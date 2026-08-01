@@ -1,0 +1,5 @@
+# Large binary assets go to LFS. A .blend is ~57MB and is rewritten in full on
+# every save, so a handful of turret re-splits would otherwise bloat the history
+# by gigabytes. The source .glb are similar and never change once generated.
+*.blend filter=lfs diff=lfs merge=lfs -text
+*.glb filter=lfs diff=lfs merge=lfs -text

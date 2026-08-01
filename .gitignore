@@ -1,0 +1,23 @@
+# Blender's rolling backups. The .blend beside them is the file of record, and
+# each backup is another 57MB of the same thing.
+*.blend1
+*.blend2
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Godot / .NET build output. .godot/ is a rebuildable import cache and the mono
+# build drops compiled assemblies inside it.
+GodotTest/.godot/
+GodotTest/bin/
+GodotTest/obj/
+GodotTest/*.sln
+
+# Harness screenshots (F12) and one-off verification captures
+GodotTest/shot_*.png
+GodotTest/_verify.png
+
+# Scratch output from ad-hoc script runs; Sprites/ is the real output and is
+# tracked.
+out/

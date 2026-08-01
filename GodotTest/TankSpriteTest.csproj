@@ -1,0 +1,9 @@
+<Project Sdk="Godot.NET.Sdk/4.5.2">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <Nullable>enable</Nullable>
+    <LangVersion>12</LangVersion>
+    <RootNamespace>TankSpriteTest</RootNamespace>
+  </PropertyGroup>
+</Project>

@@ -1,0 +1,226 @@
+using System;
+using System.Collections.Generic;
+using Godot;
+
+namespace TankSpriteTest;
+
+/// <summary>
+/// A tessellated hex field drawn from the static <c>hex</c> layer of an
+/// <see cref="AtlasSet"/>, plus the grid arithmetic that goes with it.
+///
+/// Spacing is derived from the rendered tile's own opaque size, which is exact
+/// rather than approximate. For a flat-top hex of circumradius R seen at
+/// azimuth 0 and elevation e, the sprite is 2R/upp wide and
+/// sqrt(3)*R*sin(e)/upp tall. Neighbours sit 1.5R apart across columns and
+/// sqrt(3)*R apart down a column, so in screen pixels:
+///
+///     column spacing = 0.75 * sprite width
+///     row spacing    = 1.00 * sprite height
+///     odd columns are pushed down by half a row
+///
+/// The row spacing coming out exactly equal to the sprite height is not a
+/// coincidence: flat-top hexes touch edge to edge going down a column.
+///
+/// Cells are addressed in odd-q offset coordinates (col, row). Anything that
+/// needs real hex arithmetic - rounding a click to a cell, walking a path -
+/// converts to axial first, because offset coordinates do not add.
+/// </summary>
+public sealed partial class HexField : Node2D
+{
+    /// <summary>World headings of the six edge directions of a flat-top hex.</summary>
+    public static readonly int[] EdgeHeadings = { 30, 90, 150, 210, 270, 330 };
+
+    public AtlasSet? Atlas;
+    public int Columns = 9;
+    public int Rows = 6;
+    public bool ShowField = true;
+
+    /// <summary>Cells to tint as the current move order, destination last.</summary>
+    public IReadOnlyList<Vector2I> Highlight = Array.Empty<Vector2I>();
+
+    public override void _Ready() => ZIndex = -100;
+
+    // --- layout ------------------------------------------------------------
+
+    /// <summary>Anchor point of a cell relative to the field's origin. Both the
+    /// tile and any tank standing on it are drawn against this one point, so
+    /// they cannot drift apart.</summary>
+    public Vector2 CellAnchor(int q, int r)
+    {
+        if (Atlas is null)
+            return Vector2.Zero;
+        float w = Atlas.HexRect.Size.X;
+        float h = Atlas.HexRect.Size.Y;
+        float stagger = q % 2 != 0 ? h * 0.5f : 0.0f;
+        return new Vector2(q * w * 0.75f, r * h + stagger);
+    }
+
+    public Vector2 CellAnchor(Vector2I cell) => CellAnchor(cell.X, cell.Y);
+
+    /// <summary>Offset from a cell's anchor to the centre of its hexagon.
+    ///
+    /// These are not the same point and assuming they are puts every click one
+    /// cell out near a boundary. The anchor is the turret's rotation axis
+    /// projected to screen, and the renderer places that axis at the mid-height
+    /// of the fitted bounds, so it floats above the ground plane the hexagon
+    /// lies on. The gap is constant across cells, which is what makes it a
+    /// single subtraction rather than a per-cell correction.</summary>
+    public Vector2 CentreOffset => Atlas is null
+        ? Vector2.Zero
+        : Atlas.HexRect.Position + (Vector2)Atlas.HexRect.Size * 0.5f - Atlas.Anchor;
+
+    /// <summary>Centre of a cell's drawn hexagon, in this node's local space.
+    /// This is the point <see cref="CellAt"/> inverts - not the anchor, which
+    /// sits about 60px higher on the current atlases.</summary>
+    public Vector2 CellCentre(Vector2I cell) => CellAnchor(cell) + CentreOffset;
+
+    /// <summary>Cell under a point in this node's local space.
+    ///
+    /// The rendered field is a regular hex grid squashed vertically by
+    /// sin(elevation), so the squash is undone before the standard flat-top
+    /// pixel-to-hex conversion. Rounding is done in cube coordinates: rounding
+    /// col and row independently would pick the wrong cell along every slanted
+    /// edge, which is most of the border.</summary>
+    public Vector2I CellAt(Vector2 local)
+    {
+        if (Atlas is null)
+            return Vector2I.Zero;
+        Vector2 p = local - CentreOffset;
+        float w = Atlas.HexRect.Size.X;
+        float h = Atlas.HexRect.Size.Y;
+        float size = w * 0.5f;                              // circumradius, px
+        float y = p.Y * (Mathf.Sqrt(3.0f) * w) / (2.0f * h);  // undo the squash
+        float q = 2.0f / 3.0f * p.X / size;
+        float r = (-1.0f / 3.0f * p.X + Mathf.Sqrt(3.0f) / 3.0f * y) / size;
+        return AxialToOffset(CubeRound(q, r));
+    }
+
+    public bool InBounds(Vector2I cell) =>
+        cell.X >= 0 && cell.X < Columns && cell.Y >= 0 && cell.Y < Rows;
+
+    public Vector2I ClampCell(Vector2I cell) =>
+        new(Mathf.Clamp(cell.X, 0, Columns - 1), Mathf.Clamp(cell.Y, 0, Rows - 1));
+
+    // --- grid arithmetic ---------------------------------------------------
+
+    /// <summary>The cell one step from <paramref name="cell"/> along a world
+    /// heading, without clamping. Returns the cell unchanged if the heading
+    /// points at a corner rather than an edge.</summary>
+    public static Vector2I Step(Vector2I cell, int heading)
+    {
+        bool odd = cell.X % 2 != 0;
+        int dir = ((heading % 360) + 360) % 360;
+        return dir switch
+        {
+            90 => cell + new Vector2I(0, -1),
+            270 => cell + new Vector2I(0, 1),
+            30 => cell + new Vector2I(1, odd ? 0 : -1),
+            330 => cell + new Vector2I(1, odd ? 1 : 0),
+            150 => cell + new Vector2I(-1, odd ? 0 : -1),
+            210 => cell + new Vector2I(-1, odd ? 1 : 0),
+            _ => cell,
+        };
+    }
+
+    public Vector2I Neighbour(Vector2I cell, double facing) =>
+        ClampCell(Step(cell, (int)Mathf.Round(Mathf.PosMod((float)facing, 360.0f))));
+
+    /// <summary>World heading that steps from one cell to an adjacent one, or
+    /// -1 if they are not neighbours.</summary>
+    public static int HeadingTo(Vector2I from, Vector2I to)
+    {
+        foreach (int heading in EdgeHeadings)
+            if (Step(from, heading) == to)
+                return heading;
+        return -1;
+    }
+
+    /// <summary>Shortest path between two cells, excluding the start.
+    ///
+    /// Breadth-first rather than a cube-coordinate line: a straight line
+    /// between two cells of a staggered rectangle can bulge outside it, and a
+    /// search over in-bounds cells simply cannot produce a step off the board.
+    /// With no obstacles the two agree anyway.</summary>
+    public List<Vector2I> FindPath(Vector2I from, Vector2I to)
+    {
+        var path = new List<Vector2I>();
+        if (from == to || !InBounds(from) || !InBounds(to))
+            return path;
+
+        var cameFrom = new Dictionary<Vector2I, Vector2I> { [from] = from };
+        var queue = new Queue<Vector2I>();
+        queue.Enqueue(from);
+        bool found = false;
+        while (queue.Count > 0 && !found)
+        {
+            Vector2I cell = queue.Dequeue();
+            foreach (int heading in EdgeHeadings)
+            {
+                Vector2I next = Step(cell, heading);
+                if (!InBounds(next) || cameFrom.ContainsKey(next))
+                    continue;
+                cameFrom[next] = cell;
+                if (next == to)
+                {
+                    found = true;
+                    break;
+                }
+                queue.Enqueue(next);
+            }
+        }
+        if (!found)
+            return path;
+
+        for (Vector2I at = to; at != from; at = cameFrom[at])
+            path.Add(at);
+        path.Reverse();
+        return path;
+    }
+
+    // --- cube coordinate helpers -------------------------------------------
+
+    private static Vector2I AxialToOffset(Vector2I axial) =>
+        new(axial.X, axial.Y + (axial.X - (axial.X & 1)) / 2);
+
+    private static Vector2I CubeRound(float q, float r)
+    {
+        float s = -q - r;
+        int rq = Mathf.RoundToInt(q);
+        int rr = Mathf.RoundToInt(r);
+        int rs = Mathf.RoundToInt(s);
+        float dq = Mathf.Abs(rq - q);
+        float dr = Mathf.Abs(rr - r);
+        float ds = Mathf.Abs(rs - s);
+        if (dq > dr && dq > ds)
+            rq = -rr - rs;
+        else if (dr > ds)
+            rr = -rq - rs;
+        return new Vector2I(rq, rr);
+    }
+
+    // --- drawing -----------------------------------------------------------
+
+    public override void _Draw()
+    {
+        if (Atlas is null || !ShowField)
+            return;
+        Texture2D texture = Atlas.Texture("hex");
+        Rect2 source = Atlas.Region("hex", 0);
+
+        for (int q = 0; q < Columns; q++)
+        for (int r = 0; r < Rows; r++)
+            DrawTextureRectRegion(texture,
+                new Rect2(CellAnchor(q, r) - Atlas.Anchor, Atlas.Tile), source);
+
+        for (int i = 0; i < Highlight.Count; i++)
+        {
+            bool last = i == Highlight.Count - 1;
+            var tint = last
+                ? new Color(1.0f, 0.78f, 0.30f)
+                : new Color(0.85f, 0.95f, 0.65f);
+            DrawTextureRectRegion(texture,
+                new Rect2(CellAnchor(Highlight[i]) - Atlas.Anchor, Atlas.Tile),
+                source, tint);
+        }
+    }
+}
