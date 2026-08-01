@@ -63,8 +63,8 @@ public sealed partial class TankSprite : Node2D
     /// from <see cref="Pitch"/> and <see cref="Roll"/> only so the HUD and the
     /// trace can name the source; the shear sums them, which is exact because
     /// the displacement is linear in both.</summary>
-    public double IdlePitch;
-    public double IdleRoll;
+    public double TremblePitch;
+    public double TrembleRoll;
 
     /// <summary>
     /// Pitch, applied as a shear rather than a rotation.
@@ -107,11 +107,11 @@ public sealed partial class TankSprite : Node2D
     ///
     /// The engine tremble is exempted along with them, and the seam is what
     /// makes that affordable rather than free: it costs tilt times the ring
-    /// height, which at the idle amplitude is under half a pixel - too small to
-    /// part visibly, so the turret can sit still over a trembling hull without
-    /// the two coming apart. It also removes the aerial, the tallest thing on
-    /// the tank and so the thing with the longest lever, from the tremble
-    /// entirely. That is most of what the tremble was.
+    /// height, which at the tremble amplitude is under half a pixel - too small
+    /// to part visibly, so the turret can sit still over a trembling hull
+    /// without the two coming apart. It also removes the aerial, the tallest
+    /// thing on the tank and so the thing with the longest lever, from the
+    /// tremble entirely. That is most of what the tremble was.
     ///
     /// The seam still parts a little under the driving tilts, by tilt times the
     /// ring's height above the ground: about a pixel at the amplitudes in use,
@@ -138,7 +138,7 @@ public sealed partial class TankSprite : Node2D
     public Vector2 TiltFor(bool turret) =>
         turret && TurretStabilised
             ? Vector2.Zero
-            : TiltDisplacement(Pitch + IdlePitch, Roll + IdleRoll);
+            : TiltDisplacement(Pitch + TremblePitch, Roll + TrembleRoll);
 
     /// <summary>Heave a layer receives. Never depends on the layer - see
     /// <see cref="TurretStabilised"/>.</summary>
@@ -167,7 +167,7 @@ public sealed partial class TankSprite : Node2D
         if (Atlas is null)
             return;
         bool tilted = Math.Abs(Pitch) > 1e-6 || Math.Abs(Roll) > 1e-6
-                      || Math.Abs(IdlePitch) > 1e-6 || Math.Abs(IdleRoll) > 1e-6;
+                      || Math.Abs(TremblePitch) > 1e-6 || Math.Abs(TrembleRoll) > 1e-6;
         if (ShowHull)
             DrawLayerTilted("hull", HullFacing, tilted, false);
         if (ShowTurret)

@@ -315,36 +315,36 @@ public static class SelfTest
         Check("it thins out at a crawl instead of switching off",
             crawlNonZero < fastNonZero / 3, $"{crawlNonZero} vs {fastNonZero} frames jolted");
 
-        GD.Print("engine idle");
-        var idle = new EngineIdle();
+        GD.Print("engine tremble");
+        var tremble = new EngineTremble();
         // 68px of lever from the contact point to the roof - the same figure the
         // pitch amplitude check is calibrated against
         const double roofLeverPx = 68.0;
-        double idlePeak = 0.0;
-        int pitchCrossings = 0, rollCrossings = 0, axesAgree = 0, idleSamples = 0;
+        double tremblePeak = 0.0;
+        int pitchCrossings = 0, rollCrossings = 0, axesAgree = 0, trembleSamples = 0;
         double lastPitch = 0.0, lastRoll = 0.0;
         for (int i = 0; i < 60; i++)
         {
-            idle.Advance(0.0, dt);
-            idlePeak = Math.Max(idlePeak, Math.Abs(idle.Pitch));
-            if (i > 0 && Math.Sign(idle.Pitch) != Math.Sign(lastPitch)) pitchCrossings++;
-            if (i > 0 && Math.Sign(idle.Roll) != Math.Sign(lastRoll)) rollCrossings++;
+            tremble.Advance(0.0, dt);
+            tremblePeak = Math.Max(tremblePeak, Math.Abs(tremble.Pitch));
+            if (i > 0 && Math.Sign(tremble.Pitch) != Math.Sign(lastPitch)) pitchCrossings++;
+            if (i > 0 && Math.Sign(tremble.Roll) != Math.Sign(lastRoll)) rollCrossings++;
             if (i > 0)
             {
-                idleSamples++;
-                if (Math.Sign(idle.Pitch) == Math.Sign(idle.Roll)) axesAgree++;
+                trembleSamples++;
+                if (Math.Sign(tremble.Pitch) == Math.Sign(tremble.Roll)) axesAgree++;
             }
-            lastPitch = idle.Pitch;
-            lastRoll = idle.Roll;
+            lastPitch = tremble.Pitch;
+            lastRoll = tremble.Roll;
         }
 
         // The contrast with the rumble, and the reason this class exists: the
         // rumble is driven by distance and a stopped tank gets nothing from it.
-        Check("the tremble runs with the tank standing still", idlePeak > 0.0,
-            $"peak {idlePeak:F5} at zero speed");
+        Check("the tremble runs with the tank standing still", tremblePeak > 0.0,
+            $"peak {tremblePeak:F5} at zero speed");
         Check("the tremble is well under a pixel of roof travel",
-            idlePeak * roofLeverPx is > 0.3 and < 1.5,
-            $"{idlePeak * roofLeverPx:F2}px on a {roofLeverPx:F0}px lever");
+            tremblePeak * roofLeverPx is > 0.3 and < 1.5,
+            $"{tremblePeak * roofLeverPx:F2}px on a {roofLeverPx:F0}px lever");
         // Under 30Hz or it aliases into a slow wobble at 60fps; over a few Hz or
         // it is a sway rather than a tremble. Sign changes are twice the
         // frequency, and this is one second of frames.
@@ -354,38 +354,77 @@ public static class SelfTest
         // One frequency on both axes is a mechanism cycling; two that never line
         // up is an engine.
         Check("the two axes are not in lockstep",
-            axesAgree > idleSamples * 0.2 && axesAgree < idleSamples * 0.8,
-            $"{axesAgree} of {idleSamples} frames agreed in sign");
+            axesAgree > trembleSamples * 0.2 && axesAgree < trembleSamples * 0.8,
+            $"{axesAgree} of {trembleSamples} frames agreed in sign");
 
-        var underWay = new EngineIdle { FadeSpeed = 60.0 };
+        // Under way it keeps going and speeds up - the engine working harder,
+        // not a second effect switching in.
+        var underWay = new EngineTremble { TopSpeed = 240.0 };
         double movingPeak = 0.0;
+        int movingCrossings = 0;
+        double lastMoving = 0.0;
         for (int i = 0; i < 60; i++)
         {
-            underWay.Advance(60.0, dt);
-            movingPeak = Math.Max(movingPeak,
-                Math.Max(Math.Abs(underWay.Pitch), Math.Abs(underWay.Roll)));
+            underWay.Advance(240.0, dt);
+            movingPeak = Math.Max(movingPeak, Math.Abs(underWay.Pitch));
+            if (i > 0 && Math.Sign(underWay.Pitch) != Math.Sign(lastMoving)) movingCrossings++;
+            lastMoving = underWay.Pitch;
         }
-        Check("it hands over to the rumble instead of stacking on it",
-            movingPeak < 1e-9, $"still {movingPeak:F6} at the fade speed");
+        Check("it keeps trembling under way at the same amplitude",
+            Math.Abs(movingPeak - tremblePeak) < 0.1 * tremblePeak,
+            $"{movingPeak:F5} moving vs {tremblePeak:F5} standing");
+        Check("it runs faster under load", movingCrossings > pitchCrossings,
+            $"{movingCrossings} crossings at cruise vs {pitchCrossings} at rest");
+        // The hard ceiling. Past 30Hz the signal samples into a slow wobble that
+        // has nothing to do with it, so the load factor has real headroom and
+        // this is where it runs out.
+        Check("even at full load it stays well clear of Nyquist",
+            underWay.PitchRateAt(underWay.TopSpeed) < 20.0,
+            $"{underWay.PitchRateAt(underWay.TopSpeed):F1} Hz against 30 Hz at 60fps");
+
+        // Phase is integrated, not frequency times elapsed time. Under the
+        // latter, changing speed moves the whole waveform: after ten seconds of
+        // idling the phase would jump by the frequency change times the wait -
+        // forty whole cycles here, landing anywhere - which is a visible pop at
+        // exactly the moment the tank pulls away.
+        //
+        // Measured against a twin that never opens the throttle, so what is left
+        // is only the legitimate difference: one frame at the higher rate rather
+        // than the lower, 0.42 radians of phase, at most 0.42 of the gain apart.
+        // A jumped phase would be up to twice the gain apart, well outside.
+        var shifting = new EngineTremble { TopSpeed = 240.0 };
+        var staying = new EngineTremble { TopSpeed = 240.0 };
+        for (int i = 0; i < 600; i++)                              // ten seconds idling
+        {
+            shifting.Advance(0.0, dt);
+            staying.Advance(0.0, dt);
+        }
+        shifting.Advance(240.0, dt);                               // full throttle
+        staying.Advance(0.0, dt);
+        double divergence = Math.Abs(shifting.Pitch - staying.Pitch);
+        Check("a speed change does not jump the phase",
+            divergence < 0.5 * shifting.Gain,
+            $"diverged {divergence:F5} against a gain of {shifting.Gain:F3}"
+            + " in the frame the throttle opened");
 
         // Same geometry guard the rumble roll has. A tilt about the heading and
         // a tilt across it project differently, and if both came out near
         // vertical on some heading the tremble would vanish there.
-        double worstIdleAxis = 1.0;
-        int worstIdleHeading = -1;
+        double worstTrembleAxis = 1.0;
+        int worstTrembleHeading = -1;
         foreach (int heading in HexField.EdgeHeadings)
         {
             double across = Math.Max(
                 Math.Abs(tank.Atlas!.GroundDirection(heading).X),
                 Math.Abs(tank.Atlas.GroundDirection(heading + 90.0).X));
-            if (across < worstIdleAxis)
+            if (across < worstTrembleAxis)
             {
-                worstIdleAxis = across;
-                worstIdleHeading = heading;
+                worstTrembleAxis = across;
+                worstTrembleHeading = heading;
             }
         }
         Check("the tremble has a sideways component at every heading",
-            worstIdleAxis > 0.5, $"worst is {worstIdleHeading} deg at {worstIdleAxis:F2}");
+            worstTrembleAxis > 0.5, $"worst is {worstTrembleHeading} deg at {worstTrembleAxis:F2}");
 
         GD.Print("turret scan");
         var scan = new TurretScan();
@@ -452,17 +491,17 @@ public static class SelfTest
 
         // The tremble goes the other way: the turret is exempt from it too, so
         // the aerial stops swinging. Affordable only because the seam cost is
-        // sub-pixel at the idle amplitude - checked below - which is the whole
+        // sub-pixel at the tremble amplitude - checked below - which is the whole
         // difference between this and exempting it from heave.
         tank.Pitch = 0.0;
         tank.Roll = 0.0;
-        tank.IdlePitch = 0.008;
-        tank.IdleRoll = 0.008;
+        tank.TremblePitch = 0.008;
+        tank.TrembleRoll = 0.008;
         Check("a stabilised turret sits out the engine tremble",
             tank.TiltFor(true) == Vector2.Zero && tank.TiltFor(false) != Vector2.Zero,
             $"turret {tank.TiltFor(true)} vs hull {tank.TiltFor(false)}");
-        tank.IdlePitch = 0.0;
-        tank.IdleRoll = 0.0;
+        tank.TremblePitch = 0.0;
+        tank.TrembleRoll = 0.0;
         tank.Pitch = 0.03;
         tank.Roll = 0.02;
 
@@ -476,31 +515,35 @@ public static class SelfTest
         // around a pixel and the turret's skirt covers it.
         tank.TurretStabilised = true;
         const double ringHeightPx = 55.0;
-        double idleGain = new EngineIdle().Gain;
-        // The three tilt sources cannot all peak at once: the tremble is gone by
-        // a quarter of top speed and the rumble roll only comes up to strength
-        // at half, so summing all three would be a bound on nothing. The two
-        // regimes that do happen are a standing start, where the pitch is flat
-        // out against a stopped tank still trembling, and cruising, where the
-        // tremble is silent.
-        double underWayTilt = new Vector2((float)new BodyPitch().Gain,
-            (float)new BodyRumble().RollAmplitude).Length();
-        double standingTilt = new Vector2((float)(new BodyPitch().Gain + idleGain),
-            (float)idleGain).Length();
-        double worstTilt = Math.Max(underWayTilt, standingTilt);
+        double trembleGain = new EngineTremble().Gain;
+        // The default configuration: the pitch on top of the tremble, which now
+        // runs at every speed rather than fading out, so these two really do
+        // coincide - flat-out acceleration from a standing start is exactly when
+        // both are at their peak.
+        double defaultTilt = new Vector2((float)(new BodyPitch().Gain + trembleGain),
+            (float)trembleGain).Length();
         Check("stabilising costs about a pixel at the seam",
-            worstTilt * ringHeightPx < 2.5,
-            $"{worstTilt * ringHeightPx:F2}px at a {ringHeightPx:F0}px ring"
-            + $" (under way {underWayTilt * ringHeightPx:F2}, standing"
-            + $" {standingTilt * ringHeightPx:F2})");
+            defaultTilt * ringHeightPx < 2.5,
+            $"{defaultTilt * ringHeightPx:F2}px at a {ringHeightPx:F0}px ring");
+
+        // The rumble is an opt-in extra now rather than the baseline, so it can
+        // land on top of everything else. Nothing stops the three peaking
+        // together any more, and the bound has to say so rather than quietly
+        // describing a combination the defaults happen to avoid.
+        double stackedTilt = new Vector2(
+            (float)(new BodyPitch().Gain + trembleGain),
+            (float)(new BodyRumble().RollAmplitude + trembleGain)).Length();
+        Check("with the rumble stacked on as well the seam still holds",
+            stackedTilt * ringHeightPx < 3.0,
+            $"{stackedTilt * ringHeightPx:F2}px with pitch, rumble roll and tremble at once");
 
         // What lets the turret sit out the tremble at all. Exempting it from
         // heave was ruled out because the seam would have parted by a pixel or
         // two on every jolt; the tremble is an order down from that, so the
         // same exemption costs less than half a pixel and cannot show.
         Check("the tremble alone cannot part the seam visibly",
-            Math.Sqrt(2.0) * idleGain * ringHeightPx < 1.0,
-            $"{Math.Sqrt(2.0) * idleGain * ringHeightPx:F2}px at both axes peaking together");
+            Math.Sqrt(2.0) * trembleGain * ringHeightPx < 1.0,
+            $"{Math.Sqrt(2.0) * trembleGain * ringHeightPx:F2}px at both axes peaking together");
 
         tank.Pitch = 0.0;
         tank.Roll = 0.0;
