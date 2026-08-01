@@ -3,7 +3,7 @@ The muzzle flash, as geometry, built on the stamped muzzle.
 
 Run `build()` and `build_smoke()` to make the objects, then hand `phase_hook()`
 and `smoke_phase_hook()` to `sprite_atlas` layers with `"fit": False` and
-`"phases": N`. `shot_pipeline` does all of that.
+`"phases": N`. `tank_pipeline` does all of that.
 
 Two objects, and they are two layers on purpose
 -----------------------------------------------

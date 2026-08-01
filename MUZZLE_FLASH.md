@@ -47,21 +47,29 @@
 Проверить после: суммы вершин и полигонов `Turret + Barrel` равны прежнему
 `Turret`, мировой bbox не сдвинулся, origin не трогали.
 
+**Выхлоп готовится этой же операцией**, только выделяется выпускной патрубок или
+палубная решётка, имя `Exhaust`, а родителем ставится **`Hull`**, а не `Turret`.
+Пункт 5 — единственное отличие, и перепутать его дорого: под башней порт начнёт
+поворачиваться вместе с пушкой. `exhaust_point` это ловит и отказывается работать.
+
 ## Порядок действий
 
 ```python
 import importlib.util
 spec = importlib.util.spec_from_file_location(
-    "shot_pipeline", r"D:\Projects\AgentCoding\BlenderMCP\shot_pipeline.py")
+    "tank_pipeline", r"D:\Projects\AgentCoding\BlenderMCP\tank_pipeline.py")
 shot = importlib.util.module_from_spec(spec); spec.loader.exec_module(shot)
 
 report = shot.run()                                     # черновик в out/
 report = shot.run({"output_dir": r"...\Sprites\MT"})    # набело
 ```
 
-`run` делает три шага: `prepare` (замер среза, тайл, вспышка), `render`
-(четыре слоя одним заданием), `check` (сборка композита и замеры по нему). Если
-`Barrel` не выделен, `prepare` падает с инструкцией.
+`run` делает три шага: `prepare` (замер среза, тайл, вспышка), `render` (все
+слои одним заданием), `check` (сборка композита и замеры по нему).
+
+Без `Barrel` слои вспышки просто пропускаются: тот же вызов рендерит выхлоп, если
+в сцене выделен `Exhaust` (см. CLAUDE.md). Падает он только когда нет ни того, ни
+другого, — тогда рендерить как эффект нечего.
 
 ## Инструменты
 
@@ -69,7 +77,7 @@ report = shot.run({"output_dir": r"...\Sprites\MT"})    # набело
 |---|---|
 | `muzzle_point.py` | меряет ось канала и точку среза, штампует `muzzle_point` / `muzzle_dir` / `muzzle_radius` на `Turret` и `Barrel` |
 | `muzzle_flash.py` | строит объект `Flash` на этой точке; `phase_hook()` пересобирает меш на каждую фазу |
-| `shot_pipeline.py` | всё вместе плюс проверка |
+| `tank_pipeline.py` | всё вместе плюс проверка |
 | `flash_bench.py` | стенд для подгонки: вспышка и обрубок ствола, без танка |
 | `sprite_atlas.py` | `phases` / `phase_hook`, `"fit": False`, `"holdout"` |
 | `hex_base.py` | `ground_z: None` — тайл под гусеницы |
@@ -111,7 +119,7 @@ report = flash_bench.sheet()      # out/_flash_bench.png
 каждого танка свой, а полтайла всегда 128 px; остаток и есть всё, что вспышке
 позволено. На MT это `128 − 68.8 = 59.2 px` при вылете вспышки 45. Стенд рисует
 этот предел красной чертой, но само число берётся из сцены, поэтому решается
-вопрос **на каждом танке отдельно** — и `shot_pipeline.check` меряет его
+вопрос **на каждом танке отдельно** — и `tank_pipeline.check` меряет его
 независимо, полем `flash_edge_alpha`.
 
 ## Ошибки, стоившие реального времени
@@ -181,7 +189,7 @@ report = flash_bench.sheet()      # out/_flash_bench.png
 вперёд, и никто бы не заметил.
 
 В числах не было ни намёка. Сторож теперь стоит в `muzzle_point.py`
-(`face_offset_from_axis`) и в `shot_pipeline.check` (`flash_offcentre_px`).
+(`face_offset_from_axis`) и в `tank_pipeline.check` (`flash_offcentre_px`).
 
 ### Среднее вершин — не центр площади
 
@@ -287,7 +295,7 @@ report = flash_bench.sheet()      # out/_flash_bench.png
 
 ## Проверка
 
-`shot_pipeline.check` собирает слои **без офсетов** и меряет по картинке:
+`tank_pipeline.check` собирает слои **без офсетов** и меряет по картинке:
 
 - `framing_identical` — все слои на одном якоре и масштабе;
 - `max_edge_alpha == 0` на корпусе, башне и тайле;

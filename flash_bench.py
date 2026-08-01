@@ -7,7 +7,7 @@ A bench for tuning the muzzle flash, with no tank in it.
 Renders the flash alone against a stub barrel, at every phase and at the three
 headings that differ - across the screen, at the camera, away from it - and
 assembles them into one contact sheet. Twenty-seven small renders, a couple of
-seconds, against a minute for a full `shot_pipeline.run` that drags a million
+seconds, against a minute for a full `tank_pipeline.run` that drags a million
 vertices of tank through ninety-six frames to show the same change.
 
 Nothing here is a separate asset
