@@ -45,7 +45,15 @@ CONFIG = {
     # tile's inradius clears the model's turning circle by `padding`.
     "size": None,
     "padding": 1.10,
-    "ground_z": 0.0,            # height of the tile plane
+    # Height of the tile plane. None -> the bottom of the target, so the tile
+    # lands under the tracks wherever the model happens to sit.
+    #
+    # This used to default to a flat 0.0, which is right only for a model
+    # already standing on the world origin. With `move_target` on, nothing
+    # noticed, because the model was then dropped onto the tile. With it off -
+    # the documented way to leave an already-placed tank alone - the tile
+    # stayed at zero and sliced straight through the hull.
+    "ground_z": None,
     "move_target": True,        # drop the model onto the tile
     "center_on_origin": True,   # also centre the model over the tile
     "material": "Hex_Mat",      # None -> no material
@@ -147,22 +155,29 @@ def make_hex(cfg):
 
     centre, radius, low_z = footprint(meshes)
 
-    # the axis the tile centres on, and what has to fit around it
+    # The axis the tile centres on, and what has to fit around it.
+    #
+    # The stamped ring wins outright, and is looked for whether or not the
+    # caller named any ring objects. It used to be consulted only inside the
+    # `ring_from` branch, so a call that left `ring_from` alone silently
+    # centred the tile on the footprint instead - which on MT put it 0.0305
+    # off the axis the renderer was spinning about, 4.9px of tank sitting off
+    # its own cell. Hull, turret and tile sharing one axis is the thing that
+    # makes anchor_px mean anything; it should not depend on remembering a
+    # second argument.
     axis_src = "target footprint"
-    if cfg.get("ring_from"):
+    stamped = next((o for o in hierarchy(root) if "ring_axis" in o.keys()), None)
+    if stamped is not None and cfg.get("use_stamped_ring", True):
+        centre = tuple(float(v) for v in stamped["ring_axis"])
+        axis_src = "ring_axis stamped on %s" % stamped.name
+    elif cfg.get("ring_from"):
         ring = by_hints(cfg["ring_from"])
         if not ring:
             raise RuntimeError("ring_from matched nothing: %r" % cfg["ring_from"])
-        # prefer the ring split_turret.py measured from the free gap over a
-        # bottom-slab guess: the guess drifts with the slab fraction
-        stamped = next((o for o in hierarchy(bpy.data.objects[cfg["target"]])
-                        if "ring_axis" in o.keys()), None)
-        if stamped is not None and cfg.get("use_stamped_ring", True):
-            centre = tuple(float(v) for v in stamped["ring_axis"])
-            axis_src = "ring_axis stamped on %s" % stamped.name
-        else:
-            centre = slab_centre(ring, cfg["slab"])
-            axis_src = "bottom slab of %s" % ", ".join(cfg["ring_from"])
+        # a bottom-slab guess drifts with the slab fraction, so it is only the
+        # fallback for a model nothing has measured yet
+        centre = slab_centre(ring, cfg["slab"])
+        axis_src = "bottom slab of %s" % ", ".join(cfg["ring_from"])
     fit = by_hints(cfg["fit_to"]) if cfg.get("fit_to") else meshes
     radius = radius_about(fit, centre)
 
@@ -172,8 +187,10 @@ def make_hex(cfg):
         # inradius = circumradius * cos(30) must clear the turning circle
         circumradius = radius * cfg["padding"] / math.cos(math.radians(30.0))
 
+    ground_z = low_z if cfg["ground_z"] is None else float(cfg["ground_z"])
+
     tile_centre = (0.0, 0.0) if cfg["center_on_origin"] else centre
-    ob = build_hex(cfg["name"], tile_centre, circumradius, cfg["ground_z"],
+    ob = build_hex(cfg["name"], tile_centre, circumradius, ground_z,
                    cfg["orientation"], cfg)
     root.users_collection  # noqa - keep the model's collection choice in mind
     (meshes[0].users_collection[0] if meshes[0].users_collection
@@ -183,7 +200,7 @@ def make_hex(cfg):
     if cfg["move_target"]:
         dx = (tile_centre[0] - centre[0]) if cfg["center_on_origin"] else 0.0
         dy = (tile_centre[1] - centre[1]) if cfg["center_on_origin"] else 0.0
-        dz = cfg["ground_z"] - low_z
+        dz = ground_z - low_z
         delta = Vector((dx, dy, dz))
         root.matrix_world = Matrix.Translation(delta) @ root.matrix_world
         bpy.context.view_layer.update()
@@ -197,7 +214,10 @@ def make_hex(cfg):
         "inradius": round(inradius, 5),
         "width_across_flats": round(2 * inradius, 5),
         "width_across_corners": round(2 * circumradius, 5),
-        "tile_centre": [round(v, 5) for v in tile_centre] + [cfg["ground_z"]],
+        "tile_centre": [round(v, 5) for v in tile_centre] + [round(ground_z, 5)],
+        "ground_z": round(ground_z, 5),
+        "model_low_z": round(low_z, 5),
+        "sits_on_tile": abs(ground_z - low_z) < 1e-4 or bool(cfg["move_target"]),
         "spin_axis": [round(v, 5) for v in tile_centre],
         "axis_from": axis_src,
         "fitted_radius_about_axis": round(radius, 5),

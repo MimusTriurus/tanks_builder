@@ -42,6 +42,16 @@ CONFIG = {
     "target": "world",
     # Name hints of objects to hide even though they are inside the target.
     "exclude": [],
+    # Name hints of objects that are not drawn but still block: they render as
+    # holdouts, punching zero alpha wherever they stand in front.
+    #
+    # A layer composited on top of the others is normally right, because the
+    # thing it holds is in front. An effect is the exception - a muzzle flash
+    # fired away from the camera is *behind* the turret, and drawn on top it
+    # would sit on the turret roof like a sticker. Naming the tank here gets
+    # the occlusion baked into the flash's own alpha, which is the only place
+    # it can live: the game draws flat layers and has no depth to test.
+    "holdout": [],
     # Name hints of the objects that determine the frame size and centre.
     # None -> the rendered set. Point every pass at the same set to keep one
     # shared scale across separately rendered parts.
@@ -84,6 +94,18 @@ CONFIG = {
     # "camera": the camera orbits the model -> lighting rotates with the view.
     "spin": "object",
 
+    # --- effect phases ------------------------------------------------------
+    # For a layer that also changes over time - a muzzle flash, a burning
+    # wreck. Every phase is rendered at every angle, and the atlas comes out
+    # angle across, phase down, so a game reads it as [phase][facing].
+    #
+    # `phase_hook(index, count)` is called once per phase to put the effect in
+    # that state. It may do anything, including moving the layer's root: the
+    # root transform is restored and re-read after every call, so the spin is
+    # applied on top of whatever the hook left rather than fighting it.
+    "phases": 1,
+    "phase_hook": None,
+
     # --- isometric view -----------------------------------------------------
     # 30.0     = classic isometric
     # 26.565   = 2:1 "pixel" isometric, i.e. degrees(atan(1/2))
@@ -103,6 +125,20 @@ CONFIG = {
 
     # --- image --------------------------------------------------------------
     "tile": 256,               # pixels per sprite, square
+    # Per-layer frame size, as a multiple of `tile`. The camera widens by the
+    # same factor, so `units_per_pixel` is untouched and the layer still
+    # composites on the others - it just has more room around the same picture.
+    #
+    # This is the one thing that loosens `framing_identical`, so it is worth
+    # saying what the invariant actually is. It was never "one ortho_scale and
+    # one anchor in pixels"; it is "one world distance per pixel, and one
+    # anchor at the same place in the frame". Those two survive a bigger tile;
+    # the pixel numbers do not, so the check compares the real thing now.
+    #
+    # An effect needs it and the tank does not: the muzzle already sits 68.8px
+    # out from the spin axis on MT, leaving 59 of the 128 half-tile, and a
+    # flash worth looking at is longer than that.
+    "tile_scale": 1.0,
     "columns": None,           # None -> near-square grid
     "samples": 64,             # render samples
     "keep_frames": True,       # keep the per-frame PNGs next to the atlas
@@ -335,7 +371,11 @@ def render_atlas(cfg):
     pivot = Vector((px, py, (fit_lo.z + fit_hi.z) / 2.0))
 
     angles = frame_angles(cfg)
-    columns = cfg["columns"] or math.ceil(math.sqrt(len(angles)))
+    phases = max(1, int(cfg.get("phases") or 1))
+    # a near-square grid packs a plain turntable tightly, but once there are
+    # phases the grid means something: one row per phase, one column per angle
+    columns = cfg["columns"] or (len(angles) if phases > 1
+                                 else math.ceil(math.sqrt(len(angles))))
     frames_dir = os.path.join(cfg["output_dir"], "frames")
     os.makedirs(frames_dir, exist_ok=True)
 
@@ -353,6 +393,7 @@ def render_atlas(cfg):
         "use_nodes": scene.use_nodes,
         "root_matrix": root.matrix_world.copy(),
         "hidden": {},
+        "holdout": {},
         "world_strength": None,
     }
     temp = []
@@ -360,8 +401,15 @@ def render_atlas(cfg):
     try:
         # ---- isolate what we render --------------------------------------
         keep = set(rendered)
+        blockers = by_hints(cfg.get("holdout")) - keep
         for ob in scene.objects:
             if ob in keep:
+                continue
+            if ob in blockers and ob.type in RENDERABLE:
+                saved["holdout"][ob] = ob.is_holdout
+                saved["hidden"][ob] = ob.hide_render
+                ob.is_holdout = True
+                ob.hide_render = False
                 continue
             if cfg["own_lighting"] or ob.type != "LIGHT":
                 saved["hidden"][ob] = ob.hide_render
@@ -415,33 +463,71 @@ def render_atlas(cfg):
         ortho_scale, shift_y = fit_camera(cfg, cam, pivot, spun_corners,
                                           static_corners, fit_angles, distance)
 
-        # ---- turntable ---------------------------------------------------
-        paths = []
-        for i, angle in enumerate(angles):
-            if cfg["spin"] == "object":
-                root.matrix_world = spin_matrix(pivot, angle) @ saved["root_matrix"]
-            else:
-                cam.matrix_world = camera_matrix(pivot, cfg["azimuth"] + angle,
-                                                 cfg["elevation"], distance)
-            bpy.context.view_layer.update()
+        # widen the frame without changing what a pixel is worth. The factor is
+        # recomputed from the rounded tile, so units_per_pixel comes out bit
+        # identical to the unscaled layers rather than nearly so
+        tile = cfg["tile"]
+        if float(cfg.get("tile_scale") or 1.0) != 1.0:
+            tile = max(1, int(round(tile * float(cfg["tile_scale"]))))
+            ortho_scale *= tile / float(cfg["tile"])
+            cam.data.ortho_scale = ortho_scale
+            r.resolution_x = r.resolution_y = tile
 
-            path = os.path.join(frames_dir, "%s_%03d.png" % (cfg["name"], i))
-            r.filepath = path
-            bpy.ops.render.render(write_still=True)
-            paths.append(path)
-            print("[atlas] %s %d/%d  %6.1f deg" % (cfg["name"], i + 1,
-                                                   len(angles), angle))
+        # ---- turntable ---------------------------------------------------
+        # Blockers turn with the turntable, or the flash would be occluded by a
+        # tank standing at angle zero while the flash swings round it. Only the
+        # top-most ones are driven; anything parented under another blocker
+        # follows it, and setting both would be two sources of one transform.
+        blocker_bases = {ob: ob.matrix_world.copy()
+                         for ob in blockers if ob.parent not in blockers}
+        saved["blocker_bases"] = blocker_bases
+
+        paths = []
+        hook = cfg.get("phase_hook")
+        for phase in range(phases):
+            # put the root back before the hook runs: the previous phase left
+            # it spun to the last angle, and a hook that reads or edits the
+            # transform must see the pose it was authored against
+            root.matrix_world = saved["root_matrix"]
+            if hook is not None:
+                hook(phase, phases)
+                bpy.context.view_layer.update()
+            base = root.matrix_world.copy()
+
+            for j, angle in enumerate(angles):
+                if cfg["spin"] == "object":
+                    spin = spin_matrix(pivot, angle)
+                    root.matrix_world = spin @ base
+                    for ob, rest in blocker_bases.items():
+                        ob.matrix_world = spin @ rest
+                else:
+                    cam.matrix_world = camera_matrix(pivot, cfg["azimuth"] + angle,
+                                                     cfg["elevation"], distance)
+                bpy.context.view_layer.update()
+
+                i = phase * len(angles) + j
+                path = os.path.join(frames_dir, "%s_%03d.png" % (cfg["name"], i))
+                r.filepath = path
+                bpy.ops.render.render(write_still=True)
+                paths.append(path)
+                print("[atlas] %s %d/%d  %6.1f deg  phase %d/%d"
+                      % (cfg["name"], i + 1, phases * len(angles), angle,
+                         phase + 1, phases))
 
         atlas_path = os.path.join(cfg["output_dir"], "%s_atlas.png" % cfg["name"])
-        columns, rows = write_atlas(paths, cfg["tile"], columns, atlas_path)
+        columns, rows = write_atlas(paths, tile, columns, atlas_path)
 
         # the pivot projects to the same pixel in every frame and every pass
-        anchor = [cfg["tile"] / 2.0, cfg["tile"] / 2.0 + shift_y * cfg["tile"]]
+        anchor = [tile / 2.0, tile / 2.0 + shift_y * tile]
         meta = {
             "atlas": os.path.basename(atlas_path),
-            "tile": [cfg["tile"], cfg["tile"]],
+            "tile": [tile, tile],
             "grid": {"columns": columns, "rows": rows},
+            # angles per phase, not tiles in the file: this is the number a
+            # game divides 360 by to pick a facing, and it must not change
+            # when a layer gains phases
             "count": len(angles),
+            "phases": phases,
             "rendered": sorted(o.name for o in rendered if o.type in RENDERABLE),
             "excluded": sorted(o.name for o in excluded),
             "view": {
@@ -454,20 +540,24 @@ def render_atlas(cfg):
             "spin_pivot": [round(pivot.x, 6), round(pivot.y, 6), round(pivot.z, 6)],
             # world units covered by one tile, i.e. the sprite's scale
             "ortho_scale": ortho_scale,
-            "units_per_pixel": ortho_scale / cfg["tile"],
+            "units_per_pixel": ortho_scale / tile,
             # where spin_pivot sits inside a tile, in pixels from its top-left
             # corner - draw parts on top of each other at this point
             "anchor_px": anchor,
             "frames": [
-                {"index": i, "angle": a % 360.0,
-                 "col": i % columns, "row": i // columns}
-                for i, a in enumerate(angles)
+                {"index": p * len(angles) + j, "angle": a % 360.0, "phase": p,
+                 "col": (p * len(angles) + j) % columns,
+                 "row": (p * len(angles) + j) // columns}
+                for p in range(phases) for j, a in enumerate(angles)
             ],
         }
         labels = cfg.get("frame_labels")
         if labels:
-            for frame, label in zip(meta["frames"], labels):
-                frame["label"] = label
+            # labels describe a facing, so every phase of an angle gets the
+            # same one - zipping them against the frame list would label the
+            # first phase and leave the rest blank
+            for frame in meta["frames"]:
+                frame["label"] = labels[frame["index"] % len(angles)]
         if cfg.get("meta_extra"):
             meta.update(cfg["meta_extra"])
         meta_path = os.path.join(cfg["output_dir"], "%s_atlas.json" % cfg["name"])
@@ -487,6 +577,10 @@ def render_atlas(cfg):
     finally:
         # ---- put the scene back ------------------------------------------
         root.matrix_world = saved["root_matrix"]
+        for ob, rest in saved.get("blocker_bases", {}).items():
+            ob.matrix_world = rest
+        for ob, was in saved["holdout"].items():
+            ob.is_holdout = was
         for ob, hidden in saved["hidden"].items():
             ob.hide_render = hidden
         for ob in temp:
@@ -555,9 +649,18 @@ def render_set(job):
                   # optional: auto-label frames by hex facing
                   "hex_labels": {"front_dir": 270.0, "orientation": "flat"} },
       "layers": [ {"name": "hull",   "target": "world", "exclude": ["Turret"]},
-                  {"name": "turret", "target": "world.001"},
-                  {"name": "hex",    "target": "Hex", "static": True} ],
+                  {"name": "turret", "target": "Turret"},
+                  {"name": "hex",    "target": "Hex", "static": True},
+                  # an effect: rendered, but kept out of the fit, and with a
+                  # time dimension of its own
+                  {"name": "flash",  "target": "Flash", "fit": False,
+                   "phases": 8, "phase_hook": some_callable} ],
     }
+
+    Per-layer keys beyond the CONFIG ones:
+
+        static  one frame, but fitted over the whole carousel's angles
+        fit     False to render the layer without letting it size the frame
 
     Getting layers to composite means keeping four things identical across
     passes: the spin axis, the fitted geometry, the angle list used for fitting,
@@ -579,6 +682,14 @@ def render_set(job):
                 if o not in excluded and o.type in RENDERABLE]
         if not objs:
             raise RuntimeError("layer %r renders nothing" % layer.get("name"))
+        if layer.get("fit") is False:
+            # rendered, but never sizes the frame. An effect is the case that
+            # needs this: a muzzle flash is transient and bigger than the gun
+            # it comes out of, so letting it into the fit would zoom the camera
+            # out and shrink the tank in every other layer - for something that
+            # is on screen a tenth of a second. It is also the layer most
+            # likely to be retuned, and the fit must not move when it is.
+            continue
         (static if layer.get("static") else spun).update(objs)
     if not spun:
         raise RuntimeError("every layer is static - nothing would turn")
@@ -640,7 +751,8 @@ def render_set(job):
            "front_dir_check": front_check, "warnings": warnings}
     for layer in layers:
         cfg = dict(shared)
-        cfg.update({k: v for k, v in layer.items() if k != "static"})
+        cfg.update({k: v for k, v in layer.items()
+                    if k not in ("static", "fit")})
         cfg["spin_pivot"] = list(pivot_xy)
         cfg["fit_objects"] = sorted(spun, key=lambda o: o.name)
         cfg["fit_static_objects"] = sorted(static, key=lambda o: o.name)
@@ -659,6 +771,7 @@ def render_set(job):
         out["layers"][layer["name"]] = {
             "path": path,
             "grid": meta["grid"], "count": meta["count"],
+            "tile": meta["tile"],
             "ortho_scale": meta["ortho_scale"],
             "units_per_pixel": meta["units_per_pixel"],
             "anchor_px": meta["anchor_px"],
@@ -666,13 +779,19 @@ def render_set(job):
         }
 
     # ---- the whole point: prove the layers line up ----------------------
-    scales = {round(v["ortho_scale"], 9) for v in out["layers"].values()}
-    anchors = {tuple(round(c, 6) for c in v["anchor_px"])
+    # Compared in world terms, not in pixels: one distance per pixel, and the
+    # anchor at the same fraction of the frame. A layer rendered at a bigger
+    # tile satisfies both and composites correctly; comparing ortho_scale and
+    # anchor_px would call it a mismatch, which is why the check was rewritten
+    # rather than relaxed.
+    scales = {round(v["units_per_pixel"], 12) for v in out["layers"].values()}
+    anchors = {tuple(round(c / v["tile"][i], 9)
+                     for i, c in enumerate(v["anchor_px"]))
                for v in out["layers"].values()}
     out["framing_identical"] = len(scales) == 1 and len(anchors) == 1
     if not out["framing_identical"]:
-        warnings.append("layers do NOT share a framing: scales=%s anchors=%s"
-                        % (scales, anchors))
+        warnings.append("layers do NOT share a framing: units_per_pixel=%s "
+                        "relative anchors=%s" % (scales, anchors))
     print("[atlas] set done:", out["framing_identical"], warnings)
     return out
 
@@ -680,6 +799,17 @@ def render_set(job):
 # A tank assembled from separate parts: the hull and the turret turn on the
 # same axis so the sprites can simply be drawn on top of each other, and the
 # ground tile is framed with them but never spun.
+#
+# An example, not a fixture. The scenes in Scenes/ are hand-split and their
+# object names differ - this listed a `world.001` turret root that none of the
+# three current scenes has, and it cost a wrong instruction before anyone read
+# the scene. Call get_objects_summary and build the layer list from what is
+# actually there; the /sprites command says so first thing for this reason.
+#
+# Note the gun: with the tip separated into `Barrel` and parented to `Turret`,
+# the turret layer picks it up through the hierarchy and the hull layer drops
+# it through the `Turret` hint, which excludes descendants. Parented anywhere
+# else it lands in the hull atlas and turns with the hull.
 TANK_JOB = {
     "shared": {
         "output_dir": r"D:\Projects\AgentCoding\BlenderMCP\out",
@@ -689,8 +819,8 @@ TANK_JOB = {
         "hex_labels": {"front_dir": 270.0, "orientation": "flat"},
     },
     "layers": [
-        {"name": "hull", "target": "world", "exclude": ["Turret", "world.001"]},
-        {"name": "turret", "target": "world.001"},
+        {"name": "hull", "target": "world", "exclude": ["Turret"]},
+        {"name": "turret", "target": "Turret"},
         {"name": "hex", "target": "Hex", "static": True},
     ],
 }
