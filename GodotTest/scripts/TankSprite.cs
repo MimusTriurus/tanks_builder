@@ -59,9 +59,10 @@ public sealed partial class TankSprite : Node2D
     /// heading. Shares the machinery with <see cref="Pitch"/>.</summary>
     public double Roll;
 
-    /// <summary>Engine tremble, as pitch and roll shear amplitudes. Kept apart
-    /// from <see cref="Pitch"/> and <see cref="Roll"/> because it is not
-    /// stabilised - see <see cref="TurretStabilised"/>.</summary>
+    /// <summary>Engine tremble, as pitch and roll shear amplitudes. Held apart
+    /// from <see cref="Pitch"/> and <see cref="Roll"/> only so the HUD and the
+    /// trace can name the source; the shear sums them, which is exact because
+    /// the displacement is linear in both.</summary>
     public double IdlePitch;
     public double IdleRoll;
 
@@ -104,15 +105,17 @@ public sealed partial class TankSprite : Node2D
     /// pixel or two at the seam on every jolt - the one join this whole
     /// pipeline exists to keep tight.
     ///
-    /// The engine tremble is shared for the same reason, plus one of its own: a
-    /// stabiliser holds the gun against the hull pitching and rolling under it,
-    /// on the timescale of terrain. It does not, and could not, null out an
-    /// 11Hz buzz. A trembling hull under a turret nailed rigidly to the air
-    /// reads as two sprites rather than one vehicle.
+    /// The engine tremble is exempted along with them, and the seam is what
+    /// makes that affordable rather than free: it costs tilt times the ring
+    /// height, which at the idle amplitude is under half a pixel - too small to
+    /// part visibly, so the turret can sit still over a trembling hull without
+    /// the two coming apart. It also removes the aerial, the tallest thing on
+    /// the tank and so the thing with the longest lever, from the tremble
+    /// entirely. That is most of what the tremble was.
     ///
-    /// The seam still parts a little, by tilt times the ring's height above the
-    /// ground: about a pixel at the amplitudes in use, which the turret's skirt
-    /// covers.
+    /// The seam still parts a little under the driving tilts, by tilt times the
+    /// ring's height above the ground: about a pixel at the amplitudes in use,
+    /// which the turret's skirt covers.
     /// </summary>
     public bool TurretStabilised = true;
 
@@ -133,10 +136,9 @@ public sealed partial class TankSprite : Node2D
     /// <summary>Tilt a layer receives. Exposed so the stabilisation policy can
     /// be asserted rather than read off the screen.</summary>
     public Vector2 TiltFor(bool turret) =>
-        TiltDisplacement(IdlePitch, IdleRoll)
-        + (turret && TurretStabilised
+        turret && TurretStabilised
             ? Vector2.Zero
-            : TiltDisplacement(Pitch, Roll));
+            : TiltDisplacement(Pitch + IdlePitch, Roll + IdleRoll);
 
     /// <summary>Heave a layer receives. Never depends on the layer - see
     /// <see cref="TurretStabilised"/>.</summary>

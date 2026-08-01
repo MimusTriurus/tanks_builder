@@ -28,14 +28,21 @@ namespace TankSpriteTest;
 public sealed class EngineIdle
 {
     /// <summary>Shear amplitude, in the same units as <see cref="BodyPitch.Gain"/>:
-    /// about 70px of lever from the contact point to the roof, so 0.012 is
-    /// roughly 0.8px of roof travel either way.
+    /// about 68px of lever from the contact point to the hull roof, so 0.008 is
+    /// roughly half a pixel of roof travel either way.
     ///
     /// Sub-pixel is the point. A whole-pixel tremble at this rate is a buzz, and
     /// the sprite filters linearly (the pitch shear needed that), so a fraction
     /// of a pixel actually shows. Much below this it reads as the sprite being
-    /// slightly out of focus rather than as motion.</summary>
-    public double Gain = 0.012;
+    /// slightly out of focus rather than as motion.
+    ///
+    /// 0.012 was the first setting and read as too much, for a reason the roof
+    /// figure hides: the lever is measured to the hull roof, and the aerial
+    /// stands twice that high, so it was swinging a good pixel and a half while
+    /// the hull moved under one. The turret is out of the tremble now (see
+    /// <see cref="TankSprite.TurretStabilised"/>), which takes the aerial with
+    /// it, and this is the amplitude that suits what is left.</summary>
+    public double Gain = 0.008;
 
     public double PitchHz = 11.5;
     public double RollHz = 7.3;

@@ -450,17 +450,16 @@ public static class SelfTest
             tank.HeaveFor(true) == tank.HeaveFor(false) && tank.HeaveFor(true) == tank.Shake,
             $"{tank.HeaveFor(true)} vs {tank.HeaveFor(false)}");
 
-        // Same rule for the tremble, for a second reason on top of the seam: a
-        // stabiliser works against the hull pitching over terrain, not against
-        // an 11Hz buzz, and a hull shivering under a perfectly still turret
-        // stops reading as one vehicle.
+        // The tremble goes the other way: the turret is exempt from it too, so
+        // the aerial stops swinging. Affordable only because the seam cost is
+        // sub-pixel at the idle amplitude - checked below - which is the whole
+        // difference between this and exempting it from heave.
         tank.Pitch = 0.0;
         tank.Roll = 0.0;
-        tank.IdlePitch = 0.012;
-        tank.IdleRoll = 0.010;
-        Check("the engine tremble reaches the turret as well",
-            tank.TiltFor(true) != Vector2.Zero
-            && tank.TiltFor(true) == tank.TiltFor(false),
+        tank.IdlePitch = 0.008;
+        tank.IdleRoll = 0.008;
+        Check("a stabilised turret sits out the engine tremble",
+            tank.TiltFor(true) == Vector2.Zero && tank.TiltFor(false) != Vector2.Zero,
             $"turret {tank.TiltFor(true)} vs hull {tank.TiltFor(false)}");
         tank.IdlePitch = 0.0;
         tank.IdleRoll = 0.0;
@@ -476,12 +475,32 @@ public static class SelfTest
         // ring's height above the ground. The ring sits low, so this stays
         // around a pixel and the turret's skirt covers it.
         tank.TurretStabilised = true;
-        double worstTilt = new Vector2((float)new BodyPitch().Gain,
-            (float)new BodyRumble().RollAmplitude).Length();
         const double ringHeightPx = 55.0;
+        double idleGain = new EngineIdle().Gain;
+        // The three tilt sources cannot all peak at once: the tremble is gone by
+        // a quarter of top speed and the rumble roll only comes up to strength
+        // at half, so summing all three would be a bound on nothing. The two
+        // regimes that do happen are a standing start, where the pitch is flat
+        // out against a stopped tank still trembling, and cruising, where the
+        // tremble is silent.
+        double underWayTilt = new Vector2((float)new BodyPitch().Gain,
+            (float)new BodyRumble().RollAmplitude).Length();
+        double standingTilt = new Vector2((float)(new BodyPitch().Gain + idleGain),
+            (float)idleGain).Length();
+        double worstTilt = Math.Max(underWayTilt, standingTilt);
         Check("stabilising costs about a pixel at the seam",
             worstTilt * ringHeightPx < 2.5,
-            $"{worstTilt * ringHeightPx:F2}px at a {ringHeightPx:F0}px ring");
+            $"{worstTilt * ringHeightPx:F2}px at a {ringHeightPx:F0}px ring"
+            + $" (under way {underWayTilt * ringHeightPx:F2}, standing"
+            + $" {standingTilt * ringHeightPx:F2})");
+
+        // What lets the turret sit out the tremble at all. Exempting it from
+        // heave was ruled out because the seam would have parted by a pixel or
+        // two on every jolt; the tremble is an order down from that, so the
+        // same exemption costs less than half a pixel and cannot show.
+        Check("the tremble alone cannot part the seam visibly",
+            Math.Sqrt(2.0) * idleGain * ringHeightPx < 1.0,
+            $"{Math.Sqrt(2.0) * idleGain * ringHeightPx:F2}px at both axes peaking together");
 
         tank.Pitch = 0.0;
         tank.Roll = 0.0;
