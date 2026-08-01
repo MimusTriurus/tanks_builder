@@ -4,6 +4,21 @@ using Godot;
 namespace TankSpriteTest;
 
 /// <summary>
+/// Where the muzzle flash comes from. Both are kept so the two can be compared
+/// on the same tank in the same frame - the rendered one is the point of the
+/// whole pipeline, and "it looks better" is not a claim to make from memory.
+/// </summary>
+public enum FlashSource
+{
+    /// <summary>The painted sheet, rotated and squashed into place.</summary>
+    Sheet,
+
+    /// <summary>Layers rendered in Blender with the tank, on the shared
+    /// anchor.</summary>
+    Rendered,
+}
+
+/// <summary>
 /// Hull and turret drawn as two independent layers on one shared anchor.
 ///
 /// The whole pipeline exists so these two can point in different directions.
@@ -84,6 +99,30 @@ public sealed partial class TankSprite : Node2D
     /// 150px: a little longer than the barrel, which is what a tank gun looks
     /// like.</summary>
     public float FlashScale = 0.60f;
+
+    /// <summary>Which flash to draw. Rendered where the atlas has it, and the
+    /// sheet is the fallback rather than the loser: HT and LT have no separated
+    /// barrel yet, so they have no rendered flash to show.</summary>
+    public FlashSource Source = FlashSource.Rendered;
+
+    /// <summary>Phase of the rendered shot, or -1 between shots. The sheet path
+    /// uses <see cref="FlashFrame"/> instead; they are counted separately
+    /// because the sheet has sixteen frames and the rendered set has eight, and
+    /// collapsing them into one number would tie the two tempos together.</summary>
+    public int ShotPhase = -1;
+
+    private EffectLayer? _smoke;
+    private EffectLayer? _fire;
+
+    /// <summary>Whether this tank can show the rendered flash at all.</summary>
+    public bool CanRender => Atlas?.HasEffects == true;
+
+    /// <summary>The source actually in use - Rendered falls back to Sheet on a
+    /// tank whose scene has no separated barrel.</summary>
+    public FlashSource ActiveSource =>
+        Source == FlashSource.Rendered && CanRender
+            ? FlashSource.Rendered
+            : FlashSource.Sheet;
 
     /// <summary>
     /// Pitch, applied as a shear rather than a rotation.
@@ -169,7 +208,7 @@ public sealed partial class TankSprite : Node2D
     /// <see cref="TurretStabilised"/>.</summary>
     public int HeaveFor(bool turret) => Shake;
 
-    private Transform2D ShearFor(bool turret)
+    internal Transform2D ShearFor(bool turret)
     {
         float groundY = Atlas!.GroundOffset.Y;
         Vector2 d = TiltFor(turret);
@@ -179,13 +218,25 @@ public sealed partial class TankSprite : Node2D
             new Vector2(groundY * d.X, groundY * d.Y));
     }
 
-    public override void _Ready() =>
+    public override void _Ready()
+    {
         // These are 3D renders, not pixel art, so linear costs nothing at 1:1 -
         // sample centres line up and it is bit-identical to nearest. It only
         // matters once the pitch shear resamples: with nearest, whole pixel rows
         // snap sideways one at a time as the shear changes, and that shimmer
         // reads as wobble on top of whatever the pitch is doing.
         TextureFilter = TextureFilterEnum.Linear;
+
+        // smoke first so the fire draws over it: children draw after the parent
+        // and in order, and the renderer built them expecting that stacking
+        _smoke = EffectLayer.Normal("smoke");
+        _fire = EffectLayer.Additive("flash");
+        foreach (EffectLayer layer in new[] { _smoke, _fire })
+        {
+            layer.Tank = this;
+            AddChild(layer);
+        }
+    }
 
     public override void _Draw()
     {
@@ -198,7 +249,10 @@ public sealed partial class TankSprite : Node2D
             DrawLayerTilted("hull", HullFacing, tilted, false);
         if (ShowTurret)
             DrawLayerTilted("turret", TurretFacing, tilted, true);
-        if (FlashFrame >= 0 && Flash?.Texture is not null)
+        // the rendered flash is drawn by the child layers, which need their own
+        // blend modes; only the painted sheet is drawn from here
+        if (ActiveSource == FlashSource.Sheet && FlashFrame >= 0
+            && Flash?.Texture is not null)
             DrawFlash();
         if (ShowAxis)
         {

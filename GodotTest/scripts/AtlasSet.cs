@@ -22,6 +22,20 @@ public sealed class AtlasSet
 {
     public static readonly string[] LayerNames = { "hull", "turret", "hex" };
 
+    /// <summary>
+    /// Effect layers, if the scene had them: smoke first, then fire.
+    ///
+    /// Optional because they need a `Barrel` separated by hand in the .blend and
+    /// only MT has one so far. A tank without them still loads and still drives;
+    /// the harness falls back to the painted sheet, which is also what makes the
+    /// two comparable side by side.
+    ///
+    /// The order is the draw order, and it is not arbitrary: smoke occludes and
+    /// goes on with normal alpha, fire emits and goes on additively, so fire is
+    /// last and on top.
+    /// </summary>
+    public static readonly string[] EffectNames = { "smoke", "flash" };
+
     public string Tag { get; private set; } = "";
     public string Error { get; private set; } = "";
 
@@ -70,6 +84,51 @@ public sealed class AtlasSet
     private readonly Dictionary<string, ImageTexture> _textures = new();
     private readonly Dictionary<string, int> _columns = new();
 
+    /// <summary>
+    /// Per-layer frame size and anchor.
+    ///
+    /// These used to be one pair for the whole set, taken off the hull, which
+    /// was true until the effect layers arrived: they are rendered at a wider
+    /// tile so a flash longer than the tank's half-tile is not cut off at the
+    /// frame edge. The camera widens with the tile, so `units_per_pixel` is
+    /// identical and the layers still composite - but only if each is drawn at
+    /// *its own* anchor. Drawing a 384 tile at the hull's 256 anchor puts the
+    /// flash 64px off in both directions.
+    /// </summary>
+    private readonly Dictionary<string, Vector2I> _tiles = new();
+    private readonly Dictionary<string, Vector2> _anchors = new();
+    private readonly Dictionary<string, int> _phases = new();
+
+    /// <summary>Frame size of a layer. Falls back to the tank's tile for a
+    /// layer that is not present.</summary>
+    public Vector2I TileOf(string layer) =>
+        _tiles.TryGetValue(layer, out Vector2I tile) ? tile : Tile;
+
+    /// <summary>Anchor of a layer, in that layer's own pixels.</summary>
+    public Vector2 AnchorOf(string layer) =>
+        _anchors.TryGetValue(layer, out Vector2 anchor) ? anchor : Anchor;
+
+    /// <summary>How many time steps an effect layer holds, 0 if absent.</summary>
+    public int PhasesOf(string layer) =>
+        _phases.TryGetValue(layer, out int phases) ? phases : 0;
+
+    public bool Has(string layer) => _textures.ContainsKey(layer);
+
+    /// <summary>True when this tank was rendered with the effect layers.</summary>
+    public bool HasEffects
+    {
+        get
+        {
+            foreach (string layer in EffectNames)
+                if (!Has(layer))
+                    return false;
+            return true;
+        }
+    }
+
+    /// <summary>Phases shared by the effect layers, 0 if they are missing.</summary>
+    public int EffectPhases => HasEffects ? PhasesOf(EffectNames[0]) : 0;
+
     /// <summary>Muzzle point per turret frame, in tile pixels.</summary>
     private Vector2[] _muzzle = Array.Empty<Vector2>();
 
@@ -94,6 +153,15 @@ public sealed class AtlasSet
     private readonly Dictionary<int, int> _facings = new();
 
     private AtlasSet() { }
+
+    private void Take(string layer, Image image, LayerMeta meta)
+    {
+        _textures[layer] = ImageTexture.CreateFromImage(image);
+        _columns[layer] = Math.Max(1, meta.Grid.Columns);
+        _tiles[layer] = new Vector2I(meta.Tile[0], meta.Tile[1]);
+        _anchors[layer] = new Vector2((float)meta.AnchorPx[0], (float)meta.AnchorPx[1]);
+        _phases[layer] = Math.Max(1, meta.Phases);
+    }
 
     public static AtlasSet Load(string root, string tag)
     {
@@ -137,14 +205,38 @@ public sealed class AtlasSet
                 return atlas;
             }
 
-            atlas._textures[layer] = ImageTexture.CreateFromImage(image);
-            atlas._columns[layer] = Math.Max(1, meta.Grid.Columns);
+            atlas.Take(layer, image, meta);
             if (layer == "hex")
                 atlas.HexRect = image.GetUsedRect();
             if (layer == "turret")
                 turretImage = image;
             if (layer == "hull")
                 hull = meta;
+        }
+
+        // Effects are optional and silent about it. They need a Barrel split
+        // out by hand in the .blend, which only some scenes have; a tank
+        // without them still loads, and the harness draws the painted sheet
+        // instead. A missing file here is a fact about the scene, not an error.
+        foreach (string layer in EffectNames)
+        {
+            string basePath = $"{root}/{tag}/{layer}_atlas";
+            if (!File.Exists(basePath + ".json") || !File.Exists(basePath + ".png"))
+                continue;
+            LayerMeta? meta;
+            try
+            {
+                meta = JsonSerializer.Deserialize<LayerMeta>(
+                    File.ReadAllText(basePath + ".json"));
+            }
+            catch (JsonException)
+            {
+                continue;
+            }
+            Image? image = meta is null ? null : Image.LoadFromFile(basePath + ".png");
+            if (meta is null || image is null)
+                continue;
+            atlas.Take(layer, image, meta);
         }
 
         if (hull is null)
@@ -281,10 +373,19 @@ public sealed class AtlasSet
     public Rect2 Region(string layer, int index)
     {
         int columns = _columns[layer];
+        Vector2I tile = TileOf(layer);
         return new Rect2(
-            new Vector2(index % columns * Tile.X, index / columns * Tile.Y),
-            Tile);
+            new Vector2(index % columns * tile.X, index / columns * tile.Y),
+            tile);
     }
+
+    /// <summary>Frame of an effect layer showing <paramref name="phase"/> of the
+    /// shot at <paramref name="facing"/> degrees. The grid is one row per phase
+    /// and one column per heading, so the index is the obvious product - and
+    /// `Count` is angles per phase, not tiles in the file, exactly so that it
+    /// stays the number a heading is resolved against.</summary>
+    public int EffectFrame(string layer, int phase, double facing) =>
+        Math.Clamp(phase, 0, PhasesOf(layer) - 1) * Count + FrameFor(facing);
 
     /// <summary>The headings this tank was actually rendered at, ascending.</summary>
     public IReadOnlyList<int> RenderedFacings() => _facings.Keys.OrderBy(k => k).ToList();
@@ -299,6 +400,7 @@ public sealed class AtlasSet
         [JsonPropertyName("tile")] public int[] Tile { get; set; } = { 256, 256 };
         [JsonPropertyName("grid")] public GridMeta Grid { get; set; } = new();
         [JsonPropertyName("count")] public int Count { get; set; } = 1;
+        [JsonPropertyName("phases")] public int Phases { get; set; } = 1;
         [JsonPropertyName("anchor_px")] public double[] AnchorPx { get; set; } = { 128, 128 };
         [JsonPropertyName("units_per_pixel")] public double UnitsPerPixel { get; set; }
         [JsonPropertyName("frames")] public FrameMeta[] Frames { get; set; } = Array.Empty<FrameMeta>();

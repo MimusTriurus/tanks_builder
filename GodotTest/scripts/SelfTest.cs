@@ -558,6 +558,87 @@ public static class SelfTest
             && Math.Abs(flashAway - Math.Sin(Mathf.DegToRad(atlas.Elevation))) < 1e-6,
             $"x{flashAcross:F2} across, x{flashAway:F2} away");
 
+        GD.Print("the rendered flash");
+        // The rendered flash exists to be compared against the painted sheet,
+        // so the first thing to hold is that the comparison is fair: two
+        // sources on the same tank at the same moment differing only in
+        // artwork. Different tempos would make an A/B measure the tempo.
+        Check("both flashes take the same time",
+            EffectLayer.Duration == FlashSheet.Duration,
+            $"rendered {EffectLayer.Duration} frames, sheet {FlashSheet.Duration}");
+        Check("every phase is on screen at least one frame",
+            EffectLayer.Hold.All(v => v >= 1) && EffectLayer.Hold.Length == 8,
+            $"{EffectLayer.Hold.Length} phases, min hold {EffectLayer.Hold.Min()}");
+        Check("the fire is quicker than the smoke that outlives it",
+            EffectLayer.Hold.Take(4).Sum() < EffectLayer.Hold.Skip(4).Sum(),
+            $"{EffectLayer.Hold.Take(4).Sum()} frames of fire against"
+            + $" {EffectLayer.Hold.Skip(4).Sum()} of smoke");
+        Check("the sequence runs through and ends",
+            EffectLayer.PhaseAt(0) == 0
+            && EffectLayer.PhaseAt(EffectLayer.Duration - 1) == 7
+            && EffectLayer.PhaseAt(EffectLayer.Duration) < 0,
+            $"first {EffectLayer.PhaseAt(0)},"
+            + $" last {EffectLayer.PhaseAt(EffectLayer.Duration - 1)},"
+            + $" past the end {EffectLayer.PhaseAt(EffectLayer.Duration)}");
+        var phases = new HashSet<int>();
+        for (int i = 0; i < EffectLayer.Duration; i++)
+            phases.Add(EffectLayer.PhaseAt(i));
+        Check("no phase is skipped", phases.Count == 8, $"showed {phases.Count} of 8");
+
+        if (!atlas.HasEffects)
+        {
+            Check($"{atlas.Tag} has rendered effect layers", false,
+                "no flash/smoke atlas - split a Barrel in this scene");
+        }
+        else
+        {
+            // The invariant that lets a wider tile composite at all. It was
+            // never one ortho_scale and one anchor in pixels; it is one world
+            // distance per pixel and one anchor at the same place in the frame.
+            // A layer drawn at the hull's anchor instead of its own lands 64px
+            // out in both directions, which is the whole failure mode here.
+            bool aligned = true;
+            string worstLayer = "";
+            Vector2 tankRelative = atlas.Anchor / (Vector2)atlas.Tile;
+            foreach (string layer in AtlasSet.EffectNames)
+            {
+                Vector2 relative = atlas.AnchorOf(layer) / (Vector2)atlas.TileOf(layer);
+                if ((relative - tankRelative).Length() > 1e-4)
+                {
+                    aligned = false;
+                    worstLayer = layer;
+                }
+            }
+            Check("the effect layers share the tank's anchor, in frame fractions",
+                aligned,
+                aligned ? $"{tankRelative}" : $"{worstLayer} sits elsewhere");
+            Check("the effect layers are rendered wider than the tank",
+                atlas.TileOf("flash").X > atlas.Tile.X,
+                $"flash {atlas.TileOf("flash").X}px against tank {atlas.Tile.X}px");
+            Check("smoke and fire are the same size and length",
+                atlas.TileOf("smoke") == atlas.TileOf("flash")
+                && atlas.PhasesOf("smoke") == atlas.PhasesOf("flash"),
+                $"smoke {atlas.TileOf("smoke").X}px x{atlas.PhasesOf("smoke")},"
+                + $" fire {atlas.TileOf("flash").X}px x{atlas.PhasesOf("flash")}");
+            Check("the harness clock matches the phases that were rendered",
+                atlas.EffectPhases == EffectLayer.Hold.Length,
+                $"{atlas.EffectPhases} rendered, {EffectLayer.Hold.Length} held");
+
+            // Every phase of every heading has to land on a distinct tile, or
+            // the grid is being read the wrong way round - the atlas is one row
+            // per phase and one column per heading, and transposing it shows
+            // the right picture at heading zero and nonsense everywhere else.
+            var tiles = new HashSet<int>();
+            foreach (int facing in atlas.RenderedFacings())
+                for (int phase = 0; phase < atlas.EffectPhases; phase++)
+                    tiles.Add(atlas.EffectFrame("flash", phase, facing));
+            Check("every phase and heading maps to its own tile",
+                tiles.Count == atlas.EffectPhases * atlas.Count
+                && tiles.Max() < atlas.EffectPhases * atlas.Count,
+                $"{tiles.Count} distinct of"
+                + $" {atlas.EffectPhases * atlas.Count}, highest {tiles.Max()}");
+        }
+
         GD.Print("recoil");
         var recoil = new Recoil();
         recoil.Fire(0.0);                       // gun straight ahead

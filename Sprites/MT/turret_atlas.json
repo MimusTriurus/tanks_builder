@@ -9,7 +9,9 @@
     "rows": 3
   },
   "count": 12,
+  "phases": 1,
   "rendered": [
+    "Barrel",
     "Turret"
   ],
   "excluded": [],
@@ -23,18 +25,19 @@
   "spin_pivot": [
     0.0,
     -0.030476,
-    -0.0
+    0.0
   ],
   "ortho_scale": 1.6652658367156983,
   "units_per_pixel": 0.006504944674670696,
   "anchor_px": [
     128.0,
-    120.89665126800537
+    118.90545845031738
   ],
   "frames": [
     {
       "index": 0,
       "angle": 0.0,
+      "phase": 0,
       "col": 0,
       "row": 0,
       "label": "side @ 270 deg"
@@ -42,6 +45,7 @@
     {
       "index": 1,
       "angle": 30.0,
+      "phase": 0,
       "col": 1,
       "row": 0,
       "label": "corner @ 300 deg"
@@ -49,6 +53,7 @@
     {
       "index": 2,
       "angle": 60.0,
+      "phase": 0,
       "col": 2,
       "row": 0,
       "label": "side @ 330 deg"
@@ -56,6 +61,7 @@
     {
       "index": 3,
       "angle": 90.0,
+      "phase": 0,
       "col": 3,
       "row": 0,
       "label": "corner @ 0 deg"
@@ -63,6 +69,7 @@
     {
       "index": 4,
       "angle": 120.0,
+      "phase": 0,
       "col": 0,
       "row": 1,
       "label": "side @ 30 deg"
@@ -70,6 +77,7 @@
     {
       "index": 5,
       "angle": 150.0,
+      "phase": 0,
       "col": 1,
       "row": 1,
       "label": "corner @ 60 deg"
@@ -77,6 +85,7 @@
     {
       "index": 6,
       "angle": 180.0,
+      "phase": 0,
       "col": 2,
       "row": 1,
       "label": "side @ 90 deg"
@@ -84,6 +93,7 @@
     {
       "index": 7,
       "angle": 210.0,
+      "phase": 0,
       "col": 3,
       "row": 1,
       "label": "corner @ 120 deg"
@@ -91,6 +101,7 @@
     {
       "index": 8,
       "angle": 240.0,
+      "phase": 0,
       "col": 0,
       "row": 2,
       "label": "side @ 150 deg"
@@ -98,6 +109,7 @@
     {
       "index": 9,
       "angle": 270.0,
+      "phase": 0,
       "col": 1,
       "row": 2,
       "label": "corner @ 180 deg"
@@ -105,6 +117,7 @@
     {
       "index": 10,
       "angle": 300.0,
+      "phase": 0,
       "col": 2,
       "row": 2,
       "label": "side @ 210 deg"
@@ -112,12 +125,12 @@
     {
       "index": 11,
       "angle": 330.0,
+      "phase": 0,
       "col": 3,
       "row": 2,
       "label": "corner @ 240 deg"
     }
   ],
-  "scene": "MT",
   "layer": "turret",
   "static": false
 }

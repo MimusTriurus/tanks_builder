@@ -9,6 +9,7 @@
     "rows": 1
   },
   "count": 1,
+  "phases": 1,
   "rendered": [
     "Hex"
   ],
@@ -23,24 +24,24 @@
   "spin_pivot": [
     0.0,
     -0.030476,
-    -0.0
+    0.0
   ],
   "ortho_scale": 1.6652658367156983,
   "units_per_pixel": 0.006504944674670696,
   "anchor_px": [
     128.0,
-    120.89665126800537
+    118.90545845031738
   ],
   "frames": [
     {
       "index": 0,
       "angle": 0.0,
+      "phase": 0,
       "col": 0,
       "row": 0,
       "label": "static tile"
     }
   ],
-  "scene": "MT",
   "layer": "hex",
   "static": true
 }

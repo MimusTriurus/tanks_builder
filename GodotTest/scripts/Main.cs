@@ -87,6 +87,10 @@ public sealed partial class Main : Node2D
     private string? _startTag;
     private bool _fireAtStart;
     private double? _startTurret;
+    /// <summary>Which flash to start with - key V, or --flash sheet|rendered.
+    /// Rendered by default: it is the one the pipeline exists to produce, and
+    /// it falls back on its own for a tank that has none.</summary>
+    private FlashSource _flashSource = FlashSource.Rendered;
 
     private bool Moving => _pathStep < _path.Count;
 
@@ -114,6 +118,11 @@ public sealed partial class Main : Node2D
                 _scanEnabled = true;
             else if (userArgs[i] == "--fire")
                 _fireAtStart = true;
+            else if (userArgs[i] == "--flash" && i + 1 < userArgs.Length)
+                _flashSource = userArgs[i + 1].Equals("sheet",
+                    StringComparison.OrdinalIgnoreCase)
+                    ? FlashSource.Sheet
+                    : FlashSource.Rendered;
             else if (userArgs[i] == "--turret" && i + 1 < userArgs.Length
                      && double.TryParse(userArgs[i + 1], out double bearing))
                 _startTurret = bearing;
@@ -164,7 +173,7 @@ public sealed partial class Main : Node2D
 
         _field = new HexField();
         AddChild(_field);
-        _tank = new TankSprite { Flash = _flash };
+        _tank = new TankSprite { Flash = _flash, Source = _flashSource };
         AddChild(_tank);
 
         // Judging whether two layers line up is a pixel-level question, so the
@@ -413,16 +422,23 @@ public sealed partial class Main : Node2D
         _tank.RecoilPitch = _recoil.Pitch;
         _tank.RecoilRoll = _recoil.Roll;
 
+        // Both clocks run, whichever source is showing. They are separate
+        // tables - sixteen sheet frames against eight rendered phases - but
+        // they add up to the same 34 frames, so flipping V mid-shot swaps the
+        // picture without moving the moment, which is what makes an A/B
+        // comparison one.
         int frame = _shotFrame < 0 ? -1 : FlashSheet.FrameAt(_shotFrame);
+        int phase = _shotFrame < 0 ? -1 : EffectLayer.PhaseAt(_shotFrame);
         if (_shotFrame >= 0)
         {
             _shotFrame++;
-            if (frame < 0)
+            if (frame < 0 && phase < 0)
                 _shotFrame = -1;
         }
-        if (frame != _tank.FlashFrame || _recoil.Moving)
+        if (frame != _tank.FlashFrame || phase != _tank.ShotPhase || _recoil.Moving)
         {
             _tank.FlashFrame = frame;
+            _tank.ShotPhase = phase;
             _tank.QueueRedraw();
         }
     }
@@ -598,6 +614,12 @@ public sealed partial class Main : Node2D
                 break;
             case Key.K: _tank.TurretStabilised = !_tank.TurretStabilised; break;
             case Key.Z: Fire(); break;
+            case Key.V:
+                _tank.Source = _tank.Source == FlashSource.Rendered
+                    ? FlashSource.Sheet
+                    : FlashSource.Rendered;
+                _tank.QueueRedraw();
+                break;
             case Key.Escape: CancelOrder(); break;
             case Key.Key1 or Key.Key2 or Key.Key3:
                 // Godot's Key enum is backed by long, so this needs the cast
@@ -634,6 +656,8 @@ public sealed partial class Main : Node2D
                 _recoil.Reset();
                 _shotFrame = -1;
                 _tank.FlashFrame = -1;
+                _tank.ShotPhase = -1;
+                _tank.Source = _flashSource;
                 _tank.RecoilPitch = 0.0;
                 _tank.RecoilRoll = 0.0;
                 _camera.Zoom = Vector2.One;
@@ -676,10 +700,18 @@ public sealed partial class Main : Node2D
                 + $"   scan {_scan.Offset,6:F1} deg"
                 + $"   I engine tremble: {On(_trembleEnabled)}"
                 + $"   N turret scan: {On(_scanEnabled)}",
-            $"shot frame {(_tank.FlashFrame < 0 ? " -" : _tank.FlashFrame.ToString()),2}"
-                + $" / {FlashSheet.Hold.Length}   recoil {_recoil.Pitch,7:F4} / {_recoil.Roll,7:F4}"
-                + $"   muzzle {_tank.Atlas!.Muzzle(_tank.Atlas.FrameFor(_tank.TurretFacing))}"
-                + $"   Z fire",
+            $"flash: {(_tank.ActiveSource == FlashSource.Rendered ? "RENDERED (Blender layers, additive)" : "SHEET (painted, rotated)")}"
+                + (_tank.Source == FlashSource.Rendered && !_tank.CanRender
+                    ? "   [no rendered flash for this tank - split a Barrel]" : "")
+                + $"   V swap",
+            _tank.ActiveSource == FlashSource.Rendered
+                ? $"phase {(_tank.ShotPhase < 0 ? " -" : _tank.ShotPhase.ToString()),2}"
+                    + $" / {EffectLayer.Hold.Length}   tile {atlas.TileOf("flash").X}"
+                    + $"   recoil {_recoil.Pitch,7:F4} / {_recoil.Roll,7:F4}   Z fire"
+                : $"shot frame {(_tank.FlashFrame < 0 ? " -" : _tank.FlashFrame.ToString()),2}"
+                    + $" / {FlashSheet.Hold.Length}"
+                    + $"   muzzle {atlas.Muzzle(atlas.FrameFor(_tank.TurretFacing))}"
+                    + $"   recoil {_recoil.Pitch,7:F4} / {_recoil.Roll,7:F4}   Z fire",
             "",
             "left click: drive there    F turret lock    ESC cancel    A/D hull    Q/E turret",
             "W/S step fwd/back    1/2/3 tank HT/MT/LT    wheel zoom, MMB pan",
@@ -687,7 +719,8 @@ public sealed partial class Main : Node2D
                 + $"    X axis cross: {On(_tank.ShowAxis)}",
             $"H hull layer: {On(_tank.ShowHull)}    T turret layer: {On(_tank.ShowTurret)}"
                 + $"    G field: {On(_field.ShowField)}    R reset",
-            "Z fire    P pitch    B rumble    I engine tremble    N turret scan    K stabiliser",
+            "Z fire    V flash source    P pitch    B rumble    I engine tremble"
+                + "    N turret scan    K stabiliser",
         });
     }
 
