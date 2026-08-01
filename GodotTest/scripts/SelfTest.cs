@@ -256,8 +256,51 @@ public static class SelfTest
 
         var stopped = new BodyRumble();
         stopped.Advance(0.0, 0.0);
-        Check("it is still when the tank is", stopped.Offset == 0,
-            $"offset {stopped.Offset}");
+        Check("it is still when the tank is",
+            stopped.Offset == 0 && Math.Abs(stopped.Roll) < 1e-9,
+            $"offset {stopped.Offset}, roll {stopped.Roll:F5}");
+
+        // Roll must not just track the heave, or it adds nothing the heave has
+        // not already said.
+        var pair = new BodyRumble();
+        int agree = 0, samples = 0;
+        for (int i = 0; i < 400; i++)
+        {
+            pair.Advance(240.0 * dt, 240.0);
+            if (pair.Offset == 0) continue;
+            samples++;
+            if (Math.Sign(pair.Roll) == Math.Sign(pair.Offset)) agree++;
+        }
+        Check("roll is drawn independently of the heave",
+            samples > 50 && agree > samples * 0.25 && agree < samples * 0.75,
+            $"{agree} of {samples} bumps agreed in sign");
+
+        // The point of having roll at all. A bump lifts the tank straight up in
+        // world space, which is straight up on screen at every heading, so the
+        // heave hides inside the motion whenever the tank is travelling up or
+        // down the screen. Roll runs across the heading, and comes out
+        // horizontal exactly there. Every hex direction needs at least one of
+        // the two well off the line of travel, or the rumble is invisible on
+        // that heading - which is what driving down a column looked like.
+        AtlasSet atlas = tank.Atlas!;
+        double worstAxis = 1.0;
+        int worstHeading = -1;
+        foreach (int heading in HexField.EdgeHeadings)
+        {
+            Vector2 travel = atlas.GroundDirection(heading).Normalized();
+            double acrossHeave = Math.Abs(travel.Cross(new Vector2(0.0f, 1.0f)));
+            double acrossRoll = Math.Abs(travel.Cross(
+                atlas.GroundDirection(heading + 90.0).Normalized()));
+            double best = Math.Max(acrossHeave, acrossRoll);
+            if (best < worstAxis)
+            {
+                worstAxis = best;
+                worstHeading = heading;
+            }
+        }
+        Check("every heading has a jolt axis across its travel",
+            worstAxis > 0.5,
+            $"worst is {worstHeading} deg at {worstAxis:F2}");
 
         var crawl = new BodyRumble();
         int crawlNonZero = 0, fastNonZero = 0;
@@ -271,6 +314,46 @@ public static class SelfTest
         }
         Check("it thins out at a crawl instead of switching off",
             crawlNonZero < fastNonZero / 3, $"{crawlNonZero} vs {fastNonZero} frames jolted");
+
+        GD.Print("turret stabiliser");
+        tank.HullFacing = 270.0;
+        tank.Pitch = 0.03;
+        tank.Roll = 0.02;
+        tank.Shake = -2;
+
+        tank.TurretStabilised = true;
+        Vector2 hullTilt = tank.TiltFor(false);
+        Vector2 turretTilt = tank.TiltFor(true);
+        Check("a stabilised turret takes no tilt", turretTilt == Vector2.Zero,
+            $"turret tilt {turretTilt}");
+        Check("the hull still tilts", hullTilt != Vector2.Zero, $"hull tilt {hullTilt}");
+
+        // The one that matters for the seam. A bump lifts the whole vehicle and
+        // the turret is bolted to the ring; exempting it from heave as well
+        // would part the two by a pixel or two at the join on every jolt.
+        Check("heave is shared whatever the stabiliser is doing",
+            tank.HeaveFor(true) == tank.HeaveFor(false) && tank.HeaveFor(true) == tank.Shake,
+            $"{tank.HeaveFor(true)} vs {tank.HeaveFor(false)}");
+
+        tank.TurretStabilised = false;
+        Check("with the stabiliser off the turret rides with the hull",
+            tank.TiltFor(true) == tank.TiltFor(false),
+            $"{tank.TiltFor(true)} vs {tank.TiltFor(false)}");
+
+        // What the stabiliser costs: hull and turret diverge by tilt times the
+        // ring's height above the ground. The ring sits low, so this stays
+        // around a pixel and the turret's skirt covers it.
+        tank.TurretStabilised = true;
+        double worstTilt = new Vector2((float)new BodyPitch().Gain,
+            (float)new BodyRumble().RollAmplitude).Length();
+        const double ringHeightPx = 55.0;
+        Check("stabilising costs about a pixel at the seam",
+            worstTilt * ringHeightPx < 2.5,
+            $"{worstTilt * ringHeightPx:F2}px at a {ringHeightPx:F0}px ring");
+
+        tank.Pitch = 0.0;
+        tank.Roll = 0.0;
+        tank.Shake = 0;
 
         GD.Print("movement profiles");
         MovementProfile light = MovementProfile.Light;

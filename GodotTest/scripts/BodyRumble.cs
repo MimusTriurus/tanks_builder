@@ -48,9 +48,33 @@ public sealed class BodyRumble
     /// thins out by itself rather than switching on.</summary>
     public double FullSpeed = 120.0;
 
+    /// <summary>
+    /// Shear amplitude of the roll - one track riding up over a bump.
+    ///
+    /// Heave alone is invisible half the time. A bump lifts the tank in world
+    /// space, and world vertical projects to screen vertical at every heading,
+    /// so the jolt is always straight up and down on screen. That reads only
+    /// when it runs across the direction of travel: driving up or down the
+    /// screen the tank is already moving along that axis and the jolt vanishes
+    /// into the motion, while on a diagonal the travel is mostly horizontal and
+    /// the same jolt stands out.
+    ///
+    /// Roll displaces the top of the hull sideways *relative to the heading*,
+    /// and the geometry falls out in our favour: driving up or down the screen,
+    /// the lateral direction is exactly horizontal, so the roll is at its most
+    /// visible precisely where the heave is at its least.
+    /// </summary>
+    public double RollAmplitude = 0.025;
+
     /// <summary>Whole pixels of vertical offset. Integer on purpose: it is the
     /// type that guarantees no resampling.</summary>
     public int Offset { get; private set; }
+
+    /// <summary>Shear amplitude of the roll, positive rolling to the right of
+    /// the heading. Not quantised - it feeds a shear, which resamples whatever
+    /// the value is - but held per bump, so it changes as rarely as the
+    /// heave.</summary>
+    public double Roll { get; private set; }
 
     private double _phase;
 
@@ -58,23 +82,29 @@ public sealed class BodyRumble
     {
         _phase += distance / BumpSpacing;
         double gain = Math.Clamp(Math.Abs(speed) / FullSpeed, 0.0, 1.0);
-        Offset = (int)Math.Round(Sample((long)Math.Floor(_phase)) * Amplitude * gain);
+        var bump = (long)Math.Floor(_phase);
+        Offset = (int)Math.Round(Sample(bump, 0UL) * Amplitude * gain);
+        // a separate draw off the same bump: the same ground, but which track
+        // caught it is not tied to how hard it hit
+        Roll = Sample(bump, 0x632BE59BD9B4E019UL) * RollAmplitude * gain;
     }
 
     public void Reset()
     {
         _phase = 0.0;
         Offset = 0;
+        Roll = 0.0;
     }
 
-    /// <summary>Height of bump number <paramref name="index"/>, in [-1, 1).
+    /// <summary>A value in [-1, 1) for bump number <paramref name="index"/>.
+    /// <paramref name="salt"/> gives independent draws off the same bump.
     /// A hash rather than a random generator so a replay - or a screenshot
     /// comparison - lands on the same ground twice.</summary>
-    private static double Sample(long index)
+    private static double Sample(long index, ulong salt)
     {
         unchecked
         {
-            var x = (ulong)index * 0x9E3779B97F4A7C15UL;
+            var x = ((ulong)index ^ salt) * 0x9E3779B97F4A7C15UL;
             x ^= x >> 29;
             x *= 0xBF58476D1CE4E5B9UL;
             x ^= x >> 32;

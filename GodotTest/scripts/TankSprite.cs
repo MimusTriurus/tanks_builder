@@ -55,6 +55,10 @@ public sealed partial class TankSprite : Node2D
     /// against cell anchors and must stay exact.</summary>
     public int Shake;
 
+    /// <summary>Roll, as a shear amplitude, positive to the right of the
+    /// heading. Shares the machinery with <see cref="Pitch"/>.</summary>
+    public double Roll;
+
     /// <summary>
     /// Pitch, applied as a shear rather than a rotation.
     ///
@@ -84,16 +88,53 @@ public sealed partial class TankSprite : Node2D
     /// </summary>
     private const float SquashDamping = 0.25f;
 
-    private Transform2D PitchTransform()
+    /// <summary>
+    /// Two-plane stabilisation: the turret holds its attitude while the hull
+    /// tilts under it.
+    ///
+    /// It exempts the turret from pitch and roll only. Heave is shared, and has
+    /// to be: a bump lifts the whole vehicle, and the turret is bolted to the
+    /// ring, so letting it stay put while the hull jumps would part them by a
+    /// pixel or two at the seam on every jolt - the one join this whole
+    /// pipeline exists to keep tight.
+    ///
+    /// The seam still parts a little, by tilt times the ring's height above the
+    /// ground: about a pixel at the amplitudes in use, which the turret's skirt
+    /// covers.
+    /// </summary>
+    public bool TurretStabilised = true;
+
+    /// <summary>Pitch and roll are the same operation in different directions -
+    /// both tilt the body about a horizontal axis through the contact point, so
+    /// both displace a point by an amount proportional to its height. Summing
+    /// the two directions and shearing once is exact, not an approximation, and
+    /// avoids composing two transforms.</summary>
+    private Vector2 TiltDisplacement()
+    {
+        Vector2 displacement =
+            Atlas!.GroundDirection(HullFacing) * (float)Pitch
+            + Atlas.GroundDirection(HullFacing + 90.0) * (float)Roll;
+        displacement.Y *= SquashDamping;
+        return displacement;
+    }
+
+    /// <summary>Tilt a layer receives. Exposed so the stabilisation policy can
+    /// be asserted rather than read off the screen.</summary>
+    public Vector2 TiltFor(bool turret) =>
+        turret && TurretStabilised ? Vector2.Zero : TiltDisplacement();
+
+    /// <summary>Heave a layer receives. Never depends on the layer - see
+    /// <see cref="TurretStabilised"/>.</summary>
+    public int HeaveFor(bool turret) => Shake;
+
+    private Transform2D ShearFor(bool turret)
     {
         float groundY = Atlas!.GroundOffset.Y;
-        Vector2 forward = Atlas.GroundDirection(HullFacing);
-        forward.Y *= SquashDamping;
-        var amp = (float)Pitch;
+        Vector2 d = TiltFor(turret);
         return new Transform2D(
             new Vector2(1.0f, 0.0f),                            // x is untouched
-            new Vector2(-amp * forward.X, 1.0f - amp * forward.Y),
-            new Vector2(amp * groundY * forward.X, amp * groundY * forward.Y));
+            new Vector2(-d.X, 1.0f - d.Y),
+            new Vector2(groundY * d.X, groundY * d.Y));
     }
 
     public override void _Ready() =>
@@ -108,15 +149,11 @@ public sealed partial class TankSprite : Node2D
     {
         if (Atlas is null)
             return;
-        bool sheared = Math.Abs(Pitch) > 1e-6;
-        if (sheared)
-            DrawSetTransformMatrix(PitchTransform());
+        bool tilted = Math.Abs(Pitch) > 1e-6 || Math.Abs(Roll) > 1e-6;
         if (ShowHull)
-            DrawLayer("hull", HullFacing);
+            DrawLayerTilted("hull", HullFacing, tilted, false);
         if (ShowTurret)
-            DrawLayer("turret", TurretFacing);
-        if (sheared)
-            DrawSetTransformMatrix(Transform2D.Identity);
+            DrawLayerTilted("turret", TurretFacing, tilted, true);
         if (ShowAxis)
         {
             var colour = new Color(1.0f, 0.2f, 0.2f, 0.9f);
@@ -124,6 +161,16 @@ public sealed partial class TankSprite : Node2D
             DrawLine(new Vector2(-arm, 0), new Vector2(arm, 0), colour);
             DrawLine(new Vector2(0, -arm), new Vector2(0, arm), colour);
         }
+    }
+
+    private void DrawLayerTilted(string layer, double facing, bool tilted, bool turret)
+    {
+        bool shear = tilted && TiltFor(turret) != Vector2.Zero;
+        if (shear)
+            DrawSetTransformMatrix(ShearFor(turret));
+        DrawLayer(layer, facing);
+        if (shear)
+            DrawSetTransformMatrix(Transform2D.Identity);
     }
 
     private void DrawLayer(string layer, double facing)

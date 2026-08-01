@@ -90,6 +90,16 @@ public sealed partial class Main : Node2D
                 _rumbleEnabled = true;
             else if (userArgs[i] == "--tank" && i + 1 < userArgs.Length)
                 _startTag = userArgs[i + 1].ToUpperInvariant();
+            else if (userArgs[i] == "--roll-only")
+            {
+                // Isolates the roll by silencing the heave. The two cannot be
+                // told apart in a screenshot otherwise: a vertical jolt shifts
+                // content between rows, and where the silhouette narrows - the
+                // gun, the turret - that reads as a horizontal shift of over
+                // two pixels which has nothing to do with roll.
+                _rumbleEnabled = true;
+                _rumble.Amplitude = 0.0;
+            }
             else if (userArgs[i] == "--trace" && i + 1 < userArgs.Length
                      && int.TryParse(userArgs[i + 1], out int frames))
                 _traceFrames = frames;
@@ -312,10 +322,12 @@ public sealed partial class Main : Node2D
         {
             _rumble.Reset();
             _tank.Shake = 0;
+            _tank.Roll = 0.0;
             return;
         }
         _rumble.Advance(_speed * delta, _speed);
         _tank.Shake = _rumble.Offset;
+        _tank.Roll = _rumble.Roll;
     }
 
     // --- frame -------------------------------------------------------------
@@ -346,7 +358,7 @@ public sealed partial class Main : Node2D
         {
             GD.Print($"{_frames,4}  hull {_tank.HullFacing,6:F1}  speed {_speed,6:F1}"
                      + $"  pitch {_tank.Pitch,8:F5}  shake {_tank.Shake,2}"
-                     + $"  cell ({_cell.X},{_cell.Y})");
+                     + $"  roll {_tank.Roll,8:F5}  cell ({_cell.X},{_cell.Y})");
             if (++_frames >= _traceFrames)
             {
                 GetTree().Quit();
@@ -455,6 +467,7 @@ public sealed partial class Main : Node2D
                 _rumbleEnabled = !_rumbleEnabled;
                 UpdateRumble(0.0);
                 break;
+            case Key.K: _tank.TurretStabilised = !_tank.TurretStabilised; break;
             case Key.Escape: CancelOrder(); break;
             case Key.Key1 or Key.Key2 or Key.Key3:
                 // Godot's Key enum is backed by long, so this needs the cast
@@ -483,6 +496,7 @@ public sealed partial class Main : Node2D
                 _tank.Pitch = 0.0;
                 _rumble.Reset();
                 _tank.Shake = 0;
+                _tank.Roll = 0.0;
                 _camera.Zoom = Vector2.One;
                 _camera.Position = new Vector2(760, 500);
                 SnapToCell();
@@ -515,8 +529,9 @@ public sealed partial class Main : Node2D
             $"speed {_speed,6:F0} / {_profile.TopSpeed:F0} px/s"
                 + $"   ramp {_profile.RampTime:F2}s over {_profile.RampDistance:F0}px"
                 + $"   turn {_profile.TurnRate:F0} deg/s   corner {_profile.CornerSpeed:F0} px/s",
-            $"pitch {_tank.Pitch,7:F4}   shake {_tank.Shake,2}px"
-                + $"   P body pitch: {On(_pitchEnabled)}   B ground rumble: {On(_rumbleEnabled)}",
+            $"pitch {_tank.Pitch,7:F4}   shake {_tank.Shake,2}px   roll {_tank.Roll,7:F4}"
+                + $"   P body pitch: {On(_pitchEnabled)}   B ground rumble: {On(_rumbleEnabled)}"
+                + $"   K turret stabiliser: {On(_tank.TurretStabilised)}",
             "",
             "left click: drive there    F turret lock    ESC cancel    A/D hull    Q/E turret",
             "W/S step fwd/back    1/2/3 tank HT/MT/LT    wheel zoom, MMB pan",
