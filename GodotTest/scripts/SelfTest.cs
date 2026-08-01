@@ -272,6 +272,43 @@ public static class SelfTest
         Check("it thins out at a crawl instead of switching off",
             crawlNonZero < fastNonZero / 3, $"{crawlNonZero} vs {fastNonZero} frames jolted");
 
+        GD.Print("movement profiles");
+        MovementProfile light = MovementProfile.Light;
+        MovementProfile medium = MovementProfile.Medium;
+        MovementProfile heavy = MovementProfile.Heavy;
+
+        Check("the classes are ordered light > medium > heavy",
+            light.TopSpeed > medium.TopSpeed && medium.TopSpeed > heavy.TopSpeed
+            && light.Accel > medium.Accel && medium.Accel > heavy.Accel
+            && light.TurnRate > medium.TurnRate && medium.TurnRate > heavy.TurnRate,
+            $"{light.TopSpeed}/{medium.TopSpeed}/{heavy.TopSpeed}");
+
+        // Acceleration is what actually reads as class; if the ramps are close
+        // together the three tanks feel the same however different the top
+        // speeds are.
+        Check("the ramps differ enough to be felt",
+            heavy.RampTime - light.RampTime > 0.12,
+            $"light {light.RampTime:F2}s vs heavy {heavy.RampTime:F2}s");
+        Check("no ramp is so brisk it reads as an electric car",
+            MovementProfile.All.All(p => p.RampTime >= 0.40),
+            string.Join(", ", MovementProfile.All.Select(p => $"{p.Tag} {p.RampTime:F2}s")));
+        Check("no ramp is so slow the tank never arrives",
+            MovementProfile.All.All(p => p.RampTime <= 1.0),
+            string.Join(", ", MovementProfile.All.Select(p => $"{p.Tag} {p.RampTime:F2}s")));
+
+        // The crawl has to be small enough that the sideways slide while the
+        // sprite swings round stays unnoticeable, and non-zero so a winding
+        // path does not stutter to a halt at every bend.
+        Check("the cornering crawl is a crawl, not a stop",
+            MovementProfile.All.All(p => p.CornerSpeed > 5.0
+                                         && p.CornerSpeed < p.TopSpeed * 0.25),
+            string.Join(", ", MovementProfile.All.Select(p => $"{p.Tag} {p.CornerSpeed:F0}")));
+
+        Check("an unknown tag still gets a profile",
+            MovementProfile.For("nonsense") == MovementProfile.Medium
+            && MovementProfile.For("lt") == MovementProfile.Light,
+            "fallback or case-insensitive lookup is broken");
+
         GD.Print(failed == 0 ? "SELFTEST OK" : $"SELFTEST FAILED: {failed}");
         return failed;
     }

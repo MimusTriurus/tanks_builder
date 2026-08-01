@@ -20,9 +20,6 @@ public sealed partial class Main : Node2D
     private const string SpritesRoot = "D:/Projects/AgentCoding/BlenderMCP/Sprites";
     private static readonly string[] Tags = { "HT", "MT", "LT" };
 
-    private const double RotateSpeed = 200.0;   // deg/sec of hull yaw
-    private const double MoveSpeed = 240.0;     // px/sec along the ground
-    private const double AccelRate = 900.0;     // px/sec^2 - also drives the pitch
     private const double SpinSpeed = 90.0;      // deg/sec, for the wobble check
 
     private readonly Dictionary<string, AtlasSet> _atlases = new();
@@ -40,6 +37,7 @@ public sealed partial class Main : Node2D
     private List<Vector2I> _path = new();
     private int _pathStep;
     private double _speed;
+    private MovementProfile _profile = MovementProfile.Medium;
     private readonly BodyPitch _pitch = new();
 
     /// <summary>Body pitch is off unless asked for - key P, or --pitch on a
@@ -68,6 +66,7 @@ public sealed partial class Main : Node2D
     // screenshot by arithmetic does not work - the pivot length depends on
     // which heading the pathfinder chose - so read it off instead.
     private int _traceFrames;
+    private string? _startTag;
 
     private bool Moving => _pathStep < _path.Count;
 
@@ -89,6 +88,8 @@ public sealed partial class Main : Node2D
                 _pitchEnabled = true;
             else if (userArgs[i] == "--rumble")
                 _rumbleEnabled = true;
+            else if (userArgs[i] == "--tank" && i + 1 < userArgs.Length)
+                _startTag = userArgs[i + 1].ToUpperInvariant();
             else if (userArgs[i] == "--trace" && i + 1 < userArgs.Length
                      && int.TryParse(userArgs[i + 1], out int frames))
                 _traceFrames = frames;
@@ -146,6 +147,8 @@ public sealed partial class Main : Node2D
         if (failures.Count > 0)
             GD.PushWarning("some atlases failed: " + string.Join(", ", failures));
 
+        if (_startTag is not null && _loaded.IndexOf(_startTag) >= 0)
+            _tagIndex = _loaded.IndexOf(_startTag);
         UseTag(CurrentTag());
 
         if (_selfTest)
@@ -166,6 +169,10 @@ public sealed partial class Main : Node2D
         AtlasSet atlas = _atlases[tag];
         _tank.Atlas = atlas;
         _field.Atlas = atlas;
+        _profile = MovementProfile.For(tag);
+        // the rumble reaches full strength at half cruise, whatever cruise is
+        // for this class, so a heavy tank is not stuck in the thinned-out band
+        _rumble.FullSpeed = _profile.TopSpeed * 0.5;
         CancelOrder();
         _field.QueueRedraw();
         SnapToCell();
@@ -204,22 +211,26 @@ public sealed partial class Main : Node2D
         _field.QueueRedraw();
     }
 
-    /// <summary>Distance left in the current straight run.
+    /// <summary>Distance left in the current straight run, and the speed to be
+    /// doing by the end of it.
     ///
-    /// It stops at the first bend on purpose: a tracked vehicle pivots on the
-    /// spot, so it has to come to a halt there anyway, and looking past the
-    /// bend would start the braking too late.</summary>
-    private double RemainingRun()
+    /// The run stops at the first bend on purpose: the tank has to slow there
+    /// to swing round, so looking past the bend would start the braking too
+    /// late. What it slows *to* depends on what the bend is: the crawl at a
+    /// corner, a full stop only at the destination.</summary>
+    private (double Distance, double EndSpeed) RemainingRun()
     {
         double total = (_origin + _field.CellAnchor(_path[_pathStep]) - _tank.Position).Length();
         int heading = HexField.HeadingTo(_cell, _path[_pathStep]);
-        for (int i = _pathStep; i + 1 < _path.Count; i++)
+        int i = _pathStep;
+        for (; i + 1 < _path.Count; i++)
         {
             if (HexField.HeadingTo(_path[i], _path[i + 1]) != heading)
                 break;
             total += (_field.CellAnchor(_path[i + 1]) - _field.CellAnchor(_path[i])).Length();
         }
-        return total;
+        bool endOfPath = i + 1 >= _path.Count;
+        return (total, endOfPath ? 0.0 : _profile.CornerSpeed);
     }
 
     private void AdvanceOrder(double delta)
@@ -237,20 +248,26 @@ public sealed partial class Main : Node2D
 
         if (Math.Abs(diff) > 0.5)
         {
-            // brake to a halt, then pivot: tracks turn on the spot
-            accelRatio = _speed > 0.0 ? -1.0 : 0.0;
-            _speed = Math.Max(0.0, _speed - AccelRate * delta);
-            if (_speed <= 0.0)
-            {
-                double budget = RotateSpeed * delta;
-                _tank.TurnHull(Math.Abs(diff) <= budget ? diff : Math.Sign(diff) * budget);
-            }
+            // Slow to the cornering crawl and swing round while still creeping.
+            // The crawl is a floor, never a target to speed up to, so a standing
+            // start still pivots in place - which is what a tank does - while a
+            // bend taken at speed stays continuous.
+            double crawl = _profile.CornerSpeed;
+            accelRatio = _speed > crawl ? -1.0 : 0.0;
+            if (_speed > crawl)
+                _speed = Math.Max(crawl, _speed - _profile.Accel * delta);
+            double budget = _profile.TurnRate * delta;
+            _tank.TurnHull(Math.Abs(diff) <= budget ? diff : Math.Sign(diff) * budget);
         }
         else
         {
-            bool braking = RemainingRun() <= _speed * _speed / (2.0 * AccelRate);
-            accelRatio = braking ? -1.0 : _speed < MoveSpeed ? 1.0 : 0.0;
-            _speed = Math.Clamp(_speed + accelRatio * AccelRate * delta, 0.0, MoveSpeed);
+            (double remaining, double endSpeed) = RemainingRun();
+            double brakeDistance =
+                (_speed * _speed - endSpeed * endSpeed) / (2.0 * _profile.Accel);
+            bool braking = remaining <= brakeDistance;
+            accelRatio = braking ? -1.0 : _speed < _profile.TopSpeed ? 1.0 : 0.0;
+            _speed = Math.Clamp(_speed + accelRatio * _profile.Accel * delta,
+                braking ? endSpeed : 0.0, _profile.TopSpeed);
         }
 
         UpdatePitch(accelRatio, delta);
@@ -495,7 +512,10 @@ public sealed partial class Main : Node2D
             $"turret mode: {(_tank.TurretLocked ? "LOCKED - holds world heading" : "FREE - swings with the hull")}"
                 + (_aimWithMouse ? "   (mouse aim overrides)" : ""),
             "",
-            $"speed {_speed,6:F0} px/s   pitch {_tank.Pitch,7:F4}   shake {_tank.Shake,2}px"
+            $"speed {_speed,6:F0} / {_profile.TopSpeed:F0} px/s"
+                + $"   ramp {_profile.RampTime:F2}s over {_profile.RampDistance:F0}px"
+                + $"   turn {_profile.TurnRate:F0} deg/s   corner {_profile.CornerSpeed:F0} px/s",
+            $"pitch {_tank.Pitch,7:F4}   shake {_tank.Shake,2}px"
                 + $"   P body pitch: {On(_pitchEnabled)}   B ground rumble: {On(_rumbleEnabled)}",
             "",
             "left click: drive there    F turret lock    ESC cancel    A/D hull    Q/E turret",
