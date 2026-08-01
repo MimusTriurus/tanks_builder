@@ -111,8 +111,20 @@ public sealed partial class TankSprite : Node2D
     /// collapsing them into one number would tie the two tempos together.</summary>
     public int ShotPhase = -1;
 
+    /// <summary>Phase of the engine plume's loop, or -1 with the effect off.
+    /// Driven by <see cref="ExhaustLoop"/>, which wraps rather than ending -
+    /// there is no "between shots" for an engine that is running.</summary>
+    public int ExhaustPhase = -1;
+
+    /// <summary>How much of the plume's alpha survives: an idling engine
+    /// breathes a haze and a working one smokes.</summary>
+    public float ExhaustDensity = 1.0f;
+
+    public bool ShowExhaust = true;
+
     private EffectLayer? _smoke;
     private EffectLayer? _fire;
+    private EffectLayer? _exhaust;
 
     /// <summary>Whether this tank can show the rendered flash at all.</summary>
     public bool CanRender => Atlas?.HasEffects == true;
@@ -227,11 +239,13 @@ public sealed partial class TankSprite : Node2D
         // reads as wobble on top of whatever the pitch is doing.
         TextureFilter = TextureFilterEnum.Linear;
 
-        // smoke first so the fire draws over it: children draw after the parent
-        // and in order, and the renderer built them expecting that stacking
+        // Children draw after the parent and in order. Exhaust first because it
+        // is the ambient one and a shot should read over it; then smoke, then
+        // fire, which is the stacking the renderer built the shot for.
+        _exhaust = EffectLayer.Exhaust(AtlasSet.ExhaustName);
         _smoke = EffectLayer.Normal("smoke");
         _fire = EffectLayer.Additive("flash");
-        foreach (EffectLayer layer in new[] { _smoke, _fire })
+        foreach (EffectLayer layer in new[] { _exhaust, _smoke, _fire })
         {
             layer.Tank = this;
             AddChild(layer);

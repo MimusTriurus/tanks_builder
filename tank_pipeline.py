@@ -89,6 +89,10 @@ CONFIG = {
     # be. The plume's phases are a conveyor, so every step should be about the
     # same size; a seam shows up as one outlier and nothing else does.
     "loop_tolerance": 1.35,
+    # Least the plume may change the picture by, in levels of 255, measured
+    # against the tile's own colour. Below this it is present in the alpha and
+    # absent from the screen.
+    "exhaust_contrast_min": 28.0,
 }
 
 LAYER_ORDER = ("hex", "hull", "turret", "exhaust", "smoke", "flash")
@@ -306,19 +310,35 @@ def _edge_alpha(layers, name):
     return worst
 
 
-def _sheet(cfg, layers, name, rows, cols, draw):
+def _ground_colour(layers):
+    """The tile's own colour - what the game's field looks like."""
+    tile = _tile_of(layers, "hex", 0)
+    solid = tile[:, :, 3] > 0.9
+    if not solid.any():
+        return np.array([0.16, 0.16, 0.16], dtype=np.float32)
+    return np.median(tile[solid][:, :3], axis=0).astype(np.float32)
+
+
+def _sheet(cfg, layers, name, rows, cols, draw, background):
     """A grid of composites, saved as a PNG.
 
     Sized to the widest layer, and every layer placed by its *anchor* rather
     than by its frame corner. That is the composite the game performs, and it
     is the only one that stays right when the tiles differ - which they do, the
     flash being rendered wider than the tank.
+
+    The background is an argument because the two sheets want opposite ones, and
+    picking one for both hid a real fault. A dark ground is right for the flash:
+    it emits, and it is composited additively. It is wrong for the plume, which
+    occludes - grey smoke on a 0.16 grey is a strong signal and the same smoke on
+    the game's pale field is nearly nothing. The plume was tuned on the dark one,
+    looked convincing, and moved the harness picture by 20 levels out of 255.
     """
     size = max(m["tile"][0] for _, m in layers.values())
     at = np.array([max(m["anchor_px"][i] for _, m in layers.values())
                    for i in range(2)])
     out = np.zeros((len(rows) * size, len(cols) * size, 4), dtype=np.float32)
-    out[:, :, :3] = 0.16
+    out[:, :, :3] = background
     out[:, :, 3] = 1.0
 
     def place(buf, layer, index, blend):
@@ -450,8 +470,8 @@ def check(cfg=None):
             # it goes on with normal alpha and *under* the fire.
             return place(buf, "flash", frame, _add)
 
-        report["composite"] = _sheet(cfg, layers, "_check_shot",
-                                     headings, cfg["check_phases"], draw_shot)
+        report["composite"] = _sheet(cfg, layers, "_check_shot", headings,
+                                     cfg["check_phases"], draw_shot, 0.16)
 
     # --- the plume: one full lap across --------------------------------------
     if "exhaust" in layers:
@@ -466,7 +486,8 @@ def check(cfg=None):
 
         report["exhaust_composite"] = _sheet(
             cfg, layers, "_check_exhaust", headings,
-            list(range(plume_meta["phases"])), draw_plume)
+            list(range(plume_meta["phases"])), draw_plume,
+            _ground_colour(layers))
 
     # --- nothing may touch the tile edge, on any frame of any tank layer -----
     edges = {}
@@ -587,6 +608,30 @@ def check(cfg=None):
         report["exhaust_span_px"] = (
             [max(cols) - min(cols) + 1, max(rows) - min(rows) + 1]
             if rows else [0, 0])
+
+        # How much the plume actually changes the picture, on the ground it will
+        # be seen against. Size says nothing about this: the plume measured a
+        # healthy 47x31 px while moving the harness picture by 20 levels out of
+        # 255, which on screen is a smudge you have to be told is there. Grey
+        # smoke is a strong signal on the check sheet's dark grey and a weak one
+        # on the game's pale field, and only the second is the real question.
+        ground = _ground_colour(layers)
+        worst = 0.0
+        for heading in headings:
+            for p in range(pm["phases"]):
+                t = _tile_of(layers, "exhaust", p * pm["count"] + heading)
+                a = t[:, :, 3:4]
+                over = t[:, :, :3] * a + ground[None, None, :] * (1.0 - a)
+                worst = max(worst, float(np.abs(over - ground).max()))
+        report["ground_colour"] = [round(float(v), 3) for v in ground]
+        report["exhaust_contrast"] = round(worst * 255.0, 1)
+        if worst * 255.0 < cfg["exhaust_contrast_min"]:
+            report["problems"].append(
+                "the plume only moves the picture by %.0f levels of 255 against "
+                "the ground it stands on - it is there in the alpha and not on "
+                "the screen. Raise alpha or opacity, or lower rim_falloff, "
+                "which costs more density than it looks like it should"
+                % (worst * 255.0))
         hull_cols = np.nonzero(hull_a.any(axis=0))[0]
         hull_lines = np.nonzero(hull_a.any(axis=1))[0]
         report["hull_span_px"] = [int(hull_cols.max() - hull_cols.min() + 1),
@@ -641,6 +686,8 @@ def run(cfg=None):
             "exhaust_edge_alpha": checked["exhaust_edge_alpha"],
             "exhaust_span_px": checked["exhaust_span_px"],
             "hull_span_px": checked["hull_span_px"],
+            "exhaust_contrast": checked["exhaust_contrast"],
+            "ground_colour": checked["ground_colour"],
             "exhaust_loop": {h: v["seamless"]
                              for h, v in checked["exhaust_loop"].items()},
             "exhaust_composite": checked["exhaust_composite"],

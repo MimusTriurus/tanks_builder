@@ -11,10 +11,12 @@
   "count": 12,
   "phases": 1,
   "rendered": [
+    "Engine",
     "Hull"
   ],
   "excluded": [
     "Barrel",
+    "Plume",
     "Turret"
   ],
   "view": {

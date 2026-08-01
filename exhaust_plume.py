@@ -132,7 +132,13 @@ CONFIG = {
     # exactly zero or the loop shows a seam: `onset` fades a puff up from
     # nothing at age 0 and `fade` takes it back to nothing at age 1, where the
     # next lap begins.
-    "alpha": 0.46,
+    # 0.46 was tuned on the check composite, which lays the layers on a 0.16
+    # grey. The game's ground is a pale hex field around 0.72, and grey smoke on
+    # a light background is a far weaker signal than the same smoke on a dark
+    # one: measured in the harness it moved the picture by 20 levels out of 255
+    # at its densest, which is nearly nothing. Tune against the background the
+    # thing will actually be seen against.
+    "alpha": 0.60,
     "onset": 0.14,
     "fade": 1.60,
 
@@ -148,8 +154,14 @@ CONFIG = {
     # Higher than the muzzle smoke's 1.1, so alpha falls away faster toward
     # grazing angles and each puff melts into the next instead of drawing its
     # own silhouette. This is the number that turns twenty blobs into one body.
-    "rim_falloff": 1.60,
-    "opacity": 0.62,
+    #
+    # It is also the biggest single lever on how much plume there is, which is
+    # not obvious and cost a round trip. Alpha goes as facing**this, and most of
+    # a sphere faces the camera obliquely, so raising it from 1.1 to 1.6 to
+    # soften the lumps quietly took about a third of the density with it. 1.25
+    # keeps most of the softening and gives that back.
+    "rim_falloff": 1.25,
+    "opacity": 0.70,
 }
 
 MATERIAL = "_engine_exhaust"

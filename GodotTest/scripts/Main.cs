@@ -64,6 +64,14 @@ public sealed partial class Main : Node2D
     /// <summary>Idle turret traverse - key N, or --scan.</summary>
     private bool _scanEnabled;
 
+    private readonly ExhaustLoop _exhaust = new();
+    /// <summary>Engine exhaust - key O, or --no-exhaust. On by default, and for
+    /// the same reason as the tremble: an engine that is running is running, and
+    /// a tank showing no sign of it reads as switched off. Unlike the tremble it
+    /// costs nothing to be sure of - the plume is a layer that was rendered, not
+    /// an interpretation laid over one.</summary>
+    private bool _exhaustEnabled = true;
+
     private FlashSheet _flash = null!;
     private readonly Recoil _recoil = new();
     /// <summary>Screen frames since the shot went off, or -1 between shots.</summary>
@@ -116,6 +124,8 @@ public sealed partial class Main : Node2D
                 _trembleEnabled = false;
             else if (userArgs[i] == "--scan")
                 _scanEnabled = true;
+            else if (userArgs[i] == "--no-exhaust")
+                _exhaustEnabled = false;
             else if (userArgs[i] == "--fire")
                 _fireAtStart = true;
             else if (userArgs[i] == "--flash" && i + 1 < userArgs.Length)
@@ -233,6 +243,11 @@ public sealed partial class Main : Node2D
         // its own instead of idling along because it happens to be slower
         _tremble.TopSpeed = _profile.TopSpeed;
         _tremble.Reset();
+        // phases read off the layer, never assumed: the renderer's count is a
+        // config value, and a clock wrapping anywhere but the seam pops there
+        _exhaust.TopSpeed = _profile.TopSpeed;
+        _exhaust.Phases = atlas.ExhaustPhases;
+        _exhaust.Reset();
         _scan.Reset();
         CancelOrder();
         _field.QueueRedraw();
@@ -403,6 +418,25 @@ public sealed partial class Main : Node2D
         _tank.QueueRedraw();
     }
 
+    /// <summary>Runs every frame, moving or not, like the tremble and for the
+    /// same reason: it is the engine, not the ground. Speed only moves the rate
+    /// and the density, so there is no threshold to switch on at.</summary>
+    private void UpdateExhaust(double delta)
+    {
+        if (!_exhaustEnabled || !_tank.Atlas!.HasExhaust)
+        {
+            if (_tank.ExhaustPhase < 0)
+                return;
+            _exhaust.Reset();
+            _tank.ExhaustPhase = -1;
+            _tank.QueueRedraw();
+            return;
+        }
+        _exhaust.Advance(_speed, delta);
+        _tank.ExhaustPhase = _exhaust.Frame;
+        _tank.ExhaustDensity = (float)_exhaust.Density;
+    }
+
     /// <summary>Fire. Restarts the flash from frame zero rather than being
     /// ignored while one is running, so holding the key reads as a rate of fire
     /// instead of doing nothing.</summary>
@@ -490,6 +524,7 @@ public sealed partial class Main : Node2D
                      + $"/{_tank.TrembleRoll,8:F5}  scan {_scan.Offset,6:F1}"
                      + $"  turret {_tank.TurretFacing,6:F1}  shot {_tank.FlashFrame,3}"
                      + $"  recoil {_recoil.Pitch,8:F5}/{_recoil.Roll,8:F5}"
+                     + $"  exh {_tank.ExhaustPhase,2}@{_exhaust.Phase,5:F2}"
                      + $"  cell ({_cell.X},{_cell.Y})");
             if (++_frames >= _traceFrames)
             {
@@ -510,6 +545,7 @@ public sealed partial class Main : Node2D
         }
 
         UpdateTremble(delta);
+        UpdateExhaust(delta);
         UpdateScan(delta);
         UpdateShot(delta);
 
@@ -612,6 +648,10 @@ public sealed partial class Main : Node2D
                 if (!_scanEnabled)
                     _scan.Reset();
                 break;
+            case Key.O:
+                _exhaustEnabled = !_exhaustEnabled;
+                UpdateExhaust(0.0);
+                break;
             case Key.K: _tank.TurretStabilised = !_tank.TurretStabilised; break;
             case Key.Z: Fire(); break;
             case Key.V:
@@ -652,6 +692,8 @@ public sealed partial class Main : Node2D
                 _tremble.Reset();
                 _tank.TremblePitch = 0.0;
                 _tank.TrembleRoll = 0.0;
+                _exhaust.Reset();
+                _tank.ExhaustPhase = -1;
                 _scan.Reset();
                 _recoil.Reset();
                 _shotFrame = -1;
@@ -700,6 +742,13 @@ public sealed partial class Main : Node2D
                 + $"   scan {_scan.Offset,6:F1} deg"
                 + $"   I engine tremble: {On(_trembleEnabled)}"
                 + $"   N turret scan: {On(_scanEnabled)}",
+            $"exhaust phase {(_tank.ExhaustPhase < 0 ? " -" : _tank.ExhaustPhase.ToString()),2}"
+                + $" / {atlas.ExhaustPhases}"
+                + $" at {_exhaust.RateAt(_speed),4:F1} /s"
+                + $"   density {_exhaust.Density,4:F2}"
+                + $"   O engine exhaust: {On(_exhaustEnabled)}"
+                + (atlas.HasExhaust
+                    ? "" : "   [none for this tank - split an Engine]"),
             $"flash: {(_tank.ActiveSource == FlashSource.Rendered ? "RENDERED (Blender layers, additive)" : "SHEET (painted, rotated)")}"
                 + (_tank.Source == FlashSource.Rendered && !_tank.CanRender
                     ? "   [no rendered flash for this tank - split a Barrel]" : "")
@@ -720,7 +769,7 @@ public sealed partial class Main : Node2D
             $"H hull layer: {On(_tank.ShowHull)}    T turret layer: {On(_tank.ShowTurret)}"
                 + $"    G field: {On(_field.ShowField)}    R reset",
             "Z fire    V flash source    P pitch    B rumble    I engine tremble"
-                + "    N turret scan    K stabiliser",
+                + "    N turret scan    K stabiliser    O exhaust",
         });
     }
 

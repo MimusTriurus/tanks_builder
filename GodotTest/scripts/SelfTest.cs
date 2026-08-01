@@ -653,6 +653,116 @@ public static class SelfTest
                 + $" {atlas.EffectPhases * atlas.Count}, highest {tiles.Max()}");
         }
 
+        GD.Print("the engine exhaust");
+        // What separates this from every other effect clock is that it has no
+        // end, so the assertions are about it going round rather than about it
+        // running out.
+        const double tick = 1.0 / 60.0;
+        var loop = new ExhaustLoop { Phases = 12, TopSpeed = 240.0 };
+        var visited = new HashSet<int>();
+        bool inRange = true;
+        for (int i = 0; i < 600; i++)
+        {
+            loop.Advance(0.0, tick);
+            visited.Add(loop.Frame);
+            if (loop.Phase < 0.0 || loop.Phase >= loop.Phases
+                || loop.Frame < 0 || loop.Frame >= loop.Phases)
+                inRange = false;
+        }
+        Check("the loop stays inside the phases that were rendered", inRange,
+            $"phase {loop.Phase:F3} frame {loop.Frame} of {loop.Phases}");
+        Check("a lap visits every phase", visited.Count == loop.Phases,
+            $"showed {visited.Count} of {loop.Phases}");
+        Check("the loop never runs out, where the shot does",
+            visited.All(f => f >= 0) && EffectLayer.PhaseAt(EffectLayer.Duration) < 0,
+            "an engine that is running has no last frame");
+
+        // One load ramp drives both, because both come from the engine turning
+        // harder. Asserted rather than eyeballed because a plume that does not
+        // answer to the throttle is the difference between an effect that says
+        // something about the tank and one that just sits there.
+        var idle = new ExhaustLoop { Phases = 12, TopSpeed = 240.0 };
+        var worked = new ExhaustLoop { Phases = 12, TopSpeed = 240.0 };
+        for (int i = 0; i < 60; i++)
+        {
+            idle.Advance(0.0, tick);
+            worked.Advance(240.0, tick);
+        }
+        Check("working the engine speeds the loop up",
+            worked.RateAt(240.0) > idle.RateAt(0.0) * 1.3,
+            $"{idle.RateAt(0.0):F1}/s at rest against {worked.RateAt(240.0):F1}/s");
+        Check("working the engine thickens the smoke",
+            worked.Density > idle.Density + 0.15,
+            $"{idle.Density:F2} at rest against {worked.Density:F2}");
+
+        // The phase is integrated, not rate times elapsed time. The second form
+        // moves the whole loop when the rate moves, so pulling away after a long
+        // idle would jump by the rate difference times the whole idle - several
+        // laps here, at exactly the moment the tank starts working for it.
+        var steady = new ExhaustLoop { Phases = 12, TopSpeed = 240.0 };
+        var opens = new ExhaustLoop { Phases = 12, TopSpeed = 240.0 };
+        for (int i = 0; i < 600; i++)           // ten seconds sitting there
+        {
+            steady.Advance(0.0, tick);
+            opens.Advance(0.0, tick);
+        }
+        opens.Advance(240.0, tick);            // one frame on the throttle
+        steady.Advance(0.0, tick);
+        double drift = Math.Abs(opens.Phase - steady.Phase);
+        double legitimate = (opens.RateAt(240.0) - steady.RateAt(0.0)) * tick;
+        Check("opening the throttle does not jump the loop",
+            drift <= legitimate * 1.05 + 1e-9,
+            $"moved {drift:F4} phases, one frame's worth is {legitimate:F4}");
+
+        // The two rendered effects are indexed by different parts, and swapping
+        // them is invisible at heading zero and wrong everywhere else - the tank
+        // would trail smoke from wherever the gun happened to be pointing.
+        Check("the plume follows the hull and the flash follows the turret",
+            EffectLayer.Exhaust(AtlasSet.ExhaustName).FollowsHull
+            && !EffectLayer.Additive("flash").FollowsHull
+            && !EffectLayer.Normal("smoke").FollowsHull,
+            "the outlet is bolted to the engine deck, the muzzle to the gun");
+        Check("the plume is kept out of the shot's layer list",
+            !AtlasSet.EffectNames.Contains(AtlasSet.ExhaustName),
+            "HasEffects requires every name in it, and would switch the "
+            + "rendered flash off on a tank that has one but no Engine");
+
+        if (!atlas.HasExhaust)
+        {
+            Check($"{atlas.Tag} has a rendered exhaust layer", false,
+                "no exhaust atlas - split an Engine in this scene");
+        }
+        else
+        {
+            Vector2 tankAnchor = atlas.Anchor / (Vector2)atlas.Tile;
+            Vector2 plumeAnchor = atlas.AnchorOf(AtlasSet.ExhaustName)
+                                  / (Vector2)atlas.TileOf(AtlasSet.ExhaustName);
+            Check("the plume shares the tank's anchor, in frame fractions",
+                (plumeAnchor - tankAnchor).Length() < 1e-4,
+                $"{plumeAnchor} against {tankAnchor}");
+            // Unlike the flash, which needs a wider frame to hold a long jet.
+            // The plume stands over the deck, near the anchor, so it fits the
+            // tank's own tile - and the check that says so is what would catch
+            // it silently growing until it clipped.
+            Check("the plume needs no wider frame than the tank",
+                atlas.TileOf(AtlasSet.ExhaustName) == atlas.Tile,
+                $"{atlas.TileOf(AtlasSet.ExhaustName).X}px against"
+                + $" tank {atlas.Tile.X}px");
+            Check("the plume has phases to loop over", atlas.ExhaustPhases > 1,
+                $"{atlas.ExhaustPhases} phases");
+
+            var plumeTiles = new HashSet<int>();
+            foreach (int facing in atlas.RenderedFacings())
+                for (int phase = 0; phase < atlas.ExhaustPhases; phase++)
+                    plumeTiles.Add(
+                        atlas.EffectFrame(AtlasSet.ExhaustName, phase, facing));
+            Check("every plume phase and heading maps to its own tile",
+                plumeTiles.Count == atlas.ExhaustPhases * atlas.Count
+                && plumeTiles.Max() < atlas.ExhaustPhases * atlas.Count,
+                $"{plumeTiles.Count} distinct of"
+                + $" {atlas.ExhaustPhases * atlas.Count}, highest {plumeTiles.Max()}");
+        }
+
         GD.Print("recoil");
         var recoil = new Recoil();
         recoil.Fire(0.0);                       // gun straight ahead

@@ -697,10 +697,48 @@ def render_set(job):
     angles = frame_angles(shared)
 
     # ---- one spin axis for the whole job --------------------------------
+    #
+    # More than one object carries the stamp, and that is not a curiosity: a
+    # piece separated by hand inherits the parent's custom properties, so
+    # `Barrel` carries the turret's ring and `Engine` carries the hull's. They
+    # agree, because they are copies - right up until `turret_axis.py` is re-run,
+    # which stamps `Turret` and `Hull` and leaves every split-off child holding
+    # the old number.
+    #
+    # This used to be `next(o for o in (spun | static) if ...)` over a *set*,
+    # so which one won was hash order. That is the worst possible failure: a
+    # stale axis does not distort the sprite, it walks the whole tank round a
+    # circle as it turns, and nothing in any number says so.
+    #
+    # Prefer a holder that is not underneath another holder - a child's copy is
+    # derived from its parent's, never the other way round - then by name, so
+    # the choice is the same on every run. And say so out loud when they
+    # disagree, because at that point there is no way to tell from here which
+    # one is current.
     stamped = None
-    if shared.get("spin_pivot_prop", "ring_axis"):
-        key = shared.get("spin_pivot_prop", "ring_axis")
-        stamped = next((o for o in (spun | static) if key in o.keys()), None)
+    stamped_spread = 0.0
+    key = shared.get("spin_pivot_prop", "ring_axis")
+    if key:
+        holders = sorted((o for o in (spun | static) if key in o.keys()),
+                         key=lambda o: o.name)
+        if holders:
+            held = set(holders)
+
+            def derived(ob):
+                up = ob.parent
+                while up is not None:
+                    if up in held:
+                        return True
+                    up = up.parent
+                return False
+
+            roots = [o for o in holders if not derived(o)] or holders
+            stamped = roots[0]
+            values = [tuple(float(v) for v in o[key]) for o in holders]
+            # a length mismatch is a disagreement too, not a crash
+            stamped_spread = max(
+                math.dist(values[0], v) if len(v) == len(values[0])
+                else float("inf") for v in values)
 
     if shared.get("spin_pivot"):
         pivot_xy = tuple(float(v) for v in shared["spin_pivot"])
@@ -718,6 +756,14 @@ def render_set(job):
         pivot_from = "centre of all layers"
 
     warnings = []
+    if stamped is not None and stamped_spread > 1e-5 and not shared.get("spin_pivot"):
+        warnings.append(
+            "%s disagrees by %.5f between the objects carrying it, so at least "
+            "one is a stale copy left behind by a hand split - %s was used. "
+            "Re-run turret_axis.py or clear the property off the split pieces; "
+            "a wrong axis walks the whole tank round a circle as it turns and "
+            "shows up in no other number"
+            % (key, stamped_spread, stamped.name))
     if shared.get("hex_labels") and round(shared["azimuth"]) % 30 != 0:
         warnings.append(
             "azimuth %g is not a multiple of 30, so a hex tile will project "

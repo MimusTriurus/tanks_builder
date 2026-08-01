@@ -29,6 +29,21 @@ public sealed partial class EffectLayer : Node2D
     public TankSprite? Tank;
     public string Layer = "flash";
 
+    /// <summary>
+    /// Which part's heading picks the frame, and whose tilt the layer rides.
+    ///
+    /// The muzzle flash is bolted to the gun and the exhaust to the engine deck,
+    /// so they are indexed by different things. Get it backwards and the tank
+    /// trails smoke from wherever the turret happens to be pointing - which
+    /// looks like a bug in the atlas rather than in the harness, and would be
+    /// hunted for in the wrong place.
+    /// </summary>
+    public bool FollowsHull;
+
+    /// <summary>Whether this layer runs on the looping <see cref="ExhaustLoop"/>
+    /// clock instead of the shot's one-off <see cref="Hold"/> table.</summary>
+    public bool Loops;
+
     public static EffectLayer Additive(string layer) => new()
     {
         Layer = layer,
@@ -40,14 +55,30 @@ public sealed partial class EffectLayer : Node2D
 
     public static EffectLayer Normal(string layer) => new() { Layer = layer };
 
+    /// <summary>The engine plume: normal alpha like the muzzle smoke, because it
+    /// occludes rather than emits, but on the hull's heading and on a clock that
+    /// never ends.</summary>
+    public static EffectLayer Exhaust(string layer) => new()
+    {
+        Layer = layer,
+        FollowsHull = true,
+        Loops = true,
+    };
+
     public override void _Ready() => TextureFilter = TextureFilterEnum.Linear;
 
     /// <summary>The phase this layer should be showing, or -1 for nothing.</summary>
-    private int Wanted =>
-        Tank is not null && Tank.ActiveSource == FlashSource.Rendered
-        && Tank.Atlas?.Has(Layer) == true
-            ? Tank.ShotPhase
-            : -1;
+    private int Wanted
+    {
+        get
+        {
+            if (Tank is null || Tank.Atlas?.Has(Layer) != true)
+                return -1;
+            if (Loops)
+                return Tank.ShowExhaust ? Tank.ExhaustPhase : -1;
+            return Tank.ActiveSource == FlashSource.Rendered ? Tank.ShotPhase : -1;
+        }
+    }
 
     /// <summary>What the last <see cref="_Draw"/> actually put on screen.</summary>
     private int _shown = -1;
@@ -87,16 +118,25 @@ public sealed partial class EffectLayer : Node2D
         _shown = phase;
         if (Tank is null || atlas is null || phase < 0)
             return;
-        int frame = atlas.EffectFrame(Layer, phase, Tank.TurretFacing);
-        // its *own* anchor: the effect layers are rendered at a wider tile than
+        bool turret = !FollowsHull;
+        double facing = FollowsHull ? Tank.HullFacing : Tank.TurretFacing;
+        int frame = atlas.EffectFrame(Layer, phase, facing);
+        // its *own* anchor: the flash layers are rendered at a wider tile than
         // the tank so a long flash is not clipped at the frame edge, and the
         // anchor scales with the tile. Using the hull's would throw it 64px out.
+        // The plume is rendered at the tank's own tile and needs none of that -
+        // which is exactly why the anchor is read per layer rather than per set.
         Vector2 anchor = atlas.AnchorOf(Layer);
-        DrawSetTransformMatrix(Tank.ShearFor(true));
+        // Density is pulled here rather than pushed into Modulate for the same
+        // reason the phase is: a child redraws on its own schedule, and a value
+        // written during the parent's draw can be a frame stale.
+        var tint = new Color(1.0f, 1.0f, 1.0f,
+            Loops ? Tank.ExhaustDensity : 1.0f);
+        DrawSetTransformMatrix(Tank.ShearFor(turret));
         DrawTextureRectRegion(atlas.Texture(Layer),
-            new Rect2(-anchor + new Vector2(0.0f, Tank.HeaveFor(true)),
+            new Rect2(-anchor + new Vector2(0.0f, Tank.HeaveFor(turret)),
                 atlas.TileOf(Layer)),
-            atlas.Region(Layer, frame));
+            atlas.Region(Layer, frame), tint);
         DrawSetTransformMatrix(Transform2D.Identity);
     }
 
@@ -111,6 +151,10 @@ public sealed partial class EffectLayer : Node2D
     /// Uneven for the same reason the sheet's table is: the flash is over in a
     /// tenth of a second and the smoke hangs about for half of one. The early
     /// phases are where the fire lives, so they are short.
+    ///
+    /// The exhaust does not use any of this. A table of held frames ending in a
+    /// -1 is the shape of an event, and the plume is a loop with no first frame
+    /// to start at and no last one to run out - see <see cref="ExhaustLoop"/>.
     /// </summary>
     public static readonly int[] Hold = { 1, 2, 2, 3, 4, 6, 7, 9 };
 

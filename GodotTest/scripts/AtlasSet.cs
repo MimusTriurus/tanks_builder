@@ -36,6 +36,28 @@ public sealed class AtlasSet
     /// </summary>
     public static readonly string[] EffectNames = { "smoke", "flash" };
 
+    /// <summary>
+    /// The engine plume, which is an effect layer and is not one of those.
+    ///
+    /// Kept out of <see cref="EffectNames"/> deliberately: that array is the
+    /// shot's pair, and <see cref="HasEffects"/> - which decides whether the
+    /// rendered flash can be shown at all - requires every name in it. Adding
+    /// the exhaust there would switch the rendered flash off on any tank that
+    /// had a flash but no separated Engine, which is a different question
+    /// answered wrongly.
+    ///
+    /// It also differs in both of the things a layer is indexed by. It follows
+    /// the *hull*, because the outlet is bolted to the engine deck, where the
+    /// flash follows the turret; and it loops rather than running once, so it
+    /// has its own clock in <see cref="ExhaustLoop"/> instead of a table of
+    /// held frames.
+    /// </summary>
+    public const string ExhaustName = "exhaust";
+
+    /// <summary>Layers that load if they are there and are silently skipped if
+    /// they are not. Each needs a piece separated by hand in the .blend.</summary>
+    private static readonly string[] OptionalNames = { "smoke", "flash", ExhaustName };
+
     public string Tag { get; private set; } = "";
     public string Error { get; private set; } = "";
 
@@ -129,6 +151,12 @@ public sealed class AtlasSet
     /// <summary>Phases shared by the effect layers, 0 if they are missing.</summary>
     public int EffectPhases => HasEffects ? PhasesOf(EffectNames[0]) : 0;
 
+    /// <summary>True when this tank was rendered with an engine plume.</summary>
+    public bool HasExhaust => Has(ExhaustName);
+
+    /// <summary>Phases in the exhaust loop, 0 if it is missing.</summary>
+    public int ExhaustPhases => PhasesOf(ExhaustName);
+
     /// <summary>Muzzle point per turret frame, in tile pixels.</summary>
     private Vector2[] _muzzle = Array.Empty<Vector2>();
 
@@ -214,11 +242,12 @@ public sealed class AtlasSet
                 hull = meta;
         }
 
-        // Effects are optional and silent about it. They need a Barrel split
-        // out by hand in the .blend, which only some scenes have; a tank
-        // without them still loads, and the harness draws the painted sheet
-        // instead. A missing file here is a fact about the scene, not an error.
-        foreach (string layer in EffectNames)
+        // Effects are optional and silent about it. Each needs a piece split out
+        // by hand in the .blend - a Barrel for the shot, an Engine for the plume
+        // - which only some scenes have; a tank without them still loads, and
+        // the harness draws the painted sheet instead of the rendered flash. A
+        // missing file here is a fact about the scene, not an error.
+        foreach (string layer in OptionalNames)
         {
             string basePath = $"{root}/{tag}/{layer}_atlas";
             if (!File.Exists(basePath + ".json") || !File.Exists(basePath + ".png"))
