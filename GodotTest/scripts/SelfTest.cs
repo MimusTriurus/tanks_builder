@@ -315,6 +315,121 @@ public static class SelfTest
         Check("it thins out at a crawl instead of switching off",
             crawlNonZero < fastNonZero / 3, $"{crawlNonZero} vs {fastNonZero} frames jolted");
 
+        GD.Print("engine idle");
+        var idle = new EngineIdle();
+        // 68px of lever from the contact point to the roof - the same figure the
+        // pitch amplitude check is calibrated against
+        const double roofLeverPx = 68.0;
+        double idlePeak = 0.0;
+        int pitchCrossings = 0, rollCrossings = 0, axesAgree = 0, idleSamples = 0;
+        double lastPitch = 0.0, lastRoll = 0.0;
+        for (int i = 0; i < 60; i++)
+        {
+            idle.Advance(0.0, dt);
+            idlePeak = Math.Max(idlePeak, Math.Abs(idle.Pitch));
+            if (i > 0 && Math.Sign(idle.Pitch) != Math.Sign(lastPitch)) pitchCrossings++;
+            if (i > 0 && Math.Sign(idle.Roll) != Math.Sign(lastRoll)) rollCrossings++;
+            if (i > 0)
+            {
+                idleSamples++;
+                if (Math.Sign(idle.Pitch) == Math.Sign(idle.Roll)) axesAgree++;
+            }
+            lastPitch = idle.Pitch;
+            lastRoll = idle.Roll;
+        }
+
+        // The contrast with the rumble, and the reason this class exists: the
+        // rumble is driven by distance and a stopped tank gets nothing from it.
+        Check("the tremble runs with the tank standing still", idlePeak > 0.0,
+            $"peak {idlePeak:F5} at zero speed");
+        Check("the tremble is well under a pixel of roof travel",
+            idlePeak * roofLeverPx is > 0.3 and < 1.5,
+            $"{idlePeak * roofLeverPx:F2}px on a {roofLeverPx:F0}px lever");
+        // Under 30Hz or it aliases into a slow wobble at 60fps; over a few Hz or
+        // it is a sway rather than a tremble. Sign changes are twice the
+        // frequency, and this is one second of frames.
+        Check("the tremble is a tremble, not a sway or an alias",
+            pitchCrossings is > 12 and < 40 && rollCrossings is > 8 and < 40,
+            $"{pitchCrossings} pitch and {rollCrossings} roll crossings in 1s");
+        // One frequency on both axes is a mechanism cycling; two that never line
+        // up is an engine.
+        Check("the two axes are not in lockstep",
+            axesAgree > idleSamples * 0.2 && axesAgree < idleSamples * 0.8,
+            $"{axesAgree} of {idleSamples} frames agreed in sign");
+
+        var underWay = new EngineIdle { FadeSpeed = 60.0 };
+        double movingPeak = 0.0;
+        for (int i = 0; i < 60; i++)
+        {
+            underWay.Advance(60.0, dt);
+            movingPeak = Math.Max(movingPeak,
+                Math.Max(Math.Abs(underWay.Pitch), Math.Abs(underWay.Roll)));
+        }
+        Check("it hands over to the rumble instead of stacking on it",
+            movingPeak < 1e-9, $"still {movingPeak:F6} at the fade speed");
+
+        // Same geometry guard the rumble roll has. A tilt about the heading and
+        // a tilt across it project differently, and if both came out near
+        // vertical on some heading the tremble would vanish there.
+        double worstIdleAxis = 1.0;
+        int worstIdleHeading = -1;
+        foreach (int heading in HexField.EdgeHeadings)
+        {
+            double across = Math.Max(
+                Math.Abs(tank.Atlas!.GroundDirection(heading).X),
+                Math.Abs(tank.Atlas.GroundDirection(heading + 90.0).X));
+            if (across < worstIdleAxis)
+            {
+                worstIdleAxis = across;
+                worstIdleHeading = heading;
+            }
+        }
+        Check("the tremble has a sideways component at every heading",
+            worstIdleAxis > 0.5, $"worst is {worstIdleHeading} deg at {worstIdleAxis:F2}");
+
+        GD.Print("turret scan");
+        var scan = new TurretScan();
+        scan.Reset();
+        double scanStep = 360.0 / tank.Atlas!.Count;
+        var bearings = new HashSet<int>();
+        double biggestMove = 0.0, scanPeak = 0.0;
+        int movingFrames = 0, offGrid = 0;
+        for (int i = 0; i < 3600; i++)          // a minute of idling
+        {
+            double move = scan.Advance(scanStep, dt);
+            biggestMove = Math.Max(biggestMove, Math.Abs(move));
+            scanPeak = Math.Max(scanPeak, Math.Abs(scan.Offset));
+            if (move != 0.0)
+                movingFrames++;
+            else
+            {
+                // at rest it must be parked on a bearing that was rendered,
+                // never halfway between two frames
+                if (Math.Abs(scan.Offset / scanStep - Math.Round(scan.Offset / scanStep)) > 1e-6)
+                    offGrid++;
+                bearings.Add((int)Math.Round(scan.Offset));
+            }
+        }
+
+        Check("the scan stays inside its arc",
+            scanPeak <= scan.MaxSteps * scanStep + 1e-6,
+            $"reached {scanPeak:F1} deg, limit {scan.MaxSteps * scanStep:F1}");
+        Check("the scan visits several bearings", bearings.Count >= 3,
+            $"saw {string.Join(",", bearings.OrderBy(v => v))}");
+        Check("it rests only on bearings that were rendered", offGrid == 0,
+            $"{offGrid} frames parked between frames");
+        // The quantisation lesson, made executable. A scan smaller than one
+        // frame step draws nothing at all on this atlas: the asked-for few
+        // degrees of sway is below what twelve frames can express.
+        Check("the scan is at least one frame step wide", scanPeak >= scanStep - 1e-6,
+            $"{scanPeak:F1} deg against a {scanStep:F1} deg step");
+        Check("it traverses rather than snapping",
+            biggestMove <= scan.SlewRate * dt + 1e-9,
+            $"biggest step {biggestMove:F3} deg in a frame");
+        // Mostly parked. A turret in constant motion reads as a search radar.
+        Check("it spends most of its time dwelling",
+            movingFrames < 3600 * 0.6, $"{movingFrames} of 3600 frames traversing");
+
         GD.Print("turret stabiliser");
         tank.HullFacing = 270.0;
         tank.Pitch = 0.03;
@@ -334,6 +449,23 @@ public static class SelfTest
         Check("heave is shared whatever the stabiliser is doing",
             tank.HeaveFor(true) == tank.HeaveFor(false) && tank.HeaveFor(true) == tank.Shake,
             $"{tank.HeaveFor(true)} vs {tank.HeaveFor(false)}");
+
+        // Same rule for the tremble, for a second reason on top of the seam: a
+        // stabiliser works against the hull pitching over terrain, not against
+        // an 11Hz buzz, and a hull shivering under a perfectly still turret
+        // stops reading as one vehicle.
+        tank.Pitch = 0.0;
+        tank.Roll = 0.0;
+        tank.IdlePitch = 0.012;
+        tank.IdleRoll = 0.010;
+        Check("the engine tremble reaches the turret as well",
+            tank.TiltFor(true) != Vector2.Zero
+            && tank.TiltFor(true) == tank.TiltFor(false),
+            $"turret {tank.TiltFor(true)} vs hull {tank.TiltFor(false)}");
+        tank.IdlePitch = 0.0;
+        tank.IdleRoll = 0.0;
+        tank.Pitch = 0.03;
+        tank.Roll = 0.02;
 
         tank.TurretStabilised = false;
         Check("with the stabiliser off the turret rides with the hull",

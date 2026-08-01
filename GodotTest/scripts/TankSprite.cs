@@ -59,6 +59,12 @@ public sealed partial class TankSprite : Node2D
     /// heading. Shares the machinery with <see cref="Pitch"/>.</summary>
     public double Roll;
 
+    /// <summary>Engine tremble, as pitch and roll shear amplitudes. Kept apart
+    /// from <see cref="Pitch"/> and <see cref="Roll"/> because it is not
+    /// stabilised - see <see cref="TurretStabilised"/>.</summary>
+    public double IdlePitch;
+    public double IdleRoll;
+
     /// <summary>
     /// Pitch, applied as a shear rather than a rotation.
     ///
@@ -98,6 +104,12 @@ public sealed partial class TankSprite : Node2D
     /// pixel or two at the seam on every jolt - the one join this whole
     /// pipeline exists to keep tight.
     ///
+    /// The engine tremble is shared for the same reason, plus one of its own: a
+    /// stabiliser holds the gun against the hull pitching and rolling under it,
+    /// on the timescale of terrain. It does not, and could not, null out an
+    /// 11Hz buzz. A trembling hull under a turret nailed rigidly to the air
+    /// reads as two sprites rather than one vehicle.
+    ///
     /// The seam still parts a little, by tilt times the ring's height above the
     /// ground: about a pixel at the amplitudes in use, which the turret's skirt
     /// covers.
@@ -109,11 +121,11 @@ public sealed partial class TankSprite : Node2D
     /// both displace a point by an amount proportional to its height. Summing
     /// the two directions and shearing once is exact, not an approximation, and
     /// avoids composing two transforms.</summary>
-    private Vector2 TiltDisplacement()
+    private Vector2 TiltDisplacement(double pitch, double roll)
     {
         Vector2 displacement =
-            Atlas!.GroundDirection(HullFacing) * (float)Pitch
-            + Atlas.GroundDirection(HullFacing + 90.0) * (float)Roll;
+            Atlas!.GroundDirection(HullFacing) * (float)pitch
+            + Atlas.GroundDirection(HullFacing + 90.0) * (float)roll;
         displacement.Y *= SquashDamping;
         return displacement;
     }
@@ -121,7 +133,10 @@ public sealed partial class TankSprite : Node2D
     /// <summary>Tilt a layer receives. Exposed so the stabilisation policy can
     /// be asserted rather than read off the screen.</summary>
     public Vector2 TiltFor(bool turret) =>
-        turret && TurretStabilised ? Vector2.Zero : TiltDisplacement();
+        TiltDisplacement(IdlePitch, IdleRoll)
+        + (turret && TurretStabilised
+            ? Vector2.Zero
+            : TiltDisplacement(Pitch, Roll));
 
     /// <summary>Heave a layer receives. Never depends on the layer - see
     /// <see cref="TurretStabilised"/>.</summary>
@@ -149,7 +164,8 @@ public sealed partial class TankSprite : Node2D
     {
         if (Atlas is null)
             return;
-        bool tilted = Math.Abs(Pitch) > 1e-6 || Math.Abs(Roll) > 1e-6;
+        bool tilted = Math.Abs(Pitch) > 1e-6 || Math.Abs(Roll) > 1e-6
+                      || Math.Abs(IdlePitch) > 1e-6 || Math.Abs(IdleRoll) > 1e-6;
         if (ShowHull)
             DrawLayerTilted("hull", HullFacing, tilted, false);
         if (ShowTurret)

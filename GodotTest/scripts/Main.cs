@@ -48,8 +48,19 @@ public sealed partial class Main : Node2D
     private bool _pitchEnabled;
 
     private readonly BodyRumble _rumble = new();
-    /// <summary>Ground rumble, same deal as the pitch - key B, or --rumble.</summary>
-    private bool _rumbleEnabled;
+    /// <summary>Ground rumble. On by default, unlike the rest: a tank that
+    /// slides over the ground without a tremor is wrong in a way the plain
+    /// render is not, so this one is the baseline and --no-rumble (key B) is
+    /// what you reach for to compare against.</summary>
+    private bool _rumbleEnabled = true;
+
+    private readonly EngineIdle _idle = new();
+    /// <summary>Engine tremble while stopped - key I, or --idle.</summary>
+    private bool _idleEnabled;
+
+    private readonly TurretScan _scan = new();
+    /// <summary>Idle turret traverse - key N, or --scan.</summary>
+    private bool _scanEnabled;
 
     private bool _spinning;
     private bool _aimWithMouse;
@@ -88,6 +99,12 @@ public sealed partial class Main : Node2D
                 _pitchEnabled = true;
             else if (userArgs[i] == "--rumble")
                 _rumbleEnabled = true;
+            else if (userArgs[i] == "--no-rumble")
+                _rumbleEnabled = false;
+            else if (userArgs[i] == "--idle")
+                _idleEnabled = true;
+            else if (userArgs[i] == "--scan")
+                _scanEnabled = true;
             else if (userArgs[i] == "--tank" && i + 1 < userArgs.Length)
                 _startTag = userArgs[i + 1].ToUpperInvariant();
             else if (userArgs[i] == "--roll-only")
@@ -183,6 +200,11 @@ public sealed partial class Main : Node2D
         // the rumble reaches full strength at half cruise, whatever cruise is
         // for this class, so a heavy tank is not stuck in the thinned-out band
         _rumble.FullSpeed = _profile.TopSpeed * 0.5;
+        // the tremble is gone well before the rumble is up to strength, so the
+        // two never argue over the same tilt
+        _idle.FadeSpeed = _profile.TopSpeed * 0.25;
+        _idle.Reset();
+        _scan.Reset();
         CancelOrder();
         _field.QueueRedraw();
         SnapToCell();
@@ -330,6 +352,42 @@ public sealed partial class Main : Node2D
         _tank.Roll = _rumble.Roll;
     }
 
+    /// <summary>Runs every frame, moving or not - that is the whole point of it.
+    /// The rumble is keyed on distance and goes silent the instant the tank
+    /// stops; the engine does not.</summary>
+    private void UpdateIdle(double delta)
+    {
+        if (!_idleEnabled)
+        {
+            if (_tank.IdlePitch == 0.0 && _tank.IdleRoll == 0.0)
+                return;
+            _idle.Reset();
+            _tank.IdlePitch = 0.0;
+            _tank.IdleRoll = 0.0;
+            _tank.QueueRedraw();
+            return;
+        }
+        _idle.Advance(_speed, delta);
+        _tank.IdlePitch = _idle.Pitch;
+        _tank.IdleRoll = _idle.Roll;
+        _tank.QueueRedraw();
+    }
+
+    /// <summary>Suspended while under way, and while anything else is driving
+    /// the turret. A locked turret holding its world heading through a
+    /// manoeuvre is the feature this harness exists to show; a scan quietly
+    /// walking it off that heading would look exactly like the lock failing.</summary>
+    private void UpdateScan(double delta)
+    {
+        if (!_scanEnabled || Moving || _spinning || _aimWithMouse)
+            return;
+        double move = _scan.Advance(360.0 / _tank.Atlas!.Count, delta);
+        if (move == 0.0)
+            return;
+        _tank.TurretFacing = Mod(_tank.TurretFacing + move, 360.0);
+        _tank.QueueRedraw();
+    }
+
     // --- frame -------------------------------------------------------------
 
     public override void _Process(double delta)
@@ -358,7 +416,10 @@ public sealed partial class Main : Node2D
         {
             GD.Print($"{_frames,4}  hull {_tank.HullFacing,6:F1}  speed {_speed,6:F1}"
                      + $"  pitch {_tank.Pitch,8:F5}  shake {_tank.Shake,2}"
-                     + $"  roll {_tank.Roll,8:F5}  cell ({_cell.X},{_cell.Y})");
+                     + $"  roll {_tank.Roll,8:F5}  idle {_tank.IdlePitch,8:F5}"
+                     + $"/{_tank.IdleRoll,8:F5}  scan {_scan.Offset,6:F1}"
+                     + $"  turret {_tank.TurretFacing,6:F1}"
+                     + $"  cell ({_cell.X},{_cell.Y})");
             if (++_frames >= _traceFrames)
             {
                 GetTree().Quit();
@@ -376,6 +437,9 @@ public sealed partial class Main : Node2D
             UpdateRumble(delta);
             _tank.QueueRedraw();
         }
+
+        UpdateIdle(delta);
+        UpdateScan(delta);
 
         if (!Moving && _spinning)
         {
@@ -467,6 +531,15 @@ public sealed partial class Main : Node2D
                 _rumbleEnabled = !_rumbleEnabled;
                 UpdateRumble(0.0);
                 break;
+            case Key.I:
+                _idleEnabled = !_idleEnabled;
+                UpdateIdle(0.0);
+                break;
+            case Key.N:
+                _scanEnabled = !_scanEnabled;
+                if (!_scanEnabled)
+                    _scan.Reset();
+                break;
             case Key.K: _tank.TurretStabilised = !_tank.TurretStabilised; break;
             case Key.Escape: CancelOrder(); break;
             case Key.Key1 or Key.Key2 or Key.Key3:
@@ -497,6 +570,10 @@ public sealed partial class Main : Node2D
                 _rumble.Reset();
                 _tank.Shake = 0;
                 _tank.Roll = 0.0;
+                _idle.Reset();
+                _tank.IdlePitch = 0.0;
+                _tank.IdleRoll = 0.0;
+                _scan.Reset();
                 _camera.Zoom = Vector2.One;
                 _camera.Position = new Vector2(760, 500);
                 SnapToCell();
@@ -532,6 +609,9 @@ public sealed partial class Main : Node2D
             $"pitch {_tank.Pitch,7:F4}   shake {_tank.Shake,2}px   roll {_tank.Roll,7:F4}"
                 + $"   P body pitch: {On(_pitchEnabled)}   B ground rumble: {On(_rumbleEnabled)}"
                 + $"   K turret stabiliser: {On(_tank.TurretStabilised)}",
+            $"idle tremble {_tank.IdlePitch,7:F4} / {_tank.IdleRoll,7:F4}"
+                + $"   scan {_scan.Offset,6:F1} deg"
+                + $"   I engine idle: {On(_idleEnabled)}   N turret scan: {On(_scanEnabled)}",
             "",
             "left click: drive there    F turret lock    ESC cancel    A/D hull    Q/E turret",
             "W/S step fwd/back    1/2/3 tank HT/MT/LT    wheel zoom, MMB pan",
@@ -539,6 +619,7 @@ public sealed partial class Main : Node2D
                 + $"    X axis cross: {On(_tank.ShowAxis)}",
             $"H hull layer: {On(_tank.ShowHull)}    T turret layer: {On(_tank.ShowTurret)}"
                 + $"    G field: {On(_field.ShowField)}    R reset",
+            "P pitch    B rumble    I engine idle    N turret scan    K turret stabiliser",
         });
     }
 
