@@ -28,22 +28,33 @@ namespace TankSpriteTest;
 /// </summary>
 public sealed class EngineTremble
 {
-    /// <summary>Shear amplitude, in the same units as <see cref="BodyPitch.Gain"/>:
-    /// about 68px of lever from the contact point to the hull roof, so 0.008 is
-    /// roughly half a pixel of roof travel either way.
+    /// <summary>Shear amplitude at a standstill, in the same units as
+    /// <see cref="BodyPitch.Gain"/>: about 68px of lever from the contact point
+    /// to the hull roof, so 0.005 is about a third of a pixel of roof travel
+    /// either way.
     ///
     /// Sub-pixel is the point. A whole-pixel tremble at this rate is a buzz, and
     /// the sprite filters linearly (the pitch shear needed that), so a fraction
-    /// of a pixel actually shows. Much below this it reads as the sprite being
-    /// slightly out of focus rather than as motion.
+    /// of a pixel actually shows. This is close to the floor, though: much below
+    /// it and the sprite reads as slightly out of focus rather than as
+    /// moving.</summary>
+    public double RestGain = 0.005;
+
+    /// <summary>Shear amplitude at <see cref="TopSpeed"/>.
     ///
-    /// 0.012 was the first setting and read as too much, for a reason the roof
-    /// figure hides: the lever is measured to the hull roof, and the aerial
-    /// stands twice that high, so it was swinging a good pixel and a half while
-    /// the hull moved under one. The turret is out of the tremble now (see
-    /// <see cref="TankSprite.TurretStabilised"/>), which takes the aerial with
-    /// it, and this is the amplitude that suits what is left.</summary>
-    public double Gain = 0.008;
+    /// Bigger than the rest figure for two reasons that point the same way. The
+    /// engine is under load and genuinely shaking the hull harder; and the tank
+    /// is sliding across the screen, which hides a small vibration, so the same
+    /// amplitude that reads at a standstill goes unnoticed under way.
+    ///
+    /// 0.012 was once the flat setting for both and read as too much, for a
+    /// reason the roof figure hides: the lever is measured to the hull roof, and
+    /// the aerial stands twice that high, so it was swinging a good pixel and a
+    /// half while the hull moved under one. The turret is out of the tremble now
+    /// (see <see cref="TankSprite.TurretStabilised"/>), which takes the aerial
+    /// with it, so the same number on the hull alone is a good deal quieter than
+    /// the one that was complained about.</summary>
+    public double DriveGain = 0.012;
 
     /// <summary>Frequencies at rest, Hz.</summary>
     public double PitchHz = 11.5;
@@ -86,22 +97,32 @@ public sealed class EngineTremble
 
     public void Advance(double speed, double delta)
     {
-        double load = Math.Clamp(Math.Abs(speed) / Math.Max(TopSpeed, 1e-6), 0.0, 1.0);
-        double rate = 1.0 + (LoadFactor - 1.0) * load;
+        double rate = 1.0 + (LoadFactor - 1.0) * Load(speed);
         _pitchPhase += PitchHz * rate * delta;
         _rollPhase += RollHz * rate * delta;
-        Pitch = Gain * Math.Sin(_pitchPhase * Math.Tau);
+        double gain = GainAt(speed);
+        Pitch = gain * Math.Sin(_pitchPhase * Math.Tau);
         // offset so the two axes do not start together and give one big lurch
         // on the first frame
-        Roll = Gain * Math.Sin(_rollPhase * Math.Tau + 1.7);
+        Roll = gain * Math.Sin(_rollPhase * Math.Tau + 1.7);
     }
+
+    /// <summary>How hard the engine is working, 0 at rest and 1 at cruise. One
+    /// ramp feeds both the amplitude and the frequency, because both come from
+    /// the same thing turning faster.</summary>
+    private double Load(double speed) =>
+        Math.Clamp(Math.Abs(speed) / Math.Max(TopSpeed, 1e-6), 0.0, 1.0);
+
+    /// <summary>Shear amplitude at a given speed. Exposed alongside
+    /// <see cref="PitchRateAt"/> so the seam cost can be asserted at the speed
+    /// it actually occurs at, rather than against a single worst number.</summary>
+    public double GainAt(double speed) => RestGain + (DriveGain - RestGain) * Load(speed);
 
     /// <summary>Frequency of the pitch axis at a given speed, Hz. Exposed so the
     /// Nyquist headroom can be asserted rather than recalculated by hand every
     /// time someone reaches for <see cref="LoadFactor"/>.</summary>
     public double PitchRateAt(double speed) =>
-        PitchHz * (1.0 + (LoadFactor - 1.0)
-            * Math.Clamp(Math.Abs(speed) / Math.Max(TopSpeed, 1e-6), 0.0, 1.0));
+        PitchHz * (1.0 + (LoadFactor - 1.0) * Load(speed));
 
     public void Reset()
     {

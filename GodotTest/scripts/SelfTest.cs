@@ -342,8 +342,11 @@ public static class SelfTest
         // rumble is driven by distance and a stopped tank gets nothing from it.
         Check("the tremble runs with the tank standing still", tremblePeak > 0.0,
             $"peak {tremblePeak:F5} at zero speed");
-        Check("the tremble is well under a pixel of roof travel",
-            tremblePeak * roofLeverPx is > 0.3 and < 1.5,
+        // Standing still it is near the floor of what a linear filter can show
+        // as motion rather than as a soft edge. Below about a third of a pixel
+        // it stops reading as a tremble at all.
+        Check("standing still it is a third of a pixel of roof travel",
+            tremblePeak * roofLeverPx is > 0.3 and < 0.6,
             $"{tremblePeak * roofLeverPx:F2}px on a {roofLeverPx:F0}px lever");
         // Under 30Hz or it aliases into a slow wobble at 60fps; over a few Hz or
         // it is a sway rather than a tremble. Sign changes are twice the
@@ -370,9 +373,16 @@ public static class SelfTest
             if (i > 0 && Math.Sign(underWay.Pitch) != Math.Sign(lastMoving)) movingCrossings++;
             lastMoving = underWay.Pitch;
         }
-        Check("it keeps trembling under way at the same amplitude",
-            Math.Abs(movingPeak - tremblePeak) < 0.1 * tremblePeak,
-            $"{movingPeak:F5} moving vs {tremblePeak:F5} standing");
+        // Both amplitude and rate come up with load, off one ramp. The margin on
+        // the amplitude is wide on purpose: at a standstill the tank is the only
+        // still thing on screen and a third of a pixel registers, while under
+        // way it is sliding past hexes and the same amount disappears into the
+        // travel. Equal settings do not look equal.
+        Check("it shakes harder under way", movingPeak > 2.0 * tremblePeak,
+            $"{movingPeak * roofLeverPx:F2}px moving vs {tremblePeak * roofLeverPx:F2}px standing");
+        Check("under way it is still under a pixel of roof travel",
+            movingPeak * roofLeverPx is > 0.6 and < 1.2,
+            $"{movingPeak * roofLeverPx:F2}px on a {roofLeverPx:F0}px lever");
         Check("it runs faster under load", movingCrossings > pitchCrossings,
             $"{movingCrossings} crossings at cruise vs {pitchCrossings} at rest");
         // The hard ceiling. Past 30Hz the signal samples into a slow wobble that
@@ -401,10 +411,14 @@ public static class SelfTest
         }
         shifting.Advance(240.0, dt);                               // full throttle
         staying.Advance(0.0, dt);
-        double divergence = Math.Abs(shifting.Pitch - staying.Pitch);
-        Check("a speed change does not jump the phase",
-            divergence < 0.5 * shifting.Gain,
-            $"diverged {divergence:F5} against a gain of {shifting.Gain:F3}"
+        // Divided through by the gain, because opening the throttle steps the
+        // amplitude too and that step is legitimate - what is being isolated
+        // here is the phase. (In play the gain never steps like this: speed
+        // ramps at a few px/s per frame, so the amplitude creeps.)
+        double divergence = Math.Abs(shifting.Pitch / shifting.GainAt(240.0)
+                                     - staying.Pitch / staying.GainAt(0.0));
+        Check("a speed change does not jump the phase", divergence < 0.5,
+            $"the waveform moved {divergence:F4} of full scale"
             + " in the frame the throttle opened");
 
         // Same geometry guard the rumble roll has. A tilt about the heading and
@@ -515,11 +529,11 @@ public static class SelfTest
         // around a pixel and the turret's skirt covers it.
         tank.TurretStabilised = true;
         const double ringHeightPx = 55.0;
-        double trembleGain = new EngineTremble().Gain;
-        // The default configuration: the pitch on top of the tremble, which now
-        // runs at every speed rather than fading out, so these two really do
-        // coincide - flat-out acceleration from a standing start is exactly when
-        // both are at their peak.
+        // The default configuration: the pitch on top of the tremble. The worst
+        // moment is braking from cruise rather than pulling away, now that the
+        // tremble grows with speed - both are near their peak there, where at a
+        // standing start the tremble is at its quietest.
+        double trembleGain = new EngineTremble().DriveGain;
         double defaultTilt = new Vector2((float)(new BodyPitch().Gain + trembleGain),
             (float)trembleGain).Length();
         Check("stabilising costs about a pixel at the seam",
@@ -527,14 +541,15 @@ public static class SelfTest
             $"{defaultTilt * ringHeightPx:F2}px at a {ringHeightPx:F0}px ring");
 
         // The rumble is an opt-in extra now rather than the baseline, so it can
-        // land on top of everything else. Nothing stops the three peaking
-        // together any more, and the bound has to say so rather than quietly
-        // describing a combination the defaults happen to avoid.
+        // land on top of everything else. The bound is looser here on purpose:
+        // this is every source at once, all in phase, all switched on by hand,
+        // and it is reported rather than forbidden. The number above is the one
+        // that describes what the harness does out of the box.
         double stackedTilt = new Vector2(
             (float)(new BodyPitch().Gain + trembleGain),
             (float)(new BodyRumble().RollAmplitude + trembleGain)).Length();
         Check("with the rumble stacked on as well the seam still holds",
-            stackedTilt * ringHeightPx < 3.0,
+            stackedTilt * ringHeightPx < 3.5,
             $"{stackedTilt * ringHeightPx:F2}px with pitch, rumble roll and tremble at once");
 
         // What lets the turret sit out the tremble at all. Exempting it from
