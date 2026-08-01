@@ -45,6 +45,28 @@ public sealed class AtlasSet
     /// </summary>
     public Rect2I HexRect { get; private set; }
 
+    /// <summary>Camera elevation the atlas was rendered at, degrees. Needed to
+    /// turn a world heading into a screen direction, and read from the file
+    /// rather than assumed so a re-render at another angle still works.</summary>
+    public double Elevation { get; private set; } = 30.0;
+
+    /// <summary>Offset from the shared anchor down to the ground plane, in
+    /// pixels. The anchor is the turret's rotation axis, which the renderer
+    /// places at the mid-height of the fitted bounds, so it floats well above
+    /// the ground the tank stands on - about 61px on these atlases. Anything
+    /// that needs the contact point rather than the pivot goes through here.</summary>
+    public Vector2 GroundOffset => HexRect.Position + (Vector2)HexRect.Size * 0.5f - Anchor;
+
+    /// <summary>Screen-space direction of a world heading on the ground plane.
+    /// Not normalised: the isometric view squashes the ground by
+    /// sin(elevation), and anything moving along it should shrink to match.</summary>
+    public Vector2 GroundDirection(double headingDegrees)
+    {
+        double rad = Mathf.DegToRad(headingDegrees);
+        double squash = Math.Sin(Mathf.DegToRad(Elevation));
+        return new Vector2((float)Math.Cos(rad), (float)(-Math.Sin(rad) * squash));
+    }
+
     private readonly Dictionary<string, ImageTexture> _textures = new();
     private readonly Dictionary<string, int> _columns = new();
 
@@ -117,6 +139,7 @@ public sealed class AtlasSet
         atlas.Count = Math.Max(1, hull.Count);
         atlas.Anchor = new Vector2((float)hull.AnchorPx[0], (float)hull.AnchorPx[1]);
         atlas.UnitsPerPixel = hull.UnitsPerPixel;
+        atlas.Elevation = hull.View.Elevation;
         atlas.ReadFacings(hull);
         return atlas;
     }
@@ -195,6 +218,13 @@ public sealed class AtlasSet
         [JsonPropertyName("anchor_px")] public double[] AnchorPx { get; set; } = { 128, 128 };
         [JsonPropertyName("units_per_pixel")] public double UnitsPerPixel { get; set; }
         [JsonPropertyName("frames")] public FrameMeta[] Frames { get; set; } = Array.Empty<FrameMeta>();
+        [JsonPropertyName("view")] public ViewMeta View { get; set; } = new();
+    }
+
+    private sealed class ViewMeta
+    {
+        [JsonPropertyName("elevation")] public double Elevation { get; set; } = 30.0;
+        [JsonPropertyName("azimuth")] public double Azimuth { get; set; }
     }
 
     private sealed class GridMeta

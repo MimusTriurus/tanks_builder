@@ -22,6 +22,7 @@ public sealed partial class Main : Node2D
 
     private const double RotateSpeed = 200.0;   // deg/sec of hull yaw
     private const double MoveSpeed = 240.0;     // px/sec along the ground
+    private const double AccelRate = 900.0;     // px/sec^2 - also drives the pitch
     private const double SpinSpeed = 90.0;      // deg/sec, for the wobble check
 
     private readonly Dictionary<string, AtlasSet> _atlases = new();
@@ -38,7 +39,19 @@ public sealed partial class Main : Node2D
 
     private List<Vector2I> _path = new();
     private int _pathStep;
-    private bool _rotatingIntoStep;
+    private double _speed;
+    private readonly BodyPitch _pitch = new();
+
+    /// <summary>Body pitch is off unless asked for - key P, or --pitch on a
+    /// capture run. It is an interpretation of the sprites rather than
+    /// something the atlases contain, so the plain rendered motion stays the
+    /// default and the effect is something you switch on to compare against
+    /// it.</summary>
+    private bool _pitchEnabled;
+
+    private readonly BodyRumble _rumble = new();
+    /// <summary>Ground rumble, same deal as the pitch - key B, or --rumble.</summary>
+    private bool _rumbleEnabled;
 
     private bool _spinning;
     private bool _aimWithMouse;
@@ -51,6 +64,10 @@ public sealed partial class Main : Node2D
     private int _frames;
     private bool _selfTest;
     private Vector2I? _driveTo;
+    // Prints one line of state per frame and quits. Picking a frame to
+    // screenshot by arithmetic does not work - the pivot length depends on
+    // which heading the pathfinder chose - so read it off instead.
+    private int _traceFrames;
 
     private bool Moving => _pathStep < _path.Count;
 
@@ -65,6 +82,16 @@ public sealed partial class Main : Node2D
                 _capturePath = userArgs[i]["--capture=".Length..];
             else if (userArgs[i] == "--selftest")
                 _selfTest = true;
+            else if (userArgs[i] == "--capture-at" && i + 1 < userArgs.Length
+                     && int.TryParse(userArgs[i + 1], out int at))
+                _captureAfter = at;
+            else if (userArgs[i] == "--pitch")
+                _pitchEnabled = true;
+            else if (userArgs[i] == "--rumble")
+                _rumbleEnabled = true;
+            else if (userArgs[i] == "--trace" && i + 1 < userArgs.Length
+                     && int.TryParse(userArgs[i + 1], out int frames))
+                _traceFrames = frames;
             else if (userArgs[i] == "--drive" && i + 1 < userArgs.Length)
             {
                 string[] parts = userArgs[i + 1].Split(',');
@@ -160,7 +187,6 @@ public sealed partial class Main : Node2D
             return;
         _path = _field.FindPath(_cell, target);
         _pathStep = 0;
-        _rotatingIntoStep = true;
         // Mouse aim would override both turret modes and make the feature look
         // broken while the tank drives, so an order takes the turret back.
         _aimWithMouse = false;
@@ -173,8 +199,27 @@ public sealed partial class Main : Node2D
     {
         _path = new List<Vector2I>();
         _pathStep = 0;
+        _speed = 0.0;
         _field.Highlight = Array.Empty<Vector2I>();
         _field.QueueRedraw();
+    }
+
+    /// <summary>Distance left in the current straight run.
+    ///
+    /// It stops at the first bend on purpose: a tracked vehicle pivots on the
+    /// spot, so it has to come to a halt there anyway, and looking past the
+    /// bend would start the braking too late.</summary>
+    private double RemainingRun()
+    {
+        double total = (_origin + _field.CellAnchor(_path[_pathStep]) - _tank.Position).Length();
+        int heading = HexField.HeadingTo(_cell, _path[_pathStep]);
+        for (int i = _pathStep; i + 1 < _path.Count; i++)
+        {
+            if (HexField.HeadingTo(_path[i], _path[i + 1]) != heading)
+                break;
+            total += (_field.CellAnchor(_path[i + 1]) - _field.CellAnchor(_path[i])).Length();
+        }
+        return total;
     }
 
     private void AdvanceOrder(double delta)
@@ -187,41 +232,73 @@ public sealed partial class Main : Node2D
             return;
         }
 
-        if (_rotatingIntoStep)
+        double diff = WrapAngle(heading - _tank.HullFacing);
+        double accelRatio;
+
+        if (Math.Abs(diff) > 0.5)
         {
-            double diff = WrapAngle(heading - _tank.HullFacing);
-            double budget = RotateSpeed * delta;
-            if (Math.Abs(diff) <= budget)
+            // brake to a halt, then pivot: tracks turn on the spot
+            accelRatio = _speed > 0.0 ? -1.0 : 0.0;
+            _speed = Math.Max(0.0, _speed - AccelRate * delta);
+            if (_speed <= 0.0)
             {
-                _tank.TurnHull(diff);
-                _rotatingIntoStep = false;
-            }
-            else
-            {
-                _tank.TurnHull(Math.Sign(diff) * budget);
-                return;         // turn on the spot first, then drive
+                double budget = RotateSpeed * delta;
+                _tank.TurnHull(Math.Abs(diff) <= budget ? diff : Math.Sign(diff) * budget);
             }
         }
+        else
+        {
+            bool braking = RemainingRun() <= _speed * _speed / (2.0 * AccelRate);
+            accelRatio = braking ? -1.0 : _speed < MoveSpeed ? 1.0 : 0.0;
+            _speed = Math.Clamp(_speed + accelRatio * AccelRate * delta, 0.0, MoveSpeed);
+        }
+
+        UpdatePitch(accelRatio, delta);
+        UpdateRumble(delta);
 
         Vector2 goal = _origin + _field.CellAnchor(next);
         Vector2 to = goal - _tank.Position;
-        float budgetPx = (float)(MoveSpeed * delta);
-        if (to.Length() <= budgetPx)
+        var budgetPx = (float)(_speed * delta);
+        if (to.Length() <= budgetPx || (budgetPx <= 0.0f && to.Length() < 0.5f))
         {
             _tank.Position = goal;
             _cell = next;
             _pathStep++;
-            _rotatingIntoStep = true;
             if (!Moving)
             {
                 _field.Highlight = Array.Empty<Vector2I>();
                 _field.QueueRedraw();
             }
         }
-        else
+        else if (budgetPx > 0.0f)
         {
             _tank.Position += to.Normalized() * budgetPx;
         }
+        _tank.QueueRedraw();
+    }
+
+    private void UpdatePitch(double accelRatio, double delta)
+    {
+        if (!_pitchEnabled)
+        {
+            _pitch.Reset();
+            _tank.Pitch = 0.0;
+            return;
+        }
+        _pitch.Update(accelRatio, delta);
+        _tank.Pitch = _pitch.Angle;
+    }
+
+    private void UpdateRumble(double delta)
+    {
+        if (!_rumbleEnabled)
+        {
+            _rumble.Reset();
+            _tank.Shake = 0;
+            return;
+        }
+        _rumble.Advance(_speed * delta, _speed);
+        _tank.Shake = _rumble.Offset;
     }
 
     // --- frame -------------------------------------------------------------
@@ -239,14 +316,44 @@ public sealed partial class Main : Node2D
         if (_tank.Atlas is null)
             return;
 
+        // A capture run steps at a fixed rate so two runs land on the same
+        // state at the same frame number. On real deltas they drift a frame or
+        // two apart, and comparing a pitch-on shot against a pitch-off shot
+        // then measures the drift instead: caught once when the two runs were
+        // mid-pivot on either side of a 30 deg sprite boundary and "differed"
+        // by 91k pixels.
+        if (_capturePath is not null || _traceFrames > 0)
+            delta = 1.0 / 60.0;
+
+        if (_traceFrames > 0)
+        {
+            GD.Print($"{_frames,4}  hull {_tank.HullFacing,6:F1}  speed {_speed,6:F1}"
+                     + $"  pitch {_tank.Pitch,8:F5}  shake {_tank.Shake,2}"
+                     + $"  cell ({_cell.X},{_cell.Y})");
+            if (++_frames >= _traceFrames)
+            {
+                GetTree().Quit();
+                return;
+            }
+        }
+
         if (Moving)
             AdvanceOrder(delta);
-        else if (_spinning)
+        else if (_pitch.Angle != 0.0 || _speed != 0.0 || _tank.Shake != 0)
+        {
+            // let the body settle after the stop instead of snapping level
+            _speed = 0.0;
+            UpdatePitch(0.0, delta);
+            UpdateRumble(delta);
+            _tank.QueueRedraw();
+        }
+
+        if (!Moving && _spinning)
         {
             _tank.TurretFacing = Mod(_tank.TurretFacing + SpinSpeed * delta, 360.0);
             _tank.QueueRedraw();
         }
-        else if (_aimWithMouse)
+        else if (!Moving && _aimWithMouse)
         {
             Vector2 toMouse = GetGlobalMousePosition() - _tank.GlobalPosition;
             if (toMouse.Length() > 8.0f)
@@ -323,6 +430,14 @@ public sealed partial class Main : Node2D
                 OrderMoveTo(_field.Neighbour(_cell, Mod(_tank.HullFacing + 180.0, 360.0)));
                 break;
             case Key.F: _tank.TurretLocked = !_tank.TurretLocked; break;
+            case Key.P:
+                _pitchEnabled = !_pitchEnabled;
+                UpdatePitch(0.0, 0.0);
+                break;
+            case Key.B:
+                _rumbleEnabled = !_rumbleEnabled;
+                UpdateRumble(0.0);
+                break;
             case Key.Escape: CancelOrder(); break;
             case Key.Key1 or Key.Key2 or Key.Key3:
                 // Godot's Key enum is backed by long, so this needs the cast
@@ -347,6 +462,10 @@ public sealed partial class Main : Node2D
                 _tank.TurretFacing = 270.0;
                 _spinning = false;
                 _aimWithMouse = false;
+                _pitch.Reset();
+                _tank.Pitch = 0.0;
+                _rumble.Reset();
+                _tank.Shake = 0;
                 _camera.Zoom = Vector2.One;
                 _camera.Position = new Vector2(760, 500);
                 SnapToCell();
@@ -375,6 +494,9 @@ public sealed partial class Main : Node2D
                 + $"      turret {_tank.TurretFacing,6:F1} deg -> frame {frames.Y,2}",
             $"turret mode: {(_tank.TurretLocked ? "LOCKED - holds world heading" : "FREE - swings with the hull")}"
                 + (_aimWithMouse ? "   (mouse aim overrides)" : ""),
+            "",
+            $"speed {_speed,6:F0} px/s   pitch {_tank.Pitch,7:F4}   shake {_tank.Shake,2}px"
+                + $"   P body pitch: {On(_pitchEnabled)}   B ground rumble: {On(_rumbleEnabled)}",
             "",
             "left click: drive there    F turret lock    ESC cancel    A/D hull    Q/E turret",
             "W/S step fwd/back    1/2/3 tank HT/MT/LT    wheel zoom, MMB pan",

@@ -65,9 +65,7 @@ public sealed partial class HexField : Node2D
     /// of the fitted bounds, so it floats above the ground plane the hexagon
     /// lies on. The gap is constant across cells, which is what makes it a
     /// single subtraction rather than a per-cell correction.</summary>
-    public Vector2 CentreOffset => Atlas is null
-        ? Vector2.Zero
-        : Atlas.HexRect.Position + (Vector2)Atlas.HexRect.Size * 0.5f - Atlas.Anchor;
+    public Vector2 CentreOffset => Atlas?.GroundOffset ?? Vector2.Zero;
 
     /// <summary>Centre of a cell's drawn hexagon, in this node's local space.
     /// This is the point <see cref="CellAt"/> inverts - not the anchor, which

@@ -46,14 +46,77 @@ public sealed partial class TankSprite : Node2D
 
     public static double Mod(double a, double n) => (a % n + n) % n;
 
+    /// <summary>Body pitch as a shear amplitude; positive is nose down.
+    /// See <see cref="PitchTransform"/> for why a shear and not a rotation.</summary>
+    public double Pitch;
+
+    /// <summary>Whole pixels of vertical jolt from the ground. Applied to the
+    /// draw rect rather than to Position, which the movement code compares
+    /// against cell anchors and must stay exact.</summary>
+    public int Shake;
+
+    /// <summary>
+    /// Pitch, applied as a shear rather than a rotation.
+    ///
+    /// The sprite is already projected, so rotating it in screen space is roll,
+    /// not pitch. What a small pitch actually does in an isometric view is move
+    /// a point at height h forward by about theta*h - a displacement
+    /// proportional to height above the ground, which is exactly a shear. Height
+    /// above ground is height above the contact point in sprite pixels, and the
+    /// forward direction is the hull heading projected onto the ground plane,
+    /// unnormalised so that driving into the screen pitches less, as it should.
+    /// </summary>
+    /// <summary>
+    /// How much of the shear's vertical component to keep.
+    ///
+    /// A real pitch moves a point forward by theta*h AND down by theta*f, where
+    /// f is how far forward it sits. A sprite has no depth, so f is
+    /// unrecoverable - screen y mixes height and distance - and only the first
+    /// term can be modelled. Where the heading runs across the screen that is
+    /// fine, because the shear is horizontal and reads as a tilt. Where it runs
+    /// into the screen the direction is almost pure vertical, the shear becomes
+    /// a vertical squash, and a rigid object that squashes reads as rubber.
+    ///
+    /// So the vertical part is held down to a quarter. The pitch is then weaker
+    /// when driving toward or away from the camera, which is also true of the
+    /// real thing: pitch toward the viewer shows mostly as foreshortening of
+    /// the top face, which a flat sprite cannot do either.
+    /// </summary>
+    private const float SquashDamping = 0.25f;
+
+    private Transform2D PitchTransform()
+    {
+        float groundY = Atlas!.GroundOffset.Y;
+        Vector2 forward = Atlas.GroundDirection(HullFacing);
+        forward.Y *= SquashDamping;
+        var amp = (float)Pitch;
+        return new Transform2D(
+            new Vector2(1.0f, 0.0f),                            // x is untouched
+            new Vector2(-amp * forward.X, 1.0f - amp * forward.Y),
+            new Vector2(amp * groundY * forward.X, amp * groundY * forward.Y));
+    }
+
+    public override void _Ready() =>
+        // These are 3D renders, not pixel art, so linear costs nothing at 1:1 -
+        // sample centres line up and it is bit-identical to nearest. It only
+        // matters once the pitch shear resamples: with nearest, whole pixel rows
+        // snap sideways one at a time as the shear changes, and that shimmer
+        // reads as wobble on top of whatever the pitch is doing.
+        TextureFilter = TextureFilterEnum.Linear;
+
     public override void _Draw()
     {
         if (Atlas is null)
             return;
+        bool sheared = Math.Abs(Pitch) > 1e-6;
+        if (sheared)
+            DrawSetTransformMatrix(PitchTransform());
         if (ShowHull)
             DrawLayer("hull", HullFacing);
         if (ShowTurret)
             DrawLayer("turret", TurretFacing);
+        if (sheared)
+            DrawSetTransformMatrix(Transform2D.Identity);
         if (ShowAxis)
         {
             var colour = new Color(1.0f, 0.2f, 0.2f, 0.9f);
@@ -67,7 +130,7 @@ public sealed partial class TankSprite : Node2D
     {
         int index = Atlas!.FrameFor(facing);
         DrawTextureRectRegion(Atlas.Texture(layer),
-            new Rect2(-Atlas.Anchor, Atlas.Tile),
+            new Rect2(-Atlas.Anchor + new Vector2(0.0f, Shake), Atlas.Tile),
             Atlas.Region(layer, index));
     }
 
