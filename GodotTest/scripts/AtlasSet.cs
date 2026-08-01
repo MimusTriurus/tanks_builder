@@ -70,6 +70,21 @@ public sealed class AtlasSet
     private readonly Dictionary<string, ImageTexture> _textures = new();
     private readonly Dictionary<string, int> _columns = new();
 
+    /// <summary>Muzzle point per turret frame, in tile pixels.</summary>
+    private Vector2[] _muzzle = Array.Empty<Vector2>();
+
+    /// <summary>
+    /// Where the gun ends, for the frame showing that heading, in tile pixels.
+    ///
+    /// Measured off the turret layer rather than tuned by hand, which buys two
+    /// things a constant cannot. It survives a re-render at another size or with
+    /// another model; and it foreshortens by itself - the same gun measures 68px
+    /// from the axis across the screen and 35px pointing away from the camera,
+    /// because that is what the sprite actually shows.
+    /// </summary>
+    public Vector2 Muzzle(int frameIndex) =>
+        frameIndex >= 0 && frameIndex < _muzzle.Length ? _muzzle[frameIndex] : Anchor;
+
     /// <summary>
     /// Heading in degrees to frame index, taken from the per-frame labels the
     /// renderer wrote ("side @ 270 deg"). Reading it from the file rather than
@@ -84,6 +99,7 @@ public sealed class AtlasSet
     {
         var atlas = new AtlasSet { Tag = tag };
         LayerMeta? hull = null;
+        Image? turretImage = null;
 
         foreach (string layer in LayerNames)
         {
@@ -125,6 +141,8 @@ public sealed class AtlasSet
             atlas._columns[layer] = Math.Max(1, meta.Grid.Columns);
             if (layer == "hex")
                 atlas.HexRect = image.GetUsedRect();
+            if (layer == "turret")
+                turretImage = image;
             if (layer == "hull")
                 hull = meta;
         }
@@ -141,8 +159,74 @@ public sealed class AtlasSet
         atlas.UnitsPerPixel = hull.UnitsPerPixel;
         atlas.Elevation = hull.View.Elevation;
         atlas.ReadFacings(hull);
+        if (turretImage is not null)
+            atlas.FindMuzzles(turretImage, atlas._columns["turret"]);
         return atlas;
     }
+
+    /// <summary>
+    /// Furthest *solid* pixel of each turret frame along the heading it shows.
+    ///
+    /// Solid, not merely opaque, and that word is the whole of it. Taking the
+    /// furthest opaque pixel puts the muzzle on the wireless aerial: it stands
+    /// higher than anything else on the tank, so the moment the gun points away
+    /// from the camera and foreshortens, the aerial wins and the flash comes out
+    /// of the radio. Requiring the neighbours a few pixels out to be opaque too
+    /// throws away anything thinner than the barrel, which is exactly the class
+    /// of thing that can beat it - aerials, hatch handles, tow cables.
+    /// </summary>
+    private const int MuzzleErode = 3;
+
+    private void FindMuzzles(Image image, int columns)
+    {
+        Image rgba = image;
+        if (rgba.GetFormat() != Image.Format.Rgba8)
+        {
+            rgba = (Image)image.Duplicate();
+            rgba.Convert(Image.Format.Rgba8);
+        }
+        byte[] data = rgba.GetData();
+        int width = rgba.GetWidth();
+
+        _muzzle = new Vector2[Count];
+        for (int i = 0; i < _muzzle.Length; i++)
+            _muzzle[i] = Anchor;
+
+        foreach ((int facing, int index) in _facings)
+        {
+            if (index < 0 || index >= Count)
+                continue;
+            Vector2 dir = GroundDirection(facing).Normalized();
+            int ox = index % columns * Tile.X, oy = index / columns * Tile.Y;
+            float best = float.MinValue;
+            for (int y = 0; y < Tile.Y; y++)
+            for (int x = 0; x < Tile.X; x++)
+            {
+                if (!Solid(data, width, ox, oy, x, y))
+                    continue;
+                float d = (new Vector2(x, y) - Anchor).Dot(dir);
+                if (d <= best)
+                    continue;
+                best = d;
+                _muzzle[index] = new Vector2(x, y);
+            }
+        }
+    }
+
+    private bool Solid(byte[] data, int width, int ox, int oy, int x, int y)
+    {
+        if (x < MuzzleErode || y < MuzzleErode
+            || x >= Tile.X - MuzzleErode || y >= Tile.Y - MuzzleErode)
+            return false;
+        return Opaque(data, width, ox + x, oy + y)
+               && Opaque(data, width, ox + x - MuzzleErode, oy + y)
+               && Opaque(data, width, ox + x + MuzzleErode, oy + y)
+               && Opaque(data, width, ox + x, oy + y - MuzzleErode)
+               && Opaque(data, width, ox + x, oy + y + MuzzleErode);
+    }
+
+    private static bool Opaque(byte[] data, int width, int x, int y) =>
+        data[(y * width + x) * 4 + 3] >= 32;
 
     private void ReadFacings(LayerMeta meta)
     {

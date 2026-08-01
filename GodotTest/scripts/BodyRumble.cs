@@ -70,8 +70,9 @@ public sealed class BodyRumble
     /// type that guarantees no resampling.</summary>
     public int Offset { get; private set; }
 
-    /// <summary>Shear amplitude of the roll, positive rolling to the right of
-    /// the heading. Not quantised - it feeds a shear, which resamples whatever
+    /// <summary>Shear amplitude of the roll, positive displacing the top of the
+    /// hull to its left - the shear runs along GroundDirection(heading + 90),
+    /// and headings count anticlockwise. Not quantised - it feeds a shear, which resamples whatever
     /// the value is - but held per bump, so it changes as rarely as the
     /// heave.</summary>
     public double Roll { get; private set; }

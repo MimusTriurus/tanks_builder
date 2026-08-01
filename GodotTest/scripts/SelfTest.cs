@@ -422,18 +422,18 @@ public static class SelfTest
             + " in the frame the throttle opened");
 
         // Same geometry guard the rumble roll has. A tilt about the heading and
-        // a tilt across it project differently, and if both came out near
+        // a tilt reachAcross it project differently, and if both came out near
         // vertical on some heading the tremble would vanish there.
         double worstTrembleAxis = 1.0;
         int worstTrembleHeading = -1;
         foreach (int heading in HexField.EdgeHeadings)
         {
-            double across = Math.Max(
+            double reachAcross = Math.Max(
                 Math.Abs(tank.Atlas!.GroundDirection(heading).X),
                 Math.Abs(tank.Atlas.GroundDirection(heading + 90.0).X));
-            if (across < worstTrembleAxis)
+            if (reachAcross < worstTrembleAxis)
             {
-                worstTrembleAxis = across;
+                worstTrembleAxis = reachAcross;
                 worstTrembleHeading = heading;
             }
         }
@@ -483,6 +483,126 @@ public static class SelfTest
         Check("it spends most of its time dwelling",
             movingFrames < 3600 * 0.6, $"{movingFrames} of 3600 frames traversing");
 
+        GD.Print("the shot");
+        int shotFrames = FlashSheet.Duration;
+        Check("the flash lasts about half a second",
+            shotFrames * dt is > 0.3 and < 0.8, $"{shotFrames * dt:F2}s over {shotFrames} frames");
+        Check("every sheet frame is on screen at least one frame",
+            FlashSheet.Hold.All(v => v >= 1) && FlashSheet.Hold.Length == 16,
+            $"{FlashSheet.Hold.Length} frames, min hold {FlashSheet.Hold.Min()}");
+        // The bright part is over in about a tenth of a second and the smoke
+        // hangs on for the rest. One rate for the whole sheet either drags the
+        // flash out into a fire or cuts the smoke off while it is still thick.
+        Check("the flash is quicker than the smoke that follows it",
+            FlashSheet.Hold.Take(6).Sum() * 3 < FlashSheet.Hold.Skip(6).Sum(),
+            $"{FlashSheet.Hold.Take(6).Sum()} frames of flash against"
+            + $" {FlashSheet.Hold.Skip(6).Sum()} of smoke");
+        Check("the sequence runs through and ends",
+            FlashSheet.FrameAt(0) == 0 && FlashSheet.FrameAt(shotFrames - 1) == 15
+            && FlashSheet.FrameAt(shotFrames) < 0,
+            $"first {FlashSheet.FrameAt(0)}, last {FlashSheet.FrameAt(shotFrames - 1)},"
+            + $" past the end {FlashSheet.FrameAt(shotFrames)}");
+        var walked = new HashSet<int>();
+        for (int i = 0; i < shotFrames; i++) walked.Add(FlashSheet.FrameAt(i));
+        Check("no sheet frame is skipped", walked.Count == 16, $"showed {walked.Count} of 16");
+
+        // The muzzle comes off the turret art, so this checks the atlas as much
+        // as the code. The test that matters is not how far the tip is - the
+        // gun, the aerial and the turret roof are all a similar distance up the
+        // screen once the gun points away from the camera - but whether it
+        // *swings with the heading*. A muzzle sitting on the aerial stays put
+        // while the turret turns, so its bearing from the axis stops agreeing
+        // with the gun's, and the dot product below falls away. This is the
+        // assertion that caught the aerial winning at 90 degrees.
+        double worstAim = 1.0;
+        int worstAimFacing = -1, shortest = int.MaxValue, longest = 0;
+        foreach (int facing in atlas.RenderedFacings())
+        {
+            Vector2 offset = atlas.Muzzle(atlas.FrameFor(facing)) - atlas.Anchor;
+            int reach = (int)Math.Round(offset.Length());
+            shortest = Math.Min(shortest, reach);
+            longest = Math.Max(longest, reach);
+            double aim = offset.Normalized().Dot(atlas.GroundDirection(facing).Normalized());
+            if (aim < worstAim)
+            {
+                worstAim = aim;
+                worstAimFacing = facing;
+            }
+        }
+        Check("the muzzle swings round with the gun at every heading",
+            worstAim > 0.80, $"worst is {worstAimFacing} deg at {worstAim:F2}");
+
+        // How far out it lands is not one number, and the spread is the
+        // projection rather than an error. For a gun of ground length L sitting
+        // h above the axis, the tip shows up at (L, -h*cos e) across the screen,
+        // at (0, -L*sin e - h*cos e) pointing away - distance and height adding
+        // - and at (0, +L*sin e - h*cos e) pointing at the camera, where they
+        // very nearly cancel. So the reach has to fall in that order, and the
+        // sixteen pixels at the camera are correct rather than a miss.
+        double across = (atlas.Muzzle(atlas.FrameFor(0.0)) - atlas.Anchor).Length();
+        double away = (atlas.Muzzle(atlas.FrameFor(90.0)) - atlas.Anchor).Length();
+        double toward = (atlas.Muzzle(atlas.FrameFor(270.0)) - atlas.Anchor).Length();
+        Check("the muzzle reach falls out in the order the projection dictates",
+            across > away && away > toward && across is > 55 and < 120,
+            $"across {across:F0}px, away {away:F0}px, at the camera {toward:F0}px");
+
+        // Why GroundDirection is handed to the flash unnormalised. Its length is
+        // how much of a horizontal thing survives the projection: all of it
+        // across the screen, half of it into the screen. Normalise it and a gun
+        // firing away from the camera grows a full-length flash standing over
+        // the turret.
+        double flashAcross = atlas.GroundDirection(0.0).Length();
+        double flashAway = atlas.GroundDirection(90.0).Length();
+        Check("the flash foreshortens into the screen",
+            Math.Abs(flashAcross - 1.0) < 1e-6
+            && Math.Abs(flashAway - Math.Sin(Mathf.DegToRad(atlas.Elevation))) < 1e-6,
+            $"x{flashAcross:F2} across, x{flashAway:F2} away");
+
+        GD.Print("recoil");
+        var recoil = new Recoil();
+        recoil.Fire(0.0);                       // gun straight ahead
+        double liftPeak = 0.0, recoilRollPeak = 0.0;
+        for (int i = 0; i < 30; i++)
+        {
+            recoil.Update(dt);
+            liftPeak = Math.Min(liftPeak, recoil.Pitch);
+            recoilRollPeak = Math.Max(recoilRollPeak, Math.Abs(recoil.Roll));
+        }
+        int recoilSettle = -1;
+        for (int i = 0; i < 240 && recoilSettle < 0; i++)
+        {
+            recoil.Update(dt);
+            if (!recoil.Moving) recoilSettle = i;
+        }
+        // Firing pushes the tank backwards at gun height, above the centre of
+        // mass, so the couple takes the nose up - the same sign the drive pitch
+        // uses for accelerating.
+        Check("firing rocks the tank back on its heels", liftPeak < -0.02,
+            $"peak {liftPeak:F4}");
+        Check("the kick stays inside the rigid-body amplitude",
+            Math.Abs(liftPeak) < 0.06, $"peak {Math.Abs(liftPeak):F4}");
+        Check("a shot down the hull axis does not roll it",
+            recoilRollPeak < 1e-9, $"roll reached {recoilRollPeak:F6}");
+        Check("the kick rings down quickly",
+            recoilSettle >= 0 && recoilSettle * dt < 0.6,
+            recoilSettle < 0 ? "never settled" : $"{recoilSettle * dt:F2}s");
+
+        // The turret is not always pointing where the hull is, and the recoil
+        // goes back along the gun rather than along the hull. Ninety degrees off
+        // and the tank is rocked sideways, not backwards.
+        var sideways = new Recoil();
+        sideways.Fire(90.0);
+        double sidePitch = 0.0, sideRoll = 0.0;
+        for (int i = 0; i < 30; i++)
+        {
+            sideways.Update(dt);
+            sidePitch = Math.Max(sidePitch, Math.Abs(sideways.Pitch));
+            sideRoll = Math.Max(sideRoll, Math.Abs(sideways.Roll));
+        }
+        Check("a shot across the hull rolls it instead of pitching it",
+            sideRoll > 0.02 && sidePitch < 1e-9,
+            $"roll {sideRoll:F4}, pitch {sidePitch:F6}");
+
         GD.Print("turret stabiliser");
         tank.HullFacing = 270.0;
         tank.Pitch = 0.03;
@@ -516,6 +636,20 @@ public static class SelfTest
             $"turret {tank.TiltFor(true)} vs hull {tank.TiltFor(false)}");
         tank.TremblePitch = 0.0;
         tank.TrembleRoll = 0.0;
+
+        // Recoil goes the other way again. A stabiliser rejects the hull moving
+        // under the gun; it cannot reject the gun's own firing impulse, which
+        // arrives through the mount as fast as the gun does. Nailing the turret
+        // through a shot would look broken on the one event where the turret is
+        // what is being watched.
+        tank.Pitch = 0.0;
+        tank.Roll = 0.0;
+        tank.RecoilPitch = -0.045;
+        Check("the turret takes the recoil whatever the stabiliser says",
+            tank.TiltFor(true) != Vector2.Zero
+            && tank.TiltFor(true) == tank.TiltFor(false),
+            $"turret {tank.TiltFor(true)} vs hull {tank.TiltFor(false)}");
+        tank.RecoilPitch = 0.0;
         tank.Pitch = 0.03;
         tank.Roll = 0.02;
 

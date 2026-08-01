@@ -55,8 +55,10 @@ public sealed partial class TankSprite : Node2D
     /// against cell anchors and must stay exact.</summary>
     public int Shake;
 
-    /// <summary>Roll, as a shear amplitude, positive to the right of the
-    /// heading. Shares the machinery with <see cref="Pitch"/>.</summary>
+    /// <summary>Roll, as a shear amplitude, positive displacing the top of the
+    /// hull to its left: the shear runs along GroundDirection(HullFacing + 90)
+    /// and headings count anticlockwise. Shares the machinery with
+    /// <see cref="Pitch"/>, and <see cref="Recoil"/> depends on the sign.</summary>
     public double Roll;
 
     /// <summary>Engine tremble, as pitch and roll shear amplitudes. Held apart
@@ -65,6 +67,23 @@ public sealed partial class TankSprite : Node2D
     /// the displacement is linear in both.</summary>
     public double TremblePitch;
     public double TrembleRoll;
+
+    /// <summary>The kick of firing. On its own channel because it is the one
+    /// tilt the stabiliser does not get to reject - see
+    /// <see cref="TurretStabilised"/>.</summary>
+    public double RecoilPitch;
+    public double RecoilRoll;
+
+    /// <summary>The muzzle flash sheet, and which of its frames is showing.
+    /// -1 for not firing.</summary>
+    public FlashSheet? Flash;
+    public int FlashFrame = -1;
+
+    /// <summary>Sheet pixels to sprite pixels. The sheet is drawn at 256 to a
+    /// frame and the gun is about 68px long, so a flash wants to come out around
+    /// 150px: a little longer than the barrel, which is what a tank gun looks
+    /// like.</summary>
+    public float FlashScale = 0.60f;
 
     /// <summary>
     /// Pitch, applied as a shear rather than a rotation.
@@ -136,9 +155,15 @@ public sealed partial class TankSprite : Node2D
     /// <summary>Tilt a layer receives. Exposed so the stabilisation policy can
     /// be asserted rather than read off the screen.</summary>
     public Vector2 TiltFor(bool turret) =>
-        turret && TurretStabilised
+        // Recoil first, and outside the stabiliser: a two-plane stabiliser
+        // rejects the hull moving under the gun, and cannot reject the gun's own
+        // firing impulse - it arrives through the mount as fast as the gun does.
+        // A hull rocking under a turret nailed in place would look broken on the
+        // one event where the turret is what is being watched.
+        TiltDisplacement(RecoilPitch, RecoilRoll)
+        + (turret && TurretStabilised
             ? Vector2.Zero
-            : TiltDisplacement(Pitch + TremblePitch, Roll + TrembleRoll);
+            : TiltDisplacement(Pitch + TremblePitch, Roll + TrembleRoll));
 
     /// <summary>Heave a layer receives. Never depends on the layer - see
     /// <see cref="TurretStabilised"/>.</summary>
@@ -167,11 +192,14 @@ public sealed partial class TankSprite : Node2D
         if (Atlas is null)
             return;
         bool tilted = Math.Abs(Pitch) > 1e-6 || Math.Abs(Roll) > 1e-6
-                      || Math.Abs(TremblePitch) > 1e-6 || Math.Abs(TrembleRoll) > 1e-6;
+                      || Math.Abs(TremblePitch) > 1e-6 || Math.Abs(TrembleRoll) > 1e-6
+                      || Math.Abs(RecoilPitch) > 1e-6 || Math.Abs(RecoilRoll) > 1e-6;
         if (ShowHull)
             DrawLayerTilted("hull", HullFacing, tilted, false);
         if (ShowTurret)
             DrawLayerTilted("turret", TurretFacing, tilted, true);
+        if (FlashFrame >= 0 && Flash?.Texture is not null)
+            DrawFlash();
         if (ShowAxis)
         {
             var colour = new Color(1.0f, 0.2f, 0.2f, 0.9f);
@@ -189,6 +217,38 @@ public sealed partial class TankSprite : Node2D
         DrawLayer(layer, facing);
         if (shear)
             DrawSetTransformMatrix(Transform2D.Identity);
+    }
+
+    /// <summary>
+    /// The flash, on the muzzle, pointing where the gun does.
+    ///
+    /// The direction comes straight from <c>GroundDirection</c>, unnormalised,
+    /// and that is the whole trick. Its length is 1 across the screen and
+    /// sin(elevation) - a half here - straight into it, which is exactly how
+    /// much of a horizontal thing survives the projection. Rotating without it
+    /// gives a gun firing away from the camera a full-length flash standing up
+    /// over the turret like a bonfire.
+    ///
+    /// Only the length is foreshortened. Across the barrel the flash is roughly
+    /// round, and its cross-section projects to an ellipse that depends on how
+    /// much of the puff is vertical - which the sprite does not know. At flash
+    /// scale, and for a tenth of a second, that is not worth modelling.
+    ///
+    /// It rides the turret's transform, not the hull's: the flash is fixed to
+    /// the gun, so whatever the gun is doing it does too.
+    /// </summary>
+    private void DrawFlash()
+    {
+        Vector2 along = Atlas!.GroundDirection(TurretFacing);
+        Vector2 across = new Vector2(-along.Y, along.X).Normalized();
+        Vector2 muzzle = Atlas.Muzzle(Atlas.FrameFor(TurretFacing)) - Atlas.Anchor
+                         + new Vector2(0.0f, HeaveFor(true));
+        var place = new Transform2D(along * FlashScale, across * FlashScale, muzzle);
+
+        DrawSetTransformMatrix(ShearFor(true) * place);
+        DrawTextureRectRegion(Flash!.Texture,
+            new Rect2(-Flash.Origin, Flash.Tile), Flash.Region(FlashFrame));
+        DrawSetTransformMatrix(Transform2D.Identity);
     }
 
     private void DrawLayer(string layer, double facing)

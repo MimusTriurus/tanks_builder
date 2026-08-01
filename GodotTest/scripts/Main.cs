@@ -64,6 +64,11 @@ public sealed partial class Main : Node2D
     /// <summary>Idle turret traverse - key N, or --scan.</summary>
     private bool _scanEnabled;
 
+    private FlashSheet _flash = null!;
+    private readonly Recoil _recoil = new();
+    /// <summary>Screen frames since the shot went off, or -1 between shots.</summary>
+    private int _shotFrame = -1;
+
     private bool _spinning;
     private bool _aimWithMouse;
 
@@ -80,6 +85,8 @@ public sealed partial class Main : Node2D
     // which heading the pathfinder chose - so read it off instead.
     private int _traceFrames;
     private string? _startTag;
+    private bool _fireAtStart;
+    private double? _startTurret;
 
     private bool Moving => _pathStep < _path.Count;
 
@@ -105,6 +112,11 @@ public sealed partial class Main : Node2D
                 _trembleEnabled = false;
             else if (userArgs[i] == "--scan")
                 _scanEnabled = true;
+            else if (userArgs[i] == "--fire")
+                _fireAtStart = true;
+            else if (userArgs[i] == "--turret" && i + 1 < userArgs.Length
+                     && double.TryParse(userArgs[i + 1], out double bearing))
+                _startTurret = bearing;
             else if (userArgs[i] == "--tank" && i + 1 < userArgs.Length)
                 _startTag = userArgs[i + 1].ToUpperInvariant();
             else if (userArgs[i] == "--roll-only")
@@ -146,9 +158,13 @@ public sealed partial class Main : Node2D
             }
         }
 
+        _flash = FlashSheet.Load($"{SpritesRoot}/Fire_rgba.png");
+        if (_flash.Error.Length > 0)
+            failures.Add($"flash: {_flash.Error}");
+
         _field = new HexField();
         AddChild(_field);
-        _tank = new TankSprite();
+        _tank = new TankSprite { Flash = _flash };
         AddChild(_tank);
 
         // Judging whether two layers line up is a pixel-level question, so the
@@ -184,8 +200,12 @@ public sealed partial class Main : Node2D
             GetTree().Quit(failed == 0 ? 0 : 1);
             return;
         }
+        if (_startTurret is not null)
+            _tank.TurretFacing = Mod(_startTurret.Value, 360.0);
         if (_driveTo is not null)
             OrderMoveTo(_field.ClampCell(_driveTo.Value));
+        if (_fireAtStart)
+            Fire();
     }
 
     private string CurrentTag() =>
@@ -374,6 +394,39 @@ public sealed partial class Main : Node2D
         _tank.QueueRedraw();
     }
 
+    /// <summary>Fire. Restarts the flash from frame zero rather than being
+    /// ignored while one is running, so holding the key reads as a rate of fire
+    /// instead of doing nothing.</summary>
+    private void Fire()
+    {
+        _shotFrame = 0;
+        _recoil.Fire(WrapAngle(_tank.TurretFacing - _tank.HullFacing));
+    }
+
+    /// <summary>The shot runs on screen frames, not seconds. The sheet is a
+    /// hand-timed sequence of held frames, so counting frames is what it is
+    /// timed in; under --capture the clock is fixed at 1/60 anyway, which is
+    /// what makes a shot land on the same sheet frame in two runs.</summary>
+    private void UpdateShot(double delta)
+    {
+        _recoil.Update(delta);
+        _tank.RecoilPitch = _recoil.Pitch;
+        _tank.RecoilRoll = _recoil.Roll;
+
+        int frame = _shotFrame < 0 ? -1 : FlashSheet.FrameAt(_shotFrame);
+        if (_shotFrame >= 0)
+        {
+            _shotFrame++;
+            if (frame < 0)
+                _shotFrame = -1;
+        }
+        if (frame != _tank.FlashFrame || _recoil.Moving)
+        {
+            _tank.FlashFrame = frame;
+            _tank.QueueRedraw();
+        }
+    }
+
     /// <summary>Suspended while under way, and while anything else is driving
     /// the turret. A locked turret holding its world heading through a
     /// manoeuvre is the feature this harness exists to show; a scan quietly
@@ -419,7 +472,8 @@ public sealed partial class Main : Node2D
                      + $"  pitch {_tank.Pitch,8:F5}  shake {_tank.Shake,2}"
                      + $"  roll {_tank.Roll,8:F5}  trem {_tank.TremblePitch,8:F5}"
                      + $"/{_tank.TrembleRoll,8:F5}  scan {_scan.Offset,6:F1}"
-                     + $"  turret {_tank.TurretFacing,6:F1}"
+                     + $"  turret {_tank.TurretFacing,6:F1}  shot {_tank.FlashFrame,3}"
+                     + $"  recoil {_recoil.Pitch,8:F5}/{_recoil.Roll,8:F5}"
                      + $"  cell ({_cell.X},{_cell.Y})");
             if (++_frames >= _traceFrames)
             {
@@ -441,6 +495,7 @@ public sealed partial class Main : Node2D
 
         UpdateTremble(delta);
         UpdateScan(delta);
+        UpdateShot(delta);
 
         if (!Moving && _spinning)
         {
@@ -542,6 +597,7 @@ public sealed partial class Main : Node2D
                     _scan.Reset();
                 break;
             case Key.K: _tank.TurretStabilised = !_tank.TurretStabilised; break;
+            case Key.Z: Fire(); break;
             case Key.Escape: CancelOrder(); break;
             case Key.Key1 or Key.Key2 or Key.Key3:
                 // Godot's Key enum is backed by long, so this needs the cast
@@ -575,6 +631,11 @@ public sealed partial class Main : Node2D
                 _tank.TremblePitch = 0.0;
                 _tank.TrembleRoll = 0.0;
                 _scan.Reset();
+                _recoil.Reset();
+                _shotFrame = -1;
+                _tank.FlashFrame = -1;
+                _tank.RecoilPitch = 0.0;
+                _tank.RecoilRoll = 0.0;
                 _camera.Zoom = Vector2.One;
                 _camera.Position = new Vector2(760, 500);
                 SnapToCell();
@@ -615,6 +676,10 @@ public sealed partial class Main : Node2D
                 + $"   scan {_scan.Offset,6:F1} deg"
                 + $"   I engine tremble: {On(_trembleEnabled)}"
                 + $"   N turret scan: {On(_scanEnabled)}",
+            $"shot frame {(_tank.FlashFrame < 0 ? " -" : _tank.FlashFrame.ToString()),2}"
+                + $" / {FlashSheet.Hold.Length}   recoil {_recoil.Pitch,7:F4} / {_recoil.Roll,7:F4}"
+                + $"   muzzle {_tank.Atlas!.Muzzle(_tank.Atlas.FrameFor(_tank.TurretFacing))}"
+                + $"   Z fire",
             "",
             "left click: drive there    F turret lock    ESC cancel    A/D hull    Q/E turret",
             "W/S step fwd/back    1/2/3 tank HT/MT/LT    wheel zoom, MMB pan",
@@ -622,7 +687,7 @@ public sealed partial class Main : Node2D
                 + $"    X axis cross: {On(_tank.ShowAxis)}",
             $"H hull layer: {On(_tank.ShowHull)}    T turret layer: {On(_tank.ShowTurret)}"
                 + $"    G field: {On(_field.ShowField)}    R reset",
-            "P pitch    B rumble    I engine tremble    N turret scan    K turret stabiliser",
+            "Z fire    P pitch    B rumble    I engine tremble    N turret scan    K stabiliser",
         });
     }
 
