@@ -62,9 +62,18 @@ from mathutils import Matrix
 
 REPO = r"D:\Projects\AgentCoding\BlenderMCP"
 
+MATERIAL = "_engine_exhaust"
+
 CONFIG = {
     "hull": "Hull",
     "name": "Plume",
+    # Named in the config rather than fixed to the module, because this file is
+    # driven by two callers now: the idle exhaust below, and the burning tank's
+    # smoke column in `engine_fire`. `build_material` bakes rim colour, reach,
+    # falloff and opacity into the node tree, so two configs sharing one
+    # material name do not coexist - the second build silently rewrites the
+    # first one's material and the plume comes out wearing the fire's settings.
+    "material": MATERIAL,
     # [(point, dir, radius)], hull_length - instead of reading the hull's
     # stamp. For a bench with no tank in it. In a tank scene leave this alone.
     "ports": None,
@@ -88,6 +97,12 @@ CONFIG = {
     # straight line along the axis: a rear pipe vents backwards and its plume
     # still ends up above the deck.
     "buoyancy": 0.80,
+    # How the turn is distributed along the path. 1.0 spreads it evenly, which
+    # is right for exhaust: it really does leave along the pipe and bend up
+    # afterwards. Under 1.0 does most of the turning at once, which is what a
+    # fire column wants - see engine_fire.SMOKE, where following the vent's aim
+    # for half a hull both looked wrong and cost a tile size.
+    "turn_power": 1.0,
     # Time constant of the slowing. The jet entrains air and gives its momentum
     # up, so most of the travel happens early and the puff then hangs and fades.
     # Large values make an even conveyor, which reads as a machine, not as air.
@@ -164,8 +179,6 @@ CONFIG = {
     "opacity": 0.70,
 }
 
-MATERIAL = "_engine_exhaust"
-
 
 def _sibling(name):
     """Load a module that lives next to this one - see exhaust_point._sibling."""
@@ -193,7 +206,8 @@ def _path(cfg, axis, reach, samples=96):
     """
     up = np.array([0.0, 0.0, 1.0])
     t = np.linspace(0.0, 1.0, samples)
-    turn = np.clip(cfg["buoyancy"] * t, 0.0, 1.0)[:, None]
+    turn = np.clip(cfg["buoyancy"] * np.power(t, cfg.get("turn_power", 1.0)),
+                   0.0, 1.0)[:, None]
     direction = (1.0 - turn) * axis[None, :] + turn * up[None, :]
     direction /= np.maximum(np.linalg.norm(direction, axis=1, keepdims=True), 1e-9)
     speed = np.exp(-t / max(cfg["slowing"], 1e-4))
@@ -342,7 +356,8 @@ def _place(cfg):
     # edits a copy and leaves the object where it was.
     ob.matrix_world = Matrix.Identity(4)
     ob.data.materials.clear()
-    ob.data.materials.append(_mf().build_material(cfg, MATERIAL))
+    ob.data.materials.append(
+        _mf().build_material(cfg, cfg.get("material") or MATERIAL))
     return ob
 
 
@@ -392,7 +407,7 @@ def remove(cfg=None):
         data = ob.data
         bpy.data.objects.remove(ob)
         bpy.data.meshes.remove(data)
-    mat = bpy.data.materials.get(MATERIAL)
+    mat = bpy.data.materials.get(cfg.get("material") or MATERIAL)
     if mat is not None:
         bpy.data.materials.remove(mat)
 

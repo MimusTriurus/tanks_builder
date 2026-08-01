@@ -2,8 +2,9 @@
 The whole tank, end to end.
 
 Measures the muzzle and the exhaust ports, builds the ground tile, the flash,
-its smoke and the engine plume, renders every layer as one job, and composites
-check images with the numbers that decide whether it worked.
+its smoke, the engine plume and the burning-engine flame, renders every layer as
+one job, and composites check images with the numbers that decide whether it
+worked.
 
     import tank_pipeline
     tank_pipeline.run()                       # everything, into out/
@@ -14,7 +15,14 @@ step: separating a piece of the model by hand so the measurement has something
 unambiguous to measure.
 
     Barrel  -> the gun tip, parented to Turret.  Gives the muzzle flash.
-    Engine  -> the outlet, parented to Hull.     Gives the exhaust plume.
+    Engine  -> the outlet, parented to Hull.     Gives the exhaust plume,
+                                                 and the fire when it burns.
+
+`Engine` pays for two layers off one measurement: `exhaust_point` stamps the
+ports on the hull, and both `exhaust_plume` and `engine_fire` read that stamp.
+The outlet is where the engine is and the engine is what catches fire, so a
+second measurement of the same hole would only be a second thing to keep in
+step.
 
 Neither is required. Whichever is missing is skipped with a note, so a scene can
 be brought along one piece at a time - which is what actually happens, since the
@@ -55,6 +63,8 @@ CONFIG = {
     "flash": "Flash",
     "smoke": "Smoke",
     "plume": "Plume",
+    "fire": "Fire",
+    "burn": "Burn",
     "hex": "Hex",
 
     # --- the render ---------------------------------------------------------
@@ -66,12 +76,52 @@ CONFIG = {
     # The plume needs none of that - it stands over the deck, near the anchor.
     "effect_tile_scale": 1.5,
     "plume_tile_scale": 1.0,
+    # The flame needs none of that room either, which is worth stating because
+    # it is the effect that looks like it should. It stands *above* the tank
+    # rather than beside it, so the budget it spends is the half-tile over the
+    # anchor rather than the one out to the muzzle - and that half-tile is the
+    # smaller of the two, 0.4645 of the frame against 0.5354 below. Measured on
+    # MT: the port sits 28px above the anchor, the flame is 50px of screen and
+    # its embers 66, so the tallest thing in the layer lands ~94px up against
+    # the 119px a plain tile leaves; sideways, the worst heading puts the port
+    # 67px out and the embers ~103px, against 128.
+    # Raise this if `rise` goes up - `fire_edge_alpha` will say so first.
+    "fire_tile_scale": 1.0,
+    # The smoke column is the one layer that really does need a bigger frame,
+    # and by a lot.
+    #
+    # The room a tile leaves above the anchor is `0.4645 * tile`, not
+    # `tile/2 - 9`: the anchor is a fixed *fraction* of the frame, so the
+    # shortfall grows with the tile. Getting that wrong is what put the first
+    # attempt at 2.25 and clipped 28px off the top of the column.
+    #
+    # Measured, by projecting the mesh through the same camera basis at all
+    # twelve angles rather than estimating: the column reaches 289px above the
+    # anchor and 190px to the side. 2.5 leaves 297, and rendering it put 0.008
+    # of alpha on the border - under the 0.02 the check trips at, so it passed,
+    # and still the top of the column touching its frame. Eight pixels of
+    # measured margin turned out to be none. 2.75 leaves 327 and renders clean.
+    #
+    # This is what a tall effect costs: 704px tiles, 144 of them, so an 8448px
+    # atlas - about 285 MB once a game has decoded it. That is the price of a
+    # hull and a half, and the lever on it is `rise` in engine_fire.SMOKE.
+    "burn_tile_scale": 2.75,
     "phases": 8,
     # More phases than the flash, for a reason that is about looping rather
     # than about length. A flash is watched once for a tenth of a second; the
     # plume runs for the whole game, and a conveyor stepping four pixels at a
     # time is visible in a way the same step inside an explosion is not.
     "exhaust_phases": 12,
+    # The flame's lap, for the plume's reason - it burns for as long as it is on
+    # screen, so the loop is what gets looked at rather than the shape of any
+    # one phase. It is played faster than the plume in the game; that is a rate,
+    # not a frame count, and it does not belong here.
+    #
+    # The smoke column takes the same count, because it is the same event: one
+    # tank, on fire, one clock. Two counts would only be worth having if the
+    # game wanted to run them at different rates, and it can do that with one
+    # count anyway - the layers carry separate frame indices.
+    "fire_phases": 12,
     "azimuth": 0.0,
     "elevation": 30.0,
     "front_dir": 270.0,
@@ -93,9 +143,19 @@ CONFIG = {
     # against the tile's own colour. Below this it is present in the alpha and
     # absent from the screen.
     "exhaust_contrast_min": 28.0,
+    # Least the flame may stay red by, in levels of 255: how much more red than
+    # green-and-blue the picture becomes once the layer is added over the ground.
+    # Brightness is not the thing that fails here - a fire that clips to white
+    # is brighter than one that does not, and worse. See engine_fire's docstring
+    # on the ramp.
+    "fire_redness_min": 30.0,
 }
 
-LAYER_ORDER = ("hex", "hull", "turret", "exhaust", "smoke", "flash")
+# Also the order they are composited in, which for the burning pair is not a
+# preference: the smoke goes down with normal alpha and the fire is added on
+# top of it. See engine_fire.SMOKE.
+LAYER_ORDER = ("hex", "hull", "turret", "exhaust", "burn", "fire",
+               "smoke", "flash")
 
 
 def _load(cfg, name):
@@ -145,7 +205,8 @@ def prepare(cfg=None):
 
     # the transient objects are rebuilt every run, so a re-run never leaves
     # Hex.001 behind to be rendered instead of Hex
-    for name in (cfg["hex"], cfg["flash"], cfg["smoke"], cfg["plume"]):
+    for name in (cfg["hex"], cfg["flash"], cfg["smoke"], cfg["plume"],
+                 cfg["fire"], cfg["burn"]):
         ob = scene.objects.get(name)
         if ob is not None:
             data = ob.data
@@ -178,6 +239,9 @@ def prepare(cfg=None):
     if have["exhaust"]:
         _load(cfg, "exhaust_plume").build({"hull": cfg["hull"],
                                            "name": cfg["plume"]})
+        fire_mod = _load(cfg, "engine_fire")
+        fire_mod.build({"hull": cfg["hull"], "name": cfg["fire"]})
+        fire_mod.build_smoke({"hull": cfg["hull"], "name": cfg["burn"]})
     return out
 
 
@@ -189,10 +253,10 @@ def render(cfg=None):
 
     layers = [
         # the turret hint excludes descendants, which is what keeps the barrel
-        # out of the hull layer. The plume sits at scene root and so is inside
-        # `world` too - it is named here for the same reason.
+        # out of the hull layer. The plume and the flame sit at scene root and
+        # so are inside `world` too - they are named here for the same reason.
         {"name": "hull", "target": cfg["root"],
-         "exclude": [cfg["turret"], cfg["plume"]]},
+         "exclude": [cfg["turret"], cfg["plume"], cfg["fire"], cfg["burn"]]},
         {"name": "turret", "target": cfg["turret"]},
         {"name": "hex", "target": cfg["hex"], "static": True},
     ]
@@ -235,6 +299,30 @@ def render(cfg=None):
              "phases": cfg["exhaust_phases"],
              "phase_hook": plume_mod.phase_hook({"hull": cfg["hull"],
                                                  "name": cfg["plume"]}),
+             "holdout": [cfg["hull"], cfg["turret"]]})
+
+        fire_mod = _load(cfg, "engine_fire")
+        layers.append(
+            # Same ports as the plume, same holdout argument, same plain tile.
+            # What it needs room for is height rather than reach, and the tile
+            # already has more of that than the muzzle left over - see
+            # fire_tile_scale.
+            {"name": "fire", "target": cfg["fire"], "fit": False,
+             "tile_scale": cfg["fire_tile_scale"],
+             "phases": cfg["fire_phases"],
+             "phase_hook": fire_mod.phase_hook({"hull": cfg["hull"],
+                                                "name": cfg["fire"]}),
+             "holdout": [cfg["hull"], cfg["turret"]]})
+        layers.append(
+            # The other half of the fire. Its own frame, because a hull and a
+            # half of column does not fit in the tank's tile - see
+            # burn_tile_scale. Same holdout, same phase count, drawn *under* the
+            # flame.
+            {"name": "burn", "target": cfg["burn"], "fit": False,
+             "tile_scale": cfg["burn_tile_scale"],
+             "phases": cfg["fire_phases"],
+             "phase_hook": fire_mod.smoke_phase_hook({"hull": cfg["hull"],
+                                                      "name": cfg["burn"]}),
              "holdout": [cfg["hull"], cfg["turret"]]})
 
     return atlas.render_set({
@@ -319,13 +407,19 @@ def _ground_colour(layers):
     return np.median(tile[solid][:, :3], axis=0).astype(np.float32)
 
 
-def _sheet(cfg, layers, name, rows, cols, draw, background):
+def _sheet(cfg, layers, name, rows, cols, draw, background, used):
     """A grid of composites, saved as a PNG.
 
-    Sized to the widest layer, and every layer placed by its *anchor* rather
-    than by its frame corner. That is the composite the game performs, and it
-    is the only one that stays right when the tiles differ - which they do, the
-    flash being rendered wider than the tank.
+    Sized to the widest of the layers it actually draws - `used` - and every
+    layer placed by its *anchor* rather than by its frame corner. That is the
+    composite the game performs, and it is the only one that stays right when
+    the tiles differ, which they do: the flash is rendered wider than the tank
+    and the smoke column wider again.
+
+    `used` is not a micro-optimisation. Sizing to the widest layer in the whole
+    set meant one 576px effect grew every sheet to 576px cells, so the shot
+    sheet - which does not draw it - became four times the area it needs and
+    unreadable at a glance.
 
     The background is an argument because the two sheets want opposite ones, and
     picking one for both hid a real fault. A dark ground is right for the flash:
@@ -334,9 +428,9 @@ def _sheet(cfg, layers, name, rows, cols, draw, background):
     the game's pale field is nearly nothing. The plume was tuned on the dark one,
     looked convincing, and moved the harness picture by 20 levels out of 255.
     """
-    size = max(m["tile"][0] for _, m in layers.values())
-    at = np.array([max(m["anchor_px"][i] for _, m in layers.values())
-                   for i in range(2)])
+    drawn = [layers[n][1] for n in used if n in layers]
+    size = max(m["tile"][0] for m in drawn)
+    at = np.array([max(m["anchor_px"][i] for m in drawn) for i in range(2)])
     out = np.zeros((len(rows) * size, len(cols) * size, 4), dtype=np.float32)
     out[:, :, :3] = background
     out[:, :, 3] = 1.0
@@ -377,6 +471,25 @@ def _sheet(cfg, layers, name, rows, cols, draw, background):
     finally:
         bpy.data.images.remove(img)
     return path
+
+
+def _contrast(layers, name, headings, ground):
+    """How much an occluding layer moves the picture, in levels of 255.
+
+    Against the tile's own colour, because that is the ground it will be seen
+    on. Size says nothing about this: the exhaust plume measured a healthy
+    47x31 px while shifting the harness picture by 20 levels, which on screen is
+    a smudge you have to be told is there.
+    """
+    _, meta = layers[name]
+    worst = 0.0
+    for heading in headings:
+        for p in range(meta["phases"]):
+            t = _tile_of(layers, name, p * meta["count"] + heading)
+            a = t[:, :, 3:4]
+            over = t[:, :, :3] * a + ground[None, None, :] * (1.0 - a)
+            worst = max(worst, float(np.abs(over - ground).max()))
+    return worst * 255.0
 
 
 def _loop(layers, name, heading, tolerance):
@@ -470,8 +583,10 @@ def check(cfg=None):
             # it goes on with normal alpha and *under* the fire.
             return place(buf, "flash", frame, _add)
 
-        report["composite"] = _sheet(cfg, layers, "_check_shot", headings,
-                                     cfg["check_phases"], draw_shot, 0.16)
+        report["composite"] = _sheet(
+            cfg, layers, "_check_shot", headings, cfg["check_phases"],
+            draw_shot, 0.16,
+            ["hex", "hull", "turret", "exhaust", "smoke", "flash"])
 
     # --- the plume: one full lap across --------------------------------------
     if "exhaust" in layers:
@@ -487,7 +602,30 @@ def check(cfg=None):
         report["exhaust_composite"] = _sheet(
             cfg, layers, "_check_exhaust", headings,
             list(range(plume_meta["phases"])), draw_plume,
-            _ground_colour(layers))
+            _ground_colour(layers), ["hex", "hull", "turret", "exhaust"])
+
+    # --- the burning tank: one full lap across -------------------------------
+    if "fire" in layers:
+        fire_meta = layers["fire"][1]
+
+        def draw_fire(buf, place, heading, phase):
+            for name, index in (("hex", 0), ("hull", heading),
+                                ("turret", heading)):
+                buf = place(buf, name, index, _over)
+            # Smoke down first with normal alpha, then the flame added on top of
+            # it. That order is the effect, not a preference: the flame is added,
+            # so what is behind it decides how much of it arrives, and the smoke
+            # is there to put something dark there. Reversed, the smoke would
+            # grey out the fire it is meant to back.
+            if "burn" in layers:
+                buf = place(buf, "burn",
+                            phase * layers["burn"][1]["count"] + heading, _over)
+            return place(buf, "fire", phase * fire_meta["count"] + heading, _add)
+
+        report["fire_composite"] = _sheet(
+            cfg, layers, "_check_fire", headings,
+            list(range(fire_meta["phases"])), draw_fire,
+            _ground_colour(layers), ["hex", "hull", "turret", "burn", "fire"])
 
     # --- nothing may touch the tile edge, on any frame of any tank layer -----
     edges = {}
@@ -523,6 +661,23 @@ def check(cfg=None):
                 "the plume reaches the tile edge (alpha %.3f) and is being cut "
                 "off - lower rise in exhaust_plume.CONFIG, or raise "
                 "plume_tile_scale" % worst)
+    if "fire" in layers:
+        worst = _edge_alpha(layers, "fire")
+        report["fire_edge_alpha"] = round(worst, 4)
+        if worst > 0.02:
+            report["problems"].append(
+                "the flame reaches the tile edge (alpha %.3f) and is being cut "
+                "off - the embers are the tallest thing in it, so lower "
+                "ember_reach or rise in engine_fire.CONFIG, or raise "
+                "fire_tile_scale" % worst)
+    if "burn" in layers:
+        worst = _edge_alpha(layers, "burn")
+        report["burn_edge_alpha"] = round(worst, 4)
+        if worst > 0.02:
+            report["problems"].append(
+                "the smoke column reaches the tile edge (alpha %.3f) and is "
+                "being cut off - lower rise in engine_fire.SMOKE, or raise "
+                "burn_tile_scale" % worst)
 
     # --- the tank stands on the tile, rather than the tile cutting through ---
     hull_a = _tile_of(layers, "hull", 0)[:, :, 3] > 0.5
@@ -609,20 +764,11 @@ def check(cfg=None):
             [max(cols) - min(cols) + 1, max(rows) - min(rows) + 1]
             if rows else [0, 0])
 
-        # How much the plume actually changes the picture, on the ground it will
-        # be seen against. Size says nothing about this: the plume measured a
-        # healthy 47x31 px while moving the harness picture by 20 levels out of
-        # 255, which on screen is a smudge you have to be told is there. Grey
-        # smoke is a strong signal on the check sheet's dark grey and a weak one
-        # on the game's pale field, and only the second is the real question.
+        # Grey smoke is a strong signal on the check sheet's dark grey and a
+        # weak one on the game's pale field, and only the second is the real
+        # question. See `_contrast`.
         ground = _ground_colour(layers)
-        worst = 0.0
-        for heading in headings:
-            for p in range(pm["phases"]):
-                t = _tile_of(layers, "exhaust", p * pm["count"] + heading)
-                a = t[:, :, 3:4]
-                over = t[:, :, :3] * a + ground[None, None, :] * (1.0 - a)
-                worst = max(worst, float(np.abs(over - ground).max()))
+        worst = _contrast(layers, "exhaust", headings, ground) / 255.0
         report["ground_colour"] = [round(float(v), 3) for v in ground]
         report["exhaust_contrast"] = round(worst * 255.0, 1)
         if worst * 255.0 < cfg["exhaust_contrast_min"]:
@@ -636,6 +782,124 @@ def check(cfg=None):
         hull_lines = np.nonzero(hull_a.any(axis=1))[0]
         report["hull_span_px"] = [int(hull_cols.max() - hull_cols.min() + 1),
                                   int(hull_lines.max() - hull_lines.min() + 1)]
+
+    # --- the smoke column loops, and is actually dark ------------------------
+    if "burn" in layers:
+        loops = {h: _loop(layers, "burn", h, cfg["loop_tolerance"])
+                 for h in headings}
+        report["burn_loop"] = loops
+        for heading, loop in loops.items():
+            if loop["empty_phases"]:
+                report["problems"].append(
+                    "at heading index %d the smoke column is empty on phases "
+                    "%s" % (heading, loop["empty_phases"]))
+            elif not loop["seamless"]:
+                report["problems"].append(
+                    "at heading index %d the smoke column's loop is not "
+                    "seamless: the closing step is %.1f px against a worst "
+                    "ordinary %.1f (mass %.1fx) - it will pop once a lap"
+                    % (heading, loop["wrap_step_px"], loop["worst_step_px"],
+                       loop["wrap_mass_ratio"]))
+
+        bm = layers["burn"][1]
+        rows, cols = [], []
+        for p in range(bm["phases"]):
+            a = _tile_of(layers, "burn", p * bm["count"] + headings[0])[:, :, 3]
+            ys, xs = np.nonzero(a > 0.02)
+            if len(ys):
+                rows.extend([int(ys.min()), int(ys.max())])
+                cols.extend([int(xs.min()), int(xs.max())])
+        report["burn_span_px"] = (
+            [max(cols) - min(cols) + 1, max(rows) - min(rows) + 1]
+            if rows else [0, 0])
+
+        # Same measurement as the plume's and the same threshold, because it is
+        # the same question: an occluding layer that does not move the picture
+        # is not there. It should pass by a mile - this one is nearly black on a
+        # pale field - and if it does not, the fire has lost its backdrop and
+        # the whole reason for the layer with it.
+        worst = _contrast(layers, "burn", headings, _ground_colour(layers))
+        report["burn_contrast"] = round(worst, 1)
+        if worst < cfg["exhaust_contrast_min"]:
+            report["problems"].append(
+                "the smoke column only moves the picture by %.0f levels of 255 "
+                "against the ground it stands on - raise alpha or opacity in "
+                "engine_fire.SMOKE, or darken its colour" % worst)
+
+    # --- the fire loops, and stays the colour it was tuned to ----------------
+    if "fire" in layers:
+        loops = {h: _loop(layers, "fire", h, cfg["loop_tolerance"])
+                 for h in headings}
+        report["fire_loop"] = loops
+        for heading, loop in loops.items():
+            if loop["empty_phases"]:
+                report["problems"].append(
+                    "at heading index %d the flame is empty on phases %s - the "
+                    "tank stops burning for part of the lap"
+                    % (heading, loop["empty_phases"]))
+            elif not loop["seamless"]:
+                report["problems"].append(
+                    "at heading index %d the flame's loop is not seamless: the "
+                    "closing step is %.1f px against a worst ordinary %.1f "
+                    "(mass %.1fx) - it will pop once a lap"
+                    % (heading, loop["wrap_step_px"], loop["worst_step_px"],
+                       loop["wrap_mass_ratio"]))
+
+        fm = layers["fire"][1]
+        rows, cols = [], []
+        for p in range(fm["phases"]):
+            a = _tile_of(layers, "fire", p * fm["count"] + headings[0])[:, :, 3]
+            ys, xs = np.nonzero(a > 0.02)
+            if len(ys):
+                rows.extend([int(ys.min()), int(ys.max())])
+                cols.extend([int(xs.min()), int(xs.max())])
+        report["fire_span_px"] = (
+            [max(cols) - min(cols) + 1, max(rows) - min(rows) + 1]
+            if rows else [0, 0])
+
+        # How red the picture actually goes, once the layer has been *added* to
+        # the ground. This is the fire's version of the plume's contrast check
+        # and it asks a different question on purpose: the plume can be present
+        # in the alpha and absent on screen, while the fire's failure is to
+        # arrive too hard and clip to white, which is brighter and worse. So the
+        # statistic is hue, and it is the median over the body of the flame
+        # rather than a maximum - one red pixel at the rim proves nothing.
+        #
+        # The pale ground is the worst case, and it stays the worst case now
+        # that the smoke column exists: the column only ever puts something
+        # darker behind the flame, and addition over dark clips later, not
+        # sooner. What is measured here is the part that sticks out past it.
+        ground = _ground_colour(layers)
+        base = float(ground[0] - 0.5 * (ground[1] + ground[2]))
+        reds, white, seen = [], 0, 0
+        for heading in headings:
+            for p in range(fm["phases"]):
+                t = _tile_of(layers, "fire", p * fm["count"] + heading)
+                a = t[:, :, 3]
+                mask = a > 0.25
+                if not mask.any():
+                    continue
+                over = np.clip(t[:, :, :3] * a[:, :, None]
+                               + ground[None, None, :], 0.0, 1.0)[mask]
+                reds.append(over[:, 0] - 0.5 * (over[:, 1] + over[:, 2]))
+                white += int((over.min(axis=1) > 0.99).sum())
+                seen += int(mask.sum())
+        if seen:
+            redness = float(np.median(np.concatenate(reds))) - base
+            report["fire_redness"] = round(redness * 255.0, 1)
+            report["fire_white_fraction"] = round(white / float(seen), 3)
+            if redness * 255.0 < cfg["fire_redness_min"]:
+                report["problems"].append(
+                    "the flame is only %.0f levels of 255 redder than the "
+                    "ground it burns on - additive compositing has taken the "
+                    "colour. Lower brightness or alpha in engine_fire.CONFIG, "
+                    "or move the ramp's stops away from white; raising them "
+                    "makes this worse, not better" % (redness * 255.0))
+            if white / float(seen) > 0.25:
+                report["problems"].append(
+                    "%.0f%% of the flame clips to white - it is not brighter, "
+                    "it is colourless. The lever is brightness, not the ramp"
+                    % (100.0 * white / float(seen)))
 
     report["step_deg"] = 360.0 / meta["count"]
     report["anchor_px"] = meta["anchor_px"]
@@ -691,12 +955,24 @@ def run(cfg=None):
             "exhaust_loop": {h: v["seamless"]
                              for h, v in checked["exhaust_loop"].items()},
             "exhaust_composite": checked["exhaust_composite"],
+            "fire_edge_alpha": checked["fire_edge_alpha"],
+            "fire_span_px": checked["fire_span_px"],
+            "fire_redness": checked.get("fire_redness"),
+            "fire_white_fraction": checked.get("fire_white_fraction"),
+            "fire_loop": {h: v["seamless"]
+                          for h, v in checked["fire_loop"].items()},
+            "fire_composite": checked["fire_composite"],
+            "burn_edge_alpha": checked["burn_edge_alpha"],
+            "burn_span_px": checked["burn_span_px"],
+            "burn_contrast": checked["burn_contrast"],
+            "burn_loop": {h: v["seamless"]
+                          for h, v in checked["burn_loop"].items()},
         })
 
     print("[tank] %s  %d problems" % (cfg["output_dir"], len(problems)))
     for line in problems:
         print("[tank]   ! %s" % line)
-    for key in ("composite", "exhaust_composite"):
+    for key in ("composite", "exhaust_composite", "fire_composite"):
         if report.get(key):
             print("[tank] now open %s and look at it - the numbers above have "
                   "all been green while the picture was wrong" % report[key])

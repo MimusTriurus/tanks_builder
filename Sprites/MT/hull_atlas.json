@@ -16,6 +16,8 @@
   ],
   "excluded": [
     "Barrel",
+    "Burn",
+    "Fire",
     "Plume",
     "Turret"
   ],
