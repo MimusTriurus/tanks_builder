@@ -13,8 +13,8 @@ Two steps here are not automatic and cannot sensibly be, and both are the same
 step: separating a piece of the model by hand so the measurement has something
 unambiguous to measure.
 
-    Barrel   -> the gun tip, parented to Turret.  Gives the muzzle flash.
-    Exhaust  -> the outlet, parented to Hull.     Gives the engine plume.
+    Barrel  -> the gun tip, parented to Turret.  Gives the muzzle flash.
+    Engine  -> the outlet, parented to Hull.     Gives the exhaust plume.
 
 Neither is required. Whichever is missing is skipped with a note, so a scene can
 be brought along one piece at a time - which is what actually happens, since the
@@ -51,7 +51,7 @@ CONFIG = {
     "hull": "Hull",
     "turret": "Turret",
     "barrel": "Barrel",
-    "exhaust": "Exhaust",       # a name *prefix*: two pipes are two objects
+    "exhaust": "Engine",        # a name *prefix*: two outlets are two objects
     "flash": "Flash",
     "smoke": "Smoke",
     "plume": "Plume",

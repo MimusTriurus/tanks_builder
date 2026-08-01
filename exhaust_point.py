@@ -33,8 +33,8 @@ are away from the middle of the tank.
 
 One object per port
 -------------------
-Two pipes are two objects: `Exhaust` and `Exhaust.001`, or `Exhaust_L` and
-`Exhaust_R` - anything whose name starts with the prefix. Splitting them
+Two outlets are two objects: `Engine` and `Engine.001`, or `Engine_L` and
+`Engine_R` - anything whose name starts with the prefix. Splitting them
 automatically was the first plan and it does not survive this geometry: a
 louvred grille *is* a dozen separate slats with air between them, so any
 clustering that pulls two pipes apart also shatters one grille into twelve
@@ -62,8 +62,11 @@ import numpy as np
 REPO = r"D:\Projects\AgentCoding\BlenderMCP"
 
 CONFIG = {
-    # every mesh object whose name starts with this is one port
-    "prefix": "Exhaust",
+    # Every mesh object whose name starts with this is one port, so a second
+    # one is `Engine.001` and needs no config. Named for the part rather than
+    # for the effect because that is what gets separated: on these models it is
+    # a louvred panel on the engine deck, and MT's is on the rear slope.
+    "prefix": "Engine",
     "hull": "Hull",
     "turret": "Turret",
     # objects to stamp the result on
@@ -117,8 +120,9 @@ def set_exhaust(cfg=None):
             "no mesh object whose name starts with %r - separate the exhaust "
             "outlet first: select it, Ctrl+L to complete the panels it cuts "
             "through, P > Selection, rename it %r, then select it, Ctrl-click "
-            "%r and Ctrl+P > Object (Keep Transform). On these models that is "
-            "usually the louvred grille on the engine deck; MT has no pipe."
+            "%r and Ctrl+P > Object (Keep Transform). On these models it is a "
+            "louvred panel rather than a pipe - MT's is on the rear slope, and "
+            "its rear plate carries nothing but tow hooks."
             % (cfg["prefix"], cfg["prefix"], cfg["hull"]))
 
     hull_pts = mp.world_vertices(hull)
