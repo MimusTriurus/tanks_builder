@@ -72,6 +72,16 @@ public sealed partial class Main : Node2D
     /// an interpretation laid over one.</summary>
     private bool _exhaustEnabled = true;
 
+    private readonly BurnLoop _burn = new();
+    /// <summary>The tank on fire - key J, or --burning. Off by default, and
+    /// unlike the exhaust that is not a preference: a tank that is not burning
+    /// is the normal case, and a harness that opens with one on fire would be
+    /// showing the exception. It gets its own key rather than riding on the
+    /// exhaust's so the two can be seen apart - they come off the same stamped
+    /// port and it is worth being able to prove the layers are not the same
+    /// layer.</summary>
+    private bool _burning;
+
     private FlashSheet _flash = null!;
     private readonly Recoil _recoil = new();
     /// <summary>Screen frames since the shot went off, or -1 between shots.</summary>
@@ -126,6 +136,8 @@ public sealed partial class Main : Node2D
                 _scanEnabled = true;
             else if (userArgs[i] == "--no-exhaust")
                 _exhaustEnabled = false;
+            else if (userArgs[i] == "--burning")
+                _burning = true;
             else if (userArgs[i] == "--fire")
                 _fireAtStart = true;
             else if (userArgs[i] == "--flash" && i + 1 < userArgs.Length)
@@ -248,6 +260,9 @@ public sealed partial class Main : Node2D
         _exhaust.TopSpeed = _profile.TopSpeed;
         _exhaust.Phases = atlas.ExhaustPhases;
         _exhaust.Reset();
+        // no TopSpeed here: a fire does not burn harder because the tank moves
+        _burn.Phases = atlas.BurnPhases;
+        _burn.Reset();
         _scan.Reset();
         CancelOrder();
         _field.QueueRedraw();
@@ -437,6 +452,29 @@ public sealed partial class Main : Node2D
         _tank.ExhaustDensity = (float)_exhaust.Density;
     }
 
+    /// <summary>Runs every frame like the exhaust, but takes no speed: see
+    /// <see cref="BurnLoop"/>. Both halves are required before anything is
+    /// shown, because the flame without its column is the washed-out half of the
+    /// effect rather than a cheaper version of it.</summary>
+    private void UpdateBurn(double delta)
+    {
+        if (!_burning || !_tank.Atlas!.HasBurning)
+        {
+            if (!_tank.Burning && _tank.FirePhase < 0 && _tank.BurnPhase < 0)
+                return;
+            _burn.Reset();
+            _tank.Burning = false;
+            _tank.FirePhase = -1;
+            _tank.BurnPhase = -1;
+            _tank.QueueRedraw();
+            return;
+        }
+        _burn.Advance(delta);
+        _tank.Burning = true;
+        _tank.FirePhase = _burn.FireFrame;
+        _tank.BurnPhase = _burn.SmokeFrame;
+    }
+
     /// <summary>Fire. Restarts the flash from frame zero rather than being
     /// ignored while one is running, so holding the key reads as a rate of fire
     /// instead of doing nothing.</summary>
@@ -525,6 +563,7 @@ public sealed partial class Main : Node2D
                      + $"  turret {_tank.TurretFacing,6:F1}  shot {_tank.FlashFrame,3}"
                      + $"  recoil {_recoil.Pitch,8:F5}/{_recoil.Roll,8:F5}"
                      + $"  exh {_tank.ExhaustPhase,2}@{_exhaust.Phase,5:F2}"
+                     + $"  burn {_tank.FirePhase,2}/{_tank.BurnPhase,2}"
                      + $"  cell ({_cell.X},{_cell.Y})");
             if (++_frames >= _traceFrames)
             {
@@ -546,6 +585,7 @@ public sealed partial class Main : Node2D
 
         UpdateTremble(delta);
         UpdateExhaust(delta);
+        UpdateBurn(delta);
         UpdateScan(delta);
         UpdateShot(delta);
 
@@ -652,6 +692,10 @@ public sealed partial class Main : Node2D
                 _exhaustEnabled = !_exhaustEnabled;
                 UpdateExhaust(0.0);
                 break;
+            case Key.J:
+                _burning = !_burning;
+                UpdateBurn(0.0);
+                break;
             case Key.K: _tank.TurretStabilised = !_tank.TurretStabilised; break;
             case Key.Z: Fire(); break;
             case Key.V:
@@ -694,6 +738,11 @@ public sealed partial class Main : Node2D
                 _tank.TrembleRoll = 0.0;
                 _exhaust.Reset();
                 _tank.ExhaustPhase = -1;
+                _burning = false;
+                _burn.Reset();
+                _tank.Burning = false;
+                _tank.FirePhase = -1;
+                _tank.BurnPhase = -1;
                 _scan.Reset();
                 _recoil.Reset();
                 _shotFrame = -1;
@@ -749,6 +798,14 @@ public sealed partial class Main : Node2D
                 + $"   O engine exhaust: {On(_exhaustEnabled)}"
                 + (atlas.HasExhaust
                     ? "" : "   [none for this tank - split an Engine]"),
+            $"burning: fire {(_tank.FirePhase < 0 ? " -" : _tank.FirePhase.ToString()),2}"
+                + $" at {_burn.FireRate,4:F1} /s"
+                + $"   smoke {(_tank.BurnPhase < 0 ? " -" : _tank.BurnPhase.ToString()),2}"
+                + $" at {_burn.SmokeRate,4:F1} /s"
+                + $" / {atlas.BurnPhases}"
+                + $"   J on fire: {On(_burning)}"
+                + (atlas.HasBurning
+                    ? "" : "   [none for this tank - split an Engine]"),
             $"flash: {(_tank.ActiveSource == FlashSource.Rendered ? "RENDERED (Blender layers, additive)" : "SHEET (painted, rotated)")}"
                 + (_tank.Source == FlashSource.Rendered && !_tank.CanRender
                     ? "   [no rendered flash for this tank - split a Barrel]" : "")
@@ -769,7 +826,7 @@ public sealed partial class Main : Node2D
             $"H hull layer: {On(_tank.ShowHull)}    T turret layer: {On(_tank.ShowTurret)}"
                 + $"    G field: {On(_field.ShowField)}    R reset",
             "Z fire    V flash source    P pitch    B rumble    I engine tremble"
-                + "    N turret scan    K stabiliser    O exhaust",
+                + "    N turret scan    K stabiliser    O exhaust    J on fire",
         });
     }
 

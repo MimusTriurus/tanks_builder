@@ -763,6 +763,114 @@ public static class SelfTest
                 + $" {atlas.ExhaustPhases * atlas.Count}, highest {plumeTiles.Max()}");
         }
 
+        GD.Print("the burning wreck");
+        var fire = new BurnLoop { Phases = 12 };
+        var fireSeen = new HashSet<int>();
+        var smokeSeen = new HashSet<int>();
+        bool burnInRange = true;
+        for (int i = 0; i < 600; i++)
+        {
+            fire.Advance(tick);
+            fireSeen.Add(fire.FireFrame);
+            smokeSeen.Add(fire.SmokeFrame);
+            if (fire.FirePhase < 0.0 || fire.FirePhase >= fire.Phases
+                || fire.SmokePhase < 0.0 || fire.SmokePhase >= fire.Phases)
+                burnInRange = false;
+        }
+        Check("both burning loops stay inside the phases that were rendered",
+            burnInRange,
+            $"fire {fire.FirePhase:F3}, smoke {fire.SmokePhase:F3}"
+            + $" of {fire.Phases}");
+        Check("a lap visits every phase of both",
+            fireSeen.Count == fire.Phases && smokeSeen.Count == fire.Phases,
+            $"fire {fireSeen.Count}, smoke {smokeSeen.Count} of {fire.Phases}");
+
+        // The two halves run at different rates off the same rendered phases,
+        // which is legal because each closes on itself independently. It is
+        // asserted because the obvious arrangement - one clock, one phase - is
+        // what a later edit would reach for, and it forces a choice between a
+        // smouldering flame and a column going up like a jet.
+        Check("the flame runs faster than its column",
+            fire.FireRate > fire.SmokeRate * 1.5,
+            $"{fire.FireRate:F1}/s against {fire.SmokeRate:F1}/s");
+        Check("the two halves are not in step",
+            Math.Abs(fire.FirePhase - fire.SmokePhase) > 1e-6,
+            $"fire {fire.FirePhase:F3}, smoke {fire.SmokePhase:F3}");
+
+        // No load ramp, where the exhaust has one on purpose. An engine under
+        // load smokes harder; a fire does not burn harder because the tank is
+        // moving, and BurnLoop takes no speed at all - this asserts the shape of
+        // the API rather than a value, which is the only way to state it.
+        var still = new BurnLoop { Phases = 12 };
+        var driven = new BurnLoop { Phases = 12 };
+        for (int i = 0; i < 120; i++)
+        {
+            still.Advance(tick);
+            driven.Advance(tick);
+        }
+        Check("the fire burns the same standing still as at speed",
+            Math.Abs(still.FirePhase - driven.FirePhase) < 1e-9
+            && Math.Abs(still.SmokePhase - driven.SmokePhase) < 1e-9,
+            "speed is not an input to BurnLoop");
+
+        Check("the burning pair follows the hull, like the plume",
+            EffectLayer.BurningFire(AtlasSet.FireName).FollowsHull
+            && EffectLayer.BurningSmoke(AtlasSet.BurnName).FollowsHull,
+            "the ports are stamped on the engine deck, not on the turret");
+        Check("the burning pair is kept out of the shot's layer list",
+            !AtlasSet.EffectNames.Contains(AtlasSet.FireName)
+            && !AtlasSet.EffectNames.Contains(AtlasSet.BurnName),
+            "HasEffects requires every name in it, and would switch the "
+            + "rendered flash off on a tank that has one but no Engine");
+        // Order is the effect: the column exists to put something dark under an
+        // additive flame, and reversed it greys out the fire it should back.
+        Check("the column is added to the tree before the flame",
+            Array.IndexOf(TankSprite.LayerOrder, AtlasSet.BurnName)
+            < Array.IndexOf(TankSprite.LayerOrder, AtlasSet.FireName),
+            string.Join(" -> ", TankSprite.LayerOrder));
+
+        if (!atlas.HasBurning)
+        {
+            Check($"{atlas.Tag} has both rendered burning layers", false,
+                "no fire/burn atlas - split an Engine in this scene");
+        }
+        else
+        {
+            Vector2 burnTankAnchor = atlas.Anchor / (Vector2)atlas.Tile;
+            foreach (string layer in new[] { AtlasSet.FireName, AtlasSet.BurnName })
+            {
+                Vector2 anchor = atlas.AnchorOf(layer) / (Vector2)atlas.TileOf(layer);
+                Check($"the {layer} layer shares the tank's anchor, in frame fractions",
+                    (anchor - burnTankAnchor).Length() < 1e-4,
+                    $"{anchor} against {burnTankAnchor}");
+            }
+            Check("both halves hold the same number of phases",
+                atlas.PhasesOf(AtlasSet.FireName)
+                == atlas.PhasesOf(AtlasSet.BurnName),
+                $"fire {atlas.PhasesOf(AtlasSet.FireName)},"
+                + $" burn {atlas.PhasesOf(AtlasSet.BurnName)}");
+            // The column is the one effect that genuinely needs a bigger frame -
+            // it stands a hull and a half over the deck. Stated as an assertion
+            // because the flame does *not*, and a later edit growing the flame
+            // into the column's frame would go unnoticed otherwise.
+            Check("the column is rendered wider than the tank and the flame is not",
+                atlas.TileOf(AtlasSet.BurnName).X > atlas.Tile.X
+                && atlas.TileOf(AtlasSet.FireName) == atlas.Tile,
+                $"burn {atlas.TileOf(AtlasSet.BurnName).X}px,"
+                + $" fire {atlas.TileOf(AtlasSet.FireName).X}px,"
+                + $" tank {atlas.Tile.X}px");
+
+            var burnTiles = new HashSet<int>();
+            foreach (int facing in atlas.RenderedFacings())
+                for (int phase = 0; phase < atlas.BurnPhases; phase++)
+                    burnTiles.Add(atlas.EffectFrame(AtlasSet.BurnName, phase, facing));
+            Check("every column phase and heading maps to its own tile",
+                burnTiles.Count == atlas.BurnPhases * atlas.Count
+                && burnTiles.Max() < atlas.BurnPhases * atlas.Count,
+                $"{burnTiles.Count} distinct of"
+                + $" {atlas.BurnPhases * atlas.Count}, highest {burnTiles.Max()}");
+        }
+
         GD.Print("recoil");
         var recoil = new Recoil();
         recoil.Fire(0.0);                       // gun straight ahead

@@ -122,9 +122,46 @@ public sealed partial class TankSprite : Node2D
 
     public bool ShowExhaust = true;
 
-    private EffectLayer? _smoke;
-    private EffectLayer? _fire;
-    private EffectLayer? _exhaust;
+    /// <summary>Whether this tank is on fire.</summary>
+    public bool Burning;
+
+    /// <summary>Phases of the burning wreck's two loops, or -1 when it is not
+    /// burning. Two numbers rather than one because the flame and the column run
+    /// at different rates over the same rendered phases - see
+    /// <see cref="BurnLoop"/>.</summary>
+    public int FirePhase = -1;
+    public int BurnPhase = -1;
+
+    /// <summary>
+    /// The effect layers, in the order they are added to the tree - which,
+    /// because children draw after their parent and in order, is the order they
+    /// composite in. This array is the compositing policy, and it is public so
+    /// the policy can be asserted rather than read off the screen.
+    ///
+    /// Exhaust first, because it is the ambient one and everything else should
+    /// read over it. Then the wreck's column and its flame - dark first,
+    /// additive second, which is not a preference: the column exists to give the
+    /// flame something dark to be added to, and reversed it would grey out the
+    /// fire it is there to back. Then the shot's pair on top, because a gun
+    /// going off is the event and should read over a fire that is always there.
+    /// </summary>
+    public static readonly string[] LayerOrder =
+    {
+        AtlasSet.ExhaustName, AtlasSet.BurnName, AtlasSet.FireName,
+        "smoke", "flash",
+    };
+
+    /// <summary>Which kind of layer each name is. Kept beside
+    /// <see cref="LayerOrder"/> so there is one list, not a list and a
+    /// hand-written sequence that has to agree with it.</summary>
+    private static EffectLayer MakeLayer(string layer) => layer switch
+    {
+        AtlasSet.ExhaustName => EffectLayer.Exhaust(layer),
+        AtlasSet.BurnName => EffectLayer.BurningSmoke(layer),
+        AtlasSet.FireName => EffectLayer.BurningFire(layer),
+        "smoke" => EffectLayer.Normal(layer),
+        _ => EffectLayer.Additive(layer),
+    };
 
     /// <summary>Whether this tank can show the rendered flash at all.</summary>
     public bool CanRender => Atlas?.HasEffects == true;
@@ -239,14 +276,11 @@ public sealed partial class TankSprite : Node2D
         // reads as wobble on top of whatever the pitch is doing.
         TextureFilter = TextureFilterEnum.Linear;
 
-        // Children draw after the parent and in order. Exhaust first because it
-        // is the ambient one and a shot should read over it; then smoke, then
-        // fire, which is the stacking the renderer built the shot for.
-        _exhaust = EffectLayer.Exhaust(AtlasSet.ExhaustName);
-        _smoke = EffectLayer.Normal("smoke");
-        _fire = EffectLayer.Additive("flash");
-        foreach (EffectLayer layer in new[] { _exhaust, _smoke, _fire })
+        // Children draw after the parent and in order, so adding them in
+        // LayerOrder is what puts them on screen in it. See there.
+        foreach (string name in LayerOrder)
         {
+            EffectLayer layer = MakeLayer(name);
             layer.Tank = this;
             AddChild(layer);
         }

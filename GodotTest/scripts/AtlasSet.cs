@@ -54,9 +54,25 @@ public sealed class AtlasSet
     /// </summary>
     public const string ExhaustName = "exhaust";
 
+    /// <summary>
+    /// The burning wreck: a red flame at the engine deck and a black column
+    /// above it.
+    ///
+    /// Two layers for the reason the shot is two - the flame emits and is added,
+    /// the column occludes and is not - and kept out of
+    /// <see cref="EffectNames"/> for the reason the exhaust is.
+    ///
+    /// Both follow the *hull*, like the exhaust and unlike the flash: all three
+    /// are built on the same stamped ports, and those are bolted to the engine
+    /// deck.
+    /// </summary>
+    public const string FireName = "fire";
+    public const string BurnName = "burn";
+
     /// <summary>Layers that load if they are there and are silently skipped if
     /// they are not. Each needs a piece separated by hand in the .blend.</summary>
-    private static readonly string[] OptionalNames = { "smoke", "flash", ExhaustName };
+    private static readonly string[] OptionalNames =
+        { "smoke", "flash", ExhaustName, FireName, BurnName };
 
     public string Tag { get; private set; } = "";
     public string Error { get; private set; } = "";
@@ -156,6 +172,16 @@ public sealed class AtlasSet
 
     /// <summary>Phases in the exhaust loop, 0 if it is missing.</summary>
     public int ExhaustPhases => PhasesOf(ExhaustName);
+
+    /// <summary>True when this tank was rendered burning. Both halves are
+    /// required, and that is not tidiness: the column is not decoration, it is
+    /// what the additive flame is composited against, and the flame alone on the
+    /// game's pale field washes out to nothing much.</summary>
+    public bool HasBurning => Has(FireName) && Has(BurnName);
+
+    /// <summary>Phases in the burning loop, 0 if it is missing. Both layers
+    /// share the count - one event, one render job.</summary>
+    public int BurnPhases => HasBurning ? PhasesOf(FireName) : 0;
 
     /// <summary>Muzzle point per turret frame, in tile pixels.</summary>
     private Vector2[] _muzzle = Array.Empty<Vector2>();

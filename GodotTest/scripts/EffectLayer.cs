@@ -40,9 +40,21 @@ public sealed partial class EffectLayer : Node2D
     /// </summary>
     public bool FollowsHull;
 
-    /// <summary>Whether this layer runs on the looping <see cref="ExhaustLoop"/>
-    /// clock instead of the shot's one-off <see cref="Hold"/> table.</summary>
-    public bool Loops;
+    /// <summary>
+    /// Which clock drives this layer, and so what "phase" means for it.
+    ///
+    /// The shot has a first frame and a last one and runs off the
+    /// <see cref="Hold"/> table; the exhaust and the fire have neither and go
+    /// round. The burning pair is two entries rather than one because the flame
+    /// and its column run at different rates off the same rendered phases - see
+    /// <see cref="BurnLoop"/>.
+    /// </summary>
+    public enum Clocks { Shot, Exhaust, BurningSmoke, BurningFire }
+
+    public Clocks Clock = Clocks.Shot;
+
+    /// <summary>Whether this layer goes round rather than running out.</summary>
+    public bool Loops => Clock != Clocks.Shot;
 
     public static EffectLayer Additive(string layer) => new()
     {
@@ -62,7 +74,32 @@ public sealed partial class EffectLayer : Node2D
     {
         Layer = layer,
         FollowsHull = true,
-        Loops = true,
+        Clock = Clocks.Exhaust,
+    };
+
+    /// <summary>The burning wreck's column: normal alpha, on the hull's heading.
+    /// It has to be added to the tree *before* the flame, because children draw
+    /// in order and the whole reason the column exists is to put something dark
+    /// behind an additive flame.</summary>
+    public static EffectLayer BurningSmoke(string layer) => new()
+    {
+        Layer = layer,
+        FollowsHull = true,
+        Clock = Clocks.BurningSmoke,
+    };
+
+    /// <summary>The burning wreck's flame: additive like the muzzle flash,
+    /// because it emits, but on the hull's heading and on a clock with no
+    /// end.</summary>
+    public static EffectLayer BurningFire(string layer) => new()
+    {
+        Layer = layer,
+        FollowsHull = true,
+        Clock = Clocks.BurningFire,
+        Material = new CanvasItemMaterial
+        {
+            BlendMode = CanvasItemMaterial.BlendModeEnum.Add,
+        },
     };
 
     public override void _Ready() => TextureFilter = TextureFilterEnum.Linear;
@@ -74,9 +111,14 @@ public sealed partial class EffectLayer : Node2D
         {
             if (Tank is null || Tank.Atlas?.Has(Layer) != true)
                 return -1;
-            if (Loops)
-                return Tank.ShowExhaust ? Tank.ExhaustPhase : -1;
-            return Tank.ActiveSource == FlashSource.Rendered ? Tank.ShotPhase : -1;
+            return Clock switch
+            {
+                Clocks.Exhaust => Tank.ShowExhaust ? Tank.ExhaustPhase : -1,
+                Clocks.BurningSmoke => Tank.Burning ? Tank.BurnPhase : -1,
+                Clocks.BurningFire => Tank.Burning ? Tank.FirePhase : -1,
+                _ => Tank.ActiveSource == FlashSource.Rendered
+                    ? Tank.ShotPhase : -1,
+            };
         }
     }
 
@@ -130,8 +172,10 @@ public sealed partial class EffectLayer : Node2D
         // Density is pulled here rather than pushed into Modulate for the same
         // reason the phase is: a child redraws on its own schedule, and a value
         // written during the parent's draw can be a frame stale.
+        // Only the exhaust is thinned: its density is the throttle showing. The
+        // fire has no such input - see BurnLoop.
         var tint = new Color(1.0f, 1.0f, 1.0f,
-            Loops ? Tank.ExhaustDensity : 1.0f);
+            Clock == Clocks.Exhaust ? Tank.ExhaustDensity : 1.0f);
         DrawSetTransformMatrix(Tank.ShearFor(turret));
         DrawTextureRectRegion(atlas.Texture(Layer),
             new Rect2(-anchor + new Vector2(0.0f, Tank.HeaveFor(turret)),
