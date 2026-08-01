@@ -42,21 +42,52 @@ public sealed partial class EffectLayer : Node2D
 
     public override void _Ready() => TextureFilter = TextureFilterEnum.Linear;
 
+    /// <summary>The phase this layer should be showing, or -1 for nothing.</summary>
+    private int Wanted =>
+        Tank is not null && Tank.ActiveSource == FlashSource.Rendered
+        && Tank.Atlas?.Has(Layer) == true
+            ? Tank.ShotPhase
+            : -1;
+
+    /// <summary>What the last <see cref="_Draw"/> actually put on screen.</summary>
+    private int _shown = -1;
+
+    /// <summary>
+    /// Redraw while there is something to show, and once more after there is
+    /// not.
+    ///
+    /// That second clause is the whole of it. Gating on "a shot is live" alone
+    /// looks right and leaves the last phase on screen for good: the moment the
+    /// phase goes to -1 the layer stops asking to be redrawn, so it never gets
+    /// the chance to draw nothing. The parent marking itself dirty does not
+    /// help - a child CanvasItem is redrawn when *it* is dirty, not when its
+    /// parent is. It showed up as smoke that never cleared, because by the last
+    /// phase the fire has all but gone and the smoke has not.
+    ///
+    /// Comparing what is wanted against what was drawn covers the other two
+    /// ways the layer goes quiet as well: swapping to the painted sheet
+    /// mid-shot, and switching to a tank that has no rendered flash.
+    /// </summary>
     public override void _Process(double delta)
     {
-        // cheap, and it removes the question of who marks whom dirty: while a
-        // shot is live this redraws every frame, and between shots it does not
-        if (Tank is not null && Tank.ShotPhase >= 0)
+        if (MustRedraw(Wanted, _shown))
             QueueRedraw();
     }
+
+    /// <summary>Whether a layer currently showing <paramref name="shown"/> has
+    /// to be redrawn when <paramref name="wanted"/> is what it should show.
+    /// Exposed so the case that was wrong can be asserted rather than
+    /// remembered.</summary>
+    public static bool MustRedraw(int wanted, int shown) => wanted >= 0 || shown >= 0;
 
     public override void _Draw()
     {
         AtlasSet? atlas = Tank?.Atlas;
-        if (Tank is null || atlas is null || Tank.ShotPhase < 0
-            || Tank.Source != FlashSource.Rendered || !atlas.Has(Layer))
+        int phase = Wanted;
+        _shown = phase;
+        if (Tank is null || atlas is null || phase < 0)
             return;
-        int frame = atlas.EffectFrame(Layer, Tank.ShotPhase, Tank.TurretFacing);
+        int frame = atlas.EffectFrame(Layer, phase, Tank.TurretFacing);
         // its *own* anchor: the effect layers are rendered at a wider tile than
         // the tank so a long flash is not clipped at the frame edge, and the
         // anchor scales with the tile. Using the hull's would throw it 64px out.

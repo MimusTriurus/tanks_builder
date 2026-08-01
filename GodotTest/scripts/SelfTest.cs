@@ -585,6 +585,20 @@ public static class SelfTest
             phases.Add(EffectLayer.PhaseAt(i));
         Check("no phase is skipped", phases.Count == 8, $"showed {phases.Count} of 8");
 
+        // The effect layers are their own CanvasItems, and a child is redrawn
+        // when *it* is dirty, not when its parent is. Gating the redraw on "a
+        // shot is live" therefore leaves the last phase on screen for good: the
+        // moment the phase goes to -1 the layer stops asking to be redrawn, so
+        // it never gets the chance to draw nothing. It showed as smoke that
+        // never cleared, because by the last phase the fire has gone and the
+        // smoke has not.
+        Check("the layer redraws once more after the shot ends",
+            EffectLayer.MustRedraw(-1, 7),
+            "otherwise the last phase stays on screen for good");
+        Check("a live shot keeps redrawing", EffectLayer.MustRedraw(3, 3));
+        Check("an idle layer stops redrawing", !EffectLayer.MustRedraw(-1, -1),
+            "nothing to show and nothing showing");
+
         if (!atlas.HasEffects)
         {
             Check($"{atlas.Tag} has rendered effect layers", false,
