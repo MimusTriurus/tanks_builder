@@ -240,12 +240,6 @@ public sealed partial class TankSprite : Node2D
     /// </summary>
     private readonly Dictionary<string, List<Mark>> _scars = new();
 
-    /// <summary>Bumped whenever any plate's marks change. The scar layers watch
-    /// this rather than redrawing every frame: damage is a state that changes
-    /// when a shell lands and not otherwise, and unlike a shot it is on screen
-    /// for the rest of the game.</summary>
-    public int ScarVersion { get; private set; }
-
     private static readonly IReadOnlyList<Mark> NoMarks = Array.Empty<Mark>();
 
     public IReadOnlyList<Mark> MarksOn(string face) =>
@@ -277,7 +271,7 @@ public sealed partial class TankSprite : Node2D
         marks.Add(new Mark(level, along));
         while (marks.Count > Atlas.ScarLevels)
             marks.RemoveAt(0);
-        ScarVersion++;
+        QueueRedraw();
         return level;
     }
 
@@ -285,7 +279,7 @@ public sealed partial class TankSprite : Node2D
     public void Repair()
     {
         _scars.Clear();
-        ScarVersion++;
+        QueueRedraw();
     }
 
     /// <summary>Whether this tank can show the rendered flash at all.</summary>

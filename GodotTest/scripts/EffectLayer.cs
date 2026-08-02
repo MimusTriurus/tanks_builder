@@ -185,10 +185,11 @@ public sealed partial class EffectLayer : Node2D
                 Clocks.BurningSmoke => Tank.Burning ? Tank.BurnPhase : -1,
                 Clocks.BurningFire => Tank.Burning ? Tank.FirePhase : -1,
                 Clocks.HitBurst or Clocks.HitDust => Tank.HitPhase,
-                // The scars never come through here: a plate can be carrying
-                // several marks at once, so "the phase this layer is showing"
-                // is not one number. See DrawMarks.
-                Clocks.Scar => -1,
+                // A plate carrying several marks has no single phase, so this
+                // is only "is there anything to draw". Which is all the redraw
+                // gate needs: what the layer actually puts on screen depends on
+                // the hull's heading as much as on the damage.
+                Clocks.Scar => Tank.MarksOn(FaceOf(Layer)).Count > 0 ? 0 : -1,
                 _ => Tank.ActiveSource == FlashSource.Rendered
                     ? Tank.ShotPhase : -1,
             };
@@ -228,26 +229,30 @@ public sealed partial class EffectLayer : Node2D
         // away is an empty frame, not a frame to draw somewhere else.
         if (Tank is not null && Clock is Clocks.HitBurst or Clocks.HitDust)
             ShowBehindParent = Tank.HitBehind;
-        if (Clock == Clocks.Scar)
-        {
-            // Damage is a state and it is on screen for the rest of the game,
-            // so it redraws when a shell lands rather than every frame like the
-            // layers that are running a clock. Against what was *drawn*, for
-            // the reason everything else here is: a child redraws on its own
-            // mark and never on its parent's, so a fourth hit that leaves the
-            // worst level where it already was still has to reach the layer.
-            if ((Tank?.ScarVersion ?? -1) != _shown)
-                QueueRedraw();
-            return;
-        }
-        if (MustRedraw(Wanted, _shown))
+        if (NeedsRedraw())
             QueueRedraw();
     }
 
-    /// <summary>Whether a layer currently showing <paramref name="shown"/> has
-    /// to be redrawn when <paramref name="wanted"/> is what it should show.
-    /// Exposed so the case that was wrong can be asserted rather than
-    /// remembered.</summary>
+    /// <summary>Whether this layer has to be redrawn now.</summary>
+    public bool NeedsRedraw() => MustRedraw(Wanted, _shown);
+
+    /// <summary>What this layer would put on screen: a phase, or -1 for
+    /// nothing. For the scars it is only whether the plate has anything on
+    /// it - see <see cref="Wanted"/>.</summary>
+    public int Showing => Wanted;
+
+    /// <summary>
+    /// Whether a layer currently showing <paramref name="shown"/> has to be
+    /// redrawn when <paramref name="wanted"/> is what it should show. Exposed
+    /// so the two cases that were wrong can be asserted rather than remembered.
+    ///
+    /// Note that it is true when the two agree. That looks wasteful and is the
+    /// whole point: what a layer draws is a frame chosen by a *heading*, not
+    /// just by a phase, so "nothing about the damage changed" is no reason to
+    /// keep the old frame. Gating the scars on their own damage counter instead
+    /// left the mark showing the plate as it looked at the heading the shell
+    /// arrived on, frozen through every turn after it.
+    /// </summary>
     public static bool MustRedraw(int wanted, int shown) => wanted >= 0 || shown >= 0;
 
     public override void _Draw()
@@ -310,8 +315,8 @@ public sealed partial class EffectLayer : Node2D
     /// </summary>
     private void DrawMarks(AtlasSet? atlas)
     {
-        _shown = Tank?.ScarVersion ?? -1;
-        if (Tank is null || atlas is null)
+        _shown = Wanted;
+        if (Tank is null || atlas is null || _shown < 0)
             return;
         string face = FaceOf(Layer);
         Vector2 anchor = atlas.AnchorOf(Layer);

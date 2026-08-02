@@ -1177,6 +1177,27 @@ public static class SelfTest
             Check("a mark taken dead centre draws on the anchor",
                 tank.MarkOffset(plate, new TankSprite.Mark(0, 0.0f)).Length() < 1e-3,
                 "so the burst's own zero scatter puts them in the same place");
+
+            // The frame a scar draws is chosen by the hull's heading, so the
+            // layer has to keep asking to be redrawn for as long as it is
+            // showing anything. Gating it on the damage instead - "nothing has
+            // been hit since, so nothing has changed" - froze the mark at the
+            // heading the shell arrived on and it stayed there through every
+            // turn afterwards. It looked exactly like a decal welded to the
+            // screen rather than to the tank.
+            var scarLayer = EffectLayer.Scar(atlas.ScarLayer(plate));
+            scarLayer.Tank = tank;
+            int marked = scarLayer.Showing;
+            tank.Repair();
+            int cleaned = scarLayer.Showing;
+            Check("a scar layer asks to be redrawn while it is showing anything",
+                marked >= 0 && cleaned < 0
+                && EffectLayer.MustRedraw(marked, marked)
+                && EffectLayer.MustRedraw(cleaned, marked)
+                && !EffectLayer.MustRedraw(cleaned, cleaned),
+                "its frame follows the hull, so standing still is not standing"
+                + " still");
+            scarLayer.Free();
             tank.Repair();
 
             Vector2 tankAnchor = atlas.Anchor / (Vector2)atlas.Tile;
