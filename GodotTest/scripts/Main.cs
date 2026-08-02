@@ -971,10 +971,14 @@ public sealed partial class Main : Node2D
                 + $"   x{_tank.HitScale:F2}"
                 + "   U take a hit   Y calibre"
                 + (atlas.HasHit ? "" : "   [no plate table - re-render]"),
+            // The levels each plate is carrying, oldest first - "front 012" is
+            // a plate that has taken three. The list rather than the worst,
+            // because the marks accumulate and how many there are is the thing
+            // you cannot read off a still frame.
             "damage: " + (atlas.HasScars
-                ? string.Join("  ", atlas.HitFaces.Select(
-                      f => $"{f} {_tank.ScarLevel(f) + 1}/{atlas.ScarLevels}"))
-                  + "   R repairs"
+                ? string.Join("  ", atlas.HitFaces.Select(f =>
+                      $"{f} {(_tank.MarksOn(f).Count == 0 ? "-" : string.Concat(_tank.MarksOn(f).Select(m => m.Level)))}"))
+                  + $"   max {atlas.ScarLevels}   R repairs"
                 : "[no scar layers for this tank - re-render]"),
             $"flash: {(_tank.ActiveSource == FlashSource.Rendered ? "RENDERED (Blender layers, additive)" : "SHEET (painted, rotated)")}"
                 + (_tank.Source == FlashSource.Rendered && !_tank.CanRender

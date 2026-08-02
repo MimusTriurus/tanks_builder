@@ -211,11 +211,8 @@ public sealed partial class TankSprite : Node2D
     /// set when something hits the plate and then stays until something else
     /// does. Nothing here advances with time.
     /// </summary>
-    private readonly Dictionary<string, int> _scars = new();
-
-    /// <summary>Where along each plate the mark sits, as a fraction of the
-    /// plate's half-width - the same number the burst is scattered by, because
-    /// it is the same shell.
+    /// <summary>One round's worth of damage: how bad, and where along the plate
+    /// it landed as a fraction of the plate's half-width.
     ///
     /// A fraction rather than a pixel offset, because the plate's screen
     /// tangent turns with the hull: stored in pixels it would be right at the
@@ -224,33 +221,63 @@ public sealed partial class TankSprite : Node2D
     /// at every heading, so the centroid is already where it belongs, and this
     /// only says how far along from it.
     /// </summary>
-    private readonly Dictionary<string, float> _scarAt = new();
+    public readonly record struct Mark(int Level, float Along);
 
-    public int ScarLevel(string face) =>
-        _scars.TryGetValue(face, out int level) ? level : -1;
+    /// <summary>
+    /// What each plate is carrying, oldest first.
+    ///
+    /// A list rather than one mark, because rounds do not land on top of each
+    /// other: a plate that has taken three has three holes in it, at the three
+    /// places they arrived. The level is how many times *that plate* had been
+    /// hit when each one landed, so an early scorch stays a scorch after a
+    /// later round punches through beside it - the marks are a record of what
+    /// happened, not a single state that gets overwritten.
+    ///
+    /// Capped at one per level, which is both a budget and the thing that keeps
+    /// them looking different: the decals are rendered art, so two marks at the
+    /// same level are the same drawing twice and read as stamped rather than as
+    /// damage. Past the cap the oldest goes.
+    /// </summary>
+    private readonly Dictionary<string, List<Mark>> _scars = new();
 
-    /// <summary>Where a plate's mark is drawn, in pixels from the anchor.</summary>
-    public Vector2 ScarOffset(string face) =>
-        Atlas is null || !_scarAt.TryGetValue(face, out float along)
-            ? Vector2.Zero
-            : Atlas.HitTangent(face, HullFacing) * along;
+    /// <summary>Bumped whenever any plate's marks change. The scar layers watch
+    /// this rather than redrawing every frame: damage is a state that changes
+    /// when a shell lands and not otherwise, and unlike a shot it is on screen
+    /// for the rest of the game.</summary>
+    public int ScarVersion { get; private set; }
+
+    private static readonly IReadOnlyList<Mark> NoMarks = Array.Empty<Mark>();
+
+    public IReadOnlyList<Mark> MarksOn(string face) =>
+        _scars.TryGetValue(face, out List<Mark>? marks) ? marks : NoMarks;
+
+    /// <summary>The worst a plate is carrying, or -1 if it is clean.</summary>
+    public int ScarLevel(string face)
+    {
+        int worst = -1;
+        foreach (Mark mark in MarksOn(face))
+            worst = Math.Max(worst, mark.Level);
+        return worst;
+    }
+
+    /// <summary>Where a mark is drawn, in pixels from the anchor.</summary>
+    public Vector2 MarkOffset(string face, Mark mark) =>
+        Atlas is null ? Vector2.Zero : Atlas.HitTangent(face, HullFacing) * mark.Along;
 
     /// <summary>Take one more hit on a plate, at <paramref name="along"/> of the
-    /// way across it. Returns the level it is now at, or -1 if this tank has no
-    /// marks.
-    ///
-    /// The mark moves to where the latest round landed rather than staying put
-    /// and deepening: the plate carries one mark, and it should be the one you
-    /// just watched arrive.
-    /// </summary>
+    /// way across it. Returns the level of the mark it left, or -1 if this tank
+    /// has no marks to leave.</summary>
     public int Damage(string face, float along = 0.0f)
     {
         if (Atlas?.HasScars != true || Atlas.ScarLayer(face) == "")
             return -1;
-        int level = Math.Min(ScarLevel(face) + 1, Atlas.ScarLevels - 1);
-        _scars[face] = level;
-        _scarAt[face] = along;
-        QueueRedraw();
+        if (!_scars.TryGetValue(face, out List<Mark>? marks))
+            _scars[face] = marks = new List<Mark>();
+        int level = Math.Min(marks.Count, Atlas.ScarLevels - 1);
+        marks.Add(new Mark(level, along));
+        while (marks.Count > Atlas.ScarLevels)
+            marks.RemoveAt(0);
+        ScarVersion++;
         return level;
     }
 
@@ -258,8 +285,7 @@ public sealed partial class TankSprite : Node2D
     public void Repair()
     {
         _scars.Clear();
-        _scarAt.Clear();
-        QueueRedraw();
+        ScarVersion++;
     }
 
     /// <summary>Whether this tank can show the rendered flash at all.</summary>

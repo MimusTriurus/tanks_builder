@@ -1122,17 +1122,37 @@ public static class SelfTest
             string plate = atlas.HitFaces[0];
             string other = atlas.HitFaces[1];
             bool clean = tank.ScarLevel(plate) < 0;
-            int first = tank.Damage(plate);
-            bool spared = tank.ScarLevel(other) < 0;
-            for (int i = 0; i < atlas.ScarLevels + 3; i++)
-                tank.Damage(plate);
-            int capped = tank.ScarLevel(plate);
-            tank.Repair();
-            Check("a hit marks its own plate and no other, and stops at the worst",
+            int first = tank.Damage(plate, 0.1f);
+            bool spared = tank.MarksOn(other).Count == 0;
+            for (int i = 1; i < atlas.ScarLevels; i++)
+                tank.Damage(plate, 0.1f + 0.15f * i);
+            var carried = tank.MarksOn(plate).ToList();
+            // Rounds do not land on top of each other: three hits leave three
+            // marks, each keeping the level it arrived with, so an early scorch
+            // is still a scorch after a later round punches through beside it.
+            Check("hits accumulate on the plate rather than replacing each other",
                 clean && first == 0 && spared
-                && capped == atlas.ScarLevels - 1 && tank.ScarLevel(plate) < 0,
-                $"{plate} went to {capped} of {atlas.ScarLevels - 1},"
+                && carried.Count == atlas.ScarLevels
+                && carried.Select(m => m.Level).SequenceEqual(
+                       Enumerable.Range(0, atlas.ScarLevels))
+                && carried.Select(m => m.Along).Distinct().Count() == carried.Count,
+                $"{plate} carries {string.Concat(carried.Select(m => m.Level))},"
                 + $" {other} stayed {(spared ? "clean" : "marked")}");
+            for (int i = 0; i < 4; i++)
+                tank.Damage(plate, 0.2f);
+            var full = tank.MarksOn(plate).ToList();
+            int worst = tank.ScarLevel(plate);
+            tank.Repair();
+            // Capped at one per level, which is a budget and also what keeps
+            // them looking unalike: the decals are rendered art, so two marks
+            // at one level are the same drawing twice.
+            Check("a plate carries no more marks than there are levels, and R takes them off",
+                full.Count == atlas.ScarLevels
+                && full.All(m => m.Level >= 0 && m.Level < atlas.ScarLevels)
+                && worst == atlas.ScarLevels - 1
+                && tank.MarksOn(plate).Count == 0,
+                $"{full.Count} marks after {atlas.ScarLevels + 4} hits,"
+                + $" worst {worst}");
 
             // Where the round landed, kept as a fraction of the plate rather
             // than as pixels, so it stays on the same spot of armour through a
@@ -1142,9 +1162,10 @@ public static class SelfTest
             double was = tank.HullFacing;
             tank.HullFacing = 0.0;
             tank.Damage(plate, 0.5f);
-            Vector2 atZero = tank.ScarOffset(plate);
+            TankSprite.Mark placed = tank.MarksOn(plate)[0];
+            Vector2 atZero = tank.MarkOffset(plate, placed);
             tank.HullFacing = 180.0;
-            Vector2 atHalf = tank.ScarOffset(plate);
+            Vector2 atHalf = tank.MarkOffset(plate, placed);
             tank.HullFacing = was;
             Check("a mark slides along its plate and turns with it",
                 atZero.Length() > 8.0 && atHalf.Length() > 8.0
@@ -1153,9 +1174,8 @@ public static class SelfTest
             // The other half of the same shell. A hole appearing in the middle
             // of a plate the flash went off the end of is what one number
             // shared between them prevents.
-            tank.Damage(plate, 0.0f);
             Check("a mark taken dead centre draws on the anchor",
-                tank.ScarOffset(plate).Length() < 1e-3,
+                tank.MarkOffset(plate, new TankSprite.Mark(0, 0.0f)).Length() < 1e-3,
                 "so the burst's own zero scatter puts them in the same place");
             tank.Repair();
 

@@ -74,13 +74,11 @@ public sealed partial class EffectLayer : Node2D
     public bool Placed => Clock == Clocks.HitBurst || Clock == Clocks.HitDust
                           || Clock == Clocks.Scar;
 
-    /// <summary>Where this layer is drawn from, in pixels off the anchor.</summary>
-    private Vector2 Place => Tank is null ? Vector2.Zero : Clock switch
-    {
-        Clocks.HitBurst or Clocks.HitDust => Tank.HitOffset,
-        Clocks.Scar => Tank.ScarOffset(FaceOf(Layer)),
-        _ => Vector2.Zero,
-    };
+    /// <summary>Where this layer is drawn from, in pixels off the anchor. The
+    /// scars work this out per mark instead - see <see cref="DrawMarks"/>.</summary>
+    private Vector2 Place => Tank is not null
+                             && Clock is Clocks.HitBurst or Clocks.HitDust
+        ? Tank.HitOffset : Vector2.Zero;
 
     public static EffectLayer Additive(string layer) => new()
     {
@@ -187,7 +185,10 @@ public sealed partial class EffectLayer : Node2D
                 Clocks.BurningSmoke => Tank.Burning ? Tank.BurnPhase : -1,
                 Clocks.BurningFire => Tank.Burning ? Tank.FirePhase : -1,
                 Clocks.HitBurst or Clocks.HitDust => Tank.HitPhase,
-                Clocks.Scar => Tank.ScarLevel(FaceOf(Layer)),
+                // The scars never come through here: a plate can be carrying
+                // several marks at once, so "the phase this layer is showing"
+                // is not one number. See DrawMarks.
+                Clocks.Scar => -1,
                 _ => Tank.ActiveSource == FlashSource.Rendered
                     ? Tank.ShotPhase : -1,
             };
@@ -227,6 +228,18 @@ public sealed partial class EffectLayer : Node2D
         // away is an empty frame, not a frame to draw somewhere else.
         if (Tank is not null && Clock is Clocks.HitBurst or Clocks.HitDust)
             ShowBehindParent = Tank.HitBehind;
+        if (Clock == Clocks.Scar)
+        {
+            // Damage is a state and it is on screen for the rest of the game,
+            // so it redraws when a shell lands rather than every frame like the
+            // layers that are running a clock. Against what was *drawn*, for
+            // the reason everything else here is: a child redraws on its own
+            // mark and never on its parent's, so a fourth hit that leaves the
+            // worst level where it already was still has to reach the layer.
+            if ((Tank?.ScarVersion ?? -1) != _shown)
+                QueueRedraw();
+            return;
+        }
         if (MustRedraw(Wanted, _shown))
             QueueRedraw();
     }
@@ -240,6 +253,11 @@ public sealed partial class EffectLayer : Node2D
     public override void _Draw()
     {
         AtlasSet? atlas = Tank?.Atlas;
+        if (Clock == Clocks.Scar)
+        {
+            DrawMarks(atlas);
+            return;
+        }
         int phase = Wanted;
         _shown = phase;
         if (Tank is null || atlas is null || phase < 0)
@@ -275,6 +293,38 @@ public sealed partial class EffectLayer : Node2D
             Frame(anchor, atlas.TileOf(Layer),
                 place + new Vector2(0.0f, Tank.HeaveFor(turret)), size),
             atlas.Region(Layer, frame), tint);
+        DrawSetTransformMatrix(Transform2D.Identity);
+    }
+
+    /// <summary>
+    /// Every mark this plate is carrying, oldest first.
+    ///
+    /// The one layer drawn more than once, and the reason is that rounds do not
+    /// land on top of each other: three hits on a plate are three holes at the
+    /// three places they arrived. One node still, because they are all the same
+    /// atlas at the same heading - only the frame and the offset differ.
+    ///
+    /// Oldest first so a later, deeper mark overlaps an earlier one rather than
+    /// being covered by it. They rarely touch, but when they do the newer round
+    /// is the one that took the metal away.
+    /// </summary>
+    private void DrawMarks(AtlasSet? atlas)
+    {
+        _shown = Tank?.ScarVersion ?? -1;
+        if (Tank is null || atlas is null)
+            return;
+        string face = FaceOf(Layer);
+        Vector2 anchor = atlas.AnchorOf(Layer);
+        Vector2 tile = atlas.TileOf(Layer);
+        Vector2 heave = new(0.0f, Tank.HeaveFor(false));
+        DrawSetTransformMatrix(Tank.ShearFor(false));
+        foreach (TankSprite.Mark mark in Tank.MarksOn(face))
+        {
+            int frame = atlas.EffectFrame(Layer, mark.Level, Tank.HullFacing);
+            DrawTextureRectRegion(atlas.Texture(Layer),
+                Frame(anchor, tile, Tank.MarkOffset(face, mark) + heave, 1.0f),
+                atlas.Region(Layer, frame), Colors.White);
+        }
         DrawSetTransformMatrix(Transform2D.Identity);
     }
 
