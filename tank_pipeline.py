@@ -87,25 +87,27 @@ CONFIG = {
     # 67px out and the embers ~103px, against 128.
     # Raise this if `rise` goes up - `fire_edge_alpha` will say so first.
     "fire_tile_scale": 1.0,
-    # The smoke column is the one layer that really does need a bigger frame,
-    # and by a lot.
+    # The smoke column is the only layer that needs a frame of its own, and the
+    # reason is height rather than reach - it is the one effect that stands
+    # *above* the tank instead of beside it.
     #
     # The room a tile leaves above the anchor is `0.4645 * tile`, not
-    # `tile/2 - 9`: the anchor is a fixed *fraction* of the frame, so the
-    # shortfall grows with the tile. Getting that wrong is what put the first
-    # attempt at 2.25 and clipped 28px off the top of the column.
+    # `tile/2 - 9`: the anchor sits at a fixed *fraction* of the frame, so the
+    # shortfall grows with the tile. Getting that wrong once clipped 28px off
+    # the top of an earlier, much taller version.
     #
-    # Measured, by projecting the mesh through the same camera basis at all
-    # twelve angles rather than estimating: the column reaches 289px above the
-    # anchor and 190px to the side. 2.5 leaves 297, and rendering it put 0.008
-    # of alpha on the border - under the 0.02 the check trips at, so it passed,
-    # and still the top of the column touching its frame. Eight pixels of
-    # measured margin turned out to be none. 2.75 leaves 327 and renders clean.
+    # Measured by projecting the mesh through the same camera basis at all
+    # twelve angles rather than estimated: the column reaches 131px above the
+    # anchor and 124px to the side. A plain tile leaves 119 and 128, so it does
+    # not fit - and it does not *nearly* fit either, which is the useful part:
+    # at 256 the column could only reach 112, three pixels above the flame,
+    # with seven of frame margin. Eight pixels of measured margin has already
+    # turned out to be none once. 1.25 leaves 149 and 160.
     #
-    # This is what a tall effect costs: 704px tiles, 144 of them, so an 8448px
-    # atlas - about 285 MB once a game has decoded it. That is the price of a
-    # hull and a half, and the lever on it is `rise` in engine_fire.SMOKE.
-    "burn_tile_scale": 2.75,
+    # Height is the whole cost of this layer: 320px tiles, 144 of them, a
+    # 3840px atlas, about 59 MB decoded. At a hull and a half it wanted 704px
+    # tiles and 285 MB. The lever is `rise` in engine_fire.SMOKE.
+    "burn_tile_scale": 1.25,
     "phases": 8,
     # More phases than the flash, for a reason that is about looping rather
     # than about length. A flash is watched once for a tenth of a second; the
@@ -314,10 +316,10 @@ def render(cfg=None):
                                                 "name": cfg["fire"]}),
              "holdout": [cfg["hull"], cfg["turret"]]})
         layers.append(
-            # The other half of the fire. Its own frame, because a hull and a
-            # half of column does not fit in the tank's tile - see
-            # burn_tile_scale. Same holdout, same phase count, drawn *under* the
-            # flame.
+            # The other half of the fire. Same holdout, same phase count, drawn
+            # *under* the flame. Its frame is its own config rather than the
+            # tank's tile because height is what this layer costs - see
+            # burn_tile_scale.
             {"name": "burn", "target": cfg["burn"], "fit": False,
              "tile_scale": cfg["burn_tile_scale"],
              "phases": cfg["fire_phases"],

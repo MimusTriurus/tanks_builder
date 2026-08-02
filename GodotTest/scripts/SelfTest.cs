@@ -849,13 +849,13 @@ public static class SelfTest
                 == atlas.PhasesOf(AtlasSet.BurnName),
                 $"fire {atlas.PhasesOf(AtlasSet.FireName)},"
                 + $" burn {atlas.PhasesOf(AtlasSet.BurnName)}");
-            // The column is the one effect that genuinely needs a bigger frame -
-            // it stands a hull and a half over the deck. Stated as an assertion
-            // because the flame does *not*, and a later edit growing the flame
-            // into the column's frame would go unnoticed otherwise.
-            Check("the column is rendered wider than the tank and the flame is not",
-                atlas.TileOf(AtlasSet.BurnName).X > atlas.Tile.X
-                && atlas.TileOf(AtlasSet.FireName) == atlas.Tile,
+            // The asymmetry is the point and is why this is asserted rather than
+            // left to the renderer: the column is the one effect that stands
+            // *above* the tank, so height is its cost and it gets its own frame;
+            // the flame sits on the deck and must not quietly acquire one.
+            Check("the flame fits the tank's frame and the column is given more",
+                atlas.TileOf(AtlasSet.FireName) == atlas.Tile
+                && atlas.TileOf(AtlasSet.BurnName).X >= atlas.Tile.X,
                 $"burn {atlas.TileOf(AtlasSet.BurnName).X}px,"
                 + $" fire {atlas.TileOf(AtlasSet.FireName).X}px,"
                 + $" tank {atlas.Tile.X}px");

@@ -306,12 +306,29 @@ SMOKE = {
     "density": 1.0,
 
     # --- the column, as fractions of the hull's length -----------------------
-    # A hull and a half, which on MT is 230 units of world and about 200 px of
-    # screen - call it one and three quarter tank heights. It is the number that
-    # decides the layer's frame, and the frame is the expensive part: see
-    # `burn_tile_scale` in tank_pipeline for the arithmetic.
-    "rise": 1.50,
-    "spread": 0.22,
+    # Set so the column clears the flame by enough to be seen: 0.58 tops out
+    # 131px above the anchor against the flame's 109. Solved by projecting the
+    # mesh through the render's own camera basis at all twelve angles, not
+    # guessed.
+    #
+    # The height of this column is decided by the flame, not by the tank, and
+    # that is the thing to know before reaching for the number. Three targets
+    # sound alike and are far apart: the tank's tallest pixel is 76.9px above
+    # the anchor, the plain tile's edge is 118.9 - the tile is fitted to the
+    # tank's *rotating* bounds with padding, not to its silhouette - and the
+    # flame reaches 108.9. Anything at or under the flame is invisible, because
+    # the flame is also twice as wide; it was tried at 77 and there was no smoke
+    # on screen at all, only a darker fire. So the floor is the flame's top plus
+    # something, and that put this past what a 256 tile can hold.
+    #
+    # It was 1.50 once, and changing it is not a one-number edit either way.
+    # Everything about the puffs is sized against the path: thirty of them
+    # growing 0.16 of a hull suited 1.50 and made a flat smear on the deck at
+    # 0.33, because the path has to be several puffs long before there is a
+    # column rather than a blob - see `exhaust_plume` under `puff_start`. The
+    # puff geometry is scaled with the path, never left behind by it.
+    "rise": 0.58,
+    "spread": 0.133,
     "buoyancy": 0.95,
     # Most of the turn happens at once, unlike the exhaust's even 1.0. The vent
     # points back and up at 52 degrees on MT, and over a path this long the
@@ -329,13 +346,14 @@ SMOKE = {
     "slowing": 1.10,
 
     # --- the puffs -----------------------------------------------------------
-    "puff_start": 0.90,       # of the port's radius
-    "puff_grow": 0.16,        # of the hull's length
+    "puff_start": 0.55,       # of the port's radius
+    "puff_grow": 0.060,       # of the hull's length
     "puff_power": 0.65,
-    # Thirty, not the exhaust's twenty, for the exhaust's own reason: puffs have
-    # to overlap *along the path* before a queue reads as one body of smoke, and
-    # this path is four times longer.
-    "puffs": 30,
+    # Twenty-two, near the exhaust's twenty, because the path is now the
+    # exhaust's length. It was thirty when the path was six times longer, by the
+    # exhaust's own rule: puffs have to overlap *along the path* before a queue
+    # reads as one body of smoke, and the count follows the length.
+    "puffs": 22,
     "stagger": 0.35,
     "puff_vary": 0.45,
     "wobble": 0.22,
@@ -344,10 +362,10 @@ SMOKE = {
     "seed": 91,
 
     # --- life ----------------------------------------------------------------
-    # Lower than the exhaust's 0.60 even though this is meant to be the heavier
-    # smoke, because thirty large puffs stack where twenty small ones did not.
-    # The colour to aim at is the stack's, not one puff's.
-    "alpha": 0.40,
+    # Aim at the colour of the *stack*, not of one puff: twenty-two puffs of 7
+    # to 16px along a 103px path overlap heavily, so this is well under what a
+    # single puff should look like.
+    "alpha": 0.50,
     "onset": 0.10,
     "fade": 1.25,
 

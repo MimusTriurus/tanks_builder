@@ -32,8 +32,10 @@ public sealed class BurnLoop
     public double FireRate = 10.0;
 
     /// <summary>Phases per second for the column. Twelve at 5 is 2.4s a lap,
-    /// and over this column's hull and a half of rise that is smoke climbing at
-    /// about 95px a second.</summary>
+    /// which over this column's 103px of screen is smoke climbing at about 43px
+    /// a second. It is a lap *time*, so it does not follow the height - change
+    /// `rise` in engine_fire.SMOKE and the smoke speeds up or slows down rather
+    /// than travelling further or less far.</summary>
     public double SmokeRate = 5.0;
 
     /// <summary>Phases the atlas holds. Read off the layer, never assumed - the

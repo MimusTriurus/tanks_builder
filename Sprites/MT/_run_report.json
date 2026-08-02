@@ -29,7 +29,7 @@
     "hull": 256,
     "turret": 256,
     "exhaust": 256,
-    "burn": 704,
+    "burn": 320,
     "fire": 256,
     "smoke": 384,
     "flash": 384
@@ -113,15 +113,15 @@
   "fire_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\MT\\_check_fire.png",
   "burn_edge_alpha": 0.0,
   "burn_span_px": [
-    122,
-    251
+    61,
+    83
   ],
-  "burn_contrast": 97.6,
+  "burn_contrast": 94.1,
   "burn_loop": {
     "0": true,
     "3": true,
     "6": true,
     "9": true
   },
-  "seconds": 217.5
+  "seconds": 217.6
 }
