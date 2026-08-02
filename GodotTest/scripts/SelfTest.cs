@@ -928,14 +928,38 @@ public static class SelfTest
             + $" last {HitLoop.Hold[^1]}");
 
         var strike = new HitLoop();
-        strike.Strike("front");
+        strike.Strike("front", 0.3f, 1.4f);
         for (int i = 0; i < 12; i++)
             strike.Advance();
         int midway = strike.Phase;
-        strike.Strike("rear");
+        float midwayScale = strike.Scale;
+        strike.Strike("rear", -0.2f, 0.7f);
         Check("a second shell restarts the hit rather than being ignored",
             midway > 0 && strike.Phase == 0 && strike.Face == "rear",
             $"was phase {midway}, now {strike.Phase} on {strike.Face}");
+        // The calibre belongs to the round, not to the dial. It lived on the
+        // tank as a live setting the layer read on every draw, so turning the
+        // dial while the dust was in the air resized a shell that had already
+        // landed - one round at two calibres. Everything settled when the
+        // trigger goes travels with the hit: the plate, the scatter, the size.
+        Check("a shell keeps the calibre it went off at for its whole life",
+            midwayScale == 1.4f, $"went off at 1.40, was drawing at {midwayScale:F2}");
+        Check("the next shell takes the new calibre and only it",
+            strike.Scale == 0.7f && Math.Abs(strike.Scatter + 0.2f) < 1e-6,
+            $"scale {strike.Scale:F2}, scatter {strike.Scatter:F2}");
+        strike.Reset();
+        Check("a repaired tank is back to the plain calibre",
+            strike.Scale == 1.0f && strike.Face == "", $"scale {strike.Scale:F2}");
+        // One list of calibres, whoever is asking - key, dropdown or flag. The
+        // same rule as a bearing snapping to a side of the hex, and it exists
+        // because the dropdown cannot show a value that is not in it: the flag
+        // took any number, and a 1.4 round was loaded under a control reading
+        // 1.0x.
+        Check("any calibre asked for resolves to one the gun has",
+            Main.CalibreFor(0.4f) == 0 && Main.CalibreFor(0.95f) == 1
+            && Main.CalibreFor(1.4f) == 2 && Main.CalibreFor(9.0f) == 2,
+            $"0.4 -> {Main.CalibreFor(0.4f)}, 0.95 -> {Main.CalibreFor(0.95f)},"
+            + $" 1.4 -> {Main.CalibreFor(1.4f)}, 9.0 -> {Main.CalibreFor(9.0f)}");
 
         Check("the hit pair follows the hull, like the plume",
             EffectLayer.HitBurst(AtlasSet.BurstName).FollowsHull

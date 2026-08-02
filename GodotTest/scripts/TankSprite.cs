@@ -158,6 +158,12 @@ public sealed partial class TankSprite : Node2D
     /// a bigger shell throws more dust as well as more light, and thinning one
     /// against the other is what turns the pair tan (see hit_burst.py).
     /// </summary>
+    /// <summary>The calibre of the shell currently on screen, pushed here by the
+    /// harness from <see cref="HitLoop.Scale"/> each frame the hit is live.
+    ///
+    /// Not the dial. The dial says what the *next* round will be; this says what
+    /// the one being drawn went off at, and the two are different numbers the
+    /// moment anybody touches the dial while the dust is settling.</summary>
     public float HitScale = 1.0f;
 
     /// <summary>

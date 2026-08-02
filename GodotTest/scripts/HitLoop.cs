@@ -22,6 +22,14 @@ namespace TankSpriteTest;
 /// belongs to the event: the hull can turn while the dust is still settling, and
 /// the hit has to stay on the plate it landed on rather than following the
 /// heading round.
+///
+/// The calibre is here for the same reason, and it was not at first. It sat on
+/// the tank as a live setting that the layer read on every draw, so it described
+/// the knob rather than the shell: turning the dial while the dust was still in
+/// the air resized the round that had already landed, and one shell went off at
+/// two calibres. Everything about a hit that is decided when the trigger goes
+/// belongs to the hit - the plate, where along it the round came in, and how big
+/// the round was.
 /// </summary>
 public sealed class HitLoop
 {
@@ -63,6 +71,11 @@ public sealed class HitLoop
     /// tangent, which is what keeps the scatter on the metal.</summary>
     public float Scatter { get; private set; }
 
+    /// <summary>The calibre this shell went off at, as a multiplier on the
+    /// rendered burst. Fixed when it lands and untouched for the rest of its
+    /// life, whatever the dial does in the meantime.</summary>
+    public float Scale { get; private set; } = 1.0f;
+
     private int _frame = -1;
 
     public int Phase => PhaseAt(_frame);
@@ -73,10 +86,11 @@ public sealed class HitLoop
     /// zero rather than being ignored while one is running - a second shell
     /// landing is a second hit, and the useful thing to see is the newest.
     /// </summary>
-    public void Strike(string face, float scatter = 0.0f)
+    public void Strike(string face, float scatter = 0.0f, float scale = 1.0f)
     {
         Face = face;
         Scatter = scatter;
+        Scale = scale;
         _frame = 0;
     }
 
@@ -93,5 +107,6 @@ public sealed class HitLoop
         _frame = -1;
         Face = "";
         Scatter = 0.0f;
+        Scale = 1.0f;
     }
 }

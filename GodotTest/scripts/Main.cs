@@ -144,6 +144,33 @@ public sealed partial class Main : Node2D
 
     private int _calibre = 1;
 
+    /// <summary>What the next shell will go off at.
+    ///
+    /// Read once, when the trigger goes, and handed to the hit - see
+    /// <see cref="HitLoop.Scale"/>. It used to be written straight onto the tank
+    /// and read again on every draw, which made it a property of the dial rather
+    /// than of the round: turning it while the dust was settling resized a shell
+    /// that had already landed. Same argument as the scatter, and the same
+    /// answer.</summary>
+    private float Calibre => Calibres[_calibre];
+
+    /// <summary>Which of the three a scale asked for on the command line means.
+    ///
+    /// Snapped rather than taken as given, for the reason a bearing is snapped
+    /// to a side of the hex: a gun has the calibres it has, and there is one
+    /// list of them rather than a keyboard list and a flag list. An arbitrary
+    /// number was accepted here before, and the cost was a dropdown reading
+    /// 1.0x with a 1.4 round loaded - the control lying about what it would
+    /// fire, which is the whole failure this pass is about.</summary>
+    public static int CalibreFor(float scale)
+    {
+        int best = 0;
+        for (int i = 1; i < Calibres.Length; i++)
+            if (Math.Abs(Calibres[i] - scale) < Math.Abs(Calibres[best] - scale))
+                best = i;
+        return best;
+    }
+
     private FlashSheet _flash = null!;
     private readonly Recoil _recoil = new();
     /// <summary>Screen frames since the shot went off, or -1 between shots.</summary>
@@ -169,9 +196,6 @@ public sealed partial class Main : Node2D
     /// <summary>--hit &lt;deg&gt;: take one on the way in, from that bearing. A
     /// bearing rather than a plate name, because that is what the game has.</summary>
     private double? _hitAtStart;
-    /// <summary>--hit-scale &lt;x&gt;: start at that calibre instead of the middle
-    /// one, for an A/B that does not need the keyboard.</summary>
-    private float? _hitScaleArg;
     /// <summary>--damage &lt;n&gt;: every plate already marked n levels deep, so a
     /// capture of a knocked-about tank does not need n presses of U.</summary>
     private int _damageAtStart;
@@ -236,10 +260,13 @@ public sealed partial class Main : Node2D
                 _noPanel = true;
             else if (userArgs[i] == "--ui")
                 _showPanel = true;
+            // Snapped to one of the three, like --hit is snapped to a side of
+            // the hex: the gun has the calibres it has, and the flag picks from
+            // the same list the key and the dropdown do.
             else if (userArgs[i] == "--hit-scale" && i + 1 < userArgs.Length
                      && float.TryParse(userArgs[i + 1], NumberStyles.Float,
                          CultureInfo.InvariantCulture, out float calibre))
-                _hitScaleArg = calibre;
+                _calibre = CalibreFor(calibre);
             // The two panel sliders, on the command line for the same reason the
             // calibre is: a slider is judged by a picture, and taking that
             // picture twice at two settings cannot need a hand on the mouse.
@@ -364,7 +391,6 @@ public sealed partial class Main : Node2D
         }
         if (_startTurret is not null)
             _tank.TurretFacing = Mod(_startTurret.Value, 360.0);
-        _tank.HitScale = _hitScaleArg ?? Calibres[_calibre];
         for (int i = 0; i < _damageAtStart; i++)
             foreach (string face in _tank.Atlas?.HitFaces
                                     ?? (IReadOnlyList<string>)Array.Empty<string>())
@@ -690,7 +716,10 @@ public sealed partial class Main : Node2D
         // armour, and it is about 17px wide against half-widths of 38 to 61.
         float scatter = ScatterAt(_hitCount);
         string face = atlas.FaceFor(HitFrom, _tank.HullFacing);
-        _hit.Strike(face, scatter);
+        // The calibre goes the same way as the scatter and for the same reason:
+        // both are settled the moment the round lands, so both travel with it
+        // rather than being looked up again while it is on screen.
+        _hit.Strike(face, scatter, Calibre);
         // One level per hit, so hitting the same plate three times walks it
         // scorch -> gouge -> breach, which is the only way to see that the
         // phase axis really is damage and not three renders of one drawing.
@@ -866,10 +895,9 @@ public sealed partial class Main : Node2D
             () => _calibre,
             i =>
             {
+                // Only what the *next* shell will be. Nothing on screen moves:
+                // a round already in the air keeps the calibre it went off at.
                 _calibre = i;
-                _hitScaleArg = null;
-                _tank.HitScale = Calibres[i];
-                _tank.QueueRedraw();
             });
         // Takes the bearing on the slider rather than walking it on, so the
         // panel can aim and the key can sweep.
@@ -878,10 +906,15 @@ public sealed partial class Main : Node2D
         ui.Readout(() =>
         {
             AtlasSet a = _tank.Atlas!;
+            // Two calibres side by side on purpose: what the next round will be,
+            // and what the one on screen went off at. They differ for as long as
+            // a shell outlives a turn of the dial, and seeing that is the point.
             string burst = $"burst {(_tank.HitPhase < 0 ? " -" : $"{_tank.HitPhase,2}")}"
                            + $" / {a.HitPhases}"
                            + $"   {(_hit.Face == "" ? "-" : _hit.Face)}"
                            + $"   {(_tank.HitBehind ? "behind" : "in front")}"
+                           + $"\nloaded x{Calibre:F2}"
+                           + (_hit.Live ? $"   in the air x{_hit.Scale:F2}" : "")
                            + (a.HasHit ? "" : "   [no plate table - re-render]");
             if (!a.HasScars)
                 return burst + "\nno scar layers - re-render this scene";
@@ -931,6 +964,10 @@ public sealed partial class Main : Node2D
             _tank.HitOffset = atlas.HitOffset(_hit.Face, _tank.HullFacing)
                               + tangent * _hit.Scatter;
             _tank.HitBehind = atlas.HitFacing(_hit.Face, _tank.HullFacing) <= 0.0;
+            // The shell's calibre, not the dial's. Pushed from here alongside
+            // the other two things the layer needs and cannot work out for
+            // itself, so what is drawn is what was fired.
+            _tank.HitScale = _hit.Scale;
         }
         if (phase != _tank.HitPhase)
         {
@@ -990,6 +1027,7 @@ public sealed partial class Main : Node2D
                      + $"  exh {_tank.ExhaustPhase,2}@{_exhaust.Phase,5:F2}"
                      + $"  burn {_tank.FirePhase,2}/{_tank.BurnPhase,2}"
                      + $"  hit {_tank.HitPhase,2}@{(_hit.Face == "" ? "-" : _hit.Face)}"
+                     + $" x{_hit.Scale:F2}"
                      + $"  cell ({_cell.X},{_cell.Y})"
                      // Zoom, because a capture run has no panel to read it off
                      // and a stray wheel over the window has already cost one
@@ -1132,8 +1170,6 @@ public sealed partial class Main : Node2D
                 break;
             case Key.Y:
                 _calibre = (_calibre + 1) % Calibres.Length;
-                _tank.HitScale = Calibres[_calibre];
-                _tank.QueueRedraw();
                 break;
             case Key.V:
                 _tank.Source = _tank.Source == FlashSource.Rendered
