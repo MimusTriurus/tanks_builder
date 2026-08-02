@@ -67,6 +67,7 @@ CONFIG = {
     "burn": "Burn",
     "burst": "Burst",
     "dust": "Dust",
+    "scar": "Scar",
     "hex": "Hex",
 
     # --- the render ---------------------------------------------------------
@@ -174,14 +175,48 @@ CONFIG = {
     # catches a transposed table: at heading 0 a transposed one still looks
     # plausible, and at every other heading it puts the hit off the tank.
     "hit_on_plate": 1.0,
+    # The mark left behind, on its own tile - it lies on the armour and needs
+    # no more frame than the tank does.
+    "scar_tile_scale": 1.0,
+    # Least a level of damage may be worse than the one before, as a ratio of
+    # how much of the picture each changes. What this is for is catching three
+    # renders of one drawing, and those score exactly 1.00; the bar is low
+    # because how far above 1 a real step lands depends on the plate. On the
+    # front glacis - the darkest armour on the tank - a scuff that bares metal
+    # is already most of the change a hole makes, and the step is 1.16; on the
+    # rear plate the same three levels step 1.80 and 1.71.
+    "scar_step_ratio": 1.15,
+    # Most of a mark that may lap off the tank's silhouette. Not zero, and the
+    # reason is geometric: the mark is centred on the plate's measured
+    # centroid, and a plate whose centroid sits within a mark's radius of the
+    # hull's lower edge - MT's rear plate does - laps over it by a pixel or two
+    # at oblique headings. That is twelve pixels. The version that was a
+    # quarter off the tank was a mark too big for its plate, and this catches
+    # that with room to spare.
+    "scar_off_armour_max": 0.06,
+    # Most of a plate's half-extent the worst mark may take. Over 1 it hangs
+    # off the armour it is supposed to be on.
+    "scar_fit_max": 0.85,
+    # Least even the lightest mark may move the armour by, in levels of 255.
+    # Measured against the paint, not against the ground - see the check. Not
+    # much higher than this is available: the paint is 44 to 68 levels off
+    # black, so soot alone tops out around forty however black it is, and
+    # anything above that is metal being bared.
+    "scar_contrast_min": 45.0,
 }
 
 # Also the order they are composited in, which for the burning pair is not a
 # preference: the smoke goes down with normal alpha and the fire is added on
 # top of it. See engine_fire.SMOKE. The hit pair is the same shape of rule and
 # goes last, being the most recent thing to have happened.
-LAYER_ORDER = ("hex", "hull", "turret", "exhaust", "burn", "fire",
-               "smoke", "flash", "dust", "burst")
+#
+# The scars go directly over the armour and under everything else, because they
+# are *on* the tank rather than in front of it: a plume drifting across a holed
+# plate passes over the hole.
+SCAR_FACES = ("front", "rear", "left", "right")
+SCAR_LAYERS = tuple("scar_" + f for f in SCAR_FACES)
+LAYER_ORDER = (("hex", "hull", "turret") + SCAR_LAYERS
+               + ("exhaust", "burn", "fire", "smoke", "flash", "dust", "burst"))
 
 
 def _load(cfg, name):
@@ -238,7 +273,8 @@ def prepare(cfg=None):
     # the transient objects are rebuilt every run, so a re-run never leaves
     # Hex.001 behind to be rendered instead of Hex
     for name in (cfg["hex"], cfg["flash"], cfg["smoke"], cfg["plume"],
-                 cfg["fire"], cfg["burn"], cfg["burst"], cfg["dust"]):
+                 cfg["fire"], cfg["burn"], cfg["burst"], cfg["dust"],
+                 cfg["scar"]):
         ob = scene.objects.get(name)
         if ob is not None:
             data = ob.data
@@ -286,6 +322,12 @@ def prepare(cfg=None):
     burst_mod.build_dust({"hull": cfg["hull"], "name": cfg["dust"],
                           "azimuth": cfg["azimuth"],
                           "elevation": cfg["elevation"]})
+
+    scar_mod = _load(cfg, "hit_scar")
+    scar_mod.build({"hull": cfg["hull"], "name": cfg["scar"]})
+    out["scar"] = {"faces": scar_mod.faces({"hull": cfg["hull"]}),
+                   "levels": len(scar_mod.LEVELS),
+                   "fit": scar_mod.fits({"hull": cfg["hull"]})}
     return out
 
 
@@ -301,7 +343,7 @@ def render(cfg=None):
         # so are inside `world` too - they are named here for the same reason.
         {"name": "hull", "target": cfg["root"],
          "exclude": [cfg["turret"], cfg["plume"], cfg["fire"], cfg["burn"],
-                     cfg["burst"], cfg["dust"]]},
+                     cfg["burst"], cfg["dust"], cfg["scar"]]},
         {"name": "turret", "target": cfg["turret"]},
         {"name": "hex", "target": cfg["hex"], "static": True},
     ]
@@ -395,6 +437,26 @@ def render(cfg=None):
             {"name": name, "target": target, "static": True, "fit": False,
              "tile_scale": cfg["burst_tile_scale"],
              "phases": cfg["hit_phases"], "phase_hook": hook})
+
+    scar_mod = _load(cfg, "hit_scar")
+    for face in scar_mod.faces({"hull": cfg["hull"]}):
+        layers.append(
+            # The opposite of the pair above in every way that matters, and the
+            # comparison is the point. A hole is flat, stuck to one plate and
+            # turns with the hull, so it is rendered at every heading like the
+            # armour it is on - and because it is, the tank can hold it out.
+            # That does the whole occlusion job here: when the plate faces away
+            # the hull stands in front of the decal and the frame comes out
+            # empty by itself, with no front-or-behind rule in the game at all.
+            #
+            # `phases` is damage, not time. There is no cycle to close and no
+            # hold table to run; the check asserts an ordering instead.
+            {"name": "scar_" + face, "target": cfg["scar"], "fit": False,
+             "tile_scale": cfg["scar_tile_scale"],
+             "phases": len(scar_mod.LEVELS),
+             "phase_hook": scar_mod.phase_hook(face, {"hull": cfg["hull"],
+                                                      "name": cfg["scar"]}),
+             "holdout": [cfg["hull"], cfg["turret"]]})
 
     return atlas.render_set({
         "shared": {
@@ -875,6 +937,189 @@ def check(cfg=None):
                 "%.0f%% of the burst clips to white - it is not brighter, it is "
                 "colourless" % (100.0 * white))
 
+    # --- the mark left behind: on the armour, and only where the armour is ---
+    scar_layers = [n for n in SCAR_LAYERS if n in layers]
+    if scar_layers:
+        levels = layers[scar_layers[0]][1]["phases"]
+        tile = meta["tile"][0]
+
+        # How much of each plate's mark the camera gets at each heading, and so
+        # which heading shows it best. Everything below is measured there, since
+        # a plate half turned away is a legitimate two pixels of mark and would
+        # fail any threshold worth setting.
+        cover = {}
+        for name in scar_layers:
+            m = layers[name][1]
+            cover[name] = [
+                int((_tile_of(layers, name,
+                              (levels - 1) * m["count"] + h)[:, :, 3] > 0.25).sum())
+                for h in range(m["count"])]
+        best = {n: int(np.argmax(c)) for n, c in cover.items()}
+        report["scar_best_heading"] = best
+        report["scar_cover_px"] = {n: max(c) for n, c in cover.items()}
+
+        # The assertion the holdout exists for. A plate turned away from the
+        # camera has the hull standing in front of it, so its frame has to come
+        # out *empty* - that is what lets the game draw this layer flat with no
+        # front-or-behind rule of its own. A mark visible from every heading
+        # means the holdout did not take, and it would show as a hole in the
+        # near side of the tank that is really on the far side.
+        seen = {n: sum(1 for c in cover[n] if c > 20) for n in scar_layers}
+        report["scar_headings_seen"] = seen
+        for name, n in seen.items():
+            if n == 0:
+                report["problems"].append(
+                    "%s never shows - the holdout is eating all of it, so `lift` "
+                    "is too small for this plate" % name)
+            elif n >= layers[name][1]["count"]:
+                report["problems"].append(
+                    "%s shows from every heading - the tank is not holding it "
+                    "out, so a hole in the far side is being drawn on the near "
+                    "one" % name)
+
+        # And the other half of the same question: what *is* drawn has to be on
+        # the armour. Anti-aliasing at the silhouette costs a pixel or two, so
+        # this is a fraction rather than a count.
+        off = {}
+        for name in scar_layers:
+            m = layers[name][1]
+            worst = 0.0
+            for h in range(m["count"]):
+                a = _tile_of(layers, name,
+                             (levels - 1) * m["count"] + h)[:, :, 3] > 0.5
+                # Headings where the plate is nearly edge-on are skipped, and
+                # that is not the threshold going soft. There the mark is a
+                # sliver a few pixels wide standing a pixel and a half off the
+                # armour, so a pixel either way is a quarter of it - the
+                # measure stops meaning "hangs off the tank" and starts meaning
+                # "is small". A quarter of its best showing is where it still
+                # means the first thing.
+                if a.sum() < 20 or cover[name][h] < 0.25 * max(cover[name]):
+                    continue
+                tank = np.maximum(_tile_of(layers, "hull", h)[:, :, 3],
+                                  _tile_of(layers, "turret", h)[:, :, 3]) > 0.25
+                worst = max(worst, float((a & ~tank).sum()) / float(a.sum()))
+            off[name] = round(worst, 4)
+        report["scar_off_armour"] = off
+        for name, frac in off.items():
+            if frac > cfg["scar_off_armour_max"]:
+                report["problems"].append(
+                    "%.0f%% of %s hangs off the tank - the plate was measured "
+                    "wider than it is, or the mark is bigger than the plate"
+                    % (100.0 * frac, name))
+
+        # How much each level moves the picture - the plume's contrast measure
+        # with the backdrop swapped, and the swap is the whole lesson of this
+        # layer. Every other effect here is judged over the game's pale field,
+        # because that is what it is seen against and a low-alpha layer there is
+        # that field faintly tinted. A decal is seen against dark green paint,
+        # so the rule inverts: what carries a mark on armour is the *light* in
+        # it. A black hole on a dark hull moves the picture by 40 levels and the
+        # bare metal torn back around it by 130.
+        #
+        # This is the number that says "the scorch is invisible" without
+        # anybody's eyes. It was, at first: it measured perfectly well against
+        # the ground and read as nothing at all on the tank.
+        contrast, weight = {}, {}
+        for name in scar_layers:
+            m = layers[name][1]
+            h = best[name]
+            armour = _tile_of(layers, "hull", h).copy()
+            armour = _over(armour, _tile_of(layers, "turret", h))
+            per, mass = [], []
+            for p in range(levels):
+                s = _tile_of(layers, name, p * m["count"] + h)
+                lit = _over(armour, s)
+                moved = np.abs(lit[:, :, :3] - armour[:, :, :3]).max(axis=2)
+                body = s[:, :, 3] > 0.25
+                per.append(round(float(moved[body].max() * 255.0)
+                                 if body.any() else 0.0, 1))
+                mass.append(int(moved.sum() * 255.0))
+            contrast[name] = per
+            weight[name] = mass
+        report["scar_contrast"] = contrast
+        report["scar_weight"] = weight
+        for name, per in contrast.items():
+            if min(per) < cfg["scar_contrast_min"]:
+                report["problems"].append(
+                    "the lightest %s only moves the armour by %.0f levels of "
+                    "255 - on dark paint the readable part of a mark is the "
+                    "metal it bares, not the soot" % (name, min(per)))
+
+        # Three renders of one drawing would pass everything above. The axis is
+        # damage, so each level has to be plainly heavier than the last -
+        # measured as how much of the picture it changes in total, which is the
+        # `scar_weight` above.
+        #
+        # Neither half of that on its own works, and both were tried. Area
+        # says a long scrape is worse than a round hole, because it covers more
+        # plate. Peak contrast says the opposite the moment the light level
+        # opens with bared metal - a scuff and a gouge both bare metal, so
+        # their brightest pixels are within a few levels of each other. What
+        # separates them is that the hole changes more of the picture, more.
+        steps = {}
+        for name in scar_layers:
+            m = layers[name][1]
+            steps[name] = [
+                int((_tile_of(layers, name,
+                              p * m["count"] + best[name])[:, :, 3] > 0.25).sum())
+                for p in range(levels)]
+        report["scar_level_px"] = steps
+        for name, series in weight.items():
+            gaps = [b / max(a, 1) for a, b in zip(series, series[1:])]
+            if gaps and min(gaps) < cfg["scar_step_ratio"]:
+                report["problems"].append(
+                    "%s barely worsens between levels (x%s) - the phase axis is "
+                    "damage, and three renders of one drawing is not it"
+                    % (name, ", ".join("%.2f" % g for g in gaps)))
+
+        for name in scar_layers:
+            worst = _edge_alpha(layers, name)
+            report.setdefault("scar_edge_alpha", {})[name] = round(worst, 4)
+            if worst > 0.02:
+                report["problems"].append(
+                    "%s touches its tile edge (alpha %.3f)" % (name, worst))
+
+        try:
+            fit = _load(cfg, "hit_scar").fits({"hull": cfg["hull"]})
+            report["scar_fit"] = fit
+            over = [f for f, v in fit.items() if v > cfg["scar_fit_max"]]
+            if over:
+                report["problems"].append(
+                    "the mark takes more than %.0f%% of the %s plate - it is a "
+                    "smaller shell or a plate measured too tightly, and neither "
+                    "is worth guessing at"
+                    % (100.0 * cfg["scar_fit_max"], ", ".join(over)))
+        except Exception as exc:                      # scene without the stamps
+            report["scar_fit"] = str(exc)
+
+        # heading down, plate across, at the worst damage: this is the sheet
+        # that shows the mark turning with the hull and going out behind it.
+        def draw_scar(buf, place, heading, name):
+            m = layers[name][1]
+            for layer, index in (("hex", 0), ("hull", heading),
+                                 ("turret", heading)):
+                buf = place(buf, layer, index, _over)
+            return place(buf, name, (levels - 1) * m["count"] + heading, _over)
+
+        report["scar_composite"] = _sheet(
+            cfg, layers, "_check_scar", list(range(meta["count"])), scar_layers,
+            draw_scar, _ground_colour(layers),
+            ["hex", "hull", "turret"] + scar_layers)
+
+        # plate down, damage across, each on the heading that shows it best
+        def draw_level(buf, place, name, level):
+            m = layers[name][1]
+            h = best[name]
+            for layer, index in (("hex", 0), ("hull", h), ("turret", h)):
+                buf = place(buf, layer, index, _over)
+            return place(buf, name, level * m["count"] + h, _over)
+
+        report["scar_levels"] = _sheet(
+            cfg, layers, "_check_damage", scar_layers, list(range(levels)),
+            draw_level, _ground_colour(layers),
+            ["hex", "hull", "turret"] + scar_layers)
+
     # --- nothing may touch the tile edge, on any frame of any tank layer -----
     edges = {}
     for name in ("hull", "turret", "hex"):
@@ -1234,13 +1479,23 @@ def run(cfg=None):
             "dust_contrast": checked.get("dust_contrast"),
             "hit_off_tank": checked.get("hit_off_tank"),
             "hit_composite": checked.get("hit_composite"),
+            "scar_fit": checked.get("scar_fit"),
+            "scar_headings_seen": checked.get("scar_headings_seen"),
+            "scar_off_armour": checked.get("scar_off_armour"),
+            "scar_level_px": checked.get("scar_level_px"),
+            "scar_contrast": checked.get("scar_contrast"),
+            "scar_weight": checked.get("scar_weight"),
+            "scar_cover_px": checked.get("scar_cover_px"),
+            "scar_edge_alpha": checked.get("scar_edge_alpha"),
+            "scar_composite": checked.get("scar_composite"),
+            "scar_levels": checked.get("scar_levels"),
         })
 
     print("[tank] %s  %d problems" % (cfg["output_dir"], len(problems)))
     for line in problems:
         print("[tank]   ! %s" % line)
     for key in ("composite", "exhaust_composite", "fire_composite",
-                "hit_composite"):
+                "hit_composite", "scar_composite", "scar_levels"):
         if report.get(key):
             print("[tank] now open %s and look at it - the numbers above have "
                   "all been green while the picture was wrong" % report[key])

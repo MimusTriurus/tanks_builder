@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using Godot;
 
 namespace TankSpriteTest;
@@ -177,11 +179,15 @@ public sealed partial class TankSprite : Node2D
     /// they do by their own flag rather than by their place in this list: where
     /// a hit sits in the stack and which side of the hull it is on are separate
     /// questions, and the second one changes as the tank turns.
+    /// And the scars first of all, because they are the only layers that are
+    /// *on* the tank rather than in front of it: paint on the armour, under
+    /// smoke drifting across it and under a shell landing on it.
     public static readonly string[] LayerOrder =
-    {
-        AtlasSet.ExhaustName, AtlasSet.BurnName, AtlasSet.FireName,
-        "smoke", "flash", AtlasSet.DustName, AtlasSet.BurstName,
-    };
+        AtlasSet.ScarNames.Concat(new[]
+        {
+            AtlasSet.ExhaustName, AtlasSet.BurnName, AtlasSet.FireName,
+            "smoke", "flash", AtlasSet.DustName, AtlasSet.BurstName,
+        }).ToArray();
 
     /// <summary>Which kind of layer each name is. Kept beside
     /// <see cref="LayerOrder"/> so there is one list, not a list and a
@@ -193,9 +199,41 @@ public sealed partial class TankSprite : Node2D
         AtlasSet.FireName => EffectLayer.BurningFire(layer),
         AtlasSet.DustName => EffectLayer.HitDust(layer),
         AtlasSet.BurstName => EffectLayer.HitBurst(layer),
+        _ when EffectLayer.FaceOf(layer) != "" => EffectLayer.Scar(layer),
         "smoke" => EffectLayer.Normal(layer),
         _ => EffectLayer.Additive(layer),
     };
+
+    /// <summary>How much damage each plate is carrying: absent or -1 for clean,
+    /// otherwise a level index into the scar layer's phases.
+    ///
+    /// State rather than event, which is the whole shape of this layer: it is
+    /// set when something hits the plate and then stays until something else
+    /// does. Nothing here advances with time.
+    /// </summary>
+    private readonly Dictionary<string, int> _scars = new();
+
+    public int ScarLevel(string face) =>
+        _scars.TryGetValue(face, out int level) ? level : -1;
+
+    /// <summary>Take one more hit on a plate, up to the worst the atlas has.
+    /// Returns the level it is now at, or -1 if this tank has no marks.</summary>
+    public int Damage(string face)
+    {
+        if (Atlas?.HasScars != true || Atlas.ScarLayer(face) == "")
+            return -1;
+        int level = Math.Min(ScarLevel(face) + 1, Atlas.ScarLevels - 1);
+        _scars[face] = level;
+        QueueRedraw();
+        return level;
+    }
+
+    /// <summary>Back to a tank off the line.</summary>
+    public void Repair()
+    {
+        _scars.Clear();
+        QueueRedraw();
+    }
 
     /// <summary>Whether this tank can show the rendered flash at all.</summary>
     public bool CanRender => Atlas?.HasEffects == true;

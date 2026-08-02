@@ -86,11 +86,29 @@ public sealed class AtlasSet
     public const string BurstName = "burst";
     public const string DustName = "dust";
 
+    /// <summary>
+    /// The mark a shell leaves, one layer per plate.
+    ///
+    /// The opposite of the burst in every way that matters, and worth stating
+    /// as such. It is welded to the tank, so it is rendered at every heading
+    /// and drawn at the shared anchor with no offset - it is not
+    /// <see cref="EffectLayer.Placed"/>. And its phases are not time: they are
+    /// how much damage the plate has taken, so nothing steps them and there is
+    /// no clock. A plate holds its level until something changes it.
+    ///
+    /// Because it turns with the hull, the renderer could hold the tank out of
+    /// it, which is why nothing here decides front-or-behind: a mark on a plate
+    /// facing away is simply an empty frame.
+    /// </summary>
+    public static readonly string[] ScarNames =
+        { "scar_front", "scar_rear", "scar_left", "scar_right" };
+
     /// <summary>Layers that load if they are there and are silently skipped if
-    /// they are not. All but the hit pair need a piece separated by hand in the
-    /// .blend; the hit is measured off the hull and so is always there.</summary>
+    /// they are not. All but the hit layers need a piece separated by hand in
+    /// the .blend; the hit is measured off the hull and so is always there.</summary>
     private static readonly string[] OptionalNames =
-        { "smoke", "flash", ExhaustName, FireName, BurnName, BurstName, DustName };
+        new[] { "smoke", "flash", ExhaustName, FireName, BurnName, BurstName,
+                DustName }.Concat(ScarNames).ToArray();
 
     public string Tag { get; private set; } = "";
     public string Error { get; private set; } = "";
@@ -220,6 +238,35 @@ public sealed class AtlasSet
 
     /// <summary>Phases in a hit, 0 if it is missing.</summary>
     public int HitPhases => HasHit ? PhasesOf(BurstName) : 0;
+
+    /// <summary>True when every plate has a mark to leave. All four, because a
+    /// tank that can be holed on three sides and not the fourth is worse than
+    /// one that cannot be holed at all - the clean side reads as armour that
+    /// held.</summary>
+    public bool HasScars
+    {
+        get
+        {
+            foreach (string layer in ScarNames)
+                if (!Has(layer))
+                    return false;
+            return HitFaces.Count > 0;
+        }
+    }
+
+    /// <summary>Levels of damage a plate can be in, counting the clean state
+    /// this layer does not draw. 0 if the layers are missing.</summary>
+    public int ScarLevels => HasScars ? PhasesOf(ScarNames[0]) : 0;
+
+    /// <summary>The layer that carries a given plate's mark, or "" if this tank
+    /// has none. Faces and layers are matched by name rather than by position:
+    /// <see cref="HitFaces"/> comes from the render and could in principle come
+    /// back in another order or short a plate.</summary>
+    public string ScarLayer(string face)
+    {
+        string name = "scar_" + face;
+        return Has(name) ? name : "";
+    }
 
     /// <summary>The plates this tank was measured to have, in a stable order.</summary>
     public IReadOnlyList<string> HitFaces { get; private set; } = Array.Empty<string>();

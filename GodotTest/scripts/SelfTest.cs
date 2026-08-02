@@ -1082,6 +1082,104 @@ public static class SelfTest
                 reach > 20.0, $"furthest {reach:F1}px");
         }
 
+        GD.Print("the mark it leaves");
+        // A state, not an event, and every check here is that distinction.
+        Check("a scar layer knows its plate from its name",
+            EffectLayer.FaceOf("scar_front") == "front"
+            && EffectLayer.FaceOf(AtlasSet.BurstName) == ""
+            && AtlasSet.ScarNames.All(n => EffectLayer.FaceOf(n) != ""),
+            string.Join(", ", AtlasSet.ScarNames));
+        Check("the scars follow the hull and sit at the shared anchor",
+            AtlasSet.ScarNames.All(n => EffectLayer.Scar(n).FollowsHull)
+            && AtlasSet.ScarNames.All(n => !EffectLayer.Scar(n).Placed),
+            "the plates are on the hull, and paint on armour does not move");
+        // The hit is placed and the scar is not, which sounds backwards until
+        // you notice they are placed by opposite things: the burst is one
+        // render dropped wherever the shell landed, the scar was rendered on
+        // its plate at every heading and has nowhere else to be.
+        Check("the scars do not loop and are not in the shot's layer list",
+            AtlasSet.ScarNames.All(n => !EffectLayer.Scar(n).Loops)
+            && !AtlasSet.ScarNames.Any(AtlasSet.EffectNames.Contains),
+            "nothing advances a level of damage");
+        Check("the scars are composited under every other effect",
+            AtlasSet.ScarNames.All(n =>
+                Array.IndexOf(TankSprite.LayerOrder, n)
+                < Array.IndexOf(TankSprite.LayerOrder, AtlasSet.ExhaustName)),
+            string.Join(" -> ", TankSprite.LayerOrder));
+
+        if (!atlas.HasScars)
+        {
+            Check($"{atlas.Tag} has a scar layer for every plate", false,
+                "no scar_* atlas - re-render this scene");
+        }
+        else
+        {
+            tank.Repair();
+            string plate = atlas.HitFaces[0];
+            string other = atlas.HitFaces[1];
+            bool clean = tank.ScarLevel(plate) < 0;
+            int first = tank.Damage(plate);
+            bool spared = tank.ScarLevel(other) < 0;
+            for (int i = 0; i < atlas.ScarLevels + 3; i++)
+                tank.Damage(plate);
+            int capped = tank.ScarLevel(plate);
+            tank.Repair();
+            Check("a hit marks its own plate and no other, and stops at the worst",
+                clean && first == 0 && spared
+                && capped == atlas.ScarLevels - 1 && tank.ScarLevel(plate) < 0,
+                $"{plate} went to {capped} of {atlas.ScarLevels - 1},"
+                + $" {other} stayed {(spared ? "clean" : "marked")}");
+
+            Vector2 tankAnchor = atlas.Anchor / (Vector2)atlas.Tile;
+            bool anchored = true, sameTile = true;
+            foreach (string layer in AtlasSet.ScarNames)
+            {
+                Vector2 a = atlas.AnchorOf(layer) / (Vector2)atlas.TileOf(layer);
+                if ((a - tankAnchor).Length() > 1e-4)
+                    anchored = false;
+                if (atlas.TileOf(layer) != atlas.Tile)
+                    sameTile = false;
+            }
+            Check("every scar shares the tank's anchor, in frame fractions",
+                anchored, "it is drawn on the armour, so it cannot be offset");
+            // It lies flat on the plate and reaches nowhere, so it has no
+            // reason to want a frame of its own - and a scar that grew one
+            // would mean the mark had grown past the armour.
+            Check("the scars are rendered at the tank's own tile",
+                sameTile,
+                $"{atlas.TileOf(AtlasSet.ScarNames[0]).X}px"
+                + $" against {atlas.Tile.X}px");
+
+            // Rendered *with* headings, which is the whole difference from the
+            // hit pair, and indexed by level down and heading across. A
+            // transposed grid looks right at heading zero and level zero.
+            var scarTiles = new HashSet<int>();
+            bool scarInRange = true, turns = true;
+            foreach (string layer in AtlasSet.ScarNames)
+            {
+                if (atlas.CountOf(layer) != atlas.Count)
+                    turns = false;
+                foreach (int facing in atlas.RenderedFacings())
+                    for (int level = 0; level < atlas.ScarLevels; level++)
+                    {
+                        int frame = atlas.EffectFrame(layer, level, facing);
+                        scarTiles.Add(frame);
+                        if (frame < 0 || frame >= atlas.ScarLevels * atlas.Count)
+                            scarInRange = false;
+                    }
+                if (scarTiles.Count != atlas.ScarLevels * atlas.Count)
+                    scarInRange = false;
+                scarTiles.Clear();
+            }
+            Check("the scars were rendered at every heading, unlike the hit",
+                turns && atlas.CountOf(AtlasSet.BurstName) == 1,
+                $"{atlas.CountOf(AtlasSet.ScarNames[0])} headings"
+                + $" against the burst's {atlas.CountOf(AtlasSet.BurstName)}");
+            Check("every level-by-heading pair lands in its own scar tile",
+                scarInRange,
+                $"{atlas.ScarLevels} levels x {atlas.Count} headings");
+        }
+
         GD.Print("recoil");
         var recoil = new Recoil();
         recoil.Fire(0.0);                       // gun straight ahead

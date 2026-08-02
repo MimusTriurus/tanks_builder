@@ -49,7 +49,7 @@ public sealed partial class EffectLayer : Node2D
     /// and its column run at different rates off the same rendered phases - see
     /// <see cref="BurnLoop"/>.
     /// </summary>
-    public enum Clocks { Shot, Exhaust, BurningSmoke, BurningFire, HitBurst, HitDust }
+    public enum Clocks { Shot, Exhaust, BurningSmoke, BurningFire, HitBurst, HitDust, Scar }
 
     public Clocks Clock = Clocks.Shot;
 
@@ -132,6 +132,28 @@ public sealed partial class EffectLayer : Node2D
         },
     };
 
+    /// <summary>What a shell left on one plate: normal alpha, on the hull's
+    /// heading, at the shared anchor.
+    ///
+    /// Its "phase" is not time. Nothing advances it - the plate holds a level
+    /// until it is hit again - so there is no clock here to go with
+    /// <see cref="ExhaustLoop"/> and the rest, and nothing to check for
+    /// seamlessness. That is the whole difference between a state and an
+    /// event, and it is why this is a layer with no loop and no hold table.
+    /// </summary>
+    public static EffectLayer Scar(string layer) => new()
+    {
+        Layer = layer,
+        FollowsHull = true,
+        Clock = Clocks.Scar,
+    };
+
+    /// <summary>The plate a scar layer belongs to, or "" for any other
+    /// layer.</summary>
+    public static string FaceOf(string layer) =>
+        layer.StartsWith("scar_", StringComparison.Ordinal)
+            ? layer["scar_".Length..] : "";
+
     public override void _Ready() => TextureFilter = TextureFilterEnum.Linear;
 
     /// <summary>The phase this layer should be showing, or -1 for nothing.</summary>
@@ -147,6 +169,7 @@ public sealed partial class EffectLayer : Node2D
                 Clocks.BurningSmoke => Tank.Burning ? Tank.BurnPhase : -1,
                 Clocks.BurningFire => Tank.Burning ? Tank.FirePhase : -1,
                 Clocks.HitBurst or Clocks.HitDust => Tank.HitPhase,
+                Clocks.Scar => Tank.ScarLevel(FaceOf(Layer)),
                 _ => Tank.ActiveSource == FlashSource.Rendered
                     ? Tank.ShotPhase : -1,
             };

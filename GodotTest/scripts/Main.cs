@@ -150,6 +150,9 @@ public sealed partial class Main : Node2D
     /// <summary>--hit-scale &lt;x&gt;: start at that calibre instead of the middle
     /// one, for an A/B that does not need the keyboard.</summary>
     private float? _hitScaleArg;
+    /// <summary>--damage &lt;n&gt;: every plate already marked n levels deep, so a
+    /// capture of a knocked-about tank does not need n presses of U.</summary>
+    private int _damageAtStart;
     private double? _startTurret;
     /// <summary>Which flash to start with - key V, or --flash sheet|rendered.
     /// Rendered by default: it is the one the pipeline exists to produce, and
@@ -194,6 +197,9 @@ public sealed partial class Main : Node2D
             // so a plain TryParse of "1.4" fails, leaves the default in place
             // and produces two identical captures from two different calibres -
             // which reads as "the scale does nothing" rather than as a parse.
+            else if (userArgs[i] == "--damage" && i + 1 < userArgs.Length
+                     && int.TryParse(userArgs[i + 1], out int deep))
+                _damageAtStart = deep;
             else if (userArgs[i] == "--hit-scale" && i + 1 < userArgs.Length
                      && float.TryParse(userArgs[i + 1], NumberStyles.Float,
                          CultureInfo.InvariantCulture, out float calibre))
@@ -292,6 +298,9 @@ public sealed partial class Main : Node2D
         if (_startTurret is not null)
             _tank.TurretFacing = Mod(_startTurret.Value, 360.0);
         _tank.HitScale = _hitScaleArg ?? Calibres[_calibre];
+        for (int i = 0; i < _damageAtStart; i++)
+            foreach (string face in _tank.Atlas?.HitFaces ?? (IReadOnlyList<string>)Array.Empty<string>())
+                _tank.Damage(face);
         if (_driveTo is not null)
             OrderMoveTo(_field.ClampCell(_driveTo.Value));
         if (_fireAtStart)
@@ -326,6 +335,10 @@ public sealed partial class Main : Node2D
         _burn.Reset();
         _hit.Reset();
         _tank.HitPhase = -1;
+        // damage is per tank and the plates are per tank, so switching class
+        // has to clear it or the new hull arrives holed on somebody else's
+        // measurements
+        _tank.Repair();
         _scan.Reset();
         CancelOrder();
         _field.QueueRedraw();
@@ -597,7 +610,13 @@ public sealed partial class Main : Node2D
         // different places and the diff would measure that instead.
         _hitCount++;
         float scatter = ((_hitCount * 37) % 100) / 100.0f * 1.2f - 0.6f;
-        _hit.Strike(atlas.FaceFor(_hitFrom, _tank.HullFacing), scatter);
+        string face = atlas.FaceFor(_hitFrom, _tank.HullFacing);
+        _hit.Strike(face, scatter);
+        // and it leaves something behind. One level per hit, so hitting the same
+        // plate three times walks it scorch -> gouge -> breach, which is the
+        // only way to see that the phase axis really is damage and not three
+        // renders of one drawing.
+        _tank.Damage(face);
     }
 
     /// <summary>The hit runs on screen frames for the shot's reason: it is a
@@ -866,6 +885,7 @@ public sealed partial class Main : Node2D
                 _hit.Reset();
                 _hitCount = 0;
                 _tank.HitPhase = -1;
+                _tank.Repair();
                 _scan.Reset();
                 _recoil.Reset();
                 _shotFrame = -1;
@@ -937,6 +957,11 @@ public sealed partial class Main : Node2D
                 + $"   x{_tank.HitScale:F2}"
                 + "   U take a hit   Y calibre"
                 + (atlas.HasHit ? "" : "   [no plate table - re-render]"),
+            "damage: " + (atlas.HasScars
+                ? string.Join("  ", atlas.HitFaces.Select(
+                      f => $"{f} {_tank.ScarLevel(f) + 1}/{atlas.ScarLevels}"))
+                  + "   R repairs"
+                : "[no scar layers for this tank - re-render]"),
             $"flash: {(_tank.ActiveSource == FlashSource.Rendered ? "RENDERED (Blender layers, additive)" : "SHEET (painted, rotated)")}"
                 + (_tank.Source == FlashSource.Rendered && !_tank.CanRender
                     ? "   [no rendered flash for this tank - split a Barrel]" : "")

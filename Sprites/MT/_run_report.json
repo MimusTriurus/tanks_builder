@@ -1,163 +1,294 @@
 {
-  "have": {
-    "flash": true,
-    "exhaust": true,
-    "hit": true,
-    "exhaust_objects": [
-      "Engine"
-    ]
+ "have": {
+  "flash": true,
+  "exhaust": true,
+  "hit": true,
+  "exhaust_objects": [
+   "Engine"
+  ]
+ },
+ "ground_z": -0.4597,
+ "stands_on_tile": true,
+ "framing_identical": true,
+ "spin_pivot": [
+  0.0,
+  -0.030476
+ ],
+ "spin_pivot_from": "ring_axis stamped on Hull",
+ "anchor_px": [
+  128.0,
+  118.90545845031738
+ ],
+ "units_per_pixel": 0.006504944674670696,
+ "max_edge_alpha": {
+  "hull": 0.0,
+  "turret": 0.0,
+  "hex": 0.0
+ },
+ "tiles": {
+  "hex": 256,
+  "hull": 256,
+  "turret": 256,
+  "scar_front": 256,
+  "scar_rear": 256,
+  "scar_left": 256,
+  "scar_right": 256,
+  "exhaust": 256,
+  "burn": 320,
+  "fire": 256,
+  "smoke": 384,
+  "flash": 384,
+  "dust": 192,
+  "burst": 192
+ },
+ "problems": [
+  "scar_front barely worsens between levels (x1.16, 1.24) - the phase axis is damage, and three renders of one drawing is not it"
+ ],
+ "muzzle_point": [
+  0.003335,
+  -0.477695,
+  0.162106
+ ],
+ "muzzle_shape": "disc",
+ "bearing_disagreement": 0.694,
+ "flash_edge_alpha": 0.0,
+ "flash_offcentre_px": {
+  "270": 1.32,
+  "90": -4.28
+ },
+ "composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\MT\\_check_shot.png",
+ "exhaust_ports": [
+  {
+   "object": "Engine",
+   "kind": "grille",
+   "verts": 2039,
+   "point": [
+    0.00261,
+    0.40841,
+    -0.04028
+   ],
+   "dir": [
+    0.0008,
+    0.61334,
+    0.78982
+   ],
+   "radius": 0.0834,
+   "bearing": 89.92,
+   "elevation": 52.17,
+   "shape_margin": 12.058,
+   "spread": [
+    0.04883,
+    0.02772,
+    0.0023
+   ],
+   "length_along": 0.01234
+  }
+ ],
+ "exhaust_edge_alpha": 0.0,
+ "exhaust_span_px": [
+  47,
+  32
+ ],
+ "hull_span_px": [
+  112,
+  113
+ ],
+ "exhaust_contrast": 37.7,
+ "ground_colour": [
+  0.651,
+  0.675,
+  0.627
+ ],
+ "exhaust_loop": {
+  "0": true,
+  "3": true,
+  "6": true,
+  "9": true
+ },
+ "exhaust_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\MT\\_check_exhaust.png",
+ "fire_edge_alpha": 0.0,
+ "fire_span_px": [
+  43,
+  61
+ ],
+ "fire_redness": 46.9,
+ "fire_white_fraction": 0.0,
+ "fire_loop": {
+  "0": true,
+  "3": true,
+  "6": true,
+  "9": true
+ },
+ "fire_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\MT\\_check_fire.png",
+ "burn_edge_alpha": 0.0,
+ "burn_span_px": [
+  61,
+  83
+ ],
+ "burn_contrast": 94.1,
+ "burn_loop": {
+  "0": true,
+  "3": true,
+  "6": true,
+  "9": true
+ },
+ "plates": [
+  {
+   "face": "front",
+   "elevation": 47.9,
+   "faceon": 0.67,
+   "share": 0.385,
+   "extent": [
+    0.24584,
+    0.17582
+   ]
   },
-  "ground_z": -0.4597,
-  "stands_on_tile": true,
-  "framing_identical": true,
-  "spin_pivot": [
-    0.0,
-    -0.030476
-  ],
-  "spin_pivot_from": "ring_axis stamped on Hull",
-  "anchor_px": [
-    128.0,
-    118.90545845031738
-  ],
-  "units_per_pixel": 0.006504944674670696,
-  "max_edge_alpha": {
-    "hull": 0.0,
-    "turret": 0.0,
-    "hex": 0.0
+  {
+   "face": "rear",
+   "elevation": -1.0,
+   "faceon": 1.0,
+   "share": 0.445,
+   "extent": [
+    0.29051,
+    0.15942
+   ]
   },
-  "tiles": {
-    "hex": 256,
-    "hull": 256,
-    "turret": 256,
-    "exhaust": 256,
-    "burn": 320,
-    "fire": 256,
-    "smoke": 384,
-    "flash": 384,
-    "dust": 192,
-    "burst": 192
+  {
+   "face": "left",
+   "elevation": -0.1,
+   "faceon": 1.0,
+   "share": 0.748,
+   "extent": [
+    0.39999,
+    0.15925
+   ]
   },
-  "problems": [],
-  "muzzle_point": [
-    0.003335,
-    -0.477695,
-    0.162106
+  {
+   "face": "right",
+   "elevation": 0.2,
+   "faceon": 1.0,
+   "share": 0.724,
+   "extent": [
+    0.4,
+    0.15913
+   ]
+  }
+ ],
+ "hit_table": [
+  "burst_atlas.json",
+  "dust_atlas.json"
+ ],
+ "burst_edge_alpha": 0.0,
+ "dust_edge_alpha": 0.0,
+ "burst_span_px": [
+  61,
+  51
+ ],
+ "dust_span_px": [
+  47,
+  44
+ ],
+ "burst_redness": 62.9,
+ "burst_white_fraction": 0.0,
+ "dust_contrast": 98.0,
+ "hit_off_tank": [],
+ "hit_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\MT\\_check_hit.png",
+ "scar_fit": {
+  "front": 0.636,
+  "rear": 0.627,
+  "left": 0.628,
+  "right": 0.628
+ },
+ "scar_headings_seen": {
+  "scar_front": 9,
+  "scar_rear": 5,
+  "scar_left": 5,
+  "scar_right": 5
+ },
+ "scar_off_armour": {
+  "scar_front": 0.0,
+  "scar_rear": 0.0515,
+  "scar_left": 0.0,
+  "scar_right": 0.0
+ },
+ "scar_level_px": {
+  "scar_front": [
+   335,
+   471,
+   494
   ],
-  "muzzle_shape": "disc",
-  "bearing_disagreement": 0.694,
-  "flash_edge_alpha": 0.0,
-  "flash_offcentre_px": {
-    "270": 1.32,
-    "90": -4.28
-  },
-  "composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\MT\\_check_shot.png",
-  "exhaust_edge_alpha": 0.0,
-  "exhaust_span_px": [
-    47,
-    32
+  "scar_rear": [
+   300,
+   412,
+   445
   ],
-  "hull_span_px": [
-    112,
-    113
+  "scar_left": [
+   305,
+   420,
+   454
   ],
-  "exhaust_contrast": 37.7,
-  "ground_colour": [
-    0.651,
-    0.675,
-    0.627
+  "scar_right": [
+   306,
+   427,
+   455
+  ]
+ },
+ "scar_contrast": {
+  "scar_front": [
+   75.7,
+   103.2,
+   128.9
   ],
-  "exhaust_loop": {
-    "0": true,
-    "3": true,
-    "6": true,
-    "9": true
-  },
-  "exhaust_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\MT\\_check_exhaust.png",
-  "fire_edge_alpha": 0.0,
-  "fire_span_px": [
-    43,
-    61
+  "scar_rear": [
+   49.0,
+   64.7,
+   118.5
   ],
-  "fire_redness": 46.9,
-  "fire_white_fraction": 0.0,
-  "fire_loop": {
-    "0": true,
-    "3": true,
-    "6": true,
-    "9": true
-  },
-  "fire_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\MT\\_check_fire.png",
-  "burn_edge_alpha": 0.0,
-  "burn_span_px": [
-    61,
-    83
+  "scar_left": [
+   51.2,
+   62.4,
+   87.9
   ],
-  "burn_contrast": 94.1,
-  "burn_loop": {
-    "0": true,
-    "3": true,
-    "6": true,
-    "9": true
-  },
-  "plates": [
-    {
-      "face": "front",
-      "elevation": 47.9,
-      "faceon": 0.67,
-      "share": 0.385,
-      "extent": [
-        0.24584,
-        0.17582
-      ]
-    },
-    {
-      "face": "rear",
-      "elevation": -1.0,
-      "faceon": 1.0,
-      "share": 0.445,
-      "extent": [
-        0.29051,
-        0.15942
-      ]
-    },
-    {
-      "face": "left",
-      "elevation": -0.1,
-      "faceon": 1.0,
-      "share": 0.748,
-      "extent": [
-        0.39999,
-        0.15925
-      ]
-    },
-    {
-      "face": "right",
-      "elevation": 0.2,
-      "faceon": 1.0,
-      "share": 0.724,
-      "extent": [
-        0.4,
-        0.15913
-      ]
-    }
+  "scar_right": [
+   45.7,
+   61.2,
+   82.0
+  ]
+ },
+ "scar_weight": {
+  "scar_front": [
+   15648,
+   18108,
+   22489
   ],
-  "hit_table": [
-    "burst_atlas.json",
-    "dust_atlas.json"
+  "scar_rear": [
+   5159,
+   9288,
+   15888
   ],
-  "burst_edge_alpha": 0.0,
-  "dust_edge_alpha": 0.0,
-  "burst_span_px": [
-    61,
-    51
+  "scar_left": [
+   6317,
+   9870,
+   14770
   ],
-  "dust_span_px": [
-    47,
-    44
-  ],
-  "burst_redness": 62.9,
-  "burst_white_fraction": 0.0,
-  "dust_contrast": 98.0,
-  "hit_off_tank": [],
-  "hit_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\MT\\_check_hit.png"
+  "scar_right": [
+   7335,
+   10715,
+   15279
+  ]
+ },
+ "scar_cover_px": {
+  "scar_front": 494,
+  "scar_rear": 445,
+  "scar_left": 454,
+  "scar_right": 455
+ },
+ "scar_edge_alpha": {
+  "scar_front": 0.0,
+  "scar_rear": 0.0,
+  "scar_left": 0.0,
+  "scar_right": 0.0
+ },
+ "scar_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\MT\\_check_scar.png",
+ "scar_levels": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\MT\\_check_damage.png"
 }
