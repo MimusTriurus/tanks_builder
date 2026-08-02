@@ -1224,6 +1224,40 @@ public static class SelfTest
                 $"{full.Count} marks after {atlas.ScarLevels + 4} hits,"
                 + $" worst {worst}");
 
+            // What the calibre is to the armour. The level used to come from the
+            // hit count alone, so every round walked a plate at the same rate
+            // and the dial changed nothing but the size of the flash - which is
+            // the opposite of what a calibre is.
+            int heavyRound = tank.Damage(plate, 0.0f, atlas.ScarLevels);
+            tank.Repair();
+            int lightFirst = tank.Damage(plate, 0.0f, 1);
+            int lightSecond = tank.Damage(plate, 0.15f, 1);
+            tank.Repair();
+            Check("a heavier round goes deeper into clean armour",
+                heavyRound == atlas.ScarLevels - 1 && lightFirst == 0 && lightSecond == 1,
+                $"heavy left {heavyRound}, light left {lightFirst} then {lightSecond}");
+            // The other half, and the two do not fight: three light rounds reach
+            // the same hole one heavy round makes, they just take three goes.
+            tank.Damage(plate, 0.0f, 2);
+            int onTop = tank.Damage(plate, 0.15f, 1);
+            int past = tank.Damage(plate, 0.3f, atlas.ScarLevels);
+            int wear = tank.Wear(plate);
+            tank.Repair();
+            Check("armour only ever gets worse, and stops at the deepest level",
+                onTop == 2 && past == atlas.ScarLevels - 1 && wear == atlas.ScarLevels,
+                $"gouge then a light round left {onTop}, then a heavy one {past},"
+                + $" worked {wear} of {atlas.ScarLevels}");
+            // One calibre per level of damage, which is what makes "the dial
+            // picks the hole" a rule rather than a coincidence of two lists
+            // happening to be three long today.
+            Check("the calibres span exactly the levels of damage there are",
+                Main.CalibreCount == atlas.ScarLevels
+                && Main.BiteFor(0) == 1
+                && Main.BiteFor(Main.CalibreCount - 1) == atlas.ScarLevels,
+                $"{Main.CalibreCount} calibres against {atlas.ScarLevels} levels,"
+                + $" biting {Main.BiteFor(0)}..{Main.BiteFor(Main.CalibreCount - 1)}");
+            tank.Repair();
+
             // Where the round landed, kept as a fraction of the plate rather
             // than as pixels, so it stays on the same spot of armour through a
             // turn. Stored in pixels it would be right at the heading it was

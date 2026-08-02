@@ -154,6 +154,24 @@ public sealed partial class Main : Node2D
     /// answer.</summary>
     private float Calibre => Calibres[_calibre];
 
+    /// <summary>How many levels of armour the loaded round goes through in one
+    /// hit.
+    ///
+    /// The position in the calibre list rather than a table beside it: the
+    /// calibres are ordered, there are as many of them as there are levels of
+    /// damage, and "the smallest round does one level" is the whole rule. A
+    /// second list would be a second thing to keep in step with the first.
+    /// </summary>
+    private int Bite => BiteFor(_calibre);
+
+    /// <summary>How deep the nth calibre goes. Static so the self-test can
+    /// assert the list of calibres and the levels of damage still line up -
+    /// adding a fourth round or a fourth decal without the other is the way this
+    /// stops meaning anything.</summary>
+    public static int BiteFor(int calibre) => calibre + 1;
+
+    public static int CalibreCount => Calibres.Length;
+
     /// <summary>Which of the three a scale asked for on the command line means.
     ///
     /// Snapped rather than taken as given, for the reason a bearing is snapped
@@ -720,10 +738,11 @@ public sealed partial class Main : Node2D
         // both are settled the moment the round lands, so both travel with it
         // rather than being looked up again while it is on screen.
         _hit.Strike(face, scatter, Calibre);
-        // One level per hit, so hitting the same plate three times walks it
-        // scorch -> gouge -> breach, which is the only way to see that the
-        // phase axis really is damage and not three renders of one drawing.
-        _tank.Damage(face, scatter);
+        // How deep it goes is the calibre's business - see TankSprite.Damage.
+        // A light round still walks a plate scorch -> gouge -> breach over three
+        // hits, which is what shows that the phase axis is damage and not three
+        // renders of one drawing; a heavy one gets there in one.
+        _tank.Damage(face, scatter, Bite);
     }
 
     /// <summary>The hit runs on screen frames for the shot's reason: it is a
@@ -913,7 +932,8 @@ public sealed partial class Main : Node2D
                            + $" / {a.HitPhases}"
                            + $"   {(_hit.Face == "" ? "-" : _hit.Face)}"
                            + $"   {(_tank.HitBehind ? "behind" : "in front")}"
-                           + $"\nloaded x{Calibre:F2}"
+                           + $"\nloaded x{Calibre:F2}, {Bite} level"
+                           + (Bite == 1 ? "" : "s") + " of armour"
                            + (_hit.Live ? $"   in the air x{_hit.Scale:F2}" : "")
                            + (a.HasHit ? "" : "   [no plate table - re-render]");
             if (!a.HasScars)
@@ -923,8 +943,8 @@ public sealed partial class Main : Node2D
             // because the marks accumulate and how many there are is the thing
             // no still frame shows.
             return burst + "\n" + string.Join("\n", a.HitFaces.Select(f =>
-                $"{f,-6} {(_tank.MarksOn(f).Count == 0 ? "clean" : string.Concat(_tank.MarksOn(f).Select(m => m.Level)))}"))
-                + $"   max {a.ScarLevels}";
+                $"{f,-6} {(_tank.MarksOn(f).Count == 0 ? "clean" : string.Concat(_tank.MarksOn(f).Select(m => m.Level)))}"
+                + $"   worked {_tank.Wear(f)} / {a.ScarLevels}"));
         });
 
         ui.Heading("view");

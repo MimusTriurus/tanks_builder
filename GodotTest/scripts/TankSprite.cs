@@ -264,16 +264,47 @@ public sealed partial class TankSprite : Node2D
     public Vector2 MarkOffset(string face, Mark mark) =>
         Atlas is null ? Vector2.Zero : Atlas.HitTangent(face, HullFacing) * mark.Along;
 
-    /// <summary>Take one more hit on a plate, at <paramref name="along"/> of the
-    /// way across it. Returns the level of the mark it left, or -1 if this tank
-    /// has no marks to leave.</summary>
-    public int Damage(string face, float along = 0.0f)
+    /// <summary>
+    /// How far into a plate each shell has got, in levels. Kept apart from the
+    /// marks because the marks are capped and this is not: once a plate carries
+    /// its third hole the oldest is dropped, and a wear count read off the list
+    /// would then stop climbing and start reporting the plate as fresher than it
+    /// is.
+    /// </summary>
+    private readonly Dictionary<string, int> _wear = new();
+
+    /// <summary>How deep this plate has been worked, in levels.</summary>
+    public int Wear(string face) => _wear.TryGetValue(face, out int worn) ? worn : 0;
+
+    /// <summary>
+    /// Take one more hit on a plate, at <paramref name="along"/> of the way
+    /// across it, with a round that goes <paramref name="bite"/> levels deep.
+    /// Returns the level of the mark it left, or -1 if this tank has no marks to
+    /// leave.
+    ///
+    /// The bite is the calibre's, and it is the whole of what the calibre means
+    /// to the armour: a light round scuffs the paint where a heavy one goes
+    /// through on the first try. Without it the level came from the hit count
+    /// alone, so every calibre walked a plate scorch -> gouge -> breach at the
+    /// same rate and the dial changed nothing but the size of the flash.
+    ///
+    /// Damage still accumulates on top of that, which is the other half and not
+    /// in tension with it: three light rounds reach the same breach one heavy
+    /// round does, they just take three goes. What a plate carries is how much
+    /// has been done to it, and the calibre only sets how much each shell does.
+    /// </summary>
+    public int Damage(string face, float along = 0.0f, int bite = 1)
     {
         if (Atlas?.HasScars != true || Atlas.ScarLayer(face) == "")
             return -1;
         if (!_scars.TryGetValue(face, out List<Mark>? marks))
             _scars[face] = marks = new List<Mark>();
-        int level = Math.Min(marks.Count, Atlas.ScarLevels - 1);
+        int worn = Math.Min(Wear(face) + Math.Max(bite, 1), Atlas.ScarLevels);
+        _wear[face] = worn;
+        // The mark shows what this round did, so it is the level the plate has
+        // now reached - not one per hit. A heavy round on clean armour leaves a
+        // breach and no scorch beneath it: one shell, one hole.
+        int level = Math.Clamp(worn - 1, 0, Atlas.ScarLevels - 1);
         marks.Add(new Mark(level, along));
         while (marks.Count > Atlas.ScarLevels)
             marks.RemoveAt(0);
@@ -285,6 +316,7 @@ public sealed partial class TankSprite : Node2D
     public void Repair()
     {
         _scars.Clear();
+        _wear.Clear();
         QueueRedraw();
     }
 
