@@ -153,6 +153,16 @@ public sealed partial class Main : Node2D
     /// <summary>--damage &lt;n&gt;: every plate already marked n levels deep, so a
     /// capture of a knocked-about tank does not need n presses of U.</summary>
     private int _damageAtStart;
+
+    /// <summary>The side panel, and whether to build it at all.
+    ///
+    /// Off under --capture and --trace unless --ui says otherwise, because a
+    /// capture is evidence: an A/B of two sprite renders must not differ by a
+    /// panel that happened to be open. --ui forces it back on for a screenshot
+    /// of the harness itself.</summary>
+    private ControlPanel? _panel;
+    private bool _noPanel;
+    private bool _showPanel;
     private double? _startTurret;
     /// <summary>Which flash to start with - key V, or --flash sheet|rendered.
     /// Rendered by default: it is the one the pipeline exists to produce, and
@@ -200,6 +210,10 @@ public sealed partial class Main : Node2D
             else if (userArgs[i] == "--damage" && i + 1 < userArgs.Length
                      && int.TryParse(userArgs[i + 1], out int deep))
                 _damageAtStart = deep;
+            else if (userArgs[i] == "--no-ui")
+                _noPanel = true;
+            else if (userArgs[i] == "--ui")
+                _showPanel = true;
             else if (userArgs[i] == "--hit-scale" && i + 1 < userArgs.Length
                      && float.TryParse(userArgs[i + 1], NumberStyles.Float,
                          CultureInfo.InvariantCulture, out float calibre))
@@ -239,6 +253,10 @@ public sealed partial class Main : Node2D
                 }
             }
         }
+
+        // A capture is evidence, so it gets no panel unless one is asked for.
+        if ((_capturePath is not null || _traceFrames > 0) && !_showPanel)
+            _noPanel = true;
 
         var failures = new List<string>();
         foreach (string tag in Tags)
@@ -294,6 +312,16 @@ public sealed partial class Main : Node2D
             int failed = SelfTest.Run(_field, _tank);
             GetTree().Quit(failed == 0 ? 0 : 1);
             return;
+        }
+        // After the self-test returns, so a headless run never builds it, and
+        // before the start-up flags, so the panel's first Sync sees what they
+        // did rather than the defaults.
+        if (!_noPanel)
+        {
+            _panel = new ControlPanel();
+            layer.AddChild(_panel);
+            _panel.AddHandle();
+            BuildPanel();
         }
         if (_startTurret is not null)
             _tank.TurretFacing = Mod(_startTurret.Value, 360.0);
@@ -630,6 +658,143 @@ public sealed partial class Main : Node2D
     /// <summary>The hit runs on screen frames for the shot's reason: it is a
     /// hand-timed table of held frames, and under --capture the clock is fixed
     /// at 1/60 so the same frame lands in two runs.</summary>
+    /// <summary>
+    /// Every row in the side panel, each one a pair of delegates onto the field
+    /// the keys already write.
+    ///
+    /// Not one control here owns a value. That is the whole design and it is
+    /// worth the awkwardness of the lambdas: state changed from anywhere - a
+    /// key, a start-up flag, R resetting the lot, a class switch clearing the
+    /// damage - shows up in the panel next frame without anything having to
+    /// tell it. The alternative keeps a copy per widget and they drift.
+    ///
+    /// The key each row duplicates is on its label, because the panel is a way
+    /// to find the keys, not a replacement for them: a screenshot of a session
+    /// should still be reproducible from the keyboard.
+    /// </summary>
+    private void BuildPanel()
+    {
+        ControlPanel ui = _panel!;
+
+        ui.Heading("tank");
+        ui.Choice("class  (1/2/3)", _loaded, () => _tagIndex, i =>
+        {
+            _tagIndex = i;
+            UseTag(CurrentTag());
+        });
+        ui.Readout(() =>
+        {
+            AtlasSet a = _tank.Atlas!;
+            return $"{a.Count} headings, {a.Tile.X}px, {a.UnitsPerPixel:F5} u/px";
+        });
+
+        ui.Heading("heading");
+        // Stepped by the atlas's own frame, not smoothly: twelve rendered
+        // frames is what there is, and a slider that glides between them says
+        // the sprite turns more finely than it does.
+        ui.Slide("hull  (A/D)", 0.0, 330.0, 30.0,
+            () => Math.Round(_tank.HullFacing / 30.0) * 30.0,
+            v => { CancelOrder(); _tank.HullFacing = Mod(v, 360.0); }, " deg");
+        ui.Slide("turret  (Q/E)", 0.0, 330.0, 30.0,
+            () => Math.Round(_tank.TurretFacing / 30.0) * 30.0,
+            v => { _aimWithMouse = false; _tank.TurretFacing = Mod(v, 360.0); }, " deg");
+        ui.Toggle("turret locked  (F)",
+            () => _tank.TurretLocked, on => _tank.TurretLocked = on);
+        ui.Toggle("aim with mouse  (M)",
+            () => _aimWithMouse, on => _aimWithMouse = on);
+        ui.Toggle("spin turret  (SPACE)", () => _spinning, on => _spinning = on);
+        ui.Toggle("scan on the spot  (N)", () => _scanEnabled, on =>
+        {
+            _scanEnabled = on;
+            if (!on)
+                _scan.Reset();
+        });
+
+        ui.Heading("ride");
+        ui.Toggle("body pitch  (P)", () => _pitchEnabled, on =>
+        {
+            _pitchEnabled = on;
+            UpdatePitch(0.0, 0.0);
+        });
+        ui.Toggle("ground rumble  (B)", () => _rumbleEnabled, on =>
+        {
+            _rumbleEnabled = on;
+            UpdateRumble(0.0);
+        });
+        ui.Toggle("engine tremble  (I)", () => _trembleEnabled, on =>
+        {
+            _trembleEnabled = on;
+            UpdateTremble(0.0);
+        });
+        ui.Toggle("turret stabiliser  (K)",
+            () => _tank.TurretStabilised, on => _tank.TurretStabilised = on);
+
+        ui.Heading("effects");
+        ui.Toggle("engine exhaust  (O)", () => _exhaustEnabled, on =>
+        {
+            _exhaustEnabled = on;
+            UpdateExhaust(0.0);
+        });
+        ui.Toggle("on fire  (J)", () => _burning, on =>
+        {
+            _burning = on;
+            UpdateBurn(0.0);
+        });
+        ui.Choice("flash source  (V)", new[] { "rendered", "sheet" },
+            () => _tank.Source == FlashSource.Rendered ? 0 : 1,
+            i =>
+            {
+                _tank.Source = i == 0 ? FlashSource.Rendered : FlashSource.Sheet;
+                _tank.QueueRedraw();
+            });
+        ui.Press("fire  (Z)", Fire);
+
+        ui.Heading("armour");
+        // A bearing rather than a plate, because that is what the game has -
+        // where the shooter stands. Stepped by 5, which is finer than the
+        // plates and coarse enough to land on a boundary on purpose.
+        ui.Slide("shot comes from", 0.0, 355.0, 5.0,
+            () => _hitFrom, v => _hitFrom = v, " deg");
+        ui.Choice("calibre  (Y)", new[] { "0.7x", "1.0x", "1.4x" },
+            () => _calibre,
+            i =>
+            {
+                _calibre = i;
+                _hitScaleArg = null;
+                _tank.HitScale = Calibres[i];
+                _tank.QueueRedraw();
+            });
+        // Takes the bearing on the slider rather than walking it on, so the
+        // panel can aim and the key can sweep.
+        ui.PressPair("take a hit", () => TakeHit(_hitFrom),
+                     "repair", () => _tank.Repair());
+        ui.Readout(() =>
+        {
+            AtlasSet a = _tank.Atlas!;
+            if (!a.HasScars)
+                return "no scar layers - re-render this scene";
+            return string.Join("\n", a.HitFaces.Select(f =>
+                $"{f,-6} {(_tank.MarksOn(f).Count == 0 ? "clean" : string.Concat(_tank.MarksOn(f).Select(m => m.Level)))}"));
+        });
+
+        ui.Heading("view");
+        ui.Slide("zoom  (wheel)", 0.25, 8.0, 0.05,
+            () => _camera.Zoom.X,
+            v => _camera.Zoom = new Vector2((float)v, (float)v), "x");
+        ui.Toggle("hull layer  (H)", () => _tank.ShowHull, on => _tank.ShowHull = on);
+        ui.Toggle("turret layer  (T)",
+            () => _tank.ShowTurret, on => _tank.ShowTurret = on);
+        ui.Toggle("hex field  (G)", () => _field.ShowField, on =>
+        {
+            _field.ShowField = on;
+            _field.QueueRedraw();
+        });
+        ui.Toggle("axis cross  (X)", () => _tank.ShowAxis, on => _tank.ShowAxis = on);
+        ui.PressPair("reset  (R)", ResetAll,
+                     "screenshot  (F12)", () => Capture(
+                         $"{ProjectSettings.GlobalizePath("res://")}shot_{Time.GetTicksMsec()}.png"));
+    }
+
     /// <summary>Where the nth shell lands along its plate, as a fraction of the
     /// plate's half-width. Deterministic on purpose: --capture and --trace fix
     /// the time step so two runs can be diffed, and a random scatter would be
@@ -876,45 +1041,58 @@ public sealed partial class Main : Node2D
                 Capture($"{ProjectSettings.GlobalizePath("res://")}shot_{Time.GetTicksMsec()}.png");
                 return;
             case Key.R:
-                CancelOrder();
-                _tank.HullFacing = 270.0;
-                _tank.TurretFacing = 270.0;
-                _spinning = false;
-                _aimWithMouse = false;
-                _pitch.Reset();
-                _tank.Pitch = 0.0;
-                _rumble.Reset();
-                _tank.Shake = 0;
-                _tank.Roll = 0.0;
-                _tremble.Reset();
-                _tank.TremblePitch = 0.0;
-                _tank.TrembleRoll = 0.0;
-                _exhaust.Reset();
-                _tank.ExhaustPhase = -1;
-                _burning = false;
-                _burn.Reset();
-                _tank.Burning = false;
-                _tank.FirePhase = -1;
-                _tank.BurnPhase = -1;
-                _hit.Reset();
-                _hitCount = 0;
-                _tank.HitPhase = -1;
-                _tank.Repair();
-                _scan.Reset();
-                _recoil.Reset();
-                _shotFrame = -1;
-                _tank.FlashFrame = -1;
-                _tank.ShotPhase = -1;
-                _tank.Source = _flashSource;
-                _tank.RecoilPitch = 0.0;
-                _tank.RecoilRoll = 0.0;
-                _camera.Zoom = Vector2.One;
-                _camera.Position = new Vector2(760, 500);
-                SnapToCell();
+                ResetAll();
+                break;
+            case Key.Tab:
+                _panel?.Flip();
                 break;
             default: return;
         }
 
+        _tank.QueueRedraw();
+        UpdateHud();
+    }
+
+    /// <summary>Everything back to how it started. A method rather than a case
+    /// in the key switch because the panel's Reset has to be the same reset -
+    /// two lists of things to clear is one list that will fall behind.</summary>
+    private void ResetAll()
+    {
+        CancelOrder();
+        _tank.HullFacing = 270.0;
+        _tank.TurretFacing = 270.0;
+        _spinning = false;
+        _aimWithMouse = false;
+        _pitch.Reset();
+        _tank.Pitch = 0.0;
+        _rumble.Reset();
+        _tank.Shake = 0;
+        _tank.Roll = 0.0;
+        _tremble.Reset();
+        _tank.TremblePitch = 0.0;
+        _tank.TrembleRoll = 0.0;
+        _exhaust.Reset();
+        _tank.ExhaustPhase = -1;
+        _burning = false;
+        _burn.Reset();
+        _tank.Burning = false;
+        _tank.FirePhase = -1;
+        _tank.BurnPhase = -1;
+        _hit.Reset();
+        _hitCount = 0;
+        _tank.HitPhase = -1;
+        _tank.Repair();
+        _scan.Reset();
+        _recoil.Reset();
+        _shotFrame = -1;
+        _tank.FlashFrame = -1;
+        _tank.ShotPhase = -1;
+        _tank.Source = _flashSource;
+        _tank.RecoilPitch = 0.0;
+        _tank.RecoilRoll = 0.0;
+        _camera.Zoom = Vector2.One;
+        _camera.Position = new Vector2(760, 500);
+        SnapToCell();
         _tank.QueueRedraw();
         UpdateHud();
     }

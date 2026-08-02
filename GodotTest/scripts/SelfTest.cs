@@ -1229,6 +1229,73 @@ public static class SelfTest
                 $"{atlas.ScarLevels} levels x {atlas.Count} headings");
         }
 
+        GD.Print("the side panel");
+        // The panel is a view of the harness's state and never a second copy of
+        // it, which is one claim with two halves - and the second half is a
+        // feedback loop unless something stops it, because writing a widget's
+        // value emits its changed signal.
+        // In the tree rather than standing on its own, so the shutdown frees it
+        // like any other node. A detached branch of Controls leaves its canvas
+        // items behind however carefully it is freed, and the wall of leak
+        // warnings that produces at exit would hide a real one later.
+        var panel = new ControlPanel();
+        tank.GetParent().AddChild(panel);
+        bool flag = false;
+        double dial = 1.0;
+        int pick = 0;
+        int writes = 0;
+        panel.Toggle("flag", () => flag, on => { flag = on; writes++; });
+        panel.Slide("dial", 0.0, 10.0, 0.5, () => dial, v => { dial = v; writes++; });
+        panel.Choice("pick", new[] { "a", "b", "c" }, () => pick,
+            i => { pick = i; writes++; });
+
+        // The harness changes behind the panel's back - a key, a start-up flag,
+        // R resetting the lot - and the widgets have to follow without anything
+        // telling them to.
+        flag = true;
+        dial = 6.5;
+        pick = 2;
+        panel.Sync();
+        Check("syncing the panel from the harness writes nothing back",
+            writes == 0, $"{writes} setter calls during a sync");
+
+        // ...and the other direction still works, or the panel is a display.
+        var widgets = new List<Control>();
+        void Collect(Node node)
+        {
+            foreach (Node child in node.GetChildren())
+            {
+                if (child is CheckBox or HSlider or OptionButton)
+                    widgets.Add((Control)child);
+                Collect(child);
+            }
+        }
+        Collect(panel);
+        // Driven by emitting the signals a click would, rather than by writing
+        // the widgets' properties. Godot is inconsistent about which of those
+        // emit - a CheckBox's does and an OptionButton's does not - so property
+        // writes would be testing the engine's setters instead of this wiring.
+        foreach (Control widget in widgets)
+        {
+            if (widget is CheckBox box)
+                box.EmitSignal(BaseButton.SignalName.Toggled, false);
+            else if (widget is HSlider bar)
+                bar.EmitSignal(Godot.Range.SignalName.ValueChanged, 1.0);
+            else if (widget is OptionButton drop)
+                drop.EmitSignal(OptionButton.SignalName.ItemSelected, 0);
+        }
+        Check("moving a control reaches the harness",
+            writes == 3 && !flag && Math.Abs(dial - 1.0) < 1e-9 && pick == 0,
+            $"{writes} of 3 setters ran, flag {flag}, dial {dial}, pick {pick}");
+        // Nothing on it may take keyboard focus: a focused Button eats SPACE
+        // and a focused slider eats the arrows, so the panel would break the
+        // keys it is a view of. It broke the turret spin first.
+        Check("no control on the panel takes the keyboard",
+            widgets.All(w => w.FocusMode == Control.FocusModeEnum.None),
+            $"{widgets.Count(w => w.FocusMode != Control.FocusModeEnum.None)}"
+            + $" of {widgets.Count} would steal a key");
+        panel.QueueFree();
+
         GD.Print("recoil");
         var recoil = new Recoil();
         recoil.Fire(0.0);                       // gun straight ahead
