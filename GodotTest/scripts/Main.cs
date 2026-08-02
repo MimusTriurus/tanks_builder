@@ -299,8 +299,9 @@ public sealed partial class Main : Node2D
             _tank.TurretFacing = Mod(_startTurret.Value, 360.0);
         _tank.HitScale = _hitScaleArg ?? Calibres[_calibre];
         for (int i = 0; i < _damageAtStart; i++)
-            foreach (string face in _tank.Atlas?.HitFaces ?? (IReadOnlyList<string>)Array.Empty<string>())
-                _tank.Damage(face);
+            foreach (string face in _tank.Atlas?.HitFaces
+                                    ?? (IReadOnlyList<string>)Array.Empty<string>())
+                _tank.Damage(face, ScatterAt(++_hitCount));
         if (_driveTo is not null)
             OrderMoveTo(_field.ClampCell(_driveTo.Value));
         if (_fireAtStart)
@@ -609,19 +610,32 @@ public sealed partial class Main : Node2D
         // two runs can be diffed; a random scatter would put the two hits in
         // different places and the diff would measure that instead.
         _hitCount++;
-        float scatter = ((_hitCount * 37) % 100) / 100.0f * 1.2f - 0.6f;
+        // How far along the plate this one landed, as a fraction of its
+        // half-width. It is passed to both halves - the burst that shows the
+        // shell arriving and the mark it leaves - because it is one shell, and
+        // a hole appearing in the middle of a plate the flash went off the end
+        // of is the whole reason this is a shared number rather than two.
+        //
+        // +-0.45 rather than the burst's old +-0.6: the mark has to stay on the
+        // armour, and it is about 17px wide against half-widths of 38 to 61.
+        float scatter = ScatterAt(_hitCount);
         string face = atlas.FaceFor(_hitFrom, _tank.HullFacing);
         _hit.Strike(face, scatter);
-        // and it leaves something behind. One level per hit, so hitting the same
-        // plate three times walks it scorch -> gouge -> breach, which is the
-        // only way to see that the phase axis really is damage and not three
-        // renders of one drawing.
-        _tank.Damage(face);
+        // One level per hit, so hitting the same plate three times walks it
+        // scorch -> gouge -> breach, which is the only way to see that the
+        // phase axis really is damage and not three renders of one drawing.
+        _tank.Damage(face, scatter);
     }
 
     /// <summary>The hit runs on screen frames for the shot's reason: it is a
     /// hand-timed table of held frames, and under --capture the clock is fixed
     /// at 1/60 so the same frame lands in two runs.</summary>
+    /// <summary>Where the nth shell lands along its plate, as a fraction of the
+    /// plate's half-width. Deterministic on purpose: --capture and --trace fix
+    /// the time step so two runs can be diffed, and a random scatter would be
+    /// measuring itself.</summary>
+    private static float ScatterAt(int n) => (((n * 37) % 100) / 100.0f - 0.5f) * 0.9f;
+
     private void UpdateHit(double delta)
     {
         AtlasSet atlas = _tank.Atlas!;

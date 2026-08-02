@@ -59,10 +59,28 @@ public sealed partial class EffectLayer : Node2D
                          || Clock == Clocks.BurningFire;
 
     /// <summary>Whether this layer is placed away from the shared anchor.
-    /// Only the hit is: every other layer is welded to the tank and draws at
-    /// -anchor with no offset of any kind, which is the invariant the whole
-    /// pipeline is built to keep.</summary>
-    public bool Placed => Clock == Clocks.HitBurst || Clock == Clocks.HitDust;
+    ///
+    /// Only a shell landing is - the pair that shows it arriving and the mark
+    /// it leaves. Everything else is welded to the tank and draws at -anchor
+    /// with no offset of any kind, which is the invariant the whole pipeline is
+    /// built to keep.
+    ///
+    /// The two are placed by different things and have to agree anyway: the
+    /// burst is one heading-less render dropped wherever the shell landed, and
+    /// the mark was rendered on its own plate at every heading and only slides
+    /// along it. Same shell, so the same distance along - see
+    /// <see cref="TankSprite.ScarOffset"/>.
+    /// </summary>
+    public bool Placed => Clock == Clocks.HitBurst || Clock == Clocks.HitDust
+                          || Clock == Clocks.Scar;
+
+    /// <summary>Where this layer is drawn from, in pixels off the anchor.</summary>
+    private Vector2 Place => Tank is null ? Vector2.Zero : Clock switch
+    {
+        Clocks.HitBurst or Clocks.HitDust => Tank.HitOffset,
+        Clocks.Scar => Tank.ScarOffset(FaceOf(Layer)),
+        _ => Vector2.Zero,
+    };
 
     public static EffectLayer Additive(string layer) => new()
     {
@@ -204,7 +222,10 @@ public sealed partial class EffectLayer : Node2D
         // into the layer's alpha with a holdout, as every other effect does -
         // is not available here, because this layer is rendered once and used
         // at all twelve headings.
-        if (Tank is not null && Placed)
+        // The hit pair only - the mark is placed too and must never go behind,
+        // because the renderer already held the tank out of it: a plate facing
+        // away is an empty frame, not a frame to draw somewhere else.
+        if (Tank is not null && Clock is Clocks.HitBurst or Clocks.HitDust)
             ShowBehindParent = Tank.HitBehind;
         if (MustRedraw(Wanted, _shown))
             QueueRedraw();
@@ -243,8 +264,12 @@ public sealed partial class EffectLayer : Node2D
         // the reason the phase is - a child redraws on its own schedule. So is
         // the calibre, which is a scale on the rect rather than on the node:
         // scaling the node would scale the offset that puts it on the plate.
-        Vector2 place = Placed ? Tank.HitOffset : Vector2.Zero;
-        float size = Placed ? Tank.HitScale : 1.0f;
+        Vector2 place = Place;
+        // Calibre is the shell's, so it scales the shell - not the hole. The
+        // mark was rendered at the size it is and a bigger round makes a
+        // deeper level, not a stretched decal.
+        float size = Clock is Clocks.HitBurst or Clocks.HitDust
+            ? Tank.HitScale : 1.0f;
         DrawSetTransformMatrix(Tank.ShearFor(turret));
         DrawTextureRectRegion(atlas.Texture(Layer),
             Frame(anchor, atlas.TileOf(Layer),

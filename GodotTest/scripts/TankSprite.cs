@@ -213,17 +213,43 @@ public sealed partial class TankSprite : Node2D
     /// </summary>
     private readonly Dictionary<string, int> _scars = new();
 
+    /// <summary>Where along each plate the mark sits, as a fraction of the
+    /// plate's half-width - the same number the burst is scattered by, because
+    /// it is the same shell.
+    ///
+    /// A fraction rather than a pixel offset, because the plate's screen
+    /// tangent turns with the hull: stored in pixels it would be right at the
+    /// heading it was taken on and wrong at the other eleven. The mark's *base*
+    /// position needs no storing at all - the layer was rendered on its plate
+    /// at every heading, so the centroid is already where it belongs, and this
+    /// only says how far along from it.
+    /// </summary>
+    private readonly Dictionary<string, float> _scarAt = new();
+
     public int ScarLevel(string face) =>
         _scars.TryGetValue(face, out int level) ? level : -1;
 
-    /// <summary>Take one more hit on a plate, up to the worst the atlas has.
-    /// Returns the level it is now at, or -1 if this tank has no marks.</summary>
-    public int Damage(string face)
+    /// <summary>Where a plate's mark is drawn, in pixels from the anchor.</summary>
+    public Vector2 ScarOffset(string face) =>
+        Atlas is null || !_scarAt.TryGetValue(face, out float along)
+            ? Vector2.Zero
+            : Atlas.HitTangent(face, HullFacing) * along;
+
+    /// <summary>Take one more hit on a plate, at <paramref name="along"/> of the
+    /// way across it. Returns the level it is now at, or -1 if this tank has no
+    /// marks.
+    ///
+    /// The mark moves to where the latest round landed rather than staying put
+    /// and deepening: the plate carries one mark, and it should be the one you
+    /// just watched arrive.
+    /// </summary>
+    public int Damage(string face, float along = 0.0f)
     {
         if (Atlas?.HasScars != true || Atlas.ScarLayer(face) == "")
             return -1;
         int level = Math.Min(ScarLevel(face) + 1, Atlas.ScarLevels - 1);
         _scars[face] = level;
+        _scarAt[face] = along;
         QueueRedraw();
         return level;
     }
@@ -232,6 +258,7 @@ public sealed partial class TankSprite : Node2D
     public void Repair()
     {
         _scars.Clear();
+        _scarAt.Clear();
         QueueRedraw();
     }
 

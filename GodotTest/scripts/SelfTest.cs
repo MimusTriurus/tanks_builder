@@ -911,9 +911,13 @@ public static class SelfTest
             EffectLayer.HitBurst(AtlasSet.BurstName).FollowsHull
             && EffectLayer.HitDust(AtlasSet.DustName).FollowsHull,
             "the plates are measured on the hull, not on the turret");
-        Check("the hit pair is the only one drawn away from the anchor",
+        // A shell landing is the only thing drawn away from the anchor - both
+        // halves of the hit and the mark it leaves, all three placed by where
+        // the round hit. Everything else on the tank is welded to it.
+        Check("only a shell landing is drawn away from the anchor",
             EffectLayer.HitBurst(AtlasSet.BurstName).Placed
             && EffectLayer.HitDust(AtlasSet.DustName).Placed
+            && AtlasSet.ScarNames.All(n => EffectLayer.Scar(n).Placed)
             && !EffectLayer.Exhaust(AtlasSet.ExhaustName).Placed
             && !EffectLayer.BurningFire(AtlasSet.FireName).Placed
             && !EffectLayer.Additive("flash").Placed,
@@ -1089,14 +1093,14 @@ public static class SelfTest
             && EffectLayer.FaceOf(AtlasSet.BurstName) == ""
             && AtlasSet.ScarNames.All(n => EffectLayer.FaceOf(n) != ""),
             string.Join(", ", AtlasSet.ScarNames));
-        Check("the scars follow the hull and sit at the shared anchor",
-            AtlasSet.ScarNames.All(n => EffectLayer.Scar(n).FollowsHull)
-            && AtlasSet.ScarNames.All(n => !EffectLayer.Scar(n).Placed),
-            "the plates are on the hull, and paint on armour does not move");
-        // The hit is placed and the scar is not, which sounds backwards until
-        // you notice they are placed by opposite things: the burst is one
-        // render dropped wherever the shell landed, the scar was rendered on
-        // its plate at every heading and has nowhere else to be.
+        Check("the scars follow the hull, like the plates they are on",
+            AtlasSet.ScarNames.All(n => EffectLayer.Scar(n).FollowsHull),
+            "the plates are measured on the hull, not on the turret");
+        // Both halves of a shell landing are placed, and they are placed by
+        // different things: the burst is one heading-less render dropped
+        // wherever the round hit, the mark was rendered on its own plate at
+        // every heading and only slides along it. They still have to agree,
+        // which is what the shared scatter below is for.
         Check("the scars do not loop and are not in the shot's layer list",
             AtlasSet.ScarNames.All(n => !EffectLayer.Scar(n).Loops)
             && !AtlasSet.ScarNames.Any(AtlasSet.EffectNames.Contains),
@@ -1130,6 +1134,31 @@ public static class SelfTest
                 $"{plate} went to {capped} of {atlas.ScarLevels - 1},"
                 + $" {other} stayed {(spared ? "clean" : "marked")}");
 
+            // Where the round landed, kept as a fraction of the plate rather
+            // than as pixels, so it stays on the same spot of armour through a
+            // turn. Stored in pixels it would be right at the heading it was
+            // taken on and wrong at the other eleven.
+            tank.Repair();
+            double was = tank.HullFacing;
+            tank.HullFacing = 0.0;
+            tank.Damage(plate, 0.5f);
+            Vector2 atZero = tank.ScarOffset(plate);
+            tank.HullFacing = 180.0;
+            Vector2 atHalf = tank.ScarOffset(plate);
+            tank.HullFacing = was;
+            Check("a mark slides along its plate and turns with it",
+                atZero.Length() > 8.0 && atHalf.Length() > 8.0
+                && (atZero - atHalf).Length() > 8.0,
+                $"{atZero} at heading 0, {atHalf} at 180");
+            // The other half of the same shell. A hole appearing in the middle
+            // of a plate the flash went off the end of is what one number
+            // shared between them prevents.
+            tank.Damage(plate, 0.0f);
+            Check("a mark taken dead centre draws on the anchor",
+                tank.ScarOffset(plate).Length() < 1e-3,
+                "so the burst's own zero scatter puts them in the same place");
+            tank.Repair();
+
             Vector2 tankAnchor = atlas.Anchor / (Vector2)atlas.Tile;
             bool anchored = true, sameTile = true;
             foreach (string layer in AtlasSet.ScarNames)
@@ -1141,7 +1170,7 @@ public static class SelfTest
                     sameTile = false;
             }
             Check("every scar shares the tank's anchor, in frame fractions",
-                anchored, "it is drawn on the armour, so it cannot be offset");
+                anchored, "the slide along the plate is measured from it");
             // It lies flat on the plate and reaches nowhere, so it has no
             // reason to want a frame of its own - and a scar that grew one
             // would mean the mark had grown past the armour.
