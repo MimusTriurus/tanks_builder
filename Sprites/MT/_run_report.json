@@ -2,6 +2,7 @@
   "have": {
     "flash": true,
     "exhaust": true,
+    "hit": true,
     "exhaust_objects": [
       "Engine"
     ]
@@ -32,7 +33,9 @@
     "burn": 320,
     "fire": 256,
     "smoke": 384,
-    "flash": 384
+    "flash": 384,
+    "dust": 192,
+    "burst": 192
   },
   "problems": [],
   "muzzle_point": [
@@ -48,33 +51,6 @@
     "90": -4.28
   },
   "composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\MT\\_check_shot.png",
-  "exhaust_ports": [
-    {
-      "object": "Engine",
-      "kind": "grille",
-      "verts": 2039,
-      "point": [
-        0.00261,
-        0.40841,
-        -0.04028
-      ],
-      "dir": [
-        0.0008,
-        0.61334,
-        0.78982
-      ],
-      "radius": 0.0834,
-      "bearing": 89.92,
-      "elevation": 52.17,
-      "shape_margin": 12.058,
-      "spread": [
-        0.04883,
-        0.02772,
-        0.0023
-      ],
-      "length_along": 0.01234
-    }
-  ],
   "exhaust_edge_alpha": 0.0,
   "exhaust_span_px": [
     47,
@@ -123,5 +99,65 @@
     "6": true,
     "9": true
   },
-  "seconds": 217.6
+  "plates": [
+    {
+      "face": "front",
+      "elevation": 47.9,
+      "faceon": 0.67,
+      "share": 0.385,
+      "extent": [
+        0.24584,
+        0.17582
+      ]
+    },
+    {
+      "face": "rear",
+      "elevation": -1.0,
+      "faceon": 1.0,
+      "share": 0.445,
+      "extent": [
+        0.29051,
+        0.15942
+      ]
+    },
+    {
+      "face": "left",
+      "elevation": -0.1,
+      "faceon": 1.0,
+      "share": 0.748,
+      "extent": [
+        0.39999,
+        0.15925
+      ]
+    },
+    {
+      "face": "right",
+      "elevation": 0.2,
+      "faceon": 1.0,
+      "share": 0.724,
+      "extent": [
+        0.4,
+        0.15913
+      ]
+    }
+  ],
+  "hit_table": [
+    "burst_atlas.json",
+    "dust_atlas.json"
+  ],
+  "burst_edge_alpha": 0.0,
+  "dust_edge_alpha": 0.0,
+  "burst_span_px": [
+    61,
+    51
+  ],
+  "dust_span_px": [
+    47,
+    44
+  ],
+  "burst_redness": 62.9,
+  "burst_white_fraction": 0.0,
+  "dust_contrast": 98.0,
+  "hit_off_tank": [],
+  "hit_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\MT\\_check_hit.png"
 }

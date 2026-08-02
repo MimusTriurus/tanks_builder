@@ -49,12 +49,20 @@ public sealed partial class EffectLayer : Node2D
     /// and its column run at different rates off the same rendered phases - see
     /// <see cref="BurnLoop"/>.
     /// </summary>
-    public enum Clocks { Shot, Exhaust, BurningSmoke, BurningFire }
+    public enum Clocks { Shot, Exhaust, BurningSmoke, BurningFire, HitBurst, HitDust }
 
     public Clocks Clock = Clocks.Shot;
 
     /// <summary>Whether this layer goes round rather than running out.</summary>
-    public bool Loops => Clock != Clocks.Shot;
+    public bool Loops => Clock == Clocks.Exhaust
+                         || Clock == Clocks.BurningSmoke
+                         || Clock == Clocks.BurningFire;
+
+    /// <summary>Whether this layer is placed away from the shared anchor.
+    /// Only the hit is: every other layer is welded to the tank and draws at
+    /// -anchor with no offset of any kind, which is the invariant the whole
+    /// pipeline is built to keep.</summary>
+    public bool Placed => Clock == Clocks.HitBurst || Clock == Clocks.HitDust;
 
     public static EffectLayer Additive(string layer) => new()
     {
@@ -102,6 +110,28 @@ public sealed partial class EffectLayer : Node2D
         },
     };
 
+    /// <summary>A shell arriving: dust with normal alpha, and it goes into the
+    /// tree before the burst for the burning column's reason - it is what the
+    /// additive half is composited against.</summary>
+    public static EffectLayer HitDust(string layer) => new()
+    {
+        Layer = layer,
+        FollowsHull = true,
+        Clock = Clocks.HitDust,
+    };
+
+    /// <summary>A shell arriving: the burst, additive, over its own dust.</summary>
+    public static EffectLayer HitBurst(string layer) => new()
+    {
+        Layer = layer,
+        FollowsHull = true,
+        Clock = Clocks.HitBurst,
+        Material = new CanvasItemMaterial
+        {
+            BlendMode = CanvasItemMaterial.BlendModeEnum.Add,
+        },
+    };
+
     public override void _Ready() => TextureFilter = TextureFilterEnum.Linear;
 
     /// <summary>The phase this layer should be showing, or -1 for nothing.</summary>
@@ -116,6 +146,7 @@ public sealed partial class EffectLayer : Node2D
                 Clocks.Exhaust => Tank.ShowExhaust ? Tank.ExhaustPhase : -1,
                 Clocks.BurningSmoke => Tank.Burning ? Tank.BurnPhase : -1,
                 Clocks.BurningFire => Tank.Burning ? Tank.FirePhase : -1,
+                Clocks.HitBurst or Clocks.HitDust => Tank.HitPhase,
                 _ => Tank.ActiveSource == FlashSource.Rendered
                     ? Tank.ShotPhase : -1,
             };
@@ -143,6 +174,15 @@ public sealed partial class EffectLayer : Node2D
     /// </summary>
     public override void _Process(double delta)
     {
+        // A hit on a plate turned away from the camera is behind the tank, and
+        // Godot's own back-to-front flag is the honest way to say so: a child
+        // with it set draws before its parent, and the two hit layers keep
+        // their order among themselves. The alternative - baking the occlusion
+        // into the layer's alpha with a holdout, as every other effect does -
+        // is not available here, because this layer is rendered once and used
+        // at all twelve headings.
+        if (Tank is not null && Placed)
+            ShowBehindParent = Tank.HitBehind;
         if (MustRedraw(Wanted, _shown))
             QueueRedraw();
     }
@@ -176,13 +216,33 @@ public sealed partial class EffectLayer : Node2D
         // fire has no such input - see BurnLoop.
         var tint = new Color(1.0f, 1.0f, 1.0f,
             Clock == Clocks.Exhaust ? Tank.ExhaustDensity : 1.0f);
+        // The one layer drawn away from the anchor, and it is pulled here for
+        // the reason the phase is - a child redraws on its own schedule. So is
+        // the calibre, which is a scale on the rect rather than on the node:
+        // scaling the node would scale the offset that puts it on the plate.
+        Vector2 place = Placed ? Tank.HitOffset : Vector2.Zero;
+        float size = Placed ? Tank.HitScale : 1.0f;
         DrawSetTransformMatrix(Tank.ShearFor(turret));
         DrawTextureRectRegion(atlas.Texture(Layer),
-            new Rect2(-anchor + new Vector2(0.0f, Tank.HeaveFor(turret)),
-                atlas.TileOf(Layer)),
+            Frame(anchor, atlas.TileOf(Layer),
+                place + new Vector2(0.0f, Tank.HeaveFor(turret)), size),
             atlas.Region(Layer, frame), tint);
         DrawSetTransformMatrix(Transform2D.Identity);
     }
+
+    /// <summary>
+    /// Where a tile goes on screen: its own <paramref name="anchor"/> landing on
+    /// <paramref name="at"/>, at <paramref name="size"/> times the size it was
+    /// rendered.
+    ///
+    /// Separated out so the one thing that has to hold can be asserted rather
+    /// than read: whatever the scale, the anchor stays on <paramref name="at"/>.
+    /// Scaling a rect by its origin instead would walk a hit off its plate by a
+    /// fraction of the tile - and the tile is 192px, so half a calibre is
+    /// nearly fifty pixels of walk on a plate 49px tall.
+    /// </summary>
+    public static Rect2 Frame(Vector2 anchor, Vector2 tile, Vector2 at, float size)
+        => new(at - anchor * size, tile * size);
 
     /// <summary>
     /// How many screen frames each phase is held for.

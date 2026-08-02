@@ -69,10 +69,28 @@ public sealed class AtlasSet
     public const string FireName = "fire";
     public const string BurnName = "burn";
 
+    /// <summary>
+    /// A shell arriving: the burst and the dust under it.
+    ///
+    /// Alone among the layers these are rendered with *no headings at all* -
+    /// one column of phases - because a hit is not welded to the tank the way a
+    /// muzzle flash is welded to a gun, and a ball of light looks the same from
+    /// every azimuth. The game puts it where the hit was, off the plate table
+    /// the renderer stamps into the same JSON. That is also why
+    /// <see cref="CountOf"/> exists.
+    ///
+    /// Kept out of <see cref="EffectNames"/> for the reason the exhaust is, and
+    /// required in pairs for the reason the burning halves are: the dust is not
+    /// decoration, it is what the additive burst is composited against.
+    /// </summary>
+    public const string BurstName = "burst";
+    public const string DustName = "dust";
+
     /// <summary>Layers that load if they are there and are silently skipped if
-    /// they are not. Each needs a piece separated by hand in the .blend.</summary>
+    /// they are not. All but the hit pair need a piece separated by hand in the
+    /// .blend; the hit is measured off the hull and so is always there.</summary>
     private static readonly string[] OptionalNames =
-        { "smoke", "flash", ExhaustName, FireName, BurnName };
+        { "smoke", "flash", ExhaustName, FireName, BurnName, BurstName, DustName };
 
     public string Tag { get; private set; } = "";
     public string Error { get; private set; } = "";
@@ -137,6 +155,17 @@ public sealed class AtlasSet
     private readonly Dictionary<string, Vector2> _anchors = new();
     private readonly Dictionary<string, int> _phases = new();
 
+    /// <summary>
+    /// Headings a layer was rendered at, which until the hit arrived was the
+    /// same number for every layer and so was read off the hull.
+    ///
+    /// The hit burst breaks that: it is not welded to the tank, so it renders
+    /// once with no headings at all and the game puts it where the hit was.
+    /// Its count is 1, and indexing it against the hull's 12 would run straight
+    /// off the end of a ten-frame atlas.
+    /// </summary>
+    private readonly Dictionary<string, int> _counts = new();
+
     /// <summary>Frame size of a layer. Falls back to the tank's tile for a
     /// layer that is not present.</summary>
     public Vector2I TileOf(string layer) =>
@@ -183,6 +212,81 @@ public sealed class AtlasSet
     /// share the count - one event, one render job.</summary>
     public int BurnPhases => HasBurning ? PhasesOf(FireName) : 0;
 
+    /// <summary>True when this tank was rendered with the hit pair *and* the
+    /// plate table that says where to put it. Both halves, for the burning
+    /// pair's reason: an additive burst with nothing dark under it is the
+    /// field, faintly tinted.</summary>
+    public bool HasHit => Has(BurstName) && Has(DustName) && _plates.Count > 0;
+
+    /// <summary>Phases in a hit, 0 if it is missing.</summary>
+    public int HitPhases => HasHit ? PhasesOf(BurstName) : 0;
+
+    /// <summary>The plates this tank was measured to have, in a stable order.</summary>
+    public IReadOnlyList<string> HitFaces { get; private set; } = Array.Empty<string>();
+
+    private readonly Dictionary<string, PlateMeta> _plates = new();
+
+    /// <summary>
+    /// Which plate a shell arriving from <paramref name="fromBearing"/> lands
+    /// on, given where the hull is pointing.
+    ///
+    /// The plate whose outward normal comes closest to facing the shooter. Each
+    /// plate's bearing is stamped as an offset from the hull's own heading, so
+    /// this stays right as the tank turns - a world angle would have been a
+    /// number that is only true at heading zero.
+    /// </summary>
+    public string FaceFor(double fromBearing, double hullFacing)
+    {
+        string best = HitFaces.Count > 0 ? HitFaces[0] : "";
+        double bestGap = double.MaxValue;
+        foreach (string face in HitFaces)
+        {
+            double outward = hullFacing + _plates[face].Bearing;
+            double gap = Math.Abs(Mod(outward - fromBearing + 180.0, 360.0) - 180.0);
+            if (gap < bestGap)
+            {
+                bestGap = gap;
+                best = face;
+            }
+        }
+        return best;
+    }
+
+    /// <summary>Where a plate looks, as an offset from the hull's own heading.
+    /// Exposed so <see cref="FaceFor"/> can be asserted against the geometry
+    /// rather than against itself.</summary>
+    public double HitBearing(string face) =>
+        _plates.TryGetValue(face, out PlateMeta? plate) ? plate.Bearing : 0.0;
+
+    /// <summary>Where a hit on <paramref name="face"/> sits, in pixels from the
+    /// layer's anchor, with the hull at <paramref name="hullFacing"/>.</summary>
+    public Vector2 HitOffset(string face, double hullFacing) =>
+        HitFrame(face, hullFacing) is { } row
+            ? new Vector2((float)row.Offset[0], (float)row.Offset[1])
+            : Vector2.Zero;
+
+    /// <summary>How squarely the plate faces the camera: +1 straight at it, -1
+    /// straight away. The sign alone decides whether the hit is drawn in front
+    /// of the tank or behind it.</summary>
+    public double HitFacing(string face, double hullFacing) =>
+        HitFrame(face, hullFacing)?.Facing ?? 1.0;
+
+    /// <summary>Half the plate's width, as a screen vector, so a hit can be
+    /// scattered along the plate rather than off it.</summary>
+    public Vector2 HitTangent(string face, double hullFacing) =>
+        HitFrame(face, hullFacing) is { } row
+            ? new Vector2((float)row.Tangent[0], (float)row.Tangent[1])
+            : Vector2.Zero;
+
+    private HitFrameMeta? HitFrame(string face, double hullFacing)
+    {
+        if (!_plates.TryGetValue(face, out PlateMeta? plate) || plate.Frames.Length == 0)
+            return null;
+        // the table is in frame-index order, which is what FrameFor returns
+        int index = Math.Clamp(FrameFor(hullFacing), 0, plate.Frames.Length - 1);
+        return plate.Frames[index];
+    }
+
     /// <summary>Muzzle point per turret frame, in tile pixels.</summary>
     private Vector2[] _muzzle = Array.Empty<Vector2>();
 
@@ -215,6 +319,26 @@ public sealed class AtlasSet
         _tiles[layer] = new Vector2I(meta.Tile[0], meta.Tile[1]);
         _anchors[layer] = new Vector2((float)meta.AnchorPx[0], (float)meta.AnchorPx[1]);
         _phases[layer] = Math.Max(1, meta.Phases);
+        _counts[layer] = Math.Max(1, meta.Count);
+    }
+
+    /// <summary>The plate table, straight out of the layer that gets placed by
+    /// it. Ordered front, rear, left, right when they are all present, so the
+    /// harness cycles them in a way that makes sense rather than in whatever
+    /// order the JSON happened to come in.</summary>
+    private void TakePlates(Dictionary<string, PlateMeta> plates)
+    {
+        foreach ((string face, PlateMeta plate) in plates)
+            _plates[face] = plate;
+        string[] preferred = { "front", "rear", "left", "right" };
+        var ordered = new List<string>();
+        foreach (string face in preferred)
+            if (_plates.ContainsKey(face))
+                ordered.Add(face);
+        foreach (string face in _plates.Keys)
+            if (!ordered.Contains(face))
+                ordered.Add(face);
+        HitFaces = ordered;
     }
 
     public static AtlasSet Load(string root, string tag)
@@ -292,6 +416,8 @@ public sealed class AtlasSet
             if (meta is null || image is null)
                 continue;
             atlas.Take(layer, image, meta);
+            if (layer == BurstName && meta.Hits is not null)
+                atlas.TakePlates(meta.Hits.Faces);
         }
 
         if (hull is null)
@@ -439,8 +565,18 @@ public sealed class AtlasSet
     /// and one column per heading, so the index is the obvious product - and
     /// `Count` is angles per phase, not tiles in the file, exactly so that it
     /// stays the number a heading is resolved against.</summary>
-    public int EffectFrame(string layer, int phase, double facing) =>
-        Math.Clamp(phase, 0, PhasesOf(layer) - 1) * Count + FrameFor(facing);
+    public int EffectFrame(string layer, int phase, double facing)
+    {
+        int count = CountOf(layer);
+        // a layer rendered without headings has exactly one column, and asking
+        // which of them faces anywhere is a question with one answer
+        int frame = count <= 1 ? 0 : FrameFor(facing);
+        return Math.Clamp(phase, 0, PhasesOf(layer) - 1) * count + frame;
+    }
+
+    /// <summary>Headings a layer holds; the tank's count for anything absent.</summary>
+    public int CountOf(string layer) =>
+        _counts.TryGetValue(layer, out int count) ? count : Count;
 
     /// <summary>The headings this tank was actually rendered at, ascending.</summary>
     public IReadOnlyList<int> RenderedFacings() => _facings.Keys.OrderBy(k => k).ToList();
@@ -460,6 +596,32 @@ public sealed class AtlasSet
         [JsonPropertyName("units_per_pixel")] public double UnitsPerPixel { get; set; }
         [JsonPropertyName("frames")] public FrameMeta[] Frames { get; set; } = Array.Empty<FrameMeta>();
         [JsonPropertyName("view")] public ViewMeta View { get; set; } = new();
+        [JsonPropertyName("hits")] public HitsMeta? Hits { get; set; }
+    }
+
+    private sealed class HitsMeta
+    {
+        [JsonPropertyName("faces")]
+        public Dictionary<string, PlateMeta> Faces { get; set; } = new();
+    }
+
+    private sealed class PlateMeta
+    {
+        /// <summary>Where the plate looks, as an offset from the hull's own
+        /// heading. Not a world angle: the hull turns.</summary>
+        [JsonPropertyName("bearing")] public double Bearing { get; set; }
+
+        [JsonPropertyName("frames")]
+        public HitFrameMeta[] Frames { get; set; } = Array.Empty<HitFrameMeta>();
+    }
+
+    private sealed class HitFrameMeta
+    {
+        [JsonPropertyName("offset")] public double[] Offset { get; set; } = { 0, 0 };
+        [JsonPropertyName("tangent")] public double[] Tangent { get; set; } = { 0, 0 };
+        [JsonPropertyName("slope")] public double[] Slope { get; set; } = { 0, 0 };
+        [JsonPropertyName("normal")] public double[] Normal { get; set; } = { 0, 0 };
+        [JsonPropertyName("facing")] public double Facing { get; set; } = 1.0;
     }
 
     private sealed class ViewMeta

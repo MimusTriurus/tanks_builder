@@ -132,6 +132,32 @@ public sealed partial class TankSprite : Node2D
     public int FirePhase = -1;
     public int BurnPhase = -1;
 
+    /// <summary>Phase of a shell arriving, or -1 between hits. An event like the
+    /// shot, so it runs out rather than wrapping - see <see cref="HitLoop"/>.</summary>
+    public int HitPhase = -1;
+
+    /// <summary>Where the live hit is drawn, in pixels from the layer's anchor.
+    /// The only layer in the whole set that is placed rather than anchored, and
+    /// the offset comes from the plate table the renderer stamps beside the
+    /// atlas rather than from anything worked out here.</summary>
+    public Vector2 HitOffset;
+
+    /// <summary>Whether the live hit is on a plate turned away from the camera,
+    /// and so belongs behind the tank rather than on it.</summary>
+    public bool HitBehind;
+
+    /// <summary>How big the live hit is drawn, against the size it was rendered
+    /// at. A shell has a calibre and the layer does not, so this is the one
+    /// place where an effect is scaled on screen rather than in Blender.
+    ///
+    /// It scales about the point of impact, not about the anchor: the layer is
+    /// placed on a plate, and scaling about the anchor would slide it off the
+    /// plate by the same fraction it grew. Both halves take it together -
+    /// a bigger shell throws more dust as well as more light, and thinning one
+    /// against the other is what turns the pair tan (see hit_burst.py).
+    /// </summary>
+    public float HitScale = 1.0f;
+
     /// <summary>
     /// The effect layers, in the order they are added to the tree - which,
     /// because children draw after their parent and in order, is the order they
@@ -145,10 +171,16 @@ public sealed partial class TankSprite : Node2D
     /// fire it is there to back. Then the shot's pair on top, because a gun
     /// going off is the event and should read over a fire that is always there.
     /// </summary>
+    /// Then the hit's pair last of all - dark first, additive second again -
+    /// because a shell landing is the newest thing to have happened. Its two
+    /// layers are also the only ones that may end up *behind* the tank, which
+    /// they do by their own flag rather than by their place in this list: where
+    /// a hit sits in the stack and which side of the hull it is on are separate
+    /// questions, and the second one changes as the tank turns.
     public static readonly string[] LayerOrder =
     {
         AtlasSet.ExhaustName, AtlasSet.BurnName, AtlasSet.FireName,
-        "smoke", "flash",
+        "smoke", "flash", AtlasSet.DustName, AtlasSet.BurstName,
     };
 
     /// <summary>Which kind of layer each name is. Kept beside
@@ -159,6 +191,8 @@ public sealed partial class TankSprite : Node2D
         AtlasSet.ExhaustName => EffectLayer.Exhaust(layer),
         AtlasSet.BurnName => EffectLayer.BurningSmoke(layer),
         AtlasSet.FireName => EffectLayer.BurningFire(layer),
+        AtlasSet.DustName => EffectLayer.HitDust(layer),
+        AtlasSet.BurstName => EffectLayer.HitBurst(layer),
         "smoke" => EffectLayer.Normal(layer),
         _ => EffectLayer.Additive(layer),
     };

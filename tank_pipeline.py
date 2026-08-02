@@ -65,6 +65,8 @@ CONFIG = {
     "plume": "Plume",
     "fire": "Fire",
     "burn": "Burn",
+    "burst": "Burst",
+    "dust": "Dust",
     "hex": "Hex",
 
     # --- the render ---------------------------------------------------------
@@ -108,6 +110,11 @@ CONFIG = {
     # 3840px atlas, about 59 MB decoded. At a hull and a half it wanted 704px
     # tiles and 285 MB. The lever is `rise` in engine_fire.SMOKE.
     "burn_tile_scale": 1.25,
+    # The hit pair is the one layer that wants *less* frame than the tank. It
+    # is not welded to the model, so it renders once with no headings at all and
+    # the game puts it where the hit was - which means its frame only has to
+    # hold the burst itself, 56 x 46 px on MT inside 192.
+    "burst_tile_scale": 0.75,
     "phases": 8,
     # More phases than the flash, for a reason that is about looping rather
     # than about length. A flash is watched once for a tenth of a second; the
@@ -124,6 +131,10 @@ CONFIG = {
     # game wanted to run them at different rates, and it can do that with one
     # count anyway - the layers carry separate frame indices.
     "fire_phases": 12,
+    # An event, like the shot, so the count is about how much of it there is to
+    # watch rather than about a loop closing. Ten: four of fire and six of the
+    # dust outliving it.
+    "hit_phases": 10,
     "azimuth": 0.0,
     "elevation": 30.0,
     "front_dir": 270.0,
@@ -151,13 +162,26 @@ CONFIG = {
     # is brighter than one that does not, and worse. See engine_fire's docstring
     # on the ramp.
     "fire_redness_min": 30.0,
+    # The same pair of measures for the hit, and for the same reasons: the dust
+    # must actually move the picture, the burst must stay a colour. The dust is
+    # held to more than the plume because it is a small solid puff rather than a
+    # thin column, so a low number here means it is not covering the burst -
+    # which is what makes the burst go pale.
+    "dust_contrast_min": 40.0,
+    "burst_redness_min": 30.0,
+    # How far the hit may land from the plate the table says it is on, as a
+    # fraction of that plate's own half-extent. This is the assertion that
+    # catches a transposed table: at heading 0 a transposed one still looks
+    # plausible, and at every other heading it puts the hit off the tank.
+    "hit_on_plate": 1.0,
 }
 
 # Also the order they are composited in, which for the burning pair is not a
 # preference: the smoke goes down with normal alpha and the fire is added on
-# top of it. See engine_fire.SMOKE.
+# top of it. See engine_fire.SMOKE. The hit pair is the same shape of rule and
+# goes last, being the most recent thing to have happened.
 LAYER_ORDER = ("hex", "hull", "turret", "exhaust", "burn", "fire",
-               "smoke", "flash")
+               "smoke", "flash", "dust", "burst")
 
 
 def _load(cfg, name):
@@ -181,8 +205,12 @@ def parts(cfg=None):
     cfg = dict(CONFIG, **(cfg or {}))
     scene = bpy.context.scene
     exhaust = _load(cfg, "exhaust_point").ports_of(scene, {"prefix": cfg["exhaust"]})
+    # The hit needs no hand split at all - `hit_point` fires rays at the hull
+    # and finds the plates - so every scene with a hull gets it. That is why the
+    # guard below is about the two effects that *do* need a split.
     return {"flash": _find(scene, cfg["barrel"]) is not None,
             "exhaust": bool(exhaust),
+            "hit": _find(scene, cfg["hull"]) is not None,
             "exhaust_objects": [o.name for o in exhaust]}
 
 
@@ -196,27 +224,34 @@ def prepare(cfg=None):
     scene = bpy.context.scene
     have = parts(cfg)
 
+    if not have["hit"]:
+        raise RuntimeError("no object named %r - there is no tank here"
+                           % cfg["hull"])
     if not have["flash"] and not have["exhaust"]:
-        raise RuntimeError(
-            "this scene has neither %r nor an object starting with %r, so "
-            "there is no effect to render. Separate one by hand first: select "
-            "it, Ctrl+L to complete the panels it cuts through, P > Selection, "
-            "rename it, then Ctrl+P > Object (Keep Transform) onto %s for the "
-            "gun or %s for the exhaust. See MUZZLE_FLASH.md."
-            % (cfg["barrel"], cfg["exhaust"], cfg["turret"], cfg["hull"]))
+        print("[tank] no %r and nothing starting with %r: this scene gets the "
+              "hit layers only. Separate a piece by hand for the rest - select "
+              "it, Ctrl+L to complete the panels it cuts through, P > "
+              "Selection, rename it, then Ctrl+P > Object (Keep Transform) "
+              "onto %s for the gun or %s for the exhaust. See MUZZLE_FLASH.md."
+              % (cfg["barrel"], cfg["exhaust"], cfg["turret"], cfg["hull"]))
 
     # the transient objects are rebuilt every run, so a re-run never leaves
     # Hex.001 behind to be rendered instead of Hex
     for name in (cfg["hex"], cfg["flash"], cfg["smoke"], cfg["plume"],
-                 cfg["fire"], cfg["burn"]):
+                 cfg["fire"], cfg["burn"], cfg["burst"], cfg["dust"]):
         ob = scene.objects.get(name)
         if ob is not None:
             data = ob.data
             bpy.data.objects.remove(ob)
             bpy.data.meshes.remove(data)
 
-    out = {"have": have, "muzzle": None, "exhaust": None}
+    out = {"have": have, "muzzle": None, "exhaust": None, "hits": None}
 
+    out["hits"] = _load(cfg, "hit_point").set_hits(
+        {"hull": cfg["hull"], "turret": cfg["turret"],
+         "front_dir": cfg["front_dir"], "azimuth": cfg["azimuth"],
+         "elevation": cfg["elevation"], "camera_elevation": cfg["elevation"],
+         "stamp_on": [cfg["hull"]]})
     if have["flash"]:
         out["muzzle"] = _load(cfg, "muzzle_point").set_muzzle(
             {"turret": cfg["turret"], "barrel": cfg["barrel"],
@@ -244,6 +279,13 @@ def prepare(cfg=None):
         fire_mod = _load(cfg, "engine_fire")
         fire_mod.build({"hull": cfg["hull"], "name": cfg["fire"]})
         fire_mod.build_smoke({"hull": cfg["hull"], "name": cfg["burn"]})
+
+    burst_mod = _load(cfg, "hit_burst")
+    burst_mod.build({"hull": cfg["hull"], "name": cfg["burst"],
+                     "azimuth": cfg["azimuth"], "elevation": cfg["elevation"]})
+    burst_mod.build_dust({"hull": cfg["hull"], "name": cfg["dust"],
+                          "azimuth": cfg["azimuth"],
+                          "elevation": cfg["elevation"]})
     return out
 
 
@@ -258,7 +300,8 @@ def render(cfg=None):
         # out of the hull layer. The plume and the flame sit at scene root and
         # so are inside `world` too - they are named here for the same reason.
         {"name": "hull", "target": cfg["root"],
-         "exclude": [cfg["turret"], cfg["plume"], cfg["fire"], cfg["burn"]]},
+         "exclude": [cfg["turret"], cfg["plume"], cfg["fire"], cfg["burn"],
+                     cfg["burst"], cfg["dust"]]},
         {"name": "turret", "target": cfg["turret"]},
         {"name": "hex", "target": cfg["hex"], "static": True},
     ]
@@ -327,6 +370,32 @@ def render(cfg=None):
                                                       "name": cfg["burn"]}),
              "holdout": [cfg["hull"], cfg["turret"]]})
 
+    burst_mod = _load(cfg, "hit_burst")
+    for name, target, hook in (
+            ("dust", cfg["dust"], burst_mod.dust_phase_hook(
+                {"hull": cfg["hull"], "name": cfg["dust"],
+                 "azimuth": cfg["azimuth"], "elevation": cfg["elevation"]})),
+            ("burst", cfg["burst"], burst_mod.phase_hook(
+                {"hull": cfg["hull"], "name": cfg["burst"],
+                 "azimuth": cfg["azimuth"], "elevation": cfg["elevation"]}))):
+        layers.append(
+            # `static`, so one frame rather than twelve: a hit is not welded to
+            # the tank and a ball of light looks the same from every azimuth.
+            # Still fitted over the whole carousel, so it keeps the job's
+            # units_per_pixel and is the right size.
+            #
+            # And deliberately *no holdout*. Every other effect bakes the tank's
+            # occlusion into its alpha, which it can do because it is rendered
+            # at the heading it will be drawn at. This one is rendered once and
+            # used at all twelve, so a holdout would burn heading zero's
+            # silhouette into every hit. The harness occludes instead, by
+            # drawing the layer behind the tank when the plate faces away -
+            # which the stamped `facing` says, and which agreed with the hull on
+            # all sixteen heading-face pairs tested.
+            {"name": name, "target": target, "static": True, "fit": False,
+             "tile_scale": cfg["burst_tile_scale"],
+             "phases": cfg["hit_phases"], "phase_hook": hook})
+
     return atlas.render_set({
         "shared": {
             "output_dir": cfg["output_dir"],
@@ -336,6 +405,52 @@ def render(cfg=None):
         },
         "layers": layers,
     })
+
+
+def stamp_table(cfg=None):
+    """Write the plates, projected, into the hit layers' metadata.
+
+    After the render rather than through `meta_extra`, and that is forced: the
+    table is in pixels, and `units_per_pixel` is a *result* of fitting the
+    camera to the carousel. Anything computed before the job would be a second
+    guess at a number the job is about to decide.
+
+    It goes into the hit layers' own JSON rather than the hull's, because it is
+    those layers that get placed by it, and offsets are measured from the burst
+    layer's build origin rather than from any frame's anchor. Every value here
+    is regenerated by the render that produced it, so the harness cannot read a
+    table describing a tank that has since moved.
+    """
+    cfg = dict(CONFIG, **(cfg or {}))
+    hp = _load(cfg, "hit_point")
+    burst_mod = _load(cfg, "hit_burst")
+
+    hull_path = os.path.join(cfg["output_dir"], "hull_atlas.json")
+    with open(hull_path, encoding="utf-8") as fh:
+        hull_meta = json.load(fh)
+    angles = [f["angle"] for f in hull_meta["frames"][:hull_meta["count"]]]
+
+    origin = burst_mod.origin_of({"hull": cfg["hull"], "name": cfg["burst"]})
+    written = []
+    for name in ("burst", "dust"):
+        path = os.path.join(cfg["output_dir"], "%s_atlas.json" % name)
+        if not os.path.exists(path):
+            continue
+        with open(path, encoding="utf-8") as fh:
+            meta = json.load(fh)
+        meta["hits"] = {
+            "origin": [round(float(v), 6) for v in origin],
+            "faces": hp.project_plates(
+                origin, meta["units_per_pixel"], angles,
+                {"hull": cfg["hull"], "azimuth": cfg["azimuth"],
+                 "elevation": cfg["elevation"]}),
+        }
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(meta, fh, indent=2)
+        written.append(os.path.basename(path))
+    return {"stamped": written,
+            "faces": sorted(hp.read_plates(
+                bpy.context.scene.objects[cfg["hull"]])[0])}
 
 
 # ---------------------------------------------------------------------------
@@ -400,6 +515,20 @@ def _edge_alpha(layers, name):
     return worst
 
 
+def _span_px(layers, name, floor=0.02):
+    """Widest and tallest the layer ever gets, over every frame."""
+    _, meta = layers[name]
+    w = h = 0
+    for frame in meta["frames"]:
+        a = _tile_of(layers, name, frame["index"])[:, :, 3]
+        ys, xs = np.nonzero(a > floor)
+        if not len(xs):
+            continue
+        w = max(w, int(xs.max() - xs.min() + 1))
+        h = max(h, int(ys.max() - ys.min() + 1))
+    return [w, h]
+
+
 def _ground_colour(layers):
     """The tile's own colour - what the game's field looks like."""
     tile = _tile_of(layers, "hex", 0)
@@ -437,13 +566,15 @@ def _sheet(cfg, layers, name, rows, cols, draw, background, used):
     out[:, :, :3] = background
     out[:, :, 3] = 1.0
 
-    def place(buf, layer, index, blend):
+    def place(buf, layer, index, blend, offset=(0.0, 0.0)):
         src = _tile_of(layers, layer, index)
         anchor = np.array(layers[layer][1]["anchor_px"])
         # tile pixels are top-down, the arrays are bottom-up: x shifts as it
-        # reads, y shifts the other way
-        dx = int(round(at[0] - anchor[0]))
-        dy = int(round((size - at[1]) - (src.shape[0] - anchor[1])))
+        # reads, y shifts the other way. `offset` is in screen pixels - the hit
+        # layers are the only ones that use it, and they are drawn where the
+        # plate is rather than at the anchor
+        dx = int(round(at[0] - anchor[0] + offset[0]))
+        dy = int(round((size - at[1]) - (src.shape[0] - anchor[1]) - offset[1]))
         x0, y0 = max(dx, 0), max(dy, 0)
         sx, sy = max(-dx, 0), max(-dy, 0)
         w = min(src.shape[1] - sx, size - x0)
@@ -628,6 +759,121 @@ def check(cfg=None):
             cfg, layers, "_check_fire", headings,
             list(range(fire_meta["phases"])), draw_fire,
             _ground_colour(layers), ["hex", "hull", "turret", "burn", "fire"])
+
+    # --- the hit: face across, heading down ----------------------------------
+    if "burst" in layers:
+        burst_meta = layers["burst"][1]
+        table = (burst_meta.get("hits") or {}).get("faces") or {}
+        faces = [f for f in ("front", "rear", "left", "right") if f in table]
+        hit_phase = min(1, burst_meta["phases"] - 1)
+
+        def draw_hit(buf, place, heading, face):
+            row = table[face]["frames"][heading]
+
+            def hit(b):
+                # dust down with normal alpha, burst added over it - the same
+                # order and the same reason as the burning pair
+                b = place(b, "dust", hit_phase, _over, row["offset"])
+                return place(b, "burst", hit_phase, _add, row["offset"])
+
+            # A plate turned away from the camera is behind the tank, and the
+            # harness draws it there. Compositing it on top instead would put a
+            # hit on the far side over the turret roof, which is the picture
+            # this sheet exists to rule out rather than to produce.
+            buf = place(buf, "hex", 0, _over)
+            if row["facing"] <= 0.0:
+                buf = hit(buf)
+            for name in ("hull", "turret"):
+                buf = place(buf, name, heading, _over)
+            return buf if row["facing"] <= 0.0 else hit(buf)
+
+        if faces:
+            report["hit_composite"] = _sheet(
+                cfg, layers, "_check_hit", headings, faces, draw_hit,
+                _ground_colour(layers),
+                ["hex", "hull", "turret", "dust", "burst"])
+
+        # Non-circular version of "the hit lands on its plate". The table says
+        # where the plate is, so asking the table again proves nothing; ask the
+        # *tank* instead. Every face the camera can see has to put its hit
+        # inside the tank's own silhouette, at every heading. A transposed table
+        # looks right at heading zero and puts the hit off the tank everywhere
+        # else, which is exactly the failure that survives a spot check.
+        anchor, tile = meta["anchor_px"], meta["tile"][0]
+        off_tank = []
+        for face in faces:
+            for h in range(meta["count"]):
+                row = table[face]["frames"][h]
+                if row["facing"] <= 0.25:
+                    continue
+                x = int(round(anchor[0] + row["offset"][0]))
+                y = int(round(anchor[1] + row["offset"][1]))
+                if not (0 <= x < tile and 0 <= y < tile):
+                    off_tank.append([face, h, "off frame"])
+                    continue
+                seen = max(float(_tile_of(layers, n, h)[tile - 1 - y, x, 3])
+                           for n in ("hull", "turret"))
+                if seen < 0.5:
+                    off_tank.append([face, h, round(seen, 3)])
+        report["hit_off_tank"] = off_tank
+        if off_tank:
+            report["problems"].append(
+                "%d of the hits the camera can see land off the tank (%s) - "
+                "the plate table and the atlas disagree about where the tank is"
+                % (len(off_tank), ", ".join("%s@%d" % (f, h)
+                                            for f, h, _ in off_tank[:6])))
+
+        # The same pair of colour measures as the fire, for the same reasons.
+        # The dust one is not decoration: the burst is additive, so how dark the
+        # dust is under it decides how much colour survives, and a burst that
+        # looks pale has twice now turned out to be a dust cloud with holes.
+        ground = _ground_colour(layers)
+        ground_red = float(ground[0] - 0.5 * (ground[1] + ground[2]))
+        redness, white, contrast = [], 0.0, 0.0
+        for p in range(burst_meta["phases"]):
+            b = _tile_of(layers, "burst", p)
+            field = np.zeros_like(b)
+            field[:, :, :3] = ground
+            field[:, :, 3] = 1.0
+            under = _over(field, _tile_of(layers, "dust", p)) \
+                if "dust" in layers else field
+            lit = _add(under, b)
+            body = b[:, :, 3] > 0.25
+            if body.any():
+                rgb = lit[:, :, :3][body]
+                redness.append(float(
+                    np.median(rgb[:, 0] - 0.5 * (rgb[:, 1] + rgb[:, 2]))
+                    - ground_red))
+                white = max(white, float(np.mean(rgb.min(axis=1) > 0.97)))
+            contrast = max(contrast,
+                           float(np.abs(under[:, :, :3] - ground).max() * 255.0))
+        report["burst_redness"] = round(255.0 * max(redness or [0.0]), 1)
+        report["burst_white_fraction"] = round(white, 4)
+        report["dust_contrast"] = round(contrast, 1)
+        report["burst_span_px"] = _span_px(layers, "burst")
+        report["dust_span_px"] = _span_px(layers, "dust")
+        for name in ("burst", "dust"):
+            worst = _edge_alpha(layers, name)
+            report["%s_edge_alpha" % name] = round(worst, 4)
+            if worst > 0.02:
+                report["problems"].append(
+                    "the hit's %s touches its tile edge (alpha %.3f) - raise "
+                    "burst_tile_scale or shrink it in hit_burst" % (name, worst))
+        if report["burst_redness"] < cfg["burst_redness_min"]:
+            report["problems"].append(
+                "the burst is only %.0f levels of 255 redder than the ground - "
+                "on a pale field an additive layer with nothing dark under it "
+                "is that field, faintly tinted. The lever is hit_burst.DUST, "
+                "not the ramp" % report["burst_redness"])
+        if report["dust_contrast"] < cfg["dust_contrast_min"]:
+            report["problems"].append(
+                "the hit's dust moves the picture by only %.0f levels of 255 - "
+                "it is in the alpha and not on the screen, and the burst that "
+                "sits on it will read pale" % report["dust_contrast"])
+        if white > 0.25:
+            report["problems"].append(
+                "%.0f%% of the burst clips to white - it is not brighter, it is "
+                "colourless" % (100.0 * white))
 
     # --- nothing may touch the tile edge, on any frame of any tank layer -----
     edges = {}
@@ -915,12 +1161,15 @@ def run(cfg=None):
     cfg = dict(CONFIG, **(cfg or {}))
     prepared = prepare(cfg)
     rendered = render(cfg)
+    # between the two: the plate table is in pixels and needs the camera the
+    # render just fitted, and `check` reads it back out of the layer metadata
+    stamped = stamp_table(cfg)
     checked = check(cfg)
 
     problems = list(rendered["warnings"]) + list(checked["problems"])
     if not rendered["framing_identical"]:
         problems.append("layers do not share a framing")
-    for stage in ("muzzle", "exhaust"):
+    for stage in ("muzzle", "exhaust", "hits"):
         if prepared[stage]:
             problems.extend(prepared[stage]["warnings"])
 
@@ -970,11 +1219,28 @@ def run(cfg=None):
             "burn_loop": {h: v["seamless"]
                           for h, v in checked["burn_loop"].items()},
         })
+    if prepared["hits"]:
+        report.update({
+            "plates": [{k: p[k] for k in ("face", "elevation", "faceon",
+                                          "share", "extent")}
+                       for p in prepared["hits"]["plates"]],
+            "hit_table": stamped["stamped"],
+            "burst_edge_alpha": checked.get("burst_edge_alpha"),
+            "dust_edge_alpha": checked.get("dust_edge_alpha"),
+            "burst_span_px": checked.get("burst_span_px"),
+            "dust_span_px": checked.get("dust_span_px"),
+            "burst_redness": checked.get("burst_redness"),
+            "burst_white_fraction": checked.get("burst_white_fraction"),
+            "dust_contrast": checked.get("dust_contrast"),
+            "hit_off_tank": checked.get("hit_off_tank"),
+            "hit_composite": checked.get("hit_composite"),
+        })
 
     print("[tank] %s  %d problems" % (cfg["output_dir"], len(problems)))
     for line in problems:
         print("[tank]   ! %s" % line)
-    for key in ("composite", "exhaust_composite", "fire_composite"):
+    for key in ("composite", "exhaust_composite", "fire_composite",
+                "hit_composite"):
         if report.get(key):
             print("[tank] now open %s and look at it - the numbers above have "
                   "all been green while the picture was wrong" % report[key])

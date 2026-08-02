@@ -871,6 +871,217 @@ public static class SelfTest
                 + $" {atlas.BurnPhases * atlas.Count}, highest {burnTiles.Max()}");
         }
 
+        GD.Print("a shell arriving");
+        // An event, like the shot, and unlike everything else that came after
+        // it: the phases run out into -1 rather than wrapping.
+        var hitSeen = new HashSet<int>();
+        bool hitEnds = false;
+        for (int i = 0; i < HitLoop.Duration + 10; i++)
+        {
+            int phase = HitLoop.PhaseAt(i);
+            if (phase >= 0)
+                hitSeen.Add(phase);
+            else if (i >= HitLoop.Duration)
+                hitEnds = true;
+        }
+        Check("a hit runs through every rendered phase and then stops",
+            hitSeen.Count == HitLoop.Hold.Length && hitEnds,
+            $"{hitSeen.Count} of {HitLoop.Hold.Length} phases,"
+            + $" {HitLoop.Duration} frames");
+        // The early phases are where the burst is and the late ones are dust
+        // settling. A flat tempo either stretches the flash into a bonfire or
+        // cuts the dust off in the middle - the same reason the shot's table is
+        // uneven, only more so, because the burst is gone by phase four.
+        Check("the burst runs faster than the dust that outlives it",
+            HitLoop.Hold[0] + HitLoop.Hold[1] < HitLoop.Hold[^1],
+            $"first two {HitLoop.Hold[0] + HitLoop.Hold[1]} frames,"
+            + $" last {HitLoop.Hold[^1]}");
+
+        var strike = new HitLoop();
+        strike.Strike("front");
+        for (int i = 0; i < 12; i++)
+            strike.Advance();
+        int midway = strike.Phase;
+        strike.Strike("rear");
+        Check("a second shell restarts the hit rather than being ignored",
+            midway > 0 && strike.Phase == 0 && strike.Face == "rear",
+            $"was phase {midway}, now {strike.Phase} on {strike.Face}");
+
+        Check("the hit pair follows the hull, like the plume",
+            EffectLayer.HitBurst(AtlasSet.BurstName).FollowsHull
+            && EffectLayer.HitDust(AtlasSet.DustName).FollowsHull,
+            "the plates are measured on the hull, not on the turret");
+        Check("the hit pair is the only one drawn away from the anchor",
+            EffectLayer.HitBurst(AtlasSet.BurstName).Placed
+            && EffectLayer.HitDust(AtlasSet.DustName).Placed
+            && !EffectLayer.Exhaust(AtlasSet.ExhaustName).Placed
+            && !EffectLayer.BurningFire(AtlasSet.FireName).Placed
+            && !EffectLayer.Additive("flash").Placed,
+            "every other layer draws at -anchor with no offset of any kind");
+        Check("the hit does not go round like the loops do",
+            !EffectLayer.HitBurst(AtlasSet.BurstName).Loops
+            && !EffectLayer.HitDust(AtlasSet.DustName).Loops,
+            "a shell lands once");
+        Check("the hit pair is kept out of the shot's layer list",
+            !AtlasSet.EffectNames.Contains(AtlasSet.BurstName)
+            && !AtlasSet.EffectNames.Contains(AtlasSet.DustName),
+            "HasEffects requires every name in it");
+        Check("the dust is added to the tree before the burst",
+            Array.IndexOf(TankSprite.LayerOrder, AtlasSet.DustName)
+            < Array.IndexOf(TankSprite.LayerOrder, AtlasSet.BurstName),
+            string.Join(" -> ", TankSprite.LayerOrder));
+
+        if (!atlas.HasHit)
+        {
+            Check($"{atlas.Tag} has the hit layers and a plate table", false,
+                "no burst/dust atlas or no `hits` block - re-render this scene");
+        }
+        else
+        {
+            Vector2 hitTankAnchor = atlas.Anchor / (Vector2)atlas.Tile;
+            foreach (string layer in new[] { AtlasSet.BurstName, AtlasSet.DustName })
+            {
+                Vector2 anchor = atlas.AnchorOf(layer) / (Vector2)atlas.TileOf(layer);
+                Check($"the {layer} layer shares the tank's anchor, in frame fractions",
+                    (anchor - hitTankAnchor).Length() < 1e-4,
+                    $"{anchor} against {hitTankAnchor}");
+            }
+            // The one layer with a count of its own, and the reason CountOf
+            // exists: indexed against the hull's twelve it would run straight
+            // off the end of a ten-frame atlas.
+            Check("the hit layers were rendered without headings",
+                atlas.CountOf(AtlasSet.BurstName) == 1
+                && atlas.CountOf(AtlasSet.DustName) == 1
+                && atlas.CountOf("hull") == atlas.Count,
+                $"burst {atlas.CountOf(AtlasSet.BurstName)},"
+                + $" hull {atlas.CountOf("hull")}");
+            var hitTiles = new HashSet<int>();
+            bool hitInRange = true;
+            foreach (int facing in atlas.RenderedFacings())
+                for (int phase = 0; phase < atlas.HitPhases; phase++)
+                {
+                    int frame = atlas.EffectFrame(AtlasSet.BurstName, phase, facing);
+                    hitTiles.Add(frame);
+                    if (frame < 0 || frame >= atlas.HitPhases)
+                        hitInRange = false;
+                }
+            Check("every heading resolves to the same column of hit frames",
+                hitInRange && hitTiles.Count == atlas.HitPhases,
+                $"{hitTiles.Count} distinct of {atlas.HitPhases}");
+            // It needs less frame than the tank, not more: the burst is small
+            // and is placed rather than anchored, so its tile only has to hold
+            // the burst. This is the assertion that catches it quietly growing.
+            Check("the hit needs no more frame than the tank",
+                atlas.TileOf(AtlasSet.BurstName).X <= atlas.Tile.X
+                && atlas.TileOf(AtlasSet.DustName)
+                   == atlas.TileOf(AtlasSet.BurstName),
+                $"burst {atlas.TileOf(AtlasSet.BurstName).X}px,"
+                + $" tank {atlas.Tile.X}px");
+
+            // The plate a shell lands on is geometry, and it has to keep being
+            // geometry as the hull turns. A bearing stamped as a world angle
+            // would pass at heading zero and be wrong everywhere else - the
+            // same failure shape as a transposed frame table.
+            bool picksPlate = true, turnsWithHull = true;
+            foreach (string face in atlas.HitFaces)
+            foreach (int hull in new[] { 0, 90, 180, 270, 45 })
+            {
+                double outward = hull + atlas.HitBearing(face);
+                if (atlas.FaceFor(outward, hull) != face)
+                    picksPlate = false;
+            }
+            string head = atlas.FaceFor(270.0, 270.0);
+            if (atlas.FaceFor(270.0, 90.0) == head)
+                turnsWithHull = false;
+            Check("a shell picks the plate whose armour faces the shooter",
+                picksPlate, string.Join(", ", atlas.HitFaces));
+            Check("turning the hull round changes which plate takes it",
+                turnsWithHull,
+                $"nose-on gives {head}, tail-on gives {atlas.FaceFor(270.0, 90.0)}");
+
+            // One lap of the U key, one shell per plate. The walk stepped by a
+            // fifth of a turn once, which put five bearings against four plates
+            // and left one plate taking two back to back - the right idea (stay
+            // off the normals) in the wrong place, because on screen it reads
+            // as a stuck key rather than as a test.
+            int worstLap = int.MaxValue, worstAt = -1;
+            foreach (int hull in atlas.RenderedFacings())
+            {
+                var lap = new HashSet<string>();
+                for (int i = 0; i < atlas.HitFaces.Count; i++)
+                    lap.Add(atlas.FaceFor(Main.HitSeed + Main.HitStep * i, hull));
+                if (lap.Count < worstLap)
+                {
+                    worstLap = lap.Count;
+                    worstAt = hull;
+                }
+            }
+            Check("a lap of the U key puts one shell on each plate",
+                worstLap == atlas.HitFaces.Count,
+                $"worst is {worstLap} of {atlas.HitFaces.Count},"
+                + $" at heading {worstAt}");
+
+            // ...and here is the boundary the walk no longer crosses by
+            // accident, asked directly: halfway between two plates the answer
+            // is one of them, and two degrees either way gives the other.
+            bool splits = true;
+            foreach (int hull in atlas.RenderedFacings())
+            foreach (string face in atlas.HitFaces)
+            {
+                double normal = hull + atlas.HitBearing(face);
+                if (atlas.FaceFor(normal + 44.0, hull)
+                    == atlas.FaceFor(normal + 46.0, hull))
+                    splits = false;
+            }
+            Check("either side of the split between two plates picks each of them",
+                splits, "the choice between neighbours is where the wrong one hides");
+
+            // Calibre is a scale on the drawn rect, and it has to scale about
+            // the impact rather than about the rect's own corner - the tile is
+            // 192px against a plate 49px tall, so a corner-anchored scale walks
+            // the hit clean off the armour.
+            Vector2 hitTile = atlas.TileOf(AtlasSet.BurstName);
+            Vector2 hitAnchor = atlas.AnchorOf(AtlasSet.BurstName);
+            var impact = new Vector2(37.0f, -18.0f);
+            bool scalesAboutImpact = true;
+            foreach (float size in new[] { 0.5f, 1.0f, 2.0f })
+            {
+                Rect2 rect = EffectLayer.Frame(hitAnchor, hitTile, impact, size);
+                if ((rect.Position + hitAnchor * size - impact).Length() > 1e-3f
+                    || Math.Abs(rect.Size.X / hitTile.X - size) > 1e-4f)
+                    scalesAboutImpact = false;
+            }
+            Check("calibre scales the hit about the point of impact",
+                scalesAboutImpact,
+                "scaling about the rect corner slides it off the plate");
+
+            // Facing decides front-or-behind, and it must not be the same
+            // answer everywhere: a plate that is never behind means the sign is
+            // being thrown away, which is exactly how a hit on the far side
+            // ends up sitting on the turret roof.
+            int behind = 0, infront = 0;
+            foreach (string face in atlas.HitFaces)
+            foreach (int facing in atlas.RenderedFacings())
+            {
+                if (atlas.HitFacing(face, facing) <= 0.0)
+                    behind++;
+                else
+                    infront++;
+            }
+            Check("every plate spends part of the turn behind the tank",
+                behind > 0 && infront > 0
+                && behind + infront == atlas.HitFaces.Count * atlas.Count,
+                $"{behind} behind, {infront} in front");
+            // The offset is what places the layer, so a table of zeroes would
+            // put every hit on the turret ring and pass every other check here.
+            double reach = 0.0;
+            foreach (string face in atlas.HitFaces)
+            foreach (int facing in atlas.RenderedFacings())
+                reach = Math.Max(reach, atlas.HitOffset(face, facing).Length());
+            Check("the plates sit away from the anchor, not on it",
+                reach > 20.0, $"furthest {reach:F1}px");
+        }
+
         GD.Print("recoil");
         var recoil = new Recoil();
         recoil.Fire(0.0);                       // gun straight ahead

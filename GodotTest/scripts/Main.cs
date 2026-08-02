@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Globalization;
 using System.Linq;
 using Godot;
 
@@ -82,6 +83,45 @@ public sealed partial class Main : Node2D
     /// layer.</summary>
     private bool _burning;
 
+    /// <summary>A shell arriving - key U. An event rather than a mode, so there
+    /// is nothing to switch on: each press is one hit.</summary>
+    private readonly HitLoop _hit = new();
+
+    /// <summary>How far round the bearing walks between presses, and where it
+    /// starts.
+    ///
+    /// A quarter turn against four plates, so a round of four presses puts one
+    /// on each. This was a fifth of a turn for a while, on the argument that a
+    /// step off the plate normals is what exercises the choice between two
+    /// neighbours - and that argument is right, but five bearings against four
+    /// plates leaves exactly one plate taking two of them back to back, which
+    /// reads as a stuck key rather than as a test. The boundary is asserted in
+    /// the self-test instead, where it does not depend on anyone pressing U
+    /// often enough to notice.
+    ///
+    /// The seed keeps the walk off the normals anyway: 65 degrees puts the
+    /// first shell 25 off the plate it lands on at heading zero, and no heading
+    /// of the hull collapses the four bearings onto fewer than four plates.
+    /// </summary>
+    public const double HitStep = 90.0;
+
+    public const double HitSeed = 65.0;
+
+    private double _hitFrom = HitSeed - HitStep + 360.0;
+    private int _hitCount;
+
+    /// <summary>Calibres, as a multiplier on the rendered hit - key Y.
+    ///
+    /// The layer is a sprite, so this is a scale on the drawn rect and costs
+    /// nothing; what it cannot do is change the shape of the burst, only its
+    /// size. Kept modest for that reason - past about half again the rendered
+    /// size the dust starts to read as soft rather than as bigger, and the
+    /// answer there is another render, not a bigger number.
+    /// </summary>
+    private static readonly float[] Calibres = { 0.7f, 1.0f, 1.4f };
+
+    private int _calibre = 1;
+
     private FlashSheet _flash = null!;
     private readonly Recoil _recoil = new();
     /// <summary>Screen frames since the shot went off, or -1 between shots.</summary>
@@ -104,6 +144,12 @@ public sealed partial class Main : Node2D
     private int _traceFrames;
     private string? _startTag;
     private bool _fireAtStart;
+    /// <summary>--hit &lt;deg&gt;: take one on the way in, from that bearing. A
+    /// bearing rather than a plate name, because that is what the game has.</summary>
+    private double? _hitAtStart;
+    /// <summary>--hit-scale &lt;x&gt;: start at that calibre instead of the middle
+    /// one, for an A/B that does not need the keyboard.</summary>
+    private float? _hitScaleArg;
     private double? _startTurret;
     /// <summary>Which flash to start with - key V, or --flash sheet|rendered.
     /// Rendered by default: it is the one the pipeline exists to produce, and
@@ -140,6 +186,18 @@ public sealed partial class Main : Node2D
                 _burning = true;
             else if (userArgs[i] == "--fire")
                 _fireAtStart = true;
+            else if (userArgs[i] == "--hit" && i + 1 < userArgs.Length
+                     && double.TryParse(userArgs[i + 1], out double from))
+                _hitAtStart = from;
+            // Invariant culture, and this is the first flag that needs saying
+            // so: the machine is set to a locale whose decimal mark is a comma,
+            // so a plain TryParse of "1.4" fails, leaves the default in place
+            // and produces two identical captures from two different calibres -
+            // which reads as "the scale does nothing" rather than as a parse.
+            else if (userArgs[i] == "--hit-scale" && i + 1 < userArgs.Length
+                     && float.TryParse(userArgs[i + 1], NumberStyles.Float,
+                         CultureInfo.InvariantCulture, out float calibre))
+                _hitScaleArg = calibre;
             else if (userArgs[i] == "--flash" && i + 1 < userArgs.Length)
                 _flashSource = userArgs[i + 1].Equals("sheet",
                     StringComparison.OrdinalIgnoreCase)
@@ -233,10 +291,13 @@ public sealed partial class Main : Node2D
         }
         if (_startTurret is not null)
             _tank.TurretFacing = Mod(_startTurret.Value, 360.0);
+        _tank.HitScale = _hitScaleArg ?? Calibres[_calibre];
         if (_driveTo is not null)
             OrderMoveTo(_field.ClampCell(_driveTo.Value));
         if (_fireAtStart)
             Fire();
+        if (_hitAtStart is not null)
+            TakeHit(_hitAtStart.Value);
     }
 
     private string CurrentTag() =>
@@ -263,6 +324,8 @@ public sealed partial class Main : Node2D
         // no TopSpeed here: a fire does not burn harder because the tank moves
         _burn.Phases = atlas.BurnPhases;
         _burn.Reset();
+        _hit.Reset();
+        _tank.HitPhase = -1;
         _scan.Reset();
         CancelOrder();
         _field.QueueRedraw();
@@ -515,6 +578,53 @@ public sealed partial class Main : Node2D
         }
     }
 
+    /// <summary>
+    /// Take a hit from <paramref name="fromBearing"/>, a world heading.
+    ///
+    /// The plate is chosen by the atlas rather than named here, because that is
+    /// the path the game will take: a shooter stands somewhere, and which
+    /// armour that lands on is geometry. The scatter runs along the plate's own
+    /// screen tangent, so it slides across the metal instead of off it.
+    /// </summary>
+    private void TakeHit(double fromBearing)
+    {
+        AtlasSet atlas = _tank.Atlas!;
+        if (!atlas.HasHit)
+            return;
+        _hitFrom = Mod(fromBearing, 360.0);
+        // Deterministic under --capture and --trace, which fix the time step so
+        // two runs can be diffed; a random scatter would put the two hits in
+        // different places and the diff would measure that instead.
+        _hitCount++;
+        float scatter = ((_hitCount * 37) % 100) / 100.0f * 1.2f - 0.6f;
+        _hit.Strike(atlas.FaceFor(_hitFrom, _tank.HullFacing), scatter);
+    }
+
+    /// <summary>The hit runs on screen frames for the shot's reason: it is a
+    /// hand-timed table of held frames, and under --capture the clock is fixed
+    /// at 1/60 so the same frame lands in two runs.</summary>
+    private void UpdateHit(double delta)
+    {
+        AtlasSet atlas = _tank.Atlas!;
+        int phase = _hit.Phase;
+        if (phase >= 0)
+        {
+            // Read every frame, not once at the strike: the hull can turn while
+            // the dust is still settling, and the hit has to stay on the plate
+            // it landed on rather than sliding round with the heading.
+            Vector2 tangent = atlas.HitTangent(_hit.Face, _tank.HullFacing);
+            _tank.HitOffset = atlas.HitOffset(_hit.Face, _tank.HullFacing)
+                              + tangent * _hit.Scatter;
+            _tank.HitBehind = atlas.HitFacing(_hit.Face, _tank.HullFacing) <= 0.0;
+        }
+        if (phase != _tank.HitPhase)
+        {
+            _tank.HitPhase = phase;
+            _tank.QueueRedraw();
+        }
+        _hit.Advance();
+    }
+
     /// <summary>Suspended while under way, and while anything else is driving
     /// the turret. A locked turret holding its world heading through a
     /// manoeuvre is the feature this harness exists to show; a scan quietly
@@ -564,6 +674,7 @@ public sealed partial class Main : Node2D
                      + $"  recoil {_recoil.Pitch,8:F5}/{_recoil.Roll,8:F5}"
                      + $"  exh {_tank.ExhaustPhase,2}@{_exhaust.Phase,5:F2}"
                      + $"  burn {_tank.FirePhase,2}/{_tank.BurnPhase,2}"
+                     + $"  hit {_tank.HitPhase,2}@{(_hit.Face == "" ? "-" : _hit.Face)}"
                      + $"  cell ({_cell.X},{_cell.Y})");
             if (++_frames >= _traceFrames)
             {
@@ -588,6 +699,7 @@ public sealed partial class Main : Node2D
         UpdateBurn(delta);
         UpdateScan(delta);
         UpdateShot(delta);
+        UpdateHit(delta);
 
         if (!Moving && _spinning)
         {
@@ -698,6 +810,14 @@ public sealed partial class Main : Node2D
                 break;
             case Key.K: _tank.TurretStabilised = !_tank.TurretStabilised; break;
             case Key.Z: Fire(); break;
+            case Key.U:
+                TakeHit(_hitFrom + HitStep);
+                break;
+            case Key.Y:
+                _calibre = (_calibre + 1) % Calibres.Length;
+                _tank.HitScale = Calibres[_calibre];
+                _tank.QueueRedraw();
+                break;
             case Key.V:
                 _tank.Source = _tank.Source == FlashSource.Rendered
                     ? FlashSource.Sheet
@@ -743,6 +863,9 @@ public sealed partial class Main : Node2D
                 _tank.Burning = false;
                 _tank.FirePhase = -1;
                 _tank.BurnPhase = -1;
+                _hit.Reset();
+                _hitCount = 0;
+                _tank.HitPhase = -1;
                 _scan.Reset();
                 _recoil.Reset();
                 _shotFrame = -1;
@@ -806,6 +929,14 @@ public sealed partial class Main : Node2D
                 + $"   J on fire: {On(_burning)}"
                 + (atlas.HasBurning
                     ? "" : "   [none for this tank - split an Engine]"),
+            $"hit: {(_tank.HitPhase < 0 ? " -" : _tank.HitPhase.ToString()),2}"
+                + $" / {atlas.HitPhases}"
+                + $"   {(_hit.Face == "" ? "-" : _hit.Face),-5}"
+                + $" from {_hitFrom,5:F0} deg"
+                + $"   {(_tank.HitBehind ? "behind" : "in front")}"
+                + $"   x{_tank.HitScale:F2}"
+                + "   U take a hit   Y calibre"
+                + (atlas.HasHit ? "" : "   [no plate table - re-render]"),
             $"flash: {(_tank.ActiveSource == FlashSource.Rendered ? "RENDERED (Blender layers, additive)" : "SHEET (painted, rotated)")}"
                 + (_tank.Source == FlashSource.Rendered && !_tank.CanRender
                     ? "   [no rendered flash for this tank - split a Barrel]" : "")
@@ -820,7 +951,7 @@ public sealed partial class Main : Node2D
                     + $"   recoil {_recoil.Pitch,7:F4} / {_recoil.Roll,7:F4}   Z fire",
             "",
             "left click: drive there    F turret lock    ESC cancel    A/D hull    Q/E turret",
-            "W/S step fwd/back    1/2/3 tank HT/MT/LT    wheel zoom, MMB pan",
+            "W/S step fwd/back    1/2/3 tank HT/MT/LT    wheel zoom, MMB pan    U hit, Y calibre",
             $"SPACE spin turret (axis check)    M mouse aim: {On(_aimWithMouse)}"
                 + $"    X axis cross: {On(_tank.ShowAxis)}",
             $"H hull layer: {On(_tank.ShowHull)}    T turret layer: {On(_tank.ShowTurret)}"

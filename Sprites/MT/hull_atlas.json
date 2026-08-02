@@ -17,6 +17,8 @@
   "excluded": [
     "Barrel",
     "Burn",
+    "Burst",
+    "Dust",
     "Fire",
     "Plume",
     "Turret"
