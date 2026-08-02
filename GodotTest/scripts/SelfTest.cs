@@ -317,9 +317,10 @@ public static class SelfTest
 
         GD.Print("engine tremble");
         var tremble = new EngineTremble();
-        // 68px of lever from the contact point to the roof - the same figure the
-        // pitch amplitude check is calibrated against
-        const double roofLeverPx = 68.0;
+        // The lever from the contact point to the roof - the same figure the
+        // pitch amplitude check is calibrated against, and the one the panel
+        // quotes under the level slider.
+        const double roofLeverPx = EngineTremble.RoofLeverPx;
         double tremblePeak = 0.0;
         int pitchCrossings = 0, rollCrossings = 0, axesAgree = 0, trembleSamples = 0;
         double lastPitch = 0.0, lastRoll = 0.0;
@@ -439,6 +440,35 @@ public static class SelfTest
         }
         Check("the tremble has a sideways component at every heading",
             worstTrembleAxis > 0.5, $"worst is {worstTrembleHeading} deg at {worstTrembleAxis:F2}");
+
+        // The level knob the panel puts a slider on. It is a multiplier over the
+        // tuned pair, so three things have to hold: it scales what comes out, it
+        // leaves the standing-to-moving ratio where it was measured (a slider
+        // that set an absolute amplitude would flatten that on the first drag),
+        // and it does not touch the frequency, which is not its business.
+        var loud = new EngineTremble { TopSpeed = 240.0, Level = 2.0 };
+        var silent = new EngineTremble { TopSpeed = 240.0, Level = 0.0 };
+        double loudPeak = 0.0, silentPeak = 0.0;
+        for (int i = 0; i < 60; i++)
+        {
+            loud.Advance(0.0, dt);
+            silent.Advance(0.0, dt);
+            loudPeak = Math.Max(loudPeak, Math.Abs(loud.Pitch));
+            silentPeak = Math.Max(silentPeak, Math.Abs(silent.Pitch));
+        }
+        Check("the tremble level scales what comes out",
+            Math.Abs(loudPeak - 2.0 * tremblePeak) < 1e-9,
+            $"{loudPeak:F5} at level 2 against {tremblePeak:F5} at level 1");
+        Check("at level zero the engine stops shaking the hull", silentPeak == 0.0,
+            $"peak {silentPeak:F6}");
+        Check("the level leaves the standing-to-moving ratio alone",
+            Math.Abs(loud.GainAt(240.0) / loud.GainAt(0.0)
+                     - tremble.GainAt(240.0) / tremble.GainAt(0.0)) < 1e-12,
+            $"{loud.GainAt(240.0) / loud.GainAt(0.0):F4}"
+            + $" against {tremble.GainAt(240.0) / tremble.GainAt(0.0):F4}");
+        Check("the level does not touch the frequency",
+            loud.PitchRateAt(240.0) == tremble.PitchRateAt(240.0),
+            $"{loud.PitchRateAt(240.0):F2} Hz against {tremble.PitchRateAt(240.0):F2} Hz");
 
         GD.Print("turret scan");
         var scan = new TurretScan();
@@ -1282,7 +1312,13 @@ public static class SelfTest
         int pick = 0;
         int writes = 0;
         panel.Toggle("flag", () => flag, on => { flag = on; writes++; });
-        panel.Slide("dial", 0.0, 10.0, 0.5, () => dial, v => { dial = v; writes++; });
+        // With a note line, because that is a third delegate on the row and can
+        // go stale exactly like the other two. It is what the level sliders say
+        // an abstract multiplier is worth in pixels, so a note that lags is a
+        // number that is wrong about the thing it was added to explain.
+        double noted = double.NaN;
+        panel.Slide("dial", 0.0, 10.0, 0.5, () => dial, v => { dial = v; writes++; }, "x",
+            () => { noted = dial; return "aside"; });
         panel.Choice("pick", new[] { "a", "b", "c" }, () => pick,
             i => { pick = i; writes++; });
 
@@ -1295,6 +1331,8 @@ public static class SelfTest
         panel.Sync();
         Check("syncing the panel from the harness writes nothing back",
             writes == 0, $"{writes} setter calls during a sync");
+        Check("a slider's note is refreshed along with it", noted == dial,
+            $"note read {noted} against {dial}");
 
         // ...and the other direction still works, or the panel is a display.
         var widgets = new List<Control>();
@@ -1355,7 +1393,8 @@ public static class SelfTest
         Check("firing rocks the tank back on its heels", liftPeak < -0.02,
             $"peak {liftPeak:F4}");
         Check("the kick stays inside the rigid-body amplitude",
-            Math.Abs(liftPeak) < 0.06, $"peak {Math.Abs(liftPeak):F4}");
+            Math.Abs(liftPeak) < Recoil.RigidBodyPeak,
+            $"peak {Math.Abs(liftPeak):F4} against {Recoil.RigidBodyPeak:F3}");
         Check("a shot down the hull axis does not roll it",
             recoilRollPeak < 1e-9, $"roll reached {recoilRollPeak:F6}");
         Check("the kick rings down quickly",
@@ -1377,6 +1416,35 @@ public static class SelfTest
         Check("a shot across the hull rolls it instead of pitching it",
             sideRoll > 0.02 && sidePitch < 1e-9,
             $"roll {sideRoll:F4}, pitch {sidePitch:F6}");
+
+        // The level knob, and the one place it differs in kind from the
+        // tremble's: it is read when the trigger goes rather than every frame,
+        // so what is asserted is the shot, not the state of the spring.
+        var soft = new Recoil { Level = 0.5 };
+        var dead = new Recoil { Level = 0.0 };
+        soft.Fire(0.0);
+        dead.Fire(0.0);
+        double softPeak = 0.0, deadPeak = 0.0;
+        for (int i = 0; i < 30; i++)
+        {
+            soft.Update(dt);
+            dead.Update(dt);
+            softPeak = Math.Max(softPeak, Math.Abs(soft.Pitch));
+            deadPeak = Math.Max(deadPeak, Math.Abs(dead.Pitch));
+        }
+        Check("the recoil level scales the kick",
+            Math.Abs(softPeak - 0.5 * Math.Abs(liftPeak)) < 1e-9,
+            $"{softPeak:F5} at level 0.5 against {Math.Abs(liftPeak):F5} at level 1");
+        Check("at level zero the gun does not move the hull",
+            deadPeak == 0.0 && !dead.Moving, $"peak {deadPeak:F6}");
+        // The number the panel prints beside the slider has to be the number the
+        // shot produces. Predicted on paper it would be 0.0945 - two and a half
+        // times what a 1/60 step against this spring actually reaches - so the
+        // caption would call the tuned setting dangerous and the dangerous one
+        // fine.
+        Check("the predicted peak is the peak that happens",
+            Math.Abs(new Recoil().PeakFor(1.0) - Math.Abs(liftPeak)) < 1e-9,
+            $"predicted {new Recoil().PeakFor(1.0):F5}, measured {Math.Abs(liftPeak):F5}");
 
         GD.Print("turret stabiliser");
         tank.HullFacing = 270.0;

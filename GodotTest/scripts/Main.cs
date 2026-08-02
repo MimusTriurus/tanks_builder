@@ -240,6 +240,17 @@ public sealed partial class Main : Node2D
                      && float.TryParse(userArgs[i + 1], NumberStyles.Float,
                          CultureInfo.InvariantCulture, out float calibre))
                 _hitScaleArg = calibre;
+            // The two panel sliders, on the command line for the same reason the
+            // calibre is: a slider is judged by a picture, and taking that
+            // picture twice at two settings cannot need a hand on the mouse.
+            else if (userArgs[i] == "--tremble" && i + 1 < userArgs.Length
+                     && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+                         CultureInfo.InvariantCulture, out double trembleLevel))
+                _tremble.Level = trembleLevel;
+            else if (userArgs[i] == "--recoil" && i + 1 < userArgs.Length
+                     && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+                         CultureInfo.InvariantCulture, out double recoilLevel))
+                _recoil.Level = recoilLevel;
             else if (userArgs[i] == "--flash" && i + 1 < userArgs.Length)
                 _flashSource = userArgs[i + 1].Equals("sheet",
                     StringComparison.OrdinalIgnoreCase)
@@ -310,6 +321,12 @@ public sealed partial class Main : Node2D
 
         var layer = new CanvasLayer();
         AddChild(layer);
+        // The only thing left on the scene itself: the message that says nothing
+        // loaded. Everything the corner used to carry - the key list, and the
+        // live numbers beside it - is in the panel now, where the numbers sit
+        // next to the control that moves them instead of in a block that had to
+        // be read against one. A run with --no-ui gets neither, which is what a
+        // capture wants.
         _hud = new Label { Position = new Vector2(16, 12) };
         _hud.AddThemeColorOverride("font_color", new Color(0.92f, 0.95f, 1.0f));
         _hud.AddThemeColorOverride("font_outline_color", new Color(0, 0, 0, 0.85f));
@@ -710,7 +727,11 @@ public sealed partial class Main : Node2D
         ui.Readout(() =>
         {
             AtlasSet a = _tank.Atlas!;
-            return $"{a.Count} headings, {a.Tile.X}px, {a.UnitsPerPixel:F5} u/px";
+            string order = Moving
+                ? $"-> ({_path[^1].X},{_path[^1].Y}), {_path.Count - _pathStep} left"
+                : "idle";
+            return $"{a.Count} headings, {a.Tile.X}px, {a.UnitsPerPixel:F5} u/px\n"
+                   + $"cell ({_cell.X},{_cell.Y})  {order}";
         });
 
         ui.Heading("heading");
@@ -734,6 +755,16 @@ public sealed partial class Main : Node2D
             if (!on)
                 _scan.Reset();
         });
+        // Which frame each heading resolves to. The pair is the thing worth
+        // seeing rather than either alone: two layers off the same axis, and a
+        // sprite set that has come apart says so here first.
+        ui.Readout(() =>
+        {
+            Vector2I frames = _tank.FrameIndices();
+            return $"hull {_tank.HullFacing,6:F1} deg -> frame {frames.X,2}\n"
+                   + $"turret {_tank.TurretFacing,6:F1} deg -> frame {frames.Y,2}"
+                   + $"   scan {_scan.Offset,6:F1} deg";
+        });
 
         ui.Heading("ride");
         ui.Toggle("body pitch  (P)", () => _pitchEnabled, on =>
@@ -751,8 +782,25 @@ public sealed partial class Main : Node2D
             _trembleEnabled = on;
             UpdateTremble(0.0);
         });
+        // A multiplier over the tuned pair rather than a raw amplitude - see
+        // EngineTremble.Level for why the standing and moving figures must keep
+        // their ratio. The caption carries the roof travel in pixels, because
+        // the multiplier says nothing about whether it is visible and the pixel
+        // figure is the whole argument the value was chosen on.
+        ui.Slide("engine tremble level", 0.0, 2.5, 0.05,
+            () => _tremble.Level, v => _tremble.Level = v, "x",
+            () => $"{_tremble.GainAt(_speed) * EngineTremble.RoofLeverPx:F2}px"
+                  + " of roof travel at this speed");
         ui.Toggle("turret stabiliser  (K)",
             () => _tank.TurretStabilised, on => _tank.TurretStabilised = on);
+        ui.Readout(() =>
+            $"speed {_speed,6:F0} / {_profile.TopSpeed:F0} px/s"
+            + $"   ramp {_profile.RampTime:F2}s over {_profile.RampDistance:F0}px\n"
+            + $"turn {_profile.TurnRate:F0} deg/s   corner {_profile.CornerSpeed:F0} px/s\n"
+            + $"pitch {_tank.Pitch,7:F4}   roll {_tank.Roll,7:F4}"
+            + $"   heave {_tank.Shake,2}px\n"
+            + $"tremble {_tank.TremblePitch,7:F4} / {_tank.TrembleRoll,7:F4}"
+            + $" at {_tremble.PitchRateAt(_speed),4:F1} Hz");
 
         ui.Heading("effects");
         ui.Toggle("engine exhaust  (O)", () => _exhaustEnabled, on =>
@@ -772,7 +820,37 @@ public sealed partial class Main : Node2D
                 _tank.Source = i == 0 ? FlashSource.Rendered : FlashSource.Sheet;
                 _tank.QueueRedraw();
             });
+        // Read when the trigger goes, not while the hull is rocking, so this
+        // sets the next shot rather than the one in the air.
+        ui.Slide("recoil level", 0.0, 2.5, 0.05,
+            () => _recoil.Level, v => _recoil.Level = v, "x",
+            () => $"kick peaks at {_recoil.PeakFor(_recoil.Level):F3}"
+                  + $", rigid body ends at {Recoil.RigidBodyPeak:F3}");
         ui.Press("fire  (Z)", Fire);
+        // Phase counters against the number of phases that were rendered. A
+        // clock that has walked off the end of its atlas shows up here as a
+        // number out of range, and nowhere else until the layer goes blank.
+        ui.Readout(() =>
+        {
+            AtlasSet a = _tank.Atlas!;
+            string phase(int p) => p < 0 ? " -" : $"{p,2}";
+            return $"exhaust {phase(_tank.ExhaustPhase)} / {a.ExhaustPhases}"
+                   + $" at {_exhaust.RateAt(_speed),4:F1} /s"
+                   + $"   density {_exhaust.Density,4:F2}"
+                   + (a.HasExhaust ? "" : "   [none - split an Engine]")
+                   + $"\nfire {phase(_tank.FirePhase)} at {_burn.FireRate,4:F1} /s"
+                   + $"   smoke {phase(_tank.BurnPhase)} at {_burn.SmokeRate,4:F1} /s"
+                   + $" / {a.BurnPhases}"
+                   + (a.HasBurning ? "" : "   [none - split an Engine]")
+                   + "\n" + (_tank.ActiveSource == FlashSource.Rendered
+                       ? $"shot phase {phase(_tank.ShotPhase)} / {EffectLayer.Hold.Length}"
+                         + $"   tile {a.TileOf("flash").X}px"
+                       : $"shot frame {phase(_tank.FlashFrame)} / {FlashSheet.Hold.Length}"
+                         + $"   muzzle {a.Muzzle(a.FrameFor(_tank.TurretFacing))}")
+                   + (_tank.Source == FlashSource.Rendered && !_tank.CanRender
+                       ? "   [falling back - split a Barrel]" : "")
+                   + $"\nrecoil {_recoil.Pitch,7:F4} / {_recoil.Roll,7:F4}";
+        });
 
         ui.Heading("armour");
         // A side of the hex rather than a bearing, because that is what the
@@ -800,10 +878,20 @@ public sealed partial class Main : Node2D
         ui.Readout(() =>
         {
             AtlasSet a = _tank.Atlas!;
+            string burst = $"burst {(_tank.HitPhase < 0 ? " -" : $"{_tank.HitPhase,2}")}"
+                           + $" / {a.HitPhases}"
+                           + $"   {(_hit.Face == "" ? "-" : _hit.Face)}"
+                           + $"   {(_tank.HitBehind ? "behind" : "in front")}"
+                           + (a.HasHit ? "" : "   [no plate table - re-render]");
             if (!a.HasScars)
-                return "no scar layers - re-render this scene";
-            return string.Join("\n", a.HitFaces.Select(f =>
-                $"{f,-6} {(_tank.MarksOn(f).Count == 0 ? "clean" : string.Concat(_tank.MarksOn(f).Select(m => m.Level)))}"));
+                return burst + "\nno scar layers - re-render this scene";
+            // The levels each plate is carrying, oldest first - "front 012" is a
+            // plate that has taken three. The list rather than the worst,
+            // because the marks accumulate and how many there are is the thing
+            // no still frame shows.
+            return burst + "\n" + string.Join("\n", a.HitFaces.Select(f =>
+                $"{f,-6} {(_tank.MarksOn(f).Count == 0 ? "clean" : string.Concat(_tank.MarksOn(f).Select(m => m.Level)))}"))
+                + $"   max {a.ScarLevels}";
         });
 
         ui.Heading("view");
@@ -871,7 +959,7 @@ public sealed partial class Main : Node2D
 
     public override void _Process(double delta)
     {
-        // give the HUD and both layers a couple of frames to settle first
+        // give the panel and both layers a couple of frames to settle first
         if (_capturePath is not null && ++_frames > _captureAfter)
         {
             Capture(_capturePath);
@@ -902,7 +990,12 @@ public sealed partial class Main : Node2D
                      + $"  exh {_tank.ExhaustPhase,2}@{_exhaust.Phase,5:F2}"
                      + $"  burn {_tank.FirePhase,2}/{_tank.BurnPhase,2}"
                      + $"  hit {_tank.HitPhase,2}@{(_hit.Face == "" ? "-" : _hit.Face)}"
-                     + $"  cell ({_cell.X},{_cell.Y})");
+                     + $"  cell ({_cell.X},{_cell.Y})"
+                     // Zoom, because a capture run has no panel to read it off
+                     // and a stray wheel over the window has already cost one
+                     // measurement: the A/B then differs by the whole picture
+                     // rather than by the silhouette.
+                     + $"  zoom {_camera.Zoom.X:F2}x");
             if (++_frames >= _traceFrames)
             {
                 GetTree().Quit();
@@ -950,8 +1043,6 @@ public sealed partial class Main : Node2D
                 }
             }
         }
-
-        UpdateHud();
     }
 
     public override void _UnhandledInput(InputEvent @event)
@@ -962,7 +1053,6 @@ public sealed partial class Main : Node2D
             {
                 Vector2 local = _field.ToLocal(GetGlobalMousePosition());
                 OrderMoveTo(_field.ClampCell(_field.CellAt(local)));
-                UpdateHud();
                 return;
             }
             float factor = mouse.ButtonIndex switch
@@ -975,7 +1065,6 @@ public sealed partial class Main : Node2D
             {
                 float zoom = Mathf.Clamp(_camera.Zoom.X * factor, 0.25f, 8.0f);
                 _camera.Zoom = new Vector2(zoom, zoom);
-                UpdateHud();
             }
             return;
         }
@@ -1080,7 +1169,6 @@ public sealed partial class Main : Node2D
         }
 
         _tank.QueueRedraw();
-        UpdateHud();
     }
 
     /// <summary>Everything back to how it started. A method rather than a case
@@ -1114,6 +1202,13 @@ public sealed partial class Main : Node2D
         _tank.Repair();
         _scan.Reset();
         _recoil.Reset();
+        // The two levels go back to their tuned values along with everything
+        // else. They are settings rather than state, which argues the other way,
+        // but a reset whose job is "back to the baseline" that leaves the shake
+        // at two and a half would be lying about what it did - and the tuned
+        // value is the one worth being able to get back to in one key.
+        _tremble.Level = 1.0;
+        _recoil.Level = 1.0;
         _shotFrame = -1;
         _tank.FlashFrame = -1;
         _tank.ShotPhase = -1;
@@ -1124,92 +1219,6 @@ public sealed partial class Main : Node2D
         _camera.Position = new Vector2(760, 500);
         SnapToCell();
         _tank.QueueRedraw();
-        UpdateHud();
-    }
-
-    private void UpdateHud()
-    {
-        AtlasSet atlas = _tank.Atlas!;
-        Vector2I frames = _tank.FrameIndices();
-        string On(bool v) => v ? "on" : "off";
-        string order = Moving
-            ? $"-> ({_path[^1].X},{_path[^1].Y}), {_path.Count - _pathStep} left"
-            : "idle";
-
-        _hud.Text = string.Join("\n", new[]
-        {
-            $"{atlas.Tag}   cell ({_cell.X},{_cell.Y})   {order}"
-                + $"   {atlas.UnitsPerPixel:F5} units/px   zoom {_camera.Zoom.X:F2}x",
-            $"hull   {_tank.HullFacing,6:F1} deg -> frame {frames.X,2}"
-                + $"      turret {_tank.TurretFacing,6:F1} deg -> frame {frames.Y,2}",
-            $"turret mode: {(_tank.TurretLocked ? "LOCKED - holds world heading" : "FREE - swings with the hull")}"
-                + (_aimWithMouse ? "   (mouse aim overrides)" : ""),
-            "",
-            $"speed {_speed,6:F0} / {_profile.TopSpeed:F0} px/s"
-                + $"   ramp {_profile.RampTime:F2}s over {_profile.RampDistance:F0}px"
-                + $"   turn {_profile.TurnRate:F0} deg/s   corner {_profile.CornerSpeed:F0} px/s",
-            $"pitch {_tank.Pitch,7:F4}   shake {_tank.Shake,2}px   roll {_tank.Roll,7:F4}"
-                + $"   P body pitch: {On(_pitchEnabled)}   B ground rumble: {On(_rumbleEnabled)}"
-                + $"   K turret stabiliser: {On(_tank.TurretStabilised)}",
-            $"tremble {_tank.TremblePitch,7:F4} / {_tank.TrembleRoll,7:F4}"
-                + $" at {_tremble.PitchRateAt(_speed),4:F1} Hz"
-                + $"   scan {_scan.Offset,6:F1} deg"
-                + $"   I engine tremble: {On(_trembleEnabled)}"
-                + $"   N turret scan: {On(_scanEnabled)}",
-            $"exhaust phase {(_tank.ExhaustPhase < 0 ? " -" : _tank.ExhaustPhase.ToString()),2}"
-                + $" / {atlas.ExhaustPhases}"
-                + $" at {_exhaust.RateAt(_speed),4:F1} /s"
-                + $"   density {_exhaust.Density,4:F2}"
-                + $"   O engine exhaust: {On(_exhaustEnabled)}"
-                + (atlas.HasExhaust
-                    ? "" : "   [none for this tank - split an Engine]"),
-            $"burning: fire {(_tank.FirePhase < 0 ? " -" : _tank.FirePhase.ToString()),2}"
-                + $" at {_burn.FireRate,4:F1} /s"
-                + $"   smoke {(_tank.BurnPhase < 0 ? " -" : _tank.BurnPhase.ToString()),2}"
-                + $" at {_burn.SmokeRate,4:F1} /s"
-                + $" / {atlas.BurnPhases}"
-                + $"   J on fire: {On(_burning)}"
-                + (atlas.HasBurning
-                    ? "" : "   [none for this tank - split an Engine]"),
-            $"hit: {(_tank.HitPhase < 0 ? " -" : _tank.HitPhase.ToString()),2}"
-                + $" / {atlas.HitPhases}"
-                + $"   {(_hit.Face == "" ? "-" : _hit.Face),-5}"
-                + $" from side {_hitSide + 1} at {HitFrom,3:F0} deg"
-                + $"   {(_tank.HitBehind ? "behind" : "in front")}"
-                + $"   x{_tank.HitScale:F2}"
-                + "   U take a hit   Y calibre"
-                + (atlas.HasHit ? "" : "   [no plate table - re-render]"),
-            // The levels each plate is carrying, oldest first - "front 012" is
-            // a plate that has taken three. The list rather than the worst,
-            // because the marks accumulate and how many there are is the thing
-            // you cannot read off a still frame.
-            "damage: " + (atlas.HasScars
-                ? string.Join("  ", atlas.HitFaces.Select(f =>
-                      $"{f} {(_tank.MarksOn(f).Count == 0 ? "-" : string.Concat(_tank.MarksOn(f).Select(m => m.Level)))}"))
-                  + $"   max {atlas.ScarLevels}   R repairs"
-                : "[no scar layers for this tank - re-render]"),
-            $"flash: {(_tank.ActiveSource == FlashSource.Rendered ? "RENDERED (Blender layers, additive)" : "SHEET (painted, rotated)")}"
-                + (_tank.Source == FlashSource.Rendered && !_tank.CanRender
-                    ? "   [no rendered flash for this tank - split a Barrel]" : "")
-                + $"   V swap",
-            _tank.ActiveSource == FlashSource.Rendered
-                ? $"phase {(_tank.ShotPhase < 0 ? " -" : _tank.ShotPhase.ToString()),2}"
-                    + $" / {EffectLayer.Hold.Length}   tile {atlas.TileOf("flash").X}"
-                    + $"   recoil {_recoil.Pitch,7:F4} / {_recoil.Roll,7:F4}   Z fire"
-                : $"shot frame {(_tank.FlashFrame < 0 ? " -" : _tank.FlashFrame.ToString()),2}"
-                    + $" / {FlashSheet.Hold.Length}"
-                    + $"   muzzle {atlas.Muzzle(atlas.FrameFor(_tank.TurretFacing))}"
-                    + $"   recoil {_recoil.Pitch,7:F4} / {_recoil.Roll,7:F4}   Z fire",
-            "",
-            "left click: drive there    F turret lock    ESC cancel    A/D hull    Q/E turret",
-            "W/S step fwd/back    1/2/3 tank HT/MT/LT    wheel zoom, MMB pan    U hit, Y calibre",
-            $"SPACE spin turret (axis check)    M mouse aim: {On(_aimWithMouse)}"
-                + $"    X axis cross: {On(_tank.ShowAxis)}",
-            $"H hull layer: {On(_tank.ShowHull)}    T turret layer: {On(_tank.ShowTurret)}"
-                + $"    G field: {On(_field.ShowField)}    R reset",
-            "Z fire    V flash source    P pitch    B rumble    I engine tremble"
-                + "    N turret scan    K stabiliser    O exhaust    J on fire",
-        });
     }
 
     private void Capture(string path)

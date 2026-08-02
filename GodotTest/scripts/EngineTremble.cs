@@ -28,6 +28,13 @@ namespace TankSpriteTest;
 /// </summary>
 public sealed class EngineTremble
 {
+    /// <summary>Distance from the contact patch to the hull roof, px - the lever
+    /// a shear amplitude acts on, and so the only way to say what one of these
+    /// numbers is worth. Named here because three places need it and want the
+    /// same one: the self-test's thresholds, the panel's caption, and the
+    /// reasoning in the gain comments below.</summary>
+    public const double RoofLeverPx = 68.0;
+
     /// <summary>Shear amplitude at a standstill, in the same units as
     /// <see cref="BodyPitch.Gain"/>: about 68px of lever from the contact point
     /// to the hull roof, so 0.005 is about a third of a pixel of roof travel
@@ -55,6 +62,25 @@ public sealed class EngineTremble
     /// with it, so the same number on the hull alone is a good deal quieter than
     /// the one that was complained about.</summary>
     public double DriveGain = 0.012;
+
+    /// <summary>
+    /// A plain multiplier over both gains, and the one number the panel puts on
+    /// a slider.
+    ///
+    /// A multiplier rather than an absolute amplitude, because the two gains are
+    /// not independent. Standing and moving are far apart on purpose - a still
+    /// tank is the only still thing on screen and a third of a pixel registers,
+    /// while one under way slides past hexes and the same travel disappears into
+    /// it - and a slider that set the amplitude directly would flatten that
+    /// difference on the first drag. This scales the pair and leaves the ratio
+    /// where it was measured.
+    ///
+    /// It reaches well past 1 on purpose. The tuned setting is the interesting
+    /// one to leave it at, but a knob that cannot show what too much looks like
+    /// is not much of a knob: around 2 the roof travel goes over a pixel and a
+    /// half, the aerial with it, and the engine turns into a buzz.
+    /// </summary>
+    public double Level = 1.0;
 
     /// <summary>Frequencies at rest, Hz.</summary>
     public double PitchHz = 11.5;
@@ -116,7 +142,8 @@ public sealed class EngineTremble
     /// <summary>Shear amplitude at a given speed. Exposed alongside
     /// <see cref="PitchRateAt"/> so the seam cost can be asserted at the speed
     /// it actually occurs at, rather than against a single worst number.</summary>
-    public double GainAt(double speed) => RestGain + (DriveGain - RestGain) * Load(speed);
+    public double GainAt(double speed) =>
+        Level * (RestGain + (DriveGain - RestGain) * Load(speed));
 
     /// <summary>Frequency of the pitch axis at a given speed, Hz. Exposed so the
     /// Nyquist headroom can be asserted rather than recalculated by hand every

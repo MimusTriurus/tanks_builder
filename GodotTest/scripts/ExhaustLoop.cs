@@ -76,7 +76,7 @@ public sealed class ExhaustLoop
         Density = IdleDensity + (DriveDensity - IdleDensity) * load;
     }
 
-    /// <summary>Phases per second at a given speed. Exposed so the HUD and the
+    /// <summary>Phases per second at a given speed. Exposed so the panel and the
     /// assertions can read the rate rather than recompute the ramp.</summary>
     public double RateAt(double speed) =>
         IdleRate + (DriveRate - IdleRate) * Load(speed);

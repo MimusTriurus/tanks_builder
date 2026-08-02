@@ -204,9 +204,16 @@ public sealed partial class ControlPanel : PanelContainer
 
     /// <summary>A number. <paramref name="step"/> is not decoration: the atlas
     /// is quantised, and a heading slider that slides continuously through
-    /// twelve rendered frames says the sprite is smoother than it is.</summary>
+    /// twelve rendered frames says the sprite is smoother than it is.
+    ///
+    /// <paramref name="note"/> is a second line under the slider saying what the
+    /// value is worth in units the eye has an opinion about - pixels of travel,
+    /// amplitude against the threshold it must not cross. A bare multiplier says
+    /// nothing about whether the effect is visible or excessive, and those are
+    /// the only two questions anyone drags one of these to answer.</summary>
     public void Slide(string text, double lo, double hi, double step,
-                      Func<double> get, Action<double> set, string unit = "")
+                      Func<double> get, Action<double> set, string unit = "",
+                      Func<string>? note = null)
     {
         var caption = new Label();
         caption.AddThemeFontSizeOverride("font_size", 12);
@@ -222,6 +229,14 @@ public sealed partial class ControlPanel : PanelContainer
         };
         bar.ValueChanged += v => { if (!_syncing) set(v); };
         _list.AddChild(bar);
+        Label? aside = null;
+        if (note is not null)
+        {
+            aside = new Label();
+            aside.AddThemeFontSizeOverride("font_size", 11);
+            aside.AddThemeColorOverride("font_color", new Color(0.62f, 0.66f, 0.72f));
+            _list.AddChild(aside);
+        }
         _rows.Add(new Row
         {
             Refresh = () =>
@@ -231,6 +246,8 @@ public sealed partial class ControlPanel : PanelContainer
                 caption.Text = step >= 1.0
                     ? $"{text}  {now:F0}{unit}"
                     : $"{text}  {now:F2}{unit}";
+                if (aside is not null)
+                    aside.Text = note!();
             },
         });
     }

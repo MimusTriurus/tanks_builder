@@ -79,7 +79,7 @@ public sealed partial class TankSprite : Node2D
     public double Roll;
 
     /// <summary>Engine tremble, as pitch and roll shear amplitudes. Held apart
-    /// from <see cref="Pitch"/> and <see cref="Roll"/> only so the HUD and the
+    /// from <see cref="Pitch"/> and <see cref="Roll"/> only so the panel and the
     /// trace can name the source; the shear sums them, which is exact because
     /// the displacement is linear in both.</summary>
     public double TremblePitch;

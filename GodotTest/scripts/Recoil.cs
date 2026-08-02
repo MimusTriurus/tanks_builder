@@ -26,11 +26,36 @@ public sealed class Recoil
     public double Stiffness = 1150.0;
     public double Damping = 38.0;
 
+    /// <summary>The amplitude past which the hull has stopped reading as a rigid
+    /// thing on suspension and started reading as rubber. Named here rather than
+    /// left as a number in the self-test because the panel prints it beside the
+    /// level slider: a setting that leaves the rigid-body range should be
+    /// visible before it is fired, not afterwards.</summary>
+    public const double RigidBodyPeak = 0.06;
+
     /// <summary>Angular velocity a shot injects. Peaks around 0.045 with the
     /// spring above - half again the driving pitch, which is right for a gun
     /// against a ramp, and still inside the amplitude that reads as a rigid
     /// body rather than as jelly.</summary>
     public double Impulse = 6.2;
+
+    /// <summary>
+    /// A multiplier on that impulse, and the one number the panel puts on a
+    /// slider.
+    ///
+    /// Read at the moment of firing rather than applied to the running spring,
+    /// which is where it belongs: the kick is delivered once and everything
+    /// after it is a spring ringing down on its own. Turning the knob while the
+    /// hull is still rocking does not reach back into a shot that has already
+    /// gone off - and a knob that did would be measuring itself on the next
+    /// frame rather than the shot.
+    ///
+    /// Goes past 1 for the same reason the tremble's does. The tuned value is
+    /// half again the driving pitch, which is right for a gun against a ramp;
+    /// double it and the hull leaves the rigid-body amplitude and starts to read
+    /// as rubber, and being able to see that is the point of the range.
+    /// </summary>
+    public double Level = 1.0;
 
     public double Pitch { get; private set; }
     public double Roll { get; private set; }
@@ -51,8 +76,8 @@ public sealed class Recoil
     public void Fire(double turretRelative)
     {
         double rad = Mathf.DegToRad(turretRelative);
-        _pitchRate -= Impulse * Math.Cos(rad);
-        _rollRate -= Impulse * Math.Sin(rad);
+        _pitchRate -= Impulse * Level * Math.Cos(rad);
+        _rollRate -= Impulse * Level * Math.Sin(rad);
     }
 
     public void Update(double delta)
@@ -61,6 +86,30 @@ public sealed class Recoil
         _rollRate += (-Stiffness * Roll - Damping * _rollRate) * delta;
         Pitch += _pitchRate * delta;
         Roll += _rollRate * delta;
+    }
+
+    /// <summary>
+    /// What a shot at <paramref name="level"/> would peak at, in the same units
+    /// as <see cref="Pitch"/>.
+    ///
+    /// Run through the same integrator at the same step rather than solved on
+    /// paper. The closed form for an impulse into this spring says 0.0945 at
+    /// level 1; a semi-implicit Euler step of 1/60 against omega = 33.9 says
+    /// 0.0397, which is what the screen does. Two and a half times apart, so a
+    /// caption quoting the analytic figure would call the tuned setting
+    /// dangerous and the dangerous one fine.
+    /// </summary>
+    public double PeakFor(double level)
+    {
+        const double step = 1.0 / 60.0;
+        double rate = -Impulse * level, angle = 0.0, peak = 0.0;
+        for (int i = 0; i < 60; i++)
+        {
+            rate += (-Stiffness * angle - Damping * rate) * step;
+            angle += rate * step;
+            peak = Math.Max(peak, Math.Abs(angle));
+        }
+        return peak;
     }
 
     public bool Moving => Math.Abs(Pitch) > 1e-5 || Math.Abs(Roll) > 1e-5

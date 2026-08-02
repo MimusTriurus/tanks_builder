@@ -47,7 +47,7 @@ public sealed class BurnLoop
     private double _smoke;
 
     /// <summary>Continuous positions round the two loops, in phases. Exposed for
-    /// the HUD and the assertions.</summary>
+    /// the panel and the assertions.</summary>
     public double FirePhase => _fire;
     public double SmokePhase => _smoke;
 
