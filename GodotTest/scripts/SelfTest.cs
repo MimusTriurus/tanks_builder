@@ -1003,24 +1003,40 @@ public static class SelfTest
                 turnsWithHull,
                 $"nose-on gives {head}, tail-on gives {atlas.FaceFor(270.0, 90.0)}");
 
-            // One lap of the U key, one shell per plate. The walk stepped by a
-            // fifth of a turn once, which put five bearings against four plates
-            // and left one plate taking two back to back - the right idea (stay
-            // off the normals) in the wrong place, because on screen it reads
-            // as a stuck key rather than as a test.
+            // A shell comes from a neighbouring cell, so it comes across a flat
+            // side, so the six directions a tank can drive in are the six it
+            // can be shot from. Not a knob: any bearing anything hands in has
+            // to resolve to one of those.
+            bool snapped = true;
+            for (int deg = 0; deg < 360; deg += 7)
+            {
+                int side = Main.SideFor(deg);
+                int edge = HexField.EdgeHeadings[side];
+                double gap = Math.Abs(Mathf.PosMod(edge - deg + 180.0, 360.0) - 180.0);
+                if (side < 0 || side >= HexField.EdgeHeadings.Length || gap > 30.0)
+                    snapped = false;
+            }
+            Check("a shot arrives across a flat side of the hex, whatever it was given",
+                snapped && HexField.EdgeHeadings.Length == 6,
+                string.Join(", ", HexField.EdgeHeadings));
+
+            // Six bearings against four plates cannot put one shell on each, so
+            // what is asserted is that a lap still *reaches* all four from every
+            // heading - a walk that never turned a plate up would be a walk
+            // that cannot be used to test one.
             int worstLap = int.MaxValue, worstAt = -1;
             foreach (int hull in atlas.RenderedFacings())
             {
                 var lap = new HashSet<string>();
-                for (int i = 0; i < atlas.HitFaces.Count; i++)
-                    lap.Add(atlas.FaceFor(Main.HitSeed + Main.HitStep * i, hull));
+                foreach (int edge in HexField.EdgeHeadings)
+                    lap.Add(atlas.FaceFor(edge, hull));
                 if (lap.Count < worstLap)
                 {
                     worstLap = lap.Count;
                     worstAt = hull;
                 }
             }
-            Check("a lap of the U key puts one shell on each plate",
+            Check("a lap of the six sides reaches every plate, from every heading",
                 worstLap == atlas.HitFaces.Count,
                 $"worst is {worstLap} of {atlas.HitFaces.Count},"
                 + $" at heading {worstAt}");

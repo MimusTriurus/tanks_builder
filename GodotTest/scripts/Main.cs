@@ -87,27 +87,49 @@ public sealed partial class Main : Node2D
     /// is nothing to switch on: each press is one hit.</summary>
     private readonly HitLoop _hit = new();
 
-    /// <summary>How far round the bearing walks between presses, and where it
-    /// starts.
+    /// <summary>
+    /// Which side of the hex the shooter is standing on, as an index into
+    /// <see cref="HexField.EdgeHeadings"/>.
     ///
-    /// A quarter turn against four plates, so a round of four presses puts one
-    /// on each. This was a fifth of a turn for a while, on the argument that a
-    /// step off the plate normals is what exercises the choice between two
-    /// neighbours - and that argument is right, but five bearings against four
-    /// plates leaves exactly one plate taking two of them back to back, which
-    /// reads as a stuck key rather than as a test. The boundary is asserted in
-    /// the self-test instead, where it does not depend on anyone pressing U
-    /// often enough to notice.
+    /// Six bearings, not any bearing: a tank is hit from a neighbouring cell,
+    /// and a neighbour is across a flat side. So the six directions a tank can
+    /// drive in are exactly the six it can be shot from, and there is one list
+    /// of them rather than a movement list and a gunnery list.
     ///
-    /// The seed keeps the walk off the normals anyway: 65 degrees puts the
-    /// first shell 25 off the plate it lands on at heading zero, and no heading
-    /// of the hull collapses the four bearings onto fewer than four plates.
+    /// It walked a free bearing in steps of 90 before this, seeded off the
+    /// plate normals so the choice between two neighbouring plates got
+    /// exercised. Two of the six now land square on a normal, which is not a
+    /// regression but the grid: where the shooter can stand is not a knob. The
+    /// boundary is asserted in the self-test at 44 and 46 degrees off, which
+    /// never depended on the key anyway.
+    ///
+    /// Six against four plates means a lap cannot put one shell on each - two
+    /// plates take two. It does reach all four from every hull heading, which
+    /// is the property worth keeping and is checked.
     /// </summary>
-    public const double HitStep = 90.0;
+    private int _hitSide = HexField.EdgeHeadings.Length - 1;   // U steps to 0 first
 
-    public const double HitSeed = 65.0;
+    private double HitFrom => HexField.EdgeHeadings[_hitSide];
 
-    private double _hitFrom = HitSeed - HitStep + 360.0;
+    /// <summary>The hex side a bearing arrives on. Any angle from anywhere -
+    /// the command line, a future game - is answered with one of the six.</summary>
+    public static int SideFor(double bearing)
+    {
+        int best = 0;
+        double bestGap = double.MaxValue;
+        for (int i = 0; i < HexField.EdgeHeadings.Length; i++)
+        {
+            double gap = Math.Abs(Mod(HexField.EdgeHeadings[i] - bearing + 180.0, 360.0)
+                                  - 180.0);
+            if (gap < bestGap)
+            {
+                bestGap = gap;
+                best = i;
+            }
+        }
+        return best;
+    }
+
     private int _hitCount;
 
     /// <summary>Calibres, as a multiplier on the rendered hit - key Y.
@@ -633,7 +655,10 @@ public sealed partial class Main : Node2D
         AtlasSet atlas = _tank.Atlas!;
         if (!atlas.HasHit)
             return;
-        _hitFrom = Mod(fromBearing, 360.0);
+        // Snapped, not taken as given: a shell arrives from a neighbouring
+        // cell, so every angle anything hands in resolves to one of the six
+        // sides rather than to itself.
+        _hitSide = SideFor(fromBearing);
         // Deterministic under --capture and --trace, which fix the time step so
         // two runs can be diffed; a random scatter would put the two hits in
         // different places and the diff would measure that instead.
@@ -647,7 +672,7 @@ public sealed partial class Main : Node2D
         // +-0.45 rather than the burst's old +-0.6: the mark has to stay on the
         // armour, and it is about 17px wide against half-widths of 38 to 61.
         float scatter = ScatterAt(_hitCount);
-        string face = atlas.FaceFor(_hitFrom, _tank.HullFacing);
+        string face = atlas.FaceFor(HitFrom, _tank.HullFacing);
         _hit.Strike(face, scatter);
         // One level per hit, so hitting the same plate three times walks it
         // scorch -> gouge -> breach, which is the only way to see that the
@@ -750,11 +775,15 @@ public sealed partial class Main : Node2D
         ui.Press("fire  (Z)", Fire);
 
         ui.Heading("armour");
-        // A bearing rather than a plate, because that is what the game has -
-        // where the shooter stands. Stepped by 5, which is finer than the
-        // plates and coarse enough to land on a boundary on purpose.
-        ui.Slide("shot comes from", 0.0, 355.0, 5.0,
-            () => _hitFrom, v => _hitFrom = v, " deg");
+        // A side of the hex rather than a bearing, because that is what the
+        // game has: a shell comes from a neighbouring cell, and there are six
+        // of those. A slider ran 0..355 here and offered 66 bearings that
+        // cannot happen.
+        ui.Radio(() => $"shot comes from side {_hitSide + 1}"
+                       + $" - {HitFrom:F0} deg  (U steps)",
+            Enumerable.Range(1, HexField.EdgeHeadings.Length)
+                .Select(i => i.ToString()).ToArray(),
+            () => _hitSide, i => _hitSide = i);
         ui.Choice("calibre  (Y)", new[] { "0.7x", "1.0x", "1.4x" },
             () => _calibre,
             i =>
@@ -766,7 +795,7 @@ public sealed partial class Main : Node2D
             });
         // Takes the bearing on the slider rather than walking it on, so the
         // panel can aim and the key can sweep.
-        ui.PressPair("take a hit", () => TakeHit(_hitFrom),
+        ui.PressPair("take a hit", () => TakeHit(HitFrom),
                      "repair", () => _tank.Repair());
         ui.Readout(() =>
         {
@@ -1009,7 +1038,8 @@ public sealed partial class Main : Node2D
             case Key.K: _tank.TurretStabilised = !_tank.TurretStabilised; break;
             case Key.Z: Fire(); break;
             case Key.U:
-                TakeHit(_hitFrom + HitStep);
+                TakeHit(HexField.EdgeHeadings[
+                    (_hitSide + 1) % HexField.EdgeHeadings.Length]);
                 break;
             case Key.Y:
                 _calibre = (_calibre + 1) % Calibres.Length;
@@ -1144,7 +1174,7 @@ public sealed partial class Main : Node2D
             $"hit: {(_tank.HitPhase < 0 ? " -" : _tank.HitPhase.ToString()),2}"
                 + $" / {atlas.HitPhases}"
                 + $"   {(_hit.Face == "" ? "-" : _hit.Face),-5}"
-                + $" from {_hitFrom,5:F0} deg"
+                + $" from side {_hitSide + 1} at {HitFrom,3:F0} deg"
                 + $"   {(_tank.HitBehind ? "behind" : "in front")}"
                 + $"   x{_tank.HitScale:F2}"
                 + "   U take a hit   Y calibre"

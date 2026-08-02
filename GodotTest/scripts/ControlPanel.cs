@@ -254,6 +254,55 @@ public sealed partial class ControlPanel : PanelContainer
         });
     }
 
+    /// <summary>
+    /// A short row of numbered buttons, one of which is down.
+    ///
+    /// A dropdown would do the same job in less room, and does not, because
+    /// these are directions: which one is chosen is worth seeing without
+    /// opening anything, and the six of them are a shape - the hex's six sides
+    /// - rather than a list. Godot's ButtonGroup handles the "one down unpresses
+    /// the rest" part; the caption carries what the number means.
+    /// </summary>
+    public void Radio(Func<string> caption, IReadOnlyList<string> labels,
+                      Func<int> get, Action<int> set)
+    {
+        var text = new Label();
+        text.AddThemeFontSizeOverride("font_size", 12);
+        _list.AddChild(text);
+        var row = new HBoxContainer();
+        _list.AddChild(row);
+        var group = new ButtonGroup();
+        var buttons = new List<Button>();
+        for (int i = 0; i < labels.Count; i++)
+        {
+            int index = i;
+            var button = new Button
+            {
+                Text = labels[i],
+                ToggleMode = true,
+                ButtonGroup = group,
+                FocusMode = FocusModeEnum.None,
+                SizeFlagsHorizontal = SizeFlags.ExpandFill,
+                ButtonPressed = i == get(),
+            };
+            button.Toggled += on => { if (on && !_syncing) set(index); };
+            row.AddChild(button);
+            buttons.Add(button);
+        }
+        _rows.Add(new Row
+        {
+            Refresh = () =>
+            {
+                // Only the chosen one is written: the group unpresses the rest
+                // by itself, and writing `false` over the one that is down is
+                // a state the group refuses to be in.
+                int at = Math.Clamp(get(), 0, buttons.Count - 1);
+                buttons[at].ButtonPressed = true;
+                text.Text = caption();
+            },
+        });
+    }
+
     /// <summary>Something that happens rather than something that is.</summary>
     public void Press(string text, Action go)
     {
