@@ -53,13 +53,27 @@ CONFIG = {
     "repo": REPO,
     "output_dir": os.path.join(REPO, "out"),
 
-    # scene objects. Read the scene before trusting these: the three scenes in
-    # Scenes/ are hand-split and have differed before.
-    "root": "world",
+    # Scene objects, as bare part names. They resolve on either layout - to
+    # themselves on the old single-mesh scenes and to `Hull.Geometry` and friends
+    # on a parts-built one - so this block does not change per tank. `tank_parts`
+    # owns that rule and the reasons for it; `layout` below is what differs.
     "hull": "Hull",
     "turret": "Turret",
     "barrel": "Barrel",
     "exhaust": "Engine",        # a name *prefix*: two outlets are two objects
+    # None -> read it off the scene, which is the only honest source: a flag
+    # could be stale and would then drive the wrong shape of tank.
+    "layout": None,
+    # the single-mesh layout's one root. Unused on a parts scene, which has four.
+    "root": "world",
+
+    # --- the parts layout only ----------------------------------------------
+    # The belts. Phases pose them along their own loop; 0 renders them still.
+    # `rebuild` names the belts to lay out afresh from one of their own links so
+    # that the cycle closes by construction - on the delivered asset it does not,
+    # and `track_cycle.report`'s `tread_repeat` is the number that says so.
+    "track_phases": 8,
+    "rebuild": ("L.Caterpillar.Geometry", "R.Caterpillar.Geometry"),
     "flash": "Flash",
     "smoke": "Smoke",
     "plume": "Plume",
@@ -215,7 +229,12 @@ CONFIG = {
 # plate passes over the hole.
 SCAR_FACES = ("front", "rear", "left", "right")
 SCAR_LAYERS = tuple("scar_" + f for f in SCAR_FACES)
-LAYER_ORDER = (("hex", "hull", "turret") + SCAR_LAYERS
+TRACK_LAYERS = ("track_left", "track_right")
+# The belts go straight after the hull and before everything that happens *to*
+# the tank, because they are not an effect on it - they are the part of it that
+# the hull layer cut away with a holdout. Absent on a single-mesh scene, and
+# `_atlases` skips whatever has no file, so one order serves both layouts.
+LAYER_ORDER = (("hex", "hull") + TRACK_LAYERS + ("turret",) + SCAR_LAYERS
                + ("exhaust", "burn", "fire", "smoke", "flash", "dust", "burst"))
 
 
@@ -227,26 +246,53 @@ def _load(cfg, name):
     return mod
 
 
-def _find(scene, name):
-    """An object by name, tolerating the leading space P > Selection leaves."""
-    ob = scene.objects.get(name)
-    if ob is not None:
-        return ob
-    return next((o for o in scene.objects if o.name.strip() == name.strip()), None)
-
-
 def parts(cfg=None):
-    """Which hand-split pieces this scene has, and so which layers it gets."""
+    """Which pieces this scene has, and so which layers it gets.
+
+    Also which shape the scene is, because that decides what the tank's own
+    layers are: two on a single-mesh scene, four on a parts-built one. Read from
+    the scene, never configured - see `tank_parts.layout`.
+    """
     cfg = dict(CONFIG, **(cfg or {}))
     scene = bpy.context.scene
-    exhaust = _load(cfg, "exhaust_point").ports_of(scene, {"prefix": cfg["exhaust"]})
+    tp = _load(cfg, "tank_parts")
+    kind = cfg["layout"] or tp.layout(scene)
+    named = tp.describe(cfg, scene)
+    exhaust = tp.ports(cfg["exhaust"], scene)
     # The hit needs no hand split at all - `hit_point` fires rays at the hull
     # and finds the plates - so every scene with a hull gets it. That is why the
     # guard below is about the two effects that *do* need a split.
-    return {"flash": _find(scene, cfg["barrel"]) is not None,
+    return {"layout": kind,
+            "flash": named["barrel_mesh"] is not None,
             "exhaust": bool(exhaust),
-            "hit": _find(scene, cfg["hull"]) is not None,
-            "exhaust_objects": [o.name for o in exhaust]}
+            "hit": tp.mesh(cfg["hull"], scene, required=False) is not None,
+            "exhaust_objects": [o.name for o in exhaust],
+            "named": named}
+
+
+def _names(cfg, have):
+    """The concrete object names every stage below hands to the modules.
+
+    Two kinds, and conflating them is what broke on the parts layout. A **mesh**
+    is what gets measured - rays, vertex clouds, bore axes. A **root** is what a
+    layer renders and what parenting is judged against; on a single-mesh scene a
+    part's root and its mesh are the same object, which is why nothing noticed
+    until there was a scene where they are not.
+
+    Holdouts and excludes are a third thing and appear here untouched:
+    `sprite_atlas.by_hints` matches by substring and pulls in descendants, so the
+    bare "Hull" already means hull-plus-engine on both layouts.
+    """
+    named = have["named"]
+    return {
+        "hull_mesh": named["hull_mesh"],
+        "turret_mesh": named["turret_mesh"],
+        "barrel_mesh": named["barrel_mesh"],
+        "hull_root": named["hull_root"],
+        "turret_root": named["turret_root"],
+        "hull_hint": cfg["hull"],
+        "turret_hint": cfg["turret"],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -281,63 +327,116 @@ def prepare(cfg=None):
             bpy.data.objects.remove(ob)
             bpy.data.meshes.remove(data)
 
-    out = {"have": have, "muzzle": None, "exhaust": None, "hits": None}
+    name = _names(cfg, have)
+    hull, turret = name["hull_mesh"], name["turret_mesh"]
+    out = {"have": have, "names": name, "layout": have["layout"],
+           "axis": None, "muzzle": None, "exhaust": None, "hits": None}
+
+    # The ring axis has to exist before anything below it: the flash checks its
+    # bearing against it and the burst is built on it. On the old scenes it is
+    # already stamped, by hand, possibly tuned - so measure only when there is
+    # nothing there at all, and say which it was. Silently re-stamping would
+    # overwrite a hand-set axis, and a wrong axis is the one error that shows up
+    # in no output number.
+    axis_mod = _load(cfg, "turret_axis")
+    held = [n for n in (hull, turret) if "ring_axis" in scene.objects[n].keys()]
+    if held:
+        out["axis"] = {"from": "already stamped on %s" % ", ".join(held),
+                       "ring_axis": [float(v) for v in
+                                     scene.objects[held[0]]["ring_axis"]]}
+    else:
+        # stamp but do not apply: these scenes are placed by hand and moving a
+        # turret's origin is not this stage's business
+        report = axis_mod.set_axis(dict(axis_mod.CONFIG, turret=turret,
+                                        hull=hull, apply=False, stamp=True))
+        out["axis"] = {"from": "measured here", "ring_axis": report.get("axis"),
+                       "roundness": report.get("roundness"),
+                       "wobble_px": report.get("wobble_px_before"),
+                       "warnings": report.get("warnings")}
 
     out["hits"] = _load(cfg, "hit_point").set_hits(
-        {"hull": cfg["hull"], "turret": cfg["turret"],
+        {"hull": hull, "turret": turret, "hull_root": name["hull_root"],
+         "turret_root": name["turret_root"],
          "front_dir": cfg["front_dir"], "azimuth": cfg["azimuth"],
          "elevation": cfg["elevation"], "camera_elevation": cfg["elevation"],
-         "stamp_on": [cfg["hull"]]})
+         "stamp_on": [hull]})
     if have["flash"]:
         out["muzzle"] = _load(cfg, "muzzle_point").set_muzzle(
-            {"turret": cfg["turret"], "barrel": cfg["barrel"],
-             "stamp_on": [cfg["turret"], cfg["barrel"]]})
+            {"turret": turret, "barrel": name["barrel_mesh"],
+             "turret_root": name["turret_root"],
+             "stamp_on": [turret, name["barrel_mesh"]]})
     if have["exhaust"]:
         out["exhaust"] = _load(cfg, "exhaust_point").set_exhaust(
-            {"prefix": cfg["exhaust"], "hull": cfg["hull"],
-             "turret": cfg["turret"], "stamp_on": [cfg["hull"]]})
+            {"prefix": cfg["exhaust"], "hull": hull, "turret": turret,
+             "hull_root": name["hull_root"],
+             "turret_root": name["turret_root"], "stamp_on": [hull]})
 
-    hex_mod = _load(cfg, "hex_base")
-    out["hex"] = hex_mod.make_hex(dict(
-        hex_mod.CONFIG,
-        target=cfg["root"], name=cfg["hex"],
-        # the tank in these scenes is already placed and must not be moved;
-        # ground_z None then stands the tile under its tracks
-        move_target=False, center_on_origin=False, ground_z=None))
+    # The tile. On a parts-built scene it is `parts_render`'s, because
+    # `hex_base.make_hex` walks one root and that scene has four - and it is
+    # built inside the render there, so there is nothing to do here.
+    if have["layout"] == "parts":
+        out["hex"] = {"from": "parts_render.ground_tile, at render time"}
+    else:
+        hex_mod = _load(cfg, "hex_base")
+        out["hex"] = hex_mod.make_hex(dict(
+            hex_mod.CONFIG,
+            target=cfg["root"], name=cfg["hex"],
+            # the tank in these scenes is already placed and must not be moved;
+            # ground_z None then stands the tile under its tracks
+            move_target=False, center_on_origin=False, ground_z=None))
 
     if have["flash"]:
         flash_mod = _load(cfg, "muzzle_flash")
-        flash_mod.build({"turret": cfg["turret"], "name": cfg["flash"]})
-        flash_mod.build_smoke({"turret": cfg["turret"], "name": cfg["smoke"]})
+        flash_mod.build({"turret": turret, "name": cfg["flash"]})
+        flash_mod.build_smoke({"turret": turret, "name": cfg["smoke"]})
     if have["exhaust"]:
-        _load(cfg, "exhaust_plume").build({"hull": cfg["hull"],
-                                           "name": cfg["plume"]})
+        _load(cfg, "exhaust_plume").build({"hull": hull, "name": cfg["plume"]})
         fire_mod = _load(cfg, "engine_fire")
-        fire_mod.build({"hull": cfg["hull"], "name": cfg["fire"]})
-        fire_mod.build_smoke({"hull": cfg["hull"], "name": cfg["burn"]})
+        fire_mod.build({"hull": hull, "name": cfg["fire"]})
+        fire_mod.build_smoke({"hull": hull, "name": cfg["burn"]})
 
     burst_mod = _load(cfg, "hit_burst")
-    burst_mod.build({"hull": cfg["hull"], "name": cfg["burst"],
-                     "azimuth": cfg["azimuth"], "elevation": cfg["elevation"]})
-    burst_mod.build_dust({"hull": cfg["hull"], "name": cfg["dust"],
-                          "azimuth": cfg["azimuth"],
-                          "elevation": cfg["elevation"]})
+    seat = {"hull": hull, "turret": turret, "hull_root": name["hull_root"],
+            "turret_root": name["turret_root"],
+            "azimuth": cfg["azimuth"], "elevation": cfg["elevation"]}
+    burst_mod.build(dict(seat, name=cfg["burst"]))
+    burst_mod.build_dust(dict(seat, name=cfg["dust"]))
 
     scar_mod = _load(cfg, "hit_scar")
-    scar_mod.build({"hull": cfg["hull"], "name": cfg["scar"]})
-    out["scar"] = {"faces": scar_mod.faces({"hull": cfg["hull"]}),
+    scar_mod.build({"hull": hull, "name": cfg["scar"]})
+    out["scar"] = {"faces": scar_mod.faces({"hull": hull}),
                    "levels": len(scar_mod.LEVELS),
-                   "fit": scar_mod.fits({"hull": cfg["hull"]})}
+                   "fit": scar_mod.fits({"hull": hull})}
     return out
 
 
-def render(cfg=None):
-    """Render every layer this scene has as one framed set."""
-    cfg = dict(CONFIG, **(cfg or {}))
-    atlas = _load(cfg, "sprite_atlas")
-    have = parts(cfg)
+def _body_layers(cfg, have):
+    """The layers that are the tank itself, and how to put the scene back.
 
-    layers = [
+    Returns `(layers, body)`, where `body` is `parts_render.Body` on a parts
+    scene and None on a single-mesh one. It owns transient scene state - the
+    ring-cut box, the tile, and belt vertices that are *written* - so the caller
+    must call `body.restore()` in a `finally`.
+
+    The single-mesh layout keeps its `exclude` list and the parts layout has
+    none, and that difference is the layouts in one line: there the hull layer is
+    `world`, meaning the whole tank, so everything that is not hull has to be
+    named and taken out; here it is `Hull.World`, which contains the hull and
+    nothing else. Every effect object sits at the scene root either way, which is
+    why they are excluded there and silent here.
+    """
+    if have["layout"] == "parts":
+        pr = _load(cfg, "parts_render")
+        body = pr.Body(dict(pr.CONFIG,
+                            output_dir=cfg["output_dir"], steps=cfg["steps"],
+                            tile=cfg["tile"], azimuth=cfg["azimuth"],
+                            elevation=cfg["elevation"],
+                            front_dir=cfg["front_dir"],
+                            track_phases=cfg["track_phases"],
+                            rebuild=cfg["rebuild"]))
+        return list(body.layers), body
+
+    return [
         # the turret hint excludes descendants, which is what keeps the barrel
         # out of the hull layer. The plume and the flame sit at scene root and
         # so are inside `world` too - they are named here for the same reason.
@@ -346,7 +445,23 @@ def render(cfg=None):
                      cfg["burst"], cfg["dust"], cfg["scar"]]},
         {"name": "turret", "target": cfg["turret"]},
         {"name": "hex", "target": cfg["hex"], "static": True},
-    ]
+    ], None
+
+
+def render(cfg=None):
+    """Render every layer this scene has as one framed set."""
+    cfg = dict(CONFIG, **(cfg or {}))
+    atlas = _load(cfg, "sprite_atlas")
+    have = parts(cfg)
+    named = _names(cfg, have)
+    hull, turret = named["hull_mesh"], named["turret_mesh"]
+    layers, body = _body_layers(cfg, have)
+
+    # Holdouts stay spelled bare. `by_hints` matches by substring and pulls in
+    # descendants, so "Hull" is hull-plus-engine and "Turret" is turret-plus-gun
+    # on both layouts, while the phase hooks below want the one mesh that carries
+    # the stamps. Two roles, two spellings - see `_names`.
+    blockers = [cfg["hull"], cfg["turret"]]
 
     if have["flash"]:
         flash_mod = _load(cfg, "muzzle_flash")
@@ -356,11 +471,11 @@ def render(cfg=None):
              "fit": False,
              "tile_scale": cfg["effect_tile_scale"],
              "phases": cfg["phases"],
-             "phase_hook": flash_mod.phase_hook({"turret": cfg["turret"],
+             "phase_hook": flash_mod.phase_hook({"turret": turret,
                                                  "name": cfg["flash"]}),
              # the tank blocks without being drawn: fired away from the camera
              # the flash is behind the turret, and a flat layer has no depth
-             "holdout": [cfg["hull"], cfg["turret"]]},
+             "holdout": blockers},
             # smoke is its own layer because it occludes where the flash emits.
             # One layer cannot be both: fire adds light to what is behind it,
             # smoke takes it away, and the game blends them differently.
@@ -368,8 +483,8 @@ def render(cfg=None):
              "tile_scale": cfg["effect_tile_scale"],
              "phases": cfg["phases"],
              "phase_hook": flash_mod.smoke_phase_hook(
-                 {"turret": cfg["turret"], "name": cfg["smoke"]}),
-             "holdout": [cfg["hull"], cfg["turret"]]},
+                 {"turret": turret, "name": cfg["smoke"]}),
+             "holdout": blockers},
         ])
 
     if have["exhaust"]:
@@ -384,9 +499,9 @@ def render(cfg=None):
             {"name": "exhaust", "target": cfg["plume"], "fit": False,
              "tile_scale": cfg["plume_tile_scale"],
              "phases": cfg["exhaust_phases"],
-             "phase_hook": plume_mod.phase_hook({"hull": cfg["hull"],
+             "phase_hook": plume_mod.phase_hook({"hull": hull,
                                                  "name": cfg["plume"]}),
-             "holdout": [cfg["hull"], cfg["turret"]]})
+             "holdout": blockers})
 
         fire_mod = _load(cfg, "engine_fire")
         layers.append(
@@ -397,9 +512,9 @@ def render(cfg=None):
             {"name": "fire", "target": cfg["fire"], "fit": False,
              "tile_scale": cfg["fire_tile_scale"],
              "phases": cfg["fire_phases"],
-             "phase_hook": fire_mod.phase_hook({"hull": cfg["hull"],
+             "phase_hook": fire_mod.phase_hook({"hull": hull,
                                                 "name": cfg["fire"]}),
-             "holdout": [cfg["hull"], cfg["turret"]]})
+             "holdout": blockers})
         layers.append(
             # The other half of the fire. Same holdout, same phase count, drawn
             # *under* the flame. Its frame is its own config rather than the
@@ -408,18 +523,19 @@ def render(cfg=None):
             {"name": "burn", "target": cfg["burn"], "fit": False,
              "tile_scale": cfg["burn_tile_scale"],
              "phases": cfg["fire_phases"],
-             "phase_hook": fire_mod.smoke_phase_hook({"hull": cfg["hull"],
+             "phase_hook": fire_mod.smoke_phase_hook({"hull": hull,
                                                       "name": cfg["burn"]}),
-             "holdout": [cfg["hull"], cfg["turret"]]})
+             "holdout": blockers})
 
     burst_mod = _load(cfg, "hit_burst")
-    for name, target, hook in (
-            ("dust", cfg["dust"], burst_mod.dust_phase_hook(
-                {"hull": cfg["hull"], "name": cfg["dust"],
-                 "azimuth": cfg["azimuth"], "elevation": cfg["elevation"]})),
-            ("burst", cfg["burst"], burst_mod.phase_hook(
-                {"hull": cfg["hull"], "name": cfg["burst"],
-                 "azimuth": cfg["azimuth"], "elevation": cfg["elevation"]}))):
+    seat = {"hull": hull, "turret": turret, "hull_root": named["hull_root"],
+            "turret_root": named["turret_root"],
+            "azimuth": cfg["azimuth"], "elevation": cfg["elevation"]}
+    for layer_name, target, hook in (
+            ("dust", cfg["dust"],
+             burst_mod.dust_phase_hook(dict(seat, name=cfg["dust"]))),
+            ("burst", cfg["burst"],
+             burst_mod.phase_hook(dict(seat, name=cfg["burst"])))):
         layers.append(
             # `static`, so one frame rather than twelve: a hit is not welded to
             # the tank and a ball of light looks the same from every azimuth.
@@ -434,12 +550,12 @@ def render(cfg=None):
             # drawing the layer behind the tank when the plate faces away -
             # which the stamped `facing` says, and which agreed with the hull on
             # all sixteen heading-face pairs tested.
-            {"name": name, "target": target, "static": True, "fit": False,
+            {"name": layer_name, "target": target, "static": True, "fit": False,
              "tile_scale": cfg["burst_tile_scale"],
              "phases": cfg["hit_phases"], "phase_hook": hook})
 
     scar_mod = _load(cfg, "hit_scar")
-    for face in scar_mod.faces({"hull": cfg["hull"]}):
+    for face in scar_mod.faces({"hull": hull}):
         layers.append(
             # The opposite of the pair above in every way that matters, and the
             # comparison is the point. A hole is flat, stuck to one plate and
@@ -454,19 +570,33 @@ def render(cfg=None):
             {"name": "scar_" + face, "target": cfg["scar"], "fit": False,
              "tile_scale": cfg["scar_tile_scale"],
              "phases": len(scar_mod.LEVELS),
-             "phase_hook": scar_mod.phase_hook(face, {"hull": cfg["hull"],
+             "phase_hook": scar_mod.phase_hook(face, {"hull": hull,
                                                       "name": cfg["scar"]}),
-             "holdout": [cfg["hull"], cfg["turret"]]})
+             "holdout": blockers})
 
-    return atlas.render_set({
-        "shared": {
-            "output_dir": cfg["output_dir"],
-            "steps": cfg["steps"], "tile": cfg["tile"],
-            "azimuth": cfg["azimuth"], "elevation": cfg["elevation"],
-            "hex_labels": {"front_dir": cfg["front_dir"], "orientation": "flat"},
-        },
-        "layers": layers,
-    })
+    shared = {
+        "output_dir": cfg["output_dir"],
+        "steps": cfg["steps"], "tile": cfg["tile"],
+        "azimuth": cfg["azimuth"], "elevation": cfg["elevation"],
+        "hex_labels": {"front_dir": cfg["front_dir"], "orientation": "flat"},
+    }
+    if body is not None:
+        shared.update(body.shared())
+
+    try:
+        res = atlas.render_set({"shared": shared, "layers": layers})
+    finally:
+        # the belts are posed by writing vertex coordinates and the tile and the
+        # ring-cut box are transient objects, so the scene goes back whatever
+        # happened
+        if body is not None:
+            body.restore()
+
+    if body is not None:
+        body.verify(res)
+        res["body"] = body.report(res)
+    res["layout"] = have["layout"]
+    return res
 
 
 def stamp_table(cfg=None):
@@ -486,13 +616,18 @@ def stamp_table(cfg=None):
     cfg = dict(CONFIG, **(cfg or {}))
     hp = _load(cfg, "hit_point")
     burst_mod = _load(cfg, "hit_burst")
+    named = _names(cfg, parts(cfg))
+    hull = named["hull_mesh"]
 
     hull_path = os.path.join(cfg["output_dir"], "hull_atlas.json")
     with open(hull_path, encoding="utf-8") as fh:
         hull_meta = json.load(fh)
     angles = [f["angle"] for f in hull_meta["frames"][:hull_meta["count"]]]
 
-    origin = burst_mod.origin_of({"hull": cfg["hull"], "name": cfg["burst"]})
+    origin = burst_mod.origin_of(
+        {"hull": hull, "turret": named["turret_mesh"],
+         "hull_root": named["hull_root"], "turret_root": named["turret_root"],
+         "name": cfg["burst"]})
     written = []
     for name in ("burst", "dust"):
         path = os.path.join(cfg["output_dir"], "%s_atlas.json" % name)
@@ -504,7 +639,7 @@ def stamp_table(cfg=None):
             "origin": [round(float(v), 6) for v in origin],
             "faces": hp.project_plates(
                 origin, meta["units_per_pixel"], angles,
-                {"hull": cfg["hull"], "azimuth": cfg["azimuth"],
+                {"hull": hull, "azimuth": cfg["azimuth"],
                  "elevation": cfg["elevation"]}),
         }
         with open(path, "w", encoding="utf-8") as fh:
@@ -512,7 +647,7 @@ def stamp_table(cfg=None):
         written.append(os.path.basename(path))
     return {"stamped": written,
             "faces": sorted(hp.read_plates(
-                bpy.context.scene.objects[cfg["hull"]])[0])}
+                bpy.context.scene.objects[hull])[0])}
 
 
 # ---------------------------------------------------------------------------
@@ -529,6 +664,51 @@ def _atlases(cfg):
         with open(base + ".json", encoding="utf-8") as fh:
             meta = json.load(fh)
         out[name] = (atlas.read_rgba(base + ".png"), meta)
+    return out
+
+
+def _body(layers, heading, phase=0):
+    """The tank itself at `heading`, in composite order.
+
+    Present so that the belts appear on every check sheet without each draw
+    function having to know whether this scene has them. A tank drawn without
+    its tracks looks like it is hovering, and the sheets are what gets looked
+    at - a layer missing from them is a layer nobody checks.
+
+    The belts take phase 0 unless asked otherwise: their cycle is independent of
+    whatever the sheet is stepping through, so pinning them keeps the sheet
+    about its own subject.
+    """
+    out = [("hull", heading)]
+    for name in TRACK_LAYERS:
+        if name in layers:
+            out.append((name, phase * layers[name][1]["count"] + heading))
+    out.append(("turret", heading))
+    return out
+
+
+def _body_used(*names):
+    """Layer names for `_sheet`'s `used`, with the belts always allowed in."""
+    return ["hex", "hull"] + list(TRACK_LAYERS) + ["turret"] + list(names)
+
+
+def _tank_alpha(layers, heading, phase=0):
+    """Alpha of the whole tank at `heading` - every layer that *is* the tank.
+
+    Two tests ask "is this pixel on the tank": whether a hit lands on armour and
+    whether a scar hangs off it. On a parts scene the hull layer has a hole in it
+    where the tracks were held out, so asking hull-or-turret would call the
+    track band empty and fail a hit low on a side plate that is perfectly on the
+    armour. The belts are part of the tank, not an effect on it.
+    """
+    out = _tile_of(layers, "hull", heading)[:, :, 3].copy()
+    for name in ("turret",) + TRACK_LAYERS:
+        if name not in layers:
+            continue
+        index = heading
+        if layers[name][1].get("phases", 1) > 1:
+            index = phase * layers[name][1]["count"] + heading
+        out = np.maximum(out, _tile_of(layers, name, index)[:, :, 3])
     return out
 
 
@@ -767,8 +947,8 @@ def check(cfg=None):
     if "flash" in layers:
         def draw_shot(buf, place, heading, phase):
             frame = phase * meta["count"] + heading
-            for name, index in (("hex", 0), ("hull", heading),
-                                ("turret", heading), ("smoke", frame)):
+            for name, index in ([("hex", 0)] + _body(layers, heading)
+                                + [("smoke", frame)]):
                 buf = place(buf, name, index, _over)
             if "exhaust" in layers:
                 buf = place(buf, "exhaust", heading, _over)
@@ -780,16 +960,14 @@ def check(cfg=None):
 
         report["composite"] = _sheet(
             cfg, layers, "_check_shot", headings, cfg["check_phases"],
-            draw_shot, 0.16,
-            ["hex", "hull", "turret", "exhaust", "smoke", "flash"])
+            draw_shot, 0.16, _body_used("exhaust", "smoke", "flash"))
 
     # --- the plume: one full lap across --------------------------------------
     if "exhaust" in layers:
         plume_meta = layers["exhaust"][1]
 
         def draw_plume(buf, place, heading, phase):
-            for name, index in (("hex", 0), ("hull", heading),
-                                ("turret", heading)):
+            for name, index in [("hex", 0)] + _body(layers, heading):
                 buf = place(buf, name, index, _over)
             return place(buf, "exhaust",
                          phase * plume_meta["count"] + heading, _over)
@@ -797,15 +975,14 @@ def check(cfg=None):
         report["exhaust_composite"] = _sheet(
             cfg, layers, "_check_exhaust", headings,
             list(range(plume_meta["phases"])), draw_plume,
-            _ground_colour(layers), ["hex", "hull", "turret", "exhaust"])
+            _ground_colour(layers), _body_used("exhaust"))
 
     # --- the burning tank: one full lap across -------------------------------
     if "fire" in layers:
         fire_meta = layers["fire"][1]
 
         def draw_fire(buf, place, heading, phase):
-            for name, index in (("hex", 0), ("hull", heading),
-                                ("turret", heading)):
+            for name, index in [("hex", 0)] + _body(layers, heading):
                 buf = place(buf, name, index, _over)
             # Smoke down first with normal alpha, then the flame added on top of
             # it. That order is the effect, not a preference: the flame is added,
@@ -820,7 +997,7 @@ def check(cfg=None):
         report["fire_composite"] = _sheet(
             cfg, layers, "_check_fire", headings,
             list(range(fire_meta["phases"])), draw_fire,
-            _ground_colour(layers), ["hex", "hull", "turret", "burn", "fire"])
+            _ground_colour(layers), _body_used("burn", "fire"))
 
     # --- the hit: face across, heading down ----------------------------------
     if "burst" in layers:
@@ -845,15 +1022,14 @@ def check(cfg=None):
             buf = place(buf, "hex", 0, _over)
             if row["facing"] <= 0.0:
                 buf = hit(buf)
-            for name in ("hull", "turret"):
-                buf = place(buf, name, heading, _over)
+            for name, index in _body(layers, heading):
+                buf = place(buf, name, index, _over)
             return buf if row["facing"] <= 0.0 else hit(buf)
 
         if faces:
             report["hit_composite"] = _sheet(
                 cfg, layers, "_check_hit", headings, faces, draw_hit,
-                _ground_colour(layers),
-                ["hex", "hull", "turret", "dust", "burst"])
+                _ground_colour(layers), _body_used("dust", "burst"))
 
         # Non-circular version of "the hit lands on its plate". The table says
         # where the plate is, so asking the table again proves nothing; ask the
@@ -873,8 +1049,7 @@ def check(cfg=None):
                 if not (0 <= x < tile and 0 <= y < tile):
                     off_tank.append([face, h, "off frame"])
                     continue
-                seen = max(float(_tile_of(layers, n, h)[tile - 1 - y, x, 3])
-                           for n in ("hull", "turret"))
+                seen = float(_tank_alpha(layers, h)[tile - 1 - y, x])
                 if seen < 0.5:
                     off_tank.append([face, h, round(seen, 3)])
         report["hit_off_tank"] = off_tank
@@ -996,8 +1171,7 @@ def check(cfg=None):
                 # means the first thing.
                 if a.sum() < 20 or cover[name][h] < 0.25 * max(cover[name]):
                     continue
-                tank = np.maximum(_tile_of(layers, "hull", h)[:, :, 3],
-                                  _tile_of(layers, "turret", h)[:, :, 3]) > 0.25
+                tank = _tank_alpha(layers, h) > 0.25
                 worst = max(worst, float((a & ~tank).sum()) / float(a.sum()))
             off[name] = round(worst, 4)
         report["scar_off_armour"] = off
@@ -1081,7 +1255,8 @@ def check(cfg=None):
                     "%s touches its tile edge (alpha %.3f)" % (name, worst))
 
         try:
-            fit = _load(cfg, "hit_scar").fits({"hull": cfg["hull"]})
+            fit = _load(cfg, "hit_scar").fits(
+                {"hull": _names(cfg, parts(cfg))["hull_mesh"]})
             report["scar_fit"] = fit
             over = [f for f, v in fit.items() if v > cfg["scar_fit_max"]]
             if over:
@@ -1097,32 +1272,31 @@ def check(cfg=None):
         # that shows the mark turning with the hull and going out behind it.
         def draw_scar(buf, place, heading, name):
             m = layers[name][1]
-            for layer, index in (("hex", 0), ("hull", heading),
-                                 ("turret", heading)):
+            for layer, index in [("hex", 0)] + _body(layers, heading):
                 buf = place(buf, layer, index, _over)
             return place(buf, name, (levels - 1) * m["count"] + heading, _over)
 
         report["scar_composite"] = _sheet(
             cfg, layers, "_check_scar", list(range(meta["count"])), scar_layers,
-            draw_scar, _ground_colour(layers),
-            ["hex", "hull", "turret"] + scar_layers)
+            draw_scar, _ground_colour(layers), _body_used(*scar_layers))
 
         # plate down, damage across, each on the heading that shows it best
         def draw_level(buf, place, name, level):
             m = layers[name][1]
             h = best[name]
-            for layer, index in (("hex", 0), ("hull", h), ("turret", h)):
+            for layer, index in [("hex", 0)] + _body(layers, h):
                 buf = place(buf, layer, index, _over)
             return place(buf, name, level * m["count"] + h, _over)
 
         report["scar_levels"] = _sheet(
             cfg, layers, "_check_damage", scar_layers, list(range(levels)),
-            draw_level, _ground_colour(layers),
-            ["hex", "hull", "turret"] + scar_layers)
+            draw_level, _ground_colour(layers), _body_used(*scar_layers))
 
     # --- nothing may touch the tile edge, on any frame of any tank layer -----
     edges = {}
-    for name in ("hull", "turret", "hex"):
+    for name in ("hull", "turret", "hex") + TRACK_LAYERS:
+        if name not in layers:
+            continue
         worst = _edge_alpha(layers, name)
         edges[name] = round(worst, 4)
         if worst > 0.0:
@@ -1173,7 +1347,13 @@ def check(cfg=None):
                 "burn_tile_scale" % worst)
 
     # --- the tank stands on the tile, rather than the tile cutting through ---
+    # On a parts scene the lowest thing on the tank is a belt, not the hull -
+    # the hull layer's bottom edge is where the tracks were held out of it - so
+    # the test takes whichever of them the scene has.
     hull_a = _tile_of(layers, "hull", 0)[:, :, 3] > 0.5
+    for name in TRACK_LAYERS:
+        if name in layers:
+            hull_a |= _tile_of(layers, name, 0)[:, :, 3] > 0.5
     hex_a = _tile_of(layers, "hex", 0)[:, :, 3] > 0.5
     hull_rows = np.nonzero(hull_a)[0]
     hex_rows = np.nonzero(hex_a)[0]
@@ -1414,13 +1594,25 @@ def run(cfg=None):
     problems = list(rendered["warnings"]) + list(checked["problems"])
     if not rendered["framing_identical"]:
         problems.append("layers do not share a framing")
+    # the body measures the ring itself and compares it against the stamp; a
+    # disagreement there is the invisible failure and has to surface here
+    problems.extend((rendered.get("body") or {})
+                    .get("spin", {}).get("axis_warnings", []))
     for stage in ("muzzle", "exhaust", "hits"):
         if prepared[stage]:
             problems.extend(prepared[stage]["warnings"])
 
+    # the tile is `hex_base`'s on a single-mesh scene and `parts_render`'s on a
+    # parts one, where it is built inside the render - so its numbers come back
+    # with the body rather than from `prepare`
+    body = rendered.get("body") or {}
+    tile_meta = body.get("hex") or prepared["hex"]
+
     report = {
         "have": prepared["have"],
-        "ground_z": prepared["hex"]["ground_z"],
+        "layout": prepared["layout"],
+        "axis": prepared["axis"],
+        "ground_z": tile_meta.get("ground_z"),
         "stands_on_tile": checked["stands_on_tile"],
         "framing_identical": rendered["framing_identical"],
         "spin_pivot": rendered["spin_pivot"],
@@ -1490,6 +1682,26 @@ def run(cfg=None):
             "scar_composite": checked.get("scar_composite"),
             "scar_levels": checked.get("scar_levels"),
         })
+    if body:
+        # the belts are posed by writing vertex coordinates, so whether the rest
+        # pose came back is a result to report, not a promise to make
+        report.update({
+            "track_phases": body["track_phases"],
+            "belts": body["belts"],
+            "belts_restored": body["belts_restored"],
+            "rebuilt": body["rebuilt"],
+            "ring_cut_z": body["ring"].get("cut_z"),
+            "tile_removed": body["tile_removed"],
+            "cut_box_removed": body["cut_box_removed"],
+        })
+
+    # Beside the atlases, the same as `parts_render.render()` writes and for the
+    # same reason: which axis, which ports, which plates and which belt produced
+    # these frames is not recoverable from the PNGs, and leaving it in whoever
+    # ran it means it is gone by the next session.
+    with open(os.path.join(cfg["output_dir"], "_run_report.json"), "w",
+              encoding="utf-8") as fh:
+        json.dump(report, fh, indent=1, default=str)
 
     print("[tank] %s  %d problems" % (cfg["output_dir"], len(problems)))
     for line in problems:

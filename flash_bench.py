@@ -87,7 +87,7 @@ def _load(cfg, name):
 def _scale(cfg):
     """Bore radius, units per pixel, and the muzzle's reach from the spin axis."""
     radius, upp, reach = cfg["bore_radius"], cfg["units_per_pixel"], cfg["reach_px"]
-    turret = bpy.context.scene.objects.get(cfg["turret"])
+    turret = _load(cfg, "tank_parts").mesh(cfg["turret"], required=False)
 
     if upp is None and cfg["atlas_json"] and os.path.exists(cfg["atlas_json"]):
         with open(cfg["atlas_json"], encoding="utf-8") as fh:

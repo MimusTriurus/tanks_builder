@@ -76,6 +76,11 @@ REPO = r"D:\Projects\AgentCoding\BlenderMCP"
 CONFIG = {
     "hull": "Hull",
     "name": "Burst",
+    # the turret, and the two layer roots - only used to measure the tank's own
+    # height for the build origin. None -> the meshes; see tank_parts.py
+    "turret": "Turret",
+    "hull_root": None,
+    "turret_root": None,
     # The camera the set is rendered through; the burst faces it. Same defaults
     # as sprite_atlas.CONFIG - override together with it or not at all.
     "elevation": 30.0,
@@ -306,7 +311,7 @@ def scale_of(cfg):
     """One hull length in world units."""
     if cfg.get("scale_units") is not None:
         return float(cfg["scale_units"])
-    hull = bpy.context.scene.objects[cfg["hull"]]
+    hull = _mod("tank_parts").mesh(cfg["hull"])
     if "hit_scale" not in hull.keys():
         raise RuntimeError("no 'hit_scale' on %s - run hit_point.py first"
                            % hull.name)
@@ -324,12 +329,19 @@ def origin_of(cfg):
     if cfg.get("origin") is not None:
         return Vector([float(v) for v in cfg["origin"]])
     hp = _mod("hit_point")
+    tp = _mod("tank_parts")
     scene = bpy.context.scene
-    hull = scene.objects[cfg["hull"]]
-    group = [hull] + list(hull.children_recursive)
-    turret = scene.objects.get("Turret")
+    hull = tp.mesh(cfg["hull"], scene)
+    # The tank's own height, so both layer roots and everything under them. The
+    # turret used to be looked up as the literal "Turret", behind the config's
+    # back: on a parts-built scene that found nothing, and the burst sat at half
+    # the hull's height instead of half the tank's.
+    group = list(tp.hierarchy(scene.objects[cfg["hull_root"]]
+                              if cfg.get("hull_root") else hull))
+    turret = (scene.objects[cfg["turret_root"]] if cfg.get("turret_root")
+              else tp.mesh(cfg["turret"], scene, required=False))
     if turret is not None:
-        group += [turret] + list(turret.children_recursive)
+        group += list(tp.hierarchy(turret))
     lo, hi = hp._bounds([o for o in group if o.type == "MESH"])
     if "ring_axis" in hull.keys():
         axis = [float(v) for v in hull["ring_axis"]]

@@ -1,9 +1,19 @@
 """Render the parts-built tank: hull, turret, two track belts.
 
 This is the slim analogue of `tank_pipeline.render()` for the model that arrives
-already split into parts (`Hull.Geometry`, `Turret.Geometry`, `Barrel.Geometry`,
-`Engine.Geometry`, `Track.Left.Geometry`, `Track.Right.Geometry`), each hanging
-off its own `*.World` empty and carrying its own material and texture.
+already split into parts, each hanging off its own `*.World` empty and carrying
+its own material and texture. The canonical layout, four layer roots directly at
+the scene root with no `world` above them:
+
+    Hull.World          Hull.Geometry, Engine.Geometry
+    Turret.World        Turret.Geometry, Barrel.Geometry
+    Track.Left.World    L.Caterpillar.Geometry, L.Rolls.Geometry
+    Track.Right.World   R.Caterpillar.Geometry, R.Rolls.Geometry
+
+`Barrel` and `Engine` are the hand-cut effect pieces and are optional. Note that
+the `.Geometry` suffix defeats the stock CONFIG of every effect module: they
+resolve `hull`/`turret`/`barrel` by exact name against the bare `Hull`, `Turret`,
+`Barrel` of the old single-mesh scenes.
 
 Two things here are not in the old pipeline.
 
@@ -111,6 +121,13 @@ def ring_axis(cfg=None):
     Delegated to `turret_axis.measure()` so there is one fit in the project and
     not two that can drift apart. Nothing is moved or stamped here - this scene
     is hand-assembled and the render has no business rewriting it.
+
+    But `tank_pipeline.prepare()` *does* stamp it, so from that point on the same
+    number exists twice: measured here and stamped there. They come from one fit
+    with one config and agree - and "agree" is a claim, so it is checked rather
+    than assumed. A silent disagreement would put the flash on the stamped axis
+    and spin the carousel about this one, which does not distort anything: it
+    walks the whole tank round a circle, the one failure no output number reports.
     """
     import bpy, importlib
     cfg = dict(CONFIG, **(cfg or {}))
@@ -119,15 +136,31 @@ def ring_axis(cfg=None):
                  apply=False, stamp=False)
     _, _, axis, seam_z, rep = ta.measure(probe)
     declared = np.array(bpy.data.objects[cfg["turret"]].location[:2], float)
+
+    warnings = list(rep["warnings"])
+    stamped = {}
+    for which in ("turret_mesh", "hull_mesh"):
+        ob = bpy.data.objects.get(cfg[which])
+        if ob is not None and "ring_axis" in ob.keys():
+            held = [float(v) for v in ob["ring_axis"]]
+            stamped[ob.name] = [round(v, 5) for v in held]
+            gap = float(np.hypot(held[0] - axis[0], held[1] - axis[1]))
+            if gap > 1e-5:
+                warnings.append(
+                    "ring_axis stamped on %s is %.5f away from the fit this "
+                    "render is spinning about - one of them is stale, and a "
+                    "wrong axis walks the tank round a circle of that radius"
+                    % (ob.name, gap))
     return {
         "axis": [round(float(v), 5) for v in axis[:2]],
+        "stamped": stamped,
         "seam_z": round(float(seam_z), 5),
         "roundness": rep["roundness"],
         "cross_band_spread": rep["cross_band_spread"],
         "declared_empty_xy": [round(float(v), 5) for v in declared],
         # the number that matters: the orbit the tank would walk on the wrong axis
         "wobble_px_if_empty_trusted": rep["wobble_px_before"],
-        "axis_warnings": rep["warnings"],
+        "axis_warnings": warnings,
         "rotatable": rep.get("rotatable"),
     }
 
@@ -285,127 +318,176 @@ def _belt_layer(name, root, cfg, made, drop):
     return layer
 
 
-def render(cfg=None):
-    import bpy, importlib
-    atlas = importlib.import_module("sprite_atlas")
-    tc = importlib.import_module("track_cycle")
-    cfg = dict(CONFIG, **(cfg or {}))
-    if not cfg["output_dir"]:
-        raise RuntimeError("output_dir is required")
+class Body:
+    """The layers that are the tank itself, on the parts layout.
 
-    spin = ring_axis(cfg)
-    ring = ring_plane(cfg, spin["axis"])
-    left, right = cfg["tracks"]
+    Split out of `render()` so that `tank_pipeline` can put the effect layers
+    beside these and send **one** `render_set` job. That is not tidiness: a
+    second job re-resolves the spin axis, the fitted geometry, the angle list and
+    the camera, and nothing makes it resolve them the same way. The effect layers
+    have to share the tank's framing or they do not line up with it.
 
-    running = int(cfg["track_phases"] or 0) > 1
-    belts = tc.belts() if running else []
-    built = {}
-    for name in cfg["rebuild"] or ():
-        src = next((b for b in belts if b.ob.name == name), None)
-        if src is None:
-            raise RuntimeError("%r is not one of the belts %s"
-                               % (name, [b.ob.name for b in belts]))
-        built[name] = tc.rebuild(src)
-        src.restore()          # the original stays as it arrived, and unrendered
+    Owns the transient scene state too - the ring-cut box, the ground tile, and
+    the belt vertices, which are *written* rather than transformed. `restore()`
+    has to run whatever happened, so it is the caller's `finally`.
+    """
 
-    # animate the rebuilt copy where there is one and the original everywhere
-    # else, and keep hold of both so the scene is put back either way
-    live = [built.get(b.ob.name, b) for b in belts]
-    posed = belts + list(built.values())
+    def __init__(self, cfg=None):
+        import bpy, importlib
+        tc = importlib.import_module("track_cycle")
+        self.cfg = cfg = dict(CONFIG, **(cfg or {}))
+        self.spin = ring_axis(cfg)
+        self.ring = ring_plane(cfg, self.spin["axis"])
+        self.left, self.right = cfg["tracks"]
+        self.hex = None
+        self._temps = []
 
-    by_root, drop = {}, {}
-    for b in live:
-        root = b.ob
-        while root.parent is not None:
-            root = root.parent
-        by_root.setdefault(root.name, []).append(b)
-    for b in belts:
-        root = b.ob
-        while root.parent is not None:
-            root = root.parent
-        if b.ob.name in built:
-            drop.setdefault(root.name, set()).add(b.ob.name)
-        # a rebuilt belt from an earlier run that this one is not drawing
-        stale = bpy.data.objects.get(tc.rebuilt_name(b.ob.name))
-        if stale is not None and b.ob.name not in built:
-            drop.setdefault(root.name, set()).add(stale.name)
+        running = int(cfg["track_phases"] or 0) > 1
+        self.belts = tc.belts() if running else []
+        self.built = {}
+        for name in cfg["rebuild"] or ():
+            src = next((b for b in self.belts if b.ob.name == name), None)
+            if src is None:
+                raise RuntimeError("%r is not one of the belts %s"
+                                   % (name, [b.ob.name for b in self.belts]))
+            self.built[name] = tc.rebuild(src)
+            src.restore()      # the original stays as it arrived, and unrendered
 
-    box = tile = None
-    tile_meta = None
-    try:
+        # animate the rebuilt copy where there is one and the original everywhere
+        # else, and keep hold of both so the scene is put back either way
+        self.live = [self.built.get(b.ob.name, b) for b in self.belts]
+        self.posed = self.belts + list(self.built.values())
+
+        def root_of(ob):
+            while ob.parent is not None:
+                ob = ob.parent
+            return ob
+
+        by_root, drop = {}, {}
+        for b in self.live:
+            by_root.setdefault(root_of(b.ob).name, []).append(b)
+        for b in self.belts:
+            name = root_of(b.ob).name
+            if b.ob.name in self.built:
+                drop.setdefault(name, set()).add(b.ob.name)
+            # a rebuilt belt from an earlier run that this one is not drawing
+            stale = bpy.data.objects.get(tc.rebuilt_name(b.ob.name))
+            if stale is not None and b.ob.name not in self.built:
+                drop.setdefault(name, set()).add(stale.name)
+        self._by_root, self._drop = by_root, drop
+
         turret_layer = {"name": "turret", "target": cfg["turret"]}
-        if ring["cut_z"] is not None:
-            box = _make_cut_box(cfg["cut_box"], ring["cut_z"])
+        if self.ring["cut_z"] is not None:
+            box = _make_cut_box(cfg["cut_box"], self.ring["cut_z"])
+            self._temps.append(box)
             turret_layer["holdout"] = [cfg["cut_box"]]
 
-        layers = [{"name": "hull", "target": cfg["hull"]}, turret_layer,
-                  _belt_layer("track_left", left, cfg,
-                              by_root.get(left, []), drop.get(left)),
-                  _belt_layer("track_right", right, cfg,
-                              by_root.get(right, []), drop.get(right))]
+        self.layers = [{"name": "hull", "target": cfg["hull"]}, turret_layer,
+                       _belt_layer("track_left", self.left, cfg,
+                                   by_root.get(self.left, []),
+                                   drop.get(self.left)),
+                       _belt_layer("track_right", self.right, cfg,
+                                   by_root.get(self.right, []),
+                                   drop.get(self.right))]
         if cfg["hex"] is not None:
-            tile, tile_meta = ground_tile(
-                cfg, spin["axis"], {n for s in drop.values() for n in s})
+            tile, self.hex = ground_tile(
+                cfg, self.spin["axis"], {n for s in drop.values() for n in s})
+            self._temps.append(tile)
             # one frame, but framed with the carousel like every other layer
-            layers.append({"name": "hex", "target": tile.name, "static": True})
+            self.layers.append({"name": "hex", "target": tile.name,
+                                "static": True})
 
-        res = atlas.render_set({
-            "shared": {
-                "output_dir": cfg["output_dir"],
-                "steps": cfg["steps"], "tile": cfg["tile"],
-                "azimuth": cfg["azimuth"], "elevation": cfg["elevation"],
-                # every layer turns about the measured ring, which is what lets
-                # the game stack them at one anchor with the turret aimed
-                # elsewhere. Not the empty - see the module docstring.
-                "spin_pivot": spin["axis"],
-                "hex_labels": {"front_dir": cfg["front_dir"],
-                               "orientation": "flat"},
-            },
-            "layers": layers,
-        })
-    finally:
-        for temp in (box, tile):
-            if temp is not None:
-                data = temp.data
-                bpy.data.objects.remove(temp, do_unlink=True)
-                bpy.data.meshes.remove(data)
+    def shared(self):
+        """What this layout has to say about the job as a whole."""
+        # every layer turns about the measured ring, which is what lets the game
+        # stack them at one anchor with the turret aimed elsewhere. Not the
+        # empty - see the module docstring.
+        return {"spin_pivot": self.spin["axis"]}
+
+    def restore(self):
+        import bpy
+        for temp in self._temps:
+            data = temp.data
+            bpy.data.objects.remove(temp, do_unlink=True)
+            bpy.data.meshes.remove(data)
+        self._temps = []
         # the belts are posed by writing vertex coordinates, so the .blend has
         # to be put back whatever happened
-        for b in posed:
+        for b in self.posed:
             b.restore()
 
-    # Say out loud that the belt that was supposed to move is in the picture.
-    # `exclude` matches names by substring, so dropping a belt can silently
-    # drop its replacement too, and the layer still renders - the road wheels
-    # are in it as well, so nothing is empty and nothing complains.
-    for name, layer in (("track_left", left), ("track_right", right)):
-        want = [b.ob.name for b in by_root.get(layer, [])]
-        got = res["layers"][name]["rendered"]
-        missing = [w for w in want if w not in got]
-        if missing:
-            raise RuntimeError(
-                "layer %r was meant to animate %s but rendered %s - the "
-                "exclude list matches by substring and may have taken it out"
-                % (name, missing, got))
+    def verify(self, res):
+        """Say out loud that the belt that was meant to move is in the picture.
 
-    upp = res["layers"]["hull"]["units_per_pixel"]
-    out = {"spin": spin, "ring": ring, "hex": tile_meta,
+        `exclude` matches names by substring, so dropping a belt can silently
+        drop its replacement too, and the layer still renders - the road wheels
+        are in it as well, so nothing is empty and nothing complains.
+        """
+        for name, layer in (("track_left", self.left),
+                            ("track_right", self.right)):
+            want = [b.ob.name for b in self._by_root.get(layer, [])]
+            got = res["layers"][name]["rendered"]
+            missing = [w for w in want if w not in got]
+            if missing:
+                raise RuntimeError(
+                    "layer %r was meant to animate %s but rendered %s - the "
+                    "exclude list matches by substring and may have taken it out"
+                    % (name, missing, got))
+
+    def report(self, res):
+        import bpy
+        cfg = self.cfg
+        upp = res["layers"]["hull"]["units_per_pixel"]
+        return {
+            "spin": self.spin, "ring": self.ring, "hex": self.hex,
             # by its name: the object itself is gone and touching it raises
-            "tile_removed": (tile_meta is None
-                             or tile_meta["name"] not in bpy.data.objects),
-            "framing_identical": res["framing_identical"],
-            "warnings": res["warnings"],
-            "spin_pivot": [round(float(v), 5) for v in res["spin_pivot"]],
+            "tile_removed": (self.hex is None
+                             or self.hex["name"] not in bpy.data.objects),
             "cut_box_removed": cfg["cut_box"] not in bpy.data.objects,
             "units_per_pixel": round(float(upp), 6),
             "track_phases": int(cfg["track_phases"] or 0),
             "seam_probe": bool(cfg["seam_probe"]),
-            "rebuilt": {k: v.built for k, v in built.items()},
-            "belts": [b.report(upp) for b in live],
+            "rebuilt": {k: v.built for k, v in self.built.items()},
+            "belts": [b.report(upp) for b in self.live],
             # the belts are posed by writing coordinates into the scene, so say
             # out loud that the rest pose came back rather than promising it
             "belts_restored": [
-                round(float(np.abs(_rest_gap(b)).max()), 9) for b in posed]}
+                round(float(np.abs(_rest_gap(b)).max()), 9) for b in self.posed],
+        }
+
+
+def render(cfg=None):
+    """The tank's own layers and nothing else - the A/B for the belts.
+
+    `tank_pipeline.run()` is the full set. This stays because judging a running
+    belt against a still one wants a two-minute render, not a ten-minute one.
+    """
+    import importlib
+    atlas = importlib.import_module("sprite_atlas")
+    cfg = dict(CONFIG, **(cfg or {}))
+    if not cfg["output_dir"]:
+        raise RuntimeError("output_dir is required")
+
+    body = Body(cfg)
+    try:
+        res = atlas.render_set({
+            "shared": dict({
+                "output_dir": cfg["output_dir"],
+                "steps": cfg["steps"], "tile": cfg["tile"],
+                "azimuth": cfg["azimuth"], "elevation": cfg["elevation"],
+                "hex_labels": {"front_dir": cfg["front_dir"],
+                               "orientation": "flat"},
+            }, **body.shared()),
+            "layers": body.layers,
+        })
+    finally:
+        body.restore()
+
+    body.verify(res)
+    out = dict(body.report(res),
+               framing_identical=res["framing_identical"],
+               warnings=res["warnings"],
+               spin_pivot=[round(float(v), 5) for v in res["spin_pivot"]])
 
     # Beside the atlases, like tank_pipeline's, so what a set was rendered with
     # is on disk rather than in whoever ran it. The belts especially: which link

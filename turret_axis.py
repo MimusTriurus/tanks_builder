@@ -24,9 +24,27 @@ radius err/units_per_pixel pixels. That is the "wobbly animation" failure, and
 invisible; MT.blend was at 6.5px before this script.
 """
 
+import importlib.util
+import os
+
 import bpy
 import numpy as np
 from mathutils import Matrix, Vector
+
+REPO = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() \
+    else r"D:\Projects\AgentCoding\BlenderMCP"
+_SIBLINGS = {}
+
+
+def _sibling(name):
+    """Load a module that lives next to this one, once. See muzzle_point."""
+    if name not in _SIBLINGS:
+        spec = importlib.util.spec_from_file_location(
+            name, os.path.join(REPO, "%s.py" % name))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _SIBLINGS[name] = mod
+    return _SIBLINGS[name]
 
 CONFIG = {
     "turret": "Turret",         # name or name fragment
@@ -74,14 +92,15 @@ CONFIG = {
 
 
 def find(hint):
-    name = hint.lower()
-    for ob in bpy.context.scene.objects:
-        if ob.type == "MESH" and ob.name.lower() == name:
-            return ob
-    for ob in bpy.context.scene.objects:
-        if ob.type == "MESH" and name in ob.name.lower():
-            return ob
-    raise RuntimeError("no mesh object matching %r" % hint)
+    """The mesh a part name means, by the project's one resolution rule.
+
+    This used to keep its own fragment match and return the *first* scene-order
+    hit, which is the stale-axis failure waiting to happen: two meshes mentioning
+    "Turret" and the winner is whichever Blender lists first. `tank_parts` raises
+    on an ambiguity instead of picking, which is the only safe answer for the one
+    number in this project that goes wrong invisibly.
+    """
+    return _sibling("tank_parts").mesh(hint)
 
 
 def world_co(ob):

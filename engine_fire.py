@@ -669,7 +669,7 @@ def ports_of(cfg):
         ports, scale = cfg["ports"]
         return [(np.asarray(p, dtype=np.float64), np.asarray(d, dtype=np.float64),
                  float(r)) for p, d, r in ports], float(scale)
-    hull = bpy.context.scene.objects[cfg["hull"]]
+    hull = _sibling("tank_parts").mesh(cfg["hull"])
     return _sibling("exhaust_point").read_ports(hull)
 
 

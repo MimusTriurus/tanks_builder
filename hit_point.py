@@ -77,6 +77,14 @@ REPO = r"D:\Projects\AgentCoding\BlenderMCP"
 CONFIG = {
     "hull": "Hull",
     "turret": "Turret",
+    # The objects the hull and turret *layers* render. What the rays must see is
+    # the whole hull, and on a parts-built scene the hull mesh has no children -
+    # the exhaust louvre is a sibling under `Hull.World`, so firing at the mesh
+    # alone would leave the rear plate with a hole in it exactly where the louvre
+    # was cut out. None -> the meshes, which on a single-mesh scene already carry
+    # the cut pieces as children.
+    "hull_root": None,
+    "turret_root": None,
     # objects to stamp the result on
     "stamp_on": ["Hull"],
     # Import convention, same value and same standing as everywhere else: a
@@ -391,10 +399,12 @@ def set_hits(cfg=None):
     scene = bpy.context.scene
     dg = bpy.context.evaluated_depsgraph_get()
 
-    hull = scene.objects.get(cfg["hull"])
+    tp = _sibling("tank_parts")
+    hull = tp.mesh(cfg["hull"], scene, required=False)
     if hull is None:
         raise RuntimeError("no object named %r" % cfg["hull"])
-    targets = _targets(hull)
+    targets = _targets(scene.objects[cfg["hull_root"]] if cfg["hull_root"]
+                       else hull)
     lo, hi = _bounds(targets)
     mid = (lo + hi) / 2.0
     # the larger horizontal extent, which is the fore-aft one on every tank -
@@ -447,7 +457,7 @@ def set_hits(cfg=None):
         "hit_from": ", ".join("%s: %s" % (p["face"], p["source"]) for p in plates),
     }
     for name in cfg["stamp_on"]:
-        ob = scene.objects.get(name)
+        ob = tp.mesh(name, scene, required=False)
         if ob is None:
             continue
         for key, value in stamp.items():
@@ -528,7 +538,7 @@ def project_plates(origin, units_per_pixel, angles, cfg=None):
     """
     cfg = dict(CONFIG, **(cfg or {}))
     sa = _sibling("sprite_atlas")
-    hull = bpy.context.scene.objects[cfg["hull"]]
+    hull = _sibling("tank_parts").mesh(cfg["hull"])
     plates, _scale = read_plates(hull)
     cam = sa.camera_matrix(Vector((0.0, 0.0, 0.0)), cfg["azimuth"],
                            cfg["elevation"], 1.0)
@@ -608,7 +618,7 @@ def _spike(name, point, normal, length, radius, colour, parent, segments=14):
 def markers(cfg=None, parent=True):
     """A spike on every stamped plate. Temporary - `check` removes them."""
     cfg = dict(CONFIG, **(cfg or {}))
-    hull = bpy.context.scene.objects[cfg["hull"]]
+    hull = _sibling("tank_parts").mesh(cfg["hull"])
     plates, scale = read_plates(hull)
     built = []
     for name, (point, normal, _tangent, _extent) in plates.items():

@@ -228,7 +228,7 @@ def _mod(name):
 
 
 def _hull(cfg):
-    ob = bpy.context.scene.objects.get(cfg["hull"])
+    ob = _mod("tank_parts").mesh(cfg["hull"], required=False)
     if ob is None:
         raise RuntimeError("no %r in the scene" % cfg["hull"])
     return ob

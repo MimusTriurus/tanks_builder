@@ -71,11 +71,28 @@ Tune it on `flash_bench.py`, which reads this same CONFIG without a tank in the
 way.
 """
 
+import importlib.util
 import math
+import os
 
 import bpy
 import numpy as np
 from mathutils import Matrix, Vector
+
+REPO = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() \
+    else r"D:\Projects\AgentCoding\BlenderMCP"
+_SIBLINGS = {}
+
+
+def _sibling(name):
+    """Load a module that lives next to this one, once. See muzzle_point."""
+    if name not in _SIBLINGS:
+        spec = importlib.util.spec_from_file_location(
+            name, os.path.join(REPO, "%s.py" % name))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _SIBLINGS[name] = mod
+    return _SIBLINGS[name]
 
 CONFIG = {
     "turret": "Turret",
@@ -687,7 +704,7 @@ def muzzle_of(cfg):
         point, direction, radius = cfg["muzzle"]
         return (np.array(point, dtype=np.float64),
                 np.array(direction, dtype=np.float64), float(radius))
-    turret = bpy.context.scene.objects[cfg["turret"]]
+    turret = _sibling("tank_parts").mesh(cfg["turret"])
     for key in ("muzzle_point", "muzzle_dir", "muzzle_radius"):
         if key not in turret.keys():
             raise RuntimeError("no %r on %s - run muzzle_point.py first"

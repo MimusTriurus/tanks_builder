@@ -45,15 +45,26 @@ that is true of any turret, needs nothing declared, and leaves the comparison
 with `front_dir` as an independent result rather than an assumption.
 """
 
+import importlib.util
 import math
+import os
 
 import bpy
 import numpy as np
 
+REPO = os.path.dirname(os.path.abspath(__file__)) if "__file__" in globals() \
+    else r"D:\Projects\AgentCoding\BlenderMCP"
+
 CONFIG = {
-    # the separated gun tip, and the turret it belongs to
+    # the separated gun tip, and the turret it belongs to. Bare names: they
+    # resolve to `Barrel.Geometry` / `Turret.Geometry` on a parts-built scene and
+    # to themselves on the old ones - see tank_parts.py
     "barrel": "Barrel",
     "turret": "Turret",
+    # the object the turret *layer* renders, which is what the barrel has to be
+    # parented under. None -> the turret itself, which is what it is on a
+    # single-mesh scene; on a parts scene it is `Turret.World`.
+    "turret_root": None,
     # where turret_axis.py left the rotation axis
     "ring_prop": "ring_axis",
     # objects to stamp the result on
@@ -67,6 +78,25 @@ CONFIG = {
     # complaint rather than a note, in degrees
     "bearing_tolerance": 5.0,
 }
+
+_SIBLINGS = {}
+
+
+def sibling(name):
+    """Load a module that lives next to this one, once.
+
+    Blender's Text Editor does not put the repo on `sys.path` and the pipeline
+    loads every module by explicit path, so a plain `import` would work in one
+    context and fail in the other. Cached, because the lookups below happen per
+    call and re-executing a module per lookup is a silly way to spend a second.
+    """
+    if name not in _SIBLINGS:
+        spec = importlib.util.spec_from_file_location(
+            name, os.path.join(REPO, "%s.py" % name))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        _SIBLINGS[name] = mod
+    return _SIBLINGS[name]
 
 
 def world_vertices(ob):
@@ -118,25 +148,28 @@ def set_muzzle(cfg=None):
     cfg = dict(CONFIG, **(cfg or {}))
     scene = bpy.context.scene
 
-    barrel = scene.objects.get(cfg["barrel"])
-    if barrel is None:
-        # a leading space in the name is easy to leave behind after P > Selection
-        barrel = next((o for o in scene.objects
-                       if o.name.strip() == cfg["barrel"].strip()), None)
+    tp = sibling("tank_parts")
+    barrel = tp.mesh(cfg["barrel"], scene, required=False)
     if barrel is None or barrel.type != "MESH":
         raise RuntimeError(
             "no mesh object %r - separate the gun tip first: box-select the "
             "barrel, Ctrl+L to complete the panels it cuts through, P > "
             "Selection, then parent it to the turret with Ctrl+P > Keep "
             "Transform" % cfg["barrel"])
-    turret = scene.objects[cfg["turret"]]
+    turret = tp.mesh(cfg["turret"], scene)
 
-    if barrel.parent is not turret:
+    # The barrel must ride in the turret *layer*, and on a parts-built scene the
+    # object that layer renders is `Turret.World`, not the turret mesh. Checking
+    # against the mesh was right by accident on the old scenes, where the layer
+    # target and the mesh are the same object.
+    turret_root = (scene.objects[cfg["turret_root"]] if cfg["turret_root"]
+                   else turret)
+    if not tp.inside(barrel, turret_root) or barrel is turret_root:
         raise RuntimeError(
-            "%r is not parented to %r, so the turret layer would not render it "
-            "and the hull layer would not exclude it - the gun would end up in "
-            "the hull atlas and turn with the hull"
-            % (barrel.name, turret.name))
+            "%r is not under %r, so the turret layer would not render it and "
+            "the hull layer would not exclude it - the gun would end up in the "
+            "hull atlas and turn with the hull"
+            % (barrel.name, turret_root.name))
 
     points = world_vertices(barrel)
     centre, axis, spread, shape, margin = bore_axis(points)
@@ -207,7 +240,7 @@ def set_muzzle(cfg=None):
                                        cfg["ring_prop"]),
     }
     for name in cfg["stamp_on"]:
-        ob = scene.objects.get(name)
+        ob = tp.mesh(name, scene, required=False)
         if ob is None:
             continue
         for key, value in stamp.items():

@@ -69,6 +69,12 @@ CONFIG = {
     "prefix": "Engine",
     "hull": "Hull",
     "turret": "Turret",
+    # The objects the hull and turret *layers* render, which is what a port's
+    # parenting has to be judged against. None -> the meshes themselves, which is
+    # what they are on a single-mesh scene; on a parts scene they are
+    # `Hull.World` and `Turret.World`.
+    "hull_root": None,
+    "turret_root": None,
     # objects to stamp the result on
     "stamp_on": ["Hull"],
     # the port's width is read off a percentile, not the maximum: one stray
@@ -101,19 +107,20 @@ def _sibling(name):
 
 def ports_of(scene, cfg):
     """The port objects, in name order so the ports keep their numbering."""
-    prefix = cfg["prefix"].strip().lower()
-    found = [o for o in scene.objects
-             if o.type == "MESH" and o.name.strip().lower().startswith(prefix)]
-    return sorted(found, key=lambda o: o.name)
+    return _sibling("tank_parts").ports(cfg["prefix"], scene)
 
 
 def set_exhaust(cfg=None):
     cfg = dict(CONFIG, **(cfg or {}))
     scene = bpy.context.scene
     mp = _sibling("muzzle_point")
+    tp = _sibling("tank_parts")
 
-    hull = scene.objects[cfg["hull"]]
-    turret = scene.objects.get(cfg["turret"])
+    hull = tp.mesh(cfg["hull"], scene)
+    turret = tp.mesh(cfg["turret"], scene, required=False)
+    hull_root = scene.objects[cfg["hull_root"]] if cfg["hull_root"] else hull
+    turret_root = (scene.objects[cfg["turret_root"]] if cfg["turret_root"]
+                   else turret)
     found = ports_of(scene, cfg)
     if not found:
         raise RuntimeError(
@@ -134,20 +141,20 @@ def set_exhaust(cfg=None):
 
     points, dirs, radii, warnings, detail = [], [], [], [], []
     for ob in found:
-        if turret is not None:
-            up = ob
-            while up is not None:
-                if up is turret:
-                    raise RuntimeError(
-                        "%r is under %r, so the port would swing round with the "
-                        "gun. Parent it to %r instead."
-                        % (ob.name, turret.name, hull.name))
-                up = up.parent
-        if ob.parent is not hull:
+        # Both tests are about which *layer* draws the port, so both are asked
+        # of the layer roots. Asking the meshes was right by accident on the old
+        # scenes, where a layer root and its mesh are the same object.
+        if turret_root is not None and tp.inside(ob, turret_root):
+            raise RuntimeError(
+                "%r is under %r, so the port would swing round with the gun. "
+                "Parent it to %r instead."
+                % (ob.name, turret_root.name, hull_root.name))
+        if not tp.inside(ob, hull_root) or ob is hull_root:
             warnings.append(
-                "%s is not parented to %s - it still renders in the hull layer "
-                "(that layer is the whole tank minus the turret), but nothing "
-                "keeps it there if the layer is ever narrowed" % (ob.name, hull.name))
+                "%s is not under %s - it still renders in the hull layer (that "
+                "layer is the whole tank minus the turret), but nothing keeps "
+                "it there if the layer is ever narrowed"
+                % (ob.name, hull_root.name))
 
         pts = mp.world_vertices(ob)
         centre, axis, spread, shape, margin = mp.bore_axis(pts)
@@ -210,7 +217,7 @@ def set_exhaust(cfg=None):
                            ", ".join(d["kind"] for d in detail)),
     }
     for name in cfg["stamp_on"]:
-        ob = scene.objects.get(name)
+        ob = tp.mesh(name, scene, required=False)
         if ob is None:
             continue
         for key, value in stamp.items():
