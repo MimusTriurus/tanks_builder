@@ -205,8 +205,27 @@ CONFIG = {
     # `reach` is a multiple of `rise`, so raising the flame raises them too.
     # Watch it against the tile: they are the tallest thing in the layer and
     # therefore the first thing to be clipped by the frame.
+    #
+    # 1.15 rather than the 1.30 this was tuned to on MT, and the frame is why it
+    # had to be this number and not the frame that moved. The flame's tile is
+    # asserted *equal* to the tank's in the bench - the column is the effect that
+    # buys height, and this one must not quietly acquire any - so when LT_PARTS
+    # put the embers 119.3px above the anchor against the 117.8 a plain tile
+    # leaves, the reach was the only lever left.
+    #
+    # 1.15 is not a taste: it is where this lever stops doing anything. The
+    # licks alone reach 112.0px on that tank, so at 1.15 the embers arrive at the
+    # body's own ceiling and every value below it measures the same 112.0. Going
+    # further would trade the embers away for nothing - past here the only thing
+    # that lowers the layer is `rise`, which takes the visible mass with it.
+    #
+    # Safe for the tanks already rendered, and monotonically so: cutting a reach
+    # can only reduce it, so nothing that fitted its frame before can start
+    # clipping. It is also the right lever twice over - the tips are the faintest
+    # part, and `rise` above says outright that height past what the colour can
+    # carry comes back as grey wisps.
     "embers": 8,
-    "ember_reach": 1.30,
+    "ember_reach": 1.15,
     "ember_size": 0.26,       # of the seat radius
     "ember_spread": 0.20,     # of the hull, sideways by full age
     "ember_gain": 0.85,

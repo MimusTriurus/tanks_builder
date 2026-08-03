@@ -124,7 +124,17 @@ CONFIG = {
     # Height is the whole cost of this layer: 320px tiles, 144 of them, a
     # 3840px atlas, about 59 MB decoded. At a hull and a half it wanted 704px
     # tiles and 285 MB. The lever is `rise` in engine_fire.SMOKE.
-    "burn_tile_scale": 1.25,
+    #
+    # 1.5 rather than 1.25 because of what sets the *pixel* scale, which is not
+    # the tank's size: the tile circumscribes the turning circle, so a tank whose
+    # gun does not overhang its hull fills more of its own frame. LT_PARTS'
+    # barrel stops 0.04 short of the nose, so its hull renders 136px wide where
+    # MT_PARTS' renders 112 - and every effect sized in hull fractions comes out
+    # 21% bigger in pixels for it. At 1.25 the column wanted 342px of the 320 it
+    # had and was cut with 0.180 of alpha at the edge, plainly visible on
+    # `_check_fire.png`. Measured the same way as the note above: 157px above the
+    # anchor and 129 to the side, against the 176 and 192 that 1.5 leaves.
+    "burn_tile_scale": 1.5,
     # The hit pair is the one layer that wants *less* frame than the tank. It
     # is not welded to the model, so it renders once with no headings at all and
     # the game puts it where the hit was - which means its frame only has to
