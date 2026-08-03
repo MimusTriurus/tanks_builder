@@ -19,7 +19,13 @@ namespace TankSpriteTest;
 public sealed partial class Main : Node2D
 {
     private const string SpritesRoot = "D:/Projects/AgentCoding/BlenderMCP/Sprites";
-    private static readonly string[] Tags = { "HT", "MT", "LT" };
+    /// <summary>The tanks to look for on disk, in key order.
+    ///
+    /// MTP is the same medium built from separate parts - hull, turret and two
+    /// belts as their own meshes - and it is here rather than replacing MT
+    /// because it is the only one whose tracks wind, and a moving belt is
+    /// judged against a still one.</summary>
+    private static readonly string[] Tags = { "HT", "MT", "LT", "MTP" };
 
     private const double SpinSpeed = 90.0;      // deg/sec, for the wobble check
 
@@ -64,6 +70,12 @@ public sealed partial class Main : Node2D
     private readonly TurretScan _scan = new();
     /// <summary>Idle turret traverse - key N, or --scan.</summary>
     private bool _scanEnabled;
+
+    private readonly TrackLoop _track = new();
+    /// <summary>The belts winding - key C, or --no-tracks. On by default, and
+    /// not really an option: a tank has tracks and they move. The switch is so
+    /// the hull layer can be looked at without them.</summary>
+    private bool _tracksEnabled = true;
 
     private readonly ExhaustLoop _exhaust = new();
     /// <summary>Engine exhaust - key O, or --no-exhaust. On by default, and for
@@ -259,6 +271,8 @@ public sealed partial class Main : Node2D
                 _scanEnabled = true;
             else if (userArgs[i] == "--no-exhaust")
                 _exhaustEnabled = false;
+            else if (userArgs[i] == "--no-tracks")
+                _tracksEnabled = false;
             else if (userArgs[i] == "--burning")
                 _burning = true;
             else if (userArgs[i] == "--fire")
@@ -393,7 +407,7 @@ public sealed partial class Main : Node2D
 
         if (_selfTest)
         {
-            int failed = SelfTest.Run(_field, _tank);
+            int failed = SelfTest.Run(_field, _tank, _atlases);
             GetTree().Quit(failed == 0 ? 0 : 1);
             return;
         }
@@ -445,6 +459,12 @@ public sealed partial class Main : Node2D
         // no TopSpeed here: a fire does not burn harder because the tank moves
         _burn.Phases = atlas.BurnPhases;
         _burn.Reset();
+        // and none here either, for the opposite reason: the belt is tied to
+        // the ground, not to the engine, so what it needs is the link length
+        _track.Phases = atlas.TrackPhases;
+        _track.Pitch = atlas.TrackPitch;
+        _track.Reset();
+        _tank.TrackPhase = -1;
         _hit.Reset();
         _tank.HitPhase = -1;
         // damage is per tank and the plates are per tank, so switching class
@@ -597,6 +617,32 @@ public sealed partial class Main : Node2D
         _rumble.Advance(_speed * delta, _speed);
         _tank.Shake = _rumble.Offset;
         _tank.Roll = _rumble.Roll;
+    }
+
+
+
+    /// <summary>
+    /// Winds the belts on by the ground that went past.
+    ///
+    /// Keyed on distance like the rumble, and unlike it that is not a reading of
+    /// the terrain but the belt's definition: it is the part in contact with the
+    /// ground. So this one is driven from the same <c>_speed * delta</c> and
+    /// goes still the moment the tank does, which is correct - a stationary
+    /// tank's tracks are stationary, whatever the engine is doing.
+    /// </summary>
+    private void UpdateTracks(double distance, double delta)
+    {
+        if (!_tracksEnabled || _tank.Atlas!.HasTracks != true)
+        {
+            if (_tank.TrackPhase < 0)
+                return;
+            _track.Reset();
+            _tank.TrackPhase = -1;
+            _tank.QueueRedraw();
+            return;
+        }
+        _track.Advance(distance, delta);
+        _tank.TrackPhase = _track.Frame;
     }
 
     /// <summary>Runs every frame, moving or not - that is the whole point of it.
@@ -851,6 +897,27 @@ public sealed partial class Main : Node2D
             + $" at {_tremble.PitchRateAt(_speed),4:F1} Hz");
 
         ui.Heading("effects");
+        ui.Toggle("tracks wind  (C)", () => _tracksEnabled, on =>
+        {
+            _tracksEnabled = on;
+            UpdateTracks(0.0, 0.0);
+        });
+        // The belt is the one layer tied to the ground rather than to a clock,
+        // so what it is worth saying about it is how well it is keeping up. The
+        // cap is a real limit and not a setting to hide: past it the tread would
+        // alias and run backwards, so it slips instead, and that shows here.
+        ui.Readout(() =>
+        {
+            AtlasSet a = _tank.Atlas!;
+            if (!a.HasTracks)
+                return "tracks  [none - needs a parts-built model]";
+            string phase = _tank.TrackPhase < 0 ? " -" : $"{_tank.TrackPhase,2}";
+            return $"track {phase} / {a.TrackPhases}"
+                   + $"   link {a.TrackPitch,5:F1}px"
+                   + $"\nin step to {_track.SyncSpeed,3:F0} px/s"
+                   + $" of {_profile.TopSpeed:F0}"
+                   + $"   slipping {(1.0 - _track.Slip) * 100.0,3:F0}%";
+        });
         ui.Toggle("engine exhaust  (O)", () => _exhaustEnabled, on =>
         {
             _exhaustEnabled = on;
@@ -1045,6 +1112,11 @@ public sealed partial class Main : Node2D
                      + $"  turret {_tank.TurretFacing,6:F1}  shot {_tank.FlashFrame,3}"
                      + $"  recoil {_recoil.Pitch,8:F5}/{_recoil.Roll,8:F5}"
                      + $"  exh {_tank.ExhaustPhase,2}@{_exhaust.Phase,5:F2}"
+                     // slip as well as phase: the cap is a real limit, and a
+                     // belt quietly running at two thirds of the ground is not
+                     // something to have to work out from the phase alone
+                     + $"  trk {_tank.TrackPhase,2}@{_track.Phase,5:F2}"
+                     + $" x{_track.Slip,4:F2}"
                      + $"  burn {_tank.FirePhase,2}/{_tank.BurnPhase,2}"
                      + $"  hit {_tank.HitPhase,2}@{(_hit.Face == "" ? "-" : _hit.Face)}"
                      + $" x{_hit.Scale:F2}"
@@ -1072,6 +1144,9 @@ public sealed partial class Main : Node2D
             _tank.QueueRedraw();
         }
 
+        // after the order has moved the tank, so the belts see the ground that
+        // actually went past this frame rather than last frame's
+        UpdateTracks(_speed * delta, delta);
         UpdateTremble(delta);
         UpdateExhaust(delta);
         UpdateBurn(delta);
@@ -1178,6 +1253,10 @@ public sealed partial class Main : Node2D
                 _exhaustEnabled = !_exhaustEnabled;
                 UpdateExhaust(0.0);
                 break;
+            case Key.C:
+                _tracksEnabled = !_tracksEnabled;
+                UpdateTracks(0.0, 0.0);
+                break;
             case Key.J:
                 _burning = !_burning;
                 UpdateBurn(0.0);
@@ -1198,9 +1277,15 @@ public sealed partial class Main : Node2D
                 _tank.QueueRedraw();
                 break;
             case Key.Escape: CancelOrder(); break;
-            case Key.Key1 or Key.Key2 or Key.Key3:
-                // Godot's Key enum is backed by long, so this needs the cast
-                _tagIndex = (int)(key.Keycode - Key.Key1);
+            case Key.Key1 or Key.Key2 or Key.Key3 or Key.Key4:
+                // Godot's Key enum is backed by long, so this needs the cast.
+                // Clamped rather than assumed to be in range: the number of
+                // tanks that loaded is whatever is on disk, and a key for one
+                // that is not there should do nothing rather than throw.
+                int pick = (int)(key.Keycode - Key.Key1);
+                if (pick >= _loaded.Count)
+                    break;
+                _tagIndex = pick;
                 UseTag(CurrentTag());
                 break;
             case Key.Space: _spinning = !_spinning; break;
@@ -1247,6 +1332,8 @@ public sealed partial class Main : Node2D
         _tank.TrembleRoll = 0.0;
         _exhaust.Reset();
         _tank.ExhaustPhase = -1;
+        _track.Reset();
+        _tank.TrackPhase = -1;
         _burning = false;
         _burn.Reset();
         _tank.Burning = false;

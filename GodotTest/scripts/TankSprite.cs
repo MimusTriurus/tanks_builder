@@ -138,6 +138,18 @@ public sealed partial class TankSprite : Node2D
     /// shot, so it runs out rather than wrapping - see <see cref="HitLoop"/>.</summary>
     public int HitPhase = -1;
 
+    /// <summary>Where the belts are in their cycle, or -1 with no belts to show.
+    /// Driven by <see cref="TrackLoop"/> off distance travelled, not off a
+    /// timer: the belt is what the ground is winding against.</summary>
+    public int TrackPhase = -1;
+
+    /// <summary>Whether the belts are drawn at all. On by default and not an
+    /// option in the sense the movement effects are - a tank has tracks - but
+    /// worth being able to switch off, because "does the hull layer still cover
+    /// everything it should" is a question you answer by looking at it
+    /// without them.</summary>
+    public bool ShowTracks = true;
+
     /// <summary>Where the live hit is drawn, in pixels from the layer's anchor.
     /// The only layer in the whole set that is placed rather than anchored, and
     /// the offset comes from the plate table the renderer stamps beside the
@@ -188,8 +200,11 @@ public sealed partial class TankSprite : Node2D
     /// And the scars first of all, because they are the only layers that are
     /// *on* the tank rather than in front of it: paint on the armour, under
     /// smoke drifting across it and under a shell landing on it.
+    /// The belts come before even those, because they are not on the tank -
+    /// they *are* the tank, the part of it the hull layer had held out. They go
+    /// straight after the hull and under everything that happens to it.
     public static readonly string[] LayerOrder =
-        AtlasSet.ScarNames.Concat(new[]
+        AtlasSet.TrackNames.Concat(AtlasSet.ScarNames).Concat(new[]
         {
             AtlasSet.ExhaustName, AtlasSet.BurnName, AtlasSet.FireName,
             "smoke", "flash", AtlasSet.DustName, AtlasSet.BurstName,
@@ -205,6 +220,8 @@ public sealed partial class TankSprite : Node2D
         AtlasSet.FireName => EffectLayer.BurningFire(layer),
         AtlasSet.DustName => EffectLayer.HitDust(layer),
         AtlasSet.BurstName => EffectLayer.HitBurst(layer),
+        _ when Array.IndexOf(AtlasSet.TrackNames, layer) >= 0
+            => EffectLayer.Track(layer),
         _ when EffectLayer.FaceOf(layer) != "" => EffectLayer.Scar(layer),
         "smoke" => EffectLayer.Normal(layer),
         _ => EffectLayer.Additive(layer),

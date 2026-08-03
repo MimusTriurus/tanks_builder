@@ -49,14 +49,18 @@ public sealed partial class EffectLayer : Node2D
     /// and its column run at different rates off the same rendered phases - see
     /// <see cref="BurnLoop"/>.
     /// </summary>
-    public enum Clocks { Shot, Exhaust, BurningSmoke, BurningFire, HitBurst, HitDust, Scar }
+    public enum Clocks
+    {
+        Shot, Exhaust, BurningSmoke, BurningFire, HitBurst, HitDust, Scar, Track,
+    }
 
     public Clocks Clock = Clocks.Shot;
 
     /// <summary>Whether this layer goes round rather than running out.</summary>
     public bool Loops => Clock == Clocks.Exhaust
                          || Clock == Clocks.BurningSmoke
-                         || Clock == Clocks.BurningFire;
+                         || Clock == Clocks.BurningFire
+                         || Clock == Clocks.Track;
 
     /// <summary>Whether this layer is placed away from the shared anchor.
     ///
@@ -164,6 +168,27 @@ public sealed partial class EffectLayer : Node2D
         Clock = Clocks.Scar,
     };
 
+    /// <summary>
+    /// One track belt: normal alpha, on the hull's heading, at the shared
+    /// anchor.
+    ///
+    /// The only layer here that is not an effect at all - it is part of the
+    /// tank, and it is a layer of its own for exactly one reason: it moves
+    /// relative to the hull it is bolted to, which is the one thing a single
+    /// hull sprite cannot show. Everything else about it follows the hull,
+    /// including its tilt, because a belt that did not lean with the vehicle
+    /// would come off it on the first bump.
+    ///
+    /// Its clock is neither an event nor a timer - see
+    /// <see cref="TrackLoop"/>: the belt winds with the ground.
+    /// </summary>
+    public static EffectLayer Track(string layer) => new()
+    {
+        Layer = layer,
+        FollowsHull = true,
+        Clock = Clocks.Track,
+    };
+
     /// <summary>The plate a scar layer belongs to, or "" for any other
     /// layer.</summary>
     public static string FaceOf(string layer) =>
@@ -185,6 +210,7 @@ public sealed partial class EffectLayer : Node2D
                 Clocks.BurningSmoke => Tank.Burning ? Tank.BurnPhase : -1,
                 Clocks.BurningFire => Tank.Burning ? Tank.FirePhase : -1,
                 Clocks.HitBurst or Clocks.HitDust => Tank.HitPhase,
+                Clocks.Track => Tank.ShowTracks ? Tank.TrackPhase : -1,
                 // A plate carrying several marks has no single phase, so this
                 // is only "is there anything to draw". Which is all the redraw
                 // gate needs: what the layer actually puts on screen depends on

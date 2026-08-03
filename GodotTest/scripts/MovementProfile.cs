@@ -72,7 +72,16 @@ public sealed class MovementProfile
         Tag = "HT", TopSpeed = 175.0, Accel = 260.0, TurnRate = 140.0,
     };
 
-    public static readonly MovementProfile[] All = { Light, Medium, Heavy };
+    /// <summary>The parts-built medium. Same vehicle, so the same numbers -
+    /// listed rather than left to the fallback so that changing what an
+    /// unrecognised tag gets cannot silently change how this one drives.</summary>
+    public static readonly MovementProfile MediumParts = new()
+    {
+        Tag = "MTP", TopSpeed = 240.0, Accel = 420.0, TurnRate = 200.0,
+    };
+
+    public static readonly MovementProfile[] All =
+        { Light, Medium, Heavy, MediumParts };
 
     /// <summary>Profile for an atlas tag, medium for anything unrecognised.</summary>
     public static MovementProfile For(string tag)

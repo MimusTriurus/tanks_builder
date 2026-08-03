@@ -360,8 +360,18 @@ def render_atlas(cfg):
     else:
         static_objects = by_hints(cfg.get("fit_static"))
 
-    spun_corners = corners_of(fit_objects) or corners
-    static_corners = corners_of(static_objects)
+    # A phase hook that edits mesh data - a track belt sliding along its loop -
+    # changes the very bound boxes this reads, and it has already run by the
+    # time the *next* layer starts fitting. So render_set() measures the corners
+    # once for the whole job and hands them down, the same way it hands down the
+    # spin pivot and for the same reason. Caught by the belts: the two layers
+    # rendered after a phase sweep came out 0.29% smaller than the two before it.
+    if cfg.get("fit_corners") is not None:
+        spun_corners = [Vector(p) for p in cfg["fit_corners"]] or corners
+        static_corners = [Vector(p) for p in (cfg.get("fit_static_corners") or ())]
+    else:
+        spun_corners = corners_of(fit_objects) or corners
+        static_corners = corners_of(static_objects)
     fit_lo, fit_hi = bounds_of(spun_corners + static_corners)
 
     if cfg.get("spin_pivot"):
@@ -696,6 +706,12 @@ def render_set(job):
 
     angles = frame_angles(shared)
 
+    # ---- one fitted geometry for the whole job --------------------------
+    # Measured here and now, before any layer has rendered and therefore before
+    # any phase hook has run. See the note in render_atlas.
+    fit_corners = corners_of(spun)
+    fit_static_corners = corners_of(static)
+
     # ---- one spin axis for the whole job --------------------------------
     #
     # More than one object carries the stamp, and that is not a curiosity: a
@@ -802,6 +818,8 @@ def render_set(job):
         cfg["spin_pivot"] = list(pivot_xy)
         cfg["fit_objects"] = sorted(spun, key=lambda o: o.name)
         cfg["fit_static_objects"] = sorted(static, key=lambda o: o.name)
+        cfg["fit_corners"] = fit_corners
+        cfg["fit_static_corners"] = fit_static_corners
         cfg["fit_angles"] = angles
         if layer.get("static"):
             cfg["steps"] = 1

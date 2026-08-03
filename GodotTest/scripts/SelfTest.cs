@@ -18,7 +18,16 @@ namespace TankSpriteTest;
 /// </summary>
 public static class SelfTest
 {
-    public static int Run(HexField field, TankSprite tank)
+    /// <summary>
+    /// Every check, against the tank that is loaded.
+    ///
+    /// <paramref name="atlases"/> is every tank that loaded, and it is here for
+    /// one reason: the belts only exist on the parts-built model, and the
+    /// harness starts on a different one. Asking the current tank alone would
+    /// have meant either skipping those checks or making the run order matter.
+    /// </summary>
+    public static int Run(HexField field, TankSprite tank,
+                          IReadOnlyDictionary<string, AtlasSet>? atlases = null)
     {
         int failed = 0;
 
@@ -683,11 +692,184 @@ public static class SelfTest
                 + $" {atlas.EffectPhases * atlas.Count}, highest {tiles.Max()}");
         }
 
+        const double tick = 1.0 / 60.0;
+
+        GD.Print("the track belts");
+        // A loop like the exhaust's, driven by the one thing none of the others
+        // are: the ground. Everything here is about that difference.
+        var belt = new TrackLoop { Phases = 8, Pitch = 7.0 };
+        var beltSeen = new HashSet<int>();
+        bool beltInRange = true;
+        // A crawl, so the walk is finer than a phase. At a *constant* speed the
+        // step can divide the cycle and then the same few frames come round for
+        // ever - a link of 7px stepped 1px a frame is 8/7 of a phase and shows
+        // seven of the eight, permanently. That is sampling rather than a fault,
+        // and it is the same arithmetic the cap below exists for, but it makes
+        // "a lap visits every phase" a question about the speed picked here.
+        for (int i = 0; i < 600; i++)
+        {
+            belt.Advance(0.2, tick);
+            beltSeen.Add(belt.Frame);
+            if (belt.Phase < 0.0 || belt.Phase >= belt.Phases
+                || belt.Frame < 0 || belt.Frame >= belt.Phases)
+                beltInRange = false;
+        }
+        Check("the belt stays inside the phases that were rendered", beltInRange,
+            $"phase {belt.Phase:F3} frame {belt.Frame} of {belt.Phases}");
+        Check("a slow lap visits every phase", beltSeen.Count == belt.Phases,
+            $"showed {beltSeen.Count} of {belt.Phases}");
+        Check("the belt never runs out, where the shot does",
+            EffectLayer.Track(AtlasSet.TrackNames[0]).Loops
+            && EffectLayer.PhaseAt(EffectLayer.Duration) < 0,
+            "a belt on a moving tank has no last frame");
+
+        // The one that separates it from every other clock here. The exhaust
+        // idles, the tremble idles, the fire burns; a stopped tank's tracks are
+        // stopped, and a belt that crept while the tank stood would be the most
+        // obvious thing on screen.
+        var parked = new TrackLoop { Phases = 8, Pitch = 7.0 };
+        double parkedStart = parked.Phase;
+        for (int i = 0; i < 600; i++)
+            parked.Advance(0.0, tick);
+        Check("a tank standing still has still tracks",
+            Math.Abs(parked.Phase - parkedStart) < 1e-12,
+            $"crept {parked.Phase - parkedStart:F6} phases in ten seconds");
+
+        // Distance, not time - and asserted both ways round, because either one
+        // alone passes for the wrong reason. The same ground at half the frame
+        // rate has to give the same phase; the same time at half the speed must
+        // not.
+        var quick = new TrackLoop { Phases = 8, Pitch = 7.0 };
+        var slow = new TrackLoop { Phases = 8, Pitch = 7.0 };
+        for (int i = 0; i < 120; i++)
+            quick.Advance(0.5, tick);
+        for (int i = 0; i < 60; i++)
+            slow.Advance(1.0, tick * 2.0);
+        Check("the same ground gives the same phase at any frame rate",
+            Math.Abs(quick.Phase - slow.Phase) < 1e-9,
+            $"{quick.Phase:F6} against {slow.Phase:F6}");
+        var halfSpeed = new TrackLoop { Phases = 8, Pitch = 7.0 };
+        for (int i = 0; i < 120; i++)
+            halfSpeed.Advance(0.25, tick);
+        Check("the same time at half the speed does not",
+            Math.Abs(halfSpeed.Phase - quick.Phase) > 0.5,
+            $"{halfSpeed.Phase:F3} against {quick.Phase:F3}");
+
+        // One turn of the cycle is one link, which is the whole contract with
+        // the renderer: the extra phase it rendered as a check was a slide of
+        // exactly one link and came out identical to the first.
+        var oneLink = new TrackLoop { Phases = 8, Pitch = 7.0 };
+        oneLink.Advance(7.0, 1.0);
+        Check("one link of ground is one turn of the cycle",
+            Math.Abs(oneLink.Phase) < 1e-9,
+            $"came back to {oneLink.Phase:F6} rather than 0");
+
+        var backwards = new TrackLoop { Phases = 8, Pitch = 7.0 };
+        backwards.Advance(-1.0, tick);
+        Check("backing up runs the belt backwards",
+            backwards.Phase > belt.Phases / 2.0,
+            $"phase {backwards.Phase:F3} of {backwards.Phases}");
+
+        // The cap, which is the interesting half. Past half a link per frame
+        // the phase sequence aliases and the tread reads as running the wrong
+        // way; below the cap it must be exactly in step, and above it must slip
+        // rather than reverse.
+        var capped = new TrackLoop { Phases = 8, Pitch = 7.0 };
+        double inStep = capped.SyncSpeed * 0.5 * tick;
+        capped.Advance(inStep, tick);
+        Check("below the sync speed the belt is exactly in step",
+            Math.Abs(capped.Slip - 1.0) < 1e-9, $"slip {capped.Slip:F4}");
+        double flatOut = 240.0 * tick;
+        capped.Advance(flatOut, tick);
+        Check("at cruise it slips rather than aliasing", capped.Slip < 1.0,
+            $"slip {capped.Slip:F3} at 240px/s, in step to"
+            + $" {capped.SyncSpeed:F0}px/s");
+        var stepped = new TrackLoop { Phases = 8, Pitch = 7.0 };
+        double before = stepped.Phase;
+        stepped.Advance(flatOut, tick);
+        double moved = stepped.Phase - before;
+        Check("the cap holds the step clear of the alias limit",
+            moved > 0.0 && moved < stepped.Phases / 2.0,
+            $"{moved:F3} phases in a frame, alias at {stepped.Phases / 2.0:F1}");
+
+        // Wiring. The belt is bolted to the hull, so it is indexed and tilted by
+        // the hull - the exhaust's mistake, and invisible at heading zero.
+        Check("the belts follow the hull, not the turret",
+            AtlasSet.TrackNames.All(n => EffectLayer.Track(n).FollowsHull),
+            "they are welded to the hull and lean with it");
+        Check("a belt is drawn on the shared anchor, never placed",
+            AtlasSet.TrackNames.All(n => !EffectLayer.Track(n).Placed),
+            "only an arriving shell is placed");
+        Check("the belts are kept out of the shot's layer list",
+            !AtlasSet.TrackNames.Any(n => AtlasSet.EffectNames.Contains(n)),
+            "HasEffects requires every name in it, and would switch the "
+            + "rendered flash off on a tank with a barrel but no belts");
+        Check("the belts composite before everything else on the tank",
+            TankSprite.LayerOrder.Take(AtlasSet.TrackNames.Length)
+                .SequenceEqual(AtlasSet.TrackNames),
+            "they are not on the tank, they are the tank: "
+            + string.Join(", ", TankSprite.LayerOrder.Take(3)));
+
+        AtlasSet? tracked = atlases?.Values.FirstOrDefault(a => a.HasTracks)
+                            ?? (atlas.HasTracks ? atlas : null);
+        if (tracked is null)
+        {
+            Check("some loaded tank has belts that wind", false,
+                "no parts-built model on disk - render one into Sprites/MTP");
+        }
+        else
+        {
+            Vector2 tankAnchor = tracked.Anchor / (Vector2)tracked.Tile;
+            foreach (string name in AtlasSet.TrackNames)
+            {
+                Vector2 beltAnchor = tracked.AnchorOf(name)
+                                     / (Vector2)tracked.TileOf(name);
+                Check($"{name} shares the tank's anchor, in frame fractions",
+                    (beltAnchor - tankAnchor).Length() < 1e-4,
+                    $"{beltAnchor} against {tankAnchor}");
+                // The belt sits inside the hull's own footprint, so unlike the
+                // flash it needs no room of its own. This is what would catch
+                // it quietly growing until the frame cost went up for nothing.
+                Check($"{name} needs no wider frame than the tank",
+                    tracked.TileOf(name) == tracked.Tile,
+                    $"{tracked.TileOf(name).X}px against tank {tracked.Tile.X}px");
+                // Unlike the hit, which is one heading-less column: a belt is
+                // welded to the hull and has to turn with it.
+                Check($"{name} was rendered at every heading",
+                    tracked.CountOf(name) == tracked.Count,
+                    $"{tracked.CountOf(name)} against {tracked.Count}");
+            }
+            Check("both belts have the same number of phases",
+                tracked.PhasesOf(AtlasSet.TrackNames[0])
+                == tracked.PhasesOf(AtlasSet.TrackNames[1]),
+                "one render job, one belt design");
+            Check("the belts have phases to loop over", tracked.TrackPhases > 1,
+                $"{tracked.TrackPhases} phases");
+            // A link the size of the tank would mean the cycle is not a link at
+            // all, and a link under a pixel could not be seen to move.
+            Check("the link is a plausible fraction of the tank",
+                tracked.TrackPitch > 1.0 && tracked.TrackPitch < tracked.Tile.X / 8.0,
+                $"{tracked.TrackPitch:F2}px against a {tracked.Tile.X}px frame");
+
+            foreach (string name in AtlasSet.TrackNames)
+            {
+                var beltTiles = new HashSet<int>();
+                foreach (int facing in tracked.RenderedFacings())
+                    for (int phase = 0; phase < tracked.TrackPhases; phase++)
+                        beltTiles.Add(tracked.EffectFrame(name, phase, facing));
+                Check($"every {name} phase and heading maps to its own tile",
+                    beltTiles.Count == tracked.TrackPhases * tracked.Count
+                    && beltTiles.Max() < tracked.TrackPhases * tracked.Count,
+                    $"{beltTiles.Count} distinct of"
+                    + $" {tracked.TrackPhases * tracked.Count},"
+                    + $" highest {beltTiles.Max()}");
+            }
+        }
+
         GD.Print("the engine exhaust");
         // What separates this from every other effect clock is that it has no
         // end, so the assertions are about it going round rather than about it
         // running out.
-        const double tick = 1.0 / 60.0;
         var loop = new ExhaustLoop { Phases = 12, TopSpeed = 240.0 };
         var visited = new HashSet<int>();
         bool inRange = true;

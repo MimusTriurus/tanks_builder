@@ -103,12 +103,29 @@ public sealed class AtlasSet
     public static readonly string[] ScarNames =
         { "scar_front", "scar_rear", "scar_left", "scar_right" };
 
+    /// <summary>
+    /// The two track belts, drawn as layers of their own so they can wind while
+    /// the hull they are bolted to does not.
+    ///
+    /// Both required, for the burning pair's reason and more bluntly: one belt
+    /// running and the other standing still is not half the effect, it is a
+    /// broken tank.
+    ///
+    /// Kept out of <see cref="EffectNames"/> like everything else that is not
+    /// the shot's pair, but these are not effects at all - they are part of the
+    /// vehicle, welded to the hull, and they follow its heading for the same
+    /// reason the exhaust does. What makes them a layer is only that they move
+    /// relative to the hull, which is exactly what a single hull sprite cannot
+    /// show.
+    /// </summary>
+    public static readonly string[] TrackNames = { "track_left", "track_right" };
+
     /// <summary>Layers that load if they are there and are silently skipped if
     /// they are not. All but the hit layers need a piece separated by hand in
     /// the .blend; the hit is measured off the hull and so is always there.</summary>
     private static readonly string[] OptionalNames =
         new[] { "smoke", "flash", ExhaustName, FireName, BurnName, BurstName,
-                DustName }.Concat(ScarNames).ToArray();
+                DustName }.Concat(ScarNames).Concat(TrackNames).ToArray();
 
     public string Tag { get; private set; } = "";
     public string Error { get; private set; } = "";
@@ -238,6 +255,36 @@ public sealed class AtlasSet
 
     /// <summary>Phases in a hit, 0 if it is missing.</summary>
     public int HitPhases => HasHit ? PhasesOf(BurstName) : 0;
+
+    /// <summary>True when this tank was rendered with belts that wind. Both, and
+    /// the pitch as well: a belt with no link length is a belt that cannot be
+    /// tied to the ground, and one running against a ground it does not match
+    /// is worse than one that does not run.</summary>
+    public bool HasTracks
+    {
+        get
+        {
+            foreach (string layer in TrackNames)
+                if (!Has(layer))
+                    return false;
+            return TrackPitch > 0.0;
+        }
+    }
+
+    /// <summary>Phases in the belt's cycle, 0 if it is missing. Both sides share
+    /// the count - one render job, one belt design.</summary>
+    public int TrackPhases => Has(TrackNames[0]) ? PhasesOf(TrackNames[0]) : 0;
+
+    /// <summary>
+    /// Ground covered by one turn of the belt's cycle, in pixels - one link.
+    ///
+    /// Stamped in world units and divided here, rather than stamped in pixels.
+    /// A pixel is what the camera fit produces, so a pitch in pixels written
+    /// before the render would be the renderer's second guess at its own
+    /// answer; the atlas already carries `units_per_pixel` and dividing is this
+    /// side's business.
+    /// </summary>
+    public double TrackPitch { get; private set; }
 
     /// <summary>True when every plate has a mark to leave. All four, because a
     /// tank that can be holed on three sides and not the fourth is worse than
@@ -465,6 +512,9 @@ public sealed class AtlasSet
             atlas.Take(layer, image, meta);
             if (layer == BurstName && meta.Hits is not null)
                 atlas.TakePlates(meta.Hits.Faces);
+            if (layer == TrackNames[0] && meta.Track is { Length: > 0 }
+                && meta.UnitsPerPixel > 0.0)
+                atlas.TrackPitch = meta.Track[0].Pitch / meta.UnitsPerPixel;
         }
 
         if (hull is null)
@@ -644,6 +694,23 @@ public sealed class AtlasSet
         [JsonPropertyName("frames")] public FrameMeta[] Frames { get; set; } = Array.Empty<FrameMeta>();
         [JsonPropertyName("view")] public ViewMeta View { get; set; } = new();
         [JsonPropertyName("hits")] public HitsMeta? Hits { get; set; }
+        [JsonPropertyName("track")] public TrackMeta[]? Track { get; set; }
+    }
+
+    private sealed class TrackMeta
+    {
+        /// <summary>One link, in world units. See <see cref="TrackPitch"/> for
+        /// why it is not in pixels.</summary>
+        [JsonPropertyName("pitch")] public double Pitch { get; set; }
+
+        [JsonPropertyName("links")] public int Links { get; set; }
+
+        /// <summary>Whether the belt was laid out so its cycle closes exactly,
+        /// rather than measured and hoped for. Carried through so a belt that
+        /// will pop at the seam says so in the metadata rather than on
+        /// screen.</summary>
+        [JsonPropertyName("closes_by_construction")]
+        public bool Closes { get; set; }
     }
 
     private sealed class HitsMeta

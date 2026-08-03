@@ -1,0 +1,186 @@
+{
+ "spin": {
+  "axis": [
+   0.0,
+   -0.02935
+  ],
+  "seam_z": 0.13117,
+  "roundness": 0.991,
+  "cross_band_spread": 4e-05,
+  "declared_empty_xy": [
+   0.0,
+   -0.10795
+  ],
+  "wobble_px_if_empty_trusted": 14.57,
+  "axis_warnings": [
+   "the turret still overlaps the hull 0.1399 above the seam, so it will clip through it as it turns"
+  ],
+  "rotatable": {
+   "overlap": true,
+   "min_margin_any_z": -0.13994,
+   "at_z_any": [
+    0.16670220018168408,
+    0.16871594878723994
+   ],
+   "min_margin_above_seam": -0.13994,
+   "at_z_above_seam": [
+    0.16670220018168408,
+    0.16871594878723994
+   ],
+   "seam_skip": 0.02,
+   "free": false,
+   "seam_only": false
+  }
+ },
+ "ring": {
+  "cut_z": 0.19307,
+  "cut_from": "measured",
+  "deck_max": 0.19307,
+  "deck_median": 0.16859,
+  "deck_spread": 0.0242,
+  "sunk_bins": 18,
+  "sunk_radius": [
+   0.0,
+   0.18
+  ],
+  "basket_depth": 0.11497,
+  "turret_verts_below_cut": 250302,
+  "turret_pct_below_cut": 28.4,
+  "probed_about": [
+   0.0,
+   -0.02935
+  ]
+ },
+ "hex": {
+  "name": "Hex",
+  "centre": [
+   0.0,
+   -0.02935
+  ],
+  "circumradius": 0.79749,
+  "ground_z": -0.27849,
+  "fit_radius": 0.62786,
+  "stood_on": 6
+ },
+ "tile_removed": true,
+ "framing_identical": true,
+ "warnings": [],
+ "spin_pivot": [
+  0.0,
+  -0.02935
+ ],
+ "cut_box_removed": true,
+ "units_per_pixel": 0.00648,
+ "track_phases": 8,
+ "seam_probe": false,
+ "rebuilt": {
+  "L.Caterpillar.Geometry": {
+   "from": "L.Caterpillar.Geometry",
+   "links": 46,
+   "cut_at": 0.01427,
+   "cut_density_vs_mean": 0.855,
+   "base_link": {
+    "verts": 14142,
+    "polys": 19592
+   },
+   "verts": 650532,
+   "polys": 901232,
+   "source": {
+    "verts": 668059,
+    "polys": 905152
+   },
+   "polys_per_link_in_source": [
+    13251,
+    28093
+   ]
+  },
+  "R.Caterpillar.Geometry": {
+   "from": "R.Caterpillar.Geometry",
+   "links": 46,
+   "cut_at": 0.01427,
+   "cut_density_vs_mean": 0.855,
+   "base_link": {
+    "verts": 14142,
+    "polys": 19592
+   },
+   "verts": 650532,
+   "polys": 901232,
+   "source": {
+    "verts": 668059,
+    "polys": 905152
+   },
+   "polys_per_link_in_source": [
+    13251,
+    28093
+   ]
+  }
+ },
+ "belts": [
+  {
+   "name": "L.Caterpillar.Rebuilt",
+   "verts": 650532,
+   "perimeter_local": 2.283,
+   "links": 46,
+   "links_raw": null,
+   "links_by_run": null,
+   "links_by_vertex_density": 47,
+   "pitch_from": "laid out at perimeter/46 by construction",
+   "pitch_local": 0.04963,
+   "pitch_world": 0.04492,
+   "tread_repeat": null,
+   "closes_by_construction": true,
+   "band_thickness": [
+    0.0188,
+    0.0399,
+    0.0895
+   ],
+   "offset_range": [
+    -0.0182,
+    0.0138
+   ],
+   "worst_foot_gap": 0.0,
+   "rest_roundtrip_max": 0.0,
+   "rest_roundtrip_p99": 0.0,
+   "runs_rearward_along_local_x": -1.0,
+   "ground_run_alignment": 1.0,
+   "pitch_px": 6.93,
+   "rest_roundtrip_px": 0.0
+  },
+  {
+   "name": "R.Caterpillar.Rebuilt",
+   "verts": 650532,
+   "perimeter_local": 2.283,
+   "links": 46,
+   "links_raw": null,
+   "links_by_run": null,
+   "links_by_vertex_density": 47,
+   "pitch_from": "laid out at perimeter/46 by construction",
+   "pitch_local": 0.04963,
+   "pitch_world": 0.04492,
+   "tread_repeat": null,
+   "closes_by_construction": true,
+   "band_thickness": [
+    0.0188,
+    0.0399,
+    0.0895
+   ],
+   "offset_range": [
+    -0.0182,
+    0.0138
+   ],
+   "worst_foot_gap": 0.0,
+   "rest_roundtrip_max": 0.0,
+   "rest_roundtrip_p99": 0.0,
+   "runs_rearward_along_local_x": -1.0,
+   "ground_run_alignment": 1.0,
+   "pitch_px": 6.93,
+   "rest_roundtrip_px": 0.0
+  }
+ ],
+ "belts_restored": [
+  0.0,
+  0.0,
+  0.0,
+  0.0
+ ]
+}
