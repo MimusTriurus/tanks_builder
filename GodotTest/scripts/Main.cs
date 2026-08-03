@@ -24,8 +24,9 @@ public sealed partial class Main : Node2D
     /// MTP is the same medium built from separate parts - hull, turret and two
     /// belts as their own meshes - and it is here rather than replacing MT
     /// because it is the only one whose tracks wind, and a moving belt is
-    /// judged against a still one.</summary>
-    private static readonly string[] Tags = { "HT", "MT", "LT", "MTP" };
+    /// judged against a still one. HTP is the parts-built heavy, and it sits
+    /// next to HT for the same reason.</summary>
+    private static readonly string[] Tags = { "HT", "MT", "LT", "MTP", "HTP" };
 
     private const double SpinSpeed = 90.0;      // deg/sec, for the wobble check
 
@@ -813,7 +814,10 @@ public sealed partial class Main : Node2D
         ControlPanel ui = _panel!;
 
         ui.Heading("tank");
-        ui.Choice("class  (1/2/3)", _loaded, () => _tagIndex, i =>
+        // Not "(1/2/3)": how many tanks load is whatever is on disk, so
+        // enumerating them here goes stale every time one is added, and it
+        // already had.
+        ui.Choice("class  (number keys)", _loaded, () => _tagIndex, i =>
         {
             _tagIndex = i;
             UseTag(CurrentTag());
@@ -1277,7 +1281,7 @@ public sealed partial class Main : Node2D
                 _tank.QueueRedraw();
                 break;
             case Key.Escape: CancelOrder(); break;
-            case Key.Key1 or Key.Key2 or Key.Key3 or Key.Key4:
+            case Key.Key1 or Key.Key2 or Key.Key3 or Key.Key4 or Key.Key5:
                 // Godot's Key enum is backed by long, so this needs the cast.
                 // Clamped rather than assumed to be in range: the number of
                 // tanks that loaded is whatever is on disk, and a key for one

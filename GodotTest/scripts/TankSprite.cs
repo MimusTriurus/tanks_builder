@@ -203,8 +203,16 @@ public sealed partial class TankSprite : Node2D
     /// The belts come before even those, because they are not on the tank -
     /// they *are* the tank, the part of it the hull layer had held out. They go
     /// straight after the hull and under everything that happens to it.
+    ///
+    /// And the turret is in this list, immediately after the belts, rather than
+    /// being drawn by the parent alongside the hull. "Straight after the hull"
+    /// used to be a comment this list could not keep: children draw after the
+    /// parent, so a turret drawn up there went down before every belt and the
+    /// belt painted over it. See <see cref="EffectLayer.Turret"/> for the
+    /// geometry and the measurement.
     public static readonly string[] LayerOrder =
-        AtlasSet.TrackNames.Concat(AtlasSet.ScarNames).Concat(new[]
+        AtlasSet.TrackNames.Concat(new[] { "turret" })
+            .Concat(AtlasSet.ScarNames).Concat(new[]
         {
             AtlasSet.ExhaustName, AtlasSet.BurnName, AtlasSet.FireName,
             "smoke", "flash", AtlasSet.DustName, AtlasSet.BurstName,
@@ -220,6 +228,7 @@ public sealed partial class TankSprite : Node2D
         AtlasSet.FireName => EffectLayer.BurningFire(layer),
         AtlasSet.DustName => EffectLayer.HitDust(layer),
         AtlasSet.BurstName => EffectLayer.HitBurst(layer),
+        "turret" => EffectLayer.Turret(layer),
         _ when Array.IndexOf(AtlasSet.TrackNames, layer) >= 0
             => EffectLayer.Track(layer),
         _ when EffectLayer.FaceOf(layer) != "" => EffectLayer.Scar(layer),
@@ -457,6 +466,10 @@ public sealed partial class TankSprite : Node2D
             EffectLayer layer = MakeLayer(name);
             layer.Tank = this;
             AddChild(layer);
+            // The painted sheet goes straight after the turret, which is where
+            // it was when the turret was a parent draw. See SheetFlash.
+            if (name == "turret")
+                AddChild(new SheetFlash { Tank = this });
         }
     }
 
@@ -469,13 +482,11 @@ public sealed partial class TankSprite : Node2D
                       || Math.Abs(RecoilPitch) > 1e-6 || Math.Abs(RecoilRoll) > 1e-6;
         if (ShowHull)
             DrawLayerTilted("hull", HullFacing, tilted, false);
-        if (ShowTurret)
-            DrawLayerTilted("turret", TurretFacing, tilted, true);
-        // the rendered flash is drawn by the child layers, which need their own
-        // blend modes; only the painted sheet is drawn from here
-        if (ActiveSource == FlashSource.Sheet && FlashFrame >= 0
-            && Flash?.Texture is not null)
-            DrawFlash();
+        // The turret is not drawn here - it is a child layer, so that it lands
+        // after the belts rather than before them. See LayerOrder.
+        // Neither flash is drawn from here any more: the rendered one is a child
+        // layer because it needs its own blend mode, and the painted sheet is a
+        // child because it has to land over the turret. See SheetFlash.
         if (ShowAxis)
         {
             var colour = new Color(1.0f, 0.2f, 0.2f, 0.9f);
@@ -513,18 +524,52 @@ public sealed partial class TankSprite : Node2D
     /// It rides the turret's transform, not the hull's: the flash is fixed to
     /// the gun, so whatever the gun is doing it does too.
     /// </summary>
-    private void DrawFlash()
+    /// <summary>
+    /// The painted flash sheet, and it is a node for the same reason the turret
+    /// is: it has to land <em>over</em> the turret, and the turret is a child
+    /// now. Drawn from the parent it would go under one.
+    ///
+    /// It is added immediately after the turret, so where it sits relative to
+    /// the turret is what it always was.
+    /// </summary>
+    private sealed partial class SheetFlash : Node2D
     {
-        Vector2 along = Atlas!.GroundDirection(TurretFacing);
-        Vector2 across = new Vector2(-along.Y, along.X).Normalized();
-        Vector2 muzzle = Atlas.Muzzle(Atlas.FrameFor(TurretFacing)) - Atlas.Anchor
-                         + new Vector2(0.0f, HeaveFor(true));
-        var place = new Transform2D(along * FlashScale, across * FlashScale, muzzle);
+        public TankSprite Tank = null!;
 
-        DrawSetTransformMatrix(ShearFor(true) * place);
-        DrawTextureRectRegion(Flash!.Texture,
-            new Rect2(-Flash.Origin, Flash.Tile), Flash.Region(FlashFrame));
-        DrawSetTransformMatrix(Transform2D.Identity);
+        public override void _Ready() => TextureFilter = TextureFilterEnum.Linear;
+
+        // Asked for every frame while there is one, and for one frame after it
+        // goes: the same reason the effect layers do it. A node that stops
+        // marking itself dirty never gets the chance to draw nothing, and the
+        // last frame of the flash would stay on screen for good.
+        public override void _Process(double _)
+        {
+            bool want = Tank.ActiveSource == FlashSource.Sheet && Tank.FlashFrame >= 0;
+            if (want || _drawn)
+                QueueRedraw();
+        }
+
+        private bool _drawn;
+
+        public override void _Draw()
+        {
+            FlashSheet? sheet = Tank.Flash;
+            AtlasSet? atlas = Tank.Atlas;
+            _drawn = Tank.ActiveSource == FlashSource.Sheet && Tank.FlashFrame >= 0
+                     && sheet?.Texture is not null && atlas is not null;
+            if (!_drawn)
+                return;
+            Vector2 along = atlas!.GroundDirection(Tank.TurretFacing);
+            Vector2 across = new Vector2(-along.Y, along.X).Normalized();
+            Vector2 muzzle = atlas.Muzzle(atlas.FrameFor(Tank.TurretFacing))
+                             - atlas.Anchor + new Vector2(0.0f, Tank.HeaveFor(true));
+            var place = new Transform2D(along * Tank.FlashScale,
+                                        across * Tank.FlashScale, muzzle);
+            DrawSetTransformMatrix(Tank.ShearFor(true) * place);
+            DrawTextureRectRegion(sheet!.Texture,
+                new Rect2(-sheet.Origin, sheet.Tile), sheet.Region(Tank.FlashFrame));
+            DrawSetTransformMatrix(Transform2D.Identity);
+        }
     }
 
     private void DrawLayer(string layer, double facing)

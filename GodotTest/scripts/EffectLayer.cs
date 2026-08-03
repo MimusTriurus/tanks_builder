@@ -52,6 +52,10 @@ public sealed partial class EffectLayer : Node2D
     public enum Clocks
     {
         Shot, Exhaust, BurningSmoke, BurningFire, HitBurst, HitDust, Scar, Track,
+        /// <summary>No clock at all: part of the tank, always drawn, one frame
+        /// per heading. The turret is here because *where* it composites matters
+        /// - see <see cref="Turret"/>.</summary>
+        Body,
     }
 
     public Clocks Clock = Clocks.Shot;
@@ -189,6 +193,40 @@ public sealed partial class EffectLayer : Node2D
         Clock = Clocks.Track,
     };
 
+    /// <summary>
+    /// The turret, and it is a layer rather than a parent draw for exactly one
+    /// reason: it has to composite <em>after</em> the belts.
+    ///
+    /// A belt is lower than the turret but it is not always <em>behind</em> it.
+    /// At 30 degrees of depression the sight line off the far belt's top rises
+    /// 0.577 per unit travelled, so by the hull's near flank it is well above the
+    /// deck - which is why the far belt legitimately shows over the hull, and why
+    /// the hull holdout in the belt layer leaves it there. The turret is the one
+    /// thing tall enough to be in the way: a quarter of the width along, that
+    /// same sight line is barely off the ring, and the turret stands a third of a
+    /// unit above it.
+    ///
+    /// Drawn by the parent, the turret went down before its children and the belt
+    /// painted straight over it - measured at up to 1455px of belt inside the
+    /// turret's silhouette on HTP, at ten of twelve headings, and the same with
+    /// the turret slaved to the hull as with it turned away. It read as the track
+    /// showing through the turret, which is what it was.
+    ///
+    /// Nothing is given up by moving it: the <em>near</em> belt overlaps the
+    /// turret by exactly zero at every heading, because it is below and in front,
+    /// so no belt pixel that ought to be seen is lost to this. Which is also why
+    /// this is a draw-order fix and not a holdout: holding the turret out of the
+    /// belt render would bake in the turret's heading, and a skirt this far from
+    /// round (0.666 on HTP) does not survive being baked at one angle and drawn
+    /// at another.
+    /// </summary>
+    public static EffectLayer Turret(string layer) => new()
+    {
+        Layer = layer,
+        FollowsHull = false,          // it has its own heading, that is the point
+        Clock = Clocks.Body,
+    };
+
     /// <summary>The plate a scar layer belongs to, or "" for any other
     /// layer.</summary>
     public static string FaceOf(string layer) =>
@@ -211,6 +249,9 @@ public sealed partial class EffectLayer : Node2D
                 Clocks.BurningFire => Tank.Burning ? Tank.FirePhase : -1,
                 Clocks.HitBurst or Clocks.HitDust => Tank.HitPhase,
                 Clocks.Track => Tank.ShowTracks ? Tank.TrackPhase : -1,
+                // No phase axis, so frame 0 of one - EffectFrame clamps the
+                // phase against PhasesOf and lands on the heading column.
+                Clocks.Body => Tank.ShowTurret ? 0 : -1,
                 // A plate carrying several marks has no single phase, so this
                 // is only "is there anything to draw". Which is all the redraw
                 // gate needs: what the layer actually puts on screen depends on

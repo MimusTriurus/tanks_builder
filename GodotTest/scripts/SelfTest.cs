@@ -809,6 +809,18 @@ public static class SelfTest
                 .SequenceEqual(AtlasSet.TrackNames),
             "they are not on the tank, they are the tank: "
             + string.Join(", ", TankSprite.LayerOrder.Take(3)));
+        // The belt is lower than the turret but not always behind it: the far
+        // one shows over the hull deck legitimately, and only the turret is
+        // tall enough to be in its way. Drawn by the parent the turret went
+        // down first and the belt painted over it - 1455px of it on HTP.
+        int turretAt = Array.IndexOf(TankSprite.LayerOrder, "turret");
+        Check("the turret composites after both belts",
+            turretAt == AtlasSet.TrackNames.Length,
+            $"turret at {turretAt}, belts end at {AtlasSet.TrackNames.Length}: "
+            + string.Join(", ", TankSprite.LayerOrder.Take(4)));
+        Check("and before anything that happens to the tank",
+            turretAt < Array.IndexOf(TankSprite.LayerOrder, AtlasSet.ScarNames[0]),
+            "damage and effects go over the turret, not under it");
 
         AtlasSet? tracked = atlases?.Values.FirstOrDefault(a => a.HasTracks)
                             ?? (atlas.HasTracks ? atlas : null);

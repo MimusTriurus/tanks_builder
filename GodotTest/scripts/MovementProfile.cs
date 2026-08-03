@@ -80,8 +80,15 @@ public sealed class MovementProfile
         Tag = "MTP", TopSpeed = 240.0, Accel = 420.0, TurnRate = 200.0,
     };
 
+    /// <summary>The parts-built heavy. Same vehicle as HT, so the same numbers,
+    /// and listed for the same reason MTP is.</summary>
+    public static readonly MovementProfile HeavyParts = new()
+    {
+        Tag = "HTP", TopSpeed = 175.0, Accel = 260.0, TurnRate = 140.0,
+    };
+
     public static readonly MovementProfile[] All =
-        { Light, Medium, Heavy, MediumParts };
+        { Light, Medium, Heavy, MediumParts, HeavyParts };
 
     /// <summary>Profile for an atlas tag, medium for anything unrecognised.</summary>
     public static MovementProfile For(string tag)
