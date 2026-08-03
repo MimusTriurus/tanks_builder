@@ -25,8 +25,10 @@ public sealed partial class Main : Node2D
     /// belts as their own meshes - and it is here rather than replacing MT
     /// because it is the only one whose tracks wind, and a moving belt is
     /// judged against a still one. HTP is the parts-built heavy, and it sits
-    /// next to HT for the same reason.</summary>
-    private static readonly string[] Tags = { "HT", "MT", "LT", "MTP", "HTP" };
+    /// next to HT for the same reason. LTP completes the set, so every class now
+    /// has both structures side by side.</summary>
+    private static readonly string[] Tags =
+        { "HT", "MT", "LT", "MTP", "HTP", "LTP" };
 
     private const double SpinSpeed = 90.0;      // deg/sec, for the wobble check
 
@@ -1313,7 +1315,13 @@ public sealed partial class Main : Node2D
                 _tank.QueueRedraw();
                 break;
             case Key.Escape: CancelOrder(); break;
-            case Key.Key1 or Key.Key2 or Key.Key3 or Key.Key4 or Key.Key5:
+            // A range rather than one label per tank, and that is the fix for a
+            // bug this line has now had twice: the list ended at Key4 when MTP
+            // was added and at Key5 when HTP was, and each time the new tank was
+            // simply unreachable from the keyboard while everything else about it
+            // worked. The clamp below already answers "what if that tank is not
+            // there", so the labels never needed to know how many there are.
+            case >= Key.Key1 and <= Key.Key9:
                 // Godot's Key enum is backed by long, so this needs the cast.
                 // Clamped rather than assumed to be in range: the number of
                 // tanks that loaded is whatever is on disk, and a key for one

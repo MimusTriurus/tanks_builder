@@ -87,8 +87,17 @@ public sealed class MovementProfile
         Tag = "HTP", TopSpeed = 175.0, Accel = 260.0, TurnRate = 140.0,
     };
 
+    /// <summary>The parts-built light. LT's numbers, listed for the same reason
+    /// the other two are - and it is the one where the class matters most to what
+    /// the belts do, because 310 px/s against a 7.58px link is the worst case for
+    /// the track limiter in the whole set.</summary>
+    public static readonly MovementProfile LightParts = new()
+    {
+        Tag = "LTP", TopSpeed = 310.0, Accel = 620.0, TurnRate = 260.0,
+    };
+
     public static readonly MovementProfile[] All =
-        { Light, Medium, Heavy, MediumParts, HeavyParts };
+        { Light, Medium, Heavy, MediumParts, HeavyParts, LightParts };
 
     /// <summary>Profile for an atlas tag, medium for anything unrecognised.</summary>
     public static MovementProfile For(string tag)
