@@ -1744,6 +1744,50 @@ public static class SelfTest
             tank.TiltFor(true) != Vector2.Zero
             && tank.TiltFor(true) == tank.TiltFor(false),
             $"turret {tank.TiltFor(true)} vs hull {tank.TiltFor(false)}");
+
+        // The separate mode: the same kick, given to the turret alone. It is not
+        // "the hull skips it" - the pivot moves too, from the contact patch to
+        // the ring, because that is what a mount absorbing the recoil does.
+        tank.RecoilTurretOnly = true;
+        Check("on turret-only recoil the hull is not moved at all",
+            tank.TiltFor(false) == Vector2.Zero
+            && tank.MountTiltFor(false) == Vector2.Zero,
+            $"hull ground {tank.TiltFor(false)}, mount {tank.MountTiltFor(false)}");
+        Check("and the turret still is, past the stabiliser",
+            tank.MountTiltFor(true) != Vector2.Zero,
+            $"turret mount tilt {tank.MountTiltFor(true)} with the stabiliser on");
+        // The gate the draw goes through. A stabilised turret standing still has
+        // no ground tilt whatever, so asking only TiltFor would have skipped the
+        // shear and drawn the kick nowhere.
+        Check("the draw gate sees a kick the ground tilt cannot show",
+            tank.Sheared(true) && tank.TiltFor(true) == Vector2.Zero,
+            $"sheared {tank.Sheared(true)}, ground tilt {tank.TiltFor(true)}");
+        // Why the pivot was moved. The ring is where the anchor is, so the
+        // displacement there is zero by construction and the seam cannot part -
+        // pivoting about the ground would have slid the whole turret across a
+        // stationary hull instead. Read off the transforms rather than argued:
+        // a shear applied to the anchor is its origin.
+        Vector2 ringHull = tank.ShearFor(false) * Vector2.Zero;
+        Vector2 ringTurret = tank.ShearFor(true) * Vector2.Zero;
+        Check("turret-only recoil cannot part the seam at the ring",
+            (ringTurret - ringHull).Length() < 0.01,
+            $"{(ringTurret - ringHull).Length():F4}px between hull and turret "
+            + "at the anchor");
+        // And it does move what is above the ring, which is the whole point of
+        // the mode. Measured across the screen rather than at facing 270: firing
+        // into the camera, GroundDirection is only sin(elevation) long and the
+        // squash takes another three quarters off it, so the same kick is 0.56px
+        // there against 4.5 here. That range is the projection, not a fault, and
+        // it is the one the driving pitch already has.
+        tank.HullFacing = 0.0;
+        Vector2 upHull = tank.ShearFor(false) * new Vector2(0.0f, -100.0f);
+        Vector2 upTurret = tank.ShearFor(true) * new Vector2(0.0f, -100.0f);
+        Check("but it does move the turret above it",
+            (upTurret - upHull).Length() > 2.0,
+            $"{(upTurret - upHull).Length():F2}px apart 100px above the ring, "
+            + "broadside");
+        tank.HullFacing = 270.0;
+        tank.RecoilTurretOnly = false;
         tank.RecoilPitch = 0.0;
         tank.Pitch = 0.03;
         tank.Roll = 0.02;

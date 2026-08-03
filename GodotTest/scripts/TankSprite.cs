@@ -409,6 +409,32 @@ public sealed partial class TankSprite : Node2D
     /// </summary>
     public bool TurretStabilised = true;
 
+    /// <summary>
+    /// Recoil taken by the turret alone, with the hull standing still. Key L, or
+    /// --recoil-turret. Off by default: the shared kick is what a tank does, and
+    /// this is the separate reading to compare it against.
+    ///
+    /// It is not just "the hull skips it", because that would be the wrong
+    /// motion. The other tilts pivot about the contact patch, which is right for
+    /// them - a hull rocks on its suspension. A gun whose recoil the *mount*
+    /// absorbs pivots about the mount, so this one pivots about the ring, and the
+    /// ring is where the anchor already is. Two consequences, both wanted:
+    /// the seam cannot part, because at the ring the displacement is zero by
+    /// construction; and what moves is the top of the turret and the gun, which
+    /// is what recoil into a mount looks like.
+    ///
+    /// Pivoting it about the ground instead would slide the whole turret sprite
+    /// some 2.2px across a stationary hull - measurably at the edge of what the
+    /// skirt covers, and it reads as the turret coming loose rather than as a gun
+    /// firing.
+    ///
+    /// The impulse is the same either way. A lighter body would really be kicked
+    /// harder, but making the modes differ in strength as well as in placement
+    /// would mean the A/B measured two things at once - the same reason the two
+    /// flash tracks are held to one duration.
+    /// </summary>
+    public bool RecoilTurretOnly;
+
     /// <summary>Pitch and roll are the same operation in different directions -
     /// both tilt the body about a horizontal axis through the contact point, so
     /// both displace a point by an amount proportional to its height. Summing
@@ -423,31 +449,60 @@ public sealed partial class TankSprite : Node2D
         return displacement;
     }
 
-    /// <summary>Tilt a layer receives. Exposed so the stabilisation policy can
-    /// be asserted rather than read off the screen.</summary>
+    /// <summary>Tilt a layer receives about the contact patch. Exposed so the
+    /// stabilisation policy can be asserted rather than read off the
+    /// screen.</summary>
     public Vector2 TiltFor(bool turret) =>
         // Recoil first, and outside the stabiliser: a two-plane stabiliser
         // rejects the hull moving under the gun, and cannot reject the gun's own
         // firing impulse - it arrives through the mount as fast as the gun does.
         // A hull rocking under a turret nailed in place would look broken on the
         // one event where the turret is what is being watched.
-        TiltDisplacement(RecoilPitch, RecoilRoll)
+        // Unless the kick has been given to the turret alone, in which case it is
+        // not a body tilt at all and pivots elsewhere - see MountTiltFor.
+        (RecoilTurretOnly ? Vector2.Zero : TiltDisplacement(RecoilPitch, RecoilRoll))
         + (turret && TurretStabilised
             ? Vector2.Zero
             : TiltDisplacement(Pitch + TremblePitch, Roll + TrembleRoll));
+
+    /// <summary>Tilt a layer receives about the <em>ring</em> rather than about
+    /// the contact patch, which only the turret-only recoil mode produces. Zero
+    /// for everything else, so the ordinary path is untouched.</summary>
+    public Vector2 MountTiltFor(bool turret) =>
+        RecoilTurretOnly && turret
+            ? TiltDisplacement(RecoilPitch, RecoilRoll)
+            : Vector2.Zero;
+
+    /// <summary>Whether a layer is displaced at all, by either pivot. The draw
+    /// gate needs both: in the turret-only mode a stabilised turret standing
+    /// still can have no ground tilt whatever while the kick is at its peak, and
+    /// gating on the ground tilt alone would have drawn the recoil nowhere.
+    /// </summary>
+    public bool Sheared(bool turret) =>
+        TiltFor(turret) != Vector2.Zero || MountTiltFor(turret) != Vector2.Zero;
 
     /// <summary>Heave a layer receives. Never depends on the layer - see
     /// <see cref="TurretStabilised"/>.</summary>
     public int HeaveFor(bool turret) => Shake;
 
+    /// <summary>
+    /// The one shear a layer is drawn through, for both pivots at once.
+    ///
+    /// A point h above the anchor is displaced by <c>ground * (h + groundY)</c>
+    /// by a body tilt and by <c>mount * h</c> by a kick about the ring. That sum
+    /// is still linear in h, so it is still a single shear: slope is the total,
+    /// and only the constant term stays on the ground tilt. Composing two
+    /// transforms would give the same answer and resample twice.
+    /// </summary>
     internal Transform2D ShearFor(bool turret)
     {
         float groundY = Atlas!.GroundOffset.Y;
-        Vector2 d = TiltFor(turret);
+        Vector2 ground = TiltFor(turret);
+        Vector2 both = ground + MountTiltFor(turret);
         return new Transform2D(
             new Vector2(1.0f, 0.0f),                            // x is untouched
-            new Vector2(-d.X, 1.0f - d.Y),
-            new Vector2(groundY * d.X, groundY * d.Y));
+            new Vector2(-both.X, 1.0f - both.Y),
+            new Vector2(groundY * ground.X, groundY * ground.Y));
     }
 
     public override void _Ready()
@@ -498,7 +553,7 @@ public sealed partial class TankSprite : Node2D
 
     private void DrawLayerTilted(string layer, double facing, bool tilted, bool turret)
     {
-        bool shear = tilted && TiltFor(turret) != Vector2.Zero;
+        bool shear = tilted && Sheared(turret);
         if (shear)
             DrawSetTransformMatrix(ShearFor(turret));
         DrawLayer(layer, facing);

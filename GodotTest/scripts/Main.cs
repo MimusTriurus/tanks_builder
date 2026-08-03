@@ -246,6 +246,11 @@ public sealed partial class Main : Node2D
     /// it falls back on its own for a tank that has none.</summary>
     private FlashSource _flashSource = FlashSource.Rendered;
 
+    /// <summary>Recoil taken by the turret alone - key L, or --recoil-turret.
+    /// Held here as well as on the tank because the flag is parsed before the
+    /// tank exists, exactly as the flash source is.</summary>
+    private bool _recoilTurretOnly;
+
     private bool Moving => _pathStep < _path.Count;
 
     public override void _Ready()
@@ -311,6 +316,11 @@ public sealed partial class Main : Node2D
                      && double.TryParse(userArgs[i + 1], NumberStyles.Float,
                          CultureInfo.InvariantCulture, out double recoilLevel))
                 _recoil.Level = recoilLevel;
+            // A mode rather than a level, and it needs a flag for the reason the
+            // two slider levels do: the pair is judged by a screenshot, and
+            // taking one on each setting should not need a hand on the keyboard.
+            else if (userArgs[i] == "--recoil-turret")
+                _recoilTurretOnly = true;
             else if (userArgs[i] == "--flash" && i + 1 < userArgs.Length)
                 _flashSource = userArgs[i + 1].Equals("sheet",
                     StringComparison.OrdinalIgnoreCase)
@@ -370,7 +380,11 @@ public sealed partial class Main : Node2D
 
         _field = new HexField();
         AddChild(_field);
-        _tank = new TankSprite { Flash = _flash, Source = _flashSource };
+        _tank = new TankSprite
+        {
+            Flash = _flash, Source = _flashSource,
+            RecoilTurretOnly = _recoilTurretOnly,
+        };
         AddChild(_tank);
 
         // Judging whether two layers line up is a pixel-level question, so the
@@ -945,6 +959,8 @@ public sealed partial class Main : Node2D
             () => _recoil.Level, v => _recoil.Level = v, "x",
             () => $"kick peaks at {_recoil.PeakFor(_recoil.Level):F3}"
                   + $", rigid body ends at {Recoil.RigidBodyPeak:F3}");
+        ui.Toggle("recoil on turret only  (L)",
+            () => _tank.RecoilTurretOnly, on => _tank.RecoilTurretOnly = on);
         ui.Press("fire  (Z)", Fire);
         // Phase counters against the number of phases that were rendered. A
         // clock that has walked off the end of its atlas shows up here as a
@@ -968,7 +984,15 @@ public sealed partial class Main : Node2D
                          + $"   muzzle {a.Muzzle(a.FrameFor(_tank.TurretFacing))}")
                    + (_tank.Source == FlashSource.Rendered && !_tank.CanRender
                        ? "   [falling back - split a Barrel]" : "")
-                   + $"\nrecoil {_recoil.Pitch,7:F4} / {_recoil.Roll,7:F4}";
+                   // Which body is taking the kick, and about what. The seam cost
+                   // is not printed because it is zero in both arrangements by
+                   // construction - shared, the two move together; on the turret
+                   // alone, the pivot *is* the seam. That is asserted in the
+                   // self-test, where a claim that cannot vary belongs.
+                   + $"\nrecoil {_recoil.Pitch,7:F4} / {_recoil.Roll,7:F4}"
+                   + "   on " + (_tank.RecoilTurretOnly
+                       ? "turret, about the ring"
+                       : "hull+turret, about the ground");
         });
 
         ui.Heading("armour");
@@ -1115,6 +1139,11 @@ public sealed partial class Main : Node2D
                      + $"/{_tank.TrembleRoll,8:F5}  scan {_scan.Offset,6:F1}"
                      + $"  turret {_tank.TurretFacing,6:F1}  shot {_tank.FlashFrame,3}"
                      + $"  recoil {_recoil.Pitch,8:F5}/{_recoil.Roll,8:F5}"
+                     // Which body is taking it, in the channel that survives
+                     // --no-ui. A mode that quietly failed to apply would send
+                     // you looking at the spring rather than at the flag - the
+                     // zoom is printed here for the same reason.
+                     + $"@{(_tank.RecoilTurretOnly ? "turret" : "body")}"
                      + $"  exh {_tank.ExhaustPhase,2}@{_exhaust.Phase,5:F2}"
                      // slip as well as phase: the cap is a real limit, and a
                      // belt quietly running at two thirds of the ground is not
@@ -1266,6 +1295,9 @@ public sealed partial class Main : Node2D
                 UpdateBurn(0.0);
                 break;
             case Key.K: _tank.TurretStabilised = !_tank.TurretStabilised; break;
+            // Next to the stabiliser deliberately: both answer "what does the
+            // turret do that the hull does not".
+            case Key.L: _tank.RecoilTurretOnly = !_tank.RecoilTurretOnly; break;
             case Key.Z: Fire(); break;
             case Key.U:
                 TakeHit(HexField.EdgeHeadings[
@@ -1360,6 +1392,10 @@ public sealed partial class Main : Node2D
         _tank.FlashFrame = -1;
         _tank.ShotPhase = -1;
         _tank.Source = _flashSource;
+        // Back to what the command line asked for, not to false: "how it
+        // started" is well defined here because there is a flag, which is the
+        // same reason the flash source above goes back to _flashSource.
+        _tank.RecoilTurretOnly = _recoilTurretOnly;
         _tank.RecoilPitch = 0.0;
         _tank.RecoilRoll = 0.0;
         _camera.Zoom = Vector2.One;
