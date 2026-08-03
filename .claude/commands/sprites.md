@@ -1,7 +1,15 @@
 ---
-description: Render layered isometric sprite atlases from the current Blender scene
+description: Hand-drive sprite_atlas.render_set for a scene the pipeline cannot handle - for a whole tank use /tank instead
 argument-hint: [what to render, e.g. "hull+turret+hex, 12 dirs, 256px" or "turret only, 32 dirs"]
 ---
+
+**For a whole tank, use `/tank`.** It runs `tank_pipeline.run()`, which measures
+the axis, finds the armour plates, builds the effects, renders every layer in one
+job and checks the result - and it works on both scene layouts. This command is
+the route underneath it: hand-assembled `render_set` calls, for a scene that is
+not a tank or a tank the pipeline cannot yet drive. Some of what follows predates
+the pipeline (`assemble_tank.py`, `spin_pivot_from`, `target: "world.001"`) and
+describes a scene shape the current tanks no longer have.
 
 Render sprite atlases from the live Blender scene using `sprite_atlas.py`.
 

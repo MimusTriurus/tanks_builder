@@ -33,7 +33,10 @@ Sprites/     результат, папка на сцену: <TAG>/{hull,turret,
              Fire_rgba.png — он же после кеинга, его и грузит стенд
 out/         черновой вывод разовых прогонов
 GodotTest/   стенд на Godot 4.5 mono (C#) для проверки спрайтов в движении
-.claude/commands/sprites.md    слэш-команда /sprites
+.claude/commands/tank.md       слэш-команда /tank — весь конвейер на открытой
+                               сцене, от измерения до листов проверки
+.claude/commands/sprites.md    /sprites — ручные вызовы render_set под ним,
+                               для того, что конвейер пока не водит
 MUZZLE_FLASH.md                как делается вспышка выстрела, целиком
 ```
 
