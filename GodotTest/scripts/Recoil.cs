@@ -33,6 +33,30 @@ public sealed class Recoil
     /// visible before it is fired, not afterwards.</summary>
     public const double RigidBodyPeak = 0.06;
 
+    /// <summary>
+    /// Whether the harness shears the sprite on a shot at all. False.
+    ///
+    /// Named here beside <see cref="RigidBodyPeak"/> and for the same reason: it
+    /// is one fact two places need - the harness reads it as the default for its
+    /// switch, and the self-test asserts it - and a default that lives only in a
+    /// field initialiser is a default nothing can notice being flipped back.
+    ///
+    /// **This is the one effect in the bench that is off because something else
+    /// replaced it**, rather than because it is an exception the way a burning
+    /// tank is. The class below fakes a hull that pitched by shearing a flat
+    /// sprite about a pivot, which needs the vertical term damped to a quarter to
+    /// stop a rigid hull reading as rubber, and cannot express the second term of
+    /// a rotation at all because the sprite has no depth. The gun tube's recoil
+    /// has none of those problems - it is geometry, rendered from twelve angles.
+    /// Left on together, every shot would show one true movement and one invented
+    /// one, with the invented one the larger of the two.
+    ///
+    /// The spring stays because "the rendered one is better" is an assertion until
+    /// the two can be put side by side, which is the painted flash sheet's
+    /// argument exactly.
+    /// </summary>
+    public const bool ShearOnByDefault = false;
+
     /// <summary>Angular velocity a shot injects. Peaks around 0.045 with the
     /// spring above - half again the driving pitch, which is right for a gun
     /// against a ramp, and still inside the amplitude that reads as a rigid

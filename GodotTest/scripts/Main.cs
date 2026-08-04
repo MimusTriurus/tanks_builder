@@ -187,6 +187,31 @@ public sealed partial class Main : Node2D
     /// </summary>
     private bool _recoilTube = true;
 
+    /// <summary>
+    /// The hull rocking back on the shot - key ']', or --recoil-shear.
+    ///
+    /// **Off, and it is the only effect here that is off because something else
+    /// replaced it.** The burning tank is off because burning is the exception;
+    /// this is off because the gun now recoils for real. <see cref="Recoil"/>
+    /// shears the rendered sprite about a pivot to fake a body that pitched,
+    /// which is the same class of approximation as the turret yaw that could not
+    /// be drawn at all: the sprite has no depth, so the second term of a rotation
+    /// is unavailable and the vertical part has to be damped to a quarter to stop
+    /// a rigid hull reading as rubber.
+    ///
+    /// The tube's recoil needs none of that - it is geometry that was rendered
+    /// from twelve angles, so it is simply true. Leaving a shear on top of it
+    /// means every shot shows one real movement and one invented one, and the
+    /// invented one is the larger.
+    ///
+    /// Kept rather than deleted, for the painted flash sheet's reason: "the
+    /// rendered one is better" stays an assertion until the two can be put side
+    /// by side. Asking for a level with --recoil, or for a pivot with
+    /// --recoil-turret, switches it back on - asking for the setting is asking
+    /// for the effect.
+    /// </summary>
+    private bool _recoilShear = Recoil.ShearOnByDefault;
+
     private ExhaustLoop _exhaust => Active.Exhaust;
     /// <summary>Engine exhaust - key O, or --no-exhaust. On by default, and for
     /// the same reason as the tremble: an engine that is running is running, and
@@ -457,15 +482,30 @@ public sealed partial class Main : Node2D
                      && double.TryParse(userArgs[i + 1], NumberStyles.Float,
                          CultureInfo.InvariantCulture, out double trembleLevel))
                 _trembleAtStart = trembleLevel;
+            // Both of these turn the shear back on as well as configuring it.
+            // It is off by default now that the tube recoils for real, and a flag
+            // that set a level on a switched-off effect would look like a flag
+            // that did not arrive - the same failure --hit-scale had when the
+            // decimal separator ate it.
             else if (userArgs[i] == "--recoil" && i + 1 < userArgs.Length
                      && double.TryParse(userArgs[i + 1], NumberStyles.Float,
                          CultureInfo.InvariantCulture, out double recoilLevel))
+            {
                 _recoilAtStart = recoilLevel;
+                _recoilShear = true;
+            }
             // A mode rather than a level, and it needs a flag for the reason the
             // two slider levels do: the pair is judged by a screenshot, and
             // taking one on each setting should not need a hand on the keyboard.
             else if (userArgs[i] == "--recoil-turret")
+            {
                 _recoilTurretOnly = true;
+                _recoilShear = true;
+            }
+            // The plain switch, for looking at the shear against the tube that
+            // replaced it without also changing its level or its pivot.
+            else if (userArgs[i] == "--recoil-shear")
+                _recoilShear = true;
             else if (userArgs[i] == "--flash" && i + 1 < userArgs.Length)
                 _flashSource = userArgs[i + 1].Equals("sheet",
                     StringComparison.OrdinalIgnoreCase)
@@ -1122,7 +1162,11 @@ public sealed partial class Main : Node2D
     private void Fire()
     {
         _shotFrame = 0;
-        _recoil.Fire(WrapAngle(_tank.TurretFacing - _tank.HullFacing));
+        // The sprite shear only if it is asked for: the tube's own recoil is the
+        // real article now, and the two together show one true movement and one
+        // invented one.
+        if (_recoilShear)
+            _recoil.Fire(WrapAngle(_tank.TurretFacing - _tank.HullFacing));
         // The tube goes back on the same trigger and on its own clock: the two
         // events last different lengths of time, so one counter would give one of
         // them the wrong tempo. See RecoilLoop.
@@ -1135,9 +1179,23 @@ public sealed partial class Main : Node2D
     /// what makes a shot land on the same sheet frame in two runs.</summary>
     private void UpdateShot(Vehicle v, double delta)
     {
-        v.Recoil.Update(delta);
-        v.Sprite.RecoilPitch = v.Recoil.Pitch;
-        v.Sprite.RecoilRoll = v.Recoil.Roll;
+        if (_recoilShear)
+        {
+            v.Recoil.Update(delta);
+            v.Sprite.RecoilPitch = v.Recoil.Pitch;
+            v.Sprite.RecoilRoll = v.Recoil.Roll;
+        }
+        else if (v.Recoil.Moving || v.Sprite.RecoilPitch != 0.0
+                 || v.Sprite.RecoilRoll != 0.0)
+        {
+            // Switched off part way through a ring-down, which has to put the
+            // body back rather than leave it leaning: the spring is the only
+            // effect here that holds a pose with nothing driving it.
+            v.Recoil.Reset();
+            v.Sprite.RecoilPitch = 0.0;
+            v.Sprite.RecoilRoll = 0.0;
+            v.Sprite.QueueRedraw();
+        }
 
         // Both clocks run, whichever source is showing. They are separate
         // tables - sixteen sheet frames against eight rendered phases - but
@@ -1381,12 +1439,18 @@ public sealed partial class Main : Node2D
                 _tank.Source = i == 0 ? FlashSource.Rendered : FlashSource.Sheet;
                 _tank.QueueRedraw();
             });
+        // Above its own level and pivot, because it gates both: a slider on a
+        // switched-off effect is a slider that looks broken.
+        ui.Toggle("hull shear on the shot  (])",
+            () => _recoilShear, on => _recoilShear = on);
         // Read when the trigger goes, not while the hull is rocking, so this
         // sets the next shot rather than the one in the air.
         ui.Slide("recoil level", 0.0, 2.5, 0.05,
             () => _recoil.Level, v => _recoil.Level = v, "x",
-            () => $"kick peaks at {_recoil.PeakFor(_recoil.Level):F3}"
-                  + $", rigid body ends at {Recoil.RigidBodyPeak:F3}");
+            () => _recoilShear
+                ? $"kick peaks at {_recoil.PeakFor(_recoil.Level):F3}"
+                  + $", rigid body ends at {Recoil.RigidBodyPeak:F3}"
+                : "the shear is off - the tube recoils for real instead");
         ui.Toggle("recoil on turret only  (L)",
             () => _tank.RecoilTurretOnly, on => _tank.RecoilTurretOnly = on);
         ui.Toggle("gun tube recoils  ([)",
@@ -1603,6 +1667,11 @@ public sealed partial class Main : Node2D
                      // you looking at the spring rather than at the flag - the
                      // zoom is printed here for the same reason.
                      + $"@{(_tank.RecoilTurretOnly ? "turret" : "body")}"
+                     // and whether it is on at all. Off is the default now, so a
+                     // trace of zeroes is the normal case rather than a spring
+                     // that failed to fire - which is exactly the confusion the
+                     // '@turret'/'@body' marker was added to prevent.
+                     + $"{(_recoilShear ? "" : "!off")}"
                      + $"  exh {_tank.ExhaustPhase,2}@{_exhaust.Phase,5:F2}"
                      // slip as well as phase: the cap is a real limit, and a
                      // belt quietly running at two thirds of the ground is not
@@ -1784,6 +1853,12 @@ public sealed partial class Main : Node2D
             // way the tube goes.
             case Key.Bracketleft:
                 _recoilTube = !_recoilTube;
+                break;
+            // Next to the tube it was replaced by, which is the comparison this
+            // key exists for. ']' for the same reason '[' is '[': the letters are
+            // gone.
+            case Key.Bracketright:
+                _recoilShear = !_recoilShear;
                 break;
             case Key.J:
                 _burning = !_burning;

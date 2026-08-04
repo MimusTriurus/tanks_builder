@@ -1805,6 +1805,15 @@ public static class SelfTest
         panel.QueueFree();
 
         GD.Print("recoil");
+        // Off by default, and this is the assertion that keeps it that way. The
+        // spring below still has to be right - it is kept for the A/B - but a
+        // bench that shears the hull *and* recoils the tube shows one true
+        // movement and one invented one on every shot, and the invented one is
+        // the larger. Nothing else in the harness is off for this reason: the
+        // burning tank is off because burning is the exception.
+        Check("the sprite shear is off, because the tube recoils for real now",
+            !Recoil.ShearOnByDefault,
+            "one shot, one recoil - and the rendered one is the true one");
         var recoil = new Recoil();
         recoil.Fire(0.0);                       // gun straight ahead
         double liftPeak = 0.0, recoilRollPeak = 0.0;
