@@ -78,6 +78,10 @@ CONFIG = {
     # `track_cycle.Belt.on_loop`. Empty is the delivered shape, and the shape is
     # the asset's business, so nothing here is a default anyone should inherit.
     "reshape": {},
+    # the gun tube slides back into the turret when it fires, on a layer of its
+    # own. The turret gives the tube up to it, so 0 is the A/B: the tube stays
+    # in the turret layer and nothing else changes. See `barrel_recoil.py`.
+    "recoil_phases": 5,
     "flash": "Flash",
     "smoke": "Smoke",
     "plume": "Plume",
@@ -248,7 +252,11 @@ TRACK_LAYERS = ("track_left", "track_right")
 # the tank, because they are not an effect on it - they are the part of it that
 # the hull layer cut away with a holdout. Absent on a single-mesh scene, and
 # `_atlases` skips whatever has no file, so one order serves both layouts.
-LAYER_ORDER = (("hex", "hull") + TRACK_LAYERS + ("turret",) + SCAR_LAYERS
+# The gun tube sits with the turret and for the same reason as the belts: it is
+# part of the tank that a layer cut away, not an effect on it. Straight after the
+# turret it came out of, and still ahead of the scars, which are *on* the armour.
+LAYER_ORDER = (("hex", "hull") + TRACK_LAYERS + ("turret", "barrel")
+               + SCAR_LAYERS
                + ("exhaust", "burn", "fire", "smoke", "flash", "dust", "burst"))
 
 
@@ -448,7 +456,8 @@ def _body_layers(cfg, have):
                             front_dir=cfg["front_dir"],
                             track_phases=cfg["track_phases"],
                             rebuild=cfg["rebuild"],
-                            reshape=cfg["reshape"]))
+                            reshape=cfg["reshape"],
+                            recoil_phases=cfg["recoil_phases"]))
         return list(body.layers), body
 
     return [
@@ -693,18 +702,26 @@ def _body(layers, heading, phase=0):
     The belts take phase 0 unless asked otherwise: their cycle is independent of
     whatever the sheet is stepping through, so pinning them keeps the sheet
     about its own subject.
+
+    The gun tube is the same case as the belts and arrived for the same reason:
+    it left the turret layer so that it could recoil, so every sheet that draws a
+    turret has to draw the tube back onto it or the tank has no gun. At rest,
+    because a sheet about smoke has nothing to say about recoil.
     """
     out = [("hull", heading)]
     for name in TRACK_LAYERS:
         if name in layers:
             out.append((name, phase * layers[name][1]["count"] + heading))
     out.append(("turret", heading))
+    if "barrel" in layers:
+        out.append(("barrel", heading))          # phase 0 - the tube at rest
     return out
 
 
 def _body_used(*names):
     """Layer names for `_sheet`'s `used`, with the belts always allowed in."""
-    return ["hex", "hull"] + list(TRACK_LAYERS) + ["turret"] + list(names)
+    return (["hex", "hull"] + list(TRACK_LAYERS) + ["turret", "barrel"]
+            + list(names))
 
 
 def _tank_alpha(layers, heading, phase=0):
@@ -715,9 +732,13 @@ def _tank_alpha(layers, heading, phase=0):
     where the tracks were held out, so asking hull-or-turret would call the
     track band empty and fail a hit low on a side plate that is perfectly on the
     armour. The belts are part of the tank, not an effect on it.
+
+    The gun tube joins them for the same reason: once it is its own layer, the
+    turret's alpha stops at the mantlet, and a mask that ended there would call
+    the tube empty space.
     """
     out = _tile_of(layers, "hull", heading)[:, :, 3].copy()
-    for name in ("turret",) + TRACK_LAYERS:
+    for name in ("turret", "barrel") + TRACK_LAYERS:
         if name not in layers:
             continue
         index = heading
@@ -1588,6 +1609,73 @@ def check(cfg=None):
                     "%.0f%% of the flame clips to white - it is not brighter, "
                     "it is colourless. The lever is brightness, not the ramp"
                     % (100.0 * white / float(seen)))
+
+    # --- the gun tube: the stroke across, headings down ----------------------
+    if "barrel" in layers:
+        bm = layers["barrel"][1]
+        nph = int(bm.get("phases") or 1)
+
+        def draw_recoil(buf, place, heading, phase):
+            for layer, index in [("hex", 0)] + _body(layers, heading):
+                if layer == "barrel":
+                    continue          # drawn at this sheet's phase, not at rest
+                buf = place(buf, layer, index, _over)
+            return place(buf, "barrel", phase * bm["count"] + heading, _over)
+
+        report["recoil_composite"] = _sheet(
+            cfg, layers, "_check_recoil", headings, list(range(nph)),
+            draw_recoil, _ground_colour(layers), _body_used())
+
+        # How far the muzzle actually withdraws, per phase and per heading. The
+        # travel runs along the bore, which leaves the ground plane, so this
+        # varies about four-fold with heading - the same projection that gives
+        # the muzzle its 71/60/16 px overhang, and not a fault.
+        #
+        # Two phases that render the same pixels are one render done twice, so
+        # the sheet is not the only thing that has to be looked at here.
+        ax, ay = bm["anchor_px"]
+        reach = []
+        for p in range(nph):
+            row = []
+            for h in range(bm["count"]):
+                # `_tile_of` hands back bottom-up rows and `anchor_px` counts
+                # from the top-left, so the tile is flipped before the distance
+                # is taken. Measuring in the two conventions at once pins the
+                # far point to the silhouette's bottom edge and reports a stroke
+                # of exactly zero - which reads as a hook that never fired.
+                a = _tile_of(layers, "barrel", p * bm["count"] + h)[::-1, :, 3]
+                ys, xs = np.nonzero(a > 0.5)
+                row.append(None if len(xs) == 0 else
+                           float(np.hypot(xs - ax, ys - ay).max()))
+            reach.append(row)
+        stroke = [[None if (reach[0][h] is None or reach[p][h] is None)
+                   else round(reach[0][h] - reach[p][h], 2)
+                   for h in range(bm["count"])] for p in range(nph)]
+        report["recoil_stroke_px"] = stroke
+        best = max(s for s in stroke[1] if s is not None)
+        report["recoil_peak_px"] = round(best, 2)
+        if best < 2.0:
+            report["problems"].append(
+                "the gun withdraws %.2f px at best, which reads as nothing - "
+                "raise `barrel_recoil.CONFIG['travel']`" % best)
+        # every phase past the kick must be on its way home, and none may reach
+        # further out than rest: a transposed table looks right at phase 0
+        col = [stroke[p][3 % bm["count"]] for p in range(nph)]
+        if any(s is not None and s < -0.75 for row in stroke for s in row):
+            report["problems"].append(
+                "the tube reaches further than rest on some phase - that is "
+                "not a recoil, and the phase table is the place to look")
+        elif nph > 2 and not all(col[i] >= col[i + 1] - 0.35
+                                 for i in range(1, nph - 1)):
+            report["problems"].append(
+                "the stroke does not come home monotonically: %s" % col)
+        flat = [p for p in range(2, nph)
+                if col[p] is not None and col[p - 1] is not None
+                and abs(col[p] - col[p - 1]) < 0.35]
+        if flat:
+            report["problems"].append(
+                "phases %s render the same pixels as the phase before them - "
+                "space the travel evenly or render fewer phases" % flat)
 
     report["step_deg"] = 360.0 / meta["count"]
     report["anchor_px"] = meta["anchor_px"]

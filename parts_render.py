@@ -108,6 +108,13 @@ CONFIG = {
     # and something has to be laid out on it. One side only is the A/B.
     "reshape": {},
 
+    # the gun tube slides back into the turret on firing: a phase axis on a
+    # layer of its own, and the turret gives the tube up to it. 0 leaves the
+    # tube in the turret layer exactly as before, which is the A/B.
+    # See `barrel_recoil.py` - the travel and the curve live there, and the count
+    # follows the travel: about one phase per pixel of stroke.
+    "recoil_phases": 5,
+
     # the ground tile: built at render time and never saved, as everywhere else
     # in the project. None -> skip it.
     "hex": {},
@@ -399,6 +406,24 @@ class Body:
             self._temps.append(box)
             turret_layer["holdout"] = [cfg["cut_box"]]
 
+        # the gun tube leaves the turret layer for one of its own, so that it can
+        # recoil. Both layers keep `Turret.World` as their root: the tube is a
+        # child of it and a layer root may not be a child of another layer root.
+        self.barrel = None
+        self.recoil_skipped = None
+        if int(cfg["recoil_phases"] or 0) > 1:
+            br = importlib.import_module("barrel_recoil")
+            try:
+                shorn, self.barrel = br.layers(dict(
+                    barrel="Barrel", turret=cfg["turret_mesh"],
+                    root=cfg["turret"], phases=int(cfg["recoil_phases"])))
+            except (KeyError, RuntimeError) as exc:
+                # no Barrel in this scene is a fact about the scene, like a
+                # missing Engine, and the tank still renders without it
+                self.recoil_skipped = str(exc)
+            else:
+                turret_layer["exclude"] = list(shorn["exclude"])
+
         self.layers = [{"name": "hull", "target": cfg["hull"]}, turret_layer,
                        _belt_layer("track_left", self.left, cfg,
                                    by_root.get(self.left, []),
@@ -406,6 +431,10 @@ class Body:
                        _belt_layer("track_right", self.right, cfg,
                                    by_root.get(self.right, []),
                                    drop.get(self.right))]
+        if self.barrel is not None:
+            # right after the turret it came out of, so the composite order in
+            # the sheets is the order the game draws
+            self.layers.insert(2, self.barrel)
         if cfg["hex"] is not None:
             tile, self.hex = ground_tile(
                 cfg, self.spin["axis"], {n for s in drop.values() for n in s})
@@ -422,7 +451,7 @@ class Body:
         return {"spin_pivot": self.spin["axis"]}
 
     def restore(self):
-        import bpy
+        import bpy, importlib
         for temp in self._temps:
             data = temp.data
             bpy.data.objects.remove(temp, do_unlink=True)
@@ -432,6 +461,10 @@ class Body:
         # to be put back whatever happened
         for b in self.posed:
             b.restore()
+        # the tube is posed by moving the object, and the renderer only restores
+        # a layer *root* - the tube is a child, so nothing else will put it back
+        if self.barrel is not None:
+            importlib.import_module("barrel_recoil").restore()
 
     def verify(self, res):
         """Say out loud that the belt that was meant to move is in the picture.
