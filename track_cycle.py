@@ -130,6 +130,97 @@ def _coords(me):
     return co.reshape(n, 3).astype(np.float64)
 
 
+def _resample(c, m):
+    """A closed polyline as `m` nodes spaced evenly by arc length, with frames.
+
+    The transport is a slide by *distance*, so the nodes have to be spaced by
+    distance and not by whatever parameter drew them. Shared by the traced loop
+    and by `rounded_loop`, so that a synthetic path is the same kind of object as
+    a measured one and `transport` cannot tell them apart.
+    """
+    seg = np.linalg.norm(np.roll(c, -1, 0) - c, axis=1)
+    s = np.concatenate([[0.0], np.cumsum(seg)])
+    perimeter = float(s[-1])
+    want = np.arange(m) / m * perimeter
+    loop = np.vstack([c, c[:1]])
+    node = np.stack([np.interp(want, s, loop[:, 0]),
+                     np.interp(want, s, loop[:, 1])], 1)
+    t = np.roll(node, -1, 0) - np.roll(node, 1, 0)
+    t /= np.linalg.norm(t, axis=1)[:, None]
+    return perimeter, node, perimeter / m, t, np.stack([-t[:, 1], t[:, 0]], 1)
+
+
+def rounded_loop(length, height, corner=1.0, samples=8192, unsquash=None):
+    """A rounded rectangle, as a dense closed polyline about its own centre.
+
+    `corner` is the corner radius as a fraction of *half the height*, so 1.0 is
+    a stadium - semicircular ends - and the round part follows the height on its
+    own, with no second number to keep in step with it. 0 would be a sharp
+    rectangle, which no belt can wear: `Belt.on_loop` checks the radius against
+    the band's own half-thickness, because a band thicker than the arc it turns
+    has its inner surface folded through the arc's centre.
+
+    Ordered by increasing bearing about the centre - anticlockwise from the rear,
+    down first - which is the order `_trace` produces. That is not cosmetic: `d`
+    was measured against a normal built from that order, and its sign has to keep
+    meaning the same side of the band.
+
+    `unsquash` is a pair of axis scales to divide the result by, which is how a
+    shape built in the proportions the render sees is handed back in the mesh's
+    own space. The arcs then come out as ellipses here in order to be circles
+    there - see `Belt.on_loop`'s `in_world`.
+
+    Returns the polyline and the analytic perimeter *in the space it was built
+    in*, which is not the local perimeter once `unsquash` has had its say. The
+    polyline's own measured perimeter comes out a hair under the analytic one,
+    chords cutting the arcs, and the two are reported side by side rather than
+    asserted equal.
+    """
+    a, b = 0.5 * float(length), 0.5 * float(height)
+    r = min(max(float(corner), 0.0) * b, a, b)
+    ax, bz = a - r, b - r                     # centres of the corner arcs
+    perim = 4.0 * (ax + bz) + 2.0 * np.pi * r
+    n = max(int(samples), 64)
+
+    def line(p0, p1):
+        ln = float(np.linalg.norm(np.subtract(p1, p0)))
+        if ln <= 1e-12:                       # a stadium has no straight ends
+            return np.zeros((0, 2))
+        k = max(2, int(round(n * ln / perim)))
+        t = np.linspace(0.0, 1.0, k, endpoint=False)[:, None]
+        return np.asarray(p0, float) + (np.asarray(p1, float) - p0) * t
+
+    def arc(cx, cz, a0, a1):
+        if r <= 1e-12:                        # a sharp rectangle has no arcs
+            return np.zeros((0, 2))
+        k = max(2, int(round(n * abs(a1 - a0) * r / perim)))
+        th = np.linspace(a0, a1, k, endpoint=False)
+        return np.stack([cx + r * np.cos(th), cz + r * np.sin(th)], 1)
+
+    pieces = [
+        line((-a, 0.0), (-a, -bz)),
+        arc(-ax, -bz, np.pi, 1.5 * np.pi),
+        line((-ax, -b), (ax, -b)),
+        arc(ax, -bz, 1.5 * np.pi, 2.0 * np.pi),
+        line((a, -bz), (a, bz)),
+        arc(ax, bz, 0.0, 0.5 * np.pi),
+        line((ax, b), (-ax, b)),
+        arc(-ax, bz, 0.5 * np.pi, np.pi),
+        line((-a, bz), (-a, 0.0)),
+    ]
+    c = np.vstack([p for p in pieces if len(p)])
+    if unsquash is not None:
+        c = c / np.asarray(unsquash, float)
+    # the walk starts on the -x axis, where `atan2` answers +pi and not -pi, so
+    # the first point alone sits at the far end of the bearing range and
+    # `_project`'s "strictly increasing in bearing" reads false on a loop that is
+    # perfectly star-shaped. Rolling the seam to the end makes the invariant read
+    # what it is. It moves s=0 by one dense sample - a twentieth of a pixel - and
+    # s=0 stays where the trace puts it, at the -x end of the loop, mid-band,
+    # which is what keeps a reshape from rotating the material round the belt.
+    return np.roll(c, -1, 0), float(perim)
+
+
 class Belt:
     """One belt, the loop it lies on, and where each vertex sits along it.
 
@@ -182,19 +273,8 @@ class Belt:
         tc = (np.arange(nb) + 0.5) / nb * 2 * np.pi - np.pi
         c = np.stack([rc * np.cos(tc), rc * np.sin(tc)], 1)
 
-        seg = np.linalg.norm(np.roll(c, -1, 0) - c, axis=1)
-        s = np.concatenate([[0.0], np.cumsum(seg)])
-        self.perimeter = float(s[-1])
-        m = int(cfg["path_nodes"])
-        want = np.arange(m) / m * self.perimeter
-        loop = np.vstack([c, c[:1]])
-        self.node = np.stack([np.interp(want, s, loop[:, 0]),
-                              np.interp(want, s, loop[:, 1])], 1)
-        self.ds = self.perimeter / m
-        t = np.roll(self.node, -1, 0) - np.roll(self.node, 1, 0)
-        t /= np.linalg.norm(t, axis=1)[:, None]
-        self.tan = t
-        self.nor = np.stack([-t[:, 1], t[:, 0]], 1)
+        self.perimeter, self.node, self.ds, self.tan, self.nor = \
+            _resample(c, int(cfg["path_nodes"]))
 
     # -- where every vertex sits on it -------------------------------------
     def _project(self):
@@ -421,12 +501,155 @@ class Belt:
             "rest_roundtrip_p99": round(float(np.percentile(rt, 99)), 6),
             "runs_rearward_along_local_x": self.forward,
             "ground_run_alignment": round(self.rear_speed, 4),
+            # present only on a belt whose loop was replaced rather than traced
+            "shaped": getattr(self, "shaped", None),
         }
         if upp:
             rep["pitch_px"] = round(self.pitch * scale / upp, 2)
             rep["rest_roundtrip_px"] = round(float(rt.max()) * scale / upp, 3)
         return rep
 
+
+    # -- the same material, carried by a different loop ---------------------
+    def on_loop(self, length=None, height=None, corner=1.0, keep="ground",
+                in_world=False, nodes=None, samples=8192):
+        """This belt's own material, carried by a rounded-rectangle loop.
+
+        The shape of a belt lives in exactly one place - `self.node` - because
+        `transport` is the only route from belt coordinates back to xyz. So
+        reshaping it is replacing that loop and nothing else: every vertex keeps
+        its arc length along the band, its offset from the surface and its
+        position across it, which leaves the tread relief, the cross-section, the
+        material and the UVs untouched by construction rather than by care.
+
+        `length` and `height` are the loop's own local extents and default to
+        what it has now. They are the *path's* extents, not the mesh bbox, which
+        is half a band's thickness wider on every side - about 0.02 here. The
+        corner radius is a fraction of half the height, so the round ends follow
+        the height on their own.
+
+        `keep` decides what stays put when the height changes: "ground" holds the
+        bottom run where it is, which is what the tank stands on and what the
+        tile check measures, and "centre" holds the middle instead. Nothing holds
+        the road wheels, which are a separate mesh this knows nothing about.
+
+        `in_world` is what makes the round ends round *in the frame*, and it
+        exists because they are not otherwise. The belt carries a non-uniform
+        scale - measured 0.944 along the loop against 0.665 up on LT_PARTS, a
+        ratio of 0.704 - so a circle in the mesh's own space arrives as an
+        ellipse flattened by 30%: a radius of 0.175 renders 26.3 px along the
+        belt and 18.5 px up. That is a property of every belt in the project, the
+        scale sitting on the root and on the mesh long before any reshape.
+
+        With it on, the rectangle is built in the proportions the render sees and
+        handed back divided by those two scales, so the arc is an ellipse here in
+        order to be a circle there. `length` and `height` are then world units
+        too, which is the other half of the argument: world units divide by
+        `units_per_pixel` into pixels, and the mesh's own units convert to
+        nothing at all.
+
+        The two scales are read off `matrix_world`, so this is only right while
+        the belt is parented the way the scene says. An unparented belt reports
+        its own local matrix instead and the squash silently reads as 1.
+
+        Hand the result to `rebuild(src, onto=...)`. It carries this belt's mesh
+        and measurements rather than remeasuring anything, for the same reason
+        `laid_out` is handed its coordinates: closure is exact only when the
+        layout and the slide use the same map.
+
+        It is poseable, and worth posing to see the new silhouette without
+        rebuilding 679k vertices first - but its cycle is the *source's* cycle,
+        stretched along with it, so it closes no better than the source did.
+        Judge the shape on it and the seam on what `rebuild` returns.
+        """
+        cur = self.node
+        mw = np.array(self.ob.matrix_world)[:3, :3]
+        # the loop lives in local xz, so these are the images of those two axes
+        scale = np.array([float(np.linalg.norm(mw[:, 0])),
+                          float(np.linalg.norm(mw[:, 2]))]) \
+            if in_world else np.array([1.0, 1.0])
+        if length is None:
+            length = float(np.ptp(cur[:, 0])) * scale[0]
+        if height is None:
+            height = float(np.ptp(cur[:, 1])) * scale[1]
+        c, analytic = rounded_loop(length, height, corner, samples,
+                                   unsquash=(scale if in_world else None))
+
+        # a band thicker than the arc it turns folds through the arc's centre, so
+        # the radius is checked against the offsets actually in the mesh. What has
+        # to be checked is the *local* curvature: with `in_world` the arc is an
+        # ellipse here, and an ellipse turns tightest at the end of its major
+        # axis. Written as one expression rather than two branches because a
+        # circle is the case where the two semi-axes are equal.
+        r = min(max(float(corner), 0.0) * 0.5 * height, 0.5 * length, 0.5 * height)
+        lo, hi = sorted((r / scale[0], r / scale[1]))
+        tight = (lo * lo / hi) if hi > 0 else 0.0
+        thick = float(np.percentile(np.abs(self.d), 99.9))
+        if tight <= thick:
+            raise RuntimeError(
+                "the loop turns in %.4f at its tightest and cannot carry a band "
+                "%.4f thick: the inner surface would fold through the centre of "
+                "the arc. Raise `corner`, or the height it is a fraction of."
+                % (tight, thick))
+
+        # where it sits is taken off the two polylines rather than from `height`,
+        # which would assume the built loop is centred - true of a circle, and
+        # something to re-derive for every shape that is not
+        if keep == "ground":
+            dz = float(cur[:, 1].min() - c[:, 1].min())
+        elif keep == "centre":
+            dz = float(0.5 * (cur[:, 1].min() + cur[:, 1].max())
+                       - 0.5 * (c[:, 1].min() + c[:, 1].max()))
+        else:
+            raise RuntimeError("keep is 'ground' or 'centre', not %r" % (keep,))
+        dx = float(0.5 * (cur[:, 0].min() + cur[:, 0].max())
+                   - 0.5 * (c[:, 0].min() + c[:, 0].max()))
+        c = c + np.array([dx, dz])
+
+        b = self.__class__.__new__(self.__class__)
+        b.cfg, b.ob, b.me, b.rest = self.cfg, self.ob, self.me, self.rest
+        b.centre, b.band, b.plane = self.centre, self.band, self.plane
+        b.density_links, b.tread_repeat = self.density_links, self.tread_repeat
+        b.foot_gap, b.built_closed = self.foot_gap, False
+        b.perimeter, b.node, b.ds, b.tan, b.nor = \
+            _resample(c, int(nodes or self.cfg["path_nodes"]))
+        # the material keeps its *fraction* of the way round, which is what makes
+        # this a reshape and not a slide. The link count is what follows the new
+        # perimeter, at the pitch the tread already has - a track shoe is a
+        # physical part, so a longer belt carries more of them and not longer
+        # ones. Keeping the pitch is also what keeps the game's number, and hence
+        # the bench's slip, comparable across a reshape.
+        b.s = self.s * (b.perimeter / self.perimeter)
+        b.d = self.d
+        b.links = max(1, int(round(b.perimeter / self.pitch)))
+        b.pitch = b.perimeter / b.links
+        b.pitch_from = "rounded loop at perimeter/%d, pitch kept from %s" % (
+            b.links, self.pitch_from)
+        b._sense()
+        b.shaped = {
+            # `space` says what units `length`, `height` and `corner_radius` are
+            # in, and there is no reading the rest of this without it
+            "space": "world" if in_world else "mesh",
+            "length": round(float(length), 5), "height": round(float(height), 5),
+            "corner_frac": round(float(corner), 4),
+            "corner_radius": round(float(r), 5),
+            "axis_scale_along_up": ([round(float(v), 5) for v in scale]
+                                    if in_world else None),
+            "keep": keep,
+            "was": {"length_mesh": round(float(np.ptp(cur[:, 0])), 5),
+                    "height_mesh": round(float(np.ptp(cur[:, 1])), 5),
+                    "perimeter": round(self.perimeter, 5),
+                    "links": int(self.links),
+                    "pitch": round(self.pitch, 5)},
+            "length_mesh": round(float(np.ptp(b.node[:, 0])), 5),
+            "height_mesh": round(float(np.ptp(b.node[:, 1])), 5),
+            "perimeter": round(b.perimeter, 5),
+            "perimeter_analytic_in_that_space": round(analytic, 5),
+            "links": b.links, "pitch": round(b.pitch, 5),
+            "tightest_local_radius": round(float(tight), 5),
+            "band_half_thickness": round(thick, 5),
+        }
+        return b
 
     # -- adopting a belt whose coordinates are known, not measured ----------
     @classmethod
@@ -456,6 +679,7 @@ class Belt:
         # closing frame is byte-identical to its first.
         b.tread_repeat = None
         b.built_closed = True
+        b.shaped = getattr(path, "shaped", None)
         b.pitch_from = "laid out at perimeter/%d by construction" % links
         return b
 
@@ -510,7 +734,7 @@ def rebuilt_name(name, cfg=None):
     return base + cfg["suffix"]
 
 
-def rebuild(path, cfg=None):
+def rebuild(path, cfg=None, onto=None):
     """Lay a new belt out as one link of the old one, repeated round the loop.
 
     This is the fix for a cycle that will not close, and it closes by
@@ -534,9 +758,24 @@ def rebuild(path, cfg=None):
 
     Nothing is destroyed: the result is a new object beside the original, and
     the original is left alone for the render to exclude or to keep as an A/B.
+
+    `onto` lays the links on a *different* loop from the one they were cut off -
+    see `Belt.on_loop`. The cut still reads the source's own arc length and its
+    own pitch, so the base link is one true shoe of the delivered belt, and only
+    the layout moves; the count follows the new perimeter at that pitch. Closure
+    survives untouched, and it is worth seeing why: it needs the copies to sit at
+    multiples of `perimeter / n` and nothing else. Whether the shoe is exactly
+    that long never entered the argument, so a shoe that over- or under-runs its
+    slot by the rounding - here at most a pitch in `n`, well under a tenth of a
+    pixel - closes exactly the same.
+
+    Left as None it is the source's own loop, and every number below reduces to
+    what it was: `n` is `links` because the pitch is defined as perimeter over
+    links, so a scene that does not reshape renders byte for byte as before.
     """
     import bpy
     cfg = dict(REBUILD, **(cfg or {}))
+    onto = onto if onto is not None else path
     src = path.me
     npoly, nloop = len(src.polygons), len(src.loops)
     lstart = np.empty(npoly, np.int32)
@@ -571,11 +810,14 @@ def rebuild(path, cfg=None):
     base_vi = lvi[base_loops]
     used, remap = np.unique(base_vi, return_inverse=True)
     nv, np_ = len(used), int(keep.sum())
-    n = int(path.links)
+    # as many shoes as the loop being laid on has room for, at the pitch the
+    # tread already has. `onto is path` makes this `links` exactly.
+    n = max(1, int(round(onto.perimeter / path.pitch)))
+    step = onto.perimeter / n
 
     s0, d0 = path.s[used], path.d[used]
     y0 = path.rest[used, 1]
-    co = np.concatenate([path.transport(s0, d0, y0, i * path.pitch)
+    co = np.concatenate([onto.transport(s0, d0, y0, i * step)
                          for i in range(n)])
 
     tot = ltotal[keep]
@@ -622,10 +864,11 @@ def rebuild(path, cfg=None):
     ob.matrix_parent_inverse = path.ob.matrix_parent_inverse.copy()
     ob.matrix_world = path.ob.matrix_world.copy()
 
-    s = (np.tile(s0, n) + np.repeat(np.arange(n) * path.pitch, nv)) % path.perimeter
-    made = Belt.laid_out(ob, path, s, np.tile(d0, n), path.pitch, n)
+    s = (np.tile(s0, n) + np.repeat(np.arange(n) * step, nv)) % onto.perimeter
+    made = Belt.laid_out(ob, onto, s, np.tile(d0, n), step, n)
     made.built = {
         "from": path.ob.name,
+        "onto": (None if onto is path else getattr(onto, "shaped", "a given loop")),
         "links": n,
         "cut_at": round(float(cut), 5),
         "cut_density_vs_mean": round(float(hs.min() / hs.mean()), 3),
@@ -633,10 +876,15 @@ def rebuild(path, cfg=None):
         "verts": nv * n, "polys": np_ * n,
         "source": {"verts": len(path.rest), "polys": npoly},
         "polys_per_link_in_source": [int(x) for x in (
+            # the source's own links, so `path.links` and not `n`: with a
+            # reshape those differ, and padding to the larger would report an
+            # empty link that does not exist
             np.bincount(np.floor(((poly_s - cut) % path.perimeter)
-                                 / path.pitch).astype(int), minlength=n).min(),
+                                 / path.pitch).astype(int),
+                        minlength=int(path.links)).min(),
             np.bincount(np.floor(((poly_s - cut) % path.perimeter)
-                                 / path.pitch).astype(int), minlength=n).max())],
+                                 / path.pitch).astype(int),
+                        minlength=int(path.links)).max())],
     }
     return made
 
@@ -656,3 +904,176 @@ def hook(made, denom=None):
         for b in made:
             b.set_phase(phase, n)
     return run
+
+
+PREVIEW = {
+    # Set these and run this file - Alt+P in Blender's Text Editor - and the new
+    # shape is in the viewport at once, with no render at all.
+    #
+    # It builds a `<belt>.Preview` object beside each belt and hides the belt
+    # itself with the eye, rather than writing into the belt. That is not
+    # tidiness, it is what makes iterating possible at all. Measured: a preview
+    # written into the source and then previewed again drifts 0.81px, because `d`
+    # is re-projected onto a different curve every pass and the band smears - the
+    # link count came out 47 and then 46, and the band thickened 18%. Starting
+    # from the untouched source each time is exact instead.
+    #
+    # The preview objects sit at the scene root, parented to nothing, so no
+    # render layer can see them: the track layers target `Track.*.World` and pull
+    # in descendants, and these are deliberately not descendants.
+    #
+    # The .blend does come up modified. `{"restore": True}` removes the previews
+    # and unhides the belts, and unlike a rest pose it survives a reload, because
+    # what it undoes is objects in the scene rather than a copy held in memory.
+    "belts": CONFIG["belts"],
+    "length": None,          # None is the belt as delivered, in the space below
+    "height": None,
+    "corner": None,          # radius as a fraction of half the height; None is 1.0,
+                             # or whatever the preview being rescaled already had
+    "in_world": True,        # round in the frame, and the two sizes in world units
+    "keep": "ground",
+    "restore": False,
+    "suffix": ".Preview",
+
+    # Take the two sizes off the preview object's own scale instead of typing
+    # them: run `preview()`, grab the `.Preview` object in the viewport, `S` `Y`
+    # for the length and `S` `Z` for the height - the tank's long axis is world Y
+    # and both map exactly onto the loop's own axes through the root's 90 degrees
+    # - or type them into the sidebar. Then run again with this on.
+    #
+    # While you are dragging, what you see is a *proposal* and not a belt: the
+    # scale is stretching the tread and the band along with the loop. This turns
+    # it into the real thing - the shoes back to their true size, the ends back to
+    # true arcs at the radius the new height asks for - and resets the scale, so
+    # the next drag starts from 1 again.
+    #
+    # Scaling the belt itself would be the same proposal with no way back, which
+    # is why it is the preview that carries the handle.
+    "take_scale": False,
+    # the last render's `units_per_pixel`, so the readout can be in pixels. None
+    # prints world units, because a pixel size is a thing the render decides and
+    # this is not the place to guess at it.
+    "units_per_pixel": None,
+}
+
+# stamped on the preview object, not on the belt: [length, height, corner,
+# in_world] is what this preview was asked for, and the object scale it was built
+# with is the baseline a later drag is measured against. Both die with the
+# preview, which is the point - nothing about a shape being tried out belongs on
+# the asset.
+SHAPE = "_loop_shape"
+BASE = "_loop_base_scale"
+
+
+def preview(cfg=None):
+    """Show a shape in the viewport without rendering anything.
+
+    The whole point is the length of the loop between changing a number and
+    seeing it: a render is two minutes and a shape is a judgement. So the belt's
+    own material is transported onto the new loop into a copy beside it, where
+    the viewport shows it at any zoom with its texture on, and the road wheels
+    stay put next to it so the fit is visible too.
+
+    What this cannot answer is the seam. It poses the *source's* material, so its
+    cycle is the source's cycle; closure comes from `rebuild`, and the picture
+    that shows it is the one `parts_render.check` writes.
+
+    `corner_px_along_up` is the readout worth watching: the corner radius along
+    the belt and up, in pixels, and with `in_world` the two are equal. That
+    equality is the flag working - in the mesh's own space they stand 26.3 to
+    18.5, which is the same circle flattened by 30%.
+    """
+    import bpy
+    cfg = dict(PREVIEW, **(cfg or {}))
+    upp = cfg["units_per_pixel"]
+    rows = []
+    for name in cfg["belts"]:
+        src = bpy.data.objects.get(name)
+        if src is None or src.type != "MESH":
+            continue
+        old = bpy.data.objects.get(name + cfg["suffix"])
+
+        length, height = cfg["length"], cfg["height"]
+        corner, in_world, took = cfg["corner"], cfg["in_world"], None
+        if cfg["take_scale"] and not cfg["restore"]:
+            if old is None or SHAPE not in old:
+                raise RuntimeError(
+                    "there is no scale to take: run preview(), scale %r in the "
+                    "viewport, then run this" % (name + cfg["suffix"],))
+            was_l, was_h, was_c, was_w = (float(v) for v in old[SHAPE])
+            base = [float(v) for v in old[BASE]]
+            mult = [old.scale[i] / base[i] for i in range(3)]
+            length, height = was_l * mult[0], was_h * mult[2]
+            if corner is None:
+                corner = was_c
+            # the units of the sizes just taken are the ones they were stamped
+            # in, so this is not the caller's to choose here
+            in_world = bool(was_w)
+            took = {"along_up": [round(mult[0], 4), round(mult[2], 4)],
+                    # the band's width across the belt is not a loop dimension:
+                    # the loop is a curve, and how wide the tread sits on it is
+                    # the mesh's business
+                    "across_ignored": round(mult[1], 4),
+                    "in_world_from_the_preview": in_world}
+
+        # any earlier preview goes now and always: the source carries the
+        # delivered shape and every preview has to start from it
+        if old is not None:
+            data = old.data
+            bpy.data.objects.remove(old, do_unlink=True)
+            if data.users == 0:
+                bpy.data.meshes.remove(data)
+        src.hide_set(not cfg["restore"])
+        if cfg["restore"]:
+            rows.append({"belt": name, "preview_removed": old is not None,
+                         "unhidden": True})
+            continue
+
+        b = Belt(src, cfg)
+        onto = b.on_loop(length=length, height=height,
+                         corner=1.0 if corner is None else corner,
+                         keep=cfg["keep"], in_world=in_world)
+        me = src.data.copy()
+        me.name = name + cfg["suffix"]
+        me.vertices.foreach_set(
+            "co", onto.coords_at(0.0).astype(np.float32).ravel())
+        me.update()
+        ob = bpy.data.objects.new(name + cfg["suffix"], me)
+        for coll in src.users_collection:
+            coll.objects.link(ob)
+        # no parent on purpose - see the note in PREVIEW. The placement comes
+        # across as a world matrix instead, which is the same trick `rebuild`
+        # uses in the other direction.
+        ob.matrix_world = src.matrix_world.copy()
+        # what this preview asked for, and the scale it starts from, so that a
+        # drag can be read as a multiple of it. `matrix_world` above leaves the
+        # object's scale at the belt's own non-unit one, so 1.0 is the wrong
+        # baseline and the baseline has to be recorded rather than assumed.
+        ob[SHAPE] = [float(onto.shaped["length"]), float(onto.shaped["height"]),
+                     float(1.0 if corner is None else corner),
+                     1.0 if in_world else 0.0]
+        ob[BASE] = [float(v) for v in ob.scale]
+
+        row = dict(onto.shaped, belt=name, preview=ob.name)
+        if took is not None:
+            row["took_scale"] = took
+        if upp:
+            mw = np.array(src.matrix_world)[:3, :3]
+            sa = float(np.linalg.norm(mw[:, 0]))
+            su = float(np.linalg.norm(mw[:, 2]))
+            r = onto.shaped["corner_radius"]
+            row["corner_px_along_up"] = (
+                [round(r / upp, 2)] * 2 if onto.shaped["space"] == "world"
+                else [round(r * sa / upp, 2), round(r * su / upp, 2)])
+            row["extent_px"] = [round(onto.shaped["length_mesh"] * sa / upp, 1),
+                                round(onto.shaped["height_mesh"] * su / upp, 1)]
+            row["pitch_px"] = round(onto.pitch * sa / upp, 2)
+        rows.append(row)
+    return {"restored" if cfg["restore"] else "previewed": rows,
+            "the_blend_is_now_modified": True,
+            "put_it_back_with": "track_cycle.preview({'restore': True})"}
+
+
+if __name__ == "__main__":
+    import json
+    print(json.dumps(preview(), indent=1, default=str))

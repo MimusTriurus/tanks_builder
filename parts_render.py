@@ -100,6 +100,14 @@ CONFIG = {
     # two answers next to each other in one render - see track_cycle.rebuild.
     "rebuild": (),
 
+    # belt name -> the loop to lay it on instead of its own, as keyword
+    # arguments for `track_cycle.Belt.on_loop`: `length`, `height`, `corner`
+    # (the corner radius as a fraction of half the height, so 1.0 is a stadium),
+    # `keep` ("ground" holds the bottom run, which is what the tank stands on).
+    # A belt named here has to be named in `rebuild` too: the reshape is a loop,
+    # and something has to be laid out on it. One side only is the A/B.
+    "reshape": {},
+
     # the ground tile: built at render time and never saved, as everywhere else
     # in the project. None -> skip it.
     "hex": {},
@@ -345,13 +353,22 @@ class Body:
         running = int(cfg["track_phases"] or 0) > 1
         self.belts = tc.belts() if running else []
         self.built = {}
+        shapes = dict(cfg.get("reshape") or {})
         for name in cfg["rebuild"] or ():
             src = next((b for b in self.belts if b.ob.name == name), None)
             if src is None:
                 raise RuntimeError("%r is not one of the belts %s"
                                    % (name, [b.ob.name for b in self.belts]))
-            self.built[name] = tc.rebuild(src)
+            shape = shapes.pop(name, None)
+            self.built[name] = tc.rebuild(
+                src, onto=(src.on_loop(**shape) if shape else None))
             src.restore()      # the original stays as it arrived, and unrendered
+        if shapes:
+            # a reshape with nothing laid out on it is silent otherwise, and it
+            # looks exactly like a reshape that did not work
+            raise RuntimeError("reshaped %s but did not rebuild them: a loop "
+                               "with no belt laid on it renders nothing"
+                               % sorted(shapes))
 
         # animate the rebuilt copy where there is one and the original everywhere
         # else, and keep hold of both so the scene is put back either way

@@ -74,6 +74,10 @@ CONFIG = {
     # and `track_cycle.report`'s `tread_repeat` is the number that says so.
     "track_phases": 8,
     "rebuild": ("L.Caterpillar.Geometry", "R.Caterpillar.Geometry"),
+    # belt name -> a rounded-rectangle loop to lay it on instead of its own; see
+    # `track_cycle.Belt.on_loop`. Empty is the delivered shape, and the shape is
+    # the asset's business, so nothing here is a default anyone should inherit.
+    "reshape": {},
     "flash": "Flash",
     "smoke": "Smoke",
     "plume": "Plume",
@@ -443,7 +447,8 @@ def _body_layers(cfg, have):
                             elevation=cfg["elevation"],
                             front_dir=cfg["front_dir"],
                             track_phases=cfg["track_phases"],
-                            rebuild=cfg["rebuild"]))
+                            rebuild=cfg["rebuild"],
+                            reshape=cfg["reshape"]))
         return list(body.layers), body
 
     return [
