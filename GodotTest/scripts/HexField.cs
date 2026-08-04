@@ -138,11 +138,21 @@ public sealed partial class HexField : Node2D
     /// Breadth-first rather than a cube-coordinate line: a straight line
     /// between two cells of a staggered rectangle can bulge outside it, and a
     /// search over in-bounds cells simply cannot produce a step off the board.
-    /// With no obstacles the two agree anyway.</summary>
-    public List<Vector2I> FindPath(Vector2I from, Vector2I to)
+    /// With no obstacles the two agree anyway - and now there are obstacles, which
+    /// is the other half of why the search was written this way: the other tanks
+    /// stand in cells, and a breadth-first search takes a blocked set for free
+    /// where a line would have had to be repaired around one.
+    ///
+    /// A blocked destination returns no path at all rather than a path up to it.
+    /// The caller wanted that cell; stopping short of it and calling it done is
+    /// the kind of near miss that reads as the pathing being wrong.</summary>
+    public List<Vector2I> FindPath(Vector2I from, Vector2I to,
+                                   IReadOnlySet<Vector2I>? blocked = null)
     {
         var path = new List<Vector2I>();
         if (from == to || !InBounds(from) || !InBounds(to))
+            return path;
+        if (blocked is not null && blocked.Contains(to))
             return path;
 
         var cameFrom = new Dictionary<Vector2I, Vector2I> { [from] = from };
@@ -155,7 +165,8 @@ public sealed partial class HexField : Node2D
             foreach (int heading in EdgeHeadings)
             {
                 Vector2I next = Step(cell, heading);
-                if (!InBounds(next) || cameFrom.ContainsKey(next))
+                if (!InBounds(next) || cameFrom.ContainsKey(next)
+                    || (blocked is not null && blocked.Contains(next)))
                     continue;
                 cameFrom[next] = cell;
                 if (next == to)

@@ -27,7 +27,10 @@ public static class SelfTest
     /// have meant either skipping those checks or making the run order matter.
     /// </summary>
     public static int Run(HexField field, TankSprite tank,
-                          IReadOnlyDictionary<string, AtlasSet>? atlases = null)
+                          IReadOnlyDictionary<string, AtlasSet>? atlases = null,
+                          IReadOnlyList<Vehicle>? vehicles = null,
+                          int active = 0,
+                          SelectionRing? ring = null)
     {
         int failed = 0;
 
@@ -827,7 +830,8 @@ public static class SelfTest
         if (tracked is null)
         {
             Check("some loaded tank has belts that wind", false,
-                "no parts-built model on disk - render one into Sprites/MTP");
+                "no parts-built model on disk - every tank in the harness is one "
+                + "now, so this means Sprites/ is empty or stale");
         }
         else
         {
@@ -1465,9 +1469,18 @@ public static class SelfTest
             tank.HullFacing = 180.0;
             Vector2 atHalf = tank.MarkOffset(plate, placed);
             tank.HullFacing = was;
+            // The floor is a "not accidentally zero" guard and nothing more. How
+            // many pixels half a plate is worth belongs to the plate and to how
+            // foreshortened it is at this heading, not to the rule being asserted:
+            // HitFaces[0] is the front, and at heading 0 it is turned away and
+            // squeezed, so on MTP the same half scatter that measured tens of
+            // pixels on the old single-mesh medium measures 7.5. An 8px floor was
+            // reporting that tank's plates rather than this behaviour. What has to
+            // hold is that the mark leaves the centroid at all and reverses when
+            // the hull turns round.
             Check("a mark slides along its plate and turns with it",
-                atZero.Length() > 8.0 && atHalf.Length() > 8.0
-                && (atZero - atHalf).Length() > 8.0,
+                atZero.Length() > 2.0 && atHalf.Length() > 2.0
+                && (atZero - atHalf).Length() > atZero.Length(),
                 $"{atZero} at heading 0, {atHalf} at 180");
             // The other half of the same shell. A hole appearing in the middle
             // of a plate the flash went off the end of is what one number
@@ -1837,6 +1850,187 @@ public static class SelfTest
         tank.Roll = 0.0;
         tank.Shake = 0;
 
+        if (vehicles is { Count: > 0 })
+        {
+            GD.Print("three tanks on one field");
+
+            // One per class, which is the whole reason there are three: the size
+            // difference is a comparison, and two mediums parked side by side
+            // would compare nothing.
+            Check("every tank has its own class",
+                vehicles.Select(v => v.Profile).Distinct().Count() == vehicles.Count,
+                string.Join(", ", vehicles.Select(v => $"{v.Tag} {v.Profile.Tag}")));
+            Check("and its own atlas, kept for good",
+                vehicles.All(v => ReferenceEquals(v.Sprite.Atlas, v.Atlas))
+                && vehicles.Select(v => v.Atlas).Distinct().Count() == vehicles.Count,
+                "switching selection must not re-dress one sprite - a tank left "
+                + "burning has to still be burning when you come back to it");
+            // Shared clocks would tremble in lockstep and exhaust on the same
+            // frame, which reads as one animation played three times.
+            Check("and its own clocks",
+                vehicles.Select(v => (object)v.Tremble).Distinct().Count() == vehicles.Count
+                && vehicles.Select(v => (object)v.Exhaust).Distinct().Count() == vehicles.Count
+                && vehicles.Select(v => (object)v.Track).Distinct().Count() == vehicles.Count,
+                "three engines, not one played three times");
+            Check("no two tanks are parked on the same cell",
+                vehicles.Select(v => v.Cell).Distinct().Count() == vehicles.Count,
+                string.Join(", ", vehicles.Select(v => $"{v.Tag} ({v.Cell.X},{v.Cell.Y})")));
+            // Same row, so the same screen height: what the eye compares has to be
+            // size, and two tanks at different heights differ by perspective too.
+            Check("they stand in one row, so only the size differs",
+                vehicles.Select(v => field.CellAnchor(v.HomeCell).Y).Distinct().Count() == 1,
+                string.Join(", ", vehicles.Select(
+                    v => $"{v.Tag} y={field.CellAnchor(v.HomeCell).Y:F0}")));
+            // Far enough apart that the silhouettes cannot touch. A heavy is about
+            // 212px of hull broadside; anything closer than that would have the
+            // spacing arguing with the size.
+            double gap = vehicles.Count < 2 ? double.MaxValue
+                : Enumerable.Range(1, vehicles.Count - 1).Min(
+                    i => (field.CellAnchor(vehicles[i].HomeCell)
+                          - field.CellAnchor(vehicles[i - 1].HomeCell)).Length());
+            double widest = vehicles.Max(v => v.Atlas.HullSpan * v.Sprite.BodyScale);
+            Check("and far enough apart that they cannot overlap",
+                gap > widest,
+                $"{gap:F0}px between them against {widest:F0}px of hull");
+
+            // The selection. A click on a tank drives that tank; a click on empty
+            // ground is an order. Which of the two it is comes off what is standing
+            // on the cell, so this is the routing the feature is made of.
+            int other = active == 0 ? vehicles.Count - 1 : 0;
+            Check("clicking a tank takes control of it",
+                Main.SelectionFor(vehicles, active, vehicles[other].Cell) == other,
+                $"click on {vehicles[other].Tag}'s cell picked "
+                + $"{Main.SelectionFor(vehicles, active, vehicles[other].Cell)}");
+            // Otherwise the tank you are driving could not be told to stay where it
+            // is, and clicking it would be a selection that does nothing.
+            Check("clicking the one you are driving is not a selection",
+                Main.SelectionFor(vehicles, active, vehicles[active].Cell) < 0,
+                "it has to fall through to a move order");
+            Vector2I empty = new(field.Columns - 1, field.Rows - 1);
+            Check("clicking empty ground is a move order",
+                Vehicle.At(vehicles, empty) is null
+                && Main.SelectionFor(vehicles, active, empty) < 0,
+                $"({empty.X},{empty.Y}) is not empty");
+
+            // Paths go round the others. Straight through would be the one thing a
+            // bench built to show three tanks must not draw.
+            HashSet<Vector2I> taken = Vehicle.Occupied(vehicles, vehicles[active]);
+            Check("the others are obstacles, not scenery",
+                taken.Count == vehicles.Count - 1
+                && !taken.Contains(vehicles[active].Cell),
+                $"{taken.Count} cells blocked for {vehicles[active].Tag}");
+            List<Vector2I> around = field.FindPath(
+                vehicles[active].Cell, new Vector2I(field.Columns - 1, 2), taken);
+            Check("a path routes round a tank in the way",
+                around.Count > 0 && !around.Any(taken.Contains),
+                $"{around.Count} steps, {around.Count(taken.Contains)} through a tank");
+            Check("and a cell with a tank on it is no destination at all",
+                field.FindPath(vehicles[active].Cell, vehicles[other].Cell, taken)
+                    .Count == 0,
+                "stopping short of where the click went reads as broken pathing");
+
+            // Standing on the ground of its own cell, whatever size it is drawn at.
+            // The anchor floats 50 to 59px above the ground, so placing a tank by
+            // its anchor puts its tracks off the hex by the scale times that float
+            // plus whatever the field's tile disagrees by - 17px on the light,
+            // which reads as "not centred vertically" and is not the renderer:
+            // tile and footprint agree there to within two pixels.
+            foreach (Vehicle v in vehicles)
+            {
+                Vector2 ground = v.Sprite.Position
+                                 + v.Atlas.GroundOffset * v.Sprite.BodyScale;
+                Vector2 want = field.Position + field.CellAnchor(v.Cell)
+                               + field.CentreOffset;
+                Check($"{v.Tag} stands on the centre of its own cell",
+                    (ground - want).Length() < 0.5,
+                    $"contact patch {ground} against cell centre {want}"
+                    + $" at {v.Sprite.BodyScale:F2}x");
+            }
+
+            // Depth, not tree order: the tanks move, and whoever was added last
+            // would otherwise win every overlap. Taken off the live position, so it
+            // is right in the middle of a step and not only on arrival.
+            Check("the depth order comes off the contact patch, not the cell",
+                vehicles.All(v => v.Sprite.ZIndex == Mathf.RoundToInt(
+                    field.CellAnchor(v.Cell).Y + field.CentreOffset.Y)),
+                "parked, the two agree - the live contact patch is the one that "
+                + "keeps agreeing while it drives, and at any size");
+            // Same row means same depth, whatever the sizes are. Read off the
+            // sprite origin instead, three tanks on one row came out with three
+            // different depths and the overlap order was decided by class.
+            Check("tanks on one row share a depth, whatever their size",
+                vehicles.Where(v => v.Cell.Y == vehicles[active].Cell.Y
+                                    && v.Cell.X % 2 == vehicles[active].Cell.X % 2)
+                    .Select(v => v.Sprite.ZIndex).Distinct().Count() == 1,
+                string.Join(", ", vehicles.Select(
+                    v => $"{v.Tag} z={v.Sprite.ZIndex} at {v.Sprite.BodyScale:F2}x")));
+            Check("the nearer tank draws over the further one",
+                vehicles.OrderBy(v => field.CellAnchor(v.Cell).Y)
+                    .Select(v => v.Sprite.ZIndex)
+                    .SequenceEqual(vehicles.Select(v => v.Sprite.ZIndex).OrderBy(z => z)),
+                string.Join(", ", vehicles.Select(
+                    v => $"{v.Tag} y={field.CellAnchor(v.Cell).Y:F0} z={v.Sprite.ZIndex}")));
+
+            // One field for three tanks. It cannot follow the selection - a grid
+            // that resized when you changed tank would move every tank on it.
+            Check("the field's grid does not follow the selection",
+                vehicles.Any(v => ReferenceEquals(field.Atlas, v.Atlas)),
+                "the tile comes from one tank's atlas and stays there");
+
+            if (ring is not null)
+            {
+                GD.Print("the ring on the selected tank");
+                ring.Target = vehicles[active];
+                ring._Process(0.0);
+                Check("the ring marks the tank being driven",
+                    ReferenceEquals(ring.Target, vehicles[active])
+                    && (ring.Position - vehicles[active].GroundPoint).Length() < 0.5,
+                    $"{ring.Position} against {vehicles[active].GroundPoint}");
+                // On the ground, not on the sprite's origin - the origin floats a
+                // scaled 50-odd px above it, and a ring drawn there would hang in
+                // the air by a different amount on each class.
+                Check("it sits on the contact patch, not on the sprite's origin",
+                    Math.Abs(ring.Position.Y - vehicles[active].Sprite.Position.Y)
+                        > 20.0,
+                    "the two are not the same point and the ring wants the lower");
+                // Under every tank, so its far side passes behind the hull. That is
+                // what makes it read as lying on the ground.
+                Check("it draws under every tank and over the field",
+                    ring.ZIndex < vehicles.Min(v => v.Sprite.ZIndex)
+                    && ring.ZIndex > field.ZIndex,
+                    $"ring z={ring.ZIndex}, tanks from "
+                    + $"{vehicles.Min(v => v.Sprite.ZIndex)}, field {field.ZIndex}");
+                // Cell-sized, never tank-sized: it says where the tank stands, and
+                // a ring that grew with the class would be a second statement about
+                // size arguing with the one the tanks are making.
+                Vector2[] outline = SelectionRing.Outline(
+                    field.Atlas!.HexRect.Size.X, field.Atlas.HexRect.Size.Y,
+                    ring.Inset);
+                double ringWidth = outline.Max(p => p.X) - outline.Min(p => p.X);
+                double ringHeight = outline.Max(p => p.Y) - outline.Min(p => p.Y);
+                Check("it is the size of the cell, not of the tank",
+                    Math.Abs(ringWidth - field.Atlas.HexRect.Size.X * ring.Inset) < 0.01
+                    && Math.Abs(ringHeight - field.Atlas.HexRect.Size.Y * ring.Inset) < 0.01
+                    && ringWidth > vehicles.Max(v => v.Atlas.HullSpan * v.Sprite.BodyScale) * 0.9,
+                    $"{ringWidth:F0}x{ringHeight:F0}px against a "
+                    + $"{field.Atlas.HexRect.Size.X}x{field.Atlas.HexRect.Size.Y} cell");
+                // Closed, and squashed the same way the tile is: it has to be the
+                // cell's own shape or it reads as a decoration lying over the grid.
+                Check("the outline is a closed hexagon in the tile's own shape",
+                    outline.Length == 7 && outline[0] == outline[^1]
+                    && Math.Abs(outline[1].X - outline[0].X * 0.5f) < 0.01,
+                    "flat-top: vertices at +-w/2 on the axis and +-w/4 at +-h/2");
+                // Nothing to mark, nothing drawn. Safe to call straight into: with
+                // no target it returns before it would touch the canvas.
+                ring.Target = null;
+                ring._Draw();
+                Check("and it draws nothing at all with no tank selected",
+                    !ring.Drawn, "a marker with no target is a marker that lies");
+                ring.Target = vehicles[active];
+                ring._Process(0.0);
+            }
+        }
+
         GD.Print("movement profiles");
         MovementProfile light = MovementProfile.Light;
         MovementProfile medium = MovementProfile.Medium;
@@ -1869,9 +2063,70 @@ public static class SelfTest
                                          && p.CornerSpeed < p.TopSpeed * 0.25),
             string.Join(", ", MovementProfile.All.Select(p => $"{p.Tag} {p.CornerSpeed:F0}")));
 
+        // Size. Authored rather than measured, because the models carry none: all
+        // three hulls render within 3% of the same length, so every bit of the
+        // difference on screen is these three numbers.
+        Check("the classes are drawn light < medium < heavy",
+            light.Size < medium.Size && medium.Size < heavy.Size,
+            string.Join(", ", MovementProfile.All.Select(p => $"{p.Tag} {p.Size:F2}x")));
+        Check("the medium is the size everything else is read against",
+            Math.Abs(medium.Size - 1.0) < 1e-9,
+            $"medium is {medium.Size:F2}x, so no atlas is drawn as rendered");
+        // The spread has to be big enough to see. Two tanks a few percent apart
+        // read as the same tank, and the whole point of an authored size is that
+        // the class is legible without another tank beside it to compare with.
+        Check("the spread between light and heavy is worth having",
+            heavy.Size / light.Size > 1.2,
+            $"{heavy.Size / light.Size:F2}x from lightest to heaviest");
+
+        // And the tripwire for the day the size is baked into the render instead.
+        // Right now no atlas carries a size of its own - the hulls come out within
+        // a few percent of each other - so the harness multiplying one in is the
+        // whole of it. Re-render the scenes at authored scales and this fails,
+        // which is the point: the two would then be multiplying together, and a
+        // heavy drawn 1.15x of an already-heavy atlas is 1.32x by accident.
+        if (atlases is { Count: > 1 })
+        {
+            int[] spans = atlases.Values.Select(a => a.HullSpan).ToArray();
+            Check("the atlases still carry no size of their own",
+                spans.Min() > 0 && (double)spans.Max() / spans.Min() < 1.1,
+                string.Join(", ", atlases.Select(kv => $"{kv.Key} {kv.Value.HullSpan}px"))
+                + " - if a scale has been baked in, stop scaling here too");
+        }
+
+        // How the size reaches the sprite: the node's own scale, so the layers,
+        // the children and a shell's offset on its plate all take it about one
+        // point. That point is the anchor because the anchor is the node's origin.
+        float wasScale = tank.BodyScale;
+        tank.BodyScale = 0.85f;
+        Check("size is a uniform scale on the tank node",
+            Math.Abs(tank.Scale.X - 0.85f) < 1e-6
+            && Math.Abs(tank.Scale.Y - 0.85f) < 1e-6,
+            $"{tank.Scale} - a tank wider than it is tall is a distorted render");
+        Vector2 armLocal = new(40.0f, 0.0f);
+        Check("it scales about the anchor, so the axis itself does not move",
+            tank.Transform.BasisXform(Vector2.Zero) == Vector2.Zero
+            && Math.Abs(tank.Transform.BasisXform(armLocal).X - 34.0f) < 1e-4,
+            $"a 40px arm draws at {tank.Transform.BasisXform(armLocal).X:F2}px");
+        tank.BodyScale = wasScale;
+
+        // The one thing outside the node that has to follow it. A belt wound at
+        // the unscaled link on a tank drawn smaller slips by exactly the factor
+        // it was scaled by - which looks like a track bug and is a size bug.
+        var wound = new TrackLoop { Phases = 8, Pitch = 10.0, Scale = 0.5 };
+        wound.Advance(2.5, 1.0);
+        Check("a scaled tank winds its belt by the scaled link",
+            Math.Abs(wound.LinkOnScreen - 5.0) < 1e-9
+            && Math.Abs(wound.Phase - 4.0) < 1e-9 && wound.Slip == 1.0,
+            $"half a 5px link put it at phase {wound.Phase:F2} of 8");
+        Check("and the cap moves with the link, not with the atlas",
+            Math.Abs(wound.SyncSpeed
+                     - 5.0 * wound.MaxPitchesPerFrame * wound.CapFrameRate) < 1e-9,
+            $"{wound.SyncSpeed:F0} px/s - a coarser link stays in step further up");
+
         Check("an unknown tag still gets a profile",
             MovementProfile.For("nonsense") == MovementProfile.Medium
-            && MovementProfile.For("lt") == MovementProfile.Light,
+            && MovementProfile.For("ltp") == MovementProfile.Light,
             "fallback or case-insensitive lookup is broken");
 
         GD.Print(failed == 0 ? "SELFTEST OK" : $"SELFTEST FAILED: {failed}");

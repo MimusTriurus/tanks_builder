@@ -19,36 +19,111 @@ namespace TankSpriteTest;
 public sealed partial class Main : Node2D
 {
     private const string SpritesRoot = "D:/Projects/AgentCoding/BlenderMCP/Sprites";
-    /// <summary>The tanks to look for on disk, in key order.
+    /// <summary>The tanks to look for on disk, in key order: one per class,
+    /// all three built from separate parts - hull, turret, barrel, engine and
+    /// two belts as their own meshes.
     ///
-    /// MTP is the same medium built from separate parts - hull, turret and two
-    /// belts as their own meshes - and it is here rather than replacing MT
-    /// because it is the only one whose tracks wind, and a moving belt is
-    /// judged against a still one. HTP is the parts-built heavy, and it sits
-    /// next to HT for the same reason. LTP completes the set, so every class now
-    /// has both structures side by side.</summary>
-    private static readonly string[] Tags =
-        { "HT", "MT", "LT", "MTP", "HTP", "LTP" };
+    /// The single-mesh HT/MT/LT used to sit alongside them so a winding belt
+    /// could be judged against a still one. They are gone: their belts are not
+    /// separate meshes, so they cannot wind at all, and a tank that slides on
+    /// dead tracks is not a comparison, it is the old bug still on screen.
+    /// The atlases stay on disk under Sprites/; nothing here loads them.</summary>
+    private static readonly string[] Tags = { "LTP", "MTP", "HTP" };
 
     private const double SpinSpeed = 90.0;      // deg/sec, for the wobble check
 
     private readonly Dictionary<string, AtlasSet> _atlases = new();
     private readonly List<string> _loaded = new();
 
-    private TankSprite _tank = null!;
+    /// <summary>
+    /// All three tanks, in the order they loaded, which is also key order and the
+    /// order they are parked in from left to right.
+    ///
+    /// Three at once rather than one wearing three atlases in turn, because the
+    /// size difference is a comparison and a comparison needs both terms on
+    /// screen: 0.85x against 1.15x cannot be judged from memory across a key
+    /// press. Everything a tank owns is in <see cref="Vehicle"/>; what is left
+    /// here belongs to the harness.
+    /// </summary>
+    private readonly List<Vehicle> _vehicles = new();
+
+    /// <summary>Which one the keys drive. Selected by clicking it, by a number
+    /// key, or from the panel - three ways into one field, which is what stops
+    /// them disagreeing.</summary>
+    private int _active = 1;                    // MTP - the reference tank
+
+    private Vehicle Active => _vehicles[_active];
+
+    /// <summary>The sprite of the tank being driven. A property rather than a
+    /// field so that every line written against the old single-tank harness still
+    /// says what it said - it just now says it about whichever tank is
+    /// selected.</summary>
+    private TankSprite _tank => Active.Sprite;
+
     private HexField _field = null!;
+
+    /// <summary>The ring on the ground under the tank being driven, or null on a
+    /// run that has no interface - see <see cref="SelectionRing"/>.</summary>
+    private SelectionRing? _ring;
+
     private Label _hud = null!;
     private Camera2D _camera = null!;
 
     private readonly Vector2 _origin = new(220, 200);
-    private int _tagIndex = 1;                  // MT - the largest measured axis error
-    private Vector2I _cell = new(4, 2);
 
-    private List<Vector2I> _path = new();
-    private int _pathStep;
-    private double _speed;
-    private MovementProfile _profile = MovementProfile.Medium;
-    private readonly BodyPitch _pitch = new();
+    /// <summary>Where the three are parked: one row, every other column. The same
+    /// row means the same screen height, and two columns apart - 372px against a
+    /// heavy's 212px of hull - means the silhouettes never touch, so what the eye
+    /// compares is size rather than spacing.</summary>
+    private static readonly Vector2I[] HomeCells =
+        { new(2, 2), new(4, 2), new(6, 2) };
+
+    private Vector2I _cell
+    {
+        get => Active.Cell;
+        set => Active.Cell = value;
+    }
+
+    private List<Vector2I> _path
+    {
+        get => Active.Path;
+        set => Active.Path = value;
+    }
+
+    private int _pathStep
+    {
+        get => Active.PathStep;
+        set => Active.PathStep = value;
+    }
+
+    private double _speed
+    {
+        get => Active.Speed;
+        set => Active.Speed = value;
+    }
+
+    private MovementProfile _profile => Active.Profile;
+
+    /// <summary>A multiplier over every class's <see cref="MovementProfile.Size"/>,
+    /// on the panel and on --size. A multiplier rather than a size, for the reason
+    /// the tremble level is one: the three class figures are deliberately spread,
+    /// and a dial that set the size directly would flatten that spread the first
+    /// time it was touched. This asks "all of them bigger" and leaves the ratios
+    /// where they were chosen.</summary>
+    private double _sizeLevel = 1.0;
+    /// <summary>
+    /// The driven tank's own state, read through the names the harness has always
+    /// used for it.
+    ///
+    /// Every one of these used to be a field, when there was one tank. As
+    /// properties onto <see cref="Active"/> they mean what they always meant -
+    /// "the tank being driven" - so a key, a panel row and the trace all keep
+    /// pointing at the right vehicle without a hundred call sites learning about
+    /// the list. The per-frame update methods take a <see cref="Vehicle"/>
+    /// explicitly instead, because those have to run for the tanks nobody is
+    /// driving too: three idle tanks with dead engines would be three sprites.
+    /// </summary>
+    private BodyPitch _pitch => Active.Pitch;
 
     /// <summary>Body pitch is off unless asked for - key P, or --pitch on a
     /// capture run. It is an interpretation of the sprites rather than
@@ -57,30 +132,30 @@ public sealed partial class Main : Node2D
     /// it.</summary>
     private bool _pitchEnabled;
 
-    private readonly BodyRumble _rumble = new();
+    private BodyRumble _rumble => Active.Rumble;
     /// <summary>Ground rumble - key B, or --rumble. Off again: the whole-pixel
     /// jolt turned out to be a stronger reading of the ground than wanted, and
     /// the engine tremble now covers moving as well as standing, so the two
     /// stack rather than divide the work.</summary>
     private bool _rumbleEnabled;
 
-    private readonly EngineTremble _tremble = new();
+    private EngineTremble _tremble => Active.Tremble;
     /// <summary>Engine tremble, standing or moving. The one vibration that is on
     /// by default: a tank that slides over the ground with nothing moving on it
     /// is wrong in a way the plain render is not. Key I, or --no-tremble.</summary>
     private bool _trembleEnabled = true;
 
-    private readonly TurretScan _scan = new();
+    private TurretScan _scan => Active.Scan;
     /// <summary>Idle turret traverse - key N, or --scan.</summary>
     private bool _scanEnabled;
 
-    private readonly TrackLoop _track = new();
+    private TrackLoop _track => Active.Track;
     /// <summary>The belts winding - key C, or --no-tracks. On by default, and
     /// not really an option: a tank has tracks and they move. The switch is so
     /// the hull layer can be looked at without them.</summary>
     private bool _tracksEnabled = true;
 
-    private readonly ExhaustLoop _exhaust = new();
+    private ExhaustLoop _exhaust => Active.Exhaust;
     /// <summary>Engine exhaust - key O, or --no-exhaust. On by default, and for
     /// the same reason as the tremble: an engine that is running is running, and
     /// a tank showing no sign of it reads as switched off. Unlike the tremble it
@@ -88,7 +163,7 @@ public sealed partial class Main : Node2D
     /// an interpretation laid over one.</summary>
     private bool _exhaustEnabled = true;
 
-    private readonly BurnLoop _burn = new();
+    private BurnLoop _burn => Active.Burn;
     /// <summary>The tank on fire - key J, or --burning. Off by default, and
     /// unlike the exhaust that is not a preference: a tank that is not burning
     /// is the normal case, and a harness that opens with one on fire would be
@@ -96,11 +171,15 @@ public sealed partial class Main : Node2D
     /// exhaust's so the two can be seen apart - they come off the same stamped
     /// port and it is worth being able to prove the layers are not the same
     /// layer.</summary>
-    private bool _burning;
+    private bool _burning
+    {
+        get => Active.Burning;
+        set => Active.Burning = value;
+    }
 
     /// <summary>A shell arriving - key U. An event rather than a mode, so there
     /// is nothing to switch on: each press is one hit.</summary>
-    private readonly HitLoop _hit = new();
+    private HitLoop _hit => Active.Hit;
 
     /// <summary>
     /// Which side of the hex the shooter is standing on, as an index into
@@ -145,7 +224,11 @@ public sealed partial class Main : Node2D
         return best;
     }
 
-    private int _hitCount;
+    private int _hitCount
+    {
+        get => Active.HitCount;
+        set => Active.HitCount = value;
+    }
 
     /// <summary>Calibres, as a multiplier on the rendered hit - key Y.
     ///
@@ -205,9 +288,13 @@ public sealed partial class Main : Node2D
     }
 
     private FlashSheet _flash = null!;
-    private readonly Recoil _recoil = new();
+    private Recoil _recoil => Active.Recoil;
     /// <summary>Screen frames since the shot went off, or -1 between shots.</summary>
-    private int _shotFrame = -1;
+    private int _shotFrame
+    {
+        get => Active.ShotFrame;
+        set => Active.ShotFrame = value;
+    }
 
     private bool _spinning;
     private bool _aimWithMouse;
@@ -253,6 +340,24 @@ public sealed partial class Main : Node2D
     /// tank exists, exactly as the flash source is.</summary>
     private bool _recoilTurretOnly;
 
+    /// <summary>
+    /// Three more flag values held until there is a tank to put them on:
+    /// --burning, --tremble and --recoil.
+    ///
+    /// The reason is the one already written above for the flash source and the
+    /// recoil mode, and it grew teeth when the harness went to three tanks: these
+    /// three used to be written straight through the properties that mean "the
+    /// tank being driven", and the argument loop runs before any tank exists. What
+    /// used to be a write to a field that was simply there became an index into an
+    /// empty list - the window opened, the scene never built, and --capture hung
+    /// rather than failing. Anything a flag sets that belongs to a vehicle waits
+    /// here until the vehicles are built.
+    /// </summary>
+    private bool _burnAtStart;
+    private double _trembleAtStart = 1.0;
+    private double _recoilAtStart = 1.0;
+    private bool _rollOnly;
+
     private bool Moving => _pathStep < _path.Count;
 
     public override void _Ready()
@@ -282,7 +387,7 @@ public sealed partial class Main : Node2D
             else if (userArgs[i] == "--no-tracks")
                 _tracksEnabled = false;
             else if (userArgs[i] == "--burning")
-                _burning = true;
+                _burnAtStart = true;
             else if (userArgs[i] == "--fire")
                 _fireAtStart = true;
             else if (userArgs[i] == "--hit" && i + 1 < userArgs.Length
@@ -307,17 +412,21 @@ public sealed partial class Main : Node2D
                      && float.TryParse(userArgs[i + 1], NumberStyles.Float,
                          CultureInfo.InvariantCulture, out float calibre))
                 _calibre = CalibreFor(calibre);
-            // The two panel sliders, on the command line for the same reason the
+            // The panel sliders, on the command line for the same reason the
             // calibre is: a slider is judged by a picture, and taking that
             // picture twice at two settings cannot need a hand on the mouse.
+            else if (userArgs[i] == "--size" && i + 1 < userArgs.Length
+                     && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+                         CultureInfo.InvariantCulture, out double sizeLevel))
+                _sizeLevel = sizeLevel;
             else if (userArgs[i] == "--tremble" && i + 1 < userArgs.Length
                      && double.TryParse(userArgs[i + 1], NumberStyles.Float,
                          CultureInfo.InvariantCulture, out double trembleLevel))
-                _tremble.Level = trembleLevel;
+                _trembleAtStart = trembleLevel;
             else if (userArgs[i] == "--recoil" && i + 1 < userArgs.Length
                      && double.TryParse(userArgs[i + 1], NumberStyles.Float,
                          CultureInfo.InvariantCulture, out double recoilLevel))
-                _recoil.Level = recoilLevel;
+                _recoilAtStart = recoilLevel;
             // A mode rather than a level, and it needs a flag for the reason the
             // two slider levels do: the pair is judged by a screenshot, and
             // taking one on each setting should not need a hand on the keyboard.
@@ -340,8 +449,11 @@ public sealed partial class Main : Node2D
                 // content between rows, and where the silhouette narrows - the
                 // gun, the turret - that reads as a horizontal shift of over
                 // two pixels which has nothing to do with roll.
+                //
+                // The amplitude waits for the tanks to exist, like the other
+                // per-vehicle flag values above.
                 _rumbleEnabled = true;
-                _rumble.Amplitude = 0.0;
+                _rollOnly = true;
             }
             else if (userArgs[i] == "--trace" && i + 1 < userArgs.Length
                      && int.TryParse(userArgs[i + 1], out int frames))
@@ -382,12 +494,47 @@ public sealed partial class Main : Node2D
 
         _field = new HexField();
         AddChild(_field);
-        _tank = new TankSprite
+
+        // One vehicle per atlas that loaded, parked along HomeCells. Built here
+        // rather than swapped later: each one keeps its own atlas for good, so
+        // nothing has to be reconfigured when the selection changes - which is
+        // most of what switching class used to be, and every line of it was a
+        // chance for one clock to be left pointing at the previous tank.
+        for (int i = 0; i < _loaded.Count; i++)
         {
-            Flash = _flash, Source = _flashSource,
-            RecoilTurretOnly = _recoilTurretOnly,
-        };
-        AddChild(_tank);
+            string tag = _loaded[i];
+            var sprite = new TankSprite
+            {
+                Flash = _flash, Source = _flashSource,
+                RecoilTurretOnly = _recoilTurretOnly,
+                Atlas = _atlases[tag],
+            };
+            AddChild(sprite);
+            var vehicle = new Vehicle
+            {
+                Tag = tag,
+                Atlas = _atlases[tag],
+                Sprite = sprite,
+                Profile = MovementProfile.For(tag),
+                HomeCell = HomeCells[Math.Min(i, HomeCells.Length - 1)],
+            };
+            vehicle.Cell = vehicle.HomeCell;
+            _vehicles.Add(vehicle);
+            // Phases come off each layer, never assumed: the renderer's count is
+            // a config value, and a clock that wraps anywhere but at the seam
+            // pops there.
+            vehicle.Track.Phases = vehicle.Atlas.TrackPhases;
+            vehicle.Track.Pitch = vehicle.Atlas.TrackPitch;
+            vehicle.Exhaust.Phases = vehicle.Atlas.ExhaustPhases;
+            vehicle.Burn.Phases = vehicle.Atlas.BurnPhases;
+            // Per class, so a heavy at its own cruise is as worked as a light at
+            // its own instead of idling along because it happens to be slower.
+            vehicle.Exhaust.TopSpeed = vehicle.Profile.TopSpeed;
+            vehicle.Tremble.TopSpeed = vehicle.Profile.TopSpeed;
+            // and the rumble reaches full strength at half cruise, whatever
+            // cruise is for this class
+            vehicle.Rumble.FullSpeed = vehicle.Profile.TopSpeed * 0.5;
+        }
 
         // Judging whether two layers line up is a pixel-level question, so the
         // harness has to be able to get close. Sprites are drawn at 1:1 by
@@ -419,12 +566,32 @@ public sealed partial class Main : Node2D
             GD.PushWarning("some atlases failed: " + string.Join(", ", failures));
 
         if (_startTag is not null && _loaded.IndexOf(_startTag) >= 0)
-            _tagIndex = _loaded.IndexOf(_startTag);
-        UseTag(CurrentTag());
+            _active = _loaded.IndexOf(_startTag);
+        // Clamped because how many tanks are on disk decides how many there are:
+        // the default points at the medium, and a run with only one atlas present
+        // must select that one rather than throw.
+        _active = Math.Clamp(_active, 0, _vehicles.Count - 1);
+        // The field takes its tile from a tank, and now there are three of them.
+        // The medium's, always: the grid is one grid, so it cannot follow the
+        // selection, and the reference tank is the one drawn as rendered.
+        _field.Atlas = _vehicles[Math.Min(1, _vehicles.Count - 1)].Atlas;
+        ApplySize();
+        foreach (Vehicle vehicle in _vehicles)
+            Park(vehicle);
+
+        // The mark on whoever is being driven. Absent under --capture and --trace
+        // for the reason the panel is: a capture is evidence, and an A/B of two
+        // renders must not differ by a marker. --ui brings both back.
+        if (!_noPanel)
+        {
+            _ring = new SelectionRing { Field = _field, Target = Active };
+            AddChild(_ring);
+        }
 
         if (_selfTest)
         {
-            int failed = SelfTest.Run(_field, _tank, _atlases);
+            int failed = SelfTest.Run(_field, _tank, _atlases, _vehicles, _active,
+                                      _ring);
             GetTree().Quit(failed == 0 ? 0 : 1);
             return;
         }
@@ -438,6 +605,19 @@ public sealed partial class Main : Node2D
             _panel.AddHandle();
             BuildPanel();
         }
+        // The flag values that had to wait for a tank to exist. The two levels go
+        // on every tank: they are harness settings, and a slider judged on one
+        // tank while the other two ran at a different amplitude would be measuring
+        // the difference. Burning goes on the selected one alone, because that is
+        // what J does and what makes a burning tank next to an intact one possible.
+        foreach (Vehicle vehicle in _vehicles)
+        {
+            vehicle.Tremble.Level = _trembleAtStart;
+            vehicle.Recoil.Level = _recoilAtStart;
+            if (_rollOnly)
+                vehicle.Rumble.Amplitude = 0.0;
+        }
+        Active.Burning = _burnAtStart;
         if (_startTurret is not null)
             _tank.TurretFacing = Mod(_startTurret.Value, 360.0);
         for (int i = 0; i < _damageAtStart; i++)
@@ -452,54 +632,207 @@ public sealed partial class Main : Node2D
             TakeHit(_hitAtStart.Value);
     }
 
-    private string CurrentTag() =>
-        _loaded[((_tagIndex % _loaded.Count) + _loaded.Count) % _loaded.Count];
+    private string CurrentTag() => Active.Tag;
 
-    private void UseTag(string tag)
+    /// <summary>
+    /// Take control of one of the tanks.
+    ///
+    /// All it does is move the selection. Switching class used to rebuild every
+    /// clock and clear the damage, because one tank was wearing another tank's
+    /// atlas; now each vehicle keeps its own for good, so a burning tank left
+    /// selected stays burning, a holed plate stays holed, and coming back to a
+    /// tank finds it as it was left. That is the property the bench needs - three
+    /// tanks in three different states, side by side.
+    /// </summary>
+    private void Select(int index)
     {
-        AtlasSet atlas = _atlases[tag];
-        _tank.Atlas = atlas;
-        _field.Atlas = atlas;
-        _profile = MovementProfile.For(tag);
-        // the rumble reaches full strength at half cruise, whatever cruise is
-        // for this class, so a heavy tank is not stuck in the thinned-out band
-        _rumble.FullSpeed = _profile.TopSpeed * 0.5;
-        // per class, so a heavy at its own cruise is as worked as a light at
-        // its own instead of idling along because it happens to be slower
-        _tremble.TopSpeed = _profile.TopSpeed;
-        _tremble.Reset();
-        // phases read off the layer, never assumed: the renderer's count is a
-        // config value, and a clock wrapping anywhere but the seam pops there
-        _exhaust.TopSpeed = _profile.TopSpeed;
-        _exhaust.Phases = atlas.ExhaustPhases;
-        _exhaust.Reset();
-        // no TopSpeed here: a fire does not burn harder because the tank moves
-        _burn.Phases = atlas.BurnPhases;
-        _burn.Reset();
-        // and none here either, for the opposite reason: the belt is tied to
-        // the ground, not to the engine, so what it needs is the link length
-        _track.Phases = atlas.TrackPhases;
-        _track.Pitch = atlas.TrackPitch;
-        _track.Reset();
-        _tank.TrackPhase = -1;
-        _hit.Reset();
-        _tank.HitPhase = -1;
-        // damage is per tank and the plates are per tank, so switching class
-        // has to clear it or the new hull arrives holed on somebody else's
-        // measurements
-        _tank.Repair();
-        _scan.Reset();
-        CancelOrder();
+        if (index < 0 || index >= _vehicles.Count)
+            return;
+        _active = index;
+        // The ring marks whoever is being driven, so it is set here and nowhere
+        // else - it follows the tank's own contact patch from there, including
+        // while it drives.
+        if (_ring is not null)
+            _ring.Target = Active;
+        // The highlight belongs to whoever is being driven, so it follows the
+        // selection rather than staying on the last order given.
+        _field.Highlight = Active.Path.GetRange(
+            Math.Min(Active.PathStep, Active.Path.Count),
+            Active.Path.Count - Math.Min(Active.PathStep, Active.Path.Count));
         _field.QueueRedraw();
-        SnapToCell();
+        _panel?.Sync();
+        _tank.QueueRedraw();
     }
 
-    private void SnapToCell()
+    /// <summary>
+    /// Which tank a click on a cell means, or -1 for "no tank - this is a move
+    /// order".
+    ///
+    /// A cell rather than the sprite's pixels: a tank occupies a cell, that is the
+    /// unit the game is played in, and the two readings differ only where a
+    /// silhouette overhangs its own hex - where a pixel test would let you select
+    /// a tank by clicking the ground beside it.
+    ///
+    /// The tank already being driven does not count, so clicking the one you are
+    /// driving is an order to stay put rather than a selection that does nothing.
+    /// Static and pure so the routing can be asserted: "a click on an occupied
+    /// cell selects instead of ordering" is the whole feature.
+    /// </summary>
+    public static int SelectionFor(IReadOnlyList<Vehicle> vehicles, int active,
+                                  Vector2I cell)
     {
-        _cell = _field.ClampCell(_cell);
+        for (int i = 0; i < vehicles.Count; i++)
+            if (i != active && vehicles[i].Cell == cell)
+                return i;
+        return -1;
+    }
+
+    /// <summary>
+    /// The class's size onto the tank, and onto the one thing outside it that
+    /// has to follow.
+    ///
+    /// The belt's link is a length of ground, so a tank drawn at 0.85 has a
+    /// 0.85 link and must wind that much sooner or the tread slips by exactly
+    /// the factor the tank was scaled by - the one coupling <see
+    /// cref="TankSprite.BodyScale"/> cannot take care of by scaling the node.
+    /// It moves <see cref="TrackLoop.SyncSpeed"/> with it, which is right and
+    /// visible: a bigger tank has a coarser link and so stays in step further up
+    /// its speed range.
+    ///
+    /// Speeds are not touched. They are screen px/s per class, and how large a
+    /// tank is drawn is not how fast it goes.
+    /// </summary>
+    private void ApplySize()
+    {
+        foreach (Vehicle vehicle in _vehicles)
+        {
+            float was = vehicle.Sprite.BodyScale;
+            var now = (float)(vehicle.Profile.Size * _sizeLevel);
+            if (now == was)
+                continue;
+            vehicle.Sprite.BodyScale = now;
+            vehicle.Track.Scale = now;
+            // Hold the contact patch still. The scale pivots on the anchor, which
+            // floats above the ground, so resizing alone would lift or sink the
+            // tank - see StandOn. Corrected by the change rather than re-parked,
+            // so dragging the dial while a tank is under way does not snap it back
+            // to the cell it last reached.
+            vehicle.Sprite.Position -= vehicle.Atlas.GroundOffset * (now - was);
+        }
+    }
+
+    /// <summary>Put a tank on its cell.
+    ///
+    /// The z index comes off the cell's screen height, which is the whole of the
+    /// overlap rule: a tank further down the screen is nearer the camera and draws
+    /// over one behind it. Tree order cannot say that - it is fixed at build time
+    /// and the tanks move - and without it the tank that happens to have been
+    /// created last wins every overlap, which reads as one driving through
+    /// another.</summary>
+    /// <summary>
+    /// Where a tank's sprite has to sit for the tank to be standing on a cell.
+    ///
+    /// On its <em>contact patch</em>, not on its anchor, and that distinction is
+    /// worth the method. Every layer of one tank shares the anchor, so drawing a
+    /// tank at its cell's anchor is what keeps hull, turret and belts together -
+    /// but the anchor is the turret axis lifted to the mid-height of the fitted
+    /// bounds, so it floats 50 to 59 px above the ground. Two things then move the
+    /// tank off the ground the field is drawing, and both were introduced here
+    /// rather than by the renderer, which centres tile and footprint to within
+    /// two pixels:
+    ///
+    /// - the size scales about the anchor, so a tank drawn at 0.85 has that 51px
+    ///   of float shortened to 43 and stands 8px high in its hex, and a 1.15 one
+    ///   sinks 8px into it;
+    /// - the field draws one tile under all three, and the tiles do not agree on
+    ///   where the ground is: 49.7px below the anchor on the light's, 59.0 on the
+    ///   medium's, which is another 9px.
+    ///
+    /// They happened to cancel on the heavy and to add on the light, so the tank
+    /// that looked wrong was the one where the two errors agreed - which is why
+    /// this reads as "sometimes off centre" rather than as an offset.
+    ///
+    /// Asking instead for the ground point to land on the cell's ground centre
+    /// answers both at once, at any size and with any tile under it.
+    /// </summary>
+    private Vector2 StandOn(Vehicle vehicle, Vector2I cell) =>
+        _origin + _field.CellAnchor(cell) + _field.CentreOffset
+        - vehicle.Atlas.GroundOffset * vehicle.Sprite.BodyScale;
+
+    private void Park(Vehicle vehicle)
+    {
+        vehicle.Cell = _field.ClampCell(vehicle.Cell);
         _field.Position = _origin;
-        _tank.Position = _origin + _field.CellAnchor(_cell);
-        _tank.QueueRedraw();
+        vehicle.Sprite.Position = StandOn(vehicle, vehicle.Cell);
+        Depth(vehicle);
+        vehicle.Sprite.QueueRedraw();
+    }
+
+    /// <summary>The overlap order, off where the tank actually is rather than off
+    /// the cell it last reached. Taken from the live position because a tank spends
+    /// most of a move between two cells: stamped on arrival only, one crossing the
+    /// row of another would hold the wrong order for the whole step, which is
+    /// exactly the frame you would be looking at.
+    ///
+    /// From the contact patch, not from the sprite's origin, for the same reason
+    /// <see cref="StandOn"/> exists: what decides which tank is nearer the camera
+    /// is where each one stands, and the origin sits a scaled float above that. Off
+    /// the origin, three tanks on one row got three different depths - the light by
+    /// 16 - and the order between them was decided by their sizes.</summary>
+    private void Depth(Vehicle vehicle) =>
+        vehicle.Sprite.ZIndex =
+            Mathf.RoundToInt(vehicle.GroundPoint.Y - _origin.Y);
+
+    private void SnapToCell() => Park(Active);
+
+    /// <summary>
+    /// A global effect toggle reaching every tank.
+    ///
+    /// These five are settings of the harness, not of a vehicle: "show me the
+    /// ground rumble" is a question about the effect, and answering it on one tank
+    /// while the other two sat still would make the comparison the toggle exists
+    /// for impossible. Burning is the exception and stays per tank - see
+    /// <see cref="Vehicle.Burning"/>.
+    ///
+    /// One method per toggle, called by both the key and the panel row, so the two
+    /// cannot come to mean different things.
+    /// </summary>
+    private void PitchChanged()
+    {
+        foreach (Vehicle v in _vehicles)
+            UpdatePitch(v, 0.0, 0.0);
+    }
+
+    private void RumbleChanged()
+    {
+        foreach (Vehicle v in _vehicles)
+            UpdateRumble(v, 0.0);
+    }
+
+    private void TrembleChanged()
+    {
+        foreach (Vehicle v in _vehicles)
+            UpdateTremble(v, 0.0);
+    }
+
+    private void ExhaustChanged()
+    {
+        foreach (Vehicle v in _vehicles)
+            UpdateExhaust(v, 0.0);
+    }
+
+    private void TracksChanged()
+    {
+        foreach (Vehicle v in _vehicles)
+            UpdateTracks(v, 0.0, 0.0);
+    }
+
+    private void ScanChanged()
+    {
+        if (_scanEnabled)
+            return;
+        foreach (Vehicle v in _vehicles)
+            v.Scan.Reset();
     }
 
     // --- orders ------------------------------------------------------------
@@ -508,7 +841,11 @@ public sealed partial class Main : Node2D
     {
         if (!_field.InBounds(target) || target == _cell)
             return;
-        _path = _field.FindPath(_cell, target);
+        // Round the others rather than through them. A blocked destination gives
+        // no path at all, which is why a click on an occupied cell is read as a
+        // selection before it ever gets here.
+        _path = _field.FindPath(_cell, target,
+                                Vehicle.Occupied(_vehicles, Active));
         _pathStep = 0;
         // Mouse aim would override both turret modes and make the feature look
         // broken while the tank drives, so an order takes the turret back.
@@ -518,11 +855,15 @@ public sealed partial class Main : Node2D
         _field.QueueRedraw();
     }
 
-    private void CancelOrder()
+    private void CancelOrder() => CancelOrder(Active);
+
+    private void CancelOrder(Vehicle v)
     {
-        _path = new List<Vector2I>();
-        _pathStep = 0;
-        _speed = 0.0;
+        v.Path = new List<Vector2I>();
+        v.PathStep = 0;
+        v.Speed = 0.0;
+        if (v != Active)
+            return;
         _field.Highlight = Array.Empty<Vector2I>();
         _field.QueueRedraw();
     }
@@ -534,32 +875,33 @@ public sealed partial class Main : Node2D
     /// to swing round, so looking past the bend would start the braking too
     /// late. What it slows *to* depends on what the bend is: the crawl at a
     /// corner, a full stop only at the destination.</summary>
-    private (double Distance, double EndSpeed) RemainingRun()
+    private (double Distance, double EndSpeed) RemainingRun(Vehicle v)
     {
-        double total = (_origin + _field.CellAnchor(_path[_pathStep]) - _tank.Position).Length();
-        int heading = HexField.HeadingTo(_cell, _path[_pathStep]);
-        int i = _pathStep;
-        for (; i + 1 < _path.Count; i++)
+        double total = (StandOn(v, v.Path[v.PathStep]) - v.Sprite.Position).Length();
+        int heading = HexField.HeadingTo(v.Cell, v.Path[v.PathStep]);
+        int i = v.PathStep;
+        for (; i + 1 < v.Path.Count; i++)
         {
-            if (HexField.HeadingTo(_path[i], _path[i + 1]) != heading)
+            if (HexField.HeadingTo(v.Path[i], v.Path[i + 1]) != heading)
                 break;
-            total += (_field.CellAnchor(_path[i + 1]) - _field.CellAnchor(_path[i])).Length();
+            total += (_field.CellAnchor(v.Path[i + 1])
+                      - _field.CellAnchor(v.Path[i])).Length();
         }
-        bool endOfPath = i + 1 >= _path.Count;
-        return (total, endOfPath ? 0.0 : _profile.CornerSpeed);
+        bool endOfPath = i + 1 >= v.Path.Count;
+        return (total, endOfPath ? 0.0 : v.Profile.CornerSpeed);
     }
 
-    private void AdvanceOrder(double delta)
+    private void AdvanceOrder(Vehicle v, double delta)
     {
-        Vector2I next = _path[_pathStep];
-        int heading = HexField.HeadingTo(_cell, next);
+        Vector2I next = v.Path[v.PathStep];
+        int heading = HexField.HeadingTo(v.Cell, next);
         if (heading < 0)
         {
-            CancelOrder();      // path went stale - do not drive off the grid
+            CancelOrder(v);     // path went stale - do not drive off the grid
             return;
         }
 
-        double diff = WrapAngle(heading - _tank.HullFacing);
+        double diff = WrapAngle(heading - v.Sprite.HullFacing);
         double accelRatio;
 
         if (Math.Abs(diff) > 0.5)
@@ -568,36 +910,43 @@ public sealed partial class Main : Node2D
             // The crawl is a floor, never a target to speed up to, so a standing
             // start still pivots in place - which is what a tank does - while a
             // bend taken at speed stays continuous.
-            double crawl = _profile.CornerSpeed;
-            accelRatio = _speed > crawl ? -1.0 : 0.0;
-            if (_speed > crawl)
-                _speed = Math.Max(crawl, _speed - _profile.Accel * delta);
-            double budget = _profile.TurnRate * delta;
-            _tank.TurnHull(Math.Abs(diff) <= budget ? diff : Math.Sign(diff) * budget);
+            double crawl = v.Profile.CornerSpeed;
+            accelRatio = v.Speed > crawl ? -1.0 : 0.0;
+            if (v.Speed > crawl)
+                v.Speed = Math.Max(crawl, v.Speed - v.Profile.Accel * delta);
+            double budget = v.Profile.TurnRate * delta;
+            v.Sprite.TurnHull(Math.Abs(diff) <= budget
+                ? diff
+                : Math.Sign(diff) * budget);
         }
         else
         {
-            (double remaining, double endSpeed) = RemainingRun();
+            (double remaining, double endSpeed) = RemainingRun(v);
             double brakeDistance =
-                (_speed * _speed - endSpeed * endSpeed) / (2.0 * _profile.Accel);
+                (v.Speed * v.Speed - endSpeed * endSpeed) / (2.0 * v.Profile.Accel);
             bool braking = remaining <= brakeDistance;
-            accelRatio = braking ? -1.0 : _speed < _profile.TopSpeed ? 1.0 : 0.0;
-            _speed = Math.Clamp(_speed + accelRatio * _profile.Accel * delta,
-                braking ? endSpeed : 0.0, _profile.TopSpeed);
+            accelRatio = braking ? -1.0 : v.Speed < v.Profile.TopSpeed ? 1.0 : 0.0;
+            v.Speed = Math.Clamp(v.Speed + accelRatio * v.Profile.Accel * delta,
+                braking ? endSpeed : 0.0, v.Profile.TopSpeed);
         }
 
-        UpdatePitch(accelRatio, delta);
-        UpdateRumble(delta);
+        UpdatePitch(v, accelRatio, delta);
+        UpdateRumble(v, delta);
 
-        Vector2 goal = _origin + _field.CellAnchor(next);
-        Vector2 to = goal - _tank.Position;
-        var budgetPx = (float)(_speed * delta);
+        // The same StandOn the parking uses, or the tank would drive to where its
+        // anchor belongs and stop the height of its float short of the cell.
+        Vector2 goal = StandOn(v, next);
+        Vector2 to = goal - v.Sprite.Position;
+        var budgetPx = (float)(v.Speed * delta);
         if (to.Length() <= budgetPx || (budgetPx <= 0.0f && to.Length() < 0.5f))
         {
-            _tank.Position = goal;
-            _cell = next;
-            _pathStep++;
-            if (!Moving)
+            v.Cell = next;
+            v.PathStep++;
+            // Park rather than a bare Position: arriving in a cell is also where
+            // the depth order changes, and a tank that drove past another without
+            // its z index following would pass through it.
+            Park(v);
+            if (!v.Moving && v == Active)
             {
                 _field.Highlight = Array.Empty<Vector2I>();
                 _field.QueueRedraw();
@@ -605,35 +954,36 @@ public sealed partial class Main : Node2D
         }
         else if (budgetPx > 0.0f)
         {
-            _tank.Position += to.Normalized() * budgetPx;
+            v.Sprite.Position += to.Normalized() * budgetPx;
+            Depth(v);
         }
-        _tank.QueueRedraw();
+        v.Sprite.QueueRedraw();
     }
 
-    private void UpdatePitch(double accelRatio, double delta)
+    private void UpdatePitch(Vehicle v, double accelRatio, double delta)
     {
         if (!_pitchEnabled)
         {
-            _pitch.Reset();
-            _tank.Pitch = 0.0;
+            v.Pitch.Reset();
+            v.Sprite.Pitch = 0.0;
             return;
         }
-        _pitch.Update(accelRatio, delta);
-        _tank.Pitch = _pitch.Angle;
+        v.Pitch.Update(accelRatio, delta);
+        v.Sprite.Pitch = v.Pitch.Angle;
     }
 
-    private void UpdateRumble(double delta)
+    private void UpdateRumble(Vehicle v, double delta)
     {
         if (!_rumbleEnabled)
         {
-            _rumble.Reset();
-            _tank.Shake = 0;
-            _tank.Roll = 0.0;
+            v.Rumble.Reset();
+            v.Sprite.Shake = 0;
+            v.Sprite.Roll = 0.0;
             return;
         }
-        _rumble.Advance(_speed * delta, _speed);
-        _tank.Shake = _rumble.Offset;
-        _tank.Roll = _rumble.Roll;
+        v.Rumble.Advance(v.Speed * delta, v.Speed);
+        v.Sprite.Shake = v.Rumble.Offset;
+        v.Sprite.Roll = v.Rumble.Roll;
     }
 
 
@@ -647,83 +997,83 @@ public sealed partial class Main : Node2D
     /// goes still the moment the tank does, which is correct - a stationary
     /// tank's tracks are stationary, whatever the engine is doing.
     /// </summary>
-    private void UpdateTracks(double distance, double delta)
+    private void UpdateTracks(Vehicle v, double distance, double delta)
     {
-        if (!_tracksEnabled || _tank.Atlas!.HasTracks != true)
+        if (!_tracksEnabled || v.Atlas.HasTracks != true)
         {
-            if (_tank.TrackPhase < 0)
+            if (v.Sprite.TrackPhase < 0)
                 return;
-            _track.Reset();
-            _tank.TrackPhase = -1;
-            _tank.QueueRedraw();
+            v.Track.Reset();
+            v.Sprite.TrackPhase = -1;
+            v.Sprite.QueueRedraw();
             return;
         }
-        _track.Advance(distance, delta);
-        _tank.TrackPhase = _track.Frame;
+        v.Track.Advance(distance, delta);
+        v.Sprite.TrackPhase = v.Track.Frame;
     }
 
     /// <summary>Runs every frame, moving or not - that is the whole point of it.
     /// The rumble is keyed on distance and goes silent the instant the tank
     /// stops; the engine does not. Speed only moves the frequency, so there is
     /// no threshold anywhere for the effect to switch on or off at.</summary>
-    private void UpdateTremble(double delta)
+    private void UpdateTremble(Vehicle v, double delta)
     {
         if (!_trembleEnabled)
         {
-            if (_tank.TremblePitch == 0.0 && _tank.TrembleRoll == 0.0)
+            if (v.Sprite.TremblePitch == 0.0 && v.Sprite.TrembleRoll == 0.0)
                 return;
-            _tremble.Reset();
-            _tank.TremblePitch = 0.0;
-            _tank.TrembleRoll = 0.0;
-            _tank.QueueRedraw();
+            v.Tremble.Reset();
+            v.Sprite.TremblePitch = 0.0;
+            v.Sprite.TrembleRoll = 0.0;
+            v.Sprite.QueueRedraw();
             return;
         }
-        _tremble.Advance(_speed, delta);
-        _tank.TremblePitch = _tremble.Pitch;
-        _tank.TrembleRoll = _tremble.Roll;
-        _tank.QueueRedraw();
+        v.Tremble.Advance(v.Speed, delta);
+        v.Sprite.TremblePitch = v.Tremble.Pitch;
+        v.Sprite.TrembleRoll = v.Tremble.Roll;
+        v.Sprite.QueueRedraw();
     }
 
     /// <summary>Runs every frame, moving or not, like the tremble and for the
     /// same reason: it is the engine, not the ground. Speed only moves the rate
     /// and the density, so there is no threshold to switch on at.</summary>
-    private void UpdateExhaust(double delta)
+    private void UpdateExhaust(Vehicle v, double delta)
     {
-        if (!_exhaustEnabled || !_tank.Atlas!.HasExhaust)
+        if (!_exhaustEnabled || !v.Atlas.HasExhaust)
         {
-            if (_tank.ExhaustPhase < 0)
+            if (v.Sprite.ExhaustPhase < 0)
                 return;
-            _exhaust.Reset();
-            _tank.ExhaustPhase = -1;
-            _tank.QueueRedraw();
+            v.Exhaust.Reset();
+            v.Sprite.ExhaustPhase = -1;
+            v.Sprite.QueueRedraw();
             return;
         }
-        _exhaust.Advance(_speed, delta);
-        _tank.ExhaustPhase = _exhaust.Frame;
-        _tank.ExhaustDensity = (float)_exhaust.Density;
+        v.Exhaust.Advance(v.Speed, delta);
+        v.Sprite.ExhaustPhase = v.Exhaust.Frame;
+        v.Sprite.ExhaustDensity = (float)v.Exhaust.Density;
     }
 
     /// <summary>Runs every frame like the exhaust, but takes no speed: see
     /// <see cref="BurnLoop"/>. Both halves are required before anything is
     /// shown, because the flame without its column is the washed-out half of the
     /// effect rather than a cheaper version of it.</summary>
-    private void UpdateBurn(double delta)
+    private void UpdateBurn(Vehicle v, double delta)
     {
-        if (!_burning || !_tank.Atlas!.HasBurning)
+        if (!v.Burning || !v.Atlas.HasBurning)
         {
-            if (!_tank.Burning && _tank.FirePhase < 0 && _tank.BurnPhase < 0)
+            if (!v.Sprite.Burning && v.Sprite.FirePhase < 0 && v.Sprite.BurnPhase < 0)
                 return;
-            _burn.Reset();
-            _tank.Burning = false;
-            _tank.FirePhase = -1;
-            _tank.BurnPhase = -1;
-            _tank.QueueRedraw();
+            v.Burn.Reset();
+            v.Sprite.Burning = false;
+            v.Sprite.FirePhase = -1;
+            v.Sprite.BurnPhase = -1;
+            v.Sprite.QueueRedraw();
             return;
         }
-        _burn.Advance(delta);
-        _tank.Burning = true;
-        _tank.FirePhase = _burn.FireFrame;
-        _tank.BurnPhase = _burn.SmokeFrame;
+        v.Burn.Advance(delta);
+        v.Sprite.Burning = true;
+        v.Sprite.FirePhase = v.Burn.FireFrame;
+        v.Sprite.BurnPhase = v.Burn.SmokeFrame;
     }
 
     /// <summary>Fire. Restarts the flash from frame zero rather than being
@@ -739,30 +1089,31 @@ public sealed partial class Main : Node2D
     /// hand-timed sequence of held frames, so counting frames is what it is
     /// timed in; under --capture the clock is fixed at 1/60 anyway, which is
     /// what makes a shot land on the same sheet frame in two runs.</summary>
-    private void UpdateShot(double delta)
+    private void UpdateShot(Vehicle v, double delta)
     {
-        _recoil.Update(delta);
-        _tank.RecoilPitch = _recoil.Pitch;
-        _tank.RecoilRoll = _recoil.Roll;
+        v.Recoil.Update(delta);
+        v.Sprite.RecoilPitch = v.Recoil.Pitch;
+        v.Sprite.RecoilRoll = v.Recoil.Roll;
 
         // Both clocks run, whichever source is showing. They are separate
         // tables - sixteen sheet frames against eight rendered phases - but
         // they add up to the same 34 frames, so flipping V mid-shot swaps the
         // picture without moving the moment, which is what makes an A/B
         // comparison one.
-        int frame = _shotFrame < 0 ? -1 : FlashSheet.FrameAt(_shotFrame);
-        int phase = _shotFrame < 0 ? -1 : EffectLayer.PhaseAt(_shotFrame);
-        if (_shotFrame >= 0)
+        int frame = v.ShotFrame < 0 ? -1 : FlashSheet.FrameAt(v.ShotFrame);
+        int phase = v.ShotFrame < 0 ? -1 : EffectLayer.PhaseAt(v.ShotFrame);
+        if (v.ShotFrame >= 0)
         {
-            _shotFrame++;
+            v.ShotFrame++;
             if (frame < 0 && phase < 0)
-                _shotFrame = -1;
+                v.ShotFrame = -1;
         }
-        if (frame != _tank.FlashFrame || phase != _tank.ShotPhase || _recoil.Moving)
+        if (frame != v.Sprite.FlashFrame || phase != v.Sprite.ShotPhase
+            || v.Recoil.Moving)
         {
-            _tank.FlashFrame = frame;
-            _tank.ShotPhase = phase;
-            _tank.QueueRedraw();
+            v.Sprite.FlashFrame = frame;
+            v.Sprite.ShotPhase = phase;
+            v.Sprite.QueueRedraw();
         }
     }
 
@@ -830,14 +1181,28 @@ public sealed partial class Main : Node2D
         ControlPanel ui = _panel!;
 
         ui.Heading("tank");
-        // Not "(1/2/3)": how many tanks load is whatever is on disk, so
-        // enumerating them here goes stale every time one is added, and it
-        // already had.
-        ui.Choice("class  (number keys)", _loaded, () => _tagIndex, i =>
-        {
-            _tagIndex = i;
-            UseTag(CurrentTag());
-        });
+        // Which of the three is being driven. Not "(1/2/3)": how many tanks load
+        // is whatever is on disk, so enumerating them here goes stale every time
+        // one is added, and it already had.
+        ui.Choice("driving  (number keys, or click it)", _loaded,
+            () => _active, Select);
+        // A multiplier over the three class figures, not a size - see _sizeLevel.
+        // The caption is in pixels of hull against pixels of cell, because "1.15x"
+        // answers nothing the dial is pulled for: whether the heavy reads heavier
+        // than the medium, and whether it has outgrown the hex it stands on.
+        ui.Slide("size level", 0.5, 1.5, 0.05,
+            () => _sizeLevel, v => { _sizeLevel = v; ApplySize(); }, "x",
+            () =>
+            {
+                AtlasSet a = _tank.Atlas!;
+                double span = a.HullSpan * _tank.BodyScale;
+                double cell = a.HexRect.Size.X * 0.75;
+                // Short enough to fit the panel's width: the caption is clipped,
+                // not wrapped, and a number that has run off the edge is not a
+                // number.
+                return $"class {_profile.Size:F2}x   {span:F0}px hull broadside"
+                       + $" / {cell:F0}px cell";
+            });
         ui.Readout(() =>
         {
             AtlasSet a = _tank.Atlas!;
@@ -866,8 +1231,7 @@ public sealed partial class Main : Node2D
         ui.Toggle("scan on the spot  (N)", () => _scanEnabled, on =>
         {
             _scanEnabled = on;
-            if (!on)
-                _scan.Reset();
+            ScanChanged();
         });
         // Which frame each heading resolves to. The pair is the thing worth
         // seeing rather than either alone: two layers off the same axis, and a
@@ -884,17 +1248,17 @@ public sealed partial class Main : Node2D
         ui.Toggle("body pitch  (P)", () => _pitchEnabled, on =>
         {
             _pitchEnabled = on;
-            UpdatePitch(0.0, 0.0);
+            PitchChanged();
         });
         ui.Toggle("ground rumble  (B)", () => _rumbleEnabled, on =>
         {
             _rumbleEnabled = on;
-            UpdateRumble(0.0);
+            RumbleChanged();
         });
         ui.Toggle("engine tremble  (I)", () => _trembleEnabled, on =>
         {
             _trembleEnabled = on;
-            UpdateTremble(0.0);
+            TrembleChanged();
         });
         // A multiplier over the tuned pair rather than a raw amplitude - see
         // EngineTremble.Level for why the standing and moving figures must keep
@@ -920,7 +1284,7 @@ public sealed partial class Main : Node2D
         ui.Toggle("tracks wind  (C)", () => _tracksEnabled, on =>
         {
             _tracksEnabled = on;
-            UpdateTracks(0.0, 0.0);
+            TracksChanged();
         });
         // The belt is the one layer tied to the ground rather than to a clock,
         // so what it is worth saying about it is how well it is keeping up. The
@@ -933,7 +1297,9 @@ public sealed partial class Main : Node2D
                 return "tracks  [none - needs a parts-built model]";
             string phase = _tank.TrackPhase < 0 ? " -" : $"{_tank.TrackPhase,2}";
             return $"track {phase} / {a.TrackPhases}"
-                   + $"   link {a.TrackPitch,5:F1}px"
+                   // as drawn, not as rendered: the size dial moves it, and the
+                   // sync speed below moves with it
+                   + $"   link {_track.LinkOnScreen,5:F1}px"
                    + $"\nin step to {_track.SyncSpeed,3:F0} px/s"
                    + $" of {_profile.TopSpeed:F0}"
                    + $"   slipping {(1.0 - _track.Slip) * 100.0,3:F0}%";
@@ -941,12 +1307,12 @@ public sealed partial class Main : Node2D
         ui.Toggle("engine exhaust  (O)", () => _exhaustEnabled, on =>
         {
             _exhaustEnabled = on;
-            UpdateExhaust(0.0);
+            ExhaustChanged();
         });
         ui.Toggle("on fire  (J)", () => _burning, on =>
         {
             _burning = on;
-            UpdateBurn(0.0);
+            UpdateBurn(Active, 0.0);
         });
         ui.Choice("flash source  (V)", new[] { "rendered", "sheet" },
             () => _tank.Source == FlashSource.Rendered ? 0 : 1,
@@ -1068,45 +1434,50 @@ public sealed partial class Main : Node2D
     /// measuring itself.</summary>
     private static float ScatterAt(int n) => (((n * 37) % 100) / 100.0f - 0.5f) * 0.9f;
 
-    private void UpdateHit(double delta)
+    private void UpdateHit(Vehicle v, double delta)
     {
-        AtlasSet atlas = _tank.Atlas!;
-        int phase = _hit.Phase;
+        AtlasSet atlas = v.Atlas;
+        TankSprite sprite = v.Sprite;
+        HitLoop hit = v.Hit;
+        int phase = hit.Phase;
         if (phase >= 0)
         {
             // Read every frame, not once at the strike: the hull can turn while
             // the dust is still settling, and the hit has to stay on the plate
             // it landed on rather than sliding round with the heading.
-            Vector2 tangent = atlas.HitTangent(_hit.Face, _tank.HullFacing);
-            _tank.HitOffset = atlas.HitOffset(_hit.Face, _tank.HullFacing)
-                              + tangent * _hit.Scatter;
-            _tank.HitBehind = atlas.HitFacing(_hit.Face, _tank.HullFacing) <= 0.0;
+            Vector2 tangent = atlas.HitTangent(hit.Face, sprite.HullFacing);
+            sprite.HitOffset = atlas.HitOffset(hit.Face, sprite.HullFacing)
+                               + tangent * hit.Scatter;
+            sprite.HitBehind = atlas.HitFacing(hit.Face, sprite.HullFacing) <= 0.0;
             // The shell's calibre, not the dial's. Pushed from here alongside
             // the other two things the layer needs and cannot work out for
             // itself, so what is drawn is what was fired.
-            _tank.HitScale = _hit.Scale;
+            sprite.HitScale = hit.Scale;
         }
-        if (phase != _tank.HitPhase)
+        if (phase != sprite.HitPhase)
         {
-            _tank.HitPhase = phase;
-            _tank.QueueRedraw();
+            sprite.HitPhase = phase;
+            sprite.QueueRedraw();
         }
-        _hit.Advance();
+        hit.Advance();
     }
 
     /// <summary>Suspended while under way, and while anything else is driving
     /// the turret. A locked turret holding its world heading through a
     /// manoeuvre is the feature this harness exists to show; a scan quietly
     /// walking it off that heading would look exactly like the lock failing.</summary>
-    private void UpdateScan(double delta)
+    private void UpdateScan(Vehicle v, double delta)
     {
-        if (!_scanEnabled || Moving || _spinning || _aimWithMouse)
+        // The spin and the mouse only ever drive the tank being controlled, so
+        // they only suspend that one's scan: a tank standing off to the side keeps
+        // looking around while you spin the turret of the one you are driving.
+        if (!_scanEnabled || v.Moving || (v == Active && (_spinning || _aimWithMouse)))
             return;
-        double move = _scan.Advance(360.0 / _tank.Atlas!.Count, delta);
+        double move = v.Scan.Advance(360.0 / v.Atlas.Count, delta);
         if (move == 0.0)
             return;
-        _tank.TurretFacing = Mod(_tank.TurretFacing + move, 360.0);
-        _tank.QueueRedraw();
+        v.Sprite.TurretFacing = Mod(v.Sprite.TurretFacing + move, 360.0);
+        v.Sprite.QueueRedraw();
     }
 
     // --- frame -------------------------------------------------------------
@@ -1121,7 +1492,7 @@ public sealed partial class Main : Node2D
             return;
         }
 
-        if (_tank.Atlas is null)
+        if (_vehicles.Count == 0 || _tank.Atlas is null)
             return;
 
         // A capture run steps at a fixed rate so two runs land on the same
@@ -1135,7 +1506,12 @@ public sealed partial class Main : Node2D
 
         if (_traceFrames > 0)
         {
-            GD.Print($"{_frames,4}  hull {_tank.HullFacing,6:F1}  speed {_speed,6:F1}"
+            // Which tank the line is about. There are three of them now and only
+            // one is being driven, so a trace without this says nothing about
+            // whether the selection went where the flag asked - the same reason
+            // the zoom and the size are printed here.
+            GD.Print($"{_frames,4}  {Active.Tag,-3}"
+                     + $"  hull {_tank.HullFacing,6:F1}  speed {_speed,6:F1}"
                      + $"  pitch {_tank.Pitch,8:F5}  shake {_tank.Shake,2}"
                      + $"  roll {_tank.Roll,8:F5}  trem {_tank.TremblePitch,8:F5}"
                      + $"/{_tank.TrembleRoll,8:F5}  scan {_scan.Offset,6:F1}"
@@ -1156,6 +1532,10 @@ public sealed partial class Main : Node2D
                      + $"  hit {_tank.HitPhase,2}@{(_hit.Face == "" ? "-" : _hit.Face)}"
                      + $" x{_hit.Scale:F2}"
                      + $"  cell ({_cell.X},{_cell.Y})"
+                     // Size for the same reason as the zoom: two captures at two
+                     // sizes that came out identical would send you looking at
+                     // the scale code rather than at whether the flag parsed.
+                     + $"  size {_tank.BodyScale:F2}x"
                      // Zoom, because a capture run has no panel to read it off
                      // and a stray wheel over the window has already cost one
                      // measurement: the A/B then differs by the whole picture
@@ -1168,26 +1548,34 @@ public sealed partial class Main : Node2D
             }
         }
 
-        if (Moving)
-            AdvanceOrder(delta);
-        else if (_pitch.Angle != 0.0 || _speed != 0.0 || _tank.Shake != 0)
+        // Every tank, not just the one being driven. Three tanks with two of them
+        // frozen would not be a comparison of three tanks: the engine of a tank
+        // nobody is driving is still running, and the whole reason the tremble is
+        // on by default is that a vehicle with nothing moving on it is wrong in a
+        // way a still render is not.
+        foreach (Vehicle v in _vehicles)
         {
-            // let the body settle after the stop instead of snapping level
-            _speed = 0.0;
-            UpdatePitch(0.0, delta);
-            UpdateRumble(delta);
-            _tank.QueueRedraw();
-        }
+            if (v.Moving)
+                AdvanceOrder(v, delta);
+            else if (v.Pitch.Angle != 0.0 || v.Speed != 0.0 || v.Sprite.Shake != 0)
+            {
+                // let the body settle after the stop instead of snapping level
+                v.Speed = 0.0;
+                UpdatePitch(v, 0.0, delta);
+                UpdateRumble(v, delta);
+                v.Sprite.QueueRedraw();
+            }
 
-        // after the order has moved the tank, so the belts see the ground that
-        // actually went past this frame rather than last frame's
-        UpdateTracks(_speed * delta, delta);
-        UpdateTremble(delta);
-        UpdateExhaust(delta);
-        UpdateBurn(delta);
-        UpdateScan(delta);
-        UpdateShot(delta);
-        UpdateHit(delta);
+            // after the order has moved the tank, so the belts see the ground
+            // that actually went past this frame rather than last frame's
+            UpdateTracks(v, v.Speed * delta, delta);
+            UpdateTremble(v, delta);
+            UpdateExhaust(v, delta);
+            UpdateBurn(v, delta);
+            UpdateScan(v, delta);
+            UpdateShot(v, delta);
+            UpdateHit(v, delta);
+        }
 
         if (!Moving && _spinning)
         {
@@ -1217,10 +1605,19 @@ public sealed partial class Main : Node2D
     {
         if (@event is InputEventMouseButton { Pressed: true } mouse)
         {
-            if (mouse.ButtonIndex == MouseButton.Left && _tank.Atlas is not null)
+            if (mouse.ButtonIndex == MouseButton.Left && _vehicles.Count > 0
+                && _tank.Atlas is not null)
             {
                 Vector2 local = _field.ToLocal(GetGlobalMousePosition());
-                OrderMoveTo(_field.ClampCell(_field.CellAt(local)));
+                Vector2I cell = _field.ClampCell(_field.CellAt(local));
+                // A tank there means "drive that one from now on"; empty ground
+                // means "go there". One click, and which of the two it is decided
+                // by what is standing on the cell rather than by a modifier.
+                int pick = SelectionFor(_vehicles, _active, cell);
+                if (pick >= 0)
+                    Select(pick);
+                else
+                    OrderMoveTo(cell);
                 return;
             }
             float factor = mouse.ButtonIndex switch
@@ -1244,7 +1641,7 @@ public sealed partial class Main : Node2D
         }
         if (@event is not InputEventKey { Pressed: true, Echo: false } key)
             return;
-        if (_tank.Atlas is null)
+        if (_vehicles.Count == 0 || _tank.Atlas is null)
             return;
 
         double step = 360.0 / _tank.Atlas.Count;
@@ -1269,32 +1666,31 @@ public sealed partial class Main : Node2D
             case Key.F: _tank.TurretLocked = !_tank.TurretLocked; break;
             case Key.P:
                 _pitchEnabled = !_pitchEnabled;
-                UpdatePitch(0.0, 0.0);
+                PitchChanged();
                 break;
             case Key.B:
                 _rumbleEnabled = !_rumbleEnabled;
-                UpdateRumble(0.0);
+                RumbleChanged();
                 break;
             case Key.I:
                 _trembleEnabled = !_trembleEnabled;
-                UpdateTremble(0.0);
+                TrembleChanged();
                 break;
             case Key.N:
                 _scanEnabled = !_scanEnabled;
-                if (!_scanEnabled)
-                    _scan.Reset();
+                ScanChanged();
                 break;
             case Key.O:
                 _exhaustEnabled = !_exhaustEnabled;
-                UpdateExhaust(0.0);
+                ExhaustChanged();
                 break;
             case Key.C:
                 _tracksEnabled = !_tracksEnabled;
-                UpdateTracks(0.0, 0.0);
+                TracksChanged();
                 break;
             case Key.J:
                 _burning = !_burning;
-                UpdateBurn(0.0);
+                UpdateBurn(Active, 0.0);
                 break;
             case Key.K: _tank.TurretStabilised = !_tank.TurretStabilised; break;
             // Next to the stabiliser deliberately: both answer "what does the
@@ -1327,10 +1723,9 @@ public sealed partial class Main : Node2D
                 // tanks that loaded is whatever is on disk, and a key for one
                 // that is not there should do nothing rather than throw.
                 int pick = (int)(key.Keycode - Key.Key1);
-                if (pick >= _loaded.Count)
+                if (pick >= _vehicles.Count)
                     break;
-                _tagIndex = pick;
-                UseTag(CurrentTag());
+                Select(pick);
                 break;
             case Key.Space: _spinning = !_spinning; break;
             case Key.M: _aimWithMouse = !_aimWithMouse; break;
@@ -1358,58 +1753,70 @@ public sealed partial class Main : Node2D
 
     /// <summary>Everything back to how it started. A method rather than a case
     /// in the key switch because the panel's Reset has to be the same reset -
-    /// two lists of things to clear is one list that will fall behind.</summary>
+    /// two lists of things to clear is one list that will fall behind.
+    ///
+    /// All three tanks, not just the one being driven, and back to their own home
+    /// cells. "How it started" is the bench as it opens: three tanks parked in a
+    /// row. A reset that tidied one of them and left the other two where they had
+    /// driven to would be the one key you cannot trust.</summary>
     private void ResetAll()
     {
-        CancelOrder();
-        _tank.HullFacing = 270.0;
-        _tank.TurretFacing = 270.0;
         _spinning = false;
         _aimWithMouse = false;
-        _pitch.Reset();
-        _tank.Pitch = 0.0;
-        _rumble.Reset();
-        _tank.Shake = 0;
-        _tank.Roll = 0.0;
-        _tremble.Reset();
-        _tank.TremblePitch = 0.0;
-        _tank.TrembleRoll = 0.0;
-        _exhaust.Reset();
-        _tank.ExhaustPhase = -1;
-        _track.Reset();
-        _tank.TrackPhase = -1;
-        _burning = false;
-        _burn.Reset();
-        _tank.Burning = false;
-        _tank.FirePhase = -1;
-        _tank.BurnPhase = -1;
-        _hit.Reset();
-        _hitCount = 0;
-        _tank.HitPhase = -1;
-        _tank.Repair();
-        _scan.Reset();
-        _recoil.Reset();
-        // The two levels go back to their tuned values along with everything
-        // else. They are settings rather than state, which argues the other way,
-        // but a reset whose job is "back to the baseline" that leaves the shake
-        // at two and a half would be lying about what it did - and the tuned
-        // value is the one worth being able to get back to in one key.
-        _tremble.Level = 1.0;
-        _recoil.Level = 1.0;
-        _shotFrame = -1;
-        _tank.FlashFrame = -1;
-        _tank.ShotPhase = -1;
-        _tank.Source = _flashSource;
-        // Back to what the command line asked for, not to false: "how it
-        // started" is well defined here because there is a flag, which is the
-        // same reason the flash source above goes back to _flashSource.
-        _tank.RecoilTurretOnly = _recoilTurretOnly;
-        _tank.RecoilPitch = 0.0;
-        _tank.RecoilRoll = 0.0;
+        foreach (Vehicle v in _vehicles)
+        {
+            CancelOrder(v);
+            TankSprite s = v.Sprite;
+            s.HullFacing = 270.0;
+            s.TurretFacing = 270.0;
+            v.Pitch.Reset();
+            s.Pitch = 0.0;
+            v.Rumble.Reset();
+            s.Shake = 0;
+            s.Roll = 0.0;
+            v.Tremble.Reset();
+            s.TremblePitch = 0.0;
+            s.TrembleRoll = 0.0;
+            v.Exhaust.Reset();
+            s.ExhaustPhase = -1;
+            v.Track.Reset();
+            s.TrackPhase = -1;
+            v.Burning = false;
+            v.Burn.Reset();
+            s.Burning = false;
+            s.FirePhase = -1;
+            s.BurnPhase = -1;
+            v.Hit.Reset();
+            v.HitCount = 0;
+            s.HitPhase = -1;
+            s.Repair();
+            v.Scan.Reset();
+            v.Recoil.Reset();
+            // The levels go back to their tuned values along with everything
+            // else. They are settings rather than state, which argues the other
+            // way, but a reset whose job is "back to the baseline" that leaves
+            // the shake at two and a half would be lying about what it did - and
+            // the tuned value is the one worth being able to get back to in one
+            // key.
+            v.Tremble.Level = 1.0;
+            v.Recoil.Level = 1.0;
+            v.ShotFrame = -1;
+            s.FlashFrame = -1;
+            s.ShotPhase = -1;
+            s.Source = _flashSource;
+            // Back to what the command line asked for, not to false: "how it
+            // started" is well defined here because there is a flag, which is the
+            // same reason the flash source above goes back to _flashSource.
+            s.RecoilTurretOnly = _recoilTurretOnly;
+            s.RecoilPitch = 0.0;
+            s.RecoilRoll = 0.0;
+            v.Cell = v.HomeCell;
+            Park(v);
+        }
+        _sizeLevel = 1.0;
+        ApplySize();
         _camera.Zoom = Vector2.One;
         _camera.Position = new Vector2(760, 500);
-        SnapToCell();
-        _tank.QueueRedraw();
     }
 
     private void Capture(string path)

@@ -21,7 +21,7 @@ namespace TankSpriteTest;
 /// </summary>
 public sealed class MovementProfile
 {
-    public string Tag { get; init; } = "MT";
+    public string Tag { get; init; } = "MTP";
 
     /// <summary>Cruise speed, px/s on screen.</summary>
     public double TopSpeed { get; init; } = 240.0;
@@ -31,6 +31,28 @@ public sealed class MovementProfile
 
     /// <summary>Hull yaw rate, deg/s.</summary>
     public double TurnRate { get; init; } = 200.0;
+
+    /// <summary>
+    /// How big this class is drawn, against the medium.
+    ///
+    /// Authored, and it has to be: the models carry no relative scale whatever.
+    /// The generator normalises each one to about unit size, so all three hulls
+    /// render within 3% of the same length (see <see cref="AtlasSet.HullSpan"/>)
+    /// and the heavy's turning circle is the smallest of the three in world
+    /// units. There is no measurement to recover a real size from - a light tank
+    /// is smaller than a heavy one because we say so, or not at all.
+    ///
+    /// It lives on the class profile rather than in a table of its own for the
+    /// reason the parts-built tanks were listed here rather than left to the
+    /// fallback: a second table keyed by the same tag is a second thing to keep
+    /// in agreement, and it disagrees the first time a class is added to one and
+    /// not the other. Size is not movement, but it is per class, and per class is
+    /// what this table is.
+    ///
+    /// The medium is 1.00 by definition, so it is the tank every other number is
+    /// read against and the one whose atlas is what the renderer produced.
+    /// </summary>
+    public double Size { get; init; } = 1.0;
 
     /// <summary>
     /// Speed kept while pivoting at a bend, as a fraction of TopSpeed.
@@ -57,47 +79,33 @@ public sealed class MovementProfile
     /// spends most of itself ramping and never reaches TopSpeed at all.</summary>
     public double RampDistance => TopSpeed * TopSpeed / (2.0 * Accel);
 
+    /// <summary>The light. It is the one where the class matters most to what the
+    /// belts do: 310 px/s against a 7.58px link is the worst case for the track
+    /// limiter in the whole set.</summary>
     public static readonly MovementProfile Light = new()
     {
-        Tag = "LT", TopSpeed = 310.0, Accel = 620.0, TurnRate = 260.0,
+        Tag = "LTP", TopSpeed = 310.0, Accel = 620.0, TurnRate = 260.0,
+        Size = 0.85,
     };
 
     public static readonly MovementProfile Medium = new()
     {
-        Tag = "MT", TopSpeed = 240.0, Accel = 420.0, TurnRate = 200.0,
+        Tag = "MTP", TopSpeed = 240.0, Accel = 420.0, TurnRate = 200.0,
+        Size = 1.00,
     };
 
     public static readonly MovementProfile Heavy = new()
     {
-        Tag = "HT", TopSpeed = 175.0, Accel = 260.0, TurnRate = 140.0,
-    };
-
-    /// <summary>The parts-built medium. Same vehicle, so the same numbers -
-    /// listed rather than left to the fallback so that changing what an
-    /// unrecognised tag gets cannot silently change how this one drives.</summary>
-    public static readonly MovementProfile MediumParts = new()
-    {
-        Tag = "MTP", TopSpeed = 240.0, Accel = 420.0, TurnRate = 200.0,
-    };
-
-    /// <summary>The parts-built heavy. Same vehicle as HT, so the same numbers,
-    /// and listed for the same reason MTP is.</summary>
-    public static readonly MovementProfile HeavyParts = new()
-    {
         Tag = "HTP", TopSpeed = 175.0, Accel = 260.0, TurnRate = 140.0,
+        Size = 1.15,
     };
 
-    /// <summary>The parts-built light. LT's numbers, listed for the same reason
-    /// the other two are - and it is the one where the class matters most to what
-    /// the belts do, because 310 px/s against a 7.58px link is the worst case for
-    /// the track limiter in the whole set.</summary>
-    public static readonly MovementProfile LightParts = new()
-    {
-        Tag = "LTP", TopSpeed = 310.0, Accel = 620.0, TurnRate = 260.0,
-    };
-
-    public static readonly MovementProfile[] All =
-        { Light, Medium, Heavy, MediumParts, HeavyParts, LightParts };
+    /// <summary>One profile per class, and the tags are the parts-built tanks
+    /// because those are the only tanks now. The single-mesh HT/MT/LT are gone
+    /// from the harness - their belts do not wind - and the profiles were always
+    /// about the class rather than about how the scene was cut, so retagging them
+    /// is the whole of that change here.</summary>
+    public static readonly MovementProfile[] All = { Light, Medium, Heavy };
 
     /// <summary>Profile for an atlas tag, medium for anything unrecognised.</summary>
     public static MovementProfile For(string tag)

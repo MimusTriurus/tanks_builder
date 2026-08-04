@@ -25,10 +25,11 @@ public sealed class AtlasSet
     /// <summary>
     /// Effect layers, if the scene had them: smoke first, then fire.
     ///
-    /// Optional because they need a `Barrel` separated by hand in the .blend and
-    /// only MT has one so far. A tank without them still loads and still drives;
-    /// the harness falls back to the painted sheet, which is also what makes the
-    /// two comparable side by side.
+    /// Optional because they need a `Barrel` separated by hand in the .blend.
+    /// All three tanks on disk have one now, but the option is not vestigial: a
+    /// tank without them still loads and still drives, and the harness falls back
+    /// to the painted sheet, which is also what makes the two comparable side by
+    /// side.
     ///
     /// The order is the draw order, and it is not arbitrary: smoke occludes and
     /// goes on with normal alpha, fire emits and goes on additively, so fire is
@@ -440,6 +441,7 @@ public sealed class AtlasSet
         var atlas = new AtlasSet { Tag = tag };
         LayerMeta? hull = null;
         Image? turretImage = null;
+        Image? hullImage = null;
 
         foreach (string layer in LayerNames)
         {
@@ -483,7 +485,10 @@ public sealed class AtlasSet
             if (layer == "turret")
                 turretImage = image;
             if (layer == "hull")
+            {
                 hull = meta;
+                hullImage = image;
+            }
         }
 
         // Effects are optional and silent about it. Each needs a piece split out
@@ -531,6 +536,8 @@ public sealed class AtlasSet
         atlas.ReadFacings(hull);
         if (turretImage is not null)
             atlas.FindMuzzles(turretImage, atlas._columns["turret"]);
+        if (hullImage is not null)
+            atlas.MeasureHull(hullImage, atlas._columns["hull"]);
         return atlas;
     }
 
@@ -546,6 +553,35 @@ public sealed class AtlasSet
     /// of thing that can beat it - aerials, hatch handles, tow cables.
     /// </summary>
     private const int MuzzleErode = 3;
+
+    /// <summary>
+    /// How long the hull reads at its broadest heading, in atlas pixels.
+    ///
+    /// Measured rather than configured, and it is the number that says the
+    /// generator hands over no scale at all: LTP, MTP and HTP come out 188, 183
+    /// and 182px, so all three tanks are rendered the same physical size and the
+    /// heavy's turning circle is actually the *smallest* of the three in world
+    /// units. Whatever size difference the classes have on screen is therefore
+    /// entirely <see cref="MovementProfile.Size"/>'s doing, not the models'.
+    ///
+    /// The widest of the twelve frames, not frame 0: which heading frame 0 shows
+    /// is a fact about each model's shape, and reading it there gave 138 / 110 /
+    /// 108px - a spread that looks like class and is nothing but the carousel.
+    /// Broadside is the same view of every tank, so it is the one that compares.
+    /// </summary>
+    public int HullSpan { get; private set; }
+
+    private void MeasureHull(Image image, int columns)
+    {
+        int widest = 0;
+        for (int i = 0; i < Count; i++)
+        {
+            var frame = new Rect2I(i % columns * Tile.X, i / columns * Tile.Y,
+                                   Tile.X, Tile.Y);
+            widest = Math.Max(widest, image.GetRegion(frame).GetUsedRect().Size.X);
+        }
+        HullSpan = widest;
+    }
 
     private void FindMuzzles(Image image, int columns)
     {

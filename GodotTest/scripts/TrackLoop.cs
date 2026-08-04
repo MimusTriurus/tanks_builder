@@ -46,6 +46,23 @@ public sealed class TrackLoop
     /// without the metadata still walks at a plausible rate.</summary>
     public double Pitch = 8.0;
 
+    /// <summary>How big the tank is being drawn - see
+    /// <see cref="TankSprite.BodyScale"/>.
+    ///
+    /// It belongs here rather than being multiplied into <see cref="Pitch"/> by
+    /// the caller because the two numbers answer different questions and only one
+    /// of them comes off the atlas: the link is a length the renderer measured,
+    /// the scale is a size the harness chose. Kept apart, the panel can show the
+    /// atlas figure while the arithmetic uses the drawn one, and the rule that
+    /// they multiply is something the self-test can state.</summary>
+    public double Scale = 1.0;
+
+    /// <summary>Ground covered by one turn of the cycle as actually drawn. This
+    /// is the number the belt has to keep up with: a tank drawn at 0.85 has a
+    /// 0.85 link on the ground, and winding it at the unscaled pitch would slip
+    /// by exactly the factor the tank was scaled by.</summary>
+    public double LinkOnScreen => Pitch * Scale;
+
     /// <summary>
     /// Fastest the tread may be shown running, in links per screen frame.
     ///
@@ -83,7 +100,7 @@ public sealed class TrackLoop
     /// <summary>Distance per second at which the cap starts to bite. Exposed so
     /// the panel and the assertions read the threshold rather than recompute
     /// it.</summary>
-    public double SyncSpeed => Pitch * MaxPitchesPerFrame * CapFrameRate;
+    public double SyncSpeed => LinkOnScreen * MaxPitchesPerFrame * CapFrameRate;
 
     /// <summary>
     /// Wind the belt on by <paramref name="distance"/> pixels of travel.
@@ -93,12 +110,12 @@ public sealed class TrackLoop
     /// </summary>
     public void Advance(double distance, double delta)
     {
-        if (Phases <= 0 || Pitch <= 0.0)
+        if (Phases <= 0 || LinkOnScreen <= 0.0)
         {
             Slip = 1.0;
             return;
         }
-        double want = distance / Pitch;
+        double want = distance / LinkOnScreen;
         double limit = MaxPitchesPerFrame * CapFrameRate * Math.Max(delta, 0.0);
         double take = Math.Clamp(want, -limit, limit);
         Slip = Math.Abs(want) > 1e-9 ? Math.Abs(take / want) : 1.0;

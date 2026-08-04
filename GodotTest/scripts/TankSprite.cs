@@ -36,6 +36,38 @@ public sealed partial class TankSprite : Node2D
     public bool ShowHull = true;
     public bool ShowTurret = true;
 
+    /// <summary>
+    /// How big this tank is drawn, against the size its atlas was rendered at.
+    /// The class's <see cref="MovementProfile.Size"/> times whatever the panel's
+    /// dial is on.
+    ///
+    /// It is the node's own scale, and that is the whole of the implementation
+    /// for a reason worth stating: every layer in this harness is drawn at
+    /// <c>-Anchor</c> in this node's space, so the node's origin *is* the turret
+    /// axis, and scaling the node scales about that axis exactly. Children come
+    /// with it, so the belts, the turret, the scars, the plume and a shell's
+    /// offset on its plate all grow by the same factor about the same point,
+    /// with no per-layer arithmetic to keep in agreement. Scaling each layer's
+    /// draw rect instead would be that arithmetic, in eight places.
+    ///
+    /// Uniform by construction: a tank drawn wider than it is tall is not a
+    /// bigger tank, it is a distorted render.
+    ///
+    /// One thing outside this node does have to follow it, and only one: the
+    /// belt's link is a length on the ground, so <see cref="TrackLoop.Pitch"/>
+    /// takes the same factor or the tread slips by exactly the amount the tank
+    /// was scaled by.
+    /// </summary>
+    public float BodyScale
+    {
+        get => Scale.X;
+        set
+        {
+            Scale = new Vector2(value, value);
+            QueueRedraw();
+        }
+    }
+
     /// <summary>Draws a cross on the rotation axis. An axis error does not
     /// distort a sprite, it walks it around a circle as the turret turns, and
     /// that is hard to see without a fixed mark to judge against.</summary>
@@ -103,8 +135,9 @@ public sealed partial class TankSprite : Node2D
     public float FlashScale = 0.60f;
 
     /// <summary>Which flash to draw. Rendered where the atlas has it, and the
-    /// sheet is the fallback rather than the loser: HT and LT have no separated
-    /// barrel yet, so they have no rendered flash to show.</summary>
+    /// sheet is the fallback rather than the loser: a scene whose barrel has not
+    /// been cut out yet has no rendered flash to show. All three tanks on disk
+    /// have one, so the sheet path is now only there for the A/B.</summary>
     public FlashSource Source = FlashSource.Rendered;
 
     /// <summary>Phase of the rendered shot, or -1 between shots. The sheet path
