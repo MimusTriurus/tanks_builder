@@ -11,10 +11,11 @@
   "count": 12,
   "phases": 1,
   "rendered": [
-    "Barrel.Geometry",
     "Turret.Geometry"
   ],
-  "excluded": [],
+  "excluded": [
+    "Barrel.Geometry"
+  ],
   "view": {
     "projection": "ortho",
     "elevation": 30.0,
@@ -24,14 +25,14 @@
   },
   "spin_pivot": [
     0.0,
-    -0.02123,
-    -0.02266
+    -0.02098,
+    -0.02355
   ],
-  "ortho_scale": 1.5866270542144776,
-  "units_per_pixel": 0.006197761930525303,
+  "ortho_scale": 1.6137498950958253,
+  "units_per_pixel": 0.006303710527718068,
   "anchor_px": [
     128.0,
-    117.78907680511475
+    115.53911685943604
   ],
   "frames": [
     {

@@ -183,6 +183,18 @@ public sealed partial class TankSprite : Node2D
     /// without them.</summary>
     public bool ShowTracks = true;
 
+    /// <summary>
+    /// Which pose the gun tube is in: 0 for rest, up to the atlas's last phase
+    /// at full travel.
+    ///
+    /// **Zero, not -1, and it is the only phase field here that starts there.**
+    /// Every other event on this list is absent between events - the shot, the
+    /// hit - so -1 is their idle. The tube is part of the tank and rest is a pose
+    /// it is drawn in, so this idles at 0 and a -1 would blink the gun out.
+    /// Driven by <see cref="RecoilLoop"/>.
+    /// </summary>
+    public int RecoilPhase;
+
     /// <summary>Where the live hit is drawn, in pixels from the layer's anchor.
     /// The only layer in the whole set that is placed rather than anchored, and
     /// the offset comes from the plate table the renderer stamps beside the
@@ -243,8 +255,13 @@ public sealed partial class TankSprite : Node2D
     /// parent, so a turret drawn up there went down before every belt and the
     /// belt painted over it. See <see cref="EffectLayer.Turret"/> for the
     /// geometry and the measurement.
+    /// And the gun tube goes straight after the turret, which is the only place
+    /// it can go: it slides into the mantlet, so it has to be over the turret
+    /// rather than under it, and it is part of the tank, so it comes before
+    /// everything that happens to the tank. It left the turret layer for the
+    /// belts' reason - it moves relative to what it is bolted to.
     public static readonly string[] LayerOrder =
-        AtlasSet.TrackNames.Concat(new[] { "turret" })
+        AtlasSet.TrackNames.Concat(new[] { "turret", AtlasSet.BarrelName })
             .Concat(AtlasSet.ScarNames).Concat(new[]
         {
             AtlasSet.ExhaustName, AtlasSet.BurnName, AtlasSet.FireName,
@@ -262,6 +279,7 @@ public sealed partial class TankSprite : Node2D
         AtlasSet.DustName => EffectLayer.HitDust(layer),
         AtlasSet.BurstName => EffectLayer.HitBurst(layer),
         "turret" => EffectLayer.Turret(layer),
+        AtlasSet.BarrelName => EffectLayer.Barrel(layer),
         _ when Array.IndexOf(AtlasSet.TrackNames, layer) >= 0
             => EffectLayer.Track(layer),
         _ when EffectLayer.FaceOf(layer) != "" => EffectLayer.Scar(layer),

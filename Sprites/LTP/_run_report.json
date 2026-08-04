@@ -33,19 +33,19 @@
    -0.02122813746333122
   ]
  },
- "ground_z": -0.38435,
+ "ground_z": -0.38613,
  "stands_on_tile": true,
  "framing_identical": true,
  "spin_pivot": [
   0.0,
-  -0.02123
+  -0.02098
  ],
  "spin_pivot_from": "explicit",
  "anchor_px": [
   128.0,
-  117.78907680511475
+  115.53911685943604
  ],
- "units_per_pixel": 0.006197761930525303,
+ "units_per_pixel": 0.006303710527718068,
  "max_edge_alpha": {
   "hull": 0.0,
   "turret": 0.0,
@@ -72,21 +72,23 @@
   "burst": 192
  },
  "problems": [
-  "the mark takes more than 85% of the rear plate - it is a smaller shell or a plate measured too tightly, and neither is worth guessing at"
+  "the mark takes more than 85% of the rear plate - it is a smaller shell or a plate measured too tightly, and neither is worth guessing at",
+  "ring_axis stamped on Turret.Geometry is 0.00025 away from the fit this render is spinning about - one of them is stale, and a wrong axis walks the tank round a circle of that radius",
+  "ring_axis stamped on Hull.Geometry is 0.00025 away from the fit this render is spinning about - one of them is stale, and a wrong axis walks the tank round a circle of that radius"
  ],
  "muzzle_point": [
-  0.000277,
-  -0.458757,
-  0.15491
+  -0.000395,
+  -0.458533,
+  0.155992
  ],
  "muzzle_shape": "rod",
- "bearing_disagreement": 0.8,
+ "bearing_disagreement": 0.112,
  "flash_edge_alpha": 0.0,
  "flash_offcentre_px": {
-  "270": 0.16,
-  "90": -1.77
+  "270": 0.31,
+  "90": -2.26
  },
- "composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\LTP\\_check_shot.png",
+ "composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\out\\recoil\\full\\_check_shot.png",
  "exhaust_ports": [
   {
    "object": "Engine.Geometry",
@@ -116,12 +118,12 @@
  ],
  "exhaust_edge_alpha": 0.0,
  "exhaust_span_px": [
-  82,
-  77
+  80,
+  75
  ],
  "hull_span_px": [
-  136,
-  122
+  134,
+  115
  ],
  "exhaust_contrast": 29.1,
  "ground_colour": [
@@ -135,11 +137,11 @@
   "6": true,
   "9": true
  },
- "exhaust_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\LTP\\_check_exhaust.png",
+ "exhaust_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\out\\recoil\\full\\_check_exhaust.png",
  "fire_edge_alpha": 0.0,
  "fire_span_px": [
-  77,
-  91
+  75,
+  90
  ],
  "fire_redness": 61.4,
  "fire_white_fraction": 0.0,
@@ -149,11 +151,11 @@
   "6": true,
   "9": true
  },
- "fire_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\LTP\\_check_fire.png",
+ "fire_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\out\\recoil\\full\\_check_fire.png",
  "burn_edge_alpha": 0.0,
  "burn_span_px": [
-  106,
-  138
+  105,
+  136
  ],
  "burn_contrast": 92.6,
  "burn_loop": {
@@ -211,18 +213,18 @@
  "burst_edge_alpha": 0.0,
  "dust_edge_alpha": 0.0,
  "burst_span_px": [
-  65,
-  53
+  64,
+  52
  ],
  "dust_span_px": [
-  50,
-  47
+  48,
+  45
  ],
- "burst_redness": 55.9,
+ "burst_redness": 55.7,
  "burst_white_fraction": 0.0,
- "dust_contrast": 91.0,
+ "dust_contrast": 90.2,
  "hit_off_tank": [],
- "hit_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\LTP\\_check_hit.png",
+ "hit_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\out\\recoil\\full\\_check_hit.png",
  "scar_fit": {
   "front": 0.66,
   "rear": 0.917,
@@ -230,7 +232,7 @@
   "right": 0.823
  },
  "scar_headings_seen": {
-  "scar_front": 9,
+  "scar_front": 8,
   "scar_rear": 5,
   "scar_left": 5,
   "scar_right": 5
@@ -243,75 +245,75 @@
  },
  "scar_level_px": {
   "scar_front": [
-   304,
-   368,
-   429
+   295,
+   357,
+   418
   ],
   "scar_rear": [
-   342,
-   475,
-   504
+   328,
+   460,
+   487
   ],
   "scar_left": [
-   332,
-   468,
-   496
+   326,
+   454,
+   482
   ],
   "scar_right": [
-   337,
-   471,
-   502
+   320,
+   457,
+   483
   ]
  },
  "scar_contrast": {
   "scar_front": [
-   54.5,
-   75.0,
-   97.6
+   58.7,
+   74.7,
+   98.2
   ],
   "scar_rear": [
-   59.3,
+   56.1,
    68.5,
-   100.4
+   95.7
   ],
   "scar_left": [
-   59.6,
-   70.9,
-   101.9
+   59.8,
+   70.0,
+   102.2
   ],
   "scar_right": [
-   54.5,
-   83.8,
-   105.5
+   57.4,
+   82.3,
+   103.7
   ]
  },
  "scar_weight": {
   "scar_front": [
-   6926,
-   11893,
-   18443
+   6710,
+   11442,
+   17787
   ],
   "scar_rear": [
-   5477,
-   10435,
-   17445
+   5299,
+   10069,
+   16904
   ],
   "scar_left": [
-   5821,
-   10407,
-   16285
+   5628,
+   10068,
+   15697
   ],
   "scar_right": [
-   6014,
-   10886,
-   16950
+   5798,
+   10561,
+   16331
   ]
  },
  "scar_cover_px": {
-  "scar_front": 429,
-  "scar_rear": 504,
-  "scar_left": 496,
-  "scar_right": 502
+  "scar_front": 418,
+  "scar_rear": 487,
+  "scar_left": 482,
+  "scar_right": 483
  },
  "scar_edge_alpha": {
   "scar_front": 0.0,
@@ -319,68 +321,70 @@
   "scar_left": 0.0,
   "scar_right": 0.0
  },
- "scar_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\LTP\\_check_scar.png",
- "scar_levels": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\LTP\\_check_damage.png",
+ "scar_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\out\\recoil\\full\\_check_scar.png",
+ "scar_levels": "D:\\Projects\\AgentCoding\\BlenderMCP\\out\\recoil\\full\\_check_damage.png",
  "track_phases": 8,
  "belts": [
   {
    "name": "L.Caterpillar.Rebuilt",
-   "verts": 679328,
-   "perimeter_local": 2.28953,
-   "links": 46,
+   "verts": 697151,
+   "perimeter_local": 2.33577,
+   "links": 47,
    "links_raw": null,
    "links_by_run": null,
-   "links_by_vertex_density": 46,
-   "pitch_from": "laid out at perimeter/46 by construction",
-   "pitch_local": 0.04977,
-   "pitch_world": 0.04698,
+   "links_by_vertex_density": 47,
+   "pitch_from": "laid out at perimeter/47 by construction",
+   "pitch_local": 0.0497,
+   "pitch_world": 0.04691,
    "tread_repeat": null,
    "closes_by_construction": true,
    "band_thickness": [
-    0.0245,
-    0.036,
-    0.0618
+    0.0244,
+    0.0351,
+    0.0657
    ],
    "offset_range": [
-    -0.0182,
-    0.0153
+    -0.0179,
+    0.0158
    ],
    "worst_foot_gap": 0.0,
    "rest_roundtrip_max": 0.0,
    "rest_roundtrip_p99": 0.0,
    "runs_rearward_along_local_x": -1.0,
    "ground_run_alignment": 1.0,
-   "pitch_px": 7.58,
+   "shaped": null,
+   "pitch_px": 7.44,
    "rest_roundtrip_px": 0.0
   },
   {
    "name": "R.Caterpillar.Rebuilt",
-   "verts": 679328,
-   "perimeter_local": 2.28953,
-   "links": 46,
+   "verts": 697151,
+   "perimeter_local": 2.33577,
+   "links": 47,
    "links_raw": null,
    "links_by_run": null,
-   "links_by_vertex_density": 46,
-   "pitch_from": "laid out at perimeter/46 by construction",
-   "pitch_local": 0.04977,
-   "pitch_world": 0.04698,
+   "links_by_vertex_density": 47,
+   "pitch_from": "laid out at perimeter/47 by construction",
+   "pitch_local": 0.0497,
+   "pitch_world": 0.04691,
    "tread_repeat": null,
    "closes_by_construction": true,
    "band_thickness": [
-    0.0245,
-    0.036,
-    0.0618
+    0.0244,
+    0.0351,
+    0.0657
    ],
    "offset_range": [
-    -0.0182,
-    0.0153
+    -0.0179,
+    0.0158
    ],
    "worst_foot_gap": 0.0,
    "rest_roundtrip_max": 0.0,
    "rest_roundtrip_p99": 0.0,
    "runs_rearward_along_local_x": -1.0,
    "ground_run_alignment": 1.0,
-   "pitch_px": 7.58,
+   "shaped": null,
+   "pitch_px": 7.44,
    "rest_roundtrip_px": 0.0
   }
  ],
@@ -393,42 +397,44 @@
  "rebuilt": {
   "L.Caterpillar.Geometry": {
    "from": "L.Caterpillar.Geometry",
-   "links": 46,
-   "cut_at": 0.0046,
-   "cut_density_vs_mean": 0.656,
+   "onto": null,
+   "links": 47,
+   "cut_at": 0.00534,
+   "cut_density_vs_mean": 0.664,
    "base_link": {
-    "verts": 14768,
-    "polys": 19531
+    "verts": 14833,
+    "polys": 19507
    },
-   "verts": 679328,
-   "polys": 898426,
+   "verts": 697151,
+   "polys": 916829,
    "source": {
-    "verts": 665068,
-    "polys": 898426
+    "verts": 693955,
+    "polys": 917769
    },
    "polys_per_link_in_source": [
-    19485,
-    19608
+    19498,
+    19578
    ]
   },
   "R.Caterpillar.Geometry": {
    "from": "R.Caterpillar.Geometry",
-   "links": 46,
-   "cut_at": 0.0046,
-   "cut_density_vs_mean": 0.656,
+   "onto": null,
+   "links": 47,
+   "cut_at": 0.00534,
+   "cut_density_vs_mean": 0.664,
    "base_link": {
-    "verts": 14768,
-    "polys": 19531
+    "verts": 14833,
+    "polys": 19507
    },
-   "verts": 679328,
-   "polys": 898426,
+   "verts": 697151,
+   "polys": 916829,
    "source": {
-    "verts": 665068,
-    "polys": 898426
+    "verts": 693955,
+    "polys": 917769
    },
    "polys_per_link_in_source": [
-    19485,
-    19608
+    19498,
+    19578
    ]
   }
  },

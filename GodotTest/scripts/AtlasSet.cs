@@ -121,12 +121,32 @@ public sealed class AtlasSet
     /// </summary>
     public static readonly string[] TrackNames = { "track_left", "track_right" };
 
+    /// <summary>
+    /// The gun tube, which recoils into the turret when the gun fires.
+    ///
+    /// Not an effect either, for the belts' reason and even more plainly: it is
+    /// the gun. It became a layer because the turret gave it up so that it could
+    /// move, and it moves relative to the turret - which is the one thing a
+    /// single turret sprite cannot show.
+    ///
+    /// So it follows the *turret's* heading, unlike the belts and the exhaust,
+    /// and unlike them it is on an event rather than a cycle. Kept out of
+    /// <see cref="EffectNames"/> like everything that is not the shot's pair.
+    ///
+    /// Optional, because it needs a `Barrel` separated by hand and five phases
+    /// rendered off it. A tank without it simply has its tube back inside
+    /// `turret_atlas`, drawn as part of the turret and never moving - which is
+    /// what every tank looked like before this.
+    /// </summary>
+    public const string BarrelName = "barrel";
+
     /// <summary>Layers that load if they are there and are silently skipped if
     /// they are not. All but the hit layers need a piece separated by hand in
     /// the .blend; the hit is measured off the hull and so is always there.</summary>
     private static readonly string[] OptionalNames =
         new[] { "smoke", "flash", ExhaustName, FireName, BurnName, BurstName,
-                DustName }.Concat(ScarNames).Concat(TrackNames).ToArray();
+                DustName, BarrelName }.Concat(ScarNames).Concat(TrackNames)
+            .ToArray();
 
     public string Tag { get; private set; } = "";
     public string Error { get; private set; } = "";
@@ -275,6 +295,16 @@ public sealed class AtlasSet
     /// <summary>Phases in the belt's cycle, 0 if it is missing. Both sides share
     /// the count - one render job, one belt design.</summary>
     public int TrackPhases => Has(TrackNames[0]) ? PhasesOf(TrackNames[0]) : 0;
+
+    /// <summary>True when the tube was rendered as its own layer and can recoil.
+    /// Two phases is the minimum that means anything: rest and somewhere
+    /// else.</summary>
+    public bool HasRecoil => Has(BarrelName) && PhasesOf(BarrelName) > 1;
+
+    /// <summary>Poses the tube was rendered in, rest included, 0 if absent. The
+    /// renderer picks this off the travel - about one phase per pixel of stroke -
+    /// so it is read rather than assumed.</summary>
+    public int RecoilPhases => Has(BarrelName) ? PhasesOf(BarrelName) : 0;
 
     /// <summary>
     /// Ground covered by one turn of the belt's cycle, in pixels - one link.
@@ -436,16 +466,28 @@ public sealed class AtlasSet
         HitFaces = ordered;
     }
 
-    public static AtlasSet Load(string root, string tag)
+    /// <summary>
+    /// Load one tank's layers.
+    ///
+    /// <paramref name="dir"/> is which directory the pixels come from and
+    /// defaults to <paramref name="tag"/>, which is the normal case. They are
+    /// separable so that several classes can wear one tank's atlases while the
+    /// others are being re-rendered - see <c>Main.SharedSpriteDir</c>. The tag is
+    /// what the harness knows this tank *as* and keeps driving it by, so
+    /// borrowing pixels never borrows a class.
+    /// </summary>
+    public static AtlasSet Load(string root, string tag, string? dir = null)
     {
         var atlas = new AtlasSet { Tag = tag };
+        dir ??= tag;
         LayerMeta? hull = null;
         Image? turretImage = null;
         Image? hullImage = null;
+        Image? barrelImage = null;
 
         foreach (string layer in LayerNames)
         {
-            string basePath = $"{root}/{tag}/{layer}_atlas";
+            string basePath = $"{root}/{dir}/{layer}_atlas";
             string jsonPath = basePath + ".json";
             string pngPath = basePath + ".png";
 
@@ -498,7 +540,7 @@ public sealed class AtlasSet
         // missing file here is a fact about the scene, not an error.
         foreach (string layer in OptionalNames)
         {
-            string basePath = $"{root}/{tag}/{layer}_atlas";
+            string basePath = $"{root}/{dir}/{layer}_atlas";
             if (!File.Exists(basePath + ".json") || !File.Exists(basePath + ".png"))
                 continue;
             LayerMeta? meta;
@@ -515,6 +557,8 @@ public sealed class AtlasSet
             if (meta is null || image is null)
                 continue;
             atlas.Take(layer, image, meta);
+            if (layer == BarrelName)
+                barrelImage = image;
             if (layer == BurstName && meta.Hits is not null)
                 atlas.TakePlates(meta.Hits.Faces);
             if (layer == TrackNames[0] && meta.Track is { Length: > 0 }
@@ -534,8 +578,23 @@ public sealed class AtlasSet
         atlas.UnitsPerPixel = hull.UnitsPerPixel;
         atlas.Elevation = hull.View.Elevation;
         atlas.ReadFacings(hull);
-        if (turretImage is not null)
-            atlas.FindMuzzles(turretImage, atlas._columns["turret"]);
+        // Off the gun's own layer where there is one, and off the turret only as
+        // a fallback. Not a refinement - a necessity: once the tube moved to a
+        // layer of its own the turret's alpha stops at the mantlet, so the
+        // "furthest solid pixel" of a turret frame is a corner of the turret and
+        // the sheet flash comes off the roof. Both muzzle self-tests caught it.
+        //
+        // It is also the better measurement. Reading the turret was always a
+        // proxy that had to reject the things on a turret that are not the gun,
+        // which is what MuzzleErode is for; a layer holding nothing but the tube
+        // has nothing to reject, so the erosion drops to 1 and only fends off the
+        // antialiased fringe. The two layers share a tile and an anchor - one
+        // render_set job gives every layer of one size the same anchor - so the
+        // measurement means the same thing either way.
+        if (barrelImage is not null && atlas._columns.ContainsKey(BarrelName))
+            atlas.FindMuzzles(barrelImage, atlas._columns[BarrelName], 1);
+        else if (turretImage is not null)
+            atlas.FindMuzzles(turretImage, atlas._columns["turret"], MuzzleErode);
         if (hullImage is not null)
             atlas.MeasureHull(hullImage, atlas._columns["hull"]);
         return atlas;
@@ -583,7 +642,7 @@ public sealed class AtlasSet
         HullSpan = widest;
     }
 
-    private void FindMuzzles(Image image, int columns)
+    private void FindMuzzles(Image image, int columns, int erode)
     {
         Image rgba = image;
         if (rgba.GetFormat() != Image.Format.Rgba8)
@@ -603,32 +662,48 @@ public sealed class AtlasSet
             if (index < 0 || index >= Count)
                 continue;
             Vector2 dir = GroundDirection(facing).Normalized();
+            // Row 0 whatever the layer's phase count, because index runs to
+            // Count: the barrel layer's first row is the tube at rest, which is
+            // where a muzzle is when the gun has not just fired.
             int ox = index % columns * Tile.X, oy = index / columns * Tile.Y;
-            float best = float.MinValue;
-            for (int y = 0; y < Tile.Y; y++)
-            for (int x = 0; x < Tile.X; x++)
+            // Erode, then again with none if that left this heading with nothing.
+            // Pointing away from the camera the tube foreshortens to a stub a few
+            // pixels across and the turret's holdout has taken a bite out of that,
+            // so an erosion wide enough to be useful elsewhere can reject the
+            // whole silhouette - and a heading with no muzzle keeps the seeded
+            // anchor, which puts the flash in the middle of the tank.
+            for (int pass = 0; pass < 2; pass++)
             {
-                if (!Solid(data, width, ox, oy, x, y))
-                    continue;
-                float d = (new Vector2(x, y) - Anchor).Dot(dir);
-                if (d <= best)
-                    continue;
-                best = d;
-                _muzzle[index] = new Vector2(x, y);
+                int wide = pass == 0 ? erode : 0;
+                float best = float.MinValue;
+                for (int y = 0; y < Tile.Y; y++)
+                for (int x = 0; x < Tile.X; x++)
+                {
+                    if (!Solid(data, width, ox, oy, x, y, wide))
+                        continue;
+                    float d = (new Vector2(x, y) - Anchor).Dot(dir);
+                    if (d <= best)
+                        continue;
+                    best = d;
+                    _muzzle[index] = new Vector2(x, y);
+                }
+                if (best > float.MinValue)
+                    break;
             }
         }
     }
 
-    private bool Solid(byte[] data, int width, int ox, int oy, int x, int y)
+    private bool Solid(byte[] data, int width, int ox, int oy, int x, int y,
+                       int erode)
     {
-        if (x < MuzzleErode || y < MuzzleErode
-            || x >= Tile.X - MuzzleErode || y >= Tile.Y - MuzzleErode)
+        if (x < erode || y < erode
+            || x >= Tile.X - erode || y >= Tile.Y - erode)
             return false;
         return Opaque(data, width, ox + x, oy + y)
-               && Opaque(data, width, ox + x - MuzzleErode, oy + y)
-               && Opaque(data, width, ox + x + MuzzleErode, oy + y)
-               && Opaque(data, width, ox + x, oy + y - MuzzleErode)
-               && Opaque(data, width, ox + x, oy + y + MuzzleErode);
+               && Opaque(data, width, ox + x - erode, oy + y)
+               && Opaque(data, width, ox + x + erode, oy + y)
+               && Opaque(data, width, ox + x, oy + y - erode)
+               && Opaque(data, width, ox + x, oy + y + erode);
     }
 
     private static bool Opaque(byte[] data, int width, int x, int y) =>

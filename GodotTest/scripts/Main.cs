@@ -30,6 +30,23 @@ public sealed partial class Main : Node2D
     /// The atlases stay on disk under Sprites/; nothing here loads them.</summary>
     private static readonly string[] Tags = { "LTP", "MTP", "HTP" };
 
+    /// <summary>
+    /// One directory every class reads its pixels from, or null for one per tag.
+    ///
+    /// Set while only the light tank has been re-rendered with the recoiling gun
+    /// tube: all three classes wear LTP's atlases so the new layer can be judged
+    /// on the field rather than on a contact sheet. Null is the normal state and
+    /// the one to go back to as the other two are re-rendered.
+    ///
+    /// It swaps the *pixels*, not the class: <see cref="AtlasSet.Tag"/> stays the
+    /// tag it was asked for, so <see cref="MovementProfile"/> still gives each
+    /// tank its own speed, acceleration and size. Which makes this a sharper test
+    /// of the size logic than the real thing, not a weaker one - three identical
+    /// sprites at 0.85, 1.00 and 1.15 have nothing but the scale to explain any
+    /// difference between them.
+    /// </summary>
+    private const string? SharedSpriteDir = "LTP";
+
     private const double SpinSpeed = 90.0;      // deg/sec, for the wobble check
 
     private readonly Dictionary<string, AtlasSet> _atlases = new();
@@ -154,6 +171,21 @@ public sealed partial class Main : Node2D
     /// not really an option: a tank has tracks and they move. The switch is so
     /// the hull layer can be looked at without them.</summary>
     private bool _tracksEnabled = true;
+
+    /// <summary>
+    /// The gun tube sliding back on the shot - key '[', or --no-barrel-recoil.
+    ///
+    /// On by default, like the belts and the exhaust and for the same reason: it
+    /// is a rendered layer, not an interpretation laid over one, so there is
+    /// nothing to be cautious about. The switch earns its place as an A/B - the
+    /// travel is about four pixels and whether that reads is a question you
+    /// answer by turning it off, not by remembering.
+    ///
+    /// Off does not hide the layer. The tube holds its rest pose, which is
+    /// exactly how every tank looked before it had one, so the comparison is
+    /// against the old picture rather than against a tank with no gun.
+    /// </summary>
+    private bool _recoilTube = true;
 
     private ExhaustLoop _exhaust => Active.Exhaust;
     /// <summary>Engine exhaust - key O, or --no-exhaust. On by default, and for
@@ -386,6 +418,8 @@ public sealed partial class Main : Node2D
                 _exhaustEnabled = false;
             else if (userArgs[i] == "--no-tracks")
                 _tracksEnabled = false;
+            else if (userArgs[i] == "--no-barrel-recoil")
+                _recoilTube = false;
             else if (userArgs[i] == "--burning")
                 _burnAtStart = true;
             else if (userArgs[i] == "--fire")
@@ -478,7 +512,8 @@ public sealed partial class Main : Node2D
         var failures = new List<string>();
         foreach (string tag in Tags)
         {
-            AtlasSet atlas = AtlasSet.Load(SpritesRoot, tag);
+            AtlasSet atlas = AtlasSet.Load(SpritesRoot, tag,
+                                           SharedSpriteDir ?? tag);
             if (atlas.Error.Length > 0)
                 failures.Add($"{tag}: {atlas.Error}");
             else
@@ -527,6 +562,11 @@ public sealed partial class Main : Node2D
             vehicle.Track.Pitch = vehicle.Atlas.TrackPitch;
             vehicle.Exhaust.Phases = vehicle.Atlas.ExhaustPhases;
             vehicle.Burn.Phases = vehicle.Atlas.BurnPhases;
+            // The tube's poses, read off the layer like every other count: the
+            // renderer picks it from the travel, about one phase per pixel of
+            // stroke, so a hard-coded table here would drop the last pose the
+            // day the travel changes.
+            vehicle.Barrel.Phases = vehicle.Atlas.RecoilPhases;
             // Per class, so a heavy at its own cruise is as worked as a light at
             // its own instead of idling along because it happens to be slower.
             vehicle.Exhaust.TopSpeed = vehicle.Profile.TopSpeed;
@@ -1083,6 +1123,10 @@ public sealed partial class Main : Node2D
     {
         _shotFrame = 0;
         _recoil.Fire(WrapAngle(_tank.TurretFacing - _tank.HullFacing));
+        // The tube goes back on the same trigger and on its own clock: the two
+        // events last different lengths of time, so one counter would give one of
+        // them the wrong tempo. See RecoilLoop.
+        Active.Barrel.Fire();
     }
 
     /// <summary>The shot runs on screen frames, not seconds. The sheet is a
@@ -1108,11 +1152,27 @@ public sealed partial class Main : Node2D
             if (frame < 0 && phase < 0)
                 v.ShotFrame = -1;
         }
+        // The gun tube, on its own clock and its own count of frames. Switched
+        // off it holds the rest pose rather than disappearing - the gun is still
+        // a gun, it just stops moving, which is the A/B against every tank
+        // rendered before this layer existed.
+        int tube = 0;
+        if (v.Atlas.HasRecoil && _recoilTube)
+        {
+            v.Barrel.Advance();
+            tube = v.Barrel.Phase;
+        }
+        else
+        {
+            v.Barrel.Reset();
+        }
+
         if (frame != v.Sprite.FlashFrame || phase != v.Sprite.ShotPhase
-            || v.Recoil.Moving)
+            || tube != v.Sprite.RecoilPhase || v.Recoil.Moving)
         {
             v.Sprite.FlashFrame = frame;
             v.Sprite.ShotPhase = phase;
+            v.Sprite.RecoilPhase = tube;
             v.Sprite.QueueRedraw();
         }
     }
@@ -1329,6 +1389,27 @@ public sealed partial class Main : Node2D
                   + $", rigid body ends at {Recoil.RigidBodyPeak:F3}");
         ui.Toggle("recoil on turret only  (L)",
             () => _tank.RecoilTurretOnly, on => _tank.RecoilTurretOnly = on);
+        ui.Toggle("gun tube recoils  ([)",
+            () => _recoilTube, on => _recoilTube = on);
+        // What the tube is doing and what it cost. The stroke in pixels is the
+        // number the whole layer is judged on - four is what it was authored to,
+        // and it is a fraction of that on the headings where the bore points at
+        // the camera, which is projection rather than a fault. Said here because
+        // "phase 2 of 5" answers nothing about whether it reads.
+        ui.Readout(() =>
+        {
+            AtlasSet a = _tank.Atlas!;
+            if (!a.HasRecoil)
+                return "gun tube  [none - split a Barrel and render it]";
+            string phase = _tank.RecoilPhase == 0
+                ? "rest" : $"{_tank.RecoilPhase,2}";
+            RecoilLoop tube = Active.Barrel;
+            return $"tube {phase} / {a.RecoilPhases - 1}"
+                   + $"   {tube.Duration} frames"
+                   + $" ({tube.Duration / 60.0,4:F2}s)"
+                   + $"\nheld {string.Join("/", RecoilLoop.HoldsFor(a.RecoilPhases))}"
+                   + "   kick under the flash, return in the open";
+        });
         ui.Press("fire  (Z)", Fire);
         // Phase counters against the number of phases that were rendered. A
         // clock that has walked off the end of its atlas shows up here as a
@@ -1528,6 +1609,11 @@ public sealed partial class Main : Node2D
                      // something to have to work out from the phase alone
                      + $"  trk {_tank.TrackPhase,2}@{_track.Phase,5:F2}"
                      + $" x{_track.Slip,4:F2}"
+                     // The tube, in the channel that survives --no-ui, and with
+                     // the switch beside it: 'rest' with the flag off and 'rest'
+                     // between shots are the same number and not the same thing.
+                     + $"  tube {_tank.RecoilPhase,2}"
+                     + $"{(_recoilTube ? "" : "!off")}"
                      + $"  burn {_tank.FirePhase,2}/{_tank.BurnPhase,2}"
                      + $"  hit {_tank.HitPhase,2}@{(_hit.Face == "" ? "-" : _hit.Face)}"
                      + $" x{_hit.Scale:F2}"
@@ -1687,6 +1773,17 @@ public sealed partial class Main : Node2D
             case Key.C:
                 _tracksEnabled = !_tracksEnabled;
                 TracksChanged();
+                break;
+            // Beside the belts, because it is the same kind of switch: both are
+            // parts of the tank on layers of their own, and both are off only to
+            // be compared against.
+            //
+            // '[' because every letter is taken - A to Z are all bound, and so
+            // are Space, Tab, Escape, F12 and Key1..Key9 - and this is the first
+            // free key outside an existing range. The bracket at least points the
+            // way the tube goes.
+            case Key.Bracketleft:
+                _recoilTube = !_recoilTube;
                 break;
             case Key.J:
                 _burning = !_burning;

@@ -882,6 +882,174 @@ public static class SelfTest
             }
         }
 
+        GD.Print("the gun tube's recoil");
+        // What separates this clock from every other event is that it does not
+        // end - it comes back to rest. The tube is part of the tank, so there is
+        // no frame without a gun on it, and most of what follows is that one
+        // difference asserted from several directions.
+        var tube = new RecoilLoop { Phases = 5 };
+        Check("the tube idles at rest before anything fires",
+            tube.Phase == 0 && !tube.Live, $"phase {tube.Phase}");
+        tube.Fire();
+        var poses = new HashSet<int>();
+        bool everInRange = true, everNegative = false;
+        var walk = new List<int>();
+        for (int i = 0; i < tube.Duration + 30; i++)
+        {
+            int phase = tube.Phase;
+            walk.Add(phase);
+            poses.Add(phase);
+            if (phase < 0)
+                everNegative = true;
+            if (phase >= tube.Phases)
+                everInRange = false;
+            tube.Advance();
+        }
+        Check("it never asks for -1, the way the shot and the hit do",
+            !everNegative,
+            "a -1 here would blink the gun out of existence between rounds");
+        Check("it stays inside the poses that were rendered", everInRange,
+            $"{poses.Count} distinct of {tube.Phases}");
+        Check("every rendered pose is actually shown",
+            poses.Count == tube.Phases,
+            $"{poses.Count} of {tube.Phases} - an unused pose is a wasted render");
+        Check("it is back at rest once the stroke is over",
+            walk[tube.Duration] == 0 && walk[^1] == 0,
+            $"ends on {walk[^1]}");
+        // **The phase index is time, not travel**, and mixing the two is the
+        // mistake this pair of checks exists to prevent - it was made here first.
+        // `barrel_recoil.curve` is [0, 1.0, 0.75, 0.5, 0.25], so pose 1 is full
+        // travel and pose 4 is nearly home: the index counts forward while the
+        // stroke counts back. A check written as "the highest index comes first"
+        // passes only by accident on a table that eases the wrong way.
+        Check("the stroke opens at full travel, which is pose 1",
+            walk[0] == 1, $"opens on {walk[0]}");
+        Check("full travel is shown once and not returned to",
+            walk.IndexOf(1) == 0 && walk.LastIndexOf(1) == walk.IndexOf(2) - 1,
+            "the tube does not go back out on the way home");
+        // Poses run in time order and then stop: 1,1,1,2,2,...,4,...,0.
+        bool inTimeOrder = true;
+        for (int i = 0; i + 1 < tube.Duration; i++)
+            if (walk[i + 1] < walk[i])
+                inTimeOrder = false;
+        Check("the poses run in time order all the way home", inTimeOrder,
+            string.Join(",", walk.GetRange(0, tube.Duration)));
+        int[] holds = RecoilLoop.HoldsFor(tube.Phases);
+        Check("there is one hold for every moving pose",
+            holds.Length == tube.Phases - 1,
+            $"{holds.Length} holds for {tube.Phases - 1} moving poses");
+        bool slowing = true;
+        for (int i = 1; i < holds.Length - 1; i++)
+            if (holds[i] > holds[i + 1])
+                slowing = false;
+        Check("the tube settles more slowly the closer it gets to rest", slowing,
+            $"held {string.Join("/", holds)}");
+        Check("the kick is the shortest hold of all",
+            holds.Length < 2 || holds[0] < holds[1],
+            $"kick {holds[0]} against {holds[1]} on the first return step");
+        // The kick has to be over before the flash is, or the frames spent on it
+        // are frames spent under a bloom. Measured against the shot's own table
+        // rather than a number typed here, because that is the thing covering it.
+        Check("the kick is over while the flash is still on the muzzle",
+            holds[0] <= EffectLayer.Hold[0] + EffectLayer.Hold[1]
+                        + EffectLayer.Hold[2],
+            $"kick {holds[0]} frames against the flash's first three phases");
+        tube.Fire();
+        int restarted = tube.Phase;
+        Check("a second round restarts the stroke rather than being ignored",
+            restarted == 1, $"phase {restarted}, and full travel is pose 1");
+        tube.Reset();
+        Check("reset puts it back to rest", tube.Phase == 0 && !tube.Live);
+        // A one-pose atlas cannot recoil, and asking for a phase must still be
+        // safe: HasRecoil is what gates it, and this is the arithmetic behind it.
+        Check("an atlas with nothing but rest reports rest",
+            RecoilLoop.PhaseAt(5, 1) == 0 && RecoilLoop.PhaseAt(5, 0) == 0);
+
+        // The heading, which is the one thing here that is the opposite of the
+        // belts and the exhaust: those are bolted to the hull, the tube is bolted
+        // to the turret. Get it backwards and the gun swings off the mantlet the
+        // moment hull and turret disagree.
+        EffectLayer tubeLayer = EffectLayer.Barrel(AtlasSet.BarrelName);
+        Check("the tube is indexed by the turret's heading, not the hull's",
+            !tubeLayer.FollowsHull,
+            "it is bolted to the mount, unlike the belts and the plume");
+        Check("it is drawn at the shared anchor, not placed",
+            !tubeLayer.Placed,
+            "only an arriving shell is placed off the anchor");
+        Check("its clock is neither a loop nor the shot's", !tubeLayer.Loops
+            && tubeLayer.Clock == EffectLayer.Clocks.Recoil);
+        Check("the tube is not one of the shot's layers",
+            Array.IndexOf(AtlasSet.EffectNames, AtlasSet.BarrelName) < 0,
+            "EffectNames requires all of its names, so a tank with a flash but "
+            + "no rendered tube would lose the flash");
+        int tubeAt = Array.IndexOf(TankSprite.LayerOrder, AtlasSet.BarrelName);
+        int mountAt = Array.IndexOf(TankSprite.LayerOrder, "turret");
+        Check("the tube composites straight after the turret it slides into",
+            tubeAt == mountAt + 1, $"tube at {tubeAt}, turret at {mountAt}");
+        foreach (string over in new[]
+                 {
+                     AtlasSet.ExhaustName, AtlasSet.BurnName, AtlasSet.FireName,
+                     "smoke", "flash", AtlasSet.DustName, AtlasSet.BurstName,
+                 })
+            Check($"{over} goes over the tube, not under it",
+                Array.IndexOf(TankSprite.LayerOrder, over) > tubeAt,
+                "the tube is part of the tank, so everything that happens to the "
+                + "tank happens in front of it");
+
+        AtlasSet? gunned = atlases?.Values.FirstOrDefault(a => a.HasRecoil)
+                           ?? (atlas.HasRecoil ? atlas : null);
+        if (gunned is null)
+        {
+            Check("some loaded tank has a tube that recoils", false,
+                "no barrel layer on disk - render one with "
+                + "tank_pipeline recoil_phases > 1");
+        }
+        else
+        {
+            Vector2 tankAnchor = gunned.Anchor / (Vector2)gunned.Tile;
+            Vector2 gunAnchor = gunned.AnchorOf(AtlasSet.BarrelName)
+                                / (Vector2)gunned.TileOf(AtlasSet.BarrelName);
+            Check("the tube shares the tank's anchor, in frame fractions",
+                (gunAnchor - tankAnchor).Length() < 1e-4,
+                $"{gunAnchor} against {tankAnchor}");
+            // It slides along the bore by a few pixels and stays inside the
+            // turret's own footprint, so unlike the flash it buys no extra frame.
+            Check("the tube needs no wider frame than the tank",
+                gunned.TileOf(AtlasSet.BarrelName) == gunned.Tile,
+                $"{gunned.TileOf(AtlasSet.BarrelName).X}px against tank"
+                + $" {gunned.Tile.X}px");
+            // Unlike the hit, which is one heading-less column: the gun turns.
+            Check("the tube was rendered at every heading",
+                gunned.CountOf(AtlasSet.BarrelName) == gunned.Count,
+                $"{gunned.CountOf(AtlasSet.BarrelName)} against {gunned.Count}");
+            Check("it has more than one pose to move between",
+                gunned.RecoilPhases > 1, $"{gunned.RecoilPhases} poses");
+            var gunTiles = new HashSet<int>();
+            foreach (int facing in gunned.RenderedFacings())
+                for (int phase = 0; phase < gunned.RecoilPhases; phase++)
+                    gunTiles.Add(gunned.EffectFrame(AtlasSet.BarrelName, phase,
+                                                    facing));
+            Check("every tube pose and heading maps to its own tile",
+                gunTiles.Count == gunned.RecoilPhases * gunned.Count
+                && gunTiles.Max() < gunned.RecoilPhases * gunned.Count,
+                $"{gunTiles.Count} distinct of"
+                + $" {gunned.RecoilPhases * gunned.Count},"
+                + $" highest {gunTiles.Max()}");
+            // The muzzle is read off this layer now, and the failure mode of
+            // doing that is a heading whose silhouette is too thin to survive
+            // erosion: the search finds nothing and leaves the seeded anchor,
+            // which fires the flash out of the middle of the tank. Both muzzle
+            // checks above went red when the tube left the turret layer; this is
+            // the cheap direct statement of what they were catching.
+            int atAnchor = 0;
+            for (int i = 0; i < gunned.Count; i++)
+                if ((gunned.Muzzle(i) - gunned.Anchor).Length() < 1e-3)
+                    atAnchor++;
+            Check("no heading leaves the muzzle sitting on the anchor",
+                atAnchor == 0,
+                $"{atAnchor} of {gunned.Count} headings found no solid tube");
+        }
+
         GD.Print("the engine exhaust");
         // What separates this from every other effect clock is that it has no
         // end, so the assertions are about it going round rather than about it

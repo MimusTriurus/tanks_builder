@@ -57,6 +57,12 @@ public sealed class Vehicle
     public readonly HitLoop Hit = new();
     public readonly Recoil Recoil = new();
 
+    /// <summary>The gun tube's own clock. Named for the part rather than the
+    /// event so it does not read as a second <see cref="Recoil"/> - that one is
+    /// the hull rocking under the shot, this one is the tube sliding in its
+    /// mount, and they run off the same trigger at different rates.</summary>
+    public readonly RecoilLoop Barrel = new();
+
     /// <summary>
     /// Where this tank touches the ground, in its parent's space.
     ///

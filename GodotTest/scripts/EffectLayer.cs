@@ -56,6 +56,17 @@ public sealed partial class EffectLayer : Node2D
         /// per heading. The turret is here because *where* it composites matters
         /// - see <see cref="Turret"/>.</summary>
         Body,
+
+        /// <summary>
+        /// The gun tube recoiling: an event that never goes off.
+        ///
+        /// A third shape, and worth its own entry rather than being folded into
+        /// <see cref="Shot"/>. The shot's clock runs out into -1 and its layers
+        /// stop being drawn; this one returns to phase 0, because the tube is
+        /// part of the tank and there is no frame without a gun on it. See
+        /// <see cref="RecoilLoop"/>.
+        /// </summary>
+        Recoil,
     }
 
     public Clocks Clock = Clocks.Shot;
@@ -227,6 +238,33 @@ public sealed partial class EffectLayer : Node2D
         Clock = Clocks.Body,
     };
 
+    /// <summary>
+    /// The gun tube: normal alpha, on the <em>turret's</em> heading, at the
+    /// shared anchor.
+    ///
+    /// The heading is the one thing to get right here, and it is the opposite of
+    /// the belts and the exhaust. Those are bolted to the hull; the tube is
+    /// bolted to the turret, so it is indexed by where the gun points. Index it
+    /// by the hull and the gun swings away from the turret it is mounted in as
+    /// soon as the two disagree - which reads as the atlas being broken.
+    ///
+    /// It rides the turret's tilt too, for the same reason: whatever the hull
+    /// does under it, the tube is part of the mount. That falls out of
+    /// <c>FollowsHull = false</c> - the same flag decides the frame and the
+    /// shear, which is what keeps the gun from leaving the turret face on a
+    /// bump.
+    ///
+    /// Drawn straight after the turret, so the tube is over the mantlet it slides
+    /// into rather than under it, and before everything that happens *to* the
+    /// tank. Normal alpha: it is painted metal, not light.
+    /// </summary>
+    public static EffectLayer Barrel(string layer) => new()
+    {
+        Layer = layer,
+        FollowsHull = false,
+        Clock = Clocks.Recoil,
+    };
+
     /// <summary>The plate a scar layer belongs to, or "" for any other
     /// layer.</summary>
     public static string FaceOf(string layer) =>
@@ -252,6 +290,11 @@ public sealed partial class EffectLayer : Node2D
                 // No phase axis, so frame 0 of one - EffectFrame clamps the
                 // phase against PhasesOf and lands on the heading column.
                 Clocks.Body => Tank.ShowTurret ? 0 : -1,
+                // Rest is a pose, so this never asks for -1 while the turret is
+                // up: the tube is part of the tank. It hides with the turret
+                // because a gun without the mount it comes out of is not a
+                // halfway state worth drawing.
+                Clocks.Recoil => Tank.ShowTurret ? Tank.RecoilPhase : -1,
                 // A plate carrying several marks has no single phase, so this
                 // is only "is there anything to draw". Which is all the redraw
                 // gate needs: what the layer actually puts on screen depends on
