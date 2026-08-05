@@ -33,10 +33,18 @@ public sealed partial class Main : Node2D
     /// <summary>
     /// One directory every class reads its pixels from, or null for one per tag.
     ///
-    /// Set while only the light tank has been re-rendered with the recoiling gun
-    /// tube: all three classes wear LTP's atlases so the new layer can be judged
-    /// on the field rather than on a contact sheet. Null is the normal state and
-    /// the one to go back to as the other two are re-rendered.
+    /// Set while the middle tank is the one still waiting to be re-rendered with
+    /// the recoiling gun tube: all three classes wear one tank's atlases so a new
+    /// layer can be judged on the field rather than on a contact sheet. Null is
+    /// the normal state and the one to go back to once MTP is rendered.
+    ///
+    /// Which tank lends its pixels is whichever one is being looked at - LTP and
+    /// HTP have both been through the full pipeline, so either reads correctly
+    /// here, and the heavy is worth its own turn because its gun is a short fat
+    /// howitzer rather than a rod: the muzzle the bench finds off the barrel
+    /// layer is a stub 27x19 px on the away headings, which is the hardest case
+    /// for <see cref="AtlasSet.FindMuzzles"/> and the one its no-erosion fallback
+    /// pass exists for.
     ///
     /// It swaps the *pixels*, not the class: <see cref="AtlasSet.Tag"/> stays the
     /// tag it was asked for, so <see cref="MovementProfile"/> still gives each
@@ -45,7 +53,7 @@ public sealed partial class Main : Node2D
     /// sprites at 0.85, 1.00 and 1.15 have nothing but the scale to explain any
     /// difference between them.
     /// </summary>
-    private const string? SharedSpriteDir = "LTP";
+    private const string? SharedSpriteDir = "HTP";
 
     private const double SpinSpeed = 90.0;      // deg/sec, for the wobble check
 
