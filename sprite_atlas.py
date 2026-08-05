@@ -152,6 +152,27 @@ CONFIG = {
     "fill_energy": 1.2,
     "rim_energy": 2.0,
     "world_strength": 0.25,    # ambient; None -> leave the world alone
+
+    # --- writing the frames -------------------------------------------------
+    # How many times to try a frame whose *save* failed, and how long to wait
+    # between tries. Not a render failure and not this code's fault: a full set
+    # is around a thousand small PNGs written into one directory in a couple of
+    # minutes, and on Windows something outside Blender - a scanner, an indexer,
+    # a preview thumbnailer - holds a file it has just seen for long enough that
+    # overwriting it raises "cannot save".
+    #
+    # Measured here: of three sixteen-layer runs one wrote all 1065 frames and
+    # two died, at `flash` and at `smoke_008`, and the file that could not be
+    # written was writable seconds later. So it is transient and it is per-file,
+    # which is exactly what a retry fixes and what nothing else does.
+    #
+    # It is worth having because of what a failure costs: the exception comes out
+    # of the middle of a ten-minute job, the atlases written so far stay on disk
+    # looking finished, and the ones not reached keep the *previous* run's
+    # timestamps - a half-and-half set that reads as complete. Ten minutes and a
+    # misleading directory, against one retry.
+    "save_retries": 4,
+    "save_wait": 0.75,         # seconds, doubling each try
 }
 
 
@@ -327,6 +348,35 @@ def write_atlas(paths, tile, columns, out_path):
     finally:
         bpy.data.images.remove(img)
     return columns, rows
+
+
+def _render_still(path, retries, wait):
+    """Render one frame, and try again if the *save* is what failed.
+
+    Blender reports a refused write as `RuntimeError: Error: Render error (No
+    error) cannot save: <path>`, and the "(No error)" is the tell - the render
+    itself was fine and the file is what would not open. Retrying is therefore
+    safe: nothing about the scene has changed, so the second attempt draws the
+    same pixels.
+
+    Anything else is re-raised untouched. A retry loop that swallowed real render
+    failures would turn a broken scene into four broken renders and a longer
+    wait, which is worse than the original failure by exactly the time it wastes.
+    """
+    import time
+    delay = float(wait)
+    for attempt in range(max(1, int(retries))):
+        try:
+            bpy.ops.render.render(write_still=True)
+            return attempt
+        except RuntimeError as exc:
+            if "cannot save" not in str(exc) or attempt == int(retries) - 1:
+                raise
+            print("[atlas] could not write %s (try %d) - waiting %.2fs"
+                  % (os.path.basename(path), attempt + 1, delay))
+            time.sleep(delay)
+            delay *= 2.0
+    return 0
 
 
 # ---------------------------------------------------------------------------
@@ -518,7 +568,11 @@ def render_atlas(cfg):
                 i = phase * len(angles) + j
                 path = os.path.join(frames_dir, "%s_%03d.png" % (cfg["name"], i))
                 r.filepath = path
-                bpy.ops.render.render(write_still=True)
+                # `.get`, because `render_atlas` is also called with a job dict
+                # built by hand - see hit_point - and a robustness fix that
+                # raised KeyError on another caller would be no fix at all
+                _render_still(path, cfg.get("save_retries", CONFIG["save_retries"]),
+                              cfg.get("save_wait", CONFIG["save_wait"]))
                 paths.append(path)
                 print("[atlas] %s %d/%d  %6.1f deg  phase %d/%d"
                       % (cfg["name"], i + 1, phases * len(angles), angle,
