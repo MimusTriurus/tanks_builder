@@ -425,10 +425,20 @@ def prepare(cfg=None):
     burst_mod.build_dust(dict(seat, name=cfg["dust"]))
 
     scar_mod = _load(cfg, "hit_scar")
-    scar_mod.build({"hull": hull, "name": cfg["scar"]})
+    # `hull_root` for the seat probe, and it is the same argument the hit rays
+    # make: on a parts scene the plate is assembled out of the hull mesh *and*
+    # its siblings, so a probe down one mesh reads the plate as clear where a
+    # sibling stands in front of it. See hit_scar.seat.
+    scar_seat = {"hull": hull, "hull_root": name["hull_root"],
+                 "name": cfg["scar"]}
+    scar_mod.build(scar_seat)
     out["scar"] = {"faces": scar_mod.faces({"hull": hull}),
                    "levels": len(scar_mod.LEVELS),
-                   "fit": scar_mod.fits({"hull": hull})}
+                   "fit": scar_mod.fits({"hull": hull}),
+                   # what the decal had to climb to clear its plate. Reported
+                   # because a seat that grew is a plate that is not flat, and
+                   # nothing else in the output would say so.
+                   "seats": scar_mod.seats(scar_seat)}
     return out
 
 
@@ -579,6 +589,15 @@ def render(cfg=None):
              "phases": cfg["hit_phases"], "phase_hook": hook})
 
     scar_mod = _load(cfg, "hit_scar")
+    # Measured here, with the scene at rest, and handed to the hooks as numbers.
+    # A hook runs inside the job, where the holdout objects are still spun to the
+    # previous phase's last angle, so a hook that probed the scene itself would
+    # measure the plate against a tank standing at another heading - see
+    # `hit_scar.set_state`.
+    scar_cfg = {"hull": hull, "hull_root": named["hull_root"],
+                "name": cfg["scar"]}
+    scar_seats = {f: v["seat"] for f, v in scar_mod.seats(scar_cfg).items()
+                  if isinstance(v, dict)}
     for face in scar_mod.faces({"hull": hull}):
         layers.append(
             # The opposite of the pair above in every way that matters, and the
@@ -594,8 +613,8 @@ def render(cfg=None):
             {"name": "scar_" + face, "target": cfg["scar"], "fit": False,
              "tile_scale": cfg["scar_tile_scale"],
              "phases": len(scar_mod.LEVELS),
-             "phase_hook": scar_mod.phase_hook(face, {"hull": hull,
-                                                      "name": cfg["scar"]}),
+             "phase_hook": scar_mod.phase_hook(face, dict(scar_cfg,
+                                                          seats=scar_seats)),
              "holdout": blockers})
 
     shared = {
@@ -1330,7 +1349,11 @@ def check(cfg=None):
 
     # --- nothing may touch the tile edge, on any frame of any tank layer -----
     edges = {}
-    for name in ("hull", "turret", "hex") + TRACK_LAYERS:
+    # the gun tube is named here for the reason it is named in `_body()`: it
+    # left the turret layer, so the turret's clean edge stopped saying anything
+    # about the tube, and the one layer that moves outward on its own axis was
+    # the one nobody asked
+    for name in ("hull", "turret", "barrel", "hex") + TRACK_LAYERS:
         if name not in layers:
             continue
         worst = _edge_alpha(layers, name)
@@ -1734,6 +1757,22 @@ def run(cfg=None):
             "flash_edge_alpha": checked["flash_edge_alpha"],
             "flash_offcentre_px": checked["flash_offcentre_px"],
             "composite": checked["composite"],
+        })
+    # The gun tube, and asked of `checked` rather than of `prepared`: the tube
+    # recoils when the scene has a barrel *and* phases were asked for, which is
+    # not the question `prepared["muzzle"]` answers - `recoil_phases` 0 leaves it
+    # in the turret layer and leaves these keys absent.
+    #
+    # This list is enumerated, so a key added to `check` and not added here is
+    # computed, dropped, and never seen. It happened to exactly these three: the
+    # sheet was written, the stroke was measured, and the report carried none of
+    # it - which reads as a check that was never written rather than one whose
+    # answer went nowhere.
+    if checked.get("recoil_stroke_px"):
+        report.update({
+            "recoil_stroke_px": checked["recoil_stroke_px"],
+            "recoil_peak_px": checked["recoil_peak_px"],
+            "recoil_composite": checked["recoil_composite"],
         })
     if prepared["exhaust"]:
         report.update({

@@ -98,12 +98,50 @@ REPO = r"D:\Projects\AgentCoding\BlenderMCP"
 
 CONFIG = {
     "hull": "Hull",
+    # the hull layer's root, when there is one. The probe below needs the same
+    # group the hit rays are fired at and for the same reason: on a parts scene
+    # the exhaust louvre is a *sibling* of the hull mesh, and the rear plate is
+    # assembled out of both. A probe that saw only the hull mesh would read the
+    # plate as clear exactly where the louvre stands in front of it.
+    "hull_root": None,
     "name": "Scar",
 
     # How far off the plate the decal floats, in hull lengths. About 1.5px on
     # MT. Too little and the holdout eats it in patches (see the docstring);
     # too much and it reads as a sticker hovering over the armour.
     "lift": 0.010,
+
+    # Push the decal out past the armour under it when, and only when, the
+    # camera cannot see it where `lift` puts it.
+    #
+    # `lift` clears rivets and it is measured from the plate's *fitted plane*. On
+    # a plate that is not flat the metal stands in front of that plane, and the
+    # lift is spent climbing back to the surface instead of clearing it. HT's
+    # rear plate is the case that named this: the plane is a good fit (the
+    # surface under the mark deviates 0.4px from it), the decal sat its full
+    # 1.57px proud, the plate itself is 98% visible - and only **30%** of the
+    # mark survived, because the plate is recessed under the engine deck and from
+    # a camera 30 degrees up the tank's own overhang covers the rest. Seated on
+    # the local high point, 3.3px out, it is **100%** visible.
+    #
+    # Conditional, because the high point alone is too blunt a rule: HT's glacis
+    # bulges 7.8px inside the mark's footprint - a towing hook or a lamp standing
+    # proud - and a decal floating that far off a plate it is already 94% visible
+    # on reads as a sticker hovering over the tank. So visibility is measured
+    # first and the seat is only raised for a mark that is actually being eaten.
+    # That makes it a no-op wherever things already work, which is what makes it
+    # safe for tanks already rendered, and it only ever pushes *outward*, so a
+    # mark that was visible cannot become hidden.
+    "seat_on_bulge": True,
+    # rays per pass, over the largest mark's own footprint. The footprint and not
+    # the plate: the plate can bulge anywhere, but only what is under the mark
+    # can eat it - and only the mark's own outline can reach past the plate's
+    # edge into whatever stands beyond it, which is exactly what happens here.
+    "seat_samples": 72,
+    # Least of the mark the camera must see, at the plate's best heading, before
+    # the seat is left alone. HT: rear 0.30 (raised), glacis 0.94 and both sides
+    # 1.00 (left alone).
+    "seat_min_visible": 0.70,
 
     # Angular resolution of the disc. 26 segments is where the outline stops
     # showing facets at these radii; rings are cheap and buy a smooth ramp.
@@ -244,6 +282,171 @@ def faces(cfg=None):
     """The plates that were found, in the order they were stamped."""
     found, _scale = plates(cfg)
     return list(found.keys())
+
+
+def _mark_extent(scale):
+    """Half-extents of the largest mark, across the plate and up it.
+
+    One definition, used by the seat probe and by `fits`. Across and along are
+    separate because a gouge is stretched, and one number for both would call a
+    long scrape on a wide plate too big.
+    """
+    tall = max(float(l["radius"]) for l in LEVELS) * scale
+    wide = max(float(l["radius"]) * float(l.get("stretch", 1.0))
+               for l in LEVELS) * scale
+    return wide, tall
+
+
+def _armour(cfg):
+    """The meshes the decal has to sit clear of."""
+    tp = _mod("tank_parts")
+    scene = bpy.context.scene
+    root = (scene.objects[cfg["hull_root"]] if cfg.get("hull_root")
+            else _hull(cfg))
+    return [o for o in tp.hierarchy(root)
+            if o.type == "MESH" and len(o.data.vertices)]
+
+
+def _footprint(point, normal, tangent, scale, cfg):
+    """Sample points over the largest mark's outline, in world space."""
+    n = Vector(normal).normalized()
+    t = Vector(tangent).normalized()
+    u = n.cross(t).normalized()
+    wide, tall = _mark_extent(scale)
+    rings = max(1, int(cfg["seat_samples"]) // 12)
+    pts = []
+    for ring in range(rings + 1):
+        frac = ring / float(rings)
+        spokes = 1 if ring == 0 else 12
+        for k in range(spokes):
+            th = 2.0 * math.pi * k / float(spokes)
+            pts.append(Vector(point) + t * (frac * wide * math.cos(th))
+                       + u * (frac * tall * math.sin(th)))
+    return pts, n
+
+
+def _seen_from_camera(pts, n, out, targets, dg, scale, cfg):
+    """The share of `pts` the camera can see, at the best of the headings.
+
+    The camera comes from `sprite_atlas`, not from a basis rebuilt out of the
+    angles, for the reason the plate table takes it from there. The render spins
+    the tank and holds the camera still, so the ray is spun back instead and the
+    geometry stays where it is.
+    """
+    sa = _mod("sprite_atlas")
+    hp = _mod("hit_point")
+    hpc = hp.CONFIG
+    cam = sa.camera_matrix(Vector((0.0, 0.0, 0.0)), hpc["azimuth"],
+                           hpc["camera_elevation"], 1.0)
+    toward = cam.col[2].to_3d().normalized()
+    steps = max(1, int(hpc["check_steps"]))
+    best, best_step = 0.0, 0
+    for step in range(steps):
+        spin = Matrix.Rotation(math.radians(360.0 * step / steps), 3, "Z")
+        to_cam = spin.transposed() @ toward       # a rotation: transpose inverts
+        if n.dot(to_cam) <= 0.0:
+            continue                              # turned away; nothing to see
+        clear = sum(1 for p in pts
+                    if hp._cast(targets, dg, p + to_cam * 1e-4, to_cam,
+                                scale * 3.0) is None)
+        share = clear / float(len(pts))
+        if share > best:
+            best, best_step = share, step
+    return best, best_step
+
+
+def seat(face, cfg=None):
+    """How far out the decal has to sit on this plate, and why that much.
+
+    Two passes, and the order is the whole point. First: is the mark visible
+    where `lift` puts it? If it is, that is the answer and nothing moves - see
+    CONFIG["seat_on_bulge"] for why a rule that always seated on the high point
+    is worse than no rule on a glacis with a towing hook on it.
+
+    Only for a mark the camera cannot see are rays fired down the plate's normal
+    over the mark's own footprint, and the seat becomes the high point they find.
+    The largest mark's footprint for every level on purpose: one seat per plate
+    means the three levels share a plane, and a deeper hit that floated
+    differently from a lighter one would read as the armour moving.
+
+    Probed against the hull group, not with `scene.ray_cast`, and that was worth
+    two wrong answers here: the scene cast hits `Scar` itself and the effect
+    objects that the last run leaves in the scene, so it reports a bulge which is
+    really the previous frame's decal.
+    """
+    cfg = dict(CONFIG, **(cfg or {}))
+    found, scale = plates(cfg)
+    if face not in found:
+        raise RuntimeError("no %r plate stamped on %s" % (face, cfg["hull"]))
+    point, normal, tangent, _extent = found[face]
+    lift = float(cfg["lift"]) * scale
+    if not cfg["seat_on_bulge"]:
+        return lift, {"seat_on_bulge": False}
+
+    hp = _mod("hit_point")
+    targets = _armour(cfg)
+    dg = bpy.context.evaluated_depsgraph_get()
+    pts, n = _footprint(point, normal, tangent, scale, cfg)
+
+    at_lift, best_step = _seen_from_camera([p + n * lift for p in pts], n, normal,
+                                           targets, dg, scale, cfg)
+    why = {"seat_on_bulge": True, "lift": round(lift, 6),
+           "visible_at_lift": round(at_lift, 3), "best_heading": best_step,
+           "probed": len(pts)}
+    if at_lift >= float(cfg["seat_min_visible"]):
+        why["raised"] = False
+        return lift, why
+
+    depths = []
+    for q in pts:
+        got = hp._cast(targets, dg, q + n * scale, -n, scale * 2.0)
+        if got is not None:
+            depths.append(float((got[1] - Vector(point)).dot(n)))
+    # never inward: a surface sitting *behind* its own fitted plane under the
+    # whole mark is already clear, and pulling the decal in to meet it would undo
+    # the clearance `lift` is there to give
+    bulge = max(max(depths), 0.0) if depths else 0.0
+    seated = bulge + lift
+    after, _ = _seen_from_camera([p + n * seated for p in pts], n, normal,
+                                 targets, dg, scale, cfg)
+    why.update({"raised": True, "bulge": round(bulge, 6),
+                "visible_after": round(after, 3)})
+    return seated, why
+
+
+def seats(cfg=None):
+    """Per plate: the seat, and the bulge that asked for it. In hull lengths."""
+    cfg = dict(CONFIG, **(cfg or {}))
+    _found, scale = plates(cfg)
+    out = {}
+    for face in faces(cfg):
+        distance, why = seat(face, cfg)
+        out[face] = dict(why, seat=round(distance, 6),
+                         seat_over_lift=round(distance / max(why["lift"], 1e-9), 2)
+                         if why.get("lift") else None)
+    out["hull_length"] = round(scale, 6)
+    return out
+
+
+def _mark_visibility(cfg=None):
+    """Per plate: how much of the mark the camera sees, where it is being put.
+
+    The one number that says whether this layer has anything on it, and the one
+    that was missing: `faceon` 0.999 and `visible` 0.98 both described HT's rear
+    plate correctly while every mark drawn on it was eaten.
+    """
+    cfg = dict(CONFIG, **(cfg or {}))
+    found, scale = plates(cfg)
+    targets = _armour(cfg)
+    dg = bpy.context.evaluated_depsgraph_get()
+    out = {}
+    for face, (point, normal, tangent, _e) in found.items():
+        pts, n = _footprint(point, normal, tangent, scale, cfg)
+        distance, _why = seat(face, cfg)
+        share, step = _seen_from_camera([p + n * distance for p in pts], n,
+                                        normal, targets, dg, scale, cfg)
+        out[face] = {"visible": round(share, 3), "at_heading": step}
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -419,7 +622,22 @@ def build(cfg=None):
 
 
 def set_state(face, index, count=None, cfg=None):
-    """Rebuild the mark for one plate at one level of damage."""
+    """Rebuild the mark for one plate at one level of damage.
+
+    `cfg["seats"]`, when given, is `face -> distance` measured **before** the
+    render job started, and it is not an optimisation.
+
+    A phase hook runs inside `render_atlas`, and the scene there is mid-flight:
+    the layer's own root is put back before the hook is called, but the *holdout*
+    objects - the tank - are still spun to the last angle of the previous phase.
+    So a hook that measures the scene measures the plate's rest-frame normal
+    against geometry standing at some other heading. Measured: seating on a
+    bulge probed inside the hook put every mark clear of the hull, visible from
+    nine or ten headings out of twelve instead of five, and the check called it
+    "100% hangs off the tank" - which is what it was. This is the same trap that
+    once made the camera fit read meshes a previous layer's hook had already
+    moved, and it has the same rule: measure at rest, hand the number in.
+    """
     cfg = dict(CONFIG, **(cfg or {}))
     found, scale = plates(cfg)
     if face not in found:
@@ -430,8 +648,12 @@ def set_state(face, index, count=None, cfg=None):
     ob = bpy.context.scene.objects.get(cfg["name"])
     if ob is None:
         ob = build(cfg)
-    ob.matrix_world = _frame(point, normal, tangent,
-                             float(cfg["lift"]) * scale)
+    # `seat` rather than `lift`: the plane is a fit, and on a plate that is not
+    # flat the metal stands in front of it. See CONFIG["seat_on_bulge"]. Taken
+    # from the caller when the caller measured it at rest - see the docstring.
+    given = (cfg.get("seats") or {}).get(face)
+    distance = float(given) if given is not None else seat(face, cfg)[0]
+    ob.matrix_world = _frame(point, normal, tangent, distance)
     verts, faces_out, colour = _disc(cfg, level, scale)
     _mod("muzzle_flash")._write_mesh(ob.data, verts, faces_out, colour)
     return ob
@@ -454,11 +676,7 @@ def fits(cfg=None):
     """
     cfg = dict(CONFIG, **(cfg or {}))
     found, scale = plates(cfg)
-    # across and along separately, because a gouge is stretched: one number for
-    # both would call a long scrape on a wide plate too big
-    wide = max(float(l["radius"]) * float(l.get("stretch", 1.0))
-               for l in LEVELS) * scale
-    tall = max(float(l["radius"]) for l in LEVELS) * scale
+    wide, tall = _mark_extent(scale)
     out = {}
     for name, (_p, _n, _t, extent) in found.items():
         half = [max(float(extent[0]), 1e-9), max(float(extent[1]), 1e-9)]

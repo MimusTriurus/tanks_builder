@@ -135,6 +135,20 @@ CONFIG = {
     # on its side is not the face, it is a detail on the face.
     "min_share": 0.20,
 
+    # --- visibility, which is not orientation -------------------------------
+    # How many facets to consider per face before choosing. One was the old
+    # behaviour and it is right whenever the biggest facet is also an open one.
+    "candidates": 4,
+    # Rays per facet for the visibility share, and how far off the surface they
+    # start so a facet does not occlude itself. In hull lengths.
+    "visible_samples": 40,
+    "visible_lift": 0.004,
+    # Least the camera may see of the chosen plate, at the best heading of the
+    # twelve. Half, matching `min_facing`, and for the same reason: below that
+    # there is not enough of it on screen to draw a shell hole on. HT's rear
+    # plate measured 0.30 and every mark on it was eaten.
+    "min_visible": 0.5,
+
     # --- the check render ---------------------------------------------------
     # The whole tank: with the turret off, the open ring lets the far side's
     # spike show through the deck. See `check`.
@@ -270,11 +284,16 @@ def _fan(targets, dg, lo, hi, out, cfg):
     return u, hits
 
 
-def _mode(hits, hull_length, cfg):
-    """The biggest facet among these hits: seed from the fullest normal bin,
-    then let mean-shift settle it onto its own hits."""
+def _modes(hits, hull_length, cfg):
+    """Candidate facets, richest normal bin first.
+
+    `_mode` took the fullest bin and stopped, which reads as "the biggest facet
+    is the plate" and is right up to the point where the biggest facet is one
+    the camera cannot see. Enumerating a few lets the caller judge them on
+    visibility - see `_visible_share`.
+    """
     if not hits:
-        return None, [], 0.0
+        return []
     bins = {}
     step = float(cfg["bin_deg"])
     for h in hits:
@@ -282,8 +301,29 @@ def _mode(hits, hull_length, cfg):
         key = (int(math.floor(_elevation(n) / step)),
                int(math.floor(math.degrees(math.atan2(n.y, n.x)) / step)))
         bins.setdefault(key, []).append(h)
+    out, seen_normals = [], []
+    for group in sorted(bins.values(), key=len, reverse=True):
+        if len(out) >= max(1, int(cfg["candidates"])):
+            break
+        normal, kept, share = _mode(group, hits, hull_length, cfg)
+        if normal is None:
+            continue
+        # two bins either side of one facet's normal settle onto the same facet;
+        # keeping both would spend the budget re-judging one answer
+        if any(normal.dot(prev) > cfg["cluster_cos"] for prev in seen_normals):
+            continue
+        seen_normals.append(normal)
+        out.append((normal, kept, share))
+    return out
+
+
+def _mode(seed_group, hits, hull_length, cfg):
+    """One facet: seed from `seed_group`, then let mean-shift settle it onto its
+    own hits."""
+    if not hits or not seed_group:
+        return None, [], 0.0
     seed = Vector((0.0, 0.0, 0.0))
-    for h in max(bins.values(), key=len):
+    for h in seed_group:
         seed += h["normal"]
     if seed.length < 1e-9:
         return None, [], 0.0
@@ -315,6 +355,53 @@ def _mode(hits, hull_length, cfg):
     return settled.normalized(), kept, len(kept) / float(len(hits))
 
 
+def _visible_share(targets, dg, kept, normal, hull_length, cfg):
+    """How much of a facet the camera can actually see, at its best heading.
+
+    `facing` answers a different question and answers it well: how much of
+    itself a plate at this inclination presents. What it cannot know is whether
+    anything is *in the way*, and on a hull with an overhanging engine deck that
+    is the whole story. HT's rear plate scores `faceon` 0.999 - the best of its
+    four - and never gets past 30% visible on any of the twelve headings, being
+    recessed under the deck. Every mark drawn on it was eaten by the holdout,
+    and three separate checks complained about the symptoms.
+
+    The camera comes from `sprite_atlas` rather than from a basis rebuilt out of
+    the angles, for the reason the plate table takes it from there: two
+    derivations of one camera are two things to keep in agreement.
+
+    The render spins the tank and leaves the camera still, so the ray direction
+    is spun *back* instead - the geometry being probed is unspun.
+    """
+    sa = _sibling("sprite_atlas")
+    cam = sa.camera_matrix(Vector((0.0, 0.0, 0.0)), cfg["azimuth"],
+                           cfg["camera_elevation"], 1.0)
+    toward = cam.col[2].to_3d().normalized()
+    steps = max(1, int(cfg["check_steps"]))
+    lift = float(cfg["visible_lift"]) * hull_length
+    # thin the samples: this is a share, and a few hundred rays settle it
+    stride = max(1, len(kept) // max(8, int(cfg["visible_samples"])))
+    pts = [h["point"] for h in kept[::stride]]
+    if not pts:
+        return 0.0, 0
+
+    best, best_h = 0.0, 0
+    for step in range(steps):
+        spin = Matrix.Rotation(math.radians(360.0 * step / steps), 3, "Z")
+        to_cam = spin.transposed() @ toward      # a rotation: transpose inverts
+        if normal.dot(to_cam) <= 0.0:
+            continue                              # turned away; nothing to see
+        clear = 0
+        for p in pts:
+            origin = p + to_cam * lift
+            if _cast(targets, dg, origin, to_cam, hull_length * 3.0) is None:
+                clear += 1
+        share = clear / float(len(pts))
+        if share > best:
+            best, best_h = share, step
+    return best, best_h
+
+
 def _measure_face(targets, dg, lo, hi, name, out, hull_length, cfg):
     u, hits = _fan(targets, dg, lo, hi, out, cfg)
     step = float(cfg["bin_deg"])
@@ -329,9 +416,26 @@ def _measure_face(targets, dg, lo, hi, name, out, hull_length, cfg):
              "camera_can_see": len(seen),
              "elevation_hist_15deg": {"%+d" % k: hist[k] for k in sorted(hist)}}
 
-    normal, kept, share = _mode(seen, hull_length, cfg)
-    if normal is None:
+    # Candidates, then judged on what the camera can see of them. Size alone
+    # picks a recessed panel over a smaller open one, and a plate nothing can be
+    # drawn on is not a plate.
+    cands = []
+    for normal, kept, share in _modes(seen, hull_length, cfg):
+        vis, vis_h = _visible_share(targets, dg, kept, normal, hull_length, cfg)
+        cands.append({"normal": normal, "kept": kept, "share": share,
+                      "visible": vis, "visible_at": vis_h,
+                      # the product, because either being small is fatal and for
+                      # opposite reasons: a small share is a detail on the face,
+                      # an unseen one is a surface behind the tank's own metal
+                      "score": share * vis})
+    trace["candidates"] = [
+        {"elevation": round(_elevation(c["normal"]), 1),
+         "share": round(c["share"], 3), "visible": round(c["visible"], 3),
+         "score": round(c["score"], 3)} for c in cands]
+    if not cands:
         return None, trace
+    pick = max(cands, key=lambda c: c["score"])
+    normal, kept, share = pick["normal"], pick["kept"], pick["share"]
 
     pts = np.array([[h["point"].x, h["point"].y, h["point"].z] for h in kept])
     point = Vector(np.median(pts, axis=0).tolist())
@@ -350,13 +454,19 @@ def _measure_face(targets, dg, lo, hi, name, out, hull_length, cfg):
         "face": name, "point": point, "normal": normal,
         "tangent": tangent, "up_slope": up_slope, "extent": extent,
         "hits": len(kept), "share": share,
+        # how much of it the camera can see at its best heading, which is a
+        # different question from `faceon` and the one that decides whether a
+        # mark drawn here survives the holdout
+        "visible": round(pick["visible"], 4),
+        "visible_at": pick["visible_at"],
         "faceon": float(normal.dot(out)),
         "elevation": _elevation(normal),
         "objects": sorted({h["object"] for h in kept}),
         "source": "rays",
     }
     trace["chosen"] = {"elevation": round(plate["elevation"], 1),
-                       "share": round(share, 3), "hits": len(kept)}
+                       "share": round(share, 3), "hits": len(kept),
+                       "visible": round(pick["visible"], 3)}
     return plate, trace
 
 
@@ -432,6 +542,14 @@ def set_hits(cfg=None):
                 "the %s plate is only %.0f x %.0f mm of hull - that is a strip, "
                 "not a face; impacts scattered on it will look pinned"
                 % (name, 1000.0 * plate["extent"][0], 1000.0 * plate["extent"][1]))
+        if plate.get("visible") is not None and plate["visible"] < cfg["min_visible"]:
+            warnings.append(
+                "the camera sees only %.0f%% of the %s plate at its best "
+                "heading - it is oriented well (faceon %.3f) and standing behind "
+                "the tank's own metal, so marks drawn on it are eaten by the "
+                "holdout. Mark an open panel by hand as %s.%s"
+                % (100.0 * plate["visible"], name, plate["faceon"],
+                   cfg["plate_prefix"], name.capitalize()))
         if plate["share"] < cfg["min_share"]:
             warnings.append(
                 "the %s plate is only %.0f%% of what the camera can see on that "
@@ -472,6 +590,10 @@ def set_hits(cfg=None):
         "faceon": round(p["faceon"], 3),
         "elevation": round(p["elevation"], 1),
         "hits": p["hits"], "share": round(p["share"], 3),
+        # a hand-marked plate has no measured visibility, so this is None rather
+        # than absent: the difference between "the camera sees none of it" and
+        # "nobody asked" is worth keeping in the report
+        "visible": p.get("visible"), "visible_at": p.get("visible_at"),
         "objects": p["objects"], "source": p["source"],
     } for p in plates]
 
