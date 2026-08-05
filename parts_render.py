@@ -106,6 +106,13 @@ CONFIG = {
     # `keep` ("ground" holds the bottom run, which is what the tank stands on).
     # A belt named here has to be named in `rebuild` too: the reshape is a loop,
     # and something has to be laid out on it. One side only is the A/B.
+    #
+    # The word `"preview"` instead of a dict means "the shape the bench is
+    # holding", read off the `<belt>.Preview` object that `track_cycle.preview`
+    # leaves in the scene. That is the whole point of it: retyping the four
+    # numbers here is one shape in two places, and it fails in the quiet
+    # direction - drag the preview once more and this keeps the old figure.
+    # A missing preview raises; see `track_cycle.shape_from_preview`.
     "reshape": {},
 
     # the gun tube slides back into the turret on firing: a phase axis on a
@@ -367,6 +374,10 @@ class Body:
                 raise RuntimeError("%r is not one of the belts %s"
                                    % (name, [b.ob.name for b in self.belts]))
             shape = shapes.pop(name, None)
+            if isinstance(shape, str):
+                # the shape the bench is holding rather than a copy of it typed
+                # in here - `track_cycle` owns the stamp, so it reads it
+                shape = tc.shape_from_preview(name)
             self.built[name] = tc.rebuild(
                 src, onto=(src.on_loop(**shape) if shape else None))
             src.restore()      # the original stays as it arrived, and unrendered

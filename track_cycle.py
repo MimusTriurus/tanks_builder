@@ -963,6 +963,11 @@ PREVIEW = {
 # the asset.
 SHAPE = "_loop_shape"
 BASE = "_loop_base_scale"
+# `keep` is a word, so it cannot ride in the float array above. It is stamped
+# because `shape_from_preview` hands the whole shape to the render, and a shape
+# missing the one field that decides *what stays put* would put the tank a
+# couple of pixels off its tile without saying anything.
+KEEP = "_loop_keep"
 
 
 def preview(cfg=None):
@@ -1053,6 +1058,7 @@ def preview(cfg=None):
                      float(1.0 if corner is None else corner),
                      1.0 if in_world else 0.0]
         ob[BASE] = [float(v) for v in ob.scale]
+        ob[KEEP] = str(cfg["keep"])
 
         row = dict(onto.shaped, belt=name, preview=ob.name)
         if took is not None:
@@ -1072,6 +1078,43 @@ def preview(cfg=None):
     return {"restored" if cfg["restore"] else "previewed": rows,
             "the_blend_is_now_modified": True,
             "put_it_back_with": "track_cycle.preview({'restore': True})"}
+
+
+def shape_from_preview(belt, cfg=None):
+    """The loop a `.Preview` is holding, as keywords for `on_loop`.
+
+    The bench and the render were two halves that did not speak: the shape was
+    stamped on the preview and the render wanted the same four numbers typed into
+    `parts_render.CONFIG["reshape"]`. That is one shape living in two places, and
+    it goes wrong in the quiet direction - the preview gets dragged once more, the
+    config keeps the previous figure, and the atlas comes out on a loop nobody
+    chose. Nothing in the render report would say so, because a belt laid on a
+    stated loop reports the loop it was given.
+
+    So the sentinel `"preview"` in `reshape` means *the shape being looked at*,
+    and it is read from the object that carries it.
+
+    This raises rather than falling back to the delivered loop, and the failure
+    is the useful half. A preview dies with `{"restore": True}`, so its absence
+    means the shape was deliberately put back - and rendering the belt as
+    delivered while the config says `"preview"` is exactly the silent answer this
+    exists to remove. The message names the alternative: type the numbers.
+    """
+    import bpy
+    cfg = dict(PREVIEW, **(cfg or {}))
+    name = belt + cfg["suffix"]
+    ob = bpy.data.objects.get(name)
+    if ob is None or SHAPE not in ob:
+        raise RuntimeError(
+            "%r carries no shape, so there is nothing for `reshape` to take: run "
+            "track_cycle.preview(), scale it in the viewport, take the scale - or "
+            "give `reshape` the numbers instead of the word \"preview\"" % name)
+    length, height, corner, in_world = (float(v) for v in ob[SHAPE])
+    return {"length": length, "height": height, "corner": corner,
+            "in_world": bool(in_world),
+            # older previews predate the stamp; the default is the one the bench
+            # itself uses, and it is the one that holds the bottom run
+            "keep": str(ob.get(KEEP, cfg["keep"]))}
 
 
 if __name__ == "__main__":
