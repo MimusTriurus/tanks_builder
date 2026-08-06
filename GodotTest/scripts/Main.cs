@@ -108,6 +108,15 @@ public sealed partial class Main : Node2D
     /// run that has no interface - see <see cref="SelectionRing"/>.</summary>
     private SelectionRing? _ring;
 
+    /// <summary>The same mark in red, under whoever the driven tank is shooting
+    /// at. Two rings rather than one that changes colour: both statements are
+    /// true at once and about different tanks.</summary>
+    private SelectionRing? _targetRing;
+
+    /// <summary>What the gunnery marks were last painted for. See the repaint in
+    /// <see cref="_Process"/>.</summary>
+    private (int, Vector2I, Vehicle?, Vector2I?, bool) _painted;
+
     private Label _hud = null!;
     private Camera2D _camera = null!;
 
@@ -398,6 +407,9 @@ public sealed partial class Main : Node2D
     /// <summary>--hit &lt;deg&gt;: take one on the way in, from that bearing. A
     /// bearing rather than a plate name, because that is what the game has.</summary>
     private double? _hitAtStart;
+    /// <summary>--attack &lt;n&gt;: the driven tank opens fire on vehicle n, by the
+    /// index the number keys use.</summary>
+    private int? _attackAtStart;
     /// <summary>--damage &lt;n&gt;: every plate already marked n levels deep, so a
     /// capture of a knocked-about tank does not need n presses of U.</summary>
     private int _damageAtStart;
@@ -479,6 +491,12 @@ public sealed partial class Main : Node2D
             else if (userArgs[i] == "--hit" && i + 1 < userArgs.Length
                      && double.TryParse(userArgs[i + 1], out double from))
                 _hitAtStart = from;
+            // Which tank the driven one opens fire on, by the same index the
+            // number keys use. A capture of an engagement otherwise needs a hand
+            // on the mouse, which is the one thing --capture exists to avoid.
+            else if (userArgs[i] == "--attack" && i + 1 < userArgs.Length
+                     && int.TryParse(userArgs[i + 1], out int quarry))
+                _attackAtStart = quarry;
             // Invariant culture, and this is the first flag that needs saying
             // so: the machine is set to a locale whose decimal mark is a comma,
             // so a plain TryParse of "1.4" fails, leaves the default in place
@@ -730,6 +748,16 @@ public sealed partial class Main : Node2D
         {
             _ring = new SelectionRing { Field = _field, Target = Active };
             AddChild(_ring);
+            _targetRing = new SelectionRing
+            {
+                Field = _field,
+                Target = null,
+                Ink = SelectionRing.Hostile,
+                // Tighter than the selection's, so on the day a tank is both
+                // yours and somebody's target the two rings are two rings.
+                Inset = 0.70f,
+            };
+            AddChild(_targetRing);
         }
 
         if (_selfTest)
@@ -770,6 +798,8 @@ public sealed partial class Main : Node2D
                 _tank.Damage(face, ScatterAt(++_hitCount));
         if (_driveTo is not null)
             OrderMoveTo(_field.ClampCell(_driveTo.Value));
+        if (_attackAtStart is int foe && foe >= 0 && foe < _vehicles.Count)
+            Engage(Active, _vehicles[foe]);
         if (_fireAtStart)
             Fire();
         if (_hitAtStart is not null)
@@ -804,9 +834,76 @@ public sealed partial class Main : Node2D
             Math.Min(Active.PathStep, Active.Path.Count),
             Active.Path.Count - Math.Min(Active.PathStep, Active.Path.Count));
         _field.QueueRedraw();
+        // The gunnery marks belong to the driven tank too, for the same reason
+        // the route does: every tank may be engaging something, and what is
+        // painted on the ground is what the tank in hand can see.
+        PaintGunnery();
         FocusSound();
         _panel?.Sync();
         _tank.QueueRedraw();
+    }
+
+    /// <summary>
+    /// Point a tank's gun at another one, or at nobody.
+    ///
+    /// One way in, called by the right button, by the panel and by --attack, so
+    /// the three cannot disagree about what a target is. A tank cannot be given
+    /// itself: right-clicking your own tank means "stop shooting", which is the
+    /// same shape as left-clicking it meaning "stay put".
+    /// </summary>
+    private void Engage(Vehicle shooter, Vehicle? target)
+    {
+        shooter.Target = ReferenceEquals(shooter, target) ? null : target;
+        shooter.Solution = Gunnery.None;
+        if (shooter == Active)
+        {
+            // Both of these drive the turret and would fight the gun for it,
+            // which is the same reason a move order takes them back.
+            _aimWithMouse = false;
+            _spinning = false;
+        }
+        PaintGunnery();
+    }
+
+    /// <summary>
+    /// The lanes, the live one and the ring under the target - all off the driven
+    /// tank, all recomputed together.
+    ///
+    /// The six arcs are only drawn once there is a target, and that is the point
+    /// of them: with nobody to shoot at they are clutter, and with a target that
+    /// is not on a lane they are the answer to the question the player now has,
+    /// which is not "why did it not fire" but "where do I have to drive".
+    /// </summary>
+    private void PaintGunnery()
+    {
+        if (_targetRing is not null)
+            _targetRing.Target = Active.Target;
+        if (Active.Target is null)
+        {
+            _field.Arcs = Array.Empty<Vector2I>();
+            _field.Aim = Array.Empty<Vector2I>();
+            _field.QueueRedraw();
+            return;
+        }
+        var arcs = new List<Vector2I>();
+        foreach (int heading in HexField.EdgeHeadings)
+            foreach (Vector2I cell in _field.Lane(Active.Cell, heading))
+            {
+                arcs.Add(cell);
+                // Stops at the first tank, that one included. A lane painted
+                // straight through a hull would promise reach the shell has not
+                // got, and where it stops is the same "blocked" the solution
+                // reports - said on the ground, where it does not have to be
+                // read.
+                if (Vehicle.At(_vehicles, cell) is not null)
+                    break;
+            }
+        _field.Arcs = arcs;
+        Shot shot = Gunnery.Solve(_field, _vehicles, Active, Active.Target);
+        _field.Aim = shot.Clear
+            ? _field.Lane(Active.Cell, shot.Heading, shot.Range)
+            : Array.Empty<Vector2I>();
+        _field.QueueRedraw();
     }
 
     /// <summary>
@@ -1062,6 +1159,30 @@ public sealed partial class Main : Node2D
         foreach (Vehicle v in _vehicles)
             if (v.Audio is not null)
                 v.Audio.Enabled = _soundEnabled;
+    }
+
+    /// <summary>
+    /// The gunnery field for <c>--trace</c> and for the panel.
+    ///
+    /// It reports the reason rather than a yes or no, because from outside a
+    /// tank that is not shooting looks the same whether it has no line, has
+    /// somebody in the way, is still swinging its gun round or is simply
+    /// reloading - and the first two are answered by driving somewhere else
+    /// while the last two are answered by waiting.
+    /// </summary>
+    private string AimLine()
+    {
+        Vehicle v = Active;
+        if (v.Target is null)
+            return "-";
+        if (!v.Solution.OnLane)
+            return $"{v.Target.Tag} no lane";
+        string state = v.Solution.BlockedAt is Vector2I b ? $"blocked ({b.X},{b.Y})"
+            : v.Moving ? "moving"
+            : !Gunnery.Laid(v.Sprite.TurretFacing, v.Solution.Heading) ? "laying"
+            : v.ReloadLeft > 0.0 ? $"loading {v.ReloadLeft:F1}s"
+            : "ready";
+        return $"{v.Target.Tag}@{v.Solution.Heading}deg/{v.Solution.Range} {state}";
     }
 
     /// <summary>
@@ -1363,22 +1484,33 @@ public sealed partial class Main : Node2D
     /// <summary>Fire. Restarts the flash from frame zero rather than being
     /// ignored while one is running, so holding the key reads as a rate of fire
     /// instead of doing nothing.</summary>
-    private void Fire()
+    private void Fire() => Fire(Active);
+
+    /// <summary>
+    /// One round out of one tank's gun.
+    ///
+    /// Takes the vehicle rather than working on the driven one, because a tank
+    /// left engaging a target goes on firing after you have selected somebody
+    /// else - which is the whole of the attack scene. Key Z is the same thing
+    /// aimed at nothing in particular.
+    /// </summary>
+    private void Fire(Vehicle v)
     {
-        _shotFrame = 0;
+        v.ShotFrame = 0;
+        v.ReloadLeft = v.Profile.ReloadTime;
         // The sprite shear only if it is asked for: the tube's own recoil is the
         // real article now, and the two together show one true movement and one
         // invented one.
         if (_recoilShear)
-            _recoil.Fire(WrapAngle(_tank.TurretFacing - _tank.HullFacing));
+            v.Recoil.Fire(WrapAngle(v.Sprite.TurretFacing - v.Sprite.HullFacing));
         // The tube goes back on the same trigger and on its own clock: the two
         // events last different lengths of time, so one counter would give one of
         // them the wrong tempo. See RecoilLoop.
-        Active.Barrel.Fire();
+        v.Barrel.Fire();
         // Third thing off one trigger, and a third clock, for the same reason:
         // the gun's report is 1.2s on the light and 3.4s on the heavy, and neither
         // is the 34 frames the flash runs or the 28 the tube takes to come home.
-        Active.Audio?.Fire();
+        v.Audio?.Fire();
     }
 
     /// <summary>The shot runs on screen frames, not seconds. The sheet is a
@@ -1453,17 +1585,38 @@ public sealed partial class Main : Node2D
     /// </summary>
     private void TakeHit(double fromBearing)
     {
-        AtlasSet atlas = _tank.Atlas!;
+        // The key and the flag aim the harness dial, so this one moves it. A
+        // shell arriving from another tank must not: the dial says which side
+        // the *next* manual hit comes from, and a firefight rewriting it would
+        // make the panel a report of what happened rather than a control.
+        _hitSide = SideFor(fromBearing);
+        TakeHit(Active, HitFrom, Bite, Calibre);
+    }
+
+    /// <summary>
+    /// One shell into one tank, from a world bearing, with the round's own bite
+    /// and calibre.
+    ///
+    /// The victim is a parameter for the reason the shooter is: a tank is shot
+    /// at by another tank now, and the one being driven is as likely to be the
+    /// gunner as the target. Everything else is unchanged - which is the point,
+    /// because the armour model is exactly as good at answering a shell that
+    /// came from a neighbouring tank as one that came from a keypress.
+    /// </summary>
+    private void TakeHit(Vehicle victim, double fromBearing, int bite, float calibre)
+    {
+        TankSprite sprite = victim.Sprite;
+        AtlasSet atlas = victim.Atlas;
         if (!atlas.HasHit)
             return;
         // Snapped, not taken as given: a shell arrives from a neighbouring
         // cell, so every angle anything hands in resolves to one of the six
         // sides rather than to itself.
-        _hitSide = SideFor(fromBearing);
+        double from = HexField.EdgeHeadings[SideFor(fromBearing)];
         // Deterministic under --capture and --trace, which fix the time step so
         // two runs can be diffed; a random scatter would put the two hits in
         // different places and the diff would measure that instead.
-        _hitCount++;
+        victim.HitCount++;
         // How far along the plate this one landed, as a fraction of its
         // half-width. It is passed to both halves - the burst that shows the
         // shell arriving and the mark it leaves - because it is one shell, and
@@ -1472,23 +1625,89 @@ public sealed partial class Main : Node2D
         //
         // +-0.45 rather than the burst's old +-0.6: the mark has to stay on the
         // armour, and it is about 17px wide against half-widths of 38 to 61.
-        float scatter = ScatterAt(_hitCount);
-        string face = atlas.FaceFor(HitFrom, _tank.HullFacing);
+        float scatter = ScatterAt(victim.HitCount);
+        string face = atlas.FaceFor(from, sprite.HullFacing);
         // The calibre goes the same way as the scatter and for the same reason:
         // both are settled the moment the round lands, so both travel with it
         // rather than being looked up again while it is on screen.
-        _hit.Strike(face, scatter, Calibre);
+        victim.Hit.Strike(face, scatter, calibre);
         // How deep it goes is the calibre's business - see TankSprite.Damage.
         // A light round still walks a plate scorch -> gouge -> breach over three
         // hits, which is what shows that the phase axis is damage and not three
         // renders of one drawing; a heavy one gets there in one.
-        int level = _tank.Damage(face, scatter, Bite);
+        int level = sprite.Damage(face, scatter, bite);
         // The sound is chosen by the same level the mark is, so a round that
         // bounces is heard bouncing and one that goes through is heard going
         // through. Not the calibre directly: a light round on armour already
         // twice hit does go through, and the ear should be told the same thing
         // the plate is.
-        Active.Audio?.Struck(level);
+        //
+        // On the tank that was hit rather than on the one that fired: the ricochet
+        // rings off this armour, and its player is positioned there.
+        victim.Audio?.Struck(level);
+    }
+
+    /// <summary>
+    /// One tank engaging another: lay the gun, and fire when it is laid, loaded
+    /// and there is a line.
+    ///
+    /// **The rule that shapes all of it is that a gun fires down a flat side of
+    /// the hex and nowhere else.** Six lanes out of a cell, so a target that is
+    /// not standing on one cannot be shot at from here at all - the turret comes
+    /// round to the nearest lane and stops there, visibly not lined up, and the
+    /// six arcs go down on the ground saying where to drive. Moving is the
+    /// player's business: the right button says who, the left button says where,
+    /// and a tank that drove itself into a firing position would be answering
+    /// the second question with the first.
+    ///
+    /// Three more gates, each of which is a thing that would otherwise have to
+    /// be noticed on screen:
+    ///
+    /// - **Stopped.** The lane is computed from the cell the tank is standing
+    ///   in, and a tank between two cells is standing in neither. Firing on the
+    ///   move would mean picking one of them, which is a decision with no right
+    ///   answer rather than an implementation detail.
+    /// - **Not through somebody.** A tank in the lane stops the shell. It is
+    ///   also the only reason a solution can go away without either tank moving,
+    ///   which is why <see cref="Shot"/> reports it separately.
+    /// - **Loaded.** Per class, and the one figure that makes a heavy feel heavy
+    ///   while standing perfectly still.
+    /// </summary>
+    private void UpdateAttack(Vehicle v, double delta)
+    {
+        if (v.ReloadLeft > 0.0)
+            v.ReloadLeft = Math.Max(0.0, v.ReloadLeft - delta);
+        if (v.Target is null)
+        {
+            v.Solution = Gunnery.None;
+            return;
+        }
+        v.Solution = Gunnery.Solve(_field, _vehicles, v, v.Target);
+
+        // Where the gun is allowed to point. On a lane that is the lane; off one
+        // it is the nearest flat side to where the target actually is, so the
+        // turret tracks rather than parking at whatever heading it was left on.
+        // The eye then reads "aimed at it but not down a lane", which is exactly
+        // the situation.
+        int onto = v.Solution.OnLane
+            ? v.Solution.Heading
+            : HexField.EdgeHeadings[SideFor(Gunnery.HeadingOf(
+                  v.Target.GroundPoint - v.GroundPoint))];
+        double was = v.Sprite.TurretFacing;
+        v.Sprite.TurretFacing = Gunnery.Traverse(
+            was, onto, v.Profile.TurretRate * delta);
+        if (v.Sprite.TurretFacing != was)
+            v.Sprite.QueueRedraw();
+
+        if (v.Moving || !v.Solution.Clear || v.ReloadLeft > 0.0
+            || !Gunnery.Laid(v.Sprite.TurretFacing, v.Solution.Heading))
+            return;
+        Fire(v);
+        // The shell arrives from the far end of the lane it left along, which is
+        // the whole reason the gun is restricted to the six: the bearing the
+        // armour model wants is the firing heading turned round, exactly, with
+        // nothing snapped and nothing approximated. See AtlasSet.FaceFor.
+        TakeHit(v.Target, Mod(v.Solution.Heading + 180.0, 360.0), Bite, Calibre);
     }
 
     /// <summary>The hit runs on screen frames for the shot's reason: it is a
@@ -1722,6 +1941,24 @@ public sealed partial class Main : Node2D
                        : "hull+turret, about the ground");
         });
 
+        ui.Heading("gunnery");
+        // A dropdown rather than the six buttons the shot bearing gets: those
+        // are directions and have a shape, this is a list of tanks and how many
+        // there are is whatever loaded. "nobody" is first so index 0 is the
+        // ceasefire, which is what the right button on empty ground does too.
+        ui.Choice("target  (right-click a tank)",
+            new[] { "nobody" }.Concat(_loaded).ToArray(),
+            () => Active.Target is null ? 0 : _vehicles.IndexOf(Active.Target) + 1,
+            i => Engage(Active, i == 0 ? null : _vehicles[i - 1]));
+        // The reason, not a yes or no - see AimLine. The second line is what the
+        // rule costs, which is the question the rule raises: a gun that fires
+        // down six lanes can be pointed at a tank it cannot hit, and the number
+        // of cells it *could* hit from here is the answer to "so where do I go".
+        ui.Readout(() =>
+            $"{AimLine()}\nreload {Active.Profile.ReloadTime:F1}s, "
+            + $"traverse {Active.Profile.TurretRate:F0} deg/s, "
+            + $"{_field.Arcs.Count} cells down the six lanes");
+
         ui.Heading("armour");
         // A side of the hex rather than a bearing, because that is what the
         // game has: a shell comes from a neighbouring cell, and there are six
@@ -1830,7 +2067,11 @@ public sealed partial class Main : Node2D
         // The spin and the mouse only ever drive the tank being controlled, so
         // they only suspend that one's scan: a tank standing off to the side keeps
         // looking around while you spin the turret of the one you are driving.
-        if (!_scanEnabled || v.Moving || (v == Active && (_spinning || _aimWithMouse)))
+        // A tank with a target is laying its gun, and the scan is what it does
+        // with nothing to look at - so the target suspends it on that tank only,
+        // exactly as the spin and the mouse suspend it on the driven one.
+        if (!_scanEnabled || v.Moving || v.Target is not null
+            || (v == Active && (_spinning || _aimWithMouse)))
             return;
         double move = v.Scan.Advance(360.0 / v.Atlas.Count, delta);
         if (move == 0.0)
@@ -1907,6 +2148,11 @@ public sealed partial class Main : Node2D
                      // set that is audible. A trace with rising gates and a peak
                      // pinned at -inf is the shape of a device that never opened.
                      + $"  snd {SoundLine()}"
+                     // What the gun thinks, in the channel that survives
+                     // --no-ui. "no lane" and "blocked" are two different
+                     // reasons a tank is standing there not firing, and from
+                     // outside they look identical.
+                     + $"  aim {AimLine()}"
                      + $"  cell ({_cell.X},{_cell.Y})"
                      // Size for the same reason as the zoom: two captures at two
                      // sizes that came out identical would send you looking at
@@ -1949,6 +2195,10 @@ public sealed partial class Main : Node2D
             UpdateExhaust(v, delta);
             UpdateBurn(v, delta);
             UpdateScan(v, delta);
+            // Before the shot, because it is what pulls the trigger: the gun
+            // going off this frame has to reach UpdateShot with the flash on
+            // frame 0 rather than one frame stale.
+            UpdateAttack(v, delta);
             UpdateShot(v, delta);
             UpdateHit(v, delta);
             // Last, after every clock has stepped. The audio reads results of
@@ -1958,7 +2208,28 @@ public sealed partial class Main : Node2D
             v.Audio?.Update(v, delta);
         }
 
-        if (!Moving && _spinning)
+        // The marks are about the driven tank and both tanks move, so they are
+        // repainted on change rather than on a target being set: a lane that was
+        // clear when the order was given stops being clear when somebody drives
+        // into it. Memoised because that is a handful of cells rebuilt and a
+        // redraw of the whole field, and neither is free at sixty a second.
+        var mark = (_active, Active.Cell, Active.Target, Active.Target?.Cell,
+                    Active.Solution.Clear);
+        if (mark != _painted)
+        {
+            _painted = mark;
+            PaintGunnery();
+        }
+
+        // Both of these are turret controls, and a tank that has been told what
+        // to shoot at is already using its turret. Left in, the spin would wind
+        // the gun off the target once a frame and the engagement would read as a
+        // turret that cannot hold a lay.
+        if (Active.Target is not null)
+        {
+            // nothing - UpdateAttack has the gun
+        }
+        else if (!Moving && _spinning)
         {
             _tank.TurretFacing = Mod(_tank.TurretFacing + SpinSpeed * delta, 360.0);
             _tank.QueueRedraw();
@@ -1968,11 +2239,7 @@ public sealed partial class Main : Node2D
             Vector2 toMouse = GetGlobalMousePosition() - _tank.GlobalPosition;
             if (toMouse.Length() > 8.0f)
             {
-                // Screen y grows downward and the isometric view squashes the
-                // ground plane vertically by sin(elevation); undo both before
-                // reading a world heading off the mouse.
-                double worldY = -toMouse.Y / Math.Sin(Mathf.DegToRad(30.0));
-                double facing = Mod(Mathf.RadToDeg(Math.Atan2(worldY, toMouse.X)), 360.0);
+                double facing = Gunnery.HeadingOf(toMouse);
                 if (Math.Abs(facing - _tank.TurretFacing) > 0.01)
                 {
                     _tank.TurretFacing = facing;
@@ -1999,6 +2266,20 @@ public sealed partial class Main : Node2D
                     Select(pick);
                 else
                     OrderMoveTo(cell);
+                return;
+            }
+            // The right button is the gun and nothing else. Symmetrical with the
+            // left: what is standing on the cell decides, so a tank there means
+            // "shoot that one" and empty ground means "stop shooting". The
+            // driven tank's own cell resolves to the second - see Engage - which
+            // is the same reading left-clicking yourself gets.
+            if (mouse.ButtonIndex == MouseButton.Right && _vehicles.Count > 0
+                && _tank.Atlas is not null)
+            {
+                Vector2 local = _field.ToLocal(GetGlobalMousePosition());
+                Vector2I cell = _field.ClampCell(_field.CellAt(local));
+                Engage(Active, Vehicle.At(_vehicles, cell));
+                _panel?.Sync();
                 return;
             }
             float factor = mouse.ButtonIndex switch
@@ -2197,6 +2478,12 @@ public sealed partial class Main : Node2D
             s.Burning = false;
             s.FirePhase = -1;
             s.BurnPhase = -1;
+            // The ceasefire is part of the reset for the reason the repair is:
+            // R means the bench as it opened, and a tank left engaging would
+            // start putting holes back into the armour that was just fixed.
+            v.Target = null;
+            v.Solution = Gunnery.None;
+            v.ReloadLeft = 0.0;
             v.Hit.Reset();
             v.HitCount = 0;
             s.HitPhase = -1;
@@ -2226,6 +2513,7 @@ public sealed partial class Main : Node2D
         }
         _sizeLevel = 1.0;
         ApplySize();
+        PaintGunnery();
         _camera.Zoom = Vector2.One;
         _camera.Position = new Vector2(760, 500);
     }

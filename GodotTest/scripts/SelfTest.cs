@@ -2301,6 +2301,189 @@ public static class SelfTest
                      - 5.0 * wound.MaxPitchesPerFrame * wound.CapFrameRate) < 1e-9,
             $"{wound.SyncSpeed:F0} px/s - a coarser link stays in step further up");
 
+        GD.Print("gunnery: the gun fires down a flat side and nowhere else");
+
+        // A lane is a ray of Steps, so the two have to agree by construction -
+        // and this is where that gets asserted rather than assumed, because a
+        // second definition derived in axial coordinates would be right on the
+        // even columns and wrong on the odd ones, which a screenshot cannot tell
+        // apart from the pathfinder being wrong.
+        int strays = 0;
+        var firstStray = "";
+        for (int q = 0; q < field.Columns; q++)
+        for (int r = 0; r < field.Rows; r++)
+        foreach (int heading in HexField.EdgeHeadings)
+        {
+            var from = new Vector2I(q, r);
+            List<Vector2I> lane = field.Lane(from, heading);
+            for (int i = 0; i < lane.Count; i++)
+            {
+                (int back, int range) = field.LaneTo(from, lane[i]);
+                if (back == heading && range == i + 1)
+                    continue;
+                strays++;
+                if (firstStray.Length == 0)
+                    firstStray = $"({q},{r}) {heading} deg step {i + 1}"
+                                 + $" -> {back} deg at {range}";
+            }
+        }
+        Check("every cell down a lane reports that lane and that range",
+            strays == 0, $"{strays} wrong, first {firstStray}");
+
+        // The fact that makes the rule visible at all, and the reason the three
+        // tanks cannot simply shoot each other where they are parked. If this
+        // ever starts passing by accident - the home cells moved onto a common
+        // ray - the feature stops demonstrating itself the first time it is
+        // tried, which is worth being told about.
+        Check("two cells two columns apart on the same row share no lane",
+            field.LaneTo(new Vector2I(2, 2), new Vector2I(4, 2)).Heading < 0
+            && field.LaneTo(new Vector2I(4, 2), new Vector2I(2, 2)).Heading < 0,
+            "a gun restricted to six lanes has to have somewhere it cannot shoot");
+
+        Check("a neighbour is one cell down the lane that steps onto it",
+            HexField.EdgeHeadings.All(h =>
+            {
+                var mid = new Vector2I(4, 3);
+                Vector2I next = HexField.Step(mid, h);
+                (int lane, int range) = field.LaneTo(mid, next);
+                return lane == h && range == 1
+                       && HexField.HeadingTo(mid, next) == h;
+            }),
+            "the movement heading and the firing lane are meant to be one list");
+
+        // Reciprocity. Not decoration: the shell leaves along the heading and
+        // arrives along its reverse, and the armour model is handed that reverse
+        // directly rather than a bearing snapped back to a side. If the two ends
+        // of a lane disagreed, every plate would be chosen off a bearing that is
+        // 60 degrees out on half the shots.
+        int oneWay = 0;
+        for (int q = 0; q < field.Columns; q++)
+        for (int r = 0; r < field.Rows; r++)
+        foreach (int heading in HexField.EdgeHeadings)
+        foreach (Vector2I far in field.Lane(new Vector2I(q, r), heading))
+        {
+            (int back, _) = field.LaneTo(far, new Vector2I(q, r));
+            if (back != (heading + 180) % 360)
+                oneWay++;
+        }
+        Check("a lane read from the far end is the same lane reversed",
+            oneWay == 0,
+            $"{oneWay} pairs disagree - the plate a shell lands on comes off this");
+
+        Check("the reverse of a lane is one of the six the armour knows",
+            HexField.EdgeHeadings.All(h =>
+                HexField.EdgeHeadings[Main.SideFor((h + 180) % 360)] == (h + 180) % 360),
+            "the firing heading turned round has to be a hex side exactly, "
+            + "or the snap in TakeHit moves the shell to another plate");
+
+        // The traverse has to land *on* the heading. Short by any amount and the
+        // fire gate never closes, while the picture shows a turret pointing
+        // straight at the target - a tank that aims and will not shoot.
+        Check("the traverse lands exactly on the heading it is given",
+            Gunnery.Traverse(270.0, 30.0, 5.0) != 30.0
+            && Gunnery.Traverse(28.0, 30.0, 5.0) == 30.0
+            && Gunnery.Laid(Gunnery.Traverse(28.0, 30.0, 5.0), 30),
+            $"a 2 degree gap with 5 to spend left it at "
+            + $"{Gunnery.Traverse(28.0, 30.0, 5.0):F3}");
+        Check("and it goes the short way round",
+            Math.Abs(WrapAngle(Gunnery.Traverse(350.0, 30.0, 10.0) - 0.0)) < 1e-9
+            && Math.Abs(WrapAngle(Gunnery.Traverse(30.0, 350.0, 10.0) - 20.0)) < 1e-9,
+            "350 to 30 with 10 degrees of budget should reach 0, not 340");
+
+        Check("laying is judged tightly enough to mean pointing down the lane",
+            Gunnery.Laid(30.0, 30) && !Gunnery.Laid(35.0, 30)
+            && Gunnery.LayTolerance < 1.0,
+            $"tolerance {Gunnery.LayTolerance} - loose enough and the tank "
+            + "shoots along a lane it is not pointing down");
+
+        Check("no target is not heading zero",
+            !Gunnery.None.OnLane && !Gunnery.None.Clear,
+            "default(Shot) would say 0 degrees, which is a real direction");
+
+        if (vehicles is { Count: > 1 })
+        {
+            Vehicle shooter = vehicles[active];
+            Vehicle foe = vehicles[active == 0 ? 1 : 0];
+            Vector2I wasShooter = shooter.Cell;
+            Vector2I wasFoe = foe.Cell;
+            Vehicle? wasTarget = shooter.Target;
+
+            // Put them on a lane rather than trusting where they are parked -
+            // which the check above has just established they are not.
+            shooter.Cell = new Vector2I(4, 3);
+            foe.Cell = HexField.Step(HexField.Step(shooter.Cell, 90), 90);
+            Shot clear = Gunnery.Solve(field, vehicles, shooter, foe);
+            Check("a target two cells up a lane is a clear shot",
+                clear.Clear && clear.Heading == 90 && clear.Range == 2,
+                $"{clear}");
+
+            // The blocker is the third tank standing between them. This is the
+            // only way a solution goes away without either of the two moving,
+            // which is why the reason is reported separately from "no lane".
+            Vehicle? third = vehicles.FirstOrDefault(
+                v => v != shooter && v != foe);
+            Vector2I wasThird = third?.Cell ?? Vector2I.Zero;
+            if (third is not null)
+            {
+                third.Cell = HexField.Step(shooter.Cell, 90);
+                Shot barred = Gunnery.Solve(field, vehicles, shooter, foe);
+                Check("a tank in the lane stops the shell",
+                    barred.OnLane && !barred.Clear
+                    && barred.BlockedAt == third.Cell,
+                    $"{barred} - blocked and no lane are different answers");
+                third.Cell = wasThird;
+            }
+
+            // Off the lane by one cell. The turret still tracks, which is the
+            // half of the rule that is about the picture: a tank that parked its
+            // gun where it happened to be would read as not having noticed.
+            foe.Cell = HexField.Step(HexField.Step(shooter.Cell, 90), 30);
+            Check("one cell off the lane is no shot at all",
+                !Gunnery.Solve(field, vehicles, shooter, foe).OnLane,
+                "a gun that fires down six lanes has to miss most of the board");
+
+            Check("a tank cannot be given itself as a target",
+                !Gunnery.Solve(field, vehicles, shooter, shooter).OnLane,
+                "right-clicking your own tank is a ceasefire, not a duel");
+
+            // Per vehicle, which is the whole of the scene: three tanks in three
+            // states side by side, not one duel shown three times.
+            Check("the target rides on the vehicle, not on the harness",
+                vehicles.All(v => v.Target is null || v.Target != v),
+                "a shared target would make selecting a tank retarget everyone");
+
+            // Reload is a countdown rather than a timestamp, so it is the same
+            // number of frames in two runs - the property --capture is fixed at
+            // 1/60 for.
+            // Ordered light-fastest, and every one of them longer than the shot
+            // itself - 34 frames of flash and smoke, so a reload under 0.57s
+            // would start the next round on top of the last one's picture. The
+            // gun *report* is the other floor and it is per class (1.2s on the
+            // light, 3.4s on the heavy, measured off the staged samples); it is
+            // not asserted here because nothing in this code knows a sample's
+            // length, and a single figure applied to all three would be the
+            // heavy's answer given to the light.
+            Check("the classes reload at different rates, none inside its own shot",
+                vehicles.Select(v => v.Profile.ReloadTime).Distinct().Count()
+                    == vehicles.Count
+                && MovementProfile.Light.ReloadTime < MovementProfile.Medium.ReloadTime
+                && MovementProfile.Medium.ReloadTime < MovementProfile.Heavy.ReloadTime
+                && vehicles.All(v => v.Profile.ReloadTime > 34.0 / 60.0),
+                string.Join(", ", vehicles.Select(
+                    v => $"{v.Tag} {v.Profile.ReloadTime:F1}s")));
+            Check("and traverse at different rates, heavy slowest",
+                vehicles.Select(v => v.Profile.TurretRate).Distinct().Count()
+                    == vehicles.Count
+                && MovementProfile.Heavy.TurretRate < MovementProfile.Medium.TurretRate
+                && MovementProfile.Medium.TurretRate < MovementProfile.Light.TurretRate,
+                string.Join(", ", vehicles.Select(
+                    v => $"{v.Tag} {v.Profile.TurretRate:F0} deg/s")));
+
+            shooter.Cell = wasShooter;
+            foe.Cell = wasFoe;
+            shooter.Target = wasTarget;
+        }
+
         Check("an unknown tag still gets a profile",
             MovementProfile.For("nonsense") == MovementProfile.Medium
             && MovementProfile.For("ltp") == MovementProfile.Light,

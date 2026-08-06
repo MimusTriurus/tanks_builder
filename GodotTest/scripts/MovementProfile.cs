@@ -70,6 +70,33 @@ public sealed class MovementProfile
 
     public double CornerSpeed => TopSpeed * CornerFraction;
 
+    /// <summary>
+    /// Turret traverse, deg/s. Separate from <see cref="TurnRate"/> because a
+    /// turret and a hull are two different machines, and it is the one that
+    /// decides how an engagement feels: the hull rate is spent on a corner
+    /// nobody is watching, the traverse is spent while a target is on screen
+    /// waiting to be shot at.
+    ///
+    /// Ordered the way everything else here is - the light swings fastest - and
+    /// slow enough on the heavy that a target appearing behind it costs real
+    /// time. What the gun can be laid on is quantised to 30 degrees by the
+    /// atlas, so this only decides *when* the picture jumps; it is written as a
+    /// rate because that is what stays right the day the turret is rendered
+    /// finer, which is the same argument <see cref="TurretScan"/> makes.
+    /// </summary>
+    public double TurretRate { get; init; } = 70.0;
+
+    /// <summary>
+    /// Seconds between rounds.
+    ///
+    /// Longer than the gun's own report on every class - 1.2s on the light and
+    /// 3.4s on the heavy, measured off the staged samples - because a tank that
+    /// fires over the tail of its last shot sounds like two tanks. That is the
+    /// floor; the spread above it is class character, and it is the one figure
+    /// that makes a heavy feel heavy while standing still.
+    /// </summary>
+    public double ReloadTime { get; init; } = 3.2;
+
     /// <summary>Seconds from rest to cruise - the number that actually carries
     /// the class difference.</summary>
     public double RampTime => TopSpeed / Accel;
@@ -85,19 +112,19 @@ public sealed class MovementProfile
     public static readonly MovementProfile Light = new()
     {
         Tag = "LTP", TopSpeed = 310.0, Accel = 620.0, TurnRate = 260.0,
-        Size = 0.85,
+        Size = 0.85, TurretRate = 95.0, ReloadTime = 2.2,
     };
 
     public static readonly MovementProfile Medium = new()
     {
         Tag = "MTP", TopSpeed = 240.0, Accel = 420.0, TurnRate = 200.0,
-        Size = 1.00,
+        Size = 1.00, TurretRate = 70.0, ReloadTime = 3.2,
     };
 
     public static readonly MovementProfile Heavy = new()
     {
         Tag = "HTP", TopSpeed = 175.0, Accel = 260.0, TurnRate = 140.0,
-        Size = 1.15,
+        Size = 1.15, TurretRate = 48.0, ReloadTime = 4.8,
     };
 
     /// <summary>One profile per class, and the tags are the parts-built tanks

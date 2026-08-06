@@ -38,6 +38,18 @@ public sealed partial class HexField : Node2D
     /// <summary>Cells to tint as the current move order, destination last.</summary>
     public IReadOnlyList<Vector2I> Highlight = Array.Empty<Vector2I>();
 
+    /// <summary>Every cell the driven tank could shoot into from where it
+    /// stands - the six lanes, drawn faint. See <see cref="Lane"/> for why the
+    /// gun has lanes at all; drawn because the rule is otherwise invisible
+    /// until a shot fails to happen, and what the player needs to know is not
+    /// "no line" but where to drive to get one.</summary>
+    public IReadOnlyList<Vector2I> Arcs = Array.Empty<Vector2I>();
+
+    /// <summary>The lane a live firing solution runs down, target last. Drawn
+    /// over the arcs and over the route, because it is the one that is about to
+    /// matter.</summary>
+    public IReadOnlyList<Vector2I> Aim = Array.Empty<Vector2I>();
+
     public override void _Ready() => ZIndex = -100;
 
     // --- layout ------------------------------------------------------------
@@ -133,6 +145,65 @@ public sealed partial class HexField : Node2D
         return -1;
     }
 
+    /// <summary>
+    /// The cells outward from one along a flat-side heading, nearest first,
+    /// stopping at the edge of the board.
+    ///
+    /// A lane is where a gun can shoot. The six of them are the same six
+    /// <see cref="EdgeHeadings"/> the tank drives along and is shot from, which
+    /// is the point of there being one list: a shell leaves along a flat side
+    /// and arrives across one, so the shooter's heading and the plate the
+    /// target presents are two ends of the same number rather than two
+    /// conventions to keep in agreement.
+    ///
+    /// Walked with <see cref="Step"/> rather than multiplied out in cube
+    /// coordinates, for the reason <see cref="FindPath"/> is breadth-first: Step
+    /// is already the one definition of what is next to what, and a second one
+    /// derived from axial arithmetic is a second thing that can disagree with
+    /// the board - most likely on the odd columns, where it would be wrong
+    /// every other file and right in a screenshot.
+    /// </summary>
+    public List<Vector2I> Lane(Vector2I cell, int heading, int limit = int.MaxValue)
+    {
+        var lane = new List<Vector2I>();
+        Vector2I at = cell;
+        while (lane.Count < limit)
+        {
+            Vector2I next = Step(at, heading);
+            // Step hands back the cell unchanged for a heading that points at a
+            // corner rather than an edge, so this is what stops a bogus heading
+            // spinning here forever.
+            if (next == at || !InBounds(next))
+                break;
+            lane.Add(next);
+            at = next;
+        }
+        return lane;
+    }
+
+    /// <summary>
+    /// The lane <paramref name="to"/> stands on as seen from
+    /// <paramref name="from"/>, and how many cells down it - or (-1, 0) when it
+    /// stands on none.
+    ///
+    /// Both at once because the walk finds both, and the range is wanted
+    /// wherever the heading is: the cells in between are what a shot has to
+    /// pass through.
+    /// </summary>
+    public (int Heading, int Range) LaneTo(Vector2I from, Vector2I to)
+    {
+        if (from == to)
+            return (-1, 0);
+        foreach (int heading in EdgeHeadings)
+        {
+            List<Vector2I> lane = Lane(from, heading);
+            int at = lane.IndexOf(to);
+            if (at >= 0)
+                return (heading, at + 1);
+        }
+        return (-1, 0);
+    }
+
     /// <summary>Shortest path between two cells, excluding the start.
     ///
     /// Breadth-first rather than a cube-coordinate line: a straight line
@@ -221,6 +292,21 @@ public sealed partial class HexField : Node2D
             DrawTextureRectRegion(texture,
                 new Rect2(CellAnchor(q, r) - Atlas.Anchor, Atlas.Tile), source);
 
+        // Gunnery under the route rather than over it: the arcs say where a shot
+        // could go, the route says where this tank is going, and while both are
+        // up the second is the one being given. Red for both, because amber and
+        // yellow-green are the route's and cyan is the selection ring's - a mark
+        // that has to be told apart from another mark is not a mark.
+        foreach (Vector2I cell in Arcs)
+            DrawTextureRectRegion(texture,
+                new Rect2(CellAnchor(cell) - Atlas.Anchor, Atlas.Tile), source,
+                // Barely off the bare tile. Measured on the first screenshot
+                // rather than chosen: at 0.80,0.52,0.46 the six lanes cover half
+                // the board and read as terrain - two kinds of ground - instead
+                // of as something drawn on it. The route's amber can be loud
+                // because it is a handful of cells; this is thirty of them.
+                new Color(1.0f, 0.86f, 0.84f));
+
         for (int i = 0; i < Highlight.Count; i++)
         {
             bool last = i == Highlight.Count - 1;
@@ -231,5 +317,10 @@ public sealed partial class HexField : Node2D
                 new Rect2(CellAnchor(Highlight[i]) - Atlas.Anchor, Atlas.Tile),
                 source, tint);
         }
+
+        foreach (Vector2I cell in Aim)
+            DrawTextureRectRegion(texture,
+                new Rect2(CellAnchor(cell) - Atlas.Anchor, Atlas.Tile), source,
+                new Color(1.0f, 0.40f, 0.32f));
     }
 }

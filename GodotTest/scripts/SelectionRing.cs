@@ -45,9 +45,19 @@ public sealed partial class SelectionRing : Node2D
     /// a mark. The dark line under it is the same lesson the additive effect layers
     /// taught: a colour tuned on the pale tile disappears on the amber one, so the
     /// ring carries its own contrast rather than borrowing the ground's.
+    ///
+    /// A field rather than a constant so the same ring can mark the tank being
+    /// shot at, in the red the lanes are drawn in. One class for both because
+    /// they are the same statement about the same kind of thing - which tank on
+    /// the ground this is about - and two classes would be two chances for the
+    /// mark to stop lying on the ground.
     /// </summary>
-    private static readonly Color Ink = new(0.30f, 0.85f, 1.0f);
-    private static readonly Color Backing = new(0.0f, 0.1f, 0.15f, 0.55f);
+    public Color Ink = new(0.30f, 0.85f, 1.0f);
+    public Color Backing = new(0.0f, 0.1f, 0.15f, 0.55f);
+
+    /// <summary>The red one, for the target. Named here so the shade is chosen
+    /// once beside the cyan it has to be told apart from.</summary>
+    public static readonly Color Hostile = new(1.0f, 0.36f, 0.30f);
 
     /// <summary>
     /// The cell's outline as a closed polyline, centred on the origin.

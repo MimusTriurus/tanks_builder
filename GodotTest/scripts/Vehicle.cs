@@ -101,6 +101,31 @@ public sealed class Vehicle
     /// once could not show a burning tank next to an intact one.</summary>
     public bool Burning;
 
+    /// <summary>
+    /// The tank this one is shooting at, or null for nobody.
+    ///
+    /// Per vehicle rather than on the harness, for the reason every clock here
+    /// is: an order given to a tank belongs to that tank. Select another one and
+    /// this one keeps engaging, which is the whole of the scene - a bench where
+    /// only the tank under the cursor could be fighting would be one duel shown
+    /// three times.
+    /// </summary>
+    public Vehicle? Target;
+
+    /// <summary>The solution against <see cref="Target"/> as of this frame.
+    ///
+    /// Kept rather than re-derived by everything that wants it - the fire gate,
+    /// the lanes drawn on the ground, the panel, the trace. Solved once per
+    /// frame because both tanks move; the alternative is four answers to one
+    /// question and no reason for them to agree.</summary>
+    public Shot Solution = Gunnery.None;
+
+    /// <summary>Seconds until the gun will go off again. Counted down rather
+    /// than a timestamp compared against a clock, because the harness fixes the
+    /// time step under --capture and --trace and a countdown is the same number
+    /// of frames in two runs.</summary>
+    public double ReloadLeft;
+
     /// <summary>Shells this tank has taken. Drives the deterministic scatter, so
     /// it is per tank for the same reason the marks are: they are a record of
     /// what happened to this hull.</summary>
