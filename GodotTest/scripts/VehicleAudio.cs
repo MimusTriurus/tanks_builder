@@ -77,13 +77,42 @@ public sealed partial class VehicleAudio : Node2D
     /// that has thrown away two thirds of its subject.</summary>
     public float UnfocusedDb = -9.0f;
 
+    /// <summary>
+    /// The trim for this tank's continuous voices - the engine, the belts, the
+    /// fire.
+    ///
+    /// **Only those.** The focus trim is an answer to one problem, and the
+    /// problem is that three engines at one level sum into one indistinct
+    /// engine; it is a statement about ambience, about which machine you are
+    /// sitting in. A gun going off and a shell striking armour are not ambience,
+    /// they are what is happening in the battle, and holding them back by nine
+    /// decibels because they happened to somebody else is the wrong answer to a
+    /// question nobody asked.
+    ///
+    /// It is also worse than merely wrong here, because in an engagement the
+    /// tank being driven is nearly always the shooter. Trimmed, the only impacts
+    /// heard clearly are the ones on your own hull - so a light tank plinking
+    /// away at a medium produces a report at -4dB and a ricochet at -15dB
+    /// starting on the same frame, and the ricochet is simply not there. Which
+    /// is exactly how it was reported.
+    /// </summary>
     private float Trim => MasterDb + (Focused ? 0.0f : UnfocusedDb);
+
+    /// <summary>The trim for one-shots - the gun, the impact, the wreck. No
+    /// focus in it: an event is an event whoever it happened to.</summary>
+    private float EventTrim => MasterDb;
 
     /// <summary>The trim actually being applied, in dB, for <c>--trace</c>. A
     /// focus that silently failed to move would send you looking at the mixer
     /// rather than at the selection - the same reason the recoil mode prints
     /// '@turret' or '@body'.</summary>
     public float AppliedDb => Trim;
+
+    /// <summary>The trim a one-shot gets, exposed beside <see cref="AppliedDb"/>
+    /// so "the focus holds back the ambience and not the battle" is asserted
+    /// rather than left as a comment. It is the kind of rule that drifts back:
+    /// one trim is obviously simpler until a ricochet goes missing.</summary>
+    public float AppliedEventDb => EventTrim;
 
     // Loops. Started once in _Ready and never restarted - see Gate().
     private AudioStreamPlayer2D? _engine;
@@ -290,7 +319,7 @@ public sealed partial class VehicleAudio : Node2D
     /// see <see cref="RecoilLoop"/> for why one counter cannot serve them.</summary>
     public void Fire()
     {
-        Play(_gun, Own["gun_shot"], GunDb);
+        Play(_gun, Own["gun_shot"], GunDb, EventTrim);
     }
 
     /// <summary>
@@ -327,7 +356,7 @@ public sealed partial class VehicleAudio : Node2D
         string name = deep >= 2 ? "armour_hit" : "armour_ricochet";
         AudioStreamWav? stream =
             Common[$"{name}{(Math.Abs(shell) % 2) + 1}"] ?? Common[$"{name}1"];
-        Play(_armour, stream, ArmourDb);
+        Play(_armour, stream, ArmourDb, EventTrim);
     }
 
     /// <summary>Loaded but not yet triggered by anything: the bench has no
@@ -335,15 +364,19 @@ public sealed partial class VehicleAudio : Node2D
     /// sound nobody can find, and it costs one player.</summary>
     public void Destroyed(int which)
     {
-        Play(_death, Common[$"destroyed{Math.Clamp(which, 1, 3)}"], DeathDb);
+        Play(_death, Common[$"destroyed{Math.Clamp(which, 1, 3)}"], DeathDb, EventTrim);
     }
 
-    private void Play(AudioStreamPlayer2D? player, AudioStreamWav? stream, float db)
+    /// <summary><paramref name="trim"/> is <see cref="Trim"/> for a loop and
+    /// <see cref="EventTrim"/> for a one-shot, and passing it rather than reading
+    /// it is what makes the caller say which it is.</summary>
+    private void Play(AudioStreamPlayer2D? player, AudioStreamWav? stream, float db,
+                      float trim)
     {
         if (!Enabled || player is null || stream is null)
             return;
         player.Stream = stream;
-        player.VolumeDb = Trim + db;
+        player.VolumeDb = trim + db;
         player.PitchScale = 1.0f;
         player.Play();
     }

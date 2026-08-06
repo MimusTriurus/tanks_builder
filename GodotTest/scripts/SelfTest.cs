@@ -2435,6 +2435,27 @@ public static class SelfTest
             !Gunnery.None.OnLane && !Gunnery.None.Clear,
             "default(Shot) would say 0 degrees, which is a real direction");
 
+        // The focus trim holds back the ambience and not the battle. Measured on
+        // a bare instance rather than on a vehicle's, because what is being
+        // asserted is the rule and not whichever tank happens to be selected.
+        var noSounds = new SoundSet();
+        var voice = new VehicleAudio
+        {
+            Own = noSounds, Common = noSounds, Focused = false, MasterDb = 0.0f,
+        };
+        Check("the focus sets a tank's engine back but not its gun",
+            Math.Abs(voice.AppliedDb - voice.UnfocusedDb) < 1e-6
+            && Math.Abs(voice.AppliedEventDb) < 1e-6,
+            $"loop {voice.AppliedDb:F1}dB, event {voice.AppliedEventDb:F1}dB - "
+            + "trimmed events mean you only hear hits on your own tank, and in "
+            + "an engagement you are the shooter");
+        voice.Focused = true;
+        Check("and the driven tank is trimmed nowhere",
+            Math.Abs(voice.AppliedDb) < 1e-6
+            && Math.Abs(voice.AppliedEventDb) < 1e-6,
+            $"loop {voice.AppliedDb:F1}dB, event {voice.AppliedEventDb:F1}dB");
+        voice.QueueFree();
+
         // The matchup table, cell by cell rather than by re-deriving the rule -
         // this is the one place a wrong answer is a game rule quietly changed
         // rather than a bug, so it is written out the way it was asked for.
