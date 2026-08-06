@@ -1181,12 +1181,37 @@ public sealed partial class Main : Node2D
         else
         {
             (double remaining, double endSpeed) = RemainingRun(v);
-            double brakeDistance =
-                (v.Speed * v.Speed - endSpeed * endSpeed) / (2.0 * v.Profile.Accel);
-            bool braking = remaining <= brakeDistance;
-            accelRatio = braking ? -1.0 : v.Speed < v.Profile.TopSpeed ? 1.0 : 0.0;
-            v.Speed = Math.Clamp(v.Speed + accelRatio * v.Profile.Accel * delta,
-                braking ? endSpeed : 0.0, v.Profile.TopSpeed);
+            // A ceiling rather than a brake pedal, and the difference is the
+            // whole of why a tank used to arrive still doing a third of its
+            // cruise and then stop dead in one frame.
+            //
+            // The old form asked "is the distance left below the braking
+            // distance" once a frame and then applied full retardation. The test
+            // is only as fine as the step: at cruise the tank covers 4px between
+            // asks, so braking began up to 4px late, and 4px of missed braking is
+            // sqrt(2 * 420 * 4) = 58px/s still on the clock at the goal. Measured
+            // at 72. Nothing was wrong with the arithmetic - the trigger was late,
+            // and a trigger can always be late.
+            //
+            // This is the same curve read the other way round: the fastest this
+            // tank may be going and still be able to stop in what is left. It has
+            // no moment of engagement to miss, and as `remaining` runs out the
+            // ceiling runs down to `endSpeed` on its own, so the deceleration
+            // finishes instead of being cut off by arrival.
+            double ceiling = Math.Sqrt(endSpeed * endSpeed
+                                       + 2.0 * v.Profile.Accel * Math.Max(remaining, 0.0));
+            double before = v.Speed;
+            v.Speed = Math.Min(
+                Math.Min(v.Speed + v.Profile.Accel * delta, v.Profile.TopSpeed),
+                ceiling);
+            // What the body actually felt, rather than a flag saying which branch
+            // was taken. The pitch is driven by acceleration, and under the
+            // ceiling the retardation varies instead of being all or nothing -
+            // reporting -1 throughout would give the nose a constant dip where
+            // the tank has a smooth one.
+            accelRatio = delta > 0.0
+                ? Math.Clamp((v.Speed - before) / (v.Profile.Accel * delta), -1.0, 1.0)
+                : 0.0;
         }
 
         UpdatePitch(v, accelRatio, delta);
