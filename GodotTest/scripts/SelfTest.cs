@@ -1639,10 +1639,17 @@ public static class SelfTest
                 && tank.Wear(plate) == 1,
                 $"{plink}/{plinkAgain}/{plinkThird}, worked {tank.Wear(plate)}"
                 + " - three light rounds must not add up to a hole in a heavy");
-            Check("and it leaves one mark, not one per shell",
-                tank.MarksOn(plate).Count == 1,
-                $"{tank.MarksOn(plate).Count} marks of the same level"
-                + " - one rendered decal drawn twice");
+            // The counterpart, and it used to assert the opposite - which is why
+            // nothing caught the plate quietly recording only its first hit. A
+            // ceiling stops the round getting *deeper*; it must not stop it
+            // leaving a mark, or a tank under fire from one class stops showing
+            // that it is under fire at all.
+            Check("but every shell still leaves its own mark in its own place",
+                tank.MarksOn(plate).Count == 3
+                && tank.MarksOn(plate).Select(m => m.Along).Distinct().Count() == 3,
+                $"{tank.MarksOn(plate).Count} marks at "
+                + string.Join("/", tank.MarksOn(plate).Select(m => $"{m.Along:F2}"))
+                + " - three hits on one plate are three marks");
             // It reaches its level on the first hit, unlike a bite. "A heavy
             // breaches a light" means the first round holes it, not the third.
             tank.Repair();

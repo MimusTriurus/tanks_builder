@@ -409,9 +409,19 @@ public sealed partial class TankSprite : Node2D
     /// mend the hole - the mark is what *this* shell did, the wear is what the
     /// plate has been through, and they part company exactly here.
     ///
-    /// A second mark at a level the plate already carries is not added. Decals
-    /// are rendered graphics, so two marks of one level are one drawing twice,
-    /// and the plate has as many marks as there are levels for that reason.
+    /// **Every shell leaves its own mark, in its own place.** This refused a
+    /// second mark at a level the plate already carried when it was written, on
+    /// the argument that two marks of one level are one rendered drawing shown
+    /// twice - and that argument was inherited from the accumulating rule, where
+    /// it never bit because every shell reached a *new* level. Under a ceiling
+    /// the level is constant for a given pair of classes, so the guard meant a
+    /// plate recorded the first hit and then nothing, ever. Reported as holes no
+    /// longer appearing in different places, which is what it was.
+    ///
+    /// The economy was never about the drawing anyway: two marks of one level sit
+    /// at two different points along the plate, and that reads as two hits
+    /// because it is. What bounds the cost is the count - a plate carries as many
+    /// marks as there are levels and the oldest drops off, which is unchanged.
     /// </summary>
     public int DamageTo(string face, float along, int level)
     {
@@ -421,12 +431,9 @@ public sealed partial class TankSprite : Node2D
             _scars[face] = marks = new List<Mark>();
         int at = Math.Clamp(level, 0, Atlas.ScarLevels - 1);
         _wear[face] = Math.Min(Math.Max(Wear(face), at + 1), Atlas.ScarLevels);
-        if (!marks.Exists(m => m.Level == at))
-        {
-            marks.Add(new Mark(at, along));
-            while (marks.Count > Atlas.ScarLevels)
-                marks.RemoveAt(0);
-        }
+        marks.Add(new Mark(at, along));
+        while (marks.Count > Atlas.ScarLevels)
+            marks.RemoveAt(0);
         QueueRedraw();
         return at;
     }
