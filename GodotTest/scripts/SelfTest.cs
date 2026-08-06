@@ -2457,6 +2457,23 @@ public static class SelfTest
             $"loop {voice.AppliedDb:F1}dB, event {voice.AppliedEventDb:F1}dB");
         voice.QueueFree();
 
+        // The wobble is what stands in for a second take where the second take
+        // could not be used. Two things are asked of it, and the second is the
+        // one with history: it must not itself alternate, or the pattern that was
+        // just removed comes back in a different channel.
+        var wobble = new List<float>();
+        for (int shell = 1; shell <= 12; shell++)
+            wobble.Add(VehicleAudio.PitchOf(shell));
+        Check("the impact's pitch varies and stays near unity",
+            wobble.Distinct().Count() >= 4
+            && wobble.All(p => p > 0.9f && p < 1.1f),
+            $"{wobble.Distinct().Count()} values, "
+            + $"{wobble.Min():F2}..{wobble.Max():F2}");
+        Check("and it does not fall into a two-shot pattern",
+            Enumerable.Range(0, wobble.Count - 2)
+                .Any(i => wobble[i] != wobble[i + 2]),
+            "every other shell alike is the thing this replaced");
+
         // Two takes of one event exist so two shells do not sound identical -
         // they are meant to differ in character. Differing in *level* as well is
         // how one of them goes missing: the ricochet pair was 4.2dB apart, and

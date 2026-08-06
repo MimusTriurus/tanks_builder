@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Godot;
 
 namespace TankSpriteTest;
@@ -354,10 +355,54 @@ public sealed partial class VehicleAudio : Node2D
     {
         int deep = Math.Max(level, 0);
         string name = deep >= 2 ? "armour_hit" : "armour_ricochet";
-        AudioStreamWav? stream =
-            Common[$"{name}{(Math.Abs(shell) % 2) + 1}"] ?? Common[$"{name}1"];
-        Play(_armour, stream, ArmourDb, EventTrim);
+        int[] takes = ImpactTakes[name];
+        int which = takes[Math.Abs(shell) % takes.Length];
+        Play(_armour, Common[$"{name}{which}"] ?? Common[$"{name}1"], ArmourDb,
+             EventTrim, PitchOf(shell));
     }
+
+    /// <summary>
+    /// Which takes of each impact are actually played.
+    ///
+    /// Two takes exist so that two shells do not sound identical - and that only
+    /// works if they are **interchangeable**, which is an assumption about the
+    /// recordings rather than about the design. It does not hold for the
+    /// ricochet, and both halves of finding that out were reported by ear:
+    ///
+    ///  * with the take chosen by damage level, a light tank on a medium is
+    ///    always level 0 and so always played take 1 - "no ricochet at all";
+    ///  * with it chosen by the shell count, take 2 came in every other shot -
+    ///    "the ricochet fires every other time".
+    ///
+    /// Both point at take 1, and the measurement agrees: it sits at 1531Hz
+    /// against take 2's 2627Hz, nearly an octave lower and that much nearer the
+    /// 826Hz gun report going off on the same frame. Levelling them to equal RMS
+    /// did not save it, because what is left is not level but where they sit.
+    ///
+    /// So the ricochet plays the one that reads, and the variety comes from
+    /// <see cref="PitchOf"/> instead - same sound, never quite the same twice,
+    /// and no take that can go missing. The penetration pair is left alternating:
+    /// its two are 1500 and 1073Hz, half the gap, and nobody has reported one of
+    /// them absent. Changing what has not been heard to be wrong is how the thing
+    /// that was wrong gets lost.
+    /// </summary>
+    private static readonly Dictionary<string, int[]> ImpactTakes = new()
+    {
+        ["armour_ricochet"] = new[] { 2 },
+        ["armour_hit"] = new[] { 1, 2 },
+    };
+
+    /// <summary>
+    /// A small deterministic pitch wobble per shell, so one recording does not
+    /// read as one canned sound.
+    ///
+    /// +-4% in 2% steps, off a stride of 7 into 5 so it does not fall into the
+    /// two-shot pattern the takes just came out of. Deterministic for the reason
+    /// the scatter is: --capture and --trace fix the time step so two runs can be
+    /// diffed, and a random wobble would be measuring itself.
+    /// </summary>
+    public static float PitchOf(int shell) =>
+        1.0f + ((Math.Abs(shell) * 7) % 5 - 2) * 0.02f;
 
     /// <summary>Loaded but not yet triggered by anything: the bench has no
     /// destroyed state. Here because the file is staged and the alternative is a
@@ -371,13 +416,13 @@ public sealed partial class VehicleAudio : Node2D
     /// <see cref="EventTrim"/> for a one-shot, and passing it rather than reading
     /// it is what makes the caller say which it is.</summary>
     private void Play(AudioStreamPlayer2D? player, AudioStreamWav? stream, float db,
-                      float trim)
+                      float trim, float pitch = 1.0f)
     {
         if (!Enabled || player is null || stream is null)
             return;
         player.Stream = stream;
         player.VolumeDb = trim + db;
-        player.PitchScale = 1.0f;
+        player.PitchScale = pitch;
         player.Play();
     }
 }
