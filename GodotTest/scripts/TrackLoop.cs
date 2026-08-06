@@ -103,6 +103,35 @@ public sealed class TrackLoop
     public double SyncSpeed => LinkOnScreen * MaxPitchesPerFrame * CapFrameRate;
 
     /// <summary>
+    /// Phases per second the belt actually turned on the last step - the capped
+    /// rate, not the wanted one.
+    ///
+    /// This is what the track's *sound* runs at, and taking it from here rather
+    /// than from the speed is the whole point. Above <see cref="SyncSpeed"/> the
+    /// picture slips against the ground on purpose; a rattle driven off raw speed
+    /// would keep up with the ground and so drift against the picture, which is
+    /// the one disagreement worth more than the error it was meant to fix. Fed
+    /// from here the two cannot part, and they slip together.
+    ///
+    /// Signed, so backing up reads as negative and the caller can use the
+    /// magnitude without having to know about reverse.
+    /// </summary>
+    public double PhaseRate { get; private set; }
+
+    /// <summary>
+    /// The fastest <see cref="PhaseRate"/> the cap will ever allow, phases per
+    /// second.
+    ///
+    /// The reference the track's sound is pitched against, and derived rather
+    /// than tuned on purpose. It is the speed at which the belt is showing all
+    /// the ground it is willing to show, so a rattle played at unity here and
+    /// scaled below it slows down with the picture and then stops slowing down
+    /// with the picture - both halves of the cap, for free. A number picked by
+    /// ear would have had to be re-picked every time the cap moved.
+    /// </summary>
+    public double MaxPhaseRate => MaxPitchesPerFrame * CapFrameRate * Phases;
+
+    /// <summary>
     /// Wind the belt on by <paramref name="distance"/> pixels of travel.
     ///
     /// Signed: a tank backing up runs its belt backwards, which falls out of
@@ -113,6 +142,7 @@ public sealed class TrackLoop
         if (Phases <= 0 || LinkOnScreen <= 0.0)
         {
             Slip = 1.0;
+            PhaseRate = 0.0;
             return;
         }
         double want = distance / LinkOnScreen;
@@ -120,12 +150,14 @@ public sealed class TrackLoop
         double take = Math.Clamp(want, -limit, limit);
         Slip = Math.Abs(want) > 1e-9 ? Math.Abs(take / want) : 1.0;
         _phase = Mod(_phase + take * Phases, Phases);
+        PhaseRate = delta > 0.0 ? take * Phases / delta : 0.0;
     }
 
     public void Reset()
     {
         _phase = 0.0;
         Slip = 1.0;
+        PhaseRate = 0.0;
     }
 
     private static double Mod(double a, double n) => (a % n + n) % n;

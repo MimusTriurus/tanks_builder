@@ -19,6 +19,13 @@ namespace TankSpriteTest;
 public sealed partial class Main : Node2D
 {
     private const string SpritesRoot = "D:/Projects/AgentCoding/BlenderMCP/Sprites";
+
+    /// <summary>Where <c>stage_sounds.sh</c> puts the audio. Off an absolute path
+    /// for the reason the atlases are, and one more besides: the bytes are not in
+    /// this repository - see the script - so this directory is often simply
+    /// absent, and everything downstream of it has to be happy about that.
+    /// </summary>
+    private const string SoundsRoot = "D:/Projects/AgentCoding/BlenderMCP/Sounds";
     /// <summary>The tanks to look for on disk, in key order: one per class,
     /// all three built from separate parts - hull, turret, barrel, engine and
     /// two belts as their own meshes.
@@ -59,6 +66,16 @@ public sealed partial class Main : Node2D
 
     private readonly Dictionary<string, AtlasSet> _atlases = new();
     private readonly List<string> _loaded = new();
+
+    /// <summary>One sound set per class, plus the shared one. Split the way the
+    /// pixels are: what a tank is, per tank; what happens to it, once - see
+    /// <see cref="SoundSet"/>.</summary>
+    private readonly Dictionary<string, SoundSet> _sounds = new();
+    private SoundSet _commonSounds = null!;
+
+    /// <summary>Sound on, as every other effect is on a switch. Off silences,
+    /// it does not unload, so an A/B is one keypress apart.</summary>
+    private bool _soundEnabled = true;
 
     /// <summary>
     /// All three tanks, in the order they loaded, which is also key order and the
@@ -451,6 +468,8 @@ public sealed partial class Main : Node2D
                 _exhaustEnabled = false;
             else if (userArgs[i] == "--no-tracks")
                 _tracksEnabled = false;
+            else if (userArgs[i] == "--no-sound")
+                _soundEnabled = false;
             else if (userArgs[i] == "--no-barrel-recoil")
                 _recoilTube = false;
             else if (userArgs[i] == "--burning")
@@ -575,6 +594,20 @@ public sealed partial class Main : Node2D
         if (_flash.Error.Length > 0)
             failures.Add($"flash: {_flash.Error}");
 
+        // Sound is loaded but never required. A missing set does not go into
+        // `failures`, because that list is about a bench that cannot show what it
+        // was asked to show, and this one still can - it just does it quietly.
+        // Printed instead, once per set, so "I hear nothing" has an answer in the
+        // log rather than in the source.
+        _commonSounds = SoundSet.Load(SoundsRoot, SoundSet.CommonTag);
+        GD.Print(_commonSounds.Summary());
+        foreach (string tag in _loaded)
+        {
+            SoundSet set = SoundSet.Load(SoundsRoot, tag);
+            GD.Print(set.Summary());
+            _sounds[tag] = set;
+        }
+
         _field = new HexField();
         AddChild(_field);
 
@@ -622,6 +655,25 @@ public sealed partial class Main : Node2D
             // and the rumble reaches full strength at half cruise, whatever
             // cruise is for this class
             vehicle.Rumble.FullSpeed = vehicle.Profile.TopSpeed * 0.5;
+
+            // Its own players, for the reason its clocks are its own: one shared
+            // engine node would put three tanks in phase, and three engines
+            // beating as one is one engine three times as loud. Skipped entirely
+            // when nothing loaded rather than built mute, so a silent bench has
+            // no audio nodes at all.
+            SoundSet own = _sounds.TryGetValue(tag, out SoundSet? s)
+                ? s : SoundSet.Load(SoundsRoot, tag);
+            if (own.Any || _commonSounds.Any)
+            {
+                var audio = new VehicleAudio
+                {
+                    Own = own,
+                    Common = _commonSounds,
+                    Enabled = _soundEnabled && !_selfTest,
+                };
+                AddChild(audio);
+                vehicle.Audio = audio;
+            }
         }
 
         // Judging whether two layers line up is a pixel-level question, so the
@@ -666,6 +718,10 @@ public sealed partial class Main : Node2D
         ApplySize();
         foreach (Vehicle vehicle in _vehicles)
             Park(vehicle);
+        // The flag may have picked a tank other than the first, and the trim is
+        // set on selection - so it has to be set once at the start too, or two of
+        // the three come up forward until something is clicked.
+        FocusSound();
 
         // The mark on whoever is being driven. Absent under --capture and --trace
         // for the reason the panel is: a capture is evidence, and an A/B of two
@@ -748,8 +804,26 @@ public sealed partial class Main : Node2D
             Math.Min(Active.PathStep, Active.Path.Count),
             Active.Path.Count - Math.Min(Active.PathStep, Active.Path.Count));
         _field.QueueRedraw();
+        FocusSound();
         _panel?.Sync();
         _tank.QueueRedraw();
+    }
+
+    /// <summary>
+    /// Bring the driven tank's voice forward and set the other two back.
+    ///
+    /// Set here beside the ring, and for the same reason it is: both say which
+    /// tank is yours, and one place to say it is one place for the two to
+    /// disagree. The ring can put its mark on the ground because the sprites are
+    /// what is being judged and must not be touched; sound has no ground, and
+    /// three engines at one level sum into one, so the only mark available is
+    /// level. See <see cref="VehicleAudio.Focused"/>.
+    /// </summary>
+    private void FocusSound()
+    {
+        for (int i = 0; i < _vehicles.Count; i++)
+            if (_vehicles[i].Audio is not null)
+                _vehicles[i].Audio!.Focused = i == _active;
     }
 
     /// <summary>
@@ -853,6 +927,12 @@ public sealed partial class Main : Node2D
         _field.Position = _origin;
         vehicle.Sprite.Position = StandOn(vehicle, vehicle.Cell);
         Depth(vehicle);
+        // Belt travel is read back off the heading rather than reported by
+        // whatever turned it, so the baseline has to be laid down wherever the
+        // heading is set from outside. Left stale, the first frame after a reset
+        // sees the whole of the difference as one frame's swing and the belts
+        // jump.
+        vehicle.LastHullFacing = vehicle.Sprite.HullFacing;
         vehicle.Sprite.QueueRedraw();
     }
 
@@ -915,12 +995,103 @@ public sealed partial class Main : Node2D
             UpdateTracks(v, 0.0, 0.0);
     }
 
+    /// <summary>
+    /// Roughly half the track gauge, as a fraction of the hull's broadside span.
+    ///
+    /// An estimate, and it only has to be one: it decides how fast the belts wind
+    /// during a pivot, and the difference between "the tracks are working" and
+    /// "the tank is turning on frozen tracks" is not a few per cent. Nothing in
+    /// the atlas measures the gauge - <see cref="AtlasSet.HullSpan"/> is the
+    /// widest frame, which is the hull's length - so this is a proportion rather
+    /// than a measurement, and it is named here instead of buried in the
+    /// expression so it can be argued with.
+    /// </summary>
+    private const double PivotRadiusFraction = 0.25;
+
+    /// <summary>
+    /// Ground the belts covered this frame: what the tank drove, plus what it
+    /// swung.
+    ///
+    /// The second half was missing and it showed. A tank pivoting from a standing
+    /// start has <c>Speed</c> of zero - the cornering crawl is a floor, not a
+    /// target - and so did the belts, so the hull swung round on tracks that were
+    /// not moving. Turning on the spot is the most track-heavy thing a tank does
+    /// and it was the one case with no belt motion at all.
+    ///
+    /// One number rather than a separate path for the sound, which is the whole
+    /// reason it is fixed here: <see cref="TrackLoop"/> takes the travel, the
+    /// sprite takes its phase from that and <see cref="VehicleAudio"/> takes its
+    /// rate from the same clock, so the belts cannot be heard turning while they
+    /// are seen standing still.
+    ///
+    /// Unsigned in the pivot term, and that is the part still owed. A real pivot
+    /// runs the two belts in opposite directions; the sprite carries one phase for
+    /// both (<see cref="TankSprite.TrackPhase"/>), so they can only wind together
+    /// and one of them is going the wrong way. Both moving is still nearer the
+    /// truth than both frozen - the error is a sign on one belt rather than a
+    /// missing motion on two - and closing it properly means a phase per side,
+    /// which the atlas is already ready for: track_left and track_right are
+    /// separate layers.
+    /// </summary>
+    private double BeltTravel(Vehicle v, double delta)
+    {
+        double swing = WrapAngle(v.Sprite.HullFacing - v.LastHullFacing);
+        v.LastHullFacing = v.Sprite.HullFacing;
+        double radius = v.Atlas.HullSpan * PivotRadiusFraction * v.Sprite.BodyScale;
+        double pivot = Math.Abs(Mathf.DegToRad(swing)) * radius;
+        // The swing takes the drive's sign rather than always adding, so a tank
+        // reversing round a corner does not have its belts partly cancelled by
+        // its own turn.
+        double drive = v.Speed * delta;
+        return drive + (drive < 0.0 ? -pivot : pivot);
+    }
+
     private void ScanChanged()
     {
         if (_scanEnabled)
             return;
         foreach (Vehicle v in _vehicles)
             v.Scan.Reset();
+    }
+
+    /// <summary>Push the switch to every tank. Setting the flag alone would leave
+    /// the loops running: they are gated by volume rather than stopped, so that
+    /// nudging the stick does not restart the belt from sample zero.</summary>
+    private void SoundChanged()
+    {
+        foreach (Vehicle v in _vehicles)
+            if (v.Audio is not null)
+                v.Audio.Enabled = _soundEnabled;
+    }
+
+    /// <summary>
+    /// The audio field for <c>--trace</c>: what was asked for, then what came out.
+    ///
+    /// The peak is read off the master bus rather than inferred from the gates,
+    /// and that is the whole value of the line. Gates are this code's own opinion
+    /// of how loud it is being; the peak is the mixer's, and the two part company
+    /// exactly where the interesting failures are - a stream that loaded but is
+    /// silent, a device that never opened, a loop paused at the wrong moment.
+    /// </summary>
+    private string SoundLine()
+    {
+        VehicleAudio? a = Active.Audio;
+        if (a is null)
+            return "none";
+        float peak = Mathf.Max(AudioServer.GetBusPeakVolumeLeftDb(0, 0),
+                               AudioServer.GetBusPeakVolumeRightDb(0, 0));
+        // Every tank's trim, not just the driven one's, because the whole claim
+        // is about the *balance* between them: one number cannot show that two
+        // others moved back.
+        var trims = new List<string>();
+        foreach (Vehicle vehicle in _vehicles)
+            trims.Add(vehicle.Audio is null ? "--" : $"{vehicle.Audio.AppliedDb:F0}");
+        return $"{(_soundEnabled ? "on " : "off")}"
+               + $" eng {a.EngineGate:F2}@{a.EnginePitch:F2}"
+               + $" trk {a.TrackGate:F2}@{a.TrackPitch:F2}"
+               + $" brn {a.BurnGate:F2}"
+               + $" mix[{string.Join("/", trims)}]"
+               + $" peak {(float.IsNegativeInfinity(peak) ? -99.0f : peak),6:F1}dB";
     }
 
     // --- orders ------------------------------------------------------------
@@ -1179,6 +1350,10 @@ public sealed partial class Main : Node2D
         // events last different lengths of time, so one counter would give one of
         // them the wrong tempo. See RecoilLoop.
         Active.Barrel.Fire();
+        // Third thing off one trigger, and a third clock, for the same reason:
+        // the gun's report is 1.2s on the light and 3.4s on the heavy, and neither
+        // is the 34 frames the flash runs or the 28 the tube takes to come home.
+        Active.Audio?.Fire();
     }
 
     /// <summary>The shot runs on screen frames, not seconds. The sheet is a
@@ -1282,7 +1457,13 @@ public sealed partial class Main : Node2D
         // A light round still walks a plate scorch -> gouge -> breach over three
         // hits, which is what shows that the phase axis is damage and not three
         // renders of one drawing; a heavy one gets there in one.
-        _tank.Damage(face, scatter, Bite);
+        int level = _tank.Damage(face, scatter, Bite);
+        // The sound is chosen by the same level the mark is, so a round that
+        // bounces is heard bouncing and one that goes through is heard going
+        // through. Not the calibre directly: a light round on armour already
+        // twice hit does go through, and the ear should be told the same thing
+        // the plate is.
+        Active.Audio?.Struck(level);
     }
 
     /// <summary>The hit runs on screen frames for the shot's reason: it is a
@@ -1694,6 +1875,13 @@ public sealed partial class Main : Node2D
                      + $"  burn {_tank.FirePhase,2}/{_tank.BurnPhase,2}"
                      + $"  hit {_tank.HitPhase,2}@{(_hit.Face == "" ? "-" : _hit.Face)}"
                      + $" x{_hit.Scale:F2}"
+                     // Sound has no screenshot, so this is the only place it can
+                     // be judged from outside. The gates and pitches say what was
+                     // asked for; the master bus peak says what actually came out,
+                     // and only the second one can tell a set that loaded from a
+                     // set that is audible. A trace with rising gates and a peak
+                     // pinned at -inf is the shape of a device that never opened.
+                     + $"  snd {SoundLine()}"
                      + $"  cell ({_cell.X},{_cell.Y})"
                      // Size for the same reason as the zoom: two captures at two
                      // sizes that came out identical would send you looking at
@@ -1731,13 +1919,18 @@ public sealed partial class Main : Node2D
 
             // after the order has moved the tank, so the belts see the ground
             // that actually went past this frame rather than last frame's
-            UpdateTracks(v, v.Speed * delta, delta);
+            UpdateTracks(v, BeltTravel(v, delta), delta);
             UpdateTremble(v, delta);
             UpdateExhaust(v, delta);
             UpdateBurn(v, delta);
             UpdateScan(v, delta);
             UpdateShot(v, delta);
             UpdateHit(v, delta);
+            // Last, after every clock has stepped. The audio reads results of
+            // this frame - the belt's achieved phase rate above all - and reading
+            // them before the step is reading last frame's, which is the trap
+            // EffectLayer already documents from the other side.
+            v.Audio?.Update(v, delta);
         }
 
         if (!Moving && _spinning)
@@ -1861,6 +2054,19 @@ public sealed partial class Main : Node2D
             // way the tube goes.
             case Key.Bracketleft:
                 _recoilTube = !_recoilTube;
+                break;
+            // '\' because the note on '[' has now come true twice over: A-Z are
+            // all bound, '[' went to the tube and ']' to the shear, so this is
+            // the next free key in the same physical cluster. There is no
+            // mnemonic left to have - the shortage is the reason, and the panel
+            // is where a switch is found by name.
+            //
+            // Harness-wide like the pitch and the rumble rather than per tank:
+            // judging sound on one tank while two run silent throws away the
+            // comparison it is on a switch for.
+            case Key.Backslash:
+                _soundEnabled = !_soundEnabled;
+                SoundChanged();
                 break;
             // Next to the tube it was replaced by, which is the comparison this
             // key exists for. ']' for the same reason '[' is '[': the letters are

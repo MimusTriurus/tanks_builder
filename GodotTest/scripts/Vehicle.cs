@@ -45,6 +45,18 @@ public sealed class Vehicle
     public int PathStep;
     public double Speed;
 
+    /// <summary>
+    /// Hull heading as of the end of last frame, so this frame can tell how far
+    /// it swung.
+    ///
+    /// Derived rather than reported: a pivot happens from an order taking a
+    /// corner, from a standing start, and from the A/D keys, and every future
+    /// source would have to remember to announce itself. Reading the heading back
+    /// catches all of them, including the keys, which are handled in _Input and
+    /// would otherwise be invisible to the belts entirely.
+    /// </summary>
+    public double LastHullFacing;
+
     public bool Moving => PathStep < Path.Count;
 
     public readonly BodyPitch Pitch = new();
@@ -62,6 +74,14 @@ public sealed class Vehicle
     /// the hull rocking under the shot, this one is the tube sliding in its
     /// mount, and they run off the same trigger at different rates.</summary>
     public readonly RecoilLoop Barrel = new();
+
+    /// <summary>This tank's players. Null when nothing loaded, which is a state
+    /// the bench has to reach cleanly: Sounds/ is not in the repository, so a
+    /// fresh checkout runs silent until stage_sounds.sh has been run.
+    ///
+    /// A node rather than a clock, so it is not readonly like the rest - it is
+    /// built after the vehicle and parented into the tree.</summary>
+    public VehicleAudio? Audio;
 
     /// <summary>
     /// Where this tank touches the ground, in its parent's space.
