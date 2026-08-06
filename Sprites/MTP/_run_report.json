@@ -1,91 +1,532 @@
 {
+ "have": {
+  "layout": "parts",
+  "flash": true,
+  "exhaust": true,
+  "hit": true,
+  "exhaust_objects": [
+   "Engine.Geometry"
+  ],
+  "named": {
+   "layout": "parts",
+   "hull_mesh": "Hull.Geometry",
+   "turret_mesh": "Turret.Geometry",
+   "barrel_mesh": "Barrel.Geometry",
+   "hull_root": "Hull.World",
+   "turret_root": "Turret.World",
+   "hull_hint": "Hull",
+   "turret_hint": "Turret",
+   "ports": [
+    "Engine.Geometry"
+   ],
+   "track_roots": [
+    "Track.Left.World",
+    "Track.Right.World"
+   ]
+  }
+ },
  "layout": "parts",
  "axis": {
-  "from": "already stamped on Hull.Geometry, Turret.Geometry",
+  "from": "measured here",
   "ring_axis": [
    0.0,
-   -0.02935112550596486
+   0.00654
+  ],
+  "roundness": 0.809,
+  "wobble_px": 1.32,
+  "warnings": [
+   "neighbouring bands disagree by 0.0067 on where the axis is - treat the result as approximate"
   ]
  },
+ "ground_z": -0.41737,
+ "stands_on_tile": true,
  "framing_identical": true,
- "units_per_pixel": [
-  0.006479617879
+ "spin_pivot": [
+  0.0,
+  0.00654
  ],
- "anchor_fraction": [
-  [
-   0.5,
-   0.462996591
-  ]
+ "spin_pivot_from": "explicit",
+ "anchor_px": [
+  128.0,
+  116.18005561828613
  ],
- "problems": [],
- "hit_table": [
-  "burst_atlas.json",
-  "dust_atlas.json"
- ],
- "plates": [
-  {
-   "face": "front",
-   "elevation": 45.2,
-   "faceon": 0.704,
-   "share": 0.378
-  },
-  {
-   "face": "rear",
-   "elevation": 23.1,
-   "faceon": 0.92,
-   "share": 0.761
-  },
-  {
-   "face": "left",
-   "elevation": -0.2,
-   "faceon": 1.0,
-   "share": 0.608
-  },
-  {
-   "face": "right",
-   "elevation": -0.3,
-   "faceon": 1.0,
-   "share": 0.557
-  }
- ],
- "muzzle": {
-  "muzzle_shape": "disc",
-  "bearing_disagreement": 0.207,
-  "muzzle_radius": 0.055696
+ "units_per_pixel": 0.005962645560503006,
+ "max_edge_alpha": {
+  "hull": 0.0,
+  "turret": 0.0,
+  "barrel": 0.0,
+  "hex": 0.0,
+  "track_left": 0.0,
+  "track_right": 0.0
  },
- "ports": [
-  {
-   "object": "Engine.Geometry",
-   "kind": "grille",
-   "bearing": 89.93,
-   "elevation": 71.84,
-   "radius": 0.14389
-  }
- ],
  "tiles": {
   "hex": 256,
   "hull": 256,
   "track_left": 256,
   "track_right": 256,
   "turret": 256,
+  "barrel": 256,
   "scar_front": 256,
   "scar_rear": 256,
   "scar_left": 256,
   "scar_right": 256,
   "exhaust": 256,
-  "burn": 320,
+  "burn": 384,
   "fire": 256,
   "smoke": 384,
   "flash": 384,
   "dust": 192,
   "burst": 192
  },
- "stands_on_tile": true,
- "max_edge_alpha": {
-  "hull": 0.0,
-  "turret": 0.0,
-  "hex": 0.0,
-  "track_left": 0.0,
-  "track_right": 0.0
- }
+ "problems": [
+  "the mark takes more than 85% of the rear plate - it is a smaller shell or a plate measured too tightly, and neither is worth guessing at",
+  "neighbouring bands disagree by 0.0067 on where the axis is - treat the result as approximate"
+ ],
+ "muzzle_point": [
+  -0.000593,
+  -0.499525,
+  0.083618
+ ],
+ "muzzle_shape": "rod",
+ "bearing_disagreement": 0.732,
+ "flash_edge_alpha": 0.0,
+ "flash_offcentre_px": {
+  "270": 0.18,
+  "90": -2.14
+ },
+ "composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\MTP\\_check_shot.png",
+ "recoil_stroke_px": [
+  [
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0
+  ],
+  [
+   2.19,
+   3.55,
+   4.25,
+   5.51,
+   4.47,
+   3.38,
+   2.94,
+   3.39,
+   4.47,
+   5.77,
+   4.25,
+   3.54
+  ],
+  [
+   1.98,
+   2.63,
+   3.21,
+   3.86,
+   3.47,
+   2.39,
+   2.0,
+   2.37,
+   3.48,
+   4.12,
+   3.21,
+   2.62
+  ],
+  [
+   1.11,
+   1.82,
+   2.15,
+   2.63,
+   2.23,
+   1.4,
+   1.04,
+   1.58,
+   2.23,
+   2.89,
+   2.15,
+   1.83
+  ],
+  [
+   0.19,
+   0.91,
+   1.08,
+   1.67,
+   0.87,
+   0.8,
+   0.94,
+   0.8,
+   0.88,
+   1.93,
+   1.08,
+   0.92
+  ]
+ ],
+ "recoil_peak_px": 5.77,
+ "recoil_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\MTP\\_check_recoil.png",
+ "exhaust_ports": [
+  {
+   "object": "Engine.Geometry",
+   "kind": "grille",
+   "verts": 19295,
+   "point": [
+    0.00085,
+    0.43018,
+    -0.07218
+   ],
+   "dir": [
+    0.0013,
+    0.65871,
+    0.7524
+   ],
+   "radius": 0.16496,
+   "bearing": 89.89,
+   "elevation": 48.8,
+   "shape_margin": 3.828,
+   "spread": [
+    0.09234,
+    0.06947,
+    0.01815
+   ],
+   "length_along": 0.07586
+  }
+ ],
+ "exhaust_edge_alpha": 0.0,
+ "exhaust_span_px": [
+  72,
+  53
+ ],
+ "hull_span_px": [
+  103,
+  109
+ ],
+ "exhaust_contrast": 28.7,
+ "ground_colour": [
+  0.616,
+  0.627,
+  0.6
+ ],
+ "exhaust_loop": {
+  "0": true,
+  "3": true,
+  "6": true,
+  "9": true
+ },
+ "exhaust_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\MTP\\_check_exhaust.png",
+ "fire_edge_alpha": 0.0,
+ "fire_span_px": [
+  65,
+  75
+ ],
+ "fire_redness": 61.6,
+ "fire_white_fraction": 0.0,
+ "fire_loop": {
+  "0": true,
+  "3": true,
+  "6": true,
+  "9": true
+ },
+ "fire_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\MTP\\_check_fire.png",
+ "burn_edge_alpha": 0.0,
+ "burn_span_px": [
+  94,
+  113
+ ],
+ "burn_contrast": 94.0,
+ "burn_loop": {
+  "0": true,
+  "3": true,
+  "6": true,
+  "9": true
+ },
+ "plates": [
+  {
+   "face": "front",
+   "elevation": 43.6,
+   "faceon": 0.725,
+   "visible": 1.0,
+   "visible_at": 11,
+   "share": 0.438,
+   "extent": [
+    0.1891,
+    0.12224
+   ]
+  },
+  {
+   "face": "rear",
+   "elevation": 34.0,
+   "faceon": 0.829,
+   "visible": 1.0,
+   "visible_at": 6,
+   "share": 0.462,
+   "extent": [
+    0.22693,
+    0.0948
+   ]
+  },
+  {
+   "face": "left",
+   "elevation": -0.2,
+   "faceon": 1.0,
+   "visible": 0.9767,
+   "visible_at": 8,
+   "share": 0.633,
+   "extent": [
+    0.33388,
+    0.14292
+   ]
+  },
+  {
+   "face": "right",
+   "elevation": 0.0,
+   "faceon": 1.0,
+   "visible": 1.0,
+   "visible_at": 4,
+   "share": 0.635,
+   "extent": [
+    0.33391,
+    0.14561
+   ]
+  }
+ ],
+ "hit_table": [
+  "burst_atlas.json",
+  "dust_atlas.json"
+ ],
+ "burst_edge_alpha": 0.0,
+ "dust_edge_alpha": 0.0,
+ "burst_span_px": [
+  61,
+  51
+ ],
+ "dust_span_px": [
+  46,
+  44
+ ],
+ "burst_redness": 56.0,
+ "burst_white_fraction": 0.0,
+ "dust_contrast": 90.6,
+ "hit_off_tank": [],
+ "hit_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\MTP\\_check_hit.png",
+ "scar_fit": {
+  "front": 0.748,
+  "rear": 0.954,
+  "left": 0.633,
+  "right": 0.621
+ },
+ "scar_headings_seen": {
+  "scar_front": 7,
+  "scar_rear": 7,
+  "scar_left": 5,
+  "scar_right": 5
+ },
+ "scar_off_armour": {
+  "scar_front": 0.0,
+  "scar_rear": 0.0116,
+  "scar_left": 0.0,
+  "scar_right": 0.0
+ },
+ "scar_level_px": {
+  "scar_front": [
+   337,
+   465,
+   491
+  ],
+  "scar_rear": [
+   344,
+   470,
+   478
+  ],
+  "scar_left": [
+   297,
+   410,
+   443
+  ],
+  "scar_right": [
+   297,
+   414,
+   444
+  ]
+ },
+ "scar_contrast": {
+  "scar_front": [
+   81.8,
+   114.7,
+   134.4
+  ],
+  "scar_rear": [
+   54.1,
+   66.2,
+   87.5
+  ],
+  "scar_left": [
+   65.2,
+   83.7,
+   105.0
+  ],
+  "scar_right": [
+   65.7,
+   81.5,
+   105.4
+  ]
+ },
+ "scar_weight": {
+  "scar_front": [
+   16457,
+   19342,
+   24020
+  ],
+  "scar_rear": [
+   7721,
+   12551,
+   17190
+  ],
+  "scar_left": [
+   3304,
+   8652,
+   15234
+  ],
+  "scar_right": [
+   3172,
+   8527,
+   15200
+  ]
+ },
+ "scar_cover_px": {
+  "scar_front": 491,
+  "scar_rear": 478,
+  "scar_left": 443,
+  "scar_right": 444
+ },
+ "scar_edge_alpha": {
+  "scar_front": 0.0,
+  "scar_rear": 0.0,
+  "scar_left": 0.0,
+  "scar_right": 0.0
+ },
+ "scar_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\MTP\\_check_scar.png",
+ "scar_levels": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\MTP\\_check_damage.png",
+ "track_phases": 8,
+ "belts": [
+  {
+   "name": "L.Caterpillar.Rebuilt",
+   "verts": 697151,
+   "perimeter_local": 2.33577,
+   "links": 47,
+   "links_raw": null,
+   "links_by_run": null,
+   "links_by_vertex_density": 47,
+   "pitch_from": "laid out at perimeter/47 by construction",
+   "pitch_local": 0.0497,
+   "pitch_world": 0.04246,
+   "tread_repeat": null,
+   "closes_by_construction": true,
+   "band_thickness": [
+    0.0244,
+    0.0351,
+    0.0657
+   ],
+   "offset_range": [
+    -0.0179,
+    0.0158
+   ],
+   "worst_foot_gap": 0.0,
+   "rest_roundtrip_max": 0.0,
+   "rest_roundtrip_p99": 0.0,
+   "runs_rearward_along_local_x": -1.0,
+   "ground_run_alignment": 1.0,
+   "shaped": null,
+   "pitch_px": 7.12,
+   "rest_roundtrip_px": 0.0
+  },
+  {
+   "name": "R.Caterpillar.Rebuilt",
+   "verts": 697151,
+   "perimeter_local": 2.33577,
+   "links": 47,
+   "links_raw": null,
+   "links_by_run": null,
+   "links_by_vertex_density": 47,
+   "pitch_from": "laid out at perimeter/47 by construction",
+   "pitch_local": 0.0497,
+   "pitch_world": 0.04246,
+   "tread_repeat": null,
+   "closes_by_construction": true,
+   "band_thickness": [
+    0.0244,
+    0.0351,
+    0.0657
+   ],
+   "offset_range": [
+    -0.0179,
+    0.0158
+   ],
+   "worst_foot_gap": 0.0,
+   "rest_roundtrip_max": 0.0,
+   "rest_roundtrip_p99": 0.0,
+   "runs_rearward_along_local_x": -1.0,
+   "ground_run_alignment": 1.0,
+   "shaped": null,
+   "pitch_px": 7.12,
+   "rest_roundtrip_px": 0.0
+  }
+ ],
+ "belts_restored": [
+  0.0,
+  0.0,
+  0.0,
+  0.0
+ ],
+ "rebuilt": {
+  "L.Caterpillar.Geometry": {
+   "from": "L.Caterpillar.Geometry",
+   "onto": null,
+   "links": 47,
+   "cut_at": 0.00534,
+   "cut_density_vs_mean": 0.664,
+   "base_link": {
+    "verts": 14833,
+    "polys": 19507
+   },
+   "verts": 697151,
+   "polys": 916829,
+   "source": {
+    "verts": 693955,
+    "polys": 917769
+   },
+   "polys_per_link_in_source": [
+    19498,
+    19578
+   ]
+  },
+  "R.Caterpillar.Geometry": {
+   "from": "R.Caterpillar.Geometry",
+   "onto": null,
+   "links": 47,
+   "cut_at": 0.00534,
+   "cut_density_vs_mean": 0.664,
+   "base_link": {
+    "verts": 14833,
+    "polys": 19507
+   },
+   "verts": 697151,
+   "polys": 916829,
+   "source": {
+    "verts": 693955,
+    "polys": 917769
+   },
+   "polys_per_link_in_source": [
+    19498,
+    19578
+   ]
+  }
+ },
+ "ring_cut_z": -0.02606,
+ "tile_removed": true,
+ "cut_box_removed": true
 }

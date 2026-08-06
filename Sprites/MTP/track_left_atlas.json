@@ -26,14 +26,14 @@
   },
   "spin_pivot": [
     0.0,
-    -0.02935,
-    0.163938
+    0.00654,
+    -0.026647
   ],
-  "ortho_scale": 1.6587821769714357,
-  "units_per_pixel": 0.006479617878794671,
+  "ortho_scale": 1.5264372634887695,
+  "units_per_pixel": 0.005962645560503006,
   "anchor_px": [
     128.0,
-    118.52712726593018
+    116.18005561828613
   ],
   "frames": [
     {
@@ -807,8 +807,8 @@
   ],
   "track": [
     {
-      "links": 46,
-      "pitch": 0.044993,
+      "links": 47,
+      "pitch": 0.042458,
       "closes_by_construction": true,
       "mesh": "L.Caterpillar.Rebuilt"
     }
