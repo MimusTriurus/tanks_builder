@@ -1,0 +1,91 @@
+{
+ "layout": "parts",
+ "axis": {
+  "from": "already stamped on Hull.Geometry, Turret.Geometry",
+  "ring_axis": [
+   0.0,
+   -0.02935112550596486
+  ]
+ },
+ "framing_identical": true,
+ "units_per_pixel": [
+  0.006479617879
+ ],
+ "anchor_fraction": [
+  [
+   0.5,
+   0.462996591
+  ]
+ ],
+ "problems": [],
+ "hit_table": [
+  "burst_atlas.json",
+  "dust_atlas.json"
+ ],
+ "plates": [
+  {
+   "face": "front",
+   "elevation": 45.2,
+   "faceon": 0.704,
+   "share": 0.378
+  },
+  {
+   "face": "rear",
+   "elevation": 23.1,
+   "faceon": 0.92,
+   "share": 0.761
+  },
+  {
+   "face": "left",
+   "elevation": -0.2,
+   "faceon": 1.0,
+   "share": 0.608
+  },
+  {
+   "face": "right",
+   "elevation": -0.3,
+   "faceon": 1.0,
+   "share": 0.557
+  }
+ ],
+ "muzzle": {
+  "muzzle_shape": "disc",
+  "bearing_disagreement": 0.207,
+  "muzzle_radius": 0.055696
+ },
+ "ports": [
+  {
+   "object": "Engine.Geometry",
+   "kind": "grille",
+   "bearing": 89.93,
+   "elevation": 71.84,
+   "radius": 0.14389
+  }
+ ],
+ "tiles": {
+  "hex": 256,
+  "hull": 256,
+  "track_left": 256,
+  "track_right": 256,
+  "turret": 256,
+  "scar_front": 256,
+  "scar_rear": 256,
+  "scar_left": 256,
+  "scar_right": 256,
+  "exhaust": 256,
+  "burn": 320,
+  "fire": 256,
+  "smoke": 384,
+  "flash": 384,
+  "dust": 192,
+  "burst": 192
+ },
+ "stands_on_tile": true,
+ "max_edge_alpha": {
+  "hull": 0.0,
+  "turret": 0.0,
+  "hex": 0.0,
+  "track_left": 0.0,
+  "track_right": 0.0
+ }
+}
