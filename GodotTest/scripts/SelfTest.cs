@@ -910,6 +910,14 @@ public static class SelfTest
                 "one render job, one belt design");
             Check("the belts have phases to loop over", tracked.TrackPhases > 1,
                 $"{tracked.TrackPhases} phases");
+            // What the belts wind about when the tank turns on the spot. A
+            // gauge wider than the hull is not a gauge, and one under a few
+            // pixels would leave a pivoting tank on frozen tracks.
+            Check("the tank's gauge was measured off its own belts",
+                tracked.TrackArm > tracked.Tile.X / 16.0
+                && tracked.TrackArm * 2.0 < tracked.HullSpan,
+                $"half-gauge {tracked.TrackArm:F1}px against a"
+                + $" {tracked.HullSpan}px hull");
             // A link the size of the tank would mean the cycle is not a link at
             // all, and a link under a pixel could not be seen to move.
             Check("the link is a plausible fraction of the tank",
@@ -2425,6 +2433,21 @@ public static class SelfTest
                 byTank.Length > 1
                 && byTank.Zip(byTank.Skip(1)).All(p => p.First.Px > p.Second.Px),
                 read + " - the limiter used to invert this");
+            // And the reason the pivot radius had to stop being a fraction of
+            // the hull. If the gauges were in step with the hulls the fraction
+            // would have been fine; they are not, and this is the measurement
+            // that says so rather than a memory of it.
+            double[] arms = atlases.Values.Where(a => a.HasTracks)
+                .Select(a => a.TrackArm).ToArray();
+            double[] hulls = atlases.Values.Where(a => a.HasTracks)
+                .Select(a => (double)a.HullSpan).ToArray();
+            if (arms.Length > 1 && hulls.Min() > 0.0 && arms.Min() > 0.0)
+                Check("the gauges spread wider than the hulls they sit under",
+                    arms.Max() / arms.Min() - 1.0
+                    > (hulls.Max() / hulls.Min() - 1.0) * 2.0,
+                    $"gauge {arms.Max() / arms.Min():F2}x,"
+                    + $" hull {hulls.Max() / hulls.Min():F2}x"
+                    + " - a fraction of the hull cannot say this");
             Check("the tread speeds are far enough apart to read as classes",
                 byTank.Length > 1
                 && byTank[0].Px / byTank[^1].Px > 1.2,

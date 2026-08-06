@@ -317,6 +317,25 @@ public sealed class AtlasSet
     /// </summary>
     public double TrackPitch { get; private set; }
 
+    /// <summary>
+    /// Half the track gauge in atlas pixels - the radius the belts wind about
+    /// when the tank turns on the spot. 0 when there are no belts to measure.
+    ///
+    /// Measured rather than estimated, and the three tanks are why. It used to
+    /// be a quarter of <see cref="HullSpan"/>, which cannot express what is
+    /// there: the hulls come out within 3% of one length (188/183/182px) while
+    /// the gauges do not (84/78/69px). So the one number that was supposed to
+    /// carry the difference between the classes was very nearly the same for
+    /// all of them, and it was 12%, 17% and 32% too wide besides - worst on the
+    /// heavy, whose belts sit closest together for its length.
+    ///
+    /// Half the separation of the two belts, not either belt's distance from
+    /// the anchor. The anchor is the turret axis and there is no promise it
+    /// sits on the hull's centreline - on HTP it is 5.5px off it, which would
+    /// have put the fixed number back by another sixteenth.
+    /// </summary>
+    public double TrackArm { get; private set; }
+
     /// <summary>True when every plate has a mark to leave. All four, because a
     /// tank that can be holed on three sides and not the fourth is worse than
     /// one that cannot be holed at all - the clean side reads as armour that
@@ -539,6 +558,70 @@ public sealed class AtlasSet
         _phases[name] = 1;
     }
 
+    /// <summary>
+    /// Measure <see cref="TrackArm"/> off the two belt layers.
+    ///
+    /// The widest the two belts are apart on screen, over every heading, is the
+    /// gauge: the gauge axis lies in the ground plane, so the heading that puts
+    /// it across the screen shows it whole and every other heading foreshortens
+    /// it. Taking the maximum picks that heading without having to know which
+    /// one it is - the same trick <see cref="HullSpan"/> uses to find the
+    /// broadside, and for the same reason frame 0 would not do.
+    ///
+    /// Horizontal only. The vertical separation is the camera's tilt rather
+    /// than anything about the tank, and folding it in would report a gauge
+    /// that grows with the elevation the scene was rendered at.
+    /// </summary>
+    private void MeasureGauge()
+    {
+        string left = TrackNames[0], right = TrackNames[1];
+        if (!_textures.TryGetValue(left, out ImageTexture? leftTex)
+            || !_textures.TryGetValue(right, out ImageTexture? rightTex))
+            return;
+        double[] leftAt = BeltCentres(left, leftTex);
+        double[] rightAt = BeltCentres(right, rightTex);
+        double widest = 0.0;
+        for (int f = 0; f < Math.Min(leftAt.Length, rightAt.Length); f++)
+            if (!double.IsNaN(leftAt[f]) && !double.IsNaN(rightAt[f]))
+                widest = Math.Max(widest, Math.Abs(rightAt[f] - leftAt[f]));
+        TrackArm = widest / 2.0;
+    }
+
+    /// <summary>Where a belt sits across the frame, per heading, in tile pixels;
+    /// NaN for a frame with nothing in it. Phase 0 only - the belt winds along
+    /// its loop and does not move sideways doing it.</summary>
+    private double[] BeltCentres(string layer, ImageTexture texture)
+    {
+        Image image = texture.GetImage();
+        image.Convert(Image.Format.Rgba8);
+        byte[] data = image.GetData();
+        int stride = image.GetWidth();
+        int columns = _columns[layer];
+        int count = CountOf(layer);
+        Vector2I tile = TileOf(layer);
+        var centres = new double[count];
+        for (int frame = 0; frame < count; frame++)
+        {
+            double sum = 0.0;
+            long seen = 0;
+            for (int y = 0; y < tile.Y; y++)
+            {
+                for (int x = 0; x < tile.X; x++)
+                {
+                    int sx = frame % columns * tile.X + x;
+                    int sy = frame / columns * tile.Y + y;
+                    int o = (sy * stride + sx) * 4;
+                    if (o + 3 >= data.Length || data[o + 3] <= 32)
+                        continue;
+                    sum += x;
+                    seen++;
+                }
+            }
+            centres[frame] = seen > 0 ? sum / seen : double.NaN;
+        }
+        return centres;
+    }
+
     /// <summary>The plate table, straight out of the layer that gets placed by
     /// it. Ordered front, rear, left, right when they are all present, so the
     /// harness cycles them in a way that makes sense rather than in whatever
@@ -663,6 +746,7 @@ public sealed class AtlasSet
         // long enough to blur or a loop that is meant to be read frame by frame.
         foreach (string layer in TrackNames)
             atlas.TakeSmear(layer);
+        atlas.MeasureGauge();
 
         if (hull is null)
         {

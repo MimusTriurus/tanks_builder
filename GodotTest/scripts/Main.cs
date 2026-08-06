@@ -1141,13 +1141,12 @@ public sealed partial class Main : Node2D
     /// <summary>
     /// Roughly half the track gauge, as a fraction of the hull's broadside span.
     ///
-    /// An estimate, and it only has to be one: it decides how fast the belts wind
-    /// during a pivot, and the difference between "the tracks are working" and
-    /// "the tank is turning on frozen tracks" is not a few per cent. Nothing in
-    /// the atlas measures the gauge - <see cref="AtlasSet.HullSpan"/> is the
-    /// widest frame, which is the hull's length - so this is a proportion rather
-    /// than a measurement, and it is named here instead of buried in the
-    /// expression so it can be argued with.
+    /// The fallback now, and only for a tank with no belt layers to measure -
+    /// see <see cref="AtlasSet.TrackArm"/>. It was the answer, and it was wrong
+    /// by 12-32%: <see cref="AtlasSet.HullSpan"/> is the widest frame, which is
+    /// the hull's *length*, and the three hulls are one length to within 3%
+    /// while their gauges range over a fifth. Kept because a tank without belts
+    /// still turns, and named rather than buried so it can be argued with.
     /// </summary>
     private const double PivotRadiusFraction = 0.25;
 
@@ -1175,12 +1174,21 @@ public sealed partial class Main : Node2D
     /// missing motion on two - and closing it properly means a phase per side,
     /// which the atlas is already ready for: track_left and track_right are
     /// separate layers.
+    ///
+    /// The radius is <see cref="AtlasSet.TrackArm"/>, measured off those two
+    /// layers, and only falls back to a fraction of the hull when there are no
+    /// belts to measure. The fraction was wrong by 12-32%, worst on the heavy,
+    /// and wrong in a way it could not have been right: the three hulls are one
+    /// length to within 3% and the three gauges are not.
     /// </summary>
     private double BeltTravel(Vehicle v, double delta)
     {
         double swing = WrapAngle(v.Sprite.HullFacing - v.LastHullFacing);
         v.LastHullFacing = v.Sprite.HullFacing;
-        double radius = v.Atlas.HullSpan * PivotRadiusFraction * v.Sprite.BodyScale;
+        double arm = v.Atlas.TrackArm > 0.0
+            ? v.Atlas.TrackArm
+            : v.Atlas.HullSpan * PivotRadiusFraction;
+        double radius = arm * v.Sprite.BodyScale;
         double pivot = Math.Abs(Mathf.DegToRad(swing)) * radius;
         // The swing takes the drive's sign rather than always adding, so a tank
         // reversing round a corner does not have its belts partly cancelled by
