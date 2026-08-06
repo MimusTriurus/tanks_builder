@@ -2510,6 +2510,23 @@ public static class SelfTest
         tank.TurretFacing = wasTurret;
         tank.TurretLocked = wasLocked;
 
+        // Switched off, the ring's angle still has to be read and consumed every
+        // frame. Left unread, switching the motor on mid-traverse would see the
+        // whole swing since anybody last looked as one frame of it and blip.
+        if (vehicles is { Count: > 0 } && vehicles[active].Audio is { } voiceOf)
+        {
+            Vehicle v = vehicles[active];
+            bool wasMotor = voiceOf.TurretMotor;
+            voiceOf.TurretMotor = false;
+            v.Sprite.TurretFacing = (v.Sprite.HullFacing + 40.0) % 360.0;
+            voiceOf.Update(v, 1.0 / 60.0);
+            Check("the ring's angle is read even when the motor is switched off",
+                Math.Abs(WrapAngle(v.LastTurretOffset - 40.0)) < 1e-6,
+                $"offset left at {v.LastTurretOffset:F1} - switching the motor on "
+                + "would then hear every degree since anybody last looked");
+            voiceOf.TurretMotor = wasMotor;
+        }
+
         // Every loop has to meet itself end to start - there is no crossfade.
         // The traverse motor is built rather than recorded and needed this: the
         // first attempt joined with a step forty times a typical one, which is a
@@ -2722,6 +2739,35 @@ public static class SelfTest
                 Shell.Layer > field.Rows * (int)field.CellAnchor(0, 1).Y + 1000,
                 $"{Shell.Layer} against a board {field.Rows} rows deep - a tracer "
                 + "vanishing behind a hull reads as a dropped frame");
+            // The tracer is a drawing and only a drawing. Both of these are the
+            // kind of assertion that quietly stops being true: a default is easy
+            // to flip in an initialiser nobody reads, and "hide it" is one small
+            // step from "skip it".
+            Check("the tracer is off until asked for, and the motor with it",
+                !Main.TracerOnByDefault && !Main.TurretSoundOnByDefault,
+                "both are named constants precisely so a change to them is a "
+                + "change somebody made on purpose");
+            var unseen = new Shell
+            {
+                Shooter = shooter, Target = foe, ImpactLocal = aim,
+                From = foe.Sprite.ToGlobal(aim)
+                       - new Vector2(Shell.PointBlank, 0.0f),
+                Serial = 2, Face = "front", Scatter = 0.0f, Calibre = 1.0f,
+                Level = 1,
+            };
+            unseen.Visible = false;
+            int hidden = 0;
+            while (!unseen.Arrived && hidden < 600)
+            {
+                unseen.Advance(1.0 / 60.0);
+                hidden++;
+            }
+            Check("a round with its tracer hidden still flies and still lands",
+                unseen.Arrived && hidden == frames,
+                $"{hidden} frames hidden against {frames} drawn - the flight is "
+                + "what separates the report from the impact and is not optional");
+            unseen.QueueFree();
+
             round.QueueFree();
 
             shooter.Cell = wasShooter;

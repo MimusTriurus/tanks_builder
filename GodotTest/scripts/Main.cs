@@ -78,6 +78,39 @@ public sealed partial class Main : Node2D
     private bool _soundEnabled = true;
 
     /// <summary>
+    /// The tracer drawn, or the round flying invisibly - key none, --tracer, or
+    /// the panel. **Off by default, and it switches the drawing only.**
+    ///
+    /// The flight itself is not optional and must not become so: it is what puts
+    /// time between the report and the impact, which is the whole reason the
+    /// round exists (see <see cref="Shell"/>). Switching this off gives back
+    /// exactly the picture the bench had before there was a tracer, with the
+    /// timing that came with it - which is the A/B worth having, and would not be
+    /// one if the shell stopped flying too.
+    ///
+    /// Default named here rather than left in the initialiser for the reason
+    /// <see cref="Recoil.ShearOnByDefault"/> is: a default nobody can point at is
+    /// a default that quietly changes.
+    /// </summary>
+    public const bool TracerOnByDefault = false;
+
+    private bool _tracerVisible = TracerOnByDefault;
+
+    /// <summary>
+    /// The turret's traverse motor - --turret-sound, or the panel. Off by
+    /// default.
+    ///
+    /// It is the newest and least settled voice on the tank: synthesised rather
+    /// than recorded, and its level chosen by argument rather than by ear. A
+    /// switch is how it gets judged - the question about a background hum is
+    /// whether it is missed when it stops, and that cannot be asked without
+    /// stopping it.
+    /// </summary>
+    public const bool TurretSoundOnByDefault = false;
+
+    private bool _turretSound = TurretSoundOnByDefault;
+
+    /// <summary>
     /// All three tanks, in the order they loaded, which is also key order and the
     /// order they are parked in from left to right.
     ///
@@ -482,6 +515,13 @@ public sealed partial class Main : Node2D
                 _tracksEnabled = false;
             else if (userArgs[i] == "--no-sound")
                 _soundEnabled = false;
+            // Both off by default, so both flags switch *on* - the opposite
+            // shape to --no-tracks and its neighbours, and the same shape as
+            // --pitch and --rumble, which are also off.
+            else if (userArgs[i] == "--tracer")
+                _tracerVisible = true;
+            else if (userArgs[i] == "--turret-sound")
+                _turretSound = true;
             else if (userArgs[i] == "--no-barrel-recoil")
                 _recoilTube = false;
             else if (userArgs[i] == "--burning")
@@ -688,6 +728,7 @@ public sealed partial class Main : Node2D
                     Own = own,
                     Common = _commonSounds,
                     Enabled = _soundEnabled && !_selfTest,
+                    TurretMotor = _turretSound,
                 };
                 AddChild(audio);
                 vehicle.Audio = audio;
@@ -1163,7 +1204,24 @@ public sealed partial class Main : Node2D
     {
         foreach (Vehicle v in _vehicles)
             if (v.Audio is not null)
+            {
                 v.Audio.Enabled = _soundEnabled;
+                v.Audio.TurretMotor = _turretSound;
+            }
+    }
+
+    /// <summary>
+    /// The tracer on and off, on the rounds already up as well as the next one.
+    ///
+    /// Reaching into the shells in flight is the point rather than an extra:
+    /// switching a drawing off has to take effect on what is being drawn, and a
+    /// round that kept its tracer because it was launched a moment ago would read
+    /// as the switch not working.
+    /// </summary>
+    private void TracerChanged()
+    {
+        foreach (Shell shell in _shells)
+            shell.Visible = _tracerVisible;
     }
 
     /// <summary>
@@ -1201,7 +1259,8 @@ public sealed partial class Main : Node2D
         // never launched, and from outside those are the same picture.
         string flying = _shells.Count == 0
             ? ""
-            : $" [{_shells.Count} up, {_shells[0].Fraction:F2}]";
+            : $" [{_shells.Count} up, {_shells[0].Fraction:F2}"
+              + $"{(_tracerVisible ? "" : " unseen")}]";
         return $"{v.Target.Tag}@{v.Solution.Heading}deg/{v.Solution.Range} {state}"
                + $" {face} {v.Target.Sprite.ScarLevel(face)}/{cap}{flying}";
     }
@@ -1236,6 +1295,10 @@ public sealed partial class Main : Node2D
                // driven hard while the tank drives straight and the gun holds
                // still on screen.
                + $" trt {a.TurretGate:F2}@{a.TurretPitch:F2}"
+               // 'off' and 'not turning' are the same two numbers and not the
+               // same thing - the tube's lesson, and this one is off by default
+               // so it is the reading you get unless you asked otherwise.
+               + $"{(_turretSound ? "" : "!off")}"
                + $" brn {a.BurnGate:F2}"
                + $" mix[{string.Join("/", trims)}]"
                + $" peak {(float.IsNegativeInfinity(peak) ? -99.0f : peak),6:F1}dB";
@@ -1682,6 +1745,9 @@ public sealed partial class Main : Node2D
             Calibre = Calibre,
             Level = Gunnery.Penetration(shooter.Profile, victim.Profile),
         };
+        // Invisible is still in the air: the flight is what separates the report
+        // from the impact, and only the drawing is on a switch.
+        shell.Visible = _tracerVisible;
         _shells.Add(shell);
         AddChild(shell);
     }
@@ -2113,6 +2179,14 @@ public sealed partial class Main : Node2D
         // rule costs, which is the question the rule raises: a gun that fires
         // down six lanes can be pointed at a tank it cannot hit, and the number
         // of cells it *could* hit from here is the answer to "so where do I go".
+        // The drawing only - the round flies either way, because the flight is
+        // what puts time between the report and the impact. Off by default, so
+        // the switch shows what the bench looked like before there was a tracer
+        // *with* the timing that came with it, which is the comparison worth
+        // having.
+        ui.Toggle("shell tracer  (--tracer)",
+            () => _tracerVisible,
+            on => { _tracerVisible = on; TracerChanged(); });
         ui.Readout(() =>
             $"{AimLine()}\nreload {Active.Profile.ReloadTime:F1}s, "
             + $"traverse {Active.Profile.TurretRate:F0} deg/s, "
@@ -2163,6 +2237,30 @@ public sealed partial class Main : Node2D
             return burst + "\n" + string.Join("\n", a.HitFaces.Select(f =>
                 $"{f,-6} {(_tank.MarksOn(f).Count == 0 ? "clean" : string.Concat(_tank.MarksOn(f).Select(m => m.Level)))}"
                 + $"   worked {_tank.Wear(f)} / {a.ScarLevels}"));
+        });
+
+        // The sound had no rows at all until now, which was an omission rather
+        // than a decision: the panel is where a switch is found by name, and '\'
+        // is not a name. The motor gets its own line beside the master because it
+        // is the one voice that was built rather than recorded and the one whose
+        // level was argued for rather than heard.
+        ui.Heading("sound");
+        ui.Toggle("sound  (\\)", () => _soundEnabled,
+                  on => { _soundEnabled = on; SoundChanged(); });
+        ui.Toggle("turret motor  (--turret-sound)", () => _turretSound,
+                  on => { _turretSound = on; SoundChanged(); });
+        ui.Readout(() =>
+        {
+            VehicleAudio? a = Active.Audio;
+            if (a is null)
+                return "no sound loaded - run stage_sounds.sh";
+            // The bus peak rather than the gates: gates say what was asked for,
+            // the peak says what came out, and only the second one tells a set
+            // that loaded from a set that is audible.
+            float peak = AudioServer.GetBusPeakVolumeLeftDb(0, 0);
+            return $"ring {a.TurretGate:F2} at {a.TurretPitch:F2}x, "
+                   + $"motor {a.TurretDb:F0}dB\n"
+                   + $"bus peak {(float.IsNegativeInfinity(peak) ? -99.0f : peak):F1}dB";
         });
 
         ui.Heading("view");

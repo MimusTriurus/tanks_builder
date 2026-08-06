@@ -43,6 +43,18 @@ public sealed partial class VehicleAudio : Node2D
     /// </summary>
     public bool Enabled = true;
 
+    /// <summary>
+    /// The traverse motor, separately from <see cref="Enabled"/> and off by
+    /// default - see <see cref="Main.TurretSoundOnByDefault"/>.
+    ///
+    /// Its own switch rather than a share of the master one because it is the
+    /// only voice here that was built rather than recorded, and the only one
+    /// whose level was argued for rather than heard. Harness-wide like the
+    /// master, not per tank: judging a hum on one tank while two others run
+    /// without it throws away the comparison.
+    /// </summary>
+    public bool TurretMotor;
+
     /// <summary>Master trim in dB, so the whole bench can be brought down without
     /// touching the balance between events.</summary>
     public float MasterDb;
@@ -331,9 +343,13 @@ public sealed partial class VehicleAudio : Node2D
         v.LastTurretOffset = offset;
         double ringing = delta > 0.0 ? swung / delta : 0.0;
         double effort = ringing / Math.Max(v.Profile.TurretRate, 1e-6);
-        Gate(_turret, ref _turretGate, Enabled && ringing > TurretFloor, delta,
+        // The offset is read and consumed whether the motor is switched on or
+        // not, above, so that turning it on mid-traverse does not see the whole
+        // swing since the last time anyone looked as one frame of it.
+        Gate(_turret, ref _turretGate,
+             Enabled && TurretMotor && ringing > TurretFloor, delta,
              TurretDb + (float)((1.0 - Math.Min(effort, 1.0)) * TurretCrawlTrim));
-        if (_turret is not null && ringing > TurretFloor)
+        if (_turret is not null && TurretMotor && ringing > TurretFloor)
             _turret.PitchScale =
                 (float)Math.Clamp(effort, TurretMinPitch, TurretMaxPitch);
 
