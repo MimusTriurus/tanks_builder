@@ -1191,8 +1191,14 @@ public sealed partial class Main : Node2D
         string face = v.Target.Atlas.FaceFor(
             Mod(v.Solution.Heading + 180.0, 360.0), v.Target.Sprite.HullFacing);
         int cap = Gunnery.Penetration(v.Profile, v.Target.Profile);
+        // Rounds in the air, and how far the nearest one has got. A shot that
+        // seems to do nothing is either a shell still flying or a shell that was
+        // never launched, and from outside those are the same picture.
+        string flying = _shells.Count == 0
+            ? ""
+            : $" [{_shells.Count} up, {_shells[0].Fraction:F2}]";
         return $"{v.Target.Tag}@{v.Solution.Heading}deg/{v.Solution.Range} {state}"
-               + $" {face} {v.Target.Sprite.ScarLevel(face)}/{cap}";
+               + $" {face} {v.Target.Sprite.ScarLevel(face)}/{cap}{flying}";
     }
 
     /// <summary>
@@ -1623,6 +1629,89 @@ public sealed partial class Main : Node2D
                 Gunnery.Penetration(shooter.Profile, victim.Profile), 1);
 
     /// <summary>
+    /// Put a round in the air, aimed at the plate the lane arrives on.
+    ///
+    /// Everything about the hit is settled here and carried by the round -
+    /// which plate, where on it, how deep, how loud - rather than looked up
+    /// again when it lands. Same rule the scatter and the calibre already
+    /// follow: what the trigger decided travels with the shell, because the
+    /// alternative is a round that changes calibre in flight because somebody
+    /// turned a dial.
+    ///
+    /// The muzzle comes off the turret layer for the frame the gun is showing, so
+    /// it foreshortens by itself and comes out of the tube on every heading -
+    /// the same measurement the flash is placed by, and taken from the same
+    /// place so the two cannot part company.
+    /// </summary>
+    private void Launch(Vehicle shooter, Vehicle victim, double fromBearing)
+    {
+        AtlasSet atlas = victim.Atlas;
+        if (!atlas.HasHit)
+            return;
+        double from = HexField.EdgeHeadings[SideFor(fromBearing)];
+        victim.HitCount++;
+        float scatter = ScatterAt(victim.HitCount);
+        string face = atlas.FaceFor(from, victim.Sprite.HullFacing);
+        Vector2 impact = atlas.HitOffset(face, victim.Sprite.HullFacing)
+                         + atlas.HitTangent(face, victim.Sprite.HullFacing) * scatter;
+
+        AtlasSet gun = shooter.Atlas;
+        Vector2 muzzle = gun.Muzzle(gun.FrameFor(shooter.Sprite.TurretFacing))
+                         - gun.Anchor;
+
+        var shell = new Shell
+        {
+            Shooter = shooter,
+            Target = victim,
+            ImpactLocal = impact,
+            From = shooter.Sprite.ToGlobal(muzzle),
+            Serial = victim.HitCount,
+            // Carried rather than re-read on arrival, for the reason above.
+            Face = face,
+            Scatter = scatter,
+            Calibre = Calibre,
+            Level = Gunnery.Penetration(shooter.Profile, victim.Profile),
+        };
+        _shells.Add(shell);
+        AddChild(shell);
+    }
+
+    /// <summary>Rounds in the air. A list rather than one per vehicle because
+    /// nothing about a shell belongs to the gun once it has left: the reload is
+    /// longer than any flight, so there is at most one per tank today, and the
+    /// day there is not this does not have to change.</summary>
+    private readonly List<Shell> _shells = new();
+
+    /// <summary>
+    /// Fly every round on, and land the ones that arrive.
+    ///
+    /// The damage is applied here rather than inside <see cref="Shell"/>, which
+    /// is a drawing node: a thing that must happen exactly once, in a known
+    /// order, next to the other things that happen when a tank is hit, does not
+    /// belong in _Draw's neighbourhood.
+    /// </summary>
+    private void AdvanceShells(double delta)
+    {
+        for (int i = _shells.Count - 1; i >= 0; i--)
+        {
+            Shell shell = _shells[i];
+            shell.Advance(delta);
+            if (!shell.Arrived)
+                continue;
+            _shells.RemoveAt(i);
+            Strike(shell);
+            shell.QueueFree();
+        }
+    }
+
+    private void ClearShells()
+    {
+        foreach (Shell shell in _shells)
+            shell.QueueFree();
+        _shells.Clear();
+    }
+
+    /// <summary>
     /// One shell into one tank, from a world bearing.
     ///
     /// The victim is a parameter for the reason the shooter is: a tank is shot
@@ -1662,8 +1751,21 @@ public sealed partial class Main : Node2D
         // armour, and it is about 17px wide against half-widths of 38 to 61.
         float scatter = ScatterAt(victim.HitCount);
         string face = atlas.FaceFor(from, sprite.HullFacing);
+        Land(victim, face, scatter, calibre, level, bite);
+    }
+
+    /// <summary>A round arriving, with everything about it already settled.
+    ///
+    /// Split out of <see cref="TakeHit"/> when the shell got a flight: the key
+    /// press works out which plate at the moment it lands, and a fired round
+    /// worked it out at the trigger and carried it. Both end here, so there is
+    /// one place where a tank takes a hit however the hit was arranged.</summary>
+    private void Land(Vehicle victim, string face, float scatter, float calibre,
+                      int? level, int bite)
+    {
+        TankSprite sprite = victim.Sprite;
         // The calibre goes the same way as the scatter and for the same reason:
-        // both are settled the moment the round lands, so both travel with it
+        // both are settled the moment the round leaves, so both travel with it
         // rather than being looked up again while it is on screen.
         victim.Hit.Strike(face, scatter, calibre);
         // How deep it goes is the calibre's business - see TankSprite.Damage.
@@ -1687,6 +1789,11 @@ public sealed partial class Main : Node2D
         // pointed at it.
         victim.Audio?.Struck(got, victim.HitCount);
     }
+
+    /// <summary>A round that has flown its path. Nothing is decided here - see
+    /// <see cref="Launch"/>.</summary>
+    private void Strike(Shell shell) =>
+        Land(shell.Target, shell.Face, shell.Scatter, shell.Calibre, shell.Level, 1);
 
     /// <summary>
     /// One tank engaging another: lay the gun, and fire when it is laid, loaded
@@ -1744,11 +1851,12 @@ public sealed partial class Main : Node2D
             || !Gunnery.Laid(v.Sprite.TurretFacing, v.Solution.Heading))
             return;
         Fire(v);
-        // The shell arrives from the far end of the lane it left along, which is
-        // the whole reason the gun is restricted to the six: the bearing the
-        // armour model wants is the firing heading turned round, exactly, with
-        // nothing snapped and nothing approximated. See AtlasSet.FaceFor.
-        TakeHit(v, v.Target, Mod(v.Solution.Heading + 180.0, 360.0));
+        // The round goes on its way rather than landing here. It arrives from the
+        // far end of the lane it left along, which is the whole reason the gun is
+        // restricted to the six: the bearing the armour model wants is the firing
+        // heading turned round, exactly, with nothing snapped and nothing
+        // approximated. See AtlasSet.FaceFor.
+        Launch(v, v.Target, Mod(v.Solution.Heading + 180.0, 360.0));
     }
 
     /// <summary>The hit runs on screen frames for the shot's reason: it is a
@@ -2249,6 +2357,11 @@ public sealed partial class Main : Node2D
             v.Audio?.Update(v, delta);
         }
 
+        // After every tank has moved, so a round aimed at a tank sees where that
+        // tank got to this frame rather than last frame - the same ordering the
+        // belts and the audio already need, and for the same reason.
+        AdvanceShells(delta);
+
         // The marks are about the driven tank and both tanks move, so they are
         // repainted on change rather than on a target being set: a lane that was
         // clear when the order was given stops being clear when somebody drives
@@ -2496,6 +2609,10 @@ public sealed partial class Main : Node2D
     {
         _spinning = false;
         _aimWithMouse = false;
+        // Before the tanks are repaired, not after: a round still in the air would
+        // land on armour that had just been made good, which is the one way this
+        // reset could leave a mark behind it.
+        ClearShells();
         foreach (Vehicle v in _vehicles)
         {
             CancelOrder(v);

@@ -2620,6 +2620,52 @@ public static class SelfTest
                 string.Join(", ", vehicles.Select(
                     v => $"{v.Tag} {v.Profile.TurretRate:F0} deg/s")));
 
+            // The round in the air. The property being asserted is the one the
+            // whole thing was written for: the shell must not land in the frame
+            // it left. Three passes at audio levels could only make the impact a
+            // fairer fight against a report starting on the same frame; time is
+            // what removes the masking, and time is what a faster round would
+            // silently take back.
+            Vector2 aim = foe.Sprite.ToLocal(
+                foe.Sprite.GlobalPosition + new Vector2(0.0f, -10.0f));
+            var round = new Shell
+            {
+                Shooter = shooter, Target = foe, ImpactLocal = aim,
+                From = foe.Sprite.ToGlobal(aim)
+                       - new Vector2(Shell.PointBlank, 0.0f),
+                Serial = 1, Face = "front", Scatter = 0.0f, Calibre = 1.0f,
+                Level = 1,
+            };
+            int frames = 0;
+            float was2 = -1.0f;
+            bool climbed = true;
+            while (!round.Arrived && frames < 600)
+            {
+                round.Advance(1.0 / 60.0);
+                frames++;
+                if (round.Fraction < was2)
+                    climbed = false;
+                was2 = round.Fraction;
+            }
+            Check("a round at point blank still takes several frames to arrive",
+                round.Arrived && frames >= 4,
+                $"{frames} frames over {Shell.PointBlank}px at {Shell.Speed}px/s"
+                + " - landing in the frame it was fired is what this replaced");
+            Check("and it crosses rather than jumping",
+                climbed && round.Fraction >= 1.0f,
+                $"fraction ended at {round.Fraction:F2}");
+            Check("what the trigger settled travels with the round",
+                round.Face == "front" && round.Level == 1
+                && Math.Abs(round.Calibre - 1.0f) < 1e-6,
+                "a shell that re-read the dials would change calibre in flight");
+            // Above every tank: depth is taken from the contact patch, so the
+            // deepest a tank can sit is the height of the board.
+            Check("the tracer draws over any tank on the board",
+                Shell.Layer > field.Rows * (int)field.CellAnchor(0, 1).Y + 1000,
+                $"{Shell.Layer} against a board {field.Rows} rows deep - a tracer "
+                + "vanishing behind a hull reads as a dropped frame");
+            round.QueueFree();
+
             shooter.Cell = wasShooter;
             foe.Cell = wasFoe;
             shooter.Target = wasTarget;
