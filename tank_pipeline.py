@@ -1800,8 +1800,16 @@ def run(cfg=None):
         })
     if prepared["hits"]:
         report.update({
-            "plates": [{k: p[k] for k in ("face", "elevation", "faceon",
-                                          "share", "extent")}
+            # `visible` belongs here beside `faceon` because the two disagree,
+            # and the disagreement is the whole reason it is measured: HT's rear
+            # plate had the *best* faceon of the four (0.999) while two thirds of
+            # the mark on it was under the engine deck. Enumerated by name like
+            # everything else in this report, which is how the gun tube's stroke
+            # once got computed and dropped - so a key added to a plate has to be
+            # added here too or it goes nowhere.
+            "plates": [{k: p.get(k) for k in ("face", "elevation", "faceon",
+                                              "visible", "visible_at",
+                                              "share", "extent")}
                        for p in prepared["hits"]["plates"]],
             "hit_table": stamped["stamped"],
             "burst_edge_alpha": checked.get("burst_edge_alpha"),
