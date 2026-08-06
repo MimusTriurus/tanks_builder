@@ -135,9 +135,10 @@ public sealed class EngineTremble
 
     /// <summary>How hard the engine is working, 0 at rest and 1 at cruise. One
     /// ramp feeds both the amplitude and the frequency, because both come from
-    /// the same thing turning faster.</summary>
-    private double Load(double speed) =>
-        Math.Clamp(Math.Abs(speed) / Math.Max(TopSpeed, 1e-6), 0.0, 1.0);
+    /// the same thing turning faster - and it is
+    /// <see cref="MovementProfile.LoadAt"/> rather than an expression of its own,
+    /// because the plume and the engine note ask the same question.</summary>
+    private double Load(double speed) => MovementProfile.LoadAt(speed, TopSpeed);
 
     /// <summary>Shear amplitude at a given speed. Exposed alongside
     /// <see cref="PitchRateAt"/> so the seam cost can be asserted at the speed

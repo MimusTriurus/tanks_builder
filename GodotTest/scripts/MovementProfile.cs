@@ -115,4 +115,21 @@ public sealed class MovementProfile
                 return profile;
         return Medium;
     }
+
+    /// <summary>
+    /// How hard the engine is working, 0 at rest and 1 at cruise.
+    ///
+    /// One definition because there are now three consumers and there were
+    /// already two copies of it, character for character, private to
+    /// <see cref="EngineTremble"/> and <see cref="ExhaustLoop"/>. They agree
+    /// today; the point is that nothing was keeping them agreeing, and this is
+    /// the ramp every effect that says "the engine is under load" hangs off - the
+    /// tremble's amplitude and frequency, the plume's rate and density, and the
+    /// engine note.
+    ///
+    /// Per class rather than absolute, so a heavy at its own cruise is working as
+    /// hard as a light at its. Signed speed folded, because reversing is work.
+    /// </summary>
+    public static double LoadAt(double speed, double topSpeed) =>
+        Math.Clamp(Math.Abs(speed) / Math.Max(topSpeed, 1e-6), 0.0, 1.0);
 }

@@ -81,8 +81,9 @@ public sealed class ExhaustLoop
     public double RateAt(double speed) =>
         IdleRate + (DriveRate - IdleRate) * Load(speed);
 
-    private double Load(double speed) =>
-        Math.Clamp(Math.Abs(speed) / Math.Max(TopSpeed, 1e-6), 0.0, 1.0);
+    /// <summary>Shared with the tremble and the engine note - see
+    /// <see cref="MovementProfile.LoadAt"/>.</summary>
+    public double Load(double speed) => MovementProfile.LoadAt(speed, TopSpeed);
 
     public void Reset()
     {
