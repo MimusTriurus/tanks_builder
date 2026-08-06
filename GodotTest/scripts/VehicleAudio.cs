@@ -354,12 +354,33 @@ public sealed partial class VehicleAudio : Node2D
     public void Struck(int level, int shell)
     {
         int deep = Math.Max(level, 0);
-        string name = deep >= 2 ? "armour_hit" : "armour_ricochet";
+        string name = ImpactFor(deep);
         int[] takes = ImpactTakes[name];
         int which = takes[Math.Abs(shell) % takes.Length];
         Play(_armour, Common[$"{name}{which}"] ?? Common[$"{name}1"], ArmourDb,
              EventTrim, PitchOf(shell));
     }
+
+    /// <summary>
+    /// Whether a shell that reached this level bounced or went in.
+    ///
+    /// Level 0 is the only one that means it did not get in, so it is the only
+    /// one that rings as a bounce. Static and named so the mapping from a pair of
+    /// classes to a sound can be asserted end to end rather than left implicit in
+    /// a comparison halfway down a method.
+    ///
+    /// It said <c>level >= 2</c> until a medium was heard whistling off a light
+    /// it had just gone through. The threshold was written for the older armour
+    /// model, where a level was how *worked* a plate was and only the third step
+    /// was a hole; the class matchup then changed what a level means underneath
+    /// it - 0 is now exactly "the gun did not out-class the armour", see
+    /// <see cref="Gunnery.Penetration"/>, and a medium against a light is a 1.
+    /// The comparison stayed correct and the sentence it was implementing had
+    /// moved, which is a failure with nothing to show for itself except the
+    /// wrong sound.
+    /// </summary>
+    public static string ImpactFor(int level) =>
+        Math.Max(level, 0) >= 1 ? "armour_hit" : "armour_ricochet";
 
     /// <summary>
     /// Which takes of each impact are actually played.

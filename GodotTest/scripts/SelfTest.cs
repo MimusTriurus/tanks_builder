@@ -2523,6 +2523,24 @@ public static class SelfTest
             lt.Rank < mt.Rank && mt.Rank < ht.Rank,
             $"{lt.Rank} / {mt.Rank} / {ht.Rank} - the table is a comparison");
 
+        // The pair of classes all the way through to the sound, which is where
+        // it broke: the matchup table was right, the level it produced was right,
+        // and the branch turning a level into a bounce or a penetration was still
+        // reading the older model's thresholds. Asserted end to end precisely
+        // because both ends were correct on their own.
+        Check("a gun that does not out-class the armour is heard bouncing off it",
+            VehicleAudio.ImpactFor(Gunnery.Penetration(lt, mt)) == "armour_ricochet"
+            && VehicleAudio.ImpactFor(Gunnery.Penetration(lt, ht)) == "armour_ricochet"
+            && VehicleAudio.ImpactFor(Gunnery.Penetration(mt, ht)) == "armour_ricochet",
+            "a bounce is the only thing level 0 can mean");
+        Check("and one that does is heard going through",
+            VehicleAudio.ImpactFor(Gunnery.Penetration(mt, lt)) == "armour_hit"
+            && VehicleAudio.ImpactFor(Gunnery.Penetration(ht, lt)) == "armour_hit"
+            && VehicleAudio.ImpactFor(Gunnery.Penetration(ht, mt)) == "armour_hit",
+            $"a medium into a light is level {Gunnery.Penetration(mt, lt)} and "
+            + $"sounds like {VehicleAudio.ImpactFor(Gunnery.Penetration(mt, lt))}"
+            + " - a gouge is still a round that got in");
+
         if (vehicles is { Count: > 1 })
         {
             Vehicle shooter = vehicles[active];
