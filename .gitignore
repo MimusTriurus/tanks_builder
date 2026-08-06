@@ -21,3 +21,9 @@ GodotTest/_verify.png
 # Scratch output from ad-hoc script runs; Sprites/ is the real output and is
 # tracked.
 out/
+
+# Sound set for the bench, staged by stage_sounds.sh from a Blitzkrieg 2
+# checkout. Not tracked, and it must not be: Nival's licence for that release is
+# non-commercial and revocable, so the bytes stay off this repository and the
+# script is the record of where they came from. Re-run it to rebuild the folder.
+Sounds/
