@@ -447,6 +447,98 @@ public sealed class AtlasSet
         _counts[layer] = Math.Max(1, meta.Count);
     }
 
+    /// <summary>
+    /// The name under which a layer's phase average is kept.
+    ///
+    /// Not in <see cref="LayerNames"/> or <see cref="OptionalNames"/> and never
+    /// loaded from disk: it is derived here from frames that are already in
+    /// memory, so it costs no render and cannot go stale against the layer it
+    /// comes from. The '#' keeps it out of the way of anything that matches
+    /// layer names by substring.
+    /// </summary>
+    public static string SmearName(string layer) => layer + "#smear";
+
+    /// <summary>
+    /// Build a layer's phase average: one frame per heading, each the mean of
+    /// that heading's phases.
+    ///
+    /// This is what a belt going too fast to count actually looks like, and it
+    /// is not an approximation of one - a smear <em>is</em> the average of the
+    /// positions passed through. So there is nothing to tune here and no filter
+    /// to pick: the answer is arithmetic on frames the renderer already
+    /// produced.
+    ///
+    /// Averaged premultiplied and divided back out, which matters only at the
+    /// silhouette edge but costs nothing to get right. The alpha comes out as
+    /// the mean too - and since the belt's outline barely moves between phases
+    /// (the links slide along a loop that stays where it is), that mean is
+    /// within a hair of every phase's own alpha. Which is what makes the
+    /// cross-fade safe: a belt is part of the tank, and one that went
+    /// translucent halfway through the blend would show the ground through the
+    /// hull.
+    /// </summary>
+    private void TakeSmear(string layer)
+    {
+        if (!_textures.TryGetValue(layer, out ImageTexture? texture))
+            return;
+        int phases = PhasesOf(layer);
+        int count = CountOf(layer);
+        int columns = _columns[layer];
+        Vector2I tile = TileOf(layer);
+        if (phases <= 1 || count <= 0 || tile.X <= 0 || tile.Y <= 0)
+            return;
+
+        Image source = texture.GetImage();
+        source.Convert(Image.Format.Rgba8);
+        byte[] from = source.GetData();
+        int stride = source.GetWidth();
+        int width = count * tile.X;
+        var to = new byte[width * tile.Y * 4];
+
+        for (int frame = 0; frame < count; frame++)
+        {
+            for (int y = 0; y < tile.Y; y++)
+            {
+                for (int x = 0; x < tile.X; x++)
+                {
+                    double r = 0.0, g = 0.0, b = 0.0, a = 0.0;
+                    for (int phase = 0; phase < phases; phase++)
+                    {
+                        int index = phase * count + frame;
+                        int sx = index % columns * tile.X + x;
+                        int sy = index / columns * tile.Y + y;
+                        int o = (sy * stride + sx) * 4;
+                        if (o < 0 || o + 3 >= from.Length)
+                            continue;
+                        double weight = from[o + 3] / 255.0;
+                        r += from[o] * weight;
+                        g += from[o + 1] * weight;
+                        b += from[o + 2] * weight;
+                        a += weight;
+                    }
+                    int d = (y * width + frame * tile.X + x) * 4;
+                    if (a > 0.0)
+                    {
+                        to[d] = (byte)Math.Clamp(r / a, 0.0, 255.0);
+                        to[d + 1] = (byte)Math.Clamp(g / a, 0.0, 255.0);
+                        to[d + 2] = (byte)Math.Clamp(b / a, 0.0, 255.0);
+                    }
+                    to[d + 3] = (byte)Math.Clamp(a / phases * 255.0, 0.0, 255.0);
+                }
+            }
+        }
+
+        string name = SmearName(layer);
+        Image smeared = Image.CreateFromData(
+            width, tile.Y, false, Image.Format.Rgba8, to);
+        _textures[name] = ImageTexture.CreateFromImage(smeared);
+        _columns[name] = count;
+        _counts[name] = count;
+        _tiles[name] = tile;
+        _anchors[name] = AnchorOf(layer);
+        _phases[name] = 1;
+    }
+
     /// <summary>The plate table, straight out of the layer that gets placed by
     /// it. Ordered front, rear, left, right when they are all present, so the
     /// harness cycles them in a way that makes sense rather than in whatever
@@ -565,6 +657,12 @@ public sealed class AtlasSet
                 && meta.UnitsPerPixel > 0.0)
                 atlas.TrackPitch = meta.Track[0].Pitch / meta.UnitsPerPixel;
         }
+
+        // The belts get a phase average each, built from the frames just loaded.
+        // Only the belts: everything else is either a one-shot nobody watches
+        // long enough to blur or a loop that is meant to be read frame by frame.
+        foreach (string layer in TrackNames)
+            atlas.TakeSmear(layer);
 
         if (hull is null)
         {

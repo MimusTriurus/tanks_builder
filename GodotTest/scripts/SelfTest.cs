@@ -775,27 +775,47 @@ public static class SelfTest
             backwards.Phase > belt.Phases / 2.0,
             $"phase {backwards.Phase:F3} of {backwards.Phases}");
 
-        // The cap, which is the interesting half. Past half a link per frame
-        // the phase sequence aliases and the tread reads as running the wrong
-        // way; below the cap it must be exactly in step, and above it must slip
-        // rather than reverse.
+        // The cap and the smear, which are the interesting half and now two
+        // thresholds rather than one. Below the lower the belt is in step and
+        // its links are countable; between them it is still in step and fading
+        // into its own phase average; above the upper it slips, as it always
+        // did, but from much further up.
         var capped = new TrackLoop { Phases = 8, Pitch = 7.0 };
-        double inStep = capped.SyncSpeed * 0.5 * tick;
+        double inStep = capped.BlurSpeed * 0.5 * tick;
         capped.Advance(inStep, tick);
-        Check("below the sync speed the belt is exactly in step",
-            Math.Abs(capped.Slip - 1.0) < 1e-9, $"slip {capped.Slip:F4}");
-        double flatOut = 240.0 * tick;
-        capped.Advance(flatOut, tick);
-        Check("at cruise it slips rather than aliasing", capped.Slip < 1.0,
-            $"slip {capped.Slip:F3} at 240px/s, in step to"
+        Check("below the smear speed the belt is in step and crisp",
+            Math.Abs(capped.Slip - 1.0) < 1e-9 && capped.Blur == 0.0,
+            $"slip {capped.Slip:F4}, blur {capped.Blur:F3}");
+        capped.Advance(capped.SyncSpeed * 2.0 * tick, tick);
+        Check("far above the cap it slips rather than aliasing",
+            capped.Slip < 1.0 && capped.Blur == 1.0,
+            $"slip {capped.Slip:F3} at twice {capped.SyncSpeed:F0}px/s,"
+            + $" blur {capped.Blur:F2}");
+        Check("the smear speed is the lower of the two thresholds",
+            capped.BlurSpeed < capped.SyncSpeed,
+            $"smears from {capped.BlurSpeed:F0}, slips from"
             + $" {capped.SyncSpeed:F0}px/s");
+        // What replaces the old hard cap, and it is the reason the cap could be
+        // raised past Nyquist at all: the crisp layer is what could read
+        // backwards, and by the alias limit at most half of it is left.
+        Check("nothing crisp survives past the alias limit",
+            capped.BlurAt(0.5) <= 0.5 + 1e-9 && capped.BlurAt(0.65) >= 1.0 - 1e-9,
+            $"blur {capped.BlurAt(0.5):F2} at half a link per frame,"
+            + $" {capped.BlurAt(0.65):F2} at the cap");
+        Check("the smear only ever comes on as the belt speeds up",
+            capped.BlurAt(0.0) == 0.0 && capped.BlurAt(0.2) == 0.0
+            && capped.BlurAt(0.45) > 0.0 && capped.BlurAt(0.45) < capped.BlurAt(0.55)
+            && capped.BlurAt(10.0) == 1.0,
+            "a parked tank is the one time the links are looked at");
         var stepped = new TrackLoop { Phases = 8, Pitch = 7.0 };
         double before = stepped.Phase;
-        stepped.Advance(flatOut, tick);
+        stepped.Advance(240.0 * tick, tick);
         double moved = stepped.Phase - before;
-        Check("the cap holds the step clear of the alias limit",
-            moved > 0.0 && moved < stepped.Phases / 2.0,
-            $"{moved:F3} phases in a frame, alias at {stepped.Phases / 2.0:F1}");
+        Check("a step past the alias limit is covered by the smear",
+            moved > 0.0
+            && (moved < stepped.Phases / 2.0 || stepped.Blur >= 0.5),
+            $"{moved:F3} phases in a frame under {stepped.Blur:F2} of blur,"
+            + $" alias at {stepped.Phases / 2.0:F1}");
 
         // Wiring. The belt is bolted to the hull, so it is indexed and tilted by
         // the hull - the exhaust's mistake, and invisible at heading zero.
@@ -856,6 +876,33 @@ public static class SelfTest
                 Check($"{name} was rendered at every heading",
                     tracked.CountOf(name) == tracked.Count,
                     $"{tracked.CountOf(name)} against {tracked.Count}");
+            }
+            foreach (string name in AtlasSet.TrackNames)
+            {
+                string smear = AtlasSet.SmearName(name);
+                Check($"{name} has a phase average to fade into",
+                    tracked.Has(smear),
+                    "derived from frames already loaded - no render, and it "
+                    + "cannot go stale against the layer it comes from");
+                // It stands in for the belt at the same place on screen, so it
+                // has to be the same size and hang off the same point. A
+                // different anchor would slide the belt sideways as it blurs.
+                Check($"{smear} is one frame per heading at the belt's size",
+                    tracked.PhasesOf(smear) == 1
+                    && tracked.CountOf(smear) == tracked.CountOf(name)
+                    && tracked.TileOf(smear) == tracked.TileOf(name)
+                    && (tracked.AnchorOf(smear) - tracked.AnchorOf(name)).Length()
+                       < 1e-4,
+                    $"{tracked.PhasesOf(smear)} phases,"
+                    + $" {tracked.CountOf(smear)} headings,"
+                    + $" tile {tracked.TileOf(smear).X}px");
+                // The '#' is not decoration. by_hints and every exclude in the
+                // renderer match layer names by substring, and a smear named
+                // "track_left_blur" would be caught by anything reaching for
+                // the belt.
+                Check($"{smear} is not one of the layers loaded from disk",
+                    !AtlasSet.LayerNames.Contains(smear) && smear.Contains('#'),
+                    "it is derived, and nothing should go looking for it on disk");
             }
             Check("both belts have the same number of phases",
                 tracked.PhasesOf(AtlasSet.TrackNames[0])
@@ -2344,6 +2391,47 @@ public static class SelfTest
             Math.Abs(wound.SyncSpeed
                      - 5.0 * wound.MaxPitchesPerFrame * wound.CapFrameRate) < 1e-9,
             $"{wound.SyncSpeed:F0} px/s - a coarser link stays in step further up");
+
+        // The whole reason the cap grew a smear. A limiter that bites on two
+        // classes out of three pins both of them to the same tread speed, and
+        // measured at cruise the order came out *inverted*: LTP 310px/s of
+        // ground showing 135px/s of tread against HTP's 175 on 175. So this
+        // asks the question the eye was asking - do the belts run at visibly
+        // different speeds, in the same order the tanks do.
+        if (atlases is { Count: > 1 })
+        {
+            var shown = new List<(string Tag, double Px)>();
+            foreach ((string tag, AtlasSet set) in atlases)
+            {
+                if (!set.HasTracks)
+                    continue;
+                MovementProfile profile = MovementProfile.For(tag);
+                var drawn = new TrackLoop
+                {
+                    Phases = set.TrackPhases,
+                    Pitch = set.TrackPitch,
+                    Scale = profile.Size,
+                };
+                // What the tread actually shows: the ground, until the cap.
+                shown.Add((tag, Math.Min(profile.TopSpeed, drawn.SyncSpeed)));
+            }
+            var byTank = shown
+                .OrderByDescending(s => MovementProfile.For(s.Tag).TopSpeed)
+                .ToArray();
+            string read = string.Join(", ", byTank.Select(s =>
+                $"{s.Tag} {s.Px:F0}px/s tread on"
+                + $" {MovementProfile.For(s.Tag).TopSpeed:F0} of ground"));
+            Check("a faster tank shows a faster tread",
+                byTank.Length > 1
+                && byTank.Zip(byTank.Skip(1)).All(p => p.First.Px > p.Second.Px),
+                read + " - the limiter used to invert this");
+            Check("the tread speeds are far enough apart to read as classes",
+                byTank.Length > 1
+                && byTank[0].Px / byTank[^1].Px > 1.2,
+                byTank.Length > 1
+                    ? $"{byTank[0].Px / byTank[^1].Px:F2}x from fastest to slowest"
+                    : read);
+        }
 
         GD.Print("gunnery: the gun fires down a flat side and nowhere else");
 

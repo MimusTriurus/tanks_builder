@@ -33,6 +33,24 @@ namespace TankSpriteTest;
 /// against the ground instead. Slipping is wrong and looks fine; reversing is
 /// wrong and looks broken. <see cref="Slip"/> says how much is being given up,
 /// so the trade is a number on the panel rather than a silent decision.
+///
+/// What the cap cost, and what buys it back
+/// ----------------------------------------
+/// A cap alone flattens the classes, which is the thing it was not supposed to
+/// do. Measured at cruise: LTP 310px/s, MTP 240, HTP 175 - a spread of 1.77 -
+/// and the tread showing 135, 145 and 175px/s, a spread of 1.30 with the order
+/// <em>inverted</em>. The fastest tank had the slowest-looking belt, because
+/// two of the three were pinned against the same limit.
+///
+/// The way out is not a higher cap - Nyquist does not move, and it is a
+/// property of the tread pattern rather than of how many poses were rendered,
+/// so more phases buy nothing. It is that a real belt at speed is a
+/// <em>smear</em>, and a smear has no pattern left to read backwards. So the
+/// belt fades toward the average of all its phases as it goes, and that average
+/// is the honest picture of a belt going too fast to count - see
+/// <see cref="Blur"/>. Once nothing crisp is left the rate may keep rising, and
+/// the classes separate again on both counts at once: HTP crisp and in step,
+/// MTP running true under a light smear, LTP a full blur.
 /// </summary>
 public sealed class TrackLoop
 {
@@ -64,7 +82,8 @@ public sealed class TrackLoop
     public double LinkOnScreen => Pitch * Scale;
 
     /// <summary>
-    /// Fastest the tread may be shown running, in links per screen frame.
+    /// Where the tread stops being countable, in links per screen frame, and so
+    /// where <see cref="Blur"/> starts coming in.
     ///
     /// Half a link per frame is where the phase sequence aliases outright. 0.35
     /// leaves enough margin that the motion still reads as forward rather than
@@ -72,11 +91,33 @@ public sealed class TrackLoop
     /// honest-sync speed the pipeline notes arrived at from the other end, by
     /// asking how fine a tread the model has.
     ///
+    /// This used to be the hard cap. It is now the point the smear begins,
+    /// which is the same measurement doing the job it was always the right
+    /// number for: it is where the eye loses the links, not where the belt has
+    /// to stop.
+    ///
     /// Per frame and not per second, because aliasing is a property of the
-    /// screen's sample rate. Converted against the frame time so the cap is the
-    /// same picture whatever the frame rate happens to be.
+    /// screen's sample rate. Converted against the frame time so it is the same
+    /// picture whatever the frame rate happens to be.
     /// </summary>
-    public double MaxPitchesPerFrame = 0.35;
+    public double BlurOnset = 0.35;
+
+    /// <summary>
+    /// Fastest the tread may be shown running, in links per screen frame, and
+    /// also where <see cref="Blur"/> reaches 1.
+    ///
+    /// Above Nyquist on purpose, and the two facts are the same fact: this is
+    /// not where the pattern stays readable, it is where there is no pattern
+    /// left to be read. Between <see cref="BlurOnset"/> and here the crisp belt
+    /// is fading out linearly, so by 0.50 - where a reversal could first appear
+    /// - it is down to half, and by 0.65 it is gone. What is left is the phase
+    /// average, which looks the same whichever way it is going.
+    ///
+    /// Past this the belt slips, as it always did. It is just much further up:
+    /// on LTP the limiter now bites at 251px/s against a 310 cruise rather than
+    /// at 135.
+    /// </summary>
+    public double MaxPitchesPerFrame = 0.65;
 
     /// <summary>Frame time the cap is quoted against.</summary>
     public double CapFrameRate = 60.0;
@@ -101,6 +142,24 @@ public sealed class TrackLoop
     /// the panel and the assertions read the threshold rather than recompute
     /// it.</summary>
     public double SyncSpeed => LinkOnScreen * MaxPitchesPerFrame * CapFrameRate;
+
+    /// <summary>Distance per second at which the belt starts to smear. The
+    /// companion to <see cref="SyncSpeed"/>, and the lower of the two.</summary>
+    public double BlurSpeed => LinkOnScreen * BlurOnset * CapFrameRate;
+
+    /// <summary>
+    /// How much of the belt is showing as a smear rather than as links: 0 crisp,
+    /// 1 nothing but the phase average.
+    ///
+    /// Taken from the rate the ground <em>wanted</em>, not the one the cap
+    /// allowed, so it stays at 1 above the cap instead of dropping back when
+    /// the limiter starts holding the phase down.
+    ///
+    /// 1 at a standstill would be wrong twice over and it cannot happen: a
+    /// parked tank wants no rate at all, so this is 0 and the links are there to
+    /// be counted, which is exactly when they are looked at.
+    /// </summary>
+    public double Blur { get; private set; }
 
     /// <summary>
     /// Phases per second the belt actually turned on the last step - the capped
@@ -143,14 +202,27 @@ public sealed class TrackLoop
         {
             Slip = 1.0;
             PhaseRate = 0.0;
+            Blur = 0.0;
             return;
         }
         double want = distance / LinkOnScreen;
         double limit = MaxPitchesPerFrame * CapFrameRate * Math.Max(delta, 0.0);
         double take = Math.Clamp(want, -limit, limit);
         Slip = Math.Abs(want) > 1e-9 ? Math.Abs(take / want) : 1.0;
+        Blur = BlurAt(delta > 0.0 ? Math.Abs(want) / (delta * CapFrameRate) : 0.0);
         _phase = Mod(_phase + take * Phases, Phases);
         PhaseRate = delta > 0.0 ? take * Phases / delta : 0.0;
+    }
+
+    /// <summary>The smear that goes with a wanted rate of
+    /// <paramref name="perFrame"/> links per screen frame. Split out so the ramp
+    /// can be asserted at its two ends without driving a tank to them.</summary>
+    public double BlurAt(double perFrame)
+    {
+        double span = MaxPitchesPerFrame - BlurOnset;
+        return span <= 0.0
+            ? (perFrame > BlurOnset ? 1.0 : 0.0)
+            : Math.Clamp((perFrame - BlurOnset) / span, 0.0, 1.0);
     }
 
     public void Reset()
@@ -158,6 +230,7 @@ public sealed class TrackLoop
         _phase = 0.0;
         Slip = 1.0;
         PhaseRate = 0.0;
+        Blur = 0.0;
     }
 
     private static double Mod(double a, double n) => (a % n + n) % n;

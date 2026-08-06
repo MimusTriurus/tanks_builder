@@ -176,6 +176,11 @@ public sealed partial class TankSprite : Node2D
     /// timer: the belt is what the ground is winding against.</summary>
     public int TrackPhase = -1;
 
+    /// <summary>How much of the belts is showing as a smear rather than as
+    /// links: 0 crisp, 1 nothing but the phase average. From
+    /// <see cref="TrackLoop.Blur"/>; the layer pulls it at draw time.</summary>
+    public double TrackBlur;
+
     /// <summary>Whether the belts are drawn at all. On by default and not an
     /// option in the sense the movement effects are - a tank has tracks - but
     /// worth being able to switch off, because "does the hull layer still cover

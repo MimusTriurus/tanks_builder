@@ -1499,11 +1499,13 @@ public sealed partial class Main : Node2D
                 return;
             v.Track.Reset();
             v.Sprite.TrackPhase = -1;
+            v.Sprite.TrackBlur = 0.0;
             v.Sprite.QueueRedraw();
             return;
         }
         v.Track.Advance(distance, delta);
         v.Sprite.TrackPhase = v.Track.Frame;
+        v.Sprite.TrackBlur = v.Track.Blur;
     }
 
     /// <summary>Runs every frame, moving or not - that is the whole point of it.
@@ -2078,7 +2080,12 @@ public sealed partial class Main : Node2D
                    + $"   link {_track.LinkOnScreen,5:F1}px"
                    + $"\nin step to {_track.SyncSpeed,3:F0} px/s"
                    + $" of {_profile.TopSpeed:F0}"
-                   + $"   slipping {(1.0 - _track.Slip) * 100.0,3:F0}%";
+                   + $"   slipping {(1.0 - _track.Slip) * 100.0,3:F0}%"
+                   // Both thresholds, because they answer different questions:
+                   // where the links stop being countable, and where the belt
+                   // stops keeping up with the ground.
+                   + $"\nsmears from {_track.BlurSpeed,3:F0} px/s"
+                   + $"   blur {_track.Blur * 100.0,3:F0}%";
         });
         ui.Toggle("engine exhaust  (O)", () => _exhaustEnabled, on =>
         {
@@ -2390,6 +2397,10 @@ public sealed partial class Main : Node2D
                      // something to have to work out from the phase alone
                      + $"  trk {_tank.TrackPhase,2}@{_track.Phase,5:F2}"
                      + $" x{_track.Slip,4:F2}"
+                     // and the smear, because a fully blurred belt and a stopped
+                     // one look alike in a phase number and nothing alike on
+                     // screen
+                     + $" b{_track.Blur,4:F2}"
                      // The tube, in the channel that survives --no-ui, and with
                      // the switch beside it: 'rest' with the flag off and 'rest'
                      // between shots are the same number and not the same thing.
@@ -2739,6 +2750,7 @@ public sealed partial class Main : Node2D
             s.ExhaustPhase = -1;
             v.Track.Reset();
             s.TrackPhase = -1;
+            s.TrackBlur = 0.0;
             v.Burning = false;
             v.Burn.Reset();
             s.Burning = false;

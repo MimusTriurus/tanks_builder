@@ -404,11 +404,40 @@ public sealed partial class EffectLayer : Node2D
         float size = Clock is Clocks.HitBurst or Clocks.HitDust
             ? Tank.HitScale : 1.0f;
         DrawSetTransformMatrix(Tank.ShearFor(turret));
-        DrawTextureRectRegion(atlas.Texture(Layer),
-            Frame(anchor, atlas.TileOf(Layer),
-                place + new Vector2(0.0f, Tank.HeaveFor(turret)), size),
+        Rect2 rect = Frame(anchor, atlas.TileOf(Layer),
+            place + new Vector2(0.0f, Tank.HeaveFor(turret)), size);
+        DrawTextureRectRegion(atlas.Texture(Layer), rect,
             atlas.Region(Layer, frame), tint);
+        DrawSmear(atlas, rect, facing);
         DrawSetTransformMatrix(Transform2D.Identity);
+    }
+
+    /// <summary>
+    /// The belt's phase average, laid over the links at
+    /// <see cref="TankSprite.TrackBlur"/>.
+    ///
+    /// Over rather than instead of, and that order is the one thing here worth
+    /// stating. A true cross-fade would draw the crisp layer at 1-blur, and
+    /// where the two alphas disagree even slightly that thins the belt - and the
+    /// belt is part of the tank, so a thinned one shows the field through the
+    /// running gear. Drawn on top at blur alpha, the result is the same lerp
+    /// wherever both are solid, which is everywhere that matters, and it can
+    /// never take alpha away.
+    ///
+    /// Pulled from the tank at draw time like the phase and the density, for the
+    /// reason those are: a child redraws on its own schedule.
+    /// </summary>
+    private void DrawSmear(AtlasSet atlas, Rect2 rect, double facing)
+    {
+        if (Clock != Clocks.Track || Tank is null)
+            return;
+        double blur = Tank.TrackBlur;
+        string smear = AtlasSet.SmearName(Layer);
+        if (blur <= 0.0 || !atlas.Has(smear))
+            return;
+        DrawTextureRectRegion(atlas.Texture(smear), rect,
+            atlas.Region(smear, atlas.EffectFrame(smear, 0, facing)),
+            new Color(1.0f, 1.0f, 1.0f, (float)Math.Min(blur, 1.0)));
     }
 
     /// <summary>
