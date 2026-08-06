@@ -54,6 +54,7 @@ public sealed class SoundSet
     {
         "engine_start", "engine_cycle", "engine_stop",
         "track_start", "track_cycle", "track_stop",
+        "turret_cycle",
         "gun_shot",
     };
 
@@ -85,7 +86,7 @@ public sealed class SoundSet
     /// </summary>
     public static readonly string[] Looped =
     {
-        "engine_cycle", "track_cycle", "burn_cycle",
+        "engine_cycle", "track_cycle", "turret_cycle", "burn_cycle",
     };
 
     private readonly Dictionary<string, AudioStreamWav> _streams = new();
@@ -227,6 +228,39 @@ public sealed class SoundSet
             sum += v * v;
         }
         return Math.Sqrt(sum / samples);
+    }
+
+    /// <summary>
+    /// How hard the join is on a looping sample: the step from its last sample
+    /// back to its first, against the average step inside it. Below about one it
+    /// is invisible; a click is tens.
+    ///
+    /// Worth measuring rather than trusting, because a loop plays end to start
+    /// with no crossfade and nothing else in the bench looks at it. The
+    /// synthesised traverse motor is the case that needed it - the first attempt
+    /// measured 42, forty times a typical step, because 44100/108 is not a whole
+    /// number of samples so the waveform never landed on a sample boundary. The
+    /// recorded loops come in at 0.0 to 0.4 and the built ones at 1.1 to 2.5.
+    ///
+    /// -1 when the sample is not here.
+    /// </summary>
+    public double SeamRatio(string name)
+    {
+        AudioStreamWav? stream = this[name];
+        if (stream is null)
+            return -1.0;
+        byte[] data = stream.Data;
+        int samples = data.Length / 2;
+        if (samples < 3)
+            return -1.0;
+        double Value(int i) =>
+            (short)(data[i * 2] | (data[i * 2 + 1] << 8)) / 32768.0;
+        double steps = 0.0;
+        for (int i = 1; i < samples; i++)
+            steps += Math.Abs(Value(i) - Value(i - 1));
+        double mean = steps / samples;
+        return mean <= 0.0 ? -1.0
+            : Math.Abs(Value(0) - Value(samples - 1)) / mean;
     }
 
     public string Summary()

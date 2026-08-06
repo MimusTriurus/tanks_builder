@@ -118,6 +118,7 @@ public sealed partial class VehicleAudio : Node2D
     // Loops. Started once in _Ready and never restarted - see Gate().
     private AudioStreamPlayer2D? _engine;
     private AudioStreamPlayer2D? _track;
+    private AudioStreamPlayer2D? _turret;
     private AudioStreamPlayer2D? _burn;
 
     // One-shots. One player per kind of event, so a second shell arriving while
@@ -137,6 +138,37 @@ public sealed partial class VehicleAudio : Node2D
     /// </summary>
     public float EngineDb = -12.0f;
     public float TrackDb = -14.0f;
+
+    /// <summary>
+    /// The traverse motor, and it is the quietest thing on the tank on purpose.
+    ///
+    /// It is a small electric drive inside a hull with a diesel running, and it
+    /// only has to say "the gun is being laid" - which is information the eye
+    /// gets anyway from the turret moving. Loud enough to be missed when it stops
+    /// is the whole target; loud enough to be noticed while it runs is too much.
+    /// </summary>
+    public float TurretDb = -20.0f;
+
+    /// <summary>How far the motor is trimmed and pitched down when the ring is
+    /// barely creeping, against a traverse at the class's full rate. The belt's
+    /// pair and the belt's reason - pitch alone cannot carry it, because the
+    /// floor stops it going all the way down.</summary>
+    public float TurretCrawlTrim = -8.0f;
+    public float TurretMinPitch = 0.80f;
+
+    /// <summary>
+    /// Above unity, unlike the belt's, because the ring can outrun its own class
+    /// rate: the keys step the turret a whole 30 degree frame in one frame, which
+    /// is 1800 deg/s against a rate of 48 to 95. Clamped low all the same - what
+    /// a keypress means is "as fast as it goes", not eighteen times as fast.
+    /// </summary>
+    public float TurretMaxPitch = 1.15f;
+
+    /// <summary>Below this, in deg/s, the ring is not turning. Not zero: the
+    /// gunnery lays the gun by a fraction of a degree on its last step, and a
+    /// motor that ticked on for one frame at the end of every traverse would be
+    /// a click rather than a stop.</summary>
+    public double TurretFloor = 2.0;
     public float BurnDb = -10.0f;
     public float GunDb = -4.0f;
     public float ArmourDb = -6.0f;
@@ -191,6 +223,7 @@ public sealed partial class VehicleAudio : Node2D
 
     private double _engineGate;
     private double _trackGate;
+    private double _turretGate;
     private double _burnGate;
 
     /// <summary>
@@ -205,14 +238,17 @@ public sealed partial class VehicleAudio : Node2D
     /// </summary>
     public double EngineGate => _engineGate;
     public double TrackGate => _trackGate;
+    public double TurretGate => _turretGate;
     public double BurnGate => _burnGate;
     public float EnginePitch => _engine?.PitchScale ?? 0.0f;
     public float TrackPitch => _track?.PitchScale ?? 0.0f;
+    public float TurretPitch => _turret?.PitchScale ?? 0.0f;
 
     public override void _Ready()
     {
         _engine = Loop("engine_cycle", Own);
         _track = Loop("track_cycle", Own);
+        _turret = Loop("turret_cycle", Own);
         _burn = Loop("burn_cycle", Common);
         _gun = OneShot();
         _armour = OneShot();
@@ -286,8 +322,26 @@ public sealed partial class VehicleAudio : Node2D
         if (_track is not null && turning > 0.01)
             _track.PitchScale = (float)Math.Clamp(wound, TrackMinPitch, 1.0);
 
+        // The traverse motor. Rate from how far the ring turned, which is the
+        // turret against the *hull* - see Vehicle.LastTurretOffset. Read here
+        // rather than reported, and consumed here, so the baseline is laid down
+        // exactly once a frame whatever moved the gun.
+        double offset = WrapAngle(v.Sprite.TurretFacing - v.Sprite.HullFacing);
+        double swung = Math.Abs(WrapAngle(offset - v.LastTurretOffset));
+        v.LastTurretOffset = offset;
+        double ringing = delta > 0.0 ? swung / delta : 0.0;
+        double effort = ringing / Math.Max(v.Profile.TurretRate, 1e-6);
+        Gate(_turret, ref _turretGate, Enabled && ringing > TurretFloor, delta,
+             TurretDb + (float)((1.0 - Math.Min(effort, 1.0)) * TurretCrawlTrim));
+        if (_turret is not null && ringing > TurretFloor)
+            _turret.PitchScale =
+                (float)Math.Clamp(effort, TurretMinPitch, TurretMaxPitch);
+
         Gate(_burn, ref _burnGate, Enabled && v.Burning, delta, BurnDb);
     }
+
+    private static double WrapAngle(double degrees) =>
+        (degrees % 360.0 + 360.0 + 180.0) % 360.0 - 180.0;
 
     /// <summary>
     /// Ramp one loop towards on or off.

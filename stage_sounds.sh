@@ -96,22 +96,123 @@ match_rms() {
 # One level for every take of one event - see match_rms.
 IMPACT_RMS=0.14
 
+# Make a recorded loop meet itself, by folding its tail over its head.
+#
+# A loop plays end to start with no crossfade, so the two ends have to join. Five
+# of the six recorded loops already did, by luck rather than by anyone's
+# intention - and the sixth did not: the heavy's engine joined with a step six
+# times a typical one, which is a click once a lap on a sound that never stops.
+# Found by measurement, not by ear, and only because the traverse motor had to be
+# built and the seam therefore had to be looked at.
+#
+# The fold: the last x seconds, fading out, are mixed over the first x, fading
+# in, and the tail is then dropped. The new file starts on what used to be the
+# sample at L-x, which is also where it now ends - so the join is a join the
+# recording already contained. Costs x of length, which for a three second loop
+# is one part in seventy-five.
+#
+# Applied to the recorded loops only. The synthesised one closes by arithmetic
+# (see synth_turret) and folding it would blur the exact phase that arithmetic
+# bought.
+# Two things had to be right and the first attempt had neither, both silently:
+#
+#  * **samples, not seconds.** `sox stat` reports the length rounded, and a
+#    middle cut to a rounded length misses the join by tens of samples. The fold
+#    then lands on unrelated material and the seam comes out *worse* than it
+#    started - measured 0.0 to 12.7 on the light's engine, which had been perfect.
+#  * **`sox -m` halves.** Mixing two files without `-v 1` attenuates each by half,
+#    so the whole crossfade played at -6dB: a dip with a step at each end of it,
+#    which is two seams where there was one. Measured on the tail: rms 0.076
+#    mixed against 0.153 at unity.
+#
+# With both fixed the heavy's engine joins at 1.5 typical steps, down from 6.0,
+# and peaks at 0.72 so the unity-gain sum does not clip.
+close_loop() {
+    local file="$1" x=1764 tmp="$OUT/.loop" n
+    mkdir -p "$tmp"
+    n=$(sox --i -s "$file")
+    # Nothing sensible to fold on something barely longer than the fold.
+    [ "$n" -gt $((4 * x)) ] || { rm -rf "$tmp"; return; }
+    sox "$file" "$tmp/tail.wav" trim -${x}s fade t 0 ${x}s ${x}s
+    sox "$file" "$tmp/head.wav" trim 0 ${x}s fade t ${x}s
+    sox -m -v 1 "$tmp/tail.wav" -v 1 "$tmp/head.wav" "$tmp/join.wav"
+    sox "$file" "$tmp/mid.wav" trim ${x}s $((n - 2 * x))s
+    sox "$tmp/join.wav" "$tmp/mid.wav" -t wav -c 1 -r 44100 -b 16 \
+        -e signed-integer "$file.loop" && mv "$file.loop" "$file"
+    rm -rf "$tmp"
+}
+
+# Build a turret traverse motor, because there is not one to take.
+#
+# The source has 4182 wav files and no turret rotation among them: that game's
+# vehicle audio is engine plus track and nothing else. So this one is synthesised
+# rather than lifted, which makes it the only file in the set with no licence
+# question attached - and the only one that can be tuned by changing a number
+# here instead of by going to look for another recording.
+#
+# A traverse motor is a hum with a whine over it, so: a sawtooth fundamental, its
+# octave, and a thin ninth harmonic for the gear, lowpassed and given a slow
+# tremolo to keep it from reading as a test tone.
+#
+# **Seamlessness is the whole difficulty and it is arithmetic, not taste.** The
+# loop plays end to start with no crossfade, so the two ends have to meet. Two
+# things had to be got right, and the first attempt got neither:
+#
+#  * the period must be a whole number of samples. 3s of 108Hz is 324 whole
+#    periods and still does not loop, because 44100/108 is 408.33 samples - the
+#    waveform never lands on a sample boundary. 105Hz is 420 samples exactly, and
+#    132300 samples is 315 of them.
+#  * the slice must come out of the middle of an already-filtered signal. A
+#    sawtooth's reset is a discontinuity by nature; the lowpass smears it over a
+#    dozen samples, and a loop cut at the reset jumps into the middle of that
+#    smear. Filtering six seconds and trimming one second in leaves the filter
+#    settled at both ends of the slice, and one second is 105 whole periods, so
+#    the phase still lines up.
+#
+# Measured on the result: the step across the seam is 0.019 against a typical
+# sample-to-sample step of 0.011 and a worst normal step of 0.211. The first
+# attempt measured 0.494 there - forty times a typical step, which is a click.
+synth_turret() {
+    local tag="$1" f="$2" to="$OUT/$tag/turret_cycle.wav"
+    local tmp="$OUT/.synth"
+    mkdir -p "$(dirname "$to")" "$tmp"
+    sox -n -c 1 -r 44100 -b 16 "$tmp/a.wav" synth 6 sawtooth "$f"      gain -8
+    sox -n -c 1 -r 44100 -b 16 "$tmp/b.wav" synth 6 sine $((f * 2))    gain -16
+    sox -n -c 1 -r 44100 -b 16 "$tmp/c.wav" synth 6 sine $((f * 9))    gain -22
+    sox -m "$tmp/a.wav" "$tmp/b.wav" "$tmp/c.wav" "$tmp/m.wav"
+    sox "$tmp/m.wav" "$tmp/f.wav" lowpass 3200 tremolo 6 14
+    # 1s in, 3s long: both boundaries at phase zero for every partial and for the
+    # tremolo, with the filter settled either side.
+    sox "$tmp/f.wav" -t wav -c 1 -r 44100 -b 16 -e signed-integer "$to" \
+        trim 44100s 132300s gain -n -6
+    rm -rf "$tmp"
+    printf "  %-34s <- synthesised, %sHz\n" "$tag/turret_cycle.wav" "$f"
+    made=$((made + 1))
+}
+
 # --- per class: engine, belt, gun -----------------------------------------
-# tag  engine-dir  belt-size  gun
-while read -r tag engine belt gun; do
+# tag  engine-dir  belt-size  gun  turret-motor-Hz
+while read -r tag engine belt gun turret; do
     [ -z "$tag" ] && continue
     echo "== $tag"
     take "Units/Ground/$engine/start.wav"                  "$tag/engine_start.wav"
     take "Units/Ground/$engine/cycle.wav"                  "$tag/engine_cycle.wav"
+    close_loop "$OUT/$tag/engine_cycle.wav"
     take "Units/Ground/$engine/stop.wav"                   "$tag/engine_stop.wav"
     take "Units/Ground/Caterpillar/$belt/cycle1.wav"       "$tag/track_cycle.wav"
+    close_loop "$OUT/$tag/track_cycle.wav"
     take "Units/Ground/Caterpillar/$belt/start1.wav"       "$tag/track_start.wav"
     take "Units/Ground/Caterpillar/$belt/stop1.wav"        "$tag/track_stop.wav"
     take "Weapons/Cannons/Shots/$gun.wav"                  "$tag/gun_shot.wav"
+    # Not taken - built. See synth_turret. Ordered the way the class figures are,
+    # the heavy lowest: a bigger ring is a slower, deeper drive, and the three
+    # frequencies are 350, 420 and 525 samples per period so all of them close
+    # their loop exactly.
+    synth_turret "$tag" "$turret"
 done <<'CLASSES'
-LTP tank9 Small  130mm
-MTP tank2 Medium 450mm
-HTP tank3 Big    300mm
+LTP tank9 Small  130mm 126
+MTP tank2 Medium 450mm 105
+HTP tank3 Big    300mm  84
 CLASSES
 
 # --- shared: what happens *to* a tank rather than what it is ---------------
@@ -128,6 +229,7 @@ take "Weapons/Cannons/Hits/Hard/hit2.wav"    "common/shell_hard2.wav"
 take "Weapons/Cannons/Hits/Hard/hit3.wav"    "common/shell_hard3.wav"
 # 15.6s of a burning tank - long enough that the loop is not the thing you hear
 take "Hit/tankfire.wav"                      "common/burn_cycle.wav"
+close_loop "$OUT/common/burn_cycle.wav"
 take "Explosion/tankexplosion01.wav"         "common/destroyed1.wav"
 take "Explosion/tankexplosion02.wav"         "common/destroyed2.wav"
 take "Explosion/tankexplosion03.wav"         "common/destroyed3.wav"

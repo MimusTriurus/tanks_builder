@@ -31,7 +31,8 @@ public static class SelfTest
                           IReadOnlyList<Vehicle>? vehicles = null,
                           int active = 0,
                           SelectionRing? ring = null,
-                          SoundSet? common = null)
+                          SoundSet? common = null,
+                          IReadOnlyDictionary<string, SoundSet>? sounds = null)
     {
         int failed = 0;
 
@@ -2473,6 +2474,63 @@ public static class SelfTest
             Enumerable.Range(0, wobble.Count - 2)
                 .Any(i => wobble[i] != wobble[i + 2]),
             "every other shell alike is the thing this replaced");
+
+        // The ring turns when the turret moves against the *hull*, and the two
+        // readings part company in both directions - which is why this is
+        // asserted rather than left to the obvious one. A turret riding round
+        // with an unlocked hull moves in the world and is not being driven at
+        // all; a stabilised turret holding a world heading through a hull turn
+        // is being driven the whole time and does not move on screen at all.
+        // Taking the rate off TurretFacing alone gets each of those backwards.
+        double wasHull = tank.HullFacing;
+        double wasTurret = tank.TurretFacing;
+        bool wasLocked = tank.TurretLocked;
+        double Offset() => WrapAngle(tank.TurretFacing - tank.HullFacing);
+
+        tank.HullFacing = 0.0;
+        tank.TurretFacing = 0.0;
+        tank.TurretLocked = true;
+        double wasOffset = Offset();
+        tank.TurnHull(30.0);
+        Check("a hull turn under a held gun drives the ring",
+            Math.Abs(WrapAngle(Offset() - wasOffset) - -30.0) < 1e-6,
+            $"the ring moved {WrapAngle(Offset() - wasOffset):F1} deg - a stabilised "
+            + "turret is being traversed even though nothing moves on screen");
+
+        tank.HullFacing = 0.0;
+        tank.TurretFacing = 0.0;
+        tank.TurretLocked = false;
+        before = Offset();
+        tank.TurnHull(30.0);
+        Check("and a turret riding round with the hull does not",
+            Math.Abs(WrapAngle(Offset() - before)) < 1e-6,
+            $"the ring moved {WrapAngle(Offset() - before):F1} deg - the turret "
+            + "went round the world without its motor doing anything");
+        tank.HullFacing = wasHull;
+        tank.TurretFacing = wasTurret;
+        tank.TurretLocked = wasLocked;
+
+        // Every loop has to meet itself end to start - there is no crossfade.
+        // The traverse motor is built rather than recorded and needed this: the
+        // first attempt joined with a step forty times a typical one, which is a
+        // click on a sound that plays continuously.
+        if (sounds is not null)
+        {
+            var loops = new List<(string Where, string Name, double Ratio)>();
+            foreach (KeyValuePair<string, SoundSet> set in sounds)
+            foreach (string name in SoundSet.Looped)
+            {
+                double ratio = set.Value.SeamRatio(name);
+                if (ratio >= 0.0)
+                    loops.Add(($"{set.Key}/{name}", name, ratio));
+            }
+            if (loops.Count > 0)
+                Check("every looping sample meets itself at the join",
+                    loops.All(l => l.Ratio < 4.0),
+                    string.Join(", ", loops.Where(l => l.Ratio >= 4.0)
+                        .Select(l => $"{l.Where} {l.Ratio:F1}x"))
+                    + " - a step much over a typical one is a click every lap");
+        }
 
         // Two takes of one event exist so two shells do not sound identical -
         // they are meant to differ in character. Differing in *level* as well is

@@ -763,7 +763,7 @@ public sealed partial class Main : Node2D
         if (_selfTest)
         {
             int failed = SelfTest.Run(_field, _tank, _atlases, _vehicles, _active,
-                                      _ring, _commonSounds);
+                                      _ring, _commonSounds, _sounds);
             GetTree().Quit(failed == 0 ? 0 : 1);
             return;
         }
@@ -1030,6 +1030,11 @@ public sealed partial class Main : Node2D
         // sees the whole of the difference as one frame's swing and the belts
         // jump.
         vehicle.LastHullFacing = vehicle.Sprite.HullFacing;
+        // Same baseline, same reason, one line down: the ring's rate is read back
+        // off the angle, so a reset that moved the turret and left this stale
+        // would report the whole move as one frame's traverse and blip the motor.
+        vehicle.LastTurretOffset =
+            WrapAngle(vehicle.Sprite.TurretFacing - vehicle.Sprite.HullFacing);
         vehicle.Sprite.QueueRedraw();
     }
 
@@ -1226,6 +1231,11 @@ public sealed partial class Main : Node2D
         return $"{(_soundEnabled ? "on " : "off")}"
                + $" eng {a.EngineGate:F2}@{a.EnginePitch:F2}"
                + $" trk {a.TrackGate:F2}@{a.TrackPitch:F2}"
+               // The ring, which is the only loop whose gate cannot be guessed
+               // from anything else on the line: a stabilised turret is being
+               // driven hard while the tank drives straight and the gun holds
+               // still on screen.
+               + $" trt {a.TurretGate:F2}@{a.TurretPitch:F2}"
                + $" brn {a.BurnGate:F2}"
                + $" mix[{string.Join("/", trims)}]"
                + $" peak {(float.IsNegativeInfinity(peak) ? -99.0f : peak),6:F1}dB";

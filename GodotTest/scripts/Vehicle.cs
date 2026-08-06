@@ -57,6 +57,25 @@ public sealed class Vehicle
     /// </summary>
     public double LastHullFacing;
 
+    /// <summary>
+    /// Where the turret sat relative to the hull at the end of last frame, so
+    /// this frame can tell how far the ring turned.
+    ///
+    /// **Relative, and that is the whole of it.** The traverse motor turns when
+    /// the turret moves against the hull, not when it moves against the world.
+    /// The two part company in both directions and the bench can show both: a
+    /// turret riding round with an unlocked hull is not being driven at all,
+    /// and a stabilised turret holding a world heading through a hull turn is
+    /// being driven the whole time. Taking the rate off TurretFacing alone gets
+    /// each of those exactly backwards.
+    ///
+    /// Read back off the angle rather than reported by whatever turned it, for
+    /// the reason <see cref="LastHullFacing"/> is: the keys, the scan, the mouse
+    /// and now the gunnery all move it, and every future one would have to
+    /// remember to announce itself.
+    /// </summary>
+    public double LastTurretOffset;
+
     public bool Moving => PathStep < Path.Count;
 
     public readonly BodyPitch Pitch = new();
