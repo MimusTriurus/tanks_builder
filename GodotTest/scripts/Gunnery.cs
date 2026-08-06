@@ -92,6 +92,44 @@ public static class Gunnery
     }
 
     /// <summary>
+    /// How deep a round from one class gets into another class's armour, as a
+    /// damage level - 0 scorch, 1 gouge, 2 breach.
+    ///
+    /// <code>
+    ///          vs LTP   vs MTP   vs HTP
+    ///   LTP      -        0        0
+    ///   MTP      1        -        0
+    ///   HTP      2        2        -
+    /// </code>
+    ///
+    /// **A gun that out-classes the armour does its own calibre's worth; anything
+    /// else scorches the paint.** That single sentence is the whole table, which
+    /// is why it is written as a comparison rather than as nine numbers - nine
+    /// numbers would go stale the day a fourth class arrives, and it is a table
+    /// with no rule in it that lets a light tank quietly start holing heavies.
+    ///
+    /// Note what it is *not*: a difference. Rank minus rank would make a heavy
+    /// gouge a medium and breach only a light, and the medium is the tank the
+    /// heavy is most obviously meant to overmatch.
+    ///
+    /// Equal classes come out at 0, which is the one cell of the table that was
+    /// not specified and so is an assumption: a tank does not have a special
+    /// answer to its own armour, and 0 is what every other unfavourable matchup
+    /// gives. It is also the cell the bench cannot show, there being one tank of
+    /// each class.
+    ///
+    /// **This is a level, not a bite, and that is the point.** The armour model
+    /// otherwise accumulates - three light rounds reach the breach one heavy
+    /// round does - and under that rule a light tank plinking a heavy would hole
+    /// it on the third shot, which is exactly what the class matchup exists to
+    /// forbid. See <see cref="TankSprite.DamageTo"/>: the shell reaches this
+    /// level on the first hit and never goes past it, and the plate keeps the
+    /// worst it has taken from anybody.
+    /// </summary>
+    public static int Penetration(MovementProfile gun, MovementProfile armour) =>
+        gun.Rank > armour.Rank ? gun.Rank : 0;
+
+    /// <summary>
     /// The turret swung towards a heading by at most <paramref name="budget"/>
     /// degrees, landing exactly on it when it is within reach.
     ///

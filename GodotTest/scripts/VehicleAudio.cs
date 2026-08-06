@@ -305,15 +305,28 @@ public sealed partial class VehicleAudio : Node2D
     /// <paramref name="level"/> is the damage level the plate reached, 0 based,
     /// or -1 from a tank with no marks to leave - which still took the shell, so
     /// it still rings, at the shallowest of the two.
+    ///
+    /// <paramref name="shell"/> is how many rounds this hull has taken, and it
+    /// picks which of the two takes plays. It used to be the level that did, and
+    /// that was wrong in a way that is invisible from outside: there are three
+    /// levels and the split is at 2, so the penetration branch was only ever
+    /// reachable at level 2 and <c>(2 % 2) + 1</c> is always 1. `armour_hit2` was
+    /// staged, loaded, and could not be heard. Two shells through the same plate
+    /// simply sounded identical, which reads as one event rather than as a take
+    /// that never plays - and the class matchup makes it worse rather than
+    /// better, because level 2 is now the *only* penetration.
+    ///
+    /// The count rather than a random pick because --capture and --trace fix the
+    /// time step so two runs can be compared, and a random one would differ
+    /// between them. The victim's count, so it is shells into this hull however
+    /// many guns are pointed at it.
     /// </summary>
-    public void Struck(int level)
+    public void Struck(int level, int shell)
     {
         int deep = Math.Max(level, 0);
         string name = deep >= 2 ? "armour_hit" : "armour_ricochet";
-        // Two takes of each, alternated on the level rather than at random,
-        // because --capture and --trace fix the time step so two runs can be
-        // compared and a random pick would differ between them.
-        AudioStreamWav? stream = Common[$"{name}{(deep % 2) + 1}"] ?? Common[$"{name}1"];
+        AudioStreamWav? stream =
+            Common[$"{name}{(Math.Abs(shell) % 2) + 1}"] ?? Common[$"{name}1"];
         Play(_armour, stream, ArmourDb);
     }
 

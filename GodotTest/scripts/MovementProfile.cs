@@ -71,6 +71,20 @@ public sealed class MovementProfile
     public double CornerSpeed => TopSpeed * CornerFraction;
 
     /// <summary>
+    /// Where this class sits between the others - 0 light, 1 medium, 2 heavy.
+    ///
+    /// The only thing in this table that is not a quantity, and it is here rather
+    /// than in a gunnery table for the reason <see cref="Size"/> is: a second
+    /// table keyed by the same tag is a second thing to keep in agreement, and it
+    /// disagrees the first time a class is added to one and not the other.
+    ///
+    /// Ordinal on purpose. Nothing reads it as a number of anything - it answers
+    /// "does this gun out-class that armour", which is a comparison, and every
+    /// other figure here already carries the magnitude.
+    /// </summary>
+    public int Rank { get; init; } = 1;
+
+    /// <summary>
     /// Turret traverse, deg/s. Separate from <see cref="TurnRate"/> because a
     /// turret and a hull are two different machines, and it is the one that
     /// decides how an engagement feels: the hull rate is spent on a corner
@@ -112,19 +126,19 @@ public sealed class MovementProfile
     public static readonly MovementProfile Light = new()
     {
         Tag = "LTP", TopSpeed = 310.0, Accel = 620.0, TurnRate = 260.0,
-        Size = 0.85, TurretRate = 95.0, ReloadTime = 2.2,
+        Size = 0.85, TurretRate = 95.0, ReloadTime = 2.2, Rank = 0,
     };
 
     public static readonly MovementProfile Medium = new()
     {
         Tag = "MTP", TopSpeed = 240.0, Accel = 420.0, TurnRate = 200.0,
-        Size = 1.00, TurretRate = 70.0, ReloadTime = 3.2,
+        Size = 1.00, TurretRate = 70.0, ReloadTime = 3.2, Rank = 1,
     };
 
     public static readonly MovementProfile Heavy = new()
     {
         Tag = "HTP", TopSpeed = 175.0, Accel = 260.0, TurnRate = 140.0,
-        Size = 1.15, TurretRate = 48.0, ReloadTime = 4.8,
+        Size = 1.15, TurretRate = 48.0, ReloadTime = 4.8, Rank = 2,
     };
 
     /// <summary>One profile per class, and the tags are the parts-built tanks

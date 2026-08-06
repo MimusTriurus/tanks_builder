@@ -1182,7 +1182,17 @@ public sealed partial class Main : Node2D
             : !Gunnery.Laid(v.Sprite.TurretFacing, v.Solution.Heading) ? "laying"
             : v.ReloadLeft > 0.0 ? $"loading {v.ReloadLeft:F1}s"
             : "ready";
-        return $"{v.Target.Tag}@{v.Solution.Heading}deg/{v.Solution.Range} {state}";
+        // What the shooting has achieved, which is otherwise unreadable from
+        // outside: the trace prints the driven tank, and in an engagement the
+        // driven tank is usually the one doing the damage rather than taking it.
+        // The plate this lane lands on, how deep this gun can ever get into it,
+        // and how deep it has got - so a light tank stuck at 0/0 on a heavy is
+        // the matchup working rather than the shells missing.
+        string face = v.Target.Atlas.FaceFor(
+            Mod(v.Solution.Heading + 180.0, 360.0), v.Target.Sprite.HullFacing);
+        int cap = Gunnery.Penetration(v.Profile, v.Target.Profile);
+        return $"{v.Target.Tag}@{v.Solution.Heading}deg/{v.Solution.Range} {state}"
+               + $" {face} {v.Target.Sprite.ScarLevel(face)}/{cap}";
     }
 
     /// <summary>
@@ -1590,20 +1600,45 @@ public sealed partial class Main : Node2D
         // the *next* manual hit comes from, and a firefight rewriting it would
         // make the panel a report of what happened rather than a control.
         _hitSide = SideFor(fromBearing);
-        TakeHit(Active, HitFrom, Bite, Calibre);
+        TakeHit(Active, HitFrom, Calibre, null, Bite);
     }
 
     /// <summary>
-    /// One shell into one tank, from a world bearing, with the round's own bite
-    /// and calibre.
+    /// One tank's round into another tank, with the classes deciding how deep it
+    /// gets.
+    ///
+    /// The shell that came out of a gun knows something the key-press shell
+    /// cannot: who fired it. That is all the difference between the two paths -
+    /// <see cref="Gunnery.Penetration"/> turns the pair of classes into a level,
+    /// and the level is a ceiling rather than a bite, so a light tank never holes
+    /// a heavy however long it keeps at it.
+    ///
+    /// The calibre dial still sizes the burst. It is the harness's control over
+    /// what a shell looks like, and nothing about the matchup makes it wrong -
+    /// what it no longer does on this path is decide the damage, which is now the
+    /// classes' business.
+    /// </summary>
+    private void TakeHit(Vehicle shooter, Vehicle victim, double fromBearing) =>
+        TakeHit(victim, fromBearing, Calibre,
+                Gunnery.Penetration(shooter.Profile, victim.Profile), 1);
+
+    /// <summary>
+    /// One shell into one tank, from a world bearing.
     ///
     /// The victim is a parameter for the reason the shooter is: a tank is shot
     /// at by another tank now, and the one being driven is as likely to be the
     /// gunner as the target. Everything else is unchanged - which is the point,
     /// because the armour model is exactly as good at answering a shell that
     /// came from a neighbouring tank as one that came from a keypress.
+    ///
+    /// <paramref name="level"/> is the ceiling the round cannot get past, or null
+    /// for a round with no ceiling, which digs by <paramref name="bite"/>
+    /// instead. Exactly one of the two is in force, and which one is the whole
+    /// difference between a shell fired by a tank and a shell asked for by a key
+    /// - see <see cref="TankSprite.DamageTo"/>.
     /// </summary>
-    private void TakeHit(Vehicle victim, double fromBearing, int bite, float calibre)
+    private void TakeHit(Vehicle victim, double fromBearing, float calibre,
+                         int? level, int bite)
     {
         TankSprite sprite = victim.Sprite;
         AtlasSet atlas = victim.Atlas;
@@ -1635,7 +1670,9 @@ public sealed partial class Main : Node2D
         // A light round still walks a plate scorch -> gouge -> breach over three
         // hits, which is what shows that the phase axis is damage and not three
         // renders of one drawing; a heavy one gets there in one.
-        int level = sprite.Damage(face, scatter, bite);
+        int got = level is int cap
+            ? sprite.DamageTo(face, scatter, cap)
+            : sprite.Damage(face, scatter, bite);
         // The sound is chosen by the same level the mark is, so a round that
         // bounces is heard bouncing and one that goes through is heard going
         // through. Not the calibre directly: a light round on armour already
@@ -1644,7 +1681,11 @@ public sealed partial class Main : Node2D
         //
         // On the tank that was hit rather than on the one that fired: the ricochet
         // rings off this armour, and its player is positioned there.
-        victim.Audio?.Struck(level);
+        //
+        // The shell count picks which of the two takes plays - see Struck. It is
+        // the victim's, so it counts shells into this hull however many guns are
+        // pointed at it.
+        victim.Audio?.Struck(got, victim.HitCount);
     }
 
     /// <summary>
@@ -1707,7 +1748,7 @@ public sealed partial class Main : Node2D
         // the whole reason the gun is restricted to the six: the bearing the
         // armour model wants is the firing heading turned round, exactly, with
         // nothing snapped and nothing approximated. See AtlasSet.FaceFor.
-        TakeHit(v.Target, Mod(v.Solution.Heading + 180.0, 360.0), Bite, Calibre);
+        TakeHit(v, v.Target, Mod(v.Solution.Heading + 180.0, 360.0));
     }
 
     /// <summary>The hit runs on screen frames for the shot's reason: it is a

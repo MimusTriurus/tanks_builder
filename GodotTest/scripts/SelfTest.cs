@@ -1624,6 +1624,41 @@ public static class SelfTest
                 + $" biting {Main.BiteFor(0)}..{Main.BiteFor(Main.CalibreCount - 1)}");
             tank.Repair();
 
+            // The other kind of shell: one fired by a tank, whose class sets a
+            // ceiling rather than a bite. This is the whole reason DamageTo
+            // exists - under the accumulating rule above, a light tank plinking
+            // a heavy holes it on the third shot, which is exactly what the
+            // matchup forbids.
+            int plink = tank.DamageTo(plate, 0.0f, 0);
+            int plinkAgain = tank.DamageTo(plate, 0.2f, 0);
+            int plinkThird = tank.DamageTo(plate, 0.4f, 0);
+            Check("a round with a ceiling never gets past it, however often it lands",
+                plink == 0 && plinkAgain == 0 && plinkThird == 0
+                && tank.Wear(plate) == 1,
+                $"{plink}/{plinkAgain}/{plinkThird}, worked {tank.Wear(plate)}"
+                + " - three light rounds must not add up to a hole in a heavy");
+            Check("and it leaves one mark, not one per shell",
+                tank.MarksOn(plate).Count == 1,
+                $"{tank.MarksOn(plate).Count} marks of the same level"
+                + " - one rendered decal drawn twice");
+            // It reaches its level on the first hit, unlike a bite. "A heavy
+            // breaches a light" means the first round holes it, not the third.
+            tank.Repair();
+            Check("a round with a ceiling reaches it on the first hit",
+                tank.DamageTo(plate, 0.0f, atlas.ScarLevels - 1)
+                    == atlas.ScarLevels - 1,
+                "the matchup names the outcome, not a rate of progress");
+            // The mark is what this shell did; the wear is what the plate has
+            // been through. They part company exactly here, and a light round
+            // must not mend a hole.
+            int scorchOnBreach = tank.DamageTo(plate, 0.3f, 0);
+            Check("a shallow round on breached armour scorches and mends nothing",
+                scorchOnBreach == 0 && tank.Wear(plate) == atlas.ScarLevels
+                && tank.ScarLevel(plate) == atlas.ScarLevels - 1,
+                $"left {scorchOnBreach}, plate worked {tank.Wear(plate)},"
+                + $" worst mark {tank.ScarLevel(plate)}");
+            tank.Repair();
+
             // Where the round landed, kept as a fraction of the plate rather
             // than as pixels, so it stays on the same spot of armour through a
             // turn. Stored in pixels it would be right at the heading it was
@@ -2399,6 +2434,30 @@ public static class SelfTest
         Check("no target is not heading zero",
             !Gunnery.None.OnLane && !Gunnery.None.Clear,
             "default(Shot) would say 0 degrees, which is a real direction");
+
+        // The matchup table, cell by cell rather than by re-deriving the rule -
+        // this is the one place a wrong answer is a game rule quietly changed
+        // rather than a bug, so it is written out the way it was asked for.
+        MovementProfile lt = MovementProfile.Light;
+        MovementProfile mt = MovementProfile.Medium;
+        MovementProfile ht = MovementProfile.Heavy;
+        Check("a light gun scorches a medium and a heavy and no more",
+            Gunnery.Penetration(lt, mt) == 0 && Gunnery.Penetration(lt, ht) == 0,
+            $"{Gunnery.Penetration(lt, mt)} / {Gunnery.Penetration(lt, ht)}");
+        Check("a medium gouges a light and scorches a heavy",
+            Gunnery.Penetration(mt, lt) == 1 && Gunnery.Penetration(mt, ht) == 0,
+            $"{Gunnery.Penetration(mt, lt)} / {Gunnery.Penetration(mt, ht)}");
+        Check("a heavy breaches both of the others",
+            Gunnery.Penetration(ht, lt) == 2 && Gunnery.Penetration(ht, mt) == 2,
+            $"{Gunnery.Penetration(ht, lt)} / {Gunnery.Penetration(ht, mt)}"
+            + " - a difference of ranks would gouge the medium, not breach it");
+        Check("a class has no special answer to its own armour",
+            MovementProfile.All.All(p => Gunnery.Penetration(p, p) == 0),
+            "the one cell of the table nobody specified, and the bench has one "
+            + "tank of each class so it cannot be shown either");
+        Check("the ranks are ordered light to heavy and distinct",
+            lt.Rank < mt.Rank && mt.Rank < ht.Rank,
+            $"{lt.Rank} / {mt.Rank} / {ht.Rank} - the table is a comparison");
 
         if (vehicles is { Count: > 1 })
         {

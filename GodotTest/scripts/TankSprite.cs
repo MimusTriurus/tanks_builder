@@ -389,6 +389,48 @@ public sealed partial class TankSprite : Node2D
         return level;
     }
 
+    /// <summary>
+    /// Take a hit from a round that gets exactly <paramref name="level"/> deep
+    /// and no deeper, however many times it lands.
+    ///
+    /// The other half of the armour model, and the opposite half of
+    /// <see cref="Damage"/>: there the round advances the plate by its bite and
+    /// the marks accumulate, here the round has a ceiling of its own. Both are
+    /// wanted, because they answer for two different kinds of shell. One
+    /// conjured by a key knows only the calibre dial, so all it can do is dig;
+    /// one fired by a tank knows its class against the class it hit, and the
+    /// whole content of that is a ceiling - see
+    /// <see cref="Gunnery.Penetration"/>. Under the accumulating rule a light
+    /// tank plinking a heavy holes it on the third shot, which is precisely what
+    /// the matchup exists to forbid.
+    ///
+    /// The plate still keeps the worst it has ever taken, from anybody. A light
+    /// round onto armour a heavy already breached leaves a scorch and does not
+    /// mend the hole - the mark is what *this* shell did, the wear is what the
+    /// plate has been through, and they part company exactly here.
+    ///
+    /// A second mark at a level the plate already carries is not added. Decals
+    /// are rendered graphics, so two marks of one level are one drawing twice,
+    /// and the plate has as many marks as there are levels for that reason.
+    /// </summary>
+    public int DamageTo(string face, float along, int level)
+    {
+        if (Atlas?.HasScars != true || Atlas.ScarLayer(face) == "")
+            return -1;
+        if (!_scars.TryGetValue(face, out List<Mark>? marks))
+            _scars[face] = marks = new List<Mark>();
+        int at = Math.Clamp(level, 0, Atlas.ScarLevels - 1);
+        _wear[face] = Math.Min(Math.Max(Wear(face), at + 1), Atlas.ScarLevels);
+        if (!marks.Exists(m => m.Level == at))
+        {
+            marks.Add(new Mark(at, along));
+            while (marks.Count > Atlas.ScarLevels)
+                marks.RemoveAt(0);
+        }
+        QueueRedraw();
+        return at;
+    }
+
     /// <summary>Back to a tank off the line.</summary>
     public void Repair()
     {
