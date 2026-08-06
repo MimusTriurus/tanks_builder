@@ -30,7 +30,8 @@ public static class SelfTest
                           IReadOnlyDictionary<string, AtlasSet>? atlases = null,
                           IReadOnlyList<Vehicle>? vehicles = null,
                           int active = 0,
-                          SelectionRing? ring = null)
+                          SelectionRing? ring = null,
+                          SoundSet? common = null)
     {
         int failed = 0;
 
@@ -2455,6 +2456,31 @@ public static class SelfTest
             && Math.Abs(voice.AppliedEventDb) < 1e-6,
             $"loop {voice.AppliedDb:F1}dB, event {voice.AppliedEventDb:F1}dB");
         voice.QueueFree();
+
+        // Two takes of one event exist so two shells do not sound identical -
+        // they are meant to differ in character. Differing in *level* as well is
+        // how one of them goes missing: the ricochet pair was 4.2dB apart, and
+        // against a report starting on the same frame the quiet one simply was
+        // not there. Reported as the ricochet firing every other shot, which is
+        // what it was.
+        //
+        // Skipped when nothing loaded, because Sounds/ is gitignored and a fresh
+        // checkout runs silent - which is a state the bench has to reach cleanly
+        // rather than fail in.
+        if (common is { Any: true })
+        {
+            foreach (string takes in new[] { "armour_ricochet", "armour_hit" })
+            {
+                double a = common.Rms($"{takes}1");
+                double b = common.Rms($"{takes}2");
+                if (a < 0.0 || b < 0.0)
+                    continue;
+                double gap = Math.Abs(20.0 * Math.Log10(a / b));
+                Check($"the two takes of {takes} are the same loudness", gap < 1.0,
+                    $"{gap:F1}dB apart ({a:F3} against {b:F3}) - re-run "
+                    + "stage_sounds.sh, which levels them");
+            }
+        }
 
         // The matchup table, cell by cell rather than by re-deriving the rule -
         // this is the one place a wrong answer is a game rule quietly changed

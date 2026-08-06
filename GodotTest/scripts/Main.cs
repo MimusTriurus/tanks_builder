@@ -763,7 +763,7 @@ public sealed partial class Main : Node2D
         if (_selfTest)
         {
             int failed = SelfTest.Run(_field, _tank, _atlases, _vehicles, _active,
-                                      _ring);
+                                      _ring, _commonSounds);
             GetTree().Quit(failed == 0 ? 0 : 1);
             return;
         }

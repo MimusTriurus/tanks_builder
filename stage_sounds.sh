@@ -42,7 +42,9 @@ skipped=0
 
 # take <relative-source> <destination-under-OUT>
 take() {
-    local from="$SRC/$1" to="$OUT/$2"
+    # ${3:-} rather than $3 - the script runs under `set -u` and most calls pass
+    # no level, meaning "leave it as the source had it".
+    local from="$SRC/$1" to="$OUT/$2" level="${3:-}"
     if [ ! -f "$from" ]; then
         echo "  MISSING  $1"
         skipped=$((skipped + 1))
@@ -51,6 +53,7 @@ take() {
     mkdir -p "$(dirname "$to")"
     # -c1 mono, -r44100, -b16 signed PCM: one shape for every file in the set
     if sox "$from" -c 1 -r 44100 -b 16 -e signed-integer "$to" 2>/dev/null; then
+        [ -n "$level" ] && match_rms "$to" "$level"
         printf "  %-34s <- %s\n" "$2" "$1"
         made=$((made + 1))
     else
@@ -58,6 +61,40 @@ take() {
         skipped=$((skipped + 1))
     fi
 }
+
+# Bring a file to a target RMS.
+#
+# The set arrived at whatever level each source happened to sit at, and the
+# spread is 15dB: the three gun reports are peak-normalised to full scale
+# (rms 0.41-0.47) while the impacts came in at 0.09-0.18. That makes the mixer's
+# dB constants trims on top of an uncontrolled mix rather than the mix itself.
+#
+# Only the pairs are matched here, and the reason is narrow enough to be worth
+# stating: two takes of one event exist so that two shells do not sound
+# identical, which means they are meant to differ in *character*. The ricochet
+# pair differed by 4.2dB in level as well, and against a gun report starting on
+# the very same frame that is the difference between a sound and no sound - it
+# was reported as the ricochet firing every other shot, which is exactly what it
+# was. The quiet take was the one that went missing.
+#
+# RMS and not peak: hit1 and hit2 have crest factors of 6.9 and 4.5, so peak
+# normalisation would leave them 3.8dB apart in the thing an ear actually hears.
+# 0.14 is the highest target that clears full scale on the peakiest of the four.
+match_rms() {
+    local file="$1" want="$2" have gain
+    have=$(sox "$file" -n stat 2>&1 | awk -F: '/RMS *amplitude/{print $2+0}')
+    [ -z "$have" ] && return
+    gain=$(awk -v h="$have" -v w="$want" 'BEGIN{printf "%.3f", 20*log(w/h)/log(10)}')
+    # -t wav on the scratch file: sox takes the format from the extension and
+    # does not know ".lvl", so without it this fails and leaves the level alone -
+    # silently, because the levels it would have written are not checked anywhere
+    # except by ear.
+    sox "$file" -t wav -c 1 -r 44100 -b 16 -e signed-integer "$file.lvl" \
+        gain "$gain" && mv "$file.lvl" "$file"
+}
+
+# One level for every take of one event - see match_rms.
+IMPACT_RMS=0.14
 
 # --- per class: engine, belt, gun -----------------------------------------
 # tag  engine-dir  belt-size  gun
@@ -82,10 +119,10 @@ CLASSES
 # have: a ricochet and a penetration recorded separately, so the scar levels can
 # differ in kind and not only in volume.
 echo "== common"
-take "Hit/armorrico1.wav"                    "common/armour_ricochet1.wav"
-take "Hit/armorrico2.wav"                    "common/armour_ricochet2.wav"
-take "Hit/armorhit1.wav"                     "common/armour_hit1.wav"
-take "Hit/armorhit2.wav"                     "common/armour_hit2.wav"
+take "Hit/armorrico1.wav"                    "common/armour_ricochet1.wav" $IMPACT_RMS
+take "Hit/armorrico2.wav"                    "common/armour_ricochet2.wav" $IMPACT_RMS
+take "Hit/armorhit1.wav"                     "common/armour_hit1.wav"      $IMPACT_RMS
+take "Hit/armorhit2.wav"                     "common/armour_hit2.wav"      $IMPACT_RMS
 take "Weapons/Cannons/Hits/Hard/hit1.wav"    "common/shell_hard1.wav"
 take "Weapons/Cannons/Hits/Hard/hit2.wav"    "common/shell_hard2.wav"
 take "Weapons/Cannons/Hits/Hard/hit3.wav"    "common/shell_hard3.wav"

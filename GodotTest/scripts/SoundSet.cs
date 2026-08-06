@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.IO;
 using Godot;
@@ -194,6 +195,40 @@ public sealed class SoundSet
     /// bench's live state and this is a fact about start-up, and because a capture
     /// has no panel at all.
     /// </summary>
+    /// <summary>
+    /// The RMS of a loaded sample, 0..1, or -1 if it is not here.
+    ///
+    /// Nothing in the bench looked at what is *in* a sample until two bugs in a
+    /// row turned out to be about exactly that - a take that could never be
+    /// chosen, and a take 4.2dB under its partner that went missing behind the
+    /// gun report. Both were invisible from inside the code, because from inside
+    /// a stream that loaded is a stream that is fine.
+    ///
+    /// RMS rather than peak because it is what an ear weighs against a report
+    /// playing over it, and because two takes of one event can share a peak and
+    /// still be several decibels apart - hit1 and hit2 have crest factors of 6.9
+    /// and 4.5.
+    /// </summary>
+    public double Rms(string name)
+    {
+        AudioStreamWav? stream = this[name];
+        if (stream is null)
+            return -1.0;
+        byte[] data = stream.Data;
+        if (data.Length < 2)
+            return -1.0;
+        // 16-bit signed little-endian mono - the one shape stage_sounds.sh
+        // writes, and the loader would have refused anything else.
+        double sum = 0.0;
+        int samples = data.Length / 2;
+        for (int i = 0; i < samples; i++)
+        {
+            double v = (short)(data[i * 2] | (data[i * 2 + 1] << 8)) / 32768.0;
+            sum += v * v;
+        }
+        return Math.Sqrt(sum / samples);
+    }
+
     public string Summary()
     {
         if (Error.Length > 0)
