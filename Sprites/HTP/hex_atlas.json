@@ -39,9 +39,20 @@
       "phase": 0,
       "col": 0,
       "row": 0,
-      "label": "static tile"
+      "label": "static tile",
+      "rect": [
+        1,
+        1,
+        248,
+        109
+      ],
+      "off": [
+        4,
+        112
+      ]
     }
   ],
   "layer": "hex",
-  "static": true
+  "static": true,
+  "packed": true
 }

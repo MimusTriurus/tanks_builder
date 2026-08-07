@@ -437,10 +437,17 @@ public sealed partial class EffectLayer : Node2D
         float size = Clock is Clocks.HitBurst or Clocks.HitDust
             ? Tank.HitScale : 1.0f;
         DrawSetTransformMatrix(Tank.ShearFor(turret));
+        // The frame is stored trimmed, so what is drawn is its own box shifted
+        // by however much came off the tile's top-left. The smear is not - it is
+        // built here out of whole tiles - so it keeps the tile rect.
         Rect2 rect = Frame(anchor, atlas.TileOf(Layer),
             place + new Vector2(0.0f, Tank.HeaveFor(turret)), size);
-        DrawTextureRectRegion(atlas.Texture(Layer), rect,
-            atlas.Region(Layer, frame), tint);
+        Rect2 drawn = Frame(anchor - atlas.OffsetOf(Layer, frame),
+            atlas.SizeOf(Layer, frame),
+            place + new Vector2(0.0f, Tank.HeaveFor(turret)), size);
+        if (drawn.Size.X > 0.0f && drawn.Size.Y > 0.0f)
+            DrawTextureRectRegion(atlas.Texture(Layer), drawn,
+                atlas.Region(Layer, frame), tint);
         DrawSmear(atlas, rect, facing);
         DrawSetTransformMatrix(Transform2D.Identity);
     }
@@ -492,14 +499,17 @@ public sealed partial class EffectLayer : Node2D
             return;
         string face = FaceOf(Layer);
         Vector2 anchor = atlas.AnchorOf(Layer);
-        Vector2 tile = atlas.TileOf(Layer);
         Vector2 heave = new(0.0f, Tank.HeaveFor(false));
         DrawSetTransformMatrix(Tank.ShearFor(false));
         foreach (TankSprite.Mark mark in Tank.MarksOn(face))
         {
             int frame = atlas.EffectFrame(Layer, mark.Level, Tank.HullFacing);
+            Vector2 size = atlas.SizeOf(Layer, frame);
+            if (size.X <= 0.0f || size.Y <= 0.0f)
+                continue;      // the plate is turned away and the mark is behind the hull
             DrawTextureRectRegion(atlas.Texture(Layer),
-                Frame(anchor, tile, Tank.MarkOffset(face, mark) + heave, 1.0f),
+                Frame(anchor - atlas.OffsetOf(Layer, frame), size,
+                      Tank.MarkOffset(face, mark) + heave, 1.0f),
                 atlas.Region(Layer, frame), Colors.White);
         }
         DrawSetTransformMatrix(Transform2D.Identity);

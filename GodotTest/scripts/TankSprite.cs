@@ -763,8 +763,16 @@ public sealed partial class TankSprite : Node2D
     private void DrawLayer(string layer, double facing)
     {
         int index = Atlas!.FrameFor(facing);
+        // Frames are stored trimmed to what they draw, so the quad is the
+        // frame's own box moved by whatever came off the tile's top-left. An
+        // untrimmed set reports no offset and the whole tile, which is what it
+        // always was.
+        Vector2 size = Atlas.SizeOf(layer, index);
+        if (size.X <= 0.0f || size.Y <= 0.0f)
+            return;
         DrawTextureRectRegion(Atlas.Texture(layer),
-            new Rect2(-Atlas.Anchor + new Vector2(0.0f, Shake), Atlas.Tile),
+            new Rect2(-Atlas.Anchor + Atlas.OffsetOf(layer, index)
+                      + new Vector2(0.0f, Shake), size),
             Atlas.Region(layer, index));
     }
 

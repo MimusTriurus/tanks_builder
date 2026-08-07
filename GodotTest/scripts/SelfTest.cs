@@ -739,6 +739,65 @@ public static class SelfTest
                 + $" {atlas.EffectPhases * atlas.Count}, highest {tiles.Max()}");
         }
 
+        GD.Print("trimmed frames");
+        {
+            AtlasSet packedSet = tank.Atlas!;
+            // The fallback first, because it is what keeps every set that was
+            // rendered before the trim - Sprites/Obsolete, or a tank not yet
+            // re-run - loading and drawing whole tiles.
+            Check("a layer with no rectangles reports the whole tile",
+                packedSet.SizeOf("no such layer", 0) == (Vector2)packedSet.Tile
+                && packedSet.OffsetOf("no such layer", 0) == Vector2.Zero,
+                $"{packedSet.SizeOf("no such layer", 0)} at {packedSet.OffsetOf("no such layer", 0)}");
+
+            if (packedSet.Packed)
+            {
+                long cells = 0, packed = 0;
+                int outside = 0, collisions = 0, empty = 0;
+                var placed = new HashSet<Vector2>();
+                foreach (string layer in packedSet.LoadedLayers)
+                {
+                    Vector2 tile = packedSet.TileOf(layer);
+                    int frames = packedSet.PhasesOf(layer) * packedSet.CountOf(layer);
+                    placed.Clear();
+                    for (int i = 0; i < frames; i++)
+                    {
+                        Vector2 size = packedSet.SizeOf(layer, i);
+                        Vector2 off = packedSet.OffsetOf(layer, i);
+                        cells += (long)tile.X * (long)tile.Y;
+                        packed += (long)size.X * (long)size.Y;
+                        if (size.X <= 0.0f || size.Y <= 0.0f)
+                        {
+                            empty++;
+                            continue;
+                        }
+                        // The box has to fit in the tile it was cut from, or the
+                        // anchor no longer means what every other measurement in
+                        // this atlas means by it.
+                        if (off.X < 0.0f || off.Y < 0.0f
+                            || off.X + size.X > tile.X || off.Y + size.Y > tile.Y)
+                            outside++;
+                        // Two frames stored at one place is the packer's silent
+                        // failure: the picture is wrong and nothing else says so.
+                        if (!placed.Add(packedSet.Region(layer, i).Position))
+                            collisions++;
+                    }
+                }
+                Check("every trimmed box fits inside the tile it came from",
+                    outside == 0, $"{outside} frames hang outside");
+                Check("no two frames are packed at the same place",
+                    collisions == 0, $"{collisions} collisions");
+                // The blank frames are free now, and they are real: a scar on a
+                // plate the hull is standing in front of.
+                Check("blank frames are stored as nothing at all", empty > 0,
+                    $"{empty} of the set is empty");
+                // And the win, measured rather than asserted from the file size.
+                Check("the trimmed set is a fraction of the grid it replaces",
+                    packed * 4 < cells, $"{packed * 4.0 / 1048576:F0}MB drawn"
+                    + $" against {cells * 4.0 / 1048576:F0}MB of cells");
+            }
+        }
+
         const double tick = 1.0 / 60.0;
 
         GD.Print("the track belts");

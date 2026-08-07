@@ -42,7 +42,17 @@
       "phase": 0,
       "col": 0,
       "row": 0,
-      "label": "side @ 270 deg"
+      "label": "side @ 270 deg",
+      "rect": [
+        175,
+        305,
+        150,
+        90
+      ],
+      "off": [
+        53,
+        117
+      ]
     },
     {
       "index": 1,
@@ -50,7 +60,17 @@
       "phase": 0,
       "col": 1,
       "row": 0,
-      "label": "corner @ 285 deg"
+      "label": "corner @ 285 deg",
+      "rect": [
+        1,
+        305,
+        173,
+        96
+      ],
+      "off": [
+        41,
+        115
+      ]
     },
     {
       "index": 2,
@@ -58,7 +78,17 @@
       "phase": 0,
       "col": 2,
       "row": 0,
-      "label": "corner @ 300 deg"
+      "label": "corner @ 300 deg",
+      "rect": [
+        1,
+        105,
+        193,
+        101
+      ],
+      "off": [
+        30,
+        114
+      ]
     },
     {
       "index": 3,
@@ -66,7 +96,17 @@
       "phase": 0,
       "col": 3,
       "row": 0,
-      "label": "corner @ 315 deg"
+      "label": "corner @ 315 deg",
+      "rect": [
+        1,
+        1,
+        203,
+        103
+      ],
+      "off": [
+        25,
+        113
+      ]
     },
     {
       "index": 4,
@@ -74,7 +114,17 @@
       "phase": 0,
       "col": 4,
       "row": 0,
-      "label": "side @ 330 deg"
+      "label": "side @ 330 deg",
+      "rect": [
+        784,
+        105,
+        201,
+        97
+      ],
+      "off": [
+        25,
+        116
+      ]
     },
     {
       "index": 5,
@@ -82,7 +132,17 @@
       "phase": 0,
       "col": 0,
       "row": 1,
-      "label": "corner @ 345 deg"
+      "label": "corner @ 345 deg",
+      "rect": [
+        477,
+        305,
+        191,
+        88
+      ],
+      "off": [
+        28,
+        121
+      ]
     },
     {
       "index": 6,
@@ -90,7 +150,17 @@
       "phase": 0,
       "col": 1,
       "row": 1,
-      "label": "corner @ 0 deg"
+      "label": "corner @ 0 deg",
+      "rect": [
+        385,
+        402,
+        178,
+        75
+      ],
+      "off": [
+        33,
+        128
+      ]
     },
     {
       "index": 7,
@@ -98,7 +168,17 @@
       "phase": 0,
       "col": 2,
       "row": 1,
-      "label": "corner @ 15 deg"
+      "label": "corner @ 15 deg",
+      "rect": [
+        1,
+        402,
+        191,
+        87
+      ],
+      "off": [
+        28,
+        122
+      ]
     },
     {
       "index": 8,
@@ -106,7 +186,17 @@
       "phase": 0,
       "col": 3,
       "row": 1,
-      "label": "side @ 30 deg"
+      "label": "side @ 30 deg",
+      "rect": [
+        1,
+        207,
+        200,
+        97
+      ],
+      "off": [
+        26,
+        118
+      ]
     },
     {
       "index": 9,
@@ -114,7 +204,17 @@
       "phase": 0,
       "col": 4,
       "row": 1,
-      "label": "corner @ 45 deg"
+      "label": "corner @ 45 deg",
+      "rect": [
+        205,
+        1,
+        203,
+        103
+      ],
+      "off": [
+        25,
+        115
+      ]
     },
     {
       "index": 10,
@@ -122,7 +222,17 @@
       "phase": 0,
       "col": 0,
       "row": 2,
-      "label": "corner @ 60 deg"
+      "label": "corner @ 60 deg",
+      "rect": [
+        409,
+        1,
+        193,
+        102
+      ],
+      "off": [
+        31,
+        116
+      ]
     },
     {
       "index": 11,
@@ -130,7 +240,17 @@
       "phase": 0,
       "col": 1,
       "row": 2,
-      "label": "corner @ 75 deg"
+      "label": "corner @ 75 deg",
+      "rect": [
+        202,
+        207,
+        172,
+        97
+      ],
+      "off": [
+        42,
+        119
+      ]
     },
     {
       "index": 12,
@@ -138,7 +258,17 @@
       "phase": 0,
       "col": 2,
       "row": 2,
-      "label": "side @ 90 deg"
+      "label": "side @ 90 deg",
+      "rect": [
+        326,
+        305,
+        150,
+        90
+      ],
+      "off": [
+        53,
+        123
+      ]
     },
     {
       "index": 13,
@@ -146,7 +276,17 @@
       "phase": 0,
       "col": 3,
       "row": 2,
-      "label": "corner @ 105 deg"
+      "label": "corner @ 105 deg",
+      "rect": [
+        375,
+        207,
+        173,
+        97
+      ],
+      "off": [
+        42,
+        119
+      ]
     },
     {
       "index": 14,
@@ -154,7 +294,17 @@
       "phase": 0,
       "col": 4,
       "row": 2,
-      "label": "corner @ 120 deg"
+      "label": "corner @ 120 deg",
+      "rect": [
+        195,
+        105,
+        194,
+        101
+      ],
+      "off": [
+        32,
+        116
+      ]
     },
     {
       "index": 15,
@@ -162,7 +312,17 @@
       "phase": 0,
       "col": 0,
       "row": 3,
-      "label": "corner @ 135 deg"
+      "label": "corner @ 135 deg",
+      "rect": [
+        603,
+        1,
+        202,
+        102
+      ],
+      "off": [
+        29,
+        115
+      ]
     },
     {
       "index": 16,
@@ -170,7 +330,17 @@
       "phase": 0,
       "col": 1,
       "row": 3,
-      "label": "side @ 150 deg"
+      "label": "side @ 150 deg",
+      "rect": [
+        549,
+        207,
+        200,
+        97
+      ],
+      "off": [
+        30,
+        117
+      ]
     },
     {
       "index": 17,
@@ -178,7 +348,17 @@
       "phase": 0,
       "col": 2,
       "row": 3,
-      "label": "corner @ 165 deg"
+      "label": "corner @ 165 deg",
+      "rect": [
+        193,
+        402,
+        191,
+        87
+      ],
+      "off": [
+        37,
+        122
+      ]
     },
     {
       "index": 18,
@@ -186,7 +366,17 @@
       "phase": 0,
       "col": 3,
       "row": 3,
-      "label": "corner @ 180 deg"
+      "label": "corner @ 180 deg",
+      "rect": [
+        564,
+        402,
+        178,
+        75
+      ],
+      "off": [
+        45,
+        128
+      ]
     },
     {
       "index": 19,
@@ -194,7 +384,17 @@
       "phase": 0,
       "col": 4,
       "row": 3,
-      "label": "corner @ 195 deg"
+      "label": "corner @ 195 deg",
+      "rect": [
+        669,
+        305,
+        190,
+        88
+      ],
+      "off": [
+        37,
+        121
+      ]
     },
     {
       "index": 20,
@@ -202,7 +402,17 @@
       "phase": 0,
       "col": 0,
       "row": 4,
-      "label": "side @ 210 deg"
+      "label": "side @ 210 deg",
+      "rect": [
+        583,
+        105,
+        200,
+        99
+      ],
+      "off": [
+        30,
+        115
+      ]
     },
     {
       "index": 21,
@@ -210,7 +420,17 @@
       "phase": 0,
       "col": 1,
       "row": 4,
-      "label": "corner @ 225 deg"
+      "label": "corner @ 225 deg",
+      "rect": [
+        806,
+        1,
+        202,
+        102
+      ],
+      "off": [
+        29,
+        113
+      ]
     },
     {
       "index": 22,
@@ -218,7 +438,17 @@
       "phase": 0,
       "col": 2,
       "row": 4,
-      "label": "corner @ 240 deg"
+      "label": "corner @ 240 deg",
+      "rect": [
+        390,
+        105,
+        192,
+        101
+      ],
+      "off": [
+        33,
+        114
+      ]
     },
     {
       "index": 23,
@@ -226,9 +456,20 @@
       "phase": 0,
       "col": 3,
       "row": 4,
-      "label": "corner @ 255 deg"
+      "label": "corner @ 255 deg",
+      "rect": [
+        750,
+        207,
+        172,
+        97
+      ],
+      "off": [
+        42,
+        115
+      ]
     }
   ],
   "layer": "shadow",
-  "static": false
+  "static": false,
+  "packed": true
 }

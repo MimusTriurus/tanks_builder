@@ -484,7 +484,56 @@ public sealed class AtlasSet
         _anchors[layer] = new Vector2((float)meta.AnchorPx[0], (float)meta.AnchorPx[1]);
         _phases[layer] = Math.Max(1, meta.Phases);
         _counts[layer] = Math.Max(1, meta.Count);
+        TakePlacement(layer, meta);
     }
+
+    /// <summary>
+    /// The trimmed rectangles, if this set has them.
+    /// </summary>
+    /// <remarks>
+    /// A frame is stored at its own size rather than in a cell sized for the
+    /// worst frame the layer holds, which is what the burning column's 384px
+    /// cell costs every muzzle flash that fills two per cent of one. Measured
+    /// over MTP's eighteen layers: 741MB of cells against 47MB packed.
+    ///
+    /// Kept as a parallel array rather than folded into the region arithmetic
+    /// so that a set rendered before the change - anything in Sprites/Obsolete,
+    /// or a tank that has not been re-run - still loads. Absent here means the
+    /// grid, and <see cref="Region"/> is the only place that has to know.
+    /// </remarks>
+    private void TakePlacement(string layer, LayerMeta meta)
+    {
+        if (meta.Frames.Length == 0 || meta.Frames.All(f => f.Rect is null))
+            return;
+        var rects = new Rect2I[meta.Frames.Length];
+        var offs = new Vector2I[meta.Frames.Length];
+        for (int i = 0; i < meta.Frames.Length; i++)
+        {
+            int[]? r = meta.Frames[i].Rect;
+            int[]? o = meta.Frames[i].Off;
+            // An empty frame - a scar on a plate the hull stands in front of -
+            // is a zero-sized rectangle rather than a missing entry, so the
+            // draw sites all skip it by asking the same question.
+            rects[i] = r is null ? new Rect2I(0, 0, 0, 0)
+                                 : new Rect2I(r[0], r[1], r[2], r[3]);
+            offs[i] = o is null ? Vector2I.Zero : new Vector2I(o[0], o[1]);
+        }
+        _rects[layer] = rects;
+        _offs[layer] = offs;
+    }
+
+    private readonly Dictionary<string, Rect2I[]> _rects = new();
+    private readonly Dictionary<string, Vector2I[]> _offs = new();
+
+    /// <summary>Whether this set carries trimmed frames at all. False for one
+    /// rendered before the change, and the bench draws both.</summary>
+    public bool Packed => _rects.Count > 0;
+
+    /// <summary>The layers that came off disk, smears excluded - those are built
+    /// here and are still whole tiles. Exposed so the packing can be asserted
+    /// over the whole set rather than over whichever layer a test remembered.</summary>
+    public IEnumerable<string> LoadedLayers =>
+        _textures.Keys.Where(name => !name.Contains('#'));
 
     /// <summary>
     /// The name under which a layer's phase average is kept.
@@ -522,20 +571,24 @@ public sealed class AtlasSet
             return;
         int phases = PhasesOf(layer);
         int count = CountOf(layer);
-        int columns = _columns[layer];
         Vector2I tile = TileOf(layer);
         if (phases <= 1 || count <= 0 || tile.X <= 0 || tile.Y <= 0)
             return;
 
         Image source = texture.GetImage();
         source.Convert(Image.Format.Rgba8);
-        byte[] from = source.GetData();
-        int stride = source.GetWidth();
         int width = count * tile.X;
         var to = new byte[width * tile.Y * 4];
+        // The smear stays a plain grid - one cell per heading, no phases - and
+        // is built here rather than loaded, so there is nothing to trim it
+        // against and nothing on disk it could disagree with.
+        var phaseData = new byte[phases][];
 
         for (int frame = 0; frame < count; frame++)
         {
+            for (int phase = 0; phase < phases; phase++)
+                phaseData[phase] = TileFrom(source, layer, phase * count + frame)
+                                   .GetData();
             for (int y = 0; y < tile.Y; y++)
             {
                 for (int x = 0; x < tile.X; x++)
@@ -543,10 +596,8 @@ public sealed class AtlasSet
                     double r = 0.0, g = 0.0, b = 0.0, a = 0.0;
                     for (int phase = 0; phase < phases; phase++)
                     {
-                        int index = phase * count + frame;
-                        int sx = index % columns * tile.X + x;
-                        int sy = index / columns * tile.Y + y;
-                        int o = (sy * stride + sx) * 4;
+                        byte[] from = phaseData[phase];
+                        int o = (y * tile.X + x) * 4;
                         if (o < 0 || o + 3 >= from.Length)
                             continue;
                         double weight = from[o + 3] / 255.0;
@@ -614,23 +665,19 @@ public sealed class AtlasSet
     {
         Image image = texture.GetImage();
         image.Convert(Image.Format.Rgba8);
-        byte[] data = image.GetData();
-        int stride = image.GetWidth();
-        int columns = _columns[layer];
         int count = CountOf(layer);
         Vector2I tile = TileOf(layer);
         var centres = new double[count];
         for (int frame = 0; frame < count; frame++)
         {
+            byte[] data = TileFrom(image, layer, frame).GetData();
             double sum = 0.0;
             long seen = 0;
             for (int y = 0; y < tile.Y; y++)
             {
                 for (int x = 0; x < tile.X; x++)
                 {
-                    int sx = frame % columns * tile.X + x;
-                    int sy = frame / columns * tile.Y + y;
-                    int o = (sy * stride + sx) * 4;
+                    int o = (y * tile.X + x) * 4;
                     if (o + 3 >= data.Length || data[o + 3] <= 32)
                         continue;
                     sum += x;
@@ -718,7 +765,14 @@ public sealed class AtlasSet
 
             atlas.Take(layer, image, meta);
             if (layer == "hex")
-                atlas.HexRect = image.GetUsedRect();
+                // Off the tile, not off the file. HexRect is in tile pixels -
+                // GroundOffset subtracts the anchor from it, and the terrain art
+                // is scaled to it - and once the frames are trimmed the file is
+                // the hexagon with the empty margin already gone, so its used
+                // rect starts at zero and the tile's own position is lost.
+                // Caught by looking: every number was fine and the grass tiles
+                // came out clipped.
+                atlas.HexRect = atlas.TileImage("hex", 0).GetUsedRect();
             if (layer == "turret")
                 turretImage = image;
             if (layer == "hull")
@@ -794,11 +848,11 @@ public sealed class AtlasSet
         // render_set job gives every layer of one size the same anchor - so the
         // measurement means the same thing either way.
         if (barrelImage is not null && atlas._columns.ContainsKey(BarrelName))
-            atlas.FindMuzzles(barrelImage, atlas._columns[BarrelName], 1);
+            atlas.FindMuzzles(barrelImage, BarrelName, 1);
         else if (turretImage is not null)
-            atlas.FindMuzzles(turretImage, atlas._columns["turret"], MuzzleErode);
+            atlas.FindMuzzles(turretImage, "turret", MuzzleErode);
         if (hullImage is not null)
-            atlas.MeasureHull(hullImage, atlas._columns["hull"]);
+            atlas.MeasureHull(hullImage, "hull");
         return atlas;
     }
 
@@ -832,19 +886,16 @@ public sealed class AtlasSet
     /// </summary>
     public int HullSpan { get; private set; }
 
-    private void MeasureHull(Image image, int columns)
+    private void MeasureHull(Image image, string layer)
     {
         int widest = 0;
         for (int i = 0; i < Count; i++)
-        {
-            var frame = new Rect2I(i % columns * Tile.X, i / columns * Tile.Y,
-                                   Tile.X, Tile.Y);
-            widest = Math.Max(widest, image.GetRegion(frame).GetUsedRect().Size.X);
-        }
+            widest = Math.Max(widest,
+                              TileFrom(image, layer, i).GetUsedRect().Size.X);
         HullSpan = widest;
     }
 
-    private void FindMuzzles(Image image, int columns, int erode)
+    private void FindMuzzles(Image image, string layer, int erode)
     {
         Image rgba = image;
         if (rgba.GetFormat() != Image.Format.Rgba8)
@@ -852,8 +903,6 @@ public sealed class AtlasSet
             rgba = (Image)image.Duplicate();
             rgba.Convert(Image.Format.Rgba8);
         }
-        byte[] data = rgba.GetData();
-        int width = rgba.GetWidth();
 
         _muzzle = new Vector2[Count];
         for (int i = 0; i < _muzzle.Length; i++)
@@ -864,10 +913,11 @@ public sealed class AtlasSet
             if (index < 0 || index >= Count)
                 continue;
             Vector2 dir = GroundDirection(facing).Normalized();
-            // Row 0 whatever the layer's phase count, because index runs to
-            // Count: the barrel layer's first row is the tube at rest, which is
-            // where a muzzle is when the gun has not just fired.
-            int ox = index % columns * Tile.X, oy = index / columns * Tile.Y;
+            // Index runs to Count whatever the layer's phase count, because the
+            // barrel layer's first row is the tube at rest - which is where a
+            // muzzle is when the gun has not just fired.
+            byte[] data = TileFrom(rgba, layer, index).GetData();
+            int width = Tile.X, ox = 0, oy = 0;
             // Erode, then again with none if that left this heading with nothing.
             // Pointing away from the camera the tube foreshortens to a stub a few
             // pixels across and the turret's holdout has taken a bite out of that,
@@ -961,13 +1011,78 @@ public sealed class AtlasSet
         return best;
     }
 
+    /// <summary>
+    /// Where a frame's pixels are in the atlas image.
+    ///
+    /// The single point at which the layout is known, which is why trimming the
+    /// frames touched so little: everything else addresses a frame by index and
+    /// measures in tile pixels. A packed set answers with the frame's own
+    /// rectangle, an older one with its cell.
+    /// </summary>
     public Rect2 Region(string layer, int index)
     {
+        if (_rects.TryGetValue(layer, out Rect2I[]? rects))
+            return index >= 0 && index < rects.Length
+                ? new Rect2(rects[index].Position, rects[index].Size)
+                : new Rect2();
         int columns = _columns[layer];
         Vector2I tile = TileOf(layer);
         return new Rect2(
             new Vector2(index % columns * tile.X, index / columns * tile.Y),
             tile);
+    }
+
+    /// <summary>
+    /// How much was trimmed off the top-left of a frame, in tile pixels.
+    ///
+    /// Zero for an untrimmed set, which is what lets every draw site take the
+    /// same two lines. Subtracting this from the anchor and drawing the frame's
+    /// own size puts the pixels exactly where the whole tile would have put
+    /// them - including under a class scale, because the offset scales with the
+    /// tile it was measured in.
+    /// </summary>
+    public Vector2 OffsetOf(string layer, int index) =>
+        _offs.TryGetValue(layer, out Vector2I[]? offs)
+        && index >= 0 && index < offs.Length ? offs[index] : Vector2.Zero;
+
+    /// <summary>The size a frame draws at, in tile pixels: its own if the set
+    /// is trimmed, the whole tile otherwise, and zero for a frame that came out
+    /// empty - a scar on a plate the hull is standing in front of.</summary>
+    public Vector2 SizeOf(string layer, int index) =>
+        _rects.TryGetValue(layer, out Rect2I[]? rects)
+        && index >= 0 && index < rects.Length ? rects[index].Size
+                                              : TileOf(layer);
+
+    /// <summary>
+    /// One frame pasted back into a tile-sized image, for the load-time passes
+    /// that scan pixels: <see cref="HullSpan"/>, <see cref="FindMuzzles"/>,
+    /// <see cref="TakeSmear"/>, <see cref="BeltCentres"/>.
+    ///
+    /// The mirror of `tank_pipeline._tile_of`, and the same bargain: those four
+    /// each did their own cell arithmetic and now none of them does any. They
+    /// measure in tile pixels and always did - the anchor, the muzzle point and
+    /// the gauge are all in that frame - so handing them a tile keeps every
+    /// number they produce the number it was.
+    /// </summary>
+    public Image TileImage(string layer, int index) =>
+        TileFrom(Texture(layer).GetImage(), layer, index);
+
+    /// <summary>The same, from an image already in hand. The scanning passes
+    /// walk every frame of a layer, and pulling the whole atlas back off the
+    /// GPU once per frame would be the expensive part of loading.</summary>
+    private Image TileFrom(Image whole, string layer, int index)
+    {
+        Vector2I tile = TileOf(layer);
+        var into = Image.CreateEmpty(tile.X, tile.Y, false, Image.Format.Rgba8);
+        Rect2 region = Region(layer, index);
+        if (region.Size.X <= 0 || region.Size.Y <= 0)
+            return into;
+        Vector2I off = _offs.TryGetValue(layer, out Vector2I[]? offs)
+                       && index >= 0 && index < offs.Length
+            ? offs[index] : Vector2I.Zero;
+        into.BlitRect(whole, new Rect2I((Vector2I)region.Position,
+                                        (Vector2I)region.Size), off);
+        return into;
     }
 
     /// <summary>Frame of an effect layer showing <paramref name="phase"/> of the
@@ -1068,5 +1183,16 @@ public sealed class AtlasSet
         [JsonPropertyName("index")] public int Index { get; set; }
         [JsonPropertyName("angle")] public double Angle { get; set; }
         [JsonPropertyName("label")] public string? Label { get; set; }
+
+        /// <summary>Where this frame's pixels are in the atlas, as x, y, w, h.
+        /// Null for a frame that came out empty, and absent altogether in a set
+        /// rendered before the frames were trimmed - see
+        /// <see cref="AtlasSet.Region"/>.</summary>
+        [JsonPropertyName("rect")] public int[]? Rect { get; set; }
+
+        /// <summary>Where the trimmed box sat inside the tile it was rendered
+        /// in. The tile is still the coordinate system; this is what puts the
+        /// quad back where the untrimmed frame would have drawn it.</summary>
+        [JsonPropertyName("off")] public int[]? Off { get; set; }
     }
 }

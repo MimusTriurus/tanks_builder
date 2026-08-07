@@ -804,8 +804,29 @@ def _tank_alpha(layers, heading, phase=0):
 
 
 def _tile_of(layers, name, index):
+    """One frame, pasted back into a tile-sized buffer.
+
+    The single place that knows how an atlas is laid out, which is why trimming
+    the frames cost the check sheets one function and left all ten callers
+    alone. A packed frame is fetched by its own rectangle and put back at the
+    offset it was trimmed from; an atlas without rectangles is still a grid.
+
+    Bottom-up, because that is what `read_rgba` hands back and what every caller
+    here already composites in. `atlas_pack` works top-down, so the flip happens
+    on both sides of it and nowhere else.
+    """
     pix, meta = layers[name]
     size = meta["tile"][0]
+    frame = meta["frames"][index]
+    if "rect" in frame:
+        tile = np.zeros((size, size, 4), dtype=pix.dtype)
+        rect = frame["rect"]
+        if rect is not None:
+            x, y, w, h = rect
+            ox, oy = frame["off"]
+            top = pix[::-1]
+            tile[oy:oy + h, ox:ox + w] = top[y:y + h, x:x + w]
+        return tile[::-1]
     cols, rows = meta["grid"]["columns"], meta["grid"]["rows"]
     col, row = index % cols, index // cols
     # image data is bottom-up; grid row 0 is the top one

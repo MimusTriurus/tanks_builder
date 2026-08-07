@@ -397,7 +397,8 @@ public sealed partial class HexField : Node2D
             }
         }
         DrawTextureRectRegion(Atlas!.Texture("hex"),
-            new Rect2(CellAnchor(cell) - Atlas.Anchor, Atlas.Tile),
+            new Rect2(CellAnchor(cell) - Atlas.Anchor + Atlas.OffsetOf("hex", 0),
+                      Atlas.SizeOf("hex", 0)),
             Atlas.Region("hex", 0), tint);
     }
 }

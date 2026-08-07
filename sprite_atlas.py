@@ -35,6 +35,8 @@ import bpy
 import numpy as np
 from mathutils import Matrix, Vector
 
+import atlas_pack
+
 CONFIG = {
     # --- what to render -----------------------------------------------------
     # Root of the hierarchy to render, by name. Children come with it;
@@ -356,29 +358,41 @@ def read_rgba(path):
 
 
 def write_atlas(paths, tile, columns, out_path):
+    """Assemble the rendered frames into one image.
+
+    Each frame is trimmed to what it draws and the results are packed - see
+    `atlas_pack`, which owns that and is shared with the repacker. The grid the
+    frames were rendered on survives as `columns`/`rows` in the metadata,
+    because it is still the frame *table*: which index is which phase at which
+    heading. What stops being true is that the index says where the pixels are.
+
+    Returns `(columns, rows, placements)`, one placement per frame in index
+    order, None where the frame came out empty.
+    """
     rows = math.ceil(len(paths) / columns)
-    atlas = np.zeros((rows * tile, columns * tile, 4), dtype=np.float32)
-    for i, path in enumerate(paths):
-        col, row = i % columns, i // columns
+    tiles = []
+    for path in paths:
         pix = read_rgba(path)
         if pix.shape[0] != tile or pix.shape[1] != tile:
             raise RuntimeError("frame %s is %dx%d, expected %dx%d"
                                % (path, pix.shape[1], pix.shape[0], tile, tile))
-        y0 = (rows - row - 1) * tile   # image data is bottom-up, grid row 0 is top
-        atlas[y0:y0 + tile, col * tile:(col + 1) * tile] = pix
+        tiles.append(pix[::-1])          # Blender hands these out bottom-up
 
-    img = bpy.data.images.new("_atlas", columns * tile, rows * tile,
+    atlas, placements = atlas_pack.pack(tiles)
+    height, width = atlas.shape[0], atlas.shape[1]
+
+    img = bpy.data.images.new("_atlas", width, height,
                               alpha=True, float_buffer=False)
     try:
         img.colorspace_settings.name = "Non-Color"
         img.alpha_mode = "CHANNEL_PACKED"
-        img.pixels.foreach_set(atlas.reshape(-1))
+        img.pixels.foreach_set(atlas[::-1].reshape(-1))   # and want them back
         img.file_format = "PNG"
         img.filepath_raw = out_path
         img.save()
     finally:
         bpy.data.images.remove(img)
-    return columns, rows
+    return columns, rows, placements
 
 
 def _render_still(path, retries, wait):
@@ -629,7 +643,7 @@ def render_atlas(cfg):
                          phase + 1, phases))
 
         atlas_path = os.path.join(cfg["output_dir"], "%s_atlas.png" % cfg["name"])
-        columns, rows = write_atlas(paths, tile, columns, atlas_path)
+        columns, rows, placements = write_atlas(paths, tile, columns, atlas_path)
 
         # the pivot projects to the same pixel in every frame and every pass
         anchor = [tile / 2.0, tile / 2.0 + shift_y * tile]
@@ -665,6 +679,18 @@ def render_atlas(cfg):
                 for p in range(phases) for j, a in enumerate(angles)
             ],
         }
+        # Where each frame's pixels ended up, and where its box sat inside the
+        # tile it was rendered in. The tile stays the coordinate system - the
+        # anchor, the muzzle and the plate table are all still in tile pixels -
+        # so these two say only where to fetch from and where to put the quad.
+        # A reader that finds neither falls back to col/row, which is what keeps
+        # the sets in Sprites/Obsolete loading.
+        for frame, place in zip(meta["frames"], placements):
+            frame["rect"] = place["rect"] if place else None
+            if place:
+                frame["off"] = place["off"]
+        meta["packed"] = True
+
         labels = cfg.get("frame_labels")
         if labels:
             # labels describe a facing, so every phase of an angle gets the

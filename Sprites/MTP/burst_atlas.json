@@ -39,7 +39,17 @@
       "phase": 0,
       "col": 0,
       "row": 0,
-      "label": "static tile"
+      "label": "static tile",
+      "rect": [
+        468,
+        1,
+        27,
+        26
+      ],
+      "off": [
+        82,
+        70
+      ]
     },
     {
       "index": 1,
@@ -47,7 +57,17 @@
       "phase": 1,
       "col": 0,
       "row": 1,
-      "label": "static tile"
+      "label": "static tile",
+      "rect": [
+        429,
+        1,
+        38,
+        29
+      ],
+      "off": [
+        77,
+        70
+      ]
     },
     {
       "index": 2,
@@ -55,7 +75,17 @@
       "phase": 2,
       "col": 0,
       "row": 2,
-      "label": "static tile"
+      "label": "static tile",
+      "rect": [
+        383,
+        1,
+        45,
+        37
+      ],
+      "off": [
+        76,
+        67
+      ]
     },
     {
       "index": 3,
@@ -63,7 +93,17 @@
       "phase": 3,
       "col": 0,
       "row": 3,
-      "label": "static tile"
+      "label": "static tile",
+      "rect": [
+        329,
+        1,
+        53,
+        43
+      ],
+      "off": [
+        73,
+        64
+      ]
     },
     {
       "index": 4,
@@ -71,7 +111,17 @@
       "phase": 4,
       "col": 0,
       "row": 4,
-      "label": "static tile"
+      "label": "static tile",
+      "rect": [
+        269,
+        1,
+        59,
+        48
+      ],
+      "off": [
+        70,
+        62
+      ]
     },
     {
       "index": 5,
@@ -79,7 +129,17 @@
       "phase": 5,
       "col": 0,
       "row": 5,
-      "label": "static tile"
+      "label": "static tile",
+      "rect": [
+        206,
+        1,
+        62,
+        50
+      ],
+      "off": [
+        69,
+        61
+      ]
     },
     {
       "index": 6,
@@ -87,7 +147,17 @@
       "phase": 6,
       "col": 0,
       "row": 6,
-      "label": "static tile"
+      "label": "static tile",
+      "rect": [
+        139,
+        1,
+        66,
+        53
+      ],
+      "off": [
+        67,
+        59
+      ]
     },
     {
       "index": 7,
@@ -95,7 +165,17 @@
       "phase": 7,
       "col": 0,
       "row": 7,
-      "label": "static tile"
+      "label": "static tile",
+      "rect": [
+        70,
+        1,
+        68,
+        55
+      ],
+      "off": [
+        66,
+        59
+      ]
     },
     {
       "index": 8,
@@ -103,7 +183,17 @@
       "phase": 8,
       "col": 0,
       "row": 8,
-      "label": "static tile"
+      "label": "static tile",
+      "rect": [
+        1,
+        1,
+        68,
+        56
+      ],
+      "off": [
+        66,
+        58
+      ]
     },
     {
       "index": 9,
@@ -111,7 +201,8 @@
       "phase": 9,
       "col": 0,
       "row": 9,
-      "label": "static tile"
+      "label": "static tile",
+      "rect": null
     }
   ],
   "layer": "burst",
@@ -1968,5 +2059,6 @@
         ]
       }
     }
-  }
+  },
+  "packed": true
 }
