@@ -60,11 +60,19 @@ public sealed partial class TrackMarks : Node2D
     /// </summary>
     public const int MarksZ = -101;
 
-    /// <summary>How far a belt travels between stitches, in screen pixels. Short
-    /// enough that a pivot arc reads as a curve rather than a fan of chords -
-    /// the tightest arc here has a radius of about 40px, and 4px of arc on that
-    /// is under six degrees.</summary>
-    public const double Stitch = 4.0;
+    /// <summary>How far a belt travels between stitches when the atlas does not
+    /// say. It normally does: a stitch is <b>one link</b>, so the spacing is
+    /// <see cref="AtlasSet.TrackPitch"/> - the same number the belts themselves
+    /// wind by, which makes a point of the trail and an imprint of a track shoe
+    /// the same thing rather than two things at two spacings.</summary>
+    public const double Stitch = 7.0;
+
+    /// <summary>One link on the ground, as drawn, or <see cref="Stitch"/> when
+    /// there is no belt metadata to ask.</summary>
+    private static double StitchFor(Vehicle v) =>
+        v.Atlas.TrackPitch > 0.0
+            ? v.Atlas.TrackPitch * v.Sprite.BodyScale
+            : Stitch;
 
     /// <summary>Points kept per belt. At <see cref="Stitch"/> that is 6000px of
     /// travel, some 25 rows of the board. The cost of forgetting late is a
@@ -81,7 +89,22 @@ public sealed partial class TrackMarks : Node2D
     /// than anything additive - see the pale-ground lesson the effect layers all
     /// carry - and nowhere near black: a rut is soil turned over, and a black
     /// one reads as painted rails.</summary>
-    private static readonly Color Ink = new(0.20f, 0.16f, 0.11f, 0.5f);
+    private static readonly Color Ink = new(0.20f, 0.16f, 0.11f, 0.34f);
+
+    /// <summary>The grouser bars, darker than the ground they sit in. A track
+    /// does not leave a smooth stripe: it leaves a shoe every pitch, and the
+    /// ladder is what reads as a track rather than as a drag mark.
+    ///
+    /// One inversion worth naming, because the belts themselves carry the
+    /// opposite lesson: a moving tread aliases past half a link per frame and
+    /// has to be smeared out. An imprint does not move, so the ladder is honest
+    /// at any speed - the ground is where the sampling problem is not.</summary>
+    private static readonly Color BarInk = new(0.14f, 0.11f, 0.07f, 0.55f);
+
+    /// <summary>How thick one bar is drawn, in screen pixels. Two, because a
+    /// shoe is a shoe: it does not grow with the tank, and a fatter bar closes
+    /// the gaps that make it a ladder.</summary>
+    private const float BarThickness = 2.0f;
 
     /// <summary>How much wider than the belt a scrubbed mark gets, at most. The
     /// scrub itself is derived rather than dialled - see
@@ -110,19 +133,38 @@ public sealed partial class TrackMarks : Node2D
         public readonly List<Vector2> Points = new();
         public readonly List<float> Widths = new();
         public readonly List<bool> Breaks = new();
+
+        /// <summary>Half the shoe, across the belt, in the ground plane. Stored
+        /// rather than rebuilt from a heading at draw time because it is what
+        /// the belt was actually lying along when the imprint was made, and the
+        /// hull has turned since.</summary>
+        public readonly List<Vector2> Bars = new();
+
         public double Travelled;
         public bool Down;
         public double LastWidth;
 
-        public void Add(Vector2 at, float width, bool broken)
+        /// <summary>Where the belt was at the end of the last frame, so imprints
+        /// can be placed along this frame's move rather than all at its end.
+        /// </summary>
+        public Vector2 LastAt;
+
+        /// <summary>Half the smoothing window, in points - see
+        /// <see cref="Smoothed"/>. Off the belt's length and the link pitch, so
+        /// it is however many shoes are on the ground at once.</summary>
+        public int Window = 1;
+
+        public void Add(Vector2 at, float width, Vector2 bar, bool broken)
         {
             Points.Add(at);
             Widths.Add(width);
+            Bars.Add(bar);
             Breaks.Add(broken);
             if (Points.Count > Capacity)
             {
                 Points.RemoveAt(0);
                 Widths.RemoveAt(0);
+                Bars.RemoveAt(0);
                 Breaks.RemoveAt(0);
             }
         }
@@ -131,6 +173,7 @@ public sealed partial class TrackMarks : Node2D
         {
             Points.Clear();
             Widths.Clear();
+            Bars.Clear();
             Breaks.Clear();
             Travelled = 0.0;
             Down = false;
@@ -161,6 +204,18 @@ public sealed partial class TrackMarks : Node2D
     public IReadOnlyList<Vector2> TrailOf(Vehicle v, int side) =>
         _trails.TryGetValue(v, out Trail[]? pair)
             ? pair[side].Points : Array.Empty<Vector2>();
+
+    /// <summary>The shoe half-vectors that go with <see cref="TrailOf"/>, and
+    /// the same path with the belt rolled over it. Both for the self-test: what
+    /// the ladder is laid across and how much a corner is rounded are the two
+    /// claims here, and neither can be read off a still frame.</summary>
+    public IReadOnlyList<Vector2> BarsOf(Vehicle v, int side) =>
+        _trails.TryGetValue(v, out Trail[]? pair)
+            ? pair[side].Bars : Array.Empty<Vector2>();
+
+    public IReadOnlyList<Vector2> SmoothedOf(Vehicle v, int side) =>
+        _trails.TryGetValue(v, out Trail[]? pair)
+            ? Smoothed(pair[side]) : Array.Empty<Vector2>();
 
     public void Clear()
     {
@@ -209,26 +264,50 @@ public sealed partial class TrackMarks : Node2D
         double arm = v.Atlas.TrackArm * v.Sprite.BodyScale;
         Vector2 across = v.Atlas.GroundDirection(v.Sprite.HullFacing + 90.0);
         Vector2 centre = v.GroundPoint - GlobalPosition;
-        float width = ScreenWidth(v,
-            v.Atlas.TrackWidth * v.Sprite.BodyScale * Scrub(v, travel, delta));
+        double belt = v.Atlas.TrackWidth * v.Sprite.BodyScale;
+        float width = ScreenWidth(v, belt * Scrub(v, travel, delta));
+        // Half a shoe, across the belt and in the ground plane. Off the same
+        // unnormalised GroundDirection the gauge is: a bar is a length lying on
+        // the ground, so it foreshortens with the ground.
+        Vector2 bar = across * (float)(belt * 0.5);
+        double stitch = StitchFor(v);
+        // However many shoes are on the ground at once - that is the length of
+        // belt a corner has to be rolled over by, so it is the window the ribbon
+        // is smoothed through.
+        int window = Math.Max(1, (int)Math.Round(
+            v.Atlas.TrackLength * v.Sprite.BodyScale * 0.5 / Math.Max(stitch, 1.0)));
+
         pair[0].LastWidth = width;
         pair[1].LastWidth = width;
 
         for (int side = 0; side < 2; side++)
         {
             Trail trail = pair[side];
+            trail.Window = window;
             Vector2 at = centre + across * (float)(side == 0 ? arm : -arm);
             double moved = Math.Abs(side == 0 ? travel.Left : travel.Right);
             trail.Travelled += moved;
-            if (trail.Down && trail.Travelled < Stitch)
-                continue;
-            // A stitch is dropped when the belt has covered one, or when the pen
-            // has just come down. The second half is what puts a first point
-            // under a tank that has only just started to move; without it the
-            // ribbon begins one stitch late, which on a pivot is most of it.
-            trail.Add(at, width, !trail.Down);
-            trail.Travelled = 0.0;
-            trail.Down = true;
+            if (!trail.Down)
+            {
+                // The pen coming down lays one straight away. Without it the
+                // trail begins a shoe late, which on a pivot is most of it.
+                trail.Add(at, width, bar, true);
+                trail.Travelled = 0.0;
+                trail.Down = true;
+            }
+            // The remainder is carried rather than dropped, and the imprints are
+            // placed along this frame's move rather than all at its end. Zeroing
+            // it instead quantised the spacing to whatever a frame happened to
+            // cover - 8.3px between shoes on a 7.1px link - which is the frame
+            // clock getting into a number that is supposed to be the belt's.
+            while (trail.Travelled >= stitch)
+            {
+                trail.Travelled -= stitch;
+                double back = moved > 1e-9 ? trail.Travelled / moved : 0.0;
+                trail.Add(at.Lerp(trail.LastAt, (float)Math.Clamp(back, 0.0, 1.0)),
+                          width, bar, false);
+            }
+            trail.LastAt = at;
         }
         QueueRedraw();
     }
@@ -298,7 +377,101 @@ public sealed partial class TrackMarks : Node2D
             return;
         foreach (Trail[] pair in _trails.Values)
         foreach (Trail trail in pair)
+        {
             DrawTrail(trail);
+            DrawShoes(trail);
+        }
+    }
+
+    /// <summary>
+    /// The imprints themselves: one bar across the belt per link, all in one
+    /// call.
+    ///
+    /// Drawn over the ribbon rather than instead of it. The ribbon is the soil
+    /// pressed flat, which is continuous; the ladder is what the shoes bit into,
+    /// which is not. Bars alone read as a dotted line at this pitch, and the
+    /// ribbon alone reads as a drag mark.
+    ///
+    /// Off the stored bar rather than off the hull's heading now, because the
+    /// hull has turned since - and on a pivot it has turned a long way, which is
+    /// exactly where the ladder earns its keep: the bars fan out radially and
+    /// fill the ring the belts churned, where the ribbon can only draw its
+    /// centre line.
+    /// </summary>
+    private void DrawShoes(Trail trail)
+    {
+        int n = trail.Points.Count;
+        if (n == 0)
+            return;
+        var ends = new Vector2[n * 2];
+        // One colour per bar, not per end: DrawMultilineColors takes a segment
+        // list, so the colour array is half the length of the point array.
+        var ink = new Color[n];
+        for (int i = 0; i < n; i++)
+        {
+            ends[i * 2] = trail.Points[i] - trail.Bars[i];
+            ends[i * 2 + 1] = trail.Points[i] + trail.Bars[i];
+            Color colour = BarInk;
+            colour.A *= (float)Fade(i, n);
+            ink[i] = colour;
+        }
+        DrawMultilineColors(ends, ink, BarThickness);
+    }
+
+    /// <summary>How much of the ink an imprint still has, by its age in the
+    /// ring. Measured against the whole trail rather than against the piece it
+    /// is drawn in, so a tank that stops and starts does not get a fresh dark
+    /// stub beside a faded ribbon of the same age.</summary>
+    private static double Fade(int i, int n)
+    {
+        double age = (n - 1 - i) / (double)Math.Max(n - 1, 1);
+        double fade = age <= 1.0 - FadeTail
+            ? 1.0
+            : 1.0 - (age - (1.0 - FadeTail)) / FadeTail;
+        return Math.Clamp(fade, 0.0, 1.0);
+    }
+
+    /// <summary>
+    /// The trail's points with the belt rolled over them.
+    ///
+    /// A belt is 146px long and a mark is left by all of it, so the ribbon
+    /// cannot carry a corner tighter than the belt's half-length: the belt rolls
+    /// over it. Convolving the centre line with the belt is that, to first
+    /// order, and it is one moving average - which is also the honest answer to
+    /// "take the point off the rear instead of the front". Neither end is right
+    /// on its own; the hull turns about its centre, so front and rear sweep
+    /// mirrored arcs and moving the sample point only moves the arc.
+    ///
+    /// It does mean a pivot's two neat crescents collapse towards a churned
+    /// patch, and that is the truthful picture - a tank spun on the spot leaves
+    /// a scuffed circle, not two clean arcs. The crescents are still there in
+    /// the ladder, which is not smoothed.
+    ///
+    /// Prefix sums, so this is one pass however wide the window is, and it does
+    /// not reach across a break: two runs are two trails that happen to share a
+    /// list.
+    /// </summary>
+    private static Vector2[] Smoothed(Trail trail)
+    {
+        int n = trail.Points.Count;
+        var outp = new Vector2[n];
+        var sum = new Vector2[n + 1];
+        for (int i = 0; i < n; i++)
+            sum[i + 1] = sum[i] + trail.Points[i];
+        // Where each run starts and ends, so the average never straddles a jump.
+        int runStart = 0;
+        for (int i = 0; i < n; i++)
+        {
+            if (trail.Breaks[i])
+                runStart = i;
+            int runEnd = i;
+            while (runEnd + 1 < n && !trail.Breaks[runEnd + 1])
+                runEnd++;
+            int lo = Math.Max(runStart, i - trail.Window);
+            int hi = Math.Min(runEnd, i + trail.Window);
+            outp[i] = (sum[hi + 1] - sum[lo]) / (hi - lo + 1);
+        }
+        return outp;
     }
 
     /// <summary>How far the width may drift inside one run before it is cut.
@@ -312,17 +485,18 @@ public sealed partial class TrackMarks : Node2D
     ///
     /// A wide polyline mitres its joints, and a mitre on a sharp corner shoots
     /// out to a point: where a pivot's arc met the straight run that followed
-    /// it, a 30px ribbon grew an arrowhead half a cell long. Cutting there
-    /// leaves two ribbons meeting at a blunt end, which is what a track does.
-    /// Six degrees is one stitch of the tightest arc here, so a pivot itself
-    /// never trips it.</summary>
+    /// it, a 30px ribbon grew an arrowhead half a cell long. Smoothing takes
+    /// most of those out; this catches what is left.</summary>
     private const float TurnCut = 25.0f;
 
+    /// <summary>The soil pressed flat: one ribbon down the middle of the
+    /// imprints, over the belt-smoothed path.</summary>
     private void DrawTrail(Trail trail)
     {
         int n = trail.Points.Count;
         if (n < 2)
             return;
+        Vector2[] path = Smoothed(trail);
         var run = new List<Vector2>();
         var ink = new List<Color>();
         float width = 0.0f;
@@ -331,7 +505,7 @@ public sealed partial class TrackMarks : Node2D
         {
             float want = trail.Widths[i];
             bool kinked = run.Count >= 2
-                          && Turn(run[^2], run[^1], trail.Points[i]) > TurnCut;
+                          && Turn(run[^2], run[^1], path[i]) > TurnCut;
             bool cut = trail.Breaks[i]
                        || kinked
                        || (run.Count > 0
@@ -360,16 +534,9 @@ public sealed partial class TrackMarks : Node2D
             }
             else if (run.Count == 0)
                 width = want;
-            run.Add(trail.Points[i]);
-            // Age measured against the whole trail rather than against this run,
-            // so a tank that stops and starts does not get a fresh dark stub
-            // beside a faded ribbon of the same age.
-            double age = (n - 1 - i) / (double)Math.Max(n - 1, 1);
-            double fade = age <= 1.0 - FadeTail
-                ? 1.0
-                : 1.0 - (age - (1.0 - FadeTail)) / FadeTail;
-            var colour = Ink;
-            colour.A *= (float)Math.Clamp(fade, 0.0, 1.0);
+            run.Add(path[i]);
+            Color colour = Ink;
+            colour.A *= (float)Fade(i, n);
             ink.Add(colour);
         }
         Flush(run, ink, width);

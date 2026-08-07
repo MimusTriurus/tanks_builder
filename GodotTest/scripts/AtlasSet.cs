@@ -374,6 +374,21 @@ public sealed class AtlasSet
     /// </summary>
     public double TrackWidth { get; private set; }
 
+    /// <summary>
+    /// How long one belt is in atlas pixels. 0 when there are no belts.
+    ///
+    /// The same scan as <see cref="TrackWidth"/> with the extremum the right way
+    /// up: the widest a belt is across the screen is the heading that lays its
+    /// length across, so that is the length. 153/146/162 on the three tanks.
+    ///
+    /// It is here for the ruts. A mark is left by a long belt rather than by a
+    /// point, and a belt cannot lay a corner tighter than its own half-length -
+    /// it rolls over it. So this is the window the trail is smoothed through,
+    /// which is the difference between a rut that turns and a rut with a kink
+    /// in it.
+    /// </summary>
+    public double TrackLength { get; private set; }
+
     /// <summary>True when every plate has a mark to leave. All four, because a
     /// tank that can be holed on three sides and not the fourth is worse than
     /// one that cannot be holed at all - the clean side reads as armour that
@@ -674,22 +689,25 @@ public sealed class AtlasSet
             if (!double.IsNaN(leftAt[f]) && !double.IsNaN(rightAt[f]))
                 widest = Math.Max(widest, Math.Abs(rightAt[f] - leftAt[f]));
         TrackArm = widest / 2.0;
-        double narrow = Math.Min(NarrowestBelt(left, leftTex),
-                                 NarrowestBelt(right, rightTex));
+        (double Narrow, double Wide) l = BeltSpan(left, leftTex);
+        (double Narrow, double Wide) r = BeltSpan(right, rightTex);
+        double narrow = Math.Min(l.Narrow, r.Narrow);
         TrackWidth = double.IsPositiveInfinity(narrow) ? 0.0 : narrow;
+        TrackLength = Math.Max(l.Wide, r.Wide);
     }
 
-    /// <summary>The least a belt spans across the frame over every heading - its
-    /// width. See <see cref="TrackWidth"/>. Phase 0 only, like
-    /// <see cref="BeltCentres"/>: winding along the loop does not change how
-    /// wide the belt is.</summary>
-    private double NarrowestBelt(string layer, ImageTexture texture)
+    /// <summary>The least and the most a belt spans across the frame over every
+    /// heading - its width and its length. See <see cref="TrackWidth"/>. Phase 0
+    /// only, like <see cref="BeltCentres"/>: winding along the loop changes
+    /// neither.</summary>
+    private (double Narrow, double Wide) BeltSpan(string layer, ImageTexture texture)
     {
         Image image = texture.GetImage();
         image.Convert(Image.Format.Rgba8);
         int count = CountOf(layer);
         Vector2I tile = TileOf(layer);
         double narrowest = double.PositiveInfinity;
+        double widest = 0.0;
         for (int frame = 0; frame < count; frame++)
         {
             byte[] data = TileFrom(image, layer, frame).GetData();
@@ -703,10 +721,12 @@ public sealed class AtlasSet
                 if (x < lo) lo = x;
                 if (x > hi) hi = x;
             }
-            if (hi >= lo)
-                narrowest = Math.Min(narrowest, hi - lo + 1);
+            if (hi < lo)
+                continue;
+            narrowest = Math.Min(narrowest, hi - lo + 1);
+            widest = Math.Max(widest, hi - lo + 1);
         }
-        return narrowest;
+        return (narrowest, widest);
     }
 
     /// <summary>Where a belt sits across the frame, per heading, in tile pixels;

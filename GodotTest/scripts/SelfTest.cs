@@ -1251,6 +1251,71 @@ public static class SelfTest
                     "a reset or a park moves a tank without driving it, and a "
                     + "single ribbon would draw the jump as a line across the board");
 
+                // A stitch is one link, so the trail is a list of shoe imprints
+                // rather than a second sampling at a second spacing.
+                var shod = new TrackMarks();
+                car.Sprite.HullFacing = 90.0;
+                for (int i = 0; i < 200; i++)
+                    shod.Lay(car, (1.0, 1.0), 1.0 / 60.0);
+                IReadOnlyList<Vector2> shoeWalk = shod.TrailOf(car, 0);
+                double shoePitch = car.Atlas.TrackPitch * car.Sprite.BodyScale;
+                Check("one stitch is one link of the belt",
+                    shoeWalk.Count > 2 && Math.Abs(199.0 / (shoeWalk.Count - 1) - shoePitch)
+                                      < shoePitch * 0.05,
+                    $"{199.0 / Math.Max(shoeWalk.Count - 1, 1):F2}px between imprints "
+                    + $"against a {shoePitch:F2}px link");
+
+                IReadOnlyList<Vector2> shoes = shod.BarsOf(car, 0);
+                Vector2 shoeAxis = car.Atlas.GroundDirection(90.0 + 90.0);
+                Check("the shoe is laid across the belt, in the ground plane",
+                    shoes.Count > 0
+                    && Math.Abs(shoes[^1].Cross(shoeAxis)) < 0.01
+                    && shoes[^1].Length() > 1.0,
+                    $"{shoes[^1]} against {shoeAxis} - a bar is a length lying "
+                    + "on the ground, so it foreshortens with the ground");
+
+                // The belt rolls a corner over: a mark is left by 146px of track,
+                // not by a dot, so the ribbon cannot carry a kink tighter than
+                // the belt's half-length. This is the answer to taking the point
+                // off the rear instead of the front - neither end is right alone,
+                // because the hull turns about its centre and the two sweep
+                // mirrored arcs.
+                var rolled = new TrackMarks();
+                car.Sprite.HullFacing = 270.0;
+                for (int i = 0; i < 30; i++)
+                {
+                    car.Sprite.HullFacing += 4.0;
+                    rolled.Lay(car, TrackLoop.Split(0.0, 4.0, arm), 1.0 / 60.0);
+                }
+                IReadOnlyList<Vector2> raw = rolled.TrailOf(car, 0);
+                IReadOnlyList<Vector2> smooth = rolled.SmoothedOf(car, 0);
+                Check("the smoothed path is the same length as the raw one",
+                    raw.Count == smooth.Count, $"{raw.Count} and {smooth.Count}");
+                double rawSpan = 0.0, smoothSpan = 0.0;
+                for (int i = 1; i < raw.Count; i++)
+                {
+                    rawSpan += raw[i].DistanceTo(raw[i - 1]);
+                    smoothSpan += smooth[i].DistanceTo(smooth[i - 1]);
+                }
+                Check("a turn is rolled over rather than followed to the point",
+                    smoothSpan < rawSpan * 0.9,
+                    $"{smoothSpan:F1}px of smoothed arc against {rawSpan:F1}px "
+                    + "raw - a belt cannot lay a corner tighter than its own "
+                    + "half-length");
+
+                var straight = new TrackMarks();
+                car.Sprite.HullFacing = 270.0;
+                for (int i = 0; i < 200; i++)
+                    straight.Lay(car, (1.0, 1.0), 1.0 / 60.0);
+                IReadOnlyList<Vector2> plain = straight.TrailOf(car, 0);
+                IReadOnlyList<Vector2> plainSmooth = straight.SmoothedOf(car, 0);
+                double shoeDrift = 0.0;
+                for (int i = 0; i < plain.Count; i++)
+                    shoeDrift = Math.Max(shoeDrift, plain[i].DistanceTo(plainSmooth[i]));
+                Check("a straight run is left where it was laid", shoeDrift < 0.01,
+                    $"moved by {shoeDrift:F3}px - the smoothing is for corners, and a "
+                    + "straight line has none");
+
                 var rutOff = new TrackMarks { Enabled = false };
                 for (int i = 0; i < 60; i++)
                     rutOff.Lay(car, (4.0, 4.0), 1.0 / 60.0);
