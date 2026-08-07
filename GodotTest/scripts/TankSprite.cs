@@ -74,11 +74,18 @@ public sealed partial class TankSprite : Node2D
     public bool ShowAxis;
 
     /// <summary>
-    /// Locked: the turret holds its world heading while the hull turns under
-    /// it - a turret staying on target through a manoeuvre.
-    /// Unlocked: the turret is rigid with the hull and swings with it.
+    /// True: the turret holds its world heading while the hull turns under it -
+    /// a gun staying on target through a manoeuvre.
+    /// False: the turret is rigid with the hull and swings with it.
+    ///
+    /// It was called <c>TurretLocked</c>, and that name reads backwards to
+    /// anyone who has met a real one: a traverse lock locks the turret <i>to the
+    /// hull</i>, so "locked on" ought to mean it rides round with it - the
+    /// opposite of what this does. Nothing about the behaviour changed; the name
+    /// now says which of the two it is, because "locked" never said locked to
+    /// what.
     /// </summary>
-    public bool TurretLocked = true;
+    public bool TurretHoldsHeading = true;
 
     /// <summary>The only place hull heading changes, so the turret modes cannot
     /// be bypassed by some other code path - driving and manual turns both come
@@ -88,7 +95,7 @@ public sealed partial class TankSprite : Node2D
         if (Math.Abs(delta) < 1e-9)
             return;
         HullFacing = Mod(HullFacing + delta, 360.0);
-        if (!TurretLocked)
+        if (!TurretHoldsHeading)
             TurretFacing = Mod(TurretFacing + delta, 360.0);
         QueueRedraw();
     }

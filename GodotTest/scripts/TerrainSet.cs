@@ -58,6 +58,14 @@ public sealed class TerrainSet
     /// <summary>The paint that is not one kind: every cell picks its own.</summary>
     public const string Mixed = "mixed";
 
+    /// <summary>What a board comes up as. A kind rather than the mix, because
+    /// the mix is two kinds until somebody draws a third and it reads as two
+    /// biomes rather than as one ground with variety in it. Falls back to the
+    /// mix with a warning if that file is not on disk - see
+    /// <see cref="Main"/> - so naming a kind here cannot leave a blank board.
+    /// </summary>
+    public const string Default = "soil";
+
     /// <summary>How far the art's hexagon may be off the rendered tile's before
     /// it is refused. Two percent is well inside drawing slop and nowhere near
     /// the 17% a six-degree camera error produces, so it separates the two cases

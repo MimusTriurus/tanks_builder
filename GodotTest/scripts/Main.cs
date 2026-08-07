@@ -113,16 +113,16 @@ public sealed partial class Main : Node2D
     private bool _tracerVisible = TracerOnByDefault;
 
     /// <summary>
-    /// The turret's traverse motor - --turret-sound, or the panel. Off by
-    /// default.
-    ///
-    /// It is the newest and least settled voice on the tank: synthesised rather
-    /// than recorded, and its level chosen by argument rather than by ear. A
-    /// switch is how it gets judged - the question about a background hum is
-    /// whether it is missed when it stops, and that cannot be asked without
-    /// stopping it.
+    /// The turret's traverse motor - --no-turret-sound, or the panel. On.
+    /// 
+    /// It came up off while it was the newest and least settled voice on the
+    /// tank: synthesised rather than recorded, its level chosen by argument
+    /// rather than by ear, and the question about a background hum - is it
+    /// missed when it stops - can only be asked by stopping it. That has been
+    /// asked and answered, so the default is now the tank as it sounds, and the
+    /// flag turns it off for the A/B rather than on.
     /// </summary>
-    public const bool TurretSoundOnByDefault = false;
+    public const bool TurretSoundOnByDefault = true;
 
     private bool _turretSound = TurretSoundOnByDefault;
 
@@ -165,12 +165,18 @@ public sealed partial class Main : Node2D
     /// mixed. Parked here rather than on the field because --terrain is read
     /// before the field exists, the trap named beside <c>_flashSource</c>.
     /// </summary>
-    private string _paint = TerrainSet.Mixed;
+    private string _paint = TerrainSet.Default;
 
     /// <summary>What the terrain dropdown offers: mixed, then whatever loaded.
     /// Built from the set rather than listed here, so drawing a new hex is a
     /// file drop and nothing else.</summary>
     private readonly List<string> _paints = new() { TerrainSet.Mixed };
+
+    /// <summary>The two things a turret can do while the hull turns under it,
+    /// in the order the panel offers them. Holding is index 0 because it is what
+    /// the layered atlases exist to show.</summary>
+    private static readonly string[] TurretModes =
+        { "holds its heading", "rides the hull" };
 
     /// <summary>The ring on the ground under the tank being driven, or null on a
     /// run that has no interface - see <see cref="SelectionRing"/>.</summary>
@@ -575,8 +581,8 @@ public sealed partial class Main : Node2D
             // --pitch and --rumble, which are also off.
             else if (userArgs[i] == "--tracer")
                 _tracerVisible = true;
-            else if (userArgs[i] == "--turret-sound")
-                _turretSound = true;
+            else if (userArgs[i] == "--no-turret-sound")
+                _turretSound = false;
             else if (userArgs[i] == "--no-barrel-recoil")
                 _recoilTube = false;
             else if (userArgs[i] == "--burning")
@@ -2155,8 +2161,15 @@ public sealed partial class Main : Node2D
         ui.Slide("turret  (Q/E)", 0.0, 330.0, 30.0,
             () => Math.Round(_tank.TurretFacing / 30.0) * 30.0,
             v => { _aimWithMouse = false; _tank.TurretFacing = Mod(v, 360.0); }, " deg");
-        ui.Toggle("turret locked  (F)",
-            () => _tank.TurretLocked, on => _tank.TurretLocked = on);
+        // Two named states rather than a checkbox, and the reason is the reading
+        // that went wrong: it used to say "turret locked", and a traverse lock
+        // locks the turret *to the hull*, so the label promised the opposite of
+        // what the switch does. A checkbox can only name one of the two states
+        // and leaves the other to be guessed - which is exactly what happened.
+        // A caption long enough to name both is clipped, not wrapped.
+        ui.Choice("turret through a hull turn  (F)", TurretModes,
+            () => _tank.TurretHoldsHeading ? 0 : 1,
+            i => _tank.TurretHoldsHeading = i == 0);
         ui.Toggle("aim with mouse  (M)",
             () => _aimWithMouse, on => _aimWithMouse = on);
         ui.Toggle("spin turret  (SPACE)", () => _spinning, on => _spinning = on);
@@ -2482,7 +2495,7 @@ public sealed partial class Main : Node2D
         ui.Heading("sound");
         ui.Toggle("sound  (\\)", () => _soundEnabled,
                   on => { _soundEnabled = on; SoundChanged(); });
-        ui.Toggle("turret motor  (--turret-sound)", () => _turretSound,
+        ui.Toggle("turret motor  (--no-turret-sound)", () => _turretSound,
                   on => { _turretSound = on; SoundChanged(); });
         ui.Readout(() =>
         {
@@ -2911,7 +2924,7 @@ public sealed partial class Main : Node2D
             case Key.S:
                 OrderMoveTo(_field.Neighbour(_cell, Mod(_tank.HullFacing + 180.0, 360.0)));
                 break;
-            case Key.F: _tank.TurretLocked = !_tank.TurretLocked; break;
+            case Key.F: _tank.TurretHoldsHeading = !_tank.TurretHoldsHeading; break;
             case Key.P:
                 _pitchEnabled = !_pitchEnabled;
                 PitchChanged();

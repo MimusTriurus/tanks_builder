@@ -146,29 +146,29 @@ public static class SelfTest
             bad == 0, $"{bad} bad, first {badDetail}");
 
         GD.Print("turret modes");
-        tank.TurretLocked = true;
+        tank.TurretHoldsHeading = true;
         tank.HullFacing = 270.0;
         tank.TurretFacing = 0.0;
         for (int i = 0; i < 24; i++)
             tank.TurnHull(15.0);
-        Check("locked turret holds its world heading through a full hull turn",
+        Check("a holding turret keeps its world heading through a full hull turn",
             Math.Abs(WrapAngle(tank.TurretFacing - 0.0)) < 1e-6,
             $"turret ended at {tank.TurretFacing:F3}");
-        Check("locked hull still came back round",
+        Check("the hull under it still came back round",
             Math.Abs(WrapAngle(tank.HullFacing - 270.0)) < 1e-6,
             $"hull ended at {tank.HullFacing:F3}");
 
-        tank.TurretLocked = false;
+        tank.TurretHoldsHeading = false;
         tank.HullFacing = 270.0;
         tank.TurretFacing = 0.0;
         double offsetBefore = WrapAngle(tank.TurretFacing - tank.HullFacing);
         for (int i = 0; i < 7; i++)
             tank.TurnHull(23.0);
         double offsetAfter = WrapAngle(tank.TurretFacing - tank.HullFacing);
-        Check("free turret keeps a constant offset from the hull",
+        Check("a riding turret keeps a constant offset from the hull",
             Math.Abs(WrapAngle(offsetAfter - offsetBefore)) < 1e-6,
             $"offset {offsetBefore:F3} -> {offsetAfter:F3}");
-        Check("free turret actually moved",
+        Check("a riding turret actually moved",
             Math.Abs(WrapAngle(tank.TurretFacing - 0.0)) > 1.0,
             $"turret ended at {tank.TurretFacing:F3}");
 
@@ -3277,12 +3277,12 @@ public static class SelfTest
         // Taking the rate off TurretFacing alone gets each of those backwards.
         double wasHull = tank.HullFacing;
         double wasTurret = tank.TurretFacing;
-        bool wasLocked = tank.TurretLocked;
+        bool wasLocked = tank.TurretHoldsHeading;
         double Offset() => WrapAngle(tank.TurretFacing - tank.HullFacing);
 
         tank.HullFacing = 0.0;
         tank.TurretFacing = 0.0;
-        tank.TurretLocked = true;
+        tank.TurretHoldsHeading = true;
         double wasOffset = Offset();
         tank.TurnHull(30.0);
         Check("a hull turn under a held gun drives the ring",
@@ -3292,7 +3292,7 @@ public static class SelfTest
 
         tank.HullFacing = 0.0;
         tank.TurretFacing = 0.0;
-        tank.TurretLocked = false;
+        tank.TurretHoldsHeading = false;
         before = Offset();
         tank.TurnHull(30.0);
         Check("and a turret riding round with the hull does not",
@@ -3301,7 +3301,7 @@ public static class SelfTest
             + "went round the world without its motor doing anything");
         tank.HullFacing = wasHull;
         tank.TurretFacing = wasTurret;
-        tank.TurretLocked = wasLocked;
+        tank.TurretHoldsHeading = wasLocked;
 
         // Switched off, the ring's angle still has to be read and consumed every
         // frame. Left unread, switching the motor on mid-traverse would see the
@@ -3536,10 +3536,12 @@ public static class SelfTest
             // kind of assertion that quietly stops being true: a default is easy
             // to flip in an initialiser nobody reads, and "hide it" is one small
             // step from "skip it".
-            Check("the tracer is off until asked for, and the motor with it",
-                !Main.TracerOnByDefault && !Main.TurretSoundOnByDefault,
+            Check("the tracer is off until asked for and the motor is on",
+                !Main.TracerOnByDefault && Main.TurretSoundOnByDefault,
                 "both are named constants precisely so a change to them is a "
-                + "change somebody made on purpose");
+                + "change somebody made on purpose - and they differ now: the "
+                + "hum has been judged and kept, the tracer is a drawing that "
+                + "must not creep into an A/B");
             var unseen = new Shell
             {
                 Shooter = shooter, Target = foe, ImpactLocal = aim,
