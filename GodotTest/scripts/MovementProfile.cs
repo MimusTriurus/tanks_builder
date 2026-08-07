@@ -101,6 +101,23 @@ public sealed class MovementProfile
     public double TurretRate { get; init; } = 70.0;
 
     /// <summary>
+    /// How far the view jolts when this gun fires, in screen pixels of peak
+    /// displacement at zoom 1. See <see cref="CameraShake"/>.
+    ///
+    /// In this table rather than in a table of its own, by the rule the size
+    /// followed here first: a second table keyed on the class is a second thing
+    /// to keep in agreement, and it comes apart the day a class is added to one
+    /// and forgotten in the other.
+    ///
+    /// It is the one number that makes the heavy's gun feel like a heavy's gun
+    /// while it is standing still - the reload does that too, but by absence.
+    /// The spread is wider than the reload's on purpose: 2.3x from light to
+    /// heavy against 2.2x, but a jolt is judged against nothing and a reload
+    /// against a clock, so the jolt needs the room.
+    /// </summary>
+    public double ShotShake { get; init; } = 4.5;
+
+    /// <summary>
     /// Seconds between rounds.
     ///
     /// Longer than the gun's own report on every class - 1.2s on the light and
@@ -127,18 +144,21 @@ public sealed class MovementProfile
     {
         Tag = "LTP", TopSpeed = 310.0, Accel = 620.0, TurnRate = 260.0,
         Size = 0.85, TurretRate = 95.0, ReloadTime = 2.2, Rank = 0,
+        ShotShake = 3.0,
     };
 
     public static readonly MovementProfile Medium = new()
     {
         Tag = "MTP", TopSpeed = 240.0, Accel = 420.0, TurnRate = 200.0,
         Size = 1.00, TurretRate = 70.0, ReloadTime = 3.2, Rank = 1,
+        ShotShake = 4.5,
     };
 
     public static readonly MovementProfile Heavy = new()
     {
         Tag = "HTP", TopSpeed = 175.0, Accel = 260.0, TurnRate = 140.0,
         Size = 1.15, TurretRate = 48.0, ReloadTime = 4.8, Rank = 2,
+        ShotShake = 7.0,
     };
 
     /// <summary>One profile per class, and the tags are the parts-built tanks

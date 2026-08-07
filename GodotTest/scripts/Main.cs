@@ -163,6 +163,14 @@ public sealed partial class Main : Node2D
     private Label _hud = null!;
     private Camera2D _camera = null!;
 
+    /// <summary>The view's own spring. One for the board, not one per tank: the
+    /// camera is a single thing and three guns firing into it is three impulses
+    /// into one spring, which is what compounding means and what a shake per
+    /// vehicle could not express.</summary>
+    private readonly CameraShake _shake = new();
+
+    private bool _shakeOn = CameraShake.OnByDefault;
+
     private readonly Vector2 _origin = new(220, 200);
 
     /// <summary>Where the three are parked: one row, every other column. The same
@@ -594,6 +602,21 @@ public sealed partial class Main : Node2D
             // that set a level on a switched-off effect would look like a flag
             // that did not arrive - the same failure --hit-scale had when the
             // decimal separator ate it.
+            // On, and optionally at a level: `--shake` alone turns it on, and a
+            // number after it sets the level too. One flag rather than two
+            // because they are one question - the level is meaningless with the
+            // shake off, so asking for a level is asking for the shake.
+            else if (userArgs[i] == "--shake")
+            {
+                _shakeOn = true;
+                if (i + 1 < userArgs.Length
+                    && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+                        CultureInfo.InvariantCulture, out double shakeLevel))
+                {
+                    _shake.Level = shakeLevel;
+                    i++;
+                }
+            }
             else if (userArgs[i] == "--recoil" && i + 1 < userArgs.Length
                      && double.TryParse(userArgs[i + 1], NumberStyles.Float,
                          CultureInfo.InvariantCulture, out double recoilLevel))
@@ -1647,6 +1670,14 @@ public sealed partial class Main : Node2D
         // events last different lengths of time, so one counter would give one of
         // them the wrong tempo. See RecoilLoop.
         v.Barrel.Fire();
+        // Fourth thing off the one trigger, and the only one that is not about
+        // the tank at all: the view. Along the gun's own ground direction and
+        // unnormalised, so a shot into the screen jolts less than one across it.
+        // Any tank's shot, not just the driven one - a gun going off beside you
+        // is the same event as your own, and the bench has all three on screen.
+        if (_shakeOn && v.Atlas is not null)
+            _shake.Fire(v.Atlas.GroundDirection(v.Sprite.TurretFacing),
+                        v.Profile.ShotShake);
         // Third thing off one trigger, and a third clock, for the same reason:
         // the gun's report is 1.2s on the light and 3.4s on the heavy, and neither
         // is the 34 frames the flash runs or the 28 the tube takes to come home.
@@ -2185,6 +2216,31 @@ public sealed partial class Main : Node2D
                 ? $"kick peaks at {_recoil.PeakFor(_recoil.Level):F3}"
                   + $", rigid body ends at {Recoil.RigidBodyPeak:F3}"
                 : "the shear is off - the tube recoils for real instead");
+        // Under the recoil rows because it is the same trigger seen from
+        // outside the tank: those two say what the vehicle does, this says what
+        // the view does.
+        ui.Toggle("camera shake on the shot",
+            () => _shakeOn, on =>
+            {
+                _shakeOn = on;
+                if (!on)
+                {
+                    _shake.Reset();
+                    _camera.Offset = Vector2.Zero;
+                }
+            });
+        ui.Slide("shake level", 0.0, 2.5, 0.05,
+            () => _shake.Level, v => _shake.Level = v, "x",
+            () => _shakeOn
+                // The class amplitude is what the level multiplies, so quoting
+                // the level alone would answer nothing: the same 1.00x is three
+                // pixels on the light and seven on the heavy. Across the screen,
+                // because that is where the unnormalised direction is longest
+                // and so where the number is the one worth guarding.
+                ? $"{_profile.ShotShake * _shake.Level:F1}px broadside, "
+                  + $"{_profile.ShotShake * _shake.Level * 0.5:F1}px into the "
+                  + "screen"
+                : "off - every A/B near a shot would measure this instead");
         ui.Toggle("recoil on turret only  (L)",
             () => _tank.RecoilTurretOnly, on => _tank.RecoilTurretOnly = on);
         ui.Toggle("gun tube recoils  ([)",
@@ -2504,7 +2560,12 @@ public sealed partial class Main : Node2D
                      // so: nothing in the picture does, and every conclusion
                      // drawn from it is about that tank's atlas rather than
                      // this class's.
-                     + (_spriteDir is null ? "" : $"  sprites {_spriteDir}"));
+                     + (_spriteDir is null ? "" : $"  sprites {_spriteDir}")
+                     // '!off' rather than nothing, because a still camera and a
+                     // switched-off one are the same two zeroes - the marker the
+                     // recoil spring and the tracer already carry.
+                     + $"  shake {_shake.ScreenOffset(_camera.Zoom.X)}"
+                     + (_shakeOn ? "" : "!off"));
             if (++_frames >= _traceFrames)
             {
                 GetTree().Quit();
@@ -2554,6 +2615,23 @@ public sealed partial class Main : Node2D
         // tank got to this frame rather than last frame - the same ordering the
         // belts and the audio already need, and for the same reason.
         AdvanceShells(delta);
+
+        // The view last of all, after everything that could have fired this
+        // frame: a shot has to reach the spring on the frame it goes off, or the
+        // jolt lands one frame behind its own flash.
+        //
+        // Written whenever the spring is moving *or* the camera is displaced, so
+        // that switching the shake off mid-ring-down puts the view back rather
+        // than leaving it parked a few pixels out - the trap the recoil spring
+        // already documents.
+        if (_shakeOn)
+            _shake.Update(delta);
+        else if (_shake.Moving)
+            _shake.Reset();
+        Vector2 want = _shakeOn ? _shake.ScreenOffset(_camera.Zoom.X)
+                                : Vector2.Zero;
+        if (_camera.Offset != want)
+            _camera.Offset = want;
 
         // The marks are about the driven tank and both tanks move, so they are
         // repainted on change rather than on a target being set: a lane that was
@@ -2868,6 +2946,10 @@ public sealed partial class Main : Node2D
         PaintGunnery();
         _camera.Zoom = Vector2.One;
         _camera.Position = new Vector2(760, 500);
+        // and the shake, which holds a displacement with nothing driving it -
+        // the same reason the recoil spring is reset rather than left leaning
+        _shake.Reset();
+        _camera.Offset = Vector2.Zero;
     }
 
     private void Capture(string path)

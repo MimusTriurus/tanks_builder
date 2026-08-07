@@ -852,6 +852,139 @@ public static class SelfTest
             turretAt < Array.IndexOf(onTank, AtlasSet.ScarNames[0]),
             "damage and effects go over the turret, not under it");
 
+        // --- the view jolting when a gun goes off -------------------------
+        GD.Print("camera shake");
+        Check("the shake is off by default, and that is a named fact",
+            !CameraShake.OnByDefault,
+            "it moves the whole frame, and nearly every measurement in this "
+            + "bench is a pixel diff - a default in a field initialiser is a "
+            + "default nothing can notice being flipped");
+        var jolt = new CameraShake();
+        double asked = 6.0;
+        jolt.Fire(Vector2.Right, asked);
+        double peak = 0.0;
+        for (int i = 0; i < 120; i++)
+        {
+            jolt.Update(tick);
+            peak = Math.Max(peak, Math.Abs(jolt.Offset.X));
+        }
+        Check("a kick peaks at about the pixels it was asked for",
+            Math.Abs(peak - asked) < asked * 0.05,
+            $"asked {asked:F1}px, peaked {peak:F2}px - through the same "
+            + "integrator at the same step, which is why it can be asked in "
+            + "pixels at all");
+        Check("and then it rings down to nothing",
+            !jolt.Moving && jolt.Offset.Length() < 0.01f,
+            $"left at {jolt.Offset} after two seconds");
+
+        // The one thing that makes it the *gun's* shake rather than a generic
+        // rumble: the direction arrives unnormalised, so the projection decides
+        // how much of it survives.
+        var sideOn = new CameraShake();
+        var endOn = new CameraShake();
+        sideOn.Fire(atlas.GroundDirection(0.0), 6.0);
+        endOn.Fire(atlas.GroundDirection(270.0), 6.0);
+        double sideOnPeak = 0.0, endOnPeak = 0.0;
+        for (int i = 0; i < 60; i++)
+        {
+            sideOn.Update(tick);
+            endOn.Update(tick);
+            sideOnPeak = Math.Max(sideOnPeak, sideOn.Offset.Length());
+            endOnPeak = Math.Max(endOnPeak, endOn.Offset.Length());
+        }
+        Check("a gun fired across the screen jolts further than one fired into it",
+            sideOnPeak > endOnPeak * 1.5,
+            $"{sideOnPeak:F2}px across against {endOnPeak:F2}px into - "
+            + "the ground direction is unnormalised and that is the whole of it");
+
+        // Whole *screen* pixels, so the snap has to happen after the zoom. This
+        // is what the capture proved from the other end: shifting a no-shake
+        // frame by 4px matched a shaken one with zero residual, so nothing on
+        // the board is resampled.
+        var zoomed = new CameraShake();
+        zoomed.Fire(new Vector2(0.37f, -0.61f), 5.0);
+        bool whole = true;
+        for (int i = 0; i < 40; i++)
+        {
+            zoomed.Update(tick);
+            foreach (float z in new[] { 0.5f, 1.0f, 2.0f })
+            {
+                Vector2 px = zoomed.ScreenOffset(z) * z;
+                whole &= Math.Abs(px.X - Mathf.Round(px.X)) < 1e-3f
+                         && Math.Abs(px.Y - Mathf.Round(px.Y)) < 1e-3f;
+            }
+        }
+        Check("the offset lands on whole screen pixels at every zoom", whole,
+            "a fractional camera resamples every sprite on the board at once, "
+            + "not one of them");
+
+        var quiet = new CameraShake { Level = 0.0 };
+        quiet.Fire(Vector2.Right, 6.0);
+        for (int i = 0; i < 20; i++)
+            quiet.Update(tick);
+        Check("at level zero the view does not move at all",
+            quiet.Offset.Length() < 1e-6f, $"{quiet.Offset}");
+        var doubled = new CameraShake { Level = 2.0 };
+        doubled.Fire(Vector2.Right, 6.0);
+        double doubledPeak = 0.0;
+        for (int i = 0; i < 60; i++)
+        {
+            doubled.Update(tick);
+            doubledPeak = Math.Max(doubledPeak, Math.Abs(doubled.Offset.X));
+        }
+        Check("and the level scales it",
+            Math.Abs(doubledPeak - 2.0 * peak) < 0.2,
+            $"{doubledPeak:F2}px at 2.00x against {peak:F2}px at 1.00x");
+
+        // Three tanks are on the board and any of them may fire, so what a
+        // second shot must not do is *replace* the first. Two guns going off
+        // together is the unambiguous case and it doubles.
+        var together = new CameraShake();
+        together.Fire(Vector2.Right, 6.0);
+        together.Fire(Vector2.Right, 6.0);
+        double togetherPeak = 0.0;
+        for (int i = 0; i < 60; i++)
+        {
+            together.Update(tick);
+            togetherPeak = Math.Max(togetherPeak, Math.Abs(together.Offset.X));
+        }
+        Check("two guns firing together shake twice as hard",
+            Math.Abs(togetherPeak - 2.0 * peak) < 0.2,
+            $"{togetherPeak:F2}px against {peak:F2}px for one");
+
+        // Out of phase they partly cancel instead, and that is the spring being
+        // a spring rather than a fault - an impulse against a velocity already
+        // going the other way subtracts. Worth an assertion because the obvious
+        // test ("a later shot always shakes more") is false, and asserting it
+        // would have made the honest behaviour look broken.
+        var lateShot = new CameraShake();
+        lateShot.Fire(Vector2.Right, 6.0);
+        for (int i = 0; i < 3; i++)
+            lateShot.Update(tick);
+        var freshSpring = new CameraShake();
+        lateShot.Fire(Vector2.Right, 6.0);
+        freshSpring.Fire(Vector2.Right, 6.0);
+        double lateLeft = 0.0, restartLeft = 0.0;
+        for (int i = 0; i < 60; i++)
+        {
+            lateShot.Update(tick);
+            freshSpring.Update(tick);
+            lateLeft = Math.Max(lateLeft, Math.Abs(lateShot.Offset.X));
+            restartLeft = Math.Max(restartLeft, Math.Abs(freshSpring.Offset.X));
+        }
+        Check("a second gun mid ring-down adds to the spring, it does not reset it",
+            Math.Abs(lateLeft - restartLeft) > 0.1,
+            $"{lateLeft:F2}px carrying the first shot against {restartLeft:F2}px "
+            + "from a clean spring - equal would mean the first was thrown away");
+
+        Check("a heavier gun shakes the view harder",
+            MovementProfile.Heavy.ShotShake > MovementProfile.Medium.ShotShake
+            && MovementProfile.Medium.ShotShake > MovementProfile.Light.ShotShake
+            && MovementProfile.Heavy.ShotShake
+               / MovementProfile.Light.ShotShake > 2.0,
+            string.Join(", ", MovementProfile.All
+                .Select(p => $"{p.Tag} {p.ShotShake:F1}px")));
+
         // --- lending one tank's pixels to the others ----------------------
         //
         // The bench's answer to a layer that has landed on one tank and not the
