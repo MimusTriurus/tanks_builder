@@ -1116,6 +1116,148 @@ public static class SelfTest
                 + $"{atlases[lender].Count} and {atlases[lender].HullSpan}");
         }
 
+        // --- what the belts leave behind ----------------------------------
+        //
+        // The layer exists for the case a per-cell mark cannot express, so that
+        // is what most of this is about: a tank turning on the spot never leaves
+        // its cell, and the marks it makes are the whole point.
+        GD.Print("track marks: the ruts the belts leave");
+        {
+            // The arithmetic first, with no tank in it at all. A belt one arm
+            // from the centre covers the drive plus what the turn sweeps it
+            // through - see TrackLoop.Split, which is static so this can be said
+            // without driving anything into the state.
+            (double Left, double Right) rutStill = TrackLoop.Split(0.0, 0.0, 40.0);
+            Check("standing still, neither belt moves",
+                rutStill.Left == 0.0 && rutStill.Right == 0.0);
+            (double Left, double Right) ahead = TrackLoop.Split(10.0, 0.0, 40.0);
+            Check("driving straight, both belts cover the same ground",
+                Math.Abs(ahead.Left - ahead.Right) < 1e-9 && ahead.Left > 0.0);
+            (double Left, double Right) spin = TrackLoop.Split(0.0, 30.0, 40.0);
+            Check("a pivot moves both belts, opposite ways and equally",
+                spin.Left < 0.0 && spin.Right > 0.0
+                && Math.Abs(spin.Left + spin.Right) < 1e-9,
+                $"{spin.Left:F2} and {spin.Right:F2} - one number for both belts "
+                + "wound them the same way, which is the error this replaced");
+            Check("a left turn drives the right belt forward",
+                TrackLoop.Split(0.0, 5.0, 40.0).Right > 0.0,
+                "headings rise counter-clockwise, so the outside of a left turn "
+                + "is the right side");
+            Check("a wider gauge sweeps its belts further",
+                Math.Abs(TrackLoop.Split(0.0, 30.0, 80.0).Right)
+                > Math.Abs(spin.Right));
+            (double Left, double Right) back = TrackLoop.Split(-10.0, 0.0, 40.0);
+            Check("reversing runs both belts backwards",
+                back.Left < 0.0 && back.Right < 0.0);
+
+            Check("the marks sit over the ground and under the ring",
+                TrackMarks.MarksZ > HexField.GroundZ
+                && TrackMarks.MarksZ < SelectionRing.GroundZ
+                && SelectionRing.GroundZ < TankSprite.ShadowZ,
+                $"ground {HexField.GroundZ}, ruts {TrackMarks.MarksZ}, ring "
+                + $"{SelectionRing.GroundZ}, shadow {TankSprite.ShadowZ} - a rut "
+                + "is terrain, and a shadow falls across one");
+
+            if (vehicles is null || vehicles.Count == 0)
+                GD.Print("  ..    no vehicles to lay any");
+            else
+            {
+                Vehicle car = vehicles[Math.Clamp(active, 0, vehicles.Count - 1)];
+                var marks = new TrackMarks();
+                double arm = car.Atlas.TrackArm * car.Sprite.BodyScale;
+
+                // The one this layer is for. A per-cell mark and a mark keyed on
+                // where the hull went both draw nothing here, because the hull
+                // does not move - the same failure BeltTravel records having
+                // made once with the belts themselves.
+                car.Sprite.HullFacing = 270.0;
+                for (int i = 0; i < 60; i++)
+                    marks.Lay(car, TrackLoop.Split(0.0, 3.0, arm), 1.0 / 60.0);
+                Check("turning on the spot leaves marks", marks.Count > 0,
+                    "the hull does not move, so anything keyed on where it went "
+                    + "lays nothing at all");
+
+                IReadOnlyList<Vector2> leftArc = marks.TrailOf(car, 0);
+                IReadOnlyList<Vector2> rightArc = marks.TrailOf(car, 1);
+                Check("a pivot marks both sides", leftArc.Count > 1 && rightArc.Count > 1,
+                    $"{leftArc.Count} and {rightArc.Count}");
+                // Concentric: every point of a pivot arc is one arm from the
+                // contact patch, whichever way round the hull got there.
+                Vector2 rutHub = car.GroundPoint - marks.GlobalPosition;
+                double rutWorst = 0.0;
+                foreach (Vector2 p in leftArc)
+                    rutWorst = Math.Max(rutWorst, Math.Abs(p.DistanceTo(rutHub) - arm));
+                Check("the pivot arc stays one arm from the contact patch",
+                    rutWorst < arm * 0.5,
+                    $"off by {rutWorst:F1}px of a {arm:F1}px arm - the arcs are "
+                    + "squashed by the camera, so this is loose on purpose");
+                Check("the two sides are a gauge apart",
+                    leftArc[^1].DistanceTo(rightArc[^1]) > arm,
+                    $"{leftArc[^1].DistanceTo(rightArc[^1]):F1}px against an arm "
+                    + $"of {arm:F1}");
+
+                marks.Clear();
+                Check("a repair takes the ruts with it", marks.Count == 0);
+
+                // Off distance, not off the clock: the same ground covered in
+                // half as many frames has to leave the same trail.
+                var rutSlow = new TrackMarks();
+                var rutFast = new TrackMarks();
+                for (int i = 0; i < 40; i++)
+                    rutSlow.Lay(car, (2.0, 2.0), 1.0 / 60.0);
+                for (int i = 0; i < 20; i++)
+                    rutFast.Lay(car, (4.0, 4.0), 1.0 / 60.0);
+                Check("the trail is laid by distance, not by the frame clock",
+                    Math.Abs(rutSlow.Count - rutFast.Count) <= 2,
+                    $"{rutSlow.Count} against {rutFast.Count}");
+
+                var rutIdle = new TrackMarks();
+                for (int i = 0; i < 60; i++)
+                    rutIdle.Lay(car, (0.0, 0.0), 1.0 / 60.0);
+                Check("a tank that has not moved leaves two points, not a trail",
+                    rutIdle.Count == 2, $"{rutIdle.Count}");
+
+                // The rut lies in the ground plane, so it is at its widest when
+                // the hull points up the screen and half that across it - the
+                // same squash GroundDirection carries.
+                var rutAcross = new TrackMarks();
+                car.Sprite.HullFacing = 90.0;
+                rutAcross.Lay(car, (4.0, 4.0), 1.0 / 60.0);
+                double rutUp = rutAcross.WidthOf(car);
+                car.Sprite.HullFacing = 0.0;
+                rutAcross.Lay(car, (4.0, 4.0), 1.0 / 60.0);
+                double rutSide = rutAcross.WidthOf(car);
+                Check("a rut is squashed with the ground it lies on",
+                    rutUp > rutSide * 1.5,
+                    $"{rutUp:F1}px driving up the screen against {rutSide:F1}px across "
+                    + "- a constant screen width made a 21px belt 106px wide");
+
+                var rutFull = new TrackMarks();
+                car.Sprite.HullFacing = 270.0;
+                for (int i = 0; i < TrackMarks.Capacity * 3; i++)
+                    rutFull.Lay(car, (TrackMarks.Stitch * 2.0, TrackMarks.Stitch * 2.0),
+                             1.0 / 60.0);
+                Check("the trail forgets its oldest rather than growing forever",
+                    rutFull.TrailOf(car, 0).Count <= TrackMarks.Capacity,
+                    $"{rutFull.TrailOf(car, 0).Count} of {TrackMarks.Capacity}");
+
+                var rutLifted = new TrackMarks();
+                rutLifted.Lay(car, (8.0, 8.0), 1.0 / 60.0);
+                rutLifted.Lift(car);
+                int rutBefore = rutLifted.TrailOf(car, 0).Count;
+                rutLifted.Lay(car, (8.0, 8.0), 1.0 / 60.0);
+                Check("lifting the pen still lays, it just does not join up",
+                    rutLifted.TrailOf(car, 0).Count == rutBefore + 1,
+                    "a reset or a park moves a tank without driving it, and a "
+                    + "single ribbon would draw the jump as a line across the board");
+
+                var rutOff = new TrackMarks { Enabled = false };
+                for (int i = 0; i < 60; i++)
+                    rutOff.Lay(car, (4.0, 4.0), 1.0 / 60.0);
+                Check("switched off, nothing is laid at all", rutOff.Count == 0);
+            }
+        }
+
         // --- what the cells are made of -----------------------------------
         //
         // Skipped whole when there is no art, the way the sound topic is: the

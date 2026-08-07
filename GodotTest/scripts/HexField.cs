@@ -64,7 +64,13 @@ public sealed partial class HexField : Node2D
     /// matter.</summary>
     public IReadOnlyList<Vector2I> Aim = Array.Empty<Vector2I>();
 
-    public override void _Ready() => ZIndex = -100;
+    /// <summary>Bottom of the ladder. Was -100 with the selection ring right
+    /// above it at -99, which left no rung for the ruts - they are terrain, so
+    /// they belong over this and under the ring. Both moved down rather than
+    /// leaning on child order, which decides nothing here by design.</summary>
+    public const int GroundZ = -102;
+
+    public override void _Ready() => ZIndex = GroundZ;
 
     // --- layout ------------------------------------------------------------
 

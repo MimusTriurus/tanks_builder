@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Godot;
 
@@ -82,7 +83,27 @@ public sealed class Vehicle
     public readonly BodyRumble Rumble = new();
     public readonly EngineTremble Tremble = new();
     public readonly TurretScan Scan = new();
-    public readonly TrackLoop Track = new();
+    /// <summary>A clock per belt, because the two belts do not run together.
+    ///
+    /// One clock for both was the arrangement until the ruts, and it could not
+    /// be right about the one thing a tank does that is all track: a pivot runs
+    /// them in opposite directions, and a single unsigned phase wound them the
+    /// same way, so one of the two was always going backwards up its own loop.
+    /// The atlas was ready for this from the start - track_left and track_right
+    /// are separate layers - and it was the marks on the ground that made the
+    /// error impossible to keep, because a rut records the direction where a
+    /// spinning belt only suggests it.</summary>
+    public readonly TrackLoop TrackLeft = new();
+
+    public readonly TrackLoop TrackRight = new();
+
+    /// <summary>The belt the panel, the trace and the engine note speak for:
+    /// whichever is winding faster. Not an average - during a pivot the two are
+    /// equal and opposite, and an average of those is zero, which would report
+    /// still belts on the most track-heavy thing a tank does.</summary>
+    public TrackLoop Track =>
+        Math.Abs(TrackLeft.PhaseRate) >= Math.Abs(TrackRight.PhaseRate)
+            ? TrackLeft : TrackRight;
     public readonly ExhaustLoop Exhaust = new();
     public readonly BurnLoop Burn = new();
     public readonly HitLoop Hit = new();

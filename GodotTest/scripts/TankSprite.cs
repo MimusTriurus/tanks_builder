@@ -171,15 +171,37 @@ public sealed partial class TankSprite : Node2D
     /// shot, so it runs out rather than wrapping - see <see cref="HitLoop"/>.</summary>
     public int HitPhase = -1;
 
-    /// <summary>Where the belts are in their cycle, or -1 with no belts to show.
+    /// <summary>Where each belt is in its cycle, or -1 with no belts to show.
     /// Driven by <see cref="TrackLoop"/> off distance travelled, not off a
-    /// timer: the belt is what the ground is winding against.</summary>
-    public int TrackPhase = -1;
+    /// timer: the belt is what the ground is winding against.
+    ///
+    /// One per side, because the two sides do not agree - see
+    /// <see cref="Vehicle.TrackLeft"/>. On a pivot they run opposite ways, and
+    /// on a turning drive at different rates.</summary>
+    public int TrackPhaseLeft = -1;
 
-    /// <summary>How much of the belts is showing as a smear rather than as
+    public int TrackPhaseRight = -1;
+
+    /// <summary>How much of each belt is showing as a smear rather than as
     /// links: 0 crisp, 1 nothing but the phase average. From
-    /// <see cref="TrackLoop.Blur"/>; the layer pulls it at draw time.</summary>
-    public double TrackBlur;
+    /// <see cref="TrackLoop.Blur"/>; the layer pulls it at draw time. Per side
+    /// for the reason the phase is, and it shows: a tank cornering has its
+    /// outer belt smearing while the inner one is still countable.</summary>
+    public double TrackBlurLeft;
+
+    public double TrackBlurRight;
+
+    /// <summary>Whether the belts are showing at all - either side will do,
+    /// since they are set and cleared together.</summary>
+    public bool TracksRunning => TrackPhaseLeft >= 0 || TrackPhaseRight >= 0;
+
+    private static bool IsLeftBelt(string layer) => layer == AtlasSet.TrackNames[0];
+
+    public int TrackPhaseOf(string layer) =>
+        IsLeftBelt(layer) ? TrackPhaseLeft : TrackPhaseRight;
+
+    public double TrackBlurOf(string layer) =>
+        IsLeftBelt(layer) ? TrackBlurLeft : TrackBlurRight;
 
     /// <summary>Whether the belts are drawn at all. On by default and not an
     /// option in the sense the movement effects are - a tank has tracks - but

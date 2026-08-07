@@ -316,7 +316,7 @@ public sealed partial class EffectLayer : Node2D
                 Clocks.BurningSmoke => Tank.Burning ? Tank.BurnPhase : -1,
                 Clocks.BurningFire => Tank.Burning ? Tank.FirePhase : -1,
                 Clocks.HitBurst or Clocks.HitDust => Tank.HitPhase,
-                Clocks.Track => Tank.ShowTracks ? Tank.TrackPhase : -1,
+                Clocks.Track => Tank.ShowTracks ? Tank.TrackPhaseOf(Layer) : -1,
                 // No phase axis, so frame 0 of one, like the turret: what it
                 // draws is chosen by the hull's heading and nothing else.
                 Clocks.Shadow => Tank.ShowShadow ? 0 : -1,
@@ -454,7 +454,7 @@ public sealed partial class EffectLayer : Node2D
 
     /// <summary>
     /// The belt's phase average, laid over the links at
-    /// <see cref="TankSprite.TrackBlur"/>.
+    /// <see cref="TankSprite.TrackBlurLeft"/>, per side.
     ///
     /// Over rather than instead of, and that order is the one thing here worth
     /// stating. A true cross-fade would draw the crisp layer at 1-blur, and
@@ -471,7 +471,7 @@ public sealed partial class EffectLayer : Node2D
     {
         if (Clock != Clocks.Track || Tank is null)
             return;
-        double blur = Tank.TrackBlur;
+        double blur = Tank.TrackBlurOf(Layer);
         string smear = AtlasSet.SmearName(Layer);
         if (blur <= 0.0 || !atlas.Has(smear))
             return;

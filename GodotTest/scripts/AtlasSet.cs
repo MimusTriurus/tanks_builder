@@ -356,6 +356,24 @@ public sealed class AtlasSet
     /// </summary>
     public double TrackArm { get; private set; }
 
+    /// <summary>
+    /// How wide one belt is in atlas pixels - the width of the rut it leaves.
+    /// 0 when there are no belts to measure.
+    ///
+    /// The narrowest a belt is across the screen, over every heading. The belt
+    /// is a long thin thing lying in the ground plane, so the heading that puts
+    /// its length into the screen shows nothing across but its width, and every
+    /// other heading shows more. Taking the minimum finds that heading without
+    /// having to know which one it is - the same trick <see cref="TrackArm"/>
+    /// and <see cref="HullSpan"/> use, with the extremum the other way up.
+    ///
+    /// Horizontal only, for the reason the gauge is: the vertical is the
+    /// camera's tilt, and folding it in would report a width that grows with
+    /// the elevation the scene was rendered at. Comes out 29/21/22 on the three
+    /// tanks - within a quarter of each other, unlike the gauge.
+    /// </summary>
+    public double TrackWidth { get; private set; }
+
     /// <summary>True when every plate has a mark to leave. All four, because a
     /// tank that can be holed on three sides and not the fourth is worse than
     /// one that cannot be holed at all - the clean side reads as armour that
@@ -656,6 +674,39 @@ public sealed class AtlasSet
             if (!double.IsNaN(leftAt[f]) && !double.IsNaN(rightAt[f]))
                 widest = Math.Max(widest, Math.Abs(rightAt[f] - leftAt[f]));
         TrackArm = widest / 2.0;
+        double narrow = Math.Min(NarrowestBelt(left, leftTex),
+                                 NarrowestBelt(right, rightTex));
+        TrackWidth = double.IsPositiveInfinity(narrow) ? 0.0 : narrow;
+    }
+
+    /// <summary>The least a belt spans across the frame over every heading - its
+    /// width. See <see cref="TrackWidth"/>. Phase 0 only, like
+    /// <see cref="BeltCentres"/>: winding along the loop does not change how
+    /// wide the belt is.</summary>
+    private double NarrowestBelt(string layer, ImageTexture texture)
+    {
+        Image image = texture.GetImage();
+        image.Convert(Image.Format.Rgba8);
+        int count = CountOf(layer);
+        Vector2I tile = TileOf(layer);
+        double narrowest = double.PositiveInfinity;
+        for (int frame = 0; frame < count; frame++)
+        {
+            byte[] data = TileFrom(image, layer, frame).GetData();
+            int lo = int.MaxValue, hi = int.MinValue;
+            for (int y = 0; y < tile.Y; y++)
+            for (int x = 0; x < tile.X; x++)
+            {
+                int o = (y * tile.X + x) * 4;
+                if (o + 3 >= data.Length || data[o + 3] <= 32)
+                    continue;
+                if (x < lo) lo = x;
+                if (x > hi) hi = x;
+            }
+            if (hi >= lo)
+                narrowest = Math.Min(narrowest, hi - lo + 1);
+        }
+        return narrowest;
     }
 
     /// <summary>Where a belt sits across the frame, per heading, in tile pixels;

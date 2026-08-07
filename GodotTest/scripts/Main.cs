@@ -153,6 +153,13 @@ public sealed partial class Main : Node2D
 
     private HexField _field = null!;
     private TerrainSet? _terrain;
+    private TrackMarks? _marks;
+
+    /// <summary>Whether the belts leave anything behind. On by default: a tank
+    /// that leaves no mark is the picture the bench already had, so the A/B this
+    /// layer is judged by is the one that needs the flag, not the one that needs
+    /// the default.</summary>
+    private bool _rutsEnabled = true;
 
     /// <summary>Which ground the board is painted with - a kind's name, or
     /// mixed. Parked here rather than on the field because --terrain is read
@@ -687,6 +694,8 @@ public sealed partial class Main : Node2D
             // the mouse - the argument every other A/B flag here makes.
             else if (userArgs[i] == "--terrain" && i + 1 < userArgs.Length)
                 _paint = userArgs[++i];
+            else if (userArgs[i] == "--no-ruts")
+                _rutsEnabled = false;
             else if (userArgs[i] == "--drive" && i + 1 < userArgs.Length)
             {
                 string[] parts = userArgs[i + 1].Split(',');
@@ -750,6 +759,8 @@ public sealed partial class Main : Node2D
 
         _field = new HexField { Terrain = _terrain, Paint = _paint };
         AddChild(_field);
+        _marks = new TrackMarks { Enabled = _rutsEnabled };
+        AddChild(_marks);
 
         // One vehicle per atlas that loaded, parked along HomeCells. Built here
         // rather than swapped later: each one keeps its own atlas for good, so
@@ -779,8 +790,11 @@ public sealed partial class Main : Node2D
             // Phases come off each layer, never assumed: the renderer's count is
             // a config value, and a clock that wraps anywhere but at the seam
             // pops there.
-            vehicle.Track.Phases = vehicle.Atlas.TrackPhases;
-            vehicle.Track.Pitch = vehicle.Atlas.TrackPitch;
+            foreach (TrackLoop belt in new[] { vehicle.TrackLeft, vehicle.TrackRight })
+            {
+                belt.Phases = vehicle.Atlas.TrackPhases;
+                belt.Pitch = vehicle.Atlas.TrackPitch;
+            }
             vehicle.Exhaust.Phases = vehicle.Atlas.ExhaustPhases;
             vehicle.Burn.Phases = vehicle.Atlas.BurnPhases;
             // The tube's poses, read off the layer like every other count: the
@@ -1109,7 +1123,8 @@ public sealed partial class Main : Node2D
             if (now == was)
                 continue;
             vehicle.Sprite.BodyScale = now;
-            vehicle.Track.Scale = now;
+            vehicle.TrackLeft.Scale = now;
+            vehicle.TrackRight.Scale = now;
             // Hold the contact patch still. The scale pivots on the anchor, which
             // floats above the ground, so resizing alone would lift or sink the
             // tank - see StandOn. Corrected by the change rather than re-parked,
@@ -1162,6 +1177,9 @@ public sealed partial class Main : Node2D
         vehicle.Cell = _field.ClampCell(vehicle.Cell);
         _field.Position = _origin;
         vehicle.Sprite.Position = StandOn(vehicle, vehicle.Cell);
+        // Moved rather than driven, so the ribbon must break here or the jump is
+        // drawn as a line across the board.
+        _marks?.Lift(vehicle);
         Depth(vehicle);
         // Belt travel is read back off the heading rather than reported by
         // whatever turned it, so the baseline has to be laid down wherever the
@@ -1246,7 +1264,7 @@ public sealed partial class Main : Node2D
     private void TracksChanged()
     {
         foreach (Vehicle v in _vehicles)
-            UpdateTracks(v, 0.0, 0.0);
+            UpdateTracks(v, (0.0, 0.0), 0.0);
     }
 
     /// <summary>
@@ -1277,14 +1295,17 @@ public sealed partial class Main : Node2D
     /// rate from the same clock, so the belts cannot be heard turning while they
     /// are seen standing still.
     ///
-    /// Unsigned in the pivot term, and that is the part still owed. A real pivot
-    /// runs the two belts in opposite directions; the sprite carries one phase for
-    /// both (<see cref="TankSprite.TrackPhase"/>), so they can only wind together
-    /// and one of them is going the wrong way. Both moving is still nearer the
-    /// truth than both frozen - the error is a sign on one belt rather than a
-    /// missing motion on two - and closing it properly means a phase per side,
-    /// which the atlas is already ready for: track_left and track_right are
-    /// separate layers.
+    /// Signed, and per side, which is the debt this used to carry openly. A real
+    /// pivot runs the two belts in opposite directions; one unsigned number for
+    /// both wound them the same way, so one of the two was always climbing its
+    /// loop backwards. The fix is arithmetic rather than a case: a belt at
+    /// <c>arm</c> from the centre covers <c>drive + omega*arm</c>, and the two
+    /// sides differ only in the sign of <c>arm</c>.
+    ///
+    /// It was the ruts that forced it. A spinning belt only suggests a direction
+    /// and the eye forgives it; a mark left on the ground records one, and two
+    /// arcs curling the same way where they should be counter-rotating is the
+    /// first thing anyone would see.
     ///
     /// The radius is <see cref="AtlasSet.TrackArm"/>, measured off those two
     /// layers, and only falls back to a fraction of the hull when there are no
@@ -1292,21 +1313,20 @@ public sealed partial class Main : Node2D
     /// and wrong in a way it could not have been right: the three hulls are one
     /// length to within 3% and the three gauges are not.
     /// </summary>
-    private double BeltTravel(Vehicle v, double delta)
+    private (double Left, double Right) BeltTravel(Vehicle v, double delta)
     {
         double swing = WrapAngle(v.Sprite.HullFacing - v.LastHullFacing);
         v.LastHullFacing = v.Sprite.HullFacing;
-        double arm = v.Atlas.TrackArm > 0.0
-            ? v.Atlas.TrackArm
-            : v.Atlas.HullSpan * PivotRadiusFraction;
-        double radius = arm * v.Sprite.BodyScale;
-        double pivot = Math.Abs(Mathf.DegToRad(swing)) * radius;
-        // The swing takes the drive's sign rather than always adding, so a tank
-        // reversing round a corner does not have its belts partly cancelled by
-        // its own turn.
-        double drive = v.Speed * delta;
-        return drive + (drive < 0.0 ? -pivot : pivot);
+        double radius = PivotArm(v);
+        return TrackLoop.Split(v.Speed * delta, swing, radius);
     }
+
+    /// <summary>The radius each belt winds about when the hull turns - half the
+    /// gauge, on screen.</summary>
+    private static double PivotArm(Vehicle v) =>
+        (v.Atlas.TrackArm > 0.0
+            ? v.Atlas.TrackArm
+            : v.Atlas.HullSpan * PivotRadiusFraction) * v.Sprite.BodyScale;
 
     private void ScanChanged()
     {
@@ -1610,21 +1630,28 @@ public sealed partial class Main : Node2D
     /// goes still the moment the tank does, which is correct - a stationary
     /// tank's tracks are stationary, whatever the engine is doing.
     /// </summary>
-    private void UpdateTracks(Vehicle v, double distance, double delta)
+    private void UpdateTracks(Vehicle v, (double Left, double Right) travel,
+                              double delta)
     {
         if (!_tracksEnabled || v.Atlas.HasTracks != true)
         {
-            if (v.Sprite.TrackPhase < 0)
+            if (!v.Sprite.TracksRunning)
                 return;
-            v.Track.Reset();
-            v.Sprite.TrackPhase = -1;
-            v.Sprite.TrackBlur = 0.0;
+            v.TrackLeft.Reset();
+            v.TrackRight.Reset();
+            v.Sprite.TrackPhaseLeft = -1;
+            v.Sprite.TrackPhaseRight = -1;
+            v.Sprite.TrackBlurLeft = 0.0;
+            v.Sprite.TrackBlurRight = 0.0;
             v.Sprite.QueueRedraw();
             return;
         }
-        v.Track.Advance(distance, delta);
-        v.Sprite.TrackPhase = v.Track.Frame;
-        v.Sprite.TrackBlur = v.Track.Blur;
+        v.TrackLeft.Advance(travel.Left, delta);
+        v.TrackRight.Advance(travel.Right, delta);
+        v.Sprite.TrackPhaseLeft = v.TrackLeft.Frame;
+        v.Sprite.TrackPhaseRight = v.TrackRight.Frame;
+        v.Sprite.TrackBlurLeft = v.TrackLeft.Blur;
+        v.Sprite.TrackBlurRight = v.TrackRight.Blur;
     }
 
     /// <summary>Runs every frame, moving or not - that is the whole point of it.
@@ -2215,6 +2242,28 @@ public sealed partial class Main : Node2D
             _tracksEnabled = on;
             TracksChanged();
         });
+        // No key: the alphabet is gone, and so are [ ] and \. The panel is
+        // where a switch is found by name; the flag is there because a capture
+        // is evidence and taking it twice must not need a hand on the mouse.
+        ui.Toggle("track marks  (--no-ruts)", () => _marks?.Enabled == true, on =>
+        {
+            if (_marks is null)
+                return;
+            _marks.Enabled = on;
+            _marks.QueueRedraw();
+        });
+        ui.Readout(() =>
+        {
+            AtlasSet a = _tank.Atlas!;
+            if (!a.HasTracks || _marks is null)
+                return "ruts  [none - needs a parts-built model]";
+            // Width and gauge together, because the pair is what the eye reads:
+            // a rut of the right width at the wrong gauge is two ruts of some
+            // other tank.
+            return $"ruts {_marks.Count} pts, "
+                   + $"{a.TrackWidth * _tank.BodyScale:F0}px wide at "
+                   + $"{a.TrackArm * 2.0 * _tank.BodyScale:F0}px gauge";
+        });
         // The belt is the one layer tied to the ground rather than to a clock,
         // so what it is worth saying about it is how well it is keeping up. The
         // cap is a real limit and not a setting to hide: past it the tread would
@@ -2224,8 +2273,10 @@ public sealed partial class Main : Node2D
             AtlasSet a = _tank.Atlas!;
             if (!a.HasTracks)
                 return "tracks  [none - needs a parts-built model]";
-            string phase = _tank.TrackPhase < 0 ? " -" : $"{_tank.TrackPhase,2}";
-            return $"track {phase} / {a.TrackPhases}"
+            string phase = _tank.TrackPhaseLeft < 0
+                ? " - / -"
+                : $"{_tank.TrackPhaseLeft,2} /{_tank.TrackPhaseRight,2}";
+            return $"track {phase} of {a.TrackPhases}"
                    // as drawn, not as rendered: the size dial moves it, and the
                    // sync speed below moves with it
                    + $"   link {_track.LinkOnScreen,5:F1}px"
@@ -2620,7 +2671,8 @@ public sealed partial class Main : Node2D
                      // slip as well as phase: the cap is a real limit, and a
                      // belt quietly running at two thirds of the ground is not
                      // something to have to work out from the phase alone
-                     + $"  trk {_tank.TrackPhase,2}@{_track.Phase,5:F2}"
+                     + $"  trk {_tank.TrackPhaseLeft,2}/{_tank.TrackPhaseRight,2}"
+                     + $"@{_track.Phase,5:F2}"
                      + $" x{_track.Slip,4:F2}"
                      // and the smear, because a fully blurred belt and a stopped
                      // one look alike in a phase number and nothing alike on
@@ -2668,6 +2720,8 @@ public sealed partial class Main : Node2D
                      // '!off' rather than nothing, because a still camera and a
                      // switched-off one are the same two zeroes - the marker the
                      // recoil spring and the tracer already carry.
+                     + $"  ruts {_marks?.Count ?? 0}@{_marks?.WidthOf(Active) ?? 0.0:F1}px"
+                     + (_marks?.Enabled == true ? "" : "!off")
                      + $"  shake {_shake.ScreenOffset(_camera.Zoom.X)}"
                      + (_shakeOn ? "" : "!off"));
             if (++_frames >= _traceFrames)
@@ -2697,7 +2751,9 @@ public sealed partial class Main : Node2D
 
             // after the order has moved the tank, so the belts see the ground
             // that actually went past this frame rather than last frame's
-            UpdateTracks(v, BeltTravel(v, delta), delta);
+            (double Left, double Right) belts = BeltTravel(v, delta);
+            UpdateTracks(v, belts, delta);
+            _marks?.Lay(v, belts, delta);
             UpdateTremble(v, delta);
             UpdateExhaust(v, delta);
             UpdateBurn(v, delta);
@@ -2988,6 +3044,7 @@ public sealed partial class Main : Node2D
         // land on armour that had just been made good, which is the one way this
         // reset could leave a mark behind it.
         ClearShells();
+        _marks?.Clear();
         foreach (Vehicle v in _vehicles)
         {
             CancelOrder(v);
@@ -3004,9 +3061,12 @@ public sealed partial class Main : Node2D
             s.TrembleRoll = 0.0;
             v.Exhaust.Reset();
             s.ExhaustPhase = -1;
-            v.Track.Reset();
-            s.TrackPhase = -1;
-            s.TrackBlur = 0.0;
+            v.TrackLeft.Reset();
+            v.TrackRight.Reset();
+            s.TrackPhaseLeft = -1;
+            s.TrackPhaseRight = -1;
+            s.TrackBlurLeft = 0.0;
+            s.TrackBlurRight = 0.0;
             v.Burning = false;
             v.Burn.Reset();
             s.Burning = false;

@@ -214,6 +214,31 @@ public sealed class TrackLoop
         PhaseRate = delta > 0.0 ? take * Phases / delta : 0.0;
     }
 
+    /// <summary>
+    /// One frame's ground split between the two belts.
+    ///
+    /// A belt sitting <paramref name="arm"/> from the centre covers the drive
+    /// plus what the turn sweeps it through, and the two sides differ only in
+    /// the sign of the arm - so a pivot with no drive at all comes out equal and
+    /// opposite, which is what a tank does and what one unsigned number for both
+    /// could never say.
+    ///
+    /// A rising heading turns counter-clockwise, and a point to the hull's left
+    /// then travels backwards along it: omega cross r points behind. So a left
+    /// turn is the right belt going forward.
+    ///
+    /// Static and split out for the reason <see cref="BlurAt"/> is: the claim is
+    /// about arithmetic, and it should be assertable without driving a tank into
+    /// the state that produces it.
+    /// </summary>
+    public static (double Left, double Right) Split(double drive,
+                                                    double swingDegrees,
+                                                    double arm)
+    {
+        double pivot = swingDegrees * Math.PI / 180.0 * arm;
+        return (drive - pivot, drive + pivot);
+    }
+
     /// <summary>The smear that goes with a wanted rate of
     /// <paramref name="perFrame"/> links per screen frame. Split out so the ramp
     /// can be asserted at its two ends without driving a tank to them.</summary>
