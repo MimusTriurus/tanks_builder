@@ -2099,7 +2099,11 @@ public sealed partial class Main : Node2D
             Vector2I frames = _tank.FrameIndices();
             return $"hull {_tank.HullFacing,6:F1} deg -> frame {frames.X,2}\n"
                    + $"turret {_tank.TurretFacing,6:F1} deg -> frame {frames.Y,2}"
-                   + $"   scan {_scan.Offset,6:F1} deg";
+                   // The sway, and the arc it is allowed - a bare offset says
+                   // nothing about whether one frame either side is what is on
+                   // screen, which is the only thing anyone turns this on to see.
+                   + $"   scan {_scan.Offset,6:F1} of +-"
+                   + $"{_scan.MaxSteps * 360.0 / _tank.Atlas!.Count:F0} deg";
         });
 
         ui.Heading("ride");
@@ -2461,8 +2465,28 @@ public sealed partial class Main : Node2D
         // exactly as the spin and the mouse suspend it on the driven one.
         if (!_scanEnabled || v.Moving || v.Target is not null
             || (v == Active && (_spinning || _aimWithMouse)))
+        {
+            v.Scan.Suspend();
             return;
-        double move = v.Scan.Advance(360.0 / v.Atlas.Count, delta);
+        }
+        double step = 360.0 / v.Atlas.Count;
+        if (!v.Scan.Based)
+        {
+            // The sway is an offset, so it needs a bearing to be an offset from,
+            // and the honest one is where the turret has just been left - a tank
+            // that has finished laying its gun down a lane sways about that lane.
+            // Snapped to a rendered bearing, which costs nothing on screen: the
+            // sprite is drawn at the nearest rendered heading regardless, so this
+            // moves the number and not the picture.
+            double onto = Mod(Math.Round(v.Sprite.TurretFacing / step) * step, 360.0);
+            v.Scan.Rest(onto);
+            if (onto != v.Sprite.TurretFacing)
+            {
+                v.Sprite.TurretFacing = onto;
+                v.Sprite.QueueRedraw();
+            }
+        }
+        double move = v.Scan.Advance(step, delta);
         if (move == 0.0)
             return;
         v.Sprite.TurretFacing = Mod(v.Sprite.TurretFacing + move, 360.0);

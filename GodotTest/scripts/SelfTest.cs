@@ -486,7 +486,7 @@ public static class SelfTest
 
         GD.Print("turret scan");
         var scan = new TurretScan();
-        scan.Reset();
+        scan.Rest(0.0);
         double scanStep = 360.0 / tank.Atlas!.Count;
         var bearings = new HashSet<int>();
         double biggestMove = 0.0, scanPeak = 0.0;
@@ -515,9 +515,9 @@ public static class SelfTest
             $"saw {string.Join(",", bearings.OrderBy(v => v))}");
         Check("it rests only on bearings that were rendered", offGrid == 0,
             $"{offGrid} frames parked between frames");
-        // The quantisation lesson, made executable. A scan smaller than one
-        // frame step draws nothing at all on this atlas: the asked-for few
-        // degrees of sway is below what twelve frames can express.
+        // The quantisation lesson, made executable. A sway smaller than one
+        // frame step draws nothing at all: below the step there is no frame to
+        // change to, whether the atlas holds twelve headings or twenty-four.
         Check("the scan is at least one frame step wide", scanPeak >= scanStep - 1e-6,
             $"{scanPeak:F1} deg against a {scanStep:F1} deg step");
         Check("it traverses rather than snapping",
@@ -526,6 +526,48 @@ public static class SelfTest
         // Mostly parked. A turret in constant motion reads as a search radar.
         Check("it spends most of its time dwelling",
             movingFrames < 3600 * 0.6, $"{movingFrames} of 3600 frames traversing");
+        // The amplitude that was asked for, stated as itself. The check above
+        // says the arc is not smaller than the atlas can draw; this one says it
+        // is not bigger than a sway - and the two together pin it to one step,
+        // which is the only width that is both.
+        Check("the sway reaches one frame step either side and no further",
+            scan.MaxSteps == 1 && Math.Abs(scanPeak - scanStep) < 1e-6,
+            $"{scanPeak:F1} deg either side of a {scanStep:F1} deg step");
+        // And the sway cannot lay the gun down a lane by accident. A gun fires
+        // only along a flat side of the hex, so any offset that is a multiple of
+        // 60 is a lane the tank was never ordered to fire down. One step of 15
+        // clears it; four steps of 15 would not, which is what makes this an
+        // assertion rather than a remark.
+        int onLane = Enumerable.Range(1, scan.MaxSteps)
+            .Count(k => Math.Abs((k * scanStep) % 60.0) < 1e-6);
+        Check("no leg of the sway lands on another firing lane", onLane == 0,
+            $"{onLane} of {scan.MaxSteps} steps are a multiple of 60 deg");
+        // The base is announced, never assumed. Without one the offset would be
+        // measured from a bearing nobody chose - the way it was measured from
+        // wherever the turret happened to be when the harness started.
+        var unbased = new TurretScan();
+        double unbasedMove = 0.0;
+        for (int i = 0; i < 600; i++)
+            unbasedMove += unbased.Advance(scanStep, dt);
+        Check("with no base announced the sway does not move the turret",
+            unbasedMove == 0.0 && !unbased.Based,
+            $"{unbasedMove:F3} deg over 600 frames");
+        // The case that made the base worth storing: a tank lays its gun down a
+        // lane, fires, and goes back to idling. The sway has to re-centre on the
+        // lane rather than carry its old offset into it.
+        scan.Suspend();
+        Check("anything else driving the turret takes the base away", !scan.Based,
+            $"based {scan.Based}");
+        scan.Rest(60.0);
+        double lanePeak = 0.0;
+        for (int i = 0; i < 3600; i++)
+        {
+            scan.Advance(scanStep, dt);
+            lanePeak = Math.Max(lanePeak, Math.Abs(scan.Offset));
+        }
+        Check("after a fight the sway re-centres on the bearing the gun was left on",
+            scan.Base == 60.0 && lanePeak <= scan.MaxSteps * scanStep + 1e-6,
+            $"base {scan.Base:F1} deg, reached {lanePeak:F1} deg from it");
 
         GD.Print("the shot");
         int shotFrames = FlashSheet.Duration;
