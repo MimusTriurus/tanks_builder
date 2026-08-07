@@ -140,13 +140,30 @@ public sealed class AtlasSet
     /// </summary>
     public const string BarrelName = "barrel";
 
+    /// <summary>
+    /// The dark the tank puts on the tile it stands on.
+    ///
+    /// A contact shadow rather than a cast one, so it has no direction and no
+    /// turret in it - see ground_shadow.py for why both follow from the other.
+    /// It is on the hull's heading because that is the footprint that turns.
+    ///
+    /// The one layer that is neither the tank nor an effect on it: it is the
+    /// ground, darker. Which is why it does not composite with the rest at all
+    /// but goes under every tank on the board, at the selection ring's own
+    /// z-index - see <see cref="TankSprite.ShadowZ"/>.
+    ///
+    /// Optional like the rest, and its absence is a fact about the render
+    /// rather than about the scene: every tank has ground under it.
+    /// </summary>
+    public const string ShadowName = "shadow";
+
     /// <summary>Layers that load if they are there and are silently skipped if
     /// they are not. All but the hit layers need a piece separated by hand in
     /// the .blend; the hit is measured off the hull and so is always there.</summary>
     private static readonly string[] OptionalNames =
         new[] { "smoke", "flash", ExhaustName, FireName, BurnName, BurstName,
-                DustName, BarrelName }.Concat(ScarNames).Concat(TrackNames)
-            .ToArray();
+                DustName, BarrelName, ShadowName }
+            .Concat(ScarNames).Concat(TrackNames).ToArray();
 
     public string Tag { get; private set; } = "";
     public string Error { get; private set; } = "";
@@ -254,6 +271,9 @@ public sealed class AtlasSet
 
     /// <summary>True when this tank was rendered with an engine plume.</summary>
     public bool HasExhaust => Has(ExhaustName);
+
+    /// <summary>True when this tank was rendered with ground under it.</summary>
+    public bool HasShadow => Has(ShadowName);
 
     /// <summary>Phases in the exhaust loop, 0 if it is missing.</summary>
     public int ExhaustPhases => PhasesOf(ExhaustName);

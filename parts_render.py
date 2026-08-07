@@ -64,6 +64,7 @@ basket wall; and the concentricity of the hull's own deck opening, which is
 """
 
 import json
+import math
 import os
 
 import numpy as np
@@ -125,6 +126,12 @@ CONFIG = {
     # the ground tile: built at render time and never saved, as everywhere else
     # in the project. None -> skip it.
     "hex": {},
+
+    # the dark under the tank, on that tile. Off without a tile, because it is
+    # cast onto one - the catcher is a disc of the tile's own inradius, which
+    # is what keeps the shadow on ground the tank owns.
+    "shadow": True,
+    "shadow_cfg": None,          # overrides for ground_shadow.CONFIG
 }
 
 
@@ -446,6 +453,7 @@ class Body:
             # right after the turret it came out of, so the composite order in
             # the sheets is the order the game draws
             self.layers.insert(2, self.barrel)
+        self.shadow = None
         if cfg["hex"] is not None:
             tile, self.hex = ground_tile(
                 cfg, self.spin["axis"], {n for s in drop.values() for n in s})
@@ -453,6 +461,44 @@ class Body:
             # one frame, but framed with the carousel like every other layer
             self.layers.append({"name": "hex", "target": tile.name,
                                 "static": True})
+            if cfg["shadow"]:
+                self._add_shadow(cfg, drop)
+
+    def _add_shadow(self, cfg, drop):
+        """The dark the tank puts on the tile it is standing on.
+
+        Built here because this is where the ground is: the tile's centre, its
+        foot and its radius are all decided a few lines up, and a second
+        opinion about where the ground is would be a second thing to keep in
+        agreement. See ground_shadow.py for why it is a contact shadow.
+
+        What casts is the hull and the belts and nothing else - what drives
+        over the tile, which is the same set the tile is fitted to. The turret
+        is above the hull and its footprint is inside it; the gun tube's is
+        not, and is given up on purpose rather than paid for with a second
+        layer that would not composite.
+        """
+        import importlib
+        gs = importlib.import_module("ground_shadow")
+        dropped = {n for s in drop.values() for n in s}
+        casters = [cfg["hull"]] + list(cfg["tracks"])
+        disc, self.shadow = gs.build(
+            self.spin["axis"], self.hex["ground_z"],
+            # the tile's inradius: a hexagon's own radius is to its corners,
+            # and the corners are where it comes closest to the frame edge
+            self.hex["circumradius"] * math.cos(math.radians(30.0)),
+            cfg.get("shadow_cfg"))
+        # not in `_temps`: `ground_shadow` owns the disc *and* its material, and
+        # removing the object here would leave `restore` reading a name off a
+        # freed StructRNA
+        self.shadow["cast_by"] = casters
+        self.shadow["dropped"] = sorted(dropped)
+        spec = gs.layer(disc.name, casters, cfg.get("shadow_cfg"))
+        # the original of a rebuilt belt is still in the scene and still under
+        # its root, so a caster hint naming the root would put both in the
+        # render - one belt casting two shadows a phase apart
+        spec["exclude"] = sorted(dropped)
+        self.layers.insert(0, spec)
 
     def shared(self):
         """What this layout has to say about the job as a whole."""
@@ -463,6 +509,12 @@ class Body:
 
     def restore(self):
         import bpy, importlib
+        # the disc goes with the temps; its material does not belong to any
+        # object once the disc is gone, and a stale one would be rebuilt from
+        # scratch next run anyway
+        if self.shadow is not None:
+            importlib.import_module("ground_shadow").remove(
+                self.cfg.get("shadow_cfg"))
         for temp in self._temps:
             data = temp.data
             bpy.data.objects.remove(temp, do_unlink=True)
@@ -501,6 +553,9 @@ class Body:
         upp = res["layers"]["hull"]["units_per_pixel"]
         return {
             "spin": self.spin, "ring": self.ring, "hex": self.hex,
+            "shadow": self.shadow,
+            "shadow_removed": (self.shadow is None
+                               or self.shadow["name"] not in bpy.data.objects),
             # by its name: the object itself is gone and touching it raises
             "tile_removed": (self.hex is None
                              or self.hex["name"] not in bpy.data.objects),

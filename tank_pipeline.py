@@ -93,7 +93,19 @@ CONFIG = {
     "hex": "Hex",
 
     # --- the render ---------------------------------------------------------
-    "steps": 12,
+    # Frames over the full 360, and the one number that decides how smooth the
+    # tank looks turning: the atlas quantises heading, so this is the step, and
+    # 24 is 15 deg against 30. Must stay a multiple of 6 so the six hex
+    # directions land on rendered frames.
+    #
+    # It doubles the whole set, and that is not avoidable by doubling only the
+    # hull and the turret: the belts, the tube, the scars and the effects are
+    # welded to one or the other, and a layer stepping 30 under a hull stepping
+    # 15 slides against it - worst on the scars, which are hard-edged decals on
+    # armour at 60px of radius, where half a step is 8px of slide.
+    #
+    # Measured on MTP: 387MB of decoded atlas at 12, 774 at 24.
+    "steps": 24,
     "tile": 256,
     # the flash layers get a wider frame at the same units_per_pixel: the
     # muzzle already sits 68.8px out from the spin axis, so a 256 tile leaves
@@ -173,8 +185,11 @@ CONFIG = {
     "front_dir": 270.0,
 
     # --- the check ----------------------------------------------------------
-    # frame indices to composite: at camera, across right, away, across left
-    "check_headings": [0, 3, 6, 9],
+    # Quarters of the carousel to composite: at camera, across right, away,
+    # across left. Fractions rather than frame indices, because indices are
+    # relative to `steps` and silently became eighths of a turn the day it went
+    # from 12 to 24 - four sheets that all still looked plausible.
+    "check_headings": [0.0, 0.25, 0.5, 0.75],
     "check_phases": [0, 1, 2, 4],
     # how far the flash may sit off the tank's symmetry line, in pixels, on the
     # two headings where that line is vertical on screen. This is the assertion
@@ -189,6 +204,12 @@ CONFIG = {
     # against the tile's own colour. Below this it is present in the alpha and
     # absent from the screen.
     "exhaust_contrast_min": 28.0,
+    # Least the contact shadow may darken the tile by, in levels of 255. The
+    # same measure as the plume's and a lower bar on purpose: the plume has to
+    # be seen against the field, and this only has to seat the tank, so it is
+    # right for it to be the quietest layer in the set. Below this the tank is
+    # back to reading as a decal, which is the whole complaint it answers.
+    "shadow_contrast_min": 12.0,
     # Least the flame may stay red by, in levels of 255: how much more red than
     # green-and-blue the picture becomes once the layer is added over the ground.
     # Brightness is not the thing that fails here - a fire that clips to white
@@ -255,7 +276,7 @@ TRACK_LAYERS = ("track_left", "track_right")
 # The gun tube sits with the turret and for the same reason as the belts: it is
 # part of the tank that a layer cut away, not an effect on it. Straight after the
 # turret it came out of, and still ahead of the scars, which are *on* the armour.
-LAYER_ORDER = (("hex", "hull") + TRACK_LAYERS + ("turret", "barrel")
+LAYER_ORDER = (("hex", "shadow", "hull") + TRACK_LAYERS + ("turret", "barrel")
                + SCAR_LAYERS
                + ("exhaust", "burn", "fire", "smoke", "flash", "dust", "burst"))
 
@@ -737,10 +758,25 @@ def _body(layers, heading, phase=0):
     return out
 
 
+def _ground(layers, heading):
+    """The tile and what the tank puts on it, in composite order.
+
+    Its own function rather than a `("hex", 0)` in front of every sheet because
+    the shadow is the second thing on the ground and there will not be a third
+    without this being the place it goes. It is *not* part of `_body`: the tank
+    is what turns and what a hit has to land on, and the shadow is neither - it
+    is the tile, darker.
+    """
+    out = [("hex", 0)]
+    if "shadow" in layers:
+        out.append(("shadow", heading))
+    return out
+
+
 def _body_used(*names):
     """Layer names for `_sheet`'s `used`, with the belts always allowed in."""
-    return (["hex", "hull"] + list(TRACK_LAYERS) + ["turret", "barrel"]
-            + list(names))
+    return (["hex", "shadow", "hull"] + list(TRACK_LAYERS)
+            + ["turret", "barrel"] + list(names))
 
 
 def _tank_alpha(layers, heading, phase=0):
@@ -996,13 +1032,14 @@ def check(cfg=None):
     meta = layers["hull"][1]
     report = {"problems": [], "layers": sorted(layers)}
 
-    headings = cfg["check_headings"]
+    headings = [int(round(f * meta["count"])) % meta["count"]
+                for f in cfg["check_headings"]]
 
     # --- the shot: phase across, heading down --------------------------------
     if "flash" in layers:
         def draw_shot(buf, place, heading, phase):
             frame = phase * meta["count"] + heading
-            for name, index in ([("hex", 0)] + _body(layers, heading)
+            for name, index in (_ground(layers, heading) + _body(layers, heading)
                                 + [("smoke", frame)]):
                 buf = place(buf, name, index, _over)
             if "exhaust" in layers:
@@ -1022,7 +1059,7 @@ def check(cfg=None):
         plume_meta = layers["exhaust"][1]
 
         def draw_plume(buf, place, heading, phase):
-            for name, index in [("hex", 0)] + _body(layers, heading):
+            for name, index in _ground(layers, heading) + _body(layers, heading):
                 buf = place(buf, name, index, _over)
             return place(buf, "exhaust",
                          phase * plume_meta["count"] + heading, _over)
@@ -1037,7 +1074,7 @@ def check(cfg=None):
         fire_meta = layers["fire"][1]
 
         def draw_fire(buf, place, heading, phase):
-            for name, index in [("hex", 0)] + _body(layers, heading):
+            for name, index in _ground(layers, heading) + _body(layers, heading):
                 buf = place(buf, name, index, _over)
             # Smoke down first with normal alpha, then the flame added on top of
             # it. That order is the effect, not a preference: the flame is added,
@@ -1074,7 +1111,8 @@ def check(cfg=None):
             # harness draws it there. Compositing it on top instead would put a
             # hit on the far side over the turret roof, which is the picture
             # this sheet exists to rule out rather than to produce.
-            buf = place(buf, "hex", 0, _over)
+            for name, index in _ground(layers, heading):
+                buf = place(buf, name, index, _over)
             if row["facing"] <= 0.0:
                 buf = hit(buf)
             for name, index in _body(layers, heading):
@@ -1327,7 +1365,7 @@ def check(cfg=None):
         # that shows the mark turning with the hull and going out behind it.
         def draw_scar(buf, place, heading, name):
             m = layers[name][1]
-            for layer, index in [("hex", 0)] + _body(layers, heading):
+            for layer, index in _ground(layers, heading) + _body(layers, heading):
                 buf = place(buf, layer, index, _over)
             return place(buf, name, (levels - 1) * m["count"] + heading, _over)
 
@@ -1339,7 +1377,7 @@ def check(cfg=None):
         def draw_level(buf, place, name, level):
             m = layers[name][1]
             h = best[name]
-            for layer, index in [("hex", 0)] + _body(layers, h):
+            for layer, index in _ground(layers, h) + _body(layers, h):
                 buf = place(buf, layer, index, _over)
             return place(buf, name, level * m["count"] + h, _over)
 
@@ -1353,7 +1391,11 @@ def check(cfg=None):
     # left the turret layer, so the turret's clean edge stopped saying anything
     # about the tube, and the one layer that moves outward on its own axis was
     # the one nobody asked
-    for name in ("hull", "turret", "barrel", "hex") + TRACK_LAYERS:
+    # the shadow is in this list rather than with the effects because it cannot
+    # be a budget question: its catcher is a disc of the tile's own inradius, so
+    # it is clipped to ground the tile covers, and a shadow at the frame edge
+    # means the tile is wrong rather than that the shadow is too big
+    for name in ("hull", "turret", "barrel", "hex", "shadow") + TRACK_LAYERS:
         if name not in layers:
             continue
         worst = _edge_alpha(layers, name)
@@ -1404,6 +1446,45 @@ def check(cfg=None):
                 "the smoke column reaches the tile edge (alpha %.3f) and is "
                 "being cut off - lower rise in engine_fire.SMOKE, or raise "
                 "burn_tile_scale" % worst)
+
+    # --- the shadow is dark enough to see, and it is under the tank ----------
+    #
+    # Two numbers because there are two ways to fail and they look nothing
+    # alike. A shadow present in the alpha and absent from the screen is the
+    # trap `exhaust_contrast` was written for and the same measure catches it.
+    # A shadow that is dark but in the wrong place is the trap the *whole
+    # layered pipeline* is about: it is drawn on the shared anchor, so if it
+    # were rendered against a different fit it would sit beside the tank rather
+    # than under it, and every heading would look plausible on its own.
+    if "shadow" in layers:
+        ground = _ground_colour(layers)
+        report["shadow_contrast"] = round(
+            _contrast(layers, "shadow", headings, ground), 1)
+        if report["shadow_contrast"] < cfg["shadow_contrast_min"]:
+            report["problems"].append(
+                "the shadow moves the tile by only %.1f levels of 255 - it is "
+                "in the alpha and not on the screen. Lower `reach` or widen "
+                "`softness` in ground_shadow.CONFIG"
+                % report["shadow_contrast"])
+        adrift = []
+        for heading in headings:
+            shade = _tile_of(layers, "shadow", heading)[:, :, 3] > 0.15
+            tank = _tank_alpha(layers, heading) > 0.5
+            if not shade.any():
+                adrift.append([heading, 0.0])
+                continue
+            # the tank's own column span, not its silhouette: the shadow is on
+            # the ground and the tank is above it, so they overlap in x and
+            # need not in y
+            cols = np.nonzero(tank.any(axis=0))[0]
+            on = float(shade[:, cols.min():cols.max() + 1].sum()) / shade.sum()
+            if on < 0.9:
+                adrift.append([heading, round(on, 3)])
+        report["shadow_under_tank"] = not adrift
+        if adrift:
+            report["problems"].append(
+                "the shadow falls outside the tank's own span at %s - it is "
+                "not fitted with the tank" % adrift)
 
     # --- the tank stands on the tile, rather than the tile cutting through ---
     # On a parts scene the lowest thing on the tank is a belt, not the hull -
@@ -1639,7 +1720,7 @@ def check(cfg=None):
         nph = int(bm.get("phases") or 1)
 
         def draw_recoil(buf, place, heading, phase):
-            for layer, index in [("hex", 0)] + _body(layers, heading):
+            for layer, index in _ground(layers, heading) + _body(layers, heading):
                 if layer == "barrel":
                     continue          # drawn at this sheet's phase, not at rest
                 buf = place(buf, layer, index, _over)
@@ -1746,6 +1827,9 @@ def run(cfg=None):
         "anchor_px": checked["anchor_px"],
         "units_per_pixel": checked["units_per_pixel"],
         "max_edge_alpha": checked["max_edge_alpha"],
+        "shadow": body.get("shadow"),
+        "shadow_contrast": checked.get("shadow_contrast"),
+        "shadow_under_tank": checked.get("shadow_under_tank"),
         "tiles": checked["tiles"],
         "problems": problems,
     }

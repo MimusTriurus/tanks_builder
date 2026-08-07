@@ -829,23 +829,95 @@ public static class SelfTest
             !AtlasSet.TrackNames.Any(n => AtlasSet.EffectNames.Contains(n)),
             "HasEffects requires every name in it, and would switch the "
             + "rendered flash off on a tank with a barrel but no belts");
+        // The shadow is index 0 and is not counted as being on the tank at
+        // all - it is the ground, darker, and it is ordered by an absolute z
+        // rather than by this list. Everything after it is the tank.
+        string[] onTank = TankSprite.LayerOrder
+            .SkipWhile(n => n == AtlasSet.ShadowName).ToArray();
         Check("the belts composite before everything else on the tank",
-            TankSprite.LayerOrder.Take(AtlasSet.TrackNames.Length)
+            onTank.Take(AtlasSet.TrackNames.Length)
                 .SequenceEqual(AtlasSet.TrackNames),
             "they are not on the tank, they are the tank: "
-            + string.Join(", ", TankSprite.LayerOrder.Take(3)));
+            + string.Join(", ", onTank.Take(3)));
         // The belt is lower than the turret but not always behind it: the far
         // one shows over the hull deck legitimately, and only the turret is
         // tall enough to be in its way. Drawn by the parent the turret went
         // down first and the belt painted over it - 1455px of it on HTP.
-        int turretAt = Array.IndexOf(TankSprite.LayerOrder, "turret");
+        int turretAt = Array.IndexOf(onTank, "turret");
         Check("the turret composites after both belts",
             turretAt == AtlasSet.TrackNames.Length,
             $"turret at {turretAt}, belts end at {AtlasSet.TrackNames.Length}: "
-            + string.Join(", ", TankSprite.LayerOrder.Take(4)));
+            + string.Join(", ", onTank.Take(4)));
         Check("and before anything that happens to the tank",
-            turretAt < Array.IndexOf(TankSprite.LayerOrder, AtlasSet.ScarNames[0]),
+            turretAt < Array.IndexOf(onTank, AtlasSet.ScarNames[0]),
             "damage and effects go over the turret, not under it");
+
+        // --- the ground under the tank ------------------------------------
+        //
+        // The one layer that is neither the tank nor an effect on it, and every
+        // check here is about that difference.
+        GD.Print("the contact shadow");
+        var shade = EffectLayer.Shadow(AtlasSet.ShadowName);
+        Check("the shadow is ordered under every tank, not with its own",
+            shade.ZIndex == TankSprite.ShadowZ && !shade.ZAsRelative
+            && TankSprite.ShadowZ < 0,
+            $"z {shade.ZIndex}, relative {shade.ZAsRelative} - two heavies in "
+            + "neighbouring columns overlap, and a shadow ordered with its own "
+            + "tank lands on the neighbour");
+        Check("it sits over the ground marks and under the tanks",
+            TankSprite.ShadowZ > SelectionRing.GroundZ,
+            $"shadow {TankSprite.ShadowZ}, ring {SelectionRing.GroundZ} - a "
+            + "shadow falls across paint, not under it");
+        Check("it is on the hull's heading, not the turret's",
+            shade.FollowsHull,
+            "it is the hull's footprint, and the gun is deliberately not in it");
+        Check("it is drawn on the shared anchor, never placed",
+            !shade.Placed, "only an arriving shell is placed");
+        Check("it is not a loop and not one of the shot's layers",
+            !shade.Loops && !AtlasSet.EffectNames.Contains(AtlasSet.ShadowName),
+            "no clock at all: what it draws is chosen by the heading alone");
+        Check("it composites first of everything the tank owns",
+            TankSprite.LayerOrder.Length > 0
+            && TankSprite.LayerOrder[0] == AtlasSet.ShadowName,
+            "it is the ground, and everything else is above the ground");
+
+        AtlasSet? shadowed = atlases?.Values.FirstOrDefault(a => a.HasShadow)
+                             ?? (atlas.HasShadow ? atlas : null);
+        if (shadowed is null)
+        {
+            Check("some loaded tank stands on a shadow", false,
+                "no shadow layer on disk - re-render with tank_pipeline.run()");
+        }
+        else
+        {
+            Vector2 anchorFrac = shadowed.Anchor / (Vector2)shadowed.Tile;
+            Vector2 mine = shadowed.AnchorOf(AtlasSet.ShadowName)
+                           / (Vector2)shadowed.TileOf(AtlasSet.ShadowName);
+            Check("the shadow shares the tank's anchor, in frame fractions",
+                (mine - anchorFrac).Length() < 1e-4,
+                $"{mine} against {anchorFrac}");
+            // Its catcher is a disc of the tile's own inradius, so it cannot
+            // want room the tank does not already have. A wider frame here
+            // would mean it had quietly become a cast shadow.
+            Check("the shadow needs no wider frame than the tank",
+                shadowed.TileOf(AtlasSet.ShadowName) == shadowed.Tile,
+                $"{shadowed.TileOf(AtlasSet.ShadowName).X}px against tank "
+                + $"{shadowed.Tile.X}px");
+            Check("the shadow was rendered at every heading",
+                shadowed.CountOf(AtlasSet.ShadowName) == shadowed.Count,
+                $"{shadowed.CountOf(AtlasSet.ShadowName)} against "
+                + $"{shadowed.Count} - it turns with the hull");
+            Check("the shadow has no phase axis",
+                shadowed.PhasesOf(AtlasSet.ShadowName) == 1,
+                "a contact shadow is a state of the ground, not an event");
+            var shadowTiles = new HashSet<int>();
+            foreach (int facing in shadowed.RenderedFacings())
+                shadowTiles.Add(
+                    shadowed.EffectFrame(AtlasSet.ShadowName, 0, facing));
+            Check("every shadow heading maps to its own tile",
+                shadowTiles.Count == shadowed.Count,
+                $"{shadowTiles.Count} tiles for {shadowed.Count} headings");
+        }
 
         AtlasSet? tracked = atlases?.Values.FirstOrDefault(a => a.HasTracks)
                             ?? (atlas.HasTracks ? atlas : null);

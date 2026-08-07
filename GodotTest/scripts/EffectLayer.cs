@@ -52,6 +52,10 @@ public sealed partial class EffectLayer : Node2D
     public enum Clocks
     {
         Shot, Exhaust, BurningSmoke, BurningFire, HitBurst, HitDust, Scar, Track,
+        /// <summary>The ground under the tank. No clock, no phase - one frame
+        /// per heading, and the only thing that changes it is where the hull
+        /// points. See <see cref="Shadow"/>.</summary>
+        Shadow,
         /// <summary>No clock at all: part of the tank, always drawn, one frame
         /// per heading. The turret is here because *where* it composites matters
         /// - see <see cref="Turret"/>.</summary>
@@ -231,6 +235,32 @@ public sealed partial class EffectLayer : Node2D
     /// round (0.666 on HTP) does not survive being baked at one angle and drawn
     /// at another.
     /// </summary>
+    /// <summary>
+    /// The dark the tank puts on the tile: normal alpha, on the hull's heading,
+    /// on the shared anchor - and at an absolute z under every tank on the
+    /// board rather than in this tank's own order. See
+    /// <see cref="TankSprite.ShadowZ"/>.
+    ///
+    /// No phase axis and no clock. It is not an event and not a cycle; it is
+    /// what the hull's footprint does to the ground, and the only thing that
+    /// changes it is which way the hull points.
+    ///
+    /// It rides the hull's tilt like the belts. A shadow that stayed put while
+    /// the tank pitched would come unstuck from it on every bump - and unlike
+    /// the belts, the error would read as the shadow sliding out from under the
+    /// vehicle rather than as a track glitch.
+    /// </summary>
+    public static EffectLayer Shadow(string layer) => new()
+    {
+        Layer = layer,
+        FollowsHull = true,
+        Clock = Clocks.Shadow,
+        ZIndex = TankSprite.ShadowZ,
+        // absolute, or it would be read as an offset from the tank's own z and
+        // sink under the field on the near rows and float over it on the far
+        ZAsRelative = false,
+    };
+
     public static EffectLayer Turret(string layer) => new()
     {
         Layer = layer,
@@ -287,6 +317,9 @@ public sealed partial class EffectLayer : Node2D
                 Clocks.BurningFire => Tank.Burning ? Tank.FirePhase : -1,
                 Clocks.HitBurst or Clocks.HitDust => Tank.HitPhase,
                 Clocks.Track => Tank.ShowTracks ? Tank.TrackPhase : -1,
+                // No phase axis, so frame 0 of one, like the turret: what it
+                // draws is chosen by the hull's heading and nothing else.
+                Clocks.Shadow => Tank.ShowShadow ? 0 : -1,
                 // No phase axis, so frame 0 of one - EffectFrame clamps the
                 // phase against PhasesOf and lands on the heading column.
                 Clocks.Body => Tank.ShowTurret ? 0 : -1,

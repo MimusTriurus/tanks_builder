@@ -52,6 +52,18 @@ CONFIG = {
     # the occlusion baked into the flash's own alpha, which is the only place
     # it can live: the game draws flat layers and has no depth to test.
     "holdout": [],
+    # Name hints of objects that stay in the render but are invisible to the
+    # camera: they light nothing and draw nothing, they only cast shadows.
+    #
+    # The opposite of a holdout and not a variant of it. A holdout is *seen* by
+    # the camera and punches alpha where it stands; a caster is not seen at all,
+    # and the only trace of it is the shadow it throws on whatever is being
+    # rendered. That is the whole of a ground-shadow pass: the tile is the
+    # target and the tank is a caster.
+    #
+    # Spun with the turntable like a holdout, and for the same reason - a
+    # shadow cast by a tank frozen at angle zero is worse than no shadow.
+    "casters": [],
     # Name hints of the objects that determine the frame size and centre.
     # None -> the rendered set. Point every pass at the same set to keep one
     # shared scale across separately rendered parts.
@@ -152,6 +164,15 @@ CONFIG = {
     "fill_energy": 1.2,
     "rim_energy": 2.0,
     "world_strength": 0.25,    # ambient; None -> leave the world alone
+    # None -> the three-point rig above. Otherwise a list of
+    # {tag, energy, azimuth, elevation, angle} replacing it wholesale.
+    #
+    # Wholesale rather than by tweaking the three, because the one pass that
+    # wants something else wants *one* sun: three suns throw three shadows, and
+    # the fill sits 20 deg above the horizon, so its shadow is nearly three
+    # times the tank's height and would be blamed on the pass rather than on
+    # the rig. See ground_shadow.py.
+    "light_rig": None,
 
     # --- writing the frames -------------------------------------------------
     # How many times to try a frame whose *save* failed, and how long to wait
@@ -247,22 +268,32 @@ def spin_matrix(pivot, angle_deg):
 # ---------------------------------------------------------------------------
 
 def build_lighting(cfg, cam):
-    """A 3-point rig oriented relative to the camera. Returns what it made."""
+    """A 3-point rig oriented relative to the camera. Returns what it made.
+
+    The tilts are given as a sun's angle above the horizon, which is what they
+    mean, rather than as the rotation about X that produces it: a sun points
+    down -Z at rest, so the two are complements and the rig's 35 deg of tilt is
+    a sun 55 deg up. Getting that backwards costs nothing until something wants
+    to reason about shadow length, and then it costs the whole argument.
+    """
     made = []
-    specs = (
-        ("key",  cfg["key_energy"],  Matrix.Rotation(math.radians(-35), 4, "Z")
-                                     @ Matrix.Rotation(math.radians(35), 4, "X")),
-        ("fill", cfg["fill_energy"], Matrix.Rotation(math.radians(60), 4, "Z")
-                                     @ Matrix.Rotation(math.radians(70), 4, "X")),
-        ("rim",  cfg["rim_energy"],  Matrix.Rotation(math.radians(160), 4, "Z")
-                                     @ Matrix.Rotation(math.radians(50), 4, "X")),
+    rig = cfg.get("light_rig") or (
+        {"tag": "key",  "energy": cfg["key_energy"],
+         "azimuth": -35.0, "elevation": 55.0},
+        {"tag": "fill", "energy": cfg["fill_energy"],
+         "azimuth": 60.0, "elevation": 20.0},
+        {"tag": "rim",  "energy": cfg["rim_energy"],
+         "azimuth": 160.0, "elevation": 40.0},
     )
-    for tag, energy, offset in specs:
+    for spec in rig:
+        tag = spec.get("tag", "sun")
         data = bpy.data.lights.new("_atlas_%s" % tag, type="SUN")
-        data.energy = energy
-        data.angle = math.radians(6.0)
+        data.energy = spec["energy"]
+        data.angle = math.radians(spec.get("angle", 6.0))
         ob = bpy.data.objects.new("_atlas_%s" % tag, data)
         bpy.context.scene.collection.objects.link(ob)
+        offset = (Matrix.Rotation(math.radians(spec["azimuth"]), 4, "Z")
+                  @ Matrix.Rotation(math.radians(90.0 - spec["elevation"]), 4, "X"))
         ob.matrix_world = Matrix.Translation(cam.matrix_world.translation) @ offset
         made.append(ob)
     return made
@@ -454,6 +485,7 @@ def render_atlas(cfg):
         "root_matrix": root.matrix_world.copy(),
         "hidden": {},
         "holdout": {},
+        "camera_visible": {},
         "world_strength": None,
     }
     temp = []
@@ -462,6 +494,15 @@ def render_atlas(cfg):
         # ---- isolate what we render --------------------------------------
         keep = set(rendered)
         blockers = by_hints(cfg.get("holdout")) - keep
+        # a caster that is also a holdout would be both seen and not seen, so
+        # the two lists are made disjoint here rather than left to whichever
+        # branch runs first
+        # `exclude` bites here too, and it has to: a caster hint names a layer
+        # root, and under a track root sit both the belt that is being drawn
+        # and the original it replaced - two belts a phase apart, casting two
+        # shadows. Excluding by name is how the belt layers already say which
+        # of the two is real.
+        casters = by_hints(cfg.get("casters")) - keep - blockers - excluded
         for ob in scene.objects:
             if ob in keep:
                 continue
@@ -469,6 +510,12 @@ def render_atlas(cfg):
                 saved["holdout"][ob] = ob.is_holdout
                 saved["hidden"][ob] = ob.hide_render
                 ob.is_holdout = True
+                ob.hide_render = False
+                continue
+            if ob in casters and ob.type in RENDERABLE:
+                saved["camera_visible"][ob] = ob.visible_camera
+                saved["hidden"][ob] = ob.hide_render
+                ob.visible_camera = False
                 ob.hide_render = False
                 continue
             if cfg["own_lighting"] or ob.type != "LIGHT":
@@ -538,8 +585,11 @@ def render_atlas(cfg):
         # tank standing at angle zero while the flash swings round it. Only the
         # top-most ones are driven; anything parented under another blocker
         # follows it, and setting both would be two sources of one transform.
+        # Casters turn for the same reason and by the same rule: the shadow on
+        # the tile is the tank's, so it has to be the tank at *this* heading.
+        turned = blockers | casters
         blocker_bases = {ob: ob.matrix_world.copy()
-                         for ob in blockers if ob.parent not in blockers}
+                         for ob in turned if ob.parent not in turned}
         saved["blocker_bases"] = blocker_bases
 
         paths = []
@@ -645,6 +695,8 @@ def render_atlas(cfg):
             ob.matrix_world = rest
         for ob, was in saved["holdout"].items():
             ob.is_holdout = was
+        for ob, was in saved["camera_visible"].items():
+            ob.visible_camera = was
         for ob, hidden in saved["hidden"].items():
             ob.hide_render = hidden
         for ob in temp:

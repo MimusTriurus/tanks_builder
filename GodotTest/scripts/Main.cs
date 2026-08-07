@@ -239,6 +239,16 @@ public sealed partial class Main : Node2D
     /// the hull layer can be looked at without them.</summary>
     private bool _tracksEnabled = true;
 
+    /// <summary>Whether the tanks are drawn standing on their shadows.
+    ///
+    /// No key, and that is not an oversight: A-Z are all bound, and so are
+    /// Space, Tab, Escape, F12, Key1..Key9, '[' and ']'. The panel is where a
+    /// switch goes once the mnemonics have run out - the tracer and the traverse
+    /// motor are there for the same reason - and the flag exists because a
+    /// screenshot is the evidence and taking it twice should not need a hand on
+    /// the mouse.</summary>
+    private bool _shadowEnabled = true;
+
     /// <summary>
     /// The gun tube sliding back on the shot - key '[', or --no-barrel-recoil.
     ///
@@ -513,6 +523,8 @@ public sealed partial class Main : Node2D
                 _exhaustEnabled = false;
             else if (userArgs[i] == "--no-tracks")
                 _tracksEnabled = false;
+            else if (userArgs[i] == "--no-shadow")
+                _shadowEnabled = false;
             else if (userArgs[i] == "--no-sound")
                 _soundEnabled = false;
             // Both off by default, so both flags switch *on* - the opposite
@@ -781,6 +793,11 @@ public sealed partial class Main : Node2D
         // set on selection - so it has to be set once at the start too, or two of
         // the three come up forward until something is clicked.
         FocusSound();
+        // Same shape: --no-shadow is parsed before any vehicle exists, so the
+        // switch has to be pushed once the vehicles do. The trap this repeats is
+        // named beside `_flashSource` - flags that wrote straight through
+        // "the driven tank" hung the capture instead of failing it.
+        ShadowChanged();
 
         // The mark on whoever is being driven. Absent under --capture and --trace
         // for the reason the panel is: a capture is evidence, and an A/B of two
@@ -1130,6 +1147,19 @@ public sealed partial class Main : Node2D
     {
         foreach (Vehicle v in _vehicles)
             UpdateExhaust(v, 0.0);
+    }
+
+    /// <summary>Push the switch to every tank. The shadow is a question about
+    /// the effect and not about one vehicle, so it reaches all three - the same
+    /// rule the movement effects follow, and the opposite of the fire, which is
+    /// a state one tank is in.</summary>
+    private void ShadowChanged()
+    {
+        foreach (Vehicle v in _vehicles)
+        {
+            v.Sprite.ShowShadow = _shadowEnabled;
+            v.Sprite.QueueRedraw();
+        }
     }
 
     private void TracksChanged()
@@ -2067,6 +2097,18 @@ public sealed partial class Main : Node2D
             + $" at {_tremble.PitchRateAt(_speed),4:F1} Hz");
 
         ui.Heading("effects");
+        // First, because it is the only thing here that is under the tank
+        // rather than on it, and because it is the one switch whose A/B is the
+        // whole argument for the layer: with it off the tank reads as a decal
+        // laid on the field, which is the complaint it answers.
+        ui.Toggle("contact shadow", () => _shadowEnabled, on =>
+        {
+            _shadowEnabled = on;
+            ShadowChanged();
+        });
+        ui.Readout(() => _tank.Atlas?.HasShadow == true
+            ? "shadow  rendered, on the hull's heading"
+            : "shadow  [none - re-render this tank]");
         ui.Toggle("tracks wind  (C)", () => _tracksEnabled, on =>
         {
             _tracksEnabled = on;

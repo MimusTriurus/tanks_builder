@@ -265,8 +265,35 @@ public sealed partial class TankSprite : Node2D
     /// rather than under it, and it is part of the tank, so it comes before
     /// everything that happens to the tank. It left the turret layer for the
     /// belts' reason - it moves relative to what it is bolted to.
+    /// <summary>
+    /// Where the contact shadow sits in the canvas, as an absolute z.
+    ///
+    /// Not in <see cref="LayerOrder"/>'s ordering at all, and that is the point:
+    /// the shadow is not on the tank, it is the ground with the tank's dark on
+    /// it, so it has to go under *every* tank on the board rather than under
+    /// this one. Two heavies in neighbouring columns overlap - 209px of broadside
+    /// against 186px between centres - and a shadow ordered with its own tank
+    /// would land on its neighbour.
+    ///
+    /// One above the selection ring, which is one above the field: the ring is
+    /// paint on the ground and a shadow falls across paint. The tanks take their
+    /// z from where they stand, which is always positive on this board.
+    ///
+    /// It is still a child of the tank's node, because that is what gives it the
+    /// class scale about the anchor and the shared anchor itself for free -
+    /// z-index is the only thing it takes from somewhere else.
+    /// </summary>
+    public const int ShadowZ = -98;
+
+    /// <summary>Whether the contact shadow is drawn. An option like the movement
+    /// effects and unlike the belts, because the A/B is the whole argument for
+    /// it: the complaint it answers is that the tank reads as a decal, and that
+    /// is a comparison, not a measurement.</summary>
+    public bool ShowShadow = true;
+
     public static readonly string[] LayerOrder =
-        AtlasSet.TrackNames.Concat(new[] { "turret", AtlasSet.BarrelName })
+        new[] { AtlasSet.ShadowName }
+            .Concat(AtlasSet.TrackNames).Concat(new[] { "turret", AtlasSet.BarrelName })
             .Concat(AtlasSet.ScarNames).Concat(new[]
         {
             AtlasSet.ExhaustName, AtlasSet.BurnName, AtlasSet.FireName,
@@ -278,6 +305,7 @@ public sealed partial class TankSprite : Node2D
     /// hand-written sequence that has to agree with it.</summary>
     private static EffectLayer MakeLayer(string layer) => layer switch
     {
+        AtlasSet.ShadowName => EffectLayer.Shadow(layer),
         AtlasSet.ExhaustName => EffectLayer.Exhaust(layer),
         AtlasSet.BurnName => EffectLayer.BurningSmoke(layer),
         AtlasSet.FireName => EffectLayer.BurningFire(layer),

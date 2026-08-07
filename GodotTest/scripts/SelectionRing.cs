@@ -87,7 +87,9 @@ public sealed partial class SelectionRing : Node2D
     /// <summary>Under every tank and over the field. The tanks take their z from
     /// where they stand, which is always positive on this board, so one step above
     /// the field's own -100 puts the ring between them.</summary>
-    public override void _Ready() => ZIndex = -99;
+    public const int GroundZ = -99;
+
+    public override void _Ready() => ZIndex = GroundZ;
 
     /// <summary>
     /// Follows the tank's contact patch every frame rather than snapping to the
