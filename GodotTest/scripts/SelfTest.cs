@@ -852,6 +852,36 @@ public static class SelfTest
             turretAt < Array.IndexOf(onTank, AtlasSet.ScarNames[0]),
             "damage and effects go over the turret, not under it");
 
+        // --- lending one tank's pixels to the others ----------------------
+        //
+        // The bench's answer to a layer that has landed on one tank and not the
+        // others, which is the state it is in right now: MTP has a shadow and
+        // 24 headings, LTP and HTP have neither. What it must not do is lend
+        // the *class* along with the pixels - the whole value of it is that
+        // three identical sprites at 0.85, 1.00 and 1.15 have nothing but the
+        // scale to explain any difference between them.
+        if (atlases is { Count: > 1 })
+        {
+            string lender = atlases.Keys.First();
+            string borrower = atlases.Keys.First(k => k != lender);
+            AtlasSet worn = AtlasSet.Load(
+                "D:/Projects/AgentCoding/BlenderMCP/Sprites", borrower, lender);
+            Check("a borrowed atlas keeps the tag it was asked for",
+                worn.Error.Length == 0 && worn.Tag == borrower,
+                $"asked for {borrower}, wearing {lender}, tag came back "
+                + $"'{worn.Tag}'{(worn.Error.Length > 0 ? ": " + worn.Error : "")}");
+            Check("and so still drives on its own class's numbers",
+                MovementProfile.For(worn.Tag) == MovementProfile.For(borrower),
+                "the pixels are lent, the class is not - otherwise the size "
+                + "test compares two tanks that differ in more than size");
+            Check("but it really is wearing the other tank's pixels",
+                worn.Error.Length > 0
+                || (worn.Count == atlases[lender].Count
+                    && worn.HullSpan == atlases[lender].HullSpan),
+                $"{worn.Count} headings and {worn.HullSpan}px of hull against "
+                + $"{atlases[lender].Count} and {atlases[lender].HullSpan}");
+        }
+
         // --- the ground under the tank ------------------------------------
         //
         // The one layer that is neither the tank nor an effect on it, and every

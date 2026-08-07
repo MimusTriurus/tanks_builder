@@ -62,6 +62,16 @@ public sealed partial class Main : Node2D
     /// </summary>
     private const string? SharedSpriteDir = null;
 
+    /// <summary>Which directory the pixels actually come from this run:
+    /// <see cref="SharedSpriteDir"/> unless `--sprites` said otherwise.
+    ///
+    /// The flag exists because the case this is for - a layer landing on one
+    /// tank before the others - is exactly the case where editing a constant and
+    /// rebuilding is the wrong shape of work. It is the same argument the two
+    /// slider flags make: the thing being judged is a picture, and taking it
+    /// twice should not need a source edit between the two.</summary>
+    private string? _spriteDir = SharedSpriteDir;
+
     private const double SpinSpeed = 90.0;      // deg/sec, for the wobble check
 
     private readonly Dictionary<string, AtlasSet> _atlases = new();
@@ -629,6 +639,8 @@ public sealed partial class Main : Node2D
             else if (userArgs[i] == "--trace" && i + 1 < userArgs.Length
                      && int.TryParse(userArgs[i + 1], out int frames))
                 _traceFrames = frames;
+            else if (userArgs[i] == "--sprites" && i + 1 < userArgs.Length)
+                _spriteDir = userArgs[++i];
             else if (userArgs[i] == "--drive" && i + 1 < userArgs.Length)
             {
                 string[] parts = userArgs[i + 1].Split(',');
@@ -649,8 +661,7 @@ public sealed partial class Main : Node2D
         var failures = new List<string>();
         foreach (string tag in Tags)
         {
-            AtlasSet atlas = AtlasSet.Load(SpritesRoot, tag,
-                                           SharedSpriteDir ?? tag);
+            AtlasSet atlas = AtlasSet.Load(SpritesRoot, tag, _spriteDir ?? tag);
             if (atlas.Error.Length > 0)
                 failures.Add($"{tag}: {atlas.Error}");
             else
@@ -2106,9 +2117,17 @@ public sealed partial class Main : Node2D
             _shadowEnabled = on;
             ShadowChanged();
         });
-        ui.Readout(() => _tank.Atlas?.HasShadow == true
-            ? "shadow  rendered, on the hull's heading"
-            : "shadow  [none - re-render this tank]");
+        ui.Readout(() =>
+        {
+            AtlasSet? a = _tank.Atlas;
+            string where = _spriteDir is null ? "" : $", borrowed from {_spriteDir}";
+            // headings beside it, because the two arrived together and the
+            // second is the one nothing on screen announces: a tank rendered at
+            // twelve turns in 30 deg steps beside one that turns in 15
+            return a?.HasShadow == true
+                ? $"shadow  rendered, {a.Count} headings{where}"
+                : $"shadow  [none - {a?.Count ?? 0} headings{where}, re-render]";
+        });
         ui.Toggle("tracks wind  (C)", () => _tracksEnabled, on =>
         {
             _tracksEnabled = on;
@@ -2480,7 +2499,12 @@ public sealed partial class Main : Node2D
                      // and a stray wheel over the window has already cost one
                      // measurement: the A/B then differs by the whole picture
                      // rather than by the silhouette.
-                     + $"  zoom {_camera.Zoom.X:F2}x");
+                     + $"  zoom {_camera.Zoom.X:F2}x"
+                     // A capture whose pixels came off another tank has to say
+                     // so: nothing in the picture does, and every conclusion
+                     // drawn from it is about that tank's atlas rather than
+                     // this class's.
+                     + (_spriteDir is null ? "" : $"  sprites {_spriteDir}"));
             if (++_frames >= _traceFrames)
             {
                 GetTree().Quit();
