@@ -85,7 +85,22 @@ public sealed partial class TankSprite : Node2D
     /// now says which of the two it is, because "locked" never said locked to
     /// what.
     /// </summary>
-    public bool TurretHoldsHeading = true;
+    public bool TurretHoldsHeading = HoldsHeadingByDefault;
+
+    /// <summary>
+    /// Which of the two a tank comes up in: riding the hull.
+    ///
+    /// The other one is the headline - a gun holding its world heading through
+    /// a manoeuvre is the first thing the layered atlases exist to show - and
+    /// it is still one keypress away. Riding is what a tank does when nobody is
+    /// laying the gun, so it is the resting state rather than the demo, and the
+    /// bench now opens on the tank rather than on the point being made.
+    ///
+    /// A named constant for the reason the tracer's and the motor's are: a
+    /// default sitting in a field initialiser is a thing nobody reads, and this
+    /// one decides what every screenshot of a turning tank shows.
+    /// </summary>
+    public const bool HoldsHeadingByDefault = false;
 
     /// <summary>The only place hull heading changes, so the turret modes cannot
     /// be bypassed by some other code path - driving and manual turns both come

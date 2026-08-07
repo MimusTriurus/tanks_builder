@@ -146,6 +146,15 @@ public static class SelfTest
             bad == 0, $"{bad} bad, first {badDetail}");
 
         GD.Print("turret modes");
+        // Which one a tank comes up in, off the named constant rather than off
+        // whatever the field happens to be initialised to. It decides what every
+        // screenshot of a turning tank shows, and the two modes look nothing
+        // alike.
+        Check("a tank comes up with its turret riding the hull",
+            !TankSprite.HoldsHeadingByDefault && !new TankSprite().TurretHoldsHeading,
+            "holding its heading is the headline and is one keypress away; "
+            + "riding is what a tank does when nobody is laying the gun");
+
         tank.TurretHoldsHeading = true;
         tank.HullFacing = 270.0;
         tank.TurretFacing = 0.0;
