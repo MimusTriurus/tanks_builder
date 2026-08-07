@@ -26,6 +26,12 @@ public sealed partial class Main : Node2D
     /// absent, and everything downstream of it has to be happy about that.
     /// </summary>
     private const string SoundsRoot = "D:/Projects/AgentCoding/BlenderMCP/Sounds";
+
+    /// <summary>The hand-drawn ground. Absolute for the reason the atlases are -
+    /// redraw a hex, restart, see it - and optional for the reason the sounds
+    /// are: without it the field falls back to the rendered tile and everything
+    /// else is unchanged.</summary>
+    private const string TerrainsRoot = "D:/Projects/AgentCoding/BlenderMCP/Images/Terrains";
     /// <summary>The tanks to look for on disk, in key order: one per class,
     /// all three built from separate parts - hull, turret, barrel, engine and
     /// two belts as their own meshes.
@@ -146,6 +152,18 @@ public sealed partial class Main : Node2D
     private TankSprite _tank => Active.Sprite;
 
     private HexField _field = null!;
+    private TerrainSet? _terrain;
+
+    /// <summary>Which ground the board is painted with - a kind's name, or
+    /// mixed. Parked here rather than on the field because --terrain is read
+    /// before the field exists, the trap named beside <c>_flashSource</c>.
+    /// </summary>
+    private string _paint = TerrainSet.Mixed;
+
+    /// <summary>What the terrain dropdown offers: mixed, then whatever loaded.
+    /// Built from the set rather than listed here, so drawing a new hex is a
+    /// file drop and nothing else.</summary>
+    private readonly List<string> _paints = new() { TerrainSet.Mixed };
 
     /// <summary>The ring on the ground under the tank being driven, or null on a
     /// run that has no interface - see <see cref="SelectionRing"/>.</summary>
@@ -664,6 +682,11 @@ public sealed partial class Main : Node2D
                 _traceFrames = frames;
             else if (userArgs[i] == "--sprites" && i + 1 < userArgs.Length)
                 _spriteDir = userArgs[++i];
+            // A kind's name, or "mixed". A capture of one kind against another
+            // is the whole reason a paint exists, and it must not need a hand on
+            // the mouse - the argument every other A/B flag here makes.
+            else if (userArgs[i] == "--terrain" && i + 1 < userArgs.Length)
+                _paint = userArgs[++i];
             else if (userArgs[i] == "--drive" && i + 1 < userArgs.Length)
             {
                 string[] parts = userArgs[i + 1].Split(',');
@@ -712,7 +735,20 @@ public sealed partial class Main : Node2D
             _sounds[tag] = set;
         }
 
-        _field = new HexField();
+        // Loaded but never required, exactly like the sound: a missing set does
+        // not go into `failures`, because that list is about a bench that cannot
+        // show what it was asked to show, and this one still can.
+        _terrain = TerrainSet.Load(TerrainsRoot);
+        GD.Print("terrain: " + _terrain.Note);
+        _paints.AddRange(_terrain.Names);
+        if (_paint != TerrainSet.Mixed && !_terrain.Has(_paint))
+        {
+            GD.PushWarning($"--terrain {_paint} is not one of "
+                           + string.Join(", ", _terrain.Names) + "; using mixed");
+            _paint = TerrainSet.Mixed;
+        }
+
+        _field = new HexField { Terrain = _terrain, Paint = _paint };
         AddChild(_field);
 
         // One vehicle per atlas that loaded, parked along HomeCells. Built here
@@ -820,6 +856,17 @@ public sealed partial class Main : Node2D
         // The medium's, always: the grid is one grid, so it cannot follow the
         // selection, and the reference tank is the one drawn as rendered.
         _field.Atlas = _vehicles[Math.Min(1, _vehicles.Count - 1)].Atlas;
+        // Said out loud rather than drawn crooked. The hexagon's aspect ratio is
+        // its camera angle, and CellAt inverts the *rendered* tile's - so ground
+        // drawn at another elevation stops the hexagon on screen being the cell
+        // under the mouse, and the miss grows toward the board's edge rather
+        // than showing up in the middle where anyone would look.
+        if (_terrain is not null && _terrain.Any
+            && !_terrain.CameraAgrees(_field.Atlas.HexRect))
+            GD.PushWarning(
+                $"terrain art is {_terrain.CameraError(_field.Atlas.HexRect) * 100.0f:F0}%"
+                + " off the rendered tile's camera - clicks will drift from the"
+                + " hexagons they land on");
         ApplySize();
         foreach (Vehicle vehicle in _vehicles)
             Park(vehicle);
@@ -2399,6 +2446,35 @@ public sealed partial class Main : Node2D
                    + $"bus peak {(float.IsNegativeInfinity(peak) ? -99.0f : peak):F1}dB";
         });
 
+        ui.Heading("ground");
+        // A dropdown rather than numbered buttons: how many kinds load is
+        // whatever is on disk, so a fixed row of them goes stale the first time
+        // one is drawn - the lesson the tank list already taught. "mixed" heads
+        // it because it is the board as a map would build it; the rest are there
+        // to hold one kind still and look at it.
+        ui.Choice("terrain  (--terrain)", _paints,
+            () => Math.Max(0, _paints.IndexOf(_field.Paint)),
+            i =>
+            {
+                _field.Paint = _paints[i];
+                _paint = _field.Paint;
+                _field.QueueRedraw();
+            });
+        ui.Readout(() =>
+        {
+            if (_terrain is null || !_terrain.Any)
+                return "no terrain art - rendered tile";
+            Rect2I hex = _field.Atlas!.HexRect;
+            // The camera error in the panel as well as the log, because it is
+            // the one number here that decides whether the picture can be
+            // trusted at all, and a warning printed at startup has scrolled off
+            // by the time anyone is looking at the board.
+            return $"{_terrain.Names.Count} kinds, plate {_terrain.Plate.Size.X}"
+                   + $"x{_terrain.Plate.Size.Y} at {_terrain.ScaleTo(hex):F3}x\n"
+                   + $"camera {_terrain.CameraError(hex) * 100.0f:F1}% off"
+                   + (_terrain.CameraAgrees(hex) ? "" : "  <- clicks will drift");
+        });
+
         ui.Heading("view");
         ui.Slide("zoom  (wheel)", 0.25, 8.0, 0.05,
             () => _camera.Zoom.X,
@@ -2585,6 +2661,10 @@ public sealed partial class Main : Node2D
                      // drawn from it is about that tank's atlas rather than
                      // this class's.
                      + (_spriteDir is null ? "" : $"  sprites {_spriteDir}")
+                     // Same argument as the line above: a board of one kind and
+                     // a board of a mix are two different pictures, and neither
+                     // says which it is.
+                     + $"  ground {_field.Paint}"
                      // '!off' rather than nothing, because a still camera and a
                      // switched-off one are the same two zeroes - the marker the
                      // recoil spring and the tracer already carry.

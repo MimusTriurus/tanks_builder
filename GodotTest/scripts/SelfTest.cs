@@ -1057,6 +1057,106 @@ public static class SelfTest
                 + $"{atlases[lender].Count} and {atlases[lender].HullSpan}");
         }
 
+        // --- what the cells are made of -----------------------------------
+        //
+        // Skipped whole when there is no art, the way the sound topic is: the
+        // files live outside the repository, and a bench without them is a bench
+        // running on the rendered tile, not a broken one.
+        if (field.Terrain is null || !field.Terrain.Any)
+            GD.Print("terrain: no art loaded, running on the rendered tile");
+        else
+        {
+            GD.Print("terrain: the kinds of ground on the board");
+            TerrainSet set = field.Terrain;
+            Rect2I hex = field.Atlas!.HexRect;
+            string wasPaint = field.Paint;
+
+            // The one that decides whether any of the rest means anything: the
+            // hexagon's aspect ratio is the camera angle it was drawn at, and
+            // the click arithmetic inverts the rendered tile's. Art at another
+            // elevation does not look slightly wrong, it makes the hexagon on
+            // screen stop being the cell under the mouse.
+            Check("the art was drawn at the camera the tanks were rendered at",
+                set.CameraAgrees(hex),
+                $"plate {set.Plate.Size.X}x{set.Plate.Size.Y} is "
+                + $"{set.CameraError(hex) * 100.0f:F1}% off the rendered "
+                + $"{hex.Size.X}x{hex.Size.Y}");
+
+            Check("every kind is painted on the template's frame",
+                set.Names.All(n => set.Texture(n) is Texture2D art
+                                   && art.GetSize() == (Vector2)set.Frame),
+                $"frame {set.Frame.X}x{set.Frame.Y}");
+
+            // Not the silhouette's centre - the template's plate. A kind whose
+            // grass grew would otherwise move its whole cell.
+            field.Paint = set.Names[0];
+            Rect2 drawn = set.RectAt(field.CellCentre(new Vector2I(3, 2)),
+                                     set.ScaleTo(hex));
+            Vector2 plate = drawn.Position
+                + ((Vector2)set.Plate.Position + (Vector2)set.Plate.Size * 0.5f)
+                  * set.ScaleTo(hex);
+            Check("the plate lands on the cell centre",
+                plate.DistanceTo(field.CellCentre(new Vector2I(3, 2))) < 0.01,
+                $"{plate} against {field.CellCentre(new Vector2I(3, 2))}");
+
+            misses = 0;
+            for (int q = 0; q < field.Columns; q++)
+            for (int r = 0; r < field.Rows; r++)
+                if (field.TypeAt(new Vector2I(q, r)) != set.Names[0])
+                    misses++;
+            Check("painting one kind puts it on every cell", misses == 0,
+                $"{misses} cells kept something else");
+
+            field.Paint = TerrainSet.Mixed;
+            var kinds = new HashSet<string>();
+            for (int q = 0; q < field.Columns; q++)
+            for (int r = 0; r < field.Rows; r++)
+                kinds.Add(field.TypeAt(new Vector2I(q, r)));
+            Check("mixed puts every loaded kind on the board",
+                kinds.Count == set.Names.Count,
+                $"{kinds.Count} of {set.Names.Count} appeared");
+
+            // Hashed off the cell, so this cannot fail by construction - and it
+            // is asserted anyway for the reason the shell scatter is: --capture
+            // fixes the time step so two runs can be diffed, and a board that
+            // reshuffled itself would be measuring itself.
+            Check("the mix is the same board twice",
+                Enumerable.Range(0, field.Columns * field.Rows).All(i =>
+                {
+                    var cell = new Vector2I(i % field.Columns, i / field.Columns);
+                    return field.TypeAt(cell) == field.TypeAt(cell);
+                }));
+
+            field.Paint = "no such ground";
+            Check("a kind that did not load falls back to the mix",
+                field.TypeAt(new Vector2I(0, 0)) != "no such ground"
+                && set.Has(field.TypeAt(new Vector2I(0, 0))),
+                $"got {field.TypeAt(new Vector2I(0, 0))}");
+            field.Paint = wasPaint;
+
+            // Drawn ground overhangs its cell - grass over the back edge, a tuft
+            // off the front - so the paint order is now load-bearing where the
+            // flat n-gon made it free. Furthest first, or the cell behind draws
+            // its grass over the cell in front.
+            IReadOnlyList<Vector2I> order = field.Ordered();
+            Check("every cell is painted exactly once",
+                order.Count == field.Columns * field.Rows
+                && order.Distinct().Count() == order.Count,
+                $"{order.Count} of {field.Columns * field.Rows}");
+            float last = float.NegativeInfinity;
+            misses = 0;
+            foreach (Vector2I cell in order)
+            {
+                float y = field.CellAnchor(cell).Y;
+                if (y < last)
+                    misses++;
+                last = y;
+            }
+            Check("the ground is painted back to front", misses == 0,
+                $"{misses} cells came out of order - a staggered grid has no "
+                + "nesting that walks it in screen order");
+        }
+
         // --- the ground under the tank ------------------------------------
         //
         // The one layer that is neither the tank nor an effect on it, and every

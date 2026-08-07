@@ -35,6 +35,20 @@ public sealed partial class HexField : Node2D
     public int Rows = 6;
     public bool ShowField = true;
 
+    /// <summary>The hand-drawn ground, or null to fall back to the rendered
+    /// <c>hex</c> layer. Null is a working state, not a broken one - the art is
+    /// outside the repository the way the sounds are, and a bench with none of
+    /// it still shows everything it showed before.</summary>
+    public TerrainSet? Terrain;
+
+    /// <summary>Which kind every cell is: <see cref="TerrainSet.Mixed"/> for one
+    /// per cell, or a kind's name to paint the whole board with it.
+    ///
+    /// A whole-board paint is not how a map would be built - it is how one kind
+    /// is judged against another, which is the same reason --sprites exists.
+    /// </summary>
+    public string Paint = TerrainSet.Mixed;
+
     /// <summary>Cells to tint as the current move order, destination last.</summary>
     public IReadOnlyList<Vector2I> Highlight = Array.Empty<Vector2I>();
 
@@ -278,49 +292,112 @@ public sealed partial class HexField : Node2D
         return new Vector2I(rq, rr);
     }
 
+    // --- terrain -----------------------------------------------------------
+
+    /// <summary>The kind of ground on a cell.
+    ///
+    /// A paint naming a kind that did not load is not honoured quietly: it falls
+    /// back to the mix, because a board that came up plain would read as the art
+    /// having failed to draw rather than as the name having failed to match.
+    /// </summary>
+    public string TypeAt(Vector2I cell)
+    {
+        if (Terrain is null || !Terrain.Any)
+            return TerrainSet.Plain;
+        return Terrain.Has(Paint) ? Paint : Terrain.MixedAt(cell);
+    }
+
+    /// <summary>
+    /// Every cell, furthest from the camera first.
+    ///
+    /// The rendered tile is a flat n-gon that stops at its own edge, so the
+    /// order it was drawn in never mattered - the column-major loop this
+    /// replaces was fine for exactly as long as nothing stuck out of a cell.
+    /// Drawn ground sticks out of every cell: grass over the back edge, a tuft
+    /// off the front, and on art with a slab the whole side wall hangs over
+    /// whatever is in front of it. Painted in column order, a tuft belonging to
+    /// the cell behind lands on top of the cell in front.
+    ///
+    /// Sorted rather than nested, because the odd columns are pushed down half a
+    /// row: there is no loop nesting that walks a staggered grid in screen
+    /// order, and one written to look like there is would be right down the even
+    /// files and wrong down the odd ones.
+    /// </summary>
+    public IReadOnlyList<Vector2I> Ordered()
+    {
+        if (_ordered is null || _orderedFor != new Vector2I(Columns, Rows))
+        {
+            var cells = new List<Vector2I>(Columns * Rows);
+            for (int q = 0; q < Columns; q++)
+            for (int r = 0; r < Rows; r++)
+                cells.Add(new Vector2I(q, r));
+            cells.Sort((a, b) => CellAnchor(a).Y.CompareTo(CellAnchor(b).Y));
+            _ordered = cells;
+            _orderedFor = new Vector2I(Columns, Rows);
+        }
+        return _ordered;
+    }
+
+    private List<Vector2I>? _ordered;
+    private Vector2I _orderedFor = new(-1, -1);
+
     // --- drawing -----------------------------------------------------------
+
+    /// <summary>Barely off the bare tile. Measured on the first screenshot
+    /// rather than chosen: at 0.80,0.52,0.46 the six lanes cover half the board
+    /// and read as terrain - two kinds of ground - instead of as something drawn
+    /// on it. The route's amber can be loud because it is a handful of cells;
+    /// this is thirty of them.</summary>
+    private static readonly Color ArcInk = new(1.0f, 0.86f, 0.84f);
+    private static readonly Color RouteInk = new(0.85f, 0.95f, 0.65f);
+    private static readonly Color DestInk = new(1.0f, 0.78f, 0.30f);
+    private static readonly Color AimInk = new(1.0f, 0.40f, 0.32f);
 
     public override void _Draw()
     {
         if (Atlas is null || !ShowField)
             return;
-        Texture2D texture = Atlas.Texture("hex");
-        Rect2 source = Atlas.Region("hex", 0);
 
-        for (int q = 0; q < Columns; q++)
-        for (int r = 0; r < Rows; r++)
-            DrawTextureRectRegion(texture,
-                new Rect2(CellAnchor(q, r) - Atlas.Anchor, Atlas.Tile), source);
-
+        // The marks are resolved to one colour per cell before anything is
+        // drawn, so each cell is painted exactly once. Drawing the tile again
+        // per mark was equivalent while a tile was one opaque hexagon; with
+        // terrain it would paint the grass two and three deep, and each pass
+        // over an overhang would land on whichever cell happened to be under it.
+        var ink = new Dictionary<Vector2I, Color>();
         // Gunnery under the route rather than over it: the arcs say where a shot
         // could go, the route says where this tank is going, and while both are
         // up the second is the one being given. Red for both, because amber and
         // yellow-green are the route's and cyan is the selection ring's - a mark
         // that has to be told apart from another mark is not a mark.
         foreach (Vector2I cell in Arcs)
-            DrawTextureRectRegion(texture,
-                new Rect2(CellAnchor(cell) - Atlas.Anchor, Atlas.Tile), source,
-                // Barely off the bare tile. Measured on the first screenshot
-                // rather than chosen: at 0.80,0.52,0.46 the six lanes cover half
-                // the board and read as terrain - two kinds of ground - instead
-                // of as something drawn on it. The route's amber can be loud
-                // because it is a handful of cells; this is thirty of them.
-                new Color(1.0f, 0.86f, 0.84f));
-
+            ink[cell] = ArcInk;
         for (int i = 0; i < Highlight.Count; i++)
-        {
-            bool last = i == Highlight.Count - 1;
-            var tint = last
-                ? new Color(1.0f, 0.78f, 0.30f)
-                : new Color(0.85f, 0.95f, 0.65f);
-            DrawTextureRectRegion(texture,
-                new Rect2(CellAnchor(Highlight[i]) - Atlas.Anchor, Atlas.Tile),
-                source, tint);
-        }
-
+            ink[Highlight[i]] = i == Highlight.Count - 1 ? DestInk : RouteInk;
         foreach (Vector2I cell in Aim)
-            DrawTextureRectRegion(texture,
-                new Rect2(CellAnchor(cell) - Atlas.Anchor, Atlas.Tile), source,
-                new Color(1.0f, 0.40f, 0.32f));
+            ink[cell] = AimInk;
+
+        foreach (Vector2I cell in Ordered())
+            DrawCell(cell, ink.TryGetValue(cell, out Color tint) ? tint : Colors.White);
+    }
+
+    private void DrawCell(Vector2I cell, Color tint)
+    {
+        if (Terrain is not null && Terrain.Any)
+        {
+            Texture2D? art = Terrain.Texture(TypeAt(cell));
+            if (art is not null)
+            {
+                // Against the cell's centre, not its anchor: the anchor is the
+                // turret axis floating above the ground plane, and the art knows
+                // only where its own hexagon is.
+                DrawTextureRect(art,
+                    Terrain.RectAt(CellCentre(cell), Terrain.ScaleTo(Atlas!.HexRect)),
+                    false, tint);
+                return;
+            }
+        }
+        DrawTextureRectRegion(Atlas!.Texture("hex"),
+            new Rect2(CellAnchor(cell) - Atlas.Anchor, Atlas.Tile),
+            Atlas.Region("hex", 0), tint);
     }
 }
