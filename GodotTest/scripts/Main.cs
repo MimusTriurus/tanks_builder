@@ -2260,9 +2260,10 @@ public sealed partial class Main : Node2D
             // Width and gauge together, because the pair is what the eye reads:
             // a rut of the right width at the wrong gauge is two ruts of some
             // other tank.
-            return $"ruts {_marks.Count} pts, "
+            return $"ruts {_marks.Count} pts, fading over {TrackMarks.Life:F0}s\n"
                    + $"{a.TrackWidth * _tank.BodyScale:F0}px wide at "
-                   + $"{a.TrackArm * 2.0 * _tank.BodyScale:F0}px gauge";
+                   + $"{a.TrackArm * 2.0 * _tank.BodyScale:F0}px gauge, "
+                   + $"{a.TrackPitch * _tank.BodyScale:F1}px shoe";
         });
         // The belt is the one layer tied to the ground rather than to a clock,
         // so what it is worth saying about it is how well it is keeping up. The

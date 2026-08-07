@@ -80,16 +80,29 @@ public sealed partial class TrackMarks : Node2D
     /// out-drives its own trail in one order.</summary>
     public const int Capacity = 1500;
 
-    /// <summary>How much of the tail is spent fading out. A trail that ends in a
-    /// clean cut reads as a rendering fault; one that ends in nothing reads as
-    /// ground recovering.</summary>
-    private const double FadeTail = 0.25;
+    /// <summary>
+    /// How long an imprint lasts, in seconds, from laid to gone.
+    ///
+    /// Time, not a place in the buffer. Fading by position in the ring - which
+    /// is what this did first - is not fading at all: a tank that drives ten
+    /// cells and stops leaves a trail that never goes, because nothing is
+    /// pushing the old points out, and the same drive fades differently
+    /// depending on how full the ring happens to be. Ground recovering is a
+    /// thing that happens to old marks, so age is what it has to be keyed on.
+    ///
+    /// Twenty seconds is longer than any manoeuvre on this board and shorter
+    /// than a session: the trail outlives the move that made it and does not
+    /// accumulate into a scribble. At cruise it is about 690 imprints per belt,
+    /// which also makes <see cref="Capacity"/> what it should have been all
+    /// along - a backstop rather than the mechanism.
+    /// </summary>
+    public const double Life = 20.0;
 
     /// <summary>Darkening at full strength. Plain alpha over the ground rather
     /// than anything additive - see the pale-ground lesson the effect layers all
     /// carry - and nowhere near black: a rut is soil turned over, and a black
     /// one reads as painted rails.</summary>
-    private static readonly Color Ink = new(0.20f, 0.16f, 0.11f, 0.34f);
+    private static readonly Color Ink = new(0.20f, 0.16f, 0.11f, 0.16f);
 
     /// <summary>The grouser bars, darker than the ground they sit in. A track
     /// does not leave a smooth stripe: it leaves a shoe every pitch, and the
@@ -99,7 +112,7 @@ public sealed partial class TrackMarks : Node2D
     /// opposite lesson: a moving tread aliases past half a link per frame and
     /// has to be smeared out. An imprint does not move, so the ladder is honest
     /// at any speed - the ground is where the sampling problem is not.</summary>
-    private static readonly Color BarInk = new(0.14f, 0.11f, 0.07f, 0.55f);
+    private static readonly Color BarInk = new(0.14f, 0.11f, 0.07f, 0.26f);
 
     /// <summary>How thick one bar is drawn, in screen pixels. Two, because a
     /// shoe is a shoe: it does not grow with the tank, and a fatter bar closes
@@ -134,6 +147,18 @@ public sealed partial class TrackMarks : Node2D
         public readonly List<float> Widths = new();
         public readonly List<bool> Breaks = new();
 
+        /// <summary>When each imprint was laid, on this trail's own clock.
+        /// Stamps rather than ages, so a frame does not have to write every
+        /// point it did not touch - the clock moves instead.</summary>
+        public readonly List<double> Stamps = new();
+
+        /// <summary>Seconds since this trail started. Advanced from the delta the
+        /// harness hands down, never from _Process: --capture fixes that delta so
+        /// two runs land on the same state, and a clock of its own would put the
+        /// real frame time back into a picture that is meant to be evidence.
+        /// </summary>
+        public double Clock;
+
         /// <summary>Half the shoe, across the belt, in the ground plane. Stored
         /// rather than rebuilt from a heading at draw time because it is what
         /// the belt was actually lying along when the imprint was made, and the
@@ -160,14 +185,39 @@ public sealed partial class TrackMarks : Node2D
             Widths.Add(width);
             Bars.Add(bar);
             Breaks.Add(broken);
+            Stamps.Add(Clock);
             if (Points.Count > Capacity)
-            {
-                Points.RemoveAt(0);
-                Widths.RemoveAt(0);
-                Bars.RemoveAt(0);
-                Breaks.RemoveAt(0);
-            }
+                Drop(Points.Count - Capacity);
         }
+
+        /// <summary>Move the clock on and let go of anything the ground has
+        /// recovered. Oldest first and stamps only ever increase, so the expired
+        /// are always a prefix - no scan of the whole trail.</summary>
+        public void Age(double delta)
+        {
+            Clock += delta;
+            int gone = 0;
+            while (gone < Stamps.Count && Clock - Stamps[gone] >= Life)
+                gone++;
+            if (gone > 0)
+                Drop(gone);
+        }
+
+        private void Drop(int n)
+        {
+            Points.RemoveRange(0, n);
+            Widths.RemoveRange(0, n);
+            Bars.RemoveRange(0, n);
+            Breaks.RemoveRange(0, n);
+            Stamps.RemoveRange(0, n);
+            // The trail now starts wherever the survivor does, and a run that
+            // has lost its head is a run: the first point has to say so or the
+            // ribbon draws a line back to nothing.
+            if (Points.Count > 0)
+                Breaks[0] = true;
+        }
+
+        public double AgeOf(int i) => Clock - Stamps[i];
 
         public void Clear()
         {
@@ -175,6 +225,7 @@ public sealed partial class TrackMarks : Node2D
             Widths.Clear();
             Bars.Clear();
             Breaks.Clear();
+            Stamps.Clear();
             Travelled = 0.0;
             Down = false;
         }
@@ -212,6 +263,20 @@ public sealed partial class TrackMarks : Node2D
     public IReadOnlyList<Vector2> BarsOf(Vehicle v, int side) =>
         _trails.TryGetValue(v, out Trail[]? pair)
             ? pair[side].Bars : Array.Empty<Vector2>();
+
+    /// <summary>How faded each imprint is, newest last - 1 fresh, 0 gone. For
+    /// the self-test: that old marks go is the claim, and a still frame two
+    /// seconds into a run cannot show it.</summary>
+    public IReadOnlyList<double> FadesOf(Vehicle v, int side)
+    {
+        if (!_trails.TryGetValue(v, out Trail[]? pair))
+            return Array.Empty<double>();
+        Trail trail = pair[side];
+        var fades = new double[trail.Points.Count];
+        for (int i = 0; i < fades.Length; i++)
+            fades[i] = Fade(trail, i);
+        return fades;
+    }
 
     public IReadOnlyList<Vector2> SmoothedOf(Vehicle v, int side) =>
         _trails.TryGetValue(v, out Trail[]? pair)
@@ -254,6 +319,11 @@ public sealed partial class TrackMarks : Node2D
             pair = new[] { new Trail(), new Trail() };
             _trails[v] = pair;
         }
+        // Aged before the early-out: the ground recovers whether or not the
+        // layer is switched on, so toggling it off must not freeze the trail in
+        // the state it was in.
+        pair[0].Age(delta);
+        pair[1].Age(delta);
         if (!Enabled || v.Atlas.HasTracks != true)
         {
             pair[0].Down = false;
@@ -412,24 +482,19 @@ public sealed partial class TrackMarks : Node2D
             ends[i * 2] = trail.Points[i] - trail.Bars[i];
             ends[i * 2 + 1] = trail.Points[i] + trail.Bars[i];
             Color colour = BarInk;
-            colour.A *= (float)Fade(i, n);
+            colour.A *= (float)Fade(trail, i);
             ink[i] = colour;
         }
         DrawMultilineColors(ends, ink, BarThickness);
     }
 
-    /// <summary>How much of the ink an imprint still has, by its age in the
-    /// ring. Measured against the whole trail rather than against the piece it
-    /// is drawn in, so a tank that stops and starts does not get a fresh dark
-    /// stub beside a faded ribbon of the same age.</summary>
-    private static double Fade(int i, int n)
-    {
-        double age = (n - 1 - i) / (double)Math.Max(n - 1, 1);
-        double fade = age <= 1.0 - FadeTail
-            ? 1.0
-            : 1.0 - (age - (1.0 - FadeTail)) / FadeTail;
-        return Math.Clamp(fade, 0.0, 1.0);
-    }
+    /// <summary>How much of the ink an imprint still has, by how long ago it
+    /// was laid. Linear over <see cref="Life"/>: ground does not hold a mark at
+    /// full strength and then let go of it, and a hold followed by a drop is
+    /// what a table of held frames is for - this is weather, not animation.
+    /// </summary>
+    private static double Fade(Trail trail, int i) =>
+        Math.Clamp(1.0 - trail.AgeOf(i) / Life, 0.0, 1.0);
 
     /// <summary>
     /// The trail's points with the belt rolled over them.
@@ -536,7 +601,7 @@ public sealed partial class TrackMarks : Node2D
                 width = want;
             run.Add(path[i]);
             Color colour = Ink;
-            colour.A *= (float)Fade(i, n);
+            colour.A *= (float)Fade(trail, i);
             ink.Add(colour);
         }
         Flush(run, ink, width);

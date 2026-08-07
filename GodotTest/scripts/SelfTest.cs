@@ -1316,6 +1316,38 @@ public static class SelfTest
                     $"moved by {shoeDrift:F3}px - the smoothing is for corners, and a "
                     + "straight line has none");
 
+                // Ground recovers, so the mark goes - and it goes by age rather
+                // than by being pushed out of the buffer, which is what this did
+                // first and which is not fading at all: a tank that drives and
+                // stops leaves a trail nothing is pushing on.
+                var weathered = new TrackMarks();
+                car.Sprite.HullFacing = 270.0;
+                for (int i = 0; i < 60; i++)
+                    weathered.Lay(car, (4.0, 4.0), 1.0 / 60.0);
+                IReadOnlyList<double> fresh = weathered.FadesOf(car, 0);
+                Check("an older imprint is fainter than a newer one",
+                    fresh.Count > 2 && fresh[0] < fresh[^1] && fresh[^1] > 0.98,
+                    $"{fresh[0]:F3} at the head against {fresh[^1]:F3} at the tail");
+
+                // Standing still with the belts stopped: nothing is laid, and
+                // the clock still runs.
+                for (int i = 0; i < (int)(TrackMarks.Life * 60) + 30; i++)
+                    weathered.Lay(car, (0.0, 0.0), 1.0 / 60.0);
+                Check("a trail older than its life is gone", weathered.Count == 0,
+                    $"{weathered.Count} imprints outlived {TrackMarks.Life:F0}s");
+
+                var frozen = new TrackMarks();
+                for (int i = 0; i < 60; i++)
+                    frozen.Lay(car, (4.0, 4.0), 1.0 / 60.0);
+                frozen.Enabled = false;
+                for (int i = 0; i < (int)(TrackMarks.Life * 60) + 30; i++)
+                    frozen.Lay(car, (0.0, 0.0), 1.0 / 60.0);
+                frozen.Enabled = true;
+                Check("switching the layer off does not stop the ground healing",
+                    frozen.Count == 0,
+                    $"{frozen.Count} - the marks came back on unaged, which reads "
+                    + "as the toggle having laid them");
+
                 var rutOff = new TrackMarks { Enabled = false };
                 for (int i = 0; i < 60; i++)
                     rutOff.Lay(car, (4.0, 4.0), 1.0 / 60.0);
