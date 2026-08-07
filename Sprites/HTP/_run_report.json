@@ -43,7 +43,7 @@
  "spin_pivot_from": "explicit",
  "anchor_px": [
   128.0,
-  115.11147594451904
+  115.35535717010498
  ],
  "units_per_pixel": 0.006137257441878319,
  "max_edge_alpha": {
@@ -51,11 +51,33 @@
   "turret": 0.0,
   "barrel": 0.0,
   "hex": 0.0,
+  "shadow": 0.0,
   "track_left": 0.0,
   "track_right": 0.0
  },
+ "shadow": {
+  "name": "Shadow.Catcher",
+  "radius": 0.64107,
+  "z": -0.38308,
+  "centre": [
+   0.0,
+   -0.01773
+  ],
+  "cast_by": [
+   "Hull.World",
+   "Track.Left.World",
+   "Track.Right.World"
+  ],
+  "dropped": [
+   "L.Caterpillar.Geometry",
+   "R.Caterpillar.Geometry"
+  ]
+ },
+ "shadow_contrast": 160.0,
+ "shadow_under_tank": true,
  "tiles": {
   "hex": 256,
+  "shadow": 256,
   "hull": 256,
   "track_left": 256,
   "track_right": 256,
@@ -75,7 +97,7 @@
  },
  "problems": [
   "the mark takes more than 85% of the rear plate - it is a smaller shell or a plate measured too tightly, and neither is worth guessing at",
-  "the flash reaches the tile edge (alpha 0.169) and is being cut off - shorten it in muzzle_flash.CONFIG, or raise effect_tile_scale",
+  "the flash reaches the tile edge (alpha 0.157) and is being cut off - shorten it in muzzle_flash.CONFIG, or raise effect_tile_scale",
   "neighbouring bands disagree by 0.0144 on where the axis is - treat the result as approximate"
  ],
  "muzzle_point": [
@@ -85,10 +107,10 @@
  ],
  "muzzle_shape": "rod",
  "bearing_disagreement": 0.785,
- "flash_edge_alpha": 0.1686,
+ "flash_edge_alpha": 0.1569,
  "flash_offcentre_px": {
   "270": 1.35,
-  "90": -4.74
+  "90": -4.73
  },
  "composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\HTP\\_check_shot.png",
  "recoil_stroke_px": [
@@ -104,66 +126,126 @@
    0.0,
    0.0,
    0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
+   0.0,
    0.0
   ],
   [
-   2.98,
-   3.48,
-   4.84,
-   5.21,
-   4.72,
-   3.61,
-   2.16,
-   3.6,
-   4.74,
-   5.23,
-   4.2,
-   3.45
-  ],
-  [
-   2.13,
-   2.57,
-   3.64,
-   4.29,
-   3.89,
-   2.78,
-   1.99,
-   2.78,
-   3.9,
+   2.97,
+   3.25,
+   3.46,
+   4.24,
+   4.83,
+   5.35,
+   5.2,
+   4.85,
+   4.68,
    4.3,
-   3.1,
-   2.49
+   3.36,
+   2.88,
+   2.99,
+   2.91,
+   3.37,
+   4.31,
+   4.79,
+   4.86,
+   5.22,
+   5.15,
+   4.09,
+   4.24,
+   3.44,
+   2.88
   ],
   [
-   1.13,
-   1.62,
-   2.65,
-   2.44,
-   2.51,
-   1.64,
-   1.07,
-   1.63,
-   2.52,
+   2.11,
    2.45,
-   2.1,
-   1.61
+   2.56,
+   3.25,
+   3.63,
+   4.12,
+   4.28,
+   3.59,
+   3.61,
+   3.49,
+   2.53,
+   2.22,
+   2.06,
+   2.22,
+   2.55,
+   3.48,
+   3.69,
+   3.59,
+   4.29,
+   3.91,
+   2.98,
+   3.25,
+   2.47,
+   2.28
   ],
   [
-   0.87,
+   1.25,
+   1.57,
+   1.62,
+   2.13,
+   2.63,
+   2.69,
+   2.43,
+   2.29,
+   2.22,
+   2.15,
+   1.7,
+   1.61,
+   1.16,
+   1.63,
+   1.61,
+   2.16,
+   2.31,
+   2.27,
+   2.44,
+   2.49,
+   1.99,
+   2.12,
+   1.5,
+   1.36
+  ],
+  [
+   0.25,
+   0.68,
+   0.67,
+   1.14,
+   1.64,
+   1.48,
+   1.5,
+   0.94,
+   1.1,
+   1.33,
+   0.81,
+   0.94,
+   1.0,
    0.93,
-   1.65,
+   0.81,
+   1.31,
+   1.18,
+   0.93,
    1.51,
-   1.37,
-   0.82,
-   0.16,
-   0.82,
-   1.38,
-   1.51,
+   1.28,
    0.99,
-   0.94
+   1.13,
+   0.66,
+   0.87
   ]
  ],
- "recoil_peak_px": 5.23,
+ "recoil_peak_px": 5.35,
  "recoil_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\HTP\\_check_recoil.png",
  "exhaust_ports": [
   {
@@ -194,8 +276,8 @@
  ],
  "exhaust_edge_alpha": 0.0,
  "exhaust_span_px": [
-  69,
-  56
+  70,
+  55
  ],
  "hull_span_px": [
   106,
@@ -209,42 +291,44 @@
  ],
  "exhaust_loop": {
   "0": true,
-  "3": true,
   "6": true,
-  "9": true
+  "12": true,
+  "18": true
  },
  "exhaust_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\HTP\\_check_exhaust.png",
  "fire_edge_alpha": 0.0,
  "fire_span_px": [
   64,
-  66
+  67
  ],
  "fire_redness": 60.9,
  "fire_white_fraction": 0.0,
  "fire_loop": {
   "0": true,
-  "3": true,
   "6": true,
-  "9": true
+  "12": true,
+  "18": true
  },
  "fire_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\HTP\\_check_fire.png",
  "burn_edge_alpha": 0.0,
  "burn_span_px": [
   93,
-  124
+  125
  ],
- "burn_contrast": 92.1,
+ "burn_contrast": 92.8,
  "burn_loop": {
   "0": true,
-  "3": true,
   "6": true,
-  "9": true
+  "12": true,
+  "18": true
  },
  "plates": [
   {
    "face": "front",
    "elevation": -12.5,
    "faceon": 0.976,
+   "visible": 0.9767,
+   "visible_at": 0,
    "share": 0.32,
    "extent": [
     0.23799,
@@ -255,6 +339,8 @@
    "face": "rear",
    "elevation": 2.8,
    "faceon": 0.999,
+   "visible": 0.9756,
+   "visible_at": 5,
    "share": 0.526,
    "extent": [
     0.21825,
@@ -265,6 +351,8 @@
    "face": "left",
    "elevation": 0.1,
    "faceon": 1.0,
+   "visible": 0.9524,
+   "visible_at": 8,
    "share": 0.83,
    "extent": [
     0.38595,
@@ -275,6 +363,8 @@
    "face": "right",
    "elevation": 0.2,
    "faceon": 1.0,
+   "visible": 0.9286,
+   "visible_at": 3,
    "share": 0.831,
    "extent": [
     0.38599,
@@ -290,15 +380,15 @@
  "dust_edge_alpha": 0.0,
  "burst_span_px": [
   64,
-  53
+  52
  ],
  "dust_span_px": [
   48,
-  46
+  45
  ],
- "burst_redness": 55.7,
+ "burst_redness": 55.8,
  "burst_white_fraction": 0.0,
- "dust_contrast": 90.6,
+ "dust_contrast": 90.2,
  "hit_off_tank": [],
  "hit_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\HTP\\_check_hit.png",
  "scar_fit": {
@@ -308,10 +398,10 @@
   "right": 0.83
  },
  "scar_headings_seen": {
-  "scar_front": 5,
-  "scar_rear": 7,
-  "scar_left": 5,
-  "scar_right": 5
+  "scar_front": 11,
+  "scar_rear": 15,
+  "scar_left": 11,
+  "scar_right": 11
  },
  "scar_off_armour": {
   "scar_front": 0.0513,
@@ -321,75 +411,75 @@
  },
  "scar_level_px": {
   "scar_front": [
-   270,
-   360,
-   404
+   272,
+   366,
+   407
   ],
   "scar_rear": [
-   325,
-   456,
-   487
+   328,
+   458,
+   488
   ],
   "scar_left": [
-   321,
-   446,
-   469
+   320,
+   448,
+   477
   ],
   "scar_right": [
    321,
-   444,
-   473
+   448,
+   475
   ]
  },
  "scar_contrast": {
   "scar_front": [
-   78.0,
-   93.6,
-   118.0
+   75.9,
+   90.5,
+   118.1
   ],
   "scar_rear": [
-   54.4,
-   69.4,
-   89.0
+   56.8,
+   69.1,
+   90.2
   ],
   "scar_left": [
-   49.4,
-   67.6,
-   94.4
+   48.2,
+   68.4,
+   93.1
   ],
   "scar_right": [
-   49.4,
-   70.0,
-   95.3
+   52.0,
+   69.7,
+   94.7
   ]
  },
  "scar_weight": {
   "scar_front": [
-   3628,
-   8462,
-   15300
+   3623,
+   8434,
+   15258
   ],
   "scar_rear": [
-   6911,
-   10613,
-   17149
+   6898,
+   10622,
+   17112
   ],
   "scar_left": [
-   6476,
-   10599,
-   16876
+   6510,
+   10667,
+   16805
   ],
   "scar_right": [
-   6143,
-   10342,
-   16644
+   6162,
+   10383,
+   16638
   ]
  },
  "scar_cover_px": {
-  "scar_front": 404,
-  "scar_rear": 487,
-  "scar_left": 469,
-  "scar_right": 473
+  "scar_front": 407,
+  "scar_rear": 488,
+  "scar_left": 477,
+  "scar_right": 475
  },
  "scar_edge_alpha": {
   "scar_front": 0.0,

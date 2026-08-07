@@ -5,10 +5,10 @@
     256
   ],
   "grid": {
-    "columns": 4,
-    "rows": 3
+    "columns": 5,
+    "rows": 5
   },
-  "count": 12,
+  "count": 24,
   "phases": 1,
   "rendered": [
     "Engine.Geometry",
@@ -31,7 +31,7 @@
   "units_per_pixel": 0.006137257441878319,
   "anchor_px": [
     128.0,
-    115.11147594451904
+    115.35535717010498
   ],
   "frames": [
     {
@@ -44,91 +44,187 @@
     },
     {
       "index": 1,
-      "angle": 30.0,
+      "angle": 15.0,
       "phase": 0,
       "col": 1,
+      "row": 0,
+      "label": "corner @ 285 deg"
+    },
+    {
+      "index": 2,
+      "angle": 30.0,
+      "phase": 0,
+      "col": 2,
       "row": 0,
       "label": "corner @ 300 deg"
     },
     {
-      "index": 2,
+      "index": 3,
+      "angle": 45.0,
+      "phase": 0,
+      "col": 3,
+      "row": 0,
+      "label": "corner @ 315 deg"
+    },
+    {
+      "index": 4,
       "angle": 60.0,
       "phase": 0,
-      "col": 2,
+      "col": 4,
       "row": 0,
       "label": "side @ 330 deg"
     },
     {
-      "index": 3,
+      "index": 5,
+      "angle": 75.0,
+      "phase": 0,
+      "col": 0,
+      "row": 1,
+      "label": "corner @ 345 deg"
+    },
+    {
+      "index": 6,
       "angle": 90.0,
       "phase": 0,
-      "col": 3,
-      "row": 0,
+      "col": 1,
+      "row": 1,
       "label": "corner @ 0 deg"
     },
     {
-      "index": 4,
+      "index": 7,
+      "angle": 105.0,
+      "phase": 0,
+      "col": 2,
+      "row": 1,
+      "label": "corner @ 15 deg"
+    },
+    {
+      "index": 8,
       "angle": 120.0,
       "phase": 0,
-      "col": 0,
+      "col": 3,
       "row": 1,
       "label": "side @ 30 deg"
     },
     {
-      "index": 5,
-      "angle": 150.0,
-      "phase": 0,
-      "col": 1,
-      "row": 1,
-      "label": "corner @ 60 deg"
-    },
-    {
-      "index": 6,
-      "angle": 180.0,
-      "phase": 0,
-      "col": 2,
-      "row": 1,
-      "label": "side @ 90 deg"
-    },
-    {
-      "index": 7,
-      "angle": 210.0,
-      "phase": 0,
-      "col": 3,
-      "row": 1,
-      "label": "corner @ 120 deg"
-    },
-    {
-      "index": 8,
-      "angle": 240.0,
-      "phase": 0,
-      "col": 0,
-      "row": 2,
-      "label": "side @ 150 deg"
-    },
-    {
       "index": 9,
-      "angle": 270.0,
+      "angle": 135.0,
       "phase": 0,
-      "col": 1,
-      "row": 2,
-      "label": "corner @ 180 deg"
+      "col": 4,
+      "row": 1,
+      "label": "corner @ 45 deg"
     },
     {
       "index": 10,
-      "angle": 300.0,
+      "angle": 150.0,
       "phase": 0,
-      "col": 2,
+      "col": 0,
       "row": 2,
-      "label": "side @ 210 deg"
+      "label": "corner @ 60 deg"
     },
     {
       "index": 11,
-      "angle": 330.0,
+      "angle": 165.0,
+      "phase": 0,
+      "col": 1,
+      "row": 2,
+      "label": "corner @ 75 deg"
+    },
+    {
+      "index": 12,
+      "angle": 180.0,
+      "phase": 0,
+      "col": 2,
+      "row": 2,
+      "label": "side @ 90 deg"
+    },
+    {
+      "index": 13,
+      "angle": 195.0,
       "phase": 0,
       "col": 3,
       "row": 2,
+      "label": "corner @ 105 deg"
+    },
+    {
+      "index": 14,
+      "angle": 210.0,
+      "phase": 0,
+      "col": 4,
+      "row": 2,
+      "label": "corner @ 120 deg"
+    },
+    {
+      "index": 15,
+      "angle": 225.0,
+      "phase": 0,
+      "col": 0,
+      "row": 3,
+      "label": "corner @ 135 deg"
+    },
+    {
+      "index": 16,
+      "angle": 240.0,
+      "phase": 0,
+      "col": 1,
+      "row": 3,
+      "label": "side @ 150 deg"
+    },
+    {
+      "index": 17,
+      "angle": 255.0,
+      "phase": 0,
+      "col": 2,
+      "row": 3,
+      "label": "corner @ 165 deg"
+    },
+    {
+      "index": 18,
+      "angle": 270.0,
+      "phase": 0,
+      "col": 3,
+      "row": 3,
+      "label": "corner @ 180 deg"
+    },
+    {
+      "index": 19,
+      "angle": 285.0,
+      "phase": 0,
+      "col": 4,
+      "row": 3,
+      "label": "corner @ 195 deg"
+    },
+    {
+      "index": 20,
+      "angle": 300.0,
+      "phase": 0,
+      "col": 0,
+      "row": 4,
+      "label": "side @ 210 deg"
+    },
+    {
+      "index": 21,
+      "angle": 315.0,
+      "phase": 0,
+      "col": 1,
+      "row": 4,
+      "label": "corner @ 225 deg"
+    },
+    {
+      "index": 22,
+      "angle": 330.0,
+      "phase": 0,
+      "col": 2,
+      "row": 4,
       "label": "corner @ 240 deg"
+    },
+    {
+      "index": 23,
+      "angle": 345.0,
+      "phase": 0,
+      "col": 3,
+      "row": 4,
+      "label": "corner @ 255 deg"
     }
   ],
   "layer": "hull",
