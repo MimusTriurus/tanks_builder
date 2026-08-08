@@ -48,10 +48,17 @@ namespace TankSpriteTest;
 /// </summary>
 public sealed partial class Grove : Node2D
 {
-    /// <summary>Ground px between lattice nodes before jitter. 46 puts about
-    /// twenty-five candidates over a hexagon, of which the keep-out leaves ten
-    /// or so on the rim.</summary>
-    public double Spacing = 40.0;
+    /// <summary>
+    /// Ground px between lattice nodes before jitter.
+    ///
+    /// Thirty rather than something rounder because the band a tree may stand
+    /// in is thin and measured: the keep-out ends at 83 and the hexagon's near
+    /// edge is 107 away, so a tree that needs 11 of clearance has 13 ground px
+    /// of room in the narrow direction. At 46 the emptiest wooded cell came out
+    /// with one tree on it and the minimum could not fill it, because the
+    /// minimum draws from candidates and there were none to draw.
+    /// </summary>
+    public double Spacing = 30.0;
 
     /// <summary>How far a node may wander from its lattice point, as a fraction
     /// of the spacing. Under 0.5 by construction: at 0.5 two neighbours can
@@ -61,6 +68,13 @@ public sealed partial class Grove : Node2D
     /// <summary>Ground radius nothing may grow inside, centred on the cell.
     /// Set from the tanks - see the class remarks - rather than chosen.</summary>
     public double KeepOut = 83.0;
+
+    /// <summary>Ground px a base must stand clear of the cell's border, on top
+    /// of its own measured spread. The drawn seam on the plate measures six
+    /// image pixels at x4 - a pixel and a half on screen - and this is that plus
+    /// enough that the line is not touched rather than merely not crossed.
+    /// </summary>
+    public double Clearance = 3.0;
 
     /// <summary>How far the tallest tank reaches below its own contact point, in
     /// screen px. The clearance rule's constant, and it is a measurement: the
@@ -247,7 +261,7 @@ public sealed partial class Grove : Node2D
             // The foot being inside is not enough: the base is wider than the
             // point it is measured at, and a trunk whose roots cross the border
             // reads as a tree belonging to two cells.
-            if (!RootsInside(cell, at, species, mirrored, scale))
+            if (!StandsClear(cell, seed, species, scale))
                 continue;
 
             if (ClearFront)
@@ -296,21 +310,40 @@ public sealed partial class Grove : Node2D
     }
 
     /// <summary>
-    /// Whether the base stands inside the hexagon, not merely the point it is
-    /// measured at.
+    /// Whether the base stands clear of the cell's border, in every direction.
     ///
-    /// Asked of the two horizontal extremes rather than of a radius, because the
-    /// flare is not centred on the trunk - see <see cref="PropSet"/>. Asked of
-    /// the cell rather than of an inset outline, because the cell is what
-    /// <see cref="HexField.CellAt"/> already answers exactly, slanted edges and
-    /// all; an inset hexagon would be a second description of the same shape.
+    /// The first version of this asked <see cref="HexField.CellAt"/> about the
+    /// base's two horizontal extremes, which was right about what it tested and
+    /// blind to the direction that actually fails: a trunk a pixel above the
+    /// bottom edge passes a horizontal probe and is drawn standing on the seam.
+    /// So the base is a disc on the ground and the question is its distance to
+    /// the boundary.
+    ///
+    /// A disc of the contact's own half-width, measured about the point the
+    /// prop actually stands on - see <see cref="PropSet"/>, where the foot moved
+    /// to the middle of the contact for the same reason this is a radius: a
+    /// border runs in any direction, so the extent has to answer in any
+    /// direction, and depth cannot be measured from a flat sprite at all.
+    ///
+    ///
+    /// Analytic rather than probing, because "how far inside" has no answer in
+    /// terms of which cell a point is in. For a flat-top hexagon of circumradius
+    /// R the two horizontal edges sit at |dy| = sqrt(3)R/2 and the four slanted
+    /// ones at sqrt(3)|dx| + |dy| = sqrt(3)R, whose normal has length 2 - so the
+    /// distances are the two expressions below and the boundary is the nearer.
     /// </summary>
-    private bool RootsInside(Vector2I cell, Vector2 at, int species,
-                             bool mirrored, float scale)
+    private bool StandsClear(Vector2I cell, Vector2 ground, int species,
+                             float scale)
     {
-        (float left, float right) = Props!.RootOf(species, mirrored);
-        return Field!.CellAt(at - new Vector2(left * scale, 0.0f)) == cell
-            && Field.CellAt(at + new Vector2(right * scale, 0.0f)) == cell;
+        float root = Props!.RootOf(species);
+        Vector2 centre = Field!.CellCentre(cell);
+        double r = Field.Atlas!.HexRect.Size.X * 0.5;
+        double dx = Math.Abs(ground.X - centre.X);
+        double dy = Math.Abs(ground.Y - centre.Y / Squash);
+        double root3 = Math.Sqrt(3.0);
+        double edge = Math.Min(root3 * r * 0.5 - dy,
+                               (root3 * r - root3 * dx - dy) * 0.5);
+        return edge >= root * scale + Clearance;
     }
 
     /// <summary>

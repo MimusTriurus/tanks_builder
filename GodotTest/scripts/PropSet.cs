@@ -48,10 +48,19 @@ public sealed class PropSet
     /// </summary>
     public const int Detail = 4;
 
-    /// <summary>How much of the sprite's height counts as the base. Six percent
-    /// is 27px on Tree_4, which is where the roots have finished splaying and
-    /// the trunk is still a trunk.</summary>
-    private const float RootBand = 0.06f;
+    /// <summary>
+    /// How much of the sprite's height counts as touching the ground. Three
+    /// percent is 13px on Tree_4, which reaches the second trunk's foot six
+    /// rows up and stops well below where the stems start splaying.
+    ///
+    /// It is a band and not the bottom row because a prop can stand on more than
+    /// one point: Tree_4 is two trunks, the right one set slightly back, and its
+    /// foot never appears in the bottom row at all. Reading the row alone put
+    /// the prop's position on the left trunk and called the right one an
+    /// overhang 61px wide - which is how a 16px-wide base came to demand 40px of
+    /// room and a wooded cell came out with one tree in it.
+    /// </summary>
+    private const float RootBand = 0.03f;
 
     private sealed class Prop
     {
@@ -62,8 +71,7 @@ public sealed class PropSet
         public Vector2 MirrorFoot;
         public Vector2 Size;        // image px
         public float Rise;          // image px above the foot
-        public float RootLeft;      // image px the base reaches left of the foot
-        public float RootRight;
+        public float Root;          // image px, half the ground contact's width
     }
 
     private readonly List<Prop> _props = new();
@@ -115,15 +123,13 @@ public sealed class PropSet
 
     private void Add(string name, Image art, Rect2I box)
     {
-        Vector2 foot = FootOf(art, box);
+        (Vector2 foot, float root) = FootOf(art, box);
         var mirror = (Image)art.Duplicate();
         mirror.FlipX();
 
         // Mirroring is about the image's own centre line, so the foot goes with
         // it: a trunk 58px from the left is 58px from the right afterwards.
         var mirrorFoot = new Vector2(art.GetWidth() - 1 - foot.X, foot.Y);
-
-        (float left, float right) = RootReach(art, box, foot);
 
         art.GenerateMipmaps();
         mirror.GenerateMipmaps();
@@ -136,28 +142,26 @@ public sealed class PropSet
             MirrorFoot = mirrorFoot,
             Size = new Vector2(art.GetWidth(), art.GetHeight()),
             Rise = foot.Y - box.Position.Y + 1,
-            RootLeft = left,
-            RootRight = right,
+            Root = root,
         });
     }
 
     /// <summary>
-    /// How far the base reaches either side of the foot, measured over the
-    /// bottom <see cref="RootBand"/> of the sprite.
+    /// Where the prop meets the ground, and how wide that contact is.
     ///
-    /// Two numbers rather than a radius, because the flare is not centred on
-    /// the trunk: Tree_4 reaches 12px left of its foot and 73px right, six
-    /// times as far. A radius would have to be the larger one, and a tree kept
-    /// 73px clear on both sides stands further into the cell than it needs on
-    /// the side where it has no roots.
+    /// Both come from the same band, and that is the point: the foot is the
+    /// centre of the ground contact rather than the centre of the bounding box,
+    /// which on a leaning tree are 31px apart and only one of them is where the
+    /// thing stands. Half the contact's width is what it needs kept clear
+    /// around it - one number rather than a reach either side, because a border
+    /// runs in any direction and the extent has to answer in any direction.
     ///
     /// Horizontal only. The sprite's vertical axis mixes height above the
     /// ground with depth into it, and nothing in a flat image can separate the
-    /// two - so the reach that can be measured is measured, and the one that
-    /// cannot is not guessed at.
+    /// two - so the extent that can be measured is measured and read as a
+    /// radius, and the one that cannot is not guessed at.
     /// </summary>
-    private static (float Left, float Right) RootReach(Image art, Rect2I box,
-                                                       Vector2 foot)
+    private static (Vector2 Foot, float Root) FootOf(Image art, Rect2I box)
     {
         int bottom = box.Position.Y + box.Size.Y - 1;
         int top = Math.Max(box.Position.Y,
@@ -172,27 +176,9 @@ public sealed class PropSet
             most = Math.Max(most, x);
         }
         if (least == int.MaxValue)
-            return (0.0f, 0.0f);
-        return (Math.Max(0.0f, foot.X - least), Math.Max(0.0f, most - foot.X));
-    }
-
-    /// <summary>The centre of the bottom opaque row. See the class remarks for
-    /// why not the box centre.</summary>
-    private static Vector2 FootOf(Image art, Rect2I box)
-    {
-        int bottom = box.Position.Y + box.Size.Y - 1;
-        int first = -1, last = -1;
-        for (int x = box.Position.X; x < box.Position.X + box.Size.X; x++)
-        {
-            if (art.GetPixel(x, bottom).A <= 0.03f)
-                continue;
-            if (first < 0)
-                first = x;
-            last = x;
-        }
-        if (first < 0)
-            return new Vector2(box.Position.X + box.Size.X * 0.5f, bottom);
-        return new Vector2((first + last) * 0.5f, bottom);
+            return (new Vector2(box.Position.X + box.Size.X * 0.5f, bottom), 0.0f);
+        return (new Vector2((least + most) * 0.5f, bottom),
+                (most - least) * 0.5f);
     }
 
     public string NameOf(int i) => _props[Wrap(i)].Name;
@@ -209,12 +195,10 @@ public sealed class PropSet
     /// to get what the clearance rule is written in.</summary>
     public float RiseOf(int i) => _props[Wrap(i)].Rise;
 
-    /// <summary>How far the base reaches either side of the foot, in image px.
-    /// Mirroring swaps them, for the reason the foot moves: the picture is
-    /// reversed, so left and right are the other way round.</summary>
-    public (float Left, float Right) RootOf(int i, bool mirrored) =>
-        mirrored ? (_props[Wrap(i)].RootRight, _props[Wrap(i)].RootLeft)
-                 : (_props[Wrap(i)].RootLeft, _props[Wrap(i)].RootRight);
+    /// <summary>Half the ground contact's width, in image px. Unchanged by
+    /// mirroring - the foot moves with the picture, the extent around it does
+    /// not.</summary>
+    public float RootOf(int i) => _props[Wrap(i)].Root;
 
     private int Wrap(int i) => _props.Count == 0 ? 0 : ((i % _props.Count) + _props.Count) % _props.Count;
 }

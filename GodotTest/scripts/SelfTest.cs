@@ -1547,21 +1547,28 @@ public static class SelfTest
                 intruders.Count == 0,
                 $"{intruders.Count} inside the {grove.KeepOut:F0}px keep-out");
 
-            // The foot being inside was not enough: the base is wider than the
-            // point it is measured at, and a trunk with roots over the border
-            // belongs to two cells at once.
+            // The foot being inside was never enough - the base is wider than
+            // the point it is measured at - and asking which cell the base's
+            // horizontal extremes fall in was not enough either: a trunk one
+            // pixel above the bottom edge passes that and is drawn standing on
+            // the seam. Measured against the boundary itself, in every
+            // direction, with the drawn seam's own width to spare.
+            double root3 = Math.Sqrt(3.0);
+            double radius = field.Atlas!.HexRect.Size.X * 0.5;
+            float sq = grove.Squash;
             var straddling = grove.Trees.Where(t =>
             {
-                (float left, float right) =
-                    grove.Props!.RootOf(t.Species, t.Mirrored);
-                return field.CellAt(t.Ground - new Vector2(left * t.Pixels, 0))
-                       != t.Cell
-                    || field.CellAt(t.Ground + new Vector2(right * t.Pixels, 0))
-                       != t.Cell;
+                Vector2 c = field.CellCentre(t.Cell);
+                double dx = Math.Abs(t.Ground.X - c.X);
+                double dy = Math.Abs((t.Ground.Y - c.Y) / sq);
+                double edge = Math.Min(root3 * radius * 0.5 - dy,
+                                       (root3 * radius - root3 * dx - dy) * 0.5);
+                return edge < grove.Props!.RootOf(t.Species) * t.Pixels
+                              + grove.Clearance - 0.5;
             }).ToList();
-            Check("no tree has its roots over the border",
+            Check("no tree stands on the border of its cell",
                 straddling.Count == 0,
-                $"{straddling.Count} straddle the hexagon they were planted in");
+                $"{straddling.Count} are within their own base of the edge");
 
             // A wooded cell is wooded. The minimum overrides the edge fade,
             // which is a preference among legal spots, and cannot override the
