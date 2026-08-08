@@ -310,10 +310,16 @@ public sealed partial class VehicleAudio : Node2D
 
         double load = MovementProfile.LoadAt(v.Speed, v.Profile.TopSpeed);
 
-        // The engine is always turning, so its gate is on whenever sound is. It
-        // is the one loop with no condition of its own, which is also why the
-        // bench has no "engine off" - a tank on the field is a tank running.
-        Gate(_engine, ref _engineGate, Enabled, delta,
+        // The engine turns for as long as the tank is a machine, and that is the
+        // one condition it has. "A tank on the field is a tank running" used to
+        // stand here with no qualifier and the wreck is exactly the sentence's
+        // exception - which is why it was missed: the picture already said the
+        // engine had stopped, since the plume is gone and the hull has stopped
+        // trembling, and only the ear disagreed. A gate is the whole fix, not a
+        // fade: an engine that dies away over a second is one being switched
+        // off, and this one was destroyed.
+        bool running = !v.Wreck.Dead;
+        Gate(_engine, ref _engineGate, Enabled && running, delta,
              EngineDb + (float)((1.0 - load) * EngineIdleTrim));
         if (_engine is not null)
             _engine.PitchScale =
