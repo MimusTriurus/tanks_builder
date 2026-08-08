@@ -1520,14 +1520,12 @@ public static class SelfTest
                 $"{grove.Trees.Count(t => field.CellAt(t.Ground) != t.Cell)} "
                 + "stand outside the cell that planted them");
 
-            // The rule the whole arrangement rests on: nothing grows where a
-            // tank parks. A thicket has no clearing, so it is exempt - and that
-            // exemption is exactly why thickets are barred for movement.
+            // The rule the whole arrangement rests on, and with no thicket to be
+            // exempt there is now nothing it does not cover: every wooded cell
+            // has a clearing in it, so every cell on the board is drivable.
             float squash = grove.Squash;
             var intruders = grove.Trees.Where(t =>
             {
-                if (grove.IsThicket(t.Cell))
-                    return false;
                 Vector2 centre = field.CellCentre(t.Cell);
                 var a = new Vector2(t.Ground.X, t.Ground.Y / squash);
                 var b = new Vector2(centre.X, centre.Y / squash);
@@ -1536,6 +1534,42 @@ public static class SelfTest
             Check("nothing grows where a tank stands",
                 intruders.Count == 0,
                 $"{intruders.Count} inside the {grove.KeepOut:F0}px keep-out");
+
+            // The foot being inside was not enough: the base is wider than the
+            // point it is measured at, and a trunk with roots over the border
+            // belongs to two cells at once.
+            var straddling = grove.Trees.Where(t =>
+            {
+                (float left, float right) =
+                    grove.Props!.RootOf(t.Species, t.Mirrored);
+                return field.CellAt(t.Ground - new Vector2(left * t.Pixels, 0))
+                       != t.Cell
+                    || field.CellAt(t.Ground + new Vector2(right * t.Pixels, 0))
+                       != t.Cell;
+            }).ToList();
+            Check("no tree has its roots over the border",
+                straddling.Count == 0,
+                $"{straddling.Count} straddle the hexagon they were planted in");
+
+            // A wooded cell is wooded. The minimum overrides the edge fade,
+            // which is a preference among legal spots, and cannot override the
+            // keep-out or the border, which are what make the cell drivable and
+            // the tree one cell's tree.
+            var perCell = new Dictionary<Vector2I, int>();
+            foreach (PropNode tree in grove.Trees)
+                perCell[tree.Cell] = perCell.GetValueOrDefault(tree.Cell) + 1;
+            var thin = new List<Vector2I>();
+            for (int q = 0; q < field.Columns; q++)
+            for (int r = 0; r < field.Rows; r++)
+            {
+                var cell = new Vector2I(q, r);
+                if (grove.IsForest(cell)
+                    && perCell.GetValueOrDefault(cell) < grove.Minimum)
+                    thin.Add(cell);
+            }
+            Check($"every wooded cell carries at least {grove.Minimum} trees",
+                thin.Count == 0,
+                $"{thin.Count} cells came out thinner than that");
 
             // Ground space, not screen: the lattice is square on the ground, and
             // measuring the spacing on screen would call every north-south pair
@@ -1596,8 +1630,6 @@ public static class SelfTest
             Check("with the clearance rule on, no tree crosses its own cell's tank",
                 grove.Trees.All(t =>
                 {
-                    if (grove.IsThicket(t.Cell))
-                        return true;
                     double d = t.Ground.Y - field.CellCentre(t.Cell).Y;
                     return d <= 0.0 || t.Rise < d - grove.TankBelow;
                 }),
@@ -1605,30 +1637,60 @@ public static class SelfTest
                 + "contact point");
             grove.ClearFront = wasClear;
 
-            // A thicket is a cell with no clearing in it, so it is the one cell
-            // a tank may not enter - and the two have to be the same set, or the
-            // board shows woods you can drive into and clearings you cannot.
             grove.Plant();
-            Check("the impassable cells are exactly the thickets",
-                grove.Impassable().All(c => grove.IsThicket(c))
-                && Enumerable.Range(0, field.Columns * field.Rows)
+
+            // Forest is a kind of ground, so it is chosen where the kinds are
+            // chosen. Painting one plate over the board therefore takes the
+            // woods off it, and painting forest puts them on every cell - and
+            // both have to be true, or "how much forest" has quietly become a
+            // second dial arguing with the terrain list.
+            string wasPainted = field.Paint;
+            field.Paint = TerrainSet.Forest;
+            grove.Plant();
+            int all = grove.Planted;
+            Check("painting forest woods every cell",
+                Enumerable.Range(0, field.Columns * field.Rows)
                     .Select(i => new Vector2I(i % field.Columns, i / field.Columns))
-                    .Where(c => grove.IsThicket(c))
-                    .All(c => grove.Impassable().Contains(c)),
-                $"{grove.Impassable().Count} barred");
+                    .All(c => grove.IsForest(c)) && all > 0,
+                $"{all} trees");
 
-            Check("a tank never comes up parked in a thicket",
-                vehicles is null
-                || vehicles.All(v => !grove.IsThicket(v.HomeCell)),
-                "spared cells are the home cells, and a thicket under one of "
-                + "them is the picture the keep-out exists to prevent");
-
-            double wooded = grove.Coverage;
-            grove.Coverage = 0.0;
+            field.Paint = field.Terrain!.Names[0];
             grove.Plant();
-            Check("no woods, no trees", grove.Planted == 0,
-                $"{grove.Planted} grew on a board with no forest on it");
-            grove.Coverage = wooded;
+            Check("painting a plate takes the trees off", grove.Planted == 0,
+                $"{grove.Planted} grew on a board painted {field.Terrain!.Names[0]}");
+            field.Paint = wasPainted;
+
+            // The trees stop being ground for exactly as long as a tank is in
+            // them. Every tree on the cell rather than the ones overlapping:
+            // which trees cross the tank changes with its heading, so a per-tree
+            // test would blink as it turned on the spot.
+            field.Paint = TerrainSet.Forest;
+            grove.Plant();
+            Vector2I stood = grove.Trees[0].Cell;
+            var busy = new HashSet<Vector2I> { stood };
+            for (int i = 0; i < 240; i++)
+                grove.Reveal(busy, 1.0 / 60.0);
+            Check("trees fade for a tank standing in them",
+                grove.Trees.Where(t => t.Cell == stood)
+                     .All(t => Math.Abs(t.Modulate.A - grove.Ghost) < 0.01f)
+                && grove.Trees.Where(t => t.Cell != stood)
+                        .All(t => t.Modulate.A > 0.99f),
+                $"ghost {grove.Ghost:F2}");
+            Check("and they are still there", grove.Ghost > 0.0f,
+                "a wood that vanishes is a tank standing in a field");
+            for (int i = 0; i < 240; i++)
+                grove.Reveal(new HashSet<Vector2I>(), 1.0 / 60.0);
+            Check("and come back when it drives off",
+                grove.Trees.All(t => t.Modulate.A > 0.99f),
+                "the fade is a view of the ground, not a change to it");
+
+            field.Paint = wasPainted;
+            bool wasSown = grove.Enabled;
+            grove.Enabled = false;
+            grove.Plant();
+            Check("switched off, nothing grows", grove.Planted == 0,
+                $"{grove.Planted} trees on a board with the layer off");
+            grove.Enabled = wasSown;
             grove.Plant();
         }
 

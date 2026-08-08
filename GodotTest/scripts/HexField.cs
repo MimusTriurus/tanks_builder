@@ -320,17 +320,49 @@ public sealed partial class HexField : Node2D
 
     // --- terrain -----------------------------------------------------------
 
-    /// <summary>The kind of ground on a cell.
+    /// <summary>
+    /// What a cell is: a plate kind, or <see cref="TerrainSet.Forest"/>.
     ///
-    /// A paint naming a kind that did not load is not honoured quietly: it falls
-    /// back to the mix, because a board that came up plain would read as the art
-    /// having failed to draw rather than as the name having failed to match.
+    /// Forest is the first kind that is not a picture. It has no file and never
+    /// will - it is soil with trees standing on it, and the trees are props with
+    /// their own places on the ground (see <see cref="Grove"/>). Composed rather
+    /// than painted for two reasons that are not about memory: a painted forest
+    /// hex could not have a tank drive into it without the trees being in a
+    /// fixed relationship to the tank, and the ground would be a second dirt
+    /// painting meeting soil at a visible seam.
+    ///
+    /// So it is a kind here, where kinds are chosen, and a plate elsewhere.
     /// </summary>
-    public string TypeAt(Vector2I cell)
+    public string KindAt(Vector2I cell)
     {
         if (Terrain is null || !Terrain.Any)
             return TerrainSet.Plain;
-        return Terrain.Has(Paint) ? Paint : Terrain.MixedAt(cell);
+        if (Paint == TerrainSet.Forest)
+            return TerrainSet.Forest;
+        if (Terrain.Has(Paint))
+            return Paint;
+        // In the mix it is one kind among the plates, drawn by the same hash, so
+        // "how much forest" is not a second dial arguing with the terrain list.
+        return Trees && Terrain.MixedAt(cell, TerrainSet.Forest) is var mixed
+            ? mixed : Terrain.MixedAt(cell);
+    }
+
+    /// <summary>Whether the forest kind is on offer at all. False with no props
+    /// loaded and under --no-forest, and then the mix is plates only - a board
+    /// scattered with cells that are soil and claim to be woods would be worse
+    /// than one with no woods on it.</summary>
+    public bool Trees = true;
+
+    /// <summary>The plate a cell is drawn on. Forest stands on the default
+    /// ground rather than on one of its own, so a clearing and the field beside
+    /// it are the same dirt and there is no seam at the boundary.</summary>
+    public string TypeAt(Vector2I cell)
+    {
+        string kind = KindAt(cell);
+        if (kind != TerrainSet.Forest)
+            return kind;
+        return Terrain is not null && Terrain.Has(TerrainSet.Default)
+            ? TerrainSet.Default : TerrainSet.Plain;
     }
 
     /// <summary>

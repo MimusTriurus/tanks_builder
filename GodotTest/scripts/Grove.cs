@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Godot;
 
 namespace TankSpriteTest;
@@ -26,15 +27,18 @@ namespace TankSpriteTest;
 /// rather than something that has to be an ellipse in two places.
 ///
 /// <b>Nothing grows where a tank stands.</b> The keep-out is the contact patch
-/// swept over every heading: belt length and gauge give a radius of about 83
-/// ground px, which is 53% of a cell. That is not a tuning constant, it is the
-/// measured fact that decides what a passable forest hex can look like - a
-/// clearing with trees round its rim. A hex full of trees is a hex a tank
-/// cannot stand in, and that is a gameplay decision waiting to be made
-/// deliberately rather than a drawing problem.
+/// swept over every heading: belt length and gauge give a radius of about 101
+/// ground px at the widest class, which is over half a cell. That is not a
+/// tuning constant, it is the measured fact that makes a forest hex what it is -
+/// a clearing with trees round its rim, which every tank can drive into.
 ///
 /// It also removes the "middle layer the tank replaces" case entirely: there is
 /// no middle to replace, because nothing was planted there.
+///
+/// <b>And a wooded cell is wooded, so it gets at least
+/// <see cref="Minimum"/> trees</b> however the edge fade rolls. The fade
+/// chooses among legal spots; it does not get to decide that a forest cell is a
+/// field.
 ///
 /// <b>Depth is the foot, by the same rule as the tanks.</b> Each tree is its
 /// own node at <c>ZIndex = round(footY)</c> in field-local pixels, which is
@@ -45,10 +49,9 @@ namespace TankSpriteTest;
 public sealed partial class Grove : Node2D
 {
     /// <summary>Ground px between lattice nodes before jitter. 46 puts about
-    /// twenty-five candidates over a hexagon, which is a handful on a clearing's
-    /// rim and a dozen in a thicket once the keep-out and the edge fade have
-    /// taken their share.</summary>
-    public double Spacing = 46.0;
+    /// twenty-five candidates over a hexagon, of which the keep-out leaves ten
+    /// or so on the rim.</summary>
+    public double Spacing = 40.0;
 
     /// <summary>How far a node may wander from its lattice point, as a fraction
     /// of the spacing. Under 0.5 by construction: at 0.5 two neighbours can
@@ -65,10 +68,25 @@ public sealed partial class Grove : Node2D
     /// standing on.</summary>
     public double TankBelow = 31.0;
 
-    /// <summary>Fraction of cells that are forest. Hashed per cell, so 0.4 is a
-    /// scatter of groves rather than a fixed pattern, and 1.0 is a full board.
+    /// <summary>
+    /// Trees a wooded cell gets whatever the edge fade thinks.
+    ///
+    /// Four, because three read as a cell with some trees on it and four read as
+    /// woods - and because the fade is a preference among legal spots rather
+    /// than a rule about them, so overriding it costs nothing that matters. It
+    /// cannot override the keep-out or the border: those two are what make the
+    /// cell drivable and the tree one cell's tree, and a minimum that could
+    /// break them would be a minimum that breaks the hex.
     /// </summary>
-    public double Coverage = 0.4;
+    public int Minimum = 4;
+
+    /// <summary>What a tree fades to while a tank is on its cell, and how long
+    /// it takes. Fading rather than hiding: the tank has to be visible through
+    /// the wood, but a wood that vanishes is a tank standing in a field. The
+    /// time constant is short enough to keep up with a tank crossing a cell and
+    /// long enough not to read as a switch.</summary>
+    public float Ghost = 0.35f;
+    public double FadeTime = 0.18;
 
     /// <summary>Refuse to plant anything that would cross a tank standing on its
     /// own cell. Off by default, and that is the honest default: a forest that
@@ -96,50 +114,13 @@ public sealed partial class Grove : Node2D
     /// which is the space the depth rule is written in.</summary>
     public IReadOnlyList<PropNode> Trees => _planted;
 
-    /// <summary>Whether a cell carries trees at all. Hashed off the cell, so it
-    /// answers before anything is planted and answers the same every run.
-    /// </summary>
+    /// <summary>Whether a cell carries trees. Asked of the field rather than
+    /// hashed here: forest is a kind of ground, chosen where the other kinds are
+    /// chosen, so "how much forest" is the terrain paint and not a second dial
+    /// arguing with it.</summary>
     public bool IsForest(Vector2I cell) =>
-        Coverage >= 1.0 || (Coverage > 0.0 && Hash01(cell.X, cell.Y, 7717) < Coverage);
-
-    /// <summary>
-    /// Share of wooded cells that are thicket rather than clearing.
-    ///
-    /// This is the fork the measurements force, not a feature added on top. The
-    /// swept contact patch is 53% of a cell, so a hex a tank can stand in has
-    /// room for a rim of trees and nothing else. Wanting a cell that reads as
-    /// woods means wanting a cell no tank stands in - so it is not two drawings
-    /// of one hex, it is two hexes, and the second one is impassable.
-    /// </summary>
-    public double Thicket = 0.35;
-
-    /// <summary>A wooded cell with no clearing in it. Nothing stands here, so
-    /// nothing is kept out - and <see cref="Main"/> blocks it for movement,
-    /// because a tank parked inside a thicket is the picture this whole
-    /// arrangement exists to avoid.</summary>
-    public bool IsThicket(Vector2I cell) =>
-        IsForest(cell) && Thicket > 0.0 && !Spared.Contains(cell)
-        && (Thicket >= 1.0 || Hash01(cell.X, cell.Y, 6113) < Thicket);
-
-    /// <summary>Cells that stay clearings whatever the hash says. The bench
-    /// parks its three tanks on fixed cells, and a thicket under one of them
-    /// would open the board with a tank inside trees - the one picture the
-    /// keep-out exists to make impossible.</summary>
-    public readonly HashSet<Vector2I> Spared = new();
-
-    /// <summary>Every cell no tank may enter. A query rather than a stored map,
-    /// for the reason the mix is one.</summary>
-    public HashSet<Vector2I> Impassable()
-    {
-        var blocked = new HashSet<Vector2I>();
-        if (Field is null || !Enabled)
-            return blocked;
-        for (int q = 0; q < Field.Columns; q++)
-        for (int r = 0; r < Field.Rows; r++)
-            if (IsThicket(new Vector2I(q, r)))
-                blocked.Add(new Vector2I(q, r));
-        return blocked;
-    }
+        Enabled && Field is not null
+        && Field.KindAt(cell) == TerrainSet.Forest;
 
     /// <summary>Ground-plane squash, measured off the rendered tile rather than
     /// taken from the elevation: a flat-top hexagon is (sqrt(3)/2)*sin(e) as
@@ -212,12 +193,16 @@ public sealed partial class Grove : Node2D
             MoveChild(node, _planted.Count - 1);
     }
 
+    /// <summary>One candidate that survived every rule that cannot bend, held
+    /// with the roll that decides whether it takes.</summary>
+    private readonly record struct Seedling(
+        Vector2 At, int Species, bool Mirrored, double Roll, double Fade);
+
     private void SowCell(Vector2I cell, float squash, float scale)
     {
         Vector2 centre = Field!.CellCentre(cell);
         Vector2 ground = new(centre.X, centre.Y / squash);
         Vector2I hex = Field.Atlas!.HexRect.Size;
-        bool clearing = !IsThicket(cell);
         double halfX = hex.X * 0.5;
         double halfY = hex.Y * 0.5 / squash;
 
@@ -226,6 +211,7 @@ public sealed partial class Grove : Node2D
         int j0 = (int)Math.Floor((ground.Y - halfY) / Spacing) - 1;
         int j1 = (int)Math.Ceiling((ground.Y + halfY) / Spacing) + 1;
 
+        var pool = new List<Seedling>();
         for (int i = i0; i <= i1; i++)
         for (int j = j0; j <= j1; j++)
         {
@@ -239,37 +225,115 @@ public sealed partial class Grove : Node2D
             if (Field.CellAt(at) != cell)
                 continue;
 
-            if (clearing && seed.DistanceTo(ground) < KeepOut)
-                continue;
-
-            if (Hash01(i, j, 3037) >= EdgeFade(cell, seed, squash))
+            if (seed.DistanceTo(ground) < KeepOut)
                 continue;
 
             int species = (int)(Hash01(i, j, 4051) * Props!.Count);
             bool mirrored = Hash01(i, j, 5077) < 0.5;
 
-            if (ClearFront && clearing)
+            // The foot being inside is not enough: the base is wider than the
+            // point it is measured at, and a trunk whose roots cross the border
+            // reads as a tree belonging to two cells.
+            if (!RootsInside(cell, at, species, mirrored, scale))
+                continue;
+
+            if (ClearFront)
             {
                 double d = at.Y - centre.Y;
                 if (d > 0.0 && Props.RiseOf(species) * scale >= d - TankBelow)
                     continue;
             }
 
+            pool.Add(new Seedling(at, species, mirrored, Hash01(i, j, 3037),
+                                  EdgeFade(cell, seed, squash)));
+        }
+
+        // The edge fade is a preference, not a rule, and this is where the
+        // difference shows. Everything above rejects outright: a tree inside the
+        // keep-out or across a border is wrong wherever it stands. The fade only
+        // says which of the legal spots is the better one - so when it has taken
+        // too many, the best of what it refused comes back rather than the cell
+        // coming out as a field with four trees short of being woods.
+        var taking = pool.Where(s => s.Roll < s.Fade).ToList();
+        if (taking.Count < Minimum)
+            taking.AddRange(pool.Where(s => s.Roll >= s.Fade)
+                                .OrderByDescending(s => s.Fade)
+                                .ThenBy(s => s.At.Y).ThenBy(s => s.At.X)
+                                .Take(Minimum - taking.Count));
+
+        foreach (Seedling s in taking)
+        {
             var node = new PropNode
             {
-                Art = Props.ArtOf(species, mirrored),
-                Foot = Props.FootOf(species, mirrored),
-                Size = Props.SizeOf(species),
-                RiseImage = Props.RiseOf(species),
+                Art = Props!.ArtOf(s.Species, s.Mirrored),
+                Foot = Props.FootOf(s.Species, s.Mirrored),
+                Size = Props.SizeOf(s.Species),
+                RiseImage = Props.RiseOf(s.Species),
                 Pixels = scale,
-                Ground = at,
-                Species = species,
+                Ground = s.At,
+                Species = s.Species,
+                Mirrored = s.Mirrored,
                 Cell = cell,
-                Position = Origin + at,
-                ZIndex = Mathf.RoundToInt(at.Y),
+                Position = Origin + s.At,
+                ZIndex = Mathf.RoundToInt(s.At.Y),
             };
             AddChild(node);
             _planted.Add(node);
+        }
+    }
+
+    /// <summary>
+    /// Whether the base stands inside the hexagon, not merely the point it is
+    /// measured at.
+    ///
+    /// Asked of the two horizontal extremes rather than of a radius, because the
+    /// flare is not centred on the trunk - see <see cref="PropSet"/>. Asked of
+    /// the cell rather than of an inset outline, because the cell is what
+    /// <see cref="HexField.CellAt"/> already answers exactly, slanted edges and
+    /// all; an inset hexagon would be a second description of the same shape.
+    /// </summary>
+    private bool RootsInside(Vector2I cell, Vector2 at, int species,
+                             bool mirrored, float scale)
+    {
+        (float left, float right) = Props!.RootOf(species, mirrored);
+        return Field!.CellAt(at - new Vector2(left * scale, 0.0f)) == cell
+            && Field.CellAt(at + new Vector2(right * scale, 0.0f)) == cell;
+    }
+
+    /// <summary>
+    /// Fade the trees on cells that have a tank in them, and let the rest come
+    /// back.
+    ///
+    /// A tank in the woods has to be visible, and every other way of arranging
+    /// that is worse: drawing it over the trees breaks the depth rule that makes
+    /// the forest read as ground at all, and hiding the trees leaves a tank
+    /// standing in a field. Fading keeps the cell wooded and the tank readable,
+    /// and it is the one place where the trees stop being ground and admit to
+    /// being a view of it.
+    ///
+    /// Per cell rather than per tree, and every tree on the cell rather than the
+    /// ones actually overlapping: which trees cross the tank changes with the
+    /// hull's heading, so a per-tree test would have trees blinking as the tank
+    /// turned on the spot.
+    /// </summary>
+    public void Reveal(IReadOnlySet<Vector2I> occupied, double delta)
+    {
+        if (_planted.Count == 0)
+            return;
+        // Framewise rather than a lerp on a stored target: the same integration
+        // the rest of the bench uses, so a paused frame does not step the fade.
+        double k = FadeTime <= 0.0 ? 1.0
+                 : 1.0 - Math.Exp(-delta / FadeTime);
+        foreach (PropNode tree in _planted)
+        {
+            float want = occupied.Contains(tree.Cell) ? Ghost : 1.0f;
+            float now = tree.Modulate.A;
+            float next = (float)(now + (want - now) * k);
+            if (Math.Abs(next - now) < 0.001f)
+                next = want;
+            if (next == now)
+                continue;
+            tree.Modulate = new Color(1.0f, 1.0f, 1.0f, next);
         }
     }
 
@@ -327,6 +391,7 @@ public sealed partial class PropNode : Node2D
     public float Pixels = 1.0f;   // image px to screen px
     public Vector2 Ground;      // field-local screen px of the foot
     public int Species;
+    public bool Mirrored;
     public Vector2I Cell;
 
     /// <summary>Height above the foot in image px, straight from the set.

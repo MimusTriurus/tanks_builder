@@ -158,10 +158,11 @@ public sealed partial class Main : Node2D
     private PropSet? _props;
     private Grove? _grove;
 
-    /// <summary>How much of the board is wooded, and whether a tree may stand
+    /// <summary>Whether the board grows trees at all, and whether one may stand
     /// where it would cross a tank on its own cell. Parked here for --terrain's
-    /// reason: both are read before the field exists.</summary>
-    private double _forest = 0.4;
+    /// reason: both are read before the field exists. How *much* forest there is
+    /// is the terrain paint - forest is a kind of ground, not a dial.</summary>
+    private bool _trees = true;
     private bool _clearFront;
 
     /// <summary>Whether the belts leave anything behind. On by default: a tank
@@ -736,19 +737,11 @@ public sealed partial class Main : Node2D
                 _paint = userArgs[++i];
             else if (userArgs[i] == "--no-ruts")
                 _rutsEnabled = false;
-            // Invariant culture, the trap named beside --hit-scale: this machine
-            // parses "0.4" as false and leaves the default, and two captures at
-            // two coverages come out byte for byte identical.
-            else if (userArgs[i] == "--forest" && i + 1 < userArgs.Length
-                     && double.TryParse(userArgs[i + 1],
-                                        NumberStyles.Float, CultureInfo.InvariantCulture,
-                                        out double wooded))
-            {
-                i++;
-                _forest = Math.Clamp(wooded, 0.0, 1.0);
-            }
+            // No number: how much forest there is comes from --terrain, because
+            // forest is one of the kinds of ground. This is the A/B - the same
+            // board with the tree layer off.
             else if (userArgs[i] == "--no-forest")
-                _forest = 0.0;
+                _trees = false;
             else if (userArgs[i] == "--clear-front")
                 _clearFront = true;
             else if (userArgs[i] == "--drive" && i + 1 < userArgs.Length)
@@ -805,7 +798,11 @@ public sealed partial class Main : Node2D
         _terrain = TerrainSet.Load(TerrainsRoot);
         GD.Print("terrain: " + _terrain.Note);
         _paints.AddRange(_terrain.Names);
-        if (_paint != TerrainSet.Mixed && !_terrain.Has(_paint))
+        // Forest is a kind too, and the one that is not a file - so it is not
+        // held against the loaded plates here. Whether it can be offered at all
+        // is settled a few lines down, once the props are in.
+        if (_paint != TerrainSet.Mixed && _paint != TerrainSet.Forest
+            && !_terrain.Has(_paint))
         {
             GD.PushWarning($"--terrain {_paint} is not one of "
                            + string.Join(", ", _terrain.Names) + "; using mixed");
@@ -814,8 +811,20 @@ public sealed partial class Main : Node2D
 
         _props = PropSet.Load(PropsRoot);
         GD.Print("props: " + _props.Note);
+        // Offered only when there is something to grow. A board scattered with
+        // cells that claim to be woods and are soil would be worse than one with
+        // no woods on it - the same argument that refuses a --terrain naming a
+        // kind that did not load.
+        _trees &= _props.Any;
+        if (_trees)
+            _paints.Add(TerrainSet.Forest);
+        if (_paint == TerrainSet.Forest && !_trees)
+        {
+            GD.PushWarning("--terrain forest with no tree art; using mixed");
+            _paint = TerrainSet.Mixed;
+        }
 
-        _field = new HexField { Terrain = _terrain, Paint = _paint };
+        _field = new HexField { Terrain = _terrain, Paint = _paint, Trees = _trees };
         AddChild(_field);
         _marks = new TrackMarks { Enabled = _rutsEnabled };
         AddChild(_marks);
@@ -825,7 +834,7 @@ public sealed partial class Main : Node2D
         _grove = new Grove
         {
             Field = _field, Props = _props, Origin = _origin,
-            Coverage = _forest, ClearFront = _clearFront,
+            Enabled = _trees, ClearFront = _clearFront,
         };
         AddChild(_grove);
 
@@ -1309,25 +1318,29 @@ public sealed partial class Main : Node2D
     ///
     /// The keep-out is the contact patch swept over every heading: half the belt
     /// length and the half-gauge are the two sides of it, so its radius is their
-    /// diagonal. Taken from the widest tank at its class scale, because a
-    /// clearing has to hold whichever one drives in - sized to the medium, the
-    /// heavy parks in the trees.
+    /// diagonal. The widest tank of the three, but at the size it was
+    /// <i>rendered</i> - the class scale is the bench's, named in CLAUDE.md as
+    /// something that will not exist in the game, and a clearing sized by it
+    /// would be 15% too big for the same reason the tanks are 15% apart.
+    ///
+    /// It matters more than it looks. At 1.15 the radius is 101 ground px
+    /// against a hexagon 107 tall, so the ring left over is six pixels deep at
+    /// the top - thinner than a tree's roots, and a wooded cell came out with
+    /// two trees on it whatever the lattice was set to. Unscaled it is 83, and
+    /// the ring is 24 deep.
     /// </summary>
     private void SowGrove()
     {
         if (_grove is null)
             return;
         double keepOut = 0.0, below = 0.0;
-        _grove.Spared.Clear();
         foreach (Vehicle vehicle in _vehicles)
         {
-            _grove.Spared.Add(vehicle.HomeCell);
-            double scale = vehicle.Sprite.BodyScale;
             double half = vehicle.Atlas.TrackLength * 0.5;
             double arm = vehicle.Atlas.TrackArm;
             if (half > 0.0 && arm > 0.0)
-                keepOut = Math.Max(keepOut, Math.Sqrt(half * half + arm * arm) * scale);
-            below = Math.Max(below, ReachBelow(vehicle.Atlas) * scale);
+                keepOut = Math.Max(keepOut, Math.Sqrt(half * half + arm * arm));
+            below = Math.Max(below, ReachBelow(vehicle.Atlas));
         }
         if (keepOut > 0.0)
             _grove.KeepOut = keepOut;
@@ -1336,7 +1349,20 @@ public sealed partial class Main : Node2D
         _grove.Plant();
     }
 
-    /// <summary>Cells carrying trees, clearings and thickets together.</summary>
+    /// <summary>The cell each tank is standing in right now, taken from its
+    /// contact patch rather than from the cell it last reached - the same
+    /// reading the depth order and the selection ring already use, and for the
+    /// same reason: most of an order is spent between two cells.</summary>
+    private HashSet<Vector2I> Standing()
+    {
+        var cells = new HashSet<Vector2I>();
+        foreach (Vehicle vehicle in _vehicles)
+            cells.Add(_field.ClampCell(
+                _field.CellAt(vehicle.GroundPoint - _origin)));
+        return cells;
+    }
+
+    /// <summary>Cells carrying trees.</summary>
     private int Wooded()
     {
         if (_grove is null)
@@ -1347,6 +1373,27 @@ public sealed partial class Main : Node2D
             if (_grove.IsForest(new Vector2I(q, r)))
                 n++;
         return n;
+    }
+
+    /// <summary>Trees on the thinnest wooded cell. The number the minimum is
+    /// about: a total says nothing about the cell that came out a field.
+    /// </summary>
+    private int Thinnest()
+    {
+        if (_grove is null || _grove.Planted == 0)
+            return 0;
+        var counts = new Dictionary<Vector2I, int>();
+        foreach (PropNode tree in _grove.Trees)
+            counts[tree.Cell] = counts.GetValueOrDefault(tree.Cell) + 1;
+        int least = int.MaxValue;
+        for (int q = 0; q < _field.Columns; q++)
+        for (int r = 0; r < _field.Rows; r++)
+        {
+            var cell = new Vector2I(q, r);
+            if (_grove.IsForest(cell))
+                least = Math.Min(least, counts.GetValueOrDefault(cell));
+        }
+        return least == int.MaxValue ? 0 : least;
     }
 
     /// <summary>How far a tank reaches below its own contact point, in tile px.
@@ -1650,19 +1697,12 @@ public sealed partial class Main : Node2D
         _field.QueueRedraw();
     }
 
-    /// <summary>Everywhere the driven tank may not go: the other tanks, and the
-    /// thickets. One set rather than two arguments, because a route has no
-    /// reason to care which kind of thing is in the way - and because the
-    /// destination test inside <see cref="HexField.FindPath"/> then refuses a
-    /// click into the woods for free, the same way it refuses a click onto
-    /// another tank.</summary>
-    private HashSet<Vector2I> Barred()
-    {
-        var blocked = new HashSet<Vector2I>(Vehicle.Occupied(_vehicles, Active));
-        if (_grove is not null)
-            blocked.UnionWith(_grove.Impassable());
-        return blocked;
-    }
+    /// <summary>Everywhere the driven tank may not go. The other tanks and
+    /// nothing else: a forest cell has a clearing in it by construction, so
+    /// every hex on the board is drivable and the woods cost movement nothing
+    /// yet. When they do, this is where that goes.</summary>
+    private HashSet<Vector2I> Barred() =>
+        new(Vehicle.Occupied(_vehicles, Active));
 
     private void CancelOrder() => CancelOrder(Active);
 
@@ -2439,7 +2479,6 @@ public sealed partial class Main : Node2D
         ["--destroy"] = new[] { "armour.destroy" },
         ["--turret-sound"] = new[] { "sound.turret_motor" },
         ["--terrain"] = new[] { "ground.terrain" },
-        ["--forest"] = new[] { "ground.forest" },
         ["--no-forest"] = new[] { "ground.forest" },
         ["--clear-front"] = new[] { "ground.clearfront" },
     };
@@ -2887,20 +2926,24 @@ public sealed partial class Main : Node2D
                 _paint = _field.Paint;
                 _field.QueueRedraw();
             });
-        // Two sliders rather than one, because they answer different questions:
-        // how much of the board is wooded, and how much of that is woods a tank
-        // cannot drive into. Collapsing them would make "more forest" also mean
-        // "less board", which is the decision this pair exists to keep apart.
-        ui.Slide("ground.forest", "wooded cells  (--forest)", 0.0, 1.0, 0.05,
-            () => _grove?.Coverage ?? 0.0,
-            v => { _forest = v; if (_grove is not null) { _grove.Coverage = v; SowGrove(); } },
-            "x", () => _grove is null ? "" : $"{Wooded()} of "
-                + $"{_field.Columns * _field.Rows} cells, {_grove.Planted} trees");
-        ui.Slide("ground.thicket", "of those, impassable", 0.0, 1.0, 0.05,
-            () => _grove?.Thicket ?? 0.0,
-            v => { if (_grove is not null) { _grove.Thicket = v; SowGrove(); } },
-            "x", () => _grove is null ? ""
-                : $"{_grove.Impassable().Count} cells no tank can enter");
+        // A switch, not a dial: how much forest there is comes from the terrain
+        // list above, because forest is one of the kinds of ground. This is the
+        // A/B - the same board with the trees taken off it.
+        ui.Toggle("ground.forest", "trees  (--no-forest)",
+            () => _grove?.Enabled == true,
+            on =>
+            {
+                if (_grove is null) return;
+                _grove.Enabled = on;
+                _field.Trees = on;
+                SowGrove();
+                _field.QueueRedraw();
+            });
+        ui.Slide("ground.least", "trees per wooded cell, at least", 0.0, 10.0, 1.0,
+            () => _grove?.Minimum ?? 0,
+            v => { if (_grove is not null) { _grove.Minimum = (int)v; SowGrove(); } },
+            "", () => _grove is null ? "" : $"{Wooded()} wooded cells, "
+                + $"{_grove.Planted} trees, {Thinnest()} on the emptiest");
         // The rule that cannot be had, kept as a switch so that is visible
         // rather than asserted. See Grove.ClearFront: a 111px tree needs 142px
         // of clearance in front of a tank and a hexagon offers 54, so switching
@@ -3163,7 +3206,8 @@ public sealed partial class Main : Node2D
                      // board whose props were all refused and a board sown at
                      // zero coverage are one empty picture and three faults.
                      + $"  forest {_grove?.Planted ?? 0}t/{Wooded()}c"
-                     + $"/{_grove?.Impassable().Count ?? 0}x"
+                     + $"/{Thinnest()}min"
+                     + (_grove?.Enabled == true ? "" : "!off")
                      + (_grove?.ClearFront == true ? "!clear" : "")
                      // '!off' rather than nothing, because a still camera and a
                      // switched-off one are the same two zeroes - the marker the
@@ -3225,6 +3269,13 @@ public sealed partial class Main : Node2D
         // tank got to this frame rather than last frame - the same ordering the
         // belts and the audio already need, and for the same reason.
         AdvanceShells(delta);
+
+        // Same ordering argument, one step further out: which cells are occupied
+        // is a fact about where the tanks ended up, so the wood clears for the
+        // cell a tank is entering rather than the one it left. Live cells rather
+        // than reached ones - a tank spends most of an order between two, and
+        // the trees have to be out of the way for the crossing, not after it.
+        _grove?.Reveal(Standing(), delta);
 
         // The view last of all, after everything that could have fired this
         // frame: a shot has to reach the spring on the frame it goes off, or the

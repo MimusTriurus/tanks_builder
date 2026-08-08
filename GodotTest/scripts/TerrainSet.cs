@@ -63,6 +63,12 @@ public sealed class TerrainSet
     /// <summary>The paint that is not one kind: every cell picks its own.</summary>
     public const string Mixed = "mixed";
 
+    /// <summary>The kind that is not a picture: soil with trees standing on it.
+    /// Named here because this is where kinds are named, but it has no file and
+    /// <see cref="Has"/> is false for it - see <see cref="HexField.KindAt"/>.
+    /// </summary>
+    public const string Forest = "forest";
+
     /// <summary>What a board comes up as. A kind rather than the mix, because
     /// the mix is two kinds until somebody draws a third and it reads as two
     /// biomes rather than as one ground with variety in it. Falls back to the
@@ -243,13 +249,21 @@ public sealed class TerrainSet
     /// can be diffed, and a board that reshuffled itself would be measuring
     /// itself. It also means no map has to be stored to have one.
     /// </summary>
-    public string MixedAt(Vector2I cell)
+    public string MixedAt(Vector2I cell) => MixedAt(cell, null);
+
+    /// <summary>The same, with one kind that has no file thrown into the hat -
+    /// the forest. Passed in rather than held here, because a set of drawn
+    /// ground has no business knowing what else the board can be made of.
+    /// </summary>
+    public string MixedAt(Vector2I cell, string? extra)
     {
-        if (_names.Count == 0)
+        int kinds = _names.Count + (extra is null ? 0 : 1);
+        if (kinds == 0)
             return Plain;
         int h = cell.X * 73856093 ^ cell.Y * 19349663;
         h = (h ^ (h >> 13)) * 1274126177;
         h ^= h >> 16;
-        return _names[(int)((uint)h % (uint)_names.Count)];
+        int pick = (int)((uint)h % (uint)kinds);
+        return pick < _names.Count ? _names[pick] : extra!;
     }
 }
