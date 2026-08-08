@@ -99,9 +99,30 @@ public sealed partial class EffectLayer : Node2D
 
     /// <summary>Where this layer is drawn from, in pixels off the anchor. The
     /// scars work this out per mark instead - see <see cref="DrawMarks"/>.</summary>
-    private Vector2 Place => Tank is not null
-                             && Clock is Clocks.HitBurst or Clocks.HitDust
-        ? Tank.HitOffset : Vector2.Zero;
+    /// <summary>
+    /// Whether this layer is the tank rather than something happening to it -
+    /// the belts, the turret, the tube, the marks on the armour.
+    ///
+    /// It decides one thing: that the layer chars with the hull, by taking the
+    /// parent's material instead of its own. Splitting it this way rather than
+    /// listing names at the point of use keeps the rule where the layers are
+    /// declared, and the rule is worth stating in one line: paint burns, light
+    /// does not. Tinting the flame or the burst would darken the very thing a
+    /// wreck needs bright.
+    ///
+    /// The marks are in, and that is not an oversight: a scar is paint on the
+    /// plate, so it burns with the plate it is on.
+    /// </summary>
+    public bool Armour;
+
+    private Vector2 Place => Tank is null ? Vector2.Zero
+        : Clock is Clocks.HitBurst or Clocks.HitDust ? Tank.HitOffset
+        // The turret and the tube it carries, knocked off the ring on a wreck.
+        // Here rather than on the node's own position for the reason the hit
+        // offset is: a child draws on its own schedule, so a value written
+        // during the parent's draw can be a frame stale.
+        : Clock is Clocks.Body or Clocks.Recoil ? Tank.TurretSlip
+        : Vector2.Zero;
 
     public static EffectLayer Additive(string layer) => new()
     {
@@ -185,6 +206,7 @@ public sealed partial class EffectLayer : Node2D
         Layer = layer,
         FollowsHull = true,
         Clock = Clocks.Scar,
+        Armour = true,
     };
 
     /// <summary>
@@ -206,6 +228,7 @@ public sealed partial class EffectLayer : Node2D
         Layer = layer,
         FollowsHull = true,
         Clock = Clocks.Track,
+        Armour = true,
     };
 
     /// <summary>
@@ -266,6 +289,7 @@ public sealed partial class EffectLayer : Node2D
         Layer = layer,
         FollowsHull = false,          // it has its own heading, that is the point
         Clock = Clocks.Body,
+        Armour = true,
     };
 
     /// <summary>
@@ -293,6 +317,7 @@ public sealed partial class EffectLayer : Node2D
         Layer = layer,
         FollowsHull = false,
         Clock = Clocks.Recoil,
+        Armour = true,
     };
 
     /// <summary>The plate a scar layer belongs to, or "" for any other
@@ -301,7 +326,13 @@ public sealed partial class EffectLayer : Node2D
         layer.StartsWith("scar_", StringComparison.Ordinal)
             ? layer["scar_".Length..] : "";
 
-    public override void _Ready() => TextureFilter = TextureFilterEnum.Linear;
+    public override void _Ready()
+    {
+        TextureFilter = TextureFilterEnum.Linear;
+        // The tank's own layers char with it, by wearing the hull's material
+        // rather than one each. See Armour.
+        UseParentMaterial = Armour;
+    }
 
     /// <summary>The phase this layer should be showing, or -1 for nothing.</summary>
     private int Wanted
@@ -422,10 +453,19 @@ public sealed partial class EffectLayer : Node2D
         // Density is pulled here rather than pushed into Modulate for the same
         // reason the phase is: a child redraws on its own schedule, and a value
         // written during the parent's draw can be a frame stale.
-        // Only the exhaust is thinned: its density is the throttle showing. The
-        // fire has no such input - see BurnLoop.
-        var tint = new Color(1.0f, 1.0f, 1.0f,
-            Clock == Clocks.Exhaust ? Tank.ExhaustDensity : 1.0f);
+        // The exhaust's density is the throttle showing. The fire pair has no
+        // input from the engine - see BurnLoop - but it does have one from the
+        // wreck: a hull that has finished burning stops flaming and goes on
+        // smoking, so the flame fades out and the column thins to a floor. The
+        // two are separate numbers because they end differently, which is the
+        // same reason they are two layers.
+        var tint = new Color(1.0f, 1.0f, 1.0f, Clock switch
+        {
+            Clocks.Exhaust => Tank.ExhaustDensity,
+            Clocks.BurningFire => Tank.FireDensity,
+            Clocks.BurningSmoke => Tank.SmokeDensity,
+            _ => 1.0f,
+        });
         // The one layer drawn away from the anchor, and it is pulled here for
         // the reason the phase is - a child redraws on its own schedule. So is
         // the calibre, which is a scale on the rect rather than on the node:

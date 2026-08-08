@@ -136,6 +136,11 @@ public sealed class Vehicle
     public Vector2 GroundPoint =>
         Sprite.Position + Atlas.GroundOffset * Sprite.BodyScale;
 
+    /// <summary>Whether it has been killed, and how long ago. Per tank for the
+    /// reason the fire is, and more so: a wreck beside an intact tank is the
+    /// whole of what this shows.</summary>
+    public readonly Wreck Wreck = new();
+
     /// <summary>Whether this one is on fire. Per tank rather than per harness:
     /// key J burns the tank being driven, and a bench where all three catch at
     /// once could not show a burning tank next to an intact one.</summary>

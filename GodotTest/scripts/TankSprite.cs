@@ -182,6 +182,20 @@ public sealed partial class TankSprite : Node2D
     /// <summary>Whether this tank is on fire.</summary>
     public bool Burning;
 
+    /// <summary>How much of the flame and of its column survive. The flame goes
+    /// out on a wreck that has finished burning and the column thins and stays -
+    /// see <see cref="Wreck"/>. Pulled by the layer at draw time like
+    /// <see cref="ExhaustDensity"/>, and for the same reason.</summary>
+    public float FireDensity = 1.0f;
+    public float SmokeDensity = 1.0f;
+
+    /// <summary>Where the turret sits off its ring, in pixels. Nonzero only on a
+    /// wreck: the turret has been knocked askew, which is the cheapest strong
+    /// read there is because the turret is already its own layer. The gun tube
+    /// takes it too - it is bolted to the turret, so it goes where the turret
+    /// goes.</summary>
+    public Vector2 TurretSlip = Vector2.Zero;
+
     /// <summary>Phases of the burning wreck's two loops, or -1 when it is not
     /// burning. Two numbers rather than one because the flame and the column run
     /// at different rates over the same rendered phases - see
@@ -335,6 +349,78 @@ public sealed partial class TankSprite : Node2D
     /// is a comparison, not a measurement.</summary>
     public bool ShowShadow = true;
 
+    /// <summary>
+    /// What charring does to the paint, as a shader on the tank's own layers.
+    ///
+    /// A shader rather than <c>Modulate</c> because a modulate is a per-channel
+    /// multiply and cannot desaturate: the paint here is green, and scaling a
+    /// green tank down gives a dark green tank. Burnt metal has no hue left, so
+    /// the colour has to be pulled toward its own luminance first and darkened
+    /// after.
+    ///
+    /// <c>darken</c> was chosen off the picture, and it is <em>higher</em> than
+    /// the first guess - the opposite of what the soot on the plates needed.
+    /// Measured on the hull band against the same frame alive: 0.26 takes the
+    /// mean from 33 down to 7.8 with fifteen levels of range left across the
+    /// whole hull, and that is not a burnt tank, it is a hole in the picture.
+    /// 0.55 lands near 18 and the form survives - the cant of the turret and the
+    /// tube still read. A scar has a lit plate around it to be dark against; a
+    /// wreck has nothing behind it but pale ground, so it has to carry its own
+    /// shape.
+    ///
+    /// Saturation goes to zero rather than most of the way. Burnt metal has no
+    /// hue, and the green that survives at 0.85 reads as a tank in shadow -
+    /// which is the exact failure a tint is prone to and the whole reason this
+    /// is a shader rather than a modulate. Measured: 32 levels of saturation
+    /// alive against 10 charred, and what is left of that is the ground showing
+    /// through the antialiased edge.
+    ///
+    /// It only ever touches the tank. The additive layers - flame, flash, burst -
+    /// must not be tinted at all: darkening light is the opposite of what the
+    /// wreck needs, since a dark hull under an additive flame is precisely what
+    /// makes the flame work. That falls out of which layers ask for the parent's
+    /// material; see <see cref="EffectLayer.Armour"/>.
+    /// </summary>
+    private static readonly Shader CharShader = new()
+    {
+        Code = """
+            shader_type canvas_item;
+
+            uniform float burn : hint_range(0.0, 1.0) = 0.0;
+            uniform float darken : hint_range(0.0, 1.0) = 0.55;
+            uniform float grey : hint_range(0.0, 1.0) = 1.0;
+
+            void fragment() {
+                vec4 tex = texture(TEXTURE, UV);
+                float lum = dot(tex.rgb, vec3(0.299, 0.587, 0.114));
+                vec3 soot = mix(tex.rgb, vec3(lum), grey) * darken;
+                COLOR = vec4(mix(tex.rgb, soot, burn), tex.a) * COLOR;
+            }
+            """,
+    };
+
+    /// <summary>This tank's own instance of it. Per sprite and not shared: the
+    /// uniform is how charred *this* hull is, and one material across the board
+    /// would burn all three the moment one died.</summary>
+    private ShaderMaterial? _char;
+
+    private double _charAt = -1.0;
+
+    /// <summary>How charred the paint is, 0 clean to 1 burnt out.</summary>
+    public double Char
+    {
+        get => Math.Max(_charAt, 0.0);
+        set
+        {
+            double want = Math.Clamp(value, 0.0, 1.0);
+            if (want == _charAt)
+                return;
+            _charAt = want;
+            _char?.SetShaderParameter("burn", want);
+            QueueRedraw();
+        }
+    }
+
     public static readonly string[] LayerOrder =
         new[] { AtlasSet.ShadowName }
             .Concat(AtlasSet.TrackNames).Concat(new[] { "turret", AtlasSet.BarrelName })
@@ -347,7 +433,11 @@ public sealed partial class TankSprite : Node2D
     /// <summary>Which kind of layer each name is. Kept beside
     /// <see cref="LayerOrder"/> so there is one list, not a list and a
     /// hand-written sequence that has to agree with it.</summary>
-    private static EffectLayer MakeLayer(string layer) => layer switch
+    /// <remarks>Internal rather than private so the self-test can ask, for
+    /// every name in <see cref="LayerOrder"/>, whether it chars with the hull.
+    /// That is one claim about a list, and reading it off the list is the only
+    /// way it cannot drift from it.</remarks>
+    internal static EffectLayer MakeLayer(string layer) => layer switch
     {
         AtlasSet.ShadowName => EffectLayer.Shadow(layer),
         AtlasSet.ExhaustName => EffectLayer.Exhaust(layer),
@@ -690,6 +780,14 @@ public sealed partial class TankSprite : Node2D
         // snap sideways one at a time as the shear changes, and that shimmer
         // reads as wobble on top of whatever the pitch is doing.
         TextureFilter = TextureFilterEnum.Linear;
+
+        // The hull is drawn by this node itself, so the char material goes here
+        // and the tank's other layers take it by asking for their parent's - see
+        // EffectLayer.Armour. Everything else keeps its own, which is what stops
+        // the additive layers being darkened along with the paint.
+        _char = new ShaderMaterial { Shader = CharShader };
+        _char.SetShaderParameter("burn", 0.0);
+        Material = _char;
 
         // Children draw after the parent and in order, so adding them in
         // LayerOrder is what puts them on screen in it. See there.

@@ -1901,6 +1901,86 @@ public static class SelfTest
                 + $" {atlas.ExhaustPhases * atlas.Count}, highest {plumeTiles.Max()}");
         }
 
+        GD.Print("the wreck");
+        {
+            // Death is an event and a wreck is a state, and the whole of this
+            // prototype is that everything is a function of one age. So what is
+            // asserted is the shape of that function, not any number in it.
+            var hulk = new Wreck();
+            Check("a tank opens intact",
+                !hulk.Dead && hulk.Char == 0.0, $"dead {hulk.Dead}");
+            // On a live tank the flame is at full: being on fire and being dead
+            // are different states and only one of them ends, which is what
+            // lets key J burn an intact hull without it settling into a wreck.
+            Check("a live tank on fire burns at full",
+                hulk.Blaze == 1.0 && hulk.Smoke == 1.0,
+                $"blaze {hulk.Blaze:F2}, smoke {hulk.Smoke:F2}");
+
+            Check("the killing blow lands once", hulk.Kill() && !hulk.Kill(),
+                "a second round restarted the death");
+            for (int i = 0; i < 60; i++)
+                hulk.Update(Wreck.CharSeconds / 60.0);
+            Check("the paint chars and stops charring",
+                Math.Abs(hulk.Char - 1.0) < 1e-6, $"char {hulk.Char:F3}");
+            // Not a multiple of the frame step, and that is the point: snapping
+            // to a rendered heading is what a live turret does, so a dead one
+            // sitting square on a lane looks alive.
+            Check("the turret is knocked off the rendered headings",
+                Wreck.Cant % (360.0 / 24.0) > 1.0 && Wreck.Cant % 60.0 > 1.0,
+                $"{Wreck.Cant} deg");
+
+            // The flame goes out and the column does not. That asymmetry is the
+            // effect: a burnt-out hull smoking is what says where one died from
+            // across the board, and a wreck that goes quiet is a tank that was
+            // never there.
+            for (int i = 0; i < 3600; i++)
+                hulk.Update(1.0 / 60.0);
+            Check("the flame goes out", hulk.Blaze == 0.0, $"{hulk.Blaze:F3}");
+            // Against the number and against zero, because comparing it to the
+            // constant it came from cannot fail: a floor of nought is a wreck
+            // that stops smoking, which is a tank that was never there, and a
+            // floor of one is a column that never thinned.
+            Check("the column thins to a floor and stays",
+                Math.Abs(hulk.Smoke - Wreck.SmokeFloor) < 1e-6
+                && hulk.Smoke > 0.2 && hulk.Smoke < 0.9,
+                $"{hulk.Smoke:F3} against {Wreck.SmokeFloor:F2}");
+            hulk.Reset();
+            Check("repair puts it back",
+                !hulk.Dead && hulk.Char == 0.0 && hulk.Blaze == 1.0,
+                $"dead {hulk.Dead}, char {hulk.Char:F2}");
+        }
+        {
+            // The one thing the char must not touch. An additive layer darkened
+            // along with the paint is the opposite of what a wreck needs - the
+            // dark hull is precisely what makes the flame on it work - and the
+            // failure would look like a fire that has gone dull rather than like
+            // a tint reaching too far.
+            var armour = new List<string>();
+            var lit = new List<string>();
+            foreach (string name in TankSprite.LayerOrder)
+            {
+                EffectLayer made = TankSprite.MakeLayer(name);
+                (made.Armour ? armour : lit).Add(name);
+                made.QueueFree();
+            }
+            Check("the tank's own layers char with the hull",
+                AtlasSet.TrackNames.All(armour.Contains)
+                && armour.Contains("turret") && armour.Contains(AtlasSet.BarrelName)
+                && AtlasSet.ScarNames.All(armour.Contains),
+                string.Join(", ", armour));
+            Check("nothing that emits light is charred",
+                !lit.Any(n => armour.Contains(n))
+                && !armour.Contains(AtlasSet.FireName)
+                && !armour.Contains(AtlasSet.BurstName)
+                && !armour.Contains("flash")
+                // and the ground under it is not the tank either
+                && !armour.Contains(AtlasSet.ShadowName),
+                string.Join(", ", lit));
+            Check("the hull carries the char material itself",
+                tank.Material is ShaderMaterial,
+                tank.Material?.GetType().Name ?? "none");
+        }
+
         GD.Print("the burning wreck");
         var fire = new BurnLoop { Phases = 12 };
         var fireSeen = new HashSet<int>();

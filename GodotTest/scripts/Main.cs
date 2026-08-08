@@ -540,6 +540,13 @@ public sealed partial class Main : Node2D
     /// here until the vehicles are built.
     /// </summary>
     private bool _burnAtStart;
+
+    /// <summary>Whether the driven tank opens already destroyed. Held here
+    /// rather than written straight through the property, for the reason every
+    /// other start-up state is: the flags are parsed before the vehicles exist,
+    /// and reaching for "the driven tank" then is a read of an empty list -
+    /// which hung --capture rather than failing it.</summary>
+    private bool _deadAtStart;
     private double _trembleAtStart = 1.0;
     private double _recoilAtStart = 1.0;
     private bool _rollOnly;
@@ -603,6 +610,8 @@ public sealed partial class Main : Node2D
                 _recoilTube = false;
             else if (userArgs[i] == "--burning")
                 _burnAtStart = true;
+            else if (userArgs[i] == "--destroy")
+                _deadAtStart = true;
             else if (userArgs[i] == "--fire")
                 _fireAtStart = true;
             else if (userArgs[i] == "--hit" && i + 1 < userArgs.Length
@@ -989,6 +998,10 @@ public sealed partial class Main : Node2D
                 vehicle.Rumble.Amplitude = 0.0;
         }
         Active.Burning = _burnAtStart;
+        // After the burning flag, because a wreck lights its own fire and would
+        // otherwise be put out by a flag that was not asked for.
+        if (_deadAtStart)
+            Kill(Active);
         if (_startTurret is not null)
             _tank.TurretFacing = Mod(_startTurret.Value, 360.0);
         for (int i = 0; i < _damageAtStart; i++)
@@ -1052,6 +1065,12 @@ public sealed partial class Main : Node2D
     /// </summary>
     private void Engage(Vehicle shooter, Vehicle? target)
     {
+        // Neither end of an engagement may be a wreck: a burnt-out hull has no
+        // gun, and shooting at one is a fight with nothing on the other side of
+        // it. Both refusals land here rather than at the three call sites, which
+        // is what this one way in is for.
+        if (shooter.Wreck.Dead || target?.Wreck.Dead == true)
+            target = null;
         shooter.Target = ReferenceEquals(shooter, target) ? null : target;
         shooter.Solution = Gunnery.None;
         if (shooter == Active)
@@ -1493,7 +1512,9 @@ public sealed partial class Main : Node2D
 
     private void OrderMoveTo(Vector2I target)
     {
-        if (!_field.InBounds(target) || target == _cell)
+        // A wreck does not take orders. Refused here rather than at the click,
+        // so the panel and a future script get the same answer the mouse does.
+        if (!_field.InBounds(target) || target == _cell || Active.Wreck.Dead)
             return;
         // Round the others rather than through them. A blocked destination gives
         // no path at all, which is why a click on an occupied cell is read as a
@@ -1706,7 +1727,11 @@ public sealed partial class Main : Node2D
     /// no threshold anywhere for the effect to switch on or off at.</summary>
     private void UpdateTremble(Vehicle v, double delta)
     {
-        if (!_trembleEnabled)
+        // A dead engine does not tremble. Of every switch this state throws,
+        // this is the one that carries most: it is on by default precisely
+        // because a tank with nothing moving on it reads as wrong, and that is
+        // exactly what a wreck is supposed to read as.
+        if (!_trembleEnabled || v.Wreck.Dead)
         {
             if (v.Sprite.TremblePitch == 0.0 && v.Sprite.TrembleRoll == 0.0)
                 return;
@@ -1727,7 +1752,9 @@ public sealed partial class Main : Node2D
     /// and the density, so there is no threshold to switch on at.</summary>
     private void UpdateExhaust(Vehicle v, double delta)
     {
-        if (!_exhaustEnabled || !v.Atlas.HasExhaust)
+        // A wreck's engine is not idling, and this is the plainest of the
+        // several ways the bench says so.
+        if (!_exhaustEnabled || v.Wreck.Dead || !v.Atlas.HasExhaust)
         {
             if (v.Sprite.ExhaustPhase < 0)
                 return;
@@ -1739,6 +1766,74 @@ public sealed partial class Main : Node2D
         v.Exhaust.Advance(v.Speed, delta);
         v.Sprite.ExhaustPhase = v.Exhaust.Frame;
         v.Sprite.ExhaustDensity = (float)v.Exhaust.Density;
+    }
+
+    /// <summary>
+    /// Kill one tank.
+    ///
+    /// A breach does it, and nothing else - see <see cref="Land"/>. That is an
+    /// assumption and worth naming as one: the bench has no hit points, and
+    /// inventing some would be a second damage model beside the one the class
+    /// matchup already is. Taking the deepest level as death makes the matchup
+    /// table decide who can kill whom, which is what it was written to say - a
+    /// light gun that can only ever scorch a heavy cannot destroy one either,
+    /// and now that is visible instead of implied.
+    ///
+    /// Everything here is the tank ceasing to be a machine. Most of the read is
+    /// in this list rather than in any pixel: on this field a live tank trembles,
+    /// smokes, scans with its turret and rocks when it moves.
+    /// </summary>
+    private void Kill(Vehicle v)
+    {
+        if (!v.Wreck.Kill())
+            return;
+        v.Path.Clear();
+        v.PathStep = 0;
+        v.Speed = 0.0;
+        v.Target = null;
+        v.Scan.Suspend();
+        // It burns because it has just been destroyed, not because the key was
+        // pressed - and the key can no longer put it out, since a wreck that
+        // stops smouldering on a keystroke is a switch pretending to be a state.
+        v.Burning = true;
+        // Nobody goes on shooting at a wreck. Otherwise the engagement runs for
+        // ever against a target that cannot answer, which reads as a gunnery
+        // fault rather than as a fight that is over.
+        foreach (Vehicle other in _vehicles)
+            if (other.Target == v)
+                other.Target = null;
+        // Counted off the shells this hull took, like the impact takes are: the
+        // three recordings are variety, and the same one every time reads as one
+        // event rather than as three tanks dying.
+        v.Audio?.Destroyed(1 + v.HitCount % 3);
+    }
+
+    /// <summary>
+    /// The wreck settling, once a frame.
+    ///
+    /// Everything it writes is a function of one age - see <see cref="Wreck"/> -
+    /// so there is no table here and no second clock. It runs before the burn so
+    /// the densities it sets are this frame's rather than last frame's, the same
+    /// ordering the audio and the layers already need.
+    /// </summary>
+    private static void UpdateWreck(Vehicle v, double delta)
+    {
+        if (!v.Wreck.Dead)
+            return;
+        v.Wreck.Update(delta);
+        TankSprite s = v.Sprite;
+        s.Char = v.Wreck.Char;
+        s.FireDensity = (float)v.Wreck.Blaze;
+        s.SmokeDensity = (float)v.Wreck.Smoke;
+        // The turret is knocked round and settles off its ring. Written every
+        // frame rather than once at the kill, because the hull can still be
+        // shoved about by a shell landing on it and the cant is relative to it.
+        s.TurretSlip = new Vector2(0.0f, (float)v.Wreck.SlipNow);
+        s.TurretFacing = Mod(s.HullFacing + v.Wreck.CantNow, 360.0);
+        // Once the flame is out there is nothing left to advance but the column,
+        // and it is still asked for: the smoke is what says where a tank died
+        // from the other side of the board.
+        s.QueueRedraw();
     }
 
     /// <summary>Runs every frame like the exhaust, but takes no speed: see
@@ -2066,6 +2161,11 @@ public sealed partial class Main : Node2D
         // the victim's, so it counts shells into this hull however many guns are
         // pointed at it.
         victim.Audio?.Struck(got, victim.HitCount);
+        // A breach kills, and only a breach. See Kill for why that is the whole
+        // rule: it hands the question to the matchup table, which was written to
+        // answer it.
+        if (got >= victim.Atlas.ScarLevels - 1)
+            Kill(victim);
     }
 
     /// <summary>A round that has flown its path. Nothing is decided here - see
@@ -2103,7 +2203,10 @@ public sealed partial class Main : Node2D
     {
         if (v.ReloadLeft > 0.0)
             v.ReloadLeft = Math.Max(0.0, v.ReloadLeft - delta);
-        if (v.Target is null)
+        // A wreck holds no target and cannot be given one, so this is belt and
+        // braces - but the gate is stated here as well as at the kill because
+        // the gun is the one thing that must not go off from a burnt-out hull.
+        if (v.Target is null || v.Wreck.Dead)
         {
             v.Solution = Gunnery.None;
             return;
@@ -2187,6 +2290,7 @@ public sealed partial class Main : Node2D
         ["--shake"] = new[] { "effects.camera_shake", "effects.shake_level" },
         ["--tracer"] = new[] { "gunnery.tracer" },
         ["--hit-scale"] = new[] { "armour.calibre" },
+        ["--destroy"] = new[] { "armour.destroy" },
         ["--turret-sound"] = new[] { "sound.turret_motor" },
         ["--terrain"] = new[] { "ground.terrain" },
     };
@@ -2554,6 +2658,19 @@ public sealed partial class Main : Node2D
         // panel can aim and the key can sweep.
         ui.PressPair("armour.hit", "take a hit", () => TakeHit(HitFrom),
                      "repair", () => _tank.Repair());
+        // No key. A-Z are gone, and so are the brackets and the backslash, and
+        // the next free key is no longer a mnemonic - the tracer and the
+        // traverse motor took the same answer. A button rather than a switch
+        // because destruction happens rather than is; putting it back is what
+        // reset and repair are for.
+        ui.Press("armour.destroy", "destroy this tank  (--destroy)",
+                 () => Kill(Active));
+        ui.Readout("armour.wreck", () =>
+            !Active.Wreck.Dead ? "intact"
+            : $"wrecked {Active.Wreck.Age:F1}s ago"
+              + $"   char {Active.Wreck.Char:F2}"
+              + $"   flame {Active.Wreck.Blaze:F2}, column {Active.Wreck.Smoke:F2}"
+              + $"\nturret knocked {Active.Wreck.CantNow:F0} deg off the hull");
         ui.Readout("armour.info", () =>
         {
             AtlasSet a = _tank.Atlas!;
@@ -2699,7 +2816,7 @@ public sealed partial class Main : Node2D
         // A tank with a target is laying its gun, and the scan is what it does
         // with nothing to look at - so the target suspends it on that tank only,
         // exactly as the spin and the mouse suspend it on the driven one.
-        if (!_scanEnabled || v.Moving || v.Target is not null
+        if (!_scanEnabled || v.Moving || v.Target is not null || v.Wreck.Dead
             || (v == Active && (_spinning || _aimWithMouse)))
         {
             v.Scan.Suspend();
@@ -2793,6 +2910,13 @@ public sealed partial class Main : Node2D
                      + $"  tube {_tank.RecoilPhase,2}"
                      + $"{(_recoilTube ? "" : "!off")}"
                      + $"  burn {_tank.FirePhase,2}/{_tank.BurnPhase,2}"
+                     // The wreck, and the char beside it: a tank that is dead
+                     // and a tank that is dead and has finished blackening are
+                     // the same word and different pictures, and the panel is
+                     // not there under --capture.
+                     + $"  wreck {(Active.Wreck.Dead ? $"{Active.Wreck.Age,5:F1}s" : " alive")}"
+                     + $" c{Active.Wreck.Char:F2}"
+                     + $" f{_tank.FireDensity:F2}"
                      + $"  hit {_tank.HitPhase,2}@{(_hit.Face == "" ? "-" : _hit.Face)}"
                      + $" x{_hit.Scale:F2}"
                      // Sound has no screenshot, so this is the only place it can
@@ -2870,6 +2994,8 @@ public sealed partial class Main : Node2D
             _marks?.Lay(v, belts, delta);
             UpdateTremble(v, delta);
             UpdateExhaust(v, delta);
+            // Before the burn, so the densities it writes are this frame's.
+            UpdateWreck(v, delta);
             UpdateBurn(v, delta);
             UpdateScan(v, delta);
             // Before the shot, because it is what pulls the trigger: the gun
@@ -3181,6 +3307,13 @@ public sealed partial class Main : Node2D
             s.TrackPhaseRight = -1;
             s.TrackBlurLeft = 0.0;
             s.TrackBlurRight = 0.0;
+            // Before the fire is put out, because a wreck is what keeps
+            // relighting it - see UpdateWreck.
+            v.Wreck.Reset();
+            s.Char = 0.0;
+            s.FireDensity = 1.0f;
+            s.SmokeDensity = 1.0f;
+            s.TurretSlip = Vector2.Zero;
             v.Burning = false;
             v.Burn.Reset();
             s.Burning = false;
