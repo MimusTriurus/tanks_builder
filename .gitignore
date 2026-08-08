@@ -27,3 +27,7 @@ out/
 # non-commercial and revocable, so the bytes stay off this repository and the
 # script is the record of where they came from. Re-run it to rebuild the folder.
 Sounds/
+
+# Rider's project files. Per-machine and rewritten constantly - workspace.xml
+# alone changes on every window move - and they say nothing about the bench.
+GodotTest/.idea/
