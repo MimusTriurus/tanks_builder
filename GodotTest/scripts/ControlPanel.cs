@@ -71,6 +71,33 @@ public sealed partial class ControlPanel : PanelContainer
     private readonly Dictionary<string, string> _group = new();
     private string _heading = "";
 
+    /// <summary>The box the current group's rows go into, and one entry per
+    /// group so a heading can show and hide its own. Null before the first
+    /// heading - the self-test stands rows up without one - and then
+    /// <see cref="Host"/> falls back to the flat list.</summary>
+    private VBoxContainer? _body;
+    private readonly List<(string Id, VBoxContainer Box, Button Head)> _groups = new();
+
+    /// <summary>Where a row's widgets are parented right now.</summary>
+    private Control Host => _body ?? (Control)_list;
+
+    /// <summary>Which groups are expanded. Exposed so "they open closed" is
+    /// asserted rather than left to whoever reads the constructor.</summary>
+    public IReadOnlyList<(string Id, bool Open)> Groups =>
+        _groups.Select(g => (g.Id, g.Box.Visible)).ToList();
+
+    /// <summary>Show or hide one group's rows. What clicking its heading
+    /// does.</summary>
+    public void Expand(string id, bool open)
+    {
+        foreach ((string had, VBoxContainer box, Button head) in _groups)
+            if (had == id)
+            {
+                box.Visible = open;
+                head.Text = (open ? "▾  " : "▸  ") + Text.GroupTitle(id).ToUpperInvariant();
+            }
+    }
+
     private string GroupOf(string id) =>
         _group.TryGetValue(id, out string? g) ? g : "";
 
@@ -218,20 +245,45 @@ public sealed partial class ControlPanel : PanelContainer
     // rows
     // -----------------------------------------------------------------------
 
+    /// <summary>Start a group. The heading is a button now, and the rows after
+    /// it go into a box it shows and hides.
+    ///
+    /// Every group opens closed. Fifty rows in ten groups is a panel nobody
+    /// reads down; ten headings is a table of contents, and the one being
+    /// worked on is the one open. A Button rather than a Label because that is
+    /// what it is - the arrow says so, and the tooltip that was on the label
+    /// stays where it was.</summary>
     public void Heading(string id)
     {
         _heading = id;
         if (_list.GetChildCount() > 0)
-            _list.AddChild(new Control { CustomMinimumSize = new Vector2(0, 8) });
-        var label = new Label
+            _list.AddChild(new Control { CustomMinimumSize = new Vector2(0, 6) });
+        var head = new Button
         {
-            Text = Text.GroupTitle(id).ToUpperInvariant(),
+            Text = "▸  " + Text.GroupTitle(id).ToUpperInvariant(),
             TooltipText = Text.GroupNote(id),
-            MouseFilter = MouseFilterEnum.Stop,   // a Label ignores the mouse, and an ignored label has no tooltip
+            FocusMode = FocusModeEnum.None,
+            Alignment = HorizontalAlignment.Left,
+            Flat = true,
         };
-        label.AddThemeColorOverride("font_color", new Color(0.55f, 0.72f, 0.90f));
-        label.AddThemeFontSizeOverride("font_size", 12);
-        _list.AddChild(label);
+        head.AddThemeColorOverride("font_color", new Color(0.55f, 0.72f, 0.90f));
+        head.AddThemeColorOverride("font_hover_color", new Color(0.78f, 0.88f, 1.00f));
+        head.AddThemeFontSizeOverride("font_size", 12);
+        _list.AddChild(head);
+
+        // ExpandFill and the same separation as the flat list it stands in for:
+        // the rows are now one level deeper in the tree, and a box that carries
+        // different layout from its parent is a second opinion about spacing.
+        var box = new VBoxContainer
+        {
+            Visible = false,
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+        };
+        box.AddThemeConstantOverride("separation", 4);
+        _list.AddChild(box);
+        _body = box;
+        _groups.Add((id, box, head));
+        head.Pressed += () => Expand(id, !box.Visible);
     }
 
     /// <summary>A switch: reads <paramref name="get"/>, and flipping it calls
@@ -276,7 +328,7 @@ public sealed partial class ControlPanel : PanelContainer
             MouseFilter = MouseFilterEnum.Stop,
         };
         caption.AddThemeFontSizeOverride("font_size", 12);
-        _list.AddChild(caption);
+        Host.AddChild(caption);
         var bar = new HSlider
         {
             MinValue = lo,
@@ -295,7 +347,7 @@ public sealed partial class ControlPanel : PanelContainer
             aside = new Label();
             aside.AddThemeFontSizeOverride("font_size", 11);
             aside.AddThemeColorOverride("font_color", new Color(0.62f, 0.66f, 0.72f));
-            _list.AddChild(aside);
+            Host.AddChild(aside);
         }
         _rows.Add(new Row
         {
@@ -325,7 +377,7 @@ public sealed partial class ControlPanel : PanelContainer
             MouseFilter = MouseFilterEnum.Stop,
         };
         caption.AddThemeFontSizeOverride("font_size", 12);
-        _list.AddChild(caption);
+        Host.AddChild(caption);
         var drop = new OptionButton { FocusMode = FocusModeEnum.None };
         foreach (string option in options)
             drop.AddItem(option);
@@ -368,7 +420,7 @@ public sealed partial class ControlPanel : PanelContainer
             MouseFilter = MouseFilterEnum.Stop,
         };
         text.AddThemeFontSizeOverride("font_size", 12);
-        _list.AddChild(text);
+        Host.AddChild(text);
         var row = new HBoxContainer();
         Add(id, row);
         var group = new ButtonGroup();
@@ -478,6 +530,6 @@ public sealed partial class ControlPanel : PanelContainer
     private void Add(string id, Control control)
     {
         _group[id] = _heading;
-        _list.AddChild(control);
+        Host.AddChild(control);
     }
 }

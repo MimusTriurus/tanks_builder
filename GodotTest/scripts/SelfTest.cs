@@ -2567,6 +2567,28 @@ public static class SelfTest
             Check("every row a start-up flag claims exists",
                 Main.FlaggedRows.All(id => named.Contains(id)),
                 string.Join(", ", Main.FlaggedRows.Where(id => !named.Contains(id)).Take(4)));
+
+            // Every group opens closed, and a heading shows its own rows and
+            // nobody else's. The first half is the reason the headings became
+            // buttons at all - fifty rows down one column is a panel nobody
+            // reads - and it is the half that would rot quietly, because a
+            // group left open still works and just puts the list back.
+            var shut = livePanel?.Groups ?? new List<(string, bool)>();
+            Check("the settings groups open collapsed",
+                shut.Count > 0 && shut.All(g => !g.Open),
+                $"{shut.Count(g => g.Open)} of {shut.Count} start open");
+            if (shut.Count > 0 && livePanel is not null)
+            {
+                string first = shut[0].Id;
+                livePanel.Expand(first, true);
+                var now = livePanel.Groups;
+                Check("a heading opens its own group and only its own",
+                    now.Count(g => g.Open) == 1 && now.First(g => g.Open).Id == first,
+                    $"{now.Count(g => g.Open)} open after expanding {first}");
+                livePanel.Expand(first, false);
+                Check("and closes it again",
+                    livePanel.Groups.All(g => !g.Open), "still open");
+            }
         }
 
         GD.Print("the side panel");

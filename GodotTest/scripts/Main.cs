@@ -2633,9 +2633,12 @@ public sealed partial class Main : Node2D
         });
 
         ui.Heading("view");
-        ui.Slide("view.zoom", "zoom  (wheel)", 0.25, 8.0, 0.05,
-            () => _camera.Zoom.X,
-            v => _camera.Zoom = new Vector2((float)v, (float)v), "x");
+        // No zoom row. The wheel already does it, and a slider on it is the one
+        // control that would silently rescale every A/B taken from the panel:
+        // almost everything measured here is a pixel diff of two captures, and
+        // a nudged zoom moves the whole picture rather than a silhouette. It is
+        // in --trace for exactly that reason, and a readout is what it wants to
+        // be, not a knob.
         ui.Toggle("view.hull", "hull layer  (H)", () => _tank.ShowHull, on => _tank.ShowHull = on);
         ui.Toggle("view.turret", "turret layer  (T)",
             () => _tank.ShowTurret, on => _tank.ShowTurret = on);
