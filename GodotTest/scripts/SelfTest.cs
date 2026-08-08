@@ -1519,6 +1519,23 @@ public static class SelfTest
         {
             GD.Print("the grove: what stands on the cells");
 
+            // First, and before anything here re-sows: the board as it stands
+            // has to agree with the ground it says it is painted with. Trees
+            // are nodes rather than pixels of the plate, so nothing about
+            // redrawing the field touches them - a caller that changes the
+            // paint and forgets to sow leaves woods on soil and soil where the
+            // woods were, and every other check here would pass, because they
+            // all plant first.
+            var sownOn = new HashSet<Vector2I>(grove.Trees.Select(t => t.Cell));
+            var wooded = new HashSet<Vector2I>();
+            for (int q = 0; q < field.Columns; q++)
+            for (int r = 0; r < field.Rows; r++)
+                if (grove.IsForest(new Vector2I(q, r)))
+                    wooded.Add(new Vector2I(q, r));
+            Check("the trees standing there are the ones the ground asks for",
+                sownOn.SetEquals(wooded),
+                $"{sownOn.Count} cells carry trees, {wooded.Count} are wooded");
+
             Check("every tree stands on a wooded cell",
                 grove.Trees.All(t => grove.IsForest(t.Cell)),
                 $"{grove.Trees.Count(t => !grove.IsForest(t.Cell))} of "
@@ -1590,6 +1607,30 @@ public static class SelfTest
                 thin.Count == 0,
                 $"{thin.Count} cells came out thinner than that");
 
+            Check($"and at most {grove.Maximum}",
+                grove.Maximum <= 0
+                || perCell.Values.All(n => n <= grove.Maximum),
+                $"the fullest carries "
+                + $"{(perCell.Count == 0 ? 0 : perCell.Values.Max())}");
+
+            // Both ends move, and both still hold when they are set to the same
+            // number - which is the case that catches a floor filled after the
+            // ceiling was applied, or a ceiling that trims a cell back under
+            // its floor.
+            int wasLeast = grove.Minimum, wasMost = grove.Maximum;
+            grove.Minimum = 6;
+            grove.Maximum = 6;
+            grove.Plant();
+            var counted = new Dictionary<Vector2I, int>();
+            foreach (PropNode tree in grove.Trees)
+                counted[tree.Cell] = counted.GetValueOrDefault(tree.Cell) + 1;
+            Check("a floor equal to the ceiling puts exactly that many on a cell",
+                counted.Values.All(n => n == 6),
+                $"{counted.Values.Count(n => n != 6)} cells missed six");
+            grove.Minimum = wasLeast;
+            grove.Maximum = wasMost;
+            grove.Plant();
+
             // Ground space, not screen: the lattice is square on the ground, and
             // measuring the spacing on screen would call every north-south pair
             // too close by the squash.
@@ -1605,8 +1646,11 @@ public static class SelfTest
             }
             // The lattice guarantees it whatever the cells decide, which is the
             // point of sowing globally: two neighbouring hexagons cannot plant
-            // two trees a pixel apart across their shared edge.
-            double floorGap = grove.Spacing * (1.0 - 2.0 * grove.Jitter);
+            // two trees a pixel apart across their shared edge. Half the step,
+            // because a cell short of its floor is gone over again at half - so
+            // the guarantee is the finer lattice's, and saying otherwise here
+            // would be asserting a spacing the sowing does not promise.
+            double floorGap = grove.Spacing * 0.5 * (1.0 - 2.0 * grove.Jitter);
             Check("no two trees are closer than the lattice allows",
                 closest >= floorGap - 0.5,
                 $"closest {closest:F1}px against {floorGap:F1}px");
@@ -3086,6 +3130,14 @@ public static class SelfTest
             () => { noted = dial; return "aside"; });
         stub.Choice("t.pick", "pick", new[] { "a", "b", "c" }, () => pick,
             i => { pick = i; writes++; });
+        // A counted quantity. Its own row type because a slider answers "how far
+        // along" and a count of things has states rather than a range - and its
+        // own line here because a SpinBox carries a LineEdit inside it, which is
+        // the one widget in this panel that would take the keyboard if nobody
+        // said otherwise.
+        double many = 2.0;
+        stub.Count("t.many", "many", 0.0, 20.0, 1.0, () => many,
+                   v => { many = v; writes++; });
 
         // The harness changes behind the panel's back - a key, a start-up flag,
         // R resetting the lot - and the widgets have to follow without anything
@@ -3105,7 +3157,7 @@ public static class SelfTest
         {
             foreach (Node child in node.GetChildren())
             {
-                if (child is CheckBox or HSlider or OptionButton)
+                if (child is CheckBox or HSlider or OptionButton or SpinBox or LineEdit)
                     widgets.Add((Control)child);
                 Collect(child);
             }
@@ -3123,10 +3175,14 @@ public static class SelfTest
                 bar.EmitSignal(Godot.Range.SignalName.ValueChanged, 1.0);
             else if (widget is OptionButton drop)
                 drop.EmitSignal(OptionButton.SignalName.ItemSelected, 0);
+            else if (widget is SpinBox count)
+                count.EmitSignal(Godot.Range.SignalName.ValueChanged, 7.0);
         }
         Check("moving a control reaches the harness",
-            writes == 3 && !flag && Math.Abs(dial - 1.0) < 1e-9 && pick == 0,
-            $"{writes} of 3 setters ran, flag {flag}, dial {dial}, pick {pick}");
+            writes == 4 && !flag && Math.Abs(dial - 1.0) < 1e-9 && pick == 0
+            && Math.Abs(many - 7.0) < 1e-9,
+            $"{writes} of 4 setters ran, flag {flag}, dial {dial}, pick {pick}, "
+            + $"count {many}");
         // Nothing on it may take keyboard focus: a focused Button eats SPACE
         // and a focused slider eats the arrows, so the panel would break the
         // keys it is a view of. It broke the turret spin first.

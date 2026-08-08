@@ -366,6 +366,68 @@ public sealed partial class ControlPanel : PanelContainer
         });
     }
 
+    /// <summary>
+    /// A counted quantity, stepped rather than dragged.
+    ///
+    /// A slider answers "how far along", and that is the wrong question for a
+    /// number of things: four trees and five trees are two states, not two
+    /// points on a range, and a slider makes you aim at them. This is the row
+    /// for a small integer with both ends named.
+    ///
+    /// The box takes no keyboard, like every other widget here - the panel is a
+    /// view of the bench and must not eat the keys it is a view of. So typing
+    /// into it is off and the arrows do the work, which is what stepping a
+    /// small count wants anyway.
+    /// </summary>
+    public void Count(string id, string text, double lo, double hi, double step,
+                      Func<double> get, Action<double> set,
+                      Func<string>? note = null)
+    {
+        (lo, hi, step) = Text.Range(id, lo, hi, step);
+        text = Text.Title(id, text);
+        var caption = new Label
+        {
+            Text = text,
+            TooltipText = Text.Note(id),
+            MouseFilter = MouseFilterEnum.Stop,
+        };
+        caption.AddThemeFontSizeOverride("font_size", 12);
+        Host.AddChild(caption);
+        var box = new SpinBox
+        {
+            MinValue = lo,
+            MaxValue = hi,
+            Step = step,
+            Value = get(),
+            Editable = true,
+            FocusMode = FocusModeEnum.None,
+            SizeFlagsHorizontal = SizeFlags.ExpandFill,
+            TooltipText = Text.Note(id),
+        };
+        box.GetLineEdit().FocusMode = FocusModeEnum.None;
+        box.ValueChanged += v => { if (!_syncing) set(v); };
+        Add(id, box);
+        Label? aside = null;
+        if (note is not null)
+        {
+            aside = new Label();
+            aside.AddThemeFontSizeOverride("font_size", 11);
+            aside.AddThemeColorOverride("font_color", new Color(0.62f, 0.66f, 0.72f));
+            Host.AddChild(aside);
+        }
+        _rows.Add(new Row
+        {
+            Id = id,
+            Open = t => { if (t.Number(id) is double v) set(v); },
+            Refresh = () =>
+            {
+                box.Value = get();
+                if (aside is not null)
+                    aside.Text = note!();
+            },
+        });
+    }
+
     /// <summary>A choice. <paramref name="set"/> gets the index chosen.</summary>
     public void Choice(string id, string text, IReadOnlyList<string> options,
                        Func<int> get, Action<int> set)

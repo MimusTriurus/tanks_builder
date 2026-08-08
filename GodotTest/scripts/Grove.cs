@@ -95,6 +95,16 @@ public sealed partial class Grove : Node2D
     public int Minimum = 4;
 
     /// <summary>
+    /// Trees a wooded cell may have at most, or 0 for no ceiling.
+    ///
+    /// The other end of the same statement, and it trims by the same measure the
+    /// fade prefers by: what goes first is what stood nearest open ground. So
+    /// thinning a wood pulls it back from its edges rather than punching holes
+    /// in it, which is the difference between a thinner wood and a patchy one.
+    /// </summary>
+    public int Maximum = 12;
+
+    /// <summary>
     /// What a tree fades to while a tank is on its cell.
     ///
     /// Fading rather than hiding: the tank has to be visible through the wood,
@@ -233,47 +243,54 @@ public sealed partial class Grove : Node2D
         double halfX = hex.X * 0.5;
         double halfY = hex.Y * 0.5 / squash;
 
-        int i0 = (int)Math.Floor((ground.X - halfX) / Spacing) - 1;
-        int i1 = (int)Math.Ceiling((ground.X + halfX) / Spacing) + 1;
-        int j0 = (int)Math.Floor((ground.Y - halfY) / Spacing) - 1;
-        int j1 = (int)Math.Ceiling((ground.Y + halfY) / Spacing) + 1;
-
-        var pool = new List<Seedling>();
-        for (int i = i0; i <= i1; i++)
-        for (int j = j0; j <= j1; j++)
+        List<Seedling> Gather(double step, int salt)
         {
-            var seed = new Vector2(
-                (float)((i + (Hash01(i, j, 1013) - 0.5) * 2.0 * Jitter) * Spacing),
-                (float)((j + (Hash01(i, j, 2027) - 0.5) * 2.0 * Jitter) * Spacing));
-            var at = new Vector2(seed.X, seed.Y * squash);
+            var found = new List<Seedling>();
+            int i0 = (int)Math.Floor((ground.X - halfX) / step) - 1;
+            int i1 = (int)Math.Ceiling((ground.X + halfX) / step) + 1;
+            int j0 = (int)Math.Floor((ground.Y - halfY) / step) - 1;
+            int j1 = (int)Math.Ceiling((ground.Y + halfY) / step) + 1;
 
-            // The foot decides the cell, so a node near a border is planted by
-            // whichever cell it actually stands in - once, by that cell.
-            if (Field.CellAt(at) != cell)
-                continue;
-
-            if (seed.DistanceTo(ground) < KeepOut)
-                continue;
-
-            int species = (int)(Hash01(i, j, 4051) * Props!.Count);
-            bool mirrored = Hash01(i, j, 5077) < 0.5;
-
-            // The foot being inside is not enough: the base is wider than the
-            // point it is measured at, and a trunk whose roots cross the border
-            // reads as a tree belonging to two cells.
-            if (!StandsClear(cell, seed, species, scale))
-                continue;
-
-            if (ClearFront)
+            for (int i = i0; i <= i1; i++)
+            for (int j = j0; j <= j1; j++)
             {
-                double d = at.Y - centre.Y;
-                if (d > 0.0 && Props.RiseOf(species) * scale >= d - TankBelow)
-                    continue;
-            }
+                var seed = new Vector2(
+                    (float)((i + (Hash01(i, j, 1013 + salt) - 0.5) * 2.0 * Jitter) * step),
+                    (float)((j + (Hash01(i, j, 2027 + salt) - 0.5) * 2.0 * Jitter) * step));
+                var at = new Vector2(seed.X, seed.Y * squash);
 
-            pool.Add(new Seedling(at, species, mirrored, Hash01(i, j, 3037),
-                                  EdgeFade(cell, seed, squash)));
+                // The foot decides the cell, so a node near a border is planted
+                // by whichever cell it actually stands in - once, by that cell.
+                if (Field.CellAt(at) != cell)
+                    continue;
+
+                if (seed.DistanceTo(ground) < KeepOut)
+                    continue;
+
+                int species = (int)(Hash01(i, j, 4051 + salt) * Props!.Count);
+                bool mirrored = Hash01(i, j, 5077 + salt) < 0.5;
+
+                // The foot being inside is not enough: the base is wider than
+                // the point it is measured at, and a trunk whose roots cross
+                // the border reads as a tree belonging to two cells.
+                if (!StandsClear(cell, seed, species, scale))
+                    continue;
+
+                if (ClearFront)
+                {
+                    double d = at.Y - centre.Y;
+                    if (d > 0.0 && Props.RiseOf(species) * scale >= d - TankBelow)
+                        continue;
+                }
+
+                found.Add(new Seedling(at, species, mirrored,
+                                       Hash01(i, j, 3037 + salt),
+                                       EdgeFade(cell, seed, squash)));
+            }
+            return found;
         }
+
+        var pool = Gather(Spacing, 0);
 
         // The edge fade is a preference, not a rule, and this is where the
         // difference shows. Everything above rejects outright: a tree inside the
@@ -287,6 +304,31 @@ public sealed partial class Grove : Node2D
                                 .OrderByDescending(s => s.Fade)
                                 .ThenBy(s => s.At.Y).ThenBy(s => s.At.X)
                                 .Take(Minimum - taking.Count));
+
+        // And if the whole cell had fewer legal spots than the floor asks for -
+        // which happens, the ring is thin - go over it again at half the step.
+        // The minimum draws from candidates, so a floor that cannot be filled
+        // is not a floor at all: it was a wish, and a wooded cell came out with
+        // two trees on it while the setting said four.
+        //
+        // Only where it is short, so the spacing everywhere else is the spacing
+        // that was set - and only ever finer, so nothing that was legal at the
+        // coarse step stops being legal.
+        if (taking.Count < Minimum)
+        {
+            var seen = new HashSet<Vector2>(taking.Select(s => s.At));
+            taking.AddRange(Gather(Spacing * 0.5, 617)
+                            .Where(s => !seen.Contains(s.At)
+                                        && taking.All(t => t.At.DistanceTo(s.At)
+                                                           > Spacing * 0.25))
+                            .OrderByDescending(s => s.Fade)
+                            .ThenBy(s => s.At.Y).ThenBy(s => s.At.X)
+                            .Take(Minimum - taking.Count));
+        }
+        if (Maximum > 0 && taking.Count > Maximum)
+            taking = taking.OrderByDescending(s => s.Fade)
+                           .ThenBy(s => s.At.Y).ThenBy(s => s.At.X)
+                           .Take(Maximum).ToList();
 
         foreach (Seedling s in taking)
         {

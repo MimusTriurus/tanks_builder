@@ -1384,25 +1384,32 @@ public sealed partial class Main : Node2D
         return n;
     }
 
-    /// <summary>Trees on the thinnest wooded cell. The number the minimum is
-    /// about: a total says nothing about the cell that came out a field.
+    /// <summary>Trees on the thinnest wooded cell, and on the fullest. The two
+    /// numbers the two counts are about: a total says nothing about the cell
+    /// that came out a field, nor about the one that came out a thicket.
     /// </summary>
-    private int Thinnest()
+    private int Thinnest() => Extreme(true);
+
+    private int Thickest() => Extreme(false);
+
+    private int Extreme(bool least)
     {
         if (_grove is null || _grove.Planted == 0)
             return 0;
         var counts = new Dictionary<Vector2I, int>();
         foreach (PropNode tree in _grove.Trees)
             counts[tree.Cell] = counts.GetValueOrDefault(tree.Cell) + 1;
-        int least = int.MaxValue;
+        int found = least ? int.MaxValue : 0;
         for (int q = 0; q < _field.Columns; q++)
         for (int r = 0; r < _field.Rows; r++)
         {
             var cell = new Vector2I(q, r);
-            if (_grove.IsForest(cell))
-                least = Math.Min(least, counts.GetValueOrDefault(cell));
+            if (!_grove.IsForest(cell))
+                continue;
+            int n = counts.GetValueOrDefault(cell);
+            found = least ? Math.Min(found, n) : Math.Max(found, n);
         }
-        return least == int.MaxValue ? 0 : least;
+        return found == int.MaxValue ? 0 : found;
     }
 
     /// <summary>How far a tank reaches below its own contact point, in tile px.
@@ -2934,6 +2941,13 @@ public sealed partial class Main : Node2D
             {
                 _field.Paint = _paints[i];
                 _paint = _field.Paint;
+                // Forest is a kind of ground, so choosing the ground chooses
+                // where the woods are - and the trees are nodes rather than
+                // pixels of the plate, so redrawing the field does not touch
+                // them. Left out, the board painted forest came up as bare soil
+                // until something else happened to re-sow, which reads as the
+                // kind not existing rather than as a missing call.
+                SowGrove();
                 _field.QueueRedraw();
             });
         // A switch, not a dial: how much forest there is comes from the terrain
@@ -2968,11 +2982,35 @@ public sealed partial class Main : Node2D
                           : _grove.Ghost >= 0.999f
                             ? "   - solid: the wood keeps the tank" : "");
             });
-        ui.Slide("ground.least", "trees per wooded cell, at least", 0.0, 10.0, 1.0,
+        // Two counts rather than one slider: four trees and five trees are two
+        // states, not two points on a range. Clamped against each other in the
+        // setters rather than left to disagree - a floor above the ceiling is
+        // not a board anyone wanted to see, and refusing it here is cheaper
+        // than deciding which of the two wins during sowing.
+        ui.Count("ground.least", "trees per wooded cell, at least", 0.0, 20.0, 1.0,
             () => _grove?.Minimum ?? 0,
-            v => { if (_grove is not null) { _grove.Minimum = (int)v; SowGrove(); } },
-            "", () => _grove is null ? "" : $"{Wooded()} wooded cells, "
+            v =>
+            {
+                if (_grove is null) return;
+                _grove.Minimum = (int)v;
+                if (_grove.Maximum > 0 && _grove.Maximum < _grove.Minimum)
+                    _grove.Maximum = _grove.Minimum;
+                SowGrove();
+            },
+            () => _grove is null ? "" : $"{Wooded()} wooded cells, "
                 + $"{_grove.Planted} trees, {Thinnest()} on the emptiest");
+        ui.Count("ground.most", "and at most  (0 for no ceiling)", 0.0, 20.0, 1.0,
+            () => _grove?.Maximum ?? 0,
+            v =>
+            {
+                if (_grove is null) return;
+                _grove.Maximum = (int)v;
+                if (_grove.Maximum > 0 && _grove.Maximum < _grove.Minimum)
+                    _grove.Minimum = _grove.Maximum;
+                SowGrove();
+            },
+            () => _grove is null ? "" : $"{Thickest()} on the fullest"
+                + (_grove.Maximum > 0 ? "" : "   - whatever the ground allows"));
         // The rule that cannot be had, kept as a switch so that is visible
         // rather than asserted. See Grove.ClearFront: a 111px tree needs 142px
         // of clearance in front of a tank and a hexagon offers 54, so switching
