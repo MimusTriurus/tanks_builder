@@ -358,22 +358,31 @@ public sealed partial class TankSprite : Node2D
     /// the colour has to be pulled toward its own luminance first and darkened
     /// after.
     ///
-    /// <c>darken</c> was chosen off the picture, and it is <em>higher</em> than
-    /// the first guess - the opposite of what the soot on the plates needed.
-    /// Measured on the hull band against the same frame alive: 0.26 takes the
-    /// mean from 33 down to 7.8 with fifteen levels of range left across the
-    /// whole hull, and that is not a burnt tank, it is a hole in the picture.
-    /// 0.55 lands near 18 and the form survives - the cant of the turret and the
-    /// tube still read. A scar has a lit plate around it to be dark against; a
-    /// wreck has nothing behind it but pale ground, so it has to carry its own
-    /// shape.
+    /// <c>COLOR</c> already holds the texel, and nothing here samples
+    /// <c>TEXTURE</c> at all. That is not a shortcut, it is the trap: written
+    /// the obvious way - sample, then multiply into COLOR - this backend gives
+    /// screen = texel x texel, so every tank on the board opened <em>already
+    /// darkened</em> and burn = 0 was not a no-op. Measured exactly, which is
+    /// what named it: 153 -> 92, 88 -> 30, 134 -> 70, all of them c squared to
+    /// the level. Two wrong fixes came first, an sRGB encode and a sqrt, and
+    /// both are the same mistake again - they treat a doubled multiply as a
+    /// transfer function. The check that it is gone is bit exactness: an intact
+    /// tank with this material is pixel for pixel a tank with no material.
+    ///
+    /// <c>darken</c> was chosen off the picture. Measured on the hull band
+    /// against the same frame alive: 0.55 leaves the mean at 41 of 68 and reads
+    /// as a grey tank rather than a burnt one, 0.22 lands at 16 and is nearly a
+    /// silhouette. 0.35 gives 26 with 40 at the 95th percentile - the cant of
+    /// the turret and the tube still read, and it is plainly charred. Note the
+    /// soot on the plates needed the opposite: a scar has a lit plate around it
+    /// to be dark against, while a wreck has nothing behind it but pale ground
+    /// and has to carry its own shape.
     ///
     /// Saturation goes to zero rather than most of the way. Burnt metal has no
-    /// hue, and the green that survives at 0.85 reads as a tank in shadow -
-    /// which is the exact failure a tint is prone to and the whole reason this
-    /// is a shader rather than a modulate. Measured: 32 levels of saturation
-    /// alive against 10 charred, and what is left of that is the ground showing
-    /// through the antialiased edge.
+    /// hue, and green that survives reads as a tank in shadow - the exact
+    /// failure a tint is prone to and the whole reason this is a shader rather
+    /// than a modulate. Measured: 35 levels of saturation alive against 0.4
+    /// charred.
     ///
     /// It only ever touches the tank. The additive layers - flame, flash, burst -
     /// must not be tinted at all: darkening light is the opposite of what the
@@ -387,17 +396,22 @@ public sealed partial class TankSprite : Node2D
             shader_type canvas_item;
 
             uniform float burn : hint_range(0.0, 1.0) = 0.0;
-            uniform float darken : hint_range(0.0, 1.0) = 0.55;
+            uniform float darken : hint_range(0.0, 1.0) = 0.35;
             uniform float grey : hint_range(0.0, 1.0) = 1.0;
 
             void fragment() {
-                vec4 tex = texture(TEXTURE, UV);
-                float lum = dot(tex.rgb, vec3(0.299, 0.587, 0.114));
-                vec3 soot = mix(tex.rgb, vec3(lum), grey) * darken;
-                COLOR = vec4(mix(tex.rgb, soot, burn), tex.a) * COLOR;
+                float lum = dot(COLOR.rgb, vec3(0.299, 0.587, 0.114));
+                vec3 soot = mix(COLOR.rgb, vec3(lum), grey) * darken;
+                COLOR.rgb = mix(COLOR.rgb, soot, burn);
             }
             """,
     };
+
+    /// <summary>The char shader's source, so the self-test can assert the one
+    /// thing that brought every tank on the board out already darkened: this
+    /// works on <c>COLOR</c>, which already holds the texel, and must never
+    /// sample <c>TEXTURE</c> again.</summary>
+    internal static string CharShaderCode => CharShader.Code;
 
     /// <summary>This tank's own instance of it. Per sprite and not shared: the
     /// uniform is how charred *this* hull is, and one material across the board

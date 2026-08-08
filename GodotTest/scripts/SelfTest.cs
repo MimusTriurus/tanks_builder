@@ -1979,6 +1979,20 @@ public static class SelfTest
             Check("the hull carries the char material itself",
                 tank.Material is ShaderMaterial,
                 tank.Material?.GetType().Name ?? "none");
+            Check("an intact tank is not charred at all", tank.Char == 0.0,
+                $"{tank.Char:F3}");
+            // The one that let every tank on the board open already darkened.
+            // COLOR arrives holding the texel, so sampling TEXTURE and
+            // multiplying it in again squares the sprite - measured exactly as
+            // c*c - and burn = 0 stops being a no-op. Asserted as the absence of
+            // the sample rather than as a colour, because that is the edit that
+            // brings it back, and because the colour itself needs two renders to
+            // compare and this runs in one.
+            Check("the char works on COLOR and never samples the texture again",
+                !TankSprite.CharShaderCode.Contains("texture(")
+                && TankSprite.CharShaderCode.Contains("COLOR.rgb"),
+                TankSprite.CharShaderCode.Contains("texture(")
+                    ? "it samples TEXTURE" : "it does not touch COLOR.rgb");
         }
 
         GD.Print("the burning wreck");
