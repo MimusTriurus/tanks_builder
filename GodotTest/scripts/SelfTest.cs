@@ -1631,6 +1631,23 @@ public static class SelfTest
             grove.Maximum = wasMost;
             grove.Plant();
 
+            // A prop that never gets planted is one nobody notices is missing -
+            // and with the spot choosing among the trees that fit it, the way a
+            // prop goes missing is by being too wide for every legal spot on
+            // the board rather than by being left out of a list. Measured on
+            // the four in hand: the bases want 11.3 to 18.3px of room against a
+            // ring 24 deep at its narrowest, so the largest is the one at risk.
+            var grown = new HashSet<int>(grove.Trees.Select(t => t.Species));
+            Check("every kind of tree is somewhere on the board",
+                grove.Planted < grove.Props!.Count * 4
+                || grown.Count == grove.Props.Count,
+                $"{grown.Count} of {grove.Props.Count} appeared in "
+                + $"{grove.Planted} trees; missing "
+                + string.Join(", ", Enumerable.Range(0, grove.Props.Count)
+                    .Where(k => !grown.Contains(k))
+                    .Select(k => $"{grove.Props.NameOf(k)} "
+                                 + $"(base {grove.Props.RootOf(k) * grove.DrawScale:F1}px)")));
+
             // Ground space, not screen: the lattice is square on the ground, and
             // measuring the spacing on screen would call every north-south pair
             // too close by the squash.

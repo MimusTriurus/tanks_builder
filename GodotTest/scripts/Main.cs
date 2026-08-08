@@ -970,6 +970,10 @@ public sealed partial class Main : Node2D
         foreach (Vehicle vehicle in _vehicles)
             Park(vehicle);
         SowGrove();
+        // Once, here, rather than inside the sowing: it runs again on every
+        // slider drag, and a log line per drag is a log nobody reads.
+        if (_grove is not null)
+            GD.Print("grove: " + _grove.Note());
         // The flag may have picked a tank other than the first, and the trim is
         // set on selection - so it has to be set once at the start too, or two of
         // the three come up forward until something is clicked.
@@ -3011,6 +3015,22 @@ public sealed partial class Main : Node2D
             },
             () => _grove is null ? "" : $"{Thickest()} on the fullest"
                 + (_grove.Maximum > 0 ? "" : "   - whatever the ground allows"));
+        // What actually grew, by kind. The spot picks among the trees that fit
+        // it, so a wide prop is thinned by the ground rather than by any
+        // setting - and there is nowhere else that would say so: a kind that
+        // never gets planted looks exactly like a kind nobody drew.
+        ui.Readout("ground.props", () =>
+        {
+            if (_props is null || !_props.Any)
+                return "no tree art";
+            var grown = new int[_props.Count];
+            foreach (PropNode tree in _grove?.Trees ?? new List<PropNode>())
+                grown[tree.Species]++;
+            return string.Join("\n", Enumerable.Range(0, _props.Count).Select(
+                k => $"{_props.NameOf(k)}  {grown[k]} grown, "
+                     + $"{_props.RiseOf(k) * (_grove?.DrawScale ?? 0.0f):F0}px tall, "
+                     + $"base {_props.RootOf(k) * (_grove?.DrawScale ?? 0.0f):F1}px"));
+        });
         // The rule that cannot be had, kept as a switch so that is visible
         // rather than asserted. See Grove.ClearFront: a 111px tree needs 142px
         // of clearance in front of a tank and a hexagon offers 54, so switching

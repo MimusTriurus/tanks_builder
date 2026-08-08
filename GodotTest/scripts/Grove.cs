@@ -188,6 +188,25 @@ public sealed partial class Grove : Node2D
         }
     }
 
+    /// <summary>What grew, for the log. The counts by kind rather than the
+    /// total, because the total cannot say that a prop is too wide for every
+    /// legal spot on the board - which is how a prop goes missing now that the
+    /// spot picks among the trees that fit it.</summary>
+    public string Note()
+    {
+        if (Props is null || !Props.Any)
+            return "no tree art";
+        var grown = new int[Props.Count];
+        foreach (PropNode tree in _planted)
+            grown[tree.Species]++;
+        return $"{_planted.Count} trees, keep-out {KeepOut:F0}px, "
+               + $"clearance {Clearance:F0}px: "
+               + string.Join(", ", Enumerable.Range(0, Props.Count).Select(
+                   k => $"{Props.NameOf(k)} {grown[k]}"
+                        + $" ({Props.RiseOf(k) * DrawScale:F0}px tall,"
+                        + $" base {Props.RootOf(k) * DrawScale:F1})"));
+    }
+
     public void Clear()
     {
         foreach (PropNode node in _planted)
@@ -267,14 +286,35 @@ public sealed partial class Grove : Node2D
                 if (seed.DistanceTo(ground) < KeepOut)
                     continue;
 
-                int species = (int)(Hash01(i, j, 4051 + salt) * Props!.Count);
-                bool mirrored = Hash01(i, j, 5077 + salt) < 0.5;
-
-                // The foot being inside is not enough: the base is wider than
-                // the point it is measured at, and a trunk whose roots cross
-                // the border reads as a tree belonging to two cells.
-                if (!StandsClear(cell, seed, species, scale))
+                // The spot says which trees can stand in it, and only then does
+                // the hash say which of those does. The other order - hash a
+                // species, then refuse the spot if it does not fit - throws away
+                // a place a smaller tree could have taken, and quietly thins the
+                // big ones twice over: once by refusing them and once by not
+                // planting anything in their place. Measured on the four trees
+                // in hand: the base wants 11.3px of room at the smallest and
+                // 18.3 at the largest, against a ring 24 deep at its narrowest.
+                double room = EdgeRoom(cell, seed);
+                int fits = 0;
+                for (int k = 0; k < Props!.Count; k++)
+                    if (Props.RootOf(k) * scale + Clearance <= room)
+                        fits++;
+                if (fits == 0)
                     continue;
+
+                int wanted = (int)(Hash01(i, j, 4051 + salt) * fits);
+                int species = 0;
+                for (int k = 0; k < Props.Count; k++)
+                {
+                    if (Props.RootOf(k) * scale + Clearance > room)
+                        continue;
+                    if (wanted-- == 0)
+                    {
+                        species = k;
+                        break;
+                    }
+                }
+                bool mirrored = Hash01(i, j, 5077 + salt) < 0.5;
 
                 if (ClearFront)
                 {
@@ -352,7 +392,8 @@ public sealed partial class Grove : Node2D
     }
 
     /// <summary>
-    /// Whether the base stands clear of the cell's border, in every direction.
+    /// How much room a spot has before the cell's border, in ground px - so a
+    /// prop stands there only if its base plus <see cref="Clearance"/> fits.
     ///
     /// The first version of this asked <see cref="HexField.CellAt"/> about the
     /// base's two horizontal extremes, which was right about what it tested and
@@ -374,18 +415,15 @@ public sealed partial class Grove : Node2D
     /// ones at sqrt(3)|dx| + |dy| = sqrt(3)R, whose normal has length 2 - so the
     /// distances are the two expressions below and the boundary is the nearer.
     /// </summary>
-    private bool StandsClear(Vector2I cell, Vector2 ground, int species,
-                             float scale)
+    public double EdgeRoom(Vector2I cell, Vector2 ground)
     {
-        float root = Props!.RootOf(species);
         Vector2 centre = Field!.CellCentre(cell);
         double r = Field.Atlas!.HexRect.Size.X * 0.5;
         double dx = Math.Abs(ground.X - centre.X);
         double dy = Math.Abs(ground.Y - centre.Y / Squash);
         double root3 = Math.Sqrt(3.0);
-        double edge = Math.Min(root3 * r * 0.5 - dy,
-                               (root3 * r - root3 * dx - dy) * 0.5);
-        return edge >= root * scale + Clearance;
+        return Math.Min(root3 * r * 0.5 - dy,
+                        (root3 * r - root3 * dx - dy) * 0.5);
     }
 
     /// <summary>
