@@ -117,11 +117,6 @@ public sealed partial class EffectLayer : Node2D
 
     private Vector2 Place => Tank is null ? Vector2.Zero
         : Clock is Clocks.HitBurst or Clocks.HitDust ? Tank.HitOffset
-        // The turret and the tube it carries, knocked off the ring on a wreck.
-        // Here rather than on the node's own position for the reason the hit
-        // offset is: a child draws on its own schedule, so a value written
-        // during the parent's draw can be a frame stale.
-        : Clock is Clocks.Body or Clocks.Recoil ? Tank.TurretSlip
         : Vector2.Zero;
 
     public static EffectLayer Additive(string layer) => new()

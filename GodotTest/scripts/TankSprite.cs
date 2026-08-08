@@ -189,13 +189,6 @@ public sealed partial class TankSprite : Node2D
     public float FireDensity = 1.0f;
     public float SmokeDensity = 1.0f;
 
-    /// <summary>Where the turret sits off its ring, in pixels. Nonzero only on a
-    /// wreck: the turret has been knocked askew, which is the cheapest strong
-    /// read there is because the turret is already its own layer. The gun tube
-    /// takes it too - it is bolted to the turret, so it goes where the turret
-    /// goes.</summary>
-    public Vector2 TurretSlip = Vector2.Zero;
-
     /// <summary>Phases of the burning wreck's two loops, or -1 when it is not
     /// burning. Two numbers rather than one because the flame and the column run
     /// at different rates over the same rendered phases - see

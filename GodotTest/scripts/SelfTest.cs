@@ -1922,13 +1922,6 @@ public static class SelfTest
                 hulk.Update(Wreck.CharSeconds / 60.0);
             Check("the paint chars and stops charring",
                 Math.Abs(hulk.Char - 1.0) < 1e-6, $"char {hulk.Char:F3}");
-            // Not a multiple of the frame step, and that is the point: snapping
-            // to a rendered heading is what a live turret does, so a dead one
-            // sitting square on a lane looks alive.
-            Check("the turret is knocked off the rendered headings",
-                Wreck.Cant % (360.0 / 24.0) > 1.0 && Wreck.Cant % 60.0 > 1.0,
-                $"{Wreck.Cant} deg");
-
             // The flame goes out and the column does not. That asymmetry is the
             // effect: a burnt-out hull smoking is what says where one died from
             // across the board, and a wreck that goes quiet is a tank that was

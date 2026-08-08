@@ -1825,11 +1825,6 @@ public sealed partial class Main : Node2D
         s.Char = v.Wreck.Char;
         s.FireDensity = (float)v.Wreck.Blaze;
         s.SmokeDensity = (float)v.Wreck.Smoke;
-        // The turret is knocked round and settles off its ring. Written every
-        // frame rather than once at the kill, because the hull can still be
-        // shoved about by a shell landing on it and the cant is relative to it.
-        s.TurretSlip = new Vector2(0.0f, (float)v.Wreck.SlipNow);
-        s.TurretFacing = Mod(s.HullFacing + v.Wreck.CantNow, 360.0);
         // Once the flame is out there is nothing left to advance but the column,
         // and it is still asked for: the smoke is what says where a tank died
         // from the other side of the board.
@@ -2669,8 +2664,7 @@ public sealed partial class Main : Node2D
             !Active.Wreck.Dead ? "intact"
             : $"wrecked {Active.Wreck.Age:F1}s ago"
               + $"   char {Active.Wreck.Char:F2}"
-              + $"   flame {Active.Wreck.Blaze:F2}, column {Active.Wreck.Smoke:F2}"
-              + $"\nturret knocked {Active.Wreck.CantNow:F0} deg off the hull");
+              + $"   flame {Active.Wreck.Blaze:F2}, column {Active.Wreck.Smoke:F2}");
         ui.Readout("armour.info", () =>
         {
             AtlasSet a = _tank.Atlas!;
@@ -3367,7 +3361,6 @@ public sealed partial class Main : Node2D
             s.Char = 0.0;
             s.FireDensity = 1.0f;
             s.SmokeDensity = 1.0f;
-            s.TurretSlip = Vector2.Zero;
             v.Burning = false;
             v.Burn.Reset();
             s.Burning = false;

@@ -39,21 +39,13 @@ public sealed class Wreck
     /// field.</summary>
     public const double SmokeFloor = 0.55;
 
-    /// <summary>
-    /// How far the turret is knocked round, and how far it slips off the ring.
-    ///
-    /// The cheapest strong read in the genre and it costs nothing at all: the
-    /// turret is already its own layer with its own heading, so canting it is a
-    /// number, not a frame. Deliberately not a multiple of the frame step -
-    /// snapping to a rendered heading is what a live turret does, and a turret
-    /// sitting square on a lane is exactly what a dead one should not look like.
-    ///
-    /// The slip is small on purpose. Enough to break the seam the whole pipeline
-    /// was polished to close, which is the point; more than that and it reads as
-    /// a layer that has come loose rather than as a turret off its ring.
-    /// </summary>
-    public const double Cant = 47.0;
-    public const double Slip = 3.0;
+    // The turret used to be knocked 47 degrees off the hull and slipped three
+    // pixels down the screen, and both are gone. It was the cheapest strong read
+    // available - the turret is its own layer with its own heading, so a cant is
+    // a number rather than a frame - but it is a claim about what happened to
+    // this particular tank, and the wreck does not know that. The slip went with
+    // it rather than staying: displaced without being turned, a layer reads as
+    // one that has come unstuck, which is the failure it was sized to avoid.
 
     public bool Dead { get; private set; }
 
@@ -104,9 +96,4 @@ public sealed class Wreck
     /// stays.</summary>
     public double Smoke => 1.0 - (1.0 - SmokeFloor) * (1.0 - Blaze);
 
-    /// <summary>Where the turret has been knocked to, relative to the hull, and
-    /// how far it has slipped down the screen. Both come up with the char rather
-    /// than snapping, so the whole thing is one settling movement.</summary>
-    public double CantNow => Cant * Char;
-    public double SlipNow => Slip * Char;
 }
