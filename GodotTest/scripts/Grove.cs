@@ -80,12 +80,25 @@ public sealed partial class Grove : Node2D
     /// </summary>
     public int Minimum = 4;
 
-    /// <summary>What a tree fades to while a tank is on its cell, and how long
-    /// it takes. Fading rather than hiding: the tank has to be visible through
-    /// the wood, but a wood that vanishes is a tank standing in a field. The
-    /// time constant is short enough to keep up with a tank crossing a cell and
-    /// long enough not to read as a switch.</summary>
-    public float Ghost = 0.35f;
+    /// <summary>
+    /// What a tree fades to while a tank is on its cell.
+    ///
+    /// Fading rather than hiding: the tank has to be visible through the wood,
+    /// but a wood that vanishes is a tank standing in a field. Which of those
+    /// two failures is nearer is what the dial is for - the setting is judged by
+    /// looking, and both ends of it are wrong in different ways.
+    ///
+    /// The tuned value is named rather than left in the field's initialiser, the
+    /// argument <see cref="Recoil.ShearOnByDefault"/> makes: a check that
+    /// asserts the live value would fail on a session that dragged the slider,
+    /// and one that asserts nothing would not notice the default going to zero.
+    /// </summary>
+    public const float GhostByDefault = 0.35f;
+
+    public float Ghost = GhostByDefault;
+
+    /// <summary>How long the fade takes. Short enough to keep up with a tank
+    /// crossing a cell, long enough not to read as a switch.</summary>
     public double FadeTime = 0.18;
 
     /// <summary>Refuse to plant anything that would cross a tank standing on its

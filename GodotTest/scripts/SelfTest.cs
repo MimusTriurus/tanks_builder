@@ -1688,8 +1688,27 @@ public static class SelfTest
                 && grove.Trees.Where(t => t.Cell != stood)
                         .All(t => t.Modulate.A > 0.99f),
                 $"ghost {grove.Ghost:F2}");
-            Check("and they are still there", grove.Ghost > 0.0f,
-                "a wood that vanishes is a tank standing in a field");
+            // The named default, not the live value: a session that dragged the
+            // slider would fail the second, and a check on neither would not
+            // notice the default going to zero.
+            Check("and by default they are still there",
+                Grove.GhostByDefault > 0.0f && Grove.GhostByDefault < 1.0f,
+                $"{Grove.GhostByDefault:F2} - gone is a tank standing in a "
+                + "field, solid is a tank the wood keeps");
+
+            // The dial reaches the trees, and reaches them while they are
+            // already faded: it is how the wood is being drawn rather than
+            // something a tank carried in with it, so dragging it mid-fade has
+            // to retarget rather than wait for the next cell.
+            float wasGhost = grove.Ghost;
+            grove.Ghost = 0.75f;
+            for (int i = 0; i < 240; i++)
+                grove.Reveal(busy, 1.0 / 60.0);
+            Check("the fade settles wherever the setting says",
+                grove.Trees.Where(t => t.Cell == stood)
+                     .All(t => Math.Abs(t.Modulate.A - 0.75f) < 0.01f),
+                "a fade that ignored the dial would still look like a fade");
+            grove.Ghost = wasGhost;
             for (int i = 0; i < 240; i++)
                 grove.Reveal(new HashSet<Vector2I>(), 1.0 / 60.0);
             Check("and come back when it drives off",

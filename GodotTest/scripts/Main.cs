@@ -164,6 +164,7 @@ public sealed partial class Main : Node2D
     /// is the terrain paint - forest is a kind of ground, not a dial.</summary>
     private bool _trees = true;
     private bool _clearFront;
+    private float _ghost = Grove.GhostByDefault;
 
     /// <summary>Whether the belts leave anything behind. On by default: a tank
     /// that leaves no mark is the picture the bench already had, so the A/B this
@@ -742,6 +743,14 @@ public sealed partial class Main : Node2D
             // board with the tree layer off.
             else if (userArgs[i] == "--no-forest")
                 _trees = false;
+            // Invariant culture, the trap named beside --hit-scale.
+            else if (userArgs[i] == "--ghost" && i + 1 < userArgs.Length
+                     && float.TryParse(userArgs[i + 1], NumberStyles.Float,
+                                       CultureInfo.InvariantCulture, out float ghost))
+            {
+                i++;
+                _ghost = Math.Clamp(ghost, 0.0f, 1.0f);
+            }
             else if (userArgs[i] == "--clear-front")
                 _clearFront = true;
             else if (userArgs[i] == "--drive" && i + 1 < userArgs.Length)
@@ -834,7 +843,7 @@ public sealed partial class Main : Node2D
         _grove = new Grove
         {
             Field = _field, Props = _props, Origin = _origin,
-            Enabled = _trees, ClearFront = _clearFront,
+            Enabled = _trees, ClearFront = _clearFront, Ghost = _ghost,
         };
         AddChild(_grove);
 
@@ -2480,6 +2489,7 @@ public sealed partial class Main : Node2D
         ["--turret-sound"] = new[] { "sound.turret_motor" },
         ["--terrain"] = new[] { "ground.terrain" },
         ["--no-forest"] = new[] { "ground.forest" },
+        ["--ghost"] = new[] { "ground.ghost" },
         ["--clear-front"] = new[] { "ground.clearfront" },
     };
 
@@ -2938,6 +2948,25 @@ public sealed partial class Main : Node2D
                 _field.Trees = on;
                 SowGrove();
                 _field.QueueRedraw();
+            });
+        // Read live rather than at the moment a tank enters, unlike the shell's
+        // calibre: this is not something a round carries, it is how the wood is
+        // being drawn right now, and dragging it while a tank sits in the trees
+        // is exactly how it gets judged.
+        ui.Slide("ground.ghost", "trees over a tank in them  (--ghost)",
+            0.0, 1.0, 0.05,
+            () => _grove?.Ghost ?? 0.0,
+            v => { if (_grove is not null) _grove.Ghost = (float)v; },
+            "alpha", () =>
+            {
+                if (_grove is null)
+                    return "";
+                int hidden = _grove.Trees.Count(t => t.Modulate.A < 0.99f);
+                return $"{hidden} trees faded now"
+                       + (_grove.Ghost <= 0.001f
+                          ? "   - gone: a tank standing in a field"
+                          : _grove.Ghost >= 0.999f
+                            ? "   - solid: the wood keeps the tank" : "");
             });
         ui.Slide("ground.least", "trees per wooded cell, at least", 0.0, 10.0, 1.0,
             () => _grove?.Minimum ?? 0,
