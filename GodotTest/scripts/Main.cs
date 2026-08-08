@@ -3074,8 +3074,62 @@ public sealed partial class Main : Node2D
         }
     }
 
+    /// <summary>
+    /// How far the pointer may travel between pressing the middle button and
+    /// letting it go and still count as a click rather than a pan.
+    ///
+    /// In screen pixels, not world ones: the same hand movement is eight times
+    /// the world distance at zoom 8, and whether somebody tapped or dragged is
+    /// about the hand.
+    /// </summary>
+    private const float MiddleTapSlack = 4.0f;
+
+    /// <summary>Whether a middle press that ended at <paramref name="to"/> was a
+    /// tap. Split out so the one thing overloading this button risks - a pan that
+    /// destroys a tank on the way past - is asserted rather than assumed.</summary>
+    internal static bool MiddleTap(Vector2 from, Vector2 to) =>
+        from.DistanceTo(to) <= MiddleTapSlack;
+
+    /// <summary>Where the middle button went down, or null if it is up.</summary>
+    private Vector2? _middleFrom;
+
     public override void _UnhandledInput(InputEvent @event)
     {
+        // The middle button does two things, and the gesture decides which: a
+        // drag pans, a tap destroys whatever is standing on the cell. Sharing it
+        // rather than taking another key because there is no key left worth
+        // taking, and because destroying a tank for a test wants to be aimed at
+        // one - which is a thing the mouse can say and the keyboard cannot.
+        //
+        // Resolved on release, since that is the earliest moment the two are
+        // distinguishable. The pan itself is unchanged and still runs on motion,
+        // so a drag pans all the way and then declines to kill anything.
+        if (@event is InputEventMouseButton
+            { ButtonIndex: MouseButton.Middle } middle)
+        {
+            if (middle.Pressed)
+            {
+                _middleFrom = GetGlobalMousePosition();
+                return;
+            }
+            Vector2? from = _middleFrom;
+            _middleFrom = null;
+            if (from is not Vector2 down || !MiddleTap(down, GetGlobalMousePosition())
+                || _vehicles.Count == 0 || _tank.Atlas is null)
+                return;
+            Vector2I at = _field.ClampCell(
+                _field.CellAt(_field.ToLocal(GetGlobalMousePosition())));
+            // By cell, like the left and right buttons: the cell is the unit the
+            // game is played in, and a silhouette overhangs its own hex, so
+            // picking by pixels would let a click on the ground beside a tank
+            // destroy it.
+            if (Vehicle.At(_vehicles, at) is Vehicle mark)
+            {
+                Kill(mark);
+                _panel?.Sync();
+            }
+            return;
+        }
         if (@event is InputEventMouseButton { Pressed: true } mouse)
         {
             if (mouse.ButtonIndex == MouseButton.Left && _vehicles.Count > 0

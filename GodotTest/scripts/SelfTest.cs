@@ -1981,6 +1981,16 @@ public static class SelfTest
                 tank.Material?.GetType().Name ?? "none");
             Check("an intact tank is not charred at all", tank.Char == 0.0,
                 $"{tank.Char:F3}");
+            // The middle button pans and destroys, and the gesture is all that
+            // separates them. A pan that killed a tank it happened to travel over
+            // would be the worst kind of overload: it fires while the hand is
+            // busy doing something else.
+            Check("a middle tap destroys and a middle drag does not",
+                Main.MiddleTap(new Vector2(400, 300), new Vector2(400, 300))
+                && Main.MiddleTap(new Vector2(400, 300), new Vector2(402, 301))
+                && !Main.MiddleTap(new Vector2(400, 300), new Vector2(420, 300))
+                && !Main.MiddleTap(new Vector2(400, 300), new Vector2(400, 340)),
+                "a drag reads as a tap or the other way round");
             // The one that let every tank on the board open already darkened.
             // COLOR arrives holding the texel, so sampling TEXTURE and
             // multiplying it in again squares the sprite - measured exactly as
