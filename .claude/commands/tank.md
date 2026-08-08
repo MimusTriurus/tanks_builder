@@ -60,6 +60,11 @@ Ten layers come out with no hand work at all: `hull`, `turret`, `track_left`,
 `track_right`, `hex`, `burst`, `dust` and `scar_{front,rear,left,right}`. The
 plates are found by ray fan, so every scene with a hull gets the hit layers.
 
+Three more come free from the stamps: `wreck_turret`, `wreck_track_left` and
+`wreck_track_right` - the knocked-out pose, which needs only `ring_axis` and so
+arrives with `turret_axis`. There is deliberately no wreck hull: a dead tank's
+hull is a live tank's hull to the pixel. See `wreck_pose.py`.
+
 Five more need a piece separated by hand, once per scene, and each is skipped
 with a note if it is missing:
 
@@ -112,6 +117,7 @@ read the ones the scene produced:
 | `_check_hit.png` | face across, heading down - hits land on the right plate, and a turned-away plate is drawn *behind* the tank |
 | `_check_scar.png` | plate across, all twelve headings down - the mark turns with the hull and disappears behind it |
 | `_check_damage.png` | level across, plate down, each on the heading that shows it best |
+| `_check_wreck.png` | live against knocked-out, every heading down - the whole question is the comparison, and the void under the canted turret opens towards the camera on some headings and away on others |
 
 On a parts scene the tank is drawn with its belts on every sheet. A tank that
 looks like it is hovering means the track layers are missing from the sheet, not
@@ -143,6 +149,14 @@ their thresholds, from `_run_report.json` and the check:
   `scar_fit` ≤ 0.85
 - `belts_restored` all zero - the belts are posed by *writing* vertex
   coordinates, so that the rest pose came back is a result, not a promise
+- the wreck: `wreck_turret_moved_px`, `wreck_void_px` and
+  `wreck_track_moved_px`. "The pose was applied" is exactly the claim a hook can
+  make while doing nothing, so all three are measured against the live layer.
+  `wreck_void_px` is dark hull seen through the ring at the best heading, not
+  turret pixels that moved - a cant moves the silhouette whether or not it opens
+  anything, and the earlier measure read 1676 on a pose that opened nothing
+  And `units_per_pixel` must come out unchanged from the previous run: the wreck
+  layers carry `fit: False`, so a shifted figure means something else moved
 
 State plainly which layers this scene did not produce and why. If a threshold is
 only just met, say so with the number: `exhaust_contrast` at 28.4 against 28 is
@@ -154,7 +168,9 @@ not the same news as 91.
   **substring** and pull in descendants. Excluding `L.Caterpillar.Geometry` once
   took out `L.Caterpillar.Geometry.Rebuilt` with it, and the layer still rendered
   - the road wheels were in it - so nothing looked empty. Check each layer's
-  `rendered` list against what you meant.
+  `rendered` list against what you meant. The opposite slip costs the same: a
+  belt layer with *no* `exclude` draws both belts on its root, one inside the
+  other, and every existing number passes. `Body.verify` now demands equality.
 - **`framing_identical` false.** Something resolved the camera twice. Every layer
   must go through one `render_set` job; a second job re-resolves the spin axis,
   the fitted geometry, the angle list and the camera, and nothing makes it

@@ -157,13 +157,35 @@ public sealed class AtlasSet
     /// </summary>
     public const string ShadowName = "shadow";
 
+    /// <summary>
+    /// The knocked-out tank: a canted turret with its gun dropped, and two belts
+    /// gone slack. Not effects and not a separate tank - the same layers in
+    /// another pose, standing in for the live ones once the hull is dead.
+    ///
+    /// **There is no wreck hull, and that is the whole shape of this.** A dead
+    /// tank's hull geometry is a live tank's hull geometry, so `hull_atlas` is
+    /// already the wreck's to the pixel; the same goes for the contact shadow
+    /// (zenith light, and the turret's footprint falls inside the hull's) and for
+    /// the scars, which sit on plates that have not moved. Only what actually
+    /// changed shape is re-rendered.
+    ///
+    /// The turret stays a layer of its own rather than being baked into one wreck
+    /// sprite, and the reason is the moment of death: a tank dies with its gun at
+    /// whatever bearing it had, so a baked hull-to-turret angle would snap the
+    /// gun round the instant it was hit. See wreck_pose.py.
+    /// </summary>
+    public const string WreckTurretName = "wreck_turret";
+
+    public static readonly string[] WreckTrackNames =
+        { "wreck_track_left", "wreck_track_right" };
+
     /// <summary>Layers that load if they are there and are silently skipped if
     /// they are not. All but the hit layers need a piece separated by hand in
     /// the .blend; the hit is measured off the hull and so is always there.</summary>
     private static readonly string[] OptionalNames =
         new[] { "smoke", "flash", ExhaustName, FireName, BurnName, BurstName,
-                DustName, BarrelName, ShadowName }
-            .Concat(ScarNames).Concat(TrackNames).ToArray();
+                DustName, BarrelName, ShadowName, WreckTurretName }
+            .Concat(ScarNames).Concat(TrackNames).Concat(WreckTrackNames).ToArray();
 
     public string Tag { get; private set; } = "";
     public string Error { get; private set; } = "";
@@ -320,6 +342,29 @@ public sealed class AtlasSet
     /// Two phases is the minimum that means anything: rest and somewhere
     /// else.</summary>
     public bool HasRecoil => Has(BarrelName) && PhasesOf(BarrelName) > 1;
+
+    /// <summary>
+    /// True when this tank was rendered in a knocked-out pose.
+    ///
+    /// The turret alone, because it is the half that cannot be faked: the belts'
+    /// slack is a nice-to-have and a wreck without it is still plainly a wreck,
+    /// whereas a wreck whose turret sits level and whose gun still points at the
+    /// horizon is a live tank that has stopped moving. So the belts are asked for
+    /// separately, and a set with only the turret gets the turret.
+    /// </summary>
+    public bool HasWreck => Has(WreckTurretName);
+
+    /// <summary>True when both belts were rendered slack as well.</summary>
+    public bool HasWreckTracks
+    {
+        get
+        {
+            foreach (string layer in WreckTrackNames)
+                if (!Has(layer))
+                    return false;
+            return true;
+        }
+    }
 
     /// <summary>Poses the tube was rendered in, rest included, 0 if absent. The
     /// renderer picks this off the travel - about one phase per pixel of stroke -

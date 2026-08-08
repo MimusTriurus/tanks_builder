@@ -115,6 +115,54 @@ public sealed partial class EffectLayer : Node2D
     /// </summary>
     public bool Armour;
 
+    /// <summary>Which state of the tank a layer belongs to.</summary>
+    public enum Life
+    {
+        /// <summary>Drawn whatever has happened to the tank - every effect, and
+        /// the hull's own layers that a wreck does not re-pose.</summary>
+        Always,
+
+        /// <summary>The running tank's version of a part the wreck re-poses: the
+        /// level turret, the gun at rest, the belts on their sprockets.</summary>
+        Alive,
+
+        /// <summary>The knocked-out version of it.</summary>
+        Dead,
+    }
+
+    /// <summary>
+    /// Whether this layer is a live part, a wrecked part, or neither.
+    ///
+    /// A pair rather than one layer that switches atlas, because the two are
+    /// different renders of different geometry and the pairing is the interesting
+    /// claim: exactly one of each pair draws, always. A single layer reading a
+    /// name off a flag would make "which atlas" a value rather than a structure,
+    /// and nothing would catch a set that had lost one half.
+    /// </summary>
+    public Life When = Life.Always;
+
+    /// <summary>Which layer stands in for this one once the tank is dead. Empty
+    /// for everything that is not half of such a pair.</summary>
+    public string StandIn = "";
+
+    /// <summary>
+    /// Whether the tank's state lets this layer draw at all.
+    /// </summary>
+    /// <remarks>
+    /// A live part only steps aside when its stand-in is actually there, and that
+    /// clause is the one that matters: a set rendered before the wreck layers
+    /// existed would otherwise lose its turret entirely the moment a tank died -
+    /// not a wrong turret, no turret, which is the quietest possible failure. A
+    /// tank with no wreck pose is simply a tank that stops moving, which is what
+    /// every one of them looked like before this.
+    /// </remarks>
+    public bool LiveNow(bool wrecked, bool standInReady) => When switch
+    {
+        Life.Alive => !wrecked || !standInReady,
+        Life.Dead => wrecked,
+        _ => true,
+    };
+
     private Vector2 Place => Tank is null ? Vector2.Zero
         : Clock is Clocks.HitBurst or Clocks.HitDust ? Tank.HitOffset
         : Vector2.Zero;
@@ -224,6 +272,55 @@ public sealed partial class EffectLayer : Node2D
         FollowsHull = true,
         Clock = Clocks.Track,
         Armour = true,
+        When = Life.Alive,
+        StandIn = AtlasSet.WreckTrackNames[
+            layer == AtlasSet.TrackNames[0] ? 0 : 1],
+    };
+
+    /// <summary>
+    /// The same belt gone slack, on a dead tank.
+    /// </summary>
+    /// <remarks>
+    /// No clock and no phase axis, which is the whole difference: a wreck's belt
+    /// does not wind, so there is nothing for <see cref="TrackLoop"/> to drive and
+    /// no ground for it to be tied to. One frame per hull heading, like the
+    /// shadow.
+    ///
+    /// The slack goes outboard and down over the front of the loop rather than
+    /// sagging on top, and that is measured rather than chosen: the hull sits
+    /// 0.03 above the top run and overhangs it by 0.017, so from this camera the
+    /// sponson covers the top run along its whole length and a sag there moves the
+    /// belt from one hidden place to another.
+    /// </remarks>
+    public static EffectLayer WreckTrack(string layer) => new()
+    {
+        Layer = layer,
+        FollowsHull = true,
+        Clock = Clocks.Body,
+        Armour = true,
+        When = Life.Dead,
+    };
+
+    /// <summary>
+    /// The turret dropped into its ring, gun included, on a dead tank.
+    ///
+    /// On the <em>turret's</em> heading, exactly as the live turret is, and that is
+    /// the reason the wreck is a pair of layers instead of one baked sprite: a tank
+    /// dies with its gun wherever it happened to be pointing, and a baked
+    /// hull-to-turret angle would snap it round at the moment of death.
+    ///
+    /// The gun is inside it rather than beside it: a wreck's tube does not recoil,
+    /// so it has no axis of its own to need and it rides the turret it fell with.
+    /// Which is why the live <see cref="Barrel"/> layer is <see cref="Life.Alive"/>
+    /// and there is no wreck barrel.
+    /// </summary>
+    public static EffectLayer WreckTurret(string layer) => new()
+    {
+        Layer = layer,
+        FollowsHull = false,
+        Clock = Clocks.Body,
+        Armour = true,
+        When = Life.Dead,
     };
 
     /// <summary>
@@ -285,6 +382,8 @@ public sealed partial class EffectLayer : Node2D
         FollowsHull = false,          // it has its own heading, that is the point
         Clock = Clocks.Body,
         Armour = true,
+        When = Life.Alive,            // the wreck's turret is a pose of its own
+        StandIn = AtlasSet.WreckTurretName,
     };
 
     /// <summary>
@@ -313,6 +412,9 @@ public sealed partial class EffectLayer : Node2D
         FollowsHull = false,
         Clock = Clocks.Recoil,
         Armour = true,
+        // a wreck's gun is drooped into its own turret layer, not recoiling here
+        When = Life.Alive,
+        StandIn = AtlasSet.WreckTurretName,
     };
 
     /// <summary>The plate a scar layer belongs to, or "" for any other
@@ -335,6 +437,13 @@ public sealed partial class EffectLayer : Node2D
         get
         {
             if (Tank is null || Tank.Atlas?.Has(Layer) != true)
+                return -1;
+            // Exactly one of each live/dead pair draws. Asked here rather than
+            // inside the arms below because it is a property of the layer and not
+            // of its clock, and because a wreck whose live turret kept drawing
+            // would show two turrets rather than none - a failure that reads as
+            // the atlas being wrong.
+            if (!LiveNow(Tank.Wrecked, StandIn != "" && Tank.Atlas.Has(StandIn)))
                 return -1;
             return Clock switch
             {

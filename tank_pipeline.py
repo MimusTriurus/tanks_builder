@@ -82,6 +82,11 @@ CONFIG = {
     # own. The turret gives the tube up to it, so 0 is the A/B: the tube stays
     # in the turret layer and nothing else changes. See `barrel_recoil.py`.
     "recoil_phases": 5,
+    # the knocked-out pose - a canted turret, a dropped gun, slack belts - as
+    # three extra layers of one pose each. None is the A/B: the live set and
+    # nothing else. The paint is *not* burnt here; the harness darkens it in a
+    # shader, which costs no frames and is reversible. See `wreck_pose.py`.
+    "wreck": {},
     "flash": "Flash",
     "smoke": "Smoke",
     "plume": "Plume",
@@ -269,6 +274,12 @@ CONFIG = {
 SCAR_FACES = ("front", "rear", "left", "right")
 SCAR_LAYERS = tuple("scar_" + f for f in SCAR_FACES)
 TRACK_LAYERS = ("track_left", "track_right")
+# The knocked-out pose. Only the layers whose *geometry* changes: the wreck's
+# hull, shadow and scars are the live ones to the pixel, because a dead tank's
+# hull, its zenith footprint and its armour plates have not moved. The turret
+# stays a layer of its own for the reason in wreck_pose.py - a tank dies with its
+# gun at whatever bearing it had, and one baked sprite would snap it.
+WRECK_LAYERS = ("wreck_turret", "wreck_track_left", "wreck_track_right")
 # The belts go straight after the hull and before everything that happens *to*
 # the tank, because they are not an effect on it - they are the part of it that
 # the hull layer cut away with a holdout. Absent on a single-mesh scene, and
@@ -276,8 +287,11 @@ TRACK_LAYERS = ("track_left", "track_right")
 # The gun tube sits with the turret and for the same reason as the belts: it is
 # part of the tank that a layer cut away, not an effect on it. Straight after the
 # turret it came out of, and still ahead of the scars, which are *on* the armour.
+# The wreck sits next to the live layers it stands in for, and never beside them:
+# nothing composites a canted turret over a seated one. It is in this list only so
+# that `_atlases` loads it, and every sheet names the layers it draws.
 LAYER_ORDER = (("hex", "shadow", "hull") + TRACK_LAYERS + ("turret", "barrel")
-               + SCAR_LAYERS
+               + WRECK_LAYERS + SCAR_LAYERS
                + ("exhaust", "burn", "fire", "smoke", "flash", "dust", "burst"))
 
 
@@ -488,7 +502,8 @@ def _body_layers(cfg, have):
                             track_phases=cfg["track_phases"],
                             rebuild=cfg["rebuild"],
                             reshape=cfg["reshape"],
-                            recoil_phases=cfg["recoil_phases"]))
+                            recoil_phases=cfg["recoil_phases"],
+                            wreck=cfg["wreck"]))
         return list(body.layers), body
 
     return [
@@ -1416,7 +1431,13 @@ def check(cfg=None):
     # be a budget question: its catcher is a disc of the tile's own inradius, so
     # it is clipped to ground the tile covers, and a shadow at the frame edge
     # means the tile is wrong rather than that the shadow is too big
-    for name in ("hull", "turret", "barrel", "hex", "shadow") + TRACK_LAYERS:
+    # the wreck is in this list and not with the effects for the same reason the
+    # shadow is: it is the tank, in another pose, so an edge it touches is a
+    # framing bug and not a budget. It is also the pose most likely to reach
+    # further than the live one - a canted turret stands higher than a seated
+    # one - so it is exactly the layer this test exists for.
+    for name in (("hull", "turret", "barrel", "hex", "shadow")
+                 + TRACK_LAYERS + WRECK_LAYERS):
         if name not in layers:
             continue
         worst = _edge_alpha(layers, name)
@@ -1735,6 +1756,102 @@ def check(cfg=None):
                     "it is colourless. The lever is brightness, not the ramp"
                     % (100.0 * white / float(seen)))
 
+    # --- the wreck: live tank against knocked-out, every heading -------------
+    #
+    # Two rows of the same headings, because the whole question is a comparison:
+    # a wreck has to be unmistakable beside the tank it used to be, and neither
+    # row on its own answers that. The turret's cant is fixed to the turret, so
+    # the void under it opens towards the camera on some headings and away on
+    # others - the sheet is where that is judged, and it is the reason the sheet
+    # runs every heading rather than the usual four.
+    if "wreck_turret" in layers:
+        def draw_wreck(buf, place, heading, dead):
+            for layer, index in _ground(layers, heading):
+                buf = place(buf, layer, index, _over)
+            buf = place(buf, "hull", heading, _over)
+            # phase 0 of a running belt is index `heading`, and a wreck belt has
+            # one phase, so both are the same index either way
+            for running, gone in ((TRACK_LAYERS[0], "wreck_track_left"),
+                                  (TRACK_LAYERS[1], "wreck_track_right")):
+                name = gone if (dead and gone in layers) else running
+                if name in layers:
+                    buf = place(buf, name, heading, _over)
+            if dead:
+                return place(buf, "wreck_turret", heading, _over)
+            buf = place(buf, "turret", heading, _over)
+            if "barrel" in layers:
+                buf = place(buf, "barrel", heading, _over)
+            return buf
+
+        report["wreck_composite"] = _sheet(
+            cfg, layers, "_check_wreck", list(range(layers["hull"][1]["count"])),
+            [0, 1], draw_wreck, _ground_colour(layers),
+            _body_used(*WRECK_LAYERS))
+
+        # A wreck that is not different is not a wreck. Measured against the live
+        # tank on the same heading and in the same composite, because "the pose
+        # was applied" is exactly the claim a hook can make while doing nothing:
+        # `pose_turret` reads the ring off a stamp, and a missing stamp used to
+        # mean the layer rendered a seated turret and said so in no number.
+        live = _tile_of(layers, "turret", 0)[:, :, 3]
+        dead = _tile_of(layers, "wreck_turret", 0)[:, :, 3]
+        moved = int(np.count_nonzero((live > 0.5) != (dead > 0.5)))
+        report["wreck_turret_moved_px"] = moved
+        if moved < 200:
+            report["problems"].append(
+                "the wreck's turret differs from the live one by %d px - the "
+                "pose did not take, or the cant is too small to see. It clears "
+                "the skirt at a few degrees and still hides under it until "
+                "about 20 - see wreck_pose.py" % moved)
+        # And the void: with the turret lifted, the hull's own unlit interior
+        # shows through the ring. It is the strongest mark of a wreck here, and it
+        # exists only because there is no deck under the turret.
+        #
+        # **Measured as dark hull rather than as uncovered turret**, and that
+        # correction matters: counting pixels the turret used to cover and no
+        # longer does mostly counts the silhouette *moving*, which a cant does
+        # whether or not it opens anything. That number read 1676 on HT_PARTS at a
+        # cant which opens no void at all - it passed a threshold of 60 while the
+        # picture showed a tank with a tilted turret. So the test asks for the
+        # three things that make it a void: the turret has come off it, the hull
+        # is behind it, and what is behind is far darker than the hull's own paint.
+        best, per = 0, []
+        for h in range(layers["hull"][1]["count"]):
+            hull = _tile_of(layers, "hull", h)
+            was = _tile_of(layers, "turret", h)[:, :, 3] > 0.5
+            now = _tile_of(layers, "wreck_turret", h)[:, :, 3] > 0.5
+            skin = hull[:, :, 3] > 0.5
+            lum = hull[:, :, :3] @ np.array([0.299, 0.587, 0.114])
+            if not skin.any():
+                per.append(0)
+                continue
+            paint = float(np.median(lum[skin]))
+            seen = int(np.count_nonzero(was & ~now & skin
+                                        & (lum < 0.55 * paint)))
+            per.append(seen)
+            best = max(best, seen)
+        report["wreck_void_px"] = best
+        report["wreck_void_by_heading"] = per
+        if best < 60:
+            report["problems"].append(
+                "the lifted turret opens no void - %d px of dark hull interior at "
+                "the best heading. That is what reads as a burnt-out fighting "
+                "compartment, and without it the wreck is a tank with a tilted "
+                "turret. The lever is wreck_pose.CONFIG['rim_clear_frac']" % best)
+        for name in ("wreck_track_left", "wreck_track_right"):
+            if name not in layers:
+                continue
+            base = TRACK_LAYERS[0] if name.endswith("left") else TRACK_LAYERS[1]
+            a = _tile_of(layers, base, 0)[:, :, 3]
+            b = _tile_of(layers, name, 0)[:, :, 3]
+            slack = int(np.count_nonzero((a > 0.5) != (b > 0.5)))
+            report.setdefault("wreck_track_moved_px", {})[name] = slack
+            if slack < 80:
+                report["problems"].append(
+                    "%s is within %d px of the running belt - the top run is "
+                    "under the sponson and sagging it is invisible, so the "
+                    "slack has to go outboard at the front" % (name, slack))
+
     # --- the gun tube: the stroke across, headings down ----------------------
     if "barrel" in layers:
         bm = layers["barrel"][1]
@@ -1879,6 +1996,14 @@ def run(cfg=None):
             "recoil_peak_px": checked["recoil_peak_px"],
             "recoil_composite": checked["recoil_composite"],
         })
+    if checked.get("wreck_turret_moved_px") is not None:
+        report.update({
+            "wreck_turret_moved_px": checked["wreck_turret_moved_px"],
+            "wreck_void_px": checked["wreck_void_px"],
+            "wreck_void_by_heading": checked["wreck_void_by_heading"],
+            "wreck_track_moved_px": checked.get("wreck_track_moved_px"),
+            "wreck_composite": checked["wreck_composite"],
+        })
     if prepared["exhaust"]:
         report.update({
             "exhaust_ports": prepared["exhaust"]["ports"],
@@ -1948,6 +2073,9 @@ def run(cfg=None):
             "ring_cut_z": body["ring"].get("cut_z"),
             "tile_removed": body["tile_removed"],
             "cut_box_removed": body["cut_box_removed"],
+            # the pose the wreck layers were rendered in, and the lift over the
+            # skirt that says whether its void could show at all
+            "wreck": body.get("wreck"),
         })
 
     # Beside the atlases, the same as `parts_render.render()` writes and for the

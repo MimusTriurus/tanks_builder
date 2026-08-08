@@ -130,6 +130,30 @@ public static class Gunnery
         gun.Rank > armour.Rank ? gun.Rank : 0;
 
     /// <summary>
+    /// How many rounds have to get past the paint before the tank is finished.
+    ///
+    /// **The matchup says whether, three rounds say when, and splitting the two
+    /// is the whole of this number.** It used to say both, and it collapsed: the
+    /// kill hung on the deepest scar level, so a heavy killed a medium with its
+    /// first shell and a medium killed a light never - one shot or nothing, with
+    /// no cell of the table in between. Now the table answers the question it was
+    /// written for and only that one. A light kills nobody, a medium kills a
+    /// light, a heavy kills a light and a medium, and each of them takes three
+    /// goes about it.
+    ///
+    /// A penetration is a round that came out of <see cref="Penetration"/> above
+    /// zero, and that threshold is not a new one: zero is exactly "the gun did not
+    /// out-class the armour", which is already what the impact sound switches on -
+    /// see <see cref="VehicleAudio.ImpactFor"/>. So a ricochet is not quietly
+    /// counted towards a kill, and the ear and the tally agree by construction
+    /// rather than by two comparisons kept in step.
+    ///
+    /// Three, and named rather than left in the comparison: it decides how long
+    /// every firefight on this bench lasts.
+    /// </summary>
+    public const int PenetrationsToKill = 3;
+
+    /// <summary>
     /// The turret swung towards a heading by at most <paramref name="budget"/>
     /// degrees, landing exactly on it when it is within reach.
     ///

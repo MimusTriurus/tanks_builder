@@ -413,6 +413,30 @@ public sealed partial class TankSprite : Node2D
 
     private double _charAt = -1.0;
 
+    /// <summary>
+    /// Whether this tank is a wreck, and so which pose its own layers draw.
+    ///
+    /// Separate from <see cref="Char"/> and not derived from it, because the two
+    /// happen at different speeds and both are right: the turret drops and the gun
+    /// falls at the moment of the hit, and the paint blackens over the second and a
+    /// half after it. A flag read off the char would hold the turret level until
+    /// the hull had begun to blacken, which reads as the geometry lagging the
+    /// colour.
+    /// </summary>
+    public bool Wrecked
+    {
+        get => _wrecked;
+        set
+        {
+            if (value == _wrecked)
+                return;
+            _wrecked = value;
+            QueueRedraw();
+        }
+    }
+
+    private bool _wrecked;
+
     /// <summary>How charred the paint is, 0 clean to 1 burnt out.</summary>
     public double Char
     {
@@ -428,9 +452,19 @@ public sealed partial class TankSprite : Node2D
         }
     }
 
+    /// <remarks>
+    /// The wreck's layers sit immediately beside the ones they stand in for, and
+    /// that placement is the whole of what the order has to say about them:
+    /// exactly one of each pair ever draws, so where the pair sits matters and
+    /// which half is showing does not. Putting them at the end instead would have
+    /// worked today and been wrong the moment anything composited between the
+    /// belts and the turret - the reason the turret is in this list at all.
+    /// </remarks>
     public static readonly string[] LayerOrder =
         new[] { AtlasSet.ShadowName }
-            .Concat(AtlasSet.TrackNames).Concat(new[] { "turret", AtlasSet.BarrelName })
+            .Concat(AtlasSet.TrackNames).Concat(AtlasSet.WreckTrackNames)
+            .Concat(new[] { "turret", AtlasSet.BarrelName,
+                            AtlasSet.WreckTurretName })
             .Concat(AtlasSet.ScarNames).Concat(new[]
         {
             AtlasSet.ExhaustName, AtlasSet.BurnName, AtlasSet.FireName,
@@ -454,6 +488,9 @@ public sealed partial class TankSprite : Node2D
         AtlasSet.BurstName => EffectLayer.HitBurst(layer),
         "turret" => EffectLayer.Turret(layer),
         AtlasSet.BarrelName => EffectLayer.Barrel(layer),
+        AtlasSet.WreckTurretName => EffectLayer.WreckTurret(layer),
+        _ when Array.IndexOf(AtlasSet.WreckTrackNames, layer) >= 0
+            => EffectLayer.WreckTrack(layer),
         _ when Array.IndexOf(AtlasSet.TrackNames, layer) >= 0
             => EffectLayer.Track(layer),
         _ when EffectLayer.FaceOf(layer) != "" => EffectLayer.Scar(layer),
@@ -545,6 +582,35 @@ public sealed partial class TankSprite : Node2D
     public int Wear(string face) => _wear.TryGetValue(face, out int worn) ? worn : 0;
 
     /// <summary>
+    /// How many rounds have got past this tank's paint, anywhere on it, from
+    /// anybody. <see cref="Gunnery.PenetrationsToKill"/> of them finish it.
+    ///
+    /// The tank's, not a plate's and not a pair's: a hull shot by two mediums is
+    /// being shot by two mediums, and it takes what it takes. Same reasoning as
+    /// the victim owning the shell count that picks the impact take.
+    ///
+    /// **Not derived from the wear, and that is the trap worth naming.** Summing
+    /// <see cref="Wear"/> across the plates looks like the same number and is not:
+    /// wear is per plate and caps at the deepest level, so three rounds spread
+    /// over three plates would count differently from three into one, and a plate
+    /// a heavy has already breached stops climbing while rounds keep arriving. The
+    /// kill is about the tank, so it is counted on the tank - the same argument
+    /// that keeps the wear itself apart from the capped list of marks.
+    ///
+    /// Counted inside <see cref="Damage"/> and <see cref="DamageTo"/> rather than
+    /// by whoever calls them, because those two are the only places a level is
+    /// produced. A caller cannot forget to count, and a second path into the
+    /// armour cannot arrive uncounted.
+    /// </summary>
+    public int Penetrations { get; private set; }
+
+    /// <summary>Whether <paramref name="level"/> got past the paint. Zero is
+    /// exactly "the gun did not out-class the armour" - see
+    /// <see cref="Gunnery.Penetration"/> - so this is the same threshold the
+    /// impact sound switches on, not a second one beside it.</summary>
+    public static bool Penetrating(int level) => level >= 1;
+
+    /// <summary>
     /// Take one more hit on a plate, at <paramref name="along"/> of the way
     /// across it, with a round that goes <paramref name="bite"/> levels deep.
     /// Returns the level of the mark it left, or -1 if this tank has no marks to
@@ -573,6 +639,8 @@ public sealed partial class TankSprite : Node2D
         // now reached - not one per hit. A heavy round on clean armour leaves a
         // breach and no scorch beneath it: one shell, one hole.
         int level = Math.Clamp(worn - 1, 0, Atlas.ScarLevels - 1);
+        if (Penetrating(level))
+            Penetrations++;
         marks.Add(new Mark(level, along, up));
         while (marks.Count > Atlas.ScarLevels)
             marks.RemoveAt(0);
@@ -622,6 +690,8 @@ public sealed partial class TankSprite : Node2D
             _scars[face] = marks = new List<Mark>();
         int at = Math.Clamp(level, 0, Atlas.ScarLevels - 1);
         _wear[face] = Math.Min(Math.Max(Wear(face), at + 1), Atlas.ScarLevels);
+        if (Penetrating(at))
+            Penetrations++;
         marks.Add(new Mark(at, along, up));
         while (marks.Count > Atlas.ScarLevels)
             marks.RemoveAt(0);
@@ -634,6 +704,7 @@ public sealed partial class TankSprite : Node2D
     {
         _scars.Clear();
         _wear.Clear();
+        Penetrations = 0;
         QueueRedraw();
     }
 

@@ -132,6 +132,14 @@ CONFIG = {
     # is what keeps the shadow on ground the tank owns.
     "shadow": True,
     "shadow_cfg": None,          # overrides for ground_shadow.CONFIG
+
+    # the knocked-out pose: a canted turret, a dropped gun, slack belts. Three
+    # extra layers of 24 frames, and *only* three - the wreck's hull, shadow and
+    # scars are the live ones to the pixel, because none of that geometry moves.
+    # None -> skip it. See wreck_pose.py, and note that the paint is not burnt
+    # here: the harness darkens it in a shader.
+    "wreck": {},
+    "wreck_cfg": None,           # overrides for wreck_pose.CONFIG
 }
 
 
@@ -463,6 +471,46 @@ class Body:
                                 "static": True})
             if cfg["shadow"]:
                 self._add_shadow(cfg, drop)
+        self.wreck = None
+        if cfg.get("wreck") is not None:
+            self._add_wreck(cfg)
+
+    def _add_wreck(self, cfg):
+        """The knocked-out pose, as three layers on the roots that already exist.
+
+        Last in the list on purpose. The wreck poses the turret's *children* and
+        writes belt coordinates, and the live turret layer has no hook of its own
+        to undo that - so it must not run after this. The belts are safe either
+        way, because `track_cycle`'s hook writes from their captured rest pose.
+        """
+        import importlib
+        wp = importlib.import_module("wreck_pose")
+        base = dict({"root": cfg["turret"], "turret": cfg["turret_mesh"],
+                     "hull": cfg["hull_mesh"]}, **(cfg.get("wreck_cfg") or {}))
+        try:
+            # while the scene is at rest, which is here and nowhere later: by the
+            # time the hook runs the barrel layer has finished recoiling and left
+            # the tube part-way back in its bore
+            wp.capture(base)
+            spec = [wp.turret_layer(base)]
+        except (KeyError, RuntimeError) as exc:
+            # no ring stamp or no turret is a fact about the scene, like a
+            # missing Barrel, and the live layers still render without this
+            self.wreck = {"skipped": str(exc)}
+            return
+        for name, root in (("wreck_track_left", self.left),
+                           ("wreck_track_right", self.right)):
+            belts = self._by_root.get(root, [])
+            if belts:
+                # the same exclusion the live belt layer gets, and for the same
+                # reason: each root holds the delivered belt *and* the rebuilt
+                # copy, and a layer that names neither draws both
+                spec.append(wp.belt_layer(name, root, belts, base,
+                                          self._drop.get(root)))
+        self.wreck = {"measure": wp.measure(base),
+                      "layers": [s["name"] for s in spec],
+                      "belts_slack": bool(len(spec) > 1)}
+        self.layers.extend(spec)
 
     def _add_shadow(self, cfg, drop):
         """The dark the tank puts on the tile it is standing on.
@@ -524,20 +572,40 @@ class Body:
         # to be put back whatever happened
         for b in self.posed:
             b.restore()
+        # The wreck cants the turret's children, and the live turret layer has no
+        # hook that would put them back. Before the tube's own restore and not
+        # after: both of them hold a rest pose for the barrel, and the one that
+        # runs last wins. `barrel_recoil` took its copy of that pose before the
+        # job began, so it is the one to have the final say.
+        if self.wreck is not None:
+            self.wreck["restored"] = importlib.import_module(
+                "wreck_pose").restore()
         # the tube is posed by moving the object, and the renderer only restores
         # a layer *root* - the tube is a child, so nothing else will put it back
         if self.barrel is not None:
             importlib.import_module("barrel_recoil").restore()
 
     def verify(self, res):
-        """Say out loud that the belt that was meant to move is in the picture.
+        """Say out loud which belts are in each belt layer - both ways round.
 
-        `exclude` matches names by substring, so dropping a belt can silently
-        drop its replacement too, and the layer still renders - the road wheels
-        are in it as well, so nothing is empty and nothing complains.
+        The first half was always here: `exclude` matches names by substring, so
+        dropping a belt can silently drop its replacement too, and the layer still
+        renders - the road wheels are in it as well, so nothing is empty and
+        nothing complains.
+
+        The second half is the failure that shipped. Each root carries the
+        delivered belt *and* the rebuilt copy, and a layer naming neither draws
+        both, one inside the other. It looks like a doubled track and it passes
+        every existing test: the layer renders, and the belt that was meant to move
+        is present. So the claim has to be equality, not presence.
         """
+        wreck = ("wreck_track_left", "wreck_track_right")
+        every = {b.ob.name for b in self.posed}
         for name, layer in (("track_left", self.left),
-                            ("track_right", self.right)):
+                            ("track_right", self.right),
+                            (wreck[0], self.left), (wreck[1], self.right)):
+            if name not in res["layers"]:
+                continue
             want = [b.ob.name for b in self._by_root.get(layer, [])]
             got = res["layers"][name]["rendered"]
             missing = [w for w in want if w not in got]
@@ -546,6 +614,12 @@ class Body:
                     "layer %r was meant to animate %s but rendered %s - the "
                     "exclude list matches by substring and may have taken it out"
                     % (name, missing, got))
+            extra = sorted((set(got) & every) - set(want))
+            if extra:
+                raise RuntimeError(
+                    "layer %r drew %s as well as %s - two belts one inside the "
+                    "other, which reads as a doubled track. Name them in the "
+                    "layer's `exclude`" % (name, extra, want))
 
     def report(self, res):
         import bpy
@@ -553,7 +627,7 @@ class Body:
         upp = res["layers"]["hull"]["units_per_pixel"]
         return {
             "spin": self.spin, "ring": self.ring, "hex": self.hex,
-            "shadow": self.shadow,
+            "shadow": self.shadow, "wreck": self.wreck,
             "shadow_removed": (self.shadow is None
                                or self.shadow["name"] not in bpy.data.objects),
             # by its name: the object itself is gone and touching it raises
