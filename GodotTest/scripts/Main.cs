@@ -1362,16 +1362,51 @@ public sealed partial class Main : Node2D
         _grove.Plant();
     }
 
-    /// <summary>The cell each tank is standing in right now, taken from its
-    /// contact patch rather than from the cell it last reached - the same
-    /// reading the depth order and the selection ring already use, and for the
-    /// same reason: most of an order is spent between two cells.</summary>
+    /// <summary>
+    /// Every cell a tank is in the way of: where its body is, and where it is
+    /// headed.
+    ///
+    /// Two readings, because the wood has to open before the tank arrives and
+    /// close after it has gone, and neither end is the cell its centre is in.
+    ///
+    /// <b>Where its body is</b> is the contact patch, not the centre point - so
+    /// a cell stays counted until the tank has entirely left it rather than
+    /// until its middle has. Sampled by asking which cell six points on the
+    /// patch's rim fall in, rather than by measuring a disc against a hexagon:
+    /// the cell arithmetic answers that exactly, slanted edges and all, and an
+    /// outside-distance to a hexagon would be a second description of the same
+    /// shape - the trap <see cref="Grove.EdgeRoom"/> already names from the
+    /// other side.
+    ///
+    /// <b>Where it is headed</b> is the step it is on, taken from the order the
+    /// moment it starts rather than when the patch first touches. At rest the
+    /// patch reaches 88 ground px and the neighbour's edge is 107 away, so a
+    /// tank that has just been told to drive into a wood is still 19px short of
+    /// touching it - and a wood that opens 19px late opens after the tank has
+    /// visibly set off, which reads as the trees noticing.
+    /// </summary>
     private HashSet<Vector2I> Standing()
     {
         var cells = new HashSet<Vector2I>();
+        double reach = _grove?.KeepOut ?? 0.0;
+        double squash = _grove?.Squash ?? 0.5;
         foreach (Vehicle vehicle in _vehicles)
-            cells.Add(_field.ClampCell(
-                _field.CellAt(vehicle.GroundPoint - _origin)));
+        {
+            Vector2 at = vehicle.GroundPoint - _origin;
+            cells.Add(_field.ClampCell(_field.CellAt(at)));
+            for (int k = 0; k < 6; k++)
+            {
+                double a = Math.PI * k / 3.0;
+                var rim = new Vector2(
+                    at.X + (float)(Math.Cos(a) * reach),
+                    at.Y + (float)(Math.Sin(a) * reach * squash));
+                Vector2I cell = _field.CellAt(rim);
+                if (_field.InBounds(cell))
+                    cells.Add(cell);
+            }
+            if (vehicle.Moving)
+                cells.Add(vehicle.Path[vehicle.PathStep]);
+        }
         return cells;
     }
 
@@ -2022,6 +2057,11 @@ public sealed partial class Main : Node2D
             return;
         v.Wreck.Update(delta);
         TankSprite s = v.Sprite;
+        // The pose swaps on the hit and the paint blackens over the second after
+        // it: the turret dropping is the event, the char is the aftermath. Set
+        // here rather than in Kill so that a reset which clears the wreck clears
+        // this too, through the one path that owns the state.
+        s.Wrecked = true;
         s.Char = v.Wreck.Char;
         s.FireDensity = (float)v.Wreck.Blaze;
         s.SmokeDensity = (float)v.Wreck.Smoke;
@@ -2883,7 +2923,14 @@ public sealed partial class Main : Node2D
               + " penetrations taken"
             : $"wrecked {Active.Wreck.Age:F1}s ago"
               + $"   char {Active.Wreck.Char:F2}"
-              + $"   flame {Active.Wreck.Blaze:F2}, column {Active.Wreck.Smoke:F2}");
+              + $"   flame {Active.Wreck.Blaze:F2}, column {Active.Wreck.Smoke:F2}"
+              // Whether the pose is rendered at all, beside the char. A tank
+              // whose atlas predates the wreck layers is charred and level, and
+              // from the picture that is indistinguishable from a pose that did
+              // not take.
+              + (Active.Atlas.HasWreck
+                 ? Active.Atlas.HasWreckTracks ? "   posed" : "   posed, belts live"
+                 : "   no wreck pose in this atlas"));
         ui.Readout("armour.info", () =>
         {
             AtlasSet a = _tank.Atlas!;
@@ -3248,6 +3295,11 @@ public sealed partial class Main : Node2D
                      // rather than a state, and nothing in the picture says which
                      // end of it a tank is at.
                      + $" {_tank.Penetrations}/{Gunnery.PenetrationsToKill}"
+                     // whether the pose exists, because a charred level turret
+                     // and a pose that failed are the same picture
+                     + (Active.Atlas.HasWreck
+                        ? Active.Atlas.HasWreckTracks ? " posed" : " posed-turret"
+                        : " unposed")
                      + $" c{Active.Wreck.Char:F2}"
                      + $" f{_tank.FireDensity:F2}"
                      + $"  hit {_tank.HitPhase,2}@{(_hit.Face == "" ? "-" : _hit.Face)}"
@@ -3294,6 +3346,12 @@ public sealed partial class Main : Node2D
                      // zero coverage are one empty picture and three faults.
                      + $"  forest {_grove?.Planted ?? 0}t/{Wooded()}c"
                      + $"/{Thinnest()}min"
+                     // How many are standing aside right now. The one number
+                     // that says when the wood opened and when it closed, and
+                     // neither end is visible in a still frame: the fade is
+                     // gradual by design, so a screenshot shows a state and not
+                     // the moment it started.
+                     + $"/{_grove?.Trees.Count(t => t.Modulate.A < 0.99f) ?? 0}fade"
                      + (_grove?.Enabled == true ? "" : "!off")
                      + (_grove?.ClearFront == true ? "!clear" : "")
                      // '!off' rather than nothing, because a still camera and a
@@ -3712,6 +3770,7 @@ public sealed partial class Main : Node2D
             // Before the fire is put out, because a wreck is what keeps
             // relighting it - see UpdateWreck.
             v.Wreck.Reset();
+            s.Wrecked = false;
             s.Char = 0.0;
             s.FireDensity = 1.0f;
             s.SmokeDensity = 1.0f;
