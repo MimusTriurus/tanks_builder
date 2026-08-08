@@ -33,7 +33,8 @@ public static class SelfTest
                           SelectionRing? ring = null,
                           SoundSet? common = null,
                           IReadOnlyDictionary<string, SoundSet>? sounds = null,
-                          ControlPanel? livePanel = null)
+                          ControlPanel? livePanel = null,
+                          Grove? grove = null)
     {
         int failed = 0;
 
@@ -1495,6 +1496,142 @@ public static class SelfTest
                 + "nesting that walks it in screen order");
         }
 
+        // --- what stands on the cells ---------------------------------------
+        //
+        // Skipped whole when nothing is sown, the way the terrain topic is: the
+        // tree art lives outside the repository, and a bench without it is a
+        // bench on open ground.
+        if (grove is null || grove.Planted == 0)
+            GD.Print("the grove: nothing sown, running on open ground");
+        else
+        {
+            GD.Print("the grove: what stands on the cells");
+
+            Check("every tree stands on a wooded cell",
+                grove.Trees.All(t => grove.IsForest(t.Cell)),
+                $"{grove.Trees.Count(t => !grove.IsForest(t.Cell))} of "
+                + $"{grove.Planted} grew on open ground");
+
+            // The foot decides the cell, so a tree near a border belongs to the
+            // hexagon it stands in - and to that one only. Planted per cell off
+            // a global lattice, so this is what says the two agree.
+            Check("a tree is planted by the cell it stands in",
+                grove.Trees.All(t => field.CellAt(t.Ground) == t.Cell),
+                $"{grove.Trees.Count(t => field.CellAt(t.Ground) != t.Cell)} "
+                + "stand outside the cell that planted them");
+
+            // The rule the whole arrangement rests on: nothing grows where a
+            // tank parks. A thicket has no clearing, so it is exempt - and that
+            // exemption is exactly why thickets are barred for movement.
+            float squash = grove.Squash;
+            var intruders = grove.Trees.Where(t =>
+            {
+                if (grove.IsThicket(t.Cell))
+                    return false;
+                Vector2 centre = field.CellCentre(t.Cell);
+                var a = new Vector2(t.Ground.X, t.Ground.Y / squash);
+                var b = new Vector2(centre.X, centre.Y / squash);
+                return a.DistanceTo(b) < grove.KeepOut - 0.5;
+            }).ToList();
+            Check("nothing grows where a tank stands",
+                intruders.Count == 0,
+                $"{intruders.Count} inside the {grove.KeepOut:F0}px keep-out");
+
+            // Ground space, not screen: the lattice is square on the ground, and
+            // measuring the spacing on screen would call every north-south pair
+            // too close by the squash.
+            double closest = double.MaxValue;
+            for (int i = 0; i < grove.Trees.Count; i++)
+            for (int j = i + 1; j < grove.Trees.Count; j++)
+            {
+                var a = new Vector2(grove.Trees[i].Ground.X,
+                                    grove.Trees[i].Ground.Y / squash);
+                var b = new Vector2(grove.Trees[j].Ground.X,
+                                    grove.Trees[j].Ground.Y / squash);
+                closest = Math.Min(closest, a.DistanceTo(b));
+            }
+            // The lattice guarantees it whatever the cells decide, which is the
+            // point of sowing globally: two neighbouring hexagons cannot plant
+            // two trees a pixel apart across their shared edge.
+            double floorGap = grove.Spacing * (1.0 - 2.0 * grove.Jitter);
+            Check("no two trees are closer than the lattice allows",
+                closest >= floorGap - 0.5,
+                $"closest {closest:F1}px against {floorGap:F1}px");
+
+            // Same rule as a vehicle's, in the same space - that is what lets a
+            // tree and a tank sort against each other at all.
+            Check("a tree's depth is its foot",
+                grove.Trees.All(t => t.ZIndex == Mathf.RoundToInt(t.Ground.Y)),
+                "depth off anything but the foot puts a leaning canopy in front "
+                + "of what it grows behind");
+            Check("a tree in front of another draws over it",
+                grove.Trees.Zip(grove.Trees.Skip(1))
+                     .All(p => p.First.ZIndex <= p.Second.ZIndex),
+                "the planted list is kept in depth order so a tie resolves back "
+                + "to front rather than by which cell was walked first");
+
+            // Not decoration and not an effect: a tree is an object on the
+            // ground, so it belongs over the ruts and the ring rather than
+            // among them.
+            Check("trees stand over the ground marks", grove.Trees.All(
+                    t => t.ZIndex > TrackMarks.MarksZ
+                         && t.ZIndex > SelectionRing.GroundZ),
+                "a trunk under the paint is paint");
+
+            // Hashed, not generated: --capture fixes the time step so two runs
+            // can be diffed, and a board that reshuffled itself would be
+            // measuring itself.
+            var sown = grove.Trees.Select(t => (t.Ground, t.Species)).ToList();
+            grove.Plant();
+            Check("sowing twice gives the same forest",
+                grove.Trees.Select(t => (t.Ground, t.Species)).SequenceEqual(sown),
+                $"{sown.Count} then {grove.Planted}");
+
+            // The rule that cannot be had, asserted as a rule anyway: with it on
+            // nothing crosses a tank on its own cell, and what that costs is the
+            // whole front of every clearing.
+            bool wasClear = grove.ClearFront;
+            grove.ClearFront = true;
+            grove.Plant();
+            Check("with the clearance rule on, no tree crosses its own cell's tank",
+                grove.Trees.All(t =>
+                {
+                    if (grove.IsThicket(t.Cell))
+                        return true;
+                    double d = t.Ground.Y - field.CellCentre(t.Cell).Y;
+                    return d <= 0.0 || t.Rise < d - grove.TankBelow;
+                }),
+                $"tree rise against {grove.TankBelow:F0}px of hang below the "
+                + "contact point");
+            grove.ClearFront = wasClear;
+
+            // A thicket is a cell with no clearing in it, so it is the one cell
+            // a tank may not enter - and the two have to be the same set, or the
+            // board shows woods you can drive into and clearings you cannot.
+            grove.Plant();
+            Check("the impassable cells are exactly the thickets",
+                grove.Impassable().All(c => grove.IsThicket(c))
+                && Enumerable.Range(0, field.Columns * field.Rows)
+                    .Select(i => new Vector2I(i % field.Columns, i / field.Columns))
+                    .Where(c => grove.IsThicket(c))
+                    .All(c => grove.Impassable().Contains(c)),
+                $"{grove.Impassable().Count} barred");
+
+            Check("a tank never comes up parked in a thicket",
+                vehicles is null
+                || vehicles.All(v => !grove.IsThicket(v.HomeCell)),
+                "spared cells are the home cells, and a thicket under one of "
+                + "them is the picture the keep-out exists to prevent");
+
+            double wooded = grove.Coverage;
+            grove.Coverage = 0.0;
+            grove.Plant();
+            Check("no woods, no trees", grove.Planted == 0,
+                $"{grove.Planted} grew on a board with no forest on it");
+            grove.Coverage = wooded;
+            grove.Plant();
+        }
+
         // --- the ground under the tank ------------------------------------
         //
         // The one layer that is neither the tank nor an effect on it, and every
@@ -2507,8 +2644,9 @@ public static class SelfTest
             int plinkThird = tank.DamageTo(plate, 0.4f, -0.1f, 0);
             Check("a round with a ceiling never gets past it, however often it lands",
                 plink == 0 && plinkAgain == 0 && plinkThird == 0
-                && tank.Wear(plate) == 1,
-                $"{plink}/{plinkAgain}/{plinkThird}, worked {tank.Wear(plate)}"
+                && tank.Wear(plate) == 1 && tank.Penetrations == 0,
+                $"{plink}/{plinkAgain}/{plinkThird}, worked {tank.Wear(plate)},"
+                + $" {tank.Penetrations} penetrations"
                 + " - three light rounds must not add up to a hole in a heavy");
             // The counterpart, and it used to assert the opposite - which is why
             // nothing caught the plate quietly recording only its first hit. A
@@ -2538,6 +2676,52 @@ public static class SelfTest
                 && tank.ScarLevel(plate) == atlas.ScarLevels - 1,
                 $"left {scorchOnBreach}, plate worked {tank.Wear(plate)},"
                 + $" worst mark {tank.ScarLevel(plate)}");
+
+            // What the tank is carrying towards its end, as against what each
+            // plate is carrying. The matchup says whether a round counts, this
+            // says when enough of them have.
+            tank.Repair();
+            var tally = new List<int>();
+            for (int i = 0; i < Gunnery.PenetrationsToKill; i++)
+            {
+                tank.DamageTo(plate, 0.1f * i, 0.0f, 1);
+                tally.Add(tank.Penetrations);
+            }
+            Check("penetrations count up one per round and reach the kill exactly",
+                tally.SequenceEqual(
+                    Enumerable.Range(1, Gunnery.PenetrationsToKill))
+                && tally[^2] < Gunnery.PenetrationsToKill,
+                $"tally {string.Join("/", tally)} against"
+                + $" {Gunnery.PenetrationsToKill} - the round before last must not"
+                + " already be enough");
+            // The tank's, not the plate's, and the difference is the whole reason
+            // this is not summed off the wear: a plate a heavy has already breached
+            // stops climbing while rounds keep arriving, and rounds spread over
+            // three plates would count differently from three into one.
+            tank.Repair();
+            int spread = 0;
+            foreach (string face in atlas.HitFaces.Take(3))
+            {
+                tank.DamageTo(face, 0.0f, 0.0f, 1);
+                spread = tank.Penetrations;
+            }
+            tank.Repair();
+            Check("the tally is the tank's, wherever on it the rounds landed",
+                spread == Math.Min(3, atlas.HitFaces.Count)
+                && tank.Penetrations == 0,
+                $"{spread} from three plates, {tank.Penetrations} after repair");
+            // The divergence itself, stated rather than implied: past the ceiling
+            // the plate is done and the tank is not.
+            tank.Repair();
+            int deepest = atlas.ScarLevels - 1;
+            for (int i = 0; i < 4; i++)
+                tank.DamageTo(plate, 0.1f * i, 0.0f, deepest);
+            Check("armour stops at its deepest level while the tally keeps climbing",
+                tank.Wear(plate) == atlas.ScarLevels && tank.Penetrations == 4,
+                $"plate worked {tank.Wear(plate)} of {atlas.ScarLevels},"
+                + $" tank at {tank.Penetrations} penetrations - a tally read off the"
+                + " wear would have stalled with the plate");
+            tank.Repair();
             tank.Repair();
 
             // Where the round landed, kept as a fraction of the plate rather

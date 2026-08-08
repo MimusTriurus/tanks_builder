@@ -32,6 +32,7 @@ public sealed partial class Main : Node2D
     /// are: without it the field falls back to the rendered tile and everything
     /// else is unchanged.</summary>
     private const string TerrainsRoot = "D:/Projects/AgentCoding/BlenderMCP/Images/Terrains";
+    private const string PropsRoot = "D:/Projects/AgentCoding/BlenderMCP/Images/Vegetation";
     /// <summary>The tanks to look for on disk, in key order: one per class,
     /// all three built from separate parts - hull, turret, barrel, engine and
     /// two belts as their own meshes.
@@ -154,6 +155,14 @@ public sealed partial class Main : Node2D
     private HexField _field = null!;
     private TerrainSet? _terrain;
     private TrackMarks? _marks;
+    private PropSet? _props;
+    private Grove? _grove;
+
+    /// <summary>How much of the board is wooded, and whether a tree may stand
+    /// where it would cross a tank on its own cell. Parked here for --terrain's
+    /// reason: both are read before the field exists.</summary>
+    private double _forest = 0.4;
+    private bool _clearFront;
 
     /// <summary>Whether the belts leave anything behind. On by default: a tank
     /// that leaves no mark is the picture the bench already had, so the A/B this
@@ -727,6 +736,21 @@ public sealed partial class Main : Node2D
                 _paint = userArgs[++i];
             else if (userArgs[i] == "--no-ruts")
                 _rutsEnabled = false;
+            // Invariant culture, the trap named beside --hit-scale: this machine
+            // parses "0.4" as false and leaves the default, and two captures at
+            // two coverages come out byte for byte identical.
+            else if (userArgs[i] == "--forest" && i + 1 < userArgs.Length
+                     && double.TryParse(userArgs[i + 1],
+                                        NumberStyles.Float, CultureInfo.InvariantCulture,
+                                        out double wooded))
+            {
+                i++;
+                _forest = Math.Clamp(wooded, 0.0, 1.0);
+            }
+            else if (userArgs[i] == "--no-forest")
+                _forest = 0.0;
+            else if (userArgs[i] == "--clear-front")
+                _clearFront = true;
             else if (userArgs[i] == "--drive" && i + 1 < userArgs.Length)
             {
                 string[] parts = userArgs[i + 1].Split(',');
@@ -788,10 +812,22 @@ public sealed partial class Main : Node2D
             _paint = TerrainSet.Mixed;
         }
 
+        _props = PropSet.Load(PropsRoot);
+        GD.Print("props: " + _props.Note);
+
         _field = new HexField { Terrain = _terrain, Paint = _paint };
         AddChild(_field);
         _marks = new TrackMarks { Enabled = _rutsEnabled };
         AddChild(_marks);
+        // Added before the vehicles, so a tree and a tank that come out on the
+        // same foot row - the same ZIndex - resolve to the tank. Being stood on
+        // is the tank's job.
+        _grove = new Grove
+        {
+            Field = _field, Props = _props, Origin = _origin,
+            Coverage = _forest, ClearFront = _clearFront,
+        };
+        AddChild(_grove);
 
         // One vehicle per atlas that loaded, parked along HomeCells. Built here
         // rather than swapped later: each one keeps its own atlas for good, so
@@ -915,6 +951,7 @@ public sealed partial class Main : Node2D
         ApplySize();
         foreach (Vehicle vehicle in _vehicles)
             Park(vehicle);
+        SowGrove();
         // The flag may have picked a tank other than the first, and the trim is
         // set on selection - so it has to be set once at the start too, or two of
         // the three come up forward until something is clicked.
@@ -981,7 +1018,7 @@ public sealed partial class Main : Node2D
         if (_selfTest)
         {
             int failed = SelfTest.Run(_field, _tank, _atlases, _vehicles, _active,
-                                      _ring, _commonSounds, _sounds, _panel);
+                                      _ring, _commonSounds, _sounds, _panel, _grove);
             GetTree().Quit(failed == 0 ? 0 : 1);
             return;
         }
@@ -1266,6 +1303,78 @@ public sealed partial class Main : Node2D
         vehicle.Sprite.QueueRedraw();
     }
 
+    /// <summary>
+    /// Plant the board, with the keep-out and the clearance constant taken from
+    /// the tanks that are actually on it rather than written down.
+    ///
+    /// The keep-out is the contact patch swept over every heading: half the belt
+    /// length and the half-gauge are the two sides of it, so its radius is their
+    /// diagonal. Taken from the widest tank at its class scale, because a
+    /// clearing has to hold whichever one drives in - sized to the medium, the
+    /// heavy parks in the trees.
+    /// </summary>
+    private void SowGrove()
+    {
+        if (_grove is null)
+            return;
+        double keepOut = 0.0, below = 0.0;
+        _grove.Spared.Clear();
+        foreach (Vehicle vehicle in _vehicles)
+        {
+            _grove.Spared.Add(vehicle.HomeCell);
+            double scale = vehicle.Sprite.BodyScale;
+            double half = vehicle.Atlas.TrackLength * 0.5;
+            double arm = vehicle.Atlas.TrackArm;
+            if (half > 0.0 && arm > 0.0)
+                keepOut = Math.Max(keepOut, Math.Sqrt(half * half + arm * arm) * scale);
+            below = Math.Max(below, ReachBelow(vehicle.Atlas) * scale);
+        }
+        if (keepOut > 0.0)
+            _grove.KeepOut = keepOut;
+        if (below > 0.0)
+            _grove.TankBelow = below;
+        _grove.Plant();
+    }
+
+    /// <summary>Cells carrying trees, clearings and thickets together.</summary>
+    private int Wooded()
+    {
+        if (_grove is null)
+            return 0;
+        int n = 0;
+        for (int q = 0; q < _field.Columns; q++)
+        for (int r = 0; r < _field.Rows; r++)
+            if (_grove.IsForest(new Vector2I(q, r)))
+                n++;
+        return n;
+    }
+
+    /// <summary>How far a tank reaches below its own contact point, in tile px.
+    /// Not zero and not small: the belts hang in front of the turret axis, so a
+    /// tank covers ground it is not standing on, and a prop that ignored it
+    /// would clear the contact point and cross the tracks.</summary>
+    private static double ReachBelow(AtlasSet atlas)
+    {
+        double contact = atlas.Anchor.Y + atlas.GroundOffset.Y;
+        double below = 0.0;
+        foreach (string layer in new[] { "hull", AtlasSet.TrackNames[0],
+                                         AtlasSet.TrackNames[1] })
+        {
+            if (!atlas.Has(layer))
+                continue;
+            int frames = atlas.CountOf(layer) * Math.Max(1, atlas.PhasesOf(layer));
+            for (int i = 0; i < frames; i++)
+            {
+                Vector2 size = atlas.SizeOf(layer, i);
+                if (size.Y <= 0.0f)
+                    continue;
+                below = Math.Max(below,
+                                 atlas.OffsetOf(layer, i).Y + size.Y - contact);
+            }
+        }
+        return below;
+    }
+
     /// <summary>The overlap order, off where the tank actually is rather than off
     /// the cell it last reached. Taken from the live position because a tank spends
     /// most of a move between two cells: stamped on arrival only, one crossing the
@@ -1471,8 +1580,14 @@ public sealed partial class Main : Node2D
             ? ""
             : $" [{_shells.Count} up, {_shells[0].Fraction:F2}"
               + $"{(_tracerVisible ? "" : " unseen")}]";
+        // And how near the end the target is, which the plate cannot say: three
+        // rounds finish it wherever they landed, so a tank whose front plate reads
+        // 1/1 may be one round from dead or three, depending on what its flanks
+        // have taken.
+        string near = $" pen {v.Target.Sprite.Penetrations}"
+                      + $"/{Gunnery.PenetrationsToKill}";
         return $"{v.Target.Tag}@{v.Solution.Heading}deg/{v.Solution.Range} {state}"
-               + $" {face} {v.Target.Sprite.ScarLevel(face)}/{cap}{flying}";
+               + $" {face} {v.Target.Sprite.ScarLevel(face)}/{cap}{near}{flying}";
     }
 
     /// <summary>
@@ -1525,8 +1640,7 @@ public sealed partial class Main : Node2D
         // Round the others rather than through them. A blocked destination gives
         // no path at all, which is why a click on an occupied cell is read as a
         // selection before it ever gets here.
-        _path = _field.FindPath(_cell, target,
-                                Vehicle.Occupied(_vehicles, Active));
+        _path = _field.FindPath(_cell, target, Barred());
         _pathStep = 0;
         // Mouse aim would override both turret modes and make the feature look
         // broken while the tank drives, so an order takes the turret back.
@@ -1534,6 +1648,20 @@ public sealed partial class Main : Node2D
         _spinning = false;
         _field.Highlight = _path;
         _field.QueueRedraw();
+    }
+
+    /// <summary>Everywhere the driven tank may not go: the other tanks, and the
+    /// thickets. One set rather than two arguments, because a route has no
+    /// reason to care which kind of thing is in the way - and because the
+    /// destination test inside <see cref="HexField.FindPath"/> then refuses a
+    /// click into the woods for free, the same way it refuses a click onto
+    /// another tank.</summary>
+    private HashSet<Vector2I> Barred()
+    {
+        var blocked = new HashSet<Vector2I>(Vehicle.Occupied(_vehicles, Active));
+        if (_grove is not null)
+            blocked.UnionWith(_grove.Impassable());
+        return blocked;
     }
 
     private void CancelOrder() => CancelOrder(Active);
@@ -1777,13 +1905,19 @@ public sealed partial class Main : Node2D
     /// <summary>
     /// Kill one tank.
     ///
-    /// A breach does it, and nothing else - see <see cref="Land"/>. That is an
-    /// assumption and worth naming as one: the bench has no hit points, and
-    /// inventing some would be a second damage model beside the one the class
-    /// matchup already is. Taking the deepest level as death makes the matchup
-    /// table decide who can kill whom, which is what it was written to say - a
-    /// light gun that can only ever scorch a heavy cannot destroy one either,
-    /// and now that is visible instead of implied.
+    /// Three rounds past the paint do it, and nothing else - see
+    /// <see cref="Land"/> and <see cref="Gunnery.PenetrationsToKill"/>. That is
+    /// still an assumption and worth naming as one: the bench has no hit points,
+    /// and inventing some would be a second damage model beside the one the class
+    /// matchup already is. Counting penetrations leaves the matchup table deciding
+    /// *who* can kill whom, which is what it was written to say - a light gun that
+    /// can only ever scorch a heavy cannot destroy one however long it keeps at it
+    /// - and leaves the count deciding *when*.
+    ///
+    /// The first version had the deepest scar level be death, and the two
+    /// questions were one: a heavy killed a medium with its first shell and a
+    /// medium killed a light never, so every cell of the table was one shot or
+    /// nothing. Three rounds is what put the middle back.
     ///
     /// Everything here is the tank ceasing to be a machine. Most of the read is
     /// in this list rather than in any pixel: on this field a live tank trembles,
@@ -2169,10 +2303,13 @@ public sealed partial class Main : Node2D
         // the victim's, so it counts shells into this hull however many guns are
         // pointed at it.
         victim.Audio?.Struck(got, victim.HitCount);
-        // A breach kills, and only a breach. See Kill for why that is the whole
-        // rule: it hands the question to the matchup table, which was written to
-        // answer it.
-        if (got >= victim.Atlas.ScarLevels - 1)
+        // Three rounds past the paint kill, and the matchup decides which rounds
+        // those are. The two halves are deliberately apart - see
+        // Gunnery.PenetrationsToKill. The tally is counted inside Damage/DamageTo,
+        // so this asks the tank what it has taken rather than judging the shell
+        // that just landed: a plate a heavy has already breached goes no deeper,
+        // and a kill read off this round's level would stall there.
+        if (sprite.Penetrations >= Gunnery.PenetrationsToKill)
             Kill(victim);
     }
 
@@ -2302,6 +2439,9 @@ public sealed partial class Main : Node2D
         ["--destroy"] = new[] { "armour.destroy" },
         ["--turret-sound"] = new[] { "sound.turret_motor" },
         ["--terrain"] = new[] { "ground.terrain" },
+        ["--forest"] = new[] { "ground.forest" },
+        ["--no-forest"] = new[] { "ground.forest" },
+        ["--clear-front"] = new[] { "ground.clearfront" },
     };
 
     private readonly HashSet<string> _flagged = new();
@@ -2675,7 +2815,12 @@ public sealed partial class Main : Node2D
         ui.Press("armour.destroy", "destroy this tank  (--destroy)",
                  () => Kill(Active));
         ui.Readout("armour.wreck", () =>
-            !Active.Wreck.Dead ? "intact"
+            // How near the end it is, first, because that is the number a
+            // firefight makes you want and the picture cannot give: a tank two
+            // rounds in looks exactly like a tank one round in.
+            !Active.Wreck.Dead
+            ? $"intact, {_tank.Penetrations} of {Gunnery.PenetrationsToKill}"
+              + " penetrations taken"
             : $"wrecked {Active.Wreck.Age:F1}s ago"
               + $"   char {Active.Wreck.Char:F2}"
               + $"   flame {Active.Wreck.Blaze:F2}, column {Active.Wreck.Smoke:F2}");
@@ -2742,6 +2887,27 @@ public sealed partial class Main : Node2D
                 _paint = _field.Paint;
                 _field.QueueRedraw();
             });
+        // Two sliders rather than one, because they answer different questions:
+        // how much of the board is wooded, and how much of that is woods a tank
+        // cannot drive into. Collapsing them would make "more forest" also mean
+        // "less board", which is the decision this pair exists to keep apart.
+        ui.Slide("ground.forest", "wooded cells  (--forest)", 0.0, 1.0, 0.05,
+            () => _grove?.Coverage ?? 0.0,
+            v => { _forest = v; if (_grove is not null) { _grove.Coverage = v; SowGrove(); } },
+            "x", () => _grove is null ? "" : $"{Wooded()} of "
+                + $"{_field.Columns * _field.Rows} cells, {_grove.Planted} trees");
+        ui.Slide("ground.thicket", "of those, impassable", 0.0, 1.0, 0.05,
+            () => _grove?.Thicket ?? 0.0,
+            v => { if (_grove is not null) { _grove.Thicket = v; SowGrove(); } },
+            "x", () => _grove is null ? ""
+                : $"{_grove.Impassable().Count} cells no tank can enter");
+        // The rule that cannot be had, kept as a switch so that is visible
+        // rather than asserted. See Grove.ClearFront: a 111px tree needs 142px
+        // of clearance in front of a tank and a hexagon offers 54, so switching
+        // it on empties the front of every clearing.
+        ui.Toggle("ground.clearfront", "no tree may cross a tank  (--clear-front)",
+            () => _grove?.ClearFront == true,
+            on => { if (_grove is not null) { _grove.ClearFront = on; SowGrove(); } });
         ui.Readout("ground.info", () =>
         {
             if (_terrain is null || !_terrain.Any)
@@ -2948,6 +3114,10 @@ public sealed partial class Main : Node2D
                      // the same word and different pictures, and the panel is
                      // not there under --capture.
                      + $"  wreck {(Active.Wreck.Dead ? $"{Active.Wreck.Age,5:F1}s" : " alive")}"
+                     // How far through the three it is. Alive is now a range
+                     // rather than a state, and nothing in the picture says which
+                     // end of it a tank is at.
+                     + $" {_tank.Penetrations}/{Gunnery.PenetrationsToKill}"
                      + $" c{Active.Wreck.Char:F2}"
                      + $" f{_tank.FireDensity:F2}"
                      + $"  hit {_tank.HitPhase,2}@{(_hit.Face == "" ? "-" : _hit.Face)}"
@@ -2988,6 +3158,13 @@ public sealed partial class Main : Node2D
                      // a board of a mix are two different pictures, and neither
                      // says which it is.
                      + $"  ground {_field.Paint}"
+                     // Trees, wooded cells, and how many of those no tank may
+                     // enter. Three numbers because a board with no props, a
+                     // board whose props were all refused and a board sown at
+                     // zero coverage are one empty picture and three faults.
+                     + $"  forest {_grove?.Planted ?? 0}t/{Wooded()}c"
+                     + $"/{_grove?.Impassable().Count ?? 0}x"
+                     + (_grove?.ClearFront == true ? "!clear" : "")
                      // '!off' rather than nothing, because a still camera and a
                      // switched-off one are the same two zeroes - the marker the
                      // recoil spring and the tracer already carry.
