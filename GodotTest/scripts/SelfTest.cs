@@ -946,20 +946,30 @@ public static class SelfTest
         // rather than by this list. Everything after it is the tank.
         string[] onTank = TankSprite.LayerOrder
             .SkipWhile(n => n == AtlasSet.ShadowName).ToArray();
+        // Every belt there is, running or slack: the wreck's are belts too, and
+        // an ordering claim that named only the live pair would have been an
+        // ordering claim about half the belts.
+        string[] allBelts = AtlasSet.TrackNames
+            .Concat(AtlasSet.WreckTrackNames).ToArray();
         Check("the belts composite before everything else on the tank",
-            onTank.Take(AtlasSet.TrackNames.Length)
-                .SequenceEqual(AtlasSet.TrackNames),
+            onTank.Take(allBelts.Length).OrderBy(n => n)
+                .SequenceEqual(allBelts.OrderBy(n => n)),
             "they are not on the tank, they are the tank: "
-            + string.Join(", ", onTank.Take(3)));
+            + string.Join(", ", onTank.Take(allBelts.Length + 1)));
         // The belt is lower than the turret but not always behind it: the far
         // one shows over the hull deck legitimately, and only the turret is
         // tall enough to be in its way. Drawn by the parent the turret went
         // down first and the belt painted over it - 1455px of it on HTP.
         int turretAt = Array.IndexOf(onTank, "turret");
-        Check("the turret composites after both belts",
-            turretAt == AtlasSet.TrackNames.Length,
-            $"turret at {turretAt}, belts end at {AtlasSet.TrackNames.Length}: "
-            + string.Join(", ", onTank.Take(4)));
+        // After *every* belt, which is the substance of it - a belt painting over
+        // the turret is the failure, and which belt does not matter. It used to
+        // assert the exact index, which was a stronger claim than the reasoning
+        // supports and broke the day the wreck's belts landed between them.
+        Check("the turret composites after every belt",
+            turretAt == allBelts.Length
+            && allBelts.All(b => Array.IndexOf(onTank, b) < turretAt),
+            $"turret at {turretAt}, {allBelts.Length} belts: "
+            + string.Join(", ", onTank.Take(allBelts.Length + 1)));
         Check("and before anything that happens to the tank",
             turretAt < Array.IndexOf(onTank, AtlasSet.ScarNames[0]),
             "damage and effects go over the turret, not under it");
@@ -2302,6 +2312,76 @@ public static class SelfTest
                 tank.Material?.GetType().Name ?? "none");
             Check("an intact tank is not charred at all", tank.Char == 0.0,
                 $"{tank.Char:F3}");
+
+            // The knocked-out pose. A pair of layers per part rather than one
+            // layer switching atlas, and what has to hold is that exactly one of
+            // each pair draws: both showing puts two turrets on the tank, neither
+            // showing takes its turret away, and the second is the quieter of the
+            // two failures.
+            var pairs = new List<(string Live, string Dead)>
+            {
+                ("turret", AtlasSet.WreckTurretName),
+                (AtlasSet.BarrelName, AtlasSet.WreckTurretName),
+                (AtlasSet.TrackNames[0], AtlasSet.WreckTrackNames[0]),
+                (AtlasSet.TrackNames[1], AtlasSet.WreckTrackNames[1]),
+            };
+            bool paired = true, exclusive = true, ordered = true;
+            foreach ((string alive, string gone) in pairs)
+            {
+                EffectLayer a = TankSprite.MakeLayer(alive);
+                EffectLayer b = TankSprite.MakeLayer(gone);
+                paired &= a.StandIn == gone
+                          && a.When == EffectLayer.Life.Alive
+                          && b.When == EffectLayer.Life.Dead;
+                // with the stand-in present, one of the two and never both
+                exclusive &= a.LiveNow(false, true) != a.LiveNow(true, true)
+                             && a.LiveNow(false, true) != b.LiveNow(false, true)
+                             && b.LiveNow(true, true) != a.LiveNow(true, true);
+                // and side by side in the order, because which half is showing
+                // must not change where the pair composites
+                int i = Array.IndexOf(TankSprite.LayerOrder, alive);
+                int j = Array.IndexOf(TankSprite.LayerOrder, gone);
+                ordered &= i >= 0 && j >= 0 && Math.Abs(i - j) <= pairs.Count;
+                a.QueueFree();
+                b.QueueFree();
+            }
+            Check("every part the wreck re-poses is a live/dead pair", paired,
+                string.Join(", ", pairs.Select(p => $"{p.Live}->{p.Dead}")));
+            Check("exactly one half of each pair ever draws", exclusive,
+                "both would show two turrets, neither would show none");
+            Check("the wreck's layers composite where the live ones do", ordered,
+                string.Join(" ", TankSprite.LayerOrder));
+            // And the clause that keeps an older atlas working: a live part only
+            // steps aside when there is something to step aside for. Without it a
+            // set rendered before the wreck existed loses its turret the moment a
+            // tank dies - no turret at all, which is the quietest failure there is.
+            EffectLayer solo = TankSprite.MakeLayer("turret");
+            Check("a tank with no wreck pose keeps the one it has",
+                solo.LiveNow(true, false) && solo.LiveNow(false, false),
+                "a set rendered before the wreck layers must not lose its turret");
+            solo.QueueFree();
+            // The wreck's belts have no phase axis at all, which is the whole
+            // difference from the running ones: a dead belt does not wind, so
+            // there is no ground to tie it to and nothing for TrackLoop to drive.
+            EffectLayer dead0 = TankSprite.MakeLayer(AtlasSet.WreckTrackNames[0]);
+            EffectLayer deadT = TankSprite.MakeLayer(AtlasSet.WreckTurretName);
+            Check("a wreck's belt does not wind and its turret keeps its own heading",
+                dead0.Clock == EffectLayer.Clocks.Body && dead0.FollowsHull
+                && !dead0.Loops && deadT.Clock == EffectLayer.Clocks.Body
+                && !deadT.FollowsHull && dead0.Armour && deadT.Armour,
+                $"belt {dead0.Clock} hull={dead0.FollowsHull},"
+                + $" turret {deadT.Clock} hull={deadT.FollowsHull}");
+            dead0.QueueFree();
+            deadT.QueueFree();
+            // The pose is the event and the char is the aftermath, so they are two
+            // fields and not one: a flag read off the char would hold the turret
+            // level until the hull had started to blacken.
+            tank.Wrecked = true;
+            bool posedAtOnce = tank.Wrecked && tank.Char == 0.0;
+            tank.Wrecked = false;
+            Check("the turret drops on the hit and the paint blackens after it",
+                posedAtOnce && !tank.Wrecked,
+                "the pose must not wait for the char, nor the char for the pose");
             // The middle button pans and destroys, and the gesture is all that
             // separates them. A pan that killed a tank it happened to travel over
             // would be the worst kind of overload: it fires while the hand is
@@ -3147,14 +3227,6 @@ public static class SelfTest
             () => { noted = dial; return "aside"; });
         stub.Choice("t.pick", "pick", new[] { "a", "b", "c" }, () => pick,
             i => { pick = i; writes++; });
-        // A counted quantity. Its own row type because a slider answers "how far
-        // along" and a count of things has states rather than a range - and its
-        // own line here because a SpinBox carries a LineEdit inside it, which is
-        // the one widget in this panel that would take the keyboard if nobody
-        // said otherwise.
-        double many = 2.0;
-        stub.Count("t.many", "many", 0.0, 20.0, 1.0, () => many,
-                   v => { many = v; writes++; });
 
         // The harness changes behind the panel's back - a key, a start-up flag,
         // R resetting the lot - and the widgets have to follow without anything
@@ -3174,7 +3246,7 @@ public static class SelfTest
         {
             foreach (Node child in node.GetChildren())
             {
-                if (child is CheckBox or HSlider or OptionButton or SpinBox or LineEdit)
+                if (child is CheckBox or HSlider or OptionButton)
                     widgets.Add((Control)child);
                 Collect(child);
             }
@@ -3192,14 +3264,10 @@ public static class SelfTest
                 bar.EmitSignal(Godot.Range.SignalName.ValueChanged, 1.0);
             else if (widget is OptionButton drop)
                 drop.EmitSignal(OptionButton.SignalName.ItemSelected, 0);
-            else if (widget is SpinBox count)
-                count.EmitSignal(Godot.Range.SignalName.ValueChanged, 7.0);
         }
         Check("moving a control reaches the harness",
-            writes == 4 && !flag && Math.Abs(dial - 1.0) < 1e-9 && pick == 0
-            && Math.Abs(many - 7.0) < 1e-9,
-            $"{writes} of 4 setters ran, flag {flag}, dial {dial}, pick {pick}, "
-            + $"count {many}");
+            writes == 3 && !flag && Math.Abs(dial - 1.0) < 1e-9 && pick == 0,
+            $"{writes} of 3 setters ran, flag {flag}, dial {dial}, pick {pick}");
         // Nothing on it may take keyboard focus: a focused Button eats SPACE
         // and a focused slider eats the arrows, so the panel would break the
         // keys it is a view of. It broke the turret spin first.

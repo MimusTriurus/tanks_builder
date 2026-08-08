@@ -3033,12 +3033,11 @@ public sealed partial class Main : Node2D
                           : _grove.Ghost >= 0.999f
                             ? "   - solid: the wood keeps the tank" : "");
             });
-        // Two counts rather than one slider: four trees and five trees are two
-        // states, not two points on a range. Clamped against each other in the
+        // Two sliders stepping whole trees, clamped against each other in the
         // setters rather than left to disagree - a floor above the ceiling is
         // not a board anyone wanted to see, and refusing it here is cheaper
         // than deciding which of the two wins during sowing.
-        ui.Count("ground.least", "trees per wooded cell, at least", 0.0, 20.0, 1.0,
+        ui.Slide("ground.least", "trees per wooded cell, at least", 0.0, 20.0, 1.0,
             () => _grove?.Minimum ?? 0,
             v =>
             {
@@ -3048,9 +3047,9 @@ public sealed partial class Main : Node2D
                     _grove.Maximum = _grove.Minimum;
                 SowGrove();
             },
-            () => _grove is null ? "" : $"{Wooded()} wooded cells, "
+            "", () => _grove is null ? "" : $"{Wooded()} wooded cells, "
                 + $"{_grove.Planted} trees, {Thinnest()} on the emptiest");
-        ui.Count("ground.most", "and at most  (0 for no ceiling)", 0.0, 20.0, 1.0,
+        ui.Slide("ground.most", "and at most  (0 for no ceiling)", 0.0, 20.0, 1.0,
             () => _grove?.Maximum ?? 0,
             v =>
             {
@@ -3060,7 +3059,7 @@ public sealed partial class Main : Node2D
                     _grove.Minimum = _grove.Maximum;
                 SowGrove();
             },
-            () => _grove is null ? "" : $"{Thickest()} on the fullest"
+            "", () => _grove is null ? "" : $"{Thickest()} on the fullest"
                 + (_grove.Maximum > 0 ? "" : "   - whatever the ground allows"));
         // What actually grew, by kind. The spot picks among the trees that fit
         // it, so a wide prop is thinned by the ground rather than by any
