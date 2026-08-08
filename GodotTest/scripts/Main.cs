@@ -549,6 +549,22 @@ public sealed partial class Main : Node2D
     public override void _Ready()
     {
         string[] userArgs = OS.GetCmdlineUserArgs();
+        // Which panel rows the command line has spoken for, so panel.json does
+        // not then overrule it. The order is compiled-in default, then the file,
+        // then the flag: a flag is the more specific statement, and a capture
+        // taken with one has to mean what it says whatever the file holds.
+        //
+        // Read off the arguments here rather than set inside each branch,
+        // because there are twenty-odd of them and a branch that forgot to
+        // claim its row would fail in the quietest way there is - the flag
+        // works, and then the file undoes it a hundred lines later.
+        foreach (string arg in userArgs)
+        {
+            string name = arg.Split('=')[0];
+            if (FlagRows.TryGetValue(name, out string[]? claimed))
+                foreach (string id in claimed)
+                    _flagged.Add(id);
+        }
         for (int i = 0; i < userArgs.Length; i++)
         {
             if (userArgs[i] == "--capture" && i + 1 < userArgs.Length)
@@ -919,22 +935,46 @@ public sealed partial class Main : Node2D
             AddChild(_targetRing);
         }
 
+        // Before the self-test, which now checks the rows against panel.json,
+        // and before the start-up flags, so the panel's first Sync sees what they
+        // did rather than the defaults.
+        //
+        // Built whether or not it is shown, because the rows are now the only
+        // path panel.json has into the harness - each opening value goes through
+        // the very setter the checkbox and the key use, so the file cannot reach
+        // anything the panel cannot. A capture wants the file's settings just as
+        // much as a session does; what --no-ui withholds is the widget, not the
+        // wiring. Attached to the tree only when it is to be seen: standing off
+        // the tree, Prepare() has already made the frame the rows go into, which
+        // is the same thing the self-test relies on.
+        _panelText = PanelText.Load(null);
+        if (!_panelText.Loaded)
+            GD.Print($"[panel] {PanelText.FileName}: {_panelText.Error}"
+                     + " - falling back to the built-in labels and defaults");
+        _panel = new ControlPanel { Text = _panelText };
+        _panel.Prepare();
+        if (!_noPanel)
+        {
+            layer.AddChild(_panel);
+            _panel.AddHandle();
+        }
+        BuildPanel();
+        _panel.OpenDefaults(_flagged);
+        if (_noPanel)
+        {
+            // Nothing will ever draw or sync it, and a detached branch of
+            // Controls left lying about is a wall of leak warnings at exit that
+            // would hide a real one later.
+            _panel.QueueFree();
+            _panel = null;
+        }
+
         if (_selfTest)
         {
             int failed = SelfTest.Run(_field, _tank, _atlases, _vehicles, _active,
-                                      _ring, _commonSounds, _sounds);
+                                      _ring, _commonSounds, _sounds, _panel);
             GetTree().Quit(failed == 0 ? 0 : 1);
             return;
-        }
-        // After the self-test returns, so a headless run never builds it, and
-        // before the start-up flags, so the panel's first Sync sees what they
-        // did rather than the defaults.
-        if (!_noPanel)
-        {
-            _panel = new ControlPanel();
-            layer.AddChild(_panel);
-            _panel.AddHandle();
-            BuildPanel();
         }
         // The flag values that had to wait for a tank to exist. The two levels go
         // on every tank: they are harness settings, and a slider judged on one
@@ -2114,6 +2154,58 @@ public sealed partial class Main : Node2D
     /// to find the keys, not a replacement for them: a screenshot of a session
     /// should still be reproducible from the keyboard.
     /// </summary>
+    /// <summary>
+    /// Which panel row each start-up flag speaks for.
+    ///
+    /// One table rather than a claim inside each parsing branch, because it is
+    /// the sort of list that is only correct when it can be read at once: a flag
+    /// missing from it still works and is then quietly overruled by panel.json,
+    /// which looks like the flag not arriving at all. The self-test walks it and
+    /// requires every id in it to be a row the panel actually has.
+    /// </summary>
+    private static readonly Dictionary<string, string[]> FlagRows = new()
+    {
+        ["--tank"] = new[] { "tank.driving" },
+        ["--size"] = new[] { "tank.size" },
+        ["--turret"] = new[] { "heading.turret" },
+        ["--scan"] = new[] { "heading.scan" },
+        ["--pitch"] = new[] { "ride.pitch" },
+        ["--rumble"] = new[] { "ride.rumble" },
+        ["--roll-only"] = new[] { "ride.rumble" },
+        ["--no-tremble"] = new[] { "ride.tremble" },
+        ["--tremble"] = new[] { "ride.tremble_level" },
+        ["--no-shadow"] = new[] { "effects.shadow" },
+        ["--no-tracks"] = new[] { "effects.tracks" },
+        ["--no-ruts"] = new[] { "effects.ruts" },
+        ["--no-exhaust"] = new[] { "effects.exhaust" },
+        ["--burning"] = new[] { "effects.fire" },
+        ["--flash"] = new[] { "effects.flash_source" },
+        ["--recoil-shear"] = new[] { "effects.hull_shear" },
+        ["--recoil"] = new[] { "effects.hull_shear", "effects.recoil_level" },
+        ["--recoil-turret"] = new[] { "effects.hull_shear", "effects.recoil_turret" },
+        ["--no-barrel-recoil"] = new[] { "effects.tube_recoil" },
+        ["--shake"] = new[] { "effects.camera_shake", "effects.shake_level" },
+        ["--tracer"] = new[] { "gunnery.tracer" },
+        ["--hit-scale"] = new[] { "armour.calibre" },
+        ["--turret-sound"] = new[] { "sound.turret_motor" },
+        ["--terrain"] = new[] { "ground.terrain" },
+    };
+
+    private readonly HashSet<string> _flagged = new();
+
+    /// <summary>Names, descriptions, ranges and opening values, off panel.json.
+    /// Held on the harness rather than only on the panel because --no-ui frees
+    /// the panel and the trace still has to be able to say whether the file was
+    /// read.</summary>
+    private PanelText _panelText = PanelText.Load(null);
+
+    /// <summary>Every row a start-up flag speaks for, flattened. Exposed so the
+    /// self-test can require each one to be a row the panel really has: a flag
+    /// naming a row that does not exist protects nothing, so panel.json
+    /// overrules it and the flag looks like it never arrived.</summary>
+    public static IEnumerable<string> FlaggedRows =>
+        FlagRows.Values.SelectMany(v => v).Distinct();
+
     private void BuildPanel()
     {
         ControlPanel ui = _panel!;
@@ -2122,13 +2214,13 @@ public sealed partial class Main : Node2D
         // Which of the three is being driven. Not "(1/2/3)": how many tanks load
         // is whatever is on disk, so enumerating them here goes stale every time
         // one is added, and it already had.
-        ui.Choice("driving  (number keys, or click it)", _loaded,
+        ui.Choice("tank.driving", "driving  (number keys, or click it)", _loaded,
             () => _active, Select);
         // A multiplier over the three class figures, not a size - see _sizeLevel.
         // The caption is in pixels of hull against pixels of cell, because "1.15x"
         // answers nothing the dial is pulled for: whether the heavy reads heavier
         // than the medium, and whether it has outgrown the hex it stands on.
-        ui.Slide("size level", 0.5, 1.5, 0.05,
+        ui.Slide("tank.size", "size level", 0.5, 1.5, 0.05,
             () => _sizeLevel, v => { _sizeLevel = v; ApplySize(); }, "x",
             () =>
             {
@@ -2141,7 +2233,7 @@ public sealed partial class Main : Node2D
                 return $"class {_profile.Size:F2}x   {span:F0}px hull broadside"
                        + $" / {cell:F0}px cell";
             });
-        ui.Readout(() =>
+        ui.Readout("tank.info", () =>
         {
             AtlasSet a = _tank.Atlas!;
             string order = Moving
@@ -2155,10 +2247,10 @@ public sealed partial class Main : Node2D
         // Stepped by the atlas's own frame, not smoothly: twelve rendered
         // frames is what there is, and a slider that glides between them says
         // the sprite turns more finely than it does.
-        ui.Slide("hull  (A/D)", 0.0, 330.0, 30.0,
+        ui.Slide("heading.hull", "hull  (A/D)", 0.0, 330.0, 30.0,
             () => Math.Round(_tank.HullFacing / 30.0) * 30.0,
             v => { CancelOrder(); _tank.HullFacing = Mod(v, 360.0); }, " deg");
-        ui.Slide("turret  (Q/E)", 0.0, 330.0, 30.0,
+        ui.Slide("heading.turret", "turret  (Q/E)", 0.0, 330.0, 30.0,
             () => Math.Round(_tank.TurretFacing / 30.0) * 30.0,
             v => { _aimWithMouse = false; _tank.TurretFacing = Mod(v, 360.0); }, " deg");
         // Two named states rather than a checkbox, and the reason is the reading
@@ -2167,13 +2259,13 @@ public sealed partial class Main : Node2D
         // what the switch does. A checkbox can only name one of the two states
         // and leaves the other to be guessed - which is exactly what happened.
         // A caption long enough to name both is clipped, not wrapped.
-        ui.Choice("turret through a hull turn  (F)", TurretModes,
+        ui.Choice("heading.mode", "turret through a hull turn  (F)", TurretModes,
             () => _tank.TurretHoldsHeading ? 0 : 1,
             i => _tank.TurretHoldsHeading = i == 0);
-        ui.Toggle("aim with mouse  (M)",
+        ui.Toggle("heading.mouse", "aim with mouse  (M)",
             () => _aimWithMouse, on => _aimWithMouse = on);
-        ui.Toggle("spin turret  (SPACE)", () => _spinning, on => _spinning = on);
-        ui.Toggle("scan on the spot  (N)", () => _scanEnabled, on =>
+        ui.Toggle("heading.spin", "spin turret  (SPACE)", () => _spinning, on => _spinning = on);
+        ui.Toggle("heading.scan", "scan on the spot  (N)", () => _scanEnabled, on =>
         {
             _scanEnabled = on;
             ScanChanged();
@@ -2181,7 +2273,7 @@ public sealed partial class Main : Node2D
         // Which frame each heading resolves to. The pair is the thing worth
         // seeing rather than either alone: two layers off the same axis, and a
         // sprite set that has come apart says so here first.
-        ui.Readout(() =>
+        ui.Readout("heading.frames", () =>
         {
             Vector2I frames = _tank.FrameIndices();
             return $"hull {_tank.HullFacing,6:F1} deg -> frame {frames.X,2}\n"
@@ -2194,17 +2286,17 @@ public sealed partial class Main : Node2D
         });
 
         ui.Heading("ride");
-        ui.Toggle("body pitch  (P)", () => _pitchEnabled, on =>
+        ui.Toggle("ride.pitch", "body pitch  (P)", () => _pitchEnabled, on =>
         {
             _pitchEnabled = on;
             PitchChanged();
         });
-        ui.Toggle("ground rumble  (B)", () => _rumbleEnabled, on =>
+        ui.Toggle("ride.rumble", "ground rumble  (B)", () => _rumbleEnabled, on =>
         {
             _rumbleEnabled = on;
             RumbleChanged();
         });
-        ui.Toggle("engine tremble  (I)", () => _trembleEnabled, on =>
+        ui.Toggle("ride.tremble", "engine tremble  (I)", () => _trembleEnabled, on =>
         {
             _trembleEnabled = on;
             TrembleChanged();
@@ -2214,13 +2306,13 @@ public sealed partial class Main : Node2D
         // their ratio. The caption carries the roof travel in pixels, because
         // the multiplier says nothing about whether it is visible and the pixel
         // figure is the whole argument the value was chosen on.
-        ui.Slide("engine tremble level", 0.0, 2.5, 0.05,
+        ui.Slide("ride.tremble_level", "engine tremble level", 0.0, 2.5, 0.05,
             () => _tremble.Level, v => _tremble.Level = v, "x",
             () => $"{_tremble.GainAt(_speed) * EngineTremble.RoofLeverPx:F2}px"
                   + " of roof travel at this speed");
-        ui.Toggle("turret stabiliser  (K)",
+        ui.Toggle("ride.stabiliser", "turret stabiliser  (K)",
             () => _tank.TurretStabilised, on => _tank.TurretStabilised = on);
-        ui.Readout(() =>
+        ui.Readout("ride.info", () =>
             $"speed {_speed,6:F0} / {_profile.TopSpeed:F0} px/s"
             + $"   ramp {_profile.RampTime:F2}s over {_profile.RampDistance:F0}px\n"
             + $"turn {_profile.TurnRate:F0} deg/s   corner {_profile.CornerSpeed:F0} px/s\n"
@@ -2234,12 +2326,12 @@ public sealed partial class Main : Node2D
         // rather than on it, and because it is the one switch whose A/B is the
         // whole argument for the layer: with it off the tank reads as a decal
         // laid on the field, which is the complaint it answers.
-        ui.Toggle("contact shadow", () => _shadowEnabled, on =>
+        ui.Toggle("effects.shadow", "contact shadow", () => _shadowEnabled, on =>
         {
             _shadowEnabled = on;
             ShadowChanged();
         });
-        ui.Readout(() =>
+        ui.Readout("effects.shadow_info", () =>
         {
             AtlasSet? a = _tank.Atlas;
             string where = _spriteDir is null ? "" : $", borrowed from {_spriteDir}";
@@ -2250,7 +2342,7 @@ public sealed partial class Main : Node2D
                 ? $"shadow  rendered, {a.Count} headings{where}"
                 : $"shadow  [none - {a?.Count ?? 0} headings{where}, re-render]";
         });
-        ui.Toggle("tracks wind  (C)", () => _tracksEnabled, on =>
+        ui.Toggle("effects.tracks", "tracks wind  (C)", () => _tracksEnabled, on =>
         {
             _tracksEnabled = on;
             TracksChanged();
@@ -2258,14 +2350,14 @@ public sealed partial class Main : Node2D
         // No key: the alphabet is gone, and so are [ ] and \. The panel is
         // where a switch is found by name; the flag is there because a capture
         // is evidence and taking it twice must not need a hand on the mouse.
-        ui.Toggle("track marks  (--no-ruts)", () => _marks?.Enabled == true, on =>
+        ui.Toggle("effects.ruts", "track marks  (--no-ruts)", () => _marks?.Enabled == true, on =>
         {
             if (_marks is null)
                 return;
             _marks.Enabled = on;
             _marks.QueueRedraw();
         });
-        ui.Readout(() =>
+        ui.Readout("effects.ruts_info", () =>
         {
             AtlasSet a = _tank.Atlas!;
             if (!a.HasTracks || _marks is null)
@@ -2282,7 +2374,7 @@ public sealed partial class Main : Node2D
         // so what it is worth saying about it is how well it is keeping up. The
         // cap is a real limit and not a setting to hide: past it the tread would
         // alias and run backwards, so it slips instead, and that shows here.
-        ui.Readout(() =>
+        ui.Readout("effects.track_info", () =>
         {
             AtlasSet a = _tank.Atlas!;
             if (!a.HasTracks)
@@ -2303,17 +2395,17 @@ public sealed partial class Main : Node2D
                    + $"\nsmears from {_track.BlurSpeed,3:F0} px/s"
                    + $"   blur {_track.Blur * 100.0,3:F0}%";
         });
-        ui.Toggle("engine exhaust  (O)", () => _exhaustEnabled, on =>
+        ui.Toggle("effects.exhaust", "engine exhaust  (O)", () => _exhaustEnabled, on =>
         {
             _exhaustEnabled = on;
             ExhaustChanged();
         });
-        ui.Toggle("on fire  (J)", () => _burning, on =>
+        ui.Toggle("effects.fire", "on fire  (J)", () => _burning, on =>
         {
             _burning = on;
             UpdateBurn(Active, 0.0);
         });
-        ui.Choice("flash source  (V)", new[] { "rendered", "sheet" },
+        ui.Choice("effects.flash_source", "flash source  (V)", new[] { "rendered", "sheet" },
             () => _tank.Source == FlashSource.Rendered ? 0 : 1,
             i =>
             {
@@ -2322,11 +2414,11 @@ public sealed partial class Main : Node2D
             });
         // Above its own level and pivot, because it gates both: a slider on a
         // switched-off effect is a slider that looks broken.
-        ui.Toggle("hull shear on the shot  (])",
+        ui.Toggle("effects.hull_shear", "hull shear on the shot  (])",
             () => _recoilShear, on => _recoilShear = on);
         // Read when the trigger goes, not while the hull is rocking, so this
         // sets the next shot rather than the one in the air.
-        ui.Slide("recoil level", 0.0, 2.5, 0.05,
+        ui.Slide("effects.recoil_level", "recoil level", 0.0, 2.5, 0.05,
             () => _recoil.Level, v => _recoil.Level = v, "x",
             () => _recoilShear
                 ? $"kick peaks at {_recoil.PeakFor(_recoil.Level):F3}"
@@ -2335,7 +2427,7 @@ public sealed partial class Main : Node2D
         // Under the recoil rows because it is the same trigger seen from
         // outside the tank: those two say what the vehicle does, this says what
         // the view does.
-        ui.Toggle("camera shake on the shot",
+        ui.Toggle("effects.camera_shake", "camera shake on the shot",
             () => _shakeOn, on =>
             {
                 _shakeOn = on;
@@ -2345,7 +2437,7 @@ public sealed partial class Main : Node2D
                     _camera.Offset = Vector2.Zero;
                 }
             });
-        ui.Slide("shake level", 0.0, 2.5, 0.05,
+        ui.Slide("effects.shake_level", "shake level", 0.0, 2.5, 0.05,
             () => _shake.Level, v => _shake.Level = v, "x",
             () => _shakeOn
                 // The class amplitude is what the level multiplies, so quoting
@@ -2357,16 +2449,16 @@ public sealed partial class Main : Node2D
                   + $"{_profile.ShotShake * _shake.Level * 0.5:F1}px into the "
                   + "screen"
                 : "off - every A/B near a shot would measure this instead");
-        ui.Toggle("recoil on turret only  (L)",
+        ui.Toggle("effects.recoil_turret", "recoil on turret only  (L)",
             () => _tank.RecoilTurretOnly, on => _tank.RecoilTurretOnly = on);
-        ui.Toggle("gun tube recoils  ([)",
+        ui.Toggle("effects.tube_recoil", "gun tube recoils  ([)",
             () => _recoilTube, on => _recoilTube = on);
         // What the tube is doing and what it cost. The stroke in pixels is the
         // number the whole layer is judged on - four is what it was authored to,
         // and it is a fraction of that on the headings where the bore points at
         // the camera, which is projection rather than a fault. Said here because
         // "phase 2 of 5" answers nothing about whether it reads.
-        ui.Readout(() =>
+        ui.Readout("effects.tube_info", () =>
         {
             AtlasSet a = _tank.Atlas!;
             if (!a.HasRecoil)
@@ -2380,11 +2472,11 @@ public sealed partial class Main : Node2D
                    + $"\nheld {string.Join("/", RecoilLoop.HoldsFor(a.RecoilPhases))}"
                    + "   kick under the flash, return in the open";
         });
-        ui.Press("fire  (Z)", Fire);
+        ui.Press("effects.fire_button", "fire  (Z)", Fire);
         // Phase counters against the number of phases that were rendered. A
         // clock that has walked off the end of its atlas shows up here as a
         // number out of range, and nowhere else until the layer goes blank.
-        ui.Readout(() =>
+        ui.Readout("effects.phase_info", () =>
         {
             AtlasSet a = _tank.Atlas!;
             string phase(int p) => p < 0 ? " -" : $"{p,2}";
@@ -2419,7 +2511,7 @@ public sealed partial class Main : Node2D
         // are directions and have a shape, this is a list of tanks and how many
         // there are is whatever loaded. "nobody" is first so index 0 is the
         // ceasefire, which is what the right button on empty ground does too.
-        ui.Choice("target  (right-click a tank)",
+        ui.Choice("gunnery.target", "target  (right-click a tank)",
             new[] { "nobody" }.Concat(_loaded).ToArray(),
             () => Active.Target is null ? 0 : _vehicles.IndexOf(Active.Target) + 1,
             i => Engage(Active, i == 0 ? null : _vehicles[i - 1]));
@@ -2432,10 +2524,10 @@ public sealed partial class Main : Node2D
         // the switch shows what the bench looked like before there was a tracer
         // *with* the timing that came with it, which is the comparison worth
         // having.
-        ui.Toggle("shell tracer  (--tracer)",
+        ui.Toggle("gunnery.tracer", "shell tracer  (--tracer)",
             () => _tracerVisible,
             on => { _tracerVisible = on; TracerChanged(); });
-        ui.Readout(() =>
+        ui.Readout("gunnery.info", () =>
             $"{AimLine()}\nreload {Active.Profile.ReloadTime:F1}s, "
             + $"traverse {Active.Profile.TurretRate:F0} deg/s, "
             + $"{_field.Arcs.Count} cells down the six lanes");
@@ -2445,12 +2537,12 @@ public sealed partial class Main : Node2D
         // game has: a shell comes from a neighbouring cell, and there are six
         // of those. A slider ran 0..355 here and offered 66 bearings that
         // cannot happen.
-        ui.Radio(() => $"shot comes from side {_hitSide + 1}"
+        ui.Radio("armour.side", () => $"shot comes from side {_hitSide + 1}"
                        + $" - {HitFrom:F0} deg  (U steps)",
             Enumerable.Range(1, HexField.EdgeHeadings.Length)
                 .Select(i => i.ToString()).ToArray(),
             () => _hitSide, i => _hitSide = i);
-        ui.Choice("calibre  (Y)", new[] { "0.7x", "1.0x", "1.4x" },
+        ui.Choice("armour.calibre", "calibre  (Y)", new[] { "0.7x", "1.0x", "1.4x" },
             () => _calibre,
             i =>
             {
@@ -2460,9 +2552,9 @@ public sealed partial class Main : Node2D
             });
         // Takes the bearing on the slider rather than walking it on, so the
         // panel can aim and the key can sweep.
-        ui.PressPair("take a hit", () => TakeHit(HitFrom),
+        ui.PressPair("armour.hit", "take a hit", () => TakeHit(HitFrom),
                      "repair", () => _tank.Repair());
-        ui.Readout(() =>
+        ui.Readout("armour.info", () =>
         {
             AtlasSet a = _tank.Atlas!;
             // Two calibres side by side on purpose: what the next round will be,
@@ -2493,11 +2585,11 @@ public sealed partial class Main : Node2D
         // is the one voice that was built rather than recorded and the one whose
         // level was argued for rather than heard.
         ui.Heading("sound");
-        ui.Toggle("sound  (\\)", () => _soundEnabled,
+        ui.Toggle("sound.master", "sound  (\\)", () => _soundEnabled,
                   on => { _soundEnabled = on; SoundChanged(); });
-        ui.Toggle("turret motor  (--no-turret-sound)", () => _turretSound,
+        ui.Toggle("sound.turret_motor", "turret motor  (--no-turret-sound)", () => _turretSound,
                   on => { _turretSound = on; SoundChanged(); });
-        ui.Readout(() =>
+        ui.Readout("sound.info", () =>
         {
             VehicleAudio? a = Active.Audio;
             if (a is null)
@@ -2517,7 +2609,7 @@ public sealed partial class Main : Node2D
         // one is drawn - the lesson the tank list already taught. "mixed" heads
         // it because it is the board as a map would build it; the rest are there
         // to hold one kind still and look at it.
-        ui.Choice("terrain  (--terrain)", _paints,
+        ui.Choice("ground.terrain", "terrain  (--terrain)", _paints,
             () => Math.Max(0, _paints.IndexOf(_field.Paint)),
             i =>
             {
@@ -2525,7 +2617,7 @@ public sealed partial class Main : Node2D
                 _paint = _field.Paint;
                 _field.QueueRedraw();
             });
-        ui.Readout(() =>
+        ui.Readout("ground.info", () =>
         {
             if (_terrain is null || !_terrain.Any)
                 return "no terrain art - rendered tile";
@@ -2541,19 +2633,19 @@ public sealed partial class Main : Node2D
         });
 
         ui.Heading("view");
-        ui.Slide("zoom  (wheel)", 0.25, 8.0, 0.05,
+        ui.Slide("view.zoom", "zoom  (wheel)", 0.25, 8.0, 0.05,
             () => _camera.Zoom.X,
             v => _camera.Zoom = new Vector2((float)v, (float)v), "x");
-        ui.Toggle("hull layer  (H)", () => _tank.ShowHull, on => _tank.ShowHull = on);
-        ui.Toggle("turret layer  (T)",
+        ui.Toggle("view.hull", "hull layer  (H)", () => _tank.ShowHull, on => _tank.ShowHull = on);
+        ui.Toggle("view.turret", "turret layer  (T)",
             () => _tank.ShowTurret, on => _tank.ShowTurret = on);
-        ui.Toggle("hex field  (G)", () => _field.ShowField, on =>
+        ui.Toggle("view.field", "hex field  (G)", () => _field.ShowField, on =>
         {
             _field.ShowField = on;
             _field.QueueRedraw();
         });
-        ui.Toggle("axis cross  (X)", () => _tank.ShowAxis, on => _tank.ShowAxis = on);
-        ui.PressPair("reset  (R)", ResetAll,
+        ui.Toggle("view.axis", "axis cross  (X)", () => _tank.ShowAxis, on => _tank.ShowAxis = on);
+        ui.PressPair("view.reset", "reset  (R)", ResetAll,
                      "screenshot  (F12)", () => Capture(
                          $"{ProjectSettings.GlobalizePath("res://")}shot_{Time.GetTicksMsec()}.png"));
     }
@@ -2727,6 +2819,11 @@ public sealed partial class Main : Node2D
                      // drawn from it is about that tank's atlas rather than
                      // this class's.
                      + (_spriteDir is null ? "" : $"  sprites {_spriteDir}")
+                     // Whether the settings file was read, in the channel that
+                     // survives --no-ui. A panel.json that quietly did not load
+                     // looks exactly like one whose settings did nothing, and
+                     // under --no-ui there is no panel to notice it on.
+                     + $"  panel {(_panelText.Loaded ? "json" : "built-in")}"
                      // Same argument as the line above: a board of one kind and
                      // a board of a mix are two different pictures, and neither
                      // says which it is.

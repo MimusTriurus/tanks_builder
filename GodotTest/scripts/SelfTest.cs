@@ -32,7 +32,8 @@ public static class SelfTest
                           int active = 0,
                           SelectionRing? ring = null,
                           SoundSet? common = null,
-                          IReadOnlyDictionary<string, SoundSet>? sounds = null)
+                          IReadOnlyDictionary<string, SoundSet>? sounds = null,
+                          ControlPanel? livePanel = null)
     {
         int failed = 0;
 
@@ -2512,6 +2513,62 @@ public static class SelfTest
                 $"{atlas.ScarLevels} levels x {atlas.Count} headings");
         }
 
+        GD.Print("the settings file");
+        {
+            // The file decorates rows; it does not declare them. So both
+            // directions have to hold, and neither failure says a word on
+            // screen: an entry with no row behind it is a description of
+            // nothing, and a row with no entry is a control that lost its
+            // Russian and quietly kept the English.
+            var text = PanelText.Load(null);
+            Check("panel.json loads", text.Loaded, text.Error);
+
+            // The real row list, not a stub of one: the ids and the grouping
+            // live in Main.BuildPanel, so the panel the harness just built is
+            // the only thing that knows them.
+            var named = new HashSet<string>();
+            int untitled = 0, undescribed = 0, misfiled = 0, duplicated = 0;
+            foreach ((string id, string group) in livePanel?.Ids
+                                                  ?? new List<(string, string)>())
+            {
+                if (!named.Add(id))
+                    duplicated++;
+                if (text.GroupOf(id) != group)
+                    misfiled++;
+            }
+            foreach (string id in text.RowIds)
+            {
+                if (!named.Contains(id))
+                    undescribed++;    // counted below as "spare", see the message
+                if (string.IsNullOrWhiteSpace(text.Note(id)))
+                    untitled++;
+            }
+            // Nothing here needs the harness: the panel is stood up with stub
+            // delegates, so this is about the file against the row list rather
+            // than about any tank.
+            Check("every row the panel builds is named in the file",
+                named.All(id => text.RowIds.Contains(id)),
+                $"{named.Count(id => !text.RowIds.Contains(id))} rows have no entry: "
+                + string.Join(", ", named.Where(id => !text.RowIds.Contains(id)).Take(4)));
+            Check("every entry in the file is a row the panel builds",
+                undescribed == 0,
+                $"{undescribed} spare entries: "
+                + string.Join(", ", text.RowIds.Where(id => !named.Contains(id)).Take(4)));
+            Check("the file groups each row where the panel puts it",
+                misfiled == 0, $"{misfiled} rows are filed under another heading");
+            Check("no row id is used twice", duplicated == 0,
+                $"{duplicated} repeats");
+            Check("every row carries a description", untitled == 0,
+                $"{untitled} entries have none");
+            // The flag table is the other half of the precedence rule, and it is
+            // the half that fails silently: a flag naming a row that does not
+            // exist protects nothing, so the file overrules the flag and the flag
+            // looks like it never arrived.
+            Check("every row a start-up flag claims exists",
+                Main.FlaggedRows.All(id => named.Contains(id)),
+                string.Join(", ", Main.FlaggedRows.Where(id => !named.Contains(id)).Take(4)));
+        }
+
         GD.Print("the side panel");
         // The panel is a view of the harness's state and never a second copy of
         // it, which is one claim with two halves - and the second half is a
@@ -2521,21 +2578,21 @@ public static class SelfTest
         // like any other node. A detached branch of Controls leaves its canvas
         // items behind however carefully it is freed, and the wall of leak
         // warnings that produces at exit would hide a real one later.
-        var panel = new ControlPanel();
-        tank.GetParent().AddChild(panel);
+        var stub = new ControlPanel();
+        tank.GetParent().AddChild(stub);
         bool flag = false;
         double dial = 1.0;
         int pick = 0;
         int writes = 0;
-        panel.Toggle("flag", () => flag, on => { flag = on; writes++; });
+        stub.Toggle("t.flag", "flag", () => flag, on => { flag = on; writes++; });
         // With a note line, because that is a third delegate on the row and can
         // go stale exactly like the other two. It is what the level sliders say
         // an abstract multiplier is worth in pixels, so a note that lags is a
         // number that is wrong about the thing it was added to explain.
         double noted = double.NaN;
-        panel.Slide("dial", 0.0, 10.0, 0.5, () => dial, v => { dial = v; writes++; }, "x",
+        stub.Slide("t.dial", "dial", 0.0, 10.0, 0.5, () => dial, v => { dial = v; writes++; }, "x",
             () => { noted = dial; return "aside"; });
-        panel.Choice("pick", new[] { "a", "b", "c" }, () => pick,
+        stub.Choice("t.pick", "pick", new[] { "a", "b", "c" }, () => pick,
             i => { pick = i; writes++; });
 
         // The harness changes behind the panel's back - a key, a start-up flag,
@@ -2544,7 +2601,7 @@ public static class SelfTest
         flag = true;
         dial = 6.5;
         pick = 2;
-        panel.Sync();
+        stub.Sync();
         Check("syncing the panel from the harness writes nothing back",
             writes == 0, $"{writes} setter calls during a sync");
         Check("a slider's note is refreshed along with it", noted == dial,
@@ -2561,7 +2618,7 @@ public static class SelfTest
                 Collect(child);
             }
         }
-        Collect(panel);
+        Collect(stub);
         // Driven by emitting the signals a click would, rather than by writing
         // the widgets' properties. Godot is inconsistent about which of those
         // emit - a CheckBox's does and an OptionButton's does not - so property
@@ -2585,7 +2642,7 @@ public static class SelfTest
             widgets.All(w => w.FocusMode == Control.FocusModeEnum.None),
             $"{widgets.Count(w => w.FocusMode != Control.FocusModeEnum.None)}"
             + $" of {widgets.Count} would steal a key");
-        panel.QueueFree();
+        stub.QueueFree();
 
         GD.Print("recoil");
         // Off by default, and this is the assertion that keeps it that way. The

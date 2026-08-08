@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Godot;
 
 namespace TankSpriteTest;
@@ -41,10 +42,47 @@ public sealed partial class ControlPanel : PanelContainer
     /// row cannot forget to be synced.</summary>
     private sealed class Row
     {
+        public string Id = "";
         public Action Refresh = null!;
+
+        /// <summary>Applies this row's opening value from the file, through the
+        /// very setter the key and the widget use. Null on a row that is not a
+        /// setting - a readout, a button - because there is nothing to open on.
+        ///
+        /// Going through the setter rather than at the field is the whole trick:
+        /// the file cannot reach anything the panel cannot, and a default and a
+        /// click do exactly the same thing by construction.</summary>
+        public Action<PanelText>? Open;
     }
 
     private readonly List<Row> _rows = new();
+
+    /// <summary>Names, descriptions, ranges and opening values. Never null - an
+    /// unloaded one answers with the code's own fallbacks, which is what the
+    /// bench looked like before there was a file.</summary>
+    public PanelText Text = PanelText.Load(null);
+
+    /// <summary>Every row id in build order, and the group each landed in.
+    /// Exposed so the file can be checked against the panel in both directions
+    /// rather than trusted in either.</summary>
+    public IReadOnlyList<(string Id, string Group)> Ids =>
+        _rows.Where(r => r.Id != "").Select(r => (r.Id, GroupOf(r.Id))).ToList();
+
+    private readonly Dictionary<string, string> _group = new();
+    private string _heading = "";
+
+    private string GroupOf(string id) =>
+        _group.TryGetValue(id, out string? g) ? g : "";
+
+    /// <summary>Set every row that the file has an opening value for. Called
+    /// once, after the scene exists - a good few of these setters reach into a
+    /// tank, and the tanks are built after the flags are read.</summary>
+    public void OpenDefaults(IReadOnlyCollection<string> flagged)
+    {
+        foreach (Row row in _rows)
+            if (!flagged.Contains(row.Id))
+                row.Open?.Invoke(Text);
+    }
     private VBoxContainer _list = null!;
     private Button _tab = null!;
 
@@ -99,6 +137,9 @@ public sealed partial class ControlPanel : PanelContainer
     /// </summary>
     public void Prepare()
     {
+        // Idempotent: the harness calls this to build the rows before deciding
+        // whether the panel goes in the tree, and _Ready calls it again if it
+        // does. A second frame on top of the first would swallow every row.
         if (_list is not null)
             return;
         MouseFilter = MouseFilterEnum.Stop;   // clicks here are not orders to drive
@@ -177,11 +218,17 @@ public sealed partial class ControlPanel : PanelContainer
     // rows
     // -----------------------------------------------------------------------
 
-    public void Heading(string text)
+    public void Heading(string id)
     {
+        _heading = id;
         if (_list.GetChildCount() > 0)
             _list.AddChild(new Control { CustomMinimumSize = new Vector2(0, 8) });
-        var label = new Label { Text = text.ToUpperInvariant() };
+        var label = new Label
+        {
+            Text = Text.GroupTitle(id).ToUpperInvariant(),
+            TooltipText = Text.GroupNote(id),
+            MouseFilter = MouseFilterEnum.Stop,   // a Label ignores the mouse, and an ignored label has no tooltip
+        };
         label.AddThemeColorOverride("font_color", new Color(0.55f, 0.72f, 0.90f));
         label.AddThemeFontSizeOverride("font_size", 12);
         _list.AddChild(label);
@@ -189,17 +236,23 @@ public sealed partial class ControlPanel : PanelContainer
 
     /// <summary>A switch: reads <paramref name="get"/>, and flipping it calls
     /// <paramref name="set"/> with what it should become.</summary>
-    public void Toggle(string text, Func<bool> get, Action<bool> set)
+    public void Toggle(string id, string text, Func<bool> get, Action<bool> set)
     {
         var box = new CheckBox
         {
-            Text = text,
+            Text = Text.Title(id, text),
+            TooltipText = Text.Note(id),
             FocusMode = FocusModeEnum.None,
             ButtonPressed = get(),
         };
         box.Toggled += on => { if (!_syncing) set(on); };
-        _list.AddChild(box);
-        _rows.Add(new Row { Refresh = () => box.ButtonPressed = get() });
+        Add(id, box);
+        _rows.Add(new Row
+        {
+            Id = id,
+            Refresh = () => box.ButtonPressed = get(),
+            Open = t => { if (t.Bool(id) is bool on) set(on); },
+        });
     }
 
     /// <summary>A number. <paramref name="step"/> is not decoration: the atlas
@@ -211,11 +264,17 @@ public sealed partial class ControlPanel : PanelContainer
     /// amplitude against the threshold it must not cross. A bare multiplier says
     /// nothing about whether the effect is visible or excessive, and those are
     /// the only two questions anyone drags one of these to answer.</summary>
-    public void Slide(string text, double lo, double hi, double step,
+    public void Slide(string id, string text, double lo, double hi, double step,
                       Func<double> get, Action<double> set, string unit = "",
                       Func<string>? note = null)
     {
-        var caption = new Label();
+        (lo, hi, step) = Text.Range(id, lo, hi, step);
+        text = Text.Title(id, text);
+        var caption = new Label
+        {
+            TooltipText = Text.Note(id),
+            MouseFilter = MouseFilterEnum.Stop,
+        };
         caption.AddThemeFontSizeOverride("font_size", 12);
         _list.AddChild(caption);
         var bar = new HSlider
@@ -228,7 +287,8 @@ public sealed partial class ControlPanel : PanelContainer
             SizeFlagsHorizontal = SizeFlags.ExpandFill,
         };
         bar.ValueChanged += v => { if (!_syncing) set(v); };
-        _list.AddChild(bar);
+        bar.TooltipText = Text.Note(id);
+        Add(id, bar);
         Label? aside = null;
         if (note is not null)
         {
@@ -239,6 +299,8 @@ public sealed partial class ControlPanel : PanelContainer
         }
         _rows.Add(new Row
         {
+            Id = id,
+            Open = t => { if (t.Number(id) is double v) set(v); },
             Refresh = () =>
             {
                 double now = get();
@@ -253,10 +315,15 @@ public sealed partial class ControlPanel : PanelContainer
     }
 
     /// <summary>A choice. <paramref name="set"/> gets the index chosen.</summary>
-    public void Choice(string text, IReadOnlyList<string> options,
+    public void Choice(string id, string text, IReadOnlyList<string> options,
                        Func<int> get, Action<int> set)
     {
-        var caption = new Label { Text = text };
+        var caption = new Label
+        {
+            Text = Text.Title(id, text),
+            TooltipText = Text.Note(id),
+            MouseFilter = MouseFilterEnum.Stop,
+        };
         caption.AddThemeFontSizeOverride("font_size", 12);
         _list.AddChild(caption);
         var drop = new OptionButton { FocusMode = FocusModeEnum.None };
@@ -264,10 +331,22 @@ public sealed partial class ControlPanel : PanelContainer
             drop.AddItem(option);
         drop.Selected = Math.Clamp(get(), 0, options.Count - 1);
         drop.ItemSelected += i => { if (!_syncing) set((int)i); };
-        _list.AddChild(drop);
+        drop.TooltipText = Text.Note(id);
+        Add(id, drop);
         _rows.Add(new Row
         {
+            Id = id,
             Refresh = () => drop.Selected = Math.Clamp(get(), 0, options.Count - 1),
+            // Named, not numbered: an index into a list whose length is whatever
+            // loaded picks a different tank the day a fourth one appears.
+            Open = t =>
+            {
+                if (t.Choice(id) is not string want)
+                    return;
+                for (int i = 0; i < options.Count; i++)
+                    if (string.Equals(options[i], want, StringComparison.OrdinalIgnoreCase))
+                        set(i);
+            },
         });
     }
 
@@ -280,14 +359,18 @@ public sealed partial class ControlPanel : PanelContainer
     /// - rather than a list. Godot's ButtonGroup handles the "one down unpresses
     /// the rest" part; the caption carries what the number means.
     /// </summary>
-    public void Radio(Func<string> caption, IReadOnlyList<string> labels,
+    public void Radio(string id, Func<string> caption, IReadOnlyList<string> labels,
                       Func<int> get, Action<int> set)
     {
-        var text = new Label();
+        var text = new Label
+        {
+            TooltipText = Text.Note(id),
+            MouseFilter = MouseFilterEnum.Stop,
+        };
         text.AddThemeFontSizeOverride("font_size", 12);
         _list.AddChild(text);
         var row = new HBoxContainer();
-        _list.AddChild(row);
+        Add(id, row);
         var group = new ButtonGroup();
         var buttons = new List<Button>();
         for (int i = 0; i < labels.Count; i++)
@@ -308,6 +391,12 @@ public sealed partial class ControlPanel : PanelContainer
         }
         _rows.Add(new Row
         {
+            Id = id,
+            Open = t =>
+            {
+                if (t.Number(id) is double v)
+                    set(Math.Clamp((int)v, 0, labels.Count - 1));
+            },
             Refresh = () =>
             {
                 // Only the chosen one is written: the group unpresses the rest
@@ -321,40 +410,74 @@ public sealed partial class ControlPanel : PanelContainer
     }
 
     /// <summary>Something that happens rather than something that is.</summary>
-    public void Press(string text, Action go)
+    public void Press(string id, string text, Action go)
     {
-        var button = new Button { Text = text, FocusMode = FocusModeEnum.None };
+        var button = new Button
+        {
+            Text = Text.Title(id, text),
+            TooltipText = Text.Note(id),
+            FocusMode = FocusModeEnum.None,
+        };
         button.Pressed += go;
-        _list.AddChild(button);
+        Add(id, button);
+        // Registered with no Open: a button is something that happens, and a
+        // file cannot have an opinion about what has already happened.
+        _rows.Add(new Row { Id = id, Refresh = () => { } });
     }
 
     /// <summary>Two of those side by side, for the pairs that read as a pair -
     /// fire and take a hit, reset and repair.</summary>
-    public void PressPair(string left, Action goLeft, string right, Action goRight)
+    public void PressPair(string id, string left, Action goLeft,
+                          string right, Action goRight)
     {
-        var row = new HBoxContainer();
-        _list.AddChild(row);
+        var row = new HBoxContainer { TooltipText = Text.Note(id) };
+        Add(id, row);
+        // One id for the pair, because they read as a pair. The file names both
+        // halves in one string with a slash between them, which keeps them from
+        // drifting apart into two rows the panel has not got.
+        string[] both = Text.Title(id, left + " / " + right).Split('/');
+        int at = 0;
         foreach ((string text, Action go) in new[] { (left, goLeft), (right, goRight) })
         {
             var button = new Button
             {
-                Text = text,
+                Text = (at < both.Length ? both[at] : text).Trim(),
                 FocusMode = FocusModeEnum.None,
                 SizeFlagsHorizontal = SizeFlags.ExpandFill,
             };
+            at++;
             button.Pressed += go;
             row.AddChild(button);
         }
+        _rows.Add(new Row { Id = id, Refresh = () => { } });
     }
 
     /// <summary>A line of state with no control on it - what a plate is
     /// carrying, what the loaded set is.</summary>
-    public void Readout(Func<string> get)
+    public void Readout(string id, Func<string> get)
     {
-        var label = new Label { AutowrapMode = TextServer.AutowrapMode.WordSmart };
+        var label = new Label
+        {
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+            TooltipText = Text.Note(id),
+            MouseFilter = MouseFilterEnum.Stop,
+        };
         label.AddThemeFontSizeOverride("font_size", 12);
         label.AddThemeColorOverride("font_color", new Color(0.72f, 0.76f, 0.80f));
-        _list.AddChild(label);
-        _rows.Add(new Row { Refresh = () => label.Text = get() });
+        Add(id, label);
+        // A readout is not a setting and has no Open, but it is still named in
+        // the file: what its numbers mean is exactly what a description is for,
+        // and leaving it unnamed would make the two-way check between the file
+        // and the panel impossible to state simply.
+        _rows.Add(new Row { Id = id, Refresh = () => label.Text = get() });
+    }
+
+    /// <summary>Add a widget, remembering which heading it landed under so the
+    /// grouping in the file can be checked against the grouping in the code
+    /// rather than being a second opinion about it.</summary>
+    private void Add(string id, Control control)
+    {
+        _group[id] = _heading;
+        _list.AddChild(control);
     }
 }
