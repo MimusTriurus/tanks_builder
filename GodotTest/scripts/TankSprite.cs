@@ -468,17 +468,24 @@ public sealed partial class TankSprite : Node2D
     /// set when something hits the plate and then stays until something else
     /// does. Nothing here advances with time.
     /// </summary>
-    /// <summary>One round's worth of damage: how bad, and where along the plate
-    /// it landed as a fraction of the plate's half-width.
+    /// <summary>One round's worth of damage: how bad, and where on the plate it
+    /// landed - along it as a fraction of its half-width, and up its slope as a
+    /// fraction of its half-height.
     ///
-    /// A fraction rather than a pixel offset, because the plate's screen
-    /// tangent turns with the hull: stored in pixels it would be right at the
-    /// heading it was taken on and wrong at the other eleven. The mark's *base*
-    /// position needs no storing at all - the layer was rendered on its plate
-    /// at every heading, so the centroid is already where it belongs, and this
-    /// only says how far along from it.
+    /// Fractions rather than a pixel offset, because both of the plate's screen
+    /// axes turn with the hull: stored in pixels they would be right at the
+    /// heading they were taken on and wrong at the other twenty-three. The mark's
+    /// *base* position needs no storing at all - the layer was rendered on its
+    /// plate at every heading, so the centroid is already where it belongs, and
+    /// these only say how far from it.
+    ///
+    /// Two numbers rather than one, and the second one is not decoration: with
+    /// only <c>Along</c> every round on a plate landed at the same height, so
+    /// three hits read as a row of stamps rather than as a group. They are kept
+    /// apart rather than as one screen vector because the two rulers are
+    /// different lengths - see <see cref="MarkOffset"/>.
     /// </summary>
-    public readonly record struct Mark(int Level, float Along);
+    public readonly record struct Mark(int Level, float Along, float Up);
 
     /// <summary>
     /// What each plate is carrying, oldest first.
@@ -511,9 +518,19 @@ public sealed partial class TankSprite : Node2D
         return worst;
     }
 
-    /// <summary>Where a mark is drawn, in pixels from the anchor.</summary>
+    /// <summary>
+    /// Where a mark is drawn, in pixels from the anchor.
+    ///
+    /// Both of the plate's own axes, which is what makes the offset stay on the
+    /// armour whatever the plate is doing on screen: the tangent shortens as the
+    /// flank turns away, the slope shortens as the glacis leans back, and a shift
+    /// expressed in halves of each shortens with them.
+    /// </summary>
     public Vector2 MarkOffset(string face, Mark mark) =>
-        Atlas is null ? Vector2.Zero : Atlas.HitTangent(face, HullFacing) * mark.Along;
+        Atlas is null
+            ? Vector2.Zero
+            : Atlas.HitTangent(face, HullFacing) * mark.Along
+              + Atlas.HitSlope(face, HullFacing) * mark.Up;
 
     /// <summary>
     /// How far into a plate each shell has got, in levels. Kept apart from the
@@ -544,7 +561,7 @@ public sealed partial class TankSprite : Node2D
     /// round does, they just take three goes. What a plate carries is how much
     /// has been done to it, and the calibre only sets how much each shell does.
     /// </summary>
-    public int Damage(string face, float along = 0.0f, int bite = 1)
+    public int Damage(string face, float along = 0.0f, float up = 0.0f, int bite = 1)
     {
         if (Atlas?.HasScars != true || Atlas.ScarLayer(face) == "")
             return -1;
@@ -556,7 +573,7 @@ public sealed partial class TankSprite : Node2D
         // now reached - not one per hit. A heavy round on clean armour leaves a
         // breach and no scorch beneath it: one shell, one hole.
         int level = Math.Clamp(worn - 1, 0, Atlas.ScarLevels - 1);
-        marks.Add(new Mark(level, along));
+        marks.Add(new Mark(level, along, up));
         while (marks.Count > Atlas.ScarLevels)
             marks.RemoveAt(0);
         QueueRedraw();
@@ -597,7 +614,7 @@ public sealed partial class TankSprite : Node2D
     /// because it is. What bounds the cost is the count - a plate carries as many
     /// marks as there are levels and the oldest drops off, which is unchanged.
     /// </summary>
-    public int DamageTo(string face, float along, int level)
+    public int DamageTo(string face, float along, float up, int level)
     {
         if (Atlas?.HasScars != true || Atlas.ScarLayer(face) == "")
             return -1;
@@ -605,7 +622,7 @@ public sealed partial class TankSprite : Node2D
             _scars[face] = marks = new List<Mark>();
         int at = Math.Clamp(level, 0, Atlas.ScarLevels - 1);
         _wear[face] = Math.Min(Math.Max(Wear(face), at + 1), Atlas.ScarLevels);
-        marks.Add(new Mark(at, along));
+        marks.Add(new Mark(at, along, up));
         while (marks.Count > Atlas.ScarLevels)
             marks.RemoveAt(0);
         QueueRedraw();

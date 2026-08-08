@@ -109,6 +109,10 @@ public sealed partial class Shell : Node2D
 
     public required float Scatter { get; init; }
 
+    /// <summary>Where on the plate up its slope, the second half of the scatter.
+    /// </summary>
+    public required float Rise { get; init; }
+
     public required float Calibre { get; init; }
 
     /// <summary>The ceiling this gun's class gets into that armour's class - see

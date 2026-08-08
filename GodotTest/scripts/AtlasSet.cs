@@ -475,6 +475,24 @@ public sealed class AtlasSet
             ? new Vector2((float)row.Tangent[0], (float)row.Tangent[1])
             : Vector2.Zero;
 
+    /// <summary>
+    /// The plate's other half-extent - one half-height *up its own slope* - as a
+    /// screen vector. The second axis of the scatter, and the reason a group of
+    /// hits is a patch rather than a row.
+    ///
+    /// Up the slope rather than up the screen, and that is the whole point of
+    /// taking it from the table: a glacis leaning back at 45 degrees foreshortens,
+    /// so the same fraction of it is fewer screen pixels than on a vertical flank,
+    /// and the shift stays on the metal by construction. Stamped all along beside
+    /// <see cref="HitTangent"/> - see hit_point.py, "pixels for one half-extent up
+    /// the plate's slope" - and simply never read, so nothing needed re-rendering
+    /// to start using it.
+    /// </summary>
+    public Vector2 HitSlope(string face, double hullFacing) =>
+        HitFrame(face, hullFacing) is { } row
+            ? new Vector2((float)row.Slope[0], (float)row.Slope[1])
+            : Vector2.Zero;
+
     private HitFrameMeta? HitFrame(string face, double hullFacing)
     {
         if (!_plates.TryGetValue(face, out PlateMeta? plate) || plate.Frames.Length == 0)

@@ -1007,7 +1007,13 @@ public sealed partial class Main : Node2D
         for (int i = 0; i < _damageAtStart; i++)
             foreach (string face in _tank.Atlas?.HitFaces
                                     ?? (IReadOnlyList<string>)Array.Empty<string>())
-                _tank.Damage(face, ScatterAt(++_hitCount));
+            {
+                // One increment, read twice: the two axes are two views of the
+                // same round, and stepping the counter between them would scatter
+                // a shell that does not exist.
+                int n = ++_hitCount;
+                _tank.Damage(face, ScatterAt(n), RiseAt(n));
+            }
         if (_driveTo is not null)
             OrderMoveTo(_field.ClampCell(_driveTo.Value));
         if (_attackAtStart is int foe && foe >= 0 && foe < _vehicles.Count)
@@ -2016,9 +2022,11 @@ public sealed partial class Main : Node2D
         double from = HexField.EdgeHeadings[SideFor(fromBearing)];
         victim.HitCount++;
         float scatter = ScatterAt(victim.HitCount);
+        float rise = RiseAt(victim.HitCount);
         string face = atlas.FaceFor(from, victim.Sprite.HullFacing);
         Vector2 impact = atlas.HitOffset(face, victim.Sprite.HullFacing)
-                         + atlas.HitTangent(face, victim.Sprite.HullFacing) * scatter;
+                         + atlas.HitTangent(face, victim.Sprite.HullFacing) * scatter
+                         + atlas.HitSlope(face, victim.Sprite.HullFacing) * rise;
 
         AtlasSet gun = shooter.Atlas;
         Vector2 muzzle = gun.Muzzle(gun.FrameFor(shooter.Sprite.TurretFacing))
@@ -2034,6 +2042,7 @@ public sealed partial class Main : Node2D
             // Carried rather than re-read on arrival, for the reason above.
             Face = face,
             Scatter = scatter,
+            Rise = rise,
             Calibre = Calibre,
             Level = Gunnery.Penetration(shooter.Profile, victim.Profile),
         };
@@ -2117,9 +2126,13 @@ public sealed partial class Main : Node2D
         //
         // +-0.45 rather than the burst's old +-0.6: the mark has to stay on the
         // armour, and it is about 17px wide against half-widths of 38 to 61.
+        //
+        // Two axes, because one made every round on a plate land at the same
+        // height - see RiseAt for why the vertical range is the tighter of the two.
         float scatter = ScatterAt(victim.HitCount);
+        float rise = RiseAt(victim.HitCount);
         string face = atlas.FaceFor(from, sprite.HullFacing);
-        Land(victim, face, scatter, calibre, level, bite);
+        Land(victim, face, scatter, rise, calibre, level, bite);
     }
 
     /// <summary>A round arriving, with everything about it already settled.
@@ -2128,21 +2141,21 @@ public sealed partial class Main : Node2D
     /// press works out which plate at the moment it lands, and a fired round
     /// worked it out at the trigger and carried it. Both end here, so there is
     /// one place where a tank takes a hit however the hit was arranged.</summary>
-    private void Land(Vehicle victim, string face, float scatter, float calibre,
-                      int? level, int bite)
+    private void Land(Vehicle victim, string face, float scatter, float rise,
+                      float calibre, int? level, int bite)
     {
         TankSprite sprite = victim.Sprite;
         // The calibre goes the same way as the scatter and for the same reason:
         // both are settled the moment the round leaves, so both travel with it
         // rather than being looked up again while it is on screen.
-        victim.Hit.Strike(face, scatter, calibre);
+        victim.Hit.Strike(face, scatter, rise, calibre);
         // How deep it goes is the calibre's business - see TankSprite.Damage.
         // A light round still walks a plate scorch -> gouge -> breach over three
         // hits, which is what shows that the phase axis is damage and not three
         // renders of one drawing; a heavy one gets there in one.
         int got = level is int cap
-            ? sprite.DamageTo(face, scatter, cap)
-            : sprite.Damage(face, scatter, bite);
+            ? sprite.DamageTo(face, scatter, rise, cap)
+            : sprite.Damage(face, scatter, rise, bite);
         // The sound is chosen by the same level the mark is, so a round that
         // bounces is heard bouncing and one that goes through is heard going
         // through. Not the calibre directly: a light round on armour already
@@ -2166,7 +2179,8 @@ public sealed partial class Main : Node2D
     /// <summary>A round that has flown its path. Nothing is decided here - see
     /// <see cref="Launch"/>.</summary>
     private void Strike(Shell shell) =>
-        Land(shell.Target, shell.Face, shell.Scatter, shell.Calibre, shell.Level, 1);
+        Land(shell.Target, shell.Face, shell.Scatter, shell.Rise, shell.Calibre,
+             shell.Level, 1);
 
     /// <summary>
     /// One tank engaging another: lay the gun, and fire when it is laid, loaded
@@ -2768,7 +2782,30 @@ public sealed partial class Main : Node2D
     /// plate's half-width. Deterministic on purpose: --capture and --trace fix
     /// the time step so two runs can be diffed, and a random scatter would be
     /// measuring itself.</summary>
-    private static float ScatterAt(int n) => (((n * 37) % 100) / 100.0f - 0.5f) * 0.9f;
+    internal static float ScatterAt(int n) => (((n * 37) % 100) / 100.0f - 0.5f) * 0.9f;
+
+    /// <summary>
+    /// And where up the plate's slope, as a fraction of its half-height.
+    ///
+    /// **+-0.30 against the tangent's +-0.45, and the asymmetry is the plate's,
+    /// not a preference.** A plate is two to three times wider than it is tall
+    /// (tangent 28-53px against slope 7-22px across the three tanks), so even an
+    /// equal fraction would already draw an ellipse - which is right, a group of
+    /// rounds on a wide short plate *is* wider than it is tall. What makes the
+    /// vertical fraction the smaller one as well is that the mark is nearly as
+    /// tall as the plate is: <c>scar_fit</c> runs 0.62 to 1.30, so vertical
+    /// headroom is 5-8% of a half-height on the rear plates and negative on HTP's.
+    /// The mark exceeding its plate is not the same as leaving the tank - it slides
+    /// onto the deck above or the lower hull - but it is the scarce direction, and
+    /// this is the number to pull back if <c>scar_off_armour</c> ever complains.
+    ///
+    /// A different modulus, not just a different multiplier, and that is not
+    /// fussiness: 61n and 37n are both invertible mod 100, so 61n = 53*(37n) and
+    /// the vertical would be a *function* of the horizontal - every pair sitting
+    /// on one of a handful of lines. 97 is prime and coprime to 100, so the pair
+    /// does not repeat for 9700 rounds.
+    /// </summary>
+    internal static float RiseAt(int n) => (((n * 61) % 97) / 97.0f - 0.5f) * 0.6f;
 
     private void UpdateHit(Vehicle v, double delta)
     {
@@ -2781,9 +2818,11 @@ public sealed partial class Main : Node2D
             // Read every frame, not once at the strike: the hull can turn while
             // the dust is still settling, and the hit has to stay on the plate
             // it landed on rather than sliding round with the heading.
-            Vector2 tangent = atlas.HitTangent(hit.Face, sprite.HullFacing);
             sprite.HitOffset = atlas.HitOffset(hit.Face, sprite.HullFacing)
-                               + tangent * hit.Scatter;
+                               + atlas.HitTangent(hit.Face, sprite.HullFacing)
+                                 * hit.Scatter
+                               + atlas.HitSlope(hit.Face, sprite.HullFacing)
+                                 * hit.Rise;
             sprite.HitBehind = atlas.HitFacing(hit.Face, sprite.HullFacing) <= 0.0;
             // The shell's calibre, not the dial's. Pushed from here alongside
             // the other two things the layer needs and cannot work out for

@@ -66,10 +66,16 @@ public sealed class HitLoop
     /// running.</summary>
     public string Face { get; private set; } = "";
 
-    /// <summary>Screen pixels the hit is nudged along the plate, so two hits on
-    /// the same face do not land on the same pixel. Along the plate's own
-    /// tangent, which is what keeps the scatter on the metal.</summary>
+    /// <summary>How far the hit is nudged along the plate, as a fraction of its
+    /// half-width. Along the plate's own tangent, which is what keeps the scatter
+    /// on the metal.</summary>
     public float Scatter { get; private set; }
+
+    /// <summary>The same, up the plate's own slope, as a fraction of its
+    /// half-height. Carried beside <see cref="Scatter"/> rather than folded into
+    /// it because the two rulers are different lengths - a plate is two to three
+    /// times wider than it is tall - and one number could not say that.</summary>
+    public float Rise { get; private set; }
 
     /// <summary>The calibre this shell went off at, as a multiplier on the
     /// rendered burst. Fixed when it lands and untouched for the rest of its
@@ -86,10 +92,12 @@ public sealed class HitLoop
     /// zero rather than being ignored while one is running - a second shell
     /// landing is a second hit, and the useful thing to see is the newest.
     /// </summary>
-    public void Strike(string face, float scatter = 0.0f, float scale = 1.0f)
+    public void Strike(string face, float scatter = 0.0f, float rise = 0.0f,
+                       float scale = 1.0f)
     {
         Face = face;
         Scatter = scatter;
+        Rise = rise;
         Scale = scale;
         _frame = 0;
     }
@@ -107,6 +115,7 @@ public sealed class HitLoop
         _frame = -1;
         Face = "";
         Scatter = 0.0f;
+        Rise = 0.0f;
         Scale = 1.0f;
     }
 }

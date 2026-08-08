@@ -2163,12 +2163,12 @@ public static class SelfTest
             + $" last {HitLoop.Hold[^1]}");
 
         var strike = new HitLoop();
-        strike.Strike("front", 0.3f, 1.4f);
+        strike.Strike("front", 0.3f, 0.2f, 1.4f);
         for (int i = 0; i < 12; i++)
             strike.Advance();
         int midway = strike.Phase;
         float midwayScale = strike.Scale;
-        strike.Strike("rear", -0.2f, 0.7f);
+        strike.Strike("rear", -0.2f, -0.1f, 0.7f);
         Check("a second shell restarts the hit rather than being ignored",
             midway > 0 && strike.Phase == 0 && strike.Face == "rear",
             $"was phase {midway}, now {strike.Phase} on {strike.Face}");
@@ -2180,11 +2180,14 @@ public static class SelfTest
         Check("a shell keeps the calibre it went off at for its whole life",
             midwayScale == 1.4f, $"went off at 1.40, was drawing at {midwayScale:F2}");
         Check("the next shell takes the new calibre and only it",
-            strike.Scale == 0.7f && Math.Abs(strike.Scatter + 0.2f) < 1e-6,
-            $"scale {strike.Scale:F2}, scatter {strike.Scatter:F2}");
+            strike.Scale == 0.7f && Math.Abs(strike.Scatter + 0.2f) < 1e-6
+            && Math.Abs(strike.Rise + 0.1f) < 1e-6,
+            $"scale {strike.Scale:F2}, scatter {strike.Scatter:F2}"
+            + $", rise {strike.Rise:F2}");
         strike.Reset();
         Check("a repaired tank is back to the plain calibre",
-            strike.Scale == 1.0f && strike.Face == "", $"scale {strike.Scale:F2}");
+            strike.Scale == 1.0f && strike.Face == "" && strike.Rise == 0.0f,
+            $"scale {strike.Scale:F2}");
         // One list of calibres, whoever is asking - key, dropdown or flag. The
         // same rule as a bearing snapping to a side of the hex, and it exists
         // because the dropdown cannot show a value that is not in it: the flag
@@ -2427,10 +2430,10 @@ public static class SelfTest
             string plate = atlas.HitFaces[0];
             string other = atlas.HitFaces[1];
             bool clean = tank.ScarLevel(plate) < 0;
-            int first = tank.Damage(plate, 0.1f);
+            int first = tank.Damage(plate, 0.1f, -0.1f);
             bool spared = tank.MarksOn(other).Count == 0;
             for (int i = 1; i < atlas.ScarLevels; i++)
-                tank.Damage(plate, 0.1f + 0.15f * i);
+                tank.Damage(plate, 0.1f + 0.15f * i, -0.1f + 0.1f * i);
             var carried = tank.MarksOn(plate).ToList();
             // Rounds do not land on top of each other: three hits leave three
             // marks, each keeping the level it arrived with, so an early scorch
@@ -2440,11 +2443,12 @@ public static class SelfTest
                 && carried.Count == atlas.ScarLevels
                 && carried.Select(m => m.Level).SequenceEqual(
                        Enumerable.Range(0, atlas.ScarLevels))
-                && carried.Select(m => m.Along).Distinct().Count() == carried.Count,
+                && carried.Select(m => m.Along).Distinct().Count() == carried.Count
+                && carried.Select(m => m.Up).Distinct().Count() == carried.Count,
                 $"{plate} carries {string.Concat(carried.Select(m => m.Level))},"
                 + $" {other} stayed {(spared ? "clean" : "marked")}");
             for (int i = 0; i < 4; i++)
-                tank.Damage(plate, 0.2f);
+                tank.Damage(plate, 0.2f, 0.1f);
             var full = tank.MarksOn(plate).ToList();
             int worst = tank.ScarLevel(plate);
             tank.Repair();
@@ -2463,19 +2467,19 @@ public static class SelfTest
             // hit count alone, so every round walked a plate at the same rate
             // and the dial changed nothing but the size of the flash - which is
             // the opposite of what a calibre is.
-            int heavyRound = tank.Damage(plate, 0.0f, atlas.ScarLevels);
+            int heavyRound = tank.Damage(plate, 0.0f, 0.0f, atlas.ScarLevels);
             tank.Repair();
-            int lightFirst = tank.Damage(plate, 0.0f, 1);
-            int lightSecond = tank.Damage(plate, 0.15f, 1);
+            int lightFirst = tank.Damage(plate, 0.0f, 0.0f, 1);
+            int lightSecond = tank.Damage(plate, 0.15f, 0.1f, 1);
             tank.Repair();
             Check("a heavier round goes deeper into clean armour",
                 heavyRound == atlas.ScarLevels - 1 && lightFirst == 0 && lightSecond == 1,
                 $"heavy left {heavyRound}, light left {lightFirst} then {lightSecond}");
             // The other half, and the two do not fight: three light rounds reach
             // the same hole one heavy round makes, they just take three goes.
-            tank.Damage(plate, 0.0f, 2);
-            int onTop = tank.Damage(plate, 0.15f, 1);
-            int past = tank.Damage(plate, 0.3f, atlas.ScarLevels);
+            tank.Damage(plate, 0.0f, 0.0f, 2);
+            int onTop = tank.Damage(plate, 0.15f, 0.1f, 1);
+            int past = tank.Damage(plate, 0.3f, -0.1f, atlas.ScarLevels);
             int wear = tank.Wear(plate);
             tank.Repair();
             Check("armour only ever gets worse, and stops at the deepest level",
@@ -2498,9 +2502,9 @@ public static class SelfTest
             // exists - under the accumulating rule above, a light tank plinking
             // a heavy holes it on the third shot, which is exactly what the
             // matchup forbids.
-            int plink = tank.DamageTo(plate, 0.0f, 0);
-            int plinkAgain = tank.DamageTo(plate, 0.2f, 0);
-            int plinkThird = tank.DamageTo(plate, 0.4f, 0);
+            int plink = tank.DamageTo(plate, 0.0f, 0.0f, 0);
+            int plinkAgain = tank.DamageTo(plate, 0.2f, 0.1f, 0);
+            int plinkThird = tank.DamageTo(plate, 0.4f, -0.1f, 0);
             Check("a round with a ceiling never gets past it, however often it lands",
                 plink == 0 && plinkAgain == 0 && plinkThird == 0
                 && tank.Wear(plate) == 1,
@@ -2513,7 +2517,8 @@ public static class SelfTest
             // that it is under fire at all.
             Check("but every shell still leaves its own mark in its own place",
                 tank.MarksOn(plate).Count == 3
-                && tank.MarksOn(plate).Select(m => m.Along).Distinct().Count() == 3,
+                && tank.MarksOn(plate).Select(m => m.Along).Distinct().Count() == 3
+                && tank.MarksOn(plate).Select(m => m.Up).Distinct().Count() == 3,
                 $"{tank.MarksOn(plate).Count} marks at "
                 + string.Join("/", tank.MarksOn(plate).Select(m => $"{m.Along:F2}"))
                 + " - three hits on one plate are three marks");
@@ -2521,13 +2526,13 @@ public static class SelfTest
             // breaches a light" means the first round holes it, not the third.
             tank.Repair();
             Check("a round with a ceiling reaches it on the first hit",
-                tank.DamageTo(plate, 0.0f, atlas.ScarLevels - 1)
+                tank.DamageTo(plate, 0.0f, 0.0f, atlas.ScarLevels - 1)
                     == atlas.ScarLevels - 1,
                 "the matchup names the outcome, not a rate of progress");
             // The mark is what this shell did; the wear is what the plate has
             // been through. They part company exactly here, and a light round
             // must not mend a hole.
-            int scorchOnBreach = tank.DamageTo(plate, 0.3f, 0);
+            int scorchOnBreach = tank.DamageTo(plate, 0.3f, 0.1f, 0);
             Check("a shallow round on breached armour scorches and mends nothing",
                 scorchOnBreach == 0 && tank.Wear(plate) == atlas.ScarLevels
                 && tank.ScarLevel(plate) == atlas.ScarLevels - 1,
@@ -2544,6 +2549,8 @@ public static class SelfTest
             tank.HullFacing = 0.0;
             tank.Damage(plate, 0.5f);
             TankSprite.Mark placed = tank.MarksOn(plate)[0];
+            Vector2 acrossPlate = tank.MarkOffset(plate, new TankSprite.Mark(0, 0.5f, 0.0f));
+            Vector2 upPlate = tank.MarkOffset(plate, new TankSprite.Mark(0, 0.0f, 0.5f));
             Vector2 atZero = tank.MarkOffset(plate, placed);
             tank.HullFacing = 180.0;
             Vector2 atHalf = tank.MarkOffset(plate, placed);
@@ -2565,8 +2572,60 @@ public static class SelfTest
             // of a plate the flash went off the end of is what one number
             // shared between them prevents.
             Check("a mark taken dead centre draws on the anchor",
-                tank.MarkOffset(plate, new TankSprite.Mark(0, 0.0f)).Length() < 1e-3,
+                tank.MarkOffset(plate, new TankSprite.Mark(0, 0.0f, 0.0f)).Length() < 1e-3,
                 "so the burst's own zero scatter puts them in the same place");
+
+            // The second axis, and the thing it has to be is *another* direction.
+            // With only the tangent every round on a plate landed at the same
+            // height, so three hits read as a row of stamps rather than a group;
+            // an "up" that happened to be parallel to the tangent would put them
+            // straight back on that line while looking like it had been fixed.
+            float cross = acrossPlate.X * upPlate.Y - acrossPlate.Y * upPlate.X;
+            Check("the scatter's two axes are two directions, not one",
+                upPlate.Length() > 1.0
+                && Math.Abs(cross) > 0.25f * acrossPlate.Length() * upPlate.Length(),
+                $"across {acrossPlate}, up {upPlate}"
+                + $" - {Mathf.RadToDeg(Math.Abs(Mathf.Asin(Math.Clamp(cross / Math.Max(acrossPlate.Length() * upPlate.Length(), 1e-6f), -1.0f, 1.0f)))):F0} deg apart");
+            // Up the plate's own slope, not up the screen, which is why it can be
+            // a fraction at all: a glacis leaning back foreshortens, so the same
+            // half-height is fewer screen pixels on it than on a vertical flank,
+            // and the shift stays on the metal without anyone clamping it.
+            double tallest = 0.0, leastTall = double.MaxValue;
+            foreach (string face in atlas.HitFaces)
+                for (int i = 0; i < 24; i++)
+                {
+                    double at = 15.0 * i;
+                    tallest = Math.Max(tallest, atlas.HitSlope(face, at).Length());
+                    leastTall = Math.Min(leastTall, atlas.HitSlope(face, at).Length());
+                    // The plate is wider than it is tall on every tank measured,
+                    // which is why the vertical range is the smaller fraction as
+                    // well - see Main.RiseAt.
+                    if (atlas.HitSlope(face, at).Length()
+                        > atlas.HitTangent(face, at).Length())
+                        tallest = -1.0;
+                }
+            Check("a plate is wider than it is tall, at every heading",
+                tallest > 0.0 && leastTall > 0.0,
+                tallest < 0.0
+                    ? "a plate came out taller than it is wide - the +-0.30 against"
+                      + " +-0.45 stops being an ellipse and the ruler wants rethinking"
+                    : $"half-height {leastTall:F1}..{tallest:F1}px up the slope");
+            // The two hashes must not be the same hash twice. 61n and 37n are both
+            // invertible mod 100, so with a shared modulus the height would be a
+            // function of the offset and every pair would sit on one of a handful
+            // of lines - a scatter that looks random and is a lattice.
+            var pairs = new HashSet<(float, float)>();
+            var heights = new HashSet<float>();
+            for (int n = 1; n <= 100; n++)
+            {
+                pairs.Add((Main.ScatterAt(n), Main.RiseAt(n)));
+                heights.Add(Main.RiseAt(n));
+            }
+            Check("consecutive rounds differ in height as well as in offset",
+                heights.Count > 90 && pairs.Count == 100
+                && Math.Abs(Main.RiseAt(1)) > 0.0f,
+                $"{heights.Count} distinct heights and {pairs.Count} distinct"
+                + " pairs in 100 rounds - a shared modulus gives fewer of both");
 
             // The frame a scar draws is chosen by the hull's heading, so the
             // layer has to keep asking to be redrawn for as long as it is
@@ -3716,7 +3775,7 @@ public static class SelfTest
                 Shooter = shooter, Target = foe, ImpactLocal = aim,
                 From = foe.Sprite.ToGlobal(aim)
                        - new Vector2(Shell.PointBlank, 0.0f),
-                Serial = 1, Face = "front", Scatter = 0.0f, Calibre = 1.0f,
+                Serial = 1, Face = "front", Scatter = 0.0f, Rise = 0.0f, Calibre = 1.0f,
                 Level = 1,
             };
             int frames = 0;
@@ -3762,7 +3821,7 @@ public static class SelfTest
                 Shooter = shooter, Target = foe, ImpactLocal = aim,
                 From = foe.Sprite.ToGlobal(aim)
                        - new Vector2(Shell.PointBlank, 0.0f),
-                Serial = 2, Face = "front", Scatter = 0.0f, Calibre = 1.0f,
+                Serial = 2, Face = "front", Scatter = 0.0f, Rise = 0.0f, Calibre = 1.0f,
                 Level = 1,
             };
             unseen.Visible = false;
