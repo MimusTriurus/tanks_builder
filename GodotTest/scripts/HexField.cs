@@ -38,8 +38,28 @@ public sealed partial class HexField : Node2D
     /// <summary>The hand-drawn ground, or null to fall back to the rendered
     /// <c>hex</c> layer. Null is a working state, not a broken one - the art is
     /// outside the repository the way the sounds are, and a bench with none of
-    /// it still shows everything it showed before.</summary>
-    public TerrainSet? Terrain;
+    /// it still shows everything it showed before.
+    ///
+    /// Setting it also settles the filter, which is why it is a property. The
+    /// project samples canvas textures nearest so the atlases arrive as they
+    /// were rendered, and that is right for art painted at the size it is drawn
+    /// at. Art painted finer is drawn smaller than it was painted, and nearest
+    /// minification is point-sampling: the gravel crawls as the board pans. So
+    /// ground that is drawn down asks for mipmaps, and only that ground - the
+    /// fallback <c>hex</c> layer is still 1:1.</summary>
+    public TerrainSet? Terrain
+    {
+        get => _terrain;
+        set
+        {
+            _terrain = value;
+            TextureFilter = value is not null && value.AnyDetailed
+                ? TextureFilterEnum.LinearWithMipmaps
+                : TextureFilterEnum.ParentNode;
+        }
+    }
+
+    private TerrainSet? _terrain;
 
     /// <summary>Which kind every cell is: <see cref="TerrainSet.Mixed"/> for one
     /// per cell, or a kind's name to paint the whole board with it.

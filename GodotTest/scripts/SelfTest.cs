@@ -1390,10 +1390,19 @@ public static class SelfTest
                 + $"{set.CameraError(hex) * 100.0f:F1}% off the rendered "
                 + $"{hex.Size.X}x{hex.Size.Y}");
 
-            Check("every kind is painted on the template's frame",
+            // A whole multiple of the frame, not the frame: art may be painted
+            // finer than the template as long as it is the same drawing, and
+            // "the same drawing" is exactly "the same factor in both axes" -
+            // a different factor per axis is a different hexagon, which is a
+            // different camera, which is the check above.
+            Check("every kind is painted on the template's frame or a whole "
+                  + "multiple of it",
                 set.Names.All(n => set.Texture(n) is Texture2D art
-                                   && art.GetSize() == (Vector2)set.Frame),
-                $"frame {set.Frame.X}x{set.Frame.Y}");
+                                   && art.GetSize()
+                                      == (Vector2)set.Frame * set.Detail(n)),
+                $"frame {set.Frame.X}x{set.Frame.Y}, kinds "
+                + string.Join(", ", set.Names.Select(
+                    n => $"{n} x{set.Detail(n)} {set.Texture(n)!.GetSize()}")));
 
             // Not the silhouette's centre - the template's plate. A kind whose
             // grass grew would otherwise move its whole cell.
@@ -1406,6 +1415,27 @@ public static class SelfTest
             Check("the plate lands on the cell centre",
                 plate.DistanceTo(field.CellCentre(new Vector2I(3, 2))) < 0.01,
                 $"{plate} against {field.CellCentre(new Vector2I(3, 2))}");
+
+            // What allowing a finer kind rests on: it is drawn into the same
+            // rectangle as the template, so its extra pixels land inside the
+            // cell and nothing about the cell moves. A kind drawn at its own
+            // scale instead would be four cells wide and read as a broken map.
+            Check("a finer kind is drawn down by exactly its detail",
+                set.Names.All(n => set.Texture(n)!.GetSize()
+                                   * (set.ScaleTo(hex) / set.Detail(n))
+                                   == drawn.Size),
+                $"{drawn.Size} at scale {set.ScaleTo(hex):F4}");
+
+            // Nearest minification is point sampling, and the board pans: art
+            // drawn smaller than it was painted crawls without mipmaps. The one
+            // consequence of detail that is not free, and it is off by default
+            // for everything else in the project, so it goes quiet if dropped.
+            Check("ground painted finer than the template is sampled with "
+                  + "mipmaps",
+                !set.AnyDetailed
+                || field.TextureFilter
+                   == CanvasItem.TextureFilterEnum.LinearWithMipmaps,
+                $"detailed {set.AnyDetailed}, filter {field.TextureFilter}");
 
             misses = 0;
             for (int q = 0; q < field.Columns; q++)

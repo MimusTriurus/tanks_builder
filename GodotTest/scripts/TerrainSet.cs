@@ -27,10 +27,15 @@ namespace TankSpriteTest;
 /// Two guards, and both reject rather than repair:
 ///
 /// <list type="bullet">
-/// <item><b>A kind must be the template's frame size.</b> A file of another size
-/// was drawn against another template, and there is no way to line it up that is
-/// not a guess. This is what keeps <c>HexTerrain.png</c> out - 1254 px against
-/// 256, and see below for the other half of why.</item>
+/// <item><b>A kind must be the template's frame, or a whole multiple of it.</b>
+/// A file of any other size was drawn against another template, and there is no
+/// way to line it up that is not a guess. This is what keeps
+/// <c>HexTerrain.png</c> out - 1254 px against 256, and see below for the other
+/// half of why. A whole multiple is the one size that is not a guess: 1024
+/// against 256 is the same drawing at four times the detail, so every point of
+/// it - plate, overhang, centre - is four times the template's, and dividing the
+/// draw scale by four puts all of them back where the template said. Anything
+/// between (300, 512x480) is a different frame wearing a plausible number.</item>
 /// <item><b>The template must agree with the rendered tile's camera.</b> The
 /// hexagon's flat-to-flat over vertex-to-vertex is <c>(sqrt(3)/2)*sin(elevation)</c>,
 /// so the ratio *is* the camera angle. The project renders at 30 degrees, giving
@@ -73,6 +78,7 @@ public sealed class TerrainSet
     private const float CameraTolerance = 0.02f;
 
     private readonly Dictionary<string, Texture2D> _art = new();
+    private readonly Dictionary<string, int> _detail = new();
     private readonly List<string> _names = new();
 
     /// <summary>The kinds that loaded, template first.</summary>
@@ -114,7 +120,7 @@ public sealed class TerrainSet
 
         set.Frame = new Vector2I(template.GetWidth(), template.GetHeight());
         set.Plate = template.GetUsedRect();
-        set.Add(Plain, template);
+        set.Add(Plain, template, 1);
 
         var refused = new List<string>();
         foreach (string path in Directory.GetFiles(root, "*.png").OrderBy(p => p))
@@ -129,25 +135,48 @@ public sealed class TerrainSet
                 continue;
             }
             var frame = new Vector2I(art.GetWidth(), art.GetHeight());
-            if (frame != set.Frame)
+            int detail = DetailOf(frame, set.Frame);
+            if (detail == 0)
             {
                 refused.Add($"{name} is {frame.X}x{frame.Y}, not {set.Frame.X}"
-                            + $"x{set.Frame.Y}");
+                            + $"x{set.Frame.Y} or a whole multiple of it");
                 continue;
             }
-            set.Add(name, art);
+            set.Add(name, art, detail);
         }
 
-        set.Note = $"{set._names.Count} kinds ({string.Join(", ", set._names)})"
+        set.Note = $"{set._names.Count} kinds ({string.Join(", ", set.Listed())})"
                    + $" on a {set.Frame.X}px frame, plate {set.Plate.Size.X}"
                    + $"x{set.Plate.Size.Y}"
                    + (refused.Count == 0 ? "" : "; refused " + string.Join("; ", refused));
         return set;
     }
 
-    private void Add(string name, Image image)
+    /// <summary>How many times the template's frame this one is, or 0 if it is
+    /// not a whole multiple of it in both axes by the same factor. Both axes and
+    /// the same factor, because a file that is 4x wide and 2x tall is not the
+    /// same drawing at more detail - it is a different hexagon, and the aspect
+    /// ratio is the camera angle.</summary>
+    private static int DetailOf(Vector2I frame, Vector2I template)
     {
+        if (template.X <= 0 || template.Y <= 0)
+            return 0;
+        if (frame.X % template.X != 0 || frame.Y % template.Y != 0)
+            return 0;
+        int x = frame.X / template.X;
+        return x == frame.Y / template.Y ? x : 0;
+    }
+
+    private void Add(string name, Image image, int detail)
+    {
+        // Mipmaps for anything that will be drawn smaller than it was painted.
+        // Without them a 4x kind is point-sampled down to a quarter and the
+        // gravel crawls as the board pans - the ground reads as noise rather
+        // than as ground, which is the one thing the hand-drawn art is for.
+        if (detail > 1)
+            image.GenerateMipmaps();
         _art[name] = ImageTexture.CreateFromImage(image);
+        _detail[name] = detail;
         _names.Add(name);
     }
 
@@ -155,6 +184,19 @@ public sealed class TerrainSet
 
     public Texture2D? Texture(string name) =>
         _art.TryGetValue(name, out Texture2D? art) ? art : null;
+
+    /// <summary>How many times the template's frame this kind was painted at.
+    /// Divides the draw scale, and is 1 for art drawn at the template's own
+    /// size.</summary>
+    public int Detail(string name) =>
+        _detail.TryGetValue(name, out int detail) ? detail : 1;
+
+    /// <summary>Anything drawn finer than the template, so the filter can be
+    /// told and the note can say so.</summary>
+    public bool AnyDetailed => _detail.Values.Any(d => d > 1);
+
+    private IEnumerable<string> Listed() =>
+        _names.Select(n => Detail(n) > 1 ? $"{n} x{Detail(n)}" : n);
 
     /// <summary>What the art has to be multiplied by to sit on the rendered
     /// tile. Off the width, because the width is the load-bearing number: the
@@ -178,7 +220,15 @@ public sealed class TerrainSet
     public bool CameraAgrees(Rect2I hexRect) =>
         CameraError(hexRect) <= CameraTolerance;
 
-    /// <summary>Where to draw a kind so its plate is centred on a cell.</summary>
+    /// <summary>
+    /// Where to draw a kind so its plate is centred on a cell.
+    ///
+    /// The same rectangle whatever the kind's detail, and that is the whole
+    /// argument for allowing whole multiples: a 4x kind is 4x the frame drawn at
+    /// a quarter of the scale, so the destination is the template's frame times
+    /// the template's scale either way. Detail buys pixels inside the rectangle
+    /// and moves nothing.
+    /// </summary>
     public Rect2 RectAt(Vector2 cellCentre, float scale)
     {
         Vector2 centre = ((Vector2)Plate.Position + (Vector2)Plate.Size * 0.5f) * scale;
