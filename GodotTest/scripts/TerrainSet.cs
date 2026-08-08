@@ -90,6 +90,21 @@ public sealed class TerrainSet
     /// <summary>The kinds that loaded, template first.</summary>
     public IReadOnlyList<string> Names => _names;
 
+    /// <summary>
+    /// The kinds a mixed board draws from: everything but the bare template,
+    /// unless the template is all there is.
+    ///
+    /// It is a kind - a board painted with it is the plain plate the bench had
+    /// before drawn ground existed - but it is not one of the kinds a *map* is
+    /// made of. Its job is to be the frame every other kind is aligned to, and
+    /// a mix that scattered it among drawn ground would read as ground that
+    /// failed to draw rather than as a kind of terrain. Still selectable by
+    /// name, which is where it is actually wanted: judging one kind against the
+    /// plate it was painted over.
+    /// </summary>
+    public IReadOnlyList<string> Mixable =>
+        _names.Count > 1 ? _names.Where(n => n != Plain).ToList() : _names;
+
     public bool Any => _names.Count > 0;
 
     /// <summary>The template's opaque box - the plate, in image pixels. Its
@@ -257,13 +272,14 @@ public sealed class TerrainSet
     /// </summary>
     public string MixedAt(Vector2I cell, string? extra)
     {
-        int kinds = _names.Count + (extra is null ? 0 : 1);
+        IReadOnlyList<string> pool = Mixable;
+        int kinds = pool.Count + (extra is null ? 0 : 1);
         if (kinds == 0)
             return Plain;
         int h = cell.X * 73856093 ^ cell.Y * 19349663;
         h = (h ^ (h >> 13)) * 1274126177;
         h ^= h >> 16;
         int pick = (int)((uint)h % (uint)kinds);
-        return pick < _names.Count ? _names[pick] : extra!;
+        return pick < pool.Count ? pool[pick] : extra!;
     }
 }

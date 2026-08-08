@@ -1450,10 +1450,22 @@ public static class SelfTest
             var kinds = new HashSet<string>();
             for (int q = 0; q < field.Columns; q++)
             for (int r = 0; r < field.Rows; r++)
-                kinds.Add(field.TypeAt(new Vector2I(q, r)));
-            Check("mixed puts every loaded kind on the board",
-                kinds.Count == set.Names.Count,
-                $"{kinds.Count} of {set.Names.Count} appeared");
+                kinds.Add(field.KindAt(new Vector2I(q, r)));
+            var wanted = new HashSet<string>(set.Mixable);
+            if (field.Trees)
+                wanted.Add(TerrainSet.Forest);
+            Check("mixed puts every kind a map is made of on the board",
+                kinds.SetEquals(wanted),
+                $"{string.Join(", ", kinds)} against {string.Join(", ", wanted)}");
+
+            // The template is the frame the others are aligned to, and a board
+            // that scattered bare plate among drawn ground would read as ground
+            // that failed to draw. Still selectable by name - that is where it
+            // is wanted, judging a kind against the plate it was painted over.
+            Check("the bare template is not one of them",
+                set.Names.Count <= 1 || !kinds.Contains(TerrainSet.Plain),
+                $"{TerrainSet.Plain} appeared in a mix of "
+                + string.Join(", ", set.Mixable));
 
             // Hashed off the cell, so this cannot fail by construction - and it
             // is asserted anyway for the reason the shell scatter is: --capture
