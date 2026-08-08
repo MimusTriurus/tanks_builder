@@ -182,6 +182,12 @@ public sealed partial class VehicleAudio : Node2D
     /// a click rather than a stop.</summary>
     public double TurretFloor = 2.0;
     public float BurnDb = -10.0f;
+
+    /// <summary>How little flame is still a fire. Below this the loop shuts
+    /// rather than trailing off for ever: -40dB of crackle under a hull that has
+    /// stopped burning is not quiet, it is a sound with nothing making it. Also
+    /// the floor on the trim, so the log has something to take.</summary>
+    public double BurnFloor = 0.01;
     public float GunDb = -4.0f;
     public float ArmourDb = -6.0f;
     public float DeathDb = -2.0f;
@@ -359,7 +365,23 @@ public sealed partial class VehicleAudio : Node2D
             _turret.PitchScale =
                 (float)Math.Clamp(effort, TurretMinPitch, TurretMaxPitch);
 
-        Gate(_burn, ref _burnGate, Enabled && v.Burning, delta, BurnDb);
+        // The fire follows the flame, not the flag. v.Burning stays true on a
+        // wreck for ever - the column goes on smoking, which is the point of it -
+        // so gating on that alone left a burnt-out hull crackling with no fire on
+        // it. Same shape of mistake as the engine: a condition that is true of a
+        // burning tank and stays true of the thing it becomes.
+        //
+        // Read off what is drawn rather than off the clock, so the ear and the
+        // eye cannot disagree about how much fire there is; this runs after the
+        // wreck has stepped, so it is this frame's. Smoke has no sound: it is
+        // what is left when the fire has gone.
+        //
+        // Trimmed by the flame as well as gated on it, and in amplitude like the
+        // gate itself, so the two compose. A gate alone would hold full volume
+        // down to the last of the flame and then drop it.
+        double flame = v.Sprite.FireDensity;
+        Gate(_burn, ref _burnGate, Enabled && v.Burning && flame > BurnFloor, delta,
+             BurnDb + (float)(20.0 * Math.Log10(Math.Max(flame, BurnFloor))));
     }
 
     private static double WrapAngle(double degrees) =>
