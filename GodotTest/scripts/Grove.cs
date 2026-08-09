@@ -385,6 +385,15 @@ public sealed partial class Grove : Node2D
                 Cell = cell,
                 Position = Origin + s.At,
                 ZIndex = Mathf.RoundToInt(s.At.Y),
+                // Hashed off where the tree stands rather than off its place in
+                // any list, so the wood sways the same way twice and a tree
+                // keeps its phase when the sowing around it changes. Its own
+                // salts, so phase is not a function of species or jitter -
+                // shared bits there would put rows of trees in step.
+                SwayPhase = Hash01(Mathf.RoundToInt(s.At.X),
+                                   Mathf.RoundToInt(s.At.Y), 7919) * Math.Tau,
+                SwayRate = 0.8 + 0.5 * Hash01(Mathf.RoundToInt(s.At.X),
+                                              Mathf.RoundToInt(s.At.Y), 8837),
             };
             AddChild(node);
             _planted.Add(node);
@@ -425,6 +434,89 @@ public sealed partial class Grove : Node2D
         return Math.Min(root3 * r * 0.5 - dy,
                         (root3 * r - root3 * dx - dy) * 0.5);
     }
+
+    /// <summary>
+    /// Bend the trees, and move the gust along.
+    ///
+    /// A board where nothing moves reads as a photograph of a board, which is
+    /// the same complaint the engine tremble answers on the tanks: the trees
+    /// are the largest still thing on screen and the cheapest to give a pulse.
+    ///
+    /// <b>A shear about the foot, not a rotation and not a wobble.</b> The
+    /// trunk is planted; what a tree does in wind is lean, so the drift of a
+    /// point is proportional to its height above the ground - and that is a
+    /// shear, which is the same reasoning <see cref="BodyPitch"/> uses for
+    /// pitch on a sprite that has already been projected. Linear rather than
+    /// bending harder near the crown, because an affine transform is what a
+    /// single draw call has: a real bend would mean slicing each tree, and 464
+    /// trees is not the place to spend that.
+    ///
+    /// <b>Out of step by construction.</b> Each tree carries a phase hashed off
+    /// its own foot and a rate a little either side of the wind's, so no two
+    /// agree for long. That alone would read as every tree fidgeting on its
+    /// own, so the amplitude is a gust that travels: one wave crossing the
+    /// board along x, which is what makes it read as weather rather than as
+    /// idle animation.
+    ///
+    /// <b>Integrated, not clocked off the wall.</b> The same argument as the
+    /// tremble and the exhaust: --capture and --trace fix the time step so two
+    /// runs can be diffed, and a phase taken from the wall clock would differ
+    /// between them.
+    /// </summary>
+    public void Blow(double delta)
+    {
+        if (_planted.Count == 0)
+            return;
+        Weather += delta;
+        foreach (PropNode tree in _planted)
+        {
+            float lean = 0.0f;
+            if (Wind > 0.0)
+            {
+                // The gust: one long wave travelling along x, so neighbours
+                // rise and fall a beat apart rather than together.
+                double gust = 0.5 + 0.5 * Math.Sin(
+                    Weather * GustRate - tree.Ground.X * GustTravel);
+                double phase = Weather * tree.SwayRate + tree.SwayPhase;
+                lean = (float)(Wind * (0.35 + 0.65 * gust) * Math.Sin(phase)
+                               / SwayHeight);
+            }
+            // The lean is written every frame and the redraw is not: a tree
+            // whose crown has moved a thousandth of a pixel since it was last
+            // drawn does not need drawing again. Kept apart rather than folded
+            // into one test, because folding them leaves Lean holding the last
+            // value that happened to cross the threshold - so it stops being
+            // where the tree is and starts being where it was, and every
+            // measurement of the wind is then off by the threshold.
+            tree.Lean = lean;
+            if (Math.Abs(lean - tree.Drawn) < 0.00002f)
+                continue;
+            tree.Drawn = lean;
+            tree.QueueRedraw();
+        }
+    }
+
+    /// <summary>How far the crown of a tree this tall drifts at full gust, in
+    /// screen px. Written as a drift at a height rather than as a shear so that
+    /// the setting is in the units it is judged in - and the shear that comes
+    /// out of it is what makes a taller tree lean further, which is the part
+    /// that has to be true rather than tuned.</summary>
+    public double Wind = 2.6;
+    public double SwayHeight = 120.0;
+
+    /// <summary>How fast the gust crosses, and how far apart in phase two
+    /// points a pixel apart on the board are. 0.55 rad/s is a wave every
+    /// eleven seconds; the travel puts a full cycle across about four cells,
+    /// so a gust is visibly moving rather than the whole board breathing.
+    /// </summary>
+    public double GustRate = 0.55;
+    public double GustTravel = 0.0035;
+
+    /// <summary>How long the wind has been blowing, in seconds. Public because
+    /// it is the weather's state rather than a private counter: everything the
+    /// trees do is a function of it and their own hashed phase, so it is what
+    /// says whether two runs are looking at the same gust.</summary>
+    public double Weather;
 
     /// <summary>
     /// Fade the trees on cells that have a tank in them, and let the rest come
@@ -530,6 +622,26 @@ public sealed partial class PropNode : Node2D
     /// the checks are written in.</summary>
     public float Rise => RiseImage * Pixels;
 
+    /// <summary>Where this tree is in the sway, and how fast it goes round.
+    /// Hashed off its own foot at planting - see <see cref="Grove.Blow"/>.
+    /// </summary>
+    public double SwayPhase;
+    public double SwayRate = 1.0;
+
+    /// <summary>How far a point drifts per pixel of height above the foot. A
+    /// shear rather than an angle: at these amplitudes the two are the same
+    /// number, and the shear is what the draw call takes.</summary>
+    public float Lean;
+
+    /// <summary>The lean the sprite was last drawn at. See
+    /// <see cref="Grove.Blow"/>: what is drawn lags what is true by less than a
+    /// hundredth of a pixel, and that is the whole point of it.</summary>
+    public float Drawn;
+
+    /// <summary>Where this tree's crown is right now, in screen px - the number
+    /// the setting is written in and the one a check can read.</summary>
+    public float Drift => Lean * Rise;
+
     public override void _Ready()
     {
         // Painted at four times the size it is drawn at, so the same argument
@@ -538,6 +650,25 @@ public sealed partial class PropNode : Node2D
         TextureFilter = TextureFilterEnum.LinearWithMipmaps;
     }
 
-    public override void _Draw() =>
+    /// <summary>
+    /// The shear the sprite is drawn through.
+    ///
+    /// The node's origin is the foot, because the sprite is drawn at -Foot - so
+    /// a shear with no translation in it pivots on the ground and there is
+    /// nothing to line up. A point h above the foot sits at local y = -h, hence
+    /// the minus: it has to drift the way the lean says, not against it.
+    ///
+    /// A property rather than a local, so a check can ask the matrix itself
+    /// where the foot ends up. A shear on the wrong axis and an origin left in
+    /// it both slide the whole tree, and both look like wind.
+    /// </summary>
+    public Transform2D Bend => new(new Vector2(1.0f, 0.0f),
+                                   new Vector2(-Lean, 1.0f), Vector2.Zero);
+
+    public override void _Draw()
+    {
+        if (Lean != 0.0f)
+            DrawSetTransformMatrix(Bend);
         DrawTextureRect(Art, new Rect2(-Foot * Pixels, Size * Pixels), false);
+    }
 }

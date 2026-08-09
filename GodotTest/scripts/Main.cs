@@ -165,6 +165,7 @@ public sealed partial class Main : Node2D
     private bool _trees = true;
     private bool _clearFront;
     private float _ghost = Grove.GhostByDefault;
+    private double _wind = -1.0;
 
     /// <summary>Whether the belts leave anything behind. On by default: a tank
     /// that leaves no mark is the picture the bench already had, so the A/B this
@@ -664,6 +665,13 @@ public sealed partial class Main : Node2D
                      && double.TryParse(userArgs[i + 1], NumberStyles.Float,
                          CultureInfo.InvariantCulture, out double trembleLevel))
                 _trembleAtStart = trembleLevel;
+            // Straight onto the static rather than waiting for the vehicles like
+            // the tremble does: this one is not held on a machine, because the
+            // rate has two readers that share no object. See Gunnery.TraverseRate.
+            else if (userArgs[i] == "--traverse" && i + 1 < userArgs.Length
+                     && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+                         CultureInfo.InvariantCulture, out double traverseLevel))
+                Gunnery.TraverseLevel = traverseLevel;
             // Both of these turn the shear back on as well as configuring it.
             // It is off by default now that the tube recoils for real, and a flag
             // that set a level on a switched-off effect would look like a flag
@@ -753,6 +761,16 @@ public sealed partial class Main : Node2D
             }
             else if (userArgs[i] == "--clear-front")
                 _clearFront = true;
+            // Invariant culture, the trap named beside --hit-scale. Zero is
+            // still weather - the still board - so this is not a switch.
+            else if (userArgs[i] == "--wind" && i + 1 < userArgs.Length
+                     && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+                                        CultureInfo.InvariantCulture,
+                                        out double gust))
+            {
+                i++;
+                _wind = Math.Max(0.0, gust);
+            }
             else if (userArgs[i] == "--drive" && i + 1 < userArgs.Length)
             {
                 string[] parts = userArgs[i + 1].Split(',');
@@ -845,6 +863,11 @@ public sealed partial class Main : Node2D
             Field = _field, Props = _props, Origin = _origin,
             Enabled = _trees, ClearFront = _clearFront, Ghost = _ghost,
         };
+        // Negative means the flag was not given, so the tuned default stands -
+        // zero is a legal setting here, not an absence, because a still board
+        // is the A/B this one is judged against.
+        if (_wind >= 0.0)
+            _grove.Wind = _wind;
         AddChild(_grove);
 
         // One vehicle per atlas that loaded, parked along HomeCells. Built here
@@ -2470,7 +2493,7 @@ public sealed partial class Main : Node2D
                   v.Target.GroundPoint - v.GroundPoint))];
         double was = v.Sprite.TurretFacing;
         v.Sprite.TurretFacing = Gunnery.Traverse(
-            was, onto, v.Profile.TurretRate * delta);
+            was, onto, Gunnery.TraverseRate(v.Profile) * delta);
         if (v.Sprite.TurretFacing != was)
             v.Sprite.QueueRedraw();
 
@@ -2535,6 +2558,7 @@ public sealed partial class Main : Node2D
         ["--no-barrel-recoil"] = new[] { "effects.tube_recoil" },
         ["--shake"] = new[] { "effects.camera_shake", "effects.shake_level" },
         ["--tracer"] = new[] { "gunnery.tracer" },
+        ["--traverse"] = new[] { "gunnery.traverse_level" },
         ["--hit-scale"] = new[] { "armour.calibre" },
         ["--destroy"] = new[] { "armour.destroy" },
         ["--turret-sound"] = new[] { "sound.turret_motor" },
@@ -2542,6 +2566,7 @@ public sealed partial class Main : Node2D
         ["--no-forest"] = new[] { "ground.forest" },
         ["--ghost"] = new[] { "ground.ghost" },
         ["--clear-front"] = new[] { "ground.clearfront" },
+        ["--wind"] = new[] { "ground.wind" },
     };
 
     private readonly HashSet<string> _flagged = new();
@@ -2880,9 +2905,23 @@ public sealed partial class Main : Node2D
         ui.Toggle("gunnery.tracer", "shell tracer  (--tracer)",
             () => _tracerVisible,
             on => { _tracerVisible = on; TracerChanged(); });
+        // A multiplier over the three class figures, not a rate - see
+        // Gunnery.TraverseLevel. The caption carries the swing beside the hull's
+        // own, because the ratio between those two is what "sluggish" was
+        // reporting and the multiplier on its own says nothing about it.
+        ui.Slide("gunnery.traverse_level", "turret traverse level", 0.2, 3.0, 0.05,
+            () => Gunnery.TraverseLevel, v => Gunnery.TraverseLevel = v, "x",
+            () =>
+            {
+                MovementProfile p = Active.Profile;
+                double rate = Math.Max(Gunnery.TraverseRate(p), 1e-6);
+                return $"{rate:F0} deg/s, 180 deg in {180.0 / rate:F2}s"
+                       + $" vs hull {180.0 / p.TurnRate:F2}s";
+            });
         ui.Readout("gunnery.info", () =>
             $"{AimLine()}\nreload {Active.Profile.ReloadTime:F1}s, "
-            + $"traverse {Active.Profile.TurretRate:F0} deg/s, "
+            + $"traverse {Gunnery.TraverseRate(Active.Profile):F0} deg/s"
+            + $" ({Active.Profile.TurretRate:F0} x {Gunnery.TraverseLevel:F2}), "
             + $"{_field.Arcs.Count} cells down the six lanes");
 
         ui.Heading("armour");
@@ -3081,6 +3120,23 @@ public sealed partial class Main : Node2D
         // rather than asserted. See Grove.ClearFront: a 111px tree needs 142px
         // of clearance in front of a tank and a hexagon offers 54, so switching
         // it on empties the front of every clearing.
+        // In crown pixels, because that is what it looks like - the shear it
+        // becomes is what makes a taller tree lean further, and that part is
+        // not up for tuning. The caption reads the widest lean on the board
+        // right now rather than the setting, because the gust travels and the
+        // number the setting names is only reached where the gust is.
+        ui.Slide("ground.wind", "wind, crown drift  (--wind)", 0.0, 8.0, 0.2,
+            () => _grove?.Wind ?? 0.0,
+            v => { if (_grove is not null) _grove.Wind = v; },
+            "px", () =>
+            {
+                if (_grove is null || _grove.Planted == 0)
+                    return "";
+                double most = _grove.Trees.Max(t => Math.Abs(t.Drift));
+                return _grove.Wind <= 0.0
+                    ? "still - the board is a photograph of a board"
+                    : $"{most:F1}px at the most leaning crown just now";
+            });
         ui.Toggle("ground.clearfront", "no tree may cross a tank  (--clear-front)",
             () => _grove?.ClearFront == true,
             on => { if (_grove is not null) { _grove.ClearFront = on; SowGrove(); } });
@@ -3256,7 +3312,15 @@ public sealed partial class Main : Node2D
                      + $"  pitch {_tank.Pitch,8:F5}  shake {_tank.Shake,2}"
                      + $"  roll {_tank.Roll,8:F5}  trem {_tank.TremblePitch,8:F5}"
                      + $"/{_tank.TrembleRoll,8:F5}  scan {_scan.Offset,6:F1}"
-                     + $"  turret {_tank.TurretFacing,6:F1}  shot {_tank.FlashFrame,3}"
+                     + $"  turret {_tank.TurretFacing,6:F1}"
+                     // The rate the gun is driven at, in the channel that
+                     // survives --no-ui. A traverse that is quietly still on the
+                     // tuned figure looks exactly like one the flag reached, and
+                     // the only difference between the two is how long a lay
+                     // takes - which a still frame cannot show at all.
+                     + $"  trv {Gunnery.TraverseRate(Active.Profile),4:F0}"
+                     + $"x{Gunnery.TraverseLevel,4:F2}"
+                     + $"  shot {_tank.FlashFrame,3}"
                      + $"  recoil {_recoil.Pitch,8:F5}/{_recoil.Roll,8:F5}"
                      // Which body is taking it, in the channel that survives
                      // --no-ui. A mode that quietly failed to apply would send
@@ -3420,6 +3484,7 @@ public sealed partial class Main : Node2D
         // than reached ones - a tank spends most of an order between two, and
         // the trees have to be out of the way for the crossing, not after it.
         _grove?.Reveal(Standing(), delta);
+        _grove?.Blow(delta);
 
         // The view last of all, after everything that could have fired this
         // frame: a shot has to reach the spring on the frame it goes off, or the
@@ -3812,6 +3877,10 @@ public sealed partial class Main : Node2D
             Park(v);
         }
         _sizeLevel = 1.0;
+        // With the other levels, and it is one line rather than one per tank
+        // because the traverse knob is not held on a machine - see
+        // Gunnery.TraverseLevel.
+        Gunnery.TraverseLevel = 1.0;
         ApplySize();
         PaintGunnery();
         _camera.Zoom = Vector2.One;

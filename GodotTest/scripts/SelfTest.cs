@@ -1793,6 +1793,77 @@ public static class SelfTest
                 grove.Trees.All(t => t.Modulate.A > 0.99f),
                 "the fade is a view of the ground, not a change to it");
 
+            // --- the wind ------------------------------------------------
+            //
+            // Stepped rather than clocked off the wall, so this runs the same
+            // in a check as it does under --capture.
+            double wasWind = grove.Wind;
+            grove.Wind = 3.0;
+            for (int i = 0; i < 40; i++)
+                grove.Blow(1.0 / 60.0);
+            Check("the wind leans the trees",
+                grove.Trees.Any(t => Math.Abs(t.Drift) > 0.2f),
+                $"widest lean {grove.Trees.Max(t => Math.Abs(t.Drift)):F2}px");
+
+            // The whole point of hashing a phase per tree. A wood that leans as
+            // one body is a wood on a hinge.
+            Check("and not all of them the same way",
+                grove.Trees.Any(t => t.Lean > 0.0f)
+                && grove.Trees.Any(t => t.Lean < 0.0f),
+                "every tree leaning the same way at once is one hinge, not wind");
+
+            // Drift is the shear times the height, which is what makes a taller
+            // tree lean further - the half of the setting that is derived
+            // rather than chosen, and the half that would go quietly if someone
+            // made the drift a fixed number of pixels.
+            Check("a taller tree leans further, because the lean is a shear",
+                grove.Trees.All(t => Math.Abs(t.Drift - t.Lean * t.Rise) < 1e-4),
+                "drift is the shear times the height, or it is not a lean");
+
+            // The trunk is planted, and this is the matrix that has to say so:
+            // it pivots on the foot, so whatever the crown does the ground
+            // contact does not move. Asked of the transform the draw call
+            // actually uses - the shear on the wrong axis, or an origin left in
+            // it, both slide the tree and both look like wind.
+            PropNode bent = grove.Trees.OrderByDescending(t => Math.Abs(t.Lean))
+                                       .First();
+            Vector2 foot = bent.Bend * Vector2.Zero;
+            Vector2 crown = bent.Bend * new Vector2(0.0f, -bent.Rise);
+            Check("the foot stays where it was planted",
+                foot.Length() < 1e-4f
+                && Math.Abs(crown.X - bent.Drift) < 1e-3f
+                && Math.Abs(crown.Y + bent.Rise) < 1e-4f,
+                $"foot moved to {foot}, crown to {crown} against a "
+                + $"{bent.Drift:F2}px drift");
+
+            // The same weather twice, reached two ways: the lean has to be a
+            // function of how long the wind has blown, not of how many times it
+            // was asked. The trap the tremble and the exhaust both name - a
+            // phase advanced per frame rather than per second is a wood that
+            // sways at whatever rate the machine happens to run at.
+            double wasWeather = grove.Weather;
+            grove.Weather = 0.0;
+            for (int i = 0; i < 40; i++)
+                grove.Blow(1.0 / 60.0);
+            var leaning = grove.Trees.Select(t => t.Lean).ToList();
+            grove.Weather = 0.0;
+            for (int i = 0; i < 20; i++)
+                grove.Blow(2.0 / 60.0);
+            Check("the same seconds of wind bend it the same way",
+                grove.Trees.Select(t => t.Lean).Zip(leaning)
+                     .All(p => Math.Abs(p.First - p.Second) < 1e-5f),
+                "a phase stepped per frame rather than per second sways at "
+                + "whatever rate the machine runs at");
+            grove.Weather = wasWeather;
+
+            grove.Wind = 0.0;
+            for (int i = 0; i < 40; i++)
+                grove.Blow(1.0 / 60.0);
+            Check("no wind, no lean at all",
+                grove.Trees.All(t => t.Lean == 0.0f),
+                $"{grove.Trees.Count(t => t.Lean != 0.0f)} still leaning");
+            grove.Wind = wasWind;
+
             field.Paint = wasPainted;
             bool wasSown = grove.Enabled;
             grove.Enabled = false;
@@ -4186,6 +4257,57 @@ public static class SelfTest
                 && MovementProfile.Medium.TurretRate < MovementProfile.Light.TurretRate,
                 string.Join(", ", vehicles.Select(
                     v => $"{v.Tag} {v.Profile.TurretRate:F0} deg/s")));
+            // The number the complaint was actually about. Nobody can judge
+            // 175 deg/s against 70 without something beside it, and the thing
+            // beside it is the tank's own hull: while the turret was 2.7-2.9x
+            // slower than the hull it sat on, spinning the tank was the quicker
+            // way to point the gun, which is backwards and is what read as
+            // sluggish. Half the hull rate is a floor rather than the tuned
+            // ratio, so it catches a regression without pinning the value.
+            Check("and no turret is dramatically slower than its own hull",
+                MovementProfile.All.All(p => p.TurretRate >= 0.5 * p.TurnRate),
+                string.Join(", ", MovementProfile.All.Select(
+                    p => $"{p.Tag} {p.TurretRate / p.TurnRate:F2} of hull")));
+            // A multiplier over the triple, not a rate - the same claim the
+            // tremble level and the size level carry, and the same failure if it
+            // is ever rewritten as a rate: the 2.0x class spread goes flat on the
+            // control's first drag.
+            double keepLevel = Gunnery.TraverseLevel;
+            Gunnery.TraverseLevel = 2.0;
+            bool scales = MovementProfile.All.All(p =>
+                Math.Abs(Gunnery.TraverseRate(p) - 2.0 * p.TurretRate) < 1e-9);
+            double spreadAt2 = MovementProfile.Light.TurretRate
+                               / MovementProfile.Heavy.TurretRate;
+            Gunnery.TraverseLevel = 1.0;
+            double spreadAt1 = MovementProfile.Light.TurretRate
+                               / MovementProfile.Heavy.TurretRate;
+            Check("the traverse level scales every class and keeps their spread",
+                scales && Math.Abs(spreadAt2 - spreadAt1) < 1e-9,
+                $"x2 scales all three: {scales}, spread {spreadAt1:F2} either way");
+            // Turning the gun up must not make the motor sound pinned at its
+            // stop: the effort is normalised against the rate the gun is *driven*
+            // at, which is the one thing the two readers of that rate have to
+            // agree on. Asserted through the named helper, which is why it is one.
+            Gunnery.TraverseLevel = 2.0;
+            double effortFast = VehicleAudio.TraverseEffort(
+                MovementProfile.Medium.TurretRate, MovementProfile.Medium);
+            Gunnery.TraverseLevel = 1.0;
+            double effortTuned = VehicleAudio.TraverseEffort(
+                MovementProfile.Medium.TurretRate, MovementProfile.Medium);
+            Check("the traverse motor is normalised against the driven rate",
+                Math.Abs(effortTuned - 1.0) < 1e-9
+                && Math.Abs(effortFast - 0.5) < 1e-9,
+                $"effort at the tuned rate {effortTuned:F2}, at x2 {effortFast:F2}");
+            // At zero the gun does not move at all, which is what a level has to
+            // do to be a level: the same claim the tremble and the shake carry,
+            // and the one that fails if the multiplier is ever floored somewhere.
+            Gunnery.TraverseLevel = 0.0;
+            double stuck = Gunnery.Traverse(
+                270.0, 30.0, Gunnery.TraverseRate(MovementProfile.Medium) * (1.0 / 60.0));
+            Gunnery.TraverseLevel = keepLevel;
+            Check("at zero the traverse level leaves the gun where it is",
+                Math.Abs(WrapAngle(stuck - 270.0)) < 1e-9,
+                $"asked to swing to 30, stayed at {stuck:F1}");
 
             // The round in the air. The property being asserted is the one the
             // whole thing was written for: the shell must not land in the frame
