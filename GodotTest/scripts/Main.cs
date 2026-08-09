@@ -3427,6 +3427,50 @@ public sealed partial class Main : Node2D
                           : $"   - below {half:F0}px a rise hides tracks only, "
                             + $"never hull (needs 1:{2.0 * half / (lift / Math.Max(0.001, _field.StepGrade)):F1})");
             });
+        // What the cursor is over, and everything that cell uses to decide
+        // whether it covers the driven tank.
+        //
+        // Here rather than on the scene, where the numbers would be next to the
+        // thing they are about: the panel is the one place this bench shows its
+        // figures, and a label following the mouse is in every screenshot. It is
+        // in the ground group because it is about the ground.
+        //
+        // It exists because "that hex should be covering the tank" cannot be
+        // settled by looking - it took two rounds of screenshots to find that the
+        // ordering was right and the grade was too shallow. All of it is one
+        // question asked in four numbers: which cell, how high, is it in front,
+        // and where its face begins against where the tank stands.
+        ui.Readout("ground.hover", () =>
+        {
+            if (_field.Atlas is null)
+                return "no atlas";
+            Vector2 local = _field.ToLocal(GetGlobalMousePosition());
+            Vector2I cell = _field.CellAt(local);
+            if (!_field.InBounds(cell))
+                return "off the board";
+            string what = $"hex {cell.X},{cell.Y}   level "
+                          + $"{_field.LevelAt(cell):+0;-0;0}   {_field.KindAt(cell)}";
+            if (!_field.HasRelief)
+                return what + "\nflat board - nothing covers anything";
+
+            Vehicle v = Active;
+            float row = v.GroundPoint.Y - _origin.Y + v.Height;
+            bool hides = _field.Occluders(row, v.Standing, v.Height).Contains(cell);
+            // Where this cell's face begins against where the tank's belts touch
+            // down. Positive means the face starts above the contact row, which
+            // is the only way a cell can reach hull rather than track - and the
+            // number that said the hill was too low to reach either.
+            float half = _field.Atlas.HexRect.Size.Y * 0.5f;
+            float top = _field.CellCentre(cell).Y - half;
+            float over = (row - v.Height) - top;
+            float nearer = _field.DepthOf(cell) - _field.Depth(row, v.Standing);
+            return what + $"\nvs {v.Tag} on {cell.X},{cell.Y} == "
+                   + $"{(cell == v.Cell ? "same cell" : $"{v.Cell.X},{v.Cell.Y}")}"
+                   + $"   {(hides ? "COVERS it" : "does not cover it")}\n"
+                   + $"face starts {over:+0.0;-0.0;0.0}px "
+                   + (over > 0.0f ? "above" : "below") + " its contact row, "
+                   + $"{nearer:+0.0;-0.0;0.0}px nearer the camera";
+        });
         // A switch, not a dial: how much forest there is comes from the terrain
         // list above, because forest is one of the kinds of ground. This is the
         // A/B - the same board with the trees taken off it.
