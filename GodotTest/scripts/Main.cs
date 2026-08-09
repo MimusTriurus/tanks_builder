@@ -184,6 +184,11 @@ public sealed partial class Main : Node2D
     /// <summary>Whether the board has height on it. See --relief.</summary>
     private bool _relief;
 
+    /// <summary>How steep one level is, or negative for the tuned default -
+    /// zero is a legal setting here, being a board that is flat while still
+    /// carrying levels.</summary>
+    private double _grade = -1.0;
+
     /// <summary>
     /// The one board with height on it, until a map format exists.
     ///
@@ -806,6 +811,15 @@ public sealed partial class Main : Node2D
             // was relief - see HexField.HasRelief.
             else if (userArgs[i] == "--relief")
                 _relief = true;
+            // Invariant culture, the trap named beside --hit-scale.
+            else if (userArgs[i] == "--grade" && i + 1 < userArgs.Length
+                     && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+                                        CultureInfo.InvariantCulture, out double grade))
+            {
+                i++;
+                _grade = grade;
+                _relief = true;     // asking how steep it is asks for it
+            }
             // No number: how much forest there is comes from --terrain, because
             // forest is one of the kinds of ground. This is the A/B - the same
             // board with the tree layer off.
@@ -930,6 +944,8 @@ public sealed partial class Main : Node2D
         }
 
         _field = new HexField { Terrain = _terrain, Paint = _paint, Trees = _trees };
+        if (_grade >= 0.0)
+            _field.StepGrade = _grade;
         if (_relief)
             _field.SetRelief(ReliefMap(_field.Columns, _field.Rows));
         AddChild(_field);
@@ -2114,6 +2130,13 @@ public sealed partial class Main : Node2D
         if (on == _field.HasRelief)
             return;
         _field.SetRelief(on ? ReliefMap(_field.Columns, _field.Rows) : null);
+        Settle();
+    }
+
+    /// <summary>The settling every change to the board's heights needs. See
+    /// <see cref="SetRelief"/> for what each line is for.</summary>
+    private void Settle()
+    {
         foreach (Vehicle v in _vehicles)
         {
             CancelOrder(v);
@@ -2150,6 +2173,20 @@ public sealed partial class Main : Node2D
             ? $"none, {where}"
             : $"{over.Count} ({string.Join(" ", over.Select(c => $"{c.X},{c.Y}"))})"
               + $", {where}";
+    }
+
+    /// <summary>
+    /// How steep a level is. Everything standing on the board settles the way it
+    /// does for <see cref="SetRelief"/>, and for the same reasons - every height
+    /// on the board has just changed.
+    /// </summary>
+    private void SetGrade(double grade)
+    {
+        if (Math.Abs(grade - _field.StepGrade) < 1e-9)
+            return;
+        _grade = grade;
+        _field.StepGrade = grade;
+        Settle();
     }
 
     private void UpdateLean(Vehicle v, double delta)
@@ -2876,6 +2913,7 @@ public sealed partial class Main : Node2D
         ["--destroy"] = new[] { "armour.destroy" },
         ["--turret-sound"] = new[] { "sound.turret_motor" },
         ["--relief"] = new[] { "ground.relief" },
+        ["--grade"] = new[] { "ground.relief", "ground.grade" },
         ["--terrain"] = new[] { "ground.terrain" },
         ["--no-forest"] = new[] { "ground.forest" },
         ["--ghost"] = new[] { "ground.ghost" },
@@ -3362,6 +3400,33 @@ public sealed partial class Main : Node2D
         // or hide a tank behind it, and a level does all three. See TerrainSet.
         ui.Toggle("ground.relief", "height on the board  (--relief)",
             () => _field.HasRelief, SetRelief);
+        // The number that decides whether a hill reads as one, and the only
+        // reason it is a dial rather than a constant: a level is worth
+        // grade * sqrt(3) * R * cos(e) on screen, and against a hexagon 54.5px
+        // from centre to edge that is what says how much of a tank standing
+        // behind a rise the rise gets to hide. See the note under it.
+        ui.Slide("ground.grade", "how steep one level is  (--grade)",
+            0.05, 0.60, 0.05,
+            () => _field.StepGrade, SetGrade,
+            "rise per hex", () =>
+            {
+                float lift = _field.Lift;
+                float half = _field.Atlas is null ? 0.0f
+                    : _field.Atlas.HexRect.Size.Y * 0.5f;
+                // What a rise one row in front takes off a tank behind it. Its
+                // face begins at contact + 2*half - lift, so it reaches the hull
+                // only once a level is worth more than half a hexagon - which at
+                // the tuned 1:4 it is not, and that is the whole of why a hill
+                // there hides tracks and nothing else.
+                float hull = lift - half;
+                return $"1:{1.0 / Math.Max(0.001, _field.StepGrade):F1}, "
+                       + $"{lift:F0}px a level"
+                       + (hull > 0.0f
+                          ? $"   - a rise one hex ahead hides {hull:F0}px of a "
+                            + "tank's hull behind it"
+                          : $"   - below {half:F0}px a rise hides tracks only, "
+                            + $"never hull (needs 1:{2.0 * half / (lift / Math.Max(0.001, _field.StepGrade)):F1})");
+            });
         // A switch, not a dial: how much forest there is comes from the terrain
         // list above, because forest is one of the kinds of ground. This is the
         // A/B - the same board with the trees taken off it.

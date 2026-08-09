@@ -38,6 +38,17 @@ public static class SelfTest
     {
         int failed = 0;
 
+        // Every check below either wants a flat board or lays its own relief on
+        // one, so the run starts from the flat state whatever the session was
+        // started with. Without this a --grade run fails four checks that are
+        // about the grid rather than about height - and two of them are right to
+        // fail on a board with height, which is worse than either answer: a
+        // cell's centre really can be hidden by a rise in front of it, so
+        // "clicking a cell's centre picks that cell" stops being true and the
+        // check has no way to say so.
+        bool hadRelief = field.HasRelief;
+        field.SetRelief(null);
+
         void Check(string name, bool ok, string detail = "")
         {
             if (ok)
@@ -4803,6 +4814,9 @@ public static class SelfTest
             && MovementProfile.For("ltp") == MovementProfile.Light,
             "fallback or case-insensitive lookup is broken");
 
+        if (hadRelief)
+            field.SetRelief(Main.ReliefMap(field.Columns, field.Rows));
+
         GD.Print(failed == 0 ? "SELFTEST OK" : $"SELFTEST FAILED: {failed}");
         return failed;
     }
@@ -5069,7 +5083,6 @@ public static class SelfTest
             field.Occluders(300.0f, 0.0f, 0.0f).Count == 0,
             "a flat board promoted ground over a tank");
 
-        int[]? was = null;
         field.SetRelief(Main.ReliefMap(field.Columns, field.Rows));
         try
         {
@@ -5423,7 +5436,7 @@ public static class SelfTest
         }
         finally
         {
-            field.SetRelief(was);
+            field.SetRelief(null);
         }
 
         // Taking it off again has to leave the board where it was: the panel row
@@ -5462,7 +5475,7 @@ public static class SelfTest
         (int low, int high) = field.LevelRange;
         float tan = field.Squash / Math.Max(field.RiseFactor, 0.01f);
         float shift = (high - low) * field.Lift * tan * tan;
-        field.SetRelief(was);
+        field.SetRelief(null);
         Check("and no cell ever changes places with another over it",
             shift < gap, $"height moves a cell {shift:F1}px of depth against "
                          + $"{gap:F1}px between the closest two");
