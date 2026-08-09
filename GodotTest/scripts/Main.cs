@@ -2126,6 +2126,31 @@ public sealed partial class Main : Node2D
         _field.QueueRedraw();
     }
 
+    /// <summary>
+    /// Which cells are drawn over this tank, for the trace.
+    ///
+    /// Prints the level it stands on beside the count, because a count of none
+    /// has two quite different meanings and only the level tells them apart:
+    /// nothing on the board is above this tank - which is the answer whenever it
+    /// is up on the crown - or something is and the promotion failed. The first
+    /// is the rule working; the second is a bug, and on screen they are the same
+    /// picture.
+    /// </summary>
+    private string Hiding(Vehicle v)
+    {
+        if (!_field.HasRelief)
+            return "flat";
+        float row = v.GroundPoint.Y - _origin.Y + v.Height;
+        var over = _field.Occluders(row, v.Standing);
+        (int _, int high) = _field.LevelRange;
+        int level = Mathf.RoundToInt(v.Standing / Math.Max(_field.Lift, 0.01f));
+        string where = $"on {level:+0;-0;0} of {high:+0;-0;0}";
+        return over.Count == 0
+            ? $"none, {where}"
+            : $"{over.Count} ({string.Join(" ", over.Select(c => $"{c.X},{c.Y}"))})"
+              + $", {where}";
+    }
+
     private void UpdateLean(Vehicle v, double delta)
     {
         double grade = 0.0;
@@ -3775,6 +3800,13 @@ public sealed partial class Main : Node2D
                      // measurement: the A/B then differs by the whole picture
                      // rather than by the silhouette.
                      + $"  zoom {_camera.Zoom.X:F2}x"
+                     // Which ground is drawn over this tank, and which cells.
+                     // "It should be hidden by that hex" is an argument about a
+                     // picture and cannot be settled on one: the two answers -
+                     // the cell is not higher, and the cell is higher and the
+                     // repaint did not happen - look identical on screen and are
+                     // repaired in different places. This says which.
+                     + $"  hidden {Hiding(Active)}"
                      // A capture whose pixels came off another tank has to say
                      // so: nothing in the picture does, and every conclusion
                      // drawn from it is about that tank's atlas rather than
