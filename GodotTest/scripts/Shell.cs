@@ -109,6 +109,19 @@ public sealed partial class Shell : Node2D
 
     public required float Scatter { get; init; }
 
+    /// <summary>
+    /// How far the hole ended up from the gun's own axis, in pixels.
+    ///
+    /// Zero is the normal answer, because the offset along the plate is solved
+    /// to put it there - see <see cref="Gunnery.ScatterOntoBore"/>. It is carried
+    /// and printed because the one way that solve can fail is the clamp keeping
+    /// the mark on the armour, and a clamped round is a round whose tube points a
+    /// little past its own hole. **The picture cannot say which happened**: a few
+    /// pixels of kink at close range and a plate too small to reach across look
+    /// the same, so the number goes in the trace beside the flight.
+    /// </summary>
+    public required float BoreMiss { get; init; }
+
     /// <summary>Where on the plate up its slope, the second half of the scatter.
     /// </summary>
     public required float Rise { get; init; }

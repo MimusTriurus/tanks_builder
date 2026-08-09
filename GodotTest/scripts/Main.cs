@@ -1733,6 +1733,10 @@ public sealed partial class Main : Node2D
         string flying = _shells.Count == 0
             ? ""
             : $" [{_shells.Count} up, {_shells[0].Fraction:F2}"
+              // How far off its own barrel this one is going to land. Normally
+              // zero by construction; anything else is the clamp that keeps the
+              // mark on the armour, and that is not visible in the picture.
+              + $", bore {_shells[0].BoreMiss:F1}px"
               + $"{(_tracerVisible ? "" : " unseen")}]";
         // And how near the end the target is, which the plate cannot say: three
         // rounds finish it wherever they landed, so a tank whose front plate reads
@@ -2323,23 +2327,55 @@ public sealed partial class Main : Node2D
             return;
         double from = HexField.EdgeHeadings[SideFor(fromBearing)];
         victim.HitCount++;
-        float scatter = ScatterAt(victim.HitCount);
-        float rise = RiseAt(victim.HitCount);
-        string face = atlas.FaceFor(from, victim.Sprite.HullFacing);
-        Vector2 impact = atlas.HitOffset(face, victim.Sprite.HullFacing)
-                         + atlas.HitTangent(face, victim.Sprite.HullFacing) * scatter
-                         + atlas.HitSlope(face, victim.Sprite.HullFacing) * rise;
+        double hull = victim.Sprite.HullFacing;
+        string face = atlas.FaceFor(from, hull);
+        Vector2 centroid = atlas.HitOffset(face, hull);
+        Vector2 tangent = atlas.HitTangent(face, hull);
+        Vector2 slope = atlas.HitSlope(face, hull);
 
         AtlasSet gun = shooter.Atlas;
         Vector2 muzzle = gun.Muzzle(gun.FrameFor(shooter.Sprite.TurretFacing))
                          - gun.Anchor;
+        Vector2 launched = shooter.Sprite.ToGlobal(muzzle);
+        // The bore as the target's own layers see it. Carried through both
+        // transforms as a pair of points rather than as an angle, so a scaled
+        // class and a hull leaning on its springs are handled by the transforms
+        // that already express them instead of by arithmetic repeated here.
+        //
+        // The direction is the ground direction of the turret's heading, not the
+        // muzzle minus the anchor: a tank gun is level, and a level line in the
+        // world projects to exactly the ground direction on screen, while the
+        // ring-to-muzzle vector also carries however far the trunnions sit above
+        // the ring. The same measurement the flash points itself by.
+        Vector2 eye = victim.Sprite.ToLocal(launched);
+        Vector2 down = shooter.Sprite.ToGlobal(
+            muzzle + gun.GroundDirection(shooter.Sprite.TurretFacing) * 100.0f);
+        Vector2 bore = victim.Sprite.ToLocal(down) - eye;
+
+        // The vertical fraction stays on its hash and the tangential one follows
+        // it onto the gun's axis - see Gunnery.ScatterOntoBore. Only on this
+        // path: a round asked for by the U key has no shooter and so no bore, and
+        // it keeps both hashes.
+        //
+        // The hash is not gone, it is demoted to what it should always have been:
+        // dispersion about an aim point, a tenth of a plate rather than the whole
+        // of it. Without it the solve is one number per geometry, so a gun
+        // shooting twice from the same place would put its second round exactly
+        // through the first - and where the solve is clamped that is a column of
+        // holes down one edge, which is the row-of-stamps failure again in the
+        // other axis.
+        float rise = RiseAt(victim.HitCount);
+        float scatter = AimedScatter(eye, bore, centroid, tangent, slope, rise,
+                                     victim.HitCount);
+        Vector2 impact = centroid + tangent * scatter + slope * rise;
 
         var shell = new Shell
         {
             Shooter = shooter,
             Target = victim,
             ImpactLocal = impact,
-            From = shooter.Sprite.ToGlobal(muzzle),
+            From = launched,
+            BoreMiss = Gunnery.BoreMiss(eye, bore, impact),
             Serial = victim.HitCount,
             // Carried rather than re-read on arrival, for the reason above.
             Face = face,
@@ -3280,6 +3316,50 @@ public sealed partial class Main : Node2D
     /// the time step so two runs can be diffed, and a random scatter would be
     /// measuring itself.</summary>
     internal static float ScatterAt(int n) => (((n * 37) % 100) / 100.0f - 0.5f) * 0.9f;
+
+    /// <summary>
+    /// How far along its plate a hit may sit, as a fraction of the half-width.
+    ///
+    /// It bounds <see cref="ScatterAt"/> above, which is why they are one number:
+    /// the hash was written to reach exactly this far, and a fired round now has
+    /// its offset *solved* rather than hashed - see
+    /// <see cref="Gunnery.ScatterOntoBore"/> - so the limit had to become a thing
+    /// with a name instead of a 0.9 buried in a hash. Both paths land on the same
+    /// armour and the mark is the same size on it.
+    /// </summary>
+    internal const float ScatterLimit = 0.45f;
+
+    /// <summary>
+    /// How far a fired round disperses about where the gun was actually aimed,
+    /// as a fraction of the plate's half-width.
+    ///
+    /// A quarter of <see cref="ScatterLimit"/>, and the difference between the
+    /// two numbers is the whole change: the old hash reached the full 0.45
+    /// because it *was* the placement, and 0.45 of a 28 to 53px half-width runs
+    /// almost exactly across the shot, so it was up to 24px of visible daylight
+    /// between the tube and its own hole. A group of rounds fired at one tank
+    /// from one place is a group, not a plate-wide spread.
+    /// </summary>
+    internal const float ScatterSpread = 0.12f;
+
+    /// <summary>
+    /// Where the nth round from this gun lands along that plate: aimed, then
+    /// dispersed, then kept on the armour.
+    ///
+    /// One function rather than the three steps written out at the trigger,
+    /// because the self-test has to be able to ask what actually happens. A check
+    /// that re-assembled the same three steps for itself would keep passing after
+    /// the trigger stopped doing one of them - the shape of failure this project
+    /// names as a check whose answer goes nowhere.
+    /// </summary>
+    internal static float AimedScatter(Vector2 muzzle, Vector2 bore,
+                                       Vector2 centroid, Vector2 tangent,
+                                       Vector2 slope, float rise, int n) =>
+        Math.Clamp(
+            Gunnery.ScatterOntoBore(muzzle, bore, centroid, tangent, slope, rise,
+                                    ScatterLimit, ScatterAt(n))
+            + ScatterSpread * (ScatterAt(n) / ScatterLimit),
+            -ScatterLimit, ScatterLimit);
 
     /// <summary>
     /// And where up the plate's slope, as a fraction of its half-height.

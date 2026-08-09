@@ -4298,6 +4298,108 @@ public static class SelfTest
             $"tolerance {Gunnery.LayTolerance} - loose enough and the tank "
             + "shoots along a lane it is not pointing down");
 
+        // Where a shell lands against where the gun is pointing, on the real
+        // geometry rather than on a made-up plate: the shooter stands one or two
+        // cells down a lane, its muzzle is the one the flash comes out of, and
+        // the plate is whichever one that lane arrives on. In the target's own
+        // space the shooter's anchor is minus the gap between the two cell
+        // centres, both anchors sitting the same height above their cells.
+        //
+        // Asserted rather than eyeballed because the failure is a few degrees of
+        // kink between the tube and the tracer at close range and nothing at all
+        // further out - visible in exactly the case a screenshot is least likely
+        // to be taken of.
+        {
+            AtlasSet gun = tank.Atlas!;
+            double worst = 0.0;
+            var worstAt = "";
+            int clamped = 0, tried = 0, worse = 0;
+            double solvedTotal = 0.0, hashedTotal = 0.0;
+            double keptHull = tank.HullFacing;
+            foreach (int lane in HexField.EdgeHeadings)
+            {
+                Vector2 step = field.CellCentre(HexField.Step(new Vector2I(4, 3), lane))
+                               - field.CellCentre(new Vector2I(4, 3));
+                Vector2 aim = gun.GroundDirection(lane);
+                Vector2 nose = gun.Muzzle(gun.FrameFor(lane)) - gun.Anchor;
+                for (int range = 1; range <= 2; range++)
+                for (int f = 0; f < 24; f++)
+                {
+                    double hull = 15.0 * f;
+                    // The shell leaves along the lane and arrives along its
+                    // reverse, which is what picks the plate.
+                    string face = gun.FaceFor((lane + 180) % 360, hull);
+                    Vector2 eye = nose - step * range;
+                    Vector2 centroid = gun.HitOffset(face, hull);
+                    Vector2 tangent = gun.HitTangent(face, hull);
+                    Vector2 slope = gun.HitSlope(face, hull);
+                    for (int n = 1; n <= 5; n++)
+                    {
+                        float rise = Main.RiseAt(n);
+                        float bare = Gunnery.ScatterOntoBore(
+                            eye, aim, centroid, tangent, slope, rise,
+                            Main.ScatterLimit, Main.ScatterAt(n));
+                        // What the trigger actually places, dispersion and all,
+                        // rather than the three steps reassembled here.
+                        float aimedAt = Main.AimedScatter(
+                            eye, aim, centroid, tangent, slope, rise, n);
+                        float off = Gunnery.BoreMiss(
+                            eye, aim, centroid + tangent * aimedAt + slope * rise);
+                        float aimOff = Gunnery.BoreMiss(
+                            eye, aim, centroid + tangent * bare + slope * rise);
+                        // What the hash on its own used to put on the armour, on
+                        // the same geometry and the same round. The A/B is the
+                        // claim; a solve that is merely different is not a fix.
+                        float hashed = Gunnery.BoreMiss(
+                            eye, aim,
+                            centroid + tangent * Main.ScatterAt(n) + slope * rise);
+                        tried++;
+                        solvedTotal += off;
+                        hashedTotal += hashed;
+                        if (aimOff > hashed + 0.01f)
+                            worse++;
+                        if (Math.Abs(bare) >= Main.ScatterLimit - 1e-4f)
+                            clamped++;
+                        else if (aimOff > worst)
+                        {
+                            worst = aimOff;
+                            worstAt = $"{face} at hull {hull:F0}, lane {lane},"
+                                      + $" range {range}";
+                        }
+                    }
+                }
+            }
+            tank.HullFacing = keptHull;            // Where the plate does reach the axis, it reaches it exactly. This is
+            // the algebra, and it is asserted apart from the geometry so that a
+            // sign slip cannot hide inside a clamp that was going to bite anyway.
+            Check("a fired round lands on the gun's own axis where it can",
+                tried > 1000 && clamped < tried && worst < 1.0,
+                worstAt.Length == 0 ? $"{tried} shots, {clamped} clamped"
+                                    : $"{worst:F2}px off at {worstAt}");
+            // And where it cannot, it still gets nearer than the hash did. The
+            // clamp bites on most geometries - the plates do not tile the hull,
+            // so a gun laid on the enemy's ring is not pointing at the middle of
+            // the plate it is about to hit - and that is why the claim worth
+            // making is the comparison rather than a threshold. A solve that is
+            // merely different from the hash would pass a threshold and fix
+            // nothing.
+            Check("and never aims further off it than the hash used to",
+                worse == 0,
+                $"{worse} of {tried} geometries aim worse than a hash that knows"
+                + " nothing - the clamped solve is the nearest point on the plate,"
+                + " so anything here is a sign slip");
+            // What is actually placed, dispersion included. The residual is not
+            // meant to be zero and cannot be: the gun is drawn level while the
+            // plate it hits sits 20 to 60px lower, and the plate's own centre is
+            // off the tank's axis on oblique headings. What went away is the part
+            // that varied for no reason.
+            Check("and what it places is nearer the axis than the hash was",
+                solvedTotal < 0.8 * hashedTotal,
+                $"mean off-axis {solvedTotal / Math.Max(tried, 1):F1}px against"
+                + $" the hash's {hashedTotal / Math.Max(tried, 1):F1}px"
+                + $" ({clamped} of {tried} clamped onto the near corner)");
+        }
+
         Check("no target is not heading zero",
             !Gunnery.None.OnLane && !Gunnery.None.Clear,
             "default(Shot) would say 0 degrees, which is a real direction");
@@ -4624,7 +4726,7 @@ public static class SelfTest
                 Shooter = shooter, Target = foe, ImpactLocal = aim,
                 From = foe.Sprite.ToGlobal(aim)
                        - new Vector2(Shell.PointBlank, 0.0f),
-                Serial = 1, Face = "front", Scatter = 0.0f, Rise = 0.0f, Calibre = 1.0f,
+                Serial = 1, Face = "front", Scatter = 0.0f, BoreMiss = 0.0f, Rise = 0.0f, Calibre = 1.0f,
                 Level = 1,
             };
             int frames = 0;
@@ -4670,7 +4772,7 @@ public static class SelfTest
                 Shooter = shooter, Target = foe, ImpactLocal = aim,
                 From = foe.Sprite.ToGlobal(aim)
                        - new Vector2(Shell.PointBlank, 0.0f),
-                Serial = 2, Face = "front", Scatter = 0.0f, Rise = 0.0f, Calibre = 1.0f,
+                Serial = 2, Face = "front", Scatter = 0.0f, BoreMiss = 0.0f, Rise = 0.0f, Calibre = 1.0f,
                 Level = 1,
             };
             unseen.Visible = false;

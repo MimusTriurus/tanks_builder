@@ -210,6 +210,94 @@ public static class Gunnery
         Math.Abs(WrapAngle(heading - facing)) <= LayTolerance;
 
     /// <summary>
+    /// How far off the gun's own axis a hit sits, in pixels: the perpendicular
+    /// distance from the drawn bore line to where the hole is drawn.
+    ///
+    /// **The whole of the complaint, as one number.** A round used to be placed
+    /// by a hash - see <see cref="Main.ScatterAt"/> - which knew nothing about
+    /// where the gun was pointing, so the hole landed anywhere along the plate
+    /// while the barrel pointed down the lane. The tangential half of that
+    /// scatter runs almost exactly across the shot, because the plate a shell
+    /// lands on is the one turned towards the shooter, so every pixel of it was
+    /// a pixel of miss: +-0.45 of a 28 to 53px half-width is up to 24px.
+    ///
+    /// Worst at point blank and invisible far away, which is the prediction to
+    /// check by eye: 24px across an 83px flight is 16 degrees of visible kink
+    /// between the tube and the tracer, and the same 24px at four cells is 2.
+    /// </summary>
+    public static float BoreMiss(Vector2 muzzle, Vector2 bore, Vector2 impact)
+    {
+        if (bore.LengthSquared() < 1e-9f)
+            return 0.0f;
+        Vector2 n = new Vector2(-bore.Y, bore.X).Normalized();
+        return Math.Abs(n.Dot(impact - muzzle));
+    }
+
+    /// <summary>
+    /// Where along its plate a round has to land to sit on the gun's own axis,
+    /// as a fraction of the plate's half-width.
+    ///
+    /// Everything is in one screen space and there is no depth in it, which is
+    /// not a shortcut but the shape of the problem: the sprite has no depth to
+    /// give, and what the eye is comparing is a drawn tube against a drawn hole.
+    /// So the requirement is purely a screen one - the impact must sit on the
+    /// ray from the muzzle along the bore - and that is **one** equation:
+    ///
+    /// <code>
+    ///   n . (C + s*T + r*S - M) = 0      n = perpendicular to the bore
+    /// </code>
+    ///
+    /// One equation, two unknowns, and the spare degree of freedom is the point.
+    /// The vertical fraction stays free and keeps coming off its own hash, so
+    /// consecutive rounds still land in different places; the tangential one is
+    /// solved to follow it onto the axis. **A gun that aims at a point and
+    /// disperses about it**, rather than one that aims at nothing and lands
+    /// anywhere on the plate.
+    ///
+    /// **The clamp is the common case, not the failure, and that was measured
+    /// rather than assumed.** On MTP at one cell the solve wants 1.5 to 2.5
+    /// half-widths on most geometries, and the reason is the armour model rather
+    /// than the scatter: the four plates do not tile the hull, they are four
+    /// patches each with its own centroid, and on an oblique heading the centre
+    /// of the rear plate genuinely sits up to 54px to one side of the tank's own
+    /// axis against a perpendicular half-width of 18 to 30. A gun laid on the
+    /// enemy's turret ring is not pointing at the middle of that plate and never
+    /// was.
+    ///
+    /// So the clamp says something true: a round sent at an oblique tank arrives
+    /// on **the near corner** of the plate facing it. That reads better than the
+    /// hash ever did, and it reads as geometry - shoot from the left and the
+    /// holes are on the left of the plate - where a hash reads as nothing.
+    ///
+    /// Choosing a different plate was measured and is not the lever: taking
+    /// whichever plate still facing the shooter comes nearest the bore gives
+    /// 23.8px against the 25.6px <see cref="FaceFor"/> already picks, so the
+    /// neighbouring plates are no better placed. What is left is 21.3px of
+    /// screen-vertical against 9.5px sideways, and the vertical half is the gun
+    /// being drawn level over a plate that sits lower - a real gun would depress
+    /// and this sprite has no frame for it. That reads as a shot angled slightly
+    /// down, which is what it is.
+    ///
+    /// <paramref name="fallback"/> covers a tangent lying along the shot, where
+    /// sliding along the plate cannot steer at all. It should not arise - the
+    /// plate is chosen for facing the shooter, and an affine projection cannot
+    /// make two independent ground vectors parallel - so it is a guard rather
+    /// than a case, and it hands back the hash so the round still scatters.
+    /// </summary>
+    public static float ScatterOntoBore(Vector2 muzzle, Vector2 bore,
+                                        Vector2 centroid, Vector2 tangent,
+                                        Vector2 slope, float rise,
+                                        float limit, float fallback)
+    {
+        Vector2 n = new(-bore.Y, bore.X);
+        float across = n.Dot(tangent);
+        if (Math.Abs(across) < 1e-3f * n.Length() * tangent.Length())
+            return Math.Clamp(fallback, -limit, limit);
+        float want = (n.Dot(muzzle - centroid) - rise * n.Dot(slope)) / across;
+        return Math.Clamp(want, -limit, limit);
+    }
+
+    /// <summary>
     /// The world heading a screen offset points along.
     ///
     /// Screen y grows downward and the isometric view squashes the ground plane
