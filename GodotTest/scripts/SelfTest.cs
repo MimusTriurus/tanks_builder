@@ -4754,10 +4754,20 @@ public static class SelfTest
                     climbed = false;
                 was2 = round.Fraction;
             }
+            // The floor under the speed, and the reason that slider prints frames
+            // rather than px/s: past about 1660px/s the impact climbs back inside
+            // the attack transient of the gun report, which is what the flight
+            // was written to get it out of.
             Check("a round at point blank still takes several frames to arrive",
                 round.Arrived && frames >= 4,
                 $"{frames} frames over {Shell.PointBlank}px at {Shell.Speed}px/s"
                 + " - landing in the frame it was fired is what this replaced");
+            Check("and the speed level lengthens the flight it shortens",
+                SpeedFrames(shooter, foe, aim, 0.5) > frames
+                && SpeedFrames(shooter, foe, aim, 2.0) < frames,
+                $"{SpeedFrames(shooter, foe, aim, 0.5)} frames at half speed and"
+                + $" {SpeedFrames(shooter, foe, aim, 2.0)} at double, against"
+                + $" {frames} tuned");
             Check("and it crosses rather than jumping",
                 climbed && round.Fraction >= 1.0f,
                 $"fraction ended at {round.Fraction:F2}");
@@ -4775,12 +4785,64 @@ public static class SelfTest
             // kind of assertion that quietly stops being true: a default is easy
             // to flip in an initialiser nobody reads, and "hide it" is one small
             // step from "skip it".
-            Check("the tracer is off until asked for and the motor is on",
-                !Main.TracerOnByDefault && Main.TurretSoundOnByDefault,
-                "both are named constants precisely so a change to them is a "
-                + "change somebody made on purpose - and they differ now: the "
-                + "hum has been judged and kept, the tracer is a drawing that "
-                + "must not creep into an A/B");
+            // The trail's one structural claim. A puff hung at a constant offset
+            // behind the head travels with it and reads as a comet; smoke stands
+            // where it was made. Both look identical in a screenshot, which is
+            // exactly the split these tests exist across.
+            {
+                var trailer = new Shell
+                {
+                    Shooter = shooter, Target = foe, ImpactLocal = aim,
+                    From = foe.Sprite.ToGlobal(aim) - new Vector2(400.0f, 0.0f),
+                    Serial = 3, Face = "front", Scatter = 0.0f, BoreMiss = 0.0f,
+                    Rise = 0.0f, Calibre = 1.0f, Level = 1,
+                };
+                trailer.Position = trailer.From;
+                for (int i = 0; i < 4; i++) trailer.Advance(1.0 / 60.0);
+                Vector2 wasPuff = trailer.Position + trailer.PuffLocal(1);
+                int born = trailer.Puffs;
+                for (int i = 0; i < 4; i++) trailer.Advance(1.0 / 60.0);
+                Vector2 nowPuff = trailer.Position + trailer.PuffLocal(1);
+                Check("the smoke stands still while the round goes past it",
+                    wasPuff.DistanceTo(nowPuff) < 1.5f && trailer.Puffs > born,
+                    $"puff 1 moved {wasPuff.DistanceTo(nowPuff):F1}px in four"
+                    + $" frames while the trail grew {born} -> {trailer.Puffs}"
+                    + " - a trail that follows the head is a comet");
+                Check("and the trail is continuous at the speed it is flown",
+                    Shell.Speed / 60.0f > Shell.Streak
+                    && Shell.Speed / 60.0f < 40.0f,
+                    $"{Shell.Speed / 60.0f:F0}px a frame against a"
+                    + $" {Shell.Streak:F0}px streak - the streak stopped covering"
+                    + " the gap when the round was sped up, and the trail is what"
+                    + " took that job over");
+            }
+            // Sized by the gun, not by the hit dial. One control moving two
+            // things makes every A/B taken on it measure both.
+            {
+                double keep = Shell.TracerLevel;
+                double[] atOne = MovementProfile.All
+                    .Select(p => p.TracerCalibre).ToArray();
+                Shell.TracerLevel = 2.0;
+                bool scaled = MovementProfile.All
+                    .Select((p, i) => Math.Abs(p.TracerCalibre * Shell.TracerLevel
+                                               - 2.0 * atOne[i]) < 1e-9)
+                    .All(x => x);
+                Shell.TracerLevel = keep;
+                Check("a heavier gun draws a bigger tracer, and the level keeps "
+                      + "the spread",
+                    atOne[0] < atOne[1] && atOne[1] < atOne[2]
+                    && atOne[2] / atOne[0] > 1.5 && scaled,
+                    $"{atOne[0]:F2} / {atOne[1]:F2} / {atOne[2]:F2} - a control "
+                    + "setting the size rather than a multiplier flattens the "
+                    + "class spread on its first drag");
+            }
+            Check("the tracer and its smoke draw unless asked not to",
+                Main.TracerOnByDefault && Shell.SmokeOnByDefault
+                && Main.TurretSoundOnByDefault,
+                "all three are named constants precisely so a change to them is "
+                + "a change somebody made on purpose - the tracer was off while "
+                + "it was one stroke of debug line, and is on now that it is a "
+                + "layer with a calibre and a trail to be judged");
             var unseen = new Shell
             {
                 Shooter = shooter, Target = foe, ImpactLocal = aim,
@@ -4819,6 +4881,31 @@ public static class SelfTest
 
         GD.Print(failed == 0 ? "SELFTEST OK" : $"SELFTEST FAILED: {failed}");
         return failed;
+    }
+
+    /// <summary>Frames a point-blank round takes at a given speed level. The
+    /// level is restored, because a check that leaves a global moved is a check
+    /// that decides what the next one measures.</summary>
+    private static int SpeedFrames(Vehicle shooter, Vehicle foe, Vector2 aim,
+                                   double level)
+    {
+        double keep = Shell.SpeedLevel;
+        Shell.SpeedLevel = level;
+        var round = new Shell
+        {
+            Shooter = shooter, Target = foe, ImpactLocal = aim,
+            From = foe.Sprite.ToGlobal(aim) - new Vector2(Shell.PointBlank, 0.0f),
+            Serial = 9, Face = "front", Scatter = 0.0f, BoreMiss = 0.0f,
+            Rise = 0.0f, Calibre = 1.0f, Level = 1,
+        };
+        int n = 0;
+        while (!round.Arrived && n < 600)
+        {
+            round.Advance(1.0 / 60.0);
+            n++;
+        }
+        Shell.SpeedLevel = keep;
+        return n;
     }
 
     private static double WrapAngle(double degrees) =>
@@ -5214,13 +5301,27 @@ public static class SelfTest
             // repeating the rule. Both are needed: a test that only says no
             // passes by returning nothing at all.
             int flatOver = 0, stepMissed = 0, steps = 0, behind = 0, rises = 0;
+            // Split by how far in front, because that is what a broken key
+            // reports. A rise is either half a row ahead - the two diagonal
+            // neighbours - or a whole one, and a depth key off by less than a
+            // row loses the diagonals and keeps the rest. Counted apart so the
+            // failure says which, rather than "8 were left under the tank" on a
+            // board where the ones that worked were the ones nobody parks next
+            // to.
+            int nearSteps = 0, nearMissed = 0;
             var firstFlat = "";
             var firstBehind = "";
             for (int q = 0; q < field.Columns; q++)
             for (int r = 0; r < field.Rows; r++)
             {
                 var stand = new Vector2I(q, r);
-                float row = field.FlatAnchor(stand).Y;
+                // The row the harness hands in - where the tank's tracks are,
+                // not where its turret axis projects. Built here rather than
+                // taken from a vehicle because this walks the whole board, and
+                // built by the field's own accessor because the first version
+                // wrote it out and wrote it out in the other space: the checks
+                // below then certified a rule the bench was not using.
+                float row = field.GroundRow(stand);
                 float standing = field.LevelAt(stand) * lift;
                 var hiders = new HashSet<Vector2I>(field.Occluders(row, standing, standing));
                 foreach (int heading in HexField.EdgeHeadings)
@@ -5258,8 +5359,15 @@ public static class SelfTest
                     if (step <= 0)
                         continue;
                     steps++;
-                    if (!hiders.Contains(next))
-                        stepMissed++;
+                    bool near = field.FlatAnchor(next).Y - field.FlatAnchor(stand).Y
+                                < field.Atlas!.HexRect.Size.Y * 0.75f;
+                    if (near)
+                        nearSteps++;
+                    if (hiders.Contains(next))
+                        continue;
+                    stepMissed++;
+                    if (near)
+                        nearMissed++;
                 }
             }
             Check("ground below a tank never covers it", flatOver == 0,
@@ -5277,7 +5385,7 @@ public static class SelfTest
             for (int r = 0; r < field.Rows; r++)
             {
                 var stand = new Vector2I(q, r);
-                float row = field.FlatAnchor(stand).Y;
+                float row = field.GroundRow(stand);
                 float standing = field.LevelAt(stand) * lift;
                 float contact = row - standing;
                 foreach (Vector2I cell in field.Occluders(row, standing, standing))
@@ -5295,10 +5403,14 @@ public static class SelfTest
                 worstReach <= 0.01f,
                 $"{worstReach:F1}px above the contact row at {firstReach} - that "
                 + "much of the hull is being eaten");
-            Check($"but each of the {steps} rises in front of one does",
-                stepMissed == 0 && steps > 0,
-                steps == 0 ? "the map has no rise in front of any cell - it proves nothing"
-                           : $"{stepMissed} were left under the tank");
+            Check($"but each of the {steps} rises in front of one does, "
+                  + $"{nearSteps} of them only half a row",
+                stepMissed == 0 && steps > 0 && nearSteps > 0,
+                steps == 0 || nearSteps == 0
+                    ? "the map has no rise in front of any cell - it proves nothing"
+                    : $"{stepMissed} were left under the tank, {nearMissed} of them "
+                      + "half a row in front - a depth key short by less than a row "
+                      + "keeps the ones straight ahead and loses exactly these");
             // The boundary itself, walked. Standing on a cell, the level ground
             // half a row in front has to cover the belt that hangs over into it -
             // that is the whole of what changed here, and the old rule bought its
@@ -5326,7 +5438,7 @@ public static class SelfTest
                         continue;
                     legs++;
                     float standing = field.LevelAt(from) * lift;
-                    float a = field.FlatAnchor(from).Y, b = field.FlatAnchor(onto).Y;
+                    float a = field.GroundRow(from), b = field.GroundRow(onto);
                     if (!field.Occluders(a, standing, standing).Contains(onto))
                         held++;
                     for (float t = 0.0f; t <= 1.0f; t += 0.1f)

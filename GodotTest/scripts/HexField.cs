@@ -216,6 +216,28 @@ public sealed partial class HexField : Node2D
     }
 
     /// <summary>
+    /// The row a thing standing on this cell sorts at, with the height taken
+    /// out.
+    ///
+    /// <b>The ground centre, not the anchor.</b> A cell's anchor is the turret
+    /// axis projected to screen and floats some 59px above the ground plane the
+    /// hexagon lies on - see <see cref="CentreOffset"/>, which exists because
+    /// assuming the two are one point puts every click a cell out. Everything
+    /// that stands on the board sorts where the ground is: a tank off its
+    /// <c>GroundPoint</c>, a tree off its foot. So a cell keyed off its anchor
+    /// is read 59px further away than it is, and against a hexagon 54.5px from
+    /// centre to edge that is more than a whole row - the raised hex diagonally
+    /// in front of a tank came out behind it, and the only ground that could
+    /// cover anything was a full row further on again.
+    ///
+    /// Named rather than written out at the one place that needs it, because it
+    /// is the space <see cref="Occluders"/> is asked its question in, and the
+    /// tests that certified the old answer were the ones that built the row
+    /// themselves.
+    /// </summary>
+    public float GroundRow(Vector2I cell) => FlatAnchor(cell).Y + CentreOffset.Y;
+
+    /// <summary>
     /// A cell's depth, taken at its <b>far</b> edge rather than its centre.
     ///
     /// A face is not a point and cannot be sorted as one: the near half of a low
@@ -233,7 +255,7 @@ public sealed partial class HexField : Node2D
     public float DepthOf(Vector2I cell)
     {
         float half = Atlas is null ? 0.0f : Atlas.HexRect.Size.Y * 0.5f;
-        return Depth(FlatAnchor(cell).Y - half, LevelAt(cell) * Lift);
+        return Depth(GroundRow(cell) - half, LevelAt(cell) * Lift);
     }
 
     /// <summary>
@@ -268,6 +290,13 @@ public sealed partial class HexField : Node2D
     ///
     /// The note on <see cref="DepthOf"/> put the cost of the far-edge key at "a
     /// pixel or two". That was the medium at 1.00x; on the heavy it is 49.
+    ///
+    /// <b><paramref name="flatRow"/> is measured where the ground is</b> - the
+    /// same space as <see cref="GroundRow"/> and <see cref="CellCentre"/>, which
+    /// is what a tank's <c>GroundPoint</c> and a tree's foot are already in. An
+    /// anchor row handed in here is 59px short and the whole rule shifts by more
+    /// than a row of the board; see <see cref="GroundRow"/> for the picture that
+    /// makes.
     /// </summary>
     public List<Vector2I> Occluders(float flatRow, float standing, float height)
     {
