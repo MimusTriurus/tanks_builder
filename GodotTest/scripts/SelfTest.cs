@@ -147,7 +147,7 @@ public static class SelfTest
         Check("every path is contiguous, in bounds and reaches the target",
             bad == 0, $"{bad} bad, first {badDetail}");
 
-        Relief(field, Check);
+        Relief(field, grove, Check);
         Climbing(field, tank, Check);
 
         GD.Print("turret modes");
@@ -4955,6 +4955,85 @@ public static class SelfTest
     }
 
     /// <summary>
+    /// Trees on a board with height, sorted against the projection rather than
+    /// against the expression that sorts them.
+    ///
+    /// The claim is the grove's own: a tree sorts by the same depth a tank
+    /// standing where it stands would. While the board was flat that was the
+    /// foot's screen row and the two agreed by accident; with height they agree
+    /// only because both ask the field. Off the drawn row a wood on a rise sorts
+    /// behind the entire plain.
+    /// </summary>
+    private static void Woods(HexField field, Grove? grove, double elevation,
+                              Action<string, bool, string> Check)
+    {
+        if (grove is null)
+        {
+            Check("trees sort by where they stand, not by where they are drawn",
+                true, "");
+            GD.Print("        (no grove in this run)");
+            return;
+        }
+
+        // Forced, because the default paint has no woods on it at all and a
+        // check over an empty list passes by having nothing to say.
+        string wasPaint = field.Paint;
+        try
+        {
+            field.Paint = TerrainSet.Forest;
+            grove.Plant();
+            var trees = grove.Trees;
+            int levels = 0;
+            foreach (PropNode tree in trees)
+                if (field.LevelAt(tree.Cell) != 0)
+                    levels++;
+            if (trees.Count == 0)
+            {
+                Check("trees sort by where they stand, not by where they are drawn",
+                    true, "");
+                GD.Print("        (no tree art on disk, so nothing was sown)");
+                return;
+            }
+            Check("the wood reaches ground at more than one level", levels > 0,
+                $"{trees.Count} trees and all of them on the datum - it proves nothing");
+
+            double cos = Math.Cos(elevation), sin = Math.Sin(elevation);
+            float squash = Math.Max(field.Squash, 0.01f);
+            float rise = Math.Max(field.RiseFactor, 0.01f);
+            double Along(PropNode tree)
+            {
+                float lift = field.LevelAt(tree.Cell) * field.Lift;
+                return (tree.Ground.Y + lift) / squash * cos + lift / rise * sin;
+            }
+
+            int wrong = 0;
+            var first = "";
+            for (int i = 0; i < trees.Count; i++)
+            for (int j = i + 1; j < trees.Count; j++)
+            {
+                double a = Along(trees[i]), b = Along(trees[j]);
+                if (Math.Abs(a - b) < 1.0)
+                    continue;   // a pixel apart is a tie, and ties are rounded
+                if ((a > b) == (trees[i].ZIndex > trees[j].ZIndex)
+                    || trees[i].ZIndex == trees[j].ZIndex)
+                    continue;
+                wrong++;
+                if (first.Length == 0)
+                    first = $"({trees[i].Cell.X},{trees[i].Cell.Y}) z {trees[i].ZIndex}"
+                            + $" against ({trees[j].Cell.X},{trees[j].Cell.Y}) z "
+                            + $"{trees[j].ZIndex}";
+            }
+            Check($"all {trees.Count} of them sort the way the projection does",
+                wrong == 0, $"{wrong} pairs out of order, first {first}");
+        }
+        finally
+        {
+            field.Paint = wasPaint;
+            grove.Plant();
+        }
+    }
+
+    /// <summary>
     /// Height on the board: the picking, the occlusion rule and the promise that
     /// a flat board is untouched.
     ///
@@ -4963,7 +5042,8 @@ public static class SelfTest
     /// the arithmetic is right is not a thing to find out only when somebody
     /// passes it.
     /// </summary>
-    private static void Relief(HexField field, Action<string, bool, string> Check)
+    private static void Relief(HexField field, Grove? grove,
+                               Action<string, bool, string> Check)
     {
         GD.Print("relief: a flat board is the board it was");
 
@@ -5180,6 +5260,9 @@ public static class SelfTest
                 rises == 0 ? "the map has no rise behind any cell - it proves nothing"
                            : $"{behind} did, first {firstBehind} - this paints a wall "
                              + "across the turret");
+
+            GD.Print("relief: a wood on a rise sorts where it stands");
+            Woods(field, grove, elevation, Check);
 
             GD.Print("relief: a route walks the board it is on");
             int steep = 0;

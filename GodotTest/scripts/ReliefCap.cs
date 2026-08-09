@@ -26,6 +26,17 @@ namespace TankSpriteTest;
 /// would leave a hole wherever a cell is above one tank and below another, which
 /// is the same cell.
 ///
+/// <b>And drawing it twice is what puts a ceiling on how many of these there can
+/// be.</b> The plate's rim is anti-aliased, so a pixel at alpha <c>a</c> comes
+/// out at <c>2a - a^2</c> after a second pass and converges on the art's own
+/// border colour after several. With three tanks it is one extra pass on a
+/// handful of cells and does not show. Hanging one of these off every tree was
+/// tried and is why this paragraph exists: on a wooded board dozens of caps
+/// repaint the same cell, the rim saturates, and the hill comes out drawn in
+/// white - 221 near-white pixels on a board that had none. Anything that wants
+/// this for many observers at once needs the cells promoted properly rather than
+/// repainted per observer.
+///
 /// <b>The parent's transform is undone rather than avoided.</b> The sprite node
 /// carries the class size on its <c>Scale</c>, so ground drawn in its space
 /// would be drawn at 0.85x or 1.15x. Composing the field's transform with the
@@ -72,8 +83,22 @@ public sealed partial class ReliefCap : Node2D
     /// asked to redraw an empty node sixty times a second.</summary>
     public override void _Process(double delta)
     {
-        if (Field is not null && Field.HasRelief)
-            QueueRedraw();
+        if (Field is null || !Field.HasRelief)
+            return;
+        // The same sampling the field uses, because this is the same cell drawn
+        // again and the two versions have to be the same pixels. Ground art
+        // painted at four times the frame is minified to a quarter, and the field
+        // asks for mipmaps so the gravel does not crawl as the board pans; this
+        // node hangs off a tank and would otherwise inherit whatever its parent
+        // chain happens to say, which is the project default.
+        //
+        // ParentNode is resolved rather than copied for that reason: the field's
+        // own chain ends at the project default too, and the project samples
+        // canvas textures nearest.
+        TextureFilter = Field.TextureFilter == TextureFilterEnum.ParentNode
+            ? TextureFilterEnum.Nearest
+            : Field.TextureFilter;
+        QueueRedraw();
     }
 
     public override void _Draw()

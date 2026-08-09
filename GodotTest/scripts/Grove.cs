@@ -41,10 +41,16 @@ namespace TankSpriteTest;
 /// field.
 ///
 /// <b>Depth is the foot, by the same rule as the tanks.</b> Each tree is its
-/// own node at <c>ZIndex = round(footY)</c> in field-local pixels, which is
-/// exactly <see cref="Main"/>'s depth for a vehicle. So a tree in front of a
-/// tank draws over it and a tree behind it does not, on its own cell and on
-/// every neighbour, with no bands and no special case.
+/// own node at <c>ZIndex = round(</c><see cref="HexField.Depth"/><c>)</c> of its
+/// foot, which is exactly <see cref="Main"/>'s depth for a vehicle. So a tree in
+/// front of a tank draws over it and a tree behind it does not, on its own cell
+/// and on every neighbour, with no bands and no special case.
+///
+/// That was the foot's screen row until the board had height in it, and the two
+/// are still the same number wherever nothing is raised. Where something is, a
+/// tree on a hill is drawn further up the screen and is not thereby further
+/// away - read off the drawn row a wood on a rise sorts behind the whole plain
+/// and disappears under the tanks in front of it.
 /// </summary>
 public sealed partial class Grove : Node2D
 {
@@ -244,7 +250,7 @@ public sealed partial class Grove : Node2D
         // for correctness - ZIndex already settles it - but so that a tie
         // between two trees at the same foot row resolves back to front rather
         // than to whichever cell was walked first.
-        _planted.Sort((a, b) => a.Ground.Y.CompareTo(b.Ground.Y));
+        _planted.Sort((a, b) => a.Depth.CompareTo(b.Depth));
         foreach (PropNode node in _planted)
             MoveChild(node, _planted.Count - 1);
     }
@@ -370,6 +376,12 @@ public sealed partial class Grove : Node2D
                            .ThenBy(s => s.At.Y).ThenBy(s => s.At.X)
                            .Take(Maximum).ToList();
 
+        // How high this cell stands, in screen px. The foot is already drawn
+        // lifted - it came off CellCentre - so this is only ever wanted to take
+        // the lift back out for the depth, which is the one place the two terms
+        // have to be apart.
+        float lift = Field.LevelAt(cell) * Field.Lift;
+
         foreach (Seedling s in taking)
         {
             var node = new PropNode
@@ -384,7 +396,8 @@ public sealed partial class Grove : Node2D
                 Mirrored = s.Mirrored,
                 Cell = cell,
                 Position = Origin + s.At,
-                ZIndex = Mathf.RoundToInt(s.At.Y),
+                Depth = Field.Depth(s.At.Y + lift, lift),
+                ZIndex = Mathf.RoundToInt(Field.Depth(s.At.Y + lift, lift)),
                 // Hashed off where the tree stands rather than off its place in
                 // any list, so the wood sways the same way twice and a tree
                 // keeps its phase when the sowing around it changes. Its own
@@ -937,6 +950,18 @@ public sealed partial class PropNode : Node2D
     public int Species;
     public bool Mirrored;
     public Vector2I Cell;
+
+    /// <summary>
+    /// How near the camera this tree is - <see cref="HexField.Depth"/> of its
+    /// foot, and what its <c>ZIndex</c> is rounded from.
+    ///
+    /// Not the drawn foot row, which is what it was while the board was flat and
+    /// the two were the same number. A tree standing on a hill is drawn further
+    /// up the screen and is <b>not</b> thereby further away: read off the drawn
+    /// row it sorts behind everything on the plain, and a wood on a rise ends up
+    /// under the tanks in front of it.
+    /// </summary>
+    public float Depth;
 
     /// <summary>Height above the foot in image px, straight from the set.
     /// Carried rather than derived from <see cref="Size"/>, because the two are
