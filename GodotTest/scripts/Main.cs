@@ -1625,6 +1625,7 @@ public sealed partial class Main : Node2D
             return;
         vehicle.Cap.FlatRow = row;
         vehicle.Cap.Standing = vehicle.Standing;
+        vehicle.Cap.Height = vehicle.Height;
         vehicle.Cap.QueueRedraw();
     }
 
@@ -2141,7 +2142,7 @@ public sealed partial class Main : Node2D
         if (!_field.HasRelief)
             return "flat";
         float row = v.GroundPoint.Y - _origin.Y + v.Height;
-        var over = _field.Occluders(row, v.Standing);
+        var over = _field.Occluders(row, v.Standing, v.Height);
         (int _, int high) = _field.LevelRange;
         int level = Mathf.RoundToInt(v.Standing / Math.Max(_field.Lift, 0.01f));
         string where = $"on {level:+0;-0;0} of {high:+0;-0;0}";

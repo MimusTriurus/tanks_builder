@@ -5066,7 +5066,7 @@ public static class SelfTest
         Check("and no cell is lifted", !field.HasRelief && drift == 0,
             $"{drift} cells moved");
         Check("and nothing is drawn over a tank",
-            field.Occluders(300.0f, 0.0f).Count == 0,
+            field.Occluders(300.0f, 0.0f, 0.0f).Count == 0,
             "a flat board promoted ground over a tank");
 
         int[]? was = null;
@@ -5209,7 +5209,7 @@ public static class SelfTest
                 var stand = new Vector2I(q, r);
                 float row = field.FlatAnchor(stand).Y;
                 float standing = field.LevelAt(stand) * lift;
-                var hiders = new HashSet<Vector2I>(field.Occluders(row, standing));
+                var hiders = new HashSet<Vector2I>(field.Occluders(row, standing, standing));
                 foreach (int heading in HexField.EdgeHeadings)
                 {
                     Vector2I next = HexField.Step(stand, heading);
@@ -5235,7 +5235,7 @@ public static class SelfTest
                         }
                         continue;
                     }
-                    if (step <= 0 && hiders.Contains(next))
+                    if (step < 0 && hiders.Contains(next))
                     {
                         flatOver++;
                         if (firstFlat.Length == 0)
@@ -5249,12 +5249,101 @@ public static class SelfTest
                         stepMissed++;
                 }
             }
-            Check("the cell a tank is driving into never covers it", flatOver == 0,
-                $"{flatOver} did, first {firstFlat} - this cuts the hull off at the tracks");
+            Check("ground below a tank never covers it", flatOver == 0,
+                $"{flatOver} did, first {firstFlat} - a tank on a rise is not "
+                + "hidden by the pit in front of it");
+
+            // The hull, which is the thing the old rule was protecting when it
+            // refused level ground outright. Stated as the worst margin over the
+            // whole board rather than as a yes: what has to be true is that no
+            // face ever begins above the ground the tank stands on, and a number
+            // says how close it came.
+            float worstReach = float.NegativeInfinity;
+            var firstReach = "";
+            for (int q = 0; q < field.Columns; q++)
+            for (int r = 0; r < field.Rows; r++)
+            {
+                var stand = new Vector2I(q, r);
+                float row = field.FlatAnchor(stand).Y;
+                float standing = field.LevelAt(stand) * lift;
+                float contact = row - standing;
+                foreach (Vector2I cell in field.Occluders(row, standing, standing))
+                {
+                    if (field.LevelAt(cell) * lift > standing + 0.5f)
+                        continue;   // standing higher, and then it may cover anything
+                    float top = field.CellCentre(cell).Y - field.Atlas!.HexRect.Size.Y * 0.5f;
+                    if (contact - top <= worstReach)
+                        continue;
+                    worstReach = contact - top;
+                    firstReach = $"({cell.X},{cell.Y}) over a tank on ({q},{r})";
+                }
+            }
+            Check("and level ground reaches no higher than the ground itself",
+                worstReach <= 0.01f,
+                $"{worstReach:F1}px above the contact row at {firstReach} - that "
+                + "much of the hull is being eaten");
             Check($"but each of the {steps} rises in front of one does",
                 stepMissed == 0 && steps > 0,
                 steps == 0 ? "the map has no rise in front of any cell - it proves nothing"
                            : $"{stepMissed} were left under the tank");
+            // The boundary itself, walked. Standing on a cell, the level ground
+            // half a row in front has to cover the belt that hangs over into it -
+            // that is the whole of what changed here, and the old rule bought its
+            // safety by giving this up.
+            //
+            // And then along the leg, where the failure it was bought against
+            // actually lived: mid-step the cell being entered is nearer than the
+            // tank, and under depth alone it went down last and took the hull
+            // with it. Asked as the margin rather than as presence, because
+            // presence is not the question - a face below the contact row is
+            // welcome to be there, it is a face above it that eats the tank.
+            int held = 0, legs = 0;
+            float worstLeg = float.NegativeInfinity;
+            var firstLeg = "";
+            for (int q = 0; q < field.Columns; q++)
+            for (int r = 0; r < field.Rows; r++)
+            {
+                var from = new Vector2I(q, r);
+                foreach (int heading in HexField.EdgeHeadings)
+                {
+                    Vector2I onto = HexField.Step(from, heading);
+                    if (!field.InBounds(onto)
+                        || field.LevelAt(onto) != field.LevelAt(from)
+                        || field.FlatAnchor(onto).Y <= field.FlatAnchor(from).Y)
+                        continue;
+                    legs++;
+                    float standing = field.LevelAt(from) * lift;
+                    float a = field.FlatAnchor(from).Y, b = field.FlatAnchor(onto).Y;
+                    if (!field.Occluders(a, standing, standing).Contains(onto))
+                        held++;
+                    for (float t = 0.0f; t <= 1.0f; t += 0.1f)
+                    {
+                        float row = Mathf.Lerp(a, b, t);
+                        float contact = row - standing;
+                        foreach (Vector2I cell in field.Occluders(row, standing, standing))
+                        {
+                            if (field.LevelAt(cell) * lift > standing + 0.5f)
+                                continue;
+                            float top = field.CellCentre(cell).Y
+                                        - field.Atlas!.HexRect.Size.Y * 0.5f;
+                            if (contact - top <= worstLeg)
+                                continue;
+                            worstLeg = contact - top;
+                            firstLeg = $"({cell.X},{cell.Y}) at {t:F1} of the leg "
+                                       + $"({q},{r}) to ({onto.X},{onto.Y})";
+                        }
+                    }
+                }
+            }
+            Check($"a belt hanging into the next hex is covered by it, on all "
+                  + $"{legs} of them", held == 0 && legs > 0,
+                legs == 0 ? "no level neighbour in front anywhere - it proves nothing"
+                          : $"{held} left the belt lying on top of the next hex");
+            Check("and nothing level reaches above the contact row anywhere along "
+                  + "a leg", worstLeg <= 0.01f,
+                $"{worstLeg:F1}px of hull eaten at {firstLeg} - this is the old "
+                + "failure");
+
             Check($"and none of the {rises} rises behind one does",
                 behind == 0 && rises > 0,
                 rises == 0 ? "the map has no rise behind any cell - it proves nothing"

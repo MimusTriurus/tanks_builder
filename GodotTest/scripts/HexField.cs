@@ -241,27 +241,60 @@ public sealed partial class HexField : Node2D
     /// <paramref name="standing"/> px off the ground - nearer than it <b>and</b>
     /// higher.
     ///
-    /// Both halves, and the second is the one that is easy to leave out.
     /// <b>Flat ground in front of a thing cannot hide it, at any distance</b>:
     /// the ray from a point back to the camera only ever rises, so ground below
     /// that point is never on it. Only ground standing <i>higher</i> can be - and
     /// on a board where nothing is raised that is nothing at all, which is
-    /// exactly why one field node under every tank was right until now.
+    /// exactly why one field node under every tank was right until now. Depth
+    /// alone said otherwise twice and the picture showed it both times: the cell
+    /// being driven into is nearer than the tank for the first half of every
+    /// step, so it went down last and cut the hull off at the tracks.
     ///
-    /// Depth alone said otherwise twice, and the picture showed it both times:
-    /// the cell being driven into is nearer than the tank for the first half of
-    /// every step, so it went down last and cut the hull off at the tracks.
-    /// Nearer was true; it was just never the question on its own.
+    /// <b>But a tank is not a point on the ground, and that is the second
+    /// clause.</b> Its belts hang forward of the turret axis, so it is drawn
+    /// reaching below its own contact point - 42.5px on the heavy's atlas and
+    /// 48.9 once the class size is on it, against a hexagon 54.5px from centre
+    /// to edge. Those pixels are ground-level track standing in the cell in
+    /// front, and ground level with the tank has every right to cover them: left
+    /// uncovered, a heavy parked at a boundary is drawn lying across the next
+    /// hex.
+    ///
+    /// So a cell level with the tank may cover it, and <b>only from the shared
+    /// ground down</b>. That one line is what stops the old failure returning,
+    /// rather than a promise not to: a face beginning at or below the contact row
+    /// cannot reach the hull, because the hull is above it. And the cell being
+    /// driven into fails that test from the moment the tank enters it - its far
+    /// edge falls behind the contact point - so it goes back to covering nothing.
+    ///
+    /// The note on <see cref="DepthOf"/> put the cost of the far-edge key at "a
+    /// pixel or two". That was the medium at 1.00x; on the heavy it is 49.
     /// </summary>
-    public List<Vector2I> Occluders(float flatRow, float standing)
+    public List<Vector2I> Occluders(float flatRow, float standing, float height)
     {
         var over = new List<Vector2I>();
-        if (_levels is null)
+        if (_levels is null || Atlas is null)
             return over;
         float depth = Depth(flatRow, standing);
+        float half = Atlas.HexRect.Size.Y * 0.5f;
+        // Where the thing touches the ground, on screen. Off the drawn height
+        // rather than off the standing one, which is the higher of the two while
+        // climbing: taken from the standing height the contact would be read
+        // half a wall too high mid-climb, and the cell being climbed onto would
+        // eat the hull for exactly the frames this is meant to protect.
+        float contact = flatRow - height;
         foreach (Vector2I cell in Ordered())
+        {
             if (DepthOf(cell) > depth && LevelAt(cell) * Lift > standing + 0.5f)
+            {
                 over.Add(cell);
+                continue;
+            }
+            // Level with it, and its face begins at or below the ground the two
+            // of them share.
+            if (Math.Abs(LevelAt(cell) * Lift - standing) <= 0.5f
+                && CellCentre(cell).Y - half >= contact - 0.5f)
+                over.Add(cell);
+        }
         return over;
     }
 
