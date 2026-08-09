@@ -148,6 +148,7 @@ public static class SelfTest
             bad == 0, $"{bad} bad, first {badDetail}");
 
         Relief(field, Check);
+        Climbing(field, tank, Check);
 
         GD.Print("turret modes");
         // Which one a tank comes up in, off the named constant rather than off
@@ -4808,6 +4809,150 @@ public static class SelfTest
 
     private static double WrapAngle(double degrees) =>
         (degrees % 360.0 + 360.0 + 180.0) % 360.0 - 180.0;
+
+    /// <summary>
+    /// What a slope does to the drawn body: the lean, the rise, and the two
+    /// things neither is allowed to touch.
+    /// </summary>
+    private static void Climbing(HexField field, TankSprite tank,
+                                 Action<string, bool, string> Check)
+    {
+        GD.Print("climb: the body leans and the shadow does not");
+
+        float rise = field.RiseFactor;
+        var lean = new ClimbLean();
+
+        // Level ground first, because it is what every board without relief is
+        // and what every measurement the bench already takes is taken on.
+        for (int i = 0; i < 240; i++)
+            lean.Update(0.0, 330.0, rise, 1.0 / 60.0);
+        Check("on the level it never leaves level", Math.Abs(lean.Angle) < 1e-9,
+            $"{Mathf.RadToDeg((float)lean.Angle):F4} deg on flat ground");
+
+        // Nose up climbing, nose down descending. In Godot's screen frame a
+        // positive rotation carries +x down, so the sign that reads as climbing
+        // is the negative one - the reason ClimbLean.Target has a minus in it,
+        // and the kind of thing that is invisible until somebody looks.
+        double up = ClimbLean.Target(0.25, 330.0, rise);
+        double down = ClimbLean.Target(-0.25, 330.0, rise);
+        Check("a climb lifts the nose and a descent drops it",
+            up < -0.02 && down > 0.02 && Math.Abs(up + down) < 1e-9,
+            $"climb {Mathf.RadToDeg((float)up):F1} deg, descent "
+            + $"{Mathf.RadToDeg((float)down):F1} deg");
+
+        // The documented zero, asserted so it is not repaired. Straight up and
+        // down the screen the pitch axis has no component along the view at all,
+        // so an image rotation reaches none of the pitch - the whole of it is
+        // foreshortening, which no transform of a flat sprite can produce.
+        double across = Math.Max(Math.Abs(ClimbLean.Target(0.25, 90.0, rise)),
+                                 Math.Abs(ClimbLean.Target(0.25, 270.0, rise)));
+        double slant = Math.Abs(ClimbLean.Target(0.25, 30.0, rise));
+        Check("driving into the screen draws no rotation, because none of it is",
+            across < 1e-9 && slant > 0.1,
+            $"{Mathf.RadToDeg((float)across):F3} deg into the screen against "
+            + $"{Mathf.RadToDeg((float)slant):F1} across it");
+
+        // It has to arrive over the climb rather than in one frame, and it has to
+        // stop when it gets there. Same pair BodyPitch is held to, and the same
+        // reason: a body that snaps to an angle has not climbed anything, and one
+        // that rings afterwards is on a spring nobody wanted.
+        lean.Reset();
+        int frames = 0;
+        double target = ClimbLean.Target(0.25, 330.0, rise);
+        while (frames < 240 && Math.Abs(lean.Angle - target) > Math.Abs(target) * 0.05)
+        {
+            lean.Update(0.25, 330.0, rise, 1.0 / 60.0);
+            frames++;
+        }
+        Check("it arrives over a fair part of a second, not in one frame",
+            frames is > 6 and < 60, $"took {frames} frames");
+        // Measured after it has had time to settle, not from the moment it is
+        // within five percent: taken from there the tail of the approach is the
+        // biggest number in the window and the check would be reading the arrival
+        // it just finished asserting.
+        for (int i = 0; i < 240; i++)
+            lean.Update(0.25, 330.0, rise, 1.0 / 60.0);
+        double worst = 0.0;
+        for (int i = 0; i < 240; i++)
+        {
+            lean.Update(0.25, 330.0, rise, 1.0 / 60.0);
+            worst = Math.Max(worst, Math.Abs(lean.Angle - target));
+        }
+        Check("and settles there instead of ringing",
+            worst < Math.Abs(target) * 0.02,
+            $"still {Mathf.RadToDeg((float)worst):F3} deg off after four seconds");
+
+        if (tank.Atlas is null)
+            return;
+
+        // The rise is a similarity or it is jelly. Asserted on the matrix rather
+        // than on the field it is built from, because what the eye reads is the
+        // matrix: equal column lengths and a right angle between them is exactly
+        // "every length in the silhouette scaled by the same amount".
+        double wasClimb = tank.Climb;
+        float wasRise = tank.Rise;
+        (double Pitch, double Roll, double Trem, double TremRoll,
+         double Rec, double RecRoll) was =
+            (tank.Pitch, tank.Roll, tank.TremblePitch, tank.TrembleRoll,
+             tank.RecoilPitch, tank.RecoilRoll);
+        try
+        {
+            // All six, not the two that are obvious. The tremble is on by
+            // default, so a tank asked about its matrix mid-session answers with
+            // a shear of half a percent in it - enough to fail "the rise squares
+            // nothing" on a rise that is perfectly square, which is the check
+            // measuring the wrong thing rather than the code being wrong.
+            tank.Pitch = tank.Roll = tank.TremblePitch = tank.TrembleRoll =
+                tank.RecoilPitch = tank.RecoilRoll = 0.0;
+            tank.Climb = 0.0;
+            tank.Rise = 1.0f + TankSprite.RisePerLevel;
+            Transform2D risen = tank.ShearFor(false);
+            float lx = risen.X.Length(), ly = risen.Y.Length();
+            Check("the rise scales both axes alike and squares neither",
+                Math.Abs(lx - ly) < 1e-4f && Math.Abs(risen.X.Dot(risen.Y)) < 1e-4f
+                && Math.Abs(lx - (1.0f + TankSprite.RisePerLevel)) < 1e-4f,
+                $"x {lx:F4}, y {ly:F4}, dot {risen.X.Dot(risen.Y):F5}");
+
+            // One class apart is 0.15 and two levels of climb is 0.12. They must
+            // not cross, or height starts saying what the class size is for.
+            Check("two levels of climb stay inside one class of size",
+                2.0f * TankSprite.RisePerLevel < 0.15f,
+                $"{2.0f * TankSprite.RisePerLevel:F2} against 0.15 between classes");
+
+            // The contact shadow takes the bumps and not the slope. It is the one
+            // layer that says so, and the flag is easy to lose in a refactor.
+            tank.Climb = ClimbLean.Target(0.25, 330.0, rise);
+            tank.Rise = 1.0f + TankSprite.RisePerLevel;
+            Transform2D body = tank.ShearFor(false);
+            Transform2D ground = tank.ShearFor(false, true);
+            Check("ground-printed layers are not turned by the slope",
+                ground == Transform2D.Identity && body != Transform2D.Identity,
+                $"printed {ground}, standing {body}");
+
+            // And that it is the shadow claiming it, off LayerOrder rather than
+            // by naming the one layer: the matrix above honours the flag whether
+            // or not anything ever passes it, so on its own it would go on
+            // passing with the shadow leaning at fourteen degrees. Both
+            // directions, because a second grounded layer is a part of the tank
+            // that stopped climbing with the rest of it.
+            var printed = new List<string>();
+            foreach (string name in TankSprite.LayerOrder)
+                if (TankSprite.MakeLayer(name).Grounded)
+                    printed.Add(name);
+            Check("and the shadow is the only layer that is one",
+                printed.Count == 1 && printed[0] == AtlasSet.ShadowName,
+                printed.Count == 0
+                    ? "nothing is printed on the ground, so the shadow leans"
+                    : "printed: " + string.Join(", ", printed));
+        }
+        finally
+        {
+            tank.Climb = wasClimb;
+            tank.Rise = wasRise;
+            (tank.Pitch, tank.Roll, tank.TremblePitch, tank.TrembleRoll,
+             tank.RecoilPitch, tank.RecoilRoll) = was;
+        }
+    }
 
     /// <summary>
     /// Height on the board: the picking, the occlusion rule and the promise that

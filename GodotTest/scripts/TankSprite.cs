@@ -841,7 +841,50 @@ public sealed partial class TankSprite : Node2D
     /// gating on the ground tilt alone would have drawn the recoil nowhere.
     /// </summary>
     public bool Sheared(bool turret) =>
-        TiltFor(turret) != Vector2.Zero || MountTiltFor(turret) != Vector2.Zero;
+        TiltFor(turret) != Vector2.Zero || MountTiltFor(turret) != Vector2.Zero
+        || Climbing;
+
+    /// <summary>
+    /// The slope the body is drawn on, as an image rotation in radians - see
+    /// <see cref="ClimbLean"/> for why a rotation and why it is sprung. Zero on
+    /// level ground, and on a board with no relief it is zero forever, which is
+    /// what keeps this off every measurement the bench already makes.
+    /// </summary>
+    public double Climb;
+
+    /// <summary>
+    /// The uniform scale the tank's height is worth: nearer the camera is
+    /// bigger, and on this projection height is the only thing that moves a tank
+    /// nearer without moving it down the screen.
+    ///
+    /// <b>Uniform, and that word is the finding.</b> A rigid body drawn larger is
+    /// still rigid; one axis scaled against the other is a body that squashes,
+    /// and the eye reads that as jelly at a fraction of the amount that reads as
+    /// distance. It is also what makes this compose for free - a uniform scale
+    /// commutes with the rotation, so both go in one matrix.
+    ///
+    /// Driven by how high the tank is, not by the slope it is on, so it arrives
+    /// over the climb and stays up there. Bound to it the tank breathed: 1.00 at
+    /// rest, 0.73 mid-leg, 1.00 again at the top.
+    /// </summary>
+    public float Rise = 1.0f;
+
+    /// <summary>
+    /// How much bigger one level makes a tank.
+    ///
+    /// Six percent, and the ceiling is not a taste - it is the class spread.
+    /// Light, medium and heavy are drawn at 0.85, 1.00 and 1.15, which is what
+    /// says a heavy is a heavy; a height that moved a tank a comparable amount
+    /// would be a second thing saying it, arguing with the first. Two levels of
+    /// climb is 12%, which is under the 15% between one class and the next, so
+    /// the two never cross.
+    /// </summary>
+    public const float RisePerLevel = 0.06f;
+
+    /// <summary>Whether either of the two is doing anything. One test, because
+    /// they are one matrix.</summary>
+    public bool Climbing =>
+        Math.Abs(Climb) > 1e-6 || Math.Abs(Rise - 1.0f) > 1e-6;
 
     /// <summary>Heave a layer receives. Never depends on the layer - see
     /// <see cref="TurretStabilised"/>.</summary>
@@ -856,15 +899,34 @@ public sealed partial class TankSprite : Node2D
     /// and only the constant term stays on the ground tilt. Composing two
     /// transforms would give the same answer and resample twice.
     /// </summary>
-    internal Transform2D ShearFor(bool turret)
+    internal Transform2D ShearFor(bool turret, bool grounded = false)
     {
         float groundY = Atlas!.GroundOffset.Y;
         Vector2 ground = TiltFor(turret);
         Vector2 both = ground + MountTiltFor(turret);
-        return new Transform2D(
+        var shear = new Transform2D(
             new Vector2(1.0f, 0.0f),                            // x is untouched
             new Vector2(-both.X, 1.0f - both.Y),
             new Vector2(groundY * ground.X, groundY * ground.Y));
+        // The contact shadow is printed on the ground, so it takes the bumps and
+        // not the slope. Fourteen degrees of rotation on a shadow is a shadow
+        // that has come off the ground it is a shadow of - where the pitch shear
+        // is two pixels and reads as the tank pressing into it. The two are told
+        // apart here rather than at the call site, because a layer knowing it
+        // lies flat is a property of the layer.
+        if (grounded || !Climbing)
+            return shear;
+        // Rotation and uniform scale about the contact patch - the pivot every
+        // tilt in the project uses, because the ground a tank stands on does not
+        // move. Composed outside the shear, so it carries the shear's result
+        // round rather than the two fighting over the vertical, and one matrix
+        // rather than two transforms, which would resample the sprite twice.
+        float c = Mathf.Cos((float)Climb) * Rise, s = Mathf.Sin((float)Climb) * Rise;
+        var turn = new Transform2D(new Vector2(c, s), new Vector2(-s, c),
+                                   Vector2.Zero);
+        Vector2 foot = Atlas.GroundOffset;
+        turn.Origin = foot - turn.BasisXform(foot);
+        return turn * shear;
     }
 
     public override void _Ready()
@@ -904,7 +966,8 @@ public sealed partial class TankSprite : Node2D
             return;
         bool tilted = Math.Abs(Pitch) > 1e-6 || Math.Abs(Roll) > 1e-6
                       || Math.Abs(TremblePitch) > 1e-6 || Math.Abs(TrembleRoll) > 1e-6
-                      || Math.Abs(RecoilPitch) > 1e-6 || Math.Abs(RecoilRoll) > 1e-6;
+                      || Math.Abs(RecoilPitch) > 1e-6 || Math.Abs(RecoilRoll) > 1e-6
+                      || Climbing;
         if (ShowHull)
             DrawLayerTilted("hull", HullFacing, tilted, false);
         // The turret is not drawn here - it is a child layer, so that it lands

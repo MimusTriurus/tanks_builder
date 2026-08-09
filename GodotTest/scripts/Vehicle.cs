@@ -116,6 +116,11 @@ public sealed class Vehicle
     /// repainted over it. Null until the harness builds one.</summary>
     public ReliefCap? Cap;
 
+    /// <summary>What the slope is doing to the drawn body. Its own instance for
+    /// the reason every clock here is: three tanks on three grades leaning as one
+    /// is one animation played three times.</summary>
+    public readonly ClimbLean Lean = new();
+
     public readonly BodyPitch Pitch = new();
     public readonly BodyRumble Rumble = new();
     public readonly EngineTremble Tremble = new();

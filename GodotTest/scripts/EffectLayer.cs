@@ -115,6 +115,13 @@ public sealed partial class EffectLayer : Node2D
     /// </summary>
     public bool Armour;
 
+    /// <summary>Whether this layer is printed on the ground rather than standing
+    /// on it. True of the contact shadow and nothing else: everything else on a
+    /// tank is part of the tank and turns with it up a slope. See
+    /// <see cref="Shadow"/> for why the bumps and the slope part company
+    /// here.</summary>
+    public bool Grounded;
+
     /// <summary>Which state of the tank a layer belongs to.</summary>
     public enum Life
     {
@@ -364,11 +371,18 @@ public sealed partial class EffectLayer : Node2D
     /// the tank pitched would come unstuck from it on every bump - and unlike
     /// the belts, the error would read as the shadow sliding out from under the
     /// vehicle rather than as a track glitch.
+    ///
+    /// It does <b>not</b> ride the slope, and that is not the same call made
+    /// twice. A bump is two pixels of shear and reads as the tank pressing into
+    /// its shadow; a slope is up to fourteen degrees of rotation, and a shadow
+    /// turned by that is a shadow standing off the ground it is a shadow of. See
+    /// <see cref="Grounded"/>.
     /// </summary>
     public static EffectLayer Shadow(string layer) => new()
     {
         Layer = layer,
         FollowsHull = true,
+        Grounded = true,
         Clock = Clocks.Shadow,
         ZIndex = TankSprite.ShadowZ,
         // absolute, or it would be read as an offset from the tank's own z and
@@ -580,7 +594,7 @@ public sealed partial class EffectLayer : Node2D
         // deeper level, not a stretched decal.
         float size = Clock is Clocks.HitBurst or Clocks.HitDust
             ? Tank.HitScale : 1.0f;
-        DrawSetTransformMatrix(Tank.ShearFor(turret));
+        DrawSetTransformMatrix(Tank.ShearFor(turret, Grounded));
         // The frame is stored trimmed, so what is drawn is its own box shifted
         // by however much came off the tile's top-left. The smear is not - it is
         // built here out of whole tiles - so it keeps the tile rect.

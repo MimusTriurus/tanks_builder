@@ -2059,6 +2059,39 @@ public sealed partial class Main : Node2D
         v.Standing = Math.Max(_field.LevelAt(v.Cell), _field.LevelAt(next)) * lift;
     }
 
+    /// <summary>
+    /// What the slope is doing to the drawn body, this frame.
+    ///
+    /// The grade is worked out from the live state rather than stashed when the
+    /// leg begins, and that is not tidiness. Parking happens at every cell of a
+    /// multi-cell climb, so a stored grade would be cleared and set again at each
+    /// boundary - a notch in the middle of a climb, once per hex, which reads as
+    /// the suspension catching rather than as anything about the ground.
+    ///
+    /// Runs for a standing tank too, because settling back to level after
+    /// arriving is the other half of the spring. On a board with no relief the
+    /// target is zero for ever and the angle never leaves it, so nothing here
+    /// costs a flat board a pixel.
+    /// </summary>
+    private void UpdateLean(Vehicle v, double delta)
+    {
+        double grade = 0.0;
+        if (_field.HasRelief && v.Moving)
+        {
+            Vector2I next = v.Path[v.PathStep];
+            if (HexField.HeadingTo(v.Cell, next) >= 0)
+                grade = (_field.LevelAt(next) - _field.LevelAt(v.Cell))
+                        * _field.StepGrade;
+        }
+        v.Lean.Update(grade, v.Sprite.HullFacing, _field.RiseFactor, delta);
+        v.Sprite.Climb = v.Lean.Angle;
+        v.Sprite.Rise = _field.Lift <= 0.0f
+            ? 1.0f
+            : 1.0f + TankSprite.RisePerLevel * (v.Height / _field.Lift);
+        if (v.Sprite.Climbing)
+            v.Sprite.QueueRedraw();
+    }
+
     private void UpdatePitch(Vehicle v, double accelRatio, double delta)
     {
         if (!_pitchEnabled)
@@ -3752,6 +3785,11 @@ public sealed partial class Main : Node2D
                 UpdateRumble(v, delta);
                 v.Sprite.QueueRedraw();
             }
+
+            // After the order has moved it, for the belts' reason: the lean is
+            // about the ground this tank is on now, and read a frame early it
+            // would still be about the cell it just left.
+            UpdateLean(v, delta);
 
             // after the order has moved the tank, so the belts see the ground
             // that actually went past this frame rather than last frame's
