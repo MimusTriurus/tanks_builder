@@ -181,6 +181,57 @@ public sealed partial class Main : Node2D
     /// </summary>
     private string _paint = TerrainSet.Default;
 
+    /// <summary>Whether the board has height on it. See --relief.</summary>
+    private bool _relief;
+
+    /// <summary>
+    /// The one board with height on it, until a map format exists.
+    ///
+    /// Written as rows of characters for the reason the relief bench's is: the
+    /// shape of the hill has to be legible in the source, and an int array of
+    /// fifty-four entries is not.
+    ///
+    /// <b>The hill is in front of the tanks, not behind them, and that is the
+    /// whole of why it is where it is.</b> Ground only hides what is behind it,
+    /// so a hill up at the top of the board is a hill nothing is ever occluded
+    /// by - it would show the lift and the walls and say nothing at all about the
+    /// one rule this slice is for. It sits one row in front of the home line,
+    /// where standing still is already the test.
+    ///
+    /// The three home cells stay level - all on row 2 - so the bench still opens
+    /// with the tanks in a line at one height, which is the comparison every
+    /// other thing here is judged by. The ditch is off to one side for the other
+    /// direction: a cell below the datum is drawn <i>down</i>, and its far
+    /// neighbours own the walls.
+    ///
+    /// Clipped to the board rather than refused when the two disagree: this is a
+    /// stand-in, and a board that came up empty because somebody widened the
+    /// field would read as the flag not working.
+    /// </summary>
+    public static int[] ReliefMap(int columns, int rows)
+    {
+        string[] map =
+        {
+            ".........",
+            ".........",
+            ".........",
+            "...111...",
+            "...111..v",
+            "......vvv",
+        };
+        var levels = new int[columns * rows];
+        for (int r = 0; r < rows && r < map.Length; r++)
+        for (int q = 0; q < columns && q < map[r].Length; q++)
+            levels[r * columns + q] = map[r][q] switch
+            {
+                '1' => 1,
+                '2' => 2,
+                'v' => -1,
+                _ => 0,
+            };
+        return levels;
+    }
+
     /// <summary>What the terrain dropdown offers: mixed, then whatever loaded.
     /// Built from the set rather than listed here, so drawing a new hex is a
     /// file drop and nothing else.</summary>
@@ -748,6 +799,13 @@ public sealed partial class Main : Node2D
                 _paint = userArgs[++i];
             else if (userArgs[i] == "--no-ruts")
                 _rutsEnabled = false;
+            // Height on the board. A flag rather than the default, because
+            // everything the bench measures is a pixel difference between two
+            // captures and a hill in the frame is a hill in both halves of every
+            // one of them. Off, the field draws exactly what it drew before there
+            // was relief - see HexField.HasRelief.
+            else if (userArgs[i] == "--relief")
+                _relief = true;
             // No number: how much forest there is comes from --terrain, because
             // forest is one of the kinds of ground. This is the A/B - the same
             // board with the tree layer off.
@@ -872,6 +930,8 @@ public sealed partial class Main : Node2D
         }
 
         _field = new HexField { Terrain = _terrain, Paint = _paint, Trees = _trees };
+        if (_relief)
+            _field.SetRelief(ReliefMap(_field.Columns, _field.Rows));
         AddChild(_field);
         _marks = new TrackMarks { Enabled = _rutsEnabled };
         AddChild(_marks);
@@ -918,6 +978,15 @@ public sealed partial class Main : Node2D
                 HomeCell = HomeCells[Math.Min(i, HomeCells.Length - 1)],
             };
             vehicle.Cell = vehicle.HomeCell;
+            // The ground that gets to stand in front of this one. A child of the
+            // sprite, so its z index is relative to the tank's and no cell
+            // repainted for this tank can land on another one - see ReliefCap.
+            // Built whether or not the board has relief: it draws nothing at all
+            // on a flat one, and a node that only exists under a flag is a node
+            // nobody exercises.
+            var cap = new ReliefCap { Field = _field };
+            sprite.AddChild(cap);
+            vehicle.Cap = cap;
             _vehicles.Add(vehicle);
             // Phases come off each layer, never assumed: the renderer's count is
             // a config value, and a clock that wraps anywhere but at the seam
@@ -1353,6 +1422,10 @@ public sealed partial class Main : Node2D
     {
         vehicle.Cell = _field.ClampCell(vehicle.Cell);
         _field.Position = _origin;
+        // Standing still, the two heights are the same one. They only part
+        // company while crossing between levels - see AdvanceOrder.
+        vehicle.Height = vehicle.Standing =
+            _field.LevelAt(vehicle.Cell) * _field.Lift;
         vehicle.Sprite.Position = StandOn(vehicle, vehicle.Cell);
         // Moved rather than driven, so the ribbon must break here or the jump is
         // drawn as a line across the board.
@@ -1540,9 +1613,20 @@ public sealed partial class Main : Node2D
     /// is where each one stands, and the origin sits a scaled float above that. Off
     /// the origin, three tanks on one row got three different depths - the light by
     /// 16 - and the order between them was decided by their sizes.</summary>
-    private void Depth(Vehicle vehicle) =>
-        vehicle.Sprite.ZIndex =
-            Mathf.RoundToInt(vehicle.GroundPoint.Y - _origin.Y);
+    private void Depth(Vehicle vehicle)
+    {
+        // The row it would stand on with the board flattened. The position
+        // already carries the lift - CellAnchor is lifted - so putting it back is
+        // how the two terms of the depth get separated again, and there is only
+        // ever one place the height is subtracted.
+        float row = vehicle.GroundPoint.Y - _origin.Y + vehicle.Height;
+        vehicle.Sprite.ZIndex = Mathf.RoundToInt(_field.Depth(row, vehicle.Height));
+        if (vehicle.Cap is null)
+            return;
+        vehicle.Cap.FlatRow = row;
+        vehicle.Cap.Standing = vehicle.Standing;
+        vehicle.Cap.QueueRedraw();
+    }
 
     private void SnapToCell() => Park(Active);
 
@@ -1940,9 +2024,39 @@ public sealed partial class Main : Node2D
         else if (budgetPx > 0.0f)
         {
             v.Sprite.Position += to.Normalized() * budgetPx;
+            Climb(v, next);
             Depth(v);
         }
         v.Sprite.QueueRedraw();
+    }
+
+    /// <summary>
+    /// The two heights, part way from one cell to the next.
+    ///
+    /// <see cref="Vehicle.Height"/> is taken from how far along the leg the tank
+    /// is rather than integrated frame by frame, for the reason the belts read
+    /// their travel back off the heading: a height stepped forward alongside the
+    /// driving would have to be remembered by everything else that moves a tank -
+    /// the W/S keys, a reset, an order cancelled mid-step. Read off the position
+    /// it is exact at both ends of the leg whatever happened in between, and the
+    /// drive between two lifted anchors is a straight line, so linear is not an
+    /// approximation of it.
+    ///
+    /// <see cref="Vehicle.Standing"/> is the higher of the two ends instead, and
+    /// the asymmetry is the point: see the field there.
+    /// </summary>
+    private void Climb(Vehicle v, Vector2I next)
+    {
+        if (!_field.HasRelief)
+            return;
+        Vector2 from = StandOn(v, v.Cell), goal = StandOn(v, next);
+        float span = (goal - from).Length();
+        float done = span <= 0.001f ? 1.0f
+            : Mathf.Clamp((v.Sprite.Position - from).Length() / span, 0.0f, 1.0f);
+        float lift = _field.Lift;
+        v.Height = Mathf.Lerp(_field.LevelAt(v.Cell) * lift,
+                              _field.LevelAt(next) * lift, done);
+        v.Standing = Math.Max(_field.LevelAt(v.Cell), _field.LevelAt(next)) * lift;
     }
 
     private void UpdatePitch(Vehicle v, double accelRatio, double delta)

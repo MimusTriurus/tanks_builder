@@ -92,12 +92,190 @@ public sealed partial class HexField : Node2D
 
     public override void _Ready() => ZIndex = GroundZ;
 
+    // --- relief --------------------------------------------------------------
+
+    /// <summary>
+    /// How high each cell stands, in levels, or null for a board with no relief
+    /// in it at all.
+    ///
+    /// Null rather than an array of zeroes, and that is the whole safety of this
+    /// feature landing in a bench that works: with no relief every number below
+    /// reduces to what it was before there was height, and
+    /// <see cref="Occluders"/> - the one rule that changes how the board is
+    /// painted - returns nothing at all. A flat board draws exactly as it did.
+    /// </summary>
+    private int[]? _levels;
+
+    /// <summary>Whether this board carries height.</summary>
+    public bool HasRelief => _levels is not null;
+
+    /// <summary>
+    /// How steep one level is, as a fraction of the distance to a neighbour.
+    ///
+    /// A grade rather than a height in pixels, so it is the same slope on any
+    /// tile: the pixels follow from <see cref="Reach"/>, which is measured off
+    /// the rendered hexagon. Named in the one place both the lift and the
+    /// climb-cost would read it from.
+    /// </summary>
+    public double StepGrade = 0.25;
+
+    /// <summary>How many levels a tank may take in one step. One, because two is
+    /// a cliff: at this grade a two-level step is half the distance to the
+    /// neighbour, and a route that walks a pond up onto a crown in a single hex
+    /// reads as the pathing ignoring the board.</summary>
+    public int MaxClimb = 1;
+
+    public void SetRelief(int[]? levels)
+    {
+        _levels = levels is not null && levels.Length == Columns * Rows
+            ? levels : null;
+        _ordered = null;
+        QueueRedraw();
+    }
+
+    public int LevelAt(Vector2I cell) =>
+        _levels is null || !InBounds(cell) ? 0 : _levels[cell.Y * Columns + cell.X];
+
+    /// <summary>The levels this board carries, scanned off it rather than
+    /// written down: a range that outlives an edit to the map is a picking rule
+    /// that silently stops answering for the level somebody added.</summary>
+    public (int Low, int High) LevelRange
+    {
+        get
+        {
+            if (_levels is null)
+                return (0, 0);
+            int low = 0, high = 0;
+            foreach (int level in _levels)
+            {
+                low = Math.Min(low, level);
+                high = Math.Max(high, level);
+            }
+            return (low, high);
+        }
+    }
+
+    /// <summary>Ground-plane squash - sin(elevation) - read off the rendered
+    /// tile rather than declared. The hexagon's height over its width is
+    /// (sqrt(3)/2)*sin(e) for a flat-top hex, so the tile <i>is</i> the camera
+    /// angle; see <see cref="TerrainSet"/>, which refuses art that disagrees
+    /// with it.</summary>
+    public float Squash
+    {
+        get
+        {
+            if (Atlas is null || Atlas.HexRect.Size.X <= 0)
+                return 0.5f;
+            return 2.0f * Atlas.HexRect.Size.Y
+                   / (Mathf.Sqrt(3.0f) * Atlas.HexRect.Size.X);
+        }
+    }
+
+    /// <summary>Screen px a ground px of <i>height</i> is worth - cos(elevation),
+    /// and the only new number height needs. Follows from the squash rather than
+    /// being measured apart from it, because the two are one angle.</summary>
+    public float RiseFactor => Mathf.Sqrt(Mathf.Max(0.0f, 1.0f - Squash * Squash));
+
+    /// <summary>Distance to any of the six neighbours, in ground px: sqrt(3)*R
+    /// for a flat-top hexagon, and equally twice the inradius. The same number
+    /// in all six directions, which is what lets one grade serve every
+    /// edge.</summary>
+    public float Reach =>
+        Atlas is null ? 0.0f : Mathf.Sqrt(3.0f) * Atlas.HexRect.Size.X * 0.5f;
+
+    /// <summary>One level, in screen px.</summary>
+    public float Lift => (float)StepGrade * Reach * RiseFactor;
+
+    /// <summary>
+    /// How near the camera something is - the number the painter's algorithm
+    /// actually wants, and not the ground row once the board has height in it.
+    ///
+    /// At elevation e a point's distance along the view is
+    /// <c>y_ground*cos(e) + z*sin(e)</c>: <b>raising something brings it
+    /// nearer</b>, because the camera is above. The ground row is only the first
+    /// term, which is why it was the whole answer for as long as z was zero
+    /// everywhere.
+    ///
+    /// Both arguments are screen px - the row as this node draws it, the lift as
+    /// the cell or the tank carries it - so nothing outside has to hold ground
+    /// units.
+    ///
+    /// <b>Scaled so that the flat term is the row itself</b>, which is the whole
+    /// of tan(e) and worth the line it costs. Depth is only ever compared, so any
+    /// positive multiple of it is the same answer - and this particular multiple
+    /// is the one that leaves every number that already sorts against a foot row
+    /// alone. The trees are at <c>round(footY)</c> and the ruts and rings at
+    /// fixed rungs below the board; a key that scaled the row by 1.7 would sort
+    /// every tank behind every tree, and it would do it on a board with no relief
+    /// on it at all.
+    /// </summary>
+    public float Depth(float row, float lift)
+    {
+        float tan = Squash / Mathf.Max(RiseFactor, 0.01f);
+        return row + lift * tan * tan;
+    }
+
+    /// <summary>
+    /// A cell's depth, taken at its <b>far</b> edge rather than its centre.
+    ///
+    /// A face is not a point and cannot be sorted as one: the near half of a low
+    /// cell really is in front of a tank up on the terrace behind it, and the far
+    /// half really is behind it. The two halves want opposite answers and a
+    /// single key can only give one, so it should give the one whose failure is
+    /// survivable - a tank drawn over a strip of ground it should be behind is a
+    /// pixel or two, and a tank swallowed by the ground in front of it is the
+    /// picture that started this.
+    ///
+    /// Among cells it changes nothing, every key moving by the same apothem, so
+    /// this only ever decides a cell weighed against something standing on the
+    /// board.
+    /// </summary>
+    public float DepthOf(Vector2I cell)
+    {
+        float half = Atlas is null ? 0.0f : Atlas.HexRect.Size.Y * 0.5f;
+        return Depth(FlatAnchor(cell).Y - half, LevelAt(cell) * Lift);
+    }
+
+    /// <summary>
+    /// The cells that hide a thing standing at <paramref name="flatRow"/> and
+    /// <paramref name="standing"/> px off the ground - nearer than it <b>and</b>
+    /// higher.
+    ///
+    /// Both halves, and the second is the one that is easy to leave out.
+    /// <b>Flat ground in front of a thing cannot hide it, at any distance</b>:
+    /// the ray from a point back to the camera only ever rises, so ground below
+    /// that point is never on it. Only ground standing <i>higher</i> can be - and
+    /// on a board where nothing is raised that is nothing at all, which is
+    /// exactly why one field node under every tank was right until now.
+    ///
+    /// Depth alone said otherwise twice, and the picture showed it both times:
+    /// the cell being driven into is nearer than the tank for the first half of
+    /// every step, so it went down last and cut the hull off at the tracks.
+    /// Nearer was true; it was just never the question on its own.
+    /// </summary>
+    public List<Vector2I> Occluders(float flatRow, float standing)
+    {
+        var over = new List<Vector2I>();
+        if (_levels is null)
+            return over;
+        float depth = Depth(flatRow, standing);
+        foreach (Vector2I cell in Ordered())
+            if (DepthOf(cell) > depth && LevelAt(cell) * Lift > standing + 0.5f)
+                over.Add(cell);
+        return over;
+    }
+
     // --- layout ------------------------------------------------------------
 
-    /// <summary>Anchor point of a cell relative to the field's origin. Both the
-    /// tile and any tank standing on it are drawn against this one point, so
-    /// they cannot drift apart.</summary>
-    public Vector2 CellAnchor(int q, int r)
+    /// <summary>
+    /// Anchor point of a cell with the height taken out - the ground row.
+    ///
+    /// <b>This is the sorting space</b>, and the one thing the lift must never
+    /// reach: a raised cell moves up the screen and is not thereby one step
+    /// further away. Sorting on the drawn position instead walks the hill
+    /// backwards.
+    /// </summary>
+    public Vector2 FlatAnchor(int q, int r)
     {
         if (Atlas is null)
             return Vector2.Zero;
@@ -106,6 +284,15 @@ public sealed partial class HexField : Node2D
         float stagger = q % 2 != 0 ? h * 0.5f : 0.0f;
         return new Vector2(q * w * 0.75f, r * h + stagger);
     }
+
+    public Vector2 FlatAnchor(Vector2I cell) => FlatAnchor(cell.X, cell.Y);
+
+    /// <summary>Anchor point of a cell as it is drawn. Both the tile and any tank
+    /// standing on it are placed against this one point, so they cannot drift
+    /// apart - which is what carries the height into the tank's position for
+    /// free, without anything that stands on the board knowing about it.</summary>
+    public Vector2 CellAnchor(int q, int r) =>
+        FlatAnchor(q, r) - new Vector2(0.0f, LevelAt(new Vector2I(q, r)) * Lift);
 
     public Vector2 CellAnchor(Vector2I cell) => CellAnchor(cell.X, cell.Y);
 
@@ -124,14 +311,56 @@ public sealed partial class HexField : Node2D
     /// sits about 60px higher on the current atlases.</summary>
     public Vector2 CellCentre(Vector2I cell) => CellAnchor(cell) + CentreOffset;
 
-    /// <summary>Cell under a point in this node's local space.
+    /// <summary>
+    /// Cell under a point in this node's local space, height and all.
+    ///
+    /// One screen point sits on a low cell and on the raised cell behind it at
+    /// the same time, so the flat inverse alone answers with whichever the
+    /// arithmetic reaches - which is the low one, every time, and reads as the
+    /// picking being broken rather than as the board having height.
+    ///
+    /// Asked per level instead: drop the point by each level the board carries
+    /// and keep the answers that agree about their own level. Of those the
+    /// frontmost wins, because frontmost is the one drawn last and therefore the
+    /// one being looked at. A board carries a handful of levels, so this is exact
+    /// rather than approximate, and deterministic.
+    ///
+    /// Falls back to the flat answer for a click that landed on a wall rather
+    /// than on a top face. A wall belongs to the cell above it, but resolving it
+    /// that way would need the walls kept as polygons; the cell in front is close
+    /// enough to stand a tank on and is never off the board.
+    /// </summary>
+    public Vector2I CellAt(Vector2 local)
+    {
+        if (_levels is null)
+            return FlatCellAt(local);
+
+        var best = new Vector2I(-1, -1);
+        float front = float.NegativeInfinity;
+        (int low, int high) = LevelRange;
+        for (int level = low; level <= high; level++)
+        {
+            Vector2I cell = FlatCellAt(local + new Vector2(0.0f, level * Lift));
+            if (!InBounds(cell) || LevelAt(cell) != level)
+                continue;
+            float row = FlatAnchor(cell).Y;
+            if (row <= front)
+                continue;
+            front = row;
+            best = cell;
+        }
+        return best.X >= 0 ? best : FlatCellAt(local);
+    }
+
+    /// <summary>The flat inverse: which cell a point would be in if the board
+    /// were level.
     ///
     /// The rendered field is a regular hex grid squashed vertically by
     /// sin(elevation), so the squash is undone before the standard flat-top
     /// pixel-to-hex conversion. Rounding is done in cube coordinates: rounding
     /// col and row independently would pick the wrong cell along every slanted
     /// edge, which is most of the border.</summary>
-    public Vector2I CellAt(Vector2 local)
+    private Vector2I FlatCellAt(Vector2 local)
     {
         if (Atlas is null)
             return Vector2I.Zero;
@@ -277,7 +506,12 @@ public sealed partial class HexField : Node2D
             {
                 Vector2I next = Step(cell, heading);
                 if (!InBounds(next) || cameFrom.ContainsKey(next)
-                    || (blocked is not null && blocked.Contains(next)))
+                    || (blocked is not null && blocked.Contains(next))
+                    // Height is an obstacle of the same kind as another tank, so
+                    // it is refused in the same place: a search that took the
+                    // cliff and then had the driving refuse it would report a
+                    // route it cannot walk.
+                    || Math.Abs(LevelAt(next) - LevelAt(cell)) > MaxClimb)
                     continue;
                 cameFrom[next] = cell;
                 if (next == to)
@@ -389,7 +623,12 @@ public sealed partial class HexField : Node2D
             for (int q = 0; q < Columns; q++)
             for (int r = 0; r < Rows; r++)
                 cells.Add(new Vector2I(q, r));
-            cells.Sort((a, b) => CellAnchor(a).Y.CompareTo(CellAnchor(b).Y));
+            // By depth rather than by the drawn row, and on a flat board the two
+            // are the same order: depth is the row times a constant. With height
+            // in it they part company, and sorting on the drawn position walks
+            // the hill backwards - a raised cell moves up the screen and is not
+            // thereby one step further away.
+            cells.Sort((a, b) => DepthOf(a).CompareTo(DepthOf(b)));
             _ordered = cells;
             _orderedFor = new Vector2I(Columns, Rows);
         }
@@ -421,25 +660,57 @@ public sealed partial class HexField : Node2D
         // per mark was equivalent while a tile was one opaque hexagon; with
         // terrain it would paint the grass two and three deep, and each pass
         // over an overhang would land on whichever cell happened to be under it.
-        var ink = new Dictionary<Vector2I, Color>();
-        // Gunnery under the route rather than over it: the arcs say where a shot
-        // could go, the route says where this tank is going, and while both are
-        // up the second is the one being given. Red for both, because amber and
-        // yellow-green are the route's and cyan is the selection ring's - a mark
-        // that has to be told apart from another mark is not a mark.
-        foreach (Vector2I cell in Arcs)
-            ink[cell] = ArcInk;
-        for (int i = 0; i < Highlight.Count; i++)
-            ink[Highlight[i]] = i == Highlight.Count - 1 ? DestInk : RouteInk;
-        foreach (Vector2I cell in Aim)
-            ink[cell] = AimInk;
-
+        //
+        // Resolved by asking rather than by a table built here, because a cell
+        // repainted over a tank has to arrive at the same answer, and the two
+        // lookups would be the place they disagreed. See InkFor for the order
+        // between the marks and why they all sit in one function.
         foreach (Vector2I cell in Ordered())
-            DrawCell(cell, ink.TryGetValue(cell, out Color tint) ? tint : Colors.White);
+            PaintCell(this, cell, InkFor(cell));
     }
 
-    private void DrawCell(Vector2I cell, Color tint)
+    /// <summary>
+    /// The mark a cell carries this frame, so a cell repainted over a tank
+    /// carries the same one it did underneath.
+    ///
+    /// Strongest first, which is the same order the marks used to be written
+    /// into a table in - the last write won there, the first match wins here.
+    /// Gunnery under the route rather than over it: the arcs say where a shot
+    /// could go, the route says where this tank is going, and while both are up
+    /// the second is the one being given. Red for both, because amber and
+    /// yellow-green are the route's and cyan is the selection ring's - a mark
+    /// that has to be told apart from another mark is not a mark.
+    /// </summary>
+    public Color InkFor(Vector2I cell)
     {
+        foreach (Vector2I at in Aim)
+            if (at == cell)
+                return AimInk;
+        for (int i = 0; i < Highlight.Count; i++)
+            if (Highlight[i] == cell)
+                return i == Highlight.Count - 1 ? DestInk : RouteInk;
+        foreach (Vector2I at in Arcs)
+            if (at == cell)
+                return ArcInk;
+        return Colors.White;
+    }
+
+    /// <summary>
+    /// One cell, walls and top, into whatever node is doing the drawing.
+    ///
+    /// Into a node rather than onto this one, because a cell has to be painted
+    /// twice on a board with height: once here, under everything, and once more
+    /// over whichever tank it stands in front of and above - see
+    /// <see cref="ReliefCap"/>. Passing the target keeps that from being a second
+    /// copy of how a cell is drawn, which is the way the two would come to
+    /// disagree.
+    /// </summary>
+    public void PaintCell(CanvasItem into, Vector2I cell, Color tint)
+    {
+        if (Atlas is null)
+            return;
+        DrawWalls(into, cell);
+
         if (Terrain is not null && Terrain.Any)
         {
             Texture2D? art = Terrain.Texture(TypeAt(cell));
@@ -448,15 +719,84 @@ public sealed partial class HexField : Node2D
                 // Against the cell's centre, not its anchor: the anchor is the
                 // turret axis floating above the ground plane, and the art knows
                 // only where its own hexagon is.
-                DrawTextureRect(art,
-                    Terrain.RectAt(CellCentre(cell), Terrain.ScaleTo(Atlas!.HexRect)),
+                into.DrawTextureRect(art,
+                    Terrain.RectAt(CellCentre(cell), Terrain.ScaleTo(Atlas.HexRect)),
                     false, tint);
                 return;
             }
         }
-        DrawTextureRectRegion(Atlas!.Texture("hex"),
+        into.DrawTextureRectRegion(Atlas.Texture("hex"),
             new Rect2(CellAnchor(cell) - Atlas.Anchor + Atlas.OffsetOf("hex", 0),
                       Atlas.SizeOf("hex", 0)),
             Atlas.Region("hex", 0), tint);
     }
+
+    /// <summary>The hexagon's corners in screen px about a cell's centre, right
+    /// first and going clockwise on screen, so corner i and i+1 span the edge
+    /// facing <see cref="EdgeHeadings"/>[i] reversed - see
+    /// <see cref="WallHeading"/>.
+    ///
+    /// No trigonometry, for <see cref="SelectionRing"/>'s reason: a flat-top
+    /// hexagon of circumradius R has corners at (+/-R, 0) and (+/-R/2,
+    /// +/-sqrt(3)R/2), and the isometry squashes the ground vertically - so in
+    /// units of the drawn tile those are (+/-w/2, 0) and (+/-w/4, +/-h/2), with
+    /// neither the camera angle nor a sine anywhere in it.</summary>
+    private Vector2[] Corners()
+    {
+        float w = Atlas!.HexRect.Size.X * 0.5f, h = Atlas.HexRect.Size.Y * 0.5f;
+        return new[]
+        {
+            new Vector2(w, 0.0f), new Vector2(w * 0.5f, h),
+            new Vector2(-w * 0.5f, h), new Vector2(-w, 0.0f),
+            new Vector2(-w * 0.5f, -h), new Vector2(w * 0.5f, -h),
+        };
+    }
+
+    private static readonly int[] WallHeading = { 330, 270, 210, 150, 90, 30 };
+
+    /// <summary>
+    /// The faces between a cell and whatever is across each of its edges.
+    ///
+    /// One rule for all four cases: <b>the higher cell of a pair draws the side
+    /// between them</b>. That covers the near side of a hill, the far bank of a
+    /// pit, a terrace with a shelf in front and one with a shelf behind, without
+    /// anybody knowing who is drawn first - which is what the two hand-written
+    /// cases it replaces both got wrong once each.
+    ///
+    /// Under the cell's own top face, not over it. The wall of a far edge is
+    /// covered by the face above it, and drawn afterwards it paints a pale slab
+    /// across the grass. The three walls facing the camera are not covered by
+    /// anything of this cell's, so they survive either way.
+    /// </summary>
+    private void DrawWalls(CanvasItem into, Vector2I cell)
+    {
+        if (_levels is null)
+            return;
+        int level = LevelAt(cell);
+        Vector2 centre = CellCentre(cell);
+        Vector2[] corner = Corners();
+        for (int i = 0; i < 6; i++)
+        {
+            int drop = level - LevelAt(Step(cell, WallHeading[i]));
+            if (drop <= 0)
+                continue;
+            var down = new Vector2(0.0f, drop * Lift);
+            Vector2 a = centre + corner[i], b = centre + corner[(i + 1) % 6];
+            into.DrawColoredPolygon(new[] { a, b, b + down, a + down },
+                                    WallInk(WallHeading[i]));
+        }
+    }
+
+    /// <summary>A wall, shaded by which way it faces. The two that face the
+    /// camera catch more than the four flanking them, which is all it takes for
+    /// the block to read as a solid rather than as a hexagon with a skirt.
+    /// Earth whatever the top is: a wall taken from a pond's own blue gave the
+    /// water vertical blue sides and made it a slab of glass.</summary>
+    private static Color WallInk(int heading)
+    {
+        float k = heading is 270 or 90 ? 0.62f : 0.46f;
+        return new Color(Soil.R * k, Soil.G * k, Soil.B * k);
+    }
+
+    private static readonly Color Soil = new(0.60f, 0.57f, 0.45f);
 }

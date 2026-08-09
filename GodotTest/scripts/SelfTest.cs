@@ -147,6 +147,8 @@ public static class SelfTest
         Check("every path is contiguous, in bounds and reaches the target",
             bad == 0, $"{bad} bad, first {badDetail}");
 
+        Relief(field, Check);
+
         GD.Print("turret modes");
         // Which one a tank comes up in, off the named constant rather than off
         // whatever the field happens to be initialised to. It decides what every
@@ -4806,4 +4808,265 @@ public static class SelfTest
 
     private static double WrapAngle(double degrees) =>
         (degrees % 360.0 + 360.0 + 180.0) % 360.0 - 180.0;
+
+    /// <summary>
+    /// Height on the board: the picking, the occlusion rule and the promise that
+    /// a flat board is untouched.
+    ///
+    /// Run against a relief laid on the live field and taken off again, rather
+    /// than behind --relief. The flag decides what a session looks like; whether
+    /// the arithmetic is right is not a thing to find out only when somebody
+    /// passes it.
+    /// </summary>
+    private static void Relief(HexField field, Action<string, bool, string> Check)
+    {
+        GD.Print("relief: a flat board is the board it was");
+
+        // The claim the whole slice rests on. Depth is only ever compared, so it
+        // could be scaled by anything - but the trees sort at round(footY) and
+        // the ruts and rings sit at fixed rungs below the board, so a key that
+        // scaled the row would put every tank behind every tree, on a board with
+        // no relief on it at all.
+        float worst = 0.0f;
+        for (float row = -200.0f; row <= 900.0f; row += 13.0f)
+            worst = Math.Max(worst, Math.Abs(field.Depth(row, 0.0f) - row));
+        Check("with nothing raised, depth is the foot row itself", worst < 0.001f,
+            $"off by {worst:F4} - the trees sort against this number");
+
+        int drift = 0;
+        for (int q = 0; q < field.Columns; q++)
+        for (int r = 0; r < field.Rows; r++)
+            if (field.CellAnchor(q, r) != field.FlatAnchor(q, r))
+                drift++;
+        Check("and no cell is lifted", !field.HasRelief && drift == 0,
+            $"{drift} cells moved");
+        Check("and nothing is drawn over a tank",
+            field.Occluders(300.0f, 0.0f).Count == 0,
+            "a flat board promoted ground over a tank");
+
+        int[]? was = null;
+        field.SetRelief(Main.ReliefMap(field.Columns, field.Rows));
+        try
+        {
+            GD.Print("relief: a click lands on the face that was drawn");
+
+            float lift = field.Lift;
+            Check("one level is a visible number of pixels", lift > 4.0f,
+                $"{lift:F1}px - below this the board has height nobody can see");
+
+            // The oracle, and it is deliberately not the pixel-to-hex code the
+            // picker uses: a point is on a cell's face when it is inside that
+            // cell's drawn hexagon, and the answer is the frontmost of those,
+            // because frontmost is what was drawn last. Written as half-planes on
+            // the ground-space offset, so the only thing shared with the picker
+            // is the squash.
+            float squash = Math.Max(field.Squash, 0.01f);
+            float radius = field.Atlas is null ? 0.0f
+                : field.Atlas.HexRect.Size.X * 0.5f;
+            float apothem = Mathf.Sqrt(3.0f) * radius * 0.5f;
+
+            // How far inside its own face a probe has to be before it counts. A
+            // point on a boundary is legitimately on two cells, and a check that
+            // demands an answer there is measuring float rounding.
+            const float Margin = 3.0f;
+
+            float Slack(Vector2I cell, Vector2 point)
+            {
+                Vector2 to = point - field.CellCentre(cell);
+                float gx = Math.Abs(to.X), gy = Math.Abs(to.Y / squash);
+                return Math.Min(apothem - gy, Mathf.Sqrt(3.0f) * (radius - gx) - gy);
+            }
+
+            Vector2I Frontmost(Vector2 point)
+            {
+                var best = new Vector2I(-1, -1);
+                float front = float.NegativeInfinity;
+                for (int q = 0; q < field.Columns; q++)
+                for (int r = 0; r < field.Rows; r++)
+                {
+                    var cell = new Vector2I(q, r);
+                    if (Slack(cell, point) < 0.0f)
+                        continue;
+                    float row = field.FlatAnchor(cell).Y;
+                    if (row <= front)
+                        continue;
+                    front = row;
+                    best = cell;
+                }
+                return best;
+            }
+
+            int probes = 0, wrong = 0, retired = 0;
+            var firstWrong = "";
+            for (int q = 0; q < field.Columns; q++)
+            for (int r = 0; r < field.Rows; r++)
+            {
+                var cell = new Vector2I(q, r);
+                Vector2 centre = field.CellCentre(cell);
+                for (int i = 0; i < 6; i++)
+                for (int step = 0; step <= 4; step++)
+                {
+                    double angle = Math.PI / 3.0 * i;
+                    var out_ = new Vector2((float)Math.Cos(angle) * radius,
+                                           (float)Math.Sin(angle) * apothem * squash
+                                           * (2.0f / Mathf.Sqrt(3.0f)));
+                    Vector2 point = centre + out_ * (step * 0.22f);
+                    Vector2I want = Frontmost(point);
+                    if (want.X < 0)
+                        continue;
+                    // Retired near any boundary, this cell's or another's: a
+                    // probe a hair inside one face and a hair outside the face in
+                    // front of it is a tie, and a tie has no right answer.
+                    bool edgy = false;
+                    for (int c = 0; c < field.Columns && !edgy; c++)
+                    for (int d = 0; d < field.Rows && !edgy; d++)
+                        edgy = Math.Abs(Slack(new Vector2I(c, d), point)) < Margin;
+                    if (edgy)
+                    {
+                        retired++;
+                        continue;
+                    }
+                    probes++;
+                    Vector2I got = field.CellAt(point);
+                    if (got == want)
+                        continue;
+                    wrong++;
+                    if (firstWrong.Length == 0)
+                        firstWrong = $"({point.X:F0},{point.Y:F0}) wanted "
+                                     + $"({want.X},{want.Y}) level {field.LevelAt(want)}"
+                                     + $" got ({got.X},{got.Y}) level {field.LevelAt(got)}";
+                }
+            }
+            Check($"every one of {probes} probes picks the face it is on",
+                wrong == 0 && probes > 1000,
+                wrong > 0 ? $"{wrong} wrong, first {firstWrong}"
+                          : $"only {probes} probes, {retired} retired");
+
+            GD.Print("relief: the depth key is the camera it claims to be");
+
+            // Against the projection written out from the angle, rather than
+            // against itself. Depth is compared and never read, so what has to
+            // hold is the ordering; the far edge and the flat-term scaling are
+            // both free to move under that, and this catches a swapped factor or
+            // a sign, which is what would make raising a thing push it away.
+            double elevation = Math.Asin(Math.Clamp(field.Squash, 0.01f, 0.99f));
+            double cos = Math.Cos(elevation), sin = Math.Sin(elevation);
+            double True(float row, float liftPx) =>
+                row / Math.Max(field.Squash, 0.01f) * cos
+                + liftPx / Math.Max(field.RiseFactor, 0.01f) * sin;
+            int disagree = 0;
+            var pairs = new List<(float Row, float Lift)>();
+            for (float row = 0.0f; row <= 600.0f; row += 47.0f)
+            for (int level = -1; level <= 2; level++)
+                pairs.Add((row, level * lift));
+            foreach ((float rowA, float liftA) in pairs)
+            foreach ((float rowB, float liftB) in pairs)
+            {
+                int mine = field.Depth(rowA, liftA).CompareTo(field.Depth(rowB, liftB));
+                int real = True(rowA, liftA).CompareTo(True(rowB, liftB));
+                if (mine != real && Math.Abs(True(rowA, liftA) - True(rowB, liftB)) > 0.01)
+                    disagree++;
+            }
+            Check("it orders every pair the way the projection does", disagree == 0,
+                $"{disagree} pairs out of order - raising a thing must bring it nearer");
+
+            GD.Print("relief: ground hides what stands below it and nothing else");
+
+            // The two reported pictures, asked as themselves rather than by
+            // repeating the rule. Both are needed: a test that only says no
+            // passes by returning nothing at all.
+            int flatOver = 0, stepMissed = 0, steps = 0, behind = 0, rises = 0;
+            var firstFlat = "";
+            var firstBehind = "";
+            for (int q = 0; q < field.Columns; q++)
+            for (int r = 0; r < field.Rows; r++)
+            {
+                var stand = new Vector2I(q, r);
+                float row = field.FlatAnchor(stand).Y;
+                float standing = field.LevelAt(stand) * lift;
+                var hiders = new HashSet<Vector2I>(field.Occluders(row, standing));
+                foreach (int heading in HexField.EdgeHeadings)
+                {
+                    Vector2I next = HexField.Step(stand, heading);
+                    if (!field.InBounds(next))
+                        continue;
+                    int step = field.LevelAt(next) - field.LevelAt(stand);
+                    if (field.FlatAnchor(next).Y <= field.FlatAnchor(stand).Y)
+                    {
+                        // Behind it. A rise back there is higher and is still not
+                        // allowed over the tank, and this is the half a rule
+                        // written on height alone gets wrong: the hill's wall
+                        // comes down across the turret of the tank in front of
+                        // it.
+                        if (step <= 0)
+                            continue;
+                        rises++;
+                        if (hiders.Contains(next))
+                        {
+                            behind++;
+                            if (firstBehind.Length == 0)
+                                firstBehind = $"({next.X},{next.Y}) over a tank in "
+                                              + $"front of it on ({q},{r})";
+                        }
+                        continue;
+                    }
+                    if (step <= 0 && hiders.Contains(next))
+                    {
+                        flatOver++;
+                        if (firstFlat.Length == 0)
+                            firstFlat = $"({next.X},{next.Y}) over a tank on "
+                                        + $"({q},{r}), {step} levels above it";
+                    }
+                    if (step <= 0)
+                        continue;
+                    steps++;
+                    if (!hiders.Contains(next))
+                        stepMissed++;
+                }
+            }
+            Check("the cell a tank is driving into never covers it", flatOver == 0,
+                $"{flatOver} did, first {firstFlat} - this cuts the hull off at the tracks");
+            Check($"but each of the {steps} rises in front of one does",
+                stepMissed == 0 && steps > 0,
+                steps == 0 ? "the map has no rise in front of any cell - it proves nothing"
+                           : $"{stepMissed} were left under the tank");
+            Check($"and none of the {rises} rises behind one does",
+                behind == 0 && rises > 0,
+                rises == 0 ? "the map has no rise behind any cell - it proves nothing"
+                           : $"{behind} did, first {firstBehind} - this paints a wall "
+                             + "across the turret");
+
+            GD.Print("relief: a route walks the board it is on");
+            int steep = 0;
+            var firstSteep = "";
+            for (int q = 0; q < field.Columns; q++)
+            for (int r = 0; r < field.Rows; r++)
+            {
+                var from = new Vector2I(q, r);
+                for (int c = 0; c < field.Columns; c++)
+                for (int d = 0; d < field.Rows; d++)
+                {
+                    var path = field.FindPath(from, new Vector2I(c, d));
+                    Vector2I at = from;
+                    foreach (Vector2I next in path)
+                    {
+                        if (Math.Abs(field.LevelAt(next) - field.LevelAt(at))
+                            > field.MaxClimb)
+                        {
+                            steep++;
+                            if (firstSteep.Length == 0)
+                                firstSteep = $"({at.X},{at.Y}) to ({next.X},{next.Y})";
+                        }
+                        at = next;
+                    }
+                }
+            }
+            Check("no route takes a step it cannot climb", steep == 0,
+                $"{steep} did, first {firstSteep}");
+        }
+        finally
+        {
+            field.SetRelief(was);
+        }
+    }
 }

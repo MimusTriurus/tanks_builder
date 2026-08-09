@@ -89,6 +89,33 @@ public sealed class Vehicle
 
     public bool Moving => PathStep < Path.Count;
 
+    /// <summary>How far off the datum it is drawn, in screen px. Carried in the
+    /// position already - <see cref="HexField.CellAnchor"/> is lifted, so driving
+    /// between two cells at different levels raises the sprite for free - and
+    /// kept here as well because the depth needs the two apart: which row it
+    /// stands on and how high it is standing are different terms of the same
+    /// sum, and the position is their total.</summary>
+    public float Height;
+
+    /// <summary>
+    /// How high it counts as standing for the purpose of what can hide it - the
+    /// <b>higher</b> of the two cells it is between, not the height it is drawn
+    /// at.
+    ///
+    /// Apart from <see cref="Height"/> because the two really do differ, and only
+    /// while climbing. Halfway up a vertical wall the tank is inside the rock,
+    /// and a cell that asked about its drawn height would paint over it for the
+    /// first half of every climb - reported as the hill swallowing the tank.
+    /// Saying "already up there" a moment early is invisible; the wall it is
+    /// climbing has no surface for the in-between pose to sit on anyway, which is
+    /// the honest form of this being a patch rather than a slope.
+    /// </summary>
+    public float Standing;
+
+    /// <summary>The ground that stands in front of this tank and above it,
+    /// repainted over it. Null until the harness builds one.</summary>
+    public ReliefCap? Cap;
+
     public readonly BodyPitch Pitch = new();
     public readonly BodyRumble Rumble = new();
     public readonly EngineTremble Tremble = new();
