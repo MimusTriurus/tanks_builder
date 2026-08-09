@@ -1,0 +1,6 @@
+[gd_scene load_steps=2 format=3 uid="uid://diffgapnk3ajg"]
+
+[ext_resource type="Script" uid="uid://dbroxhgv6hu5r" path="res://scripts/ReliefBench.cs" id="1_relief"]
+
+[node name="Relief" type="Node2D"]
+script = ExtResource("1_relief")
