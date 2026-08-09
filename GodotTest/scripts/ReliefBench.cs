@@ -169,14 +169,18 @@ public sealed partial class ReliefBench : Node2D
     ///
     /// Written out rather than hashed, unlike <see cref="TerrainSet.MixedAt"/>:
     /// a hashed board is right for a bench that wants variety and wrong for one
-    /// that wants a particular shape to look at. This one has a crowned hill, a
-    /// dry ditch beside flooded ones, and a shelf that puts a two-step wall in
-    /// view of a one-step wall so the facets can be compared.
+    /// that wants a particular shape to look at. A rise, a dry ditch beside
+    /// flooded ones, and the rise reaching the water so a two-level face is in
+    /// view of a one-level one.
+    ///
+    /// <b>Three levels and no more: -1, 0, +1.</b> The crown that used to sit at
+    /// +2 is gone, and what it bought was one wall twice as tall - a picture of
+    /// the same rule, not another rule.
     /// </summary>
     private static readonly string[] Relief =
     {
         "...11..",
-        "..121..",
+        "..111..",
         "wwv.1..",
         ".www...",
         "..ww...",
@@ -226,9 +230,65 @@ public sealed partial class ReliefBench : Node2D
         /// image plane and the pitch is a change of camera elevation instead.
         /// </summary>
         Turn,
+
+        /// <summary>
+        /// Both halves of the pitch axis: the turn, plus a vertical scale about
+        /// the contact patch.
+        ///
+        /// The axis decomposes into a share along the view - <c>cos(h)cos(e)</c>,
+        /// which is the turn - and a share lying in the image plane, which is
+        /// <c>sin(h)</c> and is pure foreshortening. Cosine and sine: where one
+        /// is nothing the other is everything, so between them the six headings
+        /// are covered and neither is a stand-in for the other.
+        ///
+        /// The foreshortening is a scale and never a taper. Under an orthographic
+        /// camera a rotation about a screen-horizontal axis leaves screen x
+        /// untouched, so the near end of a climbing tank is exactly as wide as
+        /// its far end; a keystone would be a perspective cue this camera does
+        /// not have.
+        ///
+        /// One scale for the whole sprite is the compromise, and it is worth
+        /// naming: the hull's length wants sin(e+t)/sin(e) and the turret's
+        /// height wants cos(e+t)/cos(e), which at 14 degrees is 1.39 against
+        /// 0.83. They pull opposite ways and a sprite cannot tell which of its
+        /// pixels is which, so this takes the hull's - it is the larger share of
+        /// the silhouette and the one carrying the slope.
+        /// </summary>
+        Pitch,
     }
 
     public Tilts Tilt = Tilts.Turn;
+
+    /// <summary>
+    /// How much bigger a tank is drawn per level it stands above the datum.
+    ///
+    /// <b>Not a tilt, and the difference is the whole of why it works.</b> A
+    /// tilt hangs on the grade, which exists only while a step is being taken,
+    /// so it comes on at the start of a leg and goes off at the end - and the
+    /// eye reads a thing that shrinks and then grows back as breathing rather
+    /// than as travel. This hangs on the height, so it arrives over the climb
+    /// and <i>stays</i>, which is what standing on a hill is.
+    ///
+    /// Uniform, both axes. The vertical foreshortening the projection really
+    /// does is anisotropic - see <see cref="Tilts.Pitch"/> - and anything that
+    /// scales one axis of a rigid object is deformation, which is the same
+    /// finding <see cref="BodyPitch"/> records at 3px of roof travel. A uniform
+    /// scale is a rigid motion and has no such reading.
+    ///
+    /// <b>Six percent, and the ceiling is the class sizes.</b> The bench draws
+    /// its three classes at 0.85 / 1.00 / 1.15, so 15% apart is what "a heavier
+    /// tank" already means on this board. A level has to stay well under that
+    /// or a light tank on a rise reads as a medium: at 0.06 it comes out 0.90
+    /// against the medium's 1.00, still clearly the smaller machine, where 0.10
+    /// would put it at 0.935 and start the argument.
+    ///
+    /// Strictly, an orthographic camera has no size falloff at all and this is a
+    /// convention rather than a projection. It is the same kind of statement the
+    /// 46px of screen lift already makes, said a second way - and a second way
+    /// is what makes it readable, because lift on its own is indistinguishable
+    /// from driving up the screen.
+    /// </summary>
+    public double RiseScale = 0.06;
 
     /// <summary>
     /// How fast the body takes up the slope it is on. omega 12, zeta 0.9: about
@@ -241,6 +301,23 @@ public sealed partial class ReliefBench : Node2D
     /// </summary>
     public double TiltStiffness = 144.0;
     public double TiltDamping = 21.6;
+
+    /// <summary>
+    /// How much of the sprite the foreshortening is allowed to have.
+    ///
+    /// The pitch does two opposite things at once and one scale cannot do both:
+    /// nose-on, the hull's length wants sin(e+t)/sin(e) and the turret's height
+    /// wants cos(e+t)/cos(e), which climbing toward the camera at 14 degrees is
+    /// 0.55 against 1.11. Applied whole, the 0.55 flattens the turret too and
+    /// the tank reads as run over rather than as tipped.
+    ///
+    /// So it gets the share of the silhouette that is actually ground-plane
+    /// extent. Measured on these proportions - hull 183 ground px long, 68 tall,
+    /// seen nose-on at 30 degrees - that is 91.5px of a 150px silhouette, near
+    /// enough 0.6. The number that comes out, 0.73, is also what preserves the
+    /// silhouette's total height, which is the other way of arriving at it.
+    /// </summary>
+    public double PitchShare = 0.6;
     private bool _art;
     private bool _check;
     private bool _flatPick;
@@ -303,6 +380,10 @@ public sealed partial class ReliefBench : Node2D
     /// hand the spring a value in the other one's units.
     /// </summary>
     private double _shear, _shearRate, _turn, _turnRate;
+
+    /// <summary>The vertical scale as drawn, resting at one rather than zero -
+    /// which is the whole of why it is not folded in with the other two.</summary>
+    private double _squash = 1.0, _squashRate;
 
     private double _wanted;
 
@@ -371,6 +452,28 @@ public sealed partial class ReliefBench : Node2D
 
     private static bool IsWater(Vector2I cell) => Mark(cell) == Water;
 
+    /// <summary>The levels on this board, scanned once.</summary>
+    private static (int Low, int High) Levels
+    {
+        get
+        {
+            if (_levels.High >= _levels.Low)
+                return _levels;
+            int low = 0, high = 0;
+            for (int q = 0; q < Columns; q++)
+            for (int r = 0; r < Rows; r++)
+            {
+                int level = LevelAt(new Vector2I(q, r));
+                low = Math.Min(low, level);
+                high = Math.Max(high, level);
+            }
+            _levels = (low, high);
+            return _levels;
+        }
+    }
+
+    private static (int Low, int High) _levels = (1, 0);
+
     // --- layout ------------------------------------------------------------
 
     /// <summary>Centre of a cell's hexagon with the height taken out - the
@@ -428,7 +531,10 @@ public sealed partial class ReliefBench : Node2D
 
         var best = new Vector2I(-1, -1);
         float front = float.NegativeInfinity;
-        for (int level = -1; level <= 2; level++)
+        // Over the levels the board actually carries, read off it rather than
+        // written down: a range that outlives an edit to the map is a picking
+        // rule that silently stops answering for the level somebody added.
+        for (int level = Levels.Low; level <= Levels.High; level++)
         {
             Vector2I cell = FlatCellAt(point + new Vector2(0.0f, level * Lift));
             if (!InBounds(cell) || LevelAt(cell) != level)
@@ -743,6 +849,12 @@ public sealed partial class ReliefBench : Node2D
                     "none" => Sides.None,
                     _ => Sides.Cliff,
                 };
+            else if (args[i] == "--rise" && i + 1 < args.Length
+                     && double.TryParse(args[i + 1],
+                                        System.Globalization.NumberStyles.Float,
+                                        System.Globalization.CultureInfo.InvariantCulture,
+                                        out double rise))
+                RiseScale = rise;
             else if (args[i] == "--crate")
                 _crate = true;
             else if (args[i] == "--sheet")
@@ -752,6 +864,7 @@ public sealed partial class ReliefBench : Node2D
                 {
                     "none" => Tilts.None,
                     "turn" => Tilts.Turn,
+                    "pitch" => Tilts.Pitch,
                     _ => Tilts.Shear,
                 };
             else if (args[i] == "--check")
@@ -978,7 +1091,7 @@ public sealed partial class ReliefBench : Node2D
             case Key.M: _crate = !_crate; break;
             // The tilt had a flag and no key, which meant the one mode that has
             // to be judged in motion could only be set before the run started.
-            case Key.N: Tilt = (Tilts)(((int)Tilt + 1) % 3); break;
+            case Key.N: Tilt = (Tilts)(((int)Tilt + 1) % 4); break;
             case Key.Bracketleft: StepGrade = Math.Max(0.0, StepGrade - 0.05); Restand(); break;
             case Key.Bracketright: StepGrade = Math.Min(0.60, StepGrade + 0.05); Restand(); break;
             case Key.R: Restand(); break;
@@ -1156,13 +1269,16 @@ public sealed partial class ReliefBench : Node2D
     {
         if (delta <= 0.0)
             return;
-        (double shear, double turn) = TargetTilt(_wanted, _facing);
+        (double shear, double turn, double squash) = TargetTilt(_wanted, _facing);
         _shearRate += (-TiltStiffness * (_shear - shear)
                        - TiltDamping * _shearRate) * delta;
         _shear += _shearRate * delta;
         _turnRate += (-TiltStiffness * (_turn - turn)
                       - TiltDamping * _turnRate) * delta;
         _turn += _turnRate * delta;
+        _squashRate += (-TiltStiffness * (_squash - squash)
+                        - TiltDamping * _squashRate) * delta;
+        _squash += _squashRate * delta;
     }
 
     private void Report()
@@ -1184,6 +1300,9 @@ public sealed partial class ReliefBench : Node2D
                 + "and rigid - no length on the silhouette changes";
             return;
         }
+        string risen = RiseScale > 0.0
+            ? $"   rise {Risen:F3}x at {_height / Math.Max(0.001f, Lift):F2} levels"
+            : "";
         double drawn = Math.Abs(_shear) * 68.0;
         double honest = Math.Abs(_wanted) * 68.0;
         _hud.Text =
@@ -1194,7 +1313,7 @@ public sealed partial class ReliefBench : Node2D
             + $"step {StepGround:F1} ground = {Lift:F1} screen px\n"
             + $"cell {_cell.X},{_cell.Y}   level {LevelAt(_cell)}"
             + (IsWater(_cell) ? " (water)" : "")
-            + "\n" + Tilted(drawn, honest) + "\n"
+            + "\n" + Tilted(drawn, honest) + risen + "\n"
             + Banks() + "\n"
             + "left click drive   [ ] step   B sides   N tilt   M tank/crate   "
             + "T ground art   G posts   R reset   ESC quit";
@@ -1219,18 +1338,26 @@ public sealed partial class ReliefBench : Node2D
                 return $"tilt: level - slope is {honest:F1}px of roof and none of "
                        + "it is drawn, which is what Age of Empires does";
             case Tilts.Turn:
+            case Tilts.Pitch:
                 // Drawn beside asked, because the whole of the spring is the gap
                 // between them: equal means it has arrived, and a still frame
                 // cannot tell settled from never-moved.
                 double want = Mathf.RadToDeg((float)(Math.Atan(_wanted) * along));
                 double now = Mathf.RadToDeg((float)_turn);
-                return $"tilt: turn {Math.Abs(now):F1} deg drawn of "
-                       + $"{Math.Abs(want):F1} asked (rigid)   "
-                       + $"axis {Math.Abs(along) * 100.0:F0}% along the view on "
-                       + $"heading {_facing:F0}"
-                       + (Math.Abs(along) < 0.01
-                          ? " - into the screen, so an image turn reaches none of it"
-                          : "");
+                double across = Math.Sin(Mathf.DegToRad(_facing));
+                string turnPart =
+                    $"tilt: turn {Math.Abs(now):F1} deg of {Math.Abs(want):F1}"
+                    + $"   axis {Math.Abs(along) * 100.0:F0}% along the view";
+                if (Tilt == Tilts.Turn)
+                    return turnPart + $" on heading {_facing:F0}"
+                           + (Math.Abs(along) < 0.01
+                              ? " - into the screen, so an image turn reaches none of it"
+                              : "");
+                (_, _, double target) = TargetTilt(_wanted, _facing);
+                return turnPart
+                       + $", {Math.Abs(across) * 100.0:F0}% in the image plane"
+                       + $"   |   vertical {_squash:F3} of {target:F3} asked "
+                       + "(the hull's share; the turret's wants the reciprocal)";
             default:
                 return $"tilt: shear {drawn:F1}px of roof, slope wanted {honest:F1}px"
                        + (drawn < 0.05 && honest > 0.05
@@ -1284,14 +1411,15 @@ public sealed partial class ReliefBench : Node2D
         (string Name, Tilts Mode)[] rows =
         {
             ("level", Tilts.None), ("shear", Tilts.Shear), ("turn", Tilts.Turn),
+            ("pitch", Tilts.Pitch),
         };
         (int Heading, double Grade, string Name)[] columns =
         {
             (330, -0.25, "330 down"), (330, 0.0, "330 flat"), (330, 0.25, "330 up"),
             (270, -0.25, "270 down"), (270, 0.0, "270 flat"), (270, 0.25, "270 up"),
         };
-        var cell = new Vector2(248.0f, 235.0f);
-        var start = new Vector2(160.0f, 260.0f);
+        var cell = new Vector2(248.0f, 195.0f);
+        var start = new Vector2(160.0f, 245.0f);
         Font font = ThemeDB.FallbackFont;
         var ink = new Color(0.92f, 0.94f, 0.98f);
         Tilts was = Tilt;
@@ -1306,9 +1434,10 @@ public sealed partial class ReliefBench : Node2D
             for (int c = 0; c < columns.Length; c++)
             {
                 Tilt = rows[r].Mode;
-                (float lean, float turn) = TiltOf(columns[c].Grade, columns[c].Heading);
+                (float lean, float turn, float squash) =
+                    TiltOf(columns[c].Grade, columns[c].Heading);
                 DrawTankAt(start + new Vector2(c * cell.X, r * cell.Y),
-                           columns[c].Heading, lean, turn);
+                           columns[c].Heading, lean, turn, squash);
             }
         }
         Tilt = was;
@@ -1525,38 +1654,62 @@ public sealed partial class ReliefBench : Node2D
     /// <summary>What the slope asks for, both ways at once and before any
     /// smoothing - the spring's target, and what the sheet draws directly
     /// because a sheet has no time in it.</summary>
-    private (double Shear, double Turn) TargetTilt(double grade, double heading)
+    private (double Shear, double Turn, double Squash) TargetTilt(double grade,
+                                                                  double heading)
     {
         double along = Math.Cos(Mathf.DegToRad(heading));
+        double across = Math.Sin(Mathf.DegToRad(heading));
+        // The camera's own elevation, read back off the tile like everything
+        // else here: sin(e) is the squash the ground is drawn at.
+        double elevation = Math.Asin(Math.Clamp(Squash, 0.01f, 0.99f));
+        // What the ground plane along the travel is worth on screen once the
+        // body has pitched - the same sine that draws it flat, asked at a
+        // different angle. Heading 90 climbs away from the camera and lengthens;
+        // 270 climbs toward it and foreshortens; across the screen sin(h) is
+        // zero and nothing happens, which is where the turn does all of it.
+        double tipped = elevation + Math.Atan(grade) * across;
+        double squash = Math.Sin(Math.Clamp(tipped, 0.02, Math.PI * 0.5))
+                        / Math.Sin(elevation);
+        // Only over the part of the sprite that is ground extent - see PitchShare.
+        squash = 1.0 + (squash - 1.0) * PitchShare;
         return (Math.Clamp(grade, -LeanCap, LeanCap) * -Math.Sign(along),
-                -Math.Atan(grade) * along * RiseFactor);
+                -Math.Atan(grade) * along * RiseFactor,
+                squash);
     }
 
-    private (float Shear, float Turn) TiltOf(double grade, double heading)
+    /// <summary>What a mode draws of the target, with no spring in it - the
+    /// sheet's view, where there is no time for one. The turn is negated because
+    /// a climb is nose <i>up</i>: the travel direction is where the nose is, and
+    /// Godot's positive rotation carries +x down the screen, so the sign that
+    /// reads as climbing is the one that reads as diving in the maths.</summary>
+    private (float Shear, float Turn, float Squash) TiltOf(double grade,
+                                                           double heading)
     {
-        double along = Math.Cos(Mathf.DegToRad(heading));
-        switch (Tilt)
+        (double shear, double turn, double squash) = TargetTilt(grade, heading);
+        return Tilt switch
         {
-            case Tilts.Shear:
-                return ((float)(Math.Clamp(grade, -LeanCap, LeanCap)
-                                * -Math.Sign(along)), 0.0f);
-            case Tilts.Turn:
-                // Negated because a climb is nose *up*: the travel direction is
-                // where the nose is, and Godot's positive rotation carries +x
-                // down the screen, so the sign that reads as climbing is the
-                // one that reads as diving in the maths.
-                return (0.0f, (float)(-Math.Atan(grade) * along * RiseFactor));
-            default:
-                return (0.0f, 0.0f);
-        }
+            Tilts.Shear => ((float)shear, 0.0f, 1.0f),
+            Tilts.Turn => (0.0f, (float)turn, 1.0f),
+            Tilts.Pitch => (0.0f, (float)turn, (float)squash),
+            _ => (0.0f, 0.0f, 1.0f),
+        };
     }
+
+    /// <summary>The uniform scale the tank's height is worth. One at the datum,
+    /// and it follows <see cref="_height"/> rather than the grade, so it arrives
+    /// over the climb and stays up there.</summary>
+    private float Risen =>
+        Lift <= 0.0f ? 1.0f : (float)(1.0 + RiseScale * (_height / Lift));
 
     private void DrawTank(Vector2 foot) =>
         DrawTankAt(foot, _facing,
                    Tilt == Tilts.Shear ? (float)_shear : 0.0f,
-                   Tilt == Tilts.Turn ? (float)_turn : 0.0f);
+                   Tilt is Tilts.Turn or Tilts.Pitch ? (float)_turn : 0.0f,
+                   Tilt == Tilts.Pitch ? (float)_squash : 1.0f,
+                   Risen);
 
-    private void DrawTankAt(Vector2 foot, double facing, float lean, float turn)
+    private void DrawTankAt(Vector2 foot, double facing, float lean, float turn,
+                            float squash, float rise = 1.0f)
     {
         AtlasSet atlas = _tank!;
         float scale = TankScale;
@@ -1568,16 +1721,26 @@ public sealed partial class ReliefBench : Node2D
         if (atlas.HasShadow)
             DrawTankLayer(atlas, AtlasSet.ShadowName, origin, scale, facing);
 
-        bool tilted = lean != 0.0f || turn != 0.0f;
+        bool tilted = lean != 0.0f || turn != 0.0f
+                      || Mathf.Abs(squash - 1.0f) > 0.0005f
+                      || Mathf.Abs(rise - 1.0f) > 0.0005f;
         if (tilted)
         {
-            // Both pivot on the contact patch, which is the pivot every tilt in
-            // the project uses: the tank turns or leans, the ground it stands on
-            // does not move.
+            // All three pivot on the contact patch, which is the pivot every
+            // tilt in the project uses: the tank turns, leans and foreshortens,
+            // and the ground it stands on does not move.
+            //
+            // Composed scale-then-shear-then-turn, so the foreshortening happens
+            // along the screen vertical the way the projection does it and the
+            // turn carries the result round. One matrix rather than three
+            // transforms, because three resample the sprite three times.
+            // The rise multiplies the whole basis, because a uniform scale
+            // commutes with the rest of it - which is the same fact as it not
+            // reading as deformation.
+            float c = Mathf.Cos(turn) * rise, s = Mathf.Sin(turn) * rise;
             var basis = new Transform2D(
-                new Vector2(Mathf.Cos(turn), Mathf.Sin(turn)),
-                new Vector2(-lean * Mathf.Cos(turn) - Mathf.Sin(turn),
-                            -lean * Mathf.Sin(turn) + Mathf.Cos(turn)),
+                new Vector2(c, s),
+                new Vector2(-lean * c - squash * s, -lean * s + squash * c),
                 Vector2.Zero);
             basis.Origin = foot - basis.BasisXform(foot);
             DrawSetTransformMatrix(basis);
