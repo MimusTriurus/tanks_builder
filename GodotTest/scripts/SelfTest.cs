@@ -1862,7 +1862,195 @@ public static class SelfTest
             Check("no wind, no lean at all",
                 grove.Trees.All(t => t.Lean == 0.0f),
                 $"{grove.Trees.Count(t => t.Lean != 0.0f)} still leaning");
+
+            // --- the blast wave ------------------------------------------
+            //
+            // Wind held at nothing throughout, so Lean is the flinch and
+            // nothing else - except in the last check here, which is about
+            // exactly the case where it is both.
+            grove.Wind = 0.0;
+            grove.Calm();
+
+            float flat = grove.Squash;
+            Vector2 Ground(Vector2 screen) => new(screen.X, screen.Y / flat);
+            Vector2 seat = Ground(field.CellCentre(grove.Trees[0].Cell));
+
+            // Ten crown pixels at the source, which is twice the shell's own
+            // and well clear of the threshold the flinch settles at.
+            (int[] Reached, int[] Sign, float[] Peak) Blast(double pixels, int shots)
+            {
+                grove.Calm();
+                for (int s = 0; s < shots; s++)
+                    grove.Shock(field.CellCentre(grove.Trees[0].Cell), pixels);
+                var reached = new int[grove.Trees.Count];
+                var sign = new int[grove.Trees.Count];
+                var peak = new float[grove.Trees.Count];
+                for (int i = 0; i < reached.Length; i++)
+                    reached[i] = -1;
+                for (int f = 0; f < 300; f++)
+                {
+                    grove.Blow(1.0 / 60.0);
+                    for (int i = 0; i < grove.Trees.Count; i++)
+                    {
+                        float now = grove.Trees[i].Flinch;
+                        if (reached[i] < 0 && now != 0.0f)
+                        {
+                            reached[i] = f;
+                            sign[i] = Math.Sign(now);
+                        }
+                        peak[i] = Math.Max(peak[i], Math.Abs(now));
+                    }
+                }
+                return (reached, sign, peak);
+            }
+
+            var wave = Blast(10.0, 1);
+            Check("a blast shoves the trees around it",
+                wave.Peak.Any(p => p > 0.0f),
+                $"{wave.Peak.Count(p => p > 0.0f)} of {grove.Planted} moved");
+
+            // The whole of why this needs no per-tree phase the way the wind
+            // does: the front travels, so the near trees go first. Asserted
+            // against the arrival the speed predicts rather than against each
+            // other, because "the far ones lag" is also true of a wave that
+            // arrives everywhere at once and merely falls off.
+            double perFrame = grove.BlastSpeed / 60.0;
+            int first = int.MaxValue, last = -1;
+            bool timed = true;
+            for (int i = 0; i < grove.Trees.Count; i++)
+            {
+                double d = Ground(grove.Trees[i].Ground).DistanceTo(seat);
+                if (d >= grove.BlastReach)
+                    continue;
+                int want = Math.Max(0, (int)Math.Ceiling(d / perFrame) - 1);
+                if (Math.Abs(wave.Reached[i] - want) > 1)
+                    timed = false;
+                first = Math.Min(first, wave.Reached[i]);
+                last = Math.Max(last, wave.Reached[i]);
+            }
+            // The spread rather than "some flinched at once": nothing grows
+            // within the keep-out, so the nearest tree there is is already
+            // seven frames out and no wave can shake anything sooner.
+            Check("and reaches them when a front travelling at its speed would",
+                timed && last - first >= 15,
+                $"the wood answers from frame {first} to frame {last} - a wave "
+                + "that arrived all at once would have those two the same");
+
+            Check("nothing past its reach feels it",
+                Enumerable.Range(0, grove.Trees.Count).All(
+                    i => Ground(grove.Trees[i].Ground).DistanceTo(seat)
+                         < grove.BlastReach || wave.Peak[i] == 0.0f),
+                $"reach {grove.BlastReach:F0}px of ground");
+
+            // Away from it, and only the part of "away" that runs across the
+            // screen: a tree straight up-board is pushed at the camera, and a
+            // shear cannot draw that lean at all. The trees with little
+            // sideways in their bearing are left out of the test for the same
+            // reason they barely move.
+            Check("and every tree is shoved away from it, not toward it",
+                Enumerable.Range(0, grove.Trees.Count).All(i =>
+                {
+                    Vector2 g = Ground(grove.Trees[i].Ground);
+                    double d = g.DistanceTo(seat);
+                    if (d >= grove.BlastReach || Math.Abs(g.X - seat.X) < 0.4 * d)
+                        return true;
+                    return wave.Sign[i] == Math.Sign(g.X - seat.X);
+                }),
+                "a tree leaning into the blast is the sign of the shove lost");
+
+            // Asked for crown pixels, delivers crown pixels - which is what the
+            // unit-impulse integrator is for, and the thing a closed-form
+            // normalisation would get wrong by enough to matter.
+            int loudest = Enumerable.Range(0, grove.Trees.Count)
+                                    .OrderByDescending(i => wave.Peak[i]).First();
+            {
+                Vector2 g = Ground(grove.Trees[loudest].Ground);
+                double d = g.DistanceTo(seat);
+                double want = 10.0 * (1.0 - d / grove.BlastReach)
+                              * Math.Abs(g.X - seat.X) / d;
+                double got = wave.Peak[loudest] * grove.SwayHeight;
+                Check("the shove arrives in the crown pixels it was asked for",
+                    Math.Abs(got - want) < 0.08 * want,
+                    $"{got:F2}px against {want:F2} at {d:F0}px of ground");
+            }
+
+            Check("and rings down to nothing",
+                grove.Trees.All(t => t.Flinch == 0.0f && t.FlinchRate == 0.0f),
+                "a spring left holding a pose bends the board for good");
+
+            // Two guns in one frame is twice one gun. The compounding statement
+            // CameraShake.Fire makes, and the reason it is put as two at once
+            // rather than one during the other's ring-down: out of phase they
+            // partly cancel, so "the second is always bigger" is false.
+            var twice = Blast(10.0, 2);
+            Check("two blasts at once shove twice as hard",
+                Math.Abs(twice.Peak[loudest] - 2.0f * wave.Peak[loudest])
+                    < 0.02f * wave.Peak[loudest],
+                $"{twice.Peak[loudest]:F4} against {wave.Peak[loudest]:F4}");
+
+            // A multiplier over the three strengths rather than a strength, so
+            // that a shot, a hit and a kill stay told apart - the argument the
+            // tremble level and the class size both make.
+            double wasBlast = grove.Blast;
+            grove.Blast = 2.0;
+            var harder = Blast(10.0, 1);
+            grove.Blast = 0.0;
+            var deaf = Blast(10.0, 1);
+            grove.Blast = wasBlast;
+            Check("the dial scales it, and nothing at zero",
+                Math.Abs(harder.Peak[loudest] - 2.0f * wave.Peak[loudest])
+                    < 0.02f * wave.Peak[loudest]
+                && deaf.Peak.All(p => p == 0.0f) && grove.Waves == 0,
+                $"{harder.Peak[loudest]:F4} at 2x, "
+                + $"{deaf.Peak.Count(p => p > 0.0f)} moved at 0x");
+
+            // The three events are meant to be told apart by how hard the wood
+            // answers, and the order of them is the statement: a tank letting
+            // go out-shoves the round that did it, which out-shoves the gun.
+            Check("a kill shoves harder than a hit, and a hit than a shot",
+                grove.DeathBlast > grove.HitBlast
+                && grove.HitBlast > grove.ShotBlast
+                    * MovementProfile.For("HTP").ShotShake,
+                $"{grove.DeathBlast:F0} / {grove.HitBlast:F0} / "
+                + $"{grove.ShotBlast * MovementProfile.For("HTP").ShotShake:F1}px "
+                + "for the heaviest gun");
+
+            // Wind and blast add. One writer for Lean, and a flinch that
+            // replaced the weather would be showing the wind switching off for
+            // a second and a half every time a gun went off.
+            grove.Wind = 3.0;
+            grove.Calm();
+            double markWeather = grove.Weather;
+            grove.Shock(field.CellCentre(grove.Trees[0].Cell), 10.0);
+            for (int f = 0; f < 30; f++)
+                grove.Blow(1.0 / 60.0);
+            var mixed = grove.Trees.Select(t => (t.Lean, t.Flinch)).ToList();
+            grove.Calm();
+            grove.Weather = markWeather;
+            for (int f = 0; f < 30; f++)
+                grove.Blow(1.0 / 60.0);
+            Check("the wind goes on blowing through a blast",
+                grove.Trees.Select(t => t.Lean).Zip(mixed)
+                     .All(p => Math.Abs(p.First + p.Second.Flinch
+                                        - p.Second.Lean) < 1e-5f)
+                && mixed.Any(m => m.Flinch != 0.0f),
+                "the lean is the weather plus the shove, or one of them is "
+                + "overwriting the other");
+
+            // The reset has to reach it: the flinch is the one thing in the
+            // grove that holds a pose with nothing driving it, and a front
+            // still crossing would arrive at a board that had just been put
+            // back. The wind is deliberately not reset - it is weather.
+            grove.Shock(field.CellCentre(grove.Trees[0].Cell), 10.0);
+            grove.Blow(1.0 / 60.0);
+            grove.Calm();
+            Check("and calming it stops every front and every flinch",
+                grove.Waves == 0
+                && grove.Trees.All(t => t.Flinch == 0.0f && t.FlinchRate == 0.0f),
+                "a wave in flight through a reset lands on a repaired board");
+
             grove.Wind = wasWind;
+            grove.Calm();
 
             field.Paint = wasPainted;
             bool wasSown = grove.Enabled;

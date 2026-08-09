@@ -468,6 +468,11 @@ public sealed partial class Grove : Node2D
         if (_planted.Count == 0)
             return;
         Weather += delta;
+        // The fronts move and deliver first, so a tree kicked this frame is
+        // integrated this frame rather than next: at 700px/s a frame is twelve
+        // ground pixels, which is a whole rank of trees getting their shove one
+        // frame late for nothing.
+        Rush(delta);
         foreach (PropNode tree in _planted)
         {
             float lean = 0.0f;
@@ -480,6 +485,31 @@ public sealed partial class Grove : Node2D
                 double phase = Weather * tree.SwayRate + tree.SwayPhase;
                 lean = (float)(Wind * (0.35 + 0.65 * gust) * Math.Sin(phase)
                                / SwayHeight);
+            }
+            // The flinch rings down on its own spring and adds to the wind,
+            // rather than overriding it: a gun going off does not stop the
+            // weather, and a tree that snapped to the blast and back would be
+            // showing the wind switching off for a second and a half.
+            //
+            // Integrated here rather than in Rush so that Lean has exactly one
+            // writer. Two of them - one for weather, one for blast - is how a
+            // pose ends up depending on which ran last, and it would show up as
+            // the wood stalling for the length of a shot.
+            if (tree.Flinch != 0.0f || tree.FlinchRate != 0.0f)
+            {
+                tree.FlinchRate += (float)((-BlastStiffness * tree.Flinch
+                                            - BlastDamping * tree.FlinchRate)
+                                           * delta);
+                tree.Flinch += (float)(tree.FlinchRate * delta);
+                // Landed: under a hundredth of a pixel of crown at any sane
+                // height, so going on integrating it only keeps the tree in the
+                // redraw list for ever.
+                if (Math.Abs(tree.Flinch) < 1e-5f && Math.Abs(tree.FlinchRate) < 1e-4f)
+                {
+                    tree.Flinch = 0.0f;
+                    tree.FlinchRate = 0.0f;
+                }
+                lean += tree.Flinch;
             }
             // The lean is written every frame and the redraw is not: a tree
             // whose crown has moved a thousandth of a pixel since it was last
@@ -517,6 +547,209 @@ public sealed partial class Grove : Node2D
     /// trees do is a function of it and their own hashed phase, so it is what
     /// says whether two runs are looking at the same gust.</summary>
     public double Weather;
+
+    // ---- the blast wave -------------------------------------------------
+
+    /// <summary>
+    /// A multiplier over the per-event strengths, and the one number the panel
+    /// puts on a slider.
+    ///
+    /// On by default, where <see cref="CameraShake.OnByDefault"/> is off, and
+    /// the difference is exactly that constant's argument: the shake moves the
+    /// whole frame, so an A/B taken near a shot measures the shake instead of
+    /// what it was aimed at. This moves trees, on wooded cells, and nothing
+    /// else - a diff of a tank is untouched by it.
+    /// </summary>
+    public double Blast = 1.0;
+
+    /// <summary>How far the wave carries, in ground px. About a cell and a half
+    /// - the hexagon's circumradius is 247, so the blast reaches the trees on
+    /// the cell it happened on and thins out over the ring of neighbours. Far
+    /// enough that a wood answers a gun going off in it, near enough that a shot
+    /// at one end of the board leaves the other end alone.</summary>
+    public double BlastReach = 320.0;
+
+    /// <summary>
+    /// How fast the front travels, in ground px per second.
+    ///
+    /// <b>This is what keeps the wood out of step, and it is the honest reason
+    /// rather than a dressed-up one.</b> The wind is desynchronised by hashing a
+    /// phase per tree, because there is no event to be at a distance from. A
+    /// blast has one, so the trees near it flinch first and the far ones a
+    /// quarter of a second later, which is what a wave is - and it costs no
+    /// per-tree state at all.
+    ///
+    /// Slow: a real blast wave is supersonic and would arrive everywhere on the
+    /// same frame, which is exactly the picture this is written to avoid. 700
+    /// puts a third of a second between the near trees and the far ones, which
+    /// is the reading, and reading is what the number is for.
+    /// </summary>
+    public double BlastSpeed = 700.0;
+
+    /// <summary>About 3.2Hz at a seventh of critical - slower and springier than
+    /// <see cref="CameraShake"/>'s 8Hz, because a tree is a big slow thing and a
+    /// camera is not. Three or four visible rebounds over a second and a half.
+    /// </summary>
+    public double BlastStiffness = 400.0;
+    public double BlastDamping = 6.0;
+
+    /// <summary>The gun's blast, as a multiple of the class's own
+    /// <see cref="MovementProfile.ShotShake"/>. Reused rather than given its own
+    /// three numbers: that field is already the measured statement that a heavy
+    /// gun goes off harder than a light one, and a second table by the same key
+    /// is the thing this project keeps refusing to write. 2.4 to 5.6px across
+    /// the classes, which is under a hit on purpose - see below.</summary>
+    public double ShotBlast = 0.8;
+
+    /// <summary>
+    /// A round bursting on armour, in crown px at the source.
+    ///
+    /// One number rather than per class, because the shell is the same shell
+    /// whoever fired it - and the key-pressed hit has no shooter to ask.
+    ///
+    /// Above even the heaviest gun's, which is a claim rather than a spare
+    /// pixel: a gun's blast is directed down the bore and most of it leaves,
+    /// where a round breaking up against a plate is a burst going out in every
+    /// direction at the tree line. The first numbers had the heavy's gun over a
+    /// hit and the ordering check caught it.
+    /// </summary>
+    public double HitBlast = 7.0;
+
+    /// <summary>A tank going up. The largest of the three by some way: it is the
+    /// one event of the three that is the machine itself letting go, and if it
+    /// did not out-shove its own gun the wood would be saying that dying is a
+    /// smaller thing than shooting.</summary>
+    public double DeathBlast = 16.0;
+
+    /// <summary>One front still travelling. A class rather than a struct because
+    /// the front advances in place; there are at most a handful of these.
+    /// </summary>
+    private sealed class Wave
+    {
+        public Vector2 Ground;     // ground space, field-local
+        public double Pixels;      // crown drift at the source
+        public double Front;       // ground px the front has reached
+    }
+
+    private readonly List<Wave> _waves = new();
+
+    /// <summary>Fronts still crossing the board. For the trace: a blast that
+    /// delivered nothing and one that was never fired are the same still
+    /// picture.</summary>
+    public int Waves => _waves.Count;
+
+    /// <summary>
+    /// The peak lean a unit impulse produces, run through the same integrator at
+    /// the same step rather than solved on paper.
+    ///
+    /// <see cref="Recoil.PeakFor"/>'s lesson, restated by
+    /// <see cref="CameraShake.UnitPeak"/>: the closed form and a 1/60
+    /// semi-implicit Euler step disagree by enough that a caption quoting the
+    /// analytic figure would be describing a different effect. Dividing by it is
+    /// what lets <see cref="Shock"/> be asked for crown pixels and deliver crown
+    /// pixels.
+    /// </summary>
+    public double UnitKick
+    {
+        get
+        {
+            const double step = 1.0 / 60.0;
+            double rate = 1.0, x = 0.0, peak = 0.0;
+            for (int i = 0; i < 240; i++)
+            {
+                rate += (-BlastStiffness * x - BlastDamping * rate) * step;
+                x += rate * step;
+                peak = Math.Max(peak, Math.Abs(x));
+            }
+            return peak;
+        }
+    }
+
+    /// <summary>
+    /// Something went off at <paramref name="at"/> - field-local screen px, the
+    /// space a tank's contact point and a tree's foot are both in - hard enough
+    /// to move a crown at the source by <paramref name="pixels"/>.
+    ///
+    /// Queued as a front rather than applied here, because the whole of the
+    /// effect is that it arrives at different trees at different times. Added to
+    /// whatever is already crossing rather than replacing it, the argument
+    /// <see cref="CameraShake.Fire"/> makes: three tanks in an engagement is the
+    /// case, and a wave that cancelled the one before it would read as the first
+    /// shot being undone by the second.
+    /// </summary>
+    public void Shock(Vector2 at, double pixels)
+    {
+        if (!Enabled || Blast <= 0.0 || pixels <= 0.0 || _planted.Count == 0)
+            return;
+        float squash = Squash;
+        _waves.Add(new Wave
+        {
+            Ground = new Vector2(at.X, at.Y / squash),
+            Pixels = pixels * Blast,
+            Front = 0.0,
+        });
+    }
+
+    /// <summary>Put the wood back at rest: no fronts crossing and nothing
+    /// leaning. For the reset, by the argument that resets the recoil spring -
+    /// the flinch is the one thing here that holds a pose with nothing driving
+    /// it, so leaving it would leave the board bent.</summary>
+    public void Calm()
+    {
+        _waves.Clear();
+        foreach (PropNode tree in _planted)
+        {
+            tree.Flinch = 0.0f;
+            tree.FlinchRate = 0.0f;
+        }
+    }
+
+    /// <summary>
+    /// Advance every front and hand its kick to the trees it passed this frame.
+    ///
+    /// <b>The direction is the horizontal share of a radial shove, and the trees
+    /// it barely moves are right to barely move.</b> A blast pushes a tree away
+    /// from it along the ground; a shear can only draw the part of that which
+    /// runs across the screen, so a tree straight up-board of the burst is being
+    /// pushed away from the camera and leans almost not at all. That is the same
+    /// projection that gives <see cref="CameraShake"/> four pixels broadside
+    /// against two into the screen, and faking it with a floor would be drawing
+    /// a lean the geometry does not have.
+    ///
+    /// The falloff runs linearly to nothing at <see cref="BlastReach"/> rather
+    /// than stopping at it: a hard edge is a line of trees that flinch beside a
+    /// line that does not, and on a lattice this dense that line is visible.
+    /// </summary>
+    private void Rush(double delta)
+    {
+        if (_waves.Count == 0)
+            return;
+        float squash = Squash;
+        double unit = UnitKick;
+        for (int w = _waves.Count - 1; w >= 0; w--)
+        {
+            Wave wave = _waves[w];
+            double was = wave.Front;
+            wave.Front += BlastSpeed * delta;
+            foreach (PropNode tree in _planted)
+            {
+                var g = new Vector2(tree.Ground.X, tree.Ground.Y / squash);
+                double d = g.DistanceTo(wave.Ground);
+                // Passed this frame, and once: the front only ever advances, so
+                // a tree is kicked by a given wave exactly when the band between
+                // last frame's radius and this one's contains it. No per-tree
+                // bookkeeping, and none that could go stale.
+                if (d < was || d >= wave.Front || d >= BlastReach)
+                    continue;
+                double share = d <= 0.001 ? 0.0 : (g.X - wave.Ground.X) / d;
+                double want = wave.Pixels * (1.0 - d / BlastReach) * share;
+                if (unit > 0.0)
+                    tree.FlinchRate += (float)(want / (SwayHeight * unit));
+            }
+            if (wave.Front >= BlastReach)
+                _waves.RemoveAt(w);
+        }
+    }
 
     /// <summary>
     /// Fade the trees on cells that have a tank in them, and let the rest come
@@ -630,8 +863,18 @@ public sealed partial class PropNode : Node2D
 
     /// <summary>How far a point drifts per pixel of height above the foot. A
     /// shear rather than an angle: at these amplitudes the two are the same
-    /// number, and the shear is what the draw call takes.</summary>
+    /// number, and the shear is what the draw call takes.
+    ///
+    /// The wind's lean plus the blast's, written once a frame by
+    /// <see cref="Grove.Blow"/> and by nothing else.</summary>
     public float Lean;
+
+    /// <summary>This tree's own blast spring: how far it is still shoved over,
+    /// and how fast that is changing. Per tree rather than one spring for the
+    /// wood, because the whole point is that the front reaches them at different
+    /// moments - see <see cref="Grove.Rush"/>.</summary>
+    public float Flinch;
+    public float FlinchRate;
 
     /// <summary>The lean the sprite was last drawn at. See
     /// <see cref="Grove.Blow"/>: what is drawn lags what is true by less than a

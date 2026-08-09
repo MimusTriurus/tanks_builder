@@ -166,6 +166,7 @@ public sealed partial class Main : Node2D
     private bool _clearFront;
     private float _ghost = Grove.GhostByDefault;
     private double _wind = -1.0;
+    private double _blast = -1.0;
 
     /// <summary>Whether the belts leave anything behind. On by default: a tank
     /// that leaves no mark is the picture the bench already had, so the A/B this
@@ -771,6 +772,16 @@ public sealed partial class Main : Node2D
                 i++;
                 _wind = Math.Max(0.0, gust);
             }
+            // Same shape as --wind and for the same reason: zero is the A/B, a
+            // board where a gun goes off in a wood and the wood does not notice.
+            else if (userArgs[i] == "--blast" && i + 1 < userArgs.Length
+                     && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+                                        CultureInfo.InvariantCulture,
+                                        out double blast))
+            {
+                i++;
+                _blast = Math.Max(0.0, blast);
+            }
             else if (userArgs[i] == "--drive" && i + 1 < userArgs.Length)
             {
                 string[] parts = userArgs[i + 1].Split(',');
@@ -868,6 +879,8 @@ public sealed partial class Main : Node2D
         // is the A/B this one is judged against.
         if (_wind >= 0.0)
             _grove.Wind = _wind;
+        if (_blast >= 0.0)
+            _grove.Blast = _blast;
         AddChild(_grove);
 
         // One vehicle per atlas that loaded, parked along HomeCells. Built here
@@ -2064,6 +2077,12 @@ public sealed partial class Main : Node2D
         // three recordings are variety, and the same one every time reads as one
         // event rather than as three tanks dying.
         v.Audio?.Destroyed(1 + v.HitCount % 3);
+        // The biggest of the three shoves, and it goes out from the hull that
+        // just let go. In Kill rather than in Land so it happens once: the round
+        // that did it has already sent its own, and a wreck taking further fire
+        // does not blow up again.
+        if (_grove is not null)
+            _grove.Shock(v.GroundPoint - _origin, _grove.DeathBlast);
     }
 
     /// <summary>
@@ -2151,6 +2170,16 @@ public sealed partial class Main : Node2D
         if (_shakeOn && v.Atlas is not null)
             _shake.Fire(v.Atlas.GroundDirection(v.Sprite.TurretFacing),
                         v.Profile.ShotShake);
+        // And the wood, which is the same event told to the other thing on the
+        // board that can answer it. Off the tank's contact point rather than the
+        // muzzle: the muzzle stands 60-70px out along the gun, and nothing grows
+        // within 83 of a cell's centre, so the source and the tube's end are on
+        // the same side of every tree there is - it would move the number and
+        // not the picture. Any tank's gun, not just the driven one, for the
+        // reason the camera shake gives just above.
+        if (_grove is not null)
+            _grove.Shock(v.GroundPoint - _origin,
+                         v.Profile.ShotShake * _grove.ShotBlast);
         // Third thing off one trigger, and a third clock, for the same reason:
         // the gun's report is 1.2s on the light and 3.4s on the heavy, and neither
         // is the 34 frames the flash runs or the 28 the tube takes to come home.
@@ -2426,6 +2455,12 @@ public sealed partial class Main : Node2D
         // the victim's, so it counts shells into this hull however many guns are
         // pointed at it.
         victim.Audio?.Struck(got, victim.HitCount);
+        // The wood answers the burst, from the hull it went off against. Every
+        // round, not only the ones that go through: a shell breaking up on
+        // armour is the louder of the two events, and a wood that only flinched
+        // at penetrations would be reading the damage table off the trees.
+        if (_grove is not null)
+            _grove.Shock(victim.GroundPoint - _origin, _grove.HitBlast);
         // Three rounds past the paint kill, and the matchup decides which rounds
         // those are. The two halves are deliberately apart - see
         // Gunnery.PenetrationsToKill. The tally is counted inside Damage/DamageTo,
@@ -2567,6 +2602,7 @@ public sealed partial class Main : Node2D
         ["--ghost"] = new[] { "ground.ghost" },
         ["--clear-front"] = new[] { "ground.clearfront" },
         ["--wind"] = new[] { "ground.wind" },
+        ["--blast"] = new[] { "ground.blast" },
     };
 
     private readonly HashSet<string> _flagged = new();
@@ -3137,6 +3173,32 @@ public sealed partial class Main : Node2D
                     ? "still - the board is a photograph of a board"
                     : $"{most:F1}px at the most leaning crown just now";
             });
+        // A multiplier over the three per-event strengths, not a strength: a
+        // shot, a hit and a tank going up are meant to be told apart by how hard
+        // the wood answers, and a knob that set the amplitude directly would
+        // flatten that on the first drag - the argument the tremble level and
+        // the class size both make. Read at the moment something goes off, like
+        // the recoil level: the kick is delivered once and the rest is a spring
+        // ringing down.
+        ui.Slide("ground.blast", "blast wave, crown shove  (--blast)",
+            0.0, 3.0, 0.1,
+            () => _grove?.Blast ?? 0.0,
+            v => { if (_grove is not null) _grove.Blast = v; },
+            "x", () =>
+            {
+                if (_grove is null || _grove.Planted == 0)
+                    return "";
+                if (_grove.Blast <= 0.0)
+                    return "deaf - a gun goes off in the wood and nothing moves";
+                double most = _grove.Trees.Max(t => Math.Abs(t.Flinch * t.Rise));
+                return $"{_grove.ShotBlast * _profile.ShotShake * _grove.Blast:F1}"
+                       + $"/{_grove.HitBlast * _grove.Blast:F0}"
+                       + $"/{_grove.DeathBlast * _grove.Blast:F0}px"
+                       + " at the source for a shot/hit/kill"
+                       + (_grove.Waves > 0
+                          ? $"   - {_grove.Waves} crossing, {most:F1}px flinching"
+                          : "");
+            });
         ui.Toggle("ground.clearfront", "no tree may cross a tank  (--clear-front)",
             () => _grove?.ClearFront == true,
             on => { if (_grove is not null) { _grove.ClearFront = on; SowGrove(); } });
@@ -3417,6 +3479,15 @@ public sealed partial class Main : Node2D
                      + $"/{_grove?.Trees.Count(t => t.Modulate.A < 0.99f) ?? 0}fade"
                      + (_grove?.Enabled == true ? "" : "!off")
                      + (_grove?.ClearFront == true ? "!clear" : "")
+                     // The blast: fronts still crossing and the hardest-shoved
+                     // crown. A wave delivers over a third of a second, so a
+                     // single frame of a capture can sit either side of the one
+                     // it was aimed at, and the two look the same in a still.
+                     // '!deaf' rather than nothing, for the shake's reason -
+                     // switched off and nothing having gone off are two zeroes.
+                     + $"  blast {_grove?.Waves ?? 0}w/"
+                     + $"{(_grove is { Planted: > 0 } g ? g.Trees.Max(t => Math.Abs(t.Flinch * t.Rise)) : 0.0f):F1}px"
+                     + (_grove is null || _grove.Blast > 0.0 ? "" : "!deaf")
                      // '!off' rather than nothing, because a still camera and a
                      // switched-off one are the same two zeroes - the marker the
                      // recoil spring and the tracer already carry.
@@ -3809,6 +3880,12 @@ public sealed partial class Main : Node2D
         // reset could leave a mark behind it.
         ClearShells();
         _marks?.Clear();
+        // With the shells and for the same reason: a front still crossing would
+        // arrive at a wood on a board that had just been put back, and the
+        // flinch is the one thing in the grove that holds a pose with nothing
+        // driving it. The wind is not reset - it is weather, and it was blowing
+        // before the key was pressed.
+        _grove?.Calm();
         foreach (Vehicle v in _vehicles)
         {
             CancelOrder(v);
