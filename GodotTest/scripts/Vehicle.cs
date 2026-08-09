@@ -77,6 +77,16 @@ public sealed class Vehicle
     /// </summary>
     public double LastTurretOffset;
 
+    /// <summary>Where it touched the ground at the end of last frame, field-local,
+    /// so this frame can tell how far and which way it travelled.
+    ///
+    /// Read back for <see cref="LastHullFacing"/>'s reason, and the list of ways
+    /// a tank moves is longer than the list of ways it turns: an order, the W/S
+    /// keys, a reset dropping it on its home cell. The wood is shouldered aside
+    /// by the hull passing, so what it needs is the passing and not whatever
+    /// arranged it.</summary>
+    public Vector2 LastGroundPoint;
+
     public bool Moving => PathStep < Path.Count;
 
     public readonly BodyPitch Pitch = new();

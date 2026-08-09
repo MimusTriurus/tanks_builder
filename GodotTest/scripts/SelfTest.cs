@@ -2037,6 +2037,120 @@ public static class SelfTest
                 "the lean is the weather plus the shove, or one of them is "
                 + "overwriting the other");
 
+            // --- a hull through the trees --------------------------------
+            //
+            // Same spring, different mechanism: a force while the hull is near
+            // rather than an impulse once. Driven at the reference cruise, from
+            // 40 ground px to the left of a tree, so what it should do is push
+            // that tree to the right and hold it there while the hull stays.
+            PropNode brushed = grove.Trees[0];
+            Vector2 hull = brushed.Ground - new Vector2(40.0f, 0.0f);
+            Vector2 step = new((float)(grove.BrushSpeed / 60.0), 0.0f);
+
+            float Pass(int frames, double level, Vector2 by)
+            {
+                double wasLevel = grove.Brushing;
+                grove.Brushing = level;
+                grove.Calm();
+                float top = 0.0f;
+                for (int f = 0; f < frames; f++)
+                {
+                    grove.Brush(hull, by, 1.0 / 60.0);
+                    grove.Blow(1.0 / 60.0);
+                    top = Math.Max(top, Math.Abs(brushed.Flinch * brushed.Rise));
+                }
+                grove.Brushing = wasLevel;
+                return top;
+            }
+
+            float wasBrushing = (float)grove.Brushing;
+            grove.Calm();
+            for (int f = 0; f < 20; f++)
+            {
+                grove.Brush(hull, step, 1.0 / 60.0);
+                grove.Blow(1.0 / 60.0);
+            }
+            Check("a hull going by shoulders the wood aside",
+                brushed.Flinch > 0.0f,
+                $"{brushed.Flinch * brushed.Rise:F2}px of crown, 40px of ground "
+                + "off the hull");
+
+            // Away from it, and the whole ring at once: what a hull does to a
+            // wood is part it, so the trees on both sides go outward. Along its
+            // travel instead would leave a tank driving up-board pushing every
+            // tree at the camera, which a shear cannot draw.
+            Check("and parts it, rather than pushing it the way it is going",
+                grove.Trees.All(t =>
+                {
+                    double d = Ground(t.Ground).DistanceTo(Ground(hull));
+                    if (d >= grove.BrushReach || t.Flinch == 0.0f)
+                        return true;
+                    return Math.Sign(t.Flinch)
+                           == Math.Sign(t.Ground.X - hull.X);
+                }),
+                "a tree leaning into the hull is the sign of the shove lost");
+
+            Check("nothing past its reach gives at all",
+                grove.Trees.All(
+                    t => Ground(t.Ground).DistanceTo(Ground(hull))
+                         < grove.BrushReach || t.Flinch == 0.0f),
+                $"reach {grove.BrushReach:F0}px of ground");
+
+            // The one that says this is a force and not a kick, and it has to be
+            // put as *held* rather than as a bigger peak: the spring settles in
+            // a tenth of a second, so six frames of drive already reach 82% of
+            // forty frames' worth and a peak comparison says almost nothing. A
+            // kick rings down, so the tree would be upright again while the hull
+            // was still alongside; a drive holds it over until the hull leaves.
+            double rest = wasBrushing * (1.0 - 40.0 / grove.BrushReach)
+                          * brushed.Rise / grove.SwayHeight;
+            grove.Brushing = wasBrushing;
+            grove.Calm();
+            for (int f = 0; f < 90; f++)
+            {
+                grove.Brush(hull, step, 1.0 / 60.0);
+                grove.Blow(1.0 / 60.0);
+            }
+            float held = brushed.Flinch * brushed.Rise;
+            for (int f = 0; f < 90; f++)
+                grove.Blow(1.0 / 60.0);
+            float sprung = brushed.Flinch * brushed.Rise;
+            Check("it holds the bend while the hull is there, being a force",
+                Math.Abs(held - rest) < 0.05 * rest && Math.Abs(sprung) < 0.02f * held,
+                $"{held:F2}px held against a {rest:F2} rest, {sprung:F2} once the "
+                + "hull has gone - a kick would be upright already");
+
+            // Which is also what bounds it: repeated kicks pile up without
+            // limit, and force over stiffness does not, so a tank that dawdles
+            // in the trees does not lay them flat.
+            float dawdled = Pass(400, wasBrushing, step);
+            Check("and no further than the spring's own rest",
+                dawdled < 2.0 * rest,
+                $"{dawdled:F2}px after seven seconds of it against a "
+                + $"{rest:F2} rest");
+
+            // Travel rather than a speed: a pivot moves no ground point, so it
+            // leaves the wood alone without anything here knowing what a pivot
+            // is - and a parked tank in a clearing is 83px from the nearest
+            // trunk anyway, which is the other half of the same statement.
+            Check("a tank that is not moving pushes nothing",
+                Pass(60, wasBrushing, Vector2.Zero) == 0.0f,
+                "displacement is what says it is happening at all");
+
+            Check("and a faster hull pushes harder",
+                Pass(30, wasBrushing, step * 0.25f) < Pass(30, wasBrushing, step),
+                "how hard a hull parts a wood is how fast it is going");
+
+            float once = Pass(30, wasBrushing, step);
+            float twofold = Pass(30, wasBrushing * 2.0, step);
+            Check("the dial scales it, and nothing at zero",
+                Math.Abs(twofold - 2.0f * once) < 0.02f * once
+                && Pass(30, 0.0, step) == 0.0f,
+                $"{twofold:F2}px at twice the setting against {once:F2}");
+
+            grove.Brushing = wasBrushing;
+            grove.Calm();
+
             // The reset has to reach it: the flinch is the one thing in the
             // grove that holds a pose with nothing driving it, and a front
             // still crossing would arrive at a board that had just been put

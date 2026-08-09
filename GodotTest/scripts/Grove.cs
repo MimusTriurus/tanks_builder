@@ -690,6 +690,99 @@ public sealed partial class Grove : Node2D
         });
     }
 
+    /// <summary>
+    /// How far a crown is shouldered over by a hull right against it at
+    /// <see cref="BrushSpeed"/>, in screen px.
+    ///
+    /// Five rather than the hit's seven: a tank going through the trees is a
+    /// bigger thing than a shell but it is leaning on them rather than bursting,
+    /// and the difference between the two has to be readable or there is no
+    /// point having both.
+    /// </summary>
+    public double Brushing = 5.0;
+
+    /// <summary>
+    /// How far from the hull the wood gives way, in ground px.
+    ///
+    /// <b>This is what makes it happen on the border and nowhere else, and it is
+    /// the keep-out doing the work rather than any test for entering a cell.</b>
+    /// Nothing grows within 83 of a cell's centre and the hexagon's near edge is
+    /// 107 out, so a tank parked in a clearing is a good 83 from the nearest
+    /// trunk and a tank halfway onto the next cell is standing in the ring. At 90
+    /// the first is barely touched and the second is in among them - which is
+    /// "driving on" and "driving off" expressed as geometry, with no moment to
+    /// detect and nothing to go stale.
+    /// </summary>
+    public double BrushReach = 90.0;
+
+    /// <summary>The speed <see cref="Brushing"/> is quoted at - the medium's
+    /// cruise. One reference rather than a fraction of each class's own top
+    /// speed, because how hard a hull shoulders a sapling aside is how fast it is
+    /// going: a heavy flat out at 175 disturbs the wood less than a light flat
+    /// out at 310, and saying otherwise would need a table nothing measured.
+    /// </summary>
+    public double BrushSpeed = 240.0;
+
+    /// <summary>
+    /// A hull passing at <paramref name="at"/>, having travelled
+    /// <paramref name="travel"/> since last frame - both field-local screen px.
+    ///
+    /// <b>A force while it is near, where the blast is an impulse once.</b> That
+    /// is the whole difference between the two and it is what they look like:
+    /// a burst leaves a tree already moving and lets go, and a hull leans on it
+    /// for as long as it takes to get past, so the tree bends over and springs
+    /// back behind it. Driving the spring rather than kicking it also means the
+    /// bend is bounded - it settles at force over stiffness however long the
+    /// tank takes - where repeated kicks would pile up without limit on a tank
+    /// that dawdled.
+    ///
+    /// <b>Shouldered aside, so the direction is away from the hull rather than
+    /// along its travel.</b> A tank driving up-board would push the trees in
+    /// front of it away from the camera, and a shear cannot draw that at all -
+    /// the same silence the blast has in that direction. But it is also not what
+    /// happens: what a hull does to a wood is part it, and parting is sideways
+    /// on screen whichever way the tank is going.
+    ///
+    /// <b>Travel rather than a speed, and it is not tidiness.</b> The
+    /// displacement says both how fast and that it is happening at all, so a tank
+    /// pivoting on the spot leaves the wood alone without anything here knowing
+    /// what a pivot is, and reverse works without a sign.
+    /// </summary>
+    public void Brush(Vector2 at, Vector2 travel, double delta)
+    {
+        if (!Enabled || Brushing <= 0.0 || _planted.Count == 0 || delta <= 0.0)
+            return;
+        float squash = Squash;
+        var src = new Vector2(at.X, at.Y / squash);
+        var way = new Vector2(travel.X, travel.Y / squash);
+        double moved = way.Length();
+        if (moved <= 0.0)
+            return;
+        // Capped at the reference rather than scaled past it: the fastest thing
+        // on the board is already at it, and a tank hurled about by a test would
+        // otherwise lay the wood flat.
+        double push = Brushing * Math.Min(1.0, moved / delta / BrushSpeed);
+        foreach (PropNode tree in _planted)
+        {
+            var g = new Vector2(tree.Ground.X, tree.Ground.Y / squash);
+            double d = g.DistanceTo(src);
+            if (d >= BrushReach || d <= 0.001)
+                continue;
+            double want = push * (1.0 - d / BrushReach) * (g.X - src.X) / d;
+            // Force, integrated by Blow with everything else. A spring driven by
+            // F rests at F over its stiffness - on paper. Stepped, it rests
+            // exactly (1 - c*dt) of that, which is a tenth of it at 1/60, so the
+            // setting would quietly mean nine tenths of what it says. The same
+            // disagreement UnitKick and Recoil.PeakFor are both about, and the
+            // same answer: ask the integrator that is actually running, not the
+            // closed form. Floored in case a frame is ever long enough to make
+            // the factor meaningless.
+            double slack = Math.Max(0.25, 1.0 - BlastDamping * delta);
+            tree.FlinchRate +=
+                (float)(want / SwayHeight * BlastStiffness / slack * delta);
+        }
+    }
+
     /// <summary>Put the wood back at rest: no fronts crossing and nothing
     /// leaning. For the reset, by the argument that resets the recoil spring -
     /// the flinch is the one thing here that holds a pose with nothing driving

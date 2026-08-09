@@ -167,6 +167,7 @@ public sealed partial class Main : Node2D
     private float _ghost = Grove.GhostByDefault;
     private double _wind = -1.0;
     private double _blast = -1.0;
+    private double _brush = -1.0;
 
     /// <summary>Whether the belts leave anything behind. On by default: a tank
     /// that leaves no mark is the picture the bench already had, so the A/B this
@@ -782,6 +783,14 @@ public sealed partial class Main : Node2D
                 i++;
                 _blast = Math.Max(0.0, blast);
             }
+            else if (userArgs[i] == "--brush" && i + 1 < userArgs.Length
+                     && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+                                        CultureInfo.InvariantCulture,
+                                        out double brush))
+            {
+                i++;
+                _brush = Math.Max(0.0, brush);
+            }
             else if (userArgs[i] == "--drive" && i + 1 < userArgs.Length)
             {
                 string[] parts = userArgs[i + 1].Split(',');
@@ -881,6 +890,8 @@ public sealed partial class Main : Node2D
             _grove.Wind = _wind;
         if (_blast >= 0.0)
             _grove.Blast = _blast;
+        if (_brush >= 0.0)
+            _grove.Brushing = _brush;
         AddChild(_grove);
 
         // One vehicle per atlas that loaded, parked along HomeCells. Built here
@@ -1358,6 +1369,11 @@ public sealed partial class Main : Node2D
         // would report the whole move as one frame's traverse and blip the motor.
         vehicle.LastTurretOffset =
             WrapAngle(vehicle.Sprite.TurretFacing - vehicle.Sprite.HullFacing);
+        // And the third baseline, for the third thing read back rather than
+        // announced. Left stale, a tank put back on its home cell would count
+        // the whole jump as one frame's travel and shoulder the wood aside on
+        // the frame after a reset.
+        vehicle.LastGroundPoint = vehicle.GroundPoint - _origin;
         vehicle.Sprite.QueueRedraw();
     }
 
@@ -2603,6 +2619,7 @@ public sealed partial class Main : Node2D
         ["--clear-front"] = new[] { "ground.clearfront" },
         ["--wind"] = new[] { "ground.wind" },
         ["--blast"] = new[] { "ground.blast" },
+        ["--brush"] = new[] { "ground.brush" },
     };
 
     private readonly HashSet<string> _flagged = new();
@@ -3199,6 +3216,26 @@ public sealed partial class Main : Node2D
                           ? $"   - {_grove.Waves} crossing, {most:F1}px flinching"
                           : "");
             });
+        // Its own row rather than a share of the blast's, because it is its own
+        // mechanism: a force while the hull is near against an impulse once, and
+        // the pair of them is the A/B that shows the difference. In crown pixels
+        // like the wind, because that is what both are looked at in.
+        ui.Slide("ground.brush", "hull through the trees  (--brush)",
+            0.0, 15.0, 0.5,
+            () => _grove?.Brushing ?? 0.0,
+            v => { if (_grove is not null) _grove.Brushing = v; },
+            "px", () =>
+            {
+                if (_grove is null)
+                    return "";
+                if (_grove.Brushing <= 0.0)
+                    return "a tank drives through the wood and nothing gives";
+                double sped = Math.Min(1.0, Active.Speed / _grove.BrushSpeed);
+                return $"{_grove.Brushing * sped:F1}px right against the hull at "
+                       + $"{Active.Speed:F0}px/s"
+                       + (Active.Speed <= 0.0
+                          ? "   - parked, so nothing is being pushed" : "");
+            });
         ui.Toggle("ground.clearfront", "no tree may cross a tank  (--clear-front)",
             () => _grove?.ClearFront == true,
             on => { if (_grove is not null) { _grove.ClearFront = on; SowGrove(); } });
@@ -3480,9 +3517,11 @@ public sealed partial class Main : Node2D
                      + (_grove?.Enabled == true ? "" : "!off")
                      + (_grove?.ClearFront == true ? "!clear" : "")
                      // The blast: fronts still crossing and the hardest-shoved
-                     // crown. A wave delivers over a third of a second, so a
-                     // single frame of a capture can sit either side of the one
-                     // it was aimed at, and the two look the same in a still.
+                     // crown - which counts the hulls pushing through as well,
+                     // because both drive the one spring. A wave delivers over a
+                     // third of a second, so a single frame of a capture can sit
+                     // either side of the one it was aimed at, and the two look
+                     // the same in a still.
                      // '!deaf' rather than nothing, for the shake's reason -
                      // switched off and nothing having gone off are two zeroes.
                      + $"  blast {_grove?.Waves ?? 0}w/"
@@ -3555,6 +3594,17 @@ public sealed partial class Main : Node2D
         // than reached ones - a tank spends most of an order between two, and
         // the trees have to be out of the way for the crossing, not after it.
         _grove?.Reveal(Standing(), delta);
+        // The hulls shoulder the wood aside, before Blow integrates what they
+        // and the blast between them asked for. Every tank rather than the
+        // driven one, for the reason its gun is: a tank left under orders goes
+        // on driving after you have selected somebody else.
+        if (_grove is not null)
+            foreach (Vehicle vehicle in _vehicles)
+            {
+                Vector2 now = vehicle.GroundPoint - _origin;
+                _grove.Brush(now, now - vehicle.LastGroundPoint, delta);
+                vehicle.LastGroundPoint = now;
+            }
         _grove?.Blow(delta);
 
         // The view last of all, after everything that could have fired this
