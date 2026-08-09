@@ -2073,6 +2073,59 @@ public sealed partial class Main : Node2D
     /// target is zero for ever and the angle never leaves it, so nothing here
     /// costs a flat board a pixel.
     /// </summary>
+    /// <summary>
+    /// Put height on the board, or take it off, with everything standing on it
+    /// already standing on it.
+    ///
+    /// The switch is not the interesting part - the settling afterwards is, and
+    /// every line of it is something that would otherwise be wrong until the next
+    /// time it happened to be recomputed:
+    ///
+    /// <list type="bullet">
+    /// <item><b>Orders are cancelled.</b> A route was found against the board it
+    /// was found on, and the climb limit is part of that board: a path that
+    /// walked a cell which has just become a two-level step is a path the driving
+    /// will refuse, and a tank that stops halfway through an order reads as the
+    /// pathing being broken.</item>
+    /// <item><b>Everybody is parked.</b> Standing still is where the two heights
+    /// are read and where the depth is stamped, and a tank whose cell just rose
+    /// forty-six pixels is otherwise left hanging under it.</item>
+    /// <item><b>The lean is reset rather than sprung down.</b> It is not a slope
+    /// that changed, it is the board; letting the spring settle from wherever it
+    /// was would draw a tank leaning into ground that has just been taken
+    /// away.</item>
+    /// <item><b>The ruts are cleared.</b> They were laid at the height the ground
+    /// was then, and there is no honest place to put them now - a ribbon that
+    /// half climbs is worse than no ribbon.</item>
+    /// <item><b>The wood is re-sown.</b> Trees are planted off the cell centre
+    /// and sorted off its depth, both of which just moved.</item>
+    /// </list>
+    /// </summary>
+    private void SetRelief(bool on)
+    {
+        _relief = on;
+        // Already there is not a change, and the settling below is not free: it
+        // cancels orders. panel.json applies its defaults through this setter -
+        // which is the point of them being defaults rather than field
+        // initialisers - so a board that comes up flat and is told to be flat
+        // would have thrown away whatever --drive had just asked for, and the
+        // capture would show a tank standing where it started.
+        if (on == _field.HasRelief)
+            return;
+        _field.SetRelief(on ? ReliefMap(_field.Columns, _field.Rows) : null);
+        foreach (Vehicle v in _vehicles)
+        {
+            CancelOrder(v);
+            v.Lean.Reset();
+            v.Sprite.Climb = 0.0;
+            v.Sprite.Rise = 1.0f;
+            Park(v);
+        }
+        _marks?.Clear();
+        SowGrove();
+        _field.QueueRedraw();
+    }
+
     private void UpdateLean(Vehicle v, double delta)
     {
         double grade = 0.0;
@@ -2796,6 +2849,7 @@ public sealed partial class Main : Node2D
         ["--hit-scale"] = new[] { "armour.calibre" },
         ["--destroy"] = new[] { "armour.destroy" },
         ["--turret-sound"] = new[] { "sound.turret_motor" },
+        ["--relief"] = new[] { "ground.relief" },
         ["--terrain"] = new[] { "ground.terrain" },
         ["--no-forest"] = new[] { "ground.forest" },
         ["--ghost"] = new[] { "ground.ghost" },
@@ -3276,6 +3330,12 @@ public sealed partial class Main : Node2D
                 SowGrove();
                 _field.QueueRedraw();
             });
+        // The board's shape, where the row above is its paint. Two rows and not
+        // one, because they are two different things about the ground and only
+        // one of them is a picture: a kind does not cost movement, block a lane
+        // or hide a tank behind it, and a level does all three. See TerrainSet.
+        ui.Toggle("ground.relief", "height on the board  (--relief)",
+            () => _field.HasRelief, SetRelief);
         // A switch, not a dial: how much forest there is comes from the terrain
         // list above, because forest is one of the kinds of ground. This is the
         // A/B - the same board with the trees taken off it.

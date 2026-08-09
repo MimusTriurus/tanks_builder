@@ -5336,5 +5336,46 @@ public static class SelfTest
         {
             field.SetRelief(was);
         }
+
+        // Taking it off again has to leave the board where it was: the panel row
+        // turns it off as readily as on.
+        GD.Print("relief: and taking it off puts the board back");
+        int moved = 0;
+        for (int q = 0; q < field.Columns; q++)
+        for (int r = 0; r < field.Rows; r++)
+            if (field.CellAnchor(q, r) != field.FlatAnchor(q, r))
+                moved++;
+        Check("nothing is left lifted", !field.HasRelief && moved == 0,
+            $"{moved} cells still lifted");
+
+        // And the claim that says why the draw order behind it can be cached at
+        // all. Height moves a cell's depth key by lift*tan(e)^2, and cells sit at
+        // least half a row apart down the board: while the one is smaller than
+        // the other, <b>relief cannot reorder the cells among themselves</b> -
+        // all it reorders is cells against the things standing on them.
+        //
+        // Worth asserting rather than assuming, because it is a threshold and not
+        // a fact: it holds at 1:4 with room to spare and stops holding somewhere
+        // past 1:2.4, and the failure is the quietest kind - the board is still
+        // drawn, in the sequence the hill wanted, and what it costs is one cell
+        // overhanging the wrong neighbour.
+        float gap = float.MaxValue;
+        for (int q = 0; q < field.Columns; q++)
+        for (int r = 0; r < field.Rows; r++)
+        for (int c = 0; c < field.Columns; c++)
+        for (int d = 0; d < field.Rows; d++)
+        {
+            float apart = Math.Abs(field.FlatAnchor(q, r).Y - field.FlatAnchor(c, d).Y);
+            if (apart > 0.01f)
+                gap = Math.Min(gap, apart);
+        }
+        field.SetRelief(Main.ReliefMap(field.Columns, field.Rows));
+        (int low, int high) = field.LevelRange;
+        float tan = field.Squash / Math.Max(field.RiseFactor, 0.01f);
+        float shift = (high - low) * field.Lift * tan * tan;
+        field.SetRelief(was);
+        Check("and no cell ever changes places with another over it",
+            shift < gap, $"height moves a cell {shift:F1}px of depth against "
+                         + $"{gap:F1}px between the closest two");
     }
 }
