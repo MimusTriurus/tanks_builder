@@ -5261,6 +5261,46 @@ public static class SelfTest
                            : $"{behind} did, first {firstBehind} - this paints a wall "
                              + "across the turret");
 
+            GD.Print("relief: every step has exactly one face across it");
+
+            // A gap and a double-drawn face are both quiet - one shows the plain
+            // through the hill from a certain angle, the other is two identical
+            // polygons - so the pairing is asserted rather than looked at. Every
+            // adjacent pair, both ways round.
+            int gaps = 0, twice = 0, spurious = 0, faces = 0;
+            var firstPair = "";
+            for (int q = 0; q < field.Columns; q++)
+            for (int r = 0; r < field.Rows; r++)
+            {
+                var here = new Vector2I(q, r);
+                foreach (int heading in HexField.EdgeHeadings)
+                {
+                    Vector2I over = HexField.Step(here, heading);
+                    if (!field.InBounds(over))
+                        continue;
+                    bool mine = field.DrawsFace(here, heading);
+                    bool theirs = field.DrawsFace(over, (heading + 180) % 360);
+                    if (mine)
+                        faces++;
+                    bool step = field.LevelAt(here) != field.LevelAt(over);
+                    if (mine && theirs)
+                        twice++;
+                    else if (step && !mine && !theirs)
+                        gaps++;
+                    else if (!step && (mine || theirs))
+                        spurious++;
+                    else
+                        continue;
+                    if (firstPair.Length == 0)
+                        firstPair = $"({q},{r}) to ({over.X},{over.Y})";
+                }
+            }
+            Check($"each of the {faces} faces is drawn by exactly one of its two cells",
+                twice == 0 && gaps == 0 && spurious == 0 && faces > 0,
+                faces == 0 ? "no faces at all - the map is flat and it proves nothing"
+                           : $"{gaps} gaps, {twice} drawn twice, {spurious} on the "
+                             + $"level, first {firstPair}");
+
             GD.Print("relief: a wood on a rise sorts where it stands");
             Woods(field, grove, elevation, Check);
 
