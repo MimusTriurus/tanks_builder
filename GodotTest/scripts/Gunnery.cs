@@ -154,6 +154,38 @@ public static class Gunnery
     public const int PenetrationsToKill = 3;
 
     /// <summary>
+    /// How fast the turret is driven, against the tuned per-class triple.
+    ///
+    /// **A multiplier over <see cref="MovementProfile.TurretRate"/> rather than a
+    /// rate**, for the reason the tremble level and the size level are: the three
+    /// figures are spread apart on purpose - 240 / 175 / 120, a 2.0x spread that
+    /// is most of what makes a heavy turret feel like one - and a control that
+    /// set the rate directly would flatten that spread on its first drag.
+    ///
+    /// One knob for all three tanks, because it is a question about the
+    /// mechanism rather than about a tank, and answering it on one while the
+    /// other two lay their guns at some other rate would destroy the comparison
+    /// the control exists for.
+    ///
+    /// A mutable static here rather than a field on the harness, which is where
+    /// every other level lives, and the reason is <see cref="TraverseRate"/>
+    /// below: the rate has two readers that share no object.
+    /// </summary>
+    public static double TraverseLevel { get; set; } = 1.0;
+
+    /// <summary>The rate this class's turret is actually driven at, deg/s.
+    ///
+    /// One definition because there are two readers and they are not
+    /// interchangeable: <see cref="Main.UpdateAttack"/> spends it as a budget,
+    /// and <see cref="VehicleAudio.TraverseEffort"/> divides by it to ask how
+    /// hard the motor is working. Scale the first and not the second and every
+    /// traverse sounds like a motor pinned at its stop - the same shape of
+    /// mistake as a threshold left behind when the quantity under it changed.
+    /// </summary>
+    public static double TraverseRate(MovementProfile profile) =>
+        profile.TurretRate * TraverseLevel;
+
+    /// <summary>
     /// The turret swung towards a heading by at most <paramref name="budget"/>
     /// degrees, landing exactly on it when it is within reach.
     ///

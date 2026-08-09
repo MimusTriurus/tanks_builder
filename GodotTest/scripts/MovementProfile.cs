@@ -92,13 +92,34 @@ public sealed class MovementProfile
     /// waiting to be shot at.
     ///
     /// Ordered the way everything else here is - the light swings fastest - and
-    /// slow enough on the heavy that a target appearing behind it costs real
-    /// time. What the gun can be laid on is quantised to 30 degrees by the
-    /// atlas, so this only decides *when* the picture jumps; it is written as a
-    /// rate because that is what stays right the day the turret is rendered
-    /// finer, which is the same argument <see cref="TurretScan"/> makes.
+    /// the spread from light to heavy is 2.0x, so a rear target still costs the
+    /// heavy about twice what it costs the light. What the gun can be laid on is
+    /// quantised to 15 degrees by the atlas, so this only decides *when* the
+    /// picture jumps; it is written as a rate because that is what stays right
+    /// the day the turret is rendered finer, which is the same argument
+    /// <see cref="TurretScan"/> makes.
+    ///
+    /// **These were 95 / 70 / 48 and read as sluggish, and the number that says
+    /// why is the ratio against the hull, not the rate itself.** At those
+    /// figures the turret was 2.7-2.9x slower than its own hull on every class,
+    /// so spinning the tank was the quicker way to point the gun - which is
+    /// backwards for a turreted vehicle, and it is what the eye was reporting.
+    /// At 240 / 175 / 120 the two are comparable (0.92 / 0.88 / 0.86 of the hull
+    /// rate) and neither is obviously the way round to do it.
+    ///
+    /// Not raised past the hull rate, which was the other candidate. The hull
+    /// rates here are arcade-fast in absolute terms - 260 deg/s is a full spin
+    /// in 1.4s - so "the turret must beat the hull" is a claim about this
+    /// harness's hull numbers rather than about tanks, and matching them is as
+    /// far as that reasoning carries. Past it the traverse stops costing
+    /// anything at all and the heavy's reload becomes the only thing that makes
+    /// it heavy while standing still.
+    ///
+    /// The exact figure is meant to be argued with, which is what
+    /// <see cref="Gunnery.TraverseLevel"/> is for: 0.4x on the slider is the old
+    /// feel, and the caption under it prints the swing against the hull's.
     /// </summary>
-    public double TurretRate { get; init; } = 70.0;
+    public double TurretRate { get; init; } = 175.0;
 
     /// <summary>
     /// How far the view jolts when this gun fires, in screen pixels of peak
@@ -143,21 +164,21 @@ public sealed class MovementProfile
     public static readonly MovementProfile Light = new()
     {
         Tag = "LTP", TopSpeed = 310.0, Accel = 620.0, TurnRate = 260.0,
-        Size = 0.85, TurretRate = 95.0, ReloadTime = 2.2, Rank = 0,
+        Size = 0.85, TurretRate = 240.0, ReloadTime = 2.2, Rank = 0,
         ShotShake = 3.0,
     };
 
     public static readonly MovementProfile Medium = new()
     {
         Tag = "MTP", TopSpeed = 240.0, Accel = 420.0, TurnRate = 200.0,
-        Size = 1.00, TurretRate = 70.0, ReloadTime = 3.2, Rank = 1,
+        Size = 1.00, TurretRate = 175.0, ReloadTime = 3.2, Rank = 1,
         ShotShake = 4.5,
     };
 
     public static readonly MovementProfile Heavy = new()
     {
         Tag = "HTP", TopSpeed = 175.0, Accel = 260.0, TurnRate = 140.0,
-        Size = 1.15, TurretRate = 48.0, ReloadTime = 4.8, Rank = 2,
+        Size = 1.15, TurretRate = 120.0, ReloadTime = 4.8, Rank = 2,
         ShotShake = 7.0,
     };
 

@@ -354,7 +354,7 @@ public sealed partial class VehicleAudio : Node2D
         double swung = Math.Abs(WrapAngle(offset - v.LastTurretOffset));
         v.LastTurretOffset = offset;
         double ringing = delta > 0.0 ? swung / delta : 0.0;
-        double effort = ringing / Math.Max(v.Profile.TurretRate, 1e-6);
+        double effort = TraverseEffort(ringing, v.Profile);
         // The offset is read and consumed whether the motor is switched on or
         // not, above, so that turning it on mid-traverse does not see the whole
         // swing since the last time anyone looked as one frame of it.
@@ -458,6 +458,23 @@ public sealed partial class VehicleAudio : Node2D
         Play(_armour, Common[$"{name}{which}"] ?? Common[$"{name}1"], ArmourDb,
              EventTrim, PitchOf(shell));
     }
+
+    /// <summary>
+    /// How hard the traverse motor is working, 0 at rest and 1 flat out.
+    ///
+    /// The ring's rate against the rate this turret is *driven* at, which is the
+    /// per-class figure times <see cref="Gunnery.TraverseLevel"/> - so turning the
+    /// traverse up makes the gun swing faster without making the motor sound
+    /// permanently pinned. Reading the raw profile figure here was correct only
+    /// while there was no knob over it.
+    ///
+    /// Static and named for the reason <see cref="ImpactFor"/> is: it lets the
+    /// claim "the motor is normalised against the same rate the gun traverses at"
+    /// be asserted, and there was nothing to hang that on while it was a division
+    /// halfway down <c>Update</c>.
+    /// </summary>
+    public static double TraverseEffort(double ringing, MovementProfile profile) =>
+        ringing / Math.Max(Gunnery.TraverseRate(profile), 1e-6);
 
     /// <summary>
     /// Whether a shell that reached this level bounced or went in.
