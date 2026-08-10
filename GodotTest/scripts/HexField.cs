@@ -921,95 +921,40 @@ public sealed partial class HexField : Node2D
         Vector2 centre = CellCentre(cell);
         Vector2[] corner = Corners();
 
-        // The cell's own ground, and its rectangle, so a screen point on this
-        // hexagon can be turned into a point in the art. Null on a board with no
-        // terrain loaded, which is a working state - see Terrain.
-        Texture2D? art = Terrain is { Any: true } ? Terrain.Texture(TypeAt(cell))
-                                                  : null;
-        Rect2 rect = art is null ? default
-            : Terrain!.RectAt(centre, Terrain.ScaleTo(Atlas!.HexRect));
-
         var down = new Vector2(0.0f, drop);
         for (int i = 0; i < NearHeading.Length; i++)
         {
             Vector2 a = centre + corner[i], b = centre + corner[(i + 1) % 6];
             var quad = new[] { a, b, b + down, a + down };
-            if (art is null)
-            {
-                into.DrawColoredPolygon(quad, WallInk(NearHeading[i]));
-                continue;
-            }
-
-            // The face is a band of this cell's own dirt, taken from just inside
-            // the edge and stretched down it.
-            //
-            // <b>Off the ground rather than off a new file, and that is a choice
-            // with a reason rather than a saving.</b> It is the same soil by
-            // construction, so it cannot disagree with the top about what kind of
-            // ground this is, and at the seam it is not merely similar - the top
-            // of the wall samples the very texels the top face has there, so
-            // there is no join to line up. Stretching a thin band downward also
-            // gives the face vertical streaks for free, which is what a cut in
-            // earth looks like; a wall taken from a taller band comes out as
-            // smeared grass.
-            //
-            // A drawn cliff would be better and drops straight in here. This is
-            // what the board looks like until somebody paints one.
-            Vector2 towardsA = (centre - a).Normalized();
-            Vector2 towardsB = (centre - b).Normalized();
-            Vector2 uvA = (a + towardsA * WallSeam - rect.Position) / rect.Size;
-            Vector2 uvB = (b + towardsB * WallSeam - rect.Position) / rect.Size;
-            Vector2 inA = towardsA * WallBand / rect.Size;
-            Vector2 inB = towardsB * WallBand / rect.Size;
-            into.DrawColoredPolygon(quad, WallTint(NearHeading[i]),
-                new[] { uvA, uvB, uvB + inB, uvA + inA }, art);
+            into.DrawColoredPolygon(quad, WallInk(NearHeading[i]));
         }
     }
 
+
     /// <summary>
-    /// How far inside its own edge the band starts, in screen px.
+    /// A face's colour, by which way it faces.
     ///
-    /// Not zero, and the first version was. The art is painted with the hexagon's
-    /// border drawn on it - a grey stripe a few px wide - so a band starting at
-    /// the edge starts on the border, and stretched down a drop of forty-six px a
-    /// four-px stripe becomes twenty: every cliff came out with a wide grey rail
-    /// along the top. Starting below it leaves the border where it belongs, on
-    /// the top face, and costs the one property the seam had - that the wall's
-    /// first row is the very texel the face has there - which is worth nothing
-    /// when that texel is a drawn line.
+    /// <b>Flat earth, and it used to be a band of the cell's own ground stretched
+    /// down the drop.</b> That version could not disagree with the top about what
+    /// kind of ground it was and gave the cut vertical streaks for free, and it
+    /// is in the history if it is ever wanted back; what it also did was carry
+    /// the grass down the wall, so a cliff read as a smeared top face rather than
+    /// as earth under one. A drawn cliff would beat both and drops straight in
+    /// here - this is what the board looks like until somebody paints one.
+    ///
+    /// <b>The two shades are what makes it a block.</b> The face square to the
+    /// camera keeps more of the light than the two flanking it; without that, a
+    /// column of one colour reads as a hexagon with a skirt, and no amount of
+    /// picking the brown fixes it.
     /// </summary>
-    private const float WallSeam = 6.0f;
-
-    /// <summary>How deep into the plate the face's band is taken from, in screen
-    /// px, measured from <see cref="WallSeam"/>. Thin, because it is stretched
-    /// over the whole drop: wider and the wall reads as smeared grass rather than
-    /// as a cut, and thinner and it repeats one row of texels into vertical
-    /// stripes.</summary>
-    private const float WallBand = 14.0f;
-
-    /// <summary>How much of the light a face keeps, by which way it faces. The
-    /// two that face the camera catch more than the four flanking them, which is
-    /// all it takes for the block to read as a solid rather than as a hexagon
-    /// with a skirt.
-    ///
-    /// A multiplier now that the face carries the ground's own colour, where it
-    /// used to be a colour of its own. That is the whole of why a pond can have
-    /// this: the old fixed earth existed to stop a wall taken from the water's
-    /// blue giving it vertical blue sides, and a band of the pond's own surface
-    /// darkened is a wet cut rather than a slab of glass.</summary>
-    private static Color WallTint(int heading)
-    {
-        float k = heading is 270 or 90 ? 0.72f : 0.55f;
-        return new Color(k, k, k);
-    }
-
-    /// <summary>The face colour with no ground art loaded. Earth whatever the top
-    /// is - see <see cref="WallTint"/>.</summary>
     private static Color WallInk(int heading)
     {
-        float k = heading is 270 or 90 ? 0.62f : 0.46f;
-        return new Color(Soil.R * k, Soil.G * k, Soil.B * k);
+        float k = heading is 270 or 90 ? 1.0f : 0.74f;
+        return new Color(Earth.R * k, Earth.G * k, Earth.B * k);
     }
 
-    private static readonly Color Soil = new(0.60f, 0.57f, 0.45f);
+    /// <summary>The cut earth itself, lit. Brown rather than the ground's own
+    /// khaki, which was chosen when the face carried the ground's texture and
+    /// only had to agree with it.</summary>
+    private static readonly Color Earth = new(0.42f, 0.30f, 0.20f);
 }
