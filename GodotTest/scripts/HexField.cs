@@ -117,7 +117,25 @@ public sealed partial class HexField : Node2D
     /// the rendered hexagon. Named in the one place both the lift and the
     /// climb-cost would read it from.
     /// </summary>
-    public double StepGrade = 0.25;
+    /// A property rather than a field because the draw order is cached and this
+    /// is one of the two things that can change it: depth carries the lift, so a
+    /// steeper board can reorder a rise against the flat ground beside it. The
+    /// other is <see cref="SetRelief"/>, which clears the same cache. Without
+    /// this the slider leaves the board sorted for the grade it had.
+    public double StepGrade
+    {
+        get => _stepGrade;
+        set
+        {
+            if (Math.Abs(value - _stepGrade) < 1e-9)
+                return;
+            _stepGrade = value;
+            _ordered = null;
+            QueueRedraw();
+        }
+    }
+
+    private double _stepGrade = 0.25;
 
     /// <summary>How many levels a tank may take in one step. One, because two is
     /// a cliff: at this grade a two-level step is half the distance to the
@@ -789,7 +807,7 @@ public sealed partial class HexField : Node2D
     /// <summary>The hexagon's corners in screen px about a cell's centre, right
     /// first and going clockwise on screen, so corner i and i+1 span the edge
     /// facing <see cref="EdgeHeadings"/>[i] reversed - see
-    /// <see cref="WallHeading"/>.
+    /// <see cref="NearHeading"/>.
     ///
     /// No trigonometry, for <see cref="SelectionRing"/>'s reason: a flat-top
     /// hexagon of circumradius R has corners at (+/-R, 0) and (+/-R/2,
@@ -807,30 +825,49 @@ public sealed partial class HexField : Node2D
         };
     }
 
-    private static readonly int[] WallHeading = { 330, 270, 210, 150, 90, 30 };
+    /// <summary>The three edges of a flat-top hexagon that face the camera, in
+    /// the order <see cref="Corners"/> gives them - so edge <c>i</c> spans
+    /// corners <c>i</c> and <c>i+1</c>. The other three face away and are listed
+    /// nowhere, which is the point: see <see cref="DrawsFace"/>.</summary>
+    private static readonly int[] NearHeading = { 330, 270, 210 };
 
     /// <summary>
     /// The faces between a cell and whatever is across each of its edges.
     ///
-    /// One rule for all four cases: <b>the higher cell of a pair draws the side
-    /// between them</b>. That covers the near side of a hill, the far bank of a
-    /// pit, a terrace with a shelf in front and one with a shelf behind, without
-    /// anybody knowing who is drawn first - which is what the two hand-written
-    /// cases it replaces both got wrong once each.
+    /// <b>The higher cell of a pair draws the side between them, and only on the
+    /// three edges that face the camera.</b> The second half was learned rather
+    /// than designed. All six were drawn at first, on the argument that a face
+    /// pointing away is covered by its own cell's top - walls go down before the
+    /// plate, so within the hexagon that is true. It is not true outside it: a
+    /// slanted edge extruded straight down leaves the hexagon near its vertex,
+    /// by up to a full lift, and lands on the cell behind - which, being farther
+    /// away, was drawn earlier and does not paint over it again.
     ///
-    /// Under the cell's own top face, not over it. The wall of a far edge is
-    /// covered by the face above it, and drawn afterwards it paints a pale slab
-    /// across the grass. The three walls facing the camera are not covered by
-    /// anything of this cell's, so they survive either way.
+    /// What it looks like is a wall standing where there is no wall. On a plain
+    /// hill it hides, because the cell it spills onto gets covered anyway by the
+    /// near neighbour drawn after it. Put a pit beside the hill and that cover
+    /// drops a whole level out of the way, and the spill stacks up the side of
+    /// the plateau into a continuous band running its full height. Reported as
+    /// a cell's side face running onto the hex below it.
+    ///
+    /// Dropping them costs nothing, and that is worth checking rather than
+    /// asserting, because the fear is a hole: between a cell's plate and the
+    /// lower ground behind it there could be a band belonging to neither. There
+    /// cannot - a neighbour one row back and one level down is drawn 109px up
+    /// and 65px back down, so the two plates overlap by 44px, and a two-level
+    /// drop overlaps by more, not less. The far bank of a pit is drawn by the
+    /// cell beyond it, on that cell's near edge, and is unaffected.
     /// </summary>
     /// <summary>Whether this cell draws the face between it and whatever is
-    /// across <paramref name="heading"/>. <b>The higher one of a pair does</b>,
-    /// and that is the whole rule - see <see cref="DrawWalls"/>. Named so it can
-    /// be asserted rather than read off a picture: the two hand-written cases it
-    /// replaced each got one of the four situations wrong, and the failures are a
-    /// gap and a double-drawn face, neither of which is loud.</summary>
+    /// across <paramref name="heading"/>: <b>the higher one of a pair does, on a
+    /// camera-facing edge only</b> - see <see cref="DrawWalls"/>. Named so it can
+    /// be asserted rather than read off a picture: the failures are a gap, a
+    /// double-drawn face, and a face on the far side, and none of the three is
+    /// loud.</summary>
     public bool DrawsFace(Vector2I cell, int heading) =>
-        _levels is not null && LevelAt(cell) > LevelAt(Step(cell, heading));
+        _levels is not null
+        && Array.IndexOf(NearHeading, ((heading % 360) + 360) % 360) >= 0
+        && LevelAt(cell) > LevelAt(Step(cell, heading));
 
     private void DrawWalls(CanvasItem into, Vector2I cell)
     {
@@ -848,17 +885,17 @@ public sealed partial class HexField : Node2D
         Rect2 rect = art is null ? default
             : Terrain!.RectAt(centre, Terrain.ScaleTo(Atlas!.HexRect));
 
-        for (int i = 0; i < 6; i++)
+        for (int i = 0; i < NearHeading.Length; i++)
         {
-            int drop = level - LevelAt(Step(cell, WallHeading[i]));
-            if (!DrawsFace(cell, WallHeading[i]))
+            int drop = level - LevelAt(Step(cell, NearHeading[i]));
+            if (!DrawsFace(cell, NearHeading[i]))
                 continue;
             var down = new Vector2(0.0f, drop * Lift);
             Vector2 a = centre + corner[i], b = centre + corner[(i + 1) % 6];
             var quad = new[] { a, b, b + down, a + down };
             if (art is null)
             {
-                into.DrawColoredPolygon(quad, WallInk(WallHeading[i]));
+                into.DrawColoredPolygon(quad, WallInk(NearHeading[i]));
                 continue;
             }
 
@@ -883,7 +920,7 @@ public sealed partial class HexField : Node2D
             Vector2 uvB = (b + towardsB * WallSeam - rect.Position) / rect.Size;
             Vector2 inA = towardsA * WallBand / rect.Size;
             Vector2 inB = towardsB * WallBand / rect.Size;
-            into.DrawColoredPolygon(quad, WallTint(WallHeading[i]),
+            into.DrawColoredPolygon(quad, WallTint(NearHeading[i]),
                 new[] { uvA, uvB, uvB + inB, uvA + inA }, art);
         }
     }

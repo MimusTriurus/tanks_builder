@@ -5551,11 +5551,17 @@ public static class SelfTest
 
             GD.Print("relief: every step has exactly one face across it");
 
-            // A gap and a double-drawn face are both quiet - one shows the plain
-            // through the hill from a certain angle, the other is two identical
-            // polygons - so the pairing is asserted rather than looked at. Every
-            // adjacent pair, both ways round.
-            int gaps = 0, twice = 0, spurious = 0, faces = 0;
+            // Three ways to be wrong and all of them quiet: a gap shows the plain
+            // through the hill, a doubled face is two identical polygons, and a
+            // face on the side turned away from the camera hangs off its own
+            // hexagon onto the cell behind - which, being farther, was drawn
+            // earlier and never paints over it again. So the pairing is asserted
+            // rather than looked at, every adjacent pair, both ways round.
+            //
+            // Split by which way the ground falls, because the two want opposite
+            // answers, and a check that lumped them read as "one face per step"
+            // and passed the version that drew all six.
+            int wrongFace = 0, toward = 0, away = 0, faces = 0;
             var firstPair = "";
             for (int q = 0; q < field.Columns; q++)
             for (int r = 0; r < field.Rows; r++)
@@ -5568,26 +5574,36 @@ public static class SelfTest
                         continue;
                     bool mine = field.DrawsFace(here, heading);
                     bool theirs = field.DrawsFace(over, (heading + 180) % 360);
-                    if (mine)
-                        faces++;
-                    bool step = field.LevelAt(here) != field.LevelAt(over);
-                    if (mine && theirs)
-                        twice++;
-                    else if (step && !mine && !theirs)
-                        gaps++;
-                    else if (!step && (mine || theirs))
-                        spurious++;
-                    else
+                    int drawn = (mine ? 1 : 0) + (theirs ? 1 : 0);
+                    faces += mine ? 1 : 0;
+                    int want = 0;
+                    if (field.LevelAt(here) != field.LevelAt(over))
+                    {
+                        bool higher = field.LevelAt(here) > field.LevelAt(over);
+                        Vector2I top = higher ? here : over, foot = higher ? over : here;
+                        // Down-screen of the higher cell, so the face between them
+                        // is turned to the camera. Off the flat rows, because the
+                        // drawn ones carry the lift and this asks about the ground.
+                        if (field.FlatAnchor(foot).Y > field.FlatAnchor(top).Y)
+                        { want = 1; toward++; }
+                        else
+                            away++;
+                    }
+                    if (drawn == want)
                         continue;
+                    wrongFace++;
                     if (firstPair.Length == 0)
-                        firstPair = $"({q},{r}) to ({over.X},{over.Y})";
+                        firstPair = $"({q},{r}) to ({over.X},{over.Y}), {drawn} drawn "
+                                    + $"where {want} belongs";
                 }
             }
-            Check($"each of the {faces} faces is drawn by exactly one of its two cells",
-                twice == 0 && gaps == 0 && spurious == 0 && faces > 0,
-                faces == 0 ? "no faces at all - the map is flat and it proves nothing"
-                           : $"{gaps} gaps, {twice} drawn twice, {spurious} on the "
-                             + $"level, first {firstPair}");
+            Check($"the higher cell draws it on each of the {toward / 2} steps that "
+                  + $"fall toward the camera, and nobody draws one on the {away / 2} "
+                  + "that fall away",
+                wrongFace == 0 && toward > 0 && away > 0,
+                toward == 0 || away == 0
+                    ? "the map has no step of one kind or the other - it proves nothing"
+                    : $"{wrongFace} disagree, first {firstPair} (of {faces} faces drawn)");
 
             GD.Print("relief: a wood on a rise sorts where it stands");
             Woods(field, grove, elevation, Check);
