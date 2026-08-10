@@ -272,21 +272,31 @@ public sealed partial class HexField : Node2D
     /// being driven into is nearer than the tank for the first half of every
     /// step, so it went down last and cut the hull off at the tracks.
     ///
-    /// <b>But a tank is not a point on the ground, and that is the second
-    /// clause.</b> Its belts hang forward of the turret axis, so it is drawn
-    /// reaching below its own contact point - 42.5px on the heavy's atlas and
-    /// 48.9 once the class size is on it, against a hexagon 54.5px from centre
-    /// to edge. Those pixels are ground-level track standing in the cell in
-    /// front, and ground level with the tank has every right to cover them: left
-    /// uncovered, a heavy parked at a boundary is drawn lying across the next
-    /// hex.
+    /// <b>Level ground was let through here once and it was a wrong turn.</b>
+    /// The argument was true as far as it went: a tank's belts hang forward of
+    /// the turret axis, so it is drawn reaching 49px below its own contact point
+    /// on the heavy, and those pixels are track standing in the next cell. What
+    /// was false was that this needed fixing at all. It is how the bench has
+    /// drawn a heavy at a boundary since long before there was any height, on a
+    /// flat board, and nobody has ever reported it. The report it was written
+    /// for was about a <i>raised</i> hex that failed to cover - the depth key was
+    /// short by more than a row, see <see cref="GroundRow"/> - and a clause about
+    /// level ground could not have fixed it and did not.
     ///
-    /// So a cell level with the tank may cover it, and <b>only from the shared
-    /// ground down</b>. That one line is what stops the old failure returning,
-    /// rather than a promise not to: a face beginning at or below the contact row
-    /// cannot reach the hull, because the hull is above it. And the cell being
-    /// driven into fails that test from the moment the tank enters it - its far
-    /// edge falls behind the contact point - so it goes back to covering nothing.
+    /// What it cost is worth writing down, because both are the shape of trouble
+    /// a whole-cell repaint makes. Admitting cells is all or nothing, so a cell
+    /// that qualifies goes down over <b>everything</b> the tank is drawn against:
+    /// the only part of the selection ring you ever see is its near edges, which
+    /// are exactly the edges shared with the cells in front, so turning relief on
+    /// erased the ring. And the test the clause carried - the face may only begin
+    /// at or below the contact row - is a test the geometry passes continuously
+    /// and then fails all at once, halfway along every leg, so the belt went from
+    /// covered to uncovered in one frame on every step between level cells.
+    ///
+    /// So: only higher ground. On a board with nothing raised that is nothing at
+    /// all, and a tank with nothing raised in front of it is drawn frame for
+    /// frame as it is on a flat board - which is a picture that can be diffed,
+    /// and was.
     ///
     /// The note on <see cref="DepthOf"/> put the cost of the far-edge key at "a
     /// pixel or two". That was the medium at 1.00x; on the heavy it is 49.
@@ -298,32 +308,15 @@ public sealed partial class HexField : Node2D
     /// than a row of the board; see <see cref="GroundRow"/> for the picture that
     /// makes.
     /// </summary>
-    public List<Vector2I> Occluders(float flatRow, float standing, float height)
+    public List<Vector2I> Occluders(float flatRow, float standing)
     {
         var over = new List<Vector2I>();
         if (_levels is null || Atlas is null)
             return over;
         float depth = Depth(flatRow, standing);
-        float half = Atlas.HexRect.Size.Y * 0.5f;
-        // Where the thing touches the ground, on screen. Off the drawn height
-        // rather than off the standing one, which is the higher of the two while
-        // climbing: taken from the standing height the contact would be read
-        // half a wall too high mid-climb, and the cell being climbed onto would
-        // eat the hull for exactly the frames this is meant to protect.
-        float contact = flatRow - height;
         foreach (Vector2I cell in Ordered())
-        {
             if (DepthOf(cell) > depth && LevelAt(cell) * Lift > standing + 0.5f)
-            {
                 over.Add(cell);
-                continue;
-            }
-            // Level with it, and its face begins at or below the ground the two
-            // of them share.
-            if (Math.Abs(LevelAt(cell) * Lift - standing) <= 0.5f
-                && CellCentre(cell).Y - half >= contact - 0.5f)
-                over.Add(cell);
-        }
         return over;
     }
 

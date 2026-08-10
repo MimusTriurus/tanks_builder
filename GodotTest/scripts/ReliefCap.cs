@@ -69,13 +69,6 @@ public sealed partial class ReliefCap : Node2D
     /// other reads as the hill swallowing the tank.</summary>
     public float Standing;
 
-    /// <summary>How far off the datum the tank is <b>drawn</b>, in screen px.
-    /// Apart from <see cref="Standing"/> because the two differ while climbing,
-    /// and the rule needs both: how high it counts as standing decides what may
-    /// cover it at all, and where it is drawn decides where the ground it shares
-    /// crosses it. See <see cref="HexField.Occluders"/>.</summary>
-    public float Height;
-
     public override void _Ready()
     {
         // Relative, so this rides whatever depth the harness gives the tank
@@ -112,7 +105,7 @@ public sealed partial class ReliefCap : Node2D
     {
         if (Field is null || !Field.HasRelief)
             return;
-        var over = Field.Occluders(FlatRow, Standing, Height);
+        var over = Field.Occluders(FlatRow, Standing);
         if (over.Count == 0)
             return;
         DrawSetTransformMatrix(GetGlobalTransform().AffineInverse()

@@ -3587,6 +3587,43 @@ public static class SelfTest
                 Check("and closes it again",
                     livePanel.Groups.All(g => !g.Open), "still open");
             }
+
+            // The second file, and it answers for a different thing: panel.json
+            // decorates rows, classes.json fills in the per-class triples. Same
+            // division of authority and the same two silent failures - an entry
+            // for a tank that does not exist is a number that did nothing, and a
+            // class with no entry quietly kept the compiled figure.
+            var classes = ClassConfig.Load(null);
+            Check("classes.json loads", classes.Loaded, classes.Error);
+            Check("every class the harness has is named in the file",
+                MovementProfile.All.All(
+                    p => classes.Tags.Contains(p.Tag, StringComparer.OrdinalIgnoreCase)),
+                string.Join(", ", MovementProfile.All
+                    .Where(p => !classes.Tags.Contains(
+                        p.Tag, StringComparer.OrdinalIgnoreCase))
+                    .Select(p => p.Tag))
+                + " run on the compiled figures, which nothing on screen says");
+            Check("and every id in the file is a class the harness has",
+                !classes.Strays().Any(),
+                string.Join(", ", classes.Strays().Take(4))
+                + " - a typo here is a setting for a tank that does not exist");
+            Check("no class id is used twice in the file",
+                classes.Duplicates.Count == 0,
+                string.Join(", ", classes.Duplicates)
+                + " - the second entry wins silently and the first reads as a "
+                + "number that did nothing");
+            // What the file is allowed to do and nothing can stop, so it is said
+            // out loud instead: three classes given the same number is a spread
+            // that has been flattened, and carrying that spread is the entire
+            // reason those triples are per class.
+            double[] tracers = MovementProfile.All.Select(p => p.TracerCalibre).ToArray();
+            double[] trails = MovementProfile.All.Select(p => p.SmokeCalibre).ToArray();
+            Check("the file did not flatten either class spread",
+                tracers[0] < tracers[2] && trails[0] < trails[2]
+                && tracers[2] / tracers[0] > 1.2 && trails[2] / trails[0] > 1.2,
+                $"tracer {tracers[0]:F2}/{tracers[2]:F2},"
+                + $" trail {trails[0]:F2}/{trails[2]:F2} - a level cannot put back"
+                + " a difference the triple no longer has");
         }
 
         GD.Print("the side panel");
@@ -4771,6 +4808,34 @@ public static class SelfTest
             Check("and it crosses rather than jumping",
                 climbed && round.Fraction >= 1.0f,
                 $"fraction ended at {round.Fraction:F2}");
+            // The change that made the trail read as smoke rather than as an
+            // effect being switched off. It is also the one most likely to be
+            // undone by accident, because freeing the node the moment it lands is
+            // the obvious thing to write.
+            Check("the round outlives its own arrival so its smoke can hang",
+                round.Arrived && !round.Expired,
+                $"expired {round.Expired} the frame it landed - and note Arrived "
+                + "stays true from here on, which is why the strike has to be "
+                + "guarded rather than driven off it");
+            for (int i = 0; i < 200 && !round.Expired; i++)
+                round.Advance(1.0 / 60.0);
+            Check("and it does go away once the smoke has",
+                round.Expired,
+                $"still drawing after {Shell.SmokeSeconds}s of trail life");
+            // Frozen at impact. While it flies, following the target is the one
+            // liberty taken; afterwards the smoke belongs to the air, and a
+            // target driving off would swing the whole line round behind it.
+            {
+                Vector2 restedAt = round.To;
+                Vector2 wasAt = foe.Sprite.Position;
+                foe.Sprite.Position = wasAt + new Vector2(120.0f, 40.0f);
+                Vector2 stillAt = round.To;
+                foe.Sprite.Position = wasAt;
+                Check("the smoke it left stops following the tank it hit",
+                    restedAt.DistanceTo(stillAt) < 0.01f,
+                    $"the trail moved {restedAt.DistanceTo(stillAt):F0}px when the "
+                    + "target drove 126px - smoke does not ride the armour");
+            }
             Check("what the trigger settled travels with the round",
                 round.Face == "front" && round.Level == 1
                 && Math.Abs(round.Calibre - 1.0f) < 1e-6,
@@ -4808,6 +4873,19 @@ public static class SelfTest
                     $"puff 1 moved {wasPuff.DistanceTo(nowPuff):F1}px in four"
                     + $" frames while the trail grew {born} -> {trailer.Puffs}"
                     + " - a trail that follows the head is a comet");
+                // The one that was wrong and looked like a class difference. A
+                // puff has to be born wider than the gap to its neighbour, or
+                // the fresh end of the trail is beads - and the fresh end is the
+                // part being looked at. It held on the medium by a fraction of a
+                // pixel and failed on the light, whose puff had shrunk while the
+                // spacing had not; both scale together now, so the claim is one
+                // ratio rather than three cases.
+                Check("a puff is born wider than the gap to the next one",
+                    2.0f * Shell.SmokeSeed > Shell.SmokeStep,
+                    $"{2.0f * Shell.SmokeSeed:F1}px across against a"
+                    + $" {Shell.SmokeStep:F1}px step - a dotted trail is not a"
+                    + " thinner trail, and no calibre can mend the ratio because"
+                    + " the calibre multiplies both");
                 Check("and the trail is continuous at the speed it is flown",
                     Shell.Speed / 60.0f > Shell.Streak
                     && Shell.Speed / 60.0f < 40.0f,
@@ -4835,6 +4913,43 @@ public static class SelfTest
                     $"{atOne[0]:F2} / {atOne[1]:F2} / {atOne[2]:F2} - a control "
                     + "setting the size rather than a multiplier flattens the "
                     + "class spread on its first drag");
+            }
+            // The trail is sized apart from the streak, which is one claim with
+            // two halves: it has its own triple, and it has its own level. Both
+            // halves fail the same silent way - one number for both looks like two
+            // dials that happen to agree, and every A/B taken on either moves the
+            // other effect too.
+            {
+                double keepTracer = Shell.TracerLevel;
+                double keepSmoke = Shell.SmokeLevel;
+                double[] trails = MovementProfile.All
+                    .Select(p => p.SmokeCalibre).ToArray();
+                double[] tracers = MovementProfile.All
+                    .Select(p => p.TracerCalibre).ToArray();
+                Check("a heavier gun lays a thicker trail, and wider apart than "
+                      + "its streak",
+                    trails[0] < trails[1] && trails[1] < trails[2]
+                    && trails[2] / trails[0] > tracers[2] / tracers[0],
+                    $"{trails[0]:F2} / {trails[1]:F2} / {trails[2]:F2}, a"
+                    + $" {trails[2] / trails[0]:F2}x spread against the streak's"
+                    + $" {tracers[2] / tracers[0]:F2}x - a soft line three to"
+                    + " eighteen pixels across has room a two-pixel head has not,"
+                    + " and one number for both could only suit one of them");
+                Shell.TracerLevel = 2.0;
+                Shell.SmokeLevel = 1.0;
+                float streakOnly = round.TracerSize, trailThen = round.SmokeSize;
+                Shell.TracerLevel = 1.0;
+                Shell.SmokeLevel = 2.0;
+                float streakThen = round.TracerSize, trailOnly = round.SmokeSize;
+                Shell.TracerLevel = keepTracer;
+                Shell.SmokeLevel = keepSmoke;
+                Check("and the two levels move one effect each",
+                    Math.Abs(streakOnly - 2.0f * streakThen) < 1e-5f
+                    && Math.Abs(trailOnly - 2.0f * trailThen) < 1e-5f,
+                    $"streak {streakThen:F2} -> {streakOnly:F2} on its own dial,"
+                    + $" trail {trailThen:F2} -> {trailOnly:F2} on the other -"
+                    + " a dial that moved both would make every A/B measure two"
+                    + " effects");
             }
             Check("the tracer and its smoke draw unless asked not to",
                 Main.TracerOnByDefault && Shell.SmokeOnByDefault
@@ -5167,7 +5282,7 @@ public static class SelfTest
         Check("and no cell is lifted", !field.HasRelief && drift == 0,
             $"{drift} cells moved");
         Check("and nothing is drawn over a tank",
-            field.Occluders(300.0f, 0.0f, 0.0f).Count == 0,
+            field.Occluders(300.0f, 0.0f).Count == 0,
             "a flat board promoted ground over a tank");
 
         field.SetRelief(Main.ReliefMap(field.Columns, field.Rows));
@@ -5323,7 +5438,7 @@ public static class SelfTest
                 // below then certified a rule the bench was not using.
                 float row = field.GroundRow(stand);
                 float standing = field.LevelAt(stand) * lift;
-                var hiders = new HashSet<Vector2I>(field.Occluders(row, standing, standing));
+                var hiders = new HashSet<Vector2I>(field.Occluders(row, standing));
                 foreach (int heading in HexField.EdgeHeadings)
                 {
                     Vector2I next = HexField.Step(stand, heading);
@@ -5374,35 +5489,6 @@ public static class SelfTest
                 $"{flatOver} did, first {firstFlat} - a tank on a rise is not "
                 + "hidden by the pit in front of it");
 
-            // The hull, which is the thing the old rule was protecting when it
-            // refused level ground outright. Stated as the worst margin over the
-            // whole board rather than as a yes: what has to be true is that no
-            // face ever begins above the ground the tank stands on, and a number
-            // says how close it came.
-            float worstReach = float.NegativeInfinity;
-            var firstReach = "";
-            for (int q = 0; q < field.Columns; q++)
-            for (int r = 0; r < field.Rows; r++)
-            {
-                var stand = new Vector2I(q, r);
-                float row = field.GroundRow(stand);
-                float standing = field.LevelAt(stand) * lift;
-                float contact = row - standing;
-                foreach (Vector2I cell in field.Occluders(row, standing, standing))
-                {
-                    if (field.LevelAt(cell) * lift > standing + 0.5f)
-                        continue;   // standing higher, and then it may cover anything
-                    float top = field.CellCentre(cell).Y - field.Atlas!.HexRect.Size.Y * 0.5f;
-                    if (contact - top <= worstReach)
-                        continue;
-                    worstReach = contact - top;
-                    firstReach = $"({cell.X},{cell.Y}) over a tank on ({q},{r})";
-                }
-            }
-            Check("and level ground reaches no higher than the ground itself",
-                worstReach <= 0.01f,
-                $"{worstReach:F1}px above the contact row at {firstReach} - that "
-                + "much of the hull is being eaten");
             Check($"but each of the {steps} rises in front of one does, "
                   + $"{nearSteps} of them only half a row",
                 stepMissed == 0 && steps > 0 && nearSteps > 0,
@@ -5411,20 +5497,20 @@ public static class SelfTest
                     : $"{stepMissed} were left under the tank, {nearMissed} of them "
                       + "half a row in front - a depth key short by less than a row "
                       + "keeps the ones straight ahead and loses exactly these");
-            // The boundary itself, walked. Standing on a cell, the level ground
-            // half a row in front has to cover the belt that hangs over into it -
-            // that is the whole of what changed here, and the old rule bought its
-            // safety by giving this up.
+            // Level ground, which had a clause here once and no longer does. The
+            // claim is worth making as a claim rather than left as an absence,
+            // because what it forbids is not a picture anyone would call wrong
+            // on a still frame - it is a whole cell going down over everything
+            // the tank is drawn against, the near half of its selection ring
+            // included, and a coverage that grows smoothly and then vanishes in
+            // one frame halfway along every leg.
             //
-            // And then along the leg, where the failure it was bought against
-            // actually lived: mid-step the cell being entered is nearer than the
-            // tank, and under depth alone it went down last and took the hull
-            // with it. Asked as the margin rather than as presence, because
-            // presence is not the question - a face below the contact row is
-            // welcome to be there, it is a face above it that eats the tank.
-            int held = 0, legs = 0;
-            float worstLeg = float.NegativeInfinity;
-            var firstLeg = "";
+            // Walked mid-step as well as parked, because that is where the
+            // clause failed: parked at either end it was harmless, and the
+            // moment it stopped applying was the moment it was covering the
+            // most.
+            int levelOver = 0, legs = 0;
+            var firstLevel = "";
             for (int q = 0; q < field.Columns; q++)
             for (int r = 0; r < field.Rows; r++)
             {
@@ -5439,35 +5525,23 @@ public static class SelfTest
                     legs++;
                     float standing = field.LevelAt(from) * lift;
                     float a = field.GroundRow(from), b = field.GroundRow(onto);
-                    if (!field.Occluders(a, standing, standing).Contains(onto))
-                        held++;
                     for (float t = 0.0f; t <= 1.0f; t += 0.1f)
+                    foreach (Vector2I cell in field.Occluders(Mathf.Lerp(a, b, t), standing))
                     {
-                        float row = Mathf.Lerp(a, b, t);
-                        float contact = row - standing;
-                        foreach (Vector2I cell in field.Occluders(row, standing, standing))
-                        {
-                            if (field.LevelAt(cell) * lift > standing + 0.5f)
-                                continue;
-                            float top = field.CellCentre(cell).Y
-                                        - field.Atlas!.HexRect.Size.Y * 0.5f;
-                            if (contact - top <= worstLeg)
-                                continue;
-                            worstLeg = contact - top;
-                            firstLeg = $"({cell.X},{cell.Y}) at {t:F1} of the leg "
-                                       + $"({q},{r}) to ({onto.X},{onto.Y})";
-                        }
+                        if (field.LevelAt(cell) * lift > standing + 0.5f)
+                            continue;
+                        levelOver++;
+                        if (firstLevel.Length == 0)
+                            firstLevel = $"({cell.X},{cell.Y}) at {t:F1} of the leg "
+                                         + $"({q},{r}) to ({onto.X},{onto.Y})";
                     }
                 }
             }
-            Check($"a belt hanging into the next hex is covered by it, on all "
-                  + $"{legs} of them", held == 0 && legs > 0,
+            Check($"and nothing level with it ever does, over {legs} legs walked",
+                levelOver == 0 && legs > 0,
                 legs == 0 ? "no level neighbour in front anywhere - it proves nothing"
-                          : $"{held} left the belt lying on top of the next hex");
-            Check("and nothing level reaches above the contact row anywhere along "
-                  + "a leg", worstLeg <= 0.01f,
-                $"{worstLeg:F1}px of hull eaten at {firstLeg} - this is the old "
-                + "failure");
+                          : $"{levelOver} did, first {firstLevel} - that repaint takes "
+                            + "the selection ring with it and lets go mid-step");
 
             Check($"and none of the {rises} rises behind one does",
                 behind == 0 && rises > 0,

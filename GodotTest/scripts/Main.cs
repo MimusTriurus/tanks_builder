@@ -96,7 +96,7 @@ public sealed partial class Main : Node2D
 
     /// <summary>
     /// The tracer drawn, or the round flying invisibly - key none, --tracer, or
-    /// the panel. **Off by default, and it switches the drawing only.**
+    /// the panel. **On by default, and it switches the drawing only.**
     ///
     /// The flight itself is not optional and must not become so: it is what puts
     /// time between the report and the impact, which is the whole reason the
@@ -105,11 +105,19 @@ public sealed partial class Main : Node2D
     /// timing that came with it - which is the A/B worth having, and would not be
     /// one if the shell stopped flying too.
     ///
+    /// **It was off, and the reason it was has expired.** A debug line that
+    /// crept into an A/B would be measuring itself, so while the tracer was one
+    /// stroke of plain code that was the right default. It is now a drawn layer
+    /// with a calibre, a trail and two levels of its own - something to be judged
+    /// rather than something to keep out of the way - and a feature you have to
+    /// switch on to see is a feature nobody looks at. The comparison is still one
+    /// click away, which is all it ever needed to be.
+    ///
     /// Default named here rather than left in the initialiser for the reason
     /// <see cref="Recoil.ShearOnByDefault"/> is: a default nobody can point at is
     /// a default that quietly changes.
     /// </summary>
-    public const bool TracerOnByDefault = false;
+    public const bool TracerOnByDefault = true;
 
     private bool _tracerVisible = TracerOnByDefault;
 
@@ -674,6 +682,37 @@ public sealed partial class Main : Node2D
             // --pitch and --rumble, which are also off.
             else if (userArgs[i] == "--tracer")
                 _tracerVisible = true;
+            else if (userArgs[i] == "--no-tracer-smoke")
+                Shell.SmokeOn = false;
+            else if (userArgs[i] == "--smoke-life" && i + 1 < userArgs.Length
+                     && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+                         CultureInfo.InvariantCulture, out double smokeLife))
+                Shell.SmokeSeconds = (float)smokeLife;
+            // Asking for the size is asking for the tracer, the shape
+            // --recoil <x> already set: a flag that tuned something invisible
+            // would look like a flag that did not arrive.
+            else if (userArgs[i] == "--tracer-size" && i + 1 < userArgs.Length
+                     && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+                         CultureInfo.InvariantCulture, out double tracerLevel))
+            {
+                Shell.TracerLevel = tracerLevel;
+                _tracerVisible = true;
+            }
+            // Same shape, and asking for the trail's size is asking for the
+            // trail: a level over a thing that is switched off is a flag that
+            // did not arrive as far as the picture is concerned.
+            else if (userArgs[i] == "--smoke-size" && i + 1 < userArgs.Length
+                     && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+                         CultureInfo.InvariantCulture, out double smokeLevel))
+            {
+                Shell.SmokeLevel = smokeLevel;
+                Shell.SmokeOn = true;
+                _tracerVisible = true;
+            }
+            else if (userArgs[i] == "--shell-speed" && i + 1 < userArgs.Length
+                     && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+                         CultureInfo.InvariantCulture, out double shellLevel))
+                Shell.SpeedLevel = shellLevel;
             else if (userArgs[i] == "--no-turret-sound")
                 _turretSound = false;
             else if (userArgs[i] == "--no-barrel-recoil")
@@ -1147,6 +1186,18 @@ public sealed partial class Main : Node2D
         // wiring. Attached to the tree only when it is to be seen: standing off
         // the tree, Prepare() has already made the frame the rows go into, which
         // is the same thing the self-test relies on.
+        // The per-class tracer and trail sizes, beside the panel's file because
+        // they are the same kind of thing: authored numbers that want restarting
+        // rather than rebuilding to change. Applied here rather than at parse time
+        // because there is nothing to race - the file sets the class triple, the
+        // flags set a level over it, so neither can overrule the other.
+        _classConfig = ClassConfig.Load(null);
+        if (_classConfig.Loaded)
+            _classConfig.Apply();
+        else
+            GD.Print($"[classes] {ClassConfig.FileName}: {_classConfig.Error}"
+                     + " - falling back to the compiled per-class figures");
+
         _panelText = PanelText.Load(null);
         if (!_panelText.Loaded)
             GD.Print($"[panel] {PanelText.FileName}: {_panelText.Error}"
@@ -1641,7 +1692,6 @@ public sealed partial class Main : Node2D
             return;
         vehicle.Cap.FlatRow = row;
         vehicle.Cap.Standing = vehicle.Standing;
-        vehicle.Cap.Height = vehicle.Height;
         vehicle.Cap.QueueRedraw();
     }
 
@@ -1831,13 +1881,25 @@ public sealed partial class Main : Node2D
         // Rounds in the air, and how far the nearest one has got. A shot that
         // seems to do nothing is either a shell still flying or a shell that was
         // never launched, and from outside those are the same picture.
-        string flying = _shells.Count == 0
-            ? ""
-            : $" [{_shells.Count} up, {_shells[0].Fraction:F2}"
+        // Rounds still in the air, not rounds still on screen: the smoke hangs
+        // for a second after the last of them has landed, and a trace that
+        // counted those would report a shot that is over as a shot in progress.
+        List<Shell> up = _shells.FindAll(s => !s.Arrived);
+        string flying = up.Count == 0
+            ? (_shells.Count == 0 ? "" : $" [{_shells.Count} smoking]")
+            : $" [{up.Count} up, {up[0].Fraction:F2}"
               // How far off its own barrel this one is going to land. Normally
               // zero by construction; anything else is the clamp that keeps the
               // mark on the armour, and that is not visible in the picture.
-              + $", bore {_shells[0].BoreMiss:F1}px"
+              + $", bore {up[0].BoreMiss:F1}px"
+              // How fast and how big, because both are levels now and a level
+              // that did not arrive looks exactly like one that did.
+              // Two calibres, because they are two settings now: a trail tuned
+              // against a streak that turned out to be the same number would be
+              // two dials that agree by accident.
+              + $", {Shell.Speed:F0}px/s cal {up[0].TracerSize:F2}"
+              + $"/{up[0].SmokeSize:F2}"
+              + $"{(Shell.SmokeOn ? "" : " nosmoke")}"
               + $"{(_tracerVisible ? "" : " unseen")}]";
         // And how near the end the target is, which the plate cannot say: three
         // rounds finish it wherever they landed, so a tank whose front plate reads
@@ -2165,7 +2227,7 @@ public sealed partial class Main : Node2D
         if (!_field.HasRelief)
             return "flat";
         float row = v.GroundPoint.Y - _origin.Y + v.Height;
-        var over = _field.Occluders(row, v.Standing, v.Height);
+        var over = _field.Occluders(row, v.Standing);
         (int _, int high) = _field.LevelRange;
         int level = Mathf.RoundToInt(v.Standing / Math.Max(_field.Lift, 0.01f));
         string where = $"on {level:+0;-0;0} of {high:+0;-0;0}";
@@ -2674,10 +2736,17 @@ public sealed partial class Main : Node2D
         {
             Shell shell = _shells[i];
             shell.Advance(delta);
-            if (!shell.Arrived)
+            // Landing and being finished with stopped being the same frame when
+            // the smoke was allowed to outlive the round, so the strike is
+            // guarded and the node is freed on the trail rather than on the hit.
+            if (shell.Arrived && !shell.Struck)
+            {
+                shell.Struck = true;
+                Strike(shell);
+            }
+            if (!shell.Expired)
                 continue;
             _shells.RemoveAt(i);
-            Strike(shell);
             shell.QueueFree();
         }
     }
@@ -2908,6 +2977,12 @@ public sealed partial class Main : Node2D
         ["--no-barrel-recoil"] = new[] { "effects.tube_recoil" },
         ["--shake"] = new[] { "effects.camera_shake", "effects.shake_level" },
         ["--tracer"] = new[] { "gunnery.tracer" },
+        ["--no-tracer-smoke"] = new[] { "gunnery.tracer_smoke" },
+        ["--smoke-life"] = new[] { "gunnery.smoke_life" },
+        ["--tracer-size"] = new[] { "gunnery.tracer_size", "gunnery.tracer" },
+        ["--smoke-size"] = new[]
+            { "gunnery.smoke_size", "gunnery.tracer_smoke", "gunnery.tracer" },
+        ["--shell-speed"] = new[] { "gunnery.shell_speed" },
         ["--traverse"] = new[] { "gunnery.traverse_level" },
         ["--hit-scale"] = new[] { "armour.calibre" },
         ["--destroy"] = new[] { "armour.destroy" },
@@ -2930,6 +3005,12 @@ public sealed partial class Main : Node2D
     /// the panel and the trace still has to be able to say whether the file was
     /// read.</summary>
     private PanelText _panelText = PanelText.Load(null);
+
+    /// <summary>Held for the same reason: the trace has to be able to say whether
+    /// the per-class file loaded, and under --no-ui there is no panel to notice it
+    /// on. A file that quietly did not load looks exactly like a file whose
+    /// numbers did nothing.</summary>
+    private ClassConfig _classConfig = new();
 
     /// <summary>Every row a start-up flag speaks for, flattened. Exposed so the
     /// self-test can require each one to be a row the panel really has: a flag
@@ -3259,6 +3340,62 @@ public sealed partial class Main : Node2D
         ui.Toggle("gunnery.tracer", "shell tracer  (--tracer)",
             () => _tracerVisible,
             on => { _tracerVisible = on; TracerChanged(); });
+        // The trail is what makes the tracer continuous once the round outruns
+        // its own streak, so the switch is here to be able to see that rather
+        // than to be told it.
+        ui.Toggle("gunnery.tracer_smoke", "tracer smoke  (--no-tracer-smoke)",
+            () => Shell.SmokeOn, on => Shell.SmokeOn = on);
+        // Seconds, not a multiplier, because there is no class triple under it -
+        // see Shell.SmokeSeconds. The caption turns it into the length of trail
+        // it buys at the speed currently set, which is the thing being looked at,
+        // and says how long the line hangs after the round has gone.
+        ui.Slide("gunnery.smoke_life", "tracer smoke life", 0.1, 3.0, 0.05,
+            () => Shell.SmokeSeconds, v => Shell.SmokeSeconds = (float)v, "s",
+            () => $"{Shell.SmokeSeconds * Shell.Speed:F0}px of trail,"
+                  + $" hangs {Shell.SmokeSeconds:F1}s after impact");
+        // Sized against the class triple, so this is a multiplier - the rule the
+        // tremble, size and traverse levels follow. The caption prints the head
+        // in pixels for the driven tank, because a few pixels of bright on a
+        // field of grass is the thing being judged and "1.00x" says nothing
+        // about it.
+        ui.Slide("gunnery.tracer_size", "tracer size level", 0.3, 3.0, 0.05,
+            () => Shell.TracerLevel, v => Shell.TracerLevel = v, "x",
+            () =>
+            {
+                double cal = Active.Profile.TracerCalibre * Shell.TracerLevel;
+                return $"{2.1 * cal:F1}px head, {Shell.Streak * cal:F0}px streak"
+                       + $" on the {Active.Tag}";
+            });
+        // A second level rather than the same one, because the streak and the
+        // trail are judged against different things - see Shell.SmokeSize. Its
+        // triple lives in classes.json and is wider than the tracer's: a soft line
+        // has room a two-pixel head has not.
+        ui.Slide("gunnery.smoke_size", "tracer smoke size level", 0.3, 3.0, 0.05,
+            () => Shell.SmokeLevel, v => Shell.SmokeLevel = v, "x",
+            () =>
+            {
+                double cal = Active.Profile.SmokeCalibre * Shell.SmokeLevel;
+                // Width across, at birth and at the end of a puff's life, because
+                // "a line that softens" and "a cloud that blooms" are the same
+                // effect at two numbers and the second one reads as a road.
+                double born = 2.0 * Shell.SmokeSeed * cal;
+                double old = 2.0 * (Shell.SmokeSeed
+                                    + Shell.SmokeGrow * Shell.SmokeSeconds) * cal;
+                return $"{born:F1}px wide fresh, {old:F0}px by the end"
+                       + $" on the {Active.Tag}";
+            });
+        // Frames, not px/s, is what this slider is about: the round exists to put
+        // time between the report and the impact, and the point-blank shot is
+        // where that time runs out first. Four frames is the floor the self-test
+        // holds; the slider is allowed past it and says so.
+        ui.Slide("gunnery.shell_speed", "shell speed level", 0.4, 2.5, 0.05,
+            () => Shell.SpeedLevel, v => Shell.SpeedLevel = v, "x",
+            () =>
+            {
+                double frames = Shell.PointBlank / Shell.Speed * 60.0;
+                return $"{Shell.Speed:F0} px/s, {frames:F1} frames point blank"
+                       + (frames < 4.0 ? " - inside the gun report" : "");
+            });
         // A multiplier over the three class figures, not a rate - see
         // Gunnery.TraverseLevel. The caption carries the swing beside the hull's
         // own, because the ratio between those two is what "sluggish" was
@@ -3455,7 +3592,7 @@ public sealed partial class Main : Node2D
 
             Vehicle v = Active;
             float row = v.GroundPoint.Y - _origin.Y + v.Height;
-            bool hides = _field.Occluders(row, v.Standing, v.Height).Contains(cell);
+            bool hides = _field.Occluders(row, v.Standing).Contains(cell);
             // Where this cell's face begins against where the tank's belts touch
             // down. Positive means the face starts above the contact row, which
             // is the only way a cell can reach hull rather than track - and the
@@ -3927,6 +4064,11 @@ public sealed partial class Main : Node2D
                      // looks exactly like one whose settings did nothing, and
                      // under --no-ui there is no panel to notice it on.
                      + $"  panel {(_panelText.Loaded ? "json" : "built-in")}"
+                     // And the same for the per-class file. Two files now, and
+                     // they answer for different things: one for the panel's text
+                     // and openings, one for the class triples. A capture taken on
+                     // the compiled figures is a capture of a different tank.
+                     + $"  classes {(_classConfig.Loaded ? "json" : "built-in")}"
                      // Same argument as the line above: a board of one kind and
                      // a board of a mix are two different pictures, and neither
                      // says which it is.
@@ -4442,6 +4584,11 @@ public sealed partial class Main : Node2D
         // because the traverse knob is not held on a machine - see
         // Gunnery.TraverseLevel.
         Gunnery.TraverseLevel = 1.0;
+        Shell.SpeedLevel = 1.0;
+        Shell.TracerLevel = 1.0;
+        Shell.SmokeLevel = 1.0;
+        Shell.SmokeOn = Shell.SmokeOnByDefault;
+        Shell.SmokeSeconds = Shell.TunedSmokeSeconds;
         ApplySize();
         PaintGunnery();
         _camera.Zoom = Vector2.One;
