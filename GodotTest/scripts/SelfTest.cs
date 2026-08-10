@@ -5632,11 +5632,11 @@ public static class SelfTest
                         continue;
                     drops++;
                     // Bottom of this cell's side against the top of that plate.
-                    float reach = field.CellCentre(here).Y + half + field.SkirtDrop(here);
+                    float past = field.CellCentre(here).Y + half + field.SkirtDrop(here);
                     float lip = field.CellCentre(front).Y - half;
-                    if (lip - reach <= worstSeam)
+                    if (lip - past <= worstSeam)
                         continue;
-                    worstSeam = lip - reach;
+                    worstSeam = lip - past;
                     firstSeam = $"({q},{r}) to ({front.X},{front.Y})";
                 }
             }
@@ -5727,6 +5727,70 @@ public static class SelfTest
                 : bites == 0 ? "the whole side is always standing proud - this board "
                                + "cannot tell the clip from no clip"
                              : firstBad);
+
+            // Fourth, where the repaint may land. Admitting a cell is all or
+            // nothing, so a cell admitted goes down over the ruts and the board
+            // wherever it happens to be - and a tank in a pit is below every
+            // level cell at once, so the far side of the board qualified. Asked
+            // as a subset, plus that the window bites: a window nothing meets is
+            // a clause that has stopped being applied.
+            int loose = 0, stands = 0, cut = 0;
+            var firstLoose = "";
+            var span = new Vector2(256.0f, 256.0f);
+            for (int q = 0; q < field.Columns; q++)
+            for (int r = 0; r < field.Rows; r++)
+            {
+                var stand = new Vector2I(q, r);
+                float standing = field.LevelAt(stand) * lift;
+                float row = field.GroundRow(stand);
+                var box = new Rect2(field.CellCentre(stand) - span * 0.5f, span);
+                var all = field.Occluders(row, standing);
+                var near = field.Occluders(row, standing, box);
+                stands++;
+                cut += all.Count - near.Count;
+                foreach (Vector2I cell in near)
+                {
+                    if (box.Intersects(field.Column(cell)))
+                        continue;
+                    loose++;
+                    if (firstLoose.Length == 0)
+                        firstLoose = $"({cell.X},{cell.Y}) over a tank on ({q},{r})";
+                }
+            }
+            Check($"and it is only repainted where it could touch that tank, "
+                  + $"over {stands} stands",
+                loose == 0 && cut > 0 && stands > 0,
+                loose > 0 ? $"{loose} repainted out of reach, first {firstLoose}"
+                          : "no cell anywhere is out of reach - this board cannot "
+                            + "tell the window from no window");
+
+            // And the test the belt marks are put back by, since a cell repainted
+            // from the terrain alone comes back bare. Asked about the drawn top
+            // face and nothing else: a mark lies where it lies, and which cell is
+            // repainting is already decided by the time this is asked.
+            //
+            // Not "and on no other" - on a board with height that is false and
+            // has to be, because a lifted hexagon overlaps the drawn face of the
+            // cell behind it. Six centres on this map do. What is asked instead
+            // is the pair that would break the repaint: a face that does not hold
+            // its own middle, and one that reaches past its own corner.
+            int missed = 0, spilled = 0;
+            float reach = field.Atlas!.HexRect.Size.X * 0.5f + 1.0f;
+            for (int q = 0; q < field.Columns; q++)
+            for (int r = 0; r < field.Rows; r++)
+            {
+                var cell = new Vector2I(q, r);
+                Vector2 centre = field.CellCentre(cell);
+                if (!field.OnCell(centre, cell))
+                    missed++;
+                if (field.OnCell(centre + new Vector2(reach, 0.0f), cell)
+                    || field.OnCell(centre + new Vector2(0.0f, reach), cell))
+                    spilled++;
+            }
+            Check("a mark sits on the drawn face of the cell it was laid on",
+                missed == 0 && spilled == 0,
+                missed > 0 ? $"{missed} faces do not hold their own middle"
+                           : $"{spilled} reach past their own corner");
 
             GD.Print("relief: a wood on a rise sorts where it stands");
             Woods(field, grove, elevation, Check);

@@ -52,6 +52,11 @@ public sealed partial class ReliefCap : Node2D
 {
     public HexField? Field;
 
+    /// <summary>The belt marks, so a repainted cell comes back with the ruts that
+    /// were on it. Null leaves the ground repainted bare, which is how this
+    /// behaved when it was reported.</summary>
+    public TrackMarks? Marks;
+
     /// <summary>Where the tank stands, in the field's local space, with the
     /// height taken out - the ground row. Set by the harness each frame, because
     /// what this needs is where the tank is now and not the cell it last
@@ -59,15 +64,19 @@ public sealed partial class ReliefCap : Node2D
     /// exactly the frame being looked at.</summary>
     public float FlatRow;
 
-    /// <summary>How far off the datum the tank is standing, in screen px.
-    ///
-    /// <b>The higher of the two cells it is crossing, not the height it is drawn
-    /// at.</b> Halfway up a vertical wall the tank is inside the rock, and asked
-    /// about its drawn height it would let the cell it is climbing onto paint
-    /// over it for the first half of every climb. Taking the higher end says
-    /// "it is already up there" a moment early, which is invisible, where the
-    /// other reads as the hill swallowing the tank.</summary>
+    /// <summary>How far off the datum the tank is standing, in screen px - the
+    /// height it is drawn at. It was the higher of the two cells it is crossing,
+    /// which called it up on the crown at the first pixel of a climb; see
+    /// <see cref="HexField.HeightBetween"/>.</summary>
     public float Standing;
+
+    /// <summary>What this tank occupies, in the field's local space. A cell that
+    /// cannot touch it is not repainted however near and high it stands - see
+    /// <see cref="HexField.Occluders"/> for the board that blinks without it.
+    /// Generous: the frame the sprite is drawn from, at the class's size, about
+    /// the anchor. Too wide costs one repaint of a cell that covers nothing; too
+    /// narrow drops one that covers something.</summary>
+    public Rect2 Box;
 
     public override void _Ready()
     {
@@ -105,7 +114,7 @@ public sealed partial class ReliefCap : Node2D
     {
         if (Field is null || !Field.HasRelief)
             return;
-        var over = Field.Occluders(FlatRow, Standing);
+        var over = Field.Occluders(FlatRow, Standing, Box);
         if (over.Count == 0)
             return;
         DrawSetTransformMatrix(GetGlobalTransform().AffineInverse()
@@ -117,5 +126,16 @@ public sealed partial class ReliefCap : Node2D
         foreach (Vector2I cell in over)
             Field.PaintCell(this, cell, Field.InkFor(cell),
                             Field.VisibleSide(cell, Standing));
+
+        // And the belt marks that were on those cells, which the terrain pass
+        // does not carry - see TrackMarks.PaintOn. In the marks' own space, the
+        // same trick the field gets above, so neither has to know where the other
+        // node sits.
+        if (Marks is null)
+            return;
+        DrawSetTransformMatrix(GetGlobalTransform().AffineInverse()
+                               * Marks.GetGlobalTransform());
+        Marks.PaintOn(this, Field, Marks.GlobalPosition - Field.GlobalPosition,
+                      over);
     }
 }

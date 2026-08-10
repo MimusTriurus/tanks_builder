@@ -326,16 +326,39 @@ public sealed partial class HexField : Node2D
     /// than a row of the board; see <see cref="GroundRow"/> for the picture that
     /// makes.
     /// </summary>
-    public List<Vector2I> Occluders(float flatRow, float standing)
+    /// <b><paramref name="box"/> is what the observer occupies</b>, in the same
+    /// space, and a cell that cannot touch it is dropped however near and high it
+    /// is. That clause reads like an optimisation and is not: admitting a cell is
+    /// all or nothing, so a cell admitted goes down over the ruts, the marks and
+    /// the board wherever it happens to be. Nothing needed it while the set was
+    /// local - a rise in front of a tank is beside that tank - but a tank
+    /// <i>descending</i> is below every level cell on the board at once, and one
+    /// step into the pit at (6,5) promoted the entire bottom row, (0,5) included,
+    /// six columns away. On screen that is the far side of the board blinking and
+    /// its belt marks going out, which is what it was reported as.
+    /// </summary>
+    public List<Vector2I> Occluders(float flatRow, float standing, Rect2? box = null)
     {
         var over = new List<Vector2I>();
         if (_levels is null || Atlas is null)
             return over;
         float depth = Depth(flatRow, standing);
         foreach (Vector2I cell in Ordered())
-            if (DepthOf(cell) > depth && LevelAt(cell) * Lift > standing + 0.5f)
+            if (DepthOf(cell) > depth && LevelAt(cell) * Lift > standing + 0.5f
+                && (box is not { } seen || seen.Intersects(Column(cell))))
                 over.Add(cell);
         return over;
+    }
+
+    /// <summary>Everything a cell paints, top and side, as a box in field space.
+    /// The side is the whole drop rather than the clipped one, because this is
+    /// asked before anybody knows who is looking.</summary>
+    public Rect2 Column(Vector2I cell)
+    {
+        Vector2 size = Atlas!.HexRect.Size;
+        Vector2 centre = CellCentre(cell);
+        return new Rect2(centre.X - size.X * 0.5f, centre.Y - size.Y * 0.5f,
+                         size.X, size.Y + SkirtDrop(cell));
     }
 
     // --- layout ------------------------------------------------------------
@@ -445,6 +468,23 @@ public sealed partial class HexField : Node2D
         float q = 2.0f / 3.0f * p.X / size;
         float r = (-1.0f / 3.0f * p.X + Mathf.Sqrt(3.0f) / 3.0f * y) / size;
         return AxialToOffset(CubeRound(q, r));
+    }
+
+    /// <summary>Whether a point lies on a cell's top face, both in this space and
+    /// both as drawn - so a mark laid on a raised cell is tested against where
+    /// that cell is, with no height to put back.
+    ///
+    /// In units of the drawn tile a flat-top hexagon is |y| &lt;= 1 and
+    /// 2|x| + |y| &lt;= 2, which is <see cref="Corners"/> read as inequalities: no
+    /// camera angle in it, for the reason there is none there.</summary>
+    public bool OnCell(Vector2 point, Vector2I cell)
+    {
+        if (Atlas is null)
+            return false;
+        Vector2 d = point - CellCentre(cell);
+        float x = Mathf.Abs(d.X) / (Atlas.HexRect.Size.X * 0.5f);
+        float y = Mathf.Abs(d.Y) / (Atlas.HexRect.Size.Y * 0.5f);
+        return y <= 1.0f && 2.0f * x + y <= 2.0f;
     }
 
     public bool InBounds(Vector2I cell) =>

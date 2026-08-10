@@ -448,8 +448,8 @@ public sealed partial class TrackMarks : Node2D
         foreach (Trail[] pair in _trails.Values)
         foreach (Trail trail in pair)
         {
-            DrawTrail(trail);
-            DrawShoes(trail);
+            DrawTrail(this, trail, null);
+            DrawShoes(this, trail, null);
         }
     }
 
@@ -468,9 +468,14 @@ public sealed partial class TrackMarks : Node2D
     /// fill the ring the belts churned, where the ribbon can only draw its
     /// centre line.
     /// </summary>
-    private void DrawShoes(Trail trail)
+    private void DrawShoes(CanvasItem into, Trail trail, Func<Vector2, bool>? keep)
     {
-        int n = trail.Points.Count;
+        int n = 0;
+        var take = new List<int>(trail.Points.Count);
+        for (int i = 0; i < trail.Points.Count; i++)
+            if (keep is null || keep(trail.Points[i]))
+                take.Add(i);
+        n = take.Count;
         if (n == 0)
             return;
         var ends = new Vector2[n * 2];
@@ -479,13 +484,14 @@ public sealed partial class TrackMarks : Node2D
         var ink = new Color[n];
         for (int i = 0; i < n; i++)
         {
-            ends[i * 2] = trail.Points[i] - trail.Bars[i];
-            ends[i * 2 + 1] = trail.Points[i] + trail.Bars[i];
+            int at = take[i];
+            ends[i * 2] = trail.Points[at] - trail.Bars[at];
+            ends[i * 2 + 1] = trail.Points[at] + trail.Bars[at];
             Color colour = BarInk;
-            colour.A *= (float)Fade(trail, i);
+            colour.A *= (float)Fade(trail, at);
             ink[i] = colour;
         }
-        DrawMultilineColors(ends, ink, BarThickness);
+        into.DrawMultilineColors(ends, ink, BarThickness);
     }
 
     /// <summary>How much of the ink an imprint still has, by how long ago it
@@ -556,7 +562,7 @@ public sealed partial class TrackMarks : Node2D
 
     /// <summary>The soil pressed flat: one ribbon down the middle of the
     /// imprints, over the belt-smoothed path.</summary>
-    private void DrawTrail(Trail trail)
+    private void DrawTrail(CanvasItem into, Trail trail, Func<Vector2, bool>? keep)
     {
         int n = trail.Points.Count;
         if (n < 2)
@@ -571,13 +577,24 @@ public sealed partial class TrackMarks : Node2D
             float want = trail.Widths[i];
             bool kinked = run.Count >= 2
                           && Turn(run[^2], run[^1], path[i]) > TurnCut;
+            // A point that is not wanted cuts the run, exactly as a lifted pen
+            // does. So a ribbon repainted for one cell stops at that cell's edge
+            // rather than reaching a stitch onto the neighbour, where it would be
+            // ground drawn over a tank that is standing in front of it.
+            if (keep is not null && !keep(path[i]))
+            {
+                Flush(into, run, ink, width);
+                run.Clear();
+                ink.Clear();
+                continue;
+            }
             bool cut = trail.Breaks[i]
                        || kinked
                        || (run.Count > 0
                            && Math.Abs(want - width) > width * WidthDrift);
             if (cut && run.Count > 0)
             {
-                Flush(run, ink, width);
+                Flush(into, run, ink, width);
                 // The next piece starts on the last point of this one, so a
                 // width change is a step in the ribbon and not a hole in it. A
                 // real break - the pen lifted - starts empty.
@@ -604,15 +621,51 @@ public sealed partial class TrackMarks : Node2D
             colour.A *= (float)Fade(trail, i);
             ink.Add(colour);
         }
-        Flush(run, ink, width);
+        Flush(into, run, ink, width);
     }
 
-    private void Flush(List<Vector2> run, List<Color> ink, float width)
+    /// <summary>
+    /// The marks that lie on one of <paramref name="cells"/>, painted into
+    /// somebody else's node.
+    ///
+    /// <b>Because a repainted cell is repainted bare.</b> The cap puts the ground
+    /// that stands in front of a tank back over it - see
+    /// <see cref="HexField.Occluders"/> - and a cell painted from the terrain
+    /// alone comes back without the belt marks that were on it, so a tank
+    /// dropping into a pit wiped its own fresh ruts off the cell it had just left.
+    /// The marks are a ribbon across cells rather than a thing each cell owns,
+    /// which is why they are not simply part of PaintCell.
+    ///
+    /// Cut per stitch, so a ribbon stops at the edge of the cell it is being
+    /// repainted for. That leaves at most one stitch of gap at the seam, and the
+    /// seam is where the drawn hexagon's own border line is.
+    /// </summary>
+    public void PaintOn(CanvasItem into, HexField field, Vector2 shift,
+                        IReadOnlyList<Vector2I> cells)
+    {
+        if (!Enabled || cells.Count == 0)
+            return;
+        bool Keep(Vector2 at)
+        {
+            foreach (Vector2I cell in cells)
+                if (field.OnCell(at + shift, cell))
+                    return true;
+            return false;
+        }
+        foreach (Trail[] pair in _trails.Values)
+        foreach (Trail trail in pair)
+        {
+            DrawTrail(into, trail, Keep);
+            DrawShoes(into, trail, Keep);
+        }
+    }
+
+    private void Flush(CanvasItem into, List<Vector2> run, List<Color> ink, float width)
     {
         // A run of one is a tank that jumped and has not moved since: nothing to
         // draw, and DrawPolylineColors will not take it.
         if (run.Count >= 2)
-            DrawPolylineColors(run.ToArray(), ink.ToArray(), width, true);
+            into.DrawPolylineColors(run.ToArray(), ink.ToArray(), width, true);
     }
 
     /// <summary>Degrees between two consecutive steps of a run.</summary>

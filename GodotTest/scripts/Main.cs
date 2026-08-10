@@ -1039,7 +1039,7 @@ public sealed partial class Main : Node2D
             // Built whether or not the board has relief: it draws nothing at all
             // on a flat one, and a node that only exists under a flag is a node
             // nobody exercises.
-            var cap = new ReliefCap { Field = _field };
+            var cap = new ReliefCap { Field = _field, Marks = _marks };
             sprite.AddChild(cap);
             vehicle.Cap = cap;
             _vehicles.Add(vehicle);
@@ -1689,7 +1689,22 @@ public sealed partial class Main : Node2D
             return;
         vehicle.Cap.FlatRow = row;
         vehicle.Cap.Standing = vehicle.Height;
+        vehicle.Cap.Box = TankBox(vehicle);
         vehicle.Cap.QueueRedraw();
+    }
+
+    /// <summary>What a tank occupies, in the field's local space, for the one
+    /// question that needs it: which cells could hide it. The frame its layers
+    /// are drawn from, at the class's size, about the anchor - so it is wider than
+    /// the tank and narrower than the gap between two columns of the grid, which
+    /// is the property that matters. Exact would mean the union of eight layers,
+    /// re-measured every frame, to decide whether to repaint a cell that is beside
+    /// the tank rather than on it.</summary>
+    private Rect2 TankBox(Vehicle vehicle)
+    {
+        Vector2 size = (Vector2)vehicle.Atlas.Tile * vehicle.Sprite.BodyScale;
+        Vector2 at = vehicle.Sprite.Position - _origin;
+        return new Rect2(at - size * 0.5f, size);
     }
 
     private void SnapToCell() => Park(Active);
@@ -2228,7 +2243,7 @@ public sealed partial class Main : Node2D
         if (!_field.HasRelief)
             return "flat";
         float row = v.GroundPoint.Y - _origin.Y + v.Height;
-        var over = _field.Occluders(row, v.Height);
+        var over = _field.Occluders(row, v.Height, TankBox(v));
         (int _, int high) = _field.LevelRange;
         int level = Mathf.RoundToInt(v.Height / Math.Max(_field.Lift, 0.01f));
         string where = $"on {level:+0;-0;0} of {high:+0;-0;0}";
