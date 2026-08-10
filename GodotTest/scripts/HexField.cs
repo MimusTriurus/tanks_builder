@@ -824,17 +824,18 @@ public sealed partial class HexField : Node2D
     /// copy of how a cell is drawn, which is the way the two would come to
     /// disagree.
     /// </summary>
-    /// <param name="clipDrop">How far down the side may be drawn, in screen px.
-    /// Unbounded for the field, which paints the whole column and lets the cells
-    /// in front cover what they cover. Bounded by <see cref="ReliefCap"/>, which
-    /// paints one cell over a tank with nothing painted after it - see
-    /// <see cref="SkirtDrop"/> for what goes wrong when it is not.</param>
+    /// <param name="seenFrom">How high the observer this is being painted for
+    /// stands, in screen px, or null for the board's own pass. The field paints
+    /// whole columns and lets the cells in front cover what they cover;
+    /// <see cref="ReliefCap"/> paints one cell over a tank with nothing painted
+    /// after it, so it has to say who is looking - see
+    /// <see cref="VisibleSide"/>.</param>
     public void PaintCell(CanvasItem into, Vector2I cell, Color tint,
-                          float clipDrop = float.PositiveInfinity)
+                          float? seenFrom = null)
     {
         if (Atlas is null)
             return;
-        DrawWalls(into, cell, clipDrop);
+        DrawWalls(into, cell, seenFrom);
 
         if (Terrain is not null && Terrain.Any)
         {
@@ -883,7 +884,7 @@ public sealed partial class HexField : Node2D
     /// nowhere, which is the point: a column is only ever seen from the front,
     /// and a side extruded from a far edge leaves the hexagon near its vertex
     /// and lands on the cell behind it.</summary>
-    private static readonly int[] NearHeading = { 330, 270, 210 };
+    public static readonly int[] NearHeading = { 330, 270, 210 };
 
     /// <summary>
     /// How far below its own near edges a cell's side carries, in screen px.
@@ -921,18 +922,6 @@ public sealed partial class HexField : Node2D
     public float SkirtDrop(Vector2I cell) =>
         _levels is null ? 0.0f : (LevelAt(cell) - LevelRange.Low) * Lift;
 
-    /// <summary>How much of a cell's side one observer may be shown, in screen
-    /// px: the part of the cliff that stands above the ground that observer is
-    /// on, and not one pixel more.
-    ///
-    /// <b>Everything below that plane is the part the ground in front hides</b>,
-    /// by construction - a cliff cannot be seen below the level of the field in
-    /// front of it - so it is exactly the part a repaint must not carry. Painted
-    /// anyway it lands on the cell in front, which was drawn correctly and is
-    /// then covered by a column that is behind it. Measured on MTP's plateau at
-    /// grade 0.35: the full skirt is 129.5 px where 64.8 is standing proud, and
-    /// the surplus ate the top half of the cell in front on every one of the
-    /// three tanks' caps.</summary>
     /// <summary>How high a thing is, <paramref name="done"/> of the way from one
     /// cell to the next, in screen px.
     ///
@@ -947,23 +936,56 @@ public sealed partial class HexField : Node2D
         Mathf.Lerp(LevelAt(from) * Lift, LevelAt(onto) * Lift,
                    Mathf.Clamp(done, 0.0f, 1.0f));
 
-    public float VisibleSide(Vector2I cell, float standing) =>
-        Mathf.Max(0.0f, LevelAt(cell) * Lift - standing);
+    /// <summary>
+    /// How much of one face of a cell's side an observer standing
+    /// <paramref name="standing"/> px off the datum may be shown.
+    ///
+    /// <b>The field never asks this.</b> It paints the whole column and lets the
+    /// cells in front cover what they cover, and paint order gets this exactly
+    /// right for free. <see cref="ReliefCap"/> has to compute it, because it puts
+    /// one cell back over a tank with nothing painted after it - so whatever it
+    /// carries stays.
+    ///
+    /// Two things bound a face, and both were needed one at a time. The observer
+    /// is one: a cliff below the ground a tank stands on is the part the field in
+    /// front hides, and carried anyway it ate the top half of the cell in front -
+    /// 64030px of it. <b>The neighbour across that very edge is the other</b>, and
+    /// leaving it out is the same picture again one level up: two cells of a
+    /// plateau side by side, and the back one's face carried a whole lift onto the
+    /// front one's top, which is level with it and hides all of it. Per edge
+    /// rather than per cell, because the three near edges have three different
+    /// neighbours and a plateau's corner cell meets a drop on one and its own kind
+    /// on the others.
+    /// </summary>
+    public float VisibleSide(Vector2I cell, int heading, float standing)
+    {
+        Vector2I front = Step(cell, heading);
+        float held = InBounds(front) ? LevelAt(front) * Lift
+                                     : LevelRange.Low * Lift;
+        return Mathf.Clamp(LevelAt(cell) * Lift - Mathf.Max(standing, held),
+                           0.0f, SkirtDrop(cell));
+    }
 
-    private void DrawWalls(CanvasItem into, Vector2I cell,
-                           float clipDrop = float.PositiveInfinity)
+    /// <param name="seenFrom">How high the one observer this is being painted for
+    /// stands, or null for the board's own pass, which paints whole columns. See
+    /// <see cref="VisibleSide"/>.</param>
+    private void DrawWalls(CanvasItem into, Vector2I cell, float? seenFrom)
     {
         if (_levels is null)
             return;
-        float drop = Mathf.Min(SkirtDrop(cell), clipDrop);
-        if (drop <= 0.0f)
+        float full = SkirtDrop(cell);
+        if (full <= 0.0f)
             return;
         Vector2 centre = CellCentre(cell);
         Vector2[] corner = Corners();
 
-        var down = new Vector2(0.0f, drop);
         for (int i = 0; i < NearHeading.Length; i++)
         {
+            float drop = seenFrom is { } eye
+                ? VisibleSide(cell, NearHeading[i], eye) : full;
+            if (drop <= 0.0f)
+                continue;
+            var down = new Vector2(0.0f, drop);
             Vector2 a = centre + corner[i], b = centre + corner[(i + 1) % 6];
             var quad = new[] { a, b, b + down, a + down };
             into.DrawColoredPolygon(quad, WallInk(NearHeading[i]));

@@ -5690,7 +5690,7 @@ public static class SelfTest
             // both less than the whole side and more than nothing: nothing means
             // the plate is put back without its face and the tank shows through
             // the cliff under it.
-            int over = 0, bare = 0, deep = 0, bites = 0;
+            int faces = 0, buried = 0, deep = 0, shown = 0, bites = 0;
             var firstBad = "";
             for (int q = 0; q < field.Columns; q++)
             for (int r = 0; r < field.Rows; r++)
@@ -5698,32 +5698,44 @@ public static class SelfTest
                 var stand = new Vector2I(q, r);
                 float standing = field.LevelAt(stand) * field.Lift;
                 foreach (Vector2I cell in field.Occluders(field.GroundRow(stand), standing))
+                foreach (int heading in HexField.NearHeading)
                 {
-                    over++;
-                    float side = field.VisibleSide(cell, standing);
-                    if (side <= 0.0f)
+                    faces++;
+                    float side = field.VisibleSide(cell, heading, standing);
+                    Vector2I front = HexField.Step(cell, heading);
+                    // Held up by the ground across that edge, or by the tank's own
+                    // plane: either way there is nothing of the cliff above it to
+                    // show, and anything carried lands on a cell that is level with
+                    // this one and covers all of it.
+                    bool hidden = field.InBounds(front)
+                                  && field.LevelAt(front) >= field.LevelAt(cell);
+                    if (side > 0.01f && (hidden || standing >= field.LevelAt(cell) * field.Lift))
                     {
-                        bare++;
+                        buried++;
                         if (firstBad.Length == 0)
-                            firstBad = $"({cell.X},{cell.Y}) over ({q},{r}) has no face";
+                            firstBad = $"({cell.X},{cell.Y}) toward {heading} over a tank "
+                                       + $"on ({q},{r}) carries {side:F0}px onto ground "
+                                       + "level with it";
                     }
                     else if (side > field.SkirtDrop(cell) + 0.01f)
                     {
                         deep++;
                         if (firstBad.Length == 0)
-                            firstBad = $"({cell.X},{cell.Y}) over ({q},{r}) carries "
-                                       + $"{side:F0}px of a {field.SkirtDrop(cell):F0}px side";
+                            firstBad = $"({cell.X},{cell.Y}) carries {side:F0}px of a "
+                                       + $"{field.SkirtDrop(cell):F0}px side";
                     }
-                    else if (side < field.SkirtDrop(cell) - 0.01f)
-                    {
+                    if (side > 0.01f)
+                        shown++;
+                    if (side < field.SkirtDrop(cell) - 0.01f)
                         bites++;
-                    }
                 }
             }
             Check($"a cell repainted over a tank carries only the side standing "
-                  + $"above it, over {over} covers",
-                over > 0 && bare == 0 && deep == 0 && bites > 0,
-                over == 0 ? "nothing stands over a tank - it proves nothing"
+                  + $"above both, over {faces} faces",
+                faces > 0 && buried == 0 && deep == 0 && bites > 0 && shown > 0,
+                faces == 0 ? "nothing stands over a tank - it proves nothing"
+                : shown == 0 ? "no face is ever shown - a repainted plate with no "
+                               + "cliff under it lets the tank through"
                 : bites == 0 ? "the whole side is always standing proud - this board "
                                + "cannot tell the clip from no clip"
                              : firstBad);
