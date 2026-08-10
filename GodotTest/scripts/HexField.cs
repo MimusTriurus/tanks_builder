@@ -893,6 +893,20 @@ public sealed partial class HexField : Node2D
     /// grade 0.35: the full skirt is 129.5 px where 64.8 is standing proud, and
     /// the surplus ate the top half of the cell in front on every one of the
     /// three tanks' caps.</summary>
+    /// <summary>How high a thing is, <paramref name="done"/> of the way from one
+    /// cell to the next, in screen px.
+    ///
+    /// <b>This is the height that answers what may hide it, and that is the whole
+    /// reason it is a function here rather than a line in the harness.</b> There
+    /// were two heights - this one for drawing and the higher of the two ends for
+    /// occlusion - and the second called a tank up on the crown at the first pixel
+    /// of a climb, so it spent the leg drawn over cells at a level it had not
+    /// reached. A tank covers a hex when it has come up to that hex's level; the
+    /// height it is drawn at is what says whether it has.</summary>
+    public float HeightBetween(Vector2I from, Vector2I onto, float done) =>
+        Mathf.Lerp(LevelAt(from) * Lift, LevelAt(onto) * Lift,
+                   Mathf.Clamp(done, 0.0f, 1.0f));
+
     public float VisibleSide(Vector2I cell, float standing) =>
         Mathf.Max(0.0f, LevelAt(cell) * Lift - standing);
 

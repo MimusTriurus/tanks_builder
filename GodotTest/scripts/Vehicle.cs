@@ -94,23 +94,13 @@ public sealed class Vehicle
     /// between two cells at different levels raises the sprite for free - and
     /// kept here as well because the depth needs the two apart: which row it
     /// stands on and how high it is standing are different terms of the same
-    /// sum, and the position is their total.</summary>
-    public float Height;
-
-    /// <summary>
-    /// How high it counts as standing for the purpose of what can hide it - the
-    /// <b>higher</b> of the two cells it is between, not the height it is drawn
-    /// at.
+    /// sum, and the position is their total.
     ///
-    /// Apart from <see cref="Height"/> because the two really do differ, and only
-    /// while climbing. Halfway up a vertical wall the tank is inside the rock,
-    /// and a cell that asked about its drawn height would paint over it for the
-    /// first half of every climb - reported as the hill swallowing the tank.
-    /// Saying "already up there" a moment early is invisible; the wall it is
-    /// climbing has no surface for the in-between pose to sit on anyway, which is
-    /// the honest form of this being a patch rather than a slope.
-    /// </summary>
-    public float Standing;
+    /// <b>It is also how high it counts as standing for what may hide it</b>, and
+    /// there was a second number for that until this one answered it: the higher
+    /// of the two cells it is between, which called a tank up on the crown at the
+    /// first pixel of the climb. See Main.Climb.</summary>
+    public float Height;
 
     /// <summary>The ground that stands in front of this tank and above it,
     /// repainted over it. Null until the harness builds one.</summary>

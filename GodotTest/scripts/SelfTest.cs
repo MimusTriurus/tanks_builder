@@ -5543,6 +5543,60 @@ public static class SelfTest
                           : $"{levelOver} did, first {firstLevel} - that repaint takes "
                             + "the selection ring with it and lets go mid-step");
 
+            // Climbing, which is where the two heights parted company. A tank
+            // covers a hex when it has come up to that hex's level - so while it
+            // is on the way up, every cell at the level it is climbing to and in
+            // front of it is still over it, and only arriving lets it out. Asked
+            // both ways round: the second half is what keeps it from being passed
+            // by a rule that never lets a tank out at all.
+            int early = 0, climbs = 0, stuck = 0;
+            var firstEarly = "";
+            for (int q = 0; q < field.Columns; q++)
+            for (int r = 0; r < field.Rows; r++)
+            {
+                var from = new Vector2I(q, r);
+                foreach (int heading in HexField.EdgeHeadings)
+                {
+                    Vector2I onto = HexField.Step(from, heading);
+                    if (!field.InBounds(onto)
+                        || field.LevelAt(onto) <= field.LevelAt(from))
+                        continue;
+                    climbs++;
+                    float a = field.GroundRow(from), b = field.GroundRow(onto);
+                    for (float t = 0.0f; t <= 1.0f; t += 0.1f)
+                    {
+                        float row = Mathf.Lerp(a, b, t);
+                        float up = field.HeightBetween(from, onto, t);
+                        var hides = field.Occluders(row, up);
+                        bool arrived = t > 0.999f;
+                        for (int c = 0; c < field.Columns; c++)
+                        for (int d = 0; d < field.Rows; d++)
+                        {
+                            var cell = new Vector2I(c, d);
+                            if (field.LevelAt(cell) != field.LevelAt(onto)
+                                || field.DepthOf(cell) <= field.Depth(row, up))
+                                continue;
+                            if (hides.Contains(cell) != arrived)
+                                continue;
+                            if (arrived)
+                                stuck++;
+                            else if (early++ == 0)
+                                firstEarly = $"({c},{d}) at {t:F1} of the climb "
+                                             + $"({q},{r}) to ({onto.X},{onto.Y})";
+                        }
+                    }
+                }
+            }
+            Check($"a tank part way up a climb is still under the level it is "
+                  + $"climbing to, over {climbs} climbs",
+                early == 0 && stuck == 0 && climbs > 0,
+                climbs == 0 ? "nothing on this map climbs - it proves nothing"
+                : early > 0 ? $"{early} let it out early, first {firstEarly} - a tank "
+                              + "called up at the first pixel is drawn over hexes it "
+                              + "has not reached"
+                            : $"{stuck} still over it once it arrived - it never gets "
+                              + "up at all");
+
             Check($"and none of the {rises} rises behind one does",
                 behind == 0 && rises > 0,
                 rises == 0 ? "the map has no rise behind any cell - it proves nothing"

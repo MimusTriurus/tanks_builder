@@ -1489,10 +1489,7 @@ public sealed partial class Main : Node2D
     {
         vehicle.Cell = _field.ClampCell(vehicle.Cell);
         _field.Position = _origin;
-        // Standing still, the two heights are the same one. They only part
-        // company while crossing between levels - see AdvanceOrder.
-        vehicle.Height = vehicle.Standing =
-            _field.LevelAt(vehicle.Cell) * _field.Lift;
+        vehicle.Height = _field.LevelAt(vehicle.Cell) * _field.Lift;
         vehicle.Sprite.Position = StandOn(vehicle, vehicle.Cell);
         // Moved rather than driven, so the ribbon must break here or the jump is
         // drawn as a line across the board.
@@ -1691,7 +1688,7 @@ public sealed partial class Main : Node2D
         if (vehicle.Cap is null)
             return;
         vehicle.Cap.FlatRow = row;
-        vehicle.Cap.Standing = vehicle.Standing;
+        vehicle.Cap.Standing = vehicle.Height;
         vehicle.Cap.QueueRedraw();
     }
 
@@ -2110,7 +2107,7 @@ public sealed partial class Main : Node2D
     }
 
     /// <summary>
-    /// The two heights, part way from one cell to the next.
+    /// The height, part way from one cell to the next.
     ///
     /// <see cref="Vehicle.Height"/> is taken from how far along the leg the tank
     /// is rather than integrated frame by frame, for the reason the belts read
@@ -2121,8 +2118,15 @@ public sealed partial class Main : Node2D
     /// drive between two lifted anchors is a straight line, so linear is not an
     /// approximation of it.
     ///
-    /// <see cref="Vehicle.Standing"/> is the higher of the two ends instead, and
-    /// the asymmetry is the point: see the field there.
+    /// <b>One height, and there were two.</b> The occlusion rule used to be asked
+    /// against the higher of the two ends, so that a tank halfway up a wall was
+    /// called up already - which reads well for the cell it is climbing onto and
+    /// is wrong about every other cell at that level. Climbing (3,2) to (4,3) the
+    /// tank was promoted to the crown at the first pixel of the leg and spent the
+    /// whole climb drawn over (3,3), a cell it had not reached and was not level
+    /// with. The rule is that a tank covers a hex when it has come up to that
+    /// hex's level, so the height that answers it is the height it is drawn at,
+    /// and the two only ever differed while that answer was wrong.
     /// </summary>
     private void Climb(Vehicle v, Vector2I next)
     {
@@ -2132,10 +2136,7 @@ public sealed partial class Main : Node2D
         float span = (goal - from).Length();
         float done = span <= 0.001f ? 1.0f
             : Mathf.Clamp((v.Sprite.Position - from).Length() / span, 0.0f, 1.0f);
-        float lift = _field.Lift;
-        v.Height = Mathf.Lerp(_field.LevelAt(v.Cell) * lift,
-                              _field.LevelAt(next) * lift, done);
-        v.Standing = Math.Max(_field.LevelAt(v.Cell), _field.LevelAt(next)) * lift;
+        v.Height = _field.HeightBetween(v.Cell, next, done);
     }
 
     /// <summary>
@@ -2227,9 +2228,9 @@ public sealed partial class Main : Node2D
         if (!_field.HasRelief)
             return "flat";
         float row = v.GroundPoint.Y - _origin.Y + v.Height;
-        var over = _field.Occluders(row, v.Standing);
+        var over = _field.Occluders(row, v.Height);
         (int _, int high) = _field.LevelRange;
-        int level = Mathf.RoundToInt(v.Standing / Math.Max(_field.Lift, 0.01f));
+        int level = Mathf.RoundToInt(v.Height / Math.Max(_field.Lift, 0.01f));
         string where = $"on {level:+0;-0;0} of {high:+0;-0;0}";
         return over.Count == 0
             ? $"none, {where}"
@@ -3592,7 +3593,7 @@ public sealed partial class Main : Node2D
 
             Vehicle v = Active;
             float row = v.GroundPoint.Y - _origin.Y + v.Height;
-            bool hides = _field.Occluders(row, v.Standing).Contains(cell);
+            bool hides = _field.Occluders(row, v.Height).Contains(cell);
             // Where this cell's face begins against where the tank's belts touch
             // down. Positive means the face starts above the contact row, which
             // is the only way a cell can reach hull rather than track - and the
@@ -3600,7 +3601,7 @@ public sealed partial class Main : Node2D
             float half = _field.Atlas.HexRect.Size.Y * 0.5f;
             float top = _field.CellCentre(cell).Y - half;
             float over = (row - v.Height) - top;
-            float nearer = _field.DepthOf(cell) - _field.Depth(row, v.Standing);
+            float nearer = _field.DepthOf(cell) - _field.Depth(row, v.Height);
             return what + $"\nvs {v.Tag} on {cell.X},{cell.Y} == "
                    + $"{(cell == v.Cell ? "same cell" : $"{v.Cell.X},{v.Cell.Y}")}"
                    + $"   {(hides ? "COVERS it" : "does not cover it")}\n"
