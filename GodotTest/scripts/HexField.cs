@@ -696,12 +696,18 @@ public sealed partial class HexField : Node2D
             for (int q = 0; q < Columns; q++)
             for (int r = 0; r < Rows; r++)
                 cells.Add(new Vector2I(q, r));
-            // By depth rather than by the drawn row, and on a flat board the two
-            // are the same order: depth is the row times a constant. With height
-            // in it they part company, and sorting on the drawn position walks
-            // the hill backwards - a raised cell moves up the screen and is not
-            // thereby one step further away.
-            cells.Sort((a, b) => DepthOf(a).CompareTo(DepthOf(b)));
+            // By the ground row, and by nothing else. Not by the drawn row -
+            // that walks the hill backwards, a raised cell moving up the screen
+            // without becoming one step further away - and no longer by
+            // <see cref="DepthOf"/> either, which carries the lift.
+            //
+            // The lift belongs in the key that sorts a cell against a tank,
+            // where the question is which of two things at different heights is
+            // nearer. It does not belong here, because a cell is not at a
+            // height: since <see cref="SkirtDrop"/> every cell is a column
+            // standing on the board's floor, and one column is in front of
+            // another exactly when its ground is.
+            cells.Sort((a, b) => GroundRow(a).CompareTo(GroundRow(b)));
             _ordered = cells;
             _orderedFor = new Vector2I(Columns, Rows);
         }
@@ -828,52 +834,54 @@ public sealed partial class HexField : Node2D
     /// <summary>The three edges of a flat-top hexagon that face the camera, in
     /// the order <see cref="Corners"/> gives them - so edge <c>i</c> spans
     /// corners <c>i</c> and <c>i+1</c>. The other three face away and are listed
-    /// nowhere, which is the point: see <see cref="DrawsFace"/>.</summary>
+    /// nowhere, which is the point: a column is only ever seen from the front,
+    /// and a side extruded from a far edge leaves the hexagon near its vertex
+    /// and lands on the cell behind it.</summary>
     private static readonly int[] NearHeading = { 330, 270, 210 };
 
     /// <summary>
-    /// The faces between a cell and whatever is across each of its edges.
+    /// How far below its own near edges a cell's side carries, in screen px.
     ///
-    /// <b>The higher cell of a pair draws the side between them, and only on the
-    /// three edges that face the camera.</b> The second half was learned rather
-    /// than designed. All six were drawn at first, on the argument that a face
-    /// pointing away is covered by its own cell's top - walls go down before the
-    /// plate, so within the hexagon that is true. It is not true outside it: a
-    /// slanted edge extruded straight down leaves the hexagon near its vertex,
-    /// by up to a full lift, and lands on the cell behind - which, being farther
-    /// away, was drawn earlier and does not paint over it again.
+    /// <b>Every cell is a column standing on one floor, not a plate with faces
+    /// fitted between it and its neighbours.</b> That is the whole of this
+    /// change and it replaces a rule per pair of cells - who is higher, which of
+    /// the six edges, how many levels between them - with one number per cell
+    /// that does not mention neighbours at all.
     ///
-    /// What it looks like is a wall standing where there is no wall. On a plain
-    /// hill it hides, because the cell it spills onto gets covered anyway by the
-    /// near neighbour drawn after it. Put a pit beside the hill and that cover
-    /// drops a whole level out of the way, and the spill stacks up the side of
-    /// the plateau into a continuous band running its full height. Reported as
-    /// a cell's side face running onto the hex below it.
+    /// The pair rule was tried and each version of it was wrong somewhere,
+    /// always for the same underlying reason: <b>a cell is not a point, and
+    /// lifting one breaks the tiling.</b> Raise a hexagon and it no longer meets
+    /// its neighbours edge to edge - it rides up over the ones behind and pulls
+    /// away from the ones in front - so which piece of which cell belongs on top
+    /// stops being answerable by one key per cell, and the faces fitted into the
+    /// gaps have to be right about a neighbour they are drawn without. Three
+    /// reports came out of that, each a different symptom of it.
     ///
-    /// Dropping them costs nothing, and that is worth checking rather than
-    /// asserting, because the fear is a hole: between a cell's plate and the
-    /// lower ground behind it there could be a band belonging to neither. There
-    /// cannot - a neighbour one row back and one level down is drawn 109px up
-    /// and 65px back down, so the two plates overlap by 44px, and a two-level
-    /// drop overlaps by more, not less. The far bank of a pit is drawn by the
-    /// cell beyond it, on that cell's near edge, and is unaffected.
+    /// A column has no gaps to fit anything into. It is solid from its own top
+    /// down to the floor, so <b>whatever is nearer covers it, and that is the
+    /// only rule left</b> - see <see cref="Ordered"/>, which sorts on the ground
+    /// row and nothing else. The visible height of a cliff is then not computed
+    /// at all: it is what is left of the higher column after the lower one in
+    /// front has been drawn over it.
+    ///
+    /// <b>The floor is the lowest level on the board</b>, so the deepest cells
+    /// carry no side and a board with no relief carries none anywhere - it draws
+    /// exactly as it did, which is the invariant this feature has kept from the
+    /// start. The height is sufficient rather than tight: the worst gap a cell
+    /// has to cover is a neighbour <c>k</c> levels below it, which opens
+    /// <c>k*Lift - 54.5</c> px, and <c>(level - low)*Lift</c> is at least that
+    /// for every k it can meet.
     /// </summary>
-    /// <summary>Whether this cell draws the face between it and whatever is
-    /// across <paramref name="heading"/>: <b>the higher one of a pair does, on a
-    /// camera-facing edge only</b> - see <see cref="DrawWalls"/>. Named so it can
-    /// be asserted rather than read off a picture: the failures are a gap, a
-    /// double-drawn face, and a face on the far side, and none of the three is
-    /// loud.</summary>
-    public bool DrawsFace(Vector2I cell, int heading) =>
-        _levels is not null
-        && Array.IndexOf(NearHeading, ((heading % 360) + 360) % 360) >= 0
-        && LevelAt(cell) > LevelAt(Step(cell, heading));
+    public float SkirtDrop(Vector2I cell) =>
+        _levels is null ? 0.0f : (LevelAt(cell) - LevelRange.Low) * Lift;
 
     private void DrawWalls(CanvasItem into, Vector2I cell)
     {
         if (_levels is null)
             return;
-        int level = LevelAt(cell);
+        float drop = SkirtDrop(cell);
+        if (drop <= 0.0f)
+            return;
         Vector2 centre = CellCentre(cell);
         Vector2[] corner = Corners();
 
@@ -885,12 +893,9 @@ public sealed partial class HexField : Node2D
         Rect2 rect = art is null ? default
             : Terrain!.RectAt(centre, Terrain.ScaleTo(Atlas!.HexRect));
 
+        var down = new Vector2(0.0f, drop);
         for (int i = 0; i < NearHeading.Length; i++)
         {
-            int drop = level - LevelAt(Step(cell, NearHeading[i]));
-            if (!DrawsFace(cell, NearHeading[i]))
-                continue;
-            var down = new Vector2(0.0f, drop * Lift);
             Vector2 a = centre + corner[i], b = centre + corner[(i + 1) % 6];
             var quad = new[] { a, b, b + down, a + down };
             if (art is null)

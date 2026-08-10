@@ -5549,61 +5549,83 @@ public static class SelfTest
                            : $"{behind} did, first {firstBehind} - this paints a wall "
                              + "across the turret");
 
-            GD.Print("relief: every step has exactly one face across it");
+            GD.Print("relief: every hex is a column standing on one floor");
 
-            // Three ways to be wrong and all of them quiet: a gap shows the plain
-            // through the hill, a doubled face is two identical polygons, and a
-            // face on the side turned away from the camera hangs off its own
-            // hexagon onto the cell behind - which, being farther, was drawn
-            // earlier and never paints over it again. So the pairing is asserted
-            // rather than looked at, every adjacent pair, both ways round.
+            // Two claims, and between them they are the whole of what a column
+            // has to satisfy - which is the point of columns: the rule per pair
+            // of cells that stood here needed four cases and got three of them
+            // wrong in turn.
             //
-            // Split by which way the ground falls, because the two want opposite
-            // answers, and a check that lumped them read as "one face per step"
-            // and passed the version that drew all six.
-            int wrongFace = 0, toward = 0, away = 0, faces = 0;
-            var firstPair = "";
+            // First, no seam. Where the ground in front of a cell is lower, the
+            // two plates part company, and what closes the gap is the higher
+            // cell's own side rather than a face fitted between the pair. Asked
+            // as the worst margin over the board, because a yes says nothing
+            // about how close it came.
+            float worstSeam = float.NegativeInfinity;
+            var firstSeam = "";
+            float half = field.Atlas!.HexRect.Size.Y * 0.5f;
+            int drops = 0;
             for (int q = 0; q < field.Columns; q++)
             for (int r = 0; r < field.Rows; r++)
             {
                 var here = new Vector2I(q, r);
                 foreach (int heading in HexField.EdgeHeadings)
                 {
-                    Vector2I over = HexField.Step(here, heading);
-                    if (!field.InBounds(over))
+                    Vector2I front = HexField.Step(here, heading);
+                    if (!field.InBounds(front)
+                        || field.FlatAnchor(front).Y <= field.FlatAnchor(here).Y
+                        || field.LevelAt(front) >= field.LevelAt(here))
                         continue;
-                    bool mine = field.DrawsFace(here, heading);
-                    bool theirs = field.DrawsFace(over, (heading + 180) % 360);
-                    int drawn = (mine ? 1 : 0) + (theirs ? 1 : 0);
-                    faces += mine ? 1 : 0;
-                    int want = 0;
-                    if (field.LevelAt(here) != field.LevelAt(over))
-                    {
-                        bool higher = field.LevelAt(here) > field.LevelAt(over);
-                        Vector2I top = higher ? here : over, foot = higher ? over : here;
-                        // Down-screen of the higher cell, so the face between them
-                        // is turned to the camera. Off the flat rows, because the
-                        // drawn ones carry the lift and this asks about the ground.
-                        if (field.FlatAnchor(foot).Y > field.FlatAnchor(top).Y)
-                        { want = 1; toward++; }
-                        else
-                            away++;
-                    }
-                    if (drawn == want)
+                    drops++;
+                    // Bottom of this cell's side against the top of that plate.
+                    float reach = field.CellCentre(here).Y + half + field.SkirtDrop(here);
+                    float lip = field.CellCentre(front).Y - half;
+                    if (lip - reach <= worstSeam)
                         continue;
-                    wrongFace++;
-                    if (firstPair.Length == 0)
-                        firstPair = $"({q},{r}) to ({over.X},{over.Y}), {drawn} drawn "
-                                    + $"where {want} belongs";
+                    worstSeam = lip - reach;
+                    firstSeam = $"({q},{r}) to ({front.X},{front.Y})";
                 }
             }
-            Check($"the higher cell draws it on each of the {toward / 2} steps that "
-                  + $"fall toward the camera, and nobody draws one on the {away / 2} "
-                  + "that fall away",
-                wrongFace == 0 && toward > 0 && away > 0,
-                toward == 0 || away == 0
-                    ? "the map has no step of one kind or the other - it proves nothing"
-                    : $"{wrongFace} disagree, first {firstPair} (of {faces} faces drawn)");
+            Check($"no cell parts company with the lower ground in front of it, "
+                  + $"over {drops} drops",
+                worstSeam <= 0.01f && drops > 0,
+                drops == 0 ? "no cell has lower ground in front - it proves nothing"
+                           : $"{worstSeam:F1}px of nothing at {firstSeam} - the board "
+                             + "shows through between two hexes");
+
+            // Second, the order. A column is in front of another exactly when its
+            // ground is, and the failure this guards is a sort key that carries
+            // the lift again: it agrees with this one nearly everywhere, so it
+            // reads as working and comes apart on the few cells where a rise and
+            // the flat ground beside it are within the lift of each other.
+            var order = new Dictionary<Vector2I, int>();
+            for (int i = 0; i < field.Ordered().Count; i++)
+                order[field.Ordered()[i]] = i;
+            int late = 0, neighbours = 0;
+            var firstLate = "";
+            for (int q = 0; q < field.Columns; q++)
+            for (int r = 0; r < field.Rows; r++)
+            {
+                var here = new Vector2I(q, r);
+                foreach (int heading in HexField.EdgeHeadings)
+                {
+                    Vector2I front = HexField.Step(here, heading);
+                    if (!field.InBounds(front)
+                        || field.FlatAnchor(front).Y <= field.FlatAnchor(here).Y)
+                        continue;
+                    neighbours++;
+                    if (order[front] > order[here])
+                        continue;
+                    late++;
+                    if (firstLate.Length == 0)
+                        firstLate = $"({front.X},{front.Y}) before ({q},{r})";
+                }
+            }
+            Check($"and each of the {neighbours} nearer neighbours is painted after the "
+                  + "one behind it",
+                late == 0 && neighbours > 0,
+                neighbours == 0 ? "no neighbour is in front of another - it proves nothing"
+                           : $"{late} the wrong way round, first {firstLate}");
 
             GD.Print("relief: a wood on a rise sorts where it stands");
             Woods(field, grove, elevation, Check);
