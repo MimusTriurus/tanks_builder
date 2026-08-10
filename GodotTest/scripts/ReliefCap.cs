@@ -110,7 +110,12 @@ public sealed partial class ReliefCap : Node2D
             return;
         DrawSetTransformMatrix(GetGlobalTransform().AffineInverse()
                                * Field.GetGlobalTransform());
+        // Clipped, because nothing is painted after this: the field drew the
+        // whole board in order and this puts a handful of cells back on top, so
+        // a cell's full column would undo the cells in front of it that had
+        // covered its lower half. See HexField.VisibleSide.
         foreach (Vector2I cell in over)
-            Field.PaintCell(this, cell, Field.InkFor(cell));
+            Field.PaintCell(this, cell, Field.InkFor(cell),
+                            Field.VisibleSide(cell, Standing));
     }
 }

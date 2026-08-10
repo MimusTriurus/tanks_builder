@@ -784,11 +784,17 @@ public sealed partial class HexField : Node2D
     /// copy of how a cell is drawn, which is the way the two would come to
     /// disagree.
     /// </summary>
-    public void PaintCell(CanvasItem into, Vector2I cell, Color tint)
+    /// <param name="clipDrop">How far down the side may be drawn, in screen px.
+    /// Unbounded for the field, which paints the whole column and lets the cells
+    /// in front cover what they cover. Bounded by <see cref="ReliefCap"/>, which
+    /// paints one cell over a tank with nothing painted after it - see
+    /// <see cref="SkirtDrop"/> for what goes wrong when it is not.</param>
+    public void PaintCell(CanvasItem into, Vector2I cell, Color tint,
+                          float clipDrop = float.PositiveInfinity)
     {
         if (Atlas is null)
             return;
-        DrawWalls(into, cell);
+        DrawWalls(into, cell, clipDrop);
 
         if (Terrain is not null && Terrain.Any)
         {
@@ -875,11 +881,27 @@ public sealed partial class HexField : Node2D
     public float SkirtDrop(Vector2I cell) =>
         _levels is null ? 0.0f : (LevelAt(cell) - LevelRange.Low) * Lift;
 
-    private void DrawWalls(CanvasItem into, Vector2I cell)
+    /// <summary>How much of a cell's side one observer may be shown, in screen
+    /// px: the part of the cliff that stands above the ground that observer is
+    /// on, and not one pixel more.
+    ///
+    /// <b>Everything below that plane is the part the ground in front hides</b>,
+    /// by construction - a cliff cannot be seen below the level of the field in
+    /// front of it - so it is exactly the part a repaint must not carry. Painted
+    /// anyway it lands on the cell in front, which was drawn correctly and is
+    /// then covered by a column that is behind it. Measured on MTP's plateau at
+    /// grade 0.35: the full skirt is 129.5 px where 64.8 is standing proud, and
+    /// the surplus ate the top half of the cell in front on every one of the
+    /// three tanks' caps.</summary>
+    public float VisibleSide(Vector2I cell, float standing) =>
+        Mathf.Max(0.0f, LevelAt(cell) * Lift - standing);
+
+    private void DrawWalls(CanvasItem into, Vector2I cell,
+                           float clipDrop = float.PositiveInfinity)
     {
         if (_levels is null)
             return;
-        float drop = SkirtDrop(cell);
+        float drop = Mathf.Min(SkirtDrop(cell), clipDrop);
         if (drop <= 0.0f)
             return;
         Vector2 centre = CellCentre(cell);

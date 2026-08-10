@@ -5627,6 +5627,53 @@ public static class SelfTest
                 neighbours == 0 ? "no neighbour is in front of another - it proves nothing"
                            : $"{late} the wrong way round, first {firstLate}");
 
+            // Third, the repaint. The field paints the whole column and lets the
+            // cells in front cover its lower half; ReliefCap paints one cell over
+            // one tank with nothing painted after it, so the same column carried
+            // whole lands on the cell in front and undoes it. What it may carry
+            // is the part standing above the ground the tank is on - a cliff is
+            // not visible below the field in front of it - and that has to be
+            // both less than the whole side and more than nothing: nothing means
+            // the plate is put back without its face and the tank shows through
+            // the cliff under it.
+            int over = 0, bare = 0, deep = 0, bites = 0;
+            var firstBad = "";
+            for (int q = 0; q < field.Columns; q++)
+            for (int r = 0; r < field.Rows; r++)
+            {
+                var stand = new Vector2I(q, r);
+                float standing = field.LevelAt(stand) * field.Lift;
+                foreach (Vector2I cell in field.Occluders(field.GroundRow(stand), standing))
+                {
+                    over++;
+                    float side = field.VisibleSide(cell, standing);
+                    if (side <= 0.0f)
+                    {
+                        bare++;
+                        if (firstBad.Length == 0)
+                            firstBad = $"({cell.X},{cell.Y}) over ({q},{r}) has no face";
+                    }
+                    else if (side > field.SkirtDrop(cell) + 0.01f)
+                    {
+                        deep++;
+                        if (firstBad.Length == 0)
+                            firstBad = $"({cell.X},{cell.Y}) over ({q},{r}) carries "
+                                       + $"{side:F0}px of a {field.SkirtDrop(cell):F0}px side";
+                    }
+                    else if (side < field.SkirtDrop(cell) - 0.01f)
+                    {
+                        bites++;
+                    }
+                }
+            }
+            Check($"a cell repainted over a tank carries only the side standing "
+                  + $"above it, over {over} covers",
+                over > 0 && bare == 0 && deep == 0 && bites > 0,
+                over == 0 ? "nothing stands over a tank - it proves nothing"
+                : bites == 0 ? "the whole side is always standing proud - this board "
+                               + "cannot tell the clip from no clip"
+                             : firstBad);
+
             GD.Print("relief: a wood on a rise sorts where it stands");
             Woods(field, grove, elevation, Check);
 
