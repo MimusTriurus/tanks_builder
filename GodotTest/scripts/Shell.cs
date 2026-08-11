@@ -50,18 +50,187 @@ public sealed partial class Shell : Node2D
     /// frames. Each further cell adds 149px along a slanted lane or 107px up a
     /// column, so four cells is 0.59s.
     ///
-    /// Nine hundred keeps the tracer reading as fast - the head moves 15px a
-    /// frame against a 24px trail, so consecutive frames still overlap into one
-    /// streak - at the cost of the shortest shot separating gun from impact by
-    /// only six frames. Point blank is the hardest case for the ear and there is
-    /// not much room in it either way: the tanks are touching.
+    /// **The floor is the ear, and it is a hard one.** At 1500 a point-blank
+    /// round crosses its 83px in four frames; at 1800 it is three, and the check
+    /// that says "a round at point blank still takes several frames" starts
+    /// failing - which is the impact climbing back inside the attack transient
+    /// of a 1.2 to 3.4 second gun report, the thing this class was written to
+    /// stop. So the slider may go past it and the frame count is what the caption
+    /// reports, because past that point the round is fast and the shot is one
+    /// noise again.
+    ///
+    /// It used to be 900, chosen so the head moved less far per frame than the
+    /// streak was long and consecutive frames overlapped into one line. **The
+    /// smoke took that job over.** At 1500 the head moves 25px against a 22px
+    /// streak, so the streak alone would read dotted - and does not, because the
+    /// trail behind it is continuous by construction: it is seeded along the
+    /// path in world space rather than dragged behind the head.
     /// </summary>
-    public const float Speed = 900.0f;
+    public const float BaseSpeed = 1500.0f;
 
-    /// <summary>How long the streak behind the head is, in pixels. About a
-    /// frame and a half of travel, so the tracer reads as one object moving
-    /// rather than as a dotted line.</summary>
-    public const float Trail = 24.0f;
+    /// <summary>
+    /// How fast rounds fly, against <see cref="BaseSpeed"/>.
+    ///
+    /// A multiplier rather than a rate, the rule the tremble, size and traverse
+    /// levels already follow - though here there is no per-class spread to
+    /// flatten, because a shell is a shell and what differs between a light gun
+    /// and a heavy one is what happens on arrival.
+    /// </summary>
+    public static double SpeedLevel { get; set; } = 1.0;
+
+    /// <summary>Screen pixels per second, as flown.</summary>
+    public static float Speed => (float)(BaseSpeed * SpeedLevel);
+
+    /// <summary>How long the bright streak behind the head is, per unit of
+    /// calibre.</summary>
+    public const float Streak = 14.0f;
+
+    /// <summary>
+    /// How big the tracer is drawn, against the per-class calibre in
+    /// <see cref="MovementProfile.TracerCalibre"/>.
+    ///
+    /// Read live rather than settled at the trigger, and that is the opposite of
+    /// the rule the plate, the scatter and the hit calibre follow - because those
+    /// decide what the round *does* and this decides only how it is drawn. The
+    /// closer precedent is the tracer's own visibility, which reaches rounds
+    /// already in the air for the same reason: a switch that skipped the round
+    /// launched a moment ago reads as a switch that does not work.
+    /// </summary>
+    public static double TracerLevel { get; set; } = 1.0;
+
+    /// <summary>This round's tracer size: its gun's calibre times the level.
+    /// Named apart from <see cref="Calibre"/>, which is the hit dial and sizes
+    /// the burst - two things called calibre, and only one of them is the gun.
+    /// </summary>
+    public float TracerSize =>
+        (float)(Shooter.Profile.TracerCalibre * TracerLevel);
+
+    /// <summary>
+    /// How thick the trail is drawn, against the per-class calibre in
+    /// <see cref="MovementProfile.SmokeCalibre"/>.
+    ///
+    /// **A level of its own, because the trail and the streak are judged against
+    /// different things.** The tracer is two pixels of bright on grass and is
+    /// judged on being findable; the trail is a soft line that crosses armour and
+    /// is judged on reading as smoke rather than as a road. One dial over both
+    /// meant every A/B taken on it moved two effects at once - the same objection
+    /// that keeps the hit calibre out of the tracer.
+    /// </summary>
+    public static double SmokeLevel { get; set; } = 1.0;
+
+    /// <summary>This round's trail thickness: its gun's smoke calibre times the
+    /// level.</summary>
+    public float SmokeSize =>
+        (float)(Shooter.Profile.SmokeCalibre * SmokeLevel);
+
+    /// <summary>Whether the round lays smoke behind it. Named rather than left
+    /// in a field initialiser, the rule <see cref="Recoil.ShearOnByDefault"/>
+    /// set: this one carries the tracer's continuity at speed, so turning it off
+    /// is a comparison somebody should have to ask for.</summary>
+    public const bool SmokeOnByDefault = true;
+
+    public static bool SmokeOn { get; set; } = SmokeOnByDefault;
+
+    /// <summary>
+    /// Pixels of path between one puff of trail and the next, on the medium.
+    /// Scaled with the smoke calibre by <see cref="Step"/>.
+    ///
+    /// **A puff at birth has to be wider than the gap to the next one**, which is
+    /// `2 * SmokeSeed > SmokeStep` and is asserted rather than left to be looked
+    /// at: a trail whose fresh end is beads is a dotted line, and it fails at the
+    /// head, which is the part of it anybody is looking at. It was 4.0 against a
+    /// 3.0px puff and got away with it on the medium because alpha blending closed
+    /// the last pixel - so the failure showed up only on the class whose puff had
+    /// shrunk.
+    /// </summary>
+    internal const float SmokeStep = 2.5f;
+
+    /// <summary>
+    /// Pixels of path between puffs for this round.
+    ///
+    /// **Scaled with the calibre, and the light tank is why.** It was constant, on
+    /// the argument that a heavier gun should lay a thicker trail rather than a
+    /// denser one - and the argument was right about the *ratio* and wrong to hold
+    /// the spacing still, because the puff shrank with the calibre and the spacing
+    /// did not. Measured on LTP: puffs 2.1px across sitting 4px apart, which is not
+    /// a thinner line but a **dotted** one, and it stayed dotted for the whole
+    /// flight (a 0.70 puff needs 0.19s of growth to close a 4px gap, and the round
+    /// arrives long before that).
+    ///
+    /// Scaling both keeps the density *relative to the width* identical on all
+    /// three classes, which is what that argument actually wanted: one trail at
+    /// three sizes, differing in how wide it is and in nothing else.
+    /// </summary>
+    public float Step => SmokeStep * Math.Max(SmokeSize, 0.05f);
+
+    /// <summary>
+    /// Seconds a puff lasts, and with it how long the line hangs after the round
+    /// has gone.
+    ///
+    /// **A value rather than a multiplier, and that is not a lapse of the rule.**
+    /// Every other level here - tremble, size, traverse, tracer size - multiplies
+    /// a per-class triple, and is a multiplier precisely so the spread between the
+    /// classes survives being adjusted. There is no triple under this one: smoke
+    /// hangs for as long as smoke hangs, whichever gun made it. So the number is
+    /// the thing itself, and the caption turns it into the length of trail it buys
+    /// at the current speed, which is what is actually being judged.
+    /// </summary>
+    public static float SmokeSeconds { get; set; } = TunedSmokeSeconds;
+
+    /// <summary>The tuned figure, named so the panel and the reset have one place
+    /// to come back to.</summary>
+    public const float TunedSmokeSeconds = 1.1f;
+
+    /// <summary>Radius a puff is born at, per unit of smoke calibre. Internal
+    /// because the panel's caption turns it into the width the trail actually
+    /// draws, and a caption that repeated the number would be a second copy of
+    /// it.</summary>
+    internal const float SmokeSeed = 1.5f;
+
+    /// <summary>How fast a puff spreads, px of radius per second. Low, because
+    /// what is wanted is a **line** that softens rather than a cloud that
+    /// blooms: at the tuned life a puff ends around eleven pixels across, and
+    /// the near half of the trail stays two or three.</summary>
+    internal const float SmokeGrow = 7.0f;
+
+    private const float SmokeAlpha = 0.55f;
+
+    /// <summary>How many puffs the round has laid so far - the head has passed
+    /// the seed point of every one of them.</summary>
+    public int Puffs => (int)(Flown / Step) + 1;
+
+    /// <summary>
+    /// Where puff <paramref name="k"/> sits, relative to the round's own
+    /// position now.
+    ///
+    /// Public so the one claim the trail rests on can be asserted instead of
+    /// described: **it stands still while the round goes past it.** A puff at a
+    /// constant offset behind the head is a comet, and the difference between the
+    /// two is invisible in a screenshot and obvious in motion, which is precisely
+    /// the split this harness's self-tests exist across.
+    /// </summary>
+    public Vector2 PuffLocal(int k)
+    {
+        Vector2 along = To - From;
+        float total = along.Length();
+        if (total < 1e-3f)
+            return Vector2.Zero;
+        along /= total;
+        Vector2 across = new(-along.Y, along.X);
+        float at = (k + 0.5f) * Step;
+        float wob = ((k * 41 + Serial * 17) % 23) / 23.0f - 0.5f;
+        float t = PuffAge(k) / SmokeSeconds;
+        return -along * (Flown - at)
+               + across * (wob * (1.2f + 5.0f * t) * SmokeSize);
+    }
+
+    /// <summary>Seconds since the head went past puff <paramref name="k"/>.
+    /// </summary>
+    public float PuffAge(int k) =>
+        (Flown - (k + 0.5f) * Step) / Math.Max(Speed, 1.0f) + _dead;
+
+    /// <summary>Distance covered, never past the target.</summary>
+    private float Flown => Math.Min(_flown, (To - From).Length());
 
     /// <summary>The gun that fired it. Kept because the impact is the shooter's
     /// business - which class it is decides how deep the round gets - and
@@ -134,16 +303,51 @@ public sealed partial class Shell : Node2D
     /// </summary>
     public required int Level { get; init; }
 
-    /// <summary>True once it has reached the armour. The owner reads this, applies
-    /// the hit and frees the node - the shell does not reach into the harness to
-    /// do damage, because then the order of two things that both have to happen
-    /// exactly once would live in a draw node.</summary>
+    /// <summary>True once it has reached the armour. The owner reads this and
+    /// applies the hit - the shell does not reach into the harness to do damage,
+    /// because then the order of two things that both have to happen exactly
+    /// once would live in a draw node.</summary>
     public bool Arrived { get; private set; }
+
+    /// <summary>Set by the owner once it has applied the strike. The round
+    /// outlives its own arrival now - the smoke hangs after the shot is over -
+    /// so "has landed" and "has been dealt with" stopped being the same fact,
+    /// and the damage has to happen exactly once across the frames in
+    /// between.</summary>
+    public bool Struck { get; set; }
+
+    /// <summary>
+    /// True once the trail has faded and there is nothing left to draw.
+    ///
+    /// **This is what the owner frees on, not <see cref="Arrived"/>.** A trail
+    /// that vanishes the instant the round lands is the thing this drawing was
+    /// changed to stop: smoke that disappears on impact reads as the effect being
+    /// switched off rather than as smoke.
+    /// </summary>
+    /// <remarks>With the trail switched off there is nothing to wait for, and
+    /// the round has to go at once: otherwise it lingers a second drawing
+    /// nothing, and the trace reports smoke that is not there - which is the
+    /// same picture as a trail that failed to draw.</remarks>
+    public bool Expired => Arrived && (!SmokeOn || _dead > SmokeSeconds);
 
     private float _flown;
 
-    /// <summary>Where it is going now, in global space.</summary>
-    public Vector2 To => Target.Sprite.ToGlobal(ImpactLocal);
+    /// <summary>Seconds since it landed.</summary>
+    private float _dead;
+
+    /// <summary>Where the path ended, frozen at the moment of arrival.</summary>
+    private Vector2 _landed;
+
+    /// <summary>
+    /// Where it is going now, in global space - and where it went, once it has.
+    ///
+    /// Frozen on arrival, and it has to be: the trail is drawn along this
+    /// direction, so a target that drives away afterwards would swing the whole
+    /// line of smoke round behind it. While the round is flying, following the
+    /// target is the deliberate liberty; once it has hit, the smoke belongs to
+    /// the air rather than to the tank.
+    /// </summary>
+    public Vector2 To => Arrived ? _landed : Target.Sprite.ToGlobal(ImpactLocal);
 
     /// <summary>Above every tank. A tracer disappearing behind a hull it is
     /// passing reads as a dropped frame, and it is a few pixels of bright on a
@@ -176,12 +380,21 @@ public sealed partial class Shell : Node2D
     /// </summary>
     public void Advance(double delta)
     {
+        if (Arrived)
+        {
+            // Landed: it stops being a round and becomes the smoke it left. It
+            // still has to ask to be redrawn, because the trail is fading.
+            _dead += (float)delta;
+            QueueRedraw();
+            return;
+        }
         Vector2 to = To;
         float total = (to - From).Length();
         _flown += (float)(Speed * delta);
         if (total <= 0.001f || _flown >= total)
         {
             Position = to;
+            _landed = to;
             Arrived = true;
         }
         else
@@ -204,50 +417,94 @@ public sealed partial class Shell : Node2D
     }
 
     /// <summary>
-    /// Head, streak and a few sparks trailing off it.
+    /// A tracer and the smoke it leaves, and nothing else.
     ///
     /// Ordinary alpha with a dark backing under a hot core, not additive. Every
     /// additive layer in this project has had the same trouble - the ground is a
     /// pale tile around 0.72 and additive light lands on it as a slightly warmer
     /// tile - and the answer the selection ring already found is that a small
     /// bright mark carries its own contrast instead of borrowing the ground's.
-    /// A tracer is about six pixels across; it cannot afford to be tinted ground.
+    /// A tracer is a few pixels across; it cannot afford to be tinted ground.
+    ///
+    /// **The trail is seeded along the path, not dragged behind the head**, and
+    /// that is the whole of it. Puffs hung at fixed offsets behind the round move
+    /// with it, which reads as a comet; smoke stands still and disperses. So a
+    /// puff belongs to a distance down the path, comes into being when the head
+    /// passes it, and ages from there - which also makes the trail continuous at
+    /// any speed, and is why the round could be allowed to fly faster than its
+    /// own streak is long.
+    ///
+    /// The smoke is a mid grey rather than white, for the reason the selection
+    /// ring is not: it spends its life over a pale tile, where white is nothing,
+    /// and crosses armour, where black would be nothing. Carrying its own
+    /// contrast costs it a little realism and buys it being visible at all.
+    ///
+    /// The sparks are gone with the sheet of things that were decoration: a halo
+    /// of dots round the tip is a firework, and the one thing a tracer has to
+    /// read as is fast.
     /// </summary>
     public override void _Draw()
     {
         Vector2 to = To;
-        Vector2 along = (to - From);
-        if (along.LengthSquared() < 1e-6f)
+        Vector2 along = to - From;
+        float total = along.Length();
+        if (total < 1e-3f)
             return;
-        along = along.Normalized();
-        Vector2 across = new(-along.Y, along.X);
+        along /= total;
+        float cal = TracerSize;
+        // Two calibres, not one, and this is the whole of that split on the
+        // drawing side: the streak takes the gun's, the trail takes the trail's.
+        float puff = SmokeSize;
+
+        if (SmokeOn)
+            for (int k = Puffs - 1; k >= 0; k--)
+            {
+                // Walking k downwards walks backwards along the path, so once
+                // one puff is too old every puff behind it is too. The wobble
+                // inside PuffLocal comes off the index and the round's serial,
+                // so two runs of --capture agree - the rule the hit scatter set.
+                float age = PuffAge(k);
+                if (age < 0.0f)
+                    continue;
+                if (age > SmokeSeconds)
+                    break;
+                float fade = (float)Math.Pow(1.0f - age / SmokeSeconds, 0.7);
+                DrawCircle(PuffLocal(k), (SmokeSeed + SmokeGrow * age) * puff,
+                           // Linear rather than squared, and that was the
+                           // difference between a trail and a smudge: a puff
+                           // grows as it ages, so a squared fade takes the
+                           // opacity away exactly as the area arrives and the
+                           // wide half of the trail is never seen.
+                           new Color(0.40f, 0.38f, 0.36f, SmokeAlpha * fade));
+            }
 
         // Backing first, one line, so the streak reads over the amber route tint
-        // as well as over the pale tile.
-        DrawLine(-along * (Trail + 2.0f), along * 2.0f,
-                 new Color(0.10f, 0.05f, 0.0f, 0.55f), 4.0f);
+        // as well as over the pale tile and its own smoke.
+        // Nothing bright is drawn once it has landed - what is left is the
+        // smoke. The round is still here only because the smoke is.
+        if (Arrived)
+            return;
 
-        // The streak, brightening into the head. Three segments rather than a
+        float len = Streak * cal;
+        DrawLine(-along * (len + 1.0f), along * 1.5f,
+                 new Color(0.10f, 0.05f, 0.0f, 0.45f), 2.6f * cal);
+
+        // The streak, brightening into the head. Two segments rather than a
         // gradient because a gradient needs a polygon and this is two pixels
         // wide.
-        DrawLine(-along * Trail, -along * (Trail * 0.55f),
-                 new Color(1.0f, 0.55f, 0.15f, 0.25f), 2.0f);
-        DrawLine(-along * (Trail * 0.55f), -along * (Trail * 0.22f),
-                 new Color(1.0f, 0.68f, 0.25f, 0.55f), 2.0f);
-        DrawLine(-along * (Trail * 0.22f), Vector2.Zero,
-                 new Color(1.0f, 0.85f, 0.45f, 0.9f), 2.5f);
-        DrawCircle(Vector2.Zero, 2.6f, new Color(1.0f, 0.93f, 0.70f));
-
-        // Sparks shed behind, off the round's own serial so two runs agree. They
-        // sit on the streak rather than around the head: a halo of dots round the
-        // tip is a firework, and the one thing a tracer has to read as is fast.
-        for (int i = 0; i < 3; i++)
-        {
-            float k = ((Serial * 13 + i * 29) % 17) / 17.0f;
-            float back = Trail * (0.35f + 0.6f * k);
-            float side = ((i % 2 == 0) ? 1.0f : -1.0f) * (0.8f + 1.4f * k);
-            DrawCircle(-along * back + across * side, 1.1f,
-                       new Color(1.0f, 0.62f, 0.22f, 0.5f));
-        }
+        //
+        // **Both segments have to out-cover their own backing.** The dim one ran
+        // at 0.35 over a 0.55 black and composited to dark brown, so the tracer
+        // read as a stick with a lit tip rather than as a streak - the backing is
+        // there to carry contrast against the ground, not to show through.
+        DrawLine(-along * len, -along * (len * 0.4f),
+                 new Color(1.0f, 0.58f, 0.22f, 0.60f), 1.7f * cal);
+        DrawLine(-along * (len * 0.4f), Vector2.Zero,
+                 new Color(1.0f, 0.80f, 0.42f, 0.92f), 2.2f * cal);
+        // **The core is small and near white, and the mass around it is smoke.**
+        // A big amber ball is a fireball travelling sideways; a hot point with a
+        // line of smoke behind it is a round. The bright part is a pixel and a
+        // half on the medium, which is as much of it as there should be.
+        DrawCircle(Vector2.Zero, 1.5f * cal, new Color(1.0f, 0.97f, 0.90f));
     }
 }

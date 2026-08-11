@@ -102,6 +102,25 @@ public sealed class Vehicle
     /// first pixel of the climb. See Main.Climb.</summary>
     public float Height;
 
+    /// <summary>
+    /// How high it counts as standing - equal to <see cref="Height"/> whenever it
+    /// is standing still, and the crown of the step while it is on the wall
+    /// between two levels. See Main.Climb for when it leaves that crown.
+    ///
+    /// <b>The second number is back, and the 3D stage is what needed it.</b>
+    /// Height alone answered this while the answer was a z index: being a level
+    /// early only admitted the tank over the crown early, which is what a
+    /// climbing tank should look like. On the stage the number is a position in
+    /// the world, so the same interpolation puts the tank <b>inside the hill</b>
+    /// for the first frames of a step - measured, and it takes the running gear
+    /// off exactly as the flat billboard used to.
+    ///
+    /// Costs nothing on screen. <c>World(row + L, L)</c> draws at the same pixel
+    /// for every L, so this moves the tank up and toward the camera by amounts
+    /// that cancel, and buys depth alone.
+    /// </summary>
+    public float Standing;
+
     /// <summary>The ground that stands in front of this tank and above it,
     /// repainted over it. Null until the harness builds one.</summary>
     public ReliefCap? Cap;

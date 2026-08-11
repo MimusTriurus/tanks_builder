@@ -52,8 +52,20 @@ public sealed partial class SelectionRing : Node2D
     /// the ground this is about - and two classes would be two chances for the
     /// mark to stop lying on the ground.
     /// </summary>
-    public Color Ink = new(0.30f, 0.85f, 1.0f);
-    public Color Backing = new(0.0f, 0.1f, 0.15f, 0.55f);
+    public Color Ink = Friendly;
+    public Color Backing = Under;
+
+    /// <summary>The dark line the ring rides on, named beside the cyan for the
+    /// reason the cyan is named: <see cref="Stage3D"/> builds the same ring out
+    /// of geometry, and a mark that carries its own contrast has to carry the
+    /// same contrast in both.</summary>
+    public static readonly Color Under = new(0.0f, 0.1f, 0.15f, 0.55f);
+
+    /// <summary>The cyan itself, named so <see cref="Stage3D"/> can build the
+    /// same ring out of geometry without choosing the shade a second time. The
+    /// field above stays a field because a ring can be told to be the other
+    /// colour; this is what it is unless it is.</summary>
+    public static readonly Color Friendly = new(0.30f, 0.85f, 1.0f);
 
     /// <summary>The red one, for the target. Named here so the shade is chosen
     /// once beside the cyan it has to be told apart from.</summary>

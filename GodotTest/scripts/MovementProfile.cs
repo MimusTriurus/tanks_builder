@@ -149,6 +149,53 @@ public sealed class MovementProfile
     /// </summary>
     public double ReloadTime { get; init; } = 3.2;
 
+    /// <summary>
+    /// How big this gun's tracer is drawn, medium being one.
+    ///
+    /// In this table for the reason <see cref="ShotShake"/> and <see cref="Size"/>
+    /// are: a second table keyed on the class is a second thing to keep in
+    /// agreement, and it comes apart the day a class is added to one and
+    /// forgotten in the other.
+    ///
+    /// **Not the hit calibre dial, and deliberately not multiplied by it.** That
+    /// dial is the harness's control over what an *arriving* round looks like and
+    /// it snaps to three values of its own; letting it size the tracer as well
+    /// would make one control move two things, so every A/B taken on it would be
+    /// measuring both. This is the gun, not the round.
+    ///
+    /// 0.80 / 1.00 / 1.35, a 1.7x spread - wider than the size spread of 1.35x,
+    /// because a tracer is a few pixels of bright on a field of grass and the
+    /// difference has to survive being small. **The bottom is held up rather than
+    /// spread down** for that same reason: a light gun's head at 0.60 would be
+    /// under a pixel, and a tracer that has to be looked for is not one.
+    ///
+    /// Settable, unlike everything else here, because
+    /// <see cref="ClassConfig"/> may override it from a file and the profiles are
+    /// singletons - a setter is how a file reaches them. The same goes for
+    /// <see cref="SmokeCalibre"/>, and for nothing else in this table.
+    /// </summary>
+    public double TracerCalibre { get; internal set; } = 1.0;
+
+    /// <summary>
+    /// How thick the smoke trail behind this gun's round is drawn, medium being
+    /// one. See <see cref="Shell.SmokeSize"/>.
+    ///
+    /// **Split from <see cref="TracerCalibre"/> because the two are judged against
+    /// different things, and one number could only ever be right for one of
+    /// them.** The tracer is two pixels of bright: its spread is compressed at the
+    /// bottom to keep the light gun's head visible at all. The trail is a soft
+    /// line three to eighteen pixels across, which has room the head does not - so
+    /// it spreads wider (0.70 / 1.00 / 1.45, 2.07x against the tracer's 1.7x) and
+    /// the class shows in the smoke more than in the streak.
+    ///
+    /// It sizes the whole trail - the puff, its wobble across the path and the
+    /// spacing along it (see <see cref="Shell.Step"/>) - so what differs between
+    /// the classes is how wide the trail is and nothing else. Sizing the puff
+    /// alone left the light's 2.1px puffs 4px apart, which is a dotted line
+    /// rather than a thin one.
+    /// </summary>
+    public double SmokeCalibre { get; internal set; } = 1.0;
+
     /// <summary>Seconds from rest to cruise - the number that actually carries
     /// the class difference.</summary>
     public double RampTime => TopSpeed / Accel;
@@ -165,21 +212,21 @@ public sealed class MovementProfile
     {
         Tag = "LTP", TopSpeed = 310.0, Accel = 620.0, TurnRate = 260.0,
         Size = 0.85, TurretRate = 240.0, ReloadTime = 2.2, Rank = 0,
-        ShotShake = 3.0,
+        ShotShake = 3.0, TracerCalibre = 0.80, SmokeCalibre = 0.70,
     };
 
     public static readonly MovementProfile Medium = new()
     {
         Tag = "MTP", TopSpeed = 240.0, Accel = 420.0, TurnRate = 200.0,
         Size = 1.00, TurretRate = 175.0, ReloadTime = 3.2, Rank = 1,
-        ShotShake = 4.5,
+        ShotShake = 4.5, TracerCalibre = 1.00, SmokeCalibre = 1.00,
     };
 
     public static readonly MovementProfile Heavy = new()
     {
         Tag = "HTP", TopSpeed = 175.0, Accel = 260.0, TurnRate = 140.0,
         Size = 1.15, TurretRate = 120.0, ReloadTime = 4.8, Rank = 2,
-        ShotShake = 7.0,
+        ShotShake = 7.0, TracerCalibre = 1.35, SmokeCalibre = 1.45,
     };
 
     /// <summary>One profile per class, and the tags are the parts-built tanks

@@ -192,6 +192,144 @@ public sealed partial class Main : Node2D
     /// <summary>Whether the board has height on it. See --relief.</summary>
     private bool _relief;
 
+    /// <summary>
+    /// Whether the board and the tanks are drawn by the depth buffer rather than
+    /// by paint order. See <see cref="Stage3D"/>.
+    ///
+    /// A flag while the two exist side by side, and not because the answer is in
+    /// doubt - the ground rule it replaces is four members of
+    /// <see cref="HexField"/> and all of <see cref="ReliefCap"/>, and it replaces
+    /// them with nothing. It is a flag because the A/B is the only honest way to
+    /// hand the board over one piece at a time: every measurement this bench has
+    /// taken is a pixel diff of two runs, and a switch is what lets the two runs
+    /// exist.
+    /// </summary>
+    private bool _stage3d;
+
+    private Stage3D? _stage;
+
+    /// <summary>
+    /// Whether the board is drawn, asked of whichever board is drawing it.
+    ///
+    /// <b>The G key and its panel row were writing the 2D field's flag
+    /// unconditionally</b>, so under the stage either one drew the canvas board
+    /// back over the entire 3D world - the same trap <see cref="FlagRows"/>
+    /// exists for, except reachable by clicking rather than by editing. One
+    /// definition rather than a check at each of the two, because a third caller
+    /// is how the two come to disagree.
+    /// </summary>
+    private bool BoardShown
+    {
+        get => _stage?.ShowBoard ?? _field.ShowField;
+        set
+        {
+            if (_stage is not null)
+            {
+                _stage.ShowBoard = value;
+                return;
+            }
+            _field.ShowField = value;
+            _field.QueueRedraw();
+        }
+    }
+
+    /// <summary>
+    /// Whether the depth buffer is drawing the board and the tanks.
+    ///
+    /// <b>Live rather than a restart, and everything awkward about it is one
+    /// idea: what the stage has not taken over yet is suppressed, never
+    /// assigned.</b> The obvious way to keep the ruts off a 3D board is to clear
+    /// the flag their own panel row reads - and then turning the stage off again
+    /// hands that row back a value the user never chose. One row writing another
+    /// row's field is <see cref="FlagRows"/>'s trap with the file swapped for a
+    /// click. So the ruts, the trees and the 2D rings keep their own answers and
+    /// are merely hidden while somebody else owns the board; the board's own row
+    /// is carried across by hand, because there the two modes have genuinely
+    /// different nodes to say it to.
+    ///
+    /// The cap is the exception and is destroyed rather than hidden: a null cap
+    /// is already the one word for "the depth buffer decides here" - see
+    /// <see cref="Depth"/> - and a hidden one would be a second.
+    /// </summary>
+    private bool Staged
+    {
+        get => _stage is not null;
+        set
+        {
+            if (value == Staged)
+                return;
+            if (value)
+                StageOn();
+            else
+                StageOff();
+            Suppress2D(Staged);
+        }
+    }
+
+    private void StageOn()
+    {
+        // Asked before the switch and told after it, because the two modes keep
+        // it in different places and the question is the user's, not the mode's.
+        bool board = BoardShown;
+        _stage = new Stage3D { Field = _field, Origin = _origin, Eye = _camera };
+        AddChild(_stage);
+        foreach (Vehicle vehicle in _vehicles)
+        {
+            _stage.Take(vehicle);
+            // Freed now rather than queued, and measured rather than reasoned:
+            // queued, the bench came down with leaked-instance warnings when the
+            // switch was thrown from the panel, though not when it was thrown by
+            // the flag one phase earlier. Immediate, neither does. Whatever the
+            // deferred free is waiting on, it is waiting on something the panel
+            // has already changed.
+            vehicle.Cap?.Free();
+            vehicle.Cap = null;
+        }
+        _field.ShowField = false;
+        _stage.ShowBoard = board;
+    }
+
+    private void StageOff()
+    {
+        if (_stage is null)
+            return;
+        bool board = BoardShown;
+        _stage.Give();
+        _stage.QueueFree();
+        _stage = null;
+        foreach (Vehicle vehicle in _vehicles)
+        {
+            var cap = new ReliefCap { Field = _field, Marks = _marks };
+            vehicle.Sprite.AddChild(cap);
+            vehicle.Cap = cap;
+            // A cap paints nothing until it is told where its tank stands, and
+            // it is told by Depth - which otherwise runs only on a step and on
+            // Park. Without this the board came back with no cliff hiding
+            // anything, standing tanks drawn whole over the cell in front of
+            // them, and the tank had to be driven a pixel to repair itself.
+            Depth(vehicle);
+        }
+        _field.ShowField = board;
+        _field.QueueRedraw();
+    }
+
+    /// <summary>Hide, never clear: canvas items are drawn over the entire 3D
+    /// world, so every 2D thing the stage has not taken over yet has to be out
+    /// of the way while it owns the board - and has to come back saying what its
+    /// own row says, not what this one wanted. The list is exactly what slices B
+    /// and C are.</summary>
+    private void Suppress2D(bool staged)
+    {
+        if (_marks is not null)
+            _marks.Visible = !staged;                   // ruts: slice B
+        if (_grove is not null)
+            _grove.Visible = !staged;                   // trees: slice C
+        if (_ring is not null)
+            _ring.Visible = !staged;                    // the stage draws its own
+        if (_targetRing is not null)
+            _targetRing.Visible = !staged;
+    }
+
     /// <summary>How steep one level is, or negative for the tuned default -
     /// zero is a legal setting here, being a board that is flat while still
     /// carrying levels.</summary>
@@ -850,6 +988,14 @@ public sealed partial class Main : Node2D
             // was relief - see HexField.HasRelief.
             else if (userArgs[i] == "--relief")
                 _relief = true;
+            // Height is the whole reason this exists, so asking for the stage
+            // asks for the board that needs it - the argument --grade already
+            // makes for --relief.
+            else if (userArgs[i] == "--3d")
+            {
+                _stage3d = true;
+                _relief = true;
+            }
             // Invariant culture, the trap named beside --hit-scale.
             else if (userArgs[i] == "--grade" && i + 1 < userArgs.Length
                      && double.TryParse(userArgs[i + 1], NumberStyles.Float,
@@ -1039,6 +1185,9 @@ public sealed partial class Main : Node2D
             // Built whether or not the board has relief: it draws nothing at all
             // on a flat one, and a node that only exists under a flag is a node
             // nobody exercises.
+            // Built here even when the bench is about to open on the stage, and
+            // taken away by StageOn: the stage is a switch now, so "which mode
+            // did we start in" must stop deciding which nodes exist at all.
             var cap = new ReliefCap { Field = _field, Marks = _marks };
             sprite.AddChild(cap);
             vehicle.Cap = cap;
@@ -1137,6 +1286,11 @@ public sealed partial class Main : Node2D
                 $"terrain art is {_terrain.CameraError(_field.Atlas.HexRect) * 100.0f:F0}%"
                 + " off the rendered tile's camera - clicks will drift from the"
                 + " hexagons they land on");
+        // The stage, before the tanks are parked: it reparents each sprite into
+        // its own render target, and a sprite moved after it has been placed
+        // would be placed in the space it has just left.
+        if (_stage3d)
+            Staged = true;
         ApplySize();
         foreach (Vehicle vehicle in _vehicles)
             Park(vehicle);
@@ -1158,6 +1312,12 @@ public sealed partial class Main : Node2D
         // The mark on whoever is being driven. Absent under --capture and --trace
         // for the reason the panel is: a capture is evidence, and an A/B of two
         // renders must not differ by a marker. --ui brings both back.
+        // On the stage the ring is geometry lying on the cell - see
+        // Stage3D.BuildRing. A canvas ring would be drawn over the tanks, and a
+        // mark that covers what it points at is not a mark. So both are built
+        // whatever mode the bench opens in and merely hidden while the stage
+        // owns the ground - the switch is live now, and a node that exists only
+        // in one mode cannot be switched into the other.
         if (!_noPanel)
         {
             _ring = new SelectionRing { Field = _field, Target = Active };
@@ -1172,6 +1332,7 @@ public sealed partial class Main : Node2D
                 Inset = 0.70f,
             };
             AddChild(_targetRing);
+            Suppress2D(Staged);
         }
 
         // Before the self-test, which now checks the rows against panel.json,
@@ -1490,6 +1651,7 @@ public sealed partial class Main : Node2D
         vehicle.Cell = _field.ClampCell(vehicle.Cell);
         _field.Position = _origin;
         vehicle.Height = _field.LevelAt(vehicle.Cell) * _field.Lift;
+        vehicle.Standing = vehicle.Height;
         vehicle.Sprite.Position = StandOn(vehicle, vehicle.Cell);
         // Moved rather than driven, so the ribbon must break here or the jump is
         // drawn as a line across the board.
@@ -2152,6 +2314,50 @@ public sealed partial class Main : Node2D
         float done = span <= 0.001f ? 1.0f
             : Mathf.Clamp((v.Sprite.Position - from).Length() / span, 0.0f, 1.0f);
         v.Height = _field.HeightBetween(v.Cell, next, done);
+        // The crown of the step while the tank is on the wall, then down onto
+        // what it is arriving at. A staircase has no ramp on it, so a tank drawn
+        // halfway up one is a tank halfway inside the block - and the stage,
+        // unlike a z index, says so, cutting the sprite along that block's top
+        // plane, which projects to a horizontal line across it.
+        //
+        // <b>The wall belongs to the higher cell, and a tank on it is not inside
+        // it</b> - so for as long as it is on the wall it counts as up on the
+        // crown. It comes down over the half of the leg where it is no longer
+        // over the higher cell, and it has to: at the far end it stands at the
+        // level it arrived on, behind whatever ridge it has just come down.
+        //
+        // Climbing, the higher cell is the one being driven onto and the tank is
+        // never off it, so the crown holds for the whole leg and this is the same
+        // number it always was. Descending, the higher cell is the one being left
+        // and the contact point crosses the shared edge halfway, which is where
+        // the descent begins. The asymmetry is the geometry and not a preference:
+        // the high ground is ahead of you climbing and behind you descending.
+        //
+        // <b>And it comes down only off a wall that faces away from the camera,
+        // because only that wall hides what is on it.</b> Driving down toward the
+        // viewer the tank is on the near face, in plain sight the whole way, and
+        // a single pixel of descent puts it under the level of the shoulder it is
+        // passing - measured on (5,3)->(6,4), where the corner of (5,4)'s top face
+        // took a wedge out of the hull. Whether a wall faces the camera is the one
+        // question that separates the two, and it is which of the two cells is
+        // nearer, not which is higher.
+        //
+        // A climb is unaffected either way: the crown is the cell being driven
+        // onto, so the descent below lerps from that value to itself.
+        //
+        // What it costs is a tank on the far wall drawn below the crown and
+        // counted at it, so a cell at that same level nearer the camera does not
+        // cover it for that half of the leg. There is one knob and it is depth: a
+        // drawn row fixes the family (row + L, L), so standing far enough forward
+        // to keep out of the block you are on is also standing level with every
+        // other cell at that height. The 2D board bought both with a per-cell sort
+        // key taken at the far edge; the stage has one position and has to choose.
+        float onto = _field.LevelAt(next) * _field.Lift;
+        float crown = Mathf.Max(_field.LevelAt(v.Cell) * _field.Lift, onto);
+        bool behind = _field.GroundRow(next) < _field.GroundRow(v.Cell);
+        v.Standing = behind
+            ? Mathf.Lerp(crown, onto, Mathf.Clamp(done * 2.0f - 1.0f, 0.0f, 1.0f))
+            : crown;
     }
 
     /// <summary>
@@ -3004,6 +3210,23 @@ public sealed partial class Main : Node2D
         ["--destroy"] = new[] { "armour.destroy" },
         ["--turret-sound"] = new[] { "sound.turret_motor" },
         ["--relief"] = new[] { "ground.relief" },
+        // The stage asks for height as well as for itself, so it declares both -
+        // the board came up flat the first time because "ground.relief" was not
+        // declared, which from outside looks exactly like a flag that did not
+        // arrive.
+        //
+        // <b>Four rows were declared here and two of them were the wrong fix.</b>
+        // "view.field" was added after the 2D board came back over the whole 3D
+        // world and cost an afternoon of measuring the wrong board; the ruts and
+        // the trees followed, on the same reasoning and with a worse trap, since
+        // nothing has driven on the opening frame and a rut layer switched back
+        // on by the file draws nothing until somebody gives an order. But a
+        // declaration only silences the file - it left the row itself writing
+        // straight through to the 2D node, one click from the same picture. All
+        // three now suppress rather than assign (see <see cref="Staged"/>) and
+        // the board's row addresses whichever board is drawing, so the file is
+        // free to answer them and this list is down to what the flag really owns.
+        ["--3d"] = new[] { "view.stage", "ground.relief" },
         ["--grade"] = new[] { "ground.relief", "ground.grade" },
         ["--terrain"] = new[] { "ground.terrain" },
         ["--no-forest"] = new[] { "ground.forest" },
@@ -3795,11 +4018,12 @@ public sealed partial class Main : Node2D
         ui.Toggle("view.hull", "hull layer  (H)", () => _tank.ShowHull, on => _tank.ShowHull = on);
         ui.Toggle("view.turret", "turret layer  (T)",
             () => _tank.ShowTurret, on => _tank.ShowTurret = on);
-        ui.Toggle("view.field", "hex field  (G)", () => _field.ShowField, on =>
-        {
-            _field.ShowField = on;
-            _field.QueueRedraw();
-        });
+        ui.Toggle("view.field", "hex field  (G)", () => BoardShown,
+                  on => BoardShown = on);
+        // No key: A-Z, the brackets and the backslash are all spoken for, and the
+        // next free key is not a mnemonic. The panel is where a switch is found
+        // by name - the same answer the tracer and the traverse motor got.
+        ui.Toggle("view.stage", "3d stage", () => Staged, on => Staged = on);
         ui.Toggle("view.axis", "axis cross  (X)", () => _tank.ShowAxis, on => _tank.ShowAxis = on);
         ui.PressPair("view.reset", "reset  (R)", ResetAll,
                      "screenshot  (F12)", () => Capture(
@@ -4216,6 +4440,16 @@ public sealed partial class Main : Node2D
         if (_camera.Offset != want)
             _camera.Offset = want;
 
+        // The stage after both: it mirrors the camera and follows every tank, so
+        // anything written to either past this point would be a frame late on
+        // the board and on time on the tanks - which reads as the hill sliding
+        // under them.
+        if (_stage is not null)
+        {
+            _stage.Selected = _noPanel ? null : Active;
+            _stage.Place(_vehicles);
+        }
+
         // The marks are about the driven tank and both tanks move, so they are
         // repainted on change rather than on a target being set: a lane that was
         // clear when the order was given stops being clear when somebody drives
@@ -4485,10 +4719,7 @@ public sealed partial class Main : Node2D
             case Key.M: _aimWithMouse = !_aimWithMouse; break;
             case Key.H: _tank.ShowHull = !_tank.ShowHull; break;
             case Key.T: _tank.ShowTurret = !_tank.ShowTurret; break;
-            case Key.G:
-                _field.ShowField = !_field.ShowField;
-                _field.QueueRedraw();
-                break;
+            case Key.G: BoardShown = !BoardShown; break;
             case Key.X: _tank.ShowAxis = !_tank.ShowAxis; break;
             case Key.F12:
                 Capture($"{ProjectSettings.GlobalizePath("res://")}shot_{Time.GetTicksMsec()}.png");
