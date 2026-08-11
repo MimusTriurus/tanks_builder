@@ -133,36 +133,6 @@ def pack(tiles, gap=GAP):
     return atlas, placements
 
 
-def alongside(tiles, placements, shape):
-    """Lay a second set of the same frames out on placements already decided.
-
-    The depth atlas is that second set, and it is not packed independently on
-    purpose: two runs of a shelf packer over two sets of boxes agree only for as
-    long as the boxes agree, and the boxes here **cannot** agree, because a depth
-    frame is opaque wherever the colour frame drew anything at all - including
-    where the colour frame drew something almost transparent. Packed on its own
-    the depth atlas would come out with its own rectangles and its own size, and
-    every frame would fetch depth from beside itself. Nothing about that reads as
-    wrong in a number; it reads as a tank whose near track is at the depth of its
-    far one.
-
-    So the colour atlas decides, and this crops the depth frame with the colour
-    frame's box. Which is also the only box worth keeping: the game samples depth
-    only where it draws a pixel, and outside the colour box it draws none.
-    """
-    sample = next((t for t in tiles if t is not None), None)
-    if sample is None:
-        return np.zeros((1, 1, 4), dtype=np.float32)
-    atlas = np.zeros((shape[0], shape[1], sample.shape[2]), dtype=sample.dtype)
-    for tile, place in zip(tiles, placements):
-        if tile is None or place is None:
-            continue
-        x, y, w, h = place["rect"]
-        ox, oy = place["off"]
-        atlas[y:y + h, x:x + w] = tile[oy:oy + h, ox:ox + w]
-    return atlas
-
-
 # ---------------------------------------------------------------------------
 # reading a set that already shipped
 # ---------------------------------------------------------------------------

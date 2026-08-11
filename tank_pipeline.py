@@ -112,11 +112,6 @@ CONFIG = {
     # Measured on MTP: 387MB of decoded atlas at 12, 774 at 24.
     "steps": 24,
     "tile": 256,
-    # A depth map beside every solid layer, so the 3D stage can sort the tank
-    # against terrain per pixel instead of choosing one depth for the whole
-    # sprite. See the depth-map section in CLAUDE.md; `sprite_atlas` decides
-    # which layers count as solid, and the effect layers get none.
-    "depth": True,
     # the flash layers get a wider frame at the same units_per_pixel: the
     # muzzle already sits 68.8px out from the spin axis, so a 256 tile leaves
     # the flash 59px and a flash worth looking at is longer than that.
@@ -663,9 +658,6 @@ def render(cfg=None):
         "steps": cfg["steps"], "tile": cfg["tile"],
         "azimuth": cfg["azimuth"], "elevation": cfg["elevation"],
         "hex_labels": {"front_dir": cfg["front_dir"], "orientation": "flat"},
-        # which layers actually get one is `sprite_atlas.CONFIG["depth_layers"]`;
-        # this only says the job wants depth at all
-        "depth": cfg["depth"],
     }
     if body is not None:
         shared.update(body.shared())

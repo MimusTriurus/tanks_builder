@@ -469,12 +469,6 @@
     }
   ],
   "packed": true,
-  "depth": {
-    "atlas": "turret_depth.png",
-    "range": 3.2274997901916507,
-    "range_px": 512.0,
-    "encoding": "rg16"
-  },
   "layer": "turret",
   "static": false
 }

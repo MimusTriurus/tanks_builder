@@ -470,12 +470,6 @@
     }
   ],
   "packed": true,
-  "depth": {
-    "atlas": "wreck_track_right_depth.png",
-    "range": 3.2274997901916507,
-    "range_px": 512.0,
-    "encoding": "rg16"
-  },
   "layer": "wreck_track_right",
   "static": false
 }

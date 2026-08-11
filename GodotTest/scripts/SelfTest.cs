@@ -823,60 +823,6 @@ public static class SelfTest
             }
         }
 
-        GD.Print("depth maps");
-        {
-            AtlasSet set = tank.Atlas!;
-            // The fallback first, and it is the important half: a set rendered
-            // before the depth pass existed has to load and draw exactly as it
-            // did. Sprites/Obsolete is that set, and so is any tank not yet
-            // re-run - today that is two of the three.
-            Check("a layer with no depth map says so rather than failing",
-                set.DepthOf("no such layer") is null
-                && set.DepthRange("no such layer") == 0.0f,
-                $"range {set.DepthRange("no such layer")}");
-
-            if (set.HasDepth)
-            {
-                // Solid tank gets one; anything additive or on the ground does
-                // not. An effect layer with a depth map would mean the renderer
-                // measured the depth of a cloud of transparent puffs, and a
-                // ground tile with one would mean the tile stopped being ground.
-                foreach (string layer in new[] { "hull", "turret" })
-                    Check($"{layer} carries a depth map", set.DepthOf(layer) is not null);
-                foreach (string layer in new[] { "hex", "flash", "fire", "burn" })
-                    if (set.Has(layer))
-                        Check($"{layer} carries none", set.DepthOf(layer) is null);
-
-                // The map has to be the same picture as the colour it explains.
-                // Different sizes mean the depth atlas was packed on its own
-                // rectangles, and then every frame fetches the depth of whatever
-                // was packed beside it - which reads as a tank whose near track
-                // is at the depth of its far one, and as nothing at all in any
-                // number. See atlas_pack.alongside.
-                int mismatched = 0;
-                var badRange = "";
-                foreach (string layer in set.LoadedLayers)
-                {
-                    Texture2D? depth = set.DepthOf(layer);
-                    if (depth is null)
-                        continue;
-                    if (depth.GetSize() != set.Texture(layer).GetSize())
-                        mismatched++;
-                    // Two tiles of range at the default span. A range that is
-                    // zero or wild means the metadata and the pixels disagree
-                    // about what the stored number means.
-                    float range = set.DepthRange(layer);
-                    float tile = set.TileOf(layer).X;
-                    if (badRange.Length == 0 && (range < tile || range > 8.0f * tile))
-                        badRange = $"{layer} spans {range}px on a {tile}px tile";
-                }
-                Check("every depth map is the size of the colour it explains",
-                    mismatched == 0, $"{mismatched} differ");
-                Check("every depth range is a sane multiple of the tile",
-                    badRange.Length == 0, badRange);
-            }
-        }
-
         const double tick = 1.0 / 60.0;
 
         GD.Print("the track belts");
