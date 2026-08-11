@@ -340,10 +340,10 @@
  "exhaust_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\LTP\\_check_exhaust.png",
  "fire_edge_alpha": 0.0,
  "fire_span_px": [
-  75,
-  122
+  67,
+  69
  ],
- "fire_redness": 61.5,
+ "fire_redness": 61.9,
  "fire_white_fraction": 0.0,
  "fire_loop": {
   "0": true,
@@ -354,10 +354,10 @@
  "fire_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\LTP\\_check_fire.png",
  "burn_edge_alpha": 0.0,
  "burn_span_px": [
-  105,
-  135
+  89,
+  103
  ],
- "burn_contrast": 93.4,
+ "burn_contrast": 89.2,
  "burn_loop": {
   "0": true,
   "6": true,
@@ -677,8 +677,8 @@
   ],
   "belts_slack": true,
   "restored": {
-   "Turret.Geometry": 0.379762441,
-   "Barrel.Geometry": 0.379063755
+   "Turret.Geometry": 0.0,
+   "Barrel.Geometry": 0.0
   }
  }
 }

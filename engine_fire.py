@@ -112,9 +112,20 @@ CONFIG = {
     # faintest part, the game adds this layer, and a faint addition to a light
     # background is nearly nothing - so height spent past what the colour can
     # carry comes back as grey wisps that read as steam. 0.45 did exactly that.
-    "rise": 0.38,
-    # sideways sway by full age, in world horizontal
-    "spread": 0.075,
+    #
+    # Down from 0.38, and the reason is the turret rather than the flame. The
+    # port is on the engine deck, so from the headings where the rear faces the
+    # camera the column stands *between* the camera and the turret - correctly,
+    # and the holdout has nothing to cut. Being an additive layer, the turret
+    # then glows through the fire instead of being hidden by it. Nothing here is
+    # broken; there is simply more column than the tank can stand behind. A
+    # flame about a quarter of a hull covers the deck it burns on and leaves the
+    # turret readable. Below ~0.2 it is a fire in a bin.
+    "rise": 0.28,
+    # sideways sway by full age, in world horizontal. Follows `rise`: sway is
+    # what makes the column look wind-blown rather than drawn, and holding it
+    # while the path shortens turns a flame into a bloom.
+    "spread": 0.058,
     # How far the path has turned toward world up by full age. Higher than the
     # plume's 0.80 and reached sooner (`turn_power` under 1): smoke drifts out
     # along the port and then rises, flame is buoyant from the first inch.
@@ -143,8 +154,18 @@ CONFIG = {
     # spread take it to 20 - six of those overlapping on a port 25 px across,
     # and the seat came out a ball wider than it was tall with the whole flame
     # inside it. The column should be about three times as tall as it is wide.
-    "seat_from_hull": 0.040,
-    "seat_from_port": 0.30,
+    #
+    # Both cut with `rise`, and the split between them was measured rather than
+    # kept, because on a grille-ported tank the note above is simply false.
+    # LTP's vent is 33 px across, so at 0.30 the port brought 10.0 px of a
+    # 15.1 px seat - *two thirds* of the width, with the hull's term nudging.
+    # Cutting `seat_from_hull` alone therefore moved almost nothing: the column
+    # lost 40% of its height and 3% of its width and came out 73 x 73, which is
+    # the ball this note is about, reached from the other direction. Watch these
+    # in pixels on the tank in hand; the weighting is a property of the vent,
+    # not of the file.
+    "seat_from_hull": 0.032,
+    "seat_from_port": 0.21,
     # What is left of that radius at full age, and how fast it gets there.
     #
     # An element must end by *shrinking*, not by fading, and that is the one
@@ -340,14 +361,20 @@ SMOKE = {
     # on screen at all, only a darker fire. So the floor is the flame's top plus
     # something, and that put this past what a 256 tile can hold.
     #
+    # Down from 0.58 with the flame, and it has to move with it rather than be
+    # judged on its own: the floor is *the flame's top* plus something, so a
+    # column left tall over a shorter fire is not more smoke, it is a stack of
+    # it standing on nothing. The ratio to `rise` is what matters and it is kept
+    # (1.53 before, 1.61 now), so the smoke still clears the flame.
+    #
     # It was 1.50 once, and changing it is not a one-number edit either way.
     # Everything about the puffs is sized against the path: thirty of them
     # growing 0.16 of a hull suited 1.50 and made a flat smear on the deck at
     # 0.33, because the path has to be several puffs long before there is a
     # column rather than a blob - see `exhaust_plume` under `puff_start`. The
     # puff geometry is scaled with the path, never left behind by it.
-    "rise": 0.58,
-    "spread": 0.133,
+    "rise": 0.45,
+    "spread": 0.103,
     "buoyancy": 0.95,
     # Most of the turn happens at once, unlike the exhaust's even 1.0. The vent
     # points back and up at 52 degrees on MT, and over a path this long the
@@ -365,8 +392,15 @@ SMOKE = {
     "slowing": 1.10,
 
     # --- the puffs -----------------------------------------------------------
-    "puff_start": 0.55,       # of the port's radius
-    "puff_grow": 0.060,       # of the hull's length
+    # Of the port's radius, and cut with the path for the reason spelled out
+    # against `seat_from_port`: on a grille-vented tank this term is most of the
+    # column's width, so leaving it while the path shortens widens the stack in
+    # proportion. LTP's vent is 33 px, so 0.55 was an 18 px puff at birth.
+    "puff_start": 0.40,
+    # Of the hull's length, and cut with the path above. This is the rule this
+    # file states twice and both times after paying for it: puff geometry is
+    # scaled with the path, never left behind by it.
+    "puff_grow": 0.048,
     "puff_power": 0.65,
     # Twenty-two, near the exhaust's twenty, because the path is now the
     # exhaust's length. It was thirty when the path was six times longer, by the
