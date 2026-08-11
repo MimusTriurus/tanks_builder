@@ -157,6 +157,38 @@ CONFIG = {
     "samples": 64,             # render samples
     "keep_frames": True,       # keep the per-frame PNGs next to the atlas
 
+    # --- depth --------------------------------------------------------------
+    # Render a second image per frame holding, per pixel, how far toward the
+    # camera that surface is from the spin pivot. A sprite carries one depth
+    # today, and a tank occupies a *range* of them, which is the whole of why a
+    # 3D board has to choose between drawing a tank in front of a hill it is
+    # partly inside and behind one it is partly in front of. With this the
+    # choice does not arise: the depth buffer sorts it per pixel.
+    #
+    # Only for layers that are solid tank - hull, turret, barrel, the belts and
+    # the wreck poses. An additive plume has no surface to be at a depth, and a
+    # ground decal is already on the ground.
+    "depth": False,
+    # Which layers of a `render_set` job get one when the job asks for depth.
+    #
+    # A name list rather than a rule, and the rule was tried: "in the fit and
+    # not static" picks out exactly the solid layers - and misses all three
+    # wreck poses, which carry `fit: False` on purpose so a canted turret cannot
+    # shrink the living tank. Deriving it would have been right about seven
+    # layers and silently wrong about the three that are hardest to look at.
+    "depth_layers": ("hull", "turret", "barrel", "track_left", "track_right",
+                     "wreck_turret", "wreck_track_left", "wreck_track_right"),
+    # Half-width of what can be encoded, in ortho_scale. The measured span of a
+    # tank is about half of one ortho_scale, so 1.0 is roughly two times over -
+    # deliberately, because a value that clips does not look clipped, it looks
+    # like a flat facet at whatever the range ended at.
+    #
+    # Costs nothing to be generous: the encoding is 16 bit over 2*span*tile
+    # pixels, so precision is 2*span*tile/65536 = 0.008px at the default and
+    # the same on every tank, because the span and units_per_pixel both scale
+    # with ortho_scale and cancel.
+    "depth_span": 1.0,
+
     # --- lighting -----------------------------------------------------------
     # True  -> hide the scene's lights and use a neutral 3-point rig fixed to
     #          the camera, so every sprite and every pass is lit the same.
@@ -301,6 +333,54 @@ def build_lighting(cfg, cam):
     return made
 
 
+def depth_material(front_anchor, half_range):
+    """An emission material that paints camera-ward distance from the pivot.
+
+    A material override rather than a Z render pass, and the reason is alignment
+    rather than taste: an override goes through the *same* render call, so the
+    depth frame inherits the camera, the framing, the holdouts that punch alpha
+    and the casters that do not appear - by construction rather than by two
+    settings agreeing. A pass would have to be composited out separately and
+    would part company with the colour frame the first time one of those moved.
+
+    `Texture Coordinate -> Camera` gives distance in **front** of the camera,
+    positive going away. View space has -Z forward, so the two run opposite and
+    camera-ward is this value *falling* - hence `anchor - z`, and getting that
+    backwards costs nothing visible: the tank is symmetric enough about its own
+    pivot that an inverted depth still fills the same range of values. It shows
+    up only as a tank sorted inside out, which is why the spike checked named
+    pixels against ray casts rather than checking the range.
+
+    `half_range` is in world units. Encodes to `0.5 + camera_ward/(2*half_range)`,
+    so 0.5 is the pivot's own plane and the value is dimensionless - a reader
+    multiplies by the range in the metadata. Must be rendered with a Raw view
+    transform: any other one is a curve applied to a number that is not a colour.
+    """
+    mat = bpy.data.materials.new("_atlas_depth")
+    mat.use_nodes = True
+    nt = mat.node_tree
+    nt.nodes.clear()
+    coord = nt.nodes.new("ShaderNodeTexCoord")
+    split = nt.nodes.new("ShaderNodeSeparateXYZ")
+    toward = nt.nodes.new("ShaderNodeMath")
+    toward.operation = "SUBTRACT"
+    scale = nt.nodes.new("ShaderNodeMath")
+    scale.operation = "MULTIPLY_ADD"
+    emit = nt.nodes.new("ShaderNodeEmission")
+    out = nt.nodes.new("ShaderNodeOutputMaterial")
+
+    nt.links.new(coord.outputs["Camera"], split.inputs[0])
+    toward.inputs[0].default_value = front_anchor
+    nt.links.new(split.outputs["Z"], toward.inputs[1])
+    nt.links.new(toward.outputs[0], scale.inputs[0])
+    scale.inputs[1].default_value = 1.0 / (2.0 * half_range)
+    scale.inputs[2].default_value = 0.5
+    nt.links.new(scale.outputs[0], emit.inputs["Color"])
+    emit.inputs["Strength"].default_value = 1.0
+    nt.links.new(emit.outputs["Emission"], out.inputs["Surface"])
+    return mat
+
+
 def fit_camera(cfg, cam, pivot, spun_corners, static_corners, angles, distance):
     """Size the camera so every frame of every pass shares one framing."""
     ext_x = 0.0
@@ -366,10 +446,18 @@ def write_atlas(paths, tile, columns, out_path):
     because it is still the frame *table*: which index is which phase at which
     heading. What stops being true is that the index says where the pixels are.
 
-    Returns `(columns, rows, placements)`, one placement per frame in index
-    order, None where the frame came out empty.
+    Returns `(columns, rows, placements, shape)`, one placement per frame in
+    index order, None where the frame came out empty, and the assembled atlas's
+    (height, width) so a parallel atlas can be laid out on the same rectangles.
     """
     rows = math.ceil(len(paths) / columns)
+    tiles = _read_frames(paths, tile)
+    atlas, placements = atlas_pack.pack(tiles)
+    _save_atlas(atlas, out_path)
+    return columns, rows, placements, (atlas.shape[0], atlas.shape[1])
+
+
+def _read_frames(paths, tile):
     tiles = []
     for path in paths:
         pix = read_rgba(path)
@@ -377,10 +465,11 @@ def write_atlas(paths, tile, columns, out_path):
             raise RuntimeError("frame %s is %dx%d, expected %dx%d"
                                % (path, pix.shape[1], pix.shape[0], tile, tile))
         tiles.append(pix[::-1])          # Blender hands these out bottom-up
+    return tiles
 
-    atlas, placements = atlas_pack.pack(tiles)
+
+def _save_atlas(atlas, out_path):
     height, width = atlas.shape[0], atlas.shape[1]
-
     img = bpy.data.images.new("_atlas", width, height,
                               alpha=True, float_buffer=False)
     try:
@@ -392,7 +481,34 @@ def write_atlas(paths, tile, columns, out_path):
         img.save()
     finally:
         bpy.data.images.remove(img)
-    return columns, rows, placements
+
+
+def write_depth_atlas(paths, tile, placements, shape, out_path):
+    """Assemble the depth frames onto the colour atlas's own rectangles.
+
+    The rendered frames carry the value as a 16-bit float-ish grey; the atlas
+    carries it as two 8-bit channels, R the high byte and G the low. Eight bits
+    would be 2px of slop on a 256px tile, which is the width of the seam this
+    whole thing exists to get right, and the sixteen-bit PNG that can hold it in
+    one channel is not a format worth asking every reader to support. Two
+    channels of a plain RGBA8 is, and it is exact: both bytes come out of the
+    encoder as k/255, so the save quantises to itself.
+
+    B is left at zero and A at one inside the box. Coverage is not stored,
+    because coverage is the colour atlas's alpha and a second copy of it is a
+    second thing to keep true.
+    """
+    tiles = _read_frames(paths, tile)
+    coded = []
+    for pix in tiles:
+        value = np.clip(pix[..., 0], 0.0, 1.0)
+        q = np.rint(value * 65535.0).astype(np.int32)
+        out = np.zeros_like(pix)
+        out[..., 0] = (q >> 8) / 255.0
+        out[..., 1] = (q & 0xFF) / 255.0
+        out[..., 3] = 1.0
+        coded.append(out)
+    _save_atlas(atlas_pack.alongside(coded, placements, shape), out_path)
 
 
 def _render_still(path, retries, wait):
@@ -430,6 +546,7 @@ def _render_still(path, retries, wait):
 
 def render_atlas(cfg):
     scene = bpy.context.scene
+    view_layer = bpy.context.view_layer
     root = bpy.data.objects[cfg["target"]] if cfg["target"] else bpy.context.active_object
     if root is None:
         raise RuntimeError("no target object")
@@ -501,8 +618,16 @@ def render_atlas(cfg):
         "holdout": {},
         "camera_visible": {},
         "world_strength": None,
+        # the depth pass borrows the whole view layer and the whole view
+        # transform, so both come back whether or not it ran
+        "material_override": view_layer.material_override,
+        "view_transform": scene.view_settings.view_transform,
+        "look": scene.view_settings.look,
+        "exposure": scene.view_settings.exposure,
+        "gamma": scene.view_settings.gamma,
     }
     temp = []
+    depth_mat = None
 
     try:
         # ---- isolate what we render --------------------------------------
@@ -606,7 +731,44 @@ def render_atlas(cfg):
                          for ob in turned if ob.parent not in turned}
         saved["blocker_bases"] = blocker_bases
 
+        # The pivot is always exactly `distance` in front of the camera - the
+        # camera is built from it - so one material serves the whole job, in
+        # both spin modes. A per-frame anchor would be the same number computed
+        # afresh, which is how two of them come to differ.
+        half_range = float(cfg.get("depth_span") or 1.0) * ortho_scale
+        if cfg.get("depth"):
+            depth_mat = depth_material(distance, half_range)
+
+        def shoot(path, as_depth):
+            """Render this pose. The depth image is the same shot, repainted.
+
+            Same call, same camera, same holdouts, same samples - so coverage
+            comes out identical and the two frames trim to the same box. Which
+            they must: `atlas_pack.alongside` crops depth with the colour box.
+            """
+            r.filepath = path
+            if as_depth:
+                view_layer.material_override = depth_mat
+                scene.view_settings.view_transform = "Raw"
+                scene.view_settings.look = "None"
+                scene.view_settings.exposure = 0.0
+                scene.view_settings.gamma = 1.0
+                r.image_settings.color_depth = "16"
+            try:
+                _render_still(path,
+                              cfg.get("save_retries", CONFIG["save_retries"]),
+                              cfg.get("save_wait", CONFIG["save_wait"]))
+            finally:
+                if as_depth:
+                    view_layer.material_override = None
+                    scene.view_settings.view_transform = saved["view_transform"]
+                    scene.view_settings.look = saved["look"]
+                    scene.view_settings.exposure = saved["exposure"]
+                    scene.view_settings.gamma = saved["gamma"]
+                    r.image_settings.color_depth = "8"
+
         paths = []
+        depth_paths = []
         hook = cfg.get("phase_hook")
         for phase in range(phases):
             # put the root back before the hook runs: the previous phase left
@@ -631,19 +793,23 @@ def render_atlas(cfg):
 
                 i = phase * len(angles) + j
                 path = os.path.join(frames_dir, "%s_%03d.png" % (cfg["name"], i))
-                r.filepath = path
                 # `.get`, because `render_atlas` is also called with a job dict
                 # built by hand - see hit_point - and a robustness fix that
                 # raised KeyError on another caller would be no fix at all
-                _render_still(path, cfg.get("save_retries", CONFIG["save_retries"]),
-                              cfg.get("save_wait", CONFIG["save_wait"]))
+                shoot(path, False)
                 paths.append(path)
+                if depth_mat is not None:
+                    dpath = os.path.join(frames_dir,
+                                         "%s_depth_%03d.png" % (cfg["name"], i))
+                    shoot(dpath, True)
+                    depth_paths.append(dpath)
                 print("[atlas] %s %d/%d  %6.1f deg  phase %d/%d"
                       % (cfg["name"], i + 1, phases * len(angles), angle,
                          phase + 1, phases))
 
         atlas_path = os.path.join(cfg["output_dir"], "%s_atlas.png" % cfg["name"])
-        columns, rows, placements = write_atlas(paths, tile, columns, atlas_path)
+        columns, rows, placements, shape = write_atlas(paths, tile, columns,
+                                                       atlas_path)
 
         # the pivot projects to the same pixel in every frame and every pass
         anchor = [tile / 2.0, tile / 2.0 + shift_y * tile]
@@ -691,6 +857,19 @@ def render_atlas(cfg):
                 frame["off"] = place["off"]
         meta["packed"] = True
 
+        if depth_paths:
+            depth_path = os.path.join(cfg["output_dir"],
+                                      "%s_depth.png" % cfg["name"])
+            write_depth_atlas(depth_paths, tile, placements, shape, depth_path)
+            meta["depth"] = {
+                "atlas": os.path.basename(depth_path),
+                # multiply (value - 0.5) by this for camera-ward world units,
+                # then divide by units_per_pixel for tile pixels
+                "range": 2.0 * half_range,
+                "range_px": 2.0 * half_range / (ortho_scale / tile),
+                "encoding": "rg16",
+            }
+
         labels = cfg.get("frame_labels")
         if labels:
             # labels describe a facing, so every phase of an angle gets the
@@ -705,7 +884,7 @@ def render_atlas(cfg):
             json.dump(meta, fh, indent=2)
 
         if not cfg["keep_frames"]:
-            for path in paths:
+            for path in paths + depth_paths:
                 os.remove(path)
             if os.path.isdir(frames_dir) and not os.listdir(frames_dir):
                 os.rmdir(frames_dir)
@@ -716,6 +895,16 @@ def render_atlas(cfg):
 
     finally:
         # ---- put the scene back ------------------------------------------
+        # First, because everything below is measured against a scene that is
+        # showing its own materials: a depth render that raised mid-frame has
+        # left the whole view layer painted and the view transform Raw.
+        view_layer.material_override = saved["material_override"]
+        scene.view_settings.view_transform = saved["view_transform"]
+        scene.view_settings.look = saved["look"]
+        scene.view_settings.exposure = saved["exposure"]
+        scene.view_settings.gamma = saved["gamma"]
+        if depth_mat is not None:
+            bpy.data.materials.remove(depth_mat)
         root.matrix_world = saved["root_matrix"]
         for ob, rest in saved.get("blocker_bases", {}).items():
             ob.matrix_world = rest
@@ -803,6 +992,7 @@ def render_set(job):
 
         static  one frame, but fitted over the whole carousel's angles
         fit     False to render the layer without letting it size the frame
+        depth   True/False to overrule `depth_layers` for this layer alone
 
     Getting layers to composite means keeping four things identical across
     passes: the spin axis, the fitted geometry, the angle list used for fitting,
@@ -963,6 +1153,18 @@ def render_set(job):
         extra.update({"layer": layer["name"], "static": bool(layer.get("static"))})
         cfg["meta_extra"] = extra
 
+        # One switch on the job says whether depth is wanted at all, one list
+        # says which layers are solid enough to have any, and a layer may still
+        # answer for itself. Set here rather than left to the copy above,
+        # because `shared` carries the job-wide flag and `cfg` inherited it -
+        # so without this every effect layer would render a depth map of a
+        # cloud of transparent puffs.
+        want = layer.get("depth")
+        if want is None:
+            want = (bool(shared.get("depth"))
+                    and layer["name"] in (shared.get("depth_layers") or ()))
+        cfg["depth"] = bool(want)
+
         path, meta = render_atlas(cfg)
         out["layers"][layer["name"]] = {
             "path": path,
@@ -972,6 +1174,7 @@ def render_set(job):
             "units_per_pixel": meta["units_per_pixel"],
             "anchor_px": meta["anchor_px"],
             "rendered": meta["rendered"],
+            "depth": meta.get("depth"),
         }
 
     # ---- the whole point: prove the layers line up ----------------------

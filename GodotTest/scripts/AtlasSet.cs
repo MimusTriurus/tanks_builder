@@ -572,9 +572,10 @@ public sealed class AtlasSet
 
     private AtlasSet() { }
 
-    private void Take(string layer, Image image, LayerMeta meta)
+    private void Take(string layer, Image image, LayerMeta meta, string dirPath)
     {
         _textures[layer] = ImageTexture.CreateFromImage(image);
+        TakeDepth(layer, meta, dirPath);
         _columns[layer] = Math.Max(1, meta.Grid.Columns);
         _tiles[layer] = new Vector2I(meta.Tile[0], meta.Tile[1]);
         _anchors[layer] = new Vector2((float)meta.AnchorPx[0], (float)meta.AnchorPx[1]);
@@ -620,6 +621,57 @@ public sealed class AtlasSet
 
     private readonly Dictionary<string, Rect2I[]> _rects = new();
     private readonly Dictionary<string, Vector2I[]> _offs = new();
+
+    private readonly Dictionary<string, ImageTexture> _depths = new();
+    private readonly Dictionary<string, float> _depthRange = new();
+
+    /// <summary>
+    /// How far toward the camera each pixel of this layer stands, or null for a
+    /// layer that has no such thing.
+    /// </summary>
+    /// <remarks>
+    /// A sprite carries one depth and a tank occupies a range of them, which is
+    /// the whole of why the 3D stage had to choose between drawing a tank in
+    /// front of a hill it is partly inside and behind one it is partly in front
+    /// of. With this the choice does not arise.
+    ///
+    /// Only the solid layers have one. An additive plume has no surface to be at
+    /// a depth and the ground tile is already the ground, so
+    /// <see cref="DepthOf"/> returning null is a fact about the layer rather
+    /// than a set that failed to load - and a set rendered before the depth pass
+    /// existed returns null for everything and draws exactly as it did.
+    ///
+    /// Converted to RGB8 on the way in. The alpha channel of a depth map would
+    /// be a second copy of coverage, which the colour atlas already carries;
+    /// measured on LTP that is 12.1MB instead of 16.1 on a 55.2MB set.
+    /// </remarks>
+    public Texture2D? DepthOf(string layer) =>
+        _depths.TryGetValue(layer, out ImageTexture? tex) ? tex : null;
+
+    /// <summary>Tile pixels spanned by the stored range, so a sampled value is
+    /// <c>(v - 0.5) * DepthRange</c> pixels toward the camera.</summary>
+    public float DepthRange(string layer) =>
+        _depthRange.TryGetValue(layer, out float range) ? range : 0.0f;
+
+    /// <summary>Whether any layer of this set carries depth. False for a set
+    /// rendered before the pass existed, which is what keeps Sprites/Obsolete
+    /// and a not-yet-re-run tank loading.</summary>
+    public bool HasDepth => _depths.Count > 0;
+
+    private void TakeDepth(string layer, LayerMeta meta, string dirPath)
+    {
+        if (meta.Depth is null || meta.Depth.RangePx <= 0.0)
+            return;
+        string path = $"{dirPath}/{meta.Depth.Atlas}";
+        if (!File.Exists(path))
+            return;
+        Image? image = Image.LoadFromFile(path);
+        if (image is null)
+            return;
+        image.Convert(Image.Format.Rgb8);
+        _depths[layer] = ImageTexture.CreateFromImage(image);
+        _depthRange[layer] = (float)meta.Depth.RangePx;
+    }
 
     /// <summary>Whether this set carries trimmed frames at all. False for one
     /// rendered before the change, and the bench draws both.</summary>
@@ -897,7 +949,7 @@ public sealed class AtlasSet
                 return atlas;
             }
 
-            atlas.Take(layer, image, meta);
+            atlas.Take(layer, image, meta, $"{root}/{dir}");
             if (layer == "hex")
                 // Off the tile, not off the file. HexRect is in tile pixels -
                 // GroundOffset subtracts the anchor from it, and the terrain art
@@ -939,7 +991,7 @@ public sealed class AtlasSet
             Image? image = meta is null ? null : Image.LoadFromFile(basePath + ".png");
             if (meta is null || image is null)
                 continue;
-            atlas.Take(layer, image, meta);
+            atlas.Take(layer, image, meta, $"{root}/{dir}");
             if (layer == BarrelName)
                 barrelImage = image;
             if (layer == BurstName && meta.Hits is not null)
@@ -1257,6 +1309,19 @@ public sealed class AtlasSet
         [JsonPropertyName("view")] public ViewMeta View { get; set; } = new();
         [JsonPropertyName("hits")] public HitsMeta? Hits { get; set; }
         [JsonPropertyName("track")] public TrackMeta[]? Track { get; set; }
+        [JsonPropertyName("depth")] public DepthMeta? Depth { get; set; }
+    }
+
+    private sealed class DepthMeta
+    {
+        [JsonPropertyName("atlas")] public string Atlas { get; set; } = "";
+
+        /// <summary>Tile pixels from the darkest stored value to the brightest,
+        /// so a pixel is <c>(value - 0.5) * RangePx</c> toward the camera. In
+        /// pixels rather than world units because that is what the stage is in;
+        /// the renderer writes both and this is the one with no conversion.
+        /// </summary>
+        [JsonPropertyName("range_px")] public double RangePx { get; set; }
     }
 
     private sealed class TrackMeta
