@@ -84,15 +84,15 @@
   "hull": 256,
   "track_left": 256,
   "track_right": 256,
+  "scar_front": 256,
+  "scar_rear": 256,
+  "scar_left": 256,
+  "scar_right": 256,
   "turret": 256,
   "barrel": 256,
   "wreck_turret": 256,
   "wreck_track_left": 256,
   "wreck_track_right": 256,
-  "scar_front": 256,
-  "scar_rear": 256,
-  "scar_left": 256,
-  "scar_right": 256,
   "exhaust": 256,
   "burn": 384,
   "fire": 256,
@@ -114,8 +114,8 @@
  "bearing_disagreement": 0.732,
  "flash_edge_alpha": 0.0,
  "flash_offcentre_px": {
-  "270": 0.18,
-  "90": -1.49
+  "270": 0.19,
+  "90": -2.16
  },
  "composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\MTP\\_check_shot.png",
  "recoil_stroke_px": [
@@ -252,8 +252,34 @@
  ],
  "recoil_peak_px": 5.77,
  "recoil_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\MTP\\_check_recoil.png",
- "wreck_turret_moved_px": 1552,
- "wreck_ring_opened_px": 739,
+ "wreck_turret_moved_px": 1543,
+ "wreck_void_px": 487,
+ "wreck_void_by_heading": [
+  324,
+  388,
+  451,
+  374,
+  310,
+  244,
+  306,
+  487,
+  438,
+  327,
+  196,
+  112,
+  52,
+  0,
+  0,
+  0,
+  0,
+  7,
+  0,
+  0,
+  0,
+  14,
+  47,
+  156
+ ],
  "wreck_track_moved_px": {
   "wreck_track_left": 468,
   "wreck_track_right": 486
@@ -289,13 +315,13 @@
  "exhaust_edge_alpha": 0.0,
  "exhaust_span_px": [
   72,
-  60
+  78
  ],
  "hull_span_px": [
   103,
   110
  ],
- "exhaust_contrast": 28.8,
+ "exhaust_contrast": 29.6,
  "ground_colour": [
   0.616,
   0.627,
@@ -310,10 +336,10 @@
  "exhaust_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\MTP\\_check_exhaust.png",
  "fire_edge_alpha": 0.0,
  "fire_span_px": [
-  66,
-  118
+  56,
+  95
  ],
- "fire_redness": 61.9,
+ "fire_redness": 61.8,
  "fire_white_fraction": 0.0,
  "fire_loop": {
   "0": true,
@@ -324,10 +350,10 @@
  "fire_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\MTP\\_check_fire.png",
  "burn_edge_alpha": 0.0,
  "burn_span_px": [
-  94,
-  116
+  80,
+  95
  ],
- "burn_contrast": 94.3,
+ "burn_contrast": 91.1,
  "burn_loop": {
   "0": true,
   "6": true,
@@ -410,7 +436,7 @@
   "right": 0.621
  },
  "scar_headings_seen": {
-  "scar_front": 15,
+  "scar_front": 16,
   "scar_rear": 15,
   "scar_left": 11,
   "scar_right": 11
@@ -467,9 +493,9 @@
  },
  "scar_weight": {
   "scar_front": [
-   16438,
-   19286,
-   23870
+   16467,
+   19401,
+   24162
   ],
   "scar_rear": [
    7723,
@@ -628,12 +654,14 @@
    ],
    "ring_radius": 0.27062,
    "skirt_below_ring": 0.03163,
-   "cant_deg": 24.0,
+   "skirt_over_radius": 0.11688,
+   "cant_deg": 23.997,
+   "cant_from": "skirt + rim_clear_frac 0.2898",
    "pitch_deg": 8.0,
    "droop_deg": 18.0,
    "hull_scale": 0.90434,
-   "rim_lift": 0.11007,
-   "rim_over_skirt": 0.07844,
+   "rim_lift": 0.11006,
+   "rim_over_skirt": 0.07843,
    "deg_to_clear_skirt": 6.71,
    "barrel_length": 0.249149,
    "muzzle_drop": 0.07699
@@ -645,8 +673,8 @@
   ],
   "belts_slack": true,
   "restored": {
-   "Turret.Geometry": 0.406736672,
-   "Barrel.Geometry": 0.403467327
+   "Turret.Geometry": 0.0,
+   "Barrel.Geometry": 0.0
   }
  }
 }

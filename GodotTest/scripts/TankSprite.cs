@@ -460,16 +460,54 @@ public sealed partial class TankSprite : Node2D
     /// worked today and been wrong the moment anything composited between the
     /// belts and the turret - the reason the turret is in this list at all.
     /// </remarks>
+    /// <remarks>
+    /// The scars moved ahead of the turret when it came out of their holdout.
+    /// They are paint on the hull and the turret stands over them at every one
+    /// of the twenty-four headings - measured, all four plates - so what used to
+    /// be cut out of them is now simply drawn on top of them. Leaving them after
+    /// the turret would have put a mark on the hull's front plate over the
+    /// turret that covers it.
+    /// </remarks>
     public static readonly string[] LayerOrder =
         new[] { AtlasSet.ShadowName }
             .Concat(AtlasSet.TrackNames).Concat(AtlasSet.WreckTrackNames)
+            .Concat(AtlasSet.ScarNames)
             .Concat(new[] { "turret", AtlasSet.BarrelName,
                             AtlasSet.WreckTurretName })
-            .Concat(AtlasSet.ScarNames).Concat(new[]
+            .Concat(new[]
         {
             AtlasSet.ExhaustName, AtlasSet.BurnName, AtlasSet.FireName,
             "smoke", "flash", AtlasSet.DustName, AtlasSet.BurstName,
         }).ToArray();
+
+    /// <summary>
+    /// The z-index a layer draws at, given where the hull is pointing.
+    /// </summary>
+    /// <remarks>
+    /// Tree order is the ordering for everything that never moves in the stack.
+    /// The three engine-deck effects do move: each is in front of the turret on
+    /// some headings and behind it on others, and which is stamped in the atlas
+    /// (see <see cref="AtlasSet.OverTurret"/>). Z-index is how a sibling gets to
+    /// jump the queue without being reparented every frame.
+    ///
+    /// Doubling the slot leaves a gap under the turret to land in, and landing
+    /// all three in the same slot is deliberate: siblings tied on z-index fall
+    /// back to tree order, which already has them in the right order among
+    /// themselves. One number, no table.
+    ///
+    /// A set with no flag reports false everywhere, so every layer keeps its
+    /// tree slot and nothing about it changes - which is what has to happen,
+    /// because such a set has the turret cut into its alpha instead.
+    /// </remarks>
+    public static int ZFor(string layer, bool overTurret)
+    {
+        int slot = Array.IndexOf(LayerOrder, layer);
+        if (slot < 0)
+            return 0;
+        if (overTurret || Array.IndexOf(AtlasSet.OrderedNames, layer) < 0)
+            return 2 * slot;
+        return 2 * Array.IndexOf(LayerOrder, "turret") - 1;
+    }
 
     /// <summary>Which kind of layer each name is. Kept beside
     /// <see cref="LayerOrder"/> so there is one list, not a list and a

@@ -433,9 +433,17 @@ public sealed partial class EffectLayer : Node2D
 
     /// <summary>The plate a scar layer belongs to, or "" for any other
     /// layer.</summary>
-    public static string FaceOf(string layer) =>
-        layer.StartsWith("scar_", StringComparison.Ordinal)
-            ? layer["scar_".Length..] : "";
+    /// <remarks>The wreck's twin of a mark is a mark on the same plate - it
+    /// differs only in which turret was held out of it - so the prefix comes off
+    /// here rather than at every reader. Missing this is silent: the twin would
+    /// report no plate, find no marks on it, and draw nothing.</remarks>
+    public static string FaceOf(string layer)
+    {
+        string name = layer.StartsWith("wreck_", StringComparison.Ordinal)
+            ? layer["wreck_".Length..] : layer;
+        return name.StartsWith("scar_", StringComparison.Ordinal)
+            ? name["scar_".Length..] : "";
+    }
 
     public override void _Ready()
     {
@@ -550,6 +558,12 @@ public sealed partial class EffectLayer : Node2D
     public override void _Draw()
     {
         AtlasSet? atlas = Tank?.Atlas;
+        // Which side of the turret this layer is on, before anything is drawn.
+        // Every layer sets it, not only the ones that move: z-index sorts
+        // siblings ahead of tree order, so one layer using it and the rest
+        // sitting at zero would put that one over everything.
+        if (Tank is not null && atlas is not null)
+            ZIndex = TankSprite.ZFor(Layer, atlas.OverTurretAt(Layer, Tank.HullFacing));
         if (Clock == Clocks.Scar)
         {
             DrawMarks(atlas);

@@ -472,8 +472,29 @@ class Body:
             if cfg["shadow"]:
                 self._add_shadow(cfg, drop)
         self.wreck = None
+        self._wreck_base = None
         if cfg.get("wreck") is not None:
             self._add_wreck(cfg)
+
+    def pose_wreck(self):
+        """A callable that puts the turret in the wreck's pose, or None.
+
+        Nothing in the pipeline needs this today: the effects that the wrecked
+        turret occludes differently are no longer held out against a turret at
+        all, they are ordered against the drawn one, which is right for the live
+        tank's traverse and for the wreck's cant alike. It is kept because the
+        one thing it does say is expensive to rediscover - the module which
+        captured the rest is the only one that may apply it. A second import of
+        `wreck_pose` starts with an empty `_REST`, takes its rest from a scene
+        that is already posed, and cants it again on top: measured at 82.8
+        degrees instead of 24, silently. `strict` turns that into an error.
+        """
+        if self._wreck_base is None or self.wreck is None or "skipped" in self.wreck:
+            return None
+        import importlib
+        wp = importlib.import_module("wreck_pose")
+        base = dict(self._wreck_base)
+        return lambda: wp.pose_turret(base, strict=True)
 
     def _add_wreck(self, cfg):
         """The knocked-out pose, as three layers on the roots that already exist.
@@ -487,6 +508,7 @@ class Body:
         wp = importlib.import_module("wreck_pose")
         base = dict({"root": cfg["turret"], "turret": cfg["turret_mesh"],
                      "hull": cfg["hull_mesh"]}, **(cfg.get("wreck_cfg") or {}))
+        self._wreck_base = base
         try:
             # while the scene is at rest, which is here and nowhere later: by the
             # time the hook runs the barrel layer has finished recoiling and left

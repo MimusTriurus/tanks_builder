@@ -274,8 +274,8 @@
       "col": 13,
       "row": 0,
       "rect": [
-        120,
-        291,
+        1,
+        318,
         2,
         3
       ],
@@ -373,8 +373,8 @@
       "col": 23,
       "row": 0,
       "rect": [
-        123,
-        291,
+        4,
+        318,
         2,
         3
       ],
@@ -1011,7 +1011,16 @@
       "phase": 2,
       "col": 15,
       "row": 2,
-      "rect": null,
+      "rect": [
+        120,
+        291,
+        6,
+        4
+      ],
+      "off": [
+        166,
+        105
+      ],
       "label": "corner @ 135 deg"
     },
     {
@@ -1057,8 +1066,8 @@
       "col": 20,
       "row": 2,
       "rect": [
-        126,
-        291,
+        13,
+        318,
         1,
         1
       ],
@@ -1074,7 +1083,16 @@
       "phase": 2,
       "col": 21,
       "row": 2,
-      "rect": null,
+      "rect": [
+        7,
+        318,
+        5,
+        3
+      ],
+      "off": [
+        91,
+        102
+      ],
       "label": "corner @ 225 deg"
     },
     {
@@ -1115,6 +1133,58 @@
     }
   ],
   "packed": true,
+  "over_turret": [
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false
+  ],
+  "over_turret_margin": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+  ],
   "layer": "scar_right",
   "static": false
 }

@@ -980,13 +980,49 @@ public static class SelfTest
         // assert the exact index, which was a stronger claim than the reasoning
         // supports and broke the day the wreck's belts landed between them.
         Check("the turret composites after every belt",
-            turretAt == allBelts.Length
-            && allBelts.All(b => Array.IndexOf(onTank, b) < turretAt),
+            allBelts.All(b => Array.IndexOf(onTank, b) < turretAt),
             $"turret at {turretAt}, {allBelts.Length} belts: "
             + string.Join(", ", onTank.Take(allBelts.Length + 1)));
+        // The marks went the other side of the turret when it came out of their
+        // holdout: they are paint on the hull, the turret stands over them at
+        // every heading, and what used to be cut out of them is now drawn on top
+        // of them. Before, this asserted the opposite - correctly, back when the
+        // renderer had already removed the overlap.
+        Check("and after the marks, which are paint on the hull under it",
+            AtlasSet.ScarNames.All(s => Array.IndexOf(onTank, s) < turretAt),
+            "a mark on the glacis has to go under the turret that covers it");
         Check("and before anything that happens to the tank",
-            turretAt < Array.IndexOf(onTank, AtlasSet.ScarNames[0]),
-            "damage and effects go over the turret, not under it");
+            turretAt < Array.IndexOf(onTank, AtlasSet.ExhaustName),
+            "effects go over the turret, not under it");
+
+        // The turret is not held out of the engine-deck effects any more - it
+        // cannot be, they are indexed by the hull and it traverses against the
+        // hull - so they are ordered against it instead, per heading. What that
+        // machinery has to do is land them on the correct side of it and nowhere
+        // else, and land everything else exactly where tree order already had
+        // it. Both halves, because a z-index that quietly ignored the flag and
+        // one that applied it to every layer look the same from a single case.
+        int zTurret = TankSprite.ZFor("turret", false);
+        Check("an ordered layer goes under the turret when the atlas says so",
+            AtlasSet.OrderedNames.All(n => TankSprite.ZFor(n, false) < zTurret),
+            "behind means behind: " + string.Join(", ", AtlasSet.OrderedNames
+                .Select(n => $"{n}={TankSprite.ZFor(n, false)}")));
+        Check("and over it when it says the other thing",
+            AtlasSet.OrderedNames.Where(n => Array.IndexOf(TankSprite.LayerOrder, n)
+                                             > Array.IndexOf(TankSprite.LayerOrder, "turret"))
+                .All(n => TankSprite.ZFor(n, true) > zTurret),
+            "in front means in front");
+        Check("the three that move keep their order among themselves",
+            TankSprite.ZFor(AtlasSet.ExhaustName, false)
+                == TankSprite.ZFor(AtlasSet.FireName, false),
+            "tied on z-index they fall back to tree order, which already has "
+            + "the column under the flame - a table here would be a second "
+            + "copy of that order to keep in step");
+        Check("and nothing else is moved by the flag at all",
+            TankSprite.LayerOrder.Where(n => Array.IndexOf(AtlasSet.OrderedNames, n) < 0)
+                .All(n => TankSprite.ZFor(n, true) == TankSprite.ZFor(n, false)),
+            "a set with no flag reports false everywhere, so every layer has to "
+            + "keep its tree slot or an older atlas would reshuffle");
 
         // --- the view jolting when a gun goes off -------------------------
         GD.Print("camera shake");

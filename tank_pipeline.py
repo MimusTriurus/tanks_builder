@@ -45,6 +45,7 @@ import math
 import os
 
 import bpy
+import mathutils
 import numpy as np
 
 REPO = r"D:\Projects\AgentCoding\BlenderMCP"
@@ -280,6 +281,15 @@ TRACK_LAYERS = ("track_left", "track_right")
 # stays a layer of its own for the reason in wreck_pose.py - a tank dies with its
 # gun at whatever bearing it had, and one baked sprite would snap it.
 WRECK_LAYERS = ("wreck_turret", "wreck_track_left", "wreck_track_right")
+# Layers the turret is *not* held out of, because it cannot be: they are indexed
+# by the hull's heading and the turret turns against the hull, so a turret baked
+# into their alpha is baked at one relative bearing out of twenty-four. Traverse
+# the gun and the bite stays where the turret used to be - a hole in the flame
+# with nothing on screen to account for it, and flame lying over the turret
+# where it now is. No amount of rendering fixes that; the frame index has no
+# axis for it. So the turret is drawn whole and these are ordered against it,
+# per heading, by `draw_order`. See `OVER_TURRET` there for what it costs.
+ORDERED_LAYERS = ("exhaust", "fire", "burn") + SCAR_LAYERS
 # The belts go straight after the hull and before everything that happens *to*
 # the tank, because they are not an effect on it - they are the part of it that
 # the hull layer cut away with a holdout. Absent on a single-mesh scene, and
@@ -290,8 +300,12 @@ WRECK_LAYERS = ("wreck_turret", "wreck_track_left", "wreck_track_right")
 # The wreck sits next to the live layers it stands in for, and never beside them:
 # nothing composites a canted turret over a seated one. It is in this list only so
 # that `_atlases` loads it, and every sheet names the layers it draws.
-LAYER_ORDER = (("hex", "shadow", "hull") + TRACK_LAYERS + ("turret", "barrel")
-               + WRECK_LAYERS + SCAR_LAYERS
+# The scars moved ahead of the turret with the holdout change: they are paint on
+# the hull and the turret stands over them at every heading (measured - all four
+# plates, all twenty-four), so what used to be cut out of them is now simply
+# drawn on top of them.
+LAYER_ORDER = (("hex", "shadow", "hull") + TRACK_LAYERS + SCAR_LAYERS
+               + ("turret", "barrel") + WRECK_LAYERS
                + ("exhaust", "burn", "fire", "smoke", "flash", "dust", "burst"))
 
 
@@ -532,6 +546,17 @@ def render(cfg=None):
     # on both layouts, while the phase hooks below want the one mesh that carries
     # the stamps. Two roles, two spellings - see `_names`.
     blockers = [cfg["hull"], cfg["turret"]]
+    # And the same list without the turret, for the layers that are ordered
+    # against it instead. The hull stays in both: it does not turn relative to
+    # anything indexed by its own heading, so holding it out is exact at every
+    # frame - which is the property the turret lost the moment it could traverse.
+    #
+    # The muzzle flash and its smoke keep the full list, and that is not an
+    # oversight either: they are indexed by the *turret's* heading, so the turret
+    # is the part that is exact for them and the hull is the one baked at one
+    # relative bearing. Same disease, other organ, and it wants its own
+    # measurement rather than this one applied by symmetry.
+    hull_only = [cfg["hull"]]
 
     if have["flash"]:
         flash_mod = _load(cfg, "muzzle_flash")
@@ -571,7 +596,7 @@ def render(cfg=None):
              "phases": cfg["exhaust_phases"],
              "phase_hook": plume_mod.phase_hook({"hull": hull,
                                                  "name": cfg["plume"]}),
-             "holdout": blockers})
+             "holdout": hull_only})
 
         fire_mod = _load(cfg, "engine_fire")
         layers.append(
@@ -584,7 +609,7 @@ def render(cfg=None):
              "phases": cfg["fire_phases"],
              "phase_hook": fire_mod.phase_hook({"hull": hull,
                                                 "name": cfg["fire"]}),
-             "holdout": blockers})
+             "holdout": hull_only})
         layers.append(
             # The other half of the fire. Same holdout, same phase count, drawn
             # *under* the flame. Its frame is its own config rather than the
@@ -595,7 +620,7 @@ def render(cfg=None):
              "phases": cfg["fire_phases"],
              "phase_hook": fire_mod.smoke_phase_hook({"hull": hull,
                                                       "name": cfg["burn"]}),
-             "holdout": blockers})
+             "holdout": hull_only})
 
     burst_mod = _load(cfg, "hit_burst")
     seat = {"hull": hull, "turret": turret, "hull_root": named["hull_root"],
@@ -651,7 +676,54 @@ def render(cfg=None):
              "phases": len(scar_mod.LEVELS),
              "phase_hook": scar_mod.phase_hook(face, dict(scar_cfg,
                                                           seats=scar_seats)),
-             "holdout": blockers})
+             "holdout": hull_only})
+
+    # ---- which side of the turret each ordered layer is on -------------------
+    #
+    # Measured here, on the resting scene, and stamped into the layer's own
+    # metadata for the harness to order by. Before the job for the plain reason
+    # that it has nothing to do with the camera fit - unlike the plate table,
+    # which is in pixels and so has to wait for it - and because the phase hooks
+    # have not run yet, so every effect is standing in the pose it was built in.
+    #
+    # One flag per layer rather than one for the group: fire and exhaust agreed
+    # on all 24 headings, and the burning column did not, being twice as tall it
+    # overlaps the turret on two more headings at each end. A shared flag would
+    # be wrong on four frames of seventy-two.
+    order = _load(cfg, "draw_order")
+    cam = atlas.camera_matrix(mathutils.Vector((0.0, 0.0, 0.0)), cfg["azimuth"],
+                              cfg["elevation"], 10.0)
+    to_cam = cam.translation.normalized()
+    angles = atlas.frame_angles({"steps": cfg["steps"], "start_angle": 0.0,
+                                 "direction": "ccw"})
+    for layer in layers:
+        if layer["name"] not in ORDERED_LAYERS:
+            continue
+        flags, margins = order.over_turret(layer["target"], turret,
+                                           None, to_cam, angles)
+        extra = dict(layer.get("meta_extra") or {})
+        extra.update({"over_turret": flags, "over_turret_margin": margins})
+        layer["meta_extra"] = extra
+
+    # The wreck goes last in the *job*, which is not the same statement as the
+    # one `Body` already makes. It poses the turret's children, and nothing puts
+    # them back until `body.restore()` in the `finally` below - the renderer
+    # writes and restores a layer *root*, and the pose is deliberately not on
+    # one, because the root is what the carousel turns. `Body` puts these last
+    # in its own list, which is exactly enough for the live turret layer it was
+    # worried about and blind to every layer appended here.
+    #
+    # Measured, because the failure is silent and reads as an effect bug: with
+    # the wreck in the middle, the flash, its smoke, the exhaust, the fire, its
+    # column, the burst, the dust and all four scars rendered against a turret
+    # canted 24 deg and dropped into its ring. The turret is their holdout, so
+    # what the wrong occluder failed to cut is what shows through the *upright*
+    # turret the game draws. One heading of one tank: 10 px of flame over the
+    # turret rendered alone, 444 px rendered in this job.
+    #
+    # Stable, so the three keep their order among themselves, and they still
+    # follow the live turret and barrel layers - which is what `Body` wanted.
+    layers.sort(key=lambda layer: layer["name"].startswith("wreck_"))
 
     shared = {
         "output_dir": cfg["output_dir"],

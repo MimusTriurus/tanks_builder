@@ -179,6 +179,27 @@ public sealed class AtlasSet
     public static readonly string[] WreckTrackNames =
         { "wreck_track_left", "wreck_track_right" };
 
+    /// <summary>
+    /// Layers ordered against the turret rather than held out of it, and so the
+    /// ones <see cref="OverTurret"/> speaks for.
+    /// </summary>
+    /// <remarks>
+    /// These are indexed by the hull's heading while the turret traverses
+    /// against the hull, so a turret cut into their alpha is cut at one relative
+    /// bearing out of twenty-four and the atlas has no axis to vary it along.
+    /// Turn the gun and the bite stays where the turret used to be. The fix is
+    /// not a better render, it is to draw the turret whole and put these on the
+    /// correct side of it - which is a property of the heading, so the harness
+    /// can do it. See draw_order.py.
+    ///
+    /// It also retired a pair of wreck twins built for the same symptom: a
+    /// turret canted 24 degrees is just another bearing the baked bite is wrong
+    /// for, and ordering covers the wreck's cant and the live tank's traverse
+    /// with one rule.
+    /// </remarks>
+    public static readonly string[] OrderedNames =
+        new[] { ExhaustName, FireName, BurnName }.Concat(ScarNames).ToArray();
+
     /// <summary>Layers that load if they are there and are silently skipped if
     /// they are not. All but the hit layers need a piece separated by hand in
     /// the .blend; the hit is measured off the hull and so is always there.</summary>
@@ -599,6 +620,8 @@ public sealed class AtlasSet
     /// </remarks>
     private void TakePlacement(string layer, LayerMeta meta)
     {
+        if (meta.OverTurret is { Length: > 0 })
+            _over[layer] = meta.OverTurret;
         if (meta.Frames.Length == 0 || meta.Frames.All(f => f.Rect is null))
             return;
         var rects = new Rect2I[meta.Frames.Length];
@@ -620,6 +643,33 @@ public sealed class AtlasSet
 
     private readonly Dictionary<string, Rect2I[]> _rects = new();
     private readonly Dictionary<string, Vector2I[]> _offs = new();
+    private readonly Dictionary<string, bool[]> _over = new();
+
+    /// <summary>
+    /// Whether <paramref name="layer"/> is drawn in front of the turret at this
+    /// hull heading, measured in Blender and stamped by the pipeline.
+    /// </summary>
+    /// <remarks>
+    /// False when the set does not carry the flag, which is what keeps an older
+    /// atlas correct: there the turret is cut into the layer's alpha, so drawing
+    /// it under the turret changes nothing and drawing it over would show the
+    /// bite. The flag and the holdout are two halves of one decision and they
+    /// arrive together or not at all.
+    ///
+    /// See draw_order.py for why this is a property of the heading and not of
+    /// the turret's bearing: the turret sits on its ring in the middle of the
+    /// hull, so traversing it changes its silhouette and not its depth.
+    /// </remarks>
+    public bool OverTurret(string layer, int heading) =>
+        _over.TryGetValue(layer, out bool[]? f) && f.Length > 0
+        && f[((heading % f.Length) + f.Length) % f.Length];
+
+    /// <summary>The same, asked with the hull's bearing rather than its column.
+    /// Resolved through <see cref="FrameFor"/> so the side a layer is drawn on
+    /// and the frame it is drawn from can never disagree about which heading
+    /// this is.</summary>
+    public bool OverTurretAt(string layer, double facing) =>
+        OverTurret(layer, FrameFor(facing));
 
     /// <summary>Whether this set carries trimmed frames at all. False for one
     /// rendered before the change, and the bench draws both.</summary>
@@ -1256,6 +1306,12 @@ public sealed class AtlasSet
         [JsonPropertyName("frames")] public FrameMeta[] Frames { get; set; } = Array.Empty<FrameMeta>();
         [JsonPropertyName("view")] public ViewMeta View { get; set; } = new();
         [JsonPropertyName("hits")] public HitsMeta? Hits { get; set; }
+
+        /// <summary>Per hull heading: is this layer in front of the turret.
+        /// Absent on a set rendered before the turret came out of these layers'
+        /// holdouts, and absent is the right default - such a set has the turret
+        /// baked into its alpha and must not be ordered over it as well.</summary>
+        [JsonPropertyName("over_turret")] public bool[]? OverTurret { get; set; }
         [JsonPropertyName("track")] public TrackMeta[]? Track { get; set; }
     }
 

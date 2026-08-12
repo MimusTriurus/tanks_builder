@@ -58,8 +58,8 @@
       "col": 2,
       "row": 0,
       "rect": [
-        92,
-        341,
+        1,
+        350,
         10,
         4
       ],
@@ -418,14 +418,14 @@
       "col": 22,
       "row": 0,
       "rect": [
-        103,
-        341,
-        7,
-        3
+        12,
+        350,
+        9,
+        4
       ],
       "off": [
-        166,
-        81
+        164,
+        80
       ],
       "label": "corner @ 240 deg"
     },
@@ -444,7 +444,16 @@
       "phase": 1,
       "col": 0,
       "row": 1,
-      "rect": null,
+      "rect": [
+        93,
+        350,
+        15,
+        2
+      ],
+      "off": [
+        118,
+        75
+      ],
       "label": "side @ 270 deg"
     },
     {
@@ -453,7 +462,16 @@
       "phase": 1,
       "col": 1,
       "row": 1,
-      "rect": null,
+      "rect": [
+        22,
+        350,
+        17,
+        4
+      ],
+      "off": [
+        95,
+        76
+      ],
       "label": "corner @ 285 deg"
     },
     {
@@ -465,7 +483,7 @@
       "rect": [
         31,
         341,
-        16,
+        21,
         7
       ],
       "off": [
@@ -823,14 +841,14 @@
       "col": 22,
       "row": 1,
       "rect": [
-        78,
+        53,
         341,
-        13,
-        6
+        20,
+        7
       ],
       "off": [
-        165,
-        79
+        158,
+        78
       ],
       "label": "corner @ 240 deg"
     },
@@ -840,7 +858,16 @@
       "phase": 1,
       "col": 23,
       "row": 1,
-      "rect": null,
+      "rect": [
+        40,
+        350,
+        17,
+        4
+      ],
+      "off": [
+        139,
+        75
+      ],
       "label": "corner @ 255 deg"
     },
     {
@@ -849,7 +876,16 @@
       "phase": 2,
       "col": 0,
       "row": 2,
-      "rect": null,
+      "rect": [
+        75,
+        350,
+        17,
+        3
+      ],
+      "off": [
+        118,
+        74
+      ],
       "label": "side @ 270 deg"
     },
     {
@@ -858,7 +894,16 @@
       "phase": 2,
       "col": 1,
       "row": 2,
-      "rect": null,
+      "rect": [
+        110,
+        341,
+        17,
+        5
+      ],
+      "off": [
+        96,
+        75
+      ],
       "label": "corner @ 285 deg"
     },
     {
@@ -868,9 +913,9 @@
       "col": 2,
       "row": 2,
       "rect": [
-        48,
+        74,
         341,
-        14,
+        17,
         7
       ],
       "off": [
@@ -1228,13 +1273,13 @@
       "col": 22,
       "row": 2,
       "rect": [
-        63,
+        92,
         341,
-        14,
+        17,
         7
       ],
       "off": [
-        163,
+        160,
         78
       ],
       "label": "corner @ 240 deg"
@@ -1245,11 +1290,72 @@
       "phase": 2,
       "col": 23,
       "row": 2,
-      "rect": null,
+      "rect": [
+        58,
+        350,
+        16,
+        4
+      ],
+      "off": [
+        140,
+        75
+      ],
       "label": "corner @ 255 deg"
     }
   ],
   "packed": true,
+  "over_turret": [
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false
+  ],
+  "over_turret_margin": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+  ],
   "layer": "scar_rear",
   "static": false
 }

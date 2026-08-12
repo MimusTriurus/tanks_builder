@@ -84,15 +84,15 @@
   "hull": 256,
   "track_left": 256,
   "track_right": 256,
+  "scar_front": 256,
+  "scar_rear": 256,
+  "scar_left": 256,
+  "scar_right": 256,
   "turret": 256,
   "barrel": 256,
   "wreck_turret": 256,
   "wreck_track_left": 256,
   "wreck_track_right": 256,
-  "scar_front": 256,
-  "scar_rear": 256,
-  "scar_left": 256,
-  "scar_right": 256,
   "exhaust": 256,
   "burn": 384,
   "fire": 256,
@@ -115,8 +115,8 @@
  "bearing_disagreement": 0.785,
  "flash_edge_alpha": 0.1569,
  "flash_offcentre_px": {
-  "270": 1.35,
-  "90": -3.8
+  "270": 1.36,
+  "90": -4.77
  },
  "composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\HTP\\_check_shot.png",
  "recoil_stroke_px": [
@@ -253,10 +253,10 @@
  ],
  "recoil_peak_px": 5.35,
  "recoil_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\HTP\\_check_recoil.png",
- "wreck_turret_moved_px": 1888,
+ "wreck_turret_moved_px": 1875,
  "wreck_void_px": 595,
  "wreck_void_by_heading": [
-  157,
+  155,
   245,
   406,
   487,
@@ -276,10 +276,10 @@
   1,
   0,
   0,
-  16,
-  33,
-  52,
-  107
+  15,
+  29,
+  46,
+  100
  ],
  "wreck_track_moved_px": {
   "wreck_track_left": 487,
@@ -316,7 +316,7 @@
  "exhaust_edge_alpha": 0.0,
  "exhaust_span_px": [
   70,
-  60
+  83
  ],
  "hull_span_px": [
   106,
@@ -337,10 +337,10 @@
  "exhaust_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\HTP\\_check_exhaust.png",
  "fire_edge_alpha": 0.0,
  "fire_span_px": [
-  64,
-  118
+  57,
+  92
  ],
- "fire_redness": 60.8,
+ "fire_redness": 61.1,
  "fire_white_fraction": 0.0,
  "fire_loop": {
   "0": true,
@@ -351,10 +351,10 @@
  "fire_composite": "D:\\Projects\\AgentCoding\\BlenderMCP\\Sprites\\HTP\\_check_fire.png",
  "burn_edge_alpha": 0.0,
  "burn_span_px": [
-  93,
-  117
+  77,
+  103
  ],
- "burn_contrast": 92.8,
+ "burn_contrast": 90.9,
  "burn_loop": {
   "0": true,
   "6": true,
@@ -778,8 +778,8 @@
   ],
   "belts_slack": true,
   "restored": {
-   "Turret.Geometry": 0.482664734,
-   "Barrel.Geometry": 0.486007392
+   "Turret.Geometry": 0.0,
+   "Barrel.Geometry": 0.0
   }
  }
 }
