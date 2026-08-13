@@ -1388,6 +1388,72 @@ public static class SelfTest
                     $"moved by {shoeDrift:F3}px - the smoothing is for corners, and a "
                     + "straight line has none");
 
+                // What the 3D board reads, and the two positions are the point of
+                // it: the ribbon takes the rolled path and the ladder the raw one.
+                // Drawn on the rolled path the ladder collapses towards the middle
+                // of its run, because the smoothing window is a belt long - which
+                // is a rendering fault that is really a bookkeeping one.
+                IReadOnlyList<TrackMarks.Imprint> printed = rolled.ImprintsOf(car, 0);
+                bool paired = printed.Count == raw.Count;
+                double apart = 0.0;
+                for (int i = 0; paired && i < printed.Count; i++)
+                {
+                    paired &= printed[i].At == raw[i] && printed[i].Rolled == smooth[i];
+                    apart = Math.Max(apart, printed[i].At.DistanceTo(printed[i].Rolled));
+                }
+                Check("an imprint carries both paths, the shoe's and the ribbon's",
+                    paired && apart > 1.0,
+                    $"{printed.Count} against {raw.Count}, furthest apart {apart:F1}px"
+                    + (paired ? "" : " - and one of the two is not what it says"));
+
+                // The height of the ground it was laid on, per imprint. Rebuilt from
+                // the cell at draw time this would be wrong on a ramp, where the
+                // height varies across the cell; taken off Vehicle.Standing it steps
+                // in half levels and a climb comes out as two jumps rather than a
+                // slope.
+                float wasHigh = car.Height;
+                var climbed = new TrackMarks();
+                car.Sprite.HullFacing = 90.0;
+                for (int i = 0; i < 40; i++)
+                {
+                    car.Height = i * 1.5f;
+                    climbed.Lay(car, (2.0, 2.0), 1.0 / 60.0);
+                }
+                IReadOnlyList<TrackMarks.Imprint> ramped = climbed.ImprintsOf(car, 0);
+                float lowest = float.MaxValue, highest = float.MinValue, jump = 0.0f;
+                for (int i = 0; i < ramped.Count; i++)
+                {
+                    lowest = Math.Min(lowest, ramped[i].Lift);
+                    highest = Math.Max(highest, ramped[i].Lift);
+                    if (i > 0)
+                        jump = Math.Max(jump, Math.Abs(ramped[i].Lift - ramped[i - 1].Lift));
+                }
+                Check("an imprint remembers how high the ground under it was",
+                    ramped.Count > 2 && lowest < 1.0f && highest > 40.0f && jump < 12.0f,
+                    $"{lowest:F1}..{highest:F1}px in steps of at most {jump:F1}");
+                car.Height = wasHigh;
+
+                // And the stage puts it back on that ground: the lift comes in
+                // apart from the row, so a mark laid a level up is a level up in
+                // the world and its screen row is untouched. The one thing a caller
+                // of World can get wrong, and the trail is full of callers.
+                Vector3 low = Stage3D.World(new Vector2(100.0f, 200.0f), 0.0f,
+                                            0.5f, 0.866f);
+                Vector3 high = Stage3D.World(new Vector2(100.0f, 200.0f + 64.0f),
+                                             64.0f, 0.5f, 0.866f);
+                Check("a rut laid a level up sits a level up, not a row back",
+                    Math.Abs(high.Y - 64.0f / 0.866f) < 0.01f
+                    && Math.Abs(high.Z - (low.Z + 64.0f / 0.5f)) < 0.01f
+                    && Math.Abs(high.X - low.X) < 0.01f,
+                    $"{low} against {high}");
+
+                Check("and it sorts under the ring and under the tanks",
+                    Stage3D.RutOrder < Stage3D.RingOrder && Stage3D.RingOrder < 0,
+                    $"ruts {Stage3D.RutOrder}, ring {Stage3D.RingOrder} - the same "
+                    + "statement the 2D z indices make, and on the stage it is the "
+                    + "only one that can be made: these are transparent, so they "
+                    + "cannot settle each other by depth");
+
                 // Ground recovers, so the mark goes - and it goes by age rather
                 // than by being pushed out of the buffer, which is what this did
                 // first and which is not fading at all: a tank that drives and

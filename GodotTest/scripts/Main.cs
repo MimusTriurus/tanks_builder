@@ -327,7 +327,15 @@ public sealed partial class Main : Node2D
 		// Asked before the switch and told after it, because the two modes keep
 		// it in different places and the question is the user's, not the mode's.
 		bool board = BoardShown;
-		_stage = new Stage3D { Field = _field, Origin = _origin, Eye = _camera };
+		_stage = new Stage3D
+		{
+			Field = _field, Origin = _origin, Eye = _camera,
+			// The ruts are laid in the marks' own space and read in the space a
+			// tank's GroundPoint is in; both nodes are children of this one, so
+			// the offset is the marks' own position. Handed over rather than
+			// assumed to be zero, which is what it is - see Stage3D.MarksAt.
+			Marks = _marks, MarksAt = _marks?.Position ?? Vector2.Zero,
+		};
 		AddChild(_stage);
 		foreach (Vehicle vehicle in _vehicles)
 		{
@@ -378,7 +386,7 @@ public sealed partial class Main : Node2D
 	private void Suppress2D(bool staged)
 	{
 		if (_marks is not null)
-			_marks.Visible = !staged;                   // ruts: slice B
+			_marks.Visible = !staged;                   // the stage draws its own
 		if (_grove is not null)
 			_grove.Visible = !staged;                   // trees: slice C
 		if (_ring is not null)
@@ -1903,8 +1911,18 @@ public sealed partial class Main : Node2D
 												   _field.RiseFactor);
 		}
 		// Moved rather than driven, so the ribbon must break here or the jump is
-		// drawn as a line across the board.
-		_marks?.Lift(vehicle);
+		// drawn as a line across the board - and only then, which is the same
+		// question the parameter above already answers. A cell is parked on at the
+		// end of *every* leg, so lifting the pen unconditionally broke the ribbon
+		// at every cell boundary of an ordinary drive: with the belt-smoothing
+		// window as long as a run, each cell's worth of trail collapsed towards its
+		// own middle and a four-cell route was drawn as four blobs. Measured on the
+		// 3D board, where the marks are geometry and the collapse is plain: 1081
+		// rut pixels in two patches 52px apart against 3476 over the whole 186px
+		// of the route. The old peak was the darker of the two (67 against 34)
+		// because a collapsed run draws its every segment on top of itself.
+		if (placed)
+			_marks?.Lift(vehicle);
 		Depth(vehicle);
 		// Belt travel is read back off the heading rather than reported by
 		// whatever turned it, so the baseline has to be laid down wherever the

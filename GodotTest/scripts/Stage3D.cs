@@ -113,6 +113,18 @@ public sealed partial class Stage3D : Node3D
     private MeshInstance3D _sides = null!;
     private MeshInstance3D _ring = null!;
     private MeshInstance3D _edges = null!;
+    private MeshInstance3D _ruts = null!;
+
+    /// <summary>The belt marks, redrawn as geometry lying on the board. Null
+    /// leaves the ground bare, which is how the stage behaved while the ruts were
+    /// still only a canvas item - see <see cref="BuildRuts"/>.</summary>
+    public TrackMarks? Marks;
+
+    /// <summary>Where the marks' own space sits in the space <see cref="World"/>
+    /// reads, which is the one a tank's <see cref="Vehicle.GroundPoint"/> is in.
+    /// Passed rather than worked out here, because only the harness holds both
+    /// nodes - the same reason <see cref="ReliefCap"/> is handed its shift.</summary>
+    public Vector2 MarksAt;
     private bool _showEdges = true;
     private readonly Dictionary<Vehicle, Stand> _stands = new();
     private string _built = "";
@@ -161,7 +173,15 @@ public sealed partial class Stage3D : Node3D
     /// the flat row is the drawn row plus the lift back on.
     /// </summary>
     public Vector3 World(Vector2 flat, float lift) =>
-        new(flat.X, lift / RiseFactor, flat.Y / Mathf.Max(Squash, 0.0001f));
+        World(flat, lift, Squash, RiseFactor);
+
+    /// <summary>The same mapping given its two camera terms instead of reading
+    /// them off the field, so the geometry built from it can stay static and be
+    /// asserted without a board - the reason <see cref="Clear"/> and
+    /// <see cref="Body"/> are shaped this way too.</summary>
+    public static Vector3 World(Vector2 flat, float lift, float squash, float rise) =>
+        new(flat.X, lift / Mathf.Max(rise, 0.0001f),
+            flat.Y / Mathf.Max(squash, 0.0001f));
 
     public override void _Ready()
     {
@@ -187,10 +207,18 @@ public sealed partial class Stage3D : Node3D
         _sides = new MeshInstance3D();
         _ring = new MeshInstance3D();
         _edges = new MeshInstance3D { Visible = _showEdges };
+        // An ImmediateMesh rather than an ArrayMesh rebuilt through a SurfaceTool:
+        // the trail grows, fades and is forgotten from the front, so this is the
+        // one piece of the board's geometry that genuinely changes every frame,
+        // and that is what the type is for. The 2D layer it replaces rebuilds the
+        // same polylines every frame too, so the cost is not new.
+        _ruts = new MeshInstance3D { Mesh = new ImmediateMesh() };
         AddChild(_tops);
         AddChild(_sides);
+        AddChild(_ruts);
         AddChild(_ring);
         AddChild(_edges);
+        _ruts.MaterialOverride = Decal(RutOrder);
     }
 
     /// <summary>
@@ -311,10 +339,12 @@ public sealed partial class Stage3D : Node3D
         _sides.Mesh = null;
         _ring.Mesh = null;
         _edges.Mesh = null;
+        _ruts.Mesh = null;
         _tops.MaterialOverride = null;
         _sides.MaterialOverride = null;
         _ring.MaterialOverride = null;
         _edges.MaterialOverride = null;
+        _ruts.MaterialOverride = null;
     }
 
     public void Give()
@@ -590,6 +620,10 @@ public sealed partial class Stage3D : Node3D
         // selection lagging.
         if (Selected is not null)
             _ring.Position = Contact(Selected);
+        // Every frame, and not only when a tank moves: the trail fades by age and
+        // is forgotten from the front, so a mesh left standing is a trail that
+        // stopped weathering the moment the tank parked.
+        BuildRuts(vehicles);
     }
 
 
@@ -956,21 +990,221 @@ public sealed partial class Stage3D : Node3D
         }
         st.GenerateNormals();
         _ring.Mesh = st.Commit();
-        _ring.MaterialOverride = new StandardMaterial3D
+        _ring.MaterialOverride = Decal(RingOrder);
+    }
+
+    /// <summary>
+    /// What everything painted on the ground is made of: unshaded, coloured per
+    /// vertex, transparent, and sorted rather than depth-sorted.
+    ///
+    /// <b>The order has to be said rather than left to the depth buffer.</b> A
+    /// tank tests depth but does not write it - which is what keeps its silhouette
+    /// smooth - so two transparent surfaces cannot settle each other and the order
+    /// is whatever the sort says. It said the ring, and the far arm was drawn
+    /// straight across the hull.
+    ///
+    /// That it cannot settle them is also what lets these share one clearance off
+    /// the ground: both test against the terrain and neither against the other, so
+    /// two decals at the same height are ordered by this number and never by a
+    /// coin toss. It is the same statement the 2D layers make with their z
+    /// indices - ruts at -101 under a ring at -99 under everything standing on
+    /// the ground.
+    /// </summary>
+    private static StandardMaterial3D Decal(int order) => new()
+    {
+        ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+        VertexColorUseAsAlbedo = true,
+        Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+        CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+        RenderPriority = order,
+    };
+
+    /// <summary>Where the two ground marks sort, mirroring
+    /// <see cref="SelectionRing.GroundZ"/> against
+    /// <see cref="TrackMarks.MarksZ"/>: a rut is terrain and the ring is a marker
+    /// laid over it. Both under the tanks, which sort at the default.</summary>
+    public const int RingOrder = -1;
+    public const int RutOrder = -2;
+
+    /// <summary>
+    /// The belt marks, as strips lying on the board.
+    ///
+    /// <b>Geometry rather than the canvas item that already draws them, for the
+    /// ring's reason.</b> Anything left drawing in 2D lands on top of the entire
+    /// 3D world, so the ruts would ride over the tanks that made them. On the
+    /// ground they go under, which is where they have always claimed to be - and
+    /// they are hidden by a hill standing in front of them, which the canvas item
+    /// could not do at all.
+    ///
+    /// <b>Where the trail goes is still the trail's answer.</b> The points come
+    /// smoothed, the shoes come laid across the belt as it was, the fade comes off
+    /// the imprint's age - none of that is worked out again here. What this owns is
+    /// one thing: the width is taken <b>on the ground</b> and the camera squashes
+    /// it, where the 2D layer had to project it onto the screen itself and got
+    /// 106px across a 21px belt the one time it was wrong. The same trade the ring
+    /// made, and the reason neither keeps a width in screen pixels.
+    ///
+    /// <b>Two passes, ribbons then shoes</b>, because these are transparent and so
+    /// do not settle each other by depth - the ladder has to be submitted after
+    /// the soil it is pressed into. Same statement the 2D layer makes by calling
+    /// DrawTrail before DrawShoes.
+    /// </summary>
+    private void BuildRuts(IReadOnlyList<Vehicle> vehicles)
+    {
+        var mesh = (ImmediateMesh)_ruts.Mesh;
+        mesh.ClearSurfaces();
+        if (Marks is null || !Marks.Enabled)
+            return;
+        var soil = new List<(Vector3 At, Color Ink)>();
+        var shoes = new List<(Vector3 At, Color Ink)>();
+        foreach (Vehicle vehicle in vehicles)
+        for (int side = 0; side < 2; side++)
         {
-            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
-            VertexColorUseAsAlbedo = true,
-            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
-            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
-            // Before the tanks, and it has to be said rather than left to the
-            // depth buffer: a tank tests depth but does not write it - which is
-            // what keeps its silhouette smooth - so two transparent surfaces
-            // cannot settle each other and the order is whatever the sort says.
-            // It said the ring, and the far arm was drawn straight across the
-            // hull. This is the same statement the 2D ring makes with its z of
-            // -99: the ground goes under everything standing on it.
-            RenderPriority = -1,
-        };
+            IReadOnlyList<TrackMarks.Imprint> trail = Marks.ImprintsOf(vehicle, side);
+            Ribbon(trail, MarksAt, Squash, RiseFactor, soil);
+            Shoes(trail, MarksAt, Squash, RiseFactor, shoes);
+        }
+        if (soil.Count == 0 && shoes.Count == 0)
+            return;
+        mesh.SurfaceBegin(Mesh.PrimitiveType.Triangles);
+        foreach ((Vector3 at, Color ink) in soil)
+        {
+            mesh.SurfaceSetColor(ink);
+            mesh.SurfaceAddVertex(at);
+        }
+        foreach ((Vector3 at, Color ink) in shoes)
+        {
+            mesh.SurfaceSetColor(ink);
+            mesh.SurfaceAddVertex(at);
+        }
+        mesh.SurfaceEnd();
+    }
+
+    /// <summary>Where one imprint sits in the world: the drawn row with its lift
+    /// put back on to get the flat row, then lifted clear of the face it lies on.
+    /// The pair is what <see cref="World"/> warns about, and the one thing a caller
+    /// here can get wrong.</summary>
+    private static Vector3 Sit(Vector2 at, float lift, Vector2 shift,
+                               float squash, float rise)
+    {
+        Vector2 flat = at + shift + new Vector2(0.0f, lift);
+        return World(flat, lift, squash, rise) + Clear(squash, rise);
+    }
+
+    /// <summary>Horizontal and across a step of the path, in the ground plane. The
+    /// step's own rise is dropped: a rut is a strip of ground, so its width lies in
+    /// the ground however steep the face is.</summary>
+    private static Vector3 Across(Vector3 step)
+    {
+        var flat = new Vector3(step.Z, 0.0f, -step.X);
+        return flat.LengthSquared() <= 1e-12f ? Vector3.Zero : flat.Normalized();
+    }
+
+    /// <summary>
+    /// The soil pressed flat: one continuous strip per run.
+    ///
+    /// <b>Per-point normals, averaged between the two steps that meet there</b>, so
+    /// the strip is continuous by construction - no gap on the outside of a corner
+    /// and, which matters more here, no overlap on the inside. These are
+    /// transparent, so an overlap is a bright seam at every joint, and that is the
+    /// failure a quad-per-segment version would have. The mitre is left
+    /// uncompensated: at the 25 degrees the trail is already smoothed to it
+    /// under-fills a corner by two percent.
+    /// </summary>
+    private static void Ribbon(IReadOnlyList<TrackMarks.Imprint> trail,
+                               Vector2 shift, float squash, float rise,
+                               List<(Vector3, Color)> into)
+    {
+        for (int start = 0; start < trail.Count;)
+        {
+            int end = start + 1;
+            while (end < trail.Count && !trail[end].Break)
+                end++;
+            int n = end - start;
+            if (n < 2)
+            {
+                start = end;
+                continue;
+            }
+            var at = new Vector3[n];
+            var side = new Vector3[n];
+            for (int i = 0; i < n; i++)
+                at[i] = Sit(trail[start + i].Rolled, trail[start + i].Lift,
+                            shift, squash, rise);
+            for (int i = 0; i < n; i++)
+            {
+                Vector3 back = i > 0 ? Across(at[i] - at[i - 1]) : Vector3.Zero;
+                Vector3 on = i + 1 < n ? Across(at[i + 1] - at[i]) : Vector3.Zero;
+                // A path that doubles straight back on itself has no mean - the two
+                // normals cancel - so one of them stands in. It happens at the
+                // apex of a reversal, where the ribbon is a fold anyway.
+                Vector3 mean = back + on;
+                if (mean.LengthSquared() <= 1e-12f)
+                    mean = back.LengthSquared() > 1e-12f ? back : on;
+                side[i] = mean.Normalized() * (trail[start + i].Ground * 0.5f);
+            }
+            for (int i = 0; i + 1 < n; i++)
+            {
+                Color a = Tint(TrackMarks.Ink, trail[start + i].Fade);
+                Color b = Tint(TrackMarks.Ink, trail[start + i + 1].Fade);
+                Quad(into, at[i] - side[i], at[i] + side[i],
+                     at[i + 1] + side[i + 1], at[i + 1] - side[i + 1], a, a, b, b);
+            }
+            start = end;
+        }
+    }
+
+    /// <summary>
+    /// The ladder: one bar across the belt per link, lying on the ground.
+    ///
+    /// The bar comes stored as the shoe's half-vector in the harness's squashed
+    /// space, so unsquashing it is all there is to do - and it is why the shoes fan
+    /// out radially on a pivot without this knowing what a pivot is.
+    ///
+    /// Its thickness is <see cref="TrackMarks.BarThickness"/> read as ground units
+    /// rather than screen pixels, which is the ring's trade again: a bar keeps its
+    /// two pixels on the edges running up the screen and comes out at sin(e) of
+    /// that across them, because that is what a mark painted on the ground does.
+    /// </summary>
+    private static void Shoes(IReadOnlyList<TrackMarks.Imprint> trail,
+                             Vector2 shift, float squash, float rise,
+                             List<(Vector3, Color)> into)
+    {
+        float half = TrackMarks.BarThickness * 0.5f;
+        for (int i = 0; i < trail.Count; i++)
+        {
+            // The raw point, not the rolled one: the ladder is where the shoes bit
+            // and is not smoothed - see TrackMarks.Imprint.
+            Vector3 at = Sit(trail[i].At, trail[i].Lift, shift, squash, rise);
+            Vector2 bar = trail[i].Bar;
+            var arm = new Vector3(bar.X, 0.0f, bar.Y / Mathf.Max(squash, 0.0001f));
+            if (arm.LengthSquared() <= 1e-12f)
+                continue;
+            // Along the shoe's own bar rather than along the path: on a pivot the
+            // two disagree by ninety degrees, and the shoe is what was pressed in.
+            Vector3 along = Across(arm) * half;
+            Color ink = Tint(TrackMarks.BarInk, trail[i].Fade);
+            Quad(into, at - arm - along, at + arm - along,
+                 at + arm + along, at - arm + along, ink, ink, ink, ink);
+        }
+    }
+
+    private static Color Tint(Color ink, float fade)
+    {
+        ink.A *= fade;
+        return ink;
+    }
+
+    private static void Quad(List<(Vector3, Color)> into,
+                             Vector3 a, Vector3 b, Vector3 c, Vector3 d,
+                             Color ia, Color ib, Color ic, Color id)
+    {
+        into.Add((a, ia));
+        into.Add((b, ib));
+        into.Add((c, ic));
+        into.Add((a, ia));
+        into.Add((c, ic));
+        into.Add((d, id));
     }
 
     /// <summary>Where the line runs, as a fraction of the cell, and the two

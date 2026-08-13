@@ -102,7 +102,7 @@ public sealed partial class TrackMarks : Node2D
     /// than anything additive - see the pale-ground lesson the effect layers all
     /// carry - and nowhere near black: a rut is soil turned over, and a black
     /// one reads as painted rails.</summary>
-    private static readonly Color Ink = new(0.20f, 0.16f, 0.11f, 0.16f);
+    public static readonly Color Ink = new(0.20f, 0.16f, 0.11f, 0.16f);
 
     /// <summary>The grouser bars, darker than the ground they sit in. A track
     /// does not leave a smooth stripe: it leaves a shoe every pitch, and the
@@ -112,12 +112,17 @@ public sealed partial class TrackMarks : Node2D
     /// opposite lesson: a moving tread aliases past half a link per frame and
     /// has to be smeared out. An imprint does not move, so the ladder is honest
     /// at any speed - the ground is where the sampling problem is not.</summary>
-    private static readonly Color BarInk = new(0.14f, 0.11f, 0.07f, 0.26f);
+    public static readonly Color BarInk = new(0.14f, 0.11f, 0.07f, 0.26f);
 
-    /// <summary>How thick one bar is drawn, in screen pixels. Two, because a
-    /// shoe is a shoe: it does not grow with the tank, and a fatter bar closes
-    /// the gaps that make it a ladder.</summary>
-    private const float BarThickness = 2.0f;
+    /// <summary>How thick one bar is drawn. Two, because a shoe is a shoe: it does
+    /// not grow with the tank, and a fatter bar closes the gaps that make it a
+    /// ladder.
+    ///
+    /// Screen pixels here and ground units to the stage, which reads the same
+    /// number - see <see cref="Stage3D.Shoes"/>. A length is a length; what
+    /// differs is that on the ground the camera thins it across the screen and on
+    /// the canvas it cannot.</summary>
+    public const float BarThickness = 2.0f;
 
     /// <summary>How much wider than the belt a scrubbed mark gets, at most. The
     /// scrub itself is derived rather than dialled - see
@@ -165,6 +170,23 @@ public sealed partial class TrackMarks : Node2D
         /// hull has turned since.</summary>
         public readonly List<Vector2> Bars = new();
 
+        /// <summary>How high the ground under this imprint was, in screen px off
+        /// the datum. Stored for the bars' reason, and the reason is sharper
+        /// here: the point is in <i>drawn</i> screen space, so on a board with
+        /// height the row it was laid at already has the lift taken out of it,
+        /// and nothing left in the trail could put it back. Rebuilt from the
+        /// cell at draw time it would also be wrong on a ramp, where the height
+        /// varies across the cell and only the tank knew where on it it stood.
+        /// </summary>
+        public readonly List<float> Lifts = new();
+
+        /// <summary>How wide the belt was lying, in ground px - the same number
+        /// <see cref="Widths"/> is the screen projection of. Both are kept
+        /// because the two views of the board want different ones: a canvas item
+        /// needs the width as drawn, and geometry lying on the ground wants the
+        /// width on the ground and lets the camera squash it.</summary>
+        public readonly List<float> Grounds = new();
+
         public double Travelled;
         public bool Down;
         public double LastWidth;
@@ -179,10 +201,13 @@ public sealed partial class TrackMarks : Node2D
         /// it is however many shoes are on the ground at once.</summary>
         public int Window = 1;
 
-        public void Add(Vector2 at, float width, Vector2 bar, bool broken)
+        public void Add(Vector2 at, float width, float ground, float lift,
+                        Vector2 bar, bool broken)
         {
             Points.Add(at);
             Widths.Add(width);
+            Grounds.Add(ground);
+            Lifts.Add(lift);
             Bars.Add(bar);
             Breaks.Add(broken);
             Stamps.Add(Clock);
@@ -207,6 +232,8 @@ public sealed partial class TrackMarks : Node2D
         {
             Points.RemoveRange(0, n);
             Widths.RemoveRange(0, n);
+            Grounds.RemoveRange(0, n);
+            Lifts.RemoveRange(0, n);
             Bars.RemoveRange(0, n);
             Breaks.RemoveRange(0, n);
             Stamps.RemoveRange(0, n);
@@ -223,6 +250,8 @@ public sealed partial class TrackMarks : Node2D
         {
             Points.Clear();
             Widths.Clear();
+            Grounds.Clear();
+            Lifts.Clear();
             Bars.Clear();
             Breaks.Clear();
             Stamps.Clear();
@@ -276,6 +305,52 @@ public sealed partial class TrackMarks : Node2D
         for (int i = 0; i < fades.Length; i++)
             fades[i] = Fade(trail, i);
         return fades;
+    }
+
+    /// <summary>
+    /// One imprint as anything drawing the trail somewhere else needs it: where
+    /// the shoe went, how high the ground under it was, what the shoe was laid
+    /// across, how wide the belt was lying on the ground, how faded it is and
+    /// whether it starts a run.
+    ///
+    /// One shape rather than a sixth parallel accessor. The lists are how the
+    /// trail is stored - a ring buffer wants columns, not rows - but a reader
+    /// that has to fetch five of them and trust their indices line up is a reader
+    /// that can be given four of the five, and this project has already paid for
+    /// a check whose answer went nowhere.
+    ///
+    /// <b>Two positions, and using one for both is a bug that looks like a
+    /// rendering fault.</b> <paramref name="Rolled"/> is the ribbon's path, with
+    /// the belt rolled over the corners; <paramref name="At"/> is where the shoe
+    /// actually bit, and the ladder is drawn on that - see
+    /// <see cref="DrawShoes"/> for why it is not smoothed. Drawn on the rolled
+    /// path the ladder collapses towards the middle of its run, because the
+    /// smoothing window is as long as the belt: measured, one 12-point run came
+    /// out as a 20px blob instead of 70px of track.
+    ///
+    /// Where the rolled path goes is <see cref="Smoothed"/>'s answer and belongs
+    /// to the trail; a second smoothing somewhere else would be a second opinion
+    /// about how far a belt rolls a corner over.
+    /// </summary>
+    public readonly record struct Imprint(Vector2 At, Vector2 Rolled, float Lift,
+                                          Vector2 Bar, float Ground, float Fade,
+                                          bool Break);
+
+    /// <summary>One belt's trail as imprints, oldest first. Empty for a tank that
+    /// has not laid anything, which is also the answer while the layer is switched
+    /// off - the trail ages but nothing new goes down.</summary>
+    public IReadOnlyList<Imprint> ImprintsOf(Vehicle v, int side)
+    {
+        if (!_trails.TryGetValue(v, out Trail[]? pair))
+            return Array.Empty<Imprint>();
+        Trail trail = pair[side];
+        Vector2[] path = Smoothed(trail);
+        var marks = new Imprint[path.Length];
+        for (int i = 0; i < path.Length; i++)
+            marks[i] = new Imprint(trail.Points[i], path[i], trail.Lifts[i],
+                                   trail.Bars[i], trail.Grounds[i],
+                                   (float)Fade(trail, i), trail.Breaks[i]);
+        return marks;
     }
 
     public IReadOnlyList<Vector2> SmoothedOf(Vehicle v, int side) =>
@@ -335,7 +410,21 @@ public sealed partial class TrackMarks : Node2D
         Vector2 across = v.Atlas.GroundDirection(v.Sprite.HullFacing + 90.0);
         Vector2 centre = v.GroundPoint - GlobalPosition;
         double belt = v.Atlas.TrackWidth * v.Sprite.BodyScale;
-        float width = ScreenWidth(v, belt * Scrub(v, travel, delta));
+        double ground = belt * Scrub(v, travel, delta);
+        float width = ScreenWidth(v, ground);
+        // Where the tank is *drawn*, not what may hide it: Vehicle.Standing is the
+        // depth promotion and is deliberately stepped - on a climb it is the crown
+        // from the first pixel - so a trail laid at it crosses a ramp as two half-
+        // level steps instead of a slope. Measured on a route that climbs one
+        // level: two jumps of 32.39px against fifty-two steps of at most 2.25px,
+        // which is a stitch of ramp. The distinction Depth and the rise already
+        // draw, and the ruts want the same side of it they do.
+        //
+        // One height for both belts. On a slope the two are a gauge apart in height
+        // and this says they are not - the same one-height-per-tank the whole
+        // sprite is drawn at, so a rut that disagreed with it would be a rut
+        // disagreeing with the tank standing on it.
+        float lift = v.Height;
         // Half a shoe, across the belt and in the ground plane. Off the same
         // unnormalised GroundDirection the gauge is: a bar is a length lying on
         // the ground, so it foreshortens with the ground.
@@ -361,7 +450,7 @@ public sealed partial class TrackMarks : Node2D
             {
                 // The pen coming down lays one straight away. Without it the
                 // trail begins a shoe late, which on a pivot is most of it.
-                trail.Add(at, width, bar, true);
+                trail.Add(at, width, (float)ground, lift, bar, true);
                 trail.Travelled = 0.0;
                 trail.Down = true;
             }
@@ -375,7 +464,7 @@ public sealed partial class TrackMarks : Node2D
                 trail.Travelled -= stitch;
                 double back = moved > 1e-9 ? trail.Travelled / moved : 0.0;
                 trail.Add(at.Lerp(trail.LastAt, (float)Math.Clamp(back, 0.0, 1.0)),
-                          width, bar, false);
+                          width, (float)ground, lift, bar, false);
             }
             trail.LastAt = at;
         }
