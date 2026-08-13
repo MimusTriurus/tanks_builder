@@ -71,6 +71,37 @@ public sealed class MovementProfile
     public double CornerSpeed => TopSpeed * CornerFraction;
 
     /// <summary>
+    /// Speed allowed while going up or down a step, as a fraction of TopSpeed.
+    ///
+    /// <b>One number for all three classes, and it is deliberately not per class.</b>
+    /// Every other figure in this table is a property of the tank; this one is a
+    /// property of the hill, and the hill is the same hill under all three. Spread
+    /// it by class and the board would be telling three different stories about how
+    /// steep it is - the same objection that keeps the ramp's own grade a single
+    /// board constant. What differs between the classes is what two thirds of their
+    /// cruise comes to (207 / 160 / 117 px/s), and that is the spread already
+    /// chosen.
+    ///
+    /// <b>A flag, not a curve.</b> The board carries exactly one grade
+    /// (<see cref="HexField.StepGrade"/>), so a factor proportional to steepness
+    /// would be a rule with one value in it - indistinguishable from a constant and
+    /// pretending to knowledge the board does not have. Whether the leg changes
+    /// height is the whole of the question; see <see cref="HexField.IsGrade"/>.
+    ///
+    /// Both ways, and the slip to guard against is capping only the climb. A
+    /// descent is the harder one to drive: a tank rides its brakes down a bank
+    /// rather than freewheeling, and one that dropped off the crown at cruise while
+    /// crawling up it would read as falling rather than as driving.
+    ///
+    /// Two thirds is above <see cref="CornerFraction"/> by a wide margin, which is
+    /// what keeps the two from fighting: a bend on a slope still slows to the
+    /// crawl, and the crawl is still a floor rather than a target.
+    /// </summary>
+    public const double GradeFraction = 2.0 / 3.0;
+
+    public double GradeSpeed => TopSpeed * GradeFraction;
+
+    /// <summary>
     /// Where this class sits between the others - 0 light, 1 medium, 2 heavy.
     ///
     /// The only thing in this table that is not a quantity, and it is here rather

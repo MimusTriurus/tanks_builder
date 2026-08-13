@@ -5744,6 +5744,83 @@ public static class SelfTest
                 halves == 0 ? "no leg touches a ramp at all"
                             : $"{wrongHalf} of {halves} climb something else");
 
+            // What the speed cap is asked - see HexField.IsGrade. Every leg on the
+            // board, against the heights themselves, because the cap has to be on
+            // for the whole of a climb and off for the whole of a level run: a leg
+            // it disagrees with is a tank that crawls across ground it is not
+            // climbing or takes a bank at cruise.
+            int graded = 0, level = 0, wrongGrade = 0, oneWay = 0, sameLevel = 0;
+            for (int q = 0; q < field.Columns; q++)
+            for (int r = 0; r < field.Rows; r++)
+            {
+                var cell = new Vector2I(q, r);
+                foreach (int heading in HexField.EdgeHeadings)
+                {
+                    Vector2I next = HexField.Step(cell, heading);
+                    if (!field.InBounds(next) || !field.Passable(cell, heading))
+                        continue;
+                    bool climbs = Math.Abs(field.TopAt(next) - field.TopAt(cell))
+                                  > 0.001f;
+                    if (field.IsGrade(cell, next) != climbs)
+                        wrongGrade++;
+                    // Symmetric, because a descent is capped too and the slip to
+                    // guard against is a rule that only sees the climb.
+                    if (field.IsGrade(cell, next) != field.IsGrade(next, cell))
+                        oneWay++;
+                    if (!climbs)
+                        level++;
+                    else
+                    {
+                        graded++;
+                        // Onto a ramp off the flat: half a lift of climb with no
+                        // change of level at all. The case that says the rule reads
+                        // height rather than level - ask LevelAt and the first half
+                        // of every climb on this board is uncapped.
+                        if (field.LevelAt(next) == field.LevelAt(cell))
+                            sameLevel++;
+                    }
+                }
+            }
+            Check("a leg is a grade exactly when it changes height",
+                wrongGrade == 0 && graded > 0 && level > 0,
+                $"{wrongGrade} disagree; {graded} graded and {level} level legs");
+            Check("and it is one going down as well as up",
+                oneWay == 0, $"{oneWay} legs are a grade one way only");
+            // The broadside case - one height, tilted ground, not a grade - has no
+            // witness on this board and cannot have one: two adjacent ramps are
+            // refused by Passable, and a ramp and a flat cell are never at the same
+            // height, so the only such leg is impassable by rule. Asserted the way
+            // it is available instead: onto a ramp is a grade, and the level says
+            // otherwise.
+            Check("and a leg onto a ramp is a grade though it changes no level",
+                sameLevel > 0,
+                "no climb happens within one level, so reading LevelAt instead of "
+                + "TopAt would pass here and leave half of every climb uncapped");
+
+            // And what it costs. A fraction of each class's own cruise rather than a
+            // speed, so the spread the table was tuned for survives; above the
+            // cornering crawl by a wide margin, or the two would fight over the same
+            // leg.
+            Check("a grade costs each class two thirds of its own cruise",
+                MovementProfile.All.All(p =>
+                    Math.Abs(p.GradeSpeed - p.TopSpeed * 2.0 / 3.0) < 0.01
+                    && p.GradeSpeed > p.CornerSpeed * 3.0
+                    && p.GradeSpeed < p.TopSpeed),
+                string.Join(", ", MovementProfile.All.Select(
+                    p => $"{p.Tag} {p.GradeSpeed:F0} of {p.TopSpeed:F0} px/s, "
+                         + $"crawl {p.CornerSpeed:F0}")));
+
+            // Why the cap is slowed into rather than clamped to. Not a preference:
+            // the step down is bigger than one frame of braking, so a bare Min would
+            // be a stop dead in a frame and would report a frame of full brake to
+            // the pitch. If this ever stops being true the branch can go.
+            Check("the cap is further below cruise than one frame of braking",
+                MovementProfile.All.All(p =>
+                    p.TopSpeed - p.GradeSpeed > p.Accel / 60.0 * 2.0),
+                string.Join(", ", MovementProfile.All.Select(
+                    p => $"{p.Tag} drops {p.TopSpeed - p.GradeSpeed:F0} against "
+                         + $"{p.Accel / 60.0:F1} px/s a frame")));
+
             // The rule, stated against the routes that have to obey it.
             int cliff = 0;
             var firstCliff = "";

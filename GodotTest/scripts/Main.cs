@@ -2459,6 +2459,19 @@ public sealed partial class Main : Node2D
 		return (total, endOfPath ? 0.0 : v.Profile.CornerSpeed);
 	}
 
+	/// <summary>The fastest this tank may cruise at where it is now: its class
+	/// figure on the level, two thirds of it going up or down a step - see
+	/// <see cref="MovementProfile.GradeFraction"/>.
+	///
+	/// A method rather than the expression inlined at the one place it drives the
+	/// speed, because the trace and the panel have to be able to say which of the
+	/// two is in force. A tank crawling up a bank and a tank whose order has gone
+	/// stale are the same picture, and the cap is the only number that tells them
+	/// apart.</summary>
+	private double SpeedCap(Vehicle v) =>
+		v.Moving && _field.IsGrade(v.Cell, v.Path[v.PathStep])
+			? v.Profile.GradeSpeed : v.Profile.TopSpeed;
+
 	private void AdvanceOrder(Vehicle v, double delta)
 	{
 		Vector2I next = v.Path[v.PathStep];
@@ -2509,10 +2522,21 @@ public sealed partial class Main : Node2D
 			// finishes instead of being cut off by arrival.
 			double ceiling = Math.Sqrt(endSpeed * endSpeed
 									   + 2.0 * v.Profile.Accel * Math.Max(remaining, 0.0));
+			// And no faster than a step allows, whichever way the step goes - see
+			// SpeedCap.
+			double allowed = Math.Min(SpeedCap(v), ceiling);
 			double before = v.Speed;
-			v.Speed = Math.Min(
-				Math.Min(v.Speed + v.Profile.Accel * delta, v.Profile.TopSpeed),
-				ceiling);
+			// Slowed into rather than snapped to, and the two are told apart here
+			// because only one of them can be. The braking ceiling descends at the
+			// tank's own retardation by construction, so clamping to it was already
+			// gradual; the grade's cap appears the frame a leg onto a bank begins and
+			// is 80px/s below cruise, which as a bare Min would be a stop dead in one
+			// frame - eleven times what the engine can do - and would report itself
+			// to the pitch as a single frame of full brake where the tank has a
+			// smooth dip.
+			v.Speed = v.Speed > allowed
+				? Math.Max(allowed, v.Speed - v.Profile.Accel * delta)
+				: Math.Min(v.Speed + v.Profile.Accel * delta, allowed);
 			// What the body actually felt, rather than a flag saying which branch
 			// was taken. The pitch is driven by acceleration, and under the
 			// ceiling the retardation varies instead of being all or nothing -
@@ -3991,7 +4015,9 @@ public sealed partial class Main : Node2D
 		ui.Toggle("ride.stabiliser", "turret stabiliser  (K)",
 			() => _tank.TurretStabilised, on => _tank.TurretStabilised = on);
 		ui.Readout("ride.info", () =>
-			$"speed {_speed,6:F0} / {_profile.TopSpeed:F0} px/s"
+			$"speed {_speed,6:F0} / {SpeedCap(Active):F0} px/s"
+			+ (SpeedCap(Active) < _profile.TopSpeed
+				? $" on a grade (of {_profile.TopSpeed:F0})" : "")
 			+ $"   ramp {_profile.RampTime:F2}s over {_profile.RampDistance:F0}px\n"
 			+ $"turn {_profile.TurnRate:F0} deg/s   corner {_profile.CornerSpeed:F0} px/s\n"
 			+ $"pitch {_tank.Pitch,7:F4}   roll {_tank.Roll,7:F4}"
@@ -4845,6 +4871,13 @@ public sealed partial class Main : Node2D
 			// the zoom and the size are printed here.
 			GD.Print($"{_frames,4}  {Active.Tag,-3}"
 					 + $"  hull {_tank.HullFacing,6:F1}  speed {_speed,6:F1}"
+					 // What it is allowed to be doing, and only when that is not the
+					 // class figure. A tank crawling up a bank and a tank that lost
+					 // its order look the same on a still and read the same in a bare
+					 // speed; "grade" is the frame this leg is capped on. See
+					 // Main.SpeedCap.
+					 + (SpeedCap(Active) < _profile.TopSpeed
+						? $"/{SpeedCap(Active),5:F0}grade" : "")
 					 // The slope under the tank and what it is drawn as. Both,
 					 // because they answer different questions: a grade with no
 					 // angle beside it is a spring that did not arrive, and an angle

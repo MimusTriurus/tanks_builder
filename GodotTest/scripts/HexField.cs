@@ -1259,6 +1259,36 @@ public sealed partial class HexField : Node2D
         TopAt(cell) + (HasRamps ? Lift * MarkClear : 0.0f);
 
     /// <summary>
+    /// Whether driving from one cell to the next goes up or down at all.
+    ///
+    /// <b>Asked of the leg's two surfaces, not of the tank.</b> The slope under a
+    /// tank is a plane and its travel grade is sprung - see
+    /// <see cref="ClimbLean.Along"/> - so reading a climb off either would lag the
+    /// board, linger past the crest and answer "no" for the first frames of the leg
+    /// that is most of the climb. The two ends of the leg are exact and known before
+    /// the tank has moved a pixel.
+    ///
+    /// <b>Height, not level, and that is what makes a ramp count.</b>
+    /// <see cref="LevelAt"/> puts a ramp on its low level, so a leg from flat
+    /// ground onto a ramp is a level leg and half a lift of climb - the same
+    /// distinction <see cref="TopAt"/> carries. Measured: reading the level instead
+    /// leaves 18 of this board's 36 graded legs uncapped, which is the first half of
+    /// every climb on it.
+    ///
+    /// Two cells at the same height are not a grade however tilted they are:
+    /// driving along a ramp band broadside climbs nothing, and a tank that crawled
+    /// across a face it was not climbing would be paying for the picture rather than
+    /// for the hill.
+    ///
+    /// No <see cref="HasRelief"/> guard, and its absence is the point: with no
+    /// relief every cell's <see cref="TopAt"/> is nought, so a flat board answers
+    /// "no" to every leg by the same arithmetic rather than by a special case. A
+    /// guard that cannot fail is not a guard.
+    /// </summary>
+    public bool IsGrade(Vector2I from, Vector2I onto) =>
+        Mathf.Abs(TopAt(onto) - TopAt(from)) > 0.001f;
+
+    /// <summary>
     /// How much of one face of a cell's side an observer standing
     /// <paramref name="standing"/> px off the datum may be shown.
     ///
