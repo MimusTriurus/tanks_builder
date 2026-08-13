@@ -1411,12 +1411,12 @@ public static class SelfTest
                 // height varies across the cell; taken off Vehicle.Standing it steps
                 // in half levels and a climb comes out as two jumps rather than a
                 // slope.
-                float wasHigh = car.Height;
+                float wasHigh = car.Height, wasGround = car.Ground;
                 var climbed = new TrackMarks();
                 car.Sprite.HullFacing = 90.0;
                 for (int i = 0; i < 40; i++)
                 {
-                    car.Height = i * 1.5f;
+                    car.Ground = i * 1.5f;
                     climbed.Lay(car, (2.0, 2.0), 1.0 / 60.0);
                 }
                 IReadOnlyList<TrackMarks.Imprint> ramped = climbed.ImprintsOf(car, 0);
@@ -1431,7 +1431,23 @@ public static class SelfTest
                 Check("an imprint remembers how high the ground under it was",
                     ramped.Count > 2 && lowest < 1.0f && highest > 40.0f && jump < 12.0f,
                     $"{lowest:F1}..{highest:F1}px in steps of at most {jump:F1}");
+
+                // The ground's height and not the tank's, which on a ramp are a
+                // quarter of a level apart - see Vehicle.Ground. Laid at the
+                // sprite's own height the trail sinks under the face it lies on and
+                // the face hides it, which is what a ramp did to it.
+                var apartHeights = new TrackMarks();
+                car.Ground = 40.0f;
+                car.Height = 0.0f;
+                apartHeights.Lay(car, (2.0, 2.0), 1.0 / 60.0);
+                IReadOnlyList<TrackMarks.Imprint> onGround =
+                    apartHeights.ImprintsOf(car, 0);
+                Check("and it is the ground's height, not the sprite's",
+                    onGround.Count > 0 && Math.Abs(onGround[0].Lift - 40.0f) < 0.01f,
+                    onGround.Count == 0 ? "nothing laid"
+                        : $"laid at {onGround[0].Lift:F1} with ground 40 and sprite 0");
                 car.Height = wasHigh;
+                car.Ground = wasGround;
 
                 // And the stage puts it back on that ground: the lift comes in
                 // apart from the row, so a mark laid a level up is a level up in
@@ -5605,6 +5621,71 @@ public static class SelfTest
             }
             Check("the surface is continuous across every step a tank may take",
                 split == 0, $"{split} steps open a seam, first {firstSplit}");
+
+            // And the height of that shared edge is one number whichever cell is
+            // asked, which is what lets anything lying in the ground be carried
+            // across a boundary without a step - see HexField.SurfaceBetween.
+            int edgeSplit = 0, dipped = 0, sunk = 0, over = 0;
+            var firstEdge = "";
+            float worstDip = 0.0f;
+            for (int q = 0; q < field.Columns; q++)
+            for (int r = 0; r < field.Rows; r++)
+            {
+                var cell = new Vector2I(q, r);
+                foreach (int heading in HexField.EdgeHeadings)
+                {
+                    Vector2I next = HexField.Step(cell, heading);
+                    if (!field.InBounds(next) || !field.Passable(cell, heading))
+                        continue;
+                    float mine = field.EdgeTop(cell, next);
+                    float theirs = field.EdgeTop(next, cell);
+                    if (Math.Abs(mine - theirs) > 0.01f)
+                    {
+                        edgeSplit++;
+                        if (firstEdge.Length == 0)
+                            firstEdge = $"({q},{r}) says {mine:F2}, ({next.X},"
+                                        + $"{next.Y}) says {theirs:F2}";
+                    }
+                    // The surface meets the edge at the halfway point and the two
+                    // cell centres at the ends: that is the claim, and it is what
+                    // the chord cannot make.
+                    if (Math.Abs(field.SurfaceBetween(cell, next, 0.5f) - mine) > 0.01f
+                        || Math.Abs(field.SurfaceBetween(cell, next, 0.0f)
+                                    - field.TopAt(cell)) > 0.01f
+                        || Math.Abs(field.SurfaceBetween(cell, next, 1.0f)
+                                    - field.TopAt(next)) > 0.01f)
+                        dipped++;
+                    // How far the chord departs from the ground, both ways. Under
+                    // the face driving at a high edge - which is what hid the belt
+                    // marks - and over it leaving towards a low one, so the chord
+                    // is no use to anything lying in the ground in either
+                    // direction.
+                    for (int step = 0; step <= 10; step++)
+                    {
+                        float f = step / 10.0f;
+                        float gap = field.SurfaceBetween(cell, next, f)
+                                    - field.HeightBetween(cell, next, f);
+                        if (Math.Abs(gap) > field.Lift * 0.25f + 0.01f)
+                            sunk++;
+                        worstDip = Math.Max(worstDip, Math.Abs(gap));
+                        if (gap < -0.01f)
+                            over++;
+                    }
+                }
+            }
+            Check("both cells agree how high the edge between them is",
+                edgeSplit == 0, $"{edgeSplit} disagree, first {firstEdge}");
+            Check("the ground under a step runs centre to edge to centre",
+                dipped == 0, $"{dipped} legs do not pass through their own edge");
+            Check("and the chord a sprite is drawn on parts from it by a quarter "
+                  + "level, both ways",
+                sunk == 0 && over > 0
+                && Math.Abs(worstDip - field.Lift * 0.25f) < 0.02f,
+                $"worst {worstDip:F2}px against a quarter level of "
+                + $"{field.Lift * 0.25f:F2}, {sunk} beyond it, {over} samples with "
+                + "the chord above - under the face it is hidden by it, over the "
+                + "face it is in front of what should hide it, so nothing lying in "
+                + "the ground can be laid at it");
 
             // A leg onto a ramp climbs half a level, which is the whole reason the
             // lean has a ramp case: read off the leg it would be half the slope

@@ -1161,6 +1161,54 @@ public sealed partial class HexField : Node2D
     public float HeightBetween(Vector2I from, Vector2I onto, float done) =>
         Mathf.Lerp(TopAt(from), TopAt(onto), Mathf.Clamp(done, 0.0f, 1.0f));
 
+    /// <summary>How high the surface stands at the middle of the edge
+    /// <paramref name="cell"/> shares with <paramref name="toward"/>: the mean of
+    /// the two corners bounding it, off <see cref="TopCorners"/> so there is one
+    /// description of where a face is and this is not a second one.
+    ///
+    /// <b>Both cells give the same answer, which is what makes the surface
+    /// continuous</b> - a ramp's high edge is a full level up and so is the floor
+    /// of the cell it climbs to. That is the rule the ramp's corner pattern exists
+    /// to keep, read at the one place two cells meet.</summary>
+    public float EdgeTop(Vector2I cell, Vector2I toward)
+    {
+        int heading = HeadingTo(cell, toward);
+        if (heading < 0)
+            return TopAt(cell);
+        float[] top = TopCorners(cell);
+        int edge = EdgeIndex(heading);
+        return (top[edge] + top[(edge + 1) % 6]) * 0.5f;
+    }
+
+    /// <summary>
+    /// How high the <b>ground</b> is under something crossing from one cell to
+    /// the next - which is not <see cref="HeightBetween"/>, and the difference is
+    /// a quarter of a level.
+    ///
+    /// <b>HeightBetween is a chord between two cell centres, and a ramp's surface
+    /// is not a chord.</b> A ramp rises a whole level across itself, so its centre
+    /// is half a level up while the edge being driven at is a full level up: the
+    /// straight line between centres runs <c>Lift/4</c> below the face at the
+    /// boundary. For anything <i>drawn as</i> a billboard that is a fine
+    /// approximation - the sprite is a flat card either way. For anything that
+    /// <i>lies on</i> the ground it is not: it sinks under the face it lies on and
+    /// the face hides it, which is what the belt marks did on the upper half of
+    /// every ramp and the far half of every crown.
+    ///
+    /// Piecewise through the shared edge, and that is the whole of it: centre to
+    /// edge, edge to centre. Exact for a plane rather than close to it, because
+    /// each half really is linear - and continuous with the next leg's answer
+    /// because <see cref="EdgeTop"/> is.
+    /// </summary>
+    public float SurfaceBetween(Vector2I from, Vector2I onto, float done)
+    {
+        float part = Mathf.Clamp(done, 0.0f, 1.0f);
+        float edge = EdgeTop(from, onto);
+        return part < 0.5f
+            ? Mathf.Lerp(TopAt(from), edge, part * 2.0f)
+            : Mathf.Lerp(edge, TopAt(onto), (part - 0.5f) * 2.0f);
+    }
+
     /// <summary>
     /// How much of one face of a cell's side an observer standing
     /// <paramref name="standing"/> px off the datum may be shown.

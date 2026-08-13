@@ -412,19 +412,20 @@ public sealed partial class TrackMarks : Node2D
         double belt = v.Atlas.TrackWidth * v.Sprite.BodyScale;
         double ground = belt * Scrub(v, travel, delta);
         float width = ScreenWidth(v, ground);
-        // Where the tank is *drawn*, not what may hide it: Vehicle.Standing is the
-        // depth promotion and is deliberately stepped - on a climb it is the crown
-        // from the first pixel - so a trail laid at it crosses a ramp as two half-
-        // level steps instead of a slope. Measured on a route that climbs one
-        // level: two jumps of 32.39px against fifty-two steps of at most 2.25px,
-        // which is a stitch of ramp. The distinction Depth and the rise already
-        // draw, and the ruts want the same side of it they do.
+        // The height of the ground, not of the tank: see Vehicle.Ground. Neither of
+        // the tank's own two heights will do. Standing is the depth promotion and is
+        // deliberately stepped - on a climb it is the crown from the first pixel -
+        // so a trail laid at it crosses a ramp in two jumps of a third of a level
+        // instead of a slope. Height is where the sprite is drawn, which is a chord
+        // between cell centres, and a chord runs a quarter of a level *below* a
+        // ramp's face at the boundary: the face then hides the rut, which is what
+        // it did on the upper half of every ramp and the far half of every crown.
         //
         // One height for both belts. On a slope the two are a gauge apart in height
         // and this says they are not - the same one-height-per-tank the whole
         // sprite is drawn at, so a rut that disagreed with it would be a rut
         // disagreeing with the tank standing on it.
-        float lift = v.Height;
+        float lift = v.Ground;
         // Half a shoe, across the belt and in the ground plane. Off the same
         // unnormalised GroundDirection the gauge is: a bar is a length lying on
         // the ground, so it foreshortens with the ground.

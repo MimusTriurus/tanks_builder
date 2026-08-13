@@ -103,6 +103,21 @@ public sealed class Vehicle
     public float Height;
 
     /// <summary>
+    /// How high the <b>ground under it</b> is, which is a third number and not a
+    /// spare copy of the first two.
+    ///
+    /// <see cref="Height"/> is where the sprite is drawn and
+    /// <see cref="Standing"/> is what may hide it; both are chords between cell
+    /// centres, which is right for a card standing on the ground and wrong for
+    /// anything lying in it. A ramp rises a whole level across itself, so the
+    /// chord runs a quarter of a level below the face at the boundary - see
+    /// <see cref="HexField.SurfaceBetween"/>. The belt marks lie in the ground, so
+    /// they take this one; sunk under the face, the face hid them for the upper
+    /// half of every ramp.
+    /// </summary>
+    public float Ground;
+
+    /// <summary>
     /// How high it counts as standing - equal to <see cref="Height"/> whenever it
     /// is standing still, and the crown of the step while it is on the wall
     /// between two levels. See Main.Climb for when it leaves that crown.
