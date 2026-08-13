@@ -31,7 +31,15 @@ public sealed partial class HexField : Node2D
     public static readonly int[] EdgeHeadings = { 30, 90, 150, 210, 270, 330 };
 
     public AtlasSet? Atlas;
-    public int Columns = 9;
+
+    /// <summary>How wide the board is. Fourteen because of the last five: the
+    /// rosette in <c>Main.Relief</c> is a hill with a ramp on each of its six
+    /// faces, and a ramp needs both of its axis neighbours on the board, so the
+    /// patch is a disc of radius two - five columns, and it had to go beside the
+    /// nine rather than into them. Wider than the window at zoom 1; the wheel and
+    /// the middle button reach the rest, and <c>--zoom</c> is how a capture
+    /// does.</summary>
+    public int Columns = 14;
     public int Rows = 6;
     public bool ShowField = true;
 

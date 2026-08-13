@@ -451,29 +451,54 @@ public sealed partial class Main : Node2D
 	/// unreachable: the low edge points off the board, and a ramp is entered
 	/// along its axis only, so the only way in was from the plateau it exists to
 	/// reach. The plateaus moved up a row instead.
+	///
+	/// <b>The right-hand five columns are the rosette: one hill cell with a ramp
+	/// on every one of its six flat faces.</b> The rest of this board exercises
+	/// one ramp heading - 90, away from the camera - because that is the one that
+	/// looks right, and a slope is drawn from a corner pattern rotated to its high
+	/// edge, so five of the six rotations were never rendered at all. Here they
+	/// all are, and the hill is reachable six ways.
+	///
+	/// <b>Two of them rise toward the camera and read badly, and that is the
+	/// point rather than an oversight.</b> A face rising at the viewer projects to
+	/// <c>sin(e) - grade*cos(e)</c> of its footprint against <c>sin(e) +
+	/// grade*cos(e)</c> going away, so the near pair is compressed to about half
+	/// the far pair's height. The lesson is written on the plateau ramps above,
+	/// which is where the map obeys it; this patch is where it can be seen.
+	///
+	/// <b>The ring cells are all adjacent to each other and none of them may be
+	/// driven to another.</b> Two adjacent ramps are refused by
+	/// <see cref="HexField.Passable"/>, so the way from one face to the next is
+	/// out to the flat, round, and back in - which is what makes each of the six
+	/// its own test rather than one lap of the hill.
 	/// </summary>
 	private static readonly string[] Relief =
 	{
-		".........",
-		".........",
-		"...1.1...",
-		"...1.1...",
-		"......vvv",
-		"......vvv",
+		"..............",
+		"..............",
+		"...1.1........",
+		"...1.1.....1..",
+		"......vvv.....",
+		"......vvv.....",
 	};
 
 	/// <summary>Where the ramps are. Kept beside <see cref="Relief"/> rather than
 	/// mixed into it because the two answer different questions about a cell -
 	/// how high it stands, and whether its top is flat - and a ramp reads its own
-	/// level out of the same grid every other cell does.</summary>
+	/// level out of the same grid every other cell does.
+	///
+	/// The six around column 11 are the rosette's, and they are not placed by eye:
+	/// they are <c>Step((11,3), h)</c> for each of the six edge headings, and their
+	/// entry cells are one more step of the same heading. Both had to land on the
+	/// board, which is what set the width at fourteen columns.</summary>
 	private static readonly string[] Ramps =
 	{
-		".........",
-		".........",
-		".........",
-		".........",
-		"...r.r.r.",
-		".........",
+		"..............",
+		"..............",
+		"...........r..",
+		"..........r.r.",
+		"...r.r.r..rrr.",
+		"..............",
 	};
 
 	public static int[] ReliefMap(int columns, int rows)
@@ -530,6 +555,23 @@ public sealed partial class Main : Node2D
 
 	private Label _hud = null!;
 	private Camera2D _camera = null!;
+
+	/// <summary>What the view opens at. See --zoom, and the panel's missing zoom
+	/// row for why this is a flag and not a slider.</summary>
+	private float _zoomAt = 1.0f;
+
+	/// <summary>Where the view is parked, and where R puts it back.
+	///
+	/// Read off the board rather than written down. It was <c>(760, 500)</c>,
+	/// which was the middle of a nine-column board and became the middle of
+	/// nothing when the board went to fourteen - the bench opened on the left half
+	/// with the rosette off screen, so seeing the thing it was widened for took a
+	/// drag of the middle button every run. Flat anchors, not lifted ones: which
+	/// way the view looks should not move when a hill is put on the board.</summary>
+	private Vector2 ViewHome =>
+		_origin + (_field.FlatAnchor(0, 0)
+				   + _field.FlatAnchor(_field.Columns - 1, _field.Rows - 1)) * 0.5f
+		+ _field.CentreOffset;
 
 	/// <summary>The view's own spring. One for the board, not one per tank: the
 	/// camera is a single thing and three guns firing into it is three impulses
@@ -1139,6 +1181,20 @@ public sealed partial class Main : Node2D
 				_grade = grade;
 				_relief = true;     // asking how steep it is asks for it
 			}
+			// The one control the panel refuses to carry, and for the reason it
+			// refuses: zoom moves the whole picture, so a row on it could silently
+			// rescale any A/B taken from the panel, and one measurement has already
+			// been lost to a stray wheel over the window. A start-up flag has none
+			// of that - it is fixed for the run and printed by --trace - and the
+			// board is now wider than the window, so a capture of all of it needs
+			// this. Around the view's own centre, which is where the wheel zooms.
+			else if (userArgs[i] == "--zoom" && i + 1 < userArgs.Length
+					 && float.TryParse(userArgs[i + 1], NumberStyles.Float,
+									   CultureInfo.InvariantCulture, out float zoomAt))
+			{
+				i++;
+				_zoomAt = Mathf.Clamp(zoomAt, 0.25f, 8.0f);
+			}
 			// No number: how much forest there is comes from --terrain, because
 			// forest is one of the kinds of ground. This is the A/B - the same
 			// board with the tree layer off.
@@ -1374,7 +1430,11 @@ public sealed partial class Main : Node2D
 		// Judging whether two layers line up is a pixel-level question, so the
 		// harness has to be able to get close. Sprites are drawn at 1:1 by
 		// default; zoom only changes the view, never the atlas sampling.
-		_camera = new Camera2D { Position = new Vector2(760, 500), Enabled = true };
+		// Parked below, once the field has its atlas: ViewHome is measured in tiles
+		// and HexField.FlatAnchor answers Vector2.Zero until there is one, so asked
+		// here it would quietly hand back the origin - which is a corner of the
+		// board and looks like a view that simply was not moved.
+		_camera = new Camera2D { Zoom = new Vector2(_zoomAt, _zoomAt), Enabled = true };
 		AddChild(_camera);
 
 		var layer = new CanvasLayer();
@@ -1410,6 +1470,9 @@ public sealed partial class Main : Node2D
 		// The medium's, always: the grid is one grid, so it cannot follow the
 		// selection, and the reference tank is the one drawn as rendered.
 		_field.Atlas = _vehicles[Math.Min(1, _vehicles.Count - 1)].Atlas;
+		// And now the view can be parked on the board, which is measured in that
+		// tile - see the camera above.
+		_camera.Position = ViewHome;
 		// Said out loud rather than drawn crooked. The hexagon's aspect ratio is
 		// its camera angle, and CellAt inverts the *rendered* tile's - so ground
 		// drawn at another elevation stops the hexagon on screen being the cell
@@ -5268,8 +5331,8 @@ public sealed partial class Main : Node2D
 		Shell.SmokeSeconds = Shell.TunedSmokeSeconds;
 		ApplySize();
 		PaintGunnery();
-		_camera.Zoom = Vector2.One;
-		_camera.Position = new Vector2(760, 500);
+		_camera.Zoom = new Vector2(_zoomAt, _zoomAt);
+		_camera.Position = ViewHome;
 		// and the shake, which holds a displacement with nothing driving it -
 		// the same reason the recoil spring is reset rather than left leaning
 		_shake.Reset();

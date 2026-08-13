@@ -5494,6 +5494,105 @@ public static class SelfTest
                    == field.LevelAt(new Vector2I(3, 4)),
                 "the ramp at (3,4) is entered off its own axis");
 
+            // --- the rosette: a hill with a ramp on each of its six faces ------
+            //
+            // The reason it is on the board at all. A ramp's top is a corner
+            // pattern rotated to its high edge, so a board whose ramps all rise
+            // the same way renders one of six rotations and says nothing about the
+            // other five. These four assertions are what make the patch a test
+            // rather than scenery.
+            var hill = new Vector2I(11, 3);
+            Check("the rosette is a hill and nothing else is that high beside it",
+                field.LevelAt(hill) == 1 && !field.IsRamp(hill),
+                $"(11,3) is level {field.LevelAt(hill)}"
+                + (field.IsRamp(hill) ? " and marked as a ramp" : ""));
+
+            // Every rotation, and it is the set that matters rather than the count:
+            // six ramps that happened to share a heading would count six.
+            var faces = new HashSet<int>();
+            for (int q = 0; q < field.Columns; q++)
+            for (int r = 0; r < field.Rows; r++)
+            {
+                int h = field.RampHeading(new Vector2I(q, r));
+                if (h >= 0)
+                    faces.Add(h);
+            }
+            Check("every one of the six flat faces is somebody's high edge",
+                HexField.EdgeHeadings.All(faces.Contains),
+                "the board only renders the rotations "
+                + string.Join(", ", faces.OrderBy(h => h))
+                + ", so the rest of the corner pattern is untested");
+
+            // Each face of the hill carries its own ramp, tilted at the hill, and
+            // each is entered from the flat one step further out along the same
+            // axis. Both halves are asserted together because a ramp that leans
+            // the right way and cannot be driven onto is not an approach.
+            int wrongWay = 0, noWayIn = 0, notReached = 0;
+            var firstBadFace = "";
+            foreach (int heading in HexField.EdgeHeadings)
+            {
+                Vector2I ramp = HexField.Step(hill, heading);
+                // From the hill, the ramp lies at `heading`; from the ramp the hill
+                // lies back the other way, and that is the ramp's high edge.
+                int high = HexField.Reverse(heading);
+                Vector2I gate = HexField.Step(ramp, heading);
+                if (field.RampHeading(ramp) != high)
+                {
+                    wrongWay++;
+                    if (firstBadFace.Length == 0)
+                        firstBadFace = $"the ramp at {ramp} tilts "
+                                       + $"{field.RampHeading(ramp)} rather than {high}";
+                }
+                else if (!field.Passable(gate, high)
+                         || HexField.Step(gate, high) != ramp)
+                {
+                    noWayIn++;
+                    if (firstBadFace.Length == 0)
+                        firstBadFace = $"the ramp at {ramp} cannot be entered from "
+                                       + $"{gate}";
+                }
+                else if (!field.Passable(ramp, high))
+                {
+                    notReached++;
+                    if (firstBadFace.Length == 0)
+                        firstBadFace = $"the ramp at {ramp} does not reach the hill";
+                }
+            }
+            Check("each of the six is tilted at the hill, entered from the flat, "
+                + "and climbs it",
+                wrongWay + noWayIn + notReached == 0,
+                $"{wrongWay} lean wrong, {noWayIn} have no way in, "
+                + $"{notReached} do not arrive: {firstBadFace}");
+
+            // And the hill is reachable from a home cell, which is the whole patch
+            // answering at once - the derivation, the six approaches, and the
+            // search that has to find one of them.
+            List<Vector2I> up = field.FindPath(new Vector2I(2, 2), hill);
+            Check("and a tank can drive from its home cell onto the rosette",
+                up.Count > 0 && up[^1] == hill
+                && field.IsRamp(up[up.Count - 2]),
+                up.Count == 0 ? "no route reaches (11,3) at all"
+                    : $"the route ends at {up[^1]} arriving from "
+                      + $"{up[up.Count - 2]}");
+
+            // The ring cells are all adjacent to each other and none of them may be
+            // driven to another, so the way from one face to the next is out and
+            // round. Asserted because it is what makes each of the six its own
+            // test, and because a rule that quietly stopped refusing would turn the
+            // ring into one lap.
+            int ringToRing = 0;
+            foreach (int heading in HexField.EdgeHeadings)
+            {
+                Vector2I ramp = HexField.Step(hill, heading);
+                foreach (int out2 in HexField.EdgeHeadings)
+                    if (field.IsRamp(HexField.Step(ramp, out2))
+                        && field.Passable(ramp, out2))
+                        ringToRing++;
+            }
+            Check("but no ramp of the ring may be driven onto its neighbour",
+                ringToRing == 0,
+                $"{ringToRing} steps go straight from one ramp to another");
+
             // The fallback, which is what keeps every relief assertion written
             // before ramps existed describing the board it was written for.
             field.SetRelief(Main.ReliefMap(field.Columns, field.Rows));
