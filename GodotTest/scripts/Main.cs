@@ -1887,8 +1887,9 @@ public sealed partial class Main : Node2D
 		vehicle.Height = _field.TopAt(vehicle.Cell);
 		vehicle.Standing = vehicle.Height;
 		// A tank standing on a cell stands at its centre, and there the chord and
-		// the surface are the same point - so the three part company only mid-leg.
-		vehicle.Ground = vehicle.Height;
+		// the surface are the same point - but the clearance is still owed, because
+		// marks are laid on the frame a leg ends too. See HexField.MarkAt.
+		vehicle.Ground = _field.MarkAt(vehicle.Cell);
 		vehicle.Trailing = vehicle.Height;
 		vehicle.Travel = Vector2.Zero;
 		vehicle.Levelling = false;
@@ -2588,7 +2589,7 @@ public sealed partial class Main : Node2D
 		// And where the ground under it actually is, which the line above is a
 		// chord of - see Vehicle.Ground. Only the belt marks read it, because only
 		// they lie in the ground rather than standing on it.
-		v.Ground = _field.SurfaceBetween(v.Cell, next, done);
+		v.Ground = _field.MarkBetween(v.Cell, next, done);
 		// The heights are the step's, not the frame's - see StepHeights, which
 		// carries the whole of why the two ends of one hull are two numbers.
 		// The gait is how far the contact point leads the trailing end, as a

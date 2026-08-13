@@ -1210,6 +1210,55 @@ public sealed partial class HexField : Node2D
     }
 
     /// <summary>
+    /// How far a flat mark is cleared of a tilted face, as a fraction of a level.
+    ///
+    /// <b>It is here because a mark and the tank that made it cannot both be
+    /// right while the tank is drawn on a chord.</b> A mark is laid at the
+    /// tank's own contact patch - it has to be, or it comes out from under
+    /// somewhere other than the tracks - so its screen row carries the chord's
+    /// error, while its height is the ground's. Reconstructing one from the other
+    /// then lands a quarter level away along the face, and the face is rising, so
+    /// the surface at the mark's own place is higher than the mark: hidden again,
+    /// by a fraction of the first amount.
+    ///
+    /// So it is cleared instead of chased, which is a deliberate approximation:
+    /// on tilted ground the mark is drawn up to this much nearer than the ground
+    /// it lies on. It costs no screen pixels - a lift and a slide along the view
+    /// cancel, which is the whole of why <see cref="Stage3D.Clear"/> works - and
+    /// it buys depth only.
+    ///
+    /// <b>A quarter level, and both bounds are measured.</b> The residual is at
+    /// most <c>Lift/4</c> of chord error times the face's own screen gradient
+    /// <c>(Lift/Reach)/sin(e)</c> - 9.6px on this board - and the worst seen on a
+    /// descent off the crown was 6px, where every last rut pixel came back. A
+    /// quarter level is 16.19px: over both, and the same quarter level the chord
+    /// is out by in the first place, so it is one number rather than a second.
+    /// </summary>
+    public const float MarkClear = 0.25f;
+
+    /// <summary>
+    /// How high to lay something flat that is crossing from one cell to the next:
+    /// the ground under it, cleared where that ground is tilted.
+    ///
+    /// The ground alone is <see cref="SurfaceBetween"/> and is what a mark is
+    /// really on; this is where it has to be drawn to be seen. See
+    /// <see cref="MarkClear"/> for why the two differ and what the difference
+    /// costs. On a step with no ramp at either end they are the same number, so a
+    /// board of flat tops never pays for this.
+    /// </summary>
+    public float MarkBetween(Vector2I from, Vector2I onto, float done) =>
+        SurfaceBetween(from, onto, done) + (HasRamps ? Lift * MarkClear : 0.0f);
+
+    /// <summary>The same height for something standing on one cell rather than
+    /// crossing between two. It has to be the same expression: a cell is parked on
+    /// at the end of every leg and marks are laid on that frame too, so a park
+    /// that skipped the clearance left the bars at every cell boundary to be eaten
+    /// by the face - measured, 201px of one descent, in two clusters at one seam
+    /// with the ribbon under them intact.</summary>
+    public float MarkAt(Vector2I cell) =>
+        TopAt(cell) + (HasRamps ? Lift * MarkClear : 0.0f);
+
+    /// <summary>
     /// How much of one face of a cell's side an observer standing
     /// <paramref name="standing"/> px off the datum may be shown.
     ///

@@ -5677,6 +5677,37 @@ public static class SelfTest
                 edgeSplit == 0, $"{edgeSplit} disagree, first {firstEdge}");
             Check("the ground under a step runs centre to edge to centre",
                 dipped == 0, $"{dipped} legs do not pass through their own edge");
+            // The clearance a flat mark is given on tilted ground, and the two
+            // things about it worth holding. It has to beat the residual the
+            // chord leaves behind - a quarter level of error times the face's own
+            // screen gradient - or a mark laid against it is eaten anyway.
+            float residual = field.Reach <= 0.0f || field.Squash <= 0.0f ? 0.0f
+                : field.Lift * field.Lift
+                  / (4.0f * field.Reach * field.Squash);
+            Check("a mark on tilted ground is cleared by more than the chord can "
+                  + "cost it",
+                field.Lift * HexField.MarkClear > residual && residual > 0.0f,
+                $"{field.Lift * HexField.MarkClear:F2}px of clearance against a "
+                + $"{residual:F2}px residual");
+
+            // And a park has to owe the same clearance as a leg, because a cell is
+            // parked on at the end of every one of them and marks are laid on that
+            // frame too. Asked as an identity rather than by driving: the two
+            // expressions are what came apart.
+            int parkGap = 0;
+            for (int q = 0; q < field.Columns; q++)
+            for (int r = 0; r < field.Rows; r++)
+            {
+                var cell = new Vector2I(q, r);
+                if (Math.Abs(field.MarkAt(cell)
+                             - field.MarkBetween(cell, cell, 0.0f)) > 0.01f)
+                    parkGap++;
+            }
+            Check("standing on a cell owes the same clearance as crossing it",
+                parkGap == 0,
+                $"{parkGap} cells clear a park differently from a leg - the bars at "
+                + "every boundary go when they do");
+
             Check("and the chord a sprite is drawn on parts from it by a quarter "
                   + "level, both ways",
                 sunk == 0 && over > 0

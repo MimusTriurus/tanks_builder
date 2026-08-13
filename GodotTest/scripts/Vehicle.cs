@@ -103,7 +103,7 @@ public sealed class Vehicle
     public float Height;
 
     /// <summary>
-    /// How high the <b>ground under it</b> is, which is a third number and not a
+    /// How high to lay something flat under it, which is a third number and not a
     /// spare copy of the first two.
     ///
     /// <see cref="Height"/> is where the sprite is drawn and
@@ -114,6 +114,11 @@ public sealed class Vehicle
     /// <see cref="HexField.SurfaceBetween"/>. The belt marks lie in the ground, so
     /// they take this one; sunk under the face, the face hid them for the upper
     /// half of every ramp.
+    ///
+    /// It is the ground <i>cleared</i> where the ground is tilted, not the ground
+    /// itself - see <see cref="HexField.MarkClear"/>, which is why the last of it
+    /// cannot be chased while the sprite rides the chord. Equal to the surface on
+    /// a step with no ramp at either end, so a flat board never pays for it.
     /// </summary>
     public float Ground;
 
