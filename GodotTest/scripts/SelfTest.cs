@@ -384,11 +384,14 @@ public static class SelfTest
         // rumble is driven by distance and a stopped tank gets nothing from it.
         Check("the tremble runs with the tank standing still", tremblePeak > 0.0,
             $"peak {tremblePeak:F5} at zero speed");
-        // Standing still it is near the floor of what a linear filter can show
-        // as motion rather than as a soft edge. Below about a third of a pixel
-        // it stops reading as a tremble at all.
-        Check("standing still it is a third of a pixel of stern travel",
-            tremblePeak * sternLeverPx is > 0.3 and < 0.6,
+        // Standing still it is near the floor of what a linear filter can show as
+        // motion rather than as a soft edge. The band came down with the gains when
+        // the lever moved to the stern - see EngineTremble.RestGain: a sixth of a
+        // pixel carried coherently by a whole end of the hull is more legible than a
+        // third of one tapering off up the body, which is what the old figure was
+        // measured on.
+        Check("standing still it is a sixth of a pixel of stern travel",
+            tremblePeak * sternLeverPx is > 0.12 and < 0.25,
             $"{tremblePeak * sternLeverPx:F2}px on a {sternLeverPx:F0}px lever");
         // Under 30Hz or it aliases into a slow wobble at 60fps; over a few Hz or
         // it is a sway rather than a tremble. Sign changes are twice the
@@ -422,8 +425,8 @@ public static class SelfTest
         // travel. Equal settings do not look equal.
         Check("it shakes harder under way", movingPeak > 2.0 * tremblePeak,
             $"{movingPeak * sternLeverPx:F2}px moving vs {tremblePeak * sternLeverPx:F2}px standing");
-        Check("under way it is still under a pixel of stern travel",
-            movingPeak * sternLeverPx is > 0.6 and < 1.2,
+        Check("under way it is still under half a pixel of stern travel",
+            movingPeak * sternLeverPx is > 0.3 and < 0.6,
             $"{movingPeak * sternLeverPx:F2}px on a {sternLeverPx:F0}px lever");
         Check("it runs faster under load", movingCrossings > pitchCrossings,
             $"{movingCrossings} crossings at cruise vs {pitchCrossings} at rest");

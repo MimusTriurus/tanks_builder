@@ -55,14 +55,29 @@ public sealed class EngineTremble
 
     /// <summary>Shear amplitude at a standstill, in the same units as
     /// <see cref="BodyPitch.Gain"/>: about 68px of lever out to the stern, so
-    /// 0.005 is about a third of a pixel of stern travel either way.
+    /// 0.0025 is about a sixth of a pixel of stern travel either way.
     ///
     /// Sub-pixel is the point. A whole-pixel tremble at this rate is a buzz, and
     /// the sprite filters linearly (the pitch shear needed that), so a fraction
-    /// of a pixel actually shows. This is close to the floor, though: much below
-    /// it and the sprite reads as slightly out of focus rather than as
-    /// moving.</summary>
-    public double RestGain = 0.005;
+    /// of a pixel actually shows.
+    ///
+    /// <b>It was 0.005 - a third of a pixel - and the halving is the lever moving,
+    /// not a change of taste.</b> Those figures were judged while the tremble
+    /// tilted the whole body and the vertical was damped by four, so the nominal
+    /// travel was only ever delivered broadside; every other heading got a fraction
+    /// of it. Now it is delivered at every heading, and it moves a whole end of the
+    /// hull coherently rather than tapering off up the body, so the same number
+    /// reads a good deal louder. Measured on three tanks standing: the old
+    /// construction moved about 960px of picture at level 1, the new one moves
+    /// 3976; halved, it moves 1038 at half the old per-pixel peak - at or under
+    /// what was accepted before.
+    ///
+    /// <b>The old floor came down with it, and honestly rather than quietly.</b>
+    /// "Much below a third of a pixel and the sprite reads as out of focus rather
+    /// than moving" was measured on a taper spread over the whole body; a sixth of
+    /// a pixel over a whole coherent end is the more legible of the two, and the
+    /// measurement says so - 1038 changed pixels is not a blur.</summary>
+    public double RestGain = 0.0025;
 
     /// <summary>Shear amplitude at <see cref="TopSpeed"/>.
     ///
@@ -71,16 +86,19 @@ public sealed class EngineTremble
     /// is sliding across the screen, which hides a small vibration, so the same
     /// amplitude that reads at a standstill goes unnoticed under way.
     ///
+    /// Halved along with <see cref="RestGain"/> and for its reason - the ratio
+    /// between the two is the thing that has to survive, which is also why the
+    /// panel's dial is a multiplier over the pair. 0.006 is about four tenths of a
+    /// pixel of stern travel.
+    ///
     /// 0.012 was once the flat setting for both and read as too much, for a
     /// reason the pixel figure hid: the lever was then measured to the hull roof,
     /// and the aerial stands twice that high, so it was swinging a good pixel and a
     /// half while the hull moved under one. The turret is out of the tremble now
     /// (see <see cref="TankSprite.TurretStabilised"/>), which takes the aerial
-    /// with it, so the same number on the hull alone is a good deal quieter than
-    /// the one that was complained about. The aerial cannot come back into it
-    /// either: the lever runs along the hull now, so height buys no amplitude at
-    /// all.</summary>
-    public double DriveGain = 0.012;
+    /// with it. The aerial cannot come back into it either: the lever runs along
+    /// the hull now, so height buys no amplitude at all.</summary>
+    public double DriveGain = 0.006;
 
     /// <summary>
     /// A plain multiplier over both gains, and the one number the panel puts on
@@ -166,8 +184,20 @@ public sealed class EngineTremble
     /// <summary>Shear amplitude at a given speed. Exposed alongside
     /// <see cref="PitchRateAt"/> so the seam cost can be asserted at the speed
     /// it actually occurs at, rather than against a single worst number.</summary>
-    public double GainAt(double speed) =>
-        Level * (RestGain + (DriveGain - RestGain) * Load(speed));
+    public double GainAt(double speed) => Level * Tuned(speed);
+
+    /// <summary>Stern travel in px at a given speed and a given level, without
+    /// asking what level this instance is on.
+    ///
+    /// The panel's caption needs exactly this: the level it is showing is the
+    /// board's, which reaches the vehicles a frame later and does not reach them at
+    /// all while the tremble is switched off - so a caption read off an instance
+    /// would freeze under the very drag it exists to describe.</summary>
+    public double TravelAt(double speed, double level) =>
+        level * Tuned(speed) * SternLeverPx;
+
+    private double Tuned(double speed) =>
+        RestGain + (DriveGain - RestGain) * Load(speed);
 
     /// <summary>Frequency of the pitch axis at a given speed, Hz. Exposed so the
     /// Nyquist headroom can be asserted rather than recalculated by hand every

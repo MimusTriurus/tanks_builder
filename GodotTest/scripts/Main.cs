@@ -679,6 +679,23 @@ public sealed partial class Main : Node2D
 	/// is wrong in a way the plain render is not. Key I, or --no-tremble.</summary>
 	private bool _trembleEnabled = true;
 
+	/// <summary>
+	/// How hard the engines shake, over the tuned pair - the panel's slider and
+	/// --tremble.
+	///
+	/// <b>Held here rather than on the driven tank's own
+	/// <see cref="EngineTremble.Level"/>, which is where it was, and that was the
+	/// bug.</b> How hard an engine shakes is a question about the effect, so it
+	/// reaches all three - the same rule the switch beside it follows, and the
+	/// reason the switch has always been a field here. Written on the vehicle it
+	/// left the other two shaking at the tuned figure, so dragging the slider
+	/// changed a third of the board and read as a slider that did nothing.
+	///
+	/// Pushed in <see cref="UpdateTremble"/> rather than on the drag, so a tank
+	/// built later cannot miss it.
+	/// </summary>
+	private double _trembleLevel = 1.0;
+
 	private TurretScan _scan => Active.Scan;
 	/// <summary>Idle turret traverse - key N, or --scan.</summary>
 	private bool _scanEnabled;
@@ -948,7 +965,6 @@ public sealed partial class Main : Node2D
 	/// and reaching for "the driven tank" then is a read of an empty list -
 	/// which hung --capture rather than failing it.</summary>
 	private bool _deadAtStart;
-	private double _trembleAtStart = 1.0;
 	private double _recoilAtStart = 1.0;
 	private bool _rollOnly;
 
@@ -1084,7 +1100,11 @@ public sealed partial class Main : Node2D
 			else if (userArgs[i] == "--tremble" && i + 1 < userArgs.Length
 					 && double.TryParse(userArgs[i + 1], NumberStyles.Float,
 						 CultureInfo.InvariantCulture, out double trembleLevel))
-				_trembleAtStart = trembleLevel;
+				// Straight onto the board's level, not onto a start-up copy of it:
+				// the vehicles read it every frame, so there is nothing to wait
+				// for - see _trembleLevel. The copy was needed while the slider
+				// wrote one tank's own amplitude and the flag had to write three.
+				_trembleLevel = trembleLevel;
 			// Straight onto the static rather than waiting for the vehicles like
 			// the tremble does: this one is not held on a machine, because the
 			// rate has two readers that share no object. See Gunnery.TraverseRate.
@@ -1608,14 +1628,18 @@ public sealed partial class Main : Node2D
 			GetTree().Quit(failed == 0 ? 0 : 1);
 			return;
 		}
-		// The flag values that had to wait for a tank to exist. The two levels go
-		// on every tank: they are harness settings, and a slider judged on one
+		// The flag values that had to wait for a tank to exist. The recoil level
+		// goes on every tank: it is a harness setting, and a slider judged on one
 		// tank while the other two ran at a different amplitude would be measuring
 		// the difference. Burning goes on the selected one alone, because that is
 		// what J does and what makes a burning tank next to an intact one possible.
+		//
+		// The tremble level is not here any more: it is the board's, pushed every
+		// frame by UpdateTremble, so a copy applied once at start-up would be
+		// overwritten by it - which is exactly what happened, and it read as the
+		// flag not arriving.
 		foreach (Vehicle vehicle in _vehicles)
 		{
-			vehicle.Tremble.Level = _trembleAtStart;
 			vehicle.Recoil.Level = _recoilAtStart;
 			if (_rollOnly)
 				vehicle.Rumble.Amplitude = 0.0;
@@ -3221,6 +3245,10 @@ public sealed partial class Main : Node2D
 			v.Sprite.QueueRedraw();
 			return;
 		}
+		// Here rather than at the drag, so every tank carries the same level and a
+		// tank built after it was set cannot be left on the tuned figure - see
+		// _trembleLevel.
+		v.Tremble.Level = _trembleLevel;
 		v.Tremble.Advance(v.Speed, delta);
 		v.Sprite.TremblePitch = v.Tremble.Pitch;
 		v.Sprite.TrembleYaw = v.Tremble.Yaw;
@@ -4005,12 +4033,15 @@ public sealed partial class Main : Node2D
 		});
 		// A multiplier over the tuned pair rather than a raw amplitude - see
 		// EngineTremble.Level for why the standing and moving figures must keep
-		// their ratio. The caption carries the roof travel in pixels, because
+		// their ratio. The caption carries the stern travel in pixels, because
 		// the multiplier says nothing about whether it is visible and the pixel
 		// figure is the whole argument the value was chosen on.
+		//
+		// Reads and writes the board's level, not the driven tank's - see
+		// _trembleLevel.
 		ui.Slide("ride.tremble_level", "engine tremble level", 0.0, 2.5, 0.05,
-			() => _tremble.Level, v => _tremble.Level = v, "x",
-			() => $"{_tremble.GainAt(_speed) * EngineTremble.SternLeverPx:F2}px"
+			() => _trembleLevel, v => _trembleLevel = v, "x",
+			() => $"{_tremble.TravelAt(_speed, _trembleLevel):F2}px"
 				  + " of stern travel at this speed");
 		ui.Toggle("ride.stabiliser", "turret stabiliser  (K)",
 			() => _tank.TurretStabilised, on => _tank.TurretStabilised = on);
