@@ -121,6 +121,53 @@ public sealed class Vehicle
     /// </summary>
     public float Standing;
 
+    /// <summary>
+    /// How high the trailing end of the hull counts as standing - equal to
+    /// <see cref="Standing"/> whenever the two ends have nothing to disagree
+    /// about, the height read off the leg behind the contact point while the
+    /// tank climbs, and the crown it is leaving while it descends behind a
+    /// rim. See Main.StepHeights for the numbers, Stage3D.Body for what is
+    /// done with them.
+    ///
+    /// <b>It exists because one depth per tank cannot answer a climb.</b>
+    /// Standing promotes the sprite to the crown so the cell being climbed does
+    /// not cut the running gear - and applied to the whole billboard it paid
+    /// with every other cell at that level: promoted at the first pixel, the
+    /// tank spent the whole of (3,2)->(4,3) drawn over (3,3), a lateral hex it
+    /// had not come up to and was never level with until the end. While the hull
+    /// is on a wall its nose and tail are at two different heights, and this is
+    /// the tail's; the stage lays the difference along the travel axis, so the
+    /// low end of the sprite goes back behind the ground it has not climbed yet
+    /// while the nose keeps the crown it is entitled to.
+    /// </summary>
+    public float Trailing;
+
+    /// <summary>True while the current leg takes the tank from one level to
+    /// another - the legs where the stage draws it over everything, because
+    /// every honest depth tried for a billboard crossing a wall bought some
+    /// stutter (see Stage3D.Place). A flat leg keeps honest depth: a tank
+    /// passing behind a ridge on its own level stays behind it. Cleared by
+    /// parking, like <see cref="Travel"/>.</summary>
+    public bool Levelling;
+
+    /// <summary>The screen direction of the current leg, zero while parked.
+    /// What lets the stage lay <see cref="Trailing"/> along the axis the hull
+    /// actually spans rather than across the whole billboard - and what fades
+    /// a climb's split out on legs up and down the screen, where the two ends
+    /// share their screen columns and a split would be wrong for both. A
+    /// descent's split does not fade: its seam is a wipe down the sprite and
+    /// never degenerates (see Main.Climb).</summary>
+    public Vector2 Travel;
+
+    /// <summary>The screen-space line the stage splits the sprite's depth
+    /// along, as <c>(a, b, c)</c> with <c>a*x + b*y &gt;= c</c> the side that
+    /// carries <see cref="Standing"/>. Climbing it is <c>Main.SeamLine</c>,
+    /// the shared edge of the hex being mounted and the raised neighbour
+    /// nearest the camera; descending behind a rim it is the wipe
+    /// <c>Main.Climb</c> sweeps down the sprite. Meaningless while parked,
+    /// and unread: the split is zero there.</summary>
+    public Vector3 SeamLine;
+
     /// <summary>The ground that stands in front of this tank and above it,
     /// repainted over it. Null until the harness builds one.</summary>
     public ReliefCap? Cap;

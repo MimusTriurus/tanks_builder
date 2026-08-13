@@ -110,6 +110,91 @@ public sealed partial class HexField : Node2D
     public bool HasRelief => _levels is not null;
 
     /// <summary>
+    /// Which way each cell's top face tilts up, as the world heading of its high
+    /// edge, or -1 for a cell whose top is flat. Null for a board with no ramps
+    /// on it at all.
+    ///
+    /// <b>Null rather than an array of -1, for <see cref="_levels"/>'s reason</b>
+    /// and it buys the same thing: with no ramps <see cref="Passable"/> falls
+    /// back to <see cref="MaxClimb"/>, which is how every board walked before
+    /// there were ramps. A relief board with no ramps on it paths exactly as it
+    /// did.
+    /// </summary>
+    private int[]? _ramps;
+
+    /// <summary>Whether this board carries any ramp at all - the flag that
+    /// decides whether a cliff may be driven up.</summary>
+    public bool HasRamps => _ramps is not null;
+
+    public bool IsRamp(Vector2I cell) => RampHeading(cell) >= 0;
+
+    /// <summary>The world heading of a ramp's high edge, or -1 where the top is
+    /// flat.</summary>
+    public int RampHeading(Vector2I cell) =>
+        _ramps is null || !InBounds(cell) ? -1 : _ramps[cell.Y * Columns + cell.X];
+
+    /// <summary>
+    /// How high a cell's surface stands where a tank parked on it would sit, in
+    /// screen px off the datum.
+    ///
+    /// <b>Half a level on a ramp, and that number is the geometry rather than a
+    /// choice.</b> The height runs linearly across the cell from its low edge to
+    /// its high one, so at the centre - which is where a parked tank stands and
+    /// where every leg begins and ends - it is exactly half. It is also where the
+    /// two corners on the ramp's own axis sit, which is what the modelled tile
+    /// reports.
+    ///
+    /// <b>Told apart from <see cref="LevelAt"/> on purpose, and both survive.</b>
+    /// The integer is what pathing and occlusion are written in - which level a
+    /// cell belongs to - and a ramp belongs to its low one. This is where its
+    /// surface is. Folding the two into one number would answer two questions
+    /// with one, which is the mistake <see cref="HeightBetween"/> already records
+    /// having made once.
+    /// </summary>
+    public float TopAt(Vector2I cell) =>
+        LevelAt(cell) * Lift + (IsRamp(cell) ? Lift * 0.5f : 0.0f);
+
+    /// <summary>
+    /// How high each of the six corners of a cell's top face stands, in screen px
+    /// off the datum, indexed as <see cref="Corners"/> is.
+    ///
+    /// <b>A rotated pattern, with no trigonometry in it</b> - the same reason
+    /// <see cref="Corners"/> has none. The two corners bounding the high edge are
+    /// at the full level, the two on the ramp's own axis at half, the two
+    /// bounding the low edge at zero: <c>[1, 1, 1/2, 0, 0, 1/2]</c> read from the
+    /// high edge's own index. Every corner of a flat cell is at its level, which
+    /// is the same expression with no rotation to do.
+    /// </summary>
+    public float[] TopCorners(Vector2I cell)
+    {
+        float floor = LevelAt(cell) * Lift;
+        var top = new float[6];
+        int heading = RampHeading(cell);
+        if (heading < 0)
+        {
+            for (int i = 0; i < 6; i++)
+                top[i] = floor;
+            return top;
+        }
+        int high = EdgeIndex(heading);
+        for (int i = 0; i < 6; i++)
+            top[i] = floor + Lift * RampCorner[((i - high) % 6 + 6) % 6];
+        return top;
+    }
+
+    private static readonly float[] RampCorner =
+        { 1.0f, 1.0f, 0.5f, 0.0f, 0.0f, 0.5f };
+
+    /// <summary>Which edge of <see cref="Corners"/> faces a world heading. Corner
+    /// i and i+1 span the edge facing <c>330 - 60i</c>, so this inverts that -
+    /// see <see cref="Corners"/> and <see cref="NearHeading"/>, which are the two
+    /// places that relation is already relied on.</summary>
+    public static int EdgeIndex(int heading) =>
+        ((330 - (((heading % 360) + 360) % 360)) / 60 % 6 + 6) % 6;
+
+    public static int Reverse(int heading) => (((heading % 360) + 360) % 360 + 180) % 360;
+
+    /// <summary>
     /// How steep one level is, as a fraction of the distance to a neighbour.
     ///
     /// A grade rather than a height in pixels, so it is the same slope on any
@@ -143,12 +228,118 @@ public sealed partial class HexField : Node2D
     /// reads as the pathing ignoring the board.</summary>
     public int MaxClimb = 1;
 
-    public void SetRelief(int[]? levels)
+    /// <summary>
+    /// Put height on the board, and optionally the ramps that let it be driven.
+    ///
+    /// <b>A ramp is marked, and which way it tilts is measured off the levels.</b>
+    /// The high edge is the one facing the neighbour a level above, so a mark
+    /// cannot disagree with the field it bridges. Handed the direction instead,
+    /// the two can part company - and then the high edge does not meet the wall
+    /// it is there to bridge, which is a seam and reports as nothing at all. Same
+    /// argument as <c>track_split</c>'s: the tread is measured rather than
+    /// marked because a mark that stops early does not read as a smaller tread.
+    ///
+    /// <b>Ambiguity raises and names the candidates rather than choosing.</b> A
+    /// cell with two higher neighbours in two directions genuinely does not
+    /// determine which of them its ramp bridges, and picking the first would be
+    /// <c>sprite_atlas</c> choosing an axis holder in hash order - a wrong answer
+    /// that no output number mentions.
+    /// </summary>
+    /// <param name="ramps">One flag per cell, or null for a board of flat tops.
+    /// </param>
+    public void SetRelief(int[]? levels, bool[]? ramps = null)
     {
         _levels = levels is not null && levels.Length == Columns * Rows
             ? levels : null;
+        _ramps = _levels is null || ramps is null
+                 || ramps.Length != Columns * Rows
+            ? null : DeriveRamps(ramps);
         _ordered = null;
         QueueRedraw();
+    }
+
+    private int[]? DeriveRamps(bool[] marked)
+    {
+        var headings = new int[Columns * Rows];
+        bool any = false;
+        for (int r = 0; r < Rows; r++)
+        for (int q = 0; q < Columns; q++)
+        {
+            int at = r * Columns + q;
+            headings[at] = -1;
+            var cell = new Vector2I(q, r);
+            if (!marked[at])
+                continue;
+            var up = new List<int>();
+            foreach (int heading in EdgeHeadings)
+            {
+                Vector2I next = Step(cell, heading);
+                if (InBounds(next) && LevelAt(next) == LevelAt(cell) + 1)
+                    up.Add(heading);
+            }
+            if (up.Count != 1)
+                throw new InvalidOperationException(
+                    $"the ramp at ({q},{r}) on level {LevelAt(cell)} has "
+                    + (up.Count == 0
+                        ? "no neighbour a level above it, so there is nothing "
+                          + "for it to bridge"
+                        : $"{up.Count} neighbours a level above it - headings "
+                          + string.Join(", ", up)
+                          + " - so which edge is its high one is not decided by "
+                          + "the map"));
+            headings[at] = up[0];
+            any = true;
+        }
+        return any ? headings : null;
+    }
+
+    /// <summary>
+    /// Whether a tank may take the step out of <paramref name="cell"/> along
+    /// <paramref name="heading"/>.
+    ///
+    /// <b>With ramps on the board a cliff is not driveable at all</b>, and that is
+    /// the whole point of having them: the level changes where the map says it
+    /// may, which is what makes a plateau a place you have to find the way up to
+    /// rather than a cell one level higher. Without ramps the old
+    /// <see cref="MaxClimb"/> rule stands, so every board that walked before this
+    /// walks the same.
+    ///
+    /// <b>A ramp is entered and left along its own axis only.</b> Across a side
+    /// edge its face runs from one level to the other, so it meets a flat
+    /// neighbour at one point and stands above or below it everywhere else -
+    /// there is no continuous surface to drive over, and the two ends of a tank
+    /// crossing there would sit at heights nothing on the board explains.
+    /// </summary>
+    public bool Passable(Vector2I cell, int heading)
+    {
+        Vector2I next = Step(cell, heading);
+        if (!InBounds(cell) || !InBounds(next))
+            return false;
+        if (_levels is null)
+            return true;
+        if (_ramps is null)
+            return Math.Abs(LevelAt(next) - LevelAt(cell)) <= MaxClimb;
+
+        int here = RampHeading(cell), there = RampHeading(next);
+        int back = Reverse(heading);
+        // Off a ramp: along its axis, and the level it reaches is the one that
+        // end of the ramp is at.
+        if (here >= 0)
+        {
+            if (heading != here && heading != Reverse(here))
+                return false;
+            if (there >= 0)
+                return false;
+            return LevelAt(next) == LevelAt(cell) + (heading == here ? 1 : 0);
+        }
+        // Onto a ramp: the shared edge seen from the ramp's side.
+        if (there >= 0)
+        {
+            if (back != there && back != Reverse(there))
+                return false;
+            return LevelAt(cell) == LevelAt(next) + (back == there ? 1 : 0);
+        }
+        return LevelAt(next) == LevelAt(cell);
     }
 
     public int LevelAt(Vector2I cell) =>
@@ -437,6 +628,20 @@ public sealed partial class HexField : Node2D
         for (int level = low; level <= high; level++)
         {
             Vector2I cell = FlatCellAt(local + new Vector2(0.0f, level * Lift));
+            // <b>A ramp answers for its own level only, and its top half is
+            // therefore picked as the cell behind it.</b> Letting it answer for
+            // the level above as well was tried and is worse than the thing it
+            // fixes: the inverse drops the point by a whole lift and lands it in
+            // some cell's footprint from a cell away, so a ramp accepted at
+            // level+1 anywhere on its face steals clicks from cells that have
+            // nothing to do with it - measured, 48 of 1620 probes, first a point
+            // in (2,2) answered by the ramp at (3,2).
+            //
+            // Answering it properly means inverting a sloped plane rather than a
+            // flat one - the lift to undo is a function of where the point lands,
+            // which is what this loop over constant lifts cannot express. Half a
+            // cell of slop on ramp cells is the price, and it lands on the cell
+            // the slope leads to.
             if (!InBounds(cell) || LevelAt(cell) != level)
                 continue;
             float row = FlatAnchor(cell).Y;
@@ -623,8 +828,9 @@ public sealed partial class HexField : Node2D
                     // Height is an obstacle of the same kind as another tank, so
                     // it is refused in the same place: a search that took the
                     // cliff and then had the driving refuse it would report a
-                    // route it cannot walk.
-                    || Math.Abs(LevelAt(next) - LevelAt(cell)) > MaxClimb)
+                    // route it cannot walk. See Passable, which is where the one
+                    // statement of what a step may cross lives.
+                    || !Passable(cell, heading))
                     continue;
                 cameFrom[next] = cell;
                 if (next == to)
@@ -932,9 +1138,13 @@ public sealed partial class HexField : Node2D
     /// of a climb, so it spent the leg drawn over cells at a level it had not
     /// reached. A tank covers a hex when it has come up to that hex's level; the
     /// height it is drawn at is what says whether it has.</summary>
+    /// <remarks><b>Off <see cref="TopAt"/> rather than the levels</b>, which is
+    /// what carries a ramp: its ends are half a level up, so a leg onto one
+    /// climbs half and the leg off it climbs the other half. On a board of flat
+    /// tops the two expressions are the same number, which is why nothing else
+    /// had to be told.</remarks>
     public float HeightBetween(Vector2I from, Vector2I onto, float done) =>
-        Mathf.Lerp(LevelAt(from) * Lift, LevelAt(onto) * Lift,
-                   Mathf.Clamp(done, 0.0f, 1.0f));
+        Mathf.Lerp(TopAt(from), TopAt(onto), Mathf.Clamp(done, 0.0f, 1.0f));
 
     /// <summary>
     /// How much of one face of a cell's side an observer standing

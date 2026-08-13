@@ -161,8 +161,13 @@ public sealed partial class Grove : Node2D
     /// hashed here: forest is a kind of ground, chosen where the other kinds are
     /// chosen, so "how much forest" is the terrain paint and not a second dial
     /// arguing with it.</summary>
+    /// <remarks><b>Never on a ramp</b>, whatever the paint says. A tree stands at
+    /// one height, read off the cell's level - and a ramp's surface is at its
+    /// level on one edge only, so a trunk planted on one sinks into the slope or
+    /// floats over it depending which end it landed at. A ramp is the way up,
+    /// which is the one cell on the board that has a reason to be clear.</remarks>
     public bool IsForest(Vector2I cell) =>
-        Enabled && Field is not null
+        Enabled && Field is not null && !Field.IsRamp(cell)
         && Field.KindAt(cell) == TerrainSet.Forest;
 
     /// <summary>Ground-plane squash, measured off the rendered tile rather than

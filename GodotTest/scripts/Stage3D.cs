@@ -72,6 +72,33 @@ public sealed partial class Stage3D : Node3D
         {
             _tops.Visible = value;
             _sides.Visible = value;
+            _edges.Visible = value && ShowEdges;
+        }
+    }
+
+    /// <summary>
+    /// Whether each cell wears an outline at its own rim.
+    ///
+    /// <b>It is drawn because <see cref="Bleed"/> exists to make sure it is
+    /// not.</b> That constant stops a top face sampling the art's own
+    /// antialiased surround, and the note on it records the result as the board
+    /// reading "as continuous ground with no cell boundary visible at all,
+    /// better than the 2D board manages" - which is right when the question is
+    /// whether the ground looks like ground, and wrong when it is which cell a
+    /// tank is standing in. Both are asked of this board, so the boundary is put
+    /// back as a mark rather than taken back out of the seam.
+    ///
+    /// Kept apart from <see cref="ShowBoard"/> and answered by it: no board, no
+    /// outline, because an outline of nothing is a wireframe of a board that is
+    /// not there.
+    /// </summary>
+    public bool ShowEdges
+    {
+        get => _showEdges;
+        set
+        {
+            _showEdges = value;
+            _edges.Visible = value && ShowBoard;
         }
     }
 
@@ -85,6 +112,8 @@ public sealed partial class Stage3D : Node3D
     private MeshInstance3D _tops = null!;
     private MeshInstance3D _sides = null!;
     private MeshInstance3D _ring = null!;
+    private MeshInstance3D _edges = null!;
+    private bool _showEdges = true;
     private readonly Dictionary<Vehicle, Stand> _stands = new();
     private string _built = "";
 
@@ -106,6 +135,14 @@ public sealed partial class Stage3D : Node3D
         /// because the size slider moves it, and a body cut for one scale bends
         /// at the wrong line at another.</summary>
         public Vector2 Lead = new(float.NaN, float.NaN);
+
+        /// <summary>The climb split the quad was last cut for: how much lower
+        /// the trailing side stands and the seam line in the quad's own frame.
+        /// Held for Lead's reason - both move while a tank is on a wall, and a
+        /// mesh cut for one frame of a climb carries the wrong depth a few
+        /// frames later.</summary>
+        public float Drop;
+        public Vector3 Line;
     }
 
     // --- the mapping ---------------------------------------------------------
@@ -149,9 +186,11 @@ public sealed partial class Stage3D : Node3D
         _tops = new MeshInstance3D();
         _sides = new MeshInstance3D();
         _ring = new MeshInstance3D();
+        _edges = new MeshInstance3D { Visible = _showEdges };
         AddChild(_tops);
         AddChild(_sides);
         AddChild(_ring);
+        AddChild(_edges);
     }
 
     /// <summary>
@@ -271,9 +310,11 @@ public sealed partial class Stage3D : Node3D
         _tops.Mesh = null;
         _sides.Mesh = null;
         _ring.Mesh = null;
+        _edges.Mesh = null;
         _tops.MaterialOverride = null;
         _sides.MaterialOverride = null;
         _ring.MaterialOverride = null;
+        _edges.MaterialOverride = null;
     }
 
     public void Give()
@@ -340,8 +381,40 @@ public sealed partial class Stage3D : Node3D
     /// is where they belong, and it is the same surface the ring and the ruts use.
     /// So the sprite is a body standing on a footprint, which is what a tank is,
     /// and the contact line is where one becomes the other.
+    ///
+    /// <b>On a wall the surface splits in two along the seam line too</b>,
+    /// because a climbing hull has its nose and its tail at two different
+    /// heights and one depth for the whole sprite answers only one of them -
+    /// promoted whole to the crown, the tank spent all of (3,2)->(4,3) drawn
+    /// over (3,3), a hex it had not come up to. <paramref name="drop"/> is how
+    /// much lower the trailing side stands and <paramref name="line"/> is
+    /// <c>Main.SeamLine</c> in the quad's own screen frame, and the trailing
+    /// side slides along the view ray by the whole of the drop: up by
+    /// <c>d/cos(e)</c> and toward the camera by <c>d/sin(e)</c>, the family
+    /// <c>World(row + L, L)</c> in the quad's own space, so not one pixel moves
+    /// and only the depth does. Zero drop is the old pair of faces exactly,
+    /// which is every parked tank and every flat board.
+    ///
+    /// <b>The cut follows the hexes' shared edge, and both simpler cuts were
+    /// built first and looked broken.</b> A ramp across the hull put columns at
+    /// heights between the two, and those are cut by the crown cells' top
+    /// faces along a line that is the rim of nothing drawn - measured on
+    /// (3,2)->(4,3), where it came back as a diagonal wedge out of the hull
+    /// with the mounted hex's ground inside it. A vertical step could not fix
+    /// it, at the contact point or anywhere else: two neighbouring hexes
+    /// overlap by half a width in x, so no vertical line has the mounted cell
+    /// wholly on one side, and whichever part of it crossed over bit a corner
+    /// of ground out of the tank riding onto it. The shared edge is the one
+    /// line that separates them - a convex hex lies entirely on its own side
+    /// of each of its edges - so the mounted hex never covers the tank
+    /// mounting it, the passed ground covers the trailing side along the rim
+    /// it actually draws, and the cover runs out exactly where that rim does.
+    /// Both faces are linear in screen space over their own parameters, so the
+    /// line is a half-plane in either's frame and the split is two convex
+    /// polygons per face.
     /// </summary>
-    private static ArrayMesh Body(Vector2 lead, float squash, float rise)
+    private static ArrayMesh Body(Vector2 lead, float squash, float rise,
+                                  float drop, Vector3 line)
     {
         float half = PaintSize * 0.5f;
         // The anchor in the contact point's frame, and the image row the two
@@ -352,38 +425,89 @@ public sealed partial class Stage3D : Node3D
         // A screen pixel below the contact is 1/sin(e) of ground going away from
         // the tank, as against 1/cos(e) of height going up it.
         float reach = (half - lead.Y) / squash;
+        float top = ay + half / rise;
+
+        // The faces over their own parameters: the standing half over
+        // (x, height), the lying half over (x, ground run).
+        var upright = new[]
+        {
+            new Vector2(ax - half, top), new Vector2(ax + half, top),
+            new Vector2(ax + half, 0.0f), new Vector2(ax - half, 0.0f),
+        };
+        var foot = new[]
+        {
+            new Vector2(ax - half, 0.0f), new Vector2(ax + half, 0.0f),
+            new Vector2(ax + half, reach), new Vector2(ax - half, reach),
+        };
 
         var st = new SurfaceTool();
         st.Begin(Mesh.PrimitiveType.Triangles);
-        float top = ay + half / rise;
-        Face(st, Vector3.Back, 0.0f, seam,
-             new Vector3(ax - half, top, 0.0f), new Vector3(ax + half, top, 0.0f),
-             new Vector3(ax + half, 0.0f, 0.0f), new Vector3(ax - half, 0.0f, 0.0f));
-        var along = new Vector3(0.0f, 0.0f, reach);
-        Face(st, Vector3.Up, seam, 1.0f,
-             lie + new Vector3(ax - half, 0.0f, 0.0f),
-             lie + new Vector3(ax + half, 0.0f, 0.0f),
-             lie + new Vector3(ax + half, 0.0f, 0.0f) + along,
-             lie + new Vector3(ax - half, 0.0f, 0.0f) + along);
+        // One polygon of one face, fanned into triangles, the whole of it
+        // slid d along the view ray. Vertices can carry their own d, but a
+        // surface interpolated between two heights is the ramp again.
+        void Fan(IReadOnlyList<Vector2> poly, bool standing, float d)
+        {
+            var slide = new Vector3(0.0f, d / rise, d / squash);
+            for (int i = 1; i + 1 < poly.Count; i++)
+            foreach (int k in new[] { 0, i, i + 1 })
+            {
+                Vector2 p = poly[k];
+                float u = (p.X - (ax - half)) / PaintSize;
+                st.SetUV(standing
+                    ? new Vector2(u, seam * (1.0f - p.Y / top))
+                    : new Vector2(u, seam + (1.0f - seam) * p.Y / reach));
+                st.SetNormal(standing ? Vector3.Back : Vector3.Up);
+                st.AddVertex(standing
+                    ? slide + new Vector3(p.X, p.Y, 0.0f)
+                    : slide + lie + new Vector3(p.X, 0.0f, p.Y));
+            }
+        }
+
+        if (Mathf.Abs(drop) < 0.25f)
+        {
+            Fan(upright, true, 0.0f);
+            Fan(foot, false, 0.0f);
+        }
+        else
+        {
+            // The screen offset from the contact of an upright point is
+            // (x, -h*cos(e)) and of a lying point (x, +z*sin(e)), so the seam
+            // is linear over both faces and the mounted side is f >= 0.
+            (List<Vector2> crown, List<Vector2> tail) = Split(upright,
+                p => line.X * p.X - line.Y * p.Y * rise - line.Z);
+            Fan(crown, true, 0.0f);
+            Fan(tail, true, drop);
+            (crown, tail) = Split(foot,
+                p => line.X * p.X + line.Y * p.Y * squash - line.Z);
+            Fan(crown, false, 0.0f);
+            Fan(tail, false, drop);
+        }
         return st.Commit();
     }
 
-    /// <summary>Four corners as two triangles, the image running from
-    /// <paramref name="top"/> to <paramref name="bottom"/> down the pair of edges
-    /// they are given in. Written out rather than <c>QuadMesh</c> because four
-    /// vertices can be read, and a primitive whose orientation rules have to be
-    /// recalled is one more thing to suspect the next time a quad comes back the
-    /// wrong shape.</summary>
-    private static void Face(SurfaceTool st, Vector3 normal, float top,
-                             float bottom, params Vector3[] corner)
+    /// <summary>A convex polygon cut in two along f = 0, winding preserved:
+    /// what f keeps, and what it rejects.</summary>
+    private static (List<Vector2>, List<Vector2>) Split(
+        IReadOnlyList<Vector2> poly, System.Func<Vector2, float> f)
     {
-        Vector2[] uv = { new(0, top), new(1, top), new(1, bottom), new(0, bottom) };
-        foreach (int i in new[] { 0, 1, 2, 0, 2, 3 })
+        var kept = new List<Vector2>();
+        var cut = new List<Vector2>();
+        for (int i = 0; i < poly.Count; i++)
         {
-            st.SetUV(uv[i]);
-            st.SetNormal(normal);
-            st.AddVertex(corner[i]);
+            Vector2 a = poly[i], b = poly[(i + 1) % poly.Count];
+            float fa = f(a), fb = f(b);
+            if (fa >= 0.0f)
+                kept.Add(a);
+            if (fa <= 0.0f)
+                cut.Add(a);
+            if (fa > 0.0f != fb > 0.0f && Mathf.Abs(fa - fb) > 1e-6f)
+            {
+                Vector2 m = a.Lerp(b, fa / (fa - fb));
+                kept.Add(m);
+                cut.Add(m);
+            }
         }
+        return (kept, cut);
     }
 
     /// <summary>Every tank's holder and quad, from where it stands this
@@ -407,12 +531,43 @@ public sealed partial class Stage3D : Node3D
             // would sort by how tall they are drawn. The anchor offset is cut into
             // the mesh instead, where it also decides where the surface bends.
             Vector2 lead = vehicle.Atlas.GroundOffset * vehicle.Sprite.BodyScale;
-            if (lead != stand.Lead)
+            // The split as the mesh carries it: how far the far side of the
+            // seam stands off the nose's height, negative for a climb's tail
+            // and positive for the crown a descending tank's tail still holds.
+            // Whether a leg splits at all - and the climb's fade driving
+            // straight up or down the screen - is Main.Climb's decision, made
+            // next to the knowledge of which leg this is; here a parked tank
+            // simply has Trailing == Standing. The seam line is fixed to the
+            // board; it moves through the quad's frame as the tank moves past.
+            float drop = vehicle.Trailing - vehicle.Standing;
+            Vector3 world = vehicle.SeamLine;
+            var line = new Vector3(world.X, world.Y,
+                world.Z - world.X * vehicle.GroundPoint.X
+                        - world.Y * vehicle.GroundPoint.Y);
+            if (lead != stand.Lead || Mathf.Abs(drop - stand.Drop) > 0.25f
+                || (line - stand.Line).Length() > 0.5f)
             {
-                stand.Quad.Mesh = Body(lead, Squash, RiseFactor);
+                stand.Quad.Mesh = Body(lead, Squash, RiseFactor, drop, line);
                 stand.Lead = lead;
+                stand.Drop = drop;
+                stand.Line = line;
             }
             stand.Quad.Position = Contact(vehicle);
+            // A tank on a leg that changes levels is drawn over everything -
+            // the user's call, made with the cost on the table. The honest
+            // mid-leg occlusion there is a billboard crossing a volume, and
+            // every version of it bought some stutter: the crown promotion
+            // snapped at parking, the descent wipe still shed a couple of
+            // hundred pixels a frame at cruise. Skipping the depth test for
+            // those legs trades all of that for the one discontinuity that
+            // is left - the tank drops back into honest depth the moment it
+            // parks. Flat legs keep the test: a tank passing behind a ridge
+            // on its own level stays honestly behind it, which is what the
+            // stage exists to show. The split machinery above keeps running;
+            // with the test off it just decides nothing until the tank
+            // stops.
+            if (stand.Quad.MaterialOverride is StandardMaterial3D paint)
+                paint.NoDepthTest = vehicle.Levelling;
         }
         // The mark goes where the tank touches the ground, every frame, for the
         // reason the 2D ring follows the contact patch: a tank spends most of an
@@ -450,8 +605,12 @@ public sealed partial class Stage3D : Node3D
         for (int r = 0; r < Field.Rows; r++)
         {
             var cell = new Vector2I(q, r);
-            note.Append(Field.LevelAt(cell)).Append(Field.InkFor(cell).ToRgba32())
-                .Append(';');
+            // The ramp's heading too, and it has to be said: a cell that starts
+            // tilting without changing level or colour is a board that is not
+            // rebuilt, which reads as the ramp not having been modelled.
+            note.Append(Field.LevelAt(cell)).Append('/')
+                .Append(Field.RampHeading(cell))
+                .Append(Field.InkFor(cell).ToRgba32()).Append(';');
         }
         // Whether there is a ring, not where it is: it is cut about its own
         // origin and driven every frame, so the cell it stands on is not
@@ -476,6 +635,9 @@ public sealed partial class Stage3D : Node3D
         };
     }
 
+    /// <summary>A cell's centre at its own base level - the lowest its top face
+    /// reaches. A flat cell's whole top sits here; a ramp's rises off it, which
+    /// <see cref="Field"/>'s <c>TopCorners</c> carries per corner.</summary>
     private Vector3 CellTop(Vector2I cell)
     {
         float lift = Field.LevelAt(cell) * Field.Lift;
@@ -483,7 +645,40 @@ public sealed partial class Stage3D : Node3D
         return World(flat, lift);
     }
 
+    /// <summary>How far above a cell's base each of its six corners stands, as a
+    /// world offset. Read off the field rather than worked out here, so the ramp's
+    /// shape has one statement and the picking, the pathing and the mesh cannot
+    /// disagree about it.</summary>
+    private Vector3[] CornerLift(Vector2I cell)
+    {
+        float[] top = Field.TopCorners(cell);
+        float floor = Field.LevelAt(cell) * Field.Lift;
+        var up = new Vector3[6];
+        for (int i = 0; i < 6; i++)
+            up[i] = new Vector3(0.0f, (top[i] - floor) / RiseFactor, 0.0f);
+        return up;
+    }
+
     private static readonly Color Earth = new(0.42f, 0.30f, 0.20f);
+
+    /// <summary>
+    /// How much a ramp's top face is darkened against the flat ground.
+    ///
+    /// <b>A mark, not a light, and the arithmetic is why.</b> The top faces are
+    /// unshaded on purpose - the ground art arrived pre-lit - so a tilted plane
+    /// comes out the identical colour as a horizontal one and the only cue left is
+    /// the silhouette. Measured: at grade 0.6 the ramps moved 35352 px of the
+    /// picture and still read as the plateau being one cell bigger rather than as
+    /// a slope up to it.
+    ///
+    /// The honest lighting factor is <c>cos(slope)</c>, and it does not read: at
+    /// the default grade that is 0.970, three percent. So this is the same answer
+    /// <see cref="RaisedEdge"/> gives to the same problem - the mark carries its
+    /// own contrast rather than borrowing the ground's - and it is lighter than
+    /// <see cref="WallInk"/>'s 0.74 because a ramp is ground that is driven on and
+    /// not a wall.
+    /// </summary>
+    private const float RampShade = 0.88f;
 
     private static Color WallInk(int heading)
     {
@@ -501,6 +696,14 @@ public sealed partial class Stage3D : Node3D
     /// cell behind. Here they are simply behind their own cell's top face, which
     /// is nearer by <c>(y_top - y)/sin(e)</c> at every screen point the two
     /// share - so the list is gone and with it the chance of getting it wrong.
+    ///
+    /// The outline goes on here rather than in its own pass because it is a band
+    /// of the cell's own top face and belongs to the loop that knows where that
+    /// face is. <b>Per cell, and on a stepped board that is not a choice:</b> two
+    /// neighbours' rims are at different heights and each has to be drawn at its
+    /// own, so there is no shared edge to draw once. On the flat that shows as an
+    /// interior seam carrying two bands to the board's outer edge's one, which is
+    /// honest - a seam is a boundary twice over.
     /// </summary>
     private void Build()
     {
@@ -512,8 +715,11 @@ public sealed partial class Stage3D : Node3D
 
         var tops = new SurfaceTool();
         var sides = new SurfaceTool();
+        var edges = new SurfaceTool();
         tops.Begin(Mesh.PrimitiveType.Triangles);
         sides.Begin(Mesh.PrimitiveType.Triangles);
+        edges.Begin(Mesh.PrimitiveType.Triangles);
+        Vector3 lie = Clear(Squash, RiseFactor);
 
         Texture2D? art = GroundArt();
         for (int q = 0; q < Field.Columns; q++)
@@ -521,28 +727,83 @@ public sealed partial class Stage3D : Node3D
         {
             var cell = new Vector2I(q, r);
             Vector3 top = CellTop(cell);
+            // How far each corner stands off that base, and the middle of the
+            // face. A ramp's top is still one plane - the height is linear in
+            // position - so the fan and the rim band are unchanged in kind; they
+            // just carry a lift per point now.
+            Vector3[] up = CornerLift(cell);
+            Vector3 mid = Vector3.Zero;
+            foreach (Vector3 v in up)
+                mid += v / 6.0f;
             Color ink = Field.InkFor(cell);
             if (art is null)
                 ink = new Color(SoilInk.R * ink.R, SoilInk.G * ink.G,
                                 SoilInk.B * ink.B);
+            if (Field.IsRamp(cell))
+                ink = new Color(ink.R * RampShade, ink.G * RampShade,
+                                ink.B * RampShade);
 
             for (int i = 1; i + 1 < 6; i++)
             foreach (int k in new[] { 0, i, i + 1 })
             {
                 tops.SetColor(ink);
+                // The art is keyed to the footprint, not to where the point is
+                // drawn - so a slope wears the same hexagon of ground stretched
+                // over a face that projects taller, which is what a slope does.
                 tops.SetUV(GroundUV(corner[k]));
-                tops.AddVertex(top + corner[k]);
+                tops.AddVertex(top + corner[k] + up[k]);
             }
 
-            float drop = top.Y - floor;
-            if (drop <= 0.0f)
-                continue;
-            var down = new Vector3(0.0f, -drop, 0.0f);
+            // A raised cell wears the wider band: its top face is cut from
+            // the same dirt as the floor and lit the same - unshaded, on
+            // purpose - so away from the walls the two are one texture, and
+            // the rim of the outline is most of what says "this ground is
+            // higher" at a glance.
+            // Above the datum, not above the board's low: a map with a pit
+            // has low = -1, and "higher than the lowest" would put the wide
+            // band on the entire floor.
+            float inner = Field.LevelAt(cell) > 0 || Field.IsRamp(cell)
+                ? RaisedEdge : Edge;
+            Vector3 rim = top + lie;
             for (int i = 0; i < 6; i++)
             {
-                Vector3 a = top + corner[i], b = top + corner[(i + 1) % 6];
+                int j = (i + 1) % 6;
+                Vector3 a = corner[i], b = corner[j];
+                // The band's inner edge is pulled toward the centre, so its lift
+                // is the face's own height there - interpolated from the middle
+                // rather than copied off the corner, which on a slope would hang
+                // the band off the plane it is meant to lie on.
+                Vector3 ai = mid + (up[i] - mid) * inner;
+                Vector3 bj = mid + (up[j] - mid) * inner;
+                foreach (Vector3 v in new[]
+                         {
+                             rim + a + up[i], rim + b + up[j], rim + b * inner + bj,
+                             rim + a + up[i], rim + b * inner + bj,
+                             rim + a * inner + ai,
+                         })
+                {
+                    edges.SetColor(EdgeInk);
+                    edges.AddVertex(v);
+                }
+            }
+
+            // Any corner above the floor earns a wall, not just a raised cell: a
+            // ramp standing on the floor still has its high edge a whole level
+            // up, and skipping it on the old "is the base above the floor" test
+            // left the slope hanging over nothing.
+            float highest = top.Y;
+            foreach (Vector3 v in up)
+                highest = Mathf.Max(highest, top.Y + v.Y);
+            if (highest - floor <= 0.0f)
+                continue;
+            for (int i = 0; i < 6; i++)
+            {
+                int j = (i + 1) % 6;
+                Vector3 a = top + corner[i] + up[i], b = top + corner[j] + up[j];
+                var af = new Vector3(a.X, floor, a.Z);
+                var bf = new Vector3(b.X, floor, b.Z);
                 Color side = WallInk((330 - 60 * i + 360) % 360);
-                foreach (Vector3 v in new[] { a, b, b + down, a, b + down, a + down })
+                foreach (Vector3 v in new[] { a, b, bf, a, bf, af })
                 {
                     sides.SetColor(side);
                     sides.AddVertex(v);
@@ -552,8 +813,22 @@ public sealed partial class Stage3D : Node3D
 
         tops.GenerateNormals();
         sides.GenerateNormals();
+        edges.GenerateNormals();
         _tops.Mesh = tops.Commit();
         _sides.Mesh = sides.Commit();
+        _edges.Mesh = edges.Commit();
+        _edges.MaterialOverride = new StandardMaterial3D
+        {
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            VertexColorUseAsAlbedo = true,
+            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+            // The ring's reason, unchanged: a tank tests depth without writing
+            // it, so two transparent surfaces cannot settle each other and the
+            // sort decides. Said out loud, the ground goes under what stands on
+            // it.
+            RenderPriority = -1,
+        };
         _tops.MaterialOverride = new StandardMaterial3D
         {
             ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
@@ -701,4 +976,42 @@ public sealed partial class Stage3D : Node3D
     private const float Ring = 0.86f;
     private const float Line = 0.008f;
     private const float Fringe = 0.020f;
+
+    /// <summary>
+    /// Where the cell outline's inner edge runs, as a fraction of the cell - so
+    /// the band is the rim itself and everything inside it is ground.
+    ///
+    /// <b>Inward, never outward.</b> Grown past the hexagon it would hang over
+    /// whatever is beyond, which on a stepped board is the top of an earth wall
+    /// or the cell below it, and a boundary drawn on the wrong cell is worse
+    /// than none.
+    ///
+    /// <b>On the ground, so the camera thins it - and that is the point.</b>
+    /// 0.02 of the circumradius is 2.5 units on the two edges that run up the
+    /// screen and <c>sin(e)</c> of that, 1.3, on the four that run across it,
+    /// which is what a line painted on the ground does. The same statement
+    /// <see cref="Line"/> makes, and the reason neither is in screen pixels.
+    /// </summary>
+    private const float Edge = 0.980f;
+
+    /// <summary>The band on a raised cell's top face - three times
+    /// <see cref="Edge"/>'s. The plateau's top wears the same dirt as the
+    /// floor, so on the faces the camera sees (the walls behind a plateau
+    /// face away from it) the rim band is most of what marks the ground as
+    /// higher; at the floor's 2px it read as just another cell.</summary>
+    private const float RaisedEdge = 0.940f;
+
+    /// <summary>
+    /// The outline's ink, and it carries its own contrast rather than borrowing
+    /// the ground's - the additive effect layers' lesson, and the selection
+    /// ring's before it. This one lies on grass, on whatever terrain art is
+    /// loaded and on the plain <see cref="SoilInk"/> of a run with no art at
+    /// all, and dark is the only one of those three it is dark against.
+    ///
+    /// Low alpha because the mark is a boundary, not a wall: at full strength
+    /// the board reads as a stack of tiles, which is the failure
+    /// <see cref="Bleed"/> was measured into avoiding and is not worth undoing
+    /// to answer a different question.
+    /// </summary>
+    private static readonly Color EdgeInk = new(0.05f, 0.04f, 0.03f, 0.30f);
 }

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Godot;
@@ -159,6 +159,7 @@ public static class SelfTest
             bad == 0, $"{bad} bad, first {badDetail}");
 
         Relief(field, grove, Check);
+        Ramps(field, Check);
         Climbing(field, tank, Check);
 
         GD.Print("turret modes");
@@ -5028,7 +5029,8 @@ public static class SelfTest
             "fallback or case-insensitive lookup is broken");
 
         if (hadRelief)
-            field.SetRelief(Main.ReliefMap(field.Columns, field.Rows));
+            field.SetRelief(Main.ReliefMap(field.Columns, field.Rows),
+                            Main.RampMask(field.Columns, field.Rows));
 
         GD.Print(failed == 0 ? "SELFTEST OK" : $"SELFTEST FAILED: {failed}");
         return failed;
@@ -5294,6 +5296,235 @@ public static class SelfTest
     /// the arithmetic is right is not a thing to find out only when somebody
     /// passes it.
     /// </summary>
+    /// <summary>
+    /// The ramps: the cells that make a level change driveable, and the rules
+    /// that make a cliff not.
+    ///
+    /// <b>What this topic is here to hold is that the surface is continuous.</b>
+    /// Everything the ramp buys follows from it - the halved step per leg, the
+    /// honest lean, the chance of retiring the depth-test escape a levelling tank
+    /// currently gets - and it is the one property that cannot be seen on a
+    /// screenshot, because a seam of a fraction of a pixel looks like a seam of
+    /// none.
+    /// </summary>
+    private static void Ramps(HexField field, Action<string, bool, string> Check)
+    {
+        GD.Print("ramps: the level changes where the map says it may");
+        try
+        {
+            field.SetRelief(Main.ReliefMap(field.Columns, field.Rows),
+                            Main.RampMask(field.Columns, field.Rows));
+            Check("the board carries ramps at all", field.HasRamps,
+                "no ramp survived the derivation, so nothing below is being tested");
+
+            // The grade IS the ramp's tangent, because a ramp rises one level over
+            // one Reach of run. Two places read it that way - the lift and the
+            // lean - so it is asserted rather than left as a coincidence of two
+            // definitions.
+            float world = field.RiseFactor <= 0.0f ? 0.0f
+                : field.Lift / field.RiseFactor;
+            float tan = field.Reach <= 0.0f ? 0.0f : world / field.Reach;
+            Check("one level over one step is the grade, which is the ramp's slope",
+                Math.Abs(tan - (float)field.StepGrade) < 1e-4f,
+                $"a ramp rises {tan:F4} per run against a grade of "
+                + $"{field.StepGrade:F4}");
+
+            // The top of a ramp is one plane, so opposite corners average to the
+            // centre - and the centre is TopAt, which is what a parked tank
+            // stands on. A top that is not planar is a tile no formula describes.
+            int bent = 0, offCentre = 0;
+            var firstBent = "";
+            for (int q = 0; q < field.Columns; q++)
+            for (int r = 0; r < field.Rows; r++)
+            {
+                var cell = new Vector2I(q, r);
+                float[] top = field.TopCorners(cell);
+                for (int i = 0; i < 3; i++)
+                {
+                    float across = top[i] + top[i + 3];
+                    if (Math.Abs(across - 2.0f * field.TopAt(cell)) > 0.01f)
+                    {
+                        bent++;
+                        if (firstBent.Length == 0)
+                            firstBent = $"({q},{r}) corners {i} and {i + 3} average "
+                                        + $"{across * 0.5f:F2} against a centre of "
+                                        + $"{field.TopAt(cell):F2}";
+                    }
+                }
+                if (field.IsRamp(cell))
+                {
+                    int high = HexField.EdgeIndex(field.RampHeading(cell));
+                    int low = HexField.EdgeIndex(
+                        HexField.Reverse(field.RampHeading(cell)));
+                    float want = (field.LevelAt(cell) + 1) * field.Lift;
+                    float floor = field.LevelAt(cell) * field.Lift;
+                    if (Math.Abs(top[high] - want) > 0.01f
+                        || Math.Abs(top[(high + 1) % 6] - want) > 0.01f
+                        || Math.Abs(top[low] - floor) > 0.01f
+                        || Math.Abs(top[(low + 1) % 6] - floor) > 0.01f)
+                        offCentre++;
+                }
+            }
+            Check("a top face is one plane, so its corners straddle its centre",
+                bent == 0, $"{bent} do not, first {firstBent}");
+            Check("and a ramp's high edge is a level above its low one",
+                offCentre == 0, $"{offCentre} ramps do not reach their own levels");
+
+            // The property everything else rests on. The shared edge of any two
+            // cells a tank may drive between has to be at one height, or the tank
+            // steps.
+            int split = 0;
+            var firstSplit = "";
+            for (int q = 0; q < field.Columns; q++)
+            for (int r = 0; r < field.Rows; r++)
+            {
+                var cell = new Vector2I(q, r);
+                float[] here = field.TopCorners(cell);
+                foreach (int heading in HexField.EdgeHeadings)
+                {
+                    Vector2I next = HexField.Step(cell, heading);
+                    if (!field.InBounds(next) || !field.Passable(cell, heading))
+                        continue;
+                    float[] there = field.TopCorners(next);
+                    int a = HexField.EdgeIndex(heading);
+                    int b = HexField.EdgeIndex(HexField.Reverse(heading));
+                    // Opposite winding, so this cell's first corner of the edge is
+                    // the neighbour's second.
+                    float d1 = Math.Abs(here[a] - there[(b + 1) % 6]);
+                    float d2 = Math.Abs(here[(a + 1) % 6] - there[b]);
+                    if (Math.Max(d1, d2) > 0.01f)
+                    {
+                        split++;
+                        if (firstSplit.Length == 0)
+                            firstSplit = $"({q},{r}) to ({next.X},{next.Y}) opens "
+                                         + $"{Math.Max(d1, d2):F2}px";
+                    }
+                }
+            }
+            Check("the surface is continuous across every step a tank may take",
+                split == 0, $"{split} steps open a seam, first {firstSplit}");
+
+            // A leg onto a ramp climbs half a level, which is the whole reason the
+            // lean has a ramp case: read off the leg it would be half the slope
+            // the tank is drawn sitting on.
+            int halves = 0, wrongHalf = 0;
+            for (int q = 0; q < field.Columns; q++)
+            for (int r = 0; r < field.Rows; r++)
+            {
+                var cell = new Vector2I(q, r);
+                foreach (int heading in HexField.EdgeHeadings)
+                {
+                    Vector2I next = HexField.Step(cell, heading);
+                    if (!field.InBounds(next) || !field.Passable(cell, heading))
+                        continue;
+                    if (field.IsRamp(cell) == field.IsRamp(next))
+                        continue;
+                    halves++;
+                    if (Math.Abs(Math.Abs(field.TopAt(next) - field.TopAt(cell))
+                                 - field.Lift * 0.5f) > 0.01f)
+                        wrongHalf++;
+                }
+            }
+            Check("a leg on or off a ramp climbs exactly half a level",
+                halves > 0 && wrongHalf == 0,
+                halves == 0 ? "no leg touches a ramp at all"
+                            : $"{wrongHalf} of {halves} climb something else");
+
+            // The rule, stated against the routes that have to obey it.
+            int cliff = 0;
+            var firstCliff = "";
+            for (int q = 0; q < field.Columns; q++)
+            for (int r = 0; r < field.Rows; r++)
+            for (int c = 0; c < field.Columns; c++)
+            for (int d = 0; d < field.Rows; d++)
+            {
+                var from = new Vector2I(q, r);
+                Vector2I at = from;
+                foreach (Vector2I next in field.FindPath(from, new Vector2I(c, d)))
+                {
+                    if (field.LevelAt(next) != field.LevelAt(at))
+                    {
+                        int heading = HexField.HeadingTo(at, next);
+                        bool onRamp =
+                            (field.IsRamp(at) && heading == field.RampHeading(at))
+                            || (field.IsRamp(next)
+                                && HexField.Reverse(heading)
+                                   == field.RampHeading(next));
+                        if (!onRamp)
+                        {
+                            cliff++;
+                            if (firstCliff.Length == 0)
+                                firstCliff = $"({at.X},{at.Y}) to "
+                                             + $"({next.X},{next.Y})";
+                        }
+                    }
+                    at = next;
+                }
+            }
+            Check("no route changes level anywhere but up a ramp", cliff == 0,
+                $"{cliff} steps do, first {firstCliff}");
+
+            // And the map has to actually be walkable, or the rule above is held
+            // by a board nobody can drive on. The homes are (2,2), (4,2), (6,2).
+            var home = new Vector2I(2, 2);
+            Check("the plateau is reachable from a home cell",
+                field.FindPath(home, new Vector2I(3, 3)).Count > 0,
+                "no route up onto (3,3), so its ramp does not connect");
+            Check("and so is the far end of the pit",
+                field.FindPath(home, new Vector2I(6, 5)).Count > 0,
+                "no route down into (6,5), so the pit's mouth does not open");
+
+            // A cliff is refused, and that is what the ramps are for. (3,3) is
+            // plateau and (3,1) is the flat two cells above it; the step from
+            // (3,1)'s neighbour straight onto the plateau is the one a tank used
+            // to be able to take.
+            Check("a cliff is not driveable where no ramp bridges it",
+                !field.Passable(new Vector2I(4, 3), 210)
+                && HexField.Step(new Vector2I(4, 3), 210) == new Vector2I(3, 3),
+                "the flat beside the plateau still steps straight up onto it");
+
+            // Onto a ramp across a side edge: the face runs from one level to the
+            // other there, so there is no surface to cross. (2,4) and the ramp at
+            // (3,4) are both level 0, so only the axis rule can refuse this one -
+            // which is what makes it the case worth asserting.
+            Check("and a ramp is not entered across a side edge",
+                !field.Passable(new Vector2I(2, 4), 330)
+                && HexField.Step(new Vector2I(2, 4), 330) == new Vector2I(3, 4)
+                && field.LevelAt(new Vector2I(2, 4))
+                   == field.LevelAt(new Vector2I(3, 4)),
+                "the ramp at (3,4) is entered off its own axis");
+
+            // The fallback, which is what keeps every relief assertion written
+            // before ramps existed describing the board it was written for.
+            field.SetRelief(Main.ReliefMap(field.Columns, field.Rows));
+            Check("without ramps a board paths by MaxClimb, as it always did",
+                !field.HasRamps && field.Passable(new Vector2I(4, 3), 150),
+                "a ramp-free board stopped letting a tank climb one level");
+
+            // And the derivation refuses what the map does not decide. (8,4) sits
+            // in the pit with two neighbours a level above it, so which edge is
+            // its high one is not answerable - proved to fail rather than assumed
+            // to, because a guard that cannot fail is not a guard.
+            var bad = new bool[field.Columns * field.Rows];
+            bad[4 * field.Columns + 8] = true;
+            bool refused = false;
+            try
+            {
+                field.SetRelief(Main.ReliefMap(field.Columns, field.Rows), bad);
+            }
+            catch (InvalidOperationException)
+            {
+                refused = true;
+            }
+            Check("an undecidable ramp is refused rather than guessed",
+                refused, "a cell with two higher neighbours was given a direction");
+        }
+        finally
+        {
+            field.SetRelief(null);
+        }
+    }
+
     private static void Relief(HexField field, Grove? grove,
                                Action<string, bool, string> Check)
     {
@@ -5321,6 +5552,10 @@ public static class SelfTest
             field.Occluders(300.0f, 0.0f).Count == 0,
             "a flat board promoted ground over a tank");
 
+        // Ramp-free on purpose: everything in this topic is the 2D board's
+        // occlusion rule, which is written in whole levels and cannot answer for a
+        // surface half a level up - see Main.Ramped. The ramps have their own
+        // topic and their own board.
         field.SetRelief(Main.ReliefMap(field.Columns, field.Rows));
         try
         {
@@ -5633,6 +5868,211 @@ public static class SelfTest
                             : $"{stuck} still over it once it arrived - it never gets "
                               + "up at all");
 
+            // The stage's version of the same statement, asked of the pair the
+            // stage actually reads. One depth per tank could not make it:
+            // promoted whole to the crown, the sprite stood level with every
+            // hex at that level from the first pixel, and (3,3) stopped
+            // covering the tank the moment (3,2)->(4,3) began. So mid-climb
+            // the nose must hold the crown - the cell being entered must not
+            // cut the running gear - while the tail is still below it, which
+            // is what lets the ground it has not climbed go back over it; a
+            // climb's split must close exactly where the leg parks, or
+            // arrival pops the tail's depth by whatever is left of it;
+            // descending behind the rim the same split runs the other way
+            // up - the nose sinking on the drawn ramp, the tail on the crown
+            // for the whole leg, drained by the seam rather than closed by
+            // the number (see StepHeights); and a level leg, or a descent in
+            // plain sight, must not split at all, because those two ends
+            // have nothing to disagree about.
+            int stepPairs = 0, noseOff = 0, tailUp = 0, openEnd = 0,
+                flatSplit = 0, buriedHull = 0;
+            var firstPair = "";
+            for (int q = 0; q < field.Columns; q++)
+            for (int r = 0; r < field.Rows; r++)
+            {
+                var from = new Vector2I(q, r);
+                foreach (int heading in HexField.EdgeHeadings)
+                {
+                    Vector2I onto = HexField.Step(from, heading);
+                    if (!field.InBounds(onto))
+                        continue;
+                    stepPairs++;
+                    (float nose, float tail) =
+                        Main.StepHeights(field, from, onto, 0.5f, 0.4f, 20.0f);
+                    (float noseEnd, float tailEnd) =
+                        Main.StepHeights(field, from, onto, 1.0f, 0.4f, 20.0f);
+                    // Surface heights rather than levels, for StepHeights'
+                    // reason: a leg onto a ramp climbs half a lift, and asked in
+                    // levels it is a flat leg that had better not split.
+                    if (field.TopAt(onto) > field.TopAt(from))
+                    {
+                        if (Mathf.Abs(nose - field.TopAt(onto))
+                            > 0.01f && noseOff++ == 0)
+                            firstPair = $"nose {nose:F1} off the crown climbing "
+                                        + $"({q},{r}) to ({onto.X},{onto.Y})";
+                        if (tail >= nose - 0.01f && tailUp++ == 0)
+                            firstPair = $"tail {tail:F1} up beside nose {nose:F1} "
+                                        + $"mid-climb ({q},{r}) to ({onto.X},{onto.Y})";
+                        // The gear and no more: the fully honest tail hid half
+                        // the tank behind a wall the camera cannot see, and the
+                        // cap is what keeps the hull of a mounting tank whole.
+                        if (tail < nose - 20.01f && buriedHull++ == 0)
+                            firstPair = $"tail {tail:F1} sunk {nose - tail:F1} "
+                                        + $"under a cover of 20, ({q},{r}) to "
+                                        + $"({onto.X},{onto.Y})";
+                        if (Mathf.Abs(tailEnd - noseEnd) > 0.01f
+                            && openEnd++ == 0)
+                            firstPair = $"a split of {noseEnd - tailEnd:F1} "
+                                        + $"still open at the far anchor of "
+                                        + $"({q},{r}) to ({onto.X},{onto.Y})";
+                    }
+                    else if (field.TopAt(onto) < field.TopAt(from)
+                             && field.GroundRow(onto) < field.GroundRow(from))
+                    {
+                        // Behind the rim the split is the climb's, the other
+                        // way up: the nose sinks on the ramp the sprite is
+                        // drawn on - anything else and what shows past the
+                        // rim sinks at a different rate than it is drawn
+                        // sinking - while the tail holds the crown for the
+                        // whole leg. Not until some moment: a fragment over
+                        // the plateau's top is visible at exactly the crown
+                        // and swallowed whole a hair under it, so a tail
+                        // that descends by number dumps the whole crown
+                        // side in one frame, wherever the number puts it.
+                        // The seam drains that side instead, which is why
+                        // this pair, alone, is allowed to stay open at the
+                        // far anchor.
+                        if ((Mathf.Abs(nose - field.HeightBetween(from, onto,
+                                 0.5f)) > 0.01f
+                             || Mathf.Abs(noseEnd - field.TopAt(onto))
+                                 > 0.01f) && noseOff++ == 0)
+                            firstPair = $"nose {nose:F1}/{noseEnd:F1} off the "
+                                        + $"drawn ramp descending ({q},{r}) "
+                                        + $"to ({onto.X},{onto.Y})";
+                        float crown = field.TopAt(from);
+                        if ((Mathf.Abs(tail - crown) > 0.01f
+                             || Mathf.Abs(tailEnd - crown) > 0.01f)
+                            && tailUp++ == 0)
+                            firstPair = $"tail {tail:F1}/{tailEnd:F1} off the "
+                                        + $"crown {crown:F1} descending "
+                                        + $"({q},{r}) to ({onto.X},{onto.Y})";
+                    }
+                    else
+                    {
+                        if (Mathf.Abs(tail - nose) > 0.01f && flatSplit++ == 0)
+                            firstPair = $"a split of {nose - tail:F1} on a leg "
+                                        + $"that is level or in plain sight, "
+                                        + $"({q},{r}) to ({onto.X},{onto.Y})";
+                        if (Mathf.Abs(tailEnd - noseEnd) > 0.01f
+                            && openEnd++ == 0)
+                            firstPair = $"a split of {noseEnd - tailEnd:F1} "
+                                        + $"still open at the far anchor of "
+                                        + $"({q},{r}) to ({onto.X},{onto.Y})";
+                    }
+                }
+            }
+            Check($"mid-climb the tail hangs below the nose by the gear and no "
+                  + $"more, and mid-descent behind the rim it still holds the "
+                  + $"crown, over {stepPairs} legs",
+                stepPairs > 0 && noseOff == 0 && tailUp == 0 && openEnd == 0
+                && flatSplit == 0 && buriedHull == 0,
+                stepPairs == 0 ? "no legs walked - it proves nothing" : firstPair);
+
+            // And the line the split runs along. The hex being mounted must be
+            // wholly on the promoted side - any corner of it across the line
+            // sits down on the tank riding up, which is how the vertical seam
+            // failed - and the covering neighbour wholly on the other, or the
+            // cover it owes the tail is cut short. The shared edge is the one
+            // line that can say both, and this asks it of every drawn corner.
+            int seams = 0, spilt = 0;
+            var firstSpill = "";
+            Vector2 hexHalf = (Vector2)field.Atlas!.HexRect.Size * 0.5f;
+            var rim = new Vector2[]
+            {
+                new(hexHalf.X, 0.0f), new(hexHalf.X * 0.5f, hexHalf.Y),
+                new(-hexHalf.X * 0.5f, hexHalf.Y), new(-hexHalf.X, 0.0f),
+                new(-hexHalf.X * 0.5f, -hexHalf.Y), new(hexHalf.X * 0.5f, -hexHalf.Y),
+            };
+            for (int q = 0; q < field.Columns; q++)
+            for (int r = 0; r < field.Rows; r++)
+            {
+                var from = new Vector2I(q, r);
+                foreach (int heading in HexField.EdgeHeadings)
+                {
+                    Vector2I onto = HexField.Step(from, heading);
+                    if (!field.InBounds(onto)
+                        || field.LevelAt(onto) <= field.LevelAt(from))
+                        continue;
+                    if (Main.SeamFlank(field, from, onto) is not Vector2I flank
+                        || field.LevelAt(flank) != field.LevelAt(onto))
+                        continue;
+                    seams++;
+                    Vector3 line = Main.SeamLine(field, Vector2.Zero, from, onto);
+                    foreach (Vector2 c in rim)
+                    {
+                        Vector2 pOn = field.CellAnchor(onto) + field.CentreOffset + c;
+                        Vector2 pFl = field.CellAnchor(flank) + field.CentreOffset + c;
+                        bool bad =
+                            line.X * pOn.X + line.Y * pOn.Y - line.Z < -0.5f
+                            || line.X * pFl.X + line.Y * pFl.Y - line.Z > 0.5f;
+                        if (bad && spilt++ == 0)
+                            firstSpill = $"({from.X},{from.Y}) to ({onto.X},{onto.Y})"
+                                         + $" beside ({flank.X},{flank.Y})";
+                    }
+                }
+            }
+            Check($"the seam keeps the mounted hex whole on one side and the "
+                  + $"covering one whole on the other, over {seams} climbs",
+                seams > 0 && spilt == 0,
+                seams == 0 ? "no flanked climb on this map - it proves nothing"
+                           : $"{spilt} corners spilt over, first {firstSpill}");
+
+            // The descent's seam is the leg's own edge in the flat world, and
+            // it must part the two cells cleanly there: any corner of the
+            // plateau being left across the line gets the sinking nose's
+            // depth while it is still drawn over the top, and the top face
+            // bites it whole. This is the same screen-vs-flat mistake the
+            // climb's seam made on its first run - the flat-perpendicular
+            // normal is (dx*s, dy/s), not the screen bisector - asserted on
+            // the seam that reads it the other way round.
+            int legsDown = 0, spiltDown = 0;
+            var firstDown = "";
+            for (int q = 0; q < field.Columns; q++)
+            for (int r = 0; r < field.Rows; r++)
+            {
+                var from = new Vector2I(q, r);
+                foreach (int heading in HexField.EdgeHeadings)
+                {
+                    Vector2I onto = HexField.Step(from, heading);
+                    if (!field.InBounds(onto)
+                        || field.LevelAt(onto) >= field.LevelAt(from)
+                        || field.GroundRow(onto) >= field.GroundRow(from))
+                        continue;
+                    legsDown++;
+                    Vector3 line = Main.SeamEdge(field, Vector2.Zero, from, onto);
+                    foreach (Vector2 c in rim)
+                    {
+                        Vector2 pFrom = field.FlatAnchor(from)
+                                        + field.CentreOffset + c;
+                        Vector2 pOnto = field.FlatAnchor(onto)
+                                        + field.CentreOffset + c;
+                        bool bad =
+                            line.X * pFrom.X + line.Y * pFrom.Y - line.Z > 0.5f
+                            || line.X * pOnto.X + line.Y * pOnto.Y - line.Z
+                               < -0.5f;
+                        if (bad && spiltDown++ == 0)
+                            firstDown = $"({from.X},{from.Y}) down to "
+                                        + $"({onto.X},{onto.Y})";
+                    }
+                }
+            }
+            Check($"and descending behind the rim, the seam parts the plateau "
+                  + $"from the floor cleanly, over {legsDown} descents",
+                legsDown > 0 && spiltDown == 0,
+                legsDown == 0 ? "no descent behind a rim on this map - it "
+                                + "proves nothing"
+                              : $"{spiltDown} corners spilt over, first {firstDown}");
+
             Check($"and none of the {rises} rises behind one does",
                 behind == 0 && rises > 0,
                 rises == 0 ? "the map has no rise behind any cell - it proves nothing"
@@ -5908,6 +6348,10 @@ public static class SelfTest
             if (apart > 0.01f)
                 gap = Math.Min(gap, apart);
         }
+        // Ramp-free on purpose: everything in this topic is the 2D board's
+        // occlusion rule, which is written in whole levels and cannot answer for a
+        // surface half a level up - see Main.Ramped. The ramps have their own
+        // topic and their own board.
         field.SetRelief(Main.ReliefMap(field.Columns, field.Rows));
         (int low, int high) = field.LevelRange;
         float tan = field.Squash / Math.Max(field.RiseFactor, 0.01f);
