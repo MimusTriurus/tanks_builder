@@ -170,6 +170,23 @@ public sealed class Vehicle
     /// <see cref="Travel"/>.</summary>
     public bool OnSlope;
 
+    /// <summary>
+    /// How much of the hull stands on the far cell of the current leg: nought while
+    /// it is all on the near one, one when it has all crossed. Zero while parked.
+    ///
+    /// <b>It exists because the slope under a tank is not a property of the leg.</b>
+    /// Asked as "which cell am I driving onto", the answer arrives the instant the
+    /// order is given - a tank a whole cell away from a ramp began pitching on the
+    /// spot, which is what it looked like. The face is under the hull or it is not,
+    /// so the grade is mixed between the two cells by this, and the pitch begins
+    /// when the nose reaches the seam and is complete when the tail has passed it.
+    ///
+    /// Not a duration and not a curve: the interval is the hull's own length in the
+    /// leg's units, so it is shorter for a light tank and longer on a short leg, and
+    /// nothing has to be tuned. The spring in <see cref="ClimbLean"/> still rounds
+    /// the two corners off.</summary>
+    public float LegBlend;
+
     /// <summary>The screen direction of the current leg, zero while parked.
     /// What lets the stage lay <see cref="Trailing"/> along the axis the hull
     /// actually spans rather than across the whole billboard - and what fades

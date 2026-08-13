@@ -1858,7 +1858,16 @@ public sealed partial class Main : Node2D
 		_origin + _field.CellAnchor(cell) + _field.CentreOffset
 		- vehicle.Atlas.GroundOffset * vehicle.Sprite.BodyScale;
 
-	private void Park(Vehicle vehicle)
+	/// <param name="placed">Whether the tank is being <i>put</i> here rather than
+	/// having driven here. It decides one thing - whether the body is sat on the
+	/// face it stands on or left to the spring - and getting it wrong is loud: a
+	/// cell is parked on at the end of <b>every</b> leg, so sitting the body on
+	/// arrival snapped a tank cresting a ramp flat in one frame, and the whole
+	/// point of <see cref="ClimbLean"/> is that it does not do that. Placing is
+	/// start-up, a reset, and the key that drops a tank on a cell; those have no
+	/// motion to preserve and want the lean already right on the first frame.
+	/// </param>
+	private void Park(Vehicle vehicle, bool placed = true)
 	{
 		vehicle.Cell = _field.ClampCell(vehicle.Cell);
 		_field.Position = _origin;
@@ -1876,14 +1885,21 @@ public sealed partial class Main : Node2D
 		// and that is the case this exists for.
 		vehicle.OnSlope = _field.IsRamp(vehicle.Cell);
 		vehicle.Sprite.Position = StandOn(vehicle, vehicle.Cell);
-		// Sat on the face it is standing on rather than sprung up to it: this is a
-		// placement, not a climb, so a tank put on a ramp is already leaning on the
-		// frame it appears. Asked after the position, because SurfaceGrade reads the
-		// heading off the sprite.
-		vehicle.Lean.Reset(ClimbLean.Target(SurfaceGrade(vehicle),
-											vehicle.Sprite.HullFacing,
-											_field.RiseFactor));
-		vehicle.Sprite.Climb = vehicle.Lean.Angle;
+		// Cleared before the lean is asked: the leg that just ended left this at
+		// one, and on the cell arrived at the two faces being mixed are the same
+		// one anyway - but the next leg's first frame must not begin already
+		// crossed.
+		vehicle.LegBlend = 0.0f;
+		// Sat on the face it is standing on rather than sprung up to it, but only
+		// for a tank being put here - see the parameter. Asked after the position,
+		// because SurfaceGrade reads the heading off the sprite.
+		if (placed)
+		{
+			vehicle.Lean.Reset(ClimbLean.Target(SurfaceGrade(vehicle),
+												vehicle.Sprite.HullFacing,
+												_field.RiseFactor));
+			vehicle.Sprite.Climb = vehicle.Lean.Angle;
+		}
 		// Moved rather than driven, so the ribbon must break here or the jump is
 		// drawn as a line across the board.
 		_marks?.Lift(vehicle);
@@ -2497,8 +2513,9 @@ public sealed partial class Main : Node2D
 			v.PathStep++;
 			// Park rather than a bare Position: arriving in a cell is also where
 			// the depth order changes, and a tank that drove past another without
-			// its z index following would pass through it.
-			Park(v);
+			// its z index following would pass through it. Driven, not placed, so
+			// the lean is left to its spring - see Park.
+			Park(v, placed: false);
 			if (!v.Moving && v == Active)
 			{
 				_field.Highlight = Array.Empty<Vector2I>();
@@ -2554,6 +2571,14 @@ public sealed partial class Main : Node2D
 		(v.Standing, v.Trailing) = StepHeights(_field, v.Cell, next, done, gait,
 			GearCover * v.Sprite.BodyScale);
 		v.Travel = span <= 0.001f ? Vector2.Zero : (goal - from) / span;
+		// How much of the hull has crossed onto the far cell's face - see
+		// Vehicle.LegBlend. Nought until the nose reaches the seam at 0.5 - gait,
+		// one when the tail has passed it at 0.5 + gait, so the span of the change
+		// is the hull's own length in the leg's units and needs no number of its
+		// own. The same gait as the two ends of the hull above, for the same
+		// reason: it is where the hull is.
+		v.LegBlend = gait <= 0.001f ? (done >= 0.5f ? 1.0f : 0.0f)
+			: Mathf.Clamp((done - (0.5f - gait)) / (2.0f * gait), 0.0f, 1.0f);
 		// The climb's split fades driving straight up or down the screen: its
 		// seam is the flanker's edge, and there the mounted hex and the ground
 		// being passed share the sprite's columns, so the only right split is
@@ -3000,14 +3025,28 @@ public sealed partial class Main : Node2D
 		if (!_field.HasRelief)
 			return 0.0;
 		Vector2I next = v.Moving ? v.Path[v.PathStep] : v.Cell;
-		int face = _field.IsRamp(v.Cell) ? _field.RampHeading(v.Cell)
-										 : _field.RampHeading(next);
-		if (face >= 0)
-			return _field.StepGrade
-				   * Math.Cos(Mathf.DegToRad(v.Sprite.HullFacing - face));
+		// Mixed between the two cells by how much of the hull has crossed, not
+		// taken from whichever of them is a ramp - see Vehicle.LegBlend. Driving
+		// onto a face this rises from nothing as the nose reaches it; cresting
+		// onto the flat top it falls away the same way, which is the same
+		// statement read backwards.
+		if (_field.IsRamp(v.Cell) || _field.IsRamp(next))
+			return Mathf.Lerp((float)FaceGrade(v, v.Cell),
+							  (float)FaceGrade(v, next), v.LegBlend);
 		if (!v.Moving || HexField.HeadingTo(v.Cell, next) < 0)
 			return 0.0;
 		return (_field.LevelAt(next) - _field.LevelAt(v.Cell)) * _field.StepGrade;
+	}
+
+	/// <summary>What one cell's own top is worth to a hull on this heading: the
+	/// ramp's steepness projected onto the travel, and nothing at all for a cell
+	/// whose top is flat.</summary>
+	private double FaceGrade(Vehicle v, Vector2I cell)
+	{
+		int face = _field.RampHeading(cell);
+		return face < 0 ? 0.0
+			: _field.StepGrade
+			  * Math.Cos(Mathf.DegToRad(v.Sprite.HullFacing - face));
 	}
 
 	private void UpdateLean(Vehicle v, double delta)
