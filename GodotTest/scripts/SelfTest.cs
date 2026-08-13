@@ -3988,17 +3988,34 @@ public static class SelfTest
                 string.Join(", ", vehicles.Select(v => $"{v.Tag} ({v.Cell.X},{v.Cell.Y})")));
             // Same row, so the same screen height: what the eye compares has to be
             // size, and two tanks at different heights differ by perspective too.
-            Check("they stand in one row, so only the size differs",
-                vehicles.Select(v => field.CellAnchor(v.HomeCell).Y).Distinct().Count() == 1,
-                string.Join(", ", vehicles.Select(
+            //
+            // The line is the tanks whose home is on Main.HomeRow rather than all of
+            // them, because one of them is parked on the rosette's hill on purpose -
+            // see Main.HomeCells. A pair is enough to compare sizes against; asking
+            // all three would fail on a map that says so out loud. Where the third
+            // went is asserted below, because "somebody moved a tank" and "the map
+            // changed" look identical from here.
+            var line = vehicles.Where(v => v.HomeCell.Y == Main.HomeRow).ToList();
+            Check("the ones on the home row stand in one row, so only the size "
+                + "differs",
+                line.Count >= 2
+                && line.Select(v => field.CellAnchor(v.HomeCell).Y)
+                       .Distinct().Count() == 1,
+                $"{line.Count} on the row: " + string.Join(", ", vehicles.Select(
                     v => $"{v.Tag} y={field.CellAnchor(v.HomeCell).Y:F0}")));
+            Check("and the one that is not is parked on the rosette",
+                vehicles.Count(v => v.HomeCell.Y != Main.HomeRow) == 0
+                || vehicles.Where(v => v.HomeCell.Y != Main.HomeRow)
+                           .All(v => v.HomeCell == new Vector2I(11, 3)),
+                string.Join(", ", vehicles.Where(v => v.HomeCell.Y != Main.HomeRow)
+                    .Select(v => $"{v.Tag} at ({v.HomeCell.X},{v.HomeCell.Y})")));
             // Far enough apart that the silhouettes cannot touch. A heavy is about
             // 212px of hull broadside; anything closer than that would have the
             // spacing arguing with the size.
-            double gap = vehicles.Count < 2 ? double.MaxValue
-                : Enumerable.Range(1, vehicles.Count - 1).Min(
-                    i => (field.CellAnchor(vehicles[i].HomeCell)
-                          - field.CellAnchor(vehicles[i - 1].HomeCell)).Length());
+            double gap = line.Count < 2 ? double.MaxValue
+                : Enumerable.Range(1, line.Count - 1).Min(
+                    i => (field.CellAnchor(line[i].HomeCell)
+                          - field.CellAnchor(line[i - 1].HomeCell)).Length());
             double widest = vehicles.Max(v => v.Atlas.HullSpan * v.Sprite.BodyScale);
             Check("and far enough apart that they cannot overlap",
                 gap > widest,
@@ -4050,8 +4067,15 @@ public static class SelfTest
             {
                 Vector2 ground = v.Sprite.Position
                                  + v.Atlas.GroundOffset * v.Sprite.BodyScale;
-                Vector2 want = field.Position + field.CellAnchor(v.Cell)
-                               + field.CentreOffset;
+                // Flat anchor less the tank's own standing height, rather than the
+                // lifted anchor: this topic runs on a flat board (SetRelief(null) at
+                // the top) while a tank may have been parked on a hill, and asked
+                // against the flat cell the check reports one whole Lift of error on
+                // a tank that is standing exactly where it should. The invariant is
+                // that the contact patch lands on the ground centre of its cell at
+                // the height it stands at, and both halves of that are named here.
+                Vector2 want = field.Position + field.FlatAnchor(v.Cell)
+                               - new Vector2(0.0f, v.Height) + field.CentreOffset;
                 Check($"{v.Tag} stands on the centre of its own cell",
                     (ground - want).Length() < 0.5,
                     $"contact patch {ground} against cell centre {want}"
@@ -4061,9 +4085,15 @@ public static class SelfTest
             // Depth, not tree order: the tanks move, and whoever was added last
             // would otherwise win every overlap. Taken off the live position, so it
             // is right in the middle of a step and not only on arrival.
+            //
+            // Through field.Depth with the tank's own height, for the reason the
+            // contact patch above uses the flat anchor: the depth key is the flat
+            // row plus what the lift is worth along the view, and a tank parked on a
+            // hill has both terms. On a flat board this is the row and nothing else,
+            // which is what it was written as.
             Check("the depth order comes off the contact patch, not the cell",
-                vehicles.All(v => v.Sprite.ZIndex == Mathf.RoundToInt(
-                    field.CellAnchor(v.Cell).Y + field.CentreOffset.Y)),
+                vehicles.All(v => v.Sprite.ZIndex == Mathf.RoundToInt(field.Depth(
+                    field.FlatAnchor(v.Cell).Y + field.CentreOffset.Y, v.Height))),
                 "parked, the two agree - the live contact patch is the one that "
                 + "keeps agreeing while it drives, and at any size");
             // Same row means same depth, whatever the sizes are. Read off the

@@ -583,12 +583,26 @@ public sealed partial class Main : Node2D
 
 	private readonly Vector2 _origin = new(220, 200);
 
+	/// <summary>The row the comparison line stands on. Named because the self-test
+	/// asks which tanks are on it, and a literal there would be a second copy of
+	/// this one.</summary>
+	public const int HomeRow = 2;
+
 	/// <summary>Where the three are parked: one row, every other column. The same
 	/// row means the same screen height, and two columns apart - 372px against a
 	/// heavy's 212px of hull - means the silhouettes never touch, so what the eye
-	/// compares is size rather than spacing.</summary>
+	/// compares is size rather than spacing.
+	///
+	/// <b>The light stands on the rosette's hill instead, and it costs the thing
+	/// the line is for.</b> Three abreast at one height is how the class sizes are
+	/// judged - see MovementProfile.Size - and with the light on (11,3) that
+	/// comparison is down to a pair. It is there because a hill with six approaches
+	/// is worth having a tank on: the lean, the standing height and the six ramps
+	/// meeting the top are all things a tank on the summit says at a glance and an
+	/// empty summit does not. R puts it back there rather than into the line, which
+	/// is what makes it a home and not a start.</summary>
 	private static readonly Vector2I[] HomeCells =
-		{ new(2, 2), new(4, 2), new(6, 2) };
+		{ new(11, 3), new(4, HomeRow), new(6, HomeRow) };
 
 	private Vector2I _cell
 	{
@@ -1859,6 +1873,14 @@ public sealed partial class Main : Node2D
 		vehicle.Travel = Vector2.Zero;
 		vehicle.Levelling = false;
 		vehicle.Sprite.Position = StandOn(vehicle, vehicle.Cell);
+		// Sat on the face it is standing on rather than sprung up to it: this is a
+		// placement, not a climb, so a tank put on a ramp is already leaning on the
+		// frame it appears. Asked after the position, because SurfaceGrade reads the
+		// heading off the sprite.
+		vehicle.Lean.Reset(ClimbLean.Target(SurfaceGrade(vehicle),
+											vehicle.Sprite.HullFacing,
+											_field.RiseFactor));
+		vehicle.Sprite.Climb = vehicle.Lean.Angle;
 		// Moved rather than driven, so the ribbon must break here or the jump is
 		// drawn as a line across the board.
 		_marks?.Lift(vehicle);
@@ -2943,25 +2965,50 @@ public sealed partial class Main : Node2D
 		Settle();
 	}
 
+	/// <summary>
+	/// Rise over run under a tank, positive nose-up, for <see cref="ClimbLean"/>.
+	///
+	/// <b>Read off the face the tank is standing on, not off the ends of its
+	/// leg</b>, and that is what lets a tank stopped on a ramp stay leaning. A
+	/// slope is a property of the ground; asked as "how much higher is the cell I
+	/// am going to", the question has no answer once the tank has arrived, so the
+	/// spring levelled it out - a tank standing on a visible slope, drawn flat.
+	///
+	/// A ramp's top is <see cref="HexField.StepGrade"/> steep and its gradient
+	/// points along its axis, so what the hull feels is that steepness projected
+	/// onto its heading: full up the axis, negated coming down it, and nothing
+	/// across it. The projection also removes the sign that used to be taken from
+	/// which end was higher - one statement where there were two.
+	///
+	/// <b>Across the slope it says level, and that is the class rather than the
+	/// map.</b> A tank standing broadside on a ramp really is rolled, and
+	/// <see cref="ClimbLean"/> is one rotation about the pitch axis - the roll
+	/// would want the other one, and the two do not compose into a rigid motion of
+	/// a flat sprite any more than the foreshortening does. Named because it is
+	/// visible: park across a face and the body stands square on a slanted tile.
+	///
+	/// Steps between two flat levels keep their old answer, the difference in
+	/// levels: there is no face there, only a wall, and a tank crossing it is
+	/// climbing nothing - it is being carried up.
+	/// </summary>
+	private double SurfaceGrade(Vehicle v)
+	{
+		if (!_field.HasRelief)
+			return 0.0;
+		Vector2I next = v.Moving ? v.Path[v.PathStep] : v.Cell;
+		int face = _field.IsRamp(v.Cell) ? _field.RampHeading(v.Cell)
+										 : _field.RampHeading(next);
+		if (face >= 0)
+			return _field.StepGrade
+				   * Math.Cos(Mathf.DegToRad(v.Sprite.HullFacing - face));
+		if (!v.Moving || HexField.HeadingTo(v.Cell, next) < 0)
+			return 0.0;
+		return (_field.LevelAt(next) - _field.LevelAt(v.Cell)) * _field.StepGrade;
+	}
+
 	private void UpdateLean(Vehicle v, double delta)
 	{
-		double grade = 0.0;
-		if (_field.HasRelief && v.Moving)
-		{
-			Vector2I next = v.Path[v.PathStep];
-			if (HexField.HeadingTo(v.Cell, next) >= 0)
-				// On a ramp the body sits on the ramp's own face, and that face
-				// is StepGrade steep - the grade IS the tangent, because a
-				// ramp's rise is one level over one Reach of run. The leg's
-				// average is half of it, since half the leg is flat ground, so
-				// reading the ends would lean the tank half as much as the slope
-				// it is on and nothing would say so.
-				grade = _field.IsRamp(v.Cell) || _field.IsRamp(next)
-					? Math.Sign(_field.TopAt(next) - _field.TopAt(v.Cell))
-					  * _field.StepGrade
-					: (_field.LevelAt(next) - _field.LevelAt(v.Cell))
-					  * _field.StepGrade;
-		}
+		double grade = SurfaceGrade(v);
 		v.Lean.Update(grade, v.Sprite.HullFacing, _field.RiseFactor, delta);
 		v.Sprite.Climb = v.Lean.Angle;
 		v.Sprite.Rise = _field.Lift <= 0.0f
@@ -4700,6 +4747,14 @@ public sealed partial class Main : Node2D
 			// the zoom and the size are printed here.
 			GD.Print($"{_frames,4}  {Active.Tag,-3}"
 					 + $"  hull {_tank.HullFacing,6:F1}  speed {_speed,6:F1}"
+					 // The slope under the tank and what it is drawn as. Both,
+					 // because they answer different questions: a grade with no
+					 // angle beside it is a spring that did not arrive, and an angle
+					 // with no grade is a lean nothing on the board asked for. And
+					 // here rather than only on the panel, because a tank standing
+					 // level on a visible slope is exactly the failure a capture is
+					 // taken to judge - see Main.SurfaceGrade.
+					 + $"  lean {Active.Lean.Angle,8:F5}@{SurfaceGrade(Active),6:F3}"
 					 + $"  pitch {_tank.Pitch,8:F5}  shake {_tank.Shake,2}"
 					 + $"  roll {_tank.Roll,8:F5}  trem {_tank.TremblePitch,8:F5}"
 					 + $"/{_tank.TrembleRoll,8:F5}  scan {_scan.Offset,6:F1}"

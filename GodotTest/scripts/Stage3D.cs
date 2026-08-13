@@ -553,6 +553,20 @@ public sealed partial class Stage3D : Node3D
                 stand.Line = line;
             }
             stand.Quad.Position = Contact(vehicle);
+            // <b>A moving tank is drawn over everything too, levels or not.</b> The
+            // board is one prism per cell, so between two cells there is a gap with
+            // the near cell's wall standing in it, and a tank halfway across a flat
+            // leg straddles that gap: measured on a drive down column 4, the wall
+            // chopped off the belts and the bottom of the hull, worst at the
+            // midpoint and gone again at each end. That is honest depth against
+            // geometry the ground is not - the gap is Bleed, not a trench - so it
+            // reads as the sprite being clipped, which is what it is.
+            //
+            // The cost is the flat-leg half of the paragraph below: a tank driving
+            // behind a ridge on its own level now passes in front of it. Parked
+            // tanks keep the test, which is where that rule still holds and where
+            // anyone would stop to look at it.
+            //
             // A tank on a leg that changes levels is drawn over everything -
             // the user's call, made with the cost on the table. The honest
             // mid-leg occlusion there is a billboard crossing a volume, and
@@ -567,7 +581,7 @@ public sealed partial class Stage3D : Node3D
             // with the test off it just decides nothing until the tank
             // stops.
             if (stand.Quad.MaterialOverride is StandardMaterial3D paint)
-                paint.NoDepthTest = vehicle.Levelling;
+                paint.NoDepthTest = vehicle.Levelling || vehicle.Moving;
         }
         // The mark goes where the tank touches the ground, every frame, for the
         // reason the 2D ring follows the contact patch: a tank spends most of an

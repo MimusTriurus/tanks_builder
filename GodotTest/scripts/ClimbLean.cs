@@ -71,9 +71,14 @@ public sealed class ClimbLean
         Angle += _rate * delta;
     }
 
-    public void Reset()
+    /// <summary>Put the body at an angle with no motion left in it. Level by
+    /// default, which is a board without relief; with an angle for a tank that is
+    /// <i>placed</i> on a slope rather than driven onto one - the spring would
+    /// otherwise walk it up from level over a third of a second, so a bench that
+    /// opens with a tank on a ramp would open with it flat.</summary>
+    public void Reset(double angle = 0.0)
     {
-        Angle = 0.0;
+        Angle = angle;
         _rate = 0.0;
     }
 }
