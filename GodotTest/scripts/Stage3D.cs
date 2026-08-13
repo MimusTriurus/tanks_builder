@@ -553,19 +553,20 @@ public sealed partial class Stage3D : Node3D
                 stand.Line = line;
             }
             stand.Quad.Position = Contact(vehicle);
-            // <b>A moving tank is drawn over everything too, levels or not.</b> The
-            // board is one prism per cell, so between two cells there is a gap with
-            // the near cell's wall standing in it, and a tank halfway across a flat
-            // leg straddles that gap: measured on a drive down column 4, the wall
-            // chopped off the belts and the bottom of the hull, worst at the
-            // midpoint and gone again at each end. That is honest depth against
-            // geometry the ground is not - the gap is Bleed, not a trench - so it
-            // reads as the sprite being clipped, which is what it is.
+            // <b>A tank on a slope is drawn over the ground, parked or not</b> - see
+            // Vehicle.OnSlope. A slope is where a flat billboard and the geometry
+            // disagree the most: the sprite stands vertically at one point of a face
+            // that is rising through it, so the half of the face in front of that
+            // point is nearer AND higher, and honest depth takes the tank's lower
+            // body. Measured on the rosette, where the case is plain - a tank parked
+            // on the ramp at (11,2) sits behind the hill it climbs, and the hill is
+            // a level up against the ramp's half.
             //
-            // The cost is the flat-leg half of the paragraph below: a tank driving
-            // behind a ridge on its own level now passes in front of it. Parked
-            // tanks keep the test, which is where that rule still holds and where
-            // anyone would stop to look at it.
+            // <b>A flat leg at one level keeps the test</b>, which is the other half
+            // of the same rule and the thing the stage exists to show: a tank
+            // driving behind a ridge on its own level stays behind it. So this is
+            // not "moving", it is "on a slope" - the two coincided on the board's
+            // first three ramps and come apart everywhere else.
             //
             // A tank on a leg that changes levels is drawn over everything -
             // the user's call, made with the cost on the table. The honest
@@ -581,7 +582,7 @@ public sealed partial class Stage3D : Node3D
             // with the test off it just decides nothing until the tank
             // stops.
             if (stand.Quad.MaterialOverride is StandardMaterial3D paint)
-                paint.NoDepthTest = vehicle.Levelling || vehicle.Moving;
+                paint.NoDepthTest = vehicle.Levelling || vehicle.OnSlope;
         }
         // The mark goes where the tank touches the ground, every frame, for the
         // reason the 2D ring follows the contact patch: a tank spends most of an

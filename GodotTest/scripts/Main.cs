@@ -1872,6 +1872,9 @@ public sealed partial class Main : Node2D
 		vehicle.Trailing = vehicle.Height;
 		vehicle.Travel = Vector2.Zero;
 		vehicle.Levelling = false;
+		// Not cleared but asked: parking is where a tank comes to rest on a ramp,
+		// and that is the case this exists for.
+		vehicle.OnSlope = _field.IsRamp(vehicle.Cell);
 		vehicle.Sprite.Position = StandOn(vehicle, vehicle.Cell);
 		// Sat on the face it is standing on rather than sprung up to it: this is a
 		// placement, not a climb, so a tank put on a ramp is already leaning on the
@@ -2559,6 +2562,7 @@ public sealed partial class Main : Node2D
 		// why the fade lives here, next to the knowledge of which leg this is,
 		// and not in the stage.
 		v.Levelling = _field.LevelAt(next) != _field.LevelAt(v.Cell);
+		v.OnSlope = _field.IsRamp(v.Cell) || _field.IsRamp(next);
 		bool down = _field.LevelAt(next) < _field.LevelAt(v.Cell);
 		if (!down)
 		{
@@ -4755,6 +4759,11 @@ public sealed partial class Main : Node2D
 					 // level on a visible slope is exactly the failure a capture is
 					 // taken to judge - see Main.SurfaceGrade.
 					 + $"  lean {Active.Lean.Angle,8:F5}@{SurfaceGrade(Active),6:F3}"
+					 // Which of the two ways the stage is drawing it, because the
+					 // grade beside it does not answer that: a tank parked across a
+					 // ramp feels no slope along its heading and is still standing on
+					 // one. See Vehicle.OnSlope.
+					 + (Active.Levelling || Active.OnSlope ? " over" : " depth")
 					 + $"  pitch {_tank.Pitch,8:F5}  shake {_tank.Shake,2}"
 					 + $"  roll {_tank.Roll,8:F5}  trem {_tank.TremblePitch,8:F5}"
 					 + $"/{_tank.TrembleRoll,8:F5}  scan {_scan.Offset,6:F1}"

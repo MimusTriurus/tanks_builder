@@ -150,6 +150,26 @@ public sealed class Vehicle
     /// parking, like <see cref="Travel"/>.</summary>
     public bool Levelling;
 
+    /// <summary>
+    /// True while the face under the tank is tilted, or the one it is driving onto
+    /// is - which is to say, while it is on a slope.
+    ///
+    /// <b>Kept apart from <see cref="Levelling"/> because a ramp changes height
+    /// without changing level.</b> Levelling asks whether the two ends of the leg
+    /// are on different levels, and a tank driving from the flat onto a ramp is on
+    /// one level at both ends while climbing half of one - so it answers no, and it
+    /// is right to: there is no wall in that leg, which is the thing it was written
+    /// about.
+    ///
+    /// The stage draws a tank over the ground whenever either is true. A slope is
+    /// where a flat billboard and the geometry disagree the most - the sprite stands
+    /// vertically at one point of a face that is rising through it - and a tank
+    /// parked on a ramp behind something higher lost its lower half to honest depth.
+    /// A flat leg at one level keeps the test, so a tank driving behind a ridge
+    /// still goes behind it. Cleared by parking onto flat ground, like
+    /// <see cref="Travel"/>.</summary>
+    public bool OnSlope;
+
     /// <summary>The screen direction of the current leg, zero while parked.
     /// What lets the stage lay <see cref="Trailing"/> along the axis the hull
     /// actually spans rather than across the whole billboard - and what fades
