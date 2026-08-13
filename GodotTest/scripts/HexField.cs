@@ -577,9 +577,16 @@ public sealed partial class HexField : Node2D
     /// <summary>Anchor point of a cell as it is drawn. Both the tile and any tank
     /// standing on it are placed against this one point, so they cannot drift
     /// apart - which is what carries the height into the tank's position for
-    /// free, without anything that stands on the board knowing about it.</summary>
+    /// free, without anything that stands on the board knowing about it.
+    ///
+    /// <b>Off the surface, not off the floor</b>, and on a ramp those are half a
+    /// level apart - see <see cref="TopAt"/>. Written as the level's lift, a tank
+    /// parked on a ramp stood on the cell's floor while the cell's own top face
+    /// rose over it, and the depth buffer ate everything below the turret ring:
+    /// measured, the hull and both belts. It read as the tank sinking into the
+    /// board, which is what it was doing.</summary>
     public Vector2 CellAnchor(int q, int r) =>
-        FlatAnchor(q, r) - new Vector2(0.0f, LevelAt(new Vector2I(q, r)) * Lift);
+        FlatAnchor(q, r) - new Vector2(0.0f, TopAt(new Vector2I(q, r)));
 
     public Vector2 CellAnchor(Vector2I cell) => CellAnchor(cell.X, cell.Y);
 

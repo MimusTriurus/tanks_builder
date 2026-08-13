@@ -1785,7 +1785,12 @@ public sealed partial class Main : Node2D
 	{
 		vehicle.Cell = _field.ClampCell(vehicle.Cell);
 		_field.Position = _origin;
-		vehicle.Height = _field.LevelAt(vehicle.Cell) * _field.Lift;
+		// The surface, not the floor: the two are half a level apart on a ramp,
+		// and this has to agree with the drawn position - HexField.CellAnchor is
+		// lifted off the same number, and Depth subtracts this one back out of
+		// that one to get the flat row. Written as the level's lift, the depth
+		// term and the drawn row disagreed by half a lift on every ramp cell.
+		vehicle.Height = _field.TopAt(vehicle.Cell);
 		vehicle.Standing = vehicle.Height;
 		vehicle.Trailing = vehicle.Height;
 		vehicle.Travel = Vector2.Zero;
