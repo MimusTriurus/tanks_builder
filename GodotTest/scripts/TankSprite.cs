@@ -132,12 +132,21 @@ public sealed partial class TankSprite : Node2D
     /// <see cref="Pitch"/>, and <see cref="Recoil"/> depends on the sign.</summary>
     public double Roll;
 
-    /// <summary>Engine tremble, as pitch and roll shear amplitudes. Held apart
-    /// from <see cref="Pitch"/> and <see cref="Roll"/> only so the panel and the
-    /// trace can name the source; the shear sums them, which is exact because
-    /// the displacement is linear in both.</summary>
+    /// <summary>
+    /// Engine tremble, as the two amplitudes of the stern's own wobble: a pitch
+    /// about the bow and a yaw about it. Fed through
+    /// <see cref="EngineTremble.SternLeverPx"/> into <see cref="TrembleFor"/>.
+    ///
+    /// <b>Kept off <see cref="Pitch"/> and <see cref="Roll"/>, which it used to be
+    /// summed into, because it no longer shares their lever.</b> Those two tilt the
+    /// whole body about the contact patch, so their lever is height above it; this
+    /// one drives one end of the hull, so its lever is distance along the hull -
+    /// see <see cref="SternWeight"/> for why the difference is the whole of the
+    /// fix. Both are still affine in the point, so the shear still composes them
+    /// into one matrix.
+    /// </summary>
     public double TremblePitch;
-    public double TrembleRoll;
+    public double TrembleYaw;
 
     /// <summary>The kick of firing. On its own channel because it is the one
     /// tilt the stabiliser does not get to reject - see
@@ -863,7 +872,118 @@ public sealed partial class TankSprite : Node2D
         (RecoilTurretOnly ? Vector2.Zero : TiltDisplacement(RecoilPitch, RecoilRoll))
         + (turret && TurretStabilised
             ? Vector2.Zero
-            : TiltDisplacement(Pitch + TremblePitch, Roll + TrembleRoll));
+            : TiltDisplacement(Pitch, Roll));
+
+    /// <summary>
+    /// How far behind the bow a point is, as a fraction of the hull's length: 0 at
+    /// the bow, 1 at the stern, 1/2 at the anchor. The lever the engine tremble
+    /// acts on, and the whole reason it is not the one the other tilts use.
+    ///
+    /// <b>The other tilts lever on screen height above the contact patch, and that
+    /// cannot tell the bow from the stern.</b> A screen row is
+    /// <c>height*cos(e) + depth*sin(e)</c>, so the end of the hull further from the
+    /// camera is drawn higher and shears more - by the atlas's own numbers, 61px of
+    /// anchor height against 46px of depth spread at the half hull, which is a
+    /// lever of 107 at the far end against 15 at the near one. A factor of seven,
+    /// and which end gets it flips as the hull turns: driving into the screen the
+    /// bow shakes, driving out of it the stern does. Correct for a body rocking on
+    /// its suspension, useless for an engine bolted in one end.
+    ///
+    /// <b>So this levers on the hull's own axis instead, which is welded to the
+    /// tank.</b> The forward coordinate is recovered by undoing the squash and
+    /// dotting with the heading - exact for a point lying in the ground plane, and
+    /// the same assumption every <see cref="AtlasSet.GroundDirection"/> in the
+    /// project already makes.
+    ///
+    /// <b>What it costs is the dual of what it fixes, and it is much the smaller
+    /// half.</b> Undoing the squash divides the screen row by sin(e), so height
+    /// leaks into the forward coordinate at 1/sin(e) - about 2 - which means the
+    /// roof over the stern reads as a third of a hull further forward than the
+    /// stern's own side and trembles about two thirds as much. Same sign, same end,
+    /// no flip; and broadside, where the hull's axis lies across the screen, there
+    /// is no leak at all. A depth-less sprite cannot do better than choose which
+    /// way to be wrong, and for a low flat hull the length is the axis worth being
+    /// right about.
+    /// </summary>
+    public float SternWeight(Vector2 at) => 0.5f - Forward(at) / HullLengthPx;
+
+    /// <summary>The hull-forward coordinate of a screen offset from the anchor, in
+    /// px, for a point taken to lie in the ground plane. Positive toward the bow.
+    ///
+    /// Degenerate at zero elevation - a ground plane seen edge on carries no
+    /// forward at all - and there it answers nought, which leaves the tremble
+    /// shaking the whole hull evenly rather than dividing by nothing. That is the
+    /// old behaviour, which is the right thing for a view this cannot describe.
+    /// </summary>
+    public float Forward(Vector2 at)
+    {
+        double squash = -Atlas!.GroundDirection(90.0).Y;
+        if (squash <= 1e-6)
+            return 0.0f;
+        double rad = Mathf.DegToRad(HullFacing);
+        return (float)(Math.Cos(rad) * at.X - Math.Sin(rad) * at.Y / squash);
+    }
+
+    /// <summary>The hull's length in atlas px, which is its broadside width: the
+    /// widest frame is the one showing the tank side on, so it is the same
+    /// measurement <see cref="AtlasSet.HullSpan"/> already makes and the same
+    /// reason frame 0 would not do.</summary>
+    private float HullLengthPx => Math.Max(Atlas!.HullSpan, 1);
+
+    /// <summary>
+    /// What the engine tremble displaces the stern by, in px. Zero for a stabilised
+    /// turret, by <see cref="TurretStabilised"/>'s policy.
+    ///
+    /// Both axes are exact projections, which is new and is why the old vertical
+    /// damping is gone. The pitch heaves the stern along the world vertical, and a
+    /// world vertical projects to a screen vertical at any heading; the yaw wags it
+    /// along the ground, which is what <see cref="AtlasSet.GroundDirection"/>
+    /// returns. <see cref="SquashDamping"/> exists because a body <em>tilt</em> seen
+    /// from ahead degenerates into a vertical squash and a rigid thing that squashes
+    /// reads as rubber - a region being carried bodily up and down squashes nothing,
+    /// so it has no such reading to avoid.
+    /// </summary>
+    public Vector2 TrembleFor(bool turret)
+    {
+        if (turret && TurretStabilised)
+            return Vector2.Zero;
+        var lever = (float)EngineTremble.SternLeverPx;
+        return new Vector2(0.0f, (float)-TremblePitch * lever)
+               + Atlas!.GroundDirection(HullFacing + 90.0)
+                 * ((float)TrembleYaw * lever);
+    }
+
+    /// <summary>Where one end of the hull sits relative to the anchor, on screen,
+    /// for a point lying in the ground plane. The bow is the way the hull is
+    /// pointing, so it is half a hull along <see cref="AtlasSet.GroundDirection"/> of
+    /// the heading.</summary>
+    public Vector2 HullEnd(bool bow) =>
+        Atlas!.GroundDirection(HullFacing) * (HullLengthPx * 0.5f * (bow ? 1.0f : -1.0f));
+
+    /// <summary>
+    /// How far the tremble moves one end of the hull, px.
+    ///
+    /// <b>Taken off the shear the layer is actually drawn through, not off the
+    /// formula that built it.</b> The two are supposed to agree and the self-test
+    /// says so, but that is exactly why this one has to be the measurement: a
+    /// tremble put back on the height lever would still report a planted bow if
+    /// this asked <see cref="SternWeight"/>, and the whole point of the pair of
+    /// numbers is to say which end of the tank moves.
+    /// </summary>
+    public float TrembleTravelPx(bool bow)
+    {
+        if (Atlas is null)
+            return 0.0f;
+        Vector2 at = HullEnd(bow);
+        Transform2D with = ShearFor(false);
+        double pitch = TremblePitch, yaw = TrembleYaw;
+        TremblePitch = 0.0;
+        TrembleYaw = 0.0;
+        Transform2D without = ShearFor(false);
+        TremblePitch = pitch;
+        TrembleYaw = yaw;
+        return (with * at - without * at).Length();
+    }
 
     /// <summary>Tilt a layer receives about the <em>ring</em> rather than about
     /// the contact patch, which only the turret-only recoil mode produces. Zero
@@ -880,7 +1000,7 @@ public sealed partial class TankSprite : Node2D
     /// </summary>
     public bool Sheared(bool turret) =>
         TiltFor(turret) != Vector2.Zero || MountTiltFor(turret) != Vector2.Zero
-        || Climbing;
+        || TrembleFor(turret) != Vector2.Zero || Climbing;
 
     /// <summary>
     /// The slope the body is drawn on, as an image rotation in radians - see
@@ -955,16 +1075,33 @@ public sealed partial class TankSprite : Node2D
     /// is still linear in h, so it is still a single shear: slope is the total,
     /// and only the constant term stays on the ground tilt. Composing two
     /// transforms would give the same answer and resample twice.
+    ///
+    /// <b>Three pivots now, and the third is not a tilt.</b> The engine tremble
+    /// displaces a point by <c>stern * SternWeight(p)</c>, which levers along the
+    /// hull rather than up from the ground - see <see cref="SternWeight"/>. It is
+    /// affine in the point like the other two, so it folds into the same matrix:
+    /// its gradient goes on the two columns and its value at the anchor on the
+    /// origin.
     /// </summary>
     internal Transform2D ShearFor(bool turret, bool grounded = false)
     {
         float groundY = Atlas!.GroundOffset.Y;
         Vector2 ground = TiltFor(turret);
         Vector2 both = ground + MountTiltFor(turret);
+        // SternWeight(p) is 0.5 - (cos(h)*p.x - sin(h)*p.y/squash) / length, so the
+        // gradient falls on x and y with those two coefficients and the constant
+        // half lands on the origin. Written out here rather than called per corner
+        // because a matrix is what the draw takes.
+        Vector2 stern = TrembleFor(turret);
+        float squash = -Atlas.GroundDirection(90.0).Y;
+        double rad = Mathf.DegToRad(HullFacing);
+        var alongX = (float)(Math.Cos(rad) / HullLengthPx);
+        var alongY = squash <= 1e-6f ? 0.0f
+            : (float)(-Math.Sin(rad) / squash / HullLengthPx);
         var shear = new Transform2D(
-            new Vector2(1.0f, 0.0f),                            // x is untouched
-            new Vector2(-both.X, 1.0f - both.Y),
-            new Vector2(groundY * ground.X, groundY * ground.Y));
+            new Vector2(1.0f, 0.0f) - stern * alongX,           // x was untouched
+            new Vector2(-both.X, 1.0f - both.Y) - stern * alongY,
+            new Vector2(groundY * ground.X, groundY * ground.Y) + stern * 0.5f);
         if (!Climbing)
             return shear;
         // Both branches turn about the contact patch - the pivot every tilt in
@@ -1041,7 +1178,7 @@ public sealed partial class TankSprite : Node2D
         if (Atlas is null)
             return;
         bool tilted = Math.Abs(Pitch) > 1e-6 || Math.Abs(Roll) > 1e-6
-                      || Math.Abs(TremblePitch) > 1e-6 || Math.Abs(TrembleRoll) > 1e-6
+                      || Math.Abs(TremblePitch) > 1e-6 || Math.Abs(TrembleYaw) > 1e-6
                       || Math.Abs(RecoilPitch) > 1e-6 || Math.Abs(RecoilRoll) > 1e-6
                       || Climbing;
         if (ShowHull)

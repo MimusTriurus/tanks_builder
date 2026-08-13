@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -3213,17 +3213,17 @@ public sealed partial class Main : Node2D
 		// exactly what a wreck is supposed to read as.
 		if (!_trembleEnabled || v.Wreck.Dead)
 		{
-			if (v.Sprite.TremblePitch == 0.0 && v.Sprite.TrembleRoll == 0.0)
+			if (v.Sprite.TremblePitch == 0.0 && v.Sprite.TrembleYaw == 0.0)
 				return;
 			v.Tremble.Reset();
 			v.Sprite.TremblePitch = 0.0;
-			v.Sprite.TrembleRoll = 0.0;
+			v.Sprite.TrembleYaw = 0.0;
 			v.Sprite.QueueRedraw();
 			return;
 		}
 		v.Tremble.Advance(v.Speed, delta);
 		v.Sprite.TremblePitch = v.Tremble.Pitch;
-		v.Sprite.TrembleRoll = v.Tremble.Roll;
+		v.Sprite.TrembleYaw = v.Tremble.Yaw;
 		v.Sprite.QueueRedraw();
 	}
 
@@ -4010,8 +4010,8 @@ public sealed partial class Main : Node2D
 		// figure is the whole argument the value was chosen on.
 		ui.Slide("ride.tremble_level", "engine tremble level", 0.0, 2.5, 0.05,
 			() => _tremble.Level, v => _tremble.Level = v, "x",
-			() => $"{_tremble.GainAt(_speed) * EngineTremble.RoofLeverPx:F2}px"
-				  + " of roof travel at this speed");
+			() => $"{_tremble.GainAt(_speed) * EngineTremble.SternLeverPx:F2}px"
+				  + " of stern travel at this speed");
 		ui.Toggle("ride.stabiliser", "turret stabiliser  (K)",
 			() => _tank.TurretStabilised, on => _tank.TurretStabilised = on);
 		ui.Readout("ride.info", () =>
@@ -4022,8 +4022,12 @@ public sealed partial class Main : Node2D
 			+ $"turn {_profile.TurnRate:F0} deg/s   corner {_profile.CornerSpeed:F0} px/s\n"
 			+ $"pitch {_tank.Pitch,7:F4}   roll {_tank.Roll,7:F4}"
 			+ $"   heave {_tank.Shake,2}px\n"
-			+ $"tremble {_tank.TremblePitch,7:F4} / {_tank.TrembleRoll,7:F4}"
-			+ $" at {_tremble.PitchRateAt(_speed),4:F1} Hz");
+			+ $"tremble {_tank.TremblePitch,7:F4} / {_tank.TrembleYaw,7:F4}"
+			+ $" at {_tremble.PitchRateAt(_speed),4:F1} Hz\n"
+			// Where it lands, which the two amplitudes above do not say: the
+			// stern's own travel and the bow's, the pair whose ratio is the whole
+			// of what this effect was fixed for. See TankSprite.SternWeight.
+			+ $"stern {_tank.TrembleTravelPx(bow: false),5:F2}px   bow {_tank.TrembleTravelPx(bow: true),5:F2}px");
 
 		ui.Heading("effects");
 		// First, because it is the only thing here that is under the tank
@@ -4899,7 +4903,13 @@ public sealed partial class Main : Node2D
 					 + (Active.Levelling || Active.OnSlope ? " over" : " depth")
 					 + $"  pitch {_tank.Pitch,8:F5}  shake {_tank.Shake,2}"
 					 + $"  roll {_tank.Roll,8:F5}  trem {_tank.TremblePitch,8:F5}"
-					 + $"/{_tank.TrembleRoll,8:F5}  scan {_scan.Offset,6:F1}"
+					 + $"/{_tank.TrembleYaw,8:F5}"
+					 // The two ends, because the amplitudes beside them cannot say
+					 // which end of the tank moves and that is the whole statement
+					 // this effect makes. A bow figure that grows with the stern's is
+					 // a tremble that has gone back to shaking the whole hull.
+					 + $"@{_tank.TrembleTravelPx(bow: false),4:F1}/{_tank.TrembleTravelPx(bow: true),4:F1}px"
+					 + $"  scan {_scan.Offset,6:F1}"
 					 + $"  turret {_tank.TurretFacing,6:F1}"
 					 // The rate the gun is driven at, in the channel that
 					 // survives --no-ui. A traverse that is quietly still on the
@@ -5462,7 +5472,7 @@ public sealed partial class Main : Node2D
 			s.Roll = 0.0;
 			v.Tremble.Reset();
 			s.TremblePitch = 0.0;
-			s.TrembleRoll = 0.0;
+			s.TrembleYaw = 0.0;
 			v.Exhaust.Reset();
 			s.ExhaustPhase = -1;
 			v.TrackLeft.Reset();

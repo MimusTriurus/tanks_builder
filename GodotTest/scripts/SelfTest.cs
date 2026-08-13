@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Godot;
@@ -235,7 +235,7 @@ public static class SelfTest
         // just leans and looks parked on a slope
         Check("the spring still overshoots", Math.Abs(minAccel) > pitch.Gain,
             $"peak {Math.Abs(minAccel):F4} vs gain {pitch.Gain:F4}");
-        // 0.045 is about 3px of roof travel on a 68px hull; past that the
+        // 0.045 is about 3px of stern travel on a 68px hull; past that the
         // sprite stops reading as rigid
         Check("amplitude stays under the jelly threshold", Math.Abs(minAccel) < 0.045,
             $"peak {Math.Abs(minAccel):F4}");
@@ -357,26 +357,27 @@ public static class SelfTest
 
         GD.Print("engine tremble");
         var tremble = new EngineTremble();
-        // The lever from the contact point to the roof - the same figure the
-        // pitch amplitude check is calibrated against, and the one the panel
-        // quotes under the level slider.
-        const double roofLeverPx = EngineTremble.RoofLeverPx;
+        // What one unit of amplitude is worth at the stern - the figure the
+        // amplitude checks are calibrated against, and the one the panel quotes
+        // under the level slider. It was the roof lever and is the same number: see
+        // EngineTremble.SternLeverPx for why keeping it is the point.
+        const double sternLeverPx = EngineTremble.SternLeverPx;
         double tremblePeak = 0.0;
-        int pitchCrossings = 0, rollCrossings = 0, axesAgree = 0, trembleSamples = 0;
-        double lastPitch = 0.0, lastRoll = 0.0;
+        int pitchCrossings = 0, yawCrossings = 0, axesAgree = 0, trembleSamples = 0;
+        double lastPitch = 0.0, lastYaw = 0.0;
         for (int i = 0; i < 60; i++)
         {
             tremble.Advance(0.0, dt);
             tremblePeak = Math.Max(tremblePeak, Math.Abs(tremble.Pitch));
             if (i > 0 && Math.Sign(tremble.Pitch) != Math.Sign(lastPitch)) pitchCrossings++;
-            if (i > 0 && Math.Sign(tremble.Roll) != Math.Sign(lastRoll)) rollCrossings++;
+            if (i > 0 && Math.Sign(tremble.Yaw) != Math.Sign(lastYaw)) yawCrossings++;
             if (i > 0)
             {
                 trembleSamples++;
-                if (Math.Sign(tremble.Pitch) == Math.Sign(tremble.Roll)) axesAgree++;
+                if (Math.Sign(tremble.Pitch) == Math.Sign(tremble.Yaw)) axesAgree++;
             }
             lastPitch = tremble.Pitch;
-            lastRoll = tremble.Roll;
+            lastYaw = tremble.Yaw;
         }
 
         // The contrast with the rumble, and the reason this class exists: the
@@ -386,15 +387,15 @@ public static class SelfTest
         // Standing still it is near the floor of what a linear filter can show
         // as motion rather than as a soft edge. Below about a third of a pixel
         // it stops reading as a tremble at all.
-        Check("standing still it is a third of a pixel of roof travel",
-            tremblePeak * roofLeverPx is > 0.3 and < 0.6,
-            $"{tremblePeak * roofLeverPx:F2}px on a {roofLeverPx:F0}px lever");
+        Check("standing still it is a third of a pixel of stern travel",
+            tremblePeak * sternLeverPx is > 0.3 and < 0.6,
+            $"{tremblePeak * sternLeverPx:F2}px on a {sternLeverPx:F0}px lever");
         // Under 30Hz or it aliases into a slow wobble at 60fps; over a few Hz or
         // it is a sway rather than a tremble. Sign changes are twice the
         // frequency, and this is one second of frames.
         Check("the tremble is a tremble, not a sway or an alias",
-            pitchCrossings is > 12 and < 40 && rollCrossings is > 8 and < 40,
-            $"{pitchCrossings} pitch and {rollCrossings} roll crossings in 1s");
+            pitchCrossings is > 12 and < 40 && yawCrossings is > 8 and < 40,
+            $"{pitchCrossings} pitch and {yawCrossings} yaw crossings in 1s");
         // One frequency on both axes is a mechanism cycling; two that never line
         // up is an engine.
         Check("the two axes are not in lockstep",
@@ -420,10 +421,10 @@ public static class SelfTest
         // way it is sliding past hexes and the same amount disappears into the
         // travel. Equal settings do not look equal.
         Check("it shakes harder under way", movingPeak > 2.0 * tremblePeak,
-            $"{movingPeak * roofLeverPx:F2}px moving vs {tremblePeak * roofLeverPx:F2}px standing");
-        Check("under way it is still under a pixel of roof travel",
-            movingPeak * roofLeverPx is > 0.6 and < 1.2,
-            $"{movingPeak * roofLeverPx:F2}px on a {roofLeverPx:F0}px lever");
+            $"{movingPeak * sternLeverPx:F2}px moving vs {tremblePeak * sternLeverPx:F2}px standing");
+        Check("under way it is still under a pixel of stern travel",
+            movingPeak * sternLeverPx is > 0.6 and < 1.2,
+            $"{movingPeak * sternLeverPx:F2}px on a {sternLeverPx:F0}px lever");
         Check("it runs faster under load", movingCrossings > pitchCrossings,
             $"{movingCrossings} crossings at cruise vs {pitchCrossings} at rest");
         // The hard ceiling. Past 30Hz the signal samples into a slow wobble that
@@ -462,24 +463,102 @@ public static class SelfTest
             $"the waveform moved {divergence:F4} of full scale"
             + " in the frame the throttle opened");
 
-        // Same geometry guard the rumble roll has. A tilt about the heading and
-        // a tilt reachAcross it project differently, and if both came out near
-        // vertical on some heading the tremble would vanish there.
-        double worstTrembleAxis = 1.0;
-        int worstTrembleHeading = -1;
-        foreach (int heading in HexField.EdgeHeadings)
+        // Which end of the tank moves, which is the whole statement this effect
+        // makes and the thing it used to get wrong. Measured off the shear the layer
+        // is drawn through - see TankSprite.TrembleTravelPx - at every rendered
+        // heading, because the fault was that the answer changed with the heading.
+        double wasPitch = tank.TremblePitch, wasYaw = tank.TrembleYaw;
+        double trembleHull = tank.HullFacing;
+        tank.TremblePitch = 0.006;
+        tank.TrembleYaw = 0.004;
+        double leastStern = double.MaxValue, mostBow = 0.0, worstRatio = double.MaxValue;
+        int worstEnd = -1;
+        for (int i = 0; i < tank.Atlas!.Count; i++)
         {
-            double reachAcross = Math.Max(
-                Math.Abs(tank.Atlas!.GroundDirection(heading).X),
-                Math.Abs(tank.Atlas.GroundDirection(heading + 90.0).X));
-            if (reachAcross < worstTrembleAxis)
+            tank.HullFacing = 360.0 * i / tank.Atlas.Count;
+            double stern = tank.TrembleTravelPx(bow: false);
+            double bow = tank.TrembleTravelPx(bow: true);
+            leastStern = Math.Min(leastStern, stern);
+            mostBow = Math.Max(mostBow, bow);
+            double ratio = stern / Math.Max(bow, 1e-6);
+            if (ratio < worstRatio) { worstRatio = ratio; worstEnd = (int)tank.HullFacing; }
+        }
+        // The stern moves at every heading and the bow is planted at every heading.
+        // Under the old lever - screen height above the contact patch - this fails
+        // outright: the end further from the camera got a lever of 107px against 15
+        // at the near one, so at half the headings the number below would be the
+        // bow's.
+        Check("the tremble shakes the stern and not the bow, at every heading",
+            leastStern > 0.2 && mostBow < 0.02,
+            $"stern moves at least {leastStern:F2}px, bow at most {mostBow:F3}px, "
+            + $"worst ratio {worstRatio:F0} at {worstEnd} deg");
+        // And it is the same amount at every heading: the amplitude belongs to the
+        // engine, not to which way the tank happens to be parked. The pitch is a
+        // world vertical, which projects to a screen vertical at any heading, and
+        // the yaw is a ground vector, so it is the yaw alone that foreshortens -
+        // which is why this is a band rather than an identity.
+        tank.TrembleYaw = 0.0;
+        double flatStern = double.MaxValue, tallStern = 0.0;
+        for (int i = 0; i < tank.Atlas.Count; i++)
+        {
+            tank.HullFacing = 360.0 * i / tank.Atlas.Count;
+            double stern = tank.TrembleTravelPx(bow: false);
+            flatStern = Math.Min(flatStern, stern);
+            tallStern = Math.Max(tallStern, stern);
+        }
+        Check("the heave carries the same travel whichever way the tank points",
+            tallStern - flatStern < 1e-3,
+            $"{flatStern:F4}px to {tallStern:F4}px around the compass");
+        // Vertical, not sheared: a world vertical projects to a screen vertical, so
+        // the heave has no sideways component to damp. Guards against it being put
+        // back through TiltDisplacement, which damps the vertical by four because a
+        // rigid body that squashes reads as rubber - a reading a region carried
+        // bodily up and down has no way to produce.
+        double sidewaysHeave = 0.0;
+        for (int i = 0; i < tank.Atlas.Count; i++)
+        {
+            tank.HullFacing = 360.0 * i / tank.Atlas.Count;
+            sidewaysHeave = Math.Max(sidewaysHeave, Math.Abs(tank.TrembleFor(false).X));
+        }
+        Check("the heave is straight up and down at every heading",
+            sidewaysHeave < 1e-6, $"worst sideways component {sidewaysHeave:F6}px");
+        // The shear and the formula that built it are two expressions of one thing,
+        // and the shear is where a sign, a column or the unsquashing could go wrong
+        // without any picture looking obviously broken. Asked against the ends and
+        // against the anchor, where the weight is a half.
+        tank.TrembleYaw = 0.004;
+        double worstAssembly = 0.0;
+        for (int i = 0; i < tank.Atlas.Count; i++)
+        {
+            tank.HullFacing = 360.0 * i / tank.Atlas.Count;
+            foreach (Vector2 at in new[]
+                     { tank.HullEnd(true), tank.HullEnd(false), Vector2.Zero })
             {
-                worstTrembleAxis = reachAcross;
-                worstTrembleHeading = heading;
+                Vector2 want = tank.TrembleFor(false) * tank.SternWeight(at);
+                double had = tank.TremblePitch, hadYaw = tank.TrembleYaw;
+                Transform2D with = tank.ShearFor(false);
+                tank.TremblePitch = 0.0;
+                tank.TrembleYaw = 0.0;
+                Vector2 got = with * at - tank.ShearFor(false) * at;
+                tank.TremblePitch = had;
+                tank.TrembleYaw = hadYaw;
+                worstAssembly = Math.Max(worstAssembly, (got - want).Length());
             }
         }
-        Check("the tremble has a sideways component at every heading",
-            worstTrembleAxis > 0.5, $"worst is {worstTrembleHeading} deg at {worstTrembleAxis:F2}");
+        Check("the shear puts the tremble exactly where the weight says",
+            worstAssembly < 1e-3, $"worst disagreement {worstAssembly:F5}px");
+        // The anchor is the ring, so the hull under the turret moves half the
+        // stern's travel while a stabilised turret moves none - and that difference
+        // is the seam. Half of a third of a pixel cannot open it, which is what
+        // makes exempting the turret from this affordable at all.
+        tank.HullFacing = 270.0;
+        Check("the tremble alone cannot part the turret from the hull",
+            (tank.TrembleFor(false) * tank.SternWeight(Vector2.Zero)).Length() < 0.5,
+            $"{(tank.TrembleFor(false) * tank.SternWeight(Vector2.Zero)).Length():F3}px"
+            + " of hull movement under a turret that does not move");
+        tank.TremblePitch = wasPitch;
+        tank.TrembleYaw = wasYaw;
+        tank.HullFacing = trembleHull;
 
         // The level knob the panel puts a slider on. It is a multiplier over the
         // tuned pair, so three things have to hold: it scales what comes out, it
@@ -3928,15 +4007,23 @@ public static class SelfTest
         // the aerial stops swinging. Affordable only because the seam cost is
         // sub-pixel at the tremble amplitude - checked below - which is the whole
         // difference between this and exempting it from heave.
+        //
+        // Asked of TrembleFor rather than of TiltFor, because the tremble is no
+        // longer summed into the tilts: it levers along the hull instead of up from
+        // the ground. See TankSprite.SternWeight. Asked at all rather than dropped,
+        // because the exemption is a policy and it has to hold on whichever channel
+        // carries it.
         tank.Pitch = 0.0;
         tank.Roll = 0.0;
         tank.TremblePitch = 0.008;
-        tank.TrembleRoll = 0.008;
+        tank.TrembleYaw = 0.008;
         Check("a stabilised turret sits out the engine tremble",
-            tank.TiltFor(true) == Vector2.Zero && tank.TiltFor(false) != Vector2.Zero,
-            $"turret {tank.TiltFor(true)} vs hull {tank.TiltFor(false)}");
+            tank.TiltFor(true) == Vector2.Zero
+            && tank.TrembleFor(true) == Vector2.Zero
+            && tank.TrembleFor(false) != Vector2.Zero,
+            $"turret {tank.TrembleFor(true)} vs hull {tank.TrembleFor(false)}");
         tank.TremblePitch = 0.0;
-        tank.TrembleRoll = 0.0;
+        tank.TrembleYaw = 0.0;
 
         // Recoil goes the other way again. A stabiliser rejects the hull moving
         // under the gun; it cannot reject the gun's own firing impulse, which
@@ -5285,7 +5372,7 @@ public static class SelfTest
         Vector2 wasSlope = tank.Slope;
         (double Pitch, double Roll, double Trem, double TremRoll,
          double Rec, double RecRoll) was =
-            (tank.Pitch, tank.Roll, tank.TremblePitch, tank.TrembleRoll,
+            (tank.Pitch, tank.Roll, tank.TremblePitch, tank.TrembleYaw,
              tank.RecoilPitch, tank.RecoilRoll);
         try
         {
@@ -5294,7 +5381,7 @@ public static class SelfTest
             // a shear of half a percent in it - enough to fail "the rise squares
             // nothing" on a rise that is perfectly square, which is the check
             // measuring the wrong thing rather than the code being wrong.
-            tank.Pitch = tank.Roll = tank.TremblePitch = tank.TrembleRoll =
+            tank.Pitch = tank.Roll = tank.TremblePitch = tank.TrembleYaw =
                 tank.RecoilPitch = tank.RecoilRoll = 0.0;
             tank.Climb = 0.0;
             tank.Slope = Vector2.Zero;
@@ -5421,7 +5508,7 @@ public static class SelfTest
             tank.Climb = wasClimb;
             tank.Rise = wasRise;
             tank.Slope = wasSlope;
-            (tank.Pitch, tank.Roll, tank.TremblePitch, tank.TrembleRoll,
+            (tank.Pitch, tank.Roll, tank.TremblePitch, tank.TrembleYaw,
              tank.RecoilPitch, tank.RecoilRoll) = was;
         }
     }
