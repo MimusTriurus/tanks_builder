@@ -1895,10 +1895,12 @@ public sealed partial class Main : Node2D
 		// because SurfaceGrade reads the heading off the sprite.
 		if (placed)
 		{
-			vehicle.Lean.Reset(ClimbLean.Target(SurfaceGrade(vehicle),
-												vehicle.Sprite.HullFacing,
-												_field.RiseFactor));
-			vehicle.Sprite.Climb = vehicle.Lean.Angle;
+			vehicle.Lean.Reset(SurfaceSlope(vehicle));
+			vehicle.Sprite.Climb =
+				vehicle.Lean.Angle(vehicle.Sprite.HullFacing, _field.RiseFactor);
+			vehicle.Sprite.Slope = ClimbLean.Print(vehicle.Lean.Slope,
+												   _field.Squash,
+												   _field.RiseFactor);
 		}
 		// Moved rather than driven, so the ribbon must break here or the jump is
 		// drawn as a line across the board.
@@ -2942,6 +2944,7 @@ public sealed partial class Main : Node2D
 			CancelOrder(v);
 			v.Lean.Reset();
 			v.Sprite.Climb = 0.0;
+			v.Sprite.Slope = Vector2.Zero;
 			v.Sprite.Rise = 1.0f;
 			Park(v);
 		}
@@ -2995,7 +2998,16 @@ public sealed partial class Main : Node2D
 	}
 
 	/// <summary>
-	/// Rise over run under a tank, positive nose-up, for <see cref="ClimbLean"/>.
+	/// The plane under a tank, as a gradient in world ground coordinates, for
+	/// <see cref="ClimbLean"/>.
+	///
+	/// <b>A plane and not a grade, because two things are drawn from it and only
+	/// one of them is the pitch.</b> The body takes the component along its
+	/// heading; the contact shadow lies in the face and takes the whole of it,
+	/// including on the headings where the component is nought. A grade along the
+	/// travel cannot be turned back into a plane - divide by the cosine and it
+	/// blows up in exactly the case that matters, a tank standing broadside on a
+	/// face, where the travel grade is zero and the face is not.
 	///
 	/// <b>Read off the face the tank is standing on, not off the ends of its
 	/// leg</b>, and that is what lets a tank stopped on a ramp stay leaning. A
@@ -3015,45 +3027,62 @@ public sealed partial class Main : Node2D
 	/// would want the other one, and the two do not compose into a rigid motion of
 	/// a flat sprite any more than the foreshortening does. Named because it is
 	/// visible: park across a face and the body stands square on a slanted tile.
+	/// Its shadow, which can express the whole plane, is not square on it.
 	///
 	/// Steps between two flat levels keep their old answer, the difference in
-	/// levels: there is no face there, only a wall, and a tank crossing it is
-	/// climbing nothing - it is being carried up.
+	/// levels laid along the travel: there is no face there, only a wall, and a
+	/// tank crossing it is climbing nothing - it is being carried up. Given a
+	/// direction anyway, so the shadow follows the body it belongs to rather than
+	/// staying flat under a hull the same fiction has tipped.
 	/// </summary>
-	private double SurfaceGrade(Vehicle v)
+	private Vector2 SurfaceSlope(Vehicle v)
 	{
 		if (!_field.HasRelief)
-			return 0.0;
+			return Vector2.Zero;
 		Vector2I next = v.Moving ? v.Path[v.PathStep] : v.Cell;
 		// Mixed between the two cells by how much of the hull has crossed, not
 		// taken from whichever of them is a ramp - see Vehicle.LegBlend. Driving
 		// onto a face this rises from nothing as the nose reaches it; cresting
 		// onto the flat top it falls away the same way, which is the same
-		// statement read backwards.
+		// statement read backwards. Mixed as planes rather than as grades, which
+		// is the same number for the body - a lerp of the projections is the
+		// projection of the lerp - and the only one of the two the shadow can use.
 		if (_field.IsRamp(v.Cell) || _field.IsRamp(next))
-			return Mathf.Lerp((float)FaceGrade(v, v.Cell),
-							  (float)FaceGrade(v, next), v.LegBlend);
-		if (!v.Moving || HexField.HeadingTo(v.Cell, next) < 0)
-			return 0.0;
-		return (_field.LevelAt(next) - _field.LevelAt(v.Cell)) * _field.StepGrade;
+			return FaceSlope(v.Cell).Lerp(FaceSlope(next), v.LegBlend);
+		int heading = HexField.HeadingTo(v.Cell, next);
+		if (!v.Moving || heading < 0)
+			return Vector2.Zero;
+		return ClimbLean.Plane(
+			(_field.LevelAt(next) - _field.LevelAt(v.Cell)) * _field.StepGrade,
+			heading);
 	}
 
-	/// <summary>What one cell's own top is worth to a hull on this heading: the
-	/// ramp's steepness projected onto the travel, and nothing at all for a cell
-	/// whose top is flat.</summary>
-	private double FaceGrade(Vehicle v, Vector2I cell)
+	/// <summary>The gradient of one cell's own top: a ramp's steepness pointed up
+	/// its axis, and nothing at all for a cell whose top is flat. Asked of the
+	/// cell and not of the tank, because a face is a property of the ground - the
+	/// projection onto whoever is standing on it happens later, in
+	/// <see cref="ClimbLean.Along"/>.</summary>
+	private Vector2 FaceSlope(Vector2I cell)
 	{
 		int face = _field.RampHeading(cell);
-		return face < 0 ? 0.0
-			: _field.StepGrade
-			  * Math.Cos(Mathf.DegToRad(v.Sprite.HullFacing - face));
+		return face < 0 ? Vector2.Zero
+						: ClimbLean.Plane(_field.StepGrade, face);
 	}
+
+	/// <summary>What the sprung plane is worth along a hull's heading, for the
+	/// trace: the number the pitch is drawn from.</summary>
+	private double SurfaceGrade(Vehicle v) =>
+		ClimbLean.Along(SurfaceSlope(v), v.Sprite.HullFacing);
 
 	private void UpdateLean(Vehicle v, double delta)
 	{
-		double grade = SurfaceGrade(v);
-		v.Lean.Update(grade, v.Sprite.HullFacing, _field.RiseFactor, delta);
-		v.Sprite.Climb = v.Lean.Angle;
+		v.Lean.Update(SurfaceSlope(v), delta);
+		v.Sprite.Climb = v.Lean.Angle(v.Sprite.HullFacing, _field.RiseFactor);
+		// The same plane as the line above, in the terms a layer printed on the
+		// ground needs it in - see TankSprite.Slope. One spring, two readings, so
+		// the shadow cannot lag the hull standing on it.
+		v.Sprite.Slope = ClimbLean.Print(v.Lean.Slope, _field.Squash,
+										 _field.RiseFactor);
 		v.Sprite.Rise = _field.Lift <= 0.0f
 			? 1.0f
 			: 1.0f + TankSprite.RisePerLevel * (v.Height / _field.Lift);
@@ -4797,7 +4826,13 @@ public sealed partial class Main : Node2D
 					 // here rather than only on the panel, because a tank standing
 					 // level on a visible slope is exactly the failure a capture is
 					 // taken to judge - see Main.SurfaceGrade.
-					 + $"  lean {Active.Lean.Angle,8:F5}@{SurfaceGrade(Active),6:F3}"
+					 + $"  lean {Active.Sprite.Climb,8:F5}@{SurfaceGrade(Active),6:F3}"
+					 // And what the same plane does to the shadow, which the lean
+					 // beside it cannot report: driving straight into the screen
+					 // the body's rotation is zero and the footprint is still
+					 // stretched half again. Two numbers that are only ever both
+					 // nought on flat ground. See TankSprite.Slope.
+					 + $"/{Active.Sprite.Slope.X,6:F3},{Active.Sprite.Slope.Y,6:F3}"
 					 // Which of the two ways the stage is drawing it, because the
 					 // grade beside it does not answer that: a tank parked across a
 					 // ramp feels no slope along its heading and is still standing on

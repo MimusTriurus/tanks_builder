@@ -891,6 +891,19 @@ public sealed partial class TankSprite : Node2D
     public double Climb;
 
     /// <summary>
+    /// The same slope as it reaches a layer <em>printed on</em> the ground: the
+    /// two coefficients of the screen map a flat footprint lying in the face
+    /// takes, from <see cref="ClimbLean.Print"/>. Zero on level ground.
+    ///
+    /// Held beside <see cref="Climb"/> rather than derived from it because it
+    /// cannot be: the body's rotation vanishes driving straight into the screen
+    /// and the plane under it does not. Both come off one sprung plane - see
+    /// <see cref="ClimbLean.Slope"/> - which is what keeps a shadow from
+    /// disagreeing with the hull standing on it.
+    /// </summary>
+    public Vector2 Slope;
+
+    /// <summary>
     /// The uniform scale the tank's height is worth: nearer the camera is
     /// bigger, and on this projection height is the only thing that moves a tank
     /// nearer without moving it down the screen.
@@ -919,10 +932,16 @@ public sealed partial class TankSprite : Node2D
     /// </summary>
     public const float RisePerLevel = 0.06f;
 
-    /// <summary>Whether either of the two is doing anything. One test, because
-    /// they are one matrix.</summary>
+    /// <summary>Whether any of the three is doing anything. One test, because
+    /// they are one matrix.
+    ///
+    /// The slope is in it and has to be, or the gate would shut on the one case
+    /// the shadow most needs: straight into the screen the body's rotation is
+    /// zero, the height may be too - a ramp's own cell is half a level up - and
+    /// the footprint is still stretched half again along the view.</summary>
     public bool Climbing =>
-        Math.Abs(Climb) > 1e-6 || Math.Abs(Rise - 1.0f) > 1e-6;
+        Math.Abs(Climb) > 1e-6 || Math.Abs(Rise - 1.0f) > 1e-6
+        || Slope != Vector2.Zero;
 
     /// <summary>Heave a layer receives. Never depends on the layer - see
     /// <see cref="TurretStabilised"/>.</summary>
@@ -946,25 +965,44 @@ public sealed partial class TankSprite : Node2D
             new Vector2(1.0f, 0.0f),                            // x is untouched
             new Vector2(-both.X, 1.0f - both.Y),
             new Vector2(groundY * ground.X, groundY * ground.Y));
-        // The contact shadow is printed on the ground, so it takes the bumps and
-        // not the slope. Fourteen degrees of rotation on a shadow is a shadow
-        // that has come off the ground it is a shadow of - where the pitch shear
-        // is two pixels and reads as the tank pressing into it. The two are told
-        // apart here rather than at the call site, because a layer knowing it
-        // lies flat is a property of the layer.
-        if (grounded || !Climbing)
+        if (!Climbing)
             return shear;
-        // Rotation and uniform scale about the contact patch - the pivot every
-        // tilt in the project uses, because the ground a tank stands on does not
-        // move. Composed outside the shear, so it carries the shear's result
-        // round rather than the two fighting over the vertical, and one matrix
-        // rather than two transforms, which would resample the sprite twice.
-        float c = Mathf.Cos((float)Climb) * Rise, s = Mathf.Sin((float)Climb) * Rise;
-        var turn = new Transform2D(new Vector2(c, s), new Vector2(-s, c),
-                                   Vector2.Zero);
+        // Both branches turn about the contact patch - the pivot every tilt in
+        // the project uses, because the ground a tank stands on does not move -
+        // and both compose outside the shear, so they carry the shear's result
+        // round rather than the two fighting over the vertical. One matrix rather
+        // than two transforms, which would resample the sprite twice.
         Vector2 foot = Atlas.GroundOffset;
-        turn.Origin = foot - turn.BasisXform(foot);
-        return turn * shear;
+        Transform2D climb;
+        if (grounded)
+        {
+            // The contact shadow is printed on the ground, so it is not turned by
+            // the slope - it is foreshortened by it, which is a different
+            // transform and, for a flat patch under an orthographic camera, an
+            // exact one. See ClimbLean.Print for the arithmetic and for why this
+            // is the layer that gets the true answer while the body gets a
+            // rotation. Fourteen degrees of rotation on a shadow is a shadow that
+            // has come off the ground it is a shadow of; the bumps stay in,
+            // because two pixels of shear reads as the tank pressing into it.
+            //
+            // The rise is in, and its absence was a fault waiting: everything at
+            // this height is nearer the camera, the ground it stands on included,
+            // so a shadow left unscaled is six percent small per level and the
+            // hull overhangs it - which is the very failure the flag was written
+            // to prevent, arriving from the other side.
+            climb = new Transform2D(new Vector2(Rise, -Slope.X * Rise),
+                                    new Vector2(0.0f, (1.0f + Slope.Y) * Rise),
+                                    Vector2.Zero);
+        }
+        else
+        {
+            float c = Mathf.Cos((float)Climb) * Rise;
+            float s = Mathf.Sin((float)Climb) * Rise;
+            climb = new Transform2D(new Vector2(c, s), new Vector2(-s, c),
+                                    Vector2.Zero);
+        }
+        climb.Origin = foot - climb.BasisXform(foot);
+        return climb * shear;
     }
 
     public override void _Ready()

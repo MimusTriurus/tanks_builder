@@ -117,9 +117,11 @@ public sealed partial class EffectLayer : Node2D
 
     /// <summary>Whether this layer is printed on the ground rather than standing
     /// on it. True of the contact shadow and nothing else: everything else on a
-    /// tank is part of the tank and turns with it up a slope. See
-    /// <see cref="Shadow"/> for why the bumps and the slope part company
-    /// here.</summary>
+    /// tank is part of the tank and turns with it up a slope, where this lies in
+    /// the face and is foreshortened by it. It does not mean "no slope" - see
+    /// <see cref="Shadow"/> for what the two answers are and
+    /// <see cref="ClimbLean.Print"/> for why the flat one is the exact
+    /// one.</summary>
     public bool Grounded;
 
     /// <summary>Which state of the tank a layer belongs to.</summary>
@@ -372,11 +374,18 @@ public sealed partial class EffectLayer : Node2D
     /// the belts, the error would read as the shadow sliding out from under the
     /// vehicle rather than as a track glitch.
     ///
-    /// It does <b>not</b> ride the slope, and that is not the same call made
+    /// It is not <b>turned</b> by the slope, and that is not the same call made
     /// twice. A bump is two pixels of shear and reads as the tank pressing into
     /// its shadow; a slope is up to fourteen degrees of rotation, and a shadow
-    /// turned by that is a shadow standing off the ground it is a shadow of. See
-    /// <see cref="Grounded"/>.
+    /// turned by that is a shadow standing off the ground it is a shadow of.
+    ///
+    /// It is <b>foreshortened</b> by it instead, which is what a flat patch lying
+    /// in a tilted plane actually does, and it is the one layer here whose slope
+    /// transform is exact rather than a stand-in: a shadow is planar and the
+    /// camera orthographic. See <see cref="ClimbLean.Print"/> and
+    /// <see cref="Grounded"/>. Left flat it parted from the hull it belongs to by
+    /// the same dozen-odd pixels the hull's nose rises - the two agree to three
+    /// percent by construction, which is why one of them moving alone shows.
     /// </summary>
     public static EffectLayer Shadow(string layer) => new()
     {

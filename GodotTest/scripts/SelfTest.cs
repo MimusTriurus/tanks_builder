@@ -5095,23 +5095,47 @@ public static class SelfTest
         (degrees % 360.0 + 360.0 + 180.0) % 360.0 - 180.0;
 
     /// <summary>
-    /// What a slope does to the drawn body: the lean, the rise, and the two
-    /// things neither is allowed to touch.
+    /// What a slope does to the drawn body: the lean, the rise, the footprint
+    /// printed on the face, and the things none of them is allowed to touch.
+    ///
+    /// The shadow's half is asserted against the projection worked out here from
+    /// the squash and the rise, not against the expression that implements it -
+    /// because for a flat patch under an orthographic camera there <i>is</i> a
+    /// right answer, and the point of the whole exercise is that this layer gets
+    /// it while the body gets a stand-in.
     /// </summary>
     private static void Climbing(HexField field, TankSprite tank,
                                  Action<string, bool, string> Check)
     {
-        GD.Print("climb: the body leans and the shadow does not");
+        GD.Print("climb: the body is turned by the slope and its shadow is "
+                 + "flattened by it");
 
         float rise = field.RiseFactor;
+        float squash = field.Squash;
         var lean = new ClimbLean();
+        // The face a tank drives straight up: its axis is the heading every check
+        // below reads the body at, so the grade along the travel is the whole of
+        // its steepness and the old numbers still mean what they meant.
+        Vector2 face = ClimbLean.Plane(0.25, 330.0);
 
         // Level ground first, because it is what every board without relief is
         // and what every measurement the bench already takes is taken on.
         for (int i = 0; i < 240; i++)
-            lean.Update(0.0, 330.0, rise, 1.0 / 60.0);
-        Check("on the level it never leaves level", Math.Abs(lean.Angle) < 1e-9,
-            $"{Mathf.RadToDeg((float)lean.Angle):F4} deg on flat ground");
+            lean.Update(Vector2.Zero, 1.0 / 60.0);
+        Check("on the level it never leaves level",
+            Math.Abs(lean.Angle(330.0, rise)) < 1e-9 && lean.Slope == Vector2.Zero,
+            $"{Mathf.RadToDeg((float)lean.Angle(330.0, rise)):F4} deg on flat "
+            + $"ground, plane {lean.Slope}");
+
+        // The projection and the plane it is taken from, which is the claim that
+        // lets one sprung state serve the body and its shadow both: reading the
+        // plane along the travel has to give back the grade the plane was built
+        // from, or the pitch is being drawn off a different hill than the shadow.
+        Check("a plane read along its own axis is the grade it was made from",
+            Math.Abs(ClimbLean.Along(face, 330.0) - 0.25) < 1e-6
+            && Math.Abs(ClimbLean.Along(face, 330.0 + 90.0)) < 1e-6,
+            $"{ClimbLean.Along(face, 330.0):F4} up the axis, "
+            + $"{ClimbLean.Along(face, 330.0 + 90.0):F4} across it");
 
         // Nose up climbing, nose down descending. In Godot's screen frame a
         // positive rotation carries +x down, so the sign that reads as climbing
@@ -5143,9 +5167,10 @@ public static class SelfTest
         lean.Reset();
         int frames = 0;
         double target = ClimbLean.Target(0.25, 330.0, rise);
-        while (frames < 240 && Math.Abs(lean.Angle - target) > Math.Abs(target) * 0.05)
+        while (frames < 240
+               && Math.Abs(lean.Angle(330.0, rise) - target) > Math.Abs(target) * 0.05)
         {
-            lean.Update(0.25, 330.0, rise, 1.0 / 60.0);
+            lean.Update(face, 1.0 / 60.0);
             frames++;
         }
         Check("it arrives over a fair part of a second, not in one frame",
@@ -5155,12 +5180,12 @@ public static class SelfTest
         // biggest number in the window and the check would be reading the arrival
         // it just finished asserting.
         for (int i = 0; i < 240; i++)
-            lean.Update(0.25, 330.0, rise, 1.0 / 60.0);
+            lean.Update(face, 1.0 / 60.0);
         double worst = 0.0;
         for (int i = 0; i < 240; i++)
         {
-            lean.Update(0.25, 330.0, rise, 1.0 / 60.0);
-            worst = Math.Max(worst, Math.Abs(lean.Angle - target));
+            lean.Update(face, 1.0 / 60.0);
+            worst = Math.Max(worst, Math.Abs(lean.Angle(330.0, rise) - target));
         }
         Check("and settles there instead of ringing",
             worst < Math.Abs(target) * 0.02,
@@ -5175,6 +5200,7 @@ public static class SelfTest
         // "every length in the silhouette scaled by the same amount".
         double wasClimb = tank.Climb;
         float wasRise = tank.Rise;
+        Vector2 wasSlope = tank.Slope;
         (double Pitch, double Roll, double Trem, double TremRoll,
          double Rec, double RecRoll) was =
             (tank.Pitch, tank.Roll, tank.TremblePitch, tank.TrembleRoll,
@@ -5189,6 +5215,7 @@ public static class SelfTest
             tank.Pitch = tank.Roll = tank.TremblePitch = tank.TrembleRoll =
                 tank.RecoilPitch = tank.RecoilRoll = 0.0;
             tank.Climb = 0.0;
+            tank.Slope = Vector2.Zero;
             tank.Rise = 1.0f + TankSprite.RisePerLevel;
             Transform2D risen = tank.ShearFor(false);
             float lx = risen.X.Length(), ly = risen.Y.Length();
@@ -5203,15 +5230,93 @@ public static class SelfTest
                 2.0f * TankSprite.RisePerLevel < 0.15f,
                 $"{2.0f * TankSprite.RisePerLevel:F2} against 0.15 between classes");
 
-            // The contact shadow takes the bumps and not the slope. It is the one
-            // layer that says so, and the flag is easy to lose in a refactor.
-            tank.Climb = ClimbLean.Target(0.25, 330.0, rise);
+            // The rise reaches the shadow, and this is the check that says so.
+            // Left out, the shadow is six percent small per level and the hull
+            // overhangs the ground it stands on - which is the same failure the
+            // grounded flag exists to prevent, arriving from the other side.
+            tank.Climb = 0.0;
+            tank.Slope = Vector2.Zero;
             tank.Rise = 1.0f + TankSprite.RisePerLevel;
+            Transform2D lifted = tank.ShearFor(false, true);
+            Check("the rise reaches the ground the tank stands on too",
+                Math.Abs(lifted.X.Length() - tank.Rise) < 1e-4f
+                && Math.Abs(lifted.Y.Length() - tank.Rise) < 1e-4f
+                && Math.Abs(lifted.X.Dot(lifted.Y)) < 1e-4f,
+                $"x {lifted.X.Length():F4}, y {lifted.Y.Length():F4}");
+
+            // The contact shadow takes the bumps and is not turned by the slope -
+            // it is foreshortened by it. Both halves are asserted, because the
+            // flag is easy to lose in a refactor and easy to over-read into "no
+            // slope at all", which is what it used to mean.
+            tank.Rise = 1.0f;
+            tank.Climb = ClimbLean.Target(0.25, 330.0, rise);
+            tank.Slope = ClimbLean.Print(face, squash, rise);
             Transform2D body = tank.ShearFor(false);
             Transform2D ground = tank.ShearFor(false, true);
-            Check("ground-printed layers are not turned by the slope",
-                ground == Transform2D.Identity && body != Transform2D.Identity,
-                $"printed {ground}, standing {body}");
+            Check("a printed layer keeps every column it had, and a body does not",
+                Math.Abs(ground.Y.X) < 1e-6f && Math.Abs(ground.X.X - 1.0f) < 1e-6f
+                && Math.Abs(body.Y.X) > 1e-3f,
+                $"printed sideways {ground.Y.X:F5}, body {body.Y.X:F5}");
+            Check("and it is moved by the slope at all",
+                ground != Transform2D.Identity, $"printed {ground}");
+
+            // Exact, not approximate, and asserted against the projection rather
+            // than against the expression that implements it: a ground offset is
+            // put where the tilted plane puts it, worked out here from the squash,
+            // the rise and the height alone. This is what catches a sign, and the
+            // 1/sin(e) that is the whole difference between a plane and a guess.
+            Vector2 foot = tank.Atlas.GroundOffset;
+            double worstPlane = 0.0;
+            foreach (Vector2 u in new[] { new Vector2(60.0f, 0.0f),
+                                          new Vector2(0.0f, 55.0f),
+                                          new Vector2(-40.0f, -30.0f),
+                                          new Vector2(25.0f, -48.0f) })
+            {
+                var flat = new Vector2(u.X, -u.Y * squash);
+                Vector2 want = foot + flat
+                    - new Vector2(0.0f, rise * (face.X * u.X + face.Y * u.Y));
+                worstPlane = Math.Max(worstPlane,
+                                      (ground * (foot + flat) - want).Length());
+            }
+            Check("a footprint lands where the tilted plane puts it, exactly",
+                worstPlane < 1e-3, $"off by {worstPlane:F4}px at worst");
+
+            // The two readings of one plane have to agree, or the shadow slides
+            // out from under the tank it belongs to. Along the travel the body's
+            // rotation lifts the nose by sin(atan(g)*cos(e)) per pixel and the
+            // shadow's shear by g*cos(e): the same number to three percent, which
+            // is why one of them moving alone is what shows.
+            tank.Climb = ClimbLean.Target(0.25, 0.0, rise);
+            tank.Slope = ClimbLean.Print(ClimbLean.Plane(0.25, 0.0), squash, rise);
+            var nose = new Vector2(60.0f, 0.0f);
+            float byBody = (tank.ShearFor(false) * (foot + nose) - foot - nose).Y;
+            float byShade = (tank.ShearFor(false, true) * (foot + nose)
+                             - foot - nose).Y;
+            Check("the shadow's nose rises with the hull's, not on its own",
+                byBody < -10.0f && Math.Abs(byBody - byShade) < Math.Abs(byBody) * 0.05f,
+                $"hull {byBody:F2}px, shadow {byShade:F2}px");
+
+            // The documented zero of the body, and the finding that goes with it:
+            // straight into the screen the rotation reaches none of the pitch, and
+            // the footprint - which is planar, so affine is exact for it - takes
+            // the whole of it as a stretch along the view.
+            tank.Rise = 1.0f;
+            tank.Climb = ClimbLean.Target(0.25, 90.0, rise);
+            tank.Slope = ClimbLean.Print(ClimbLean.Plane(0.25, 90.0), squash, rise);
+            Transform2D intoBody = tank.ShearFor(false);
+            Transform2D intoShade = tank.ShearFor(false, true);
+            // Nil rather than exactly identity: cos(90 deg) in float leaves a
+            // rotation of 1e-17 in the body's matrix, and asking for the identity
+            // asks the float library a question about the camera angle.
+            Check("driving into the screen the shadow is stretched where the body "
+                  + "cannot be",
+                Math.Abs(intoBody.Y.X) < 1e-6f && Math.Abs(intoBody.X.Y) < 1e-6f
+                && intoShade.Y.Y > 1.4f && Math.Abs(intoShade.X.Y) < 1e-6f,
+                $"body turn {intoBody.X.Y:E2}, shadow stretch {intoShade.Y.Y:F3}");
+
+            tank.Rise = 1.0f + TankSprite.RisePerLevel;
+            tank.Climb = ClimbLean.Target(0.25, 330.0, rise);
+            tank.Slope = ClimbLean.Print(face, squash, rise);
 
             // And that it is the shadow claiming it, off LayerOrder rather than
             // by naming the one layer: the matrix above honours the flag whether
@@ -5233,6 +5338,7 @@ public static class SelfTest
         {
             tank.Climb = wasClimb;
             tank.Rise = wasRise;
+            tank.Slope = wasSlope;
             (tank.Pitch, tank.Roll, tank.TremblePitch, tank.TrembleRoll,
              tank.RecoilPitch, tank.RecoilRoll) = was;
         }
