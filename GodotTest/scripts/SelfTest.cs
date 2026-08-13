@@ -556,6 +556,31 @@ public static class SelfTest
             (tank.TrembleFor(false) * tank.SternWeight(Vector2.Zero)).Length() < 0.5,
             $"{(tank.TrembleFor(false) * tank.SternWeight(Vector2.Zero)).Length():F3}px"
             + " of hull movement under a turret that does not move");
+        // And the belts sit it out, which is the argument the whole effect is built
+        // on: the engine reaches the hull through the mounts while the tracks are
+        // standing on the ground. Asked of the shear a planted layer is drawn
+        // through, at every heading, and asked with the hull's own shear beside it -
+        // a belt that stopped moving because the tremble stopped would pass a check
+        // that only looked at the belt.
+        double worstBelt = 0.0, leastHull = double.MaxValue;
+        for (int i = 0; i < tank.Atlas.Count; i++)
+        {
+            tank.HullFacing = 360.0 * i / tank.Atlas.Count;
+            Vector2 at = tank.HullEnd(false);
+            Vector2 onBelt = tank.ShearFor(false, false, true) * at;
+            double had = tank.TremblePitch, hadYaw = tank.TrembleYaw;
+            tank.TremblePitch = 0.0;
+            tank.TrembleYaw = 0.0;
+            Vector2 unshaken = tank.ShearFor(false) * at;
+            tank.TremblePitch = had;
+            tank.TrembleYaw = hadYaw;
+            worstBelt = Math.Max(worstBelt, (onBelt - unshaken).Length());
+            leastHull = Math.Min(leastHull, tank.TrembleTravelPx(bow: false));
+        }
+        Check("the belts stand still while the engine shakes the hull",
+            worstBelt < 1e-3 && leastHull > 0.2,
+            $"belt moves at most {worstBelt:F5}px where the hull's stern moves at "
+            + $"least {leastHull:F2}px");
         tank.TremblePitch = wasPitch;
         tank.TrembleYaw = wasYaw;
         tank.HullFacing = trembleHull;
@@ -2873,12 +2898,28 @@ public static class SelfTest
             // a tint reaching too far.
             var armour = new List<string>();
             var lit = new List<string>();
+            var planted = new List<string>();
             foreach (string name in TankSprite.LayerOrder)
             {
                 EffectLayer made = TankSprite.MakeLayer(name);
                 (made.Armour ? armour : lit).Add(name);
+                if (made.Planted)
+                    planted.Add(name);
                 made.QueueFree();
             }
+            // Which layers stand on the ground rather than being carried by the
+            // hull, and so sit out the engine tremble - see EffectLayer.Planted.
+            // The belts and nothing else: it is not a synonym for "part of the
+            // tank" (the turret and the gun are carried) nor for Grounded (the
+            // shadow is a mark in the ground plane, not a thing resting on it).
+            Check("the belts stand on the ground and the rest of the tank does not",
+                AtlasSet.TrackNames.All(planted.Contains)
+                && AtlasSet.WreckTrackNames.All(planted.Contains)
+                && !planted.Contains("turret")
+                && !planted.Contains(AtlasSet.BarrelName)
+                && !planted.Contains(AtlasSet.ShadowName)
+                && !AtlasSet.ScarNames.Any(planted.Contains),
+                string.Join(", ", planted));
             Check("the tank's own layers char with the hull",
                 AtlasSet.TrackNames.All(armour.Contains)
                 && armour.Contains("turret") && armour.Contains(AtlasSet.BarrelName)

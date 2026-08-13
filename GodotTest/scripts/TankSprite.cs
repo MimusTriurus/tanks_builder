@@ -932,7 +932,9 @@ public sealed partial class TankSprite : Node2D
 
     /// <summary>
     /// What the engine tremble displaces the stern by, in px. Zero for a stabilised
-    /// turret, by <see cref="TurretStabilised"/>'s policy.
+    /// turret, by <see cref="TurretStabilised"/>'s policy, and zero for a belt, by
+    /// <see cref="EffectLayer.Planted"/>'s: the engine reaches the hull through the
+    /// mounts while the tracks are standing on the ground.
     ///
     /// Both axes are exact projections, which is new and is why the old vertical
     /// damping is gone. The pitch heaves the stern along the world vertical, and a
@@ -943,9 +945,9 @@ public sealed partial class TankSprite : Node2D
     /// reads as rubber - a region being carried bodily up and down squashes nothing,
     /// so it has no such reading to avoid.
     /// </summary>
-    public Vector2 TrembleFor(bool turret)
+    public Vector2 TrembleFor(bool turret, bool planted = false)
     {
-        if (turret && TurretStabilised)
+        if (planted || (turret && TurretStabilised))
             return Vector2.Zero;
         var lever = (float)EngineTremble.SternLeverPx;
         return new Vector2(0.0f, (float)-TremblePitch * lever)
@@ -1083,7 +1085,8 @@ public sealed partial class TankSprite : Node2D
     /// its gradient goes on the two columns and its value at the anchor on the
     /// origin.
     /// </summary>
-    internal Transform2D ShearFor(bool turret, bool grounded = false)
+    internal Transform2D ShearFor(bool turret, bool grounded = false,
+                                  bool planted = false)
     {
         float groundY = Atlas!.GroundOffset.Y;
         Vector2 ground = TiltFor(turret);
@@ -1092,7 +1095,7 @@ public sealed partial class TankSprite : Node2D
         // gradient falls on x and y with those two coefficients and the constant
         // half lands on the origin. Written out here rather than called per corner
         // because a matrix is what the draw takes.
-        Vector2 stern = TrembleFor(turret);
+        Vector2 stern = TrembleFor(turret, planted);
         float squash = -Atlas.GroundDirection(90.0).Y;
         double rad = Mathf.DegToRad(HullFacing);
         var alongX = (float)(Math.Cos(rad) / HullLengthPx);

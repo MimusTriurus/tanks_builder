@@ -124,6 +124,36 @@ public sealed partial class EffectLayer : Node2D
     /// one.</summary>
     public bool Grounded;
 
+    /// <summary>
+    /// Whether this layer stands on the ground rather than being carried by the
+    /// hull, and so sits out the engine tremble. True of the belts and nothing
+    /// else.
+    ///
+    /// <b>It is the argument the tremble is built on, finally implemented.</b>
+    /// Engine vibration reaches the hull through the mounts and the suspension
+    /// while the tracks stay planted - see <see cref="EngineTremble"/> - and while
+    /// the tremble tilted the whole body there was no way to say so: every layer
+    /// took the same shear. Now that it levers along the hull (see
+    /// <see cref="TankSprite.SternWeight"/>) the belt is the one part whose stern
+    /// end must not move with the hull's.
+    ///
+    /// <b>Not <see cref="Grounded"/>, and the two are nearly opposites.</b> The
+    /// shadow is <em>printed on</em> the ground: it is a mark in the ground plane
+    /// and takes the slope's foreshortening. A belt <em>rests on</em> the ground
+    /// and is otherwise part of the tank - it climbs, pitches, rumbles and heaves
+    /// with the hull, and this exempts it from one effect only.
+    ///
+    /// <b>The seam it opens is why this waited for the lever.</b> The hull's stern
+    /// moves a third of a pixel at rest and eight tenths under way while the belt
+    /// under it does not, so the join along the belt's top run parts by that much -
+    /// the same bargain as <see cref="TankSprite.TurretStabilised"/>, and the same
+    /// reason it is affordable: sub-pixel, and along an edge the hull overhangs
+    /// anyway. Under the old whole-body tilt the exemption would have cost the
+    /// belt's own lever instead, which is the height of the belt band, and that is
+    /// not sub-pixel.
+    /// </summary>
+    public bool Planted;
+
     /// <summary>Which state of the tank a layer belongs to.</summary>
     public enum Life
     {
@@ -272,6 +302,11 @@ public sealed partial class EffectLayer : Node2D
     /// including its tilt, because a belt that did not lean with the vehicle
     /// would come off it on the first bump.
     ///
+    /// <b>Everything but the engine tremble</b> - see <see cref="Planted"/>. The
+    /// distinction is between the hull carrying the belt, which it does through
+    /// every lean and bump, and the engine shaking the hull, which the ground the
+    /// belt is standing on does not join in with.
+    ///
     /// Its clock is neither an event nor a timer - see
     /// <see cref="TrackLoop"/>: the belt winds with the ground.
     /// </summary>
@@ -281,6 +316,7 @@ public sealed partial class EffectLayer : Node2D
         FollowsHull = true,
         Clock = Clocks.Track,
         Armour = true,
+        Planted = true,
         When = Life.Alive,
         StandIn = AtlasSet.WreckTrackNames[
             layer == AtlasSet.TrackNames[0] ? 0 : 1],
@@ -307,6 +343,12 @@ public sealed partial class EffectLayer : Node2D
         FollowsHull = true,
         Clock = Clocks.Body,
         Armour = true,
+        // Planted for its live twin's reason, and it costs nothing here: a wreck's
+        // engine does not run, so there is no tremble to sit out. Set anyway
+        // because the pair must answer alike about what kind of part it is - one
+        // that stands on the ground - and a flag that differs across the pair is a
+        // belt that starts trembling the moment the tank is knocked out.
+        Planted = true,
         When = Life.Dead,
     };
 
@@ -617,7 +659,7 @@ public sealed partial class EffectLayer : Node2D
         // deeper level, not a stretched decal.
         float size = Clock is Clocks.HitBurst or Clocks.HitDust
             ? Tank.HitScale : 1.0f;
-        DrawSetTransformMatrix(Tank.ShearFor(turret, Grounded));
+        DrawSetTransformMatrix(Tank.ShearFor(turret, Grounded, Planted));
         // The frame is stored trimmed, so what is drawn is its own box shifted
         // by however much came off the tile's top-left. The smear is not - it is
         // built here out of whole tiles - so it keeps the tile rect.
