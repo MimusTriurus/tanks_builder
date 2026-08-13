@@ -228,6 +228,18 @@ public sealed partial class Main : Node2D
 	/// hand the board over one piece at a time: every measurement this bench has
 	/// taken is a pixel diff of two runs, and a switch is what lets the two runs
 	/// exist.
+	///
+	/// <b>It says which board this run has, not which board --3d asked for, and
+	/// that distinction cost the ramps.</b> The flag is read before the stage
+	/// exists - <see cref="SetRelief"/> hangs the ramp mask on it while the field
+	/// is being built - so it cannot simply be <see cref="Staged"/>. But it was
+	/// only ever written by the flag, and the stage has three other ways in: the
+	/// panel row, panel.json's default for it, and the key. Opened with
+	/// <c>view.stage</c> defaulted true and no <c>--3d</c> on the line, the stage
+	/// came up and this stayed false, so <see cref="Ramped"/> stayed false and the
+	/// board had no ramps on it - a mode switch that arrives by every path except
+	/// the one the feature reads. So the setter of <see cref="Staged"/> writes it
+	/// too, and the board is the truth.
 	/// </summary>
 	private bool _stage3d;
 
@@ -299,7 +311,14 @@ public sealed partial class Main : Node2D
 				StageOn();
 			else
 				StageOff();
+			// The flag follows the board, not the other way round - see
+			// <see cref="_stage3d"/>. Written before the ramps are re-asked,
+			// because Ramped reads it.
+			_stage3d = value;
 			Suppress2D(Staged);
+			// Whether a ramp exists at all is a property of who draws the board,
+			// so handing the board over is a change to its heights.
+			ApplyRamps();
 		}
 	}
 
@@ -2760,7 +2779,18 @@ public sealed partial class Main : Node2D
 		if (on == _field.HasRamps)
 			return;
 		_ramps = on;
-		if (!_relief || !_stage3d)
+		ApplyRamps();
+	}
+
+	/// <summary>Put the board's ramps where <see cref="Ramped"/> says they should
+	/// be. Two ways in, and both are a change of mind about the board rather than
+	/// about the ramps: the row above, and handing the board to the stage or
+	/// taking it back. Silent when it agrees already, because <see cref="Settle"/>
+	/// is not free - it cancels orders, which is the trap named on
+	/// <see cref="SetRelief"/>.</summary>
+	private void ApplyRamps()
+	{
+		if (_field is null || !_relief || Ramped == _field.HasRamps)
 			return;
 		_field.SetRelief(ReliefMap(_field.Columns, _field.Rows),
 						 Ramped ? RampMask(_field.Columns, _field.Rows) : null);
