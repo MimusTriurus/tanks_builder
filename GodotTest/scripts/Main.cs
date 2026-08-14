@@ -335,6 +335,11 @@ public sealed partial class Main : Node2D
 			// the offset is the marks' own position. Handed over rather than
 			// assumed to be zero, which is what it is - see Stage3D.MarksAt.
 			Marks = _marks, MarksAt = _marks?.Position ?? Vector2.Zero,
+			// The wood, by the same division: the grove goes on deciding where
+			// its trees stand and how they lean, the stage draws them where the
+			// depth buffer can judge them. No shift to hand over - a PropNode's
+			// own position already carries Origin.
+			Wood = _grove,
 		};
 		AddChild(_stage);
 		foreach (Vehicle vehicle in _vehicles)
@@ -388,7 +393,7 @@ public sealed partial class Main : Node2D
 		if (_marks is not null)
 			_marks.Visible = !staged;                   // the stage draws its own
 		if (_grove is not null)
-			_grove.Visible = !staged;                   // trees: slice C
+			_grove.Visible = !staged;                   // the stage draws its own
 		if (_ring is not null)
 			_ring.Visible = !staged;                    // the stage draws its own
 		if (_targetRing is not null)

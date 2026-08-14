@@ -125,6 +125,11 @@ public sealed partial class Stage3D : Node3D
     /// Passed rather than worked out here, because only the harness holds both
     /// nodes - the same reason <see cref="ReliefCap"/> is handed its shift.</summary>
     public Vector2 MarksAt;
+
+    /// <summary>The forest, redrawn as billboards standing on the board. Null
+    /// leaves the ground bare, which is how the stage behaved while the trees
+    /// were still only canvas items - see <see cref="BuildTrees"/>.</summary>
+    public Grove? Wood;
     private bool _showEdges = true;
     private readonly Dictionary<Vehicle, Stand> _stands = new();
     private string _built = "";
@@ -345,6 +350,9 @@ public sealed partial class Stage3D : Node3D
         _ring.MaterialOverride = null;
         _edges.MaterialOverride = null;
         _ruts.MaterialOverride = null;
+        // The wood is 464 meshes and 464 materials made here, which is by some way
+        // the largest thing this node owns.
+        Fell();
     }
 
     public void Give()
@@ -624,6 +632,10 @@ public sealed partial class Stage3D : Node3D
         // is forgotten from the front, so a mesh left standing is a trail that
         // stopped weathering the moment the tank parked.
         BuildRuts(vehicles);
+        // The same, and for a nearer reason: the wood leans in a gust that is
+        // always moving, so a frame that skipped this is a frame the wind stopped
+        // in.
+        BuildTrees();
     }
 
 
@@ -1206,6 +1218,208 @@ public sealed partial class Stage3D : Node3D
         into.Add((c, ic));
         into.Add((d, id));
     }
+
+    // --- the wood ------------------------------------------------------------
+
+    /// <summary>One billboard per planted tree, and the quad shape shared by
+    /// every tree of a kind.</summary>
+    private readonly Dictionary<PropNode, MeshInstance3D> _standing = new();
+    private readonly Dictionary<(int Species, bool Mirrored), ArrayMesh> _stems = new();
+    private int _sown = -1;
+
+    /// <summary>
+    /// The forest, as upright quads standing on the board.
+    ///
+    /// <b>Geometry rather than the canvas nodes that already draw it, for the
+    /// ring's and the ruts' reason:</b> anything left drawing in 2D lands on top
+    /// of the entire 3D world, so a wood left as it was rode over every tank on
+    /// the board - and while the stage owned the ground the trees were simply
+    /// switched off, which is a wooded cell drawn as a field.
+    ///
+    /// <b>What the wood decides is still the wood's.</b> Where a tree stands,
+    /// which species it is, how it leans in the gust, how hard a blast shoved it
+    /// and how far it has faded for the tank on its cell - all of that is
+    /// <see cref="Grove"/>'s, computed on nodes that are hidden rather than gone.
+    /// Two things are this side of the line, and they are the two the 2D layer had
+    /// to do by hand:
+    ///
+    /// <b>Depth is the foot, and now it is the foot rather than a number derived
+    /// from it.</b> In 2D each tree carried <c>ZIndex = round(Depth(foot))</c>,
+    /// which is <see cref="HexField.Depth"/> written out because a canvas item has
+    /// no other way to sort - and that rounding is why a tree and a tank on the
+    /// same row needed a tie-break rule. Here the quad stands where the tree
+    /// stands and the camera sorts it, with <see cref="MeshInstance3D.SortingUseAabbCenter"/>
+    /// off so the key is the trunk's own point and not the middle of a crown that
+    /// leans.
+    ///
+    /// <b>The lean is the transform, and it costs nothing.</b> A shear about the
+    /// foot is what <see cref="PropNode.Bend"/> already is; the same statement in
+    /// the world is one column of the basis, so a gust crossing 464 trees rebuilds
+    /// no geometry at all. The <c>rise</c> in it is the only conversion: the lean
+    /// is quoted in screen px of drift per screen px of height, and world height
+    /// is screen height over <c>cos(e)</c>.
+    ///
+    /// <b>Alpha-blended, and a material per tree, which is the renderer's doing
+    /// rather than a choice.</b> The fade is per tree and this bench runs on GL
+    /// Compatibility, where <see cref="GeometryInstance3D.Transparency"/> - the
+    /// per-instance answer - does nothing at all. Scissored alpha would let the
+    /// trees write depth and settle each other in the buffer, but a scissor cannot
+    /// fade: a tree at 0.35 would vanish outright, and that fade is the one thing
+    /// keeping a tank visible in the woods. So they are transparent objects sorted
+    /// by their own foot, which is exactly the rule the 2D layer sorted them by,
+    /// and the sort's usual failure - intersecting geometry - cannot arise between
+    /// billboards that do not touch.
+    /// </summary>
+    private void BuildTrees()
+    {
+        if (Field.Atlas is null)
+            return;
+        // A different wood, or none: Grove counts its own sowings, because the
+        // tree count does not move when a re-roll moves every tree.
+        int sown = Wood?.Sown ?? -1;
+        if (sown != _sown)
+        {
+            Fell();
+            if (Wood is not null)
+                Sow();
+            _sown = sown;
+        }
+        foreach ((PropNode tree, MeshInstance3D stem) in _standing)
+        {
+            stem.Transform = Rooted(tree);
+            // The fade the wood set this frame. Read off the node rather than
+            // pushed by whoever set it, for Selected's reason - the reveal, the
+            // slider and the reset all write it.
+            if (stem.MaterialOverride is StandardMaterial3D bark)
+                bark.AlbedoColor = new Color(1.0f, 1.0f, 1.0f, tree.Modulate.A);
+        }
+    }
+
+    private void Sow()
+    {
+        foreach (PropNode tree in Wood!.Trees)
+        {
+            (int, bool) kind = (tree.Species, tree.Mirrored);
+            if (!_stems.TryGetValue(kind, out ArrayMesh? shape))
+                _stems[kind] = shape = Stem(tree.Foot * tree.Pixels,
+                                            tree.Size * tree.Pixels, RiseFactor);
+            var stem = new MeshInstance3D
+            {
+                Mesh = shape,
+                // Sorted by where the node is, which is the trunk's foot: the
+                // same rule the tanks are sorted by and the same one the 2D
+                // ZIndex stated. By its box it would be the middle of the crown,
+                // and a crown leans.
+                SortingUseAabbCenter = false,
+                MaterialOverride = Bark(tree.Art),
+            };
+            AddChild(stem);
+            _standing[tree] = stem;
+        }
+    }
+
+    private void Fell()
+    {
+        foreach (MeshInstance3D stem in _standing.Values)
+        {
+            stem.Mesh = null;
+            stem.MaterialOverride = null;
+            stem.QueueFree();
+        }
+        _standing.Clear();
+        _stems.Clear();
+    }
+
+    /// <summary>One tree's transform, from where it stands on this board.</summary>
+    private Transform3D Rooted(PropNode tree) =>
+        Trunk(Origin + tree.Ground, Field.LevelAt(tree.Cell) * Field.Lift,
+              tree.Lean, Squash, RiseFactor);
+
+    /// <summary>
+    /// Where a tree stands and how far it is leaning, as its transform. Given the
+    /// two camera terms rather than reading them off the field, for
+    /// <see cref="Body"/>'s reason - so what it claims can be asserted without a
+    /// board under it.
+    ///
+    /// <b>The foot's row is drawn lifted</b> - it came off <c>CellCentre</c> - so
+    /// the flat row is that row with the lift put back on. The pair
+    /// <see cref="World"/> warns about, and a tree on a plateau is where it goes
+    /// wrong: read as a flat row it would stand a level too far up the board.
+    ///
+    /// Lifted clear of the face it stands on by <see cref="Clear"/>, because a
+    /// quad's base row is coplanar with the ground under it and that is
+    /// <c>hit_scar</c>'s coin toss again - and the nudge costs no screen pixels by
+    /// construction.
+    ///
+    /// <b>The lean is a shear, and the <c>rise</c> is the whole of the
+    /// conversion.</b> <see cref="PropNode.Bend"/> quotes it as screen px of drift
+    /// per screen px of height above the foot; world height is screen height over
+    /// <c>cos(e)</c>, so the basis column that carries height gains exactly
+    /// <c>lean*cos(e)</c> of x. Nothing else in the matrix moves, which is why a
+    /// gust crossing the whole wood rebuilds no geometry.
+    /// </summary>
+    public static Transform3D Trunk(Vector2 foot, float lift, float lean,
+                                    float squash, float rise)
+    {
+        Vector3 at = World(foot + new Vector2(0.0f, lift), lift, squash, rise)
+                     + Clear(squash, rise);
+        var bend = new Basis(new Vector3(1.0f, 0.0f, 0.0f),
+                             new Vector3(lean * rise, 1.0f, 0.0f),
+                             new Vector3(0.0f, 0.0f, 1.0f));
+        return new Transform3D(bend, at);
+    }
+
+    /// <summary>
+    /// One kind of tree as a quad, upright in the plane the tank's standing half
+    /// uses, with its origin at the foot.
+    ///
+    /// The rect is <see cref="PropNode"/>'s own: from <c>-Foot</c> across
+    /// <c>Size</c>, in screen px, with y down the screen. World height is screen
+    /// height over <c>cos(e)</c>, so the art keeps the height it is drawn at
+    /// exactly - the mapping is the same one that makes the board project back
+    /// onto the 2D bench's pixels.
+    ///
+    /// <b>The bottom edge may fall below the foot, and that is not a bug to
+    /// clamp.</b> Art with transparent margin under the trunk has a Size taller
+    /// than its Rise, and those rows are behind the ground here for the reason a
+    /// tank's running gear was - which costs nothing, because they are the rows
+    /// with nothing in them.
+    /// </summary>
+    public static ArrayMesh Stem(Vector2 foot, Vector2 size, float rise)
+    {
+        float left = -foot.X, right = size.X - foot.X;
+        float top = foot.Y / rise, bottom = (foot.Y - size.Y) / rise;
+
+        var st = new SurfaceTool();
+        st.Begin(Mesh.PrimitiveType.Triangles);
+        (Vector3 At, Vector2 Uv)[] corner =
+        {
+            (new Vector3(left, top, 0.0f), new Vector2(0.0f, 0.0f)),
+            (new Vector3(right, top, 0.0f), new Vector2(1.0f, 0.0f)),
+            (new Vector3(right, bottom, 0.0f), new Vector2(1.0f, 1.0f)),
+            (new Vector3(left, bottom, 0.0f), new Vector2(0.0f, 1.0f)),
+        };
+        foreach (int k in new[] { 0, 1, 2, 0, 2, 3 })
+        {
+            st.SetNormal(Vector3.Back);
+            st.SetUV(corner[k].Uv);
+            st.AddVertex(corner[k].At);
+        }
+        return st.Commit();
+    }
+
+    /// <summary>What a tree is painted with: the set's own art, unshaded because
+    /// it arrived lit, and mipmapped because it is painted at four times the size
+    /// it is drawn at - <see cref="PropNode._Ready"/>'s reason, unchanged. One per
+    /// tree, because the fade is per tree; see <see cref="BuildTrees"/>.</summary>
+    private static StandardMaterial3D Bark(Texture2D art) => new()
+    {
+        ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+        AlbedoTexture = art,
+        Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+        TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps,
+        CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+    };
 
     /// <summary>Where the line runs, as a fraction of the cell, and the two
     /// half-widths about it - <see cref="SelectionRing.Inset"/>'s 0.86 and its

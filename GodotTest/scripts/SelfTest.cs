@@ -1942,6 +1942,98 @@ public static class SelfTest
                          && t.ZIndex > SelectionRing.GroundZ),
                 "a trunk under the paint is paint");
 
+            // --- and the same wood, drawn by the stage --------------------
+            //
+            // The billboards are these trees put where the depth buffer can judge
+            // them, so what has to hold is that nothing moved. Asserted against
+            // the projection rather than against the expression that implements
+            // it - Relief3D's rule, and the reason Trunk takes its two camera
+            // terms rather than reading a board.
+            const float squashed = 0.5077f, risen = 0.8616f;
+            float Row(Vector3 at) => at.Z * squashed - at.Y * risen;
+            PropNode planted = grove.Trees[0];
+            float storey = field.LevelAt(planted.Cell) * field.Lift;
+            Vector3 root = Stage3D.Trunk(planted.Ground, storey, 0.0f,
+                                         squashed, risen).Origin;
+            Check("a tree on the stage stands on the row it was planted on",
+                Math.Abs(Row(root) - planted.Ground.Y) < 0.01f,
+                $"row {Row(root):F2} against {planted.Ground.Y:F2} - the drawn "
+                + "row carries the lift already, so reading it as a flat one "
+                + "stands a tree on a plateau a level too far up the board; and "
+                + "the clearance off the face is up-and-back, so it must cost no "
+                + "screen row at all");
+            // A level up is a level up, not a row further off - the same thing
+            // the ruts have to get right, and the same pair to get wrong.
+            // Against the tree on the floor rather than against the lift itself,
+            // because both carry the clearance off their own face and the
+            // difference is what the level is worth.
+            Vector3 upstairs = Stage3D.Trunk(planted.Ground, field.Lift, 0.0f,
+                                             squashed, risen).Origin;
+            Vector3 downstairs = Stage3D.Trunk(planted.Ground, 0.0f, 0.0f,
+                                               squashed, risen).Origin;
+            Check("and a tree a level up is a level up in the world",
+                Math.Abs((upstairs.Y - downstairs.Y) * risen - field.Lift) < 0.01f
+                && Math.Abs(Row(upstairs) - Row(downstairs)) < 0.01f,
+                $"{(upstairs.Y - downstairs.Y) * risen:F2} of height against a "
+                + $"{field.Lift:F2} lift, on the same drawn row");
+
+            // The lean, as the matrix carries it: a point a hundred screen px up
+            // drifts by a hundred times the shear, and the foot does not move.
+            // The shear is quoted in screen px per screen px, so the rise in the
+            // basis is the whole of the conversion - and dropping it would leave
+            // a wood that leans by cos(e) of what the wind says while every check
+            // on Grove's side still passed.
+            Transform3D leaning3 = Stage3D.Trunk(planted.Ground, storey, 0.05f,
+                                                 squashed, risen);
+            Vector3 head = leaning3 * new Vector3(0.0f, 100.0f / risen, 0.0f);
+            Check("the stage leans a tree by what the wind says, about its foot",
+                Math.Abs(head.X - leaning3.Origin.X - 5.0f) < 0.01f
+                && Math.Abs(Row(head) - Row(leaning3.Origin) + 100.0f) < 0.01f
+                && (Stage3D.Trunk(planted.Ground, storey, 0.0f, squashed, risen)
+                    * new Vector3(0.0f, 100.0f / risen, 0.0f)).X
+                   == leaning3.Origin.X,
+                $"{head.X - leaning3.Origin.X:F2}px of drift 100px up at a 0.05 "
+                + "shear, and a hundred screen px of height still a hundred");
+
+            // The art keeps the size it is drawn at, which is what makes the
+            // stage a different way of drawing the same wood rather than a
+            // second opinion about how big a tree is.
+            Aabb quad = Stage3D.Stem(planted.Foot * planted.Pixels,
+                                     planted.Size * planted.Pixels, risen)
+                               .GetAabb();
+            Check("and the quad is the size the tree is drawn at",
+                Math.Abs(quad.Size.X - planted.Size.X * planted.Pixels) < 0.01f
+                && Math.Abs(quad.Size.Y * risen
+                            - planted.Size.Y * planted.Pixels) < 0.01f
+                && Math.Abs(quad.End.Y * risen
+                            - planted.Foot.Y * planted.Pixels) < 0.01f,
+                $"{quad.Size.X:F1} wide and {quad.Size.Y * risen:F1} screen px "
+                + $"tall against {planted.Size.X * planted.Pixels:F1} by "
+                + $"{planted.Size.Y * planted.Pixels:F1}");
+
+            // Over the ground marks on the stage too, where the statement is a
+            // render priority rather than a z index: the decals are negative and
+            // a tree is at the default, which is also where the tanks are - so a
+            // tree and a tank settle each other by their feet and neither is
+            // paint.
+            Check("and it stands over them on the stage as well",
+                Stage3D.RutOrder < 0 && Stage3D.RingOrder < 0,
+                $"ruts {Stage3D.RutOrder}, ring {Stage3D.RingOrder} against a "
+                + "tree at 0");
+
+            // What tells somebody drawing this wood that it is a different wood.
+            // The count cannot: a re-roll moves every tree and can leave the
+            // total exactly where it was, and billboards built for trees that
+            // have been freed keep standing - a freed node still answers where
+            // it stood.
+            int counter = grove.Sown, standing = grove.Planted;
+            grove.Plant();
+            grove.Plant();
+            Check("the wood counts its own sowings",
+                grove.Sown == counter + 2 && grove.Planted == standing,
+                $"{counter} to {grove.Sown} over {standing} trees that did not "
+                + "change in number");
+
             // Hashed, not generated: --capture fixes the time step so two runs
             // can be diffed, and a board that reshuffled itself would be
             // measuring itself.

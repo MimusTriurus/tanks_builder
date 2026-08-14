@@ -157,6 +157,19 @@ public sealed partial class Grove : Node2D
     /// which is the space the depth rule is written in.</summary>
     public IReadOnlyList<PropNode> Trees => _planted;
 
+    /// <summary>
+    /// How many times the board has been sown, so somebody drawing this wood
+    /// somewhere else knows when it is a different wood.
+    ///
+    /// A counter rather than the tree count, and that is the whole reason it
+    /// exists: sowing runs on any slider drag, and the spacing, the fade and the
+    /// species can all be re-rolled without the total moving a tree. Read off
+    /// the count, <see cref="Stage3D"/> would carry on drawing billboards for
+    /// trees that had been freed - which is the quiet half, because a freed node
+    /// still answers where it stood.
+    /// </summary>
+    public int Sown { get; private set; }
+
     /// <summary>Whether a cell carries trees. Asked of the field rather than
     /// hashed here: forest is a kind of ground, chosen where the other kinds are
     /// chosen, so "how much forest" is the terrain paint and not a second dial
@@ -236,6 +249,10 @@ public sealed partial class Grove : Node2D
     public void Plant()
     {
         Clear();
+        // Counted even when nothing is sown: "the wood was cleared" is a change
+        // to the wood, and a stage that missed it would keep the last one
+        // standing.
+        Sown++;
         if (!Enabled || Field?.Atlas is null || Props is null || !Props.Any)
             return;
 
