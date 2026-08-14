@@ -2870,14 +2870,42 @@ public static class SelfTest
             worked.Advance(240.0, tick);
         }
         Check("working the engine speeds the loop up",
-            worked.RateAt(240.0) > idle.RateAt(0.0) * 1.3,
+            worked.RateAt(240.0) > idle.RateAt(0.0) * 2.0,
             $"{idle.RateAt(0.0):F1}/s at rest against {worked.RateAt(240.0):F1}/s");
+        // The straight ramp read as no change at all, and the grid says why: a
+        // one-cell order never reaches cruise, so an effect carrying its change
+        // in the top of the range spends its life showing the bottom. The curve
+        // is asserted at the speeds the tank is at rather than at the two ends,
+        // where every shape agrees - a straight ramp passes both of those and
+        // was the thing being complained about.
+        Check("and it answers the throttle where the tank actually drives",
+            worked.Response(60.0) > 0.4 && worked.Response(120.0) > 0.6,
+            $"{worked.Response(60.0) * 100.0:F0}% of the range up at a quarter"
+            + $" of cruise, {worked.Response(120.0) * 100.0:F0}% at half"
+            + $" - straight would be 25 and 50");
+        Check("but the two ends are still the two ends",
+            Math.Abs(worked.Response(0.0)) < 1e-9
+            && Math.Abs(worked.Response(240.0) - 1.0) < 1e-9,
+            "a curve that misses its own ends is a different pair of rates");
         Check("working the engine thickens the smoke",
             worked.Density > idle.Density + 0.15,
             $"{idle.Density:F2} at rest against {worked.Density:F2}");
+        // On the same curve as the rate, and asserted because it was a choice:
+        // both halves are one engine answering one throttle, and two shapes
+        // would make the plume quick and thin at the very speeds the shape is
+        // there to cover.
+        var crawling = new ExhaustLoop { Phases = 12, TopSpeed = 240.0 };
+        crawling.Advance(60.0, tick);
+        Check("and thickens it on the same curve the rate follows",
+            Math.Abs(crawling.Density
+                     - (crawling.IdleDensity
+                        + (crawling.DriveDensity - crawling.IdleDensity)
+                        * crawling.Response(60.0))) < 1e-9,
+            $"{crawling.Density:F2} at a quarter of cruise, response"
+            + $" {crawling.Response(60.0):F2}");
 
         // The knob is a multiplier over the pair, which is the whole of what
-        // keeps the 1.7x between an idling engine and a working one alive: a
+        // keeps the 2.5x between an idling engine and a working one alive: a
         // slider that set the rate would flatten it on the first drag, and the
         // load ramp is the thing the effect says about the tank.
         var turned = new ExhaustLoop { Phases = 12, TopSpeed = 240.0, Level = 2.0 };

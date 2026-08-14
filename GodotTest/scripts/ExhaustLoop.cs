@@ -24,6 +24,11 @@ namespace TankSpriteTest;
 /// engine turning harder. That an engine under load smokes more is the plainest
 /// fact about diesel exhaust there is, and it is the thing that makes the effect
 /// say something about the tank rather than just sitting there.
+///
+/// The ramp is 2.5x and bent, and both halves of that are the same complaint:
+/// the change was not visible. 1.7x straight was too narrow to read at all, and
+/// straight was the worse half of it - see <see cref="RampShape"/>, where the
+/// grid rather than the engine does the arguing.
 /// </summary>
 public sealed class ExhaustLoop
 {
@@ -32,11 +37,19 @@ public sealed class ExhaustLoop
     /// rather than a jet.</summary>
     public double IdleRate = 6.5;
 
-    /// <summary>Phases per second at <see cref="TopSpeed"/> - a lap in about a
-    /// second. Well short of the trouble the tremble runs into: that one is a
+    /// <summary>
+    /// Phases per second at <see cref="TopSpeed"/> - two and a half times the
+    /// idle, a lap in three quarters of a second.
+    ///
+    /// It was 11.0, which is 1.7x, and 1.7x turned out not to be visible. Well
+    /// short of the trouble the tremble runs into either way: that one is a
     /// waveform sampled at 60fps and has Nyquist to answer to, while this steps
-    /// a rendered frame at a few hertz.</summary>
-    public double DriveRate = 11.0;
+    /// a rendered frame at a few hertz. What it does have to answer to is
+    /// <see cref="FloorFramesPerPhase"/>, and at 16.25 a pose is held for 3.7
+    /// screen frames - clear of it, but no longer clear by a mile, so this is
+    /// the end of what the rate alone can buy.
+    /// </summary>
+    public double DriveRate = 16.25;
 
     /// <summary>How much of the layer's alpha survives, at rest and at speed. An
     /// idling engine breathes a haze and a working one smokes.</summary>
@@ -47,6 +60,30 @@ public sealed class ExhaustLoop
     /// <see cref="EngineTremble.TopSpeed"/>, so a heavy at its own cruise works
     /// as hard as a light at its.</summary>
     public double TopSpeed = 240.0;
+
+    /// <summary>
+    /// How early in the speed range the plume answers the throttle. Below 1 it
+    /// answers early; at 1 it is the straight ramp this used to be.
+    ///
+    /// The straight ramp is why widening the rates was not enough on its own,
+    /// and the reason is the grid rather than the effect:
+    /// <see cref="MovementProfile.RampDistance"/> is about 69px against a row
+    /// step of 107, so a single-cell order never reaches cruise at all and a
+    /// longer one spends its first half getting there. A plume that carries most
+    /// of its change in the top of the range therefore spends most of its life
+    /// showing the bottom of it, and what reaches the screen is an idling engine
+    /// on a tank that is plainly moving.
+    ///
+    /// A real diesel does the same thing, and for a nearer reason than symmetry:
+    /// the smoke jumps as the governor opens and then goes on much the same, so
+    /// the interesting part of the curve is at the bottom.
+    ///
+    /// The cost is named rather than argued away - the idle look now belongs to
+    /// a genuine standstill, because at a quarter of cruise the plume is already
+    /// halfway up. That is the trade asked for: the change has to be visible at
+    /// the speeds the tank is actually at.
+    /// </summary>
+    public double RampShape = 0.5;
 
     /// <summary>How many phases the atlas actually holds. Read off the layer
     /// rather than assumed: the renderer's phase count is a config value and the
@@ -59,8 +96,8 @@ public sealed class ExhaustLoop
     ///
     /// The same argument as <see cref="EngineTremble.Level"/> and the class
     /// sizes: the two figures are apart on purpose - 6.5 at rest is smoke
-    /// drifting off an idling engine and 11.0 is one under load - and a slider
-    /// that set the rate directly would flatten that 1.7x on the first drag. It
+    /// drifting off an idling engine and 16.25 is one under load - and a slider
+    /// that set the rate directly would flatten that 2.5x on the first drag. It
     /// scales both ends and leaves the ratio where it was measured.
     ///
     /// It does not touch the density, which is the other half of the load ramp.
@@ -103,10 +140,15 @@ public sealed class ExhaustLoop
         if (Phases <= 0)
             return;
         _phase = Mod(_phase + RateAt(speed) * delta, Phases);
-        // Off the ramp rather than off the rate, because the level does not
+        // Off the response and not off the rate, because the level does not
         // reach it: a plume turned down to a crawl is still an engine under
         // load, and still smokes like one.
-        Density = IdleDensity + (DriveDensity - IdleDensity) * Load(speed);
+        //
+        // The same curve as the rate, though, and deliberately: both halves are
+        // one engine answering one throttle, and putting them on two shapes
+        // would be a second thing to hold in mind for no gain - the plume would
+        // be quick and thin at the very speeds the shape is there to cover.
+        Density = IdleDensity + (DriveDensity - IdleDensity) * Response(speed);
     }
 
     /// <summary>Phases per second at a given speed. Exposed so the panel and the
@@ -122,11 +164,21 @@ public sealed class ExhaustLoop
     public double RateAt(double speed, double level) => level * Tuned(speed);
 
     private double Tuned(double speed) =>
-        IdleRate + (DriveRate - IdleRate) * Load(speed);
+        IdleRate + (DriveRate - IdleRate) * Response(speed);
 
     /// <summary>Shared with the tremble and the engine note - see
-    /// <see cref="MovementProfile.LoadAt"/>.</summary>
+    /// <see cref="MovementProfile.LoadAt"/>. Raw, and it stays raw: the shape
+    /// below is this plume's answer to the throttle and not a different opinion
+    /// about how hard the engine is working, which is what bending the shared
+    /// ramp here would quietly make it.</summary>
     public double Load(double speed) => MovementProfile.LoadAt(speed, TopSpeed);
+
+    /// <summary>How far up its own range the plume is at a given speed - the load
+    /// put through <see cref="RampShape"/>. Exposed so the curve can be asserted
+    /// at the speeds the tank is actually at, rather than only at the two ends,
+    /// where every shape agrees.</summary>
+    public double Response(double speed) =>
+        Math.Pow(Load(speed), Math.Max(RampShape, 1e-6));
 
     public void Reset()
     {
