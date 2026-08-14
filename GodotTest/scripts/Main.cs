@@ -791,6 +791,20 @@ public sealed partial class Main : Node2D
 	/// </summary>
 	private double _exhaustLevel = 1.0;
 
+	/// <summary>
+	/// The analogue load ramp instead of the two states - the panel's "load
+	/// ramp" row, or --exhaust-ramp. Off by default, and the only effect switch
+	/// here that names a superseded model rather than an optional effect: the
+	/// fire is off because a burning tank is exceptional, the hull shear because
+	/// the tube recoils for real, and this because the ramp was a faithful model
+	/// of something twelve rendered poses cannot carry - see
+	/// <see cref="ExhaustLoop.Binary"/>.
+	///
+	/// Kept rather than deleted for the reason the flash sheet is kept: "the step
+	/// reads better" stays a claim until both are on screen.
+	/// </summary>
+	private bool _exhaustRamp = !ExhaustLoop.BinaryByDefault;
+
 	private BurnLoop _burn => Active.Burn;
 	/// <summary>The tank on fire - key J, or --burning. Off by default, and
 	/// unlike the exhaust that is not a preference: a tank that is not burning
@@ -1139,6 +1153,12 @@ public sealed partial class Main : Node2D
 					 && double.TryParse(userArgs[i + 1], NumberStyles.Float,
 						 CultureInfo.InvariantCulture, out double exhaustLevel))
 				_exhaustLevel = exhaustLevel;
+			// A mode and not a level, so it gets a bare flag - the same shape as
+			// --recoil-turret. It does not imply --exhaust: the level means the
+			// same thing to both models, because it multiplies the pair either
+			// way.
+			else if (userArgs[i] == "--exhaust-ramp")
+				_exhaustRamp = true;
 			// Straight onto the static rather than waiting for the vehicles like
 			// the tremble does: this one is not held on a machine, because the
 			// rate has two readers that share no object. See Gunnery.TraverseRate.
@@ -3305,10 +3325,17 @@ public sealed partial class Main : Node2D
 	}
 
 	/// <summary>Runs every frame, moving or not, like the tremble and for the
-	/// same reason: it is the engine, not the ground. Speed only moves the rate
-	/// and the density, so there is no threshold to switch on at.</summary>
+	/// same reason: it is the engine, not the ground. Speed picks one of two
+	/// states, or walks the ramp under --exhaust-ramp.</summary>
 	private void UpdateExhaust(Vehicle v, double delta)
 	{
+		// Both settings before the early return, not after it. The panel's
+		// caption reads the rate off this instance, so a clock left on last
+		// frame's model while the exhaust is switched off would freeze under the
+		// very control describing it - and switching the model back on with the
+		// plume off, then on, would show the stale one for a frame.
+		v.Exhaust.Level = _exhaustLevel;
+		v.Exhaust.Binary = !_exhaustRamp;
 		// A wreck's engine is not idling, and this is the plainest of the
 		// several ways the bench says so.
 		if (!_exhaustEnabled || v.Wreck.Dead || !v.Atlas.HasExhaust)
@@ -3320,9 +3347,6 @@ public sealed partial class Main : Node2D
 			v.Sprite.QueueRedraw();
 			return;
 		}
-		// Here rather than at the drag, for the reason the tremble's level is
-		// pushed here - see _exhaustLevel.
-		v.Exhaust.Level = _exhaustLevel;
 		v.Exhaust.Advance(v.Speed, delta);
 		v.Sprite.ExhaustPhase = v.Exhaust.Frame;
 		v.Sprite.ExhaustDensity = (float)v.Exhaust.Density;
@@ -3920,6 +3944,7 @@ public sealed partial class Main : Node2D
 		["--no-ruts"] = new[] { "effects.ruts" },
 		["--no-exhaust"] = new[] { "effects.exhaust" },
 		["--exhaust"] = new[] { "effects.exhaust_level" },
+		["--exhaust-ramp"] = new[] { "effects.exhaust_ramp" },
 		["--burning"] = new[] { "effects.fire" },
 		["--flash"] = new[] { "effects.flash_source" },
 		["--recoil-shear"] = new[] { "effects.hull_shear" },
@@ -4193,6 +4218,10 @@ public sealed partial class Main : Node2D
 			_exhaustEnabled = on;
 			ExhaustChanged();
 		});
+		// Above the level rather than below it, because it decides what the
+		// level's caption is describing.
+		ui.Toggle("effects.exhaust_ramp", "load ramp instead of two states",
+			() => _exhaustRamp, on => _exhaustRamp = on);
 		// Frames per phase and not just the rate, because that is the question
 		// the drag runs into: the plume is twelve rendered poses stepped a few
 		// times a second, and the ceiling is how briefly a pose can be held
@@ -4208,7 +4237,14 @@ public sealed partial class Main : Node2D
 			{
 				double rate = _exhaust.RateAt(_speed, _exhaustLevel);
 				double held = ExhaustLoop.FramesPerPhase(rate);
-				return $"{rate,4:F1} phases/s at this speed"
+				// Which state, and not only the rate it works out to: the two
+				// models can agree on a number and mean different things by it,
+				// and "resting" on a tank that is plainly rolling is the one
+				// failure this row could show and otherwise would not.
+				return (_exhaustRamp
+						   ? $"ramp {_exhaust.Response(_speed) * 100.0,3:F0}%"
+						   : _exhaust.Response(_speed) > 0.0 ? "working" : "resting")
+					   + $",  {rate,4:F1} phases/s at this speed"
 					   + (double.IsInfinity(held)
 						   ? ",  stopped"
 						   : $",  {held:F1} frames a phase")
@@ -5043,6 +5079,12 @@ public sealed partial class Main : Node2D
 				 // arrived" are the same picture.
 				 + $"  exh {_tank.ExhaustPhase,2}@{_exhaust.Phase,5:F2}"
 				 + $" x{_exhaustLevel,4:F2}"
+				 // Which model, because the two agree at both ends: a trace taken
+				 // standing still, or at cruise, cannot tell them apart, and those
+				 // are the two frames most likely to be traced.
+				 + (_exhaustRamp
+					 ? $"ramp{_exhaust.Response(_speed),4:F2}"
+					 : _exhaust.Response(_speed) > 0.0 ? "work" : "rest")
 					 // slip as well as phase: the cap is a real limit, and a
 					 // belt quietly running at two thirds of the ground is not
 					 // something to have to work out from the phase alone

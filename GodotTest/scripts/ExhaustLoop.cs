@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 
 namespace TankSpriteTest;
 
@@ -25,16 +25,16 @@ namespace TankSpriteTest;
 /// fact about diesel exhaust there is, and it is the thing that makes the effect
 /// say something about the tank rather than just sitting there.
 ///
-/// The ramp is 2.5x and bent, and both halves of that are the same complaint:
-/// the change was not visible. 1.7x straight was too narrow to read at all, and
-/// straight was the worse half of it - see <see cref="RampShape"/>, where the
-/// grid rather than the engine does the arguing.
+/// Two states rather than a ramp, and the ramp is what it replaced: see
+/// <see cref="Binary"/> for why the analogue one kept losing, and
+/// <see cref="RampShape"/> for the two rounds of trying to save it.
 /// </summary>
 public sealed class ExhaustLoop
 {
-    /// <summary>Phases per second at a standstill. Twelve phases at 6.5 is a lap
-    /// every 1.85s, which at this plume's 37px of rise is smoke drifting up
-    /// rather than a jet.</summary>
+    /// <summary>Phases per second at a standstill - the whole of the resting
+    /// state under <see cref="Binary"/>. Twelve phases at 6.5 is a lap every
+    /// 1.85s, which at this plume's 37px of rise is smoke drifting up rather
+    /// than a jet.</summary>
     public double IdleRate = 6.5;
 
     /// <summary>
@@ -62,8 +62,60 @@ public sealed class ExhaustLoop
     public double TopSpeed = 240.0;
 
     /// <summary>
+    /// Two states - resting and working - rather than a ramp between them.
+    ///
+    /// It is the default because the analogue model lost three times running,
+    /// and each loss was the same shape: a quantity that varies continuously,
+    /// shown through a conveyor of twelve rendered poses, is a change nobody can
+    /// see. 1.7x straight was invisible. 2.5x straight was invisible for a
+    /// second reason - the grid, see <see cref="RampShape"/>. 2.5x bent was
+    /// visible and then measured out at the ceiling for about half of every
+    /// order longer than one cell, so most of what the curve bought was spent
+    /// arriving somewhere it then sat.
+    ///
+    /// So the honest reading of what survived is that the plume has two states,
+    /// and the ramp was an accurate model of a thing the medium cannot carry.
+    /// The step is legible on every order at every length, which is the property
+    /// the ramp never had.
+    ///
+    /// What is given up is named: the plume no longer says how fast, only
+    /// whether. That was already most of the truth - the measured spread across
+    /// a whole move was x2.01 to x2.32 between classes, tighter than the step it
+    /// is now made of - and the effects that do say how fast are the tremble,
+    /// which is continuous by nature, and the belts, which are tied to the
+    /// ground. The analogue model stays behind the flag rather than being
+    /// deleted, for the reason the muzzle-flash sheet does: "the step reads
+    /// better" is a claim, and a claim needs both sides on screen.
+    /// </summary>
+    public bool Binary = BinaryByDefault;
+
+    /// <summary>Named once, not left in the field initialiser, because a default
+    /// nobody can point at is a default that quietly flips back - the argument
+    /// <see cref="Recoil.ShearOnByDefault"/> makes.</summary>
+    public const bool BinaryByDefault = true;
+
+    /// <summary>
+    /// The speed, as a fraction of <see cref="TopSpeed"/>, above which the tank
+    /// counts as working. Only <see cref="Binary"/> reads it.
+    ///
+    /// Small, because there is nothing to tune here: the question is where a
+    /// tank stops being stopped, and speed passes through this once on the way
+    /// out and once on the way in. It cannot chatter - the mover accelerates and
+    /// brakes monotonically, and the one speed it holds below cruise is the
+    /// creep at a path bend, which is 12% of cruise and therefore working. A
+    /// tank grinding round a corner is working, so that is the right answer and
+    /// not a lucky one.
+    ///
+    /// Not zero, because a tank arriving is a few hundredths of a pixel a second
+    /// for a frame or two, and a plume that steps up for those frames is a flick
+    /// at the end of every order.
+    /// </summary>
+    public double MoveThreshold = 0.02;
+
+    /// <summary>
     /// How early in the speed range the plume answers the throttle. Below 1 it
-    /// answers early; at 1 it is the straight ramp this used to be.
+    /// answers early; at 1 it is the straight ramp this started as. Read only
+    /// when <see cref="Binary"/> is off.
     ///
     /// The straight ramp is why widening the rates was not enough on its own,
     /// and the reason is the grid rather than the effect:
@@ -173,12 +225,24 @@ public sealed class ExhaustLoop
     /// ramp here would quietly make it.</summary>
     public double Load(double speed) => MovementProfile.LoadAt(speed, TopSpeed);
 
-    /// <summary>How far up its own range the plume is at a given speed - the load
-    /// put through <see cref="RampShape"/>. Exposed so the curve can be asserted
-    /// at the speeds the tank is actually at, rather than only at the two ends,
-    /// where every shape agrees.</summary>
-    public double Response(double speed) =>
-        Math.Pow(Load(speed), Math.Max(RampShape, 1e-6));
+    /// <summary>
+    /// How far up its own range the plume is at a given speed: under
+    /// <see cref="Binary"/> a 0 or a 1, otherwise the load through
+    /// <see cref="RampShape"/>.
+    ///
+    /// One function for both models, and every consumer goes through it - the
+    /// rate, the density, the caption and the assertions. Two models mean two
+    /// chances to disagree about what the engine is doing, and the way that
+    /// failure looks is a plume cycling like a working one while breathing like
+    /// an idling one.
+    ///
+    /// Exposed because the curve has to be assertable at the speeds the tank is
+    /// actually at: at the two ends every shape agrees, so an ends-only check
+    /// passes the straight ramp, which is the thing that was complained about.
+    /// </summary>
+    public double Response(double speed) => Binary
+        ? (Load(speed) > MoveThreshold ? 1.0 : 0.0)
+        : Math.Pow(Load(speed), Math.Max(RampShape, 1e-6));
 
     public void Reset()
     {
@@ -188,3 +252,5 @@ public sealed class ExhaustLoop
 
     private static double Mod(double a, double n) => (a % n + n) % n;
 }
+
+

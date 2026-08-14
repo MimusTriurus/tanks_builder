@@ -2872,21 +2872,60 @@ public static class SelfTest
         Check("working the engine speeds the loop up",
             worked.RateAt(240.0) > idle.RateAt(0.0) * 2.0,
             $"{idle.RateAt(0.0):F1}/s at rest against {worked.RateAt(240.0):F1}/s");
-        // The straight ramp read as no change at all, and the grid says why: a
-        // one-cell order never reaches cruise, so an effect carrying its change
-        // in the top of the range spends its life showing the bottom. The curve
-        // is asserted at the speeds the tank is at rather than at the two ends,
-        // where every shape agrees - a straight ramp passes both of those and
-        // was the thing being complained about.
-        Check("and it answers the throttle where the tank actually drives",
-            worked.Response(60.0) > 0.4 && worked.Response(120.0) > 0.6,
-            $"{worked.Response(60.0) * 100.0:F0}% of the range up at a quarter"
-            + $" of cruise, {worked.Response(120.0) * 100.0:F0}% at half"
-            + $" - straight would be 25 and 50");
         Check("but the two ends are still the two ends",
             Math.Abs(worked.Response(0.0)) < 1e-9
             && Math.Abs(worked.Response(240.0) - 1.0) < 1e-9,
-            "a curve that misses its own ends is a different pair of rates");
+            "either model has to agree with itself about resting and working");
+
+        // Two states is the delivered model, so the assertion is that there is
+        // no third: a plume that reads "part way" is the analogue one, which was
+        // measured out and put behind a flag.
+        Check("moving is one state, whatever speed it is",
+            new[] { 12.0, 60.0, 120.0, 200.0, 240.0 }.All(s =>
+                Math.Abs(worked.RateAt(s) - worked.RateAt(240.0)) < 1e-9),
+            $"{worked.RateAt(60.0):F2}/s at a quarter of cruise"
+            + $" against {worked.RateAt(240.0):F2}/s at cruise");
+        Check("and the step is the whole 2.5x",
+            Math.Abs(worked.RateAt(240.0) / worked.RateAt(0.0) - 2.5) < 1e-9,
+            $"{worked.RateAt(240.0) / worked.RateAt(0.0):F2}x between the states");
+        // The creep at a path bend is a real held speed below cruise, and it is
+        // the only one - so it decides whether the threshold has a case to
+        // answer. A tank grinding round a corner is working.
+        Check("a tank creeping round a bend still counts as working",
+            worked.Response(240.0 * MovementProfile.Medium.CornerFraction) == 1.0,
+            $"the crawl is {MovementProfile.Medium.CornerFraction * 100.0:F0}% of"
+            + $" cruise against a threshold of {worked.MoveThreshold * 100.0:F0}%");
+        // A real speed and not one derived from the threshold: written as a
+        // fraction of MoveThreshold this passes with the threshold at zero,
+        // which is the one setting it exists to rule out.
+        Check("but arriving does not flick the plume up",
+            worked.Response(0.05) == 0.0,
+            "a twentieth of a pixel a second is a tank that has stopped,"
+            + $" against a threshold of {worked.MoveThreshold * 240.0:F1} px/s");
+        // The step is in the rate, never in the phase - the property the whole
+        // class is built round. A discontinuous rate is fine; a discontinuous
+        // phase is the pop that integrating exists to prevent.
+        var stepping = new ExhaustLoop { Phases = 12, TopSpeed = 240.0 };
+        for (int i = 0; i < 120; i++)
+            stepping.Advance(0.0, tick);
+        double resting = stepping.Phase;
+        stepping.Advance(240.0, tick);
+        Check("and the step lands in the rate, not in the phase",
+            Math.Abs(stepping.Phase - resting - stepping.RateAt(240.0) * tick) < 1e-9,
+            $"moved {stepping.Phase - resting:F4} phases, one frame at the working"
+            + $" rate is {stepping.RateAt(240.0) * tick:F4}");
+
+        // The analogue model, named explicitly, because a check that silently
+        // ran against the delivered one would be a check that does not run: the
+        // curve and the straight ramp agree at both ends, and the ends are all a
+        // two-state clock has.
+        var analogue = new ExhaustLoop { Phases = 12, TopSpeed = 240.0, Binary = false };
+        Check("the ramp behind the flag is still the curved one",
+            analogue.Response(60.0) > 0.4 && analogue.Response(120.0) > 0.6
+            && analogue.Response(60.0) < 1.0,
+            $"{analogue.Response(60.0) * 100.0:F0}% of the range up at a quarter"
+            + $" of cruise, {analogue.Response(120.0) * 100.0:F0}% at half"
+            + " - straight would be 25 and 50");
         Check("working the engine thickens the smoke",
             worked.Density > idle.Density + 0.15,
             $"{idle.Density:F2} at rest against {worked.Density:F2}");
