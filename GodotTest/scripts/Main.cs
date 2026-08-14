@@ -776,6 +776,21 @@ public sealed partial class Main : Node2D
 	/// an interpretation laid over one.</summary>
 	private bool _exhaustEnabled = true;
 
+	/// <summary>
+	/// How fast the plume walks its loop, as a multiplier over the pair of rates
+	/// - see <see cref="ExhaustLoop.Level"/>.
+	///
+	/// The board's, not the driven tank's, for the reason the tremble's is: how
+	/// hard the exhaust cycles is a question about the effect and not about one
+	/// machine, so it reaches all three. A level written onto the selected
+	/// vehicle moves a third of the board and reads as a slider that does
+	/// nothing.
+	///
+	/// Pushed in <see cref="UpdateExhaust"/> rather than on the drag, so a tank
+	/// built later cannot miss it.
+	/// </summary>
+	private double _exhaustLevel = 1.0;
+
 	private BurnLoop _burn => Active.Burn;
 	/// <summary>The tank on fire - key J, or --burning. Off by default, and
 	/// unlike the exhaust that is not a preference: a tank that is not burning
@@ -1117,6 +1132,13 @@ public sealed partial class Main : Node2D
 				// for - see _trembleLevel. The copy was needed while the slider
 				// wrote one tank's own amplitude and the flag had to write three.
 				_trembleLevel = trembleLevel;
+			// Asking for a rate is not asking for the effect, unlike the recoil
+			// level: the exhaust is on by default, so --no-exhaust and this one
+			// are about different things and neither implies the other.
+			else if (userArgs[i] == "--exhaust" && i + 1 < userArgs.Length
+					 && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+						 CultureInfo.InvariantCulture, out double exhaustLevel))
+				_exhaustLevel = exhaustLevel;
 			// Straight onto the static rather than waiting for the vehicles like
 			// the tremble does: this one is not held on a machine, because the
 			// rate has two readers that share no object. See Gunnery.TraverseRate.
@@ -3298,6 +3320,9 @@ public sealed partial class Main : Node2D
 			v.Sprite.QueueRedraw();
 			return;
 		}
+		// Here rather than at the drag, for the reason the tremble's level is
+		// pushed here - see _exhaustLevel.
+		v.Exhaust.Level = _exhaustLevel;
 		v.Exhaust.Advance(v.Speed, delta);
 		v.Sprite.ExhaustPhase = v.Exhaust.Frame;
 		v.Sprite.ExhaustDensity = (float)v.Exhaust.Density;
@@ -3894,6 +3919,7 @@ public sealed partial class Main : Node2D
 		["--no-tracks"] = new[] { "effects.tracks" },
 		["--no-ruts"] = new[] { "effects.ruts" },
 		["--no-exhaust"] = new[] { "effects.exhaust" },
+		["--exhaust"] = new[] { "effects.exhaust_level" },
 		["--burning"] = new[] { "effects.fire" },
 		["--flash"] = new[] { "effects.flash_source" },
 		["--recoil-shear"] = new[] { "effects.hull_shear" },
@@ -4167,6 +4193,29 @@ public sealed partial class Main : Node2D
 			_exhaustEnabled = on;
 			ExhaustChanged();
 		});
+		// Frames per phase and not just the rate, because that is the question
+		// the drag runs into: the plume is twelve rendered poses stepped a few
+		// times a second, and the ceiling is how briefly a pose can be held
+		// before the loop reads as a flicker rather than as smoke. The rate
+		// alone does not say how close to it you are, and the multiplier says
+		// less than that.
+		//
+		// Reads the board's level rather than the driven tank's - see
+		// _exhaustLevel and ExhaustLoop.RateAt(speed, level).
+		ui.Slide("effects.exhaust_level", "exhaust rate", 0.0, 3.0, 0.05,
+			() => _exhaustLevel, v => _exhaustLevel = v, "x",
+			() =>
+			{
+				double rate = _exhaust.RateAt(_speed, _exhaustLevel);
+				double held = ExhaustLoop.FramesPerPhase(rate);
+				return $"{rate,4:F1} phases/s at this speed"
+					   + (double.IsInfinity(held)
+						   ? ",  stopped"
+						   : $",  {held:F1} frames a phase")
+					   + (held < ExhaustLoop.FloorFramesPerPhase
+						   ? $" - under {ExhaustLoop.FloorFramesPerPhase:F0}, flickers"
+						   : "");
+			});
 		ui.Toggle("effects.fire", "on fire  (J)", () => _burning, on =>
 		{
 			_burning = on;
@@ -4989,7 +5038,11 @@ public sealed partial class Main : Node2D
 					 // that failed to fire - which is exactly the confusion the
 					 // '@turret'/'@body' marker was added to prevent.
 					 + $"{(_recoilShear ? "" : "!off")}"
-					 + $"  exh {_tank.ExhaustPhase,2}@{_exhaust.Phase,5:F2}"
+					 // The level beside the phase, for the reason the traverse
+				 // prints its own: "the tuned figure is in" and "the flag
+				 // arrived" are the same picture.
+				 + $"  exh {_tank.ExhaustPhase,2}@{_exhaust.Phase,5:F2}"
+				 + $" x{_exhaustLevel,4:F2}"
 					 // slip as well as phase: the cap is a real limit, and a
 					 // belt quietly running at two thirds of the ground is not
 					 // something to have to work out from the phase alone

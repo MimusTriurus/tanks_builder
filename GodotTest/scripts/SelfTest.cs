@@ -2876,6 +2876,47 @@ public static class SelfTest
             worked.Density > idle.Density + 0.15,
             $"{idle.Density:F2} at rest against {worked.Density:F2}");
 
+        // The knob is a multiplier over the pair, which is the whole of what
+        // keeps the 1.7x between an idling engine and a working one alive: a
+        // slider that set the rate would flatten it on the first drag, and the
+        // load ramp is the thing the effect says about the tank.
+        var turned = new ExhaustLoop { Phases = 12, TopSpeed = 240.0, Level = 2.0 };
+        Check("the exhaust level scales both ends of the ramp",
+            Math.Abs(turned.RateAt(0.0) - idle.RateAt(0.0) * 2.0) < 1e-9
+            && Math.Abs(turned.RateAt(240.0) - worked.RateAt(240.0) * 2.0) < 1e-9,
+            $"{turned.RateAt(0.0):F1}/s at rest and {turned.RateAt(240.0):F1}/s worked");
+        Check("and leaves the spread between them where it was measured",
+            Math.Abs(turned.RateAt(240.0) / turned.RateAt(0.0)
+                     - worked.RateAt(240.0) / idle.RateAt(0.0)) < 1e-9,
+            $"{turned.RateAt(240.0) / turned.RateAt(0.0):F2}x either way");
+        // The other half of the ramp is not its business. Two questions answered
+        // by one control make every A/B taken on it a measurement of both.
+        var thick = new ExhaustLoop { Phases = 12, TopSpeed = 240.0, Level = 2.5 };
+        for (int i = 0; i < 60; i++)
+            thick.Advance(240.0, tick);
+        Check("but does not touch how thick the smoke is",
+            Math.Abs(thick.Density - worked.Density) < 1e-9,
+            $"{thick.Density:F2} turned up against {worked.Density:F2}");
+        var stalled = new ExhaustLoop { Phases = 12, TopSpeed = 240.0, Level = 0.0 };
+        for (int i = 0; i < 600; i++)
+            stalled.Advance(240.0, tick);
+        Check("at zero the plume holds its pose",
+            stalled.Phase == 0.0 && stalled.Frame == 0,
+            $"phase {stalled.Phase:F3} after ten seconds at cruise");
+        // The ceiling the caption prints, asserted at the value it is printed
+        // from: the slider reaches past it on purpose - a knob that cannot show
+        // what too much looks like is not much of a knob - but the tuned setting
+        // has to be clear of it, or the plume flickers as delivered.
+        Check("the tuned level is clear of the flicker floor",
+            ExhaustLoop.FramesPerPhase(worked.RateAt(240.0))
+            > ExhaustLoop.FloorFramesPerPhase * 1.5,
+            $"{ExhaustLoop.FramesPerPhase(worked.RateAt(240.0)):F1} frames a phase"
+            + $" against a floor of {ExhaustLoop.FloorFramesPerPhase:F0}");
+        Check("and the slider can be dragged past it",
+            ExhaustLoop.FramesPerPhase(new ExhaustLoop { TopSpeed = 240.0, Level = 3.0 }
+                .RateAt(240.0)) < ExhaustLoop.FloorFramesPerPhase,
+            "too much has to be reachable, or the caption warns about nothing");
+
         // The phase is integrated, not rate times elapsed time. The second form
         // moves the whole loop when the rate moves, so pulling away after a long
         // idle would jump by the rate difference times the whole idle - several

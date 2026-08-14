@@ -54,6 +54,38 @@ public sealed class ExhaustLoop
     /// seam.</summary>
     public int Phases = 12;
 
+    /// <summary>
+    /// A multiplier over the pair of rates, not a rate.
+    ///
+    /// The same argument as <see cref="EngineTremble.Level"/> and the class
+    /// sizes: the two figures are apart on purpose - 6.5 at rest is smoke
+    /// drifting off an idling engine and 11.0 is one under load - and a slider
+    /// that set the rate directly would flatten that 1.7x on the first drag. It
+    /// scales both ends and leaves the ratio where it was measured.
+    ///
+    /// It does not touch the density, which is the other half of the load ramp.
+    /// How thick the smoke is is not the question this knob asks, and answering
+    /// two questions with one control makes any A/B taken on it a measurement of
+    /// both - the objection that keeps the tracer's size and its smoke's on two
+    /// sliders.
+    /// </summary>
+    public double Level = 1.0;
+
+    /// <summary>Frames one phase is held for at the ceiling, and the whole of
+    /// why this slider has a limit worth printing. The plume is a rendered
+    /// frame stepped a few times a second, so it has no Nyquist to answer to the
+    /// way the tremble's waveform does - what it has is a conveyor of twelve
+    /// poses, and below about two screen frames a pose the loop stops reading as
+    /// smoke moving and starts reading as a flicker. There is nothing for it to
+    /// blur into the way a track has its own smear.</summary>
+    public const double FloorFramesPerPhase = 2.0;
+
+    /// <summary>Screen frames one phase lasts at a given rate. Named here rather
+    /// than divided out at the caption, so the number the slider prints and the
+    /// number the assertion checks are the same number.</summary>
+    public static double FramesPerPhase(double rate) =>
+        rate <= 0.0 ? double.PositiveInfinity : 60.0 / rate;
+
     private double _phase;
 
     /// <summary>Continuous position round the loop, in phases.</summary>
@@ -70,15 +102,26 @@ public sealed class ExhaustLoop
     {
         if (Phases <= 0)
             return;
-        double load = Load(speed);
-        _phase = Mod(_phase + (IdleRate + (DriveRate - IdleRate) * load) * delta,
-            Phases);
-        Density = IdleDensity + (DriveDensity - IdleDensity) * load;
+        _phase = Mod(_phase + RateAt(speed) * delta, Phases);
+        // Off the ramp rather than off the rate, because the level does not
+        // reach it: a plume turned down to a crawl is still an engine under
+        // load, and still smokes like one.
+        Density = IdleDensity + (DriveDensity - IdleDensity) * Load(speed);
     }
 
     /// <summary>Phases per second at a given speed. Exposed so the panel and the
     /// assertions can read the rate rather than recompute the ramp.</summary>
-    public double RateAt(double speed) =>
+    public double RateAt(double speed) => Level * Tuned(speed);
+
+    /// <summary>The rate at a given speed and a given level, without asking what
+    /// level this instance is on - see <see cref="EngineTremble.TravelAt"/>. The
+    /// caption is showing the board's level, which reaches the vehicles a frame
+    /// later and does not reach them at all while the exhaust is switched off,
+    /// so one read off an instance would freeze under the drag describing
+    /// it.</summary>
+    public double RateAt(double speed, double level) => level * Tuned(speed);
+
+    private double Tuned(double speed) =>
         IdleRate + (DriveRate - IdleRate) * Load(speed);
 
     /// <summary>Shared with the tremble and the engine note - see
