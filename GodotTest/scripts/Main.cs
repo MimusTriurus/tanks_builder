@@ -243,6 +243,13 @@ public sealed partial class Main : Node2D
 	/// </summary>
 	private bool _stage3d;
 
+	/// <summary>Whether <c>--no-3d</c> was given. Held apart from
+	/// <see cref="_stage3d"/> rather than clearing it, because the two are asked at
+	/// different times: the flag is parsed before the field exists and the refusal
+	/// has to survive <c>panel.json</c>'s default for <c>view.stage</c>, which is
+	/// what closed the only door to the 2D board.</summary>
+	private bool _noStage;
+
 	private Stage3D? _stage;
 
 	/// <summary>
@@ -1213,6 +1220,14 @@ public sealed partial class Main : Node2D
 				_stage3d = true;
 				_relief = true;
 			}
+			// And the way back, which panel.json's default for view.stage took
+			// away: the stage opens by default now, so the 2D board - the thing
+			// every measurement on the stage is measured against - had no path
+			// from the command line at all. A flag rather than an edit to the
+			// file, by the rule the whole bench runs on: a capture is evidence,
+			// and taking it twice must not need an edit between the two.
+			else if (userArgs[i] == "--no-3d")
+				_noStage = true;
 			// The A/B the outline is judged by, and the reason it is a flag: the
 			// question it answers is whether the board still reads as ground with
 			// a line on every cell, and that is two captures, not a hand on the
@@ -1649,6 +1664,13 @@ public sealed partial class Main : Node2D
 			if (_rollOnly)
 				vehicle.Rumble.Amplitude = 0.0;
 		}
+		// Said out loud rather than left to the row claim: --no-3d works because
+		// FlagRows keeps panel.json's default off view.stage, and a table entry is
+		// not where a refusal should live on its own - drop the entry and the flag
+		// stops working with nothing to read. Here it also covers the file having
+		// turned the stage on before this point.
+		if (_noStage)
+			Staged = false;
 		Active.Burning = _burnAtStart;
 		// After the burning flag, because a wreck lights its own fire and would
 		// otherwise be put out by a flag that was not asked for.
@@ -3909,6 +3931,7 @@ public sealed partial class Main : Node2D
 		// the board's row addresses whichever board is drawing, so the file is
 		// free to answer them and this list is down to what the flag really owns.
 		["--3d"] = new[] { "view.stage", "ground.relief" },
+		["--no-3d"] = new[] { "view.stage" },
 		["--no-cell-edges"] = new[] { "view.edges" },
 		["--grade"] = new[] { "ground.relief", "ground.grade" },
 		["--terrain"] = new[] { "ground.terrain" },

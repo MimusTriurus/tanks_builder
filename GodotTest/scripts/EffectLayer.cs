@@ -206,13 +206,48 @@ public sealed partial class EffectLayer : Node2D
         : Clock is Clocks.HitBurst or Clocks.HitDust ? Tank.HitOffset
         : Vector2.Zero;
 
+    /// <summary>
+    /// What every emitting layer is drawn with: addition that leaves the alpha
+    /// channel alone.
+    ///
+    /// <b>One material for both boards, and the render target is why it had to
+    /// change.</b> On the canvas the two are the same picture - premultiplied
+    /// blending with nought alpha is <c>dst.rgb + src.rgb</c>, which is what
+    /// <see cref="CanvasItemMaterial.BlendModeEnum.Add"/> does - and the 2D bench
+    /// is byte for byte where it was. Inside <see cref="Stage3D"/>'s render target
+    /// it is the difference between the effect working and not: Add accumulates
+    /// alpha as well as light, so a flame over open ground raised the target's
+    /// alpha and the quad then took that much of the ground away again, and
+    /// nothing was left of the flame but a dull patch. Measured on the same
+    /// burning tank, against the canvas: 9 levels of red gone with Add, 7 with
+    /// premultiplied display alone, <b>1</b> with this.
+    ///
+    /// So an emitting layer says what it is: light to add, and nothing to hide
+    /// behind. What it is composited against is the dark half beneath it - the
+    /// burn column, the dust - which is the whole reason those exist.
+    /// </summary>
+    /// <remarks>Internal so the check can ask whether an emitting layer is
+    /// emitting - the pair of shaders is one statement, and half of it in the
+    /// wrong mode is a flame that vanishes on one board and not the other.
+    /// </remarks>
+    internal static readonly ShaderMaterial Glow = new()
+    {
+        Shader = new Shader
+        {
+            Code = @"
+shader_type canvas_item;
+render_mode blend_premul_alpha, unshaded;
+void fragment() {
+    COLOR = vec4(COLOR.rgb * COLOR.a, 0.0);
+}
+",
+        },
+    };
+
     public static EffectLayer Additive(string layer) => new()
     {
         Layer = layer,
-        Material = new CanvasItemMaterial
-        {
-            BlendMode = CanvasItemMaterial.BlendModeEnum.Add,
-        },
+        Material = Glow,
     };
 
     public static EffectLayer Normal(string layer) => new() { Layer = layer };
@@ -246,10 +281,7 @@ public sealed partial class EffectLayer : Node2D
         Layer = layer,
         FollowsHull = true,
         Clock = Clocks.BurningFire,
-        Material = new CanvasItemMaterial
-        {
-            BlendMode = CanvasItemMaterial.BlendModeEnum.Add,
-        },
+        Material = Glow,
     };
 
     /// <summary>A shell arriving: dust with normal alpha, and it goes into the
@@ -268,10 +300,7 @@ public sealed partial class EffectLayer : Node2D
         Layer = layer,
         FollowsHull = true,
         Clock = Clocks.HitBurst,
-        Material = new CanvasItemMaterial
-        {
-            BlendMode = CanvasItemMaterial.BlendModeEnum.Add,
-        },
+        Material = Glow,
     };
 
     /// <summary>What a shell left on one plate: normal alpha, on the hull's

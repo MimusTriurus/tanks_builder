@@ -3193,6 +3193,37 @@ public static class SelfTest
             < Array.IndexOf(TankSprite.LayerOrder, AtlasSet.FireName),
             string.Join(" -> ", TankSprite.LayerOrder));
 
+        // Every emitting layer is emitting, on both boards, and that is one
+        // statement in two places: the layer adds light without touching alpha,
+        // and the stage displays its render target premultiplied. Either half back
+        // on straight alpha and the flame dies inside the target - an additive
+        // layer raises rgb over a background whose alpha stays at nought, and the
+        // quad then scales that rgb by almost nought. Measured on one burning
+        // tank against the canvas: 9 levels of red gone, and the flame visibly
+        // duller for it.
+        //
+        // Read off the shaders rather than described, because the failure is a
+        // render mode and nothing else about the pass changes with it.
+        var emitters = new[]
+        {
+            TankSprite.MakeLayer(AtlasSet.FireName),
+            TankSprite.MakeLayer(AtlasSet.BurstName),
+            TankSprite.MakeLayer("flash"),
+        };
+        Check("light adds to the ground on either board",
+            emitters.All(l => ReferenceEquals(l.Material, EffectLayer.Glow))
+            && EffectLayer.Glow.Shader.Code.Contains("blend_premul_alpha")
+            && Stage3D.PaintShader.Contains("blend_premul_alpha"),
+            emitters.Any(l => !ReferenceEquals(l.Material, EffectLayer.Glow))
+                ? "an emitting layer is drawing with something else"
+                : "one of the two shaders is not premultiplied, so the flame is "
+                  + "being multiplied by an alpha it never asked to have");
+        Check("and it hides nothing while it does",
+            EffectLayer.Glow.Shader.Code.Contains("COLOR.a, 0.0"),
+            "an emitting layer that writes alpha takes the ground away by as "
+            + "much as it lights it - the dark half beneath it is the burn "
+            + "column's job, not the flame's");
+
         if (!atlas.HasBurning)
         {
             Check($"{atlas.Tag} has both rendered burning layers", false,

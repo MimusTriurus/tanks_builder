@@ -160,6 +160,12 @@ public sealed partial class Stage3D : Node3D
         /// frames later.</summary>
         public float Drop;
         public Vector3 Line;
+
+        /// <summary>Whether the quad is currently wearing the material that
+        /// ignores depth. Held so the swap happens on a change rather than every
+        /// frame: a new material per frame is a new shader binding per frame.
+        /// </summary>
+        public bool Over;
     }
 
     // --- the mapping ---------------------------------------------------------
@@ -304,24 +310,77 @@ public sealed partial class Stage3D : Node3D
             // middle of the footprint, which is longer on some headings than on
             // others, and two tanks abreast would swap on a turn.
             SortingUseAabbCenter = false,
-            // Unshaded because the sprite is already lit - it was rendered with
-            // its own three-point rig - and nearest because at 1:1 a resampled
-            // atlas is the one thing that would make these look worse than the
-            // 2D bench draws them.
-            MaterialOverride = new StandardMaterial3D
-            {
-                ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
-                AlbedoTexture = paint.GetTexture(),
-                Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
-                TextureFilter = BaseMaterial3D.TextureFilterEnum.Nearest,
-                CullMode = BaseMaterial3D.CullModeEnum.Disabled,
-            },
+            MaterialOverride = Paint(paint.GetTexture(), false),
         };
         AddChild(quad);
         _stands[vehicle] = new Stand
         {
             Paint = paint, Holder = holder, Quad = quad, Home = home,
         };
+    }
+
+    /// <summary>
+    /// What a tank's picture is drawn with, and the blend mode is the whole
+    /// reason it is a shader rather than <see cref="StandardMaterial3D"/>.
+    ///
+    /// <b>A render target holds premultiplied colour, and the additive layers are
+    /// what makes that matter.</b> Drawing into a transparent target with ordinary
+    /// alpha leaves <c>rgb*a</c> in it - that is what the blend equation puts
+    /// there - so displaying it with straight alpha blending multiplies by the
+    /// alpha a second time. On the body that is a dark fringe round the
+    /// silhouette; on the flame it is the effect disappearing, because an additive
+    /// layer adds rgb to a target whose alpha stays near nought and the quad then
+    /// scales that rgb by almost nought. Measured against the 2D bench, the same
+    /// burning tank: the stage took 9 levels of red out of the picture where the
+    /// canvas took 1, and the flame read visibly duller.
+    ///
+    /// <c>blend_premul_alpha</c> is <c>rgb + dst*(1-a)</c>, which is exactly what
+    /// the target holds: the ordinary layers composite as they always did and the
+    /// additive ones land on the ground behind the tank, which is where they were
+    /// always meant to land. <b>And it keeps every ordering inside the sprite</b> -
+    /// the per-heading turret order, the holdouts, the burst that goes behind the
+    /// hull - which the obvious answer, a second render target for the additive
+    /// layers, would have thrown away for the same result.
+    ///
+    /// Unshaded because the sprite is already lit - it was rendered with its own
+    /// three-point rig - nearest because at 1:1 a resampled atlas is the one thing
+    /// that would make these look worse than the 2D bench draws them, and no depth
+    /// written because a tank that wrote depth would settle its own transparent
+    /// fringe against the ground.
+    /// </summary>
+    /// <remarks>Internal so the check can read the render mode: this shader and
+    /// <see cref="EffectLayer.Glow"/> are one statement in two places, and either
+    /// of them back on straight alpha kills the flame.</remarks>
+    internal const string PaintShader = @"
+shader_type spatial;
+render_mode unshaded, blend_premul_alpha, depth_draw_never, cull_disabled{0};
+uniform sampler2D picture : source_color, filter_nearest;
+void fragment() {{
+    vec4 c = texture(picture, UV);
+    ALBEDO = c.rgb;
+    ALPHA = c.a;
+}}
+";
+
+    /// <summary>The same shader with the depth test off, for the legs where the
+    /// tank is drawn over the ground - see <see cref="Place"/>. Two shaders rather
+    /// than a uniform because the test is a render mode: it is compiled in, not
+    /// set.</summary>
+    private static readonly Shader Tested = new()
+    {
+        Code = string.Format(PaintShader, ""),
+    };
+
+    private static readonly Shader Free = new()
+    {
+        Code = string.Format(PaintShader, ", depth_test_disabled"),
+    };
+
+    private static ShaderMaterial Paint(Texture2D picture, bool overGround)
+    {
+        var ink = new ShaderMaterial { Shader = overGround ? Free : Tested };
+        ink.SetShaderParameter("picture", picture);
+        return ink;
     }
 
     /// <summary>
@@ -619,8 +678,16 @@ public sealed partial class Stage3D : Node3D
             // stage exists to show. The split machinery above keeps running;
             // with the test off it just decides nothing until the tank
             // stops.
-            if (stand.Quad.MaterialOverride is StandardMaterial3D paint)
-                paint.NoDepthTest = vehicle.Levelling || vehicle.OnSlope;
+            //
+            // Swapped rather than switched, because the depth test is a render
+            // mode and a render mode is compiled in - see Paint.
+            bool over = vehicle.Levelling || vehicle.OnSlope;
+            if (over != stand.Over)
+            {
+                stand.Quad.MaterialOverride =
+                    Paint(stand.Paint.GetTexture(), over);
+                stand.Over = over;
+            }
         }
         // The mark goes where the tank touches the ground, every frame, for the
         // reason the 2D ring follows the contact patch: a tank spends most of an
