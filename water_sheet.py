@@ -6,30 +6,35 @@ at all.  What comes out of here is four frames of one calm hexagon, squashed
 onto the board's camera and cut to the plate exactly, which is what the pond
 surface in ``Stage3D`` draws.
 
-**Only the top row, and that is a measurement rather than a preference.**  Rows
-two and three carry spray that runs off the top of their own plate, so their
-alpha touches the row above and no boundary between them can be *found* - it
-would have to be declared, and a declared grid is a second opinion about a
-number the file already answers.  The calm quartet has no overhang at all: its
-bounding box **is** its plate, so the frame needs no template, no anchor and no
-overhang machinery.  That is the whole reason those four are the ford's frames
-and not just the quiet-looking ones.
+**All twelve, as three bands of four**, because that is what the sheet is: it
+escalates monotonically from a flat calm to a breaking sea, and the pond reads
+the ladder as a sea *state* rather than as one long animation.  Calm under a
+still cell, chop under a cell a tank is driving through, break where one has just
+crossed a shoreline.
 
-The other two reasons, both measured (see ``report``):
+That split is what makes the sheet usable at all.  **The twelve do not close** -
+their wrap is 41.5 against a worst normal step of 33.2, which is a seam by any
+reading - but **each quartet does**: 1..4 wraps at 1.14 of its own worst inside
+step, 5..8 at 1.11, 9..12 at 1.21, where the project calls a seam anything over
+4.  So the loop is four frames long and the band is a state, not a phase.
 
-* **The tint under a wading tank is one flat colour and cannot be anything
-  else.**  The waterline is cut inside the tank's own shader, because a plane
-  with one sort key cannot stand half in front of a billboard; the tint stands
-  in for the surface over that fragment, and the shader cannot sample the real
-  surface there because a billboard does not know where in the world its lower
-  half is.  So the submerged half is flat by construction, and how badly that
-  shows is exactly how uneven the surface is: sd(L) runs 11 on frame 1 to 45 on
-  frame 12.  Flat paint under calm water is invisible; under a breaking sea it
-  is a patch.
-* **The quartet closes.**  Consecutive steps 6.2, 7.9, 8.6 and a wrap of 9.8
-  against a worst inside step of 8.6 - ratio 1.14, where the project calls a
-  seam anything over 4.  The full twelve do not: their wrap is 41.5 against a
-  worst normal step of 33.2.
+**The first cut took only the top row, on a measurement that was wrong**, and it
+is worth saying which: read without an alpha channel, the lower rows' spray
+seemed to reach the row above, so their boundary looked undiscoverable.  With the
+alpha the sheet parts into three clean runs - 141..325, 404..587, 670..852 - and
+what looked like a merge is detached droplets standing over frames 10 to 12.
+
+Two things a frame is not allowed to keep, and both are cropped:
+
+* **Attached spray.**  Frames 10 to 12 run 190, 209 and 215 px against a plate of
+  185, all of it upward.  A frame has to *be* the plate, because that is what puts
+  a corner of the mesh on a corner of the picture; airborne water is a different
+  effect standing above the surface and does not belong to the plane.
+* **Droplets.**  Same argument, arriving as separate runs.
+
+So the plate is measured, not declared: the bottom edge comes off the alpha per
+frame - spray goes up, never down - and the height is carried from the top row,
+whose four plates are unambiguous at 185 and agree to the pixel.
 
 And one thing the frames arrive with that has to be taken off them: **the keyed
 rim**.  The sheet came shaped by its alpha, which is right for a picture standing
@@ -65,9 +70,15 @@ CONFIG = {
     "elevation": 30.0,
     # Anything below this is surround, not surface.
     "alpha_floor": 8,
-    # How many plates the top row must hold. Named so a sheet laid out some
-    # other way is refused by count rather than quietly cut wrong.
-    "expect": 4,
+    # The grid the sheet is laid out on. Named so a sheet laid out some other
+    # way is refused by count rather than quietly cut wrong, and because the
+    # rows are what the pond reads as sea states - see the module docstring.
+    "columns": 4,
+    "rows": 3,
+    # What counts as a plate rather than a droplet: a hexagon reaches nearly the
+    # full width of its column somewhere, and a fleck of spray does not. Frames
+    # 10 to 12 carry two, one and one detached runs above their own plate.
+    "plate_share": 0.9,
 }
 
 
@@ -91,31 +102,62 @@ def _runs(mask: np.ndarray) -> list[tuple[int, int]]:
 
 
 def plates(img: np.ndarray, cfg=CONFIG) -> list[tuple[int, int, int, int]]:
-    """The top row's plates, as (x0, y0, w, h), measured off the alpha.
+    """Every plate, as (x0, y0, w, h), in reading order, measured off the alpha.
 
-    Two passes because the sheet's rows overlap in y and its columns do not.
-    The column runs are found in a band that stops short of the second row's
-    plate, then each plate's own rows are found inside its own columns - which
-    is clean precisely because the calm frames carry no spray to touch the row
-    below them.
+    Three passes, and each one asks the pixels a question they can answer:
+
+    1. the column bands, from the top third of the sheet - where the four calm
+       frames stand alone and nothing overhangs anything;
+    2. within a column, the runs that are *plates*, told from droplets by
+       reaching nearly the full column width;
+    3. each plate's bottom edge, which is the one boundary spray cannot move,
+       because spray goes up.
+
+    The height is the only number carried rather than measured, and it is
+    carried from the top row - four plates, no spray at all, agreeing on 185 to
+    the pixel.  Cutting to each frame's own run instead would scale frames 10 to
+    12 by 190, 209 and 215 against everybody else's 185, and a hexagon that
+    changes size between frames is a pond that breathes.
     """
     a = _alpha(img)
     h = a.shape[0]
-    # A third of the sheet: past the first row's plate, short of the second's.
-    band = a[: h // 3, :] > cfg["alpha_floor"]
+    band = a[: h // cfg["rows"], :] > cfg["alpha_floor"]
     cols = _runs(band.any(axis=0))
-    if len(cols) != cfg["expect"]:
+    if len(cols) != cfg["columns"]:
         raise SystemExit(
-            f"top row holds {len(cols)} plates, not {cfg['expect']}: {cols}"
+            f"top row holds {len(cols)} plates, not {cfg['columns']}: {cols}"
         )
+    width = max(x1 - x0 + 1 for x0, x1 in cols)
 
-    out = []
+    # The top row, on its own, settles the plate's height for the whole sheet.
+    tall = 0
     for x0, x1 in cols:
-        rows = _runs((a[: h // 3, x0 : x1 + 1] > cfg["alpha_floor"]).any(axis=1))
+        rows = _runs((a[: h // cfg["rows"], x0 : x1 + 1] > cfg["alpha_floor"])
+                     .any(axis=1))
         if len(rows) != 1:
             raise SystemExit(f"plate at x{x0}..{x1} is {len(rows)} pieces: {rows}")
-        y0, y1 = rows[0]
-        out.append((x0, y0, x1 - x0 + 1, y1 - y0 + 1))
+        tall = max(tall, rows[0][1] - rows[0][0] + 1)
+
+    out: list[tuple[int, int, int, int]] = []
+    found: list[list[tuple[int, int]]] = []
+    for x0, x1 in cols:
+        keep = []
+        for y0, y1 in _runs((a[:, x0 : x1 + 1] > cfg["alpha_floor"]).any(axis=1)):
+            wide = int((a[y0 : y1 + 1, x0 : x1 + 1] > cfg["alpha_floor"])
+                       .sum(axis=1).max())
+            if wide >= cfg["plate_share"] * width:
+                keep.append((y0, y1))
+        if len(keep) != cfg["rows"]:
+            raise SystemExit(
+                f"column x{x0}..{x1} holds {len(keep)} plates, not {cfg['rows']}:"
+                f" {keep}"
+            )
+        found.append(keep)
+
+    for r in range(cfg["rows"]):
+        for c, (x0, x1) in enumerate(cols):
+            bottom = found[c][r][1]
+            out.append((x0, bottom - tall + 1, x1 - x0 + 1, tall))
     return out
 
 
@@ -247,10 +289,13 @@ def run(cfg=CONFIG) -> dict:
     Image.fromarray(strip, "RGBA").save(out)
 
     per = [_stats(f) for f in frames]
-    mean = tuple(
-        int(sum(p[0][c] for p in per) / len(per)) for c in range(3)
-    )
+    band = len(frames) // cfg["rows"]
+    mean = tuple(int(sum(p[0][c] for p in per[:band]) / band) for c in range(3))
     return {
+        "bands": [
+            [round(p[1], 1) for p in per[i * band : (i + 1) * band]]
+            for i in range(cfg["rows"])
+        ],
         "source": cfg["source"],
         "out": cfg["out"],
         "plates": boxes,

@@ -265,8 +265,18 @@ public sealed partial class Main : Node2D
 	/// before the stage exists, and both are pushed at it every frame rather than
 	/// on the drag, so a stage built later does not come up on the built-in.
 	/// </summary>
-	private double _swell = Stage3D.SwellPeriodDefault;
+	private double _swellPeriod = Stage3D.SwellPeriodDefault;
 	private bool _swellBlend = Stage3D.SwellBlendDefault;
+
+	/// <summary>How stirred up each flooded cell is. Built with the field, ticked
+	/// here and drawn by the stage - the same division the belt marks have, and for
+	/// the same reason: what the tanks did to the ground is neither the ground's
+	/// business nor the renderer's.</summary>
+	private Swell? _sea;
+
+	/// <summary>Whether the water answers the tanks. See --still-water: the pond
+	/// as it was, which is the A/B this is judged by.</summary>
+	private bool _seaReacts = true;
 
 	/// <summary>
 	/// Whether the board and the tanks are drawn by the depth buffer rather than
@@ -403,6 +413,8 @@ public sealed partial class Main : Node2D
 			// on deciding which cells are wet and how deep, the stage draws the
 			// surface over them.
 			Surf = Surf,
+			// And what each of its cells is doing, by the same division again.
+			Sea = _sea,
 		};
 		AddChild(_stage);
 		foreach (Vehicle vehicle in _vehicles)
@@ -1384,7 +1396,7 @@ public sealed partial class Main : Node2D
 					 && double.TryParse(userArgs[i + 1], NumberStyles.Float,
 										CultureInfo.InvariantCulture, out double turn))
 			{
-				_swell = turn;
+				_swellPeriod = turn;
 				i++;
 			}
 			// And the stepped loop back, which is the A/B the blend is judged by:
@@ -1392,6 +1404,13 @@ public sealed partial class Main : Node2D
 			// so this is the only way to see what choosing when actually buys.
 			else if (userArgs[i] == "--hard-swell")
 				_swellBlend = false;
+			// The pond that answers nobody, which is the A/B this is judged by:
+			// the chop and the splash are the only things on the board that read
+			// the tanks, so the difference against a still pond is the whole
+			// claim. Not the same as --flat-water - that takes the picture away,
+			// this leaves it and takes away the reaction.
+			else if (userArgs[i] == "--still-water")
+				_seaReacts = false;
 			// How deep, over the row above rather than instead of it: a depth
 			// asked for is water asked for, or the flag would look like one that
 			// did not arrive - the argument --recoil <x> already makes.
@@ -1584,6 +1603,9 @@ public sealed partial class Main : Node2D
 		// yet is water judged against a board that does not exist.
 		if (Watered)
 			_field.SetWater(WaterMask(_field.Columns, _field.Rows));
+		// After the mask, because the cells it keeps a state for are the field's
+		// list and that list is settled by SetWater.
+		_sea = new Swell { Field = _field, Enabled = _seaReacts };
 		AddChild(_field);
 		_marks = new TrackMarks { Enabled = _rutsEnabled };
 		AddChild(_marks);
@@ -3403,6 +3425,12 @@ public sealed partial class Main : Node2D
 			Park(v);
 		}
 		_marks?.Clear();
+		// The pond too, and beside the belt marks because it is the same kind of
+		// thing: what the tanks did to the ground. A swell left standing comes
+		// back as water that was breaking before anybody drove into it - and this
+		// runs when the water itself is taken off the board, where a state held
+		// against cells that no longer exist is worse than wrong.
+		_sea?.Settle();
 		SowGrove();
 		_field.QueueRedraw();
 	}
@@ -4282,6 +4310,7 @@ public sealed partial class Main : Node2D
 		["--flat-water"] = new[] { "ground.water_paint" },
 		["--swell"] = new[] { "ground.swell" },
 		["--hard-swell"] = new[] { "ground.swell_blend" },
+		["--still-water"] = new[] { "ground.water_react" },
 		// The stage asks for height as well as for itself, so it declares both -
 		// the board came up flat the first time because "ground.relief" was not
 		// declared, which from outside looks exactly like a flag that did not
@@ -4935,13 +4964,13 @@ public sealed partial class Main : Node2D
 		// when it stops being an animation at all.
 		ui.Slide("ground.swell", "water speed  (--swell)",
 			0.4, 6.0, 0.2,
-			() => _swell, v => _swell = v,
+			() => _swellPeriod, v => _swellPeriod = v,
 			"s per turn", () =>
 			{
 				int frames = _waterArt?.Frames ?? 0;
-				if (frames < 1 || _swell <= 0.0)
+				if (frames < 1 || _swellPeriod <= 0.0)
 					return "no drawn surface to turn";
-				double held = _swell / frames;
+				double held = _swellPeriod / frames;
 				return $"{frames} frames, {held:F2}s each = {held * 60.0:F0} screen"
 					   + " frames"
 					   + (_swellBlend
@@ -4954,6 +4983,21 @@ public sealed partial class Main : Node2D
 		// any speed, so the choice is between stepping and dissolving.
 		ui.Toggle("ground.swell_blend", "carry each frame into the next  (--hard-swell)",
 			() => _swellBlend, v => _swellBlend = v);
+		// Whether the water answers the tanks at all, and what it is doing right
+		// now - the second is a readout because the bench measures it and nobody
+		// sets it, which is the whole of what a readout is.
+		ui.Toggle("ground.water_react", "water answers the tanks  (--still-water)",
+			() => _seaReacts, v => _seaReacts = v);
+		ui.Readout("ground.water_state", () =>
+		{
+			if (_sea is null || _field.WaterCells.Count == 0)
+				return "no water on the board";
+			float peak = _sea.Peak;
+			string band = peak >= Swell.SplashBand - 0.5f ? "breaking"
+						: peak >= Swell.ChurnBand - 0.5f ? "chop" : "calm";
+			return $"{peak:F2} of {Swell.SplashBand:F0} at its busiest, {band}"
+				   + $"   ({_field.WaterCells.Count} cells)";
+		});
 		// The number that decides whether a hill reads as one, and the only
 		// reason it is a dial rather than a constant: a level is worth
 		// grade * sqrt(3) * R * cos(e) on screen, and against a hexagon 54.5px
@@ -5543,6 +5587,15 @@ public sealed partial class Main : Node2D
 					 // a board of a mix are two different pictures, and neither
 					 // says which it is.
 					 + $"  ground {_field.Paint}"
+					 // What the water is doing, and under the driven tank as well
+					 // as at its worst. Two numbers because they fail apart: a
+					 // pond that reacts to nobody and one that reacts to the wrong
+					 // cell are the same still picture, and the trace is the only
+					 // channel that survives --no-ui.
+					 + (_sea is null || _field.WaterCells.Count == 0 ? "  sea -"
+						: $"  sea {_sea.StateAt(_field.CellAt(Active.GroundPoint)):F2}"
+						  + $"/{_sea.Peak:F2}"
+						  + (_seaReacts ? "" : "!still"))
 					 // Trees, wooded cells, and how many of those no tank may
 					 // enter. Three numbers because a board with no props, a
 					 // board whose props were all refused and a board sown at
@@ -5680,8 +5733,23 @@ public sealed partial class Main : Node2D
 			// Every frame rather than on the drag, for the tremble level's reason:
 			// a stage handed the board later would otherwise sit on the built-in
 			// while the row it is a view of says something else.
-			_stage.SwellPeriod = (float)_swell;
+			_stage.SwellPeriod = (float)_swellPeriod;
 			_stage.SwellBlend = _swellBlend;
+			// Before Place, because the tint a wading tank wears is read off its
+			// own cell's state and Place is where that is pushed at the sprite.
+			if (_sea is not null)
+			{
+				_sea.Enabled = _seaReacts;
+				// Every tank noted before anything is stepped: the chop is "is
+				// anybody in this cell now", which is not known until they all
+				// have been. Indexed by place in the list rather than by the
+				// object, because the swell has no business knowing what a tank
+				// is - see Swell.Note.
+				for (int i = 0; i < _vehicles.Count; i++)
+					_sea.Note(i, _field.CellAt(_vehicles[i].GroundPoint),
+							  _vehicles[i].Speed > Swell.StirAbove);
+				_sea.Tick(delta);
+			}
 			_stage.Place(_vehicles);
 		}
 

@@ -480,6 +480,19 @@ public sealed partial class HexField : Node2D
         _water = water is not null && water.Length == Columns * Rows
                  && Array.Exists(water, on => on)
             ? water : null;
+        // The flooded cells in one fixed order, settled here and nowhere else.
+        // Two things index by it - the surface mesh writes an ordinal into each
+        // vertex, and the swell keeps a state per cell - and a second ordering
+        // beside this one is two lists that agree until somebody floods a cell.
+        _wet = new List<Vector2I>();
+        if (_water is not null)
+            for (int r = 0; r < Rows; r++)
+            for (int q = 0; q < Columns; q++)
+                if (_water[r * Columns + q])
+                    _wet.Add(new Vector2I(q, r));
+        _wetIndex = new Dictionary<Vector2I, int>();
+        for (int i = 0; i < _wet.Count; i++)
+            _wetIndex[_wet[i]] = i;
         _ordered = null;
         QueueRedraw();
     }
@@ -494,6 +507,19 @@ public sealed partial class HexField : Node2D
     /// </summary>
     public bool IsWet(Vector2I from, Vector2I onto) =>
         IsWater(from) || IsWater(onto);
+
+    private List<Vector2I> _wet = new();
+    private Dictionary<Vector2I, int> _wetIndex = new();
+
+    /// <summary>The flooded cells in a fixed order. The surface mesh writes each
+    /// cell's place in this list into its own vertices and <see cref="Swell"/>
+    /// keeps one state per entry, so this is the only ordering there is.</summary>
+    public IReadOnlyList<Vector2I> WaterCells => _wet;
+
+    /// <summary>Where a cell sits in <see cref="WaterCells"/>, or -1 for dry
+    /// ground.</summary>
+    public int WaterIndex(Vector2I cell) =>
+        _wetIndex.TryGetValue(cell, out int i) ? i : -1;
 
     /// <summary>Ground-plane squash - sin(elevation) - read off the rendered
     /// tile rather than declared. The hexagon's height over its width is

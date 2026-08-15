@@ -293,6 +293,7 @@ public sealed partial class Stage3D : Node3D
             _swell = Mathf.PosMod(_swell + (float)delta / SwellPeriod, 1.0f);
         _swellInk?.SetShaderParameter("phase", _swell);
         _swellInk?.SetShaderParameter("blend", SwellBlend ? 1.0f : 0.0f);
+        PushSwell();
     }
 
     private void Aim()
@@ -792,7 +793,7 @@ void fragment() {{
             var ink = (ShaderMaterial)stand.Quad.MaterialOverride;
             AtlasSet atlas = vehicle.Atlas;
             float scale = vehicle.Sprite.BodyScale;
-            ink.SetShaderParameter("pond", WaterTint);
+            ink.SetShaderParameter("pond", WaterTintAt(Field.CellAt(vehicle.GroundPoint)));
             ink.SetShaderParameter("shore", atlas.Groundline);
             ink.SetShaderParameter("shore_map", new Godot.Vector4(
                 atlas.Anchor.X, atlas.Anchor.Y, scale, PaintSize));
@@ -955,6 +956,29 @@ void fragment() {{
     /// The opacity stays this side of it either way. How much of the bottom
     /// shows through is a statement about the ford, not about the paint.
     /// </summary>
+    /// <summary>
+    /// The tint for a tank standing in a given cell: the water it is actually in.
+    ///
+    /// <b>Per cell, because the state is per cell.</b> The tint's whole job is to
+    /// be the surface over a fragment the sprite's shader cannot sample, and once
+    /// a cell can be calm while its neighbour breaks, one tint for the pond is the
+    /// same water disagreeing with itself again - a tank in a churning cell would
+    /// come out darker than the water around it, which reads as shadow rather than
+    /// as wet.
+    /// </summary>
+    public Color WaterTintAt(Vector2I cell)
+    {
+        if (Surf is not { Any: true } s)
+            return Pond;
+        float band = Mathf.Clamp(Sea?.StateAt(cell) ?? 0.0f, 0.0f,
+                                 WaterArt.Bands - 1);
+        int low = Mathf.FloorToInt(band);
+        Color a = s.MeanOfBand(low), b = s.MeanOfBand(low + 1);
+        float t = band - low;
+        return new Color(Mathf.Lerp(a.R, b.R, t), Mathf.Lerp(a.G, b.G, t),
+                         Mathf.Lerp(a.B, b.B, t), Pond.A);
+    }
+
     public Color WaterTint =>
         Surf is { Any: true } s
             ? new Color(s.Mean.R, s.Mean.G, s.Mean.B, Pond.A) : Pond;
@@ -1191,6 +1215,7 @@ void fragment() {{
         var st = new SurfaceTool();
         st.Begin(Mesh.PrimitiveType.Triangles);
         bool any = false;
+        int over = 0;
         for (int q = 0; q < Field.Columns; q++)
         for (int r = 0; r < Field.Rows; r++)
         {
@@ -1198,6 +1223,18 @@ void fragment() {{
             if (!Field.IsWater(cell))
                 continue;
             any = true;
+            // Its place in the field's own list, written into every vertex so the
+            // surface can be told what this cell is doing without the mesh being
+            // rebuilt for it. Past the cap it reads the last slot rather than off
+            // the end of the array, and the note says so - a pond that quietly
+            // went calm past cell 64 would be the silent failure.
+            int ord = Field.WaterIndex(cell);
+            if (ord >= MaxWaterCells)
+            {
+                over++;
+                ord = MaxWaterCells - 1;
+            }
+            var ordinal = new Vector2(ord, 0.0f);
             Vector2 flat = Origin + Field.FlatAnchor(cell) + Field.CentreOffset;
             Vector3 top = World(flat, Field.WaterTop(cell));
             for (int i = 1; i + 1 < 6; i++)
@@ -1210,6 +1247,7 @@ void fragment() {{
                 st.SetUV(new Vector2(
                     0.5f + inset.X * corner[k].X / (2.0f * halfX),
                     0.5f + inset.Y * corner[k].Z / (2.0f * halfZ)));
+                st.SetUV2(ordinal);
                 st.AddVertex(top + corner[k]);
             }
         }
@@ -1218,6 +1256,10 @@ void fragment() {{
             _pond.Mesh = null;
             return;
         }
+        if (over > 0)
+            GD.PushWarning($"{over} flooded cells past the {MaxWaterCells} the "
+                           + "surface can carry a state for - they share the last "
+                           + "slot, so they will churn when it does");
         st.GenerateNormals();
         _pond.Mesh = st.Commit();
     }
@@ -1284,23 +1326,54 @@ void fragment() {{
 
     public bool SwellBlend = SwellBlendDefault;
 
+    /// <summary>
+    /// How many flooded cells the surface can carry a state for.
+    ///
+    /// <b>A cap because a shader array has to have one</b>, and named rather than
+    /// left at whatever looked big: a pond past it would silently draw calm, which
+    /// is the failure this project keeps refusing - so <see cref="BuildWater"/>
+    /// says so instead. The board's pond is five.
+    /// </summary>
+    public const int MaxWaterCells = 64;
+
     private ShaderMaterial? _swellInk;
 
     private ShaderMaterial Swell()
     {
-        if (_swellInk is null)
+        _swellInk ??= new ShaderMaterial
         {
-            _swellInk = new ShaderMaterial
+            Shader = new Shader
             {
-                Shader = new Shader { Code = SwellShader },
-                RenderPriority = WaterOrder,
-            };
-        }
+                Code = string.Format(SwellShader, MaxWaterCells),
+            },
+            RenderPriority = WaterOrder,
+        };
         _swellInk.SetShaderParameter("surf", Surf!.Texture);
-        _swellInk.SetShaderParameter("frames", (float)Surf!.Frames);
+        _swellInk.SetShaderParameter("frames", (float)Surf!.Loop);
+        _swellInk.SetShaderParameter("bands", (float)WaterArt.Bands);
         _swellInk.SetShaderParameter("tint", WaterTint);
         return _swellInk;
     }
+
+    /// <summary>Hand the surface what each of its cells is doing. Every frame and
+    /// not on a change, because it is a decay: the states are always moving, and
+    /// the mesh they belong to is deliberately built only when the board does.
+    /// </summary>
+    private void PushSwell()
+    {
+        if (_swellInk is null)
+            return;
+        int n = Mathf.Min(Field.WaterCells.Count, MaxWaterCells);
+        var state = new float[MaxWaterCells];
+        for (int i = 0; i < n; i++)
+            state[i] = Sea?.State.Length > i ? Sea.State[i] : 0.0f;
+        _swellInk.SetShaderParameter("state", state);
+    }
+
+    /// <summary>What each flooded cell is doing. Null leaves the pond calm, which
+    /// is how it behaved before the water answered anybody - see --still-water.
+    /// </summary>
+    public Swell? Sea;
 
     /// <summary>
     /// The pond's surface: one frame of the strip, chosen per cell and per
@@ -1340,19 +1413,33 @@ render_mode unshaded, cull_disabled, depth_draw_never;
 uniform sampler2D surf : source_color, filter_linear_mipmap;
 uniform vec4 tint = vec4(0.0);
 uniform float frames = 1.0;
+uniform float bands = 1.0;
 uniform float phase = 0.0;
 uniform float blend = 1.0;
-void fragment() {
-    float t = fract(phase) * frames;
-    float step = floor(t);
-    float inset = 0.5 * frames / float(textureSize(surf, 0).x);
+uniform float state[{0}];
+void fragment() {{
+    float total = frames * bands;
+    float inset = 0.5 * total / float(textureSize(surf, 0).x);
     float u = clamp(UV.x, inset, 1.0 - inset);
-    vec4 a = texture(surf, vec2((u + step) / frames, UV.y));
-    vec4 b = texture(surf, vec2((u + mod(step + 1.0, frames)) / frames, UV.y));
-    vec4 c = mix(a, b, fract(t) * blend);
+
+    float t = fract(phase) * frames;
+    float f0 = floor(t);
+    float f1 = mod(f0 + 1.0, frames);
+    float ft = fract(t) * blend;
+
+    float s = clamp(state[int(UV2.x + 0.5)], 0.0, bands - 1.0);
+    float b0 = floor(s);
+    float b1 = min(b0 + 1.0, bands - 1.0);
+    float fb = s - b0;
+
+    vec4 lo = mix(texture(surf, vec2((u + b0 * frames + f0) / total, UV.y)),
+                  texture(surf, vec2((u + b0 * frames + f1) / total, UV.y)), ft);
+    vec4 hi = mix(texture(surf, vec2((u + b1 * frames + f0) / total, UV.y)),
+                  texture(surf, vec2((u + b1 * frames + f1) / total, UV.y)), ft);
+    vec4 c = mix(lo, hi, fb);
     ALBEDO = c.rgb;
     ALPHA = c.a * tint.a;
-}
+}}
 ";
 
     /// <summary>The plain board when there is no art, tinted by whatever the

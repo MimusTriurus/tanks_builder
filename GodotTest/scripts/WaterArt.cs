@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using Godot;
 
 namespace TankSpriteTest;
@@ -16,10 +17,11 @@ namespace TankSpriteTest;
 ///
 /// <b>A frame is exactly the plate, and that is what makes this small.</b> The
 /// terrain kinds are painted on a template with room to overhang it, so they
-/// need a frame, an anchor and a plate rect; the calm frames of the water sheet
-/// carry no spray at all, so the hexagon *is* the picture and a corner of the
-/// mesh maps to a corner of the frame. See <c>water_sheet.py</c>, which is
-/// where that was measured and where the four frames are cut.
+/// need a frame, an anchor and a plate rect; a water frame is cut to its plate,
+/// so the hexagon *is* the picture and a corner of the mesh maps to a corner of
+/// the frame. Airborne spray is cropped away with the rest of the overhang -
+/// water standing above the surface is a different effect and does not belong to
+/// the plane. See <c>water_sheet.py</c>, where that is measured and cut.
 ///
 /// <b>The frame count and the camera check are one question.</b> Nothing in the
 /// file says how many frames it holds, and a sidecar saying so would be a
@@ -60,16 +62,56 @@ public sealed class WaterArt
 
     public Texture2D? Texture { get; private set; }
 
+    /// <summary>
+    /// How many sea states the strip is divided into: calm, chop, breaking.
+    ///
+    /// <b>Declared, because the pixels cannot say it.</b> Everything else here is
+    /// measured off the file - the frame count, the camera, the mean, the edge -
+    /// and this one is what the bands *mean*, which is a fact about the drawing
+    /// and not about its pixels. What the pixels do say is that it is true: the
+    /// spread of each frame climbs 13, 15, 21, 22 / 24, 31, 38, 40 / 38, 41, 45,
+    /// 47, and the near-white share 0.0% to 5.2%, monotonically, in three groups
+    /// of four.
+    ///
+    /// And the split is not decoration: the twelve frames <b>do not close</b> as
+    /// one loop - wrap 41.5 against a worst normal step of 33.2 - while each
+    /// quartet does, at 1.14, 1.11 and 1.21. So the loop is a quarter of the
+    /// strip and the band is the axis across it.
+    /// </summary>
+    public const int Bands = 3;
+
     /// <summary>How many frames the strip holds. One would be a still, and a
     /// still is not a loop - see <see cref="Any"/>.</summary>
     public int Frames { get; private set; }
 
+    /// <summary>The length of one loop: the strip divided by its bands.</summary>
+    public int Loop => Frames / Bands;
+
     /// <summary>One frame, in image px.</summary>
     public Vector2I Frame { get; private set; }
 
-    /// <summary>The surface's average, linear, ready to be a shader uniform.
-    /// This is what a wading tank is tinted with.</summary>
-    public Color Mean { get; private set; }
+    /// <summary>The calm band's average, linear, ready to be a shader uniform -
+    /// what a wading tank in still water is tinted with. See
+    /// <see cref="MeanOfBand"/> for why it is per band and not one number for the
+    /// strip.</summary>
+    public Color Mean => MeanOfBand(0);
+
+    private Color[] _mean = Array.Empty<Color>();
+
+    /// <summary>
+    /// A band's average, linear.
+    ///
+    /// <b>Per band, because the tint has to be the water the tank is actually
+    /// standing in.</b> The tint stands in for a surface the sprite's shader
+    /// cannot sample, so the whole of its job is to be that surface's colour -
+    /// and the bands are 0.038/0.114/0.110 calm against 0.089/0.184/0.181
+    /// breaking, which is not a rounding difference. One number for the strip
+    /// would leave a tank in a churning cell visibly darker than the water
+    /// around it, which reads as the tank being in shadow rather than in water.
+    /// </summary>
+    public Color MeanOfBand(int band) =>
+        _mean.Length == 0 ? Stage3D.Pond
+                          : _mean[Mathf.Clamp(band, 0, _mean.Length - 1)];
 
     /// <summary>
     /// The least alpha the mesh can sample anywhere on its own boundary, once
@@ -135,16 +177,26 @@ public sealed class WaterArt
                        + $" tile's shape - refused, see water_sheet.py";
             return set;
         }
+        if (frames % Bands != 0)
+        {
+            set.Note = $"{File}.png is {frames} frames, which is not {Bands} bands"
+                       + " of a whole loop - refused, see water_sheet.py";
+            return set;
+        }
 
         set.Frames = frames;
         set.Frame = new Vector2I(w / frames, h);
-        set.Mean = MeanOf(art);
+        set._mean = new Color[Bands];
+        for (int b = 0; b < Bands; b++)
+            set._mean[b] = MeanOf(art, b * set.Loop * set.Frame.X,
+                                  set.Loop * set.Frame.X);
         set.EdgeAlpha = RimOf(art, set.Frame, frames);
         art.GenerateMipmaps();
         set.Texture = ImageTexture.CreateFromImage(art);
-        set.Note = $"{File} {w}x{h}, {frames} frames of {set.Frame.X}"
-                   + $"x{set.Frame.Y}, mean {set.Mean.ToHtml(false)}, edge alpha "
-                   + $"{set.EdgeAlpha:F2}";
+        set.Note = $"{File} {w}x{h}, {Bands} bands of {set.Loop} frames of "
+                   + $"{set.Frame.X}x{set.Frame.Y}, means "
+                   + string.Join("/", set._mean.Select(c => c.ToHtml(false)))
+                   + $", edge alpha {set.EdgeAlpha:F2}";
         return set;
     }
 
@@ -201,12 +253,12 @@ public sealed class WaterArt
         return worst;
     }
 
-    private static Color MeanOf(Image art)
+    private static Color MeanOf(Image art, int from, int wide)
     {
         double r = 0.0, g = 0.0, b = 0.0;
         long n = 0;
         for (int y = 0; y < art.GetHeight(); y += MeanStride)
-        for (int x = 0; x < art.GetWidth(); x += MeanStride)
+        for (int x = from; x < from + wide; x += MeanStride)
         {
             Color c = art.GetPixel(x, y);
             if (c.A <= 0.98f)

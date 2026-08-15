@@ -6720,8 +6720,13 @@ public static class SelfTest
                 // separate objects: desynchronised, two cells show different
                 // moments of the same swell either side of a shared edge, so the
                 // water draws every cell boundary instead of hiding it.
+                // The phase is shared and the *state* is not, and the shader is
+                // where those two part company. UV2 carries which cell this is,
+                // which is the state's business; a phase offset per cell would be
+                // the swell disagreeing with itself across every shared edge.
                 Check("and the whole pond shows one moment of the same swell",
-                    !Stage3D.SwellShader.Contains("UV2"),
+                    Stage3D.SwellShader.Contains("fract(phase) * frames")
+                    && !Stage3D.SwellShader.Contains("phase + UV2"),
                     "the surface takes a phase per cell, so its cells disagree "
                     + "across every edge they share");
 
@@ -6730,9 +6735,20 @@ public static class SelfTest
                 // surface that advanced its frames through its UVs would rebuild
                 // the whole board sixty times a second.
                 Check("and the frame steps in the shader rather than in the mesh",
-                    Stage3D.SwellShader.Contains("(u + step) / frames"),
+                    Stage3D.SwellShader.Contains("b0 * frames + f0"),
                     "the surface shader does not step frames, so the loop can "
                     + "only move by the board being rebuilt");
+
+                // The ladder, and which way up it is. Getting it backwards would
+                // leave a tank ploughing a flat calm through breaking water,
+                // which no number reports and which the loader would load happily.
+                Check("and its bands climb from calm to breaking, in that order",
+                    surf.Loop >= 2 && surf.Loop * WaterArt.Bands == surf.Frames
+                    && surf.MeanOfBand(0).Luminance < surf.MeanOfBand(1).Luminance
+                    && surf.MeanOfBand(1).Luminance < surf.MeanOfBand(2).Luminance,
+                    $"{surf.Frames} frames in {WaterArt.Bands} bands, means "
+                    + string.Join("/", Enumerable.Range(0, WaterArt.Bands)
+                        .Select(b => surf.MeanOfBand(b).Luminance.ToString("F3"))));
 
                 // Blending is a model, not a smoothing knob, and this is what
                 // makes it one: at zero the mix term vanishes and what is drawn is
@@ -6778,6 +6794,67 @@ public static class SelfTest
                     + $"measured {surf.Mean.ToHtml(false)}, {off:F3} apart - "
                     + "--flat-water would be swapping the colour too");
             }
+
+            // What the water does about the tanks. Built here on the real field,
+            // and driven by cells and a flag rather than by a Vehicle - which is
+            // the whole reason Swell.Note takes those: a tank cannot be built in
+            // a check, and the interesting part is not about tanks anyway.
+            var sea = new Swell { Field = field };
+            Check("a pond nobody has driven into is calm all over",
+                sea.Peak == 0.0f && pond.All(c => sea.StateAt(c) == 0.0f),
+                $"peak {sea.Peak:F2} before anybody moved");
+
+            // Driving through a cell stirs that cell. Its neighbour is the other
+            // half of the claim: a chop that spread would be the pond reacting as
+            // one body, which is what the shared phase says and what the state
+            // deliberately does not.
+            for (int i = 0; i < 30; i++)
+            {
+                sea.Note(0, pond[0], true);
+                sea.Tick(1.0 / 60.0);
+            }
+            Check("and a tank driving through one stirs that cell, not its neighbour",
+                sea.StateAt(pond[0]) > 0.9f * Swell.ChurnBand
+                && sea.StateAt(pond[1]) == 0.0f,
+                $"({pond[0].X},{pond[0].Y}) is {sea.StateAt(pond[0]):F2} and "
+                + $"({pond[1].X},{pond[1].Y}) is {sea.StateAt(pond[1]):F2}");
+
+            // Crossing into a cell breaks it, and higher than driving through it:
+            // if the two landed on the same band there would be no splash, only a
+            // chop that arrived sooner.
+            float churned = sea.StateAt(pond[0]);
+            sea.Note(0, pond[1], true);
+            sea.Tick(1.0 / 60.0);
+            Check("and crossing into one breaks it, above the chop it was at",
+                sea.StateAt(pond[1]) > churned
+                && sea.StateAt(pond[1]) >= Swell.SplashBand - 0.05f,
+                $"the crossing reached {sea.StateAt(pond[1]):F2} against a chop of "
+                + $"{churned:F2} and a break at {Swell.SplashBand:F0}");
+
+            // Both ends, because leaving throws as much water as entering and a
+            // shoreline is crossed by exactly one of them being dry.
+            Check("and the cell it left breaks too",
+                sea.StateAt(pond[0]) >= Swell.SplashBand - 0.05f,
+                $"the cell behind is {sea.StateAt(pond[0]):F2}");
+
+            // And it settles. A state that stuck would be a pond that had been
+            // driven through once and stayed broken for the rest of the session.
+            for (int i = 0; i < 60 * 5; i++)
+                sea.Tick(1.0 / 60.0);
+            Check("and it all settles back to calm once nobody is in it",
+                sea.Peak == 0.0f, $"peak {sea.Peak:F2} five seconds later");
+
+            // One ordering, and the mesh writes an ordinal off it into every
+            // vertex. Two lists that agree until somebody floods a cell is the
+            // failure this is here to make impossible.
+            bool ordered = true;
+            for (int i = 0; i < field.WaterCells.Count; i++)
+                ordered &= field.WaterIndex(field.WaterCells[i]) == i;
+            Check("and the surface and the swell index its cells the same way",
+                ordered && field.WaterIndex(HexField.Step(pond[0], 90)) is var away
+                        && (field.IsWater(HexField.Step(pond[0], 90)) || away < 0),
+                "the field's list and its index disagree, so the mesh would hand "
+                + "a cell somebody else's state");
 
             // The one number the belts read, and the whole of what stops a rut
             // being laid in a pond. Two halves of one field rather than a flag
