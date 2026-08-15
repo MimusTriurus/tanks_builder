@@ -938,7 +938,7 @@ void fragment() {{
     /// with it - so water that let most of the bottom through would read as a stain
     /// on the grass, and water that let none through would read as a hole.
     /// </summary>
-    public static readonly Color Pond = new(0.038f, 0.117f, 0.112f, 0.66f);
+    public static readonly Color Pond = new(0.038f, 0.114f, 0.110f, 0.66f);
 
     /// <summary>
     /// What a wading tank's submerged half is tinted with: the drawn surface's
@@ -1180,6 +1180,12 @@ void fragment() {{
             halfX = Mathf.Max(halfX, Mathf.Abs(c.X));
             halfZ = Mathf.Max(halfZ, Mathf.Abs(c.Z));
         }
+        // Pulled in off its own boundary, exactly as the ground faces are - see
+        // Bleed, which is this defect solved once already.
+        Vector2 inset = drawn
+            ? new Vector2(1.0f - 2.0f * SwellBleed / Surf!.Frame.X,
+                          1.0f - 2.0f * SwellBleed / Surf!.Frame.Y)
+            : Vector2.One;
         var st = new SurfaceTool();
         st.Begin(Mesh.PrimitiveType.Triangles);
         bool any = false;
@@ -1192,7 +1198,6 @@ void fragment() {{
             any = true;
             Vector2 flat = Origin + Field.FlatAnchor(cell) + Field.CentreOffset;
             Vector3 top = World(flat, Field.WaterTop(cell));
-            var offset = new Vector2(SwellAt(cell), 0.0f);
             for (int i = 1; i + 1 < 6; i++)
             foreach (int k in new[] { 0, i, i + 1 })
             {
@@ -1200,9 +1205,9 @@ void fragment() {{
                 // +Z reads as +v, the same way the ground art is laid on a top
                 // face: two conventions in one scene is how a texture comes out
                 // mirrored on one surface and nobody can say against what.
-                st.SetUV(new Vector2(0.5f + corner[k].X / (2.0f * halfX),
-                                     0.5f + corner[k].Z / (2.0f * halfZ)));
-                st.SetUV2(offset);
+                st.SetUV(new Vector2(
+                    0.5f + inset.X * corner[k].X / (2.0f * halfX),
+                    0.5f + inset.Y * corner[k].Z / (2.0f * halfZ)));
                 st.AddVertex(top + corner[k]);
             }
         }
@@ -1216,26 +1221,24 @@ void fragment() {{
     }
 
     /// <summary>
-    /// Where in the loop a cell starts, 0..1.
+    /// How far inside its own frame the surface stops sampling, in art px.
     ///
-    /// <b>Per cell, because five hexagons breathing together are one animation
-    /// played five times.</b> That is the objection every clock in this project
-    /// has already answered - the three tanks have their own tremble, their own
-    /// exhaust, their own gunner - arriving at the one surface that is drawn as a
-    /// single mesh and would otherwise pulse as one.
+    /// <b>The belt, not the braces.</b> What actually broke the pond was the art
+    /// carrying a keyed rim: a frame is exactly the plate, so the hexagon faded
+    /// out on the frame's own boundary, two cells meeting laid two fades on top of
+    /// each other, and the five-cell pond drew as three pieces with a 5px strip of
+    /// dry ground along every shared edge. That is fixed where it was made -
+    /// <c>water_sheet.py</c> hardens the alpha, because <b>the mesh is already a
+    /// hexagon and the texture must not be one too</b>.
     ///
-    /// Hashed off the cell rather than drawn from a generator, for
-    /// <see cref="TerrainSet.MixedAt"/>'s reason: --capture and --trace fix the
-    /// time step so two runs can be diffed, and a pond that reshuffled itself
-    /// would be measuring itself.
+    /// This stays for what a hard mask cannot help: the outermost texel of a hard
+    /// edge is still half a texel from the boundary, and a linear sample there
+    /// reaches across it. Eight is 2.2% of a 360px plate, the same fraction
+    /// <see cref="Bleed"/> takes off the ground's 248px plate for the same reason.
+    /// <see cref="WaterArt.EdgeAlpha"/> is what holds the pair honest: it measures
+    /// the alpha the mesh can actually reach, after this.
     /// </summary>
-    public static float SwellAt(Vector2I cell)
-    {
-        int h = cell.X * 73856093 ^ cell.Y * 19349663;
-        h = (h ^ (h >> 13)) * 1274126177;
-        h ^= h >> 16;
-        return ((uint)h % 1000u) / 1000.0f;
-    }
+    internal const float SwellBleed = 8.0f;
 
     /// <summary>
     /// How long one turn of the water's frames takes, in seconds.
@@ -1271,11 +1274,18 @@ void fragment() {{
     /// The pond's surface: one frame of the strip, chosen per cell and per
     /// moment, at the flat colour's own opacity.
     ///
-    /// <b>The step is taken in the shader and not in the mesh</b>, which is the
-    /// whole reason the phase rides in UV2. Advancing the frame by rewriting the
-    /// UVs would rebuild the board's geometry sixty times a second for a picture
-    /// that has not changed shape - and <see cref="Build"/> is deliberately gated
-    /// on the board changing at all.
+    /// <b>One phase for the whole pond, and the per-cell one was wrong.</b> It was
+    /// put in on the rule every clock in this bench obeys - three tanks tremble on
+    /// their own, exhaust on their own, scan on their own - and that rule is about
+    /// <i>separate objects</i>. A pond is one body of water. Desynchronised, its
+    /// cells show different moments of the same swell either side of a shared edge,
+    /// so the edge is the one place the picture disagrees with itself, and every
+    /// cell boundary is drawn by the water rather than hidden by it.
+    ///
+    /// <b>The step is taken in the shader and not in the mesh.</b> Advancing the
+    /// frame by rewriting the UVs would rebuild the board's geometry sixty times a
+    /// second for a picture that has not changed shape - and <see cref="Build"/> is
+    /// deliberately gated on the board changing at all.
     ///
     /// <b>Inset by half a texel.</b> A frame is exactly the plate, so the
     /// hexagon's left and right vertices sit on the frame's own boundary, and a
@@ -1294,7 +1304,7 @@ uniform vec4 tint = vec4(0.0);
 uniform float frames = 1.0;
 uniform float phase = 0.0;
 void fragment() {
-    float step = floor(fract(phase + UV2.x) * frames);
+    float step = floor(fract(phase) * frames);
     float inset = 0.5 * frames / float(textureSize(surf, 0).x);
     float u = clamp(UV.x, inset, 1.0 - inset);
     vec4 c = texture(surf, vec2((u + step) / frames, UV.y));

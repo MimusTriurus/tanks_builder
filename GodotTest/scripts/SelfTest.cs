@@ -6714,26 +6714,36 @@ public static class SelfTest
                     $"the art is {got:F4} against the tile's {want:F4} - "
                     + $"{Math.Abs(got - want) / want:P1} out, see water_sheet.py");
 
-                // The one thing a single mesh cannot say for itself. Every clock
-                // in this bench is per tank for this reason; the pond is drawn as
-                // one surface, so the phase has to be carried per cell or five
-                // hexagons breathe together and read as one animation played five
-                // times.
-                var phases = pond.Select(Stage3D.SwellAt).ToList();
-                Check("and each flooded cell starts its loop somewhere else",
-                    phases.Distinct().Count() == phases.Count,
-                    $"{phases.Count - phases.Distinct().Count()} of "
-                    + $"{phases.Count} cells share a phase with another");
+                // A pond is one body of water, so it shows one moment of itself.
+                // The per-cell phase this replaces came from the rule the clocks
+                // obey - three tanks tremble on their own - and that rule is about
+                // separate objects: desynchronised, two cells show different
+                // moments of the same swell either side of a shared edge, so the
+                // water draws every cell boundary instead of hiding it.
+                Check("and the whole pond shows one moment of the same swell",
+                    !Stage3D.SwellShader.Contains("UV2"),
+                    "the surface takes a phase per cell, so its cells disagree "
+                    + "across every edge they share");
 
-                // The step is taken in the shader, off UV2, and not by rewriting
-                // the mesh: Build is deliberately gated on the board changing at
-                // all, so a surface that advanced its frames through its UVs would
-                // rebuild the whole board sixty times a second.
+                // The step is taken in the shader and not by rewriting the mesh:
+                // Build is deliberately gated on the board changing at all, so a
+                // surface that advanced its frames through its UVs would rebuild
+                // the whole board sixty times a second.
                 Check("and the frame steps in the shader rather than in the mesh",
-                    Stage3D.SwellShader.Contains("UV2.x")
-                    && Stage3D.SwellShader.Contains("(u + step) / frames"),
+                    Stage3D.SwellShader.Contains("(u + step) / frames"),
                     "the surface shader does not step frames, so the loop can "
                     + "only move by the board being rebuilt");
+
+                // What the pond actually broke on, and nothing but the picture
+                // said so: a frame is exactly the plate, so the keyed rim lies on
+                // the frame's own edge and two cells meeting lay two fades on top
+                // of each other. Five cells drew as three pieces with dry ground
+                // between them. Measured where the mesh samples, after the bleed.
+                Check("and it is opaque along the edge a neighbour is on",
+                    surf.EdgeAlpha >= 0.99f,
+                    $"the drawn boundary bottoms out at alpha {surf.EdgeAlpha:F2} "
+                    + $"with {Stage3D.SwellBleed:F0}px of bleed - every shared "
+                    + "edge is a strip of dry ground");
 
                 // The flat fallback and the art have to be the same water. This
                 // is what makes --flat-water an A/B about the texture: a fallback

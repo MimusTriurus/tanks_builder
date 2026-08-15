@@ -31,6 +31,12 @@ The other two reasons, both measured (see ``report``):
   seam anything over 4.  The full twelve do not: their wrap is 41.5 against a
   worst normal step of 33.2.
 
+And one thing the frames arrive with that has to be taken off them: **the keyed
+rim**.  The sheet came shaped by its alpha, which is right for a picture standing
+on its own and wrong here, because the surface mesh is already that hexagon.  Two
+cells meeting edge to edge laid two fades on top of each other and the pond drew
+as separate pieces - see ``_harden``.
+
 Plain Python, no Blender: this is a pure function of pixels, the same argument
 ``atlas_pack.repack_dir`` makes.
 
@@ -140,6 +146,61 @@ def _linear(c: int) -> float:
     return v / 12.92 if v <= 0.04045 else ((v + 0.055) / 1.055) ** 2.4
 
 
+def _harden(frame: np.ndarray) -> np.ndarray:
+    """Give the frame a hard hexagon and colour that reaches it.
+
+    **The mesh is already a hexagon, so the texture must not be one too.**  The
+    sheet arrived keyed, which means its hexagon fades out over three to seven
+    pixels of rim - and a frame is cut to the plate exactly, so that rim sits on
+    the frame's own boundary.  Two cells meeting edge to edge then lay two of
+    those fades on top of each other, and the pond draws as separate pieces with
+    dry ground along every shared edge.  Measured on the first cut: alpha 15 of
+    255 at the outermost column, five cells rendering as three.
+
+    So the alpha becomes the plate's own hexagon, hard: opaque inside, nothing
+    outside, no rim to double up.  The shape is not lost - the surface mesh is
+    that same hexagon, and it is what cuts the silhouette, exactly as it did when
+    the pond was a flat colour with no texture at all.
+
+    Colour is carried outward first.  Where alpha was low the stored colour is
+    whatever survived unpremultiplying near zero, and turning that opaque would
+    hang a dark fringe on the water; each pass hands an unresolved pixel the mean
+    of its solid neighbours, which is the same trick that fills a keyed sheet's
+    edge everywhere else in this project.
+    """
+    out = frame.astype(np.float64).copy()
+    solid = out[:, :, 3] > 250
+    for _ in range(_FILL_PASSES):
+        if solid.all():
+            break
+        near = np.zeros(out.shape[:2] + (4,), dtype=np.float64)
+        count = np.zeros(out.shape[:2], dtype=np.float64)
+        for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            rolled = np.roll(np.roll(out[:, :, :3] * solid[:, :, None], dy, 0), dx, 1)
+            near[:, :, :3] += rolled
+            count += np.roll(np.roll(solid, dy, 0), dx, 1)
+        grow = (~solid) & (count > 0)
+        out[:, :, :3] = np.where(
+            grow[:, :, None], near[:, :, :3] / np.maximum(count, 1)[:, :, None],
+            out[:, :, :3])
+        solid = solid | grow
+
+    h, w = out.shape[:2]
+    y, x = np.mgrid[0:h, 0:w]
+    # A flat-top hexagon inscribed in the plate: the left boundary runs from 0 at
+    # mid height to w/4 at either end, and the right one mirrors it. Straight off
+    # the frame's size, with no trigonometry - the plate already is the camera.
+    left = (w / 2.0) * np.abs(y + 0.5 - h / 2.0) / h
+    inside = (x + 0.5 >= left) & (x + 0.5 <= w - left)
+    out[:, :, 3] = np.where(inside, 255.0, 0.0)
+    return np.clip(out, 0, 255).astype(np.uint8)
+
+
+#: How far colour is carried out past the keyed rim. Seven, one past the widest
+#: rim measured on the shipped sheet.
+_FILL_PASSES = 7
+
+
 def _stats(frame: np.ndarray) -> tuple[tuple[int, int, int], float, float]:
     """Mean colour, spread of luminance and the near-white share, over the
     frame's solid interior. The spread is the number that decides whether a
@@ -177,7 +238,8 @@ def run(cfg=CONFIG) -> dict:
 
     frames = []
     for x0, y0, w, h in boxes:
-        frames.append(_resize(img[y0 : y0 + h, x0 : x0 + w], (width, tall)))
+        frames.append(
+            _harden(_resize(img[y0 : y0 + h, x0 : x0 + w], (width, tall))))
 
     strip = np.concatenate(frames, axis=1)
     out = os.path.join(here, cfg["out"])

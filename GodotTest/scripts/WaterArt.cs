@@ -71,6 +71,22 @@ public sealed class WaterArt
     /// This is what a wading tank is tinted with.</summary>
     public Color Mean { get; private set; }
 
+    /// <summary>
+    /// The least alpha the mesh can sample anywhere on its own boundary, once
+    /// <see cref="Stage3D.SwellBleed"/> has pulled it in.
+    ///
+    /// <b>The number the pond broke on.</b> A frame is exactly the plate, so the
+    /// hexagon's keyed rim lies on the frame's own edge - and where two cells meet,
+    /// two of those fades land on top of each other. Shipped as cut, the outermost
+    /// column was alpha 15 of 255 and the five-cell pond drew as three separate
+    /// pieces with dry ground between them. Nothing in the picture said so except
+    /// the picture.
+    ///
+    /// Measured over the hexagon's six vertices and six edge midpoints, which is
+    /// exactly the boundary a neighbour is on the other side of.
+    /// </summary>
+    public float EdgeAlpha { get; private set; }
+
     public string Note { get; private set; } = "no water art";
 
     /// <summary>Usable as a moving surface. Two frames is the least that can
@@ -123,10 +139,12 @@ public sealed class WaterArt
         set.Frames = frames;
         set.Frame = new Vector2I(w / frames, h);
         set.Mean = MeanOf(art);
+        set.EdgeAlpha = RimOf(art, set.Frame, frames);
         art.GenerateMipmaps();
         set.Texture = ImageTexture.CreateFromImage(art);
         set.Note = $"{File} {w}x{h}, {frames} frames of {set.Frame.X}"
-                   + $"x{set.Frame.Y}, mean {set.Mean.ToHtml(false)}";
+                   + $"x{set.Frame.Y}, mean {set.Mean.ToHtml(false)}, edge alpha "
+                   + $"{set.EdgeAlpha:F2}";
         return set;
     }
 
@@ -144,6 +162,45 @@ public sealed class WaterArt
     /// visibly lighter than the surface beside it - which is the exact seam
     /// this number exists to close.
     /// </summary>
+    /// <summary>
+    /// The worst alpha on the drawn boundary of every frame, after the bleed.
+    ///
+    /// The twelve points are the flat-top hexagon's own: six vertices at
+    /// <c>(±0.5, 0)</c> and <c>(±0.25, ±0.5)</c> of the frame, and the six edge
+    /// midpoints between them. In frame-local terms that is exactly what
+    /// <see cref="Stage3D"/> hands the mesh, so this asks the question the mesh
+    /// asks and not a similar one.
+    /// </summary>
+    private static float RimOf(Image art, Vector2I frame, int frames)
+    {
+        // Straight out of the frame's own size, with no trigonometry in it: a
+        // flat-top hexagon drawn on a plate has its vertices at (+-w/2, 0) and
+        // (+-w/4, +-h/2), and the plate is already the camera's squash. The same
+        // statement SelectionRing makes about the tile.
+        var hex = new[]
+        {
+            new Vector2(0.5f, 0.0f), new Vector2(0.25f, 0.5f),
+            new Vector2(-0.25f, 0.5f), new Vector2(-0.5f, 0.0f),
+            new Vector2(-0.25f, -0.5f), new Vector2(0.25f, -0.5f),
+        };
+        var inset = new Vector2(1.0f - 2.0f * Stage3D.SwellBleed / frame.X,
+                                1.0f - 2.0f * Stage3D.SwellBleed / frame.Y);
+        float worst = 1.0f;
+        for (int f = 0; f < frames; f++)
+        for (int i = 0; i < 6; i++)
+        foreach (Vector2 p in new[] { hex[i], (hex[i] + hex[(i + 1) % 6]) * 0.5f })
+        {
+            var at = new Vector2I(
+                Mathf.Clamp(f * frame.X
+                            + Mathf.RoundToInt((0.5f + inset.X * p.X) * frame.X),
+                            f * frame.X, (f + 1) * frame.X - 1),
+                Mathf.Clamp(Mathf.RoundToInt((0.5f + inset.Y * p.Y) * frame.Y),
+                            0, frame.Y - 1));
+            worst = Mathf.Min(worst, art.GetPixel(at.X, at.Y).A);
+        }
+        return worst;
+    }
+
     private static Color MeanOf(Image art)
     {
         double r = 0.0, g = 0.0, b = 0.0;
