@@ -31,3 +31,9 @@ Sounds/
 # Rider's project files. Per-machine and rewritten constantly - workspace.xml
 # alone changes on every window move - and they say nothing about the bench.
 GodotTest/.idea/
+
+# Claude Code's per-machine settings. Its sibling .claude/settings.json IS
+# tracked - that one declares the project's MCP server and belongs to the repo,
+# the same way .mcp.json does. This one accumulates whatever a session happened
+# to allow, including absolute scratchpad paths, so it is nobody else's.
+.claude/settings.local.json
