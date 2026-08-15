@@ -1147,12 +1147,16 @@ public sealed partial class Main : Node2D
 				_shadowEnabled = false;
 			else if (userArgs[i] == "--no-sound")
 				_soundEnabled = false;
-			// Off unless asked for, and that is the point rather than caution: the
-			// connection services calls between frames, and almost everything here
-			// is measured as a pixel difference between two captures. A capture has
-			// to be able to say nothing was listening. See Main.Mcp.cs.
+			// On, so the shape here is --no-mcp turning it off - and --mcp kept
+			// beside it because it was the flag that switched it on, and a flag
+			// that silently stops existing reads as a flag that stopped working.
+			// Neither reaches --capture, --trace or --selftest: those refuse the
+			// connection at StartMcp whatever was asked for, which is where a
+			// guarantee about evidence belongs. See Main.Mcp.cs.
 			else if (userArgs[i] == "--mcp")
 				_mcpEnabled = true;
+			else if (userArgs[i] == "--no-mcp")
+				_mcpEnabled = false;
 			// Both off by default, so both flags switch *on* - the opposite
 			// shape to --no-tracks and its neighbours, and the same shape as
 			// --pitch and --rumble, which are also off.

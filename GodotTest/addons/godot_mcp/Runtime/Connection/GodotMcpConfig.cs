@@ -1,0 +1,580 @@
+/*
+┌──────────────────────────────────────────────────────────────────┐
+│  Author: Ivan Murzak (https://github.com/IvanMurzak)             │
+│  Repository: GitHub (https://github.com/IvanMurzak/Godot-MCP)    │
+│  Copyright (c) 2026 Ivan Murzak                                  │
+│  Licensed under the Apache License, Version 2.0.                 │
+│  See the LICENSE file in the project root for more information.  │
+└──────────────────────────────────────────────────────────────────┘
+*/
+#nullable enable
+using System;
+using System.Text.Json.Serialization;
+using System.Threading.Tasks;
+using com.IvanMurzak.McpPlugin;
+using HubConsts = com.IvanMurzak.McpPlugin.Common.Consts.Hub;
+using McpServerConsts = com.IvanMurzak.McpPlugin.Common.Consts.MCP.Server;
+
+namespace com.IvanMurzak.Godot.MCP.Connection
+{
+    /// <summary>
+    /// Which MCP server the Godot plugin connects to.
+    /// </summary>
+    public enum GodotMcpConnectionMode
+    {
+        /// <summary>A user-supplied server URL (local dev server, self-hosted, etc.).</summary>
+        Custom,
+
+        /// <summary>The hosted ai-game.dev cloud server.</summary>
+        Cloud
+    }
+
+    /// <summary>
+    /// Connection configuration for the Godot-MCP plugin. The Godot analog of Unity-MCP's
+    /// <c>UnityMcpPlugin.UnityConnectionConfig</c> — it extends the reused
+    /// <see cref="ConnectionConfig"/> from <c>com.IvanMurzak.McpPlugin</c> (so the SignalR client
+    /// consumes <see cref="Host"/>/<see cref="Token"/>/<see cref="KeepConnected"/> unchanged) and
+    /// layers Cloud/Custom mode selection plus environment-variable overrides on top.
+    ///
+    /// <para>
+    /// The URL/token <em>resolution</em> logic lives in pure static helpers
+    /// (<see cref="ResolveCloudBaseUrl"/>, <see cref="ResolveCloudUrl"/>,
+    /// <see cref="ResolveActiveMode"/>) so it is unit-testable in the plain-xUnit
+    /// <c>Godot-MCP.Tests</c> host without constructing any Godot native types or a live
+    /// SignalR client.
+    /// </para>
+    /// </summary>
+    public class GodotMcpConfig : ConnectionConfig
+    {
+        // --- Environment-variable names (Godot analog of UNITY_MCP_*). ---
+
+        /// <summary>Overrides the cloud base URL (analogous to <c>UNITY_MCP_CLOUD_URL</c>).</summary>
+        public const string EnvCloudUrl = GodotMcpEnv.CloudUrl;
+
+        /// <summary>Overrides the custom-mode server host (used only in <see cref="GodotMcpConnectionMode.Custom"/>).</summary>
+        public const string EnvHost = GodotMcpEnv.Host;
+
+        /// <summary>Supplies the bearer token (routed to cloud or custom token by active mode).</summary>
+        public const string EnvToken = GodotMcpEnv.Token;
+
+        /// <summary>Forces the connection mode (<c>Cloud</c> / <c>Custom</c>, case-insensitive).</summary>
+        public const string EnvConnectionMode = GodotMcpEnv.ConnectionMode;
+
+        /// <summary>
+        /// Forces the Custom-mode authorization option (<c>none</c> / <c>oauth</c> / <c>token</c>,
+        /// case-insensitive; the retired <c>required</c> is accepted and normalized to <c>token</c>).
+        /// The Godot analog of Unity-MCP's <c>UNITY_MCP_AUTH_OPTION</c>.
+        /// </summary>
+        public const string EnvAuthOption = GodotMcpEnv.AuthOption;
+
+        /// <summary>
+        /// Forces the plugin's log-verbosity threshold (<c>Trace</c> / <c>Debug</c> / <c>Info</c> /
+        /// <c>Warning</c> / <c>Error</c> / <c>None</c>, case-insensitive) — the Godot analog of a
+        /// <c>UNITY_MCP_LOG_LEVEL</c>. Honored live by <see cref="ActiveLogLevel"/> so a smoke run can be
+        /// driven at <c>Trace</c> without touching the persisted config.
+        /// </summary>
+        public const string EnvLogLevel = GodotMcpEnv.LogLevel;
+
+        // --- Defaults. ---
+
+        /// <summary>Base URL of the hosted cloud server. The <c>/mcp</c> hub path is appended by <see cref="ResolveCloudUrl"/>.</summary>
+        public const string DefaultCloudBaseUrl = "https://ai-game.dev";
+
+        /// <summary>The MCP hub path appended to the cloud base URL.</summary>
+        public const string CloudHubPath = "/mcp";
+
+        /// <summary>
+        /// The connect-side "nothing configured yet" BASELINE SENTINEL for the Custom-mode host. It is NOT
+        /// the port anything actually binds or writes on the golden path: at connect time
+        /// <c>GodotMcpConnection.ResolveConfig → SeedDefaultLocalServerHost</c> replaces this baseline with
+        /// the project's ProjectIdentity-derived local host (<c>http://localhost:&lt;derived-port&gt;</c>),
+        /// and the local self-hosted server binds the derived port directly via
+        /// <c>GodotMcpConnection.ResolveLocalServerPort</c> (mcp-authorize e1 · PR 4 + g3 — the Phase-4
+        /// 8080 → derived-port migration, design 06 · D15). The literal 8080 survives only as the sentinel
+        /// the seed detects (so a pre-migration persisted <c>http://localhost:8080</c> is re-derived) and as
+        /// the Server-URL field's placeholder format hint.
+        /// </summary>
+        public const string DefaultCustomHost = "http://localhost:8080";
+
+        // --- Serialized backing fields. ---
+
+        /// <summary>
+        /// Backing field for the custom-mode server URL. Serialized as <c>host</c>.
+        /// Use <see cref="Host"/> for the active connection URL (which routes through Cloud mode).
+        /// </summary>
+        [JsonPropertyName("host")]
+        public string CustomHost { get; set; } = DefaultCustomHost;
+
+        /// <summary>Backing field for the custom-mode bearer token. Serialized as <c>token</c>.</summary>
+        [JsonPropertyName("token")]
+        public string? CustomToken { get; set; }
+
+        /// <summary>Backing field for the cloud-mode bearer token. Serialized as <c>cloudToken</c>.</summary>
+        [JsonPropertyName("cloudToken")]
+        public string? CloudToken { get; set; }
+
+        /// <summary>The configured connection mode (overridable by <see cref="EnvConnectionMode"/> via <see cref="ResolveActiveMode"/>).</summary>
+        [JsonPropertyName("connectionMode")]
+        public GodotMcpConnectionMode ConnectionMode { get; set; } = GodotMcpConnectionMode.Cloud;
+
+        /// <summary>
+        /// The configured Custom-mode authorization option (overridable by <see cref="EnvAuthOption"/> via
+        /// <see cref="ResolveActiveAuthOption"/>). Defaults to <see cref="McpServerConsts.AuthOption.none"/> —
+        /// a fresh Custom connection is anonymous until the user opts into auth. Only consulted in Custom mode.
+        ///
+        /// <para>
+        /// Uses the SHARED <c>com.IvanMurzak.McpPlugin.Common.Consts.MCP.Server.AuthOption</c>
+        /// (<c>none</c>/<c>oauth</c>/<c>token</c>) — the per-engine <c>GodotMcpAuthOption</c> enum was retired in
+        /// mcp-authorize g6 so the launch-arg builder + auth enum are shared once across engines. A persisted or
+        /// env <c>required</c> (the retired shared-token name) is normalized to <c>token</c> on read
+        /// (<see cref="ResolveActiveAuthOption"/>) and rewritten on load (<see cref="GodotMcpConfigStore.Load"/>).
+        /// </para>
+        /// </summary>
+        [JsonPropertyName("authOption")]
+        public McpServerConsts.AuthOption AuthOption { get; set; } = McpServerConsts.AuthOption.none;
+
+        /// <summary>
+        /// The configured log-verbosity threshold for the plugin's routing of the reused framework's
+        /// <c>Microsoft.Extensions.Logging</c> output to the Godot Output (overridable by
+        /// <see cref="EnvLogLevel"/> via <see cref="ResolveActiveLogLevel"/>). Defaults to
+        /// <see cref="GodotMcpLogLevel.Info"/> — the framework's connection/handshake info lines are shown,
+        /// but trace/debug noise is suppressed until the user opts in via the dock's Log Level dropdown.
+        /// </summary>
+        [JsonPropertyName("logLevel")]
+        public GodotMcpLogLevel LogLevel { get; set; } = GodotMcpLogLevel.Info;
+
+        /// <summary>
+        /// Persisted per-feature enable/disable map for the dock's MCP-features section (tools / prompts /
+        /// resources). Only user-touched items are stored; an empty map means "everything at its live default"
+        /// (the McpPlugin managers default to enabled), so a fresh install disables nothing. Reapplied on plugin
+        /// boot (see <c>GodotMcpConnection.ReapplyFeatureStates</c>) and updated when the user toggles an item in
+        /// a feature list window. The merge/capture logic is pure-managed (<see cref="GodotMcpFeatureStateMerge"/>).
+        /// </summary>
+        [JsonPropertyName("features")]
+        public GodotMcpFeatureMap Features { get; set; } = new();
+
+        /// <summary>
+        /// The AI agent the dock's "AI agent" section has selected (the <c>AgentId</c> of a
+        /// <c>GodotAgentConfigurator</c>, e.g. <c>claude-code</c>). Persisted so the user's choice survives an editor
+        /// restart. Defaults to <c>claude-code</c> — the first-listed configurator. This is pure presentation state
+        /// (it does not affect the plugin's own connection), so it is never env-overridden.
+        /// </summary>
+        [JsonPropertyName("selectedAgentId")]
+        public string SelectedAgentId { get; set; } = "claude-code";
+
+        /// <summary>
+        /// The effective connection mode after applying the <see cref="EnvConnectionMode"/> override.
+        /// Never serialized — recomputed from the env each access so a process-level override always wins.
+        /// </summary>
+        [JsonIgnore]
+        public GodotMcpConnectionMode ActiveMode => ResolveActiveMode(ConnectionMode);
+
+        /// <summary>
+        /// The effective Custom-mode authorization option after applying the <see cref="EnvAuthOption"/>
+        /// override. Never serialized — recomputed from the env each access so a process-level override
+        /// always wins (parity with <see cref="ActiveMode"/>).
+        /// </summary>
+        [JsonIgnore]
+        public McpServerConsts.AuthOption ActiveAuthOption => ResolveActiveAuthOption(AuthOption);
+
+        /// <summary>
+        /// The effective log-verbosity threshold after applying the <see cref="EnvLogLevel"/> override.
+        /// Never serialized — recomputed from the env each access so a process-level override always wins
+        /// (parity with <see cref="ActiveMode"/> / <see cref="ActiveAuthOption"/>). The logger reads this
+        /// LIVE on every log call, so the dock's Log Level dropdown takes effect without a rebuild.
+        /// </summary>
+        [JsonIgnore]
+        public GodotMcpLogLevel ActiveLogLevel => ResolveActiveLogLevel(LogLevel);
+
+        /// <summary>
+        /// Active connection URL based on <see cref="ActiveMode"/>:
+        /// the resolved cloud URL in Cloud mode, otherwise the custom host.
+        /// The setter writes through to <see cref="CustomHost"/> (custom mode is the only writable host).
+        /// </summary>
+        [JsonIgnore]
+        public override string Host
+        {
+            get => ActiveMode == GodotMcpConnectionMode.Cloud ? ResolveCloudUrl() : ResolveCustomHost();
+            set => CustomHost = value;
+        }
+
+        /// <summary>
+        /// Active bearer token based on <see cref="ActiveMode"/>. In Cloud mode the cloud token (env-overridable);
+        /// in Custom mode the custom token (env-overridable). The setter mirrors the getter so a generic
+        /// <c>Token = ...</c> assignment lands on the field that matches the active mode.
+        ///
+        /// <para>
+        /// McpPlugin 7.0 dropped the base <see cref="ConnectionConfig"/>'s <c>Token</c> property in favor of an
+        /// async <see cref="ConnectionConfig.CredentialProvider"/> (a <c>Func&lt;Task&lt;string?&gt;&gt;</c> the
+        /// SignalR client invokes per connect). This property is therefore no longer an <c>override</c> — it stays
+        /// as the addon's single active-token accessor (read by the AI-agent configurators and the config store),
+        /// and the constructor wires <see cref="ConnectionConfig.CredentialProvider"/> to read it live so the
+        /// client sends the identical bearer it did under 6.x. Behavior is unchanged.
+        /// </para>
+        /// </summary>
+        [JsonIgnore]
+        public string? Token
+        {
+            get => ActiveMode == GodotMcpConnectionMode.Cloud ? ResolveCloudToken() : ResolveCustomToken();
+            set
+            {
+                if (ActiveMode == GodotMcpConnectionMode.Cloud)
+                    CloudToken = value;
+                else
+                    CustomToken = value;
+            }
+        }
+
+        /// <summary>
+        /// Never serialized. McpPlugin 7.0's base <see cref="ConnectionConfig.CredentialProvider"/> is a
+        /// non-serializable delegate (<c>Func&lt;Task&lt;string?&gt;&gt;</c>) with no <c>[JsonIgnore]</c> of its
+        /// own, so a straight serialization of this persisted config throws <c>NotSupportedException</c>. This
+        /// override adds nothing but the <see cref="JsonIgnoreAttribute"/> — it forwards get/set to the base so
+        /// the constructor's wiring and the SignalR client's per-connect read are unchanged, while the config
+        /// store (<see cref="GodotMcpConfigStore"/>) round-trips only the serializable state as before.
+        /// </summary>
+        [JsonIgnore]
+        public override Func<Task<string?>>? CredentialProvider
+        {
+            get => base.CredentialProvider;
+            set => base.CredentialProvider = value;
+        }
+
+        public GodotMcpConfig()
+        {
+            // Auto-reconnect / backoff are handled by the reused McpPlugin SignalR client when
+            // KeepConnected is true (it drives a FixedRetryPolicy on the underlying HubConnection).
+            // We do not reimplement transport — we just opt into staying connected.
+            KeepConnected = true;
+
+            // McpPlugin 7.0 reads the bearer from CredentialProvider (an async Func<Task<string?>>) rather than a
+            // Token property. Resolve it LIVE off Token on each connect so the active-mode + env overrides still
+            // apply — behavior-preserving vs the 6.x virtual Token the client used to read.
+            CredentialProvider = () => Task.FromResult(Token);
+
+            // Auto-generate skills is ON by default (owner-approved v1 default): on a fresh install the addon
+            // regenerates the skills-capable agent's SKILL.md files on boot via GenerateSkillFilesIfNeeded(), so the
+            // AI agent sees up-to-date per-tool skills with no manual step. The dock's Skills card exposes a toggle
+            // that persists an override (GenerateSkillFiles is a serialized field on the base ConnectionConfig).
+            GenerateSkillFiles = true;
+        }
+
+        // --- Pure resolution helpers (unit-testable; no Godot / SignalR dependency). ---
+
+        /// <summary>
+        /// Resolve the active connection mode, letting <see cref="EnvConnectionMode"/> override the configured value.
+        /// An unrecognized/empty env value falls through to <paramref name="configured"/>.
+        /// </summary>
+        public static GodotMcpConnectionMode ResolveActiveMode(GodotMcpConnectionMode configured)
+        {
+            var normalized = NormalizeEnv(ReadEnv(EnvConnectionMode));
+            if (string.IsNullOrEmpty(normalized))
+                return configured;
+
+            // Only honor named enum values; reject numeric strings ("1") that Enum.TryParse
+            // would otherwise accept and silently map to an arbitrary mode.
+            if (Enum.TryParse<GodotMcpConnectionMode>(normalized, ignoreCase: true, out var parsed) &&
+                !int.TryParse(normalized, out _))
+                return parsed;
+
+            return configured;
+        }
+
+        /// <summary>
+        /// Resolve the cloud BASE url (no hub path), applying the <see cref="EnvCloudUrl"/> override.
+        /// Invalid / non-http(s) overrides fall back to <see cref="DefaultCloudBaseUrl"/>. A trailing
+        /// <c>/mcp</c> is stripped so <see cref="ResolveCloudUrl"/> never produces <c>/mcp/mcp</c>.
+        /// </summary>
+        public static string ResolveCloudBaseUrl()
+        {
+            var normalized = NormalizeUrl(ReadEnv(EnvCloudUrl));
+            if (string.IsNullOrEmpty(normalized))
+                return DefaultCloudBaseUrl;
+
+            if (!IsValidHttpUrl(normalized))
+                return DefaultCloudBaseUrl;
+
+            if (normalized.EndsWith(CloudHubPath, StringComparison.OrdinalIgnoreCase))
+                normalized = normalized[..^CloudHubPath.Length];
+
+            return normalized;
+        }
+
+        /// <summary>Resolve the full cloud connection URL (base + <see cref="CloudHubPath"/>).</summary>
+        public static string ResolveCloudUrl() => ResolveCloudBaseUrl() + CloudHubPath;
+
+        /// <summary>
+        /// Resolve the MCP-client endpoint URL an external AI client (Claude Code, Cursor, …) should POST to —
+        /// the value the AI-agent configurators write into the user's MCP-client config. This is DISTINCT from
+        /// <see cref="Host"/> (the URL the <em>plugin</em> connects to): the plugin connects to
+        /// <c>&lt;host&gt;/hub/mcp-server</c> over SignalR, while an MCP client connects to <c>&lt;host&gt;/mcp</c>
+        /// over streamable-HTTP.
+        ///
+        /// <list type="bullet">
+        ///   <item><b>Cloud mode</b>: <see cref="ResolveCloudUrl"/> — already ends in <see cref="CloudHubPath"/>
+        ///   (<c>/mcp</c>), so it is returned unchanged.</item>
+        ///   <item><b>Custom mode</b>: the resolved custom host (trailing slash stripped) with
+        ///   <see cref="CloudHubPath"/> appended — e.g. <c>http://localhost:8080</c> → <c>http://localhost:8080/mcp</c>.
+        ///   A host that already ends in <c>/mcp</c> is not double-suffixed.</item>
+        /// </list>
+        ///
+        /// Reads the active mode/host LIVE off <paramref name="config"/> (so an env override applies) but is a
+        /// pure static — no Godot / SignalR dependency — so it is unit-testable in the plain-xUnit host.
+        /// </summary>
+        public static string ResolveMcpClientUrl(GodotMcpConfig config)
+        {
+            if (config == null)
+                throw new ArgumentNullException(nameof(config));
+
+            if (config.ActiveMode == GodotMcpConnectionMode.Cloud)
+                return ResolveCloudUrl();
+
+            // Custom mode: the plugin connects to <host>/hub/mcp-server; the MCP client connects to <host>/mcp.
+            var host = config.ResolveCustomHost().TrimEnd('/');
+            if (host.EndsWith(CloudHubPath, StringComparison.OrdinalIgnoreCase))
+                return host;
+
+            return host + CloudHubPath;
+        }
+
+        /// <summary>
+        /// Resolve the active custom-mode host, applying the <see cref="EnvHost"/> override.
+        /// </summary>
+        public string ResolveCustomHost()
+        {
+            // Prefer the env override, then the configured host; validate each as an http(s) URL
+            // (mirroring ResolveCloudBaseUrl) and fall back to DefaultCustomHost on anything invalid.
+            var envHost = NormalizeUrl(ReadEnv(EnvHost));
+            if (!string.IsNullOrEmpty(envHost))
+                return IsValidHttpUrl(envHost) ? envHost : DefaultCustomHost;
+
+            var configuredHost = NormalizeUrl(CustomHost);
+            if (!string.IsNullOrEmpty(configuredHost))
+                return IsValidHttpUrl(configuredHost) ? configuredHost : DefaultCustomHost;
+
+            return DefaultCustomHost;
+        }
+
+        /// <summary>Resolve the active cloud token, applying the <see cref="EnvToken"/> override.</summary>
+        public string? ResolveCloudToken()
+        {
+            var envToken = NormalizeEnv(ReadEnv(EnvToken));
+            return string.IsNullOrEmpty(envToken) ? CloudToken : envToken;
+        }
+
+        /// <summary>
+        /// Resolve the bearer the plugin presents on a Custom-mode connection, routed by the active auth
+        /// option:
+        /// <list type="bullet">
+        ///   <item><see cref="McpServerConsts.AuthOption.none"/> — <c>null</c>: an anonymous loopback
+        ///   connection sends no bearer, regardless of any token the user previously generated (so flipping
+        ///   auth back to <c>none</c> drops the token from the wire without discarding the stored value).</item>
+        ///   <item><see cref="McpServerConsts.AuthOption.token"/> — the offline static secret
+        ///   (<see cref="CustomToken"/>); the <see cref="EnvToken"/> override wins over the persisted value,
+        ///   mirroring the other resolvers.</item>
+        ///   <item><see cref="McpServerConsts.AuthOption.oauth"/> — the signed-in ACCOUNT JWT
+        ///   (<see cref="ResolveCloudToken"/>): oauth-local validates the loopback-audience account token
+        ///   against ai-game.dev's JWKS (design Part A), so the same credential the Cloud path presents flows
+        ///   to a local oauth server too.</item>
+        /// </list>
+        /// </summary>
+        public string? ResolveCustomToken()
+        {
+            switch (ActiveAuthOption)
+            {
+                case McpServerConsts.AuthOption.token:
+                    var envToken = NormalizeEnv(ReadEnv(EnvToken));
+                    return string.IsNullOrEmpty(envToken) ? CustomToken : envToken;
+
+                case McpServerConsts.AuthOption.oauth:
+                    return ResolveCloudToken();
+
+                default: // none
+                    return null;
+            }
+        }
+
+        /// <summary>
+        /// Resolve the active Custom-mode auth option, letting <see cref="EnvAuthOption"/> override the
+        /// configured value. An unrecognized/empty/numeric env value falls through to
+        /// <paramref name="configured"/> — identical discipline to <see cref="ResolveActiveMode"/>. The result
+        /// is always normalized to one of the three target-state modes via <see cref="NormalizeAuthOption"/>
+        /// (the retired <c>required</c> → <c>token</c>; <c>unknown</c> → <c>none</c>).
+        /// </summary>
+        public static McpServerConsts.AuthOption ResolveActiveAuthOption(McpServerConsts.AuthOption configured)
+        {
+            var normalized = NormalizeEnv(ReadEnv(EnvAuthOption));
+
+            var resolved = configured;
+            if (!string.IsNullOrEmpty(normalized) &&
+                Enum.TryParse<McpServerConsts.AuthOption>(normalized, ignoreCase: true, out var parsed) &&
+                !int.TryParse(normalized, out _))
+            {
+                resolved = parsed;
+            }
+
+            return NormalizeAuthOption(resolved);
+        }
+
+        /// <summary>
+        /// Normalize a shared <see cref="McpServerConsts.AuthOption"/> to the three target-state modes the
+        /// Godot Custom-mode UI + local-launch path support — <c>none</c> / <c>oauth</c> / <c>token</c>:
+        /// <list type="bullet">
+        ///   <item>the retired <c>required</c> shared-token name (mcp-authorize b5, whose dedicated server
+        ///   strategy was deleted) maps to the offline <c>token</c> mode — so an un-migrated persisted or env
+        ///   <c>required</c> is treated as <c>token</c> everywhere instead of reaching the shared launch-arg
+        ///   builder, which fail-closed rejects <c>required</c>;</item>
+        ///   <item><c>unknown</c> (and any out-of-range value) falls back to the crash-safe <c>none</c>.</item>
+        /// </list>
+        /// Applied on every read (<see cref="ResolveActiveAuthOption"/>) AND when a persisted config is loaded
+        /// (<see cref="GodotMcpConfigStore.Load"/> rewrites the stored field), so an old
+        /// <c>authorization=required</c> config self-heals to <c>token</c>.
+        /// </summary>
+        public static McpServerConsts.AuthOption NormalizeAuthOption(McpServerConsts.AuthOption option) => option switch
+        {
+            McpServerConsts.AuthOption.required => McpServerConsts.AuthOption.token,
+            McpServerConsts.AuthOption.oauth => McpServerConsts.AuthOption.oauth,
+            McpServerConsts.AuthOption.token => McpServerConsts.AuthOption.token,
+            _ => McpServerConsts.AuthOption.none
+        };
+
+        /// <summary>
+        /// Resolve the active log-verbosity threshold, letting <see cref="EnvLogLevel"/> override the
+        /// configured value. An unrecognized/empty/numeric env value falls through to
+        /// <paramref name="configured"/> — identical discipline to <see cref="ResolveActiveMode"/> /
+        /// <see cref="ResolveActiveAuthOption"/>.
+        /// </summary>
+        public static GodotMcpLogLevel ResolveActiveLogLevel(GodotMcpLogLevel configured)
+        {
+            var normalized = NormalizeEnv(ReadEnv(EnvLogLevel));
+            if (string.IsNullOrEmpty(normalized))
+                return configured;
+
+            if (Enum.TryParse<GodotMcpLogLevel>(normalized, ignoreCase: true, out var parsed) &&
+                !int.TryParse(normalized, out _))
+                return parsed;
+
+            return configured;
+        }
+
+        static string? ReadEnv(string name) => Environment.GetEnvironmentVariable(name);
+
+        /// <summary>
+        /// Single normalization for env/config string values: trim surrounding whitespace and a single
+        /// pair of wrapping double-quotes (so <c>GODOT_MCP_TOKEN="abc"</c> yields <c>abc</c>, not a
+        /// bearer value with literal quotes). Returns <c>null</c> for null/blank input.
+        ///
+        /// <para>
+        /// Exposed <c>internal</c> so the <c>.env</c> file layer
+        /// (<see cref="GodotMcpEnvFile"/>) sanitizes file values identically to process-env values
+        /// — see the precedence note on <see cref="GodotMcpEnvFile.Apply"/>.
+        /// </para>
+        /// </summary>
+        internal static string? NormalizeEnv(string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+                return null;
+
+            return raw.Trim().Trim('"');
+        }
+
+        /// <summary>
+        /// URL-flavored normalization: <see cref="NormalizeEnv"/> plus a trailing-slash trim so URL
+        /// resolvers compare/append cleanly. Returns <c>null</c> for null/blank input.
+        /// </summary>
+        internal static string? NormalizeUrl(string? raw)
+        {
+            var normalized = NormalizeEnv(raw);
+            return string.IsNullOrEmpty(normalized) ? null : normalized.TrimEnd('/');
+        }
+
+        /// <summary>True when <paramref name="value"/> is an absolute http or https URL.</summary>
+        internal static bool IsValidHttpUrl(string value) =>
+            Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
+            (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+
+        /// <summary>
+        /// True when <paramref name="url"/> targets a loopback host (<c>localhost</c>, an IPv4
+        /// <c>127.0.0.0/8</c> address, or IPv6 <c>::1</c>). Mirrors Unity-MCP's
+        /// <c>EnvironmentUtils.IsLoopbackUrl</c> — used to auto-select <see cref="GodotMcpConnectionMode.Custom"/>
+        /// when a local-dev host is configured without an explicit mode. Pure-managed (no Godot types).
+        /// </summary>
+        internal static bool IsLoopbackUrl(string? url)
+        {
+            if (string.IsNullOrWhiteSpace(url))
+                return false;
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+                return false;
+
+            var host = uri.Host;
+            if (string.Equals(host, "localhost", StringComparison.OrdinalIgnoreCase))
+                return true;
+            if (System.Net.IPAddress.TryParse(host, out var ip))
+                return System.Net.IPAddress.IsLoopback(ip);
+
+            return false;
+        }
+
+        /// <summary>
+        /// The port the user EXPLICITLY typed into <paramref name="url"/>, or <c>null</c> when the URL
+        /// carries no explicit port. This is the Godot mirror of the shared writer's
+        /// <c>AgentConfiguratorSettings.TryGetExplicitPort</c> — the level-2 input of the writer's
+        /// marker → typed → derived port precedence. The library's copy is <c>internal</c>, so it cannot
+        /// be consumed here; this reimplements the same documented rule (URL parsing, not the hashing /
+        /// port math, which stays inherited from <see cref="GodotProjectIdentity.Derive"/>).
+        ///
+        /// <para><b>Why the raw string and not <c>Uri.Port</c>:</b> <see cref="Uri"/> synthesises the
+        /// scheme's default port, so <c>http://localhost/mcp</c> and <c>http://localhost:80/mcp</c> both
+        /// report <c>80</c> and become indistinguishable. Only the first has no user intent behind it and
+        /// must fall through to the derived port; the second is a port the user deliberately typed. Reading
+        /// the raw authority is what preserves that distinction — using <c>Uri.Port</c> here would make the
+        /// binder bind <c>80</c> for a portless loopback host while the writer wrote the derived port.</para>
+        ///
+        /// <para>An out-of-range port yields <c>null</c> too, mirroring the writer, so an unusable value
+        /// falls back to the derived port on BOTH sides rather than diverging.</para>
+        ///
+        /// <para><b>Keep this a line-for-line mirror of the library's copy.</b> There is no compiler-
+        /// enforced link between the two, so structural fidelity is the only thing that makes drift
+        /// visible on inspection. Do not "tidy" a step away — including the empty-port guard that the
+        /// <c>NumberStyles.None</c> parse would also reject — without making the same change upstream.</para>
+        /// </summary>
+        internal static int? TryGetExplicitPort(string? url)
+        {
+            if (string.IsNullOrWhiteSpace(url))
+                return null;
+
+            // Isolate the authority: after "scheme://" (if present), up to the first '/', '?' or '#'.
+            var schemeEnd = url!.IndexOf("://", StringComparison.Ordinal);
+            var start = schemeEnd >= 0 ? schemeEnd + 3 : 0;
+            var end = url.IndexOfAny(AuthorityTerminators, start);
+            var authority = end >= 0 ? url.Substring(start, end - start) : url.Substring(start);
+
+            // Drop any userinfo ("user:pass@host:port") — its colon is not a port separator.
+            var at = authority.LastIndexOf('@');
+            if (at >= 0)
+                authority = authority.Substring(at + 1);
+
+            // For an IPv6 literal the port follows the closing bracket ("[::1]:8080"); the colons inside
+            // the brackets are part of the address. LastIndexOf returns -1 for a normal host, so the
+            // search then starts at 0 and finds a plain "host:port" colon.
+            var colon = authority.IndexOf(':', authority.LastIndexOf(']') + 1);
+            if (colon < 0 || colon == authority.Length - 1)
+                return null;
+
+            // NumberStyles.None is the whole validator: it rejects sign, whitespace, separators and any
+            // non-ASCII-digit character, so a hand-rolled digit scan on top would be redundant.
+            if (!int.TryParse(
+                    authority.Substring(colon + 1),
+                    System.Globalization.NumberStyles.None,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    out var port))
+                return null;
+
+            return port > 0 && port <= HubConsts.MaxPort ? port : (int?)null;
+        }
+
+        /// <summary>Characters that terminate a URL authority. Static so the parse does not allocate a
+        /// fresh separator array on every call.</summary>
+        static readonly char[] AuthorityTerminators = { '/', '?', '#' };
+    }
+}

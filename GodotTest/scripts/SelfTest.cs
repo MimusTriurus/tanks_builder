@@ -5526,6 +5526,17 @@ public static class SelfTest
                 + "a change somebody made on purpose - the tracer was off while "
                 + "it was one stroke of debug line, and is on now that it is a "
                 + "layer with a calibre and a trail to be judged");
+            // The other half of this one is not a constant and cannot be: that no
+            // [mcp] line is printed by the very run this check is inside. If the
+            // connection had opened, it would have opened before SelfTest.Run was
+            // called - StartMcp is the last thing _Ready does, and --selftest quits
+            // from _Ready before reaching it.
+            Check("the bench serves its tools unless asked not to",
+                Main.McpOnByDefault,
+                "named for the reason the three above are. On is safe only because "
+                + "--capture, --trace and --selftest refuse the connection at "
+                + "StartMcp whatever the flag said: a run that answered a tool call "
+                + "between frames is not the run the other half of an A/B came from");
             var unseen = new Shell
             {
                 Shooter = shooter, Target = foe, ImpactLocal = aim,
