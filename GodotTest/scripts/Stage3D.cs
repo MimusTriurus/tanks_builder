@@ -289,8 +289,10 @@ public sealed partial class Stage3D : Node3D
         // the board does not, which is exactly the split the gate is there to
         // make. Wrapped rather than left to grow, so a bench left open all
         // afternoon keeps the same precision in the fraction as one just started.
-        _swell = Mathf.PosMod(_swell + (float)delta / SwellPeriod, 1.0f);
+        if (SwellPeriod > 0.0f)
+            _swell = Mathf.PosMod(_swell + (float)delta / SwellPeriod, 1.0f);
         _swellInk?.SetShaderParameter("phase", _swell);
+        _swellInk?.SetShaderParameter("blend", SwellBlend ? 1.0f : 0.0f);
     }
 
     private void Aim()
@@ -1243,14 +1245,44 @@ void fragment() {{
     /// <summary>
     /// How long one turn of the water's frames takes, in seconds.
     ///
+    /// <b>Seconds and not a multiplier, because there is no triple under it.</b>
+    /// The dials that are levels - tremble, exhaust, traverse, tracer - sit over a
+    /// per-class trio whose spread a direct control would flatten on the first
+    /// drag. The pond is one board's worth of water. Same call
+    /// <c>--smoke-life</c> made.
+    ///
     /// <b>The period rather than a rate, because what was measured is a period.</b>
-    /// The four frames are a swell going by, not a mechanism turning: at 2.4s they
-    /// step about every 0.6s, which is slow enough that the loop reads as water
-    /// moving and fast enough that a stopped board does not read as ice. Faster and
-    /// the quartet reads as a flicker - there are four frames, not twelve, and
-    /// nothing here can be blurred into its own average the way a track can.
+    /// Four frames over 2.4s is one every 0.6s - 36 screen frames apiece, which is
+    /// a slideshow and is exactly what "jerky" was. Speed alone cannot answer that:
+    /// four frames step at any rate, and faster only trades a slideshow for a
+    /// flicker. What answers it is <see cref="SwellBlendDefault"/>; this then says
+    /// how fast the water flows rather than how coarsely it ticks.
     /// </summary>
-    private const float SwellPeriod = 2.4f;
+    public const float SwellPeriodDefault = 2.4f;
+
+    /// <summary>Live, off the panel row. Floored rather than validated: a period
+    /// of zero is a still pond, which is a legible thing to ask for, where the
+    /// division it would otherwise do is not.</summary>
+    public float SwellPeriod = SwellPeriodDefault;
+
+    /// <summary>How far one frame is carried into the next, 0..1.
+    ///
+    /// <b>Zero is the stepped loop exactly</b>, which is what makes this an A/B
+    /// rather than a smoothing knob: the shader mixes toward the following frame
+    /// by <c>fract(t) * blend</c>, so at zero the mix term vanishes and what is
+    /// drawn is the floor frame and nothing else - the pond as it was.
+    ///
+    /// <b>On by default, because it is the answer to the complaint.</b> Four
+    /// frames cannot be made smooth by choosing when to change them; they can only
+    /// be made to stop changing all at once. The cost is honest and worth naming:
+    /// a dissolve is not a translation, so what crossing frames buys is continuous
+    /// motion and what it spends is a little of the wave's edge. On this quartet
+    /// that trade is cheap - consecutive frames differ by 6-9 units of picture,
+    /// which is why they were chosen as the ford's frames in the first place.
+    /// </summary>
+    public const bool SwellBlendDefault = true;
+
+    public bool SwellBlend = SwellBlendDefault;
 
     private ShaderMaterial? _swellInk;
 
@@ -1293,6 +1325,12 @@ void fragment() {{
     /// moment of the same water, so it does not look like corruption; it looks
     /// like nothing, until the strip is one day cut from frames that differ.
     ///
+    /// <b>Two frames fetched, and the last one wraps to the first.</b> The mix is
+    /// what stops four frames reading as four; wrapping is free here because the
+    /// quartet closes by measurement, not by hope - its wrap step is 1.14 of the
+    /// worst step inside it, where the project calls a seam anything over 4. On a
+    /// strip that did not close, this blend would be the place it showed.
+    ///
     /// The opacity stays the flat colour's: the bottom has to show through, which
     /// is what makes a ford a ford rather than a hole.
     /// </summary>
@@ -1303,11 +1341,15 @@ uniform sampler2D surf : source_color, filter_linear_mipmap;
 uniform vec4 tint = vec4(0.0);
 uniform float frames = 1.0;
 uniform float phase = 0.0;
+uniform float blend = 1.0;
 void fragment() {
-    float step = floor(fract(phase) * frames);
+    float t = fract(phase) * frames;
+    float step = floor(t);
     float inset = 0.5 * frames / float(textureSize(surf, 0).x);
     float u = clamp(UV.x, inset, 1.0 - inset);
-    vec4 c = texture(surf, vec2((u + step) / frames, UV.y));
+    vec4 a = texture(surf, vec2((u + step) / frames, UV.y));
+    vec4 b = texture(surf, vec2((u + mod(step + 1.0, frames)) / frames, UV.y));
+    vec4 c = mix(a, b, fract(t) * blend);
     ALBEDO = c.rgb;
     ALPHA = c.a * tint.a;
 }

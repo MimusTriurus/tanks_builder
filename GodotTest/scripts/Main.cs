@@ -260,6 +260,14 @@ public sealed partial class Main : Node2D
 	/// is off or the file is not on disk.</summary>
 	private WaterArt? Surf => _waterPaint ? _waterArt : null;
 
+	/// <summary>Seconds for one turn of the water's frames, and whether one frame
+	/// is carried into the next. Parked here for --terrain's reason: both are read
+	/// before the stage exists, and both are pushed at it every frame rather than
+	/// on the drag, so a stage built later does not come up on the built-in.
+	/// </summary>
+	private double _swell = Stage3D.SwellPeriodDefault;
+	private bool _swellBlend = Stage3D.SwellBlendDefault;
+
 	/// <summary>
 	/// Whether the board and the tanks are drawn by the depth buffer rather than
 	/// by paint order. See <see cref="Stage3D"/>.
@@ -1369,6 +1377,21 @@ public sealed partial class Main : Node2D
 			// blamed for that survives this flag is the water, not the art.
 			else if (userArgs[i] == "--flat-water")
 				_waterPaint = false;
+			// How fast the swell goes round, in seconds. Seconds and not a level,
+			// because there is no per-class triple under it - the same call
+			// --smoke-life made.
+			else if (userArgs[i] == "--swell" && i + 1 < userArgs.Length
+					 && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+										CultureInfo.InvariantCulture, out double turn))
+			{
+				_swell = turn;
+				i++;
+			}
+			// And the stepped loop back, which is the A/B the blend is judged by:
+			// four frames cannot be made smooth by choosing when to change them,
+			// so this is the only way to see what choosing when actually buys.
+			else if (userArgs[i] == "--hard-swell")
+				_swellBlend = false;
 			// How deep, over the row above rather than instead of it: a depth
 			// asked for is water asked for, or the flag would look like one that
 			// did not arrive - the argument --recoil <x> already makes.
@@ -3323,6 +3346,17 @@ public sealed partial class Main : Node2D
 	public const double ShallowAt = 0.15;
 	public const double SunkAt = 0.45;
 
+	/// <summary>How long a single frame of the water may be held before the loop
+	/// stops reading as motion, in screen frames. Named because the caption and
+	/// the check both want it, and a threshold with two copies is a threshold that
+	/// moves in one of them.
+	///
+	/// Twenty is a third of a second. It is the far side of the same argument
+	/// <see cref="ExhaustLoop.FloorFramesPerPhase"/> makes from the near side -
+	/// under two frames a cycle flickers, over twenty it is a slideshow - and the
+	/// tuned 2.4s sits at 36, which is why the water was called jerky.</summary>
+	public const double StepsAt = 20.0;
+
 	/// <summary>How deep the water stands. Everything settles for
 	/// <see cref="SetGrade"/>'s reason narrowed to one thing: no height on the
 	/// board moves, but every waterline on a tank standing in it does, and those
@@ -4246,6 +4280,8 @@ public sealed partial class Main : Node2D
 		["--water"] = new[] { "ground.water" },
 		["--depth"] = new[] { "ground.water", "ground.depth" },
 		["--flat-water"] = new[] { "ground.water_paint" },
+		["--swell"] = new[] { "ground.swell" },
+		["--hard-swell"] = new[] { "ground.swell_blend" },
 		// The stage asks for height as well as for itself, so it declares both -
 		// the board came up flat the first time because "ground.relief" was not
 		// declared, which from outside looks exactly like a flag that did not
@@ -4893,6 +4929,31 @@ public sealed partial class Main : Node2D
 		// itself off and blame the toggle for the file.
 		ui.Toggle("ground.water_paint", "drawn water surface  (--flat-water)",
 			() => _waterPaint, SetWaterPaint);
+		// How fast the swell turns, and what it costs in the units the complaint
+		// was made in: how long one frame is held, and how many screen frames that
+		// is. Both, because the first says how the water reads and the second says
+		// when it stops being an animation at all.
+		ui.Slide("ground.swell", "water speed  (--swell)",
+			0.4, 6.0, 0.2,
+			() => _swell, v => _swell = v,
+			"s per turn", () =>
+			{
+				int frames = _waterArt?.Frames ?? 0;
+				if (frames < 1 || _swell <= 0.0)
+					return "no drawn surface to turn";
+				double held = _swell / frames;
+				return $"{frames} frames, {held:F2}s each = {held * 60.0:F0} screen"
+					   + " frames"
+					   + (_swellBlend
+						  ? "   - crossed, so the step is not seen"
+						  : held * 60.0 > StepsAt
+							  ? $"   - over {StepsAt:F0} it reads as a slideshow"
+							  : "");
+			});
+		// The A/B, and the only thing that answers "jerky": four frames step at
+		// any speed, so the choice is between stepping and dissolving.
+		ui.Toggle("ground.swell_blend", "carry each frame into the next  (--hard-swell)",
+			() => _swellBlend, v => _swellBlend = v);
 		// The number that decides whether a hill reads as one, and the only
 		// reason it is a dial rather than a constant: a level is worth
 		// grade * sqrt(3) * R * cos(e) on screen, and against a hexagon 54.5px
@@ -5616,6 +5677,11 @@ public sealed partial class Main : Node2D
 		if (_stage is not null)
 		{
 			_stage.Selected = _noPanel ? null : Active;
+			// Every frame rather than on the drag, for the tremble level's reason:
+			// a stage handed the board later would otherwise sit on the built-in
+			// while the row it is a view of says something else.
+			_stage.SwellPeriod = (float)_swell;
+			_stage.SwellBlend = _swellBlend;
 			_stage.Place(_vehicles);
 		}
 

@@ -6734,7 +6734,26 @@ public static class SelfTest
                     "the surface shader does not step frames, so the loop can "
                     + "only move by the board being rebuilt");
 
-                // What the pond actually broke on, and nothing but the picture
+                // Blending is a model, not a smoothing knob, and this is what
+                // makes it one: at zero the mix term vanishes and what is drawn is
+                // the floor frame and nothing else - the stepped loop exactly. A
+                // blend written any other way would leave --hard-swell showing a
+                // third thing that was never the pond.
+                Check("and turning the blend off leaves exactly the stepped loop",
+                    Stage3D.SwellShader.Contains("fract(t) * blend")
+                    && Stage3D.SwellShader.Contains("floor(t)"),
+                    "the surface does not fold its blend into the step, so off is "
+                    + "not the loop it is meant to be judged against");
+
+                // The tuned speed has to be on the right side of the number the
+                // caption warns about, and the slider has to be able to reach the
+                // wrong side - a dial that cannot show what too much looks like is
+                // a poor dial, and one whose default is already past it is worse.
+                double held = Stage3D.SwellPeriodDefault / surf.Frames * 60.0;
+                Check("and one frame of it is held for less than a slideshow",
+                    held <= Main.StepsAt || Stage3D.SwellBlendDefault,
+                    $"a frame stands for {held:F0} screen frames against "
+                    + $"{Main.StepsAt:F0}, and the blend that answers that is off");
                 // said so: a frame is exactly the plate, so the keyed rim lies on
                 // the frame's own edge and two cells meeting lay two fades on top
                 // of each other. Five cells drew as three pieces with dry ground
