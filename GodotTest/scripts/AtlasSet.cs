@@ -158,6 +158,27 @@ public sealed class AtlasSet
     public const string ShadowName = "shadow";
 
     /// <summary>
+    /// How high the surface under every pixel of the hull and the belts stands,
+    /// a byte apiece - see sprite_height.py, which renders it.
+    ///
+    /// It exists because <see cref="Groundline"/> answers a different question
+    /// and was being asked this one. The groundline is where a tank meets the
+    /// bottom; lifting it by the depth of the water gives the waterline only if
+    /// the pixel that projects lowest in a column sits at the same distance
+    /// from the camera as the surface the water plane crosses there. Measured
+    /// against the geometry on LT_PARTS, over every column of four headings:
+    /// the drawn line stood 3.6 to 15.2px above the true one on the median
+    /// column and up to 33.8px out at worst, on 34px of water. One-way, so a
+    /// tank read as less sunk than it was - and it wore the shape of its own
+    /// underside at the waterline, which is where the six-pixel step at each
+    /// track guard came from.
+    ///
+    /// Not drawn, ever. It is a table that happens to have been rendered, and
+    /// what reads it is <see cref="Waterline"/>.
+    /// </summary>
+    public const string HeightName = "height";
+
+    /// <summary>
     /// The knocked-out tank: a canted turret with its gun dropped, and two belts
     /// gone slack. Not effects and not a separate tank - the same layers in
     /// another pose, standing in for the live ones once the hull is dead.
@@ -205,7 +226,7 @@ public sealed class AtlasSet
     /// the .blend; the hit is measured off the hull and so is always there.</summary>
     private static readonly string[] OptionalNames =
         new[] { "smoke", "flash", ExhaustName, FireName, BurnName, BurstName,
-                DustName, BarrelName, ShadowName, WreckTurretName }
+                DustName, BarrelName, ShadowName, HeightName, WreckTurretName }
             .Concat(ScarNames).Concat(TrackNames).Concat(WreckTrackNames).ToArray();
 
     public string Tag { get; private set; } = "";
@@ -926,6 +947,8 @@ public sealed class AtlasSet
         Image? turretImage = null;
         Image? hullImage = null;
         Image? barrelImage = null;
+        Image? heightImage = null;
+        LayerMeta? heightMeta = null;
 
         foreach (string layer in LayerNames)
         {
@@ -1008,6 +1031,11 @@ public sealed class AtlasSet
             atlas.Take(layer, image, meta);
             if (layer == BarrelName)
                 barrelImage = image;
+            if (layer == HeightName)
+            {
+                heightImage = image;
+                heightMeta = meta;
+            }
             if (layer == BurstName && meta.Hits is not null)
                 atlas.TakePlates(meta.Hits.Faces);
             if (layer == TrackNames[0] && meta.Track is { Length: > 0 }
@@ -1053,9 +1081,14 @@ public sealed class AtlasSet
             atlas.FindMuzzles(turretImage, "turret", MuzzleErode);
         if (hullImage is not null)
             atlas.MeasureHull(hullImage, "hull");
-        // Last, because it reads the tile, the count and the anchor that were only
-        // just settled off the hull's own metadata.
+        // Last, because they read the tile, the count and the anchor that were
+        // only just settled off the hull's own metadata. The groundline stays
+        // whether or not the height map arrived: it is what a set rendered
+        // before sprite_height.py existed still cuts its waterline against, and
+        // it is still the honest answer to the question it was written for.
         atlas.TakeGroundline();
+        if (heightImage is not null && heightMeta is not null)
+            atlas.TakeHeights(heightImage, heightMeta);
         return atlas;
     }
 
@@ -1136,6 +1169,125 @@ public sealed class AtlasSet
             ? -1 : _shoreRows[frame * Tile.X + column];
 
     private int[]? _shoreRows;
+
+    /// <summary>The height map, one byte per pixel of every heading: 0 where
+    /// there is no tank, else 1..255 up the tank's own height. Kept as bytes
+    /// rather than as a texture because nothing samples it - it is scanned, and
+    /// the texture that comes out of the scan is <see cref="Waterline"/>.
+    /// </summary>
+    private byte[]? _heights;
+
+    /// <summary>How many screen pixels of rise the whole byte range is worth.
+    /// The one number that turns the map into an answer about a water plane
+    /// standing so many pixels above the tank's feet.</summary>
+    public double HeightSpanPx { get; private set; }
+
+    /// <summary>Whether this set carries a height map at all. A set rendered
+    /// before sprite_height.py existed does not, and falls back to the
+    /// groundline lifted by the depth - which is how every set behaved until
+    /// this arrived.</summary>
+    public bool HasHeights => _heights is not null;
+
+    private void TakeHeights(Image image, LayerMeta meta)
+    {
+        if (meta.HeightRange is not { Length: 2 } || meta.UnitsPerPixel <= 0.0
+            || Tile.X <= 0 || Tile.Y <= 0)
+            return;
+        HeightSpanPx = (meta.HeightRange[1] - meta.HeightRange[0])
+                       * Math.Cos(Mathf.DegToRad(meta.View.Elevation))
+                       / meta.UnitsPerPixel;
+        if (HeightSpanPx <= 0.0)
+            return;
+        Vector2I tile = TileOf(HeightName);
+        int count = Math.Min(Count, CountOf(HeightName));
+        var map = new byte[Count * Tile.X * Tile.Y];
+        image.Convert(Image.Format.Rgba8);
+        for (int frame = 0; frame < count; frame++)
+        {
+            byte[] data = TileFrom(image, HeightName, frame).GetData();
+            for (int y = 0; y < Math.Min(tile.Y, Tile.Y); y++)
+            for (int x = 0; x < Math.Min(tile.X, Tile.X); x++)
+            {
+                int at = (y * tile.X + x) * 4;
+                if (data[at + 3] < 128)
+                    continue;
+                map[(frame * Tile.Y + y) * Tile.X + x] = Math.Max((byte)1, data[at]);
+            }
+        }
+        _heights = map;
+    }
+
+    /// <summary>
+    /// The waterline: which row of each column of each heading the water leaves
+    /// the tank at, for water standing <paramref name="dip"/> tile pixels above
+    /// its feet. -1 in a column the water never reaches.
+    ///
+    /// <b>Scanned up from the bottom, stopping at the first dry pixel</b>, and
+    /// both halves of that matter. Stopping is what keeps the line on the near
+    /// side of the tank: the far belt shows over the hull at the ends of some
+    /// headings and is genuinely below the surface, so a rule that took the
+    /// highest wet pixel would carry the line to the top of the sprite there.
+    /// Passing through empty pixels is the other half - a gap between hull and
+    /// belt is water seen through the tank, and what is above it is wet.
+    ///
+    /// Rebuilt only when the depth changes, which is a dial nobody drags: the
+    /// scan is a byte compare over the whole map and the result is a table the
+    /// two shaders share, so the line on the armour and the line on the water
+    /// cannot be two answers.
+    /// </summary>
+    public Texture2D? Waterline(float dip)
+    {
+        if (_heights is null || HeightSpanPx <= 0.0)
+            return null;
+        if (_waterAt is not null && Mathf.Abs(dip - _waterDip) < 0.01f)
+            return _waterAt;
+        // The byte a surface exactly at the water plane would carry. The ramp
+        // was rendered over 1..255 so that 0 could mean "no tank", so the
+        // fraction runs (code - 1) / 254 - see sprite_height.py's floor.
+        double wet = 1.0 + 254.0 * dip / HeightSpanPx;
+        var rows = new int[Count * Tile.X];
+        for (int frame = 0; frame < Count; frame++)
+        for (int x = 0; x < Tile.X; x++)
+        {
+            int line = -1;
+            for (int y = Tile.Y - 1; y >= 0; y--)
+            {
+                byte code = _heights[(frame * Tile.Y + y) * Tile.X + x];
+                if (code == 0)
+                    continue;
+                if (code > wet)
+                    break;
+                line = y;
+            }
+            rows[frame * Tile.X + x] = line;
+        }
+        _waterRows = rows;
+        _waterDip = dip;
+        int max = Tile.Y - 1;
+        var bytes = new byte[rows.Length * 4];
+        for (int i = 0; i < rows.Length; i++)
+        {
+            if (rows[i] < 0)
+                continue;
+            bytes[i * 4] = (byte)Math.Clamp(rows[i] * 255 / max, 0, 255);
+            bytes[i * 4 + 3] = 255;
+        }
+        _waterAt = ImageTexture.CreateFromImage(Image.CreateFromData(
+            Tile.X, Count, false, Image.Format.Rgba8, bytes));
+        return _waterAt;
+    }
+
+    /// <summary>The waterline table's own answer for one column, in tile rows,
+    /// or -1 where the water never reaches that column. Ask
+    /// <see cref="Waterline"/> first: this reads what that last built.</summary>
+    public int WaterlineAt(int frame, int column) =>
+        _waterRows is null || frame < 0 || frame >= Count
+        || column < 0 || column >= Tile.X
+            ? -1 : _waterRows[frame * Tile.X + column];
+
+    private ImageTexture? _waterAt;
+    private int[]? _waterRows;
+    private float _waterDip = float.NaN;
 
     private void TakeGroundline()
     {
@@ -1453,6 +1605,11 @@ public sealed class AtlasSet
         /// baked into its alpha and must not be ordered over it as well.</summary>
         [JsonPropertyName("over_turret")] public bool[]? OverTurret { get; set; }
         [JsonPropertyName("track")] public TrackMeta[]? Track { get; set; }
+
+        /// <summary>The world z the height layer's 1 and 255 stand for. Absent
+        /// on every other layer, and on a height layer rendered before it was
+        /// stamped - in which case the map cannot be read and is not.</summary>
+        [JsonPropertyName("height_range")] public double[]? HeightRange { get; set; }
     }
 
     private sealed class TrackMeta

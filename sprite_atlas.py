@@ -153,6 +153,11 @@ CONFIG = {
     # out from the spin axis on MT, leaving 59 of the 128 half-tile, and a
     # flash worth looking at is longer than that.
     "tile_scale": 1.0,
+    # None -> leave the scene's look alone, which is what every layer that is a
+    # picture wants. "Raw" for a layer whose pixels are a measurement: see
+    # sprite_height.py, where the byte is the height of the surface under it and
+    # a tone curve would be a lie told in the units the reader trusts.
+    "view_transform": None,
     "columns": None,           # None -> near-square grid
     "samples": 64,             # render samples
     "keep_frames": True,       # keep the per-frame PNGs next to the atlas
@@ -495,6 +500,7 @@ def render_atlas(cfg):
         "format": r.image_settings.file_format,
         "color_mode": r.image_settings.color_mode,
         "depth": r.image_settings.color_depth,
+        "view_transform": scene.view_settings.view_transform,
         "use_nodes": scene.use_nodes,
         "root_matrix": root.matrix_world.copy(),
         "hidden": {},
@@ -561,6 +567,15 @@ def render_atlas(cfg):
         r.image_settings.file_format = "PNG"
         r.image_settings.color_mode = "RGBA"
         r.image_settings.color_depth = "8"
+        # A layer that writes numbers instead of a picture says so, and this is
+        # the only way it can: the view transform is the last thing between a
+        # shaded value and the byte in the file, so a height ramp rendered under
+        # the scene's filmic look comes out as a photograph of a height ramp.
+        # Saved and restored like the format above, per layer, because the same
+        # job renders both kinds - the tank wants its look and this one wants
+        # none of it.
+        if cfg.get("view_transform"):
+            scene.view_settings.view_transform = cfg["view_transform"]
         scene.use_nodes = False          # skip any compositor setup
         if hasattr(scene, "eevee"):
             saved["eevee_samples"] = getattr(scene.eevee, "taa_render_samples", None)
@@ -743,6 +758,7 @@ def render_atlas(cfg):
         r.image_settings.file_format = saved["format"]
         r.image_settings.color_mode = saved["color_mode"]
         r.image_settings.color_depth = saved["depth"]
+        scene.view_settings.view_transform = saved["view_transform"]
         scene.use_nodes = saved["use_nodes"]
         if saved.get("eevee_samples") is not None:
             scene.eevee.taa_render_samples = saved["eevee_samples"]

@@ -87,6 +87,11 @@ CONFIG = {
     # three extra layers of one pose each. None is the A/B: the live set and
     # nothing else. The paint is *not* burnt here; the harness darkens it in a
     # shader, which costs no frames and is reversible. See `wreck_pose.py`.
+    # The height map: a byte per pixel saying how high the surface under it
+    # stands, which is what a waterline is cut against. Not a picture and never
+    # drawn - see `sprite_height.py`. False renders the set without it, which is
+    # how every set shipped before it existed and what such a set falls back to.
+    "height": True,
     "wreck": {},
     "flash": "Flash",
     "smoke": "Smoke",
@@ -678,6 +683,19 @@ def render(cfg=None):
                                                           seats=scar_seats)),
              "holdout": hull_only})
 
+    # ---- how high the surface under every pixel of the tank stands -----------
+    #
+    # A table that happens to have been rendered, and the only layer of the set
+    # that is never drawn: the game cuts a wading tank's waterline against it.
+    # It goes in last of the fit-free layers and takes its geometry from the
+    # body layers above, exclusions and all, so it cannot describe a belt the
+    # atlas does not draw - see sprite_height.py.
+    height = height_mod = None
+    if have["layout"] == "parts" and cfg["height"]:
+        height_mod = _load(cfg, "sprite_height")
+        height = height_mod.build(layers, atlas)
+        layers.append(height_mod.layer(height))
+
     # ---- which side of the turret each ordered layer is on -------------------
     #
     # Measured here, on the resting scene, and stamped into the layer's own
@@ -742,9 +760,13 @@ def render(cfg=None):
         # happened
         if body is not None:
             body.restore()
+        if height_mod is not None:
+            height_mod.remove()
 
     if body is not None:
         body.verify(res)
+    if height_mod is not None:
+        res["height"] = height_mod.report(res)
         res["body"] = body.report(res)
     res["layout"] = have["layout"]
     return res
@@ -2149,6 +2171,13 @@ def run(cfg=None):
             # skirt that says whether its void could show at all
             "wreck": body.get("wreck"),
         })
+    # Named, like everything else here: a key nobody names is computed and
+    # thrown away, and a check whose answer goes nowhere and a check that was
+    # never run look the same from outside. The height map's own numbers are
+    # what say whether the map can be read at all - how much rise a byte is
+    # worth, and over what range.
+    if rendered.get("height"):
+        report["height"] = rendered["height"]
 
     # Beside the atlases, the same as `parts_render.render()` writes and for the
     # same reason: which axis, which ports, which plates and which belt produced

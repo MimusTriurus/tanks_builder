@@ -6611,9 +6611,91 @@ public static class SelfTest
             // already is.
             Check("and the submerged half is tinted by the sprite's own shader",
                 Stage3D.PaintShader.Contains("uniform sampler2D shore")
-                && Stage3D.PaintShader.Contains("bottom - shore_cut.x"),
+                && Stage3D.PaintShader.Contains("shore_cut.x / scale"),
                 "the paint shader has no waterline in it, so the pond can only "
                 + "tint the whole tank or none of it");
+
+            // The height map, and what it is for. Asked of every tank rather
+            // than of the field's own, so both halves are exercised by whatever
+            // is on disk: a set that carries a map is judged on it, and a set
+            // rendered before sprite_height.py existed is judged on falling
+            // back to the groundline instead of losing its waterline.
+            var mapped = new List<string>();
+            var bare = new List<string>();
+            string tallTale = "", underTale = "", deepTale = "";
+            foreach (string tag in Main.Tags)
+            {
+                AtlasSet set = AtlasSet.Load(
+                    "D:/Projects/AgentCoding/BlenderMCP/Sprites", tag, tag);
+                if (set.Error.Length > 0)
+                    continue;
+                if (!set.HasHeights)
+                {
+                    bare.Add(tag);
+                    if (set.Waterline(20.0f) is not null)
+                        deepTale = $"{tag} builds a waterline with no map";
+                    continue;
+                }
+                mapped.Add(tag);
+                // A tank is not as tall as it is drawn: the drawn height is
+                // height*cos(e) + depth*sin(e), and this number is only the
+                // first term. A map claiming otherwise has been read with the
+                // wrong range and would put the waterline off the top.
+                if (set.HeightSpanPx <= 0.0 || set.HeightSpanPx >= set.Tile.Y)
+                    tallTale = $"{tag} says one tank is {set.HeightSpanPx:0.0}px "
+                               + $"of rise in a {set.Tile.Y}px tile";
+                set.Waterline(20.0f);
+                int above = 0, moved = 0, rose = 0, fell = 0;
+                var shallow = new int[set.Count * set.Tile.X];
+                for (int f = 0; f < set.Count; f++)
+                for (int x = 0; x < set.Tile.X; x++)
+                {
+                    int line = set.WaterlineAt(f, x);
+                    shallow[f * set.Tile.X + x] = line;
+                    int ground = set.GroundlineAt(f, x);
+                    // Water stands *on* the tank, so its line is at or above
+                    // the row where that column meets the ground - never below
+                    // it, which would be a tank standing in a hole in the pond.
+                    if (line >= 0 && ground >= 0 && line > ground)
+                        above++;
+                }
+                set.Waterline(40.0f);
+                for (int f = 0; f < set.Count; f++)
+                for (int x = 0; x < set.Tile.X; x++)
+                {
+                    int now = set.WaterlineAt(f, x);
+                    int had = shallow[f * set.Tile.X + x];
+                    if (now == had)
+                        continue;
+                    moved++;
+                    if (had < 0 || now < 0)
+                        continue;
+                    if (now < had)
+                        rose++;
+                    else
+                        fell++;
+                }
+                if (above > 0)
+                    underTale = $"{tag}: {above} columns put the water below "
+                                + "the tank's own feet";
+                if (moved == 0 || fell > 0)
+                    deepTale = $"{tag}: deeper water moved {moved} columns, "
+                               + $"{rose} up and {fell} down";
+            }
+            Check("some tank carries a height map, and some may not",
+                mapped.Count + bare.Count > 0,
+                "no set loaded at all, so neither path was exercised");
+            Check("and where there is one it is a tank's height, not a tile's",
+                tallTale.Length == 0, tallTale);
+            Check("and the water it puts on a tank never stands below its feet",
+                underTale.Length == 0, underTale);
+            Check("and deeper water climbs the tank, in every column that moves",
+                deepTale.Length == 0, deepTale);
+            Check("and a set without one still has a groundline to fall back on",
+                bare.All(t => AtlasSet.Load(
+                    "D:/Projects/AgentCoding/BlenderMCP/Sprites", t, t)
+                    .Groundline is not null),
+                $"{string.Join(", ", bare)} would lose the waterline entirely");
 
             // The table the waterline is cut against, and the three things about
             // it that decide whether it can be trusted: that it exists, that it
@@ -7199,7 +7281,7 @@ public static class SelfTest
                 Stage3D.PaintShader.Split('\n').Select(l => l.Split("//")[0]));
             Check("and the foam at the hull is drawn by the hull, at the same "
                   + "line the tint is cut at",
-                paint.Contains("float line = bottom - shore_cut.x / scale;")
+                paint.Contains("float line = bottom;")
                 && paint.Contains("tile.y > line")
                 && paint.Contains("tile.y - (line"),
                 "the sprite either draws no foam at its waterline or draws it "

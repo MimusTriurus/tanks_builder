@@ -48,7 +48,7 @@ public sealed partial class Main : Node2D
 	/// separate meshes, so they cannot wind at all, and a tank that slides on
 	/// dead tracks is not a comparison, it is the old bug still on screen.
 	/// The atlases stay on disk under Sprites/; nothing here loads them.</summary>
-	private static readonly string[] Tags = { "LTP", "MTP", "HTP" };
+	internal static readonly string[] Tags = { "LTP", "MTP", "HTP" };
 
 	/// <summary>
 	/// One directory every class reads its pixels from, or null for one per tag.

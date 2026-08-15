@@ -439,13 +439,24 @@ public sealed partial class Stage3D : Node3D
 shader_type spatial;
 render_mode unshaded, blend_premul_alpha, depth_draw_never, cull_disabled{0};
 uniform sampler2D picture : source_color, filter_nearest;
+// The waterline table where the set carries a height map, the groundline
+// where it does not - see AtlasSet.Waterline. The shader cannot tell which,
+// and does not have to: whichever it is, shore_cut.x is the lift that turns
+// its row into the line, and a table that is already the line hands over
+// nought.
 uniform sampler2D shore : filter_nearest, repeat_disable;
 uniform vec4 pond = vec4(0.0);
 // anchor.x, anchor.y, class scale, the render target's size
 uniform vec4 shore_map = vec4(0.0);
-// water over the sprite's own ground in board px, this heading's row of the
-// table, the tile row the ground sits on, and the tile's last row
+// how far the water stands over the table's own row in board px, this
+// heading's row of the table, the tile row the ground sits on, and the tile's
+// last row
 uniform vec4 shore_cut = vec4(-1.0);
+// The lift for a column the table has no answer for - the gun swung out past
+// the tracks, or on a height map any column the water never reaches. Always
+// the full depth over the flat ground row, which is far below such a column
+// and therefore leaves it dry.
+uniform float shore_flat = 0.0;
 // The foam lapping at the hull: rgb the water's own foam colour, a its level,
 // so the pond's dial and --no-foam take this with them rather than leaving a
 // white line on a tank standing in water that has stopped foaming.
@@ -463,15 +474,15 @@ void fragment() {{
     if (shore_cut.x >= 0.0) {{
         float scale = max(shore_map.z, 0.0001);
         vec2 tile = (UV * shore_map.w - shore_map.w * 0.5) / scale + shore_map.xy;
-        float bottom = shore_cut.z;
+        float bottom = shore_cut.z - shore_flat / scale;
         if (shore_cut.y >= 0.0) {{
             vec4 s = texture(shore, vec2((tile.x + 0.5)
                                          / float(textureSize(shore, 0).x),
                                          shore_cut.y));
             if (s.a > 0.5)
-                bottom = s.r * shore_cut.w;
+                bottom = s.r * shore_cut.w - shore_cut.x / scale;
         }}
-        float line = bottom - shore_cut.x / scale;
+        float line = bottom;
         if (tile.y > line)
             ALBEDO = mix(c.rgb, pond.rgb * c.a, pond.a);
         // And the foam at that line, drawn here because these pixels belong to
@@ -852,16 +863,25 @@ void fragment() {{
             // driven through.
             ink.SetShaderParameter(
                 "pond", WaterTintAt(Field.CellAt(vehicle.GroundPoint - Origin)));
-            ink.SetShaderParameter("shore", atlas.Groundline);
+            // Which table, and what it still owes: the height map's is already
+            // the waterline and is handed nought to lift it by, the groundline's
+            // is where the tank meets the bottom and is handed the depth. One
+            // call site for both, so a set with a map and a set without differ
+            // in the table they carry and in nothing else.
+            float lift = vehicle.Wading ? vehicle.Waterline - vehicle.Height : 0.0f;
+            Texture2D? table = vehicle.Wading
+                ? atlas.Waterline(lift / Mathf.Max(scale, 1e-4f)) : null;
+            ink.SetShaderParameter("shore", table ?? atlas.Groundline);
             ink.SetShaderParameter("shore_map", new Godot.Vector4(
                 atlas.Anchor.X, atlas.Anchor.Y, scale, PaintSize));
             ink.SetShaderParameter("shore_cut", new Godot.Vector4(
-                vehicle.Wading ? vehicle.Waterline - vehicle.Height : -1.0f,
-                atlas.Groundline is null ? -1.0f
+                !vehicle.Wading ? -1.0f : table is not null ? 0.0f : lift,
+                (table ?? atlas.Groundline) is null ? -1.0f
                     : (atlas.FrameFor(vehicle.Sprite.HullFacing) + 0.5f)
                       / Mathf.Max(atlas.Count, 1),
                 atlas.HexRect.Position.Y + atlas.HexRect.Size.Y * 0.5f,
                 Mathf.Max(atlas.Tile.Y - 1, 1)));
+            ink.SetShaderParameter("shore_flat", lift);
             // The water's own foam colour and level, so this line and the pond's
             // are one dial: a tank still wearing a white collar in water that
             // has stopped foaming would be the reading nobody could explain.
@@ -892,7 +912,10 @@ void fragment() {{
                 if (worn >= Collars || !vehicle.Wading)
                     continue;
                 AtlasSet set = vehicle.Atlas;
-                if (set.Groundline is null)
+                float wetPx = (vehicle.Waterline - vehicle.Height)
+                              / Mathf.Max(vehicle.Sprite.BodyScale, 1e-4f);
+                bool mapped = set.Waterline(wetPx) is not null;
+                if (!mapped && set.Groundline is null)
                     continue;
                 // The sprite's own anchor, in the harness's 2D px - the space the
                 // groundline is measured in, and the one the shader puts a
@@ -903,24 +926,22 @@ void fragment() {{
                 pivot[worn] = set.Anchor;
                 size[worn] = new Vector2(vehicle.Sprite.BodyScale, set.Tile.X);
                 int frame = set.FrameFor(vehicle.Sprite.HullFacing);
-                // The groundline, and how far the water stands up it. The shape
-                // is the table's, because the outline is what the eye sees of a
-                // tank standing in water - but the height is the waterline's,
-                // and taking the table's own height was drawing the collar
-                // where the tank touches the bottom. Most of that hid behind the
-                // hull, which is why it read as stray white segments beside it
-                // rather than as a line in the wrong place.
-                //
-                // The same expression the sprite cuts its tint at, so the half
-                // of the line on the armour and the half on the water are one
-                // measurement and cannot part.
-                dip[worn] = (vehicle.Waterline - vehicle.Height)
-                            / Mathf.Max(vehicle.Sprite.BodyScale, 1e-4f);
+                // The same table and the same lift the sprite cuts its own tint
+                // at, so the half of the line that lies on the armour and the
+                // half that lies on the water are one measurement and cannot
+                // part. Taking the groundline's own row was drawing this half
+                // where the tank meets the bottom, a whole water below the
+                // other; most of that hid behind the hull, which is why it read
+                // as stray white beside the tank rather than as a line in the
+                // wrong place.
+                dip[worn] = mapped ? 0.0f : wetPx;
                 for (int i = 0; i < HullLine; i++)
                 {
                     int column = Mathf.RoundToInt(
                         i * (set.Tile.X - 1) / (float)(HullLine - 1));
-                    line[worn * HullLine + i] = set.GroundlineAt(frame, column);
+                    line[worn * HullLine + i] = mapped
+                        ? set.WaterlineAt(frame, column)
+                        : set.GroundlineAt(frame, column);
                 }
                 worn++;
             }
