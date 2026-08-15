@@ -102,6 +102,29 @@ public sealed class MovementProfile
     public double GradeSpeed => TopSpeed * GradeFraction;
 
     /// <summary>
+    /// Speed allowed while wading, as a fraction of TopSpeed.
+    ///
+    /// <b>One number for all three classes, by <see cref="GradeFraction"/>'s
+    /// argument word for word</b>: everything else in this table is a property of
+    /// the tank, and this is a property of the water, and the water is the same
+    /// water under all three. The spread is already there in what 45% of three
+    /// different cruises comes to.
+    ///
+    /// <b>Below the grade's two thirds, and that is the whole of what makes a ford
+    /// a ford.</b> Equal to it and water would be a hill that happens to be blue:
+    /// two terrains with one cost is one terrain. Wading is the slower of the two
+    /// because a tank in water is pushing it out of the way the whole time, where a
+    /// bank is over in a cell.
+    ///
+    /// Still well above <see cref="CornerFraction"/>, which is what keeps the two
+    /// from fighting - a bend in the water slows to the crawl, and the crawl stays
+    /// a floor rather than a target.
+    /// </summary>
+    public const double WaterFraction = 0.45;
+
+    public double WaterSpeed => TopSpeed * WaterFraction;
+
+    /// <summary>
     /// Where this class sits between the others - 0 light, 1 medium, 2 heavy.
     ///
     /// The only thing in this table that is not a quantity, and it is here rather

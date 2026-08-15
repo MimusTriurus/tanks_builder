@@ -399,7 +399,12 @@ public sealed partial class TrackMarks : Node2D
         // the state it was in.
         pair[0].Age(delta);
         pair[1].Age(delta);
-        if (!Enabled || v.Atlas.HasTracks != true)
+        // Water keeps no ruts, and the pen going up is what says so rather than a
+        // faster fade: a mark is what is left on the ground, and water is the one
+        // ground that does not remember. The same gate the layer being switched
+        // off uses, so a trail that runs into a ford ends at the shoreline
+        // instead of being joined across it - which is what Lift is for.
+        if (!Enabled || v.Atlas.HasTracks != true || v.Wading)
         {
             pair[0].Down = false;
             pair[1].Down = false;

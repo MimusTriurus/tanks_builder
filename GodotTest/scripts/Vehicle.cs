@@ -123,6 +123,33 @@ public sealed class Vehicle
     public float Ground;
 
     /// <summary>
+    /// Where the surface of the water this tank is in stands, in screen px off the
+    /// datum, or negative infinity on dry land.
+    ///
+    /// <b>One number rather than a flag and a height, because the flag is the
+    /// height.</b> Two readers want it and they want opposite halves: the belt
+    /// marks want "is it wet" and the stage wants "where is the line", and a pair
+    /// of fields is a pair that can disagree the first time one of them is set
+    /// somewhere the other is not.
+    ///
+    /// Pushed by the harness like <see cref="Standing"/>, <see cref="Ground"/> and
+    /// <see cref="OnSlope"/>: it is a fact about the board under this tank, and the
+    /// board is not something a vehicle holds.
+    /// </summary>
+    public float Waterline = float.NegativeInfinity;
+
+    /// <summary>Whether this tank is standing in water at all.</summary>
+    public bool Wading => WadingAt(Waterline);
+
+    /// <summary>The same question asked of a bare height, so the check can be
+    /// built on it - a required-member type cannot be conjured in a test, and a
+    /// check that re-wrote the predicate would keep passing after this stopped
+    /// meaning it. The reason <see cref="VehicleAudio.ImpactFor"/> is a named
+    /// static too.</summary>
+    public static bool WadingAt(float waterline) =>
+        !float.IsNegativeInfinity(waterline);
+
+    /// <summary>
     /// How high it counts as standing - equal to <see cref="Height"/> whenever it
     /// is standing still, and the crown of the step while it is on the wall
     /// between two levels. See Main.Climb for when it leaves that crown.

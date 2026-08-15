@@ -160,6 +160,7 @@ public static class SelfTest
 
         Relief(field, grove, Check);
         Ramps(field, Check);
+        Water(field, grove, Check);
         Climbing(field, tank, Check);
 
         GD.Print("turret modes");
@@ -2119,10 +2120,17 @@ public static class SelfTest
             field.Paint = TerrainSet.Forest;
             grove.Plant();
             int all = grove.Planted;
-            Check("painting forest woods every cell",
+            // Every cell the ground can be, which is not quite every cell: a ramp
+            // and a flooded cell refuse trees whatever the paint says, and both
+            // refusals are the grove's own - see Grove.IsForest. Written as an
+            // exception here rather than loosened to "most of them", because "the
+            // paint reaches every cell" and "these two kinds of cell are never
+            // wooded" are both statements worth keeping.
+            Check("painting forest woods every cell the ground allows",
                 Enumerable.Range(0, field.Columns * field.Rows)
                     .Select(i => new Vector2I(i % field.Columns, i / field.Columns))
-                    .All(c => grove.IsForest(c)) && all > 0,
+                    .All(c => grove.IsForest(c)
+                              || field.IsRamp(c) || field.IsWater(c)) && all > 0,
                 $"{all} trees");
 
             field.Paint = field.Terrain!.Names[0];
@@ -6423,6 +6431,214 @@ public static class SelfTest
         finally
         {
             field.SetRelief(null);
+        }
+    }
+
+    /// <summary>
+    /// The water: cells a tank drives into rather than round.
+    ///
+    /// <b>What this topic holds is that the water is a surface and not a
+    /// colour.</b> Everything asked for follows from that one thing - the tank
+    /// goes under it, the pond has to be flat, a slope cannot carry it, and the
+    /// cost of being in it is a speed rather than a refusal - and the half that a
+    /// screenshot cannot settle is exactly the half that says so: a pond drawn at
+    /// one height per cell looks identical to a pond drawn at one height, until
+    /// somebody puts two levels next to each other.
+    /// </summary>
+    private static void Water(HexField field, Grove? grove,
+                              Action<string, bool, string> Check)
+    {
+        GD.Print("water: a cell to drive into, not round");
+        // What the session came up with, because the grove was sown against it and
+        // the topic that judges the wood asks the board as it stands. Run() clears
+        // the relief for the same reason and puts it back at the end; this is that
+        // line for the water, and without it the pond's own cells come back
+        // forest-eligible with no trees on them - which reports as the grove
+        // disagreeing with the ground, a mile from anything to do with water.
+        bool hadWater = field.HasWater;
+        try
+        {
+            field.SetRelief(Main.ReliefMap(field.Columns, field.Rows),
+                            Main.RampMask(field.Columns, field.Rows));
+            field.SetWater(Main.WaterMask(field.Columns, field.Rows));
+            Check("the board carries water at all", field.HasWater,
+                "no cell flooded, so nothing below is being tested");
+
+            // It stands over its bottom rather than replacing it: a tank in a ford
+            // is standing on the cell's own top face, and the water is what is
+            // added. Nought here is the whole feature quietly reduced to a tinted
+            // hexagon.
+            int flat = 0, sunk = 0;
+            var pond = new List<Vector2I>();
+            for (int q = 0; q < field.Columns; q++)
+            for (int r = 0; r < field.Rows; r++)
+            {
+                var cell = new Vector2I(q, r);
+                if (!field.IsWater(cell))
+                    continue;
+                pond.Add(cell);
+                if (field.WaterTop(cell) - field.TopAt(cell) < 1.0f)
+                    sunk++;
+                foreach (int heading in HexField.EdgeHeadings)
+                {
+                    Vector2I next = HexField.Step(cell, heading);
+                    if (field.IsWater(next)
+                        && Math.Abs(field.WaterTop(next) - field.WaterTop(cell))
+                           > 0.01f)
+                        flat++;
+                }
+            }
+            Check("water stands over its bottom rather than on it", sunk == 0,
+                $"{sunk} cells are flooded to less than a pixel");
+            Check("and one body of it is one surface", flat == 0,
+                $"{flat} neighbouring pairs are at two heights");
+
+            // How much of a tank goes under, which is the only measure of the
+            // depth worth having - the fraction of a level says nothing about
+            // whether it reads. Both ends are wrong in their own way, which is why
+            // there are two of them.
+            float deep = field.WaterRise;
+            float tall = field.Atlas?.DrawnHeight ?? 0.0f;
+            double part = tall > 0.0f ? deep / tall : 0.0;
+            Check("a ford is deep enough to see and shallow enough to drive",
+                part >= Main.ShallowAt && part <= Main.SunkAt,
+                $"{deep:F0}px is {part:P0} of a tank's {tall:F0}px - wanted "
+                + $"{Main.ShallowAt:P0} to {Main.SunkAt:P0}");
+
+            // Water is not a wall, which was the whole request. The pond is
+            // entered from the beach at the pit's mouth, so this is asked of the
+            // board rather than of the rule: a Passable that learned about water
+            // would show up here as a step that used to be legal and is not.
+            int blocked = 0;
+            foreach (Vector2I cell in pond)
+            foreach (int heading in HexField.EdgeHeadings)
+            {
+                Vector2I next = HexField.Step(cell, heading);
+                if (field.InBounds(next) && field.IsWater(next)
+                    && !field.Passable(cell, heading))
+                    blocked++;
+            }
+            Check("water is not a wall - a pond can be driven across",
+                blocked == 0,
+                $"{blocked} steps between flooded cells are refused");
+            Check("and the pond is reachable from the tanks' own end of the board",
+                field.FindPath(new Vector2I(4, 2), pond[0]).Count > 0,
+                $"no route from (4,2) to ({pond[0].X},{pond[0].Y})");
+
+            // Both ways, which is the slip the grade's own note names: wading out
+            // onto a bank is the harder half and capping only the way in is what
+            // gets forgotten.
+            Vector2I wet = pond[0];
+            Vector2I dry = HexField.Step(wet, 90);
+            foreach (int heading in HexField.EdgeHeadings)
+            {
+                Vector2I next = HexField.Step(wet, heading);
+                if (field.InBounds(next) && !field.IsWater(next))
+                    dry = next;
+            }
+            Check("entering the water costs and so does leaving it",
+                field.IsWet(dry, wet) && field.IsWet(wet, dry),
+                "one direction of the shoreline is free");
+            Check("and dry ground either side of it costs nothing",
+                !field.IsWet(new Vector2I(2, 2), new Vector2I(3, 2)),
+                "a dry leg reports as wet");
+
+            // The lower of the two caps and never their product: the beach at the
+            // mouth of the pit is a leg that is both, and a product would invent a
+            // third terrain there.
+            MovementProfile medium = MovementProfile.Medium;
+            Check("wading is slower than climbing, so the two are different ground",
+                MovementProfile.WaterFraction < MovementProfile.GradeFraction
+                && MovementProfile.WaterFraction > medium.CornerFraction,
+                $"water {MovementProfile.WaterFraction:F2}, grade "
+                + $"{MovementProfile.GradeFraction:F2}, crawl "
+                + $"{medium.CornerFraction:F2}");
+            Check("and a wet grade is the slower of the two, not the two multiplied",
+                Math.Abs(Math.Min(medium.GradeSpeed, medium.WaterSpeed)
+                         - medium.WaterSpeed) < 0.01
+                && medium.GradeSpeed * MovementProfile.WaterFraction
+                   < medium.WaterSpeed - 1.0,
+                $"min is {Math.Min(medium.GradeSpeed, medium.WaterSpeed):F0}, "
+                + $"product would be "
+                + $"{medium.GradeSpeed * MovementProfile.WaterFraction:F0}");
+
+            // Where it sits in the ladder of things lying on the board. Over the
+            // marks because they are on the bottom, under the tanks because a
+            // surface has one sort key and a tank standing in front of the pond
+            // would lose to it.
+            Check("the water sorts over the ground marks and under every tank",
+                Stage3D.RutOrder < Stage3D.RingOrder
+                && Stage3D.RingOrder < Stage3D.WaterOrder
+                && Stage3D.WaterOrder < 0,
+                $"ruts {Stage3D.RutOrder}, ring {Stage3D.RingOrder}, water "
+                + $"{Stage3D.WaterOrder}");
+
+            // The cut is the shader's, and it has to be: a horizontal surface
+            // crossing an upright billboard has half of itself in front of the
+            // card, and one sort key cannot say so. Asserted on the shader source
+            // rather than on a rendered pixel, the way the premultiplied blend
+            // already is.
+            Check("and the submerged half is tinted by the sprite's own shader",
+                Stage3D.PaintShader.Contains("uniform float water")
+                && Stage3D.PaintShader.Contains("height < water"),
+                "the paint shader has no waterline in it, so the pond can only "
+                + "tint the whole tank or none of it");
+
+            int wooded = pond.Count(c => grove?.IsForest(c) ?? false);
+            Check("nothing grows in the water", wooded == 0,
+                $"{wooded} flooded cells are wooded");
+
+            // Both guards, and both have to be shown to bite: a guard that cannot
+            // refuse is a comment.
+            bool onRamp = false, twoLevels = false;
+            var mask = Main.WaterMask(field.Columns, field.Rows);
+            Vector2I ramp = default;
+            for (int q = 0; q < field.Columns && ramp == default; q++)
+            for (int r = 0; r < field.Rows; r++)
+                if (field.IsRamp(new Vector2I(q, r)))
+                {
+                    ramp = new Vector2I(q, r);
+                    break;
+                }
+            var bad = (bool[])mask.Clone();
+            bad[ramp.Y * field.Columns + ramp.X] = true;
+            try { field.SetWater(bad); }
+            catch (InvalidOperationException) { onRamp = true; }
+            Check("water on a ramp is refused rather than wedged along it", onRamp,
+                $"a pond was allowed onto the ramp at ({ramp.X},{ramp.Y}), which "
+                + "has no one surface height");
+
+            // A cell of the pit and the cell above it on the flat: adjacent, two
+            // levels, which is a waterfall and not a pond.
+            bad = (bool[])mask.Clone();
+            Vector2I over = HexField.Step(pond[0], 90);
+            for (int i = 0; i < 6 && field.LevelAt(over) == field.LevelAt(pond[0]);
+                 i++)
+                over = HexField.Step(pond[0], HexField.EdgeHeadings[i]);
+            bad[over.Y * field.Columns + over.X] = true;
+            try { field.SetWater(bad); }
+            catch (InvalidOperationException) { twoLevels = true; }
+            Check("and a pond on two levels is refused rather than made a fall",
+                twoLevels,
+                $"({over.X},{over.Y}) on {field.LevelAt(over)} was allowed beside "
+                + $"({pond[0].X},{pond[0].Y}) on {field.LevelAt(pond[0])}");
+
+            // The one number the belts read, and the whole of what stops a rut
+            // being laid in a pond. Two halves of one field rather than a flag
+            // beside a height, because a pair is a pair that can disagree.
+            Check("a tank is wading exactly when it has a waterline",
+                !Vehicle.WadingAt(float.NegativeInfinity)
+                && Vehicle.WadingAt(field.WaterTop(pond[0]))
+                && Vehicle.WadingAt(0.0f),
+                "the belts and the stage read this one field for two questions, "
+                + "and the belts read it to keep a rut out of the water");
+        }
+        finally
+        {
+            field.SetWater(null);
+            field.SetRelief(null);
+            if (hadWater)
+                field.SetWater(Main.WaterMask(field.Columns, field.Rows));
         }
     }
 

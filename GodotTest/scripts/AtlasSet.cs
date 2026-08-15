@@ -243,6 +243,22 @@ public sealed class AtlasSet
     /// that needs the contact point rather than the pivot goes through here.</summary>
     public Vector2 GroundOffset => HexRect.Position + (Vector2)HexRect.Size * 0.5f - Anchor;
 
+    /// <summary>
+    /// How tall a tank is drawn above the ground it stands on, in board px.
+    ///
+    /// <b>Twice the anchor's float, which is the atlas's own statement rather than
+    /// a measurement of pixels.</b> The anchor is the turret axis raised to the
+    /// middle of the fitted bounds' height, so what stands above the contact point
+    /// is about twice the distance from that point up to it - see
+    /// <see cref="GroundOffset"/>.
+    ///
+    /// Here rather than at its one caller because it is a fact about the atlas and
+    /// because the check has to be able to ask the same question: a threshold on
+    /// how much of a tank goes under water, judged against a height the checker
+    /// worked out for itself, is a threshold with two definitions.
+    /// </summary>
+    public float DrawnHeight => 2.0f * GroundOffset.Y;
+
     /// <summary>Screen-space direction of a world heading on the ground plane.
     /// Not normalised: the isometric view squashes the ground by
     /// sin(elevation), and anything moving along it should shrink to match.</summary>

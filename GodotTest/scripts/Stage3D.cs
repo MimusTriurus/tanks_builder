@@ -72,6 +72,7 @@ public sealed partial class Stage3D : Node3D
         {
             _tops.Visible = value;
             _sides.Visible = value;
+            _pond.Visible = value;
             _edges.Visible = value && ShowEdges;
         }
     }
@@ -114,6 +115,7 @@ public sealed partial class Stage3D : Node3D
     private MeshInstance3D _ring = null!;
     private MeshInstance3D _edges = null!;
     private MeshInstance3D _ruts = null!;
+    private MeshInstance3D _pond = null!;
 
     /// <summary>The belt marks, redrawn as geometry lying on the board. Null
     /// leaves the ground bare, which is how the stage behaved while the ruts were
@@ -224,12 +226,15 @@ public sealed partial class Stage3D : Node3D
         // and that is what the type is for. The 2D layer it replaces rebuilds the
         // same polylines every frame too, so the cost is not new.
         _ruts = new MeshInstance3D { Mesh = new ImmediateMesh() };
+        _pond = new MeshInstance3D();
         AddChild(_tops);
         AddChild(_sides);
         AddChild(_ruts);
         AddChild(_ring);
+        AddChild(_pond);
         AddChild(_edges);
         _ruts.MaterialOverride = Decal(RutOrder);
+        _pond.MaterialOverride = Decal(WaterOrder);
     }
 
     /// <summary>
@@ -351,13 +356,37 @@ public sealed partial class Stage3D : Node3D
     /// <remarks>Internal so the check can read the render mode: this shader and
     /// <see cref="EffectLayer.Glow"/> are one statement in two places, and either
     /// of them back on straight alpha kills the flame.</remarks>
+    /// <remarks>
+    /// <b>The waterline is a cut this shader has to make, and the geometry cannot
+    /// make it.</b> A horizontal surface crossing an upright billboard has half of
+    /// itself in front of the card and half behind, and a transparent surface has
+    /// one sort key for the whole of it - so the pond drawn over the tank tints
+    /// the dry hull as well, and drawn under it tints nothing. The depth buffer
+    /// would answer honestly and cannot be asked: a tank writes no depth, which is
+    /// what keeps its silhouette smooth, and water that wrote depth would cut the
+    /// submerged half away rather than tint it. A tank with its running gear
+    /// missing reads as a bug; a tank seen dimly through water reads as a ford.
+    ///
+    /// So the surface is a height in the world and every fragment below it is
+    /// composited as though the pond lay over that fragment alone. The colour is
+    /// the pond's own, handed in rather than written here, because the plane and
+    /// the tint are one statement and two copies of a colour part company.
+    /// <c>c.rgb</c> is premultiplied, so mixing toward <c>pond.rgb * c.a</c> is the
+    /// same blend the plane would have done.
+    /// </remarks>
     internal const string PaintShader = @"
 shader_type spatial;
 render_mode unshaded, blend_premul_alpha, depth_draw_never, cull_disabled{0};
 uniform sampler2D picture : source_color, filter_nearest;
+uniform float water = -100000.0;
+uniform vec4 pond = vec4(0.0);
+varying float height;
+void vertex() {{
+    height = (MODEL_MATRIX * vec4(VERTEX, 1.0)).y;
+}}
 void fragment() {{
     vec4 c = texture(picture, UV);
-    ALBEDO = c.rgb;
+    ALBEDO = height < water ? mix(c.rgb, pond.rgb * c.a, pond.a) : c.rgb;
     ALPHA = c.a;
 }}
 ";
@@ -380,6 +409,11 @@ void fragment() {{
     {
         var ink = new ShaderMaterial { Shader = overGround ? Free : Tested };
         ink.SetShaderParameter("picture", picture);
+        // The colour once, here, because it never changes; the line every frame,
+        // in Place, because it does. Set the other way round a tank that crossed
+        // a slope mid-ford would come back from the material swap with no water in
+        // it at all.
+        ink.SetShaderParameter("pond", Pond);
         return ink;
     }
 
@@ -404,11 +438,13 @@ void fragment() {{
         _ring.Mesh = null;
         _edges.Mesh = null;
         _ruts.Mesh = null;
+        _pond.Mesh = null;
         _tops.MaterialOverride = null;
         _sides.MaterialOverride = null;
         _ring.MaterialOverride = null;
         _edges.MaterialOverride = null;
         _ruts.MaterialOverride = null;
+        _pond.MaterialOverride = null;
         // The wood is 464 meshes and 464 materials made here, which is by some way
         // the largest thing this node owns.
         Fell();
@@ -688,6 +724,14 @@ void fragment() {{
                     Paint(stand.Paint.GetTexture(), over);
                 stand.Over = over;
             }
+            // The waterline in the quad's own space, which is the world's: the
+            // quad stands at the contact point and its upright face is measured
+            // in world height off it, so this is the same y the pond's own
+            // vertices carry. After the swap above, never before it - a new
+            // material is a new set of uniforms.
+            ((ShaderMaterial)stand.Quad.MaterialOverride).SetShaderParameter(
+                "water", vehicle.Wading
+                    ? vehicle.Waterline / RiseFactor : -100000.0f);
         }
         // The mark goes where the tank touches the ground, every frame, for the
         // reason the 2D ring follows the contact patch: a tank spends most of an
@@ -738,8 +782,16 @@ void fragment() {{
             // rebuilt, which reads as the ramp not having been modelled.
             note.Append(Field.LevelAt(cell)).Append('/')
                 .Append(Field.RampHeading(cell))
+                // And whether it is under water, for the ramp heading's reason: a
+                // cell that floods without changing level or colour is a board
+                // that was not rebuilt, which reads as the water not having been
+                // put on the map.
+                .Append(Field.IsWater(cell) ? '~' : '.')
                 .Append(Field.InkFor(cell).ToRgba32()).Append(';');
         }
+        // The depth as well, and not only where the water is: it is a slider, and
+        // moving it moves the surface without moving a single cell of the mask.
+        note.Append('@').Append(Field.WaterRise.ToString("F3"));
         // Whether there is a ring, not where it is: it is cut about its own
         // origin and driven every frame, so the cell it stands on is not
         // something the board has to be rebuilt for.
@@ -788,6 +840,24 @@ void fragment() {{
     }
 
     private static readonly Color Earth = new(0.42f, 0.30f, 0.20f);
+
+    /// <summary>
+    /// What water is, as one colour read twice: the surface plane's own vertex
+    /// colour, and the tint the submerged part of a tank is composited with in
+    /// <see cref="PaintShader"/>.
+    ///
+    /// <b>One constant because it is one statement.</b> The tint exists precisely
+    /// to stand in for the plane over that fragment, so a second colour beside it
+    /// would be the same water disagreeing with itself - and the way that shows is
+    /// a hull that is a different water from the water it is in, which reads as the
+    /// tank being lit rather than as it being wet.
+    ///
+    /// Dark and two thirds opaque. The ground here is pale - that is the argument
+    /// every additive layer in this project has already had with it - so water
+    /// that let most of the bottom through would read as a stain on the grass, and
+    /// water that let none through would read as a hole.
+    /// </summary>
+    public static readonly Color Pond = new(0.13f, 0.26f, 0.31f, 0.66f);
 
     /// <summary>
     /// How much a ramp's top face is darkened against the flat ground.
@@ -972,6 +1042,60 @@ void fragment() {{
             CullMode = BaseMaterial3D.CullModeEnum.Disabled,
         };
         BuildRing(corner);
+        BuildWater(corner);
+    }
+
+    /// <summary>
+    /// One flat hexagon per water cell, at the surface of the water over it.
+    ///
+    /// <b>No clearance off the ground, and it is the one thing lying on this board
+    /// that needs none.</b> A rut and a ring are coplanar with the face they mark
+    /// and have to be nudged off it or the depth test tosses a coin - see
+    /// <see cref="Clear"/>. This stands a good part of a level above its own
+    /// bottom, because that is what a depth <i>is</i>, so there is nothing for it
+    /// to fight with.
+    ///
+    /// <b>One mesh for the whole board, where the trees are one node each.</b> The
+    /// trees are sorted against the tanks individually and so must each carry
+    /// their own key; this sorts under every tank by
+    /// <see cref="WaterOrder"/>, so what its single key would decide has already
+    /// been decided. What replaces the per-cell sort is the tint in
+    /// <see cref="PaintShader"/>, which is per fragment and therefore right where
+    /// no sort key could be.
+    /// </summary>
+    private void BuildWater(Vector3[] corner)
+    {
+        if (!Field.HasWater)
+        {
+            _pond.Mesh = null;
+            return;
+        }
+        var st = new SurfaceTool();
+        st.Begin(Mesh.PrimitiveType.Triangles);
+        bool any = false;
+        for (int q = 0; q < Field.Columns; q++)
+        for (int r = 0; r < Field.Rows; r++)
+        {
+            var cell = new Vector2I(q, r);
+            if (!Field.IsWater(cell))
+                continue;
+            any = true;
+            Vector2 flat = Origin + Field.FlatAnchor(cell) + Field.CentreOffset;
+            Vector3 top = World(flat, Field.WaterTop(cell));
+            for (int i = 1; i + 1 < 6; i++)
+            foreach (int k in new[] { 0, i, i + 1 })
+            {
+                st.SetColor(Pond);
+                st.AddVertex(top + corner[k]);
+            }
+        }
+        if (!any)
+        {
+            _pond.Mesh = null;
+            return;
+        }
+        st.GenerateNormals();
+        _pond.Mesh = st.Commit();
     }
 
     /// <summary>The plain board when there is no art, tinted by whatever the
@@ -1098,12 +1222,21 @@ void fragment() {{
         RenderPriority = order,
     };
 
-    /// <summary>Where the two ground marks sort, mirroring
+    /// <summary>Where the ground marks sort, mirroring
     /// <see cref="SelectionRing.GroundZ"/> against
     /// <see cref="TrackMarks.MarksZ"/>: a rut is terrain and the ring is a marker
-    /// laid over it. Both under the tanks, which sort at the default.</summary>
-    public const int RingOrder = -1;
-    public const int RutOrder = -2;
+    /// laid over it. All under the tanks, which sort at the default.
+    ///
+    /// <b>The water is the top rung of the ladder and still under them</b>, which
+    /// is the whole statement: a rut and a ring lie on the bottom, so the water
+    /// goes over both, and a tank standing in it is drawn over the surface and
+    /// tints its own submerged half - see <see cref="PaintShader"/>. Drawn over
+    /// the tanks instead it would be right for the near half of its own cell and
+    /// wrong for every tank in front of that cell, because one sort key is one
+    /// answer for a whole surface.</summary>
+    public const int WaterOrder = -1;
+    public const int RingOrder = -2;
+    public const int RutOrder = -3;
 
     /// <summary>
     /// The belt marks, as strips lying on the board.

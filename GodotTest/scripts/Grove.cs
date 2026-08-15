@@ -178,9 +178,18 @@ public sealed partial class Grove : Node2D
     /// one height, read off the cell's level - and a ramp's surface is at its
     /// level on one edge only, so a trunk planted on one sinks into the slope or
     /// floats over it depending which end it landed at. A ramp is the way up,
-    /// which is the one cell on the board that has a reason to be clear.</remarks>
+    /// which is the one cell on the board that has a reason to be clear.
+    ///
+    /// <b>And never in water</b>, for a reason that is not the ramp's. A ramp is
+    /// refused because a trunk there has no one height to stand at; a flooded cell
+    /// has one perfectly good height and the trees stand on it - which is the
+    /// picture the first pond came back with, a wood growing out of a pond with the
+    /// water drawn across its trunks. Reeds are a kind of ground somebody could
+    /// draw; a mature wood is not, and the paint has no way to know the cell is
+    /// under water because the water is not paint.</remarks>
     public bool IsForest(Vector2I cell) =>
         Enabled && Field is not null && !Field.IsRamp(cell)
+        && !Field.IsWater(cell)
         && Field.KindAt(cell) == TerrainSet.Forest;
 
     /// <summary>Ground-plane squash, measured off the rendered tile rather than

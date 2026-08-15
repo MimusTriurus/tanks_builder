@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Godot;
 
 namespace TankSpriteTest;
@@ -371,6 +372,128 @@ public sealed partial class HexField : Node2D
             return (low, high);
         }
     }
+
+    // --- water ---------------------------------------------------------------
+
+    /// <summary>
+    /// Which cells are under water, or null for a dry board.
+    ///
+    /// <b>A map of its own, beside the levels and the ramps rather than inside
+    /// either.</b> It is not paint - <see cref="TerrainSet"/>'s note says a kind
+    /// does not cost movement, and this one does, so this is where that table
+    /// goes. It is not a level either: a tank in a ford stands on the bottom,
+    /// which is the cell's own <see cref="TopAt"/> unchanged, and what is added
+    /// is a surface above it. So none of the climbing arithmetic moves.
+    ///
+    /// Null rather than an array of false, for <see cref="_levels"/>'s reason and
+    /// buying the same thing: a board with no water on it is the board that was
+    /// here before, down to the sort order of what is drawn on it.
+    /// </summary>
+    private bool[]? _water;
+
+    /// <summary>Whether this board carries water at all.</summary>
+    public bool HasWater => _water is not null;
+
+    public bool IsWater(Vector2I cell) =>
+        _water is not null && InBounds(cell)
+        && _water[cell.Y * Columns + cell.X];
+
+    /// <summary>
+    /// How deep the water stands, as a fraction of one level.
+    ///
+    /// <b>A fraction, never pixels</b>, for the reason every other size in this
+    /// project is: pixels follow from the rendered tile, so a figure in them is a
+    /// guess at a number the atlas has already decided. It is judged by neither,
+    /// though - what settles it is how much of the drawn tank goes under, which is
+    /// what the check measures.
+    ///
+    /// Deep enough to swallow the running gear and the lower hull and no deeper:
+    /// a tank in a ford is a tank driving, and one submerged to the turret ring is
+    /// a tank sinking. Those are different pictures and only one of them was asked
+    /// for.
+    /// </summary>
+    public double WaterDepth = 0.55;
+
+    /// <summary>The depth in screen px, which is what everything drawn reads.
+    /// </summary>
+    public float WaterRise => Lift * (float)WaterDepth;
+
+    /// <summary>Where the surface of the water over a cell stands, in screen px
+    /// off the datum - the bottom plus the depth. Meaningless on a dry cell, and
+    /// the callers ask <see cref="IsWater"/> first.</summary>
+    public float WaterTop(Vector2I cell) => TopAt(cell) + WaterRise;
+
+    /// <summary>
+    /// Put water on the board.
+    ///
+    /// <b>Two guards, and both refuse rather than repair</b> - the shape
+    /// <see cref="DeriveRamps"/> already has, and for its reason: a map that does
+    /// not decide something cannot be made to decide it by picking.
+    ///
+    /// <list type="bullet">
+    /// <item><b>Not on a ramp.</b> A slope has no single surface height, so water
+    /// on one would either be a wedge or a lie about where its own top is.</item>
+    /// <item><b>A body is flat.</b> Two water cells side by side at different
+    /// levels is a waterfall, which is a different thing entirely and is not what
+    /// this draws. Asked of neighbours rather than of the whole board, because two
+    /// unconnected ponds at two levels are perfectly reasonable.</item>
+    /// </list>
+    ///
+    /// Nothing here touches <see cref="Passable"/>. Water is not a wall - the
+    /// whole request was a cell a tank can drive into - so the pathing does not
+    /// learn a new rule, and the cost of being in it is a speed and not a refusal.
+    /// </summary>
+    public void SetWater(bool[]? water)
+    {
+        if (water is not null && water.Length == Columns * Rows)
+        {
+            var ramped = new List<Vector2I>();
+            var stepped = new List<string>();
+            for (int r = 0; r < Rows; r++)
+            for (int q = 0; q < Columns; q++)
+            {
+                var cell = new Vector2I(q, r);
+                if (!water[r * Columns + q])
+                    continue;
+                if (IsRamp(cell))
+                    ramped.Add(cell);
+                foreach (int heading in EdgeHeadings)
+                {
+                    Vector2I next = Step(cell, heading);
+                    if (!InBounds(next) || !water[next.Y * Columns + next.X])
+                        continue;
+                    if (LevelAt(next) != LevelAt(cell))
+                        stepped.Add($"({q},{r}) on {LevelAt(cell)} beside "
+                                    + $"({next.X},{next.Y}) on {LevelAt(next)}");
+                }
+            }
+            if (ramped.Count > 0)
+                throw new InvalidOperationException(
+                    "water on a ramp has no one surface height to stand at - "
+                    + string.Join(", ", ramped.Select(c => $"({c.X},{c.Y})")));
+            if (stepped.Count > 0)
+                throw new InvalidOperationException(
+                    "one body of water is one surface, and these neighbours are "
+                    + "on two levels, which is a waterfall: "
+                    + string.Join("; ", stepped.Distinct()));
+        }
+        _water = water is not null && water.Length == Columns * Rows
+                 && Array.Exists(water, on => on)
+            ? water : null;
+        _ordered = null;
+        QueueRedraw();
+    }
+
+    /// <summary>
+    /// Whether a leg has water at either end - the question the speed ceiling
+    /// asks, shaped exactly as <see cref="IsGrade"/> is.
+    ///
+    /// <b>Either end, so entering and leaving both cost.</b> Wading out of a ford
+    /// onto a bank is the harder half of it, and capping only the way in is the
+    /// slip the grade's own note names.
+    /// </summary>
+    public bool IsWet(Vector2I from, Vector2I onto) =>
+        IsWater(from) || IsWater(onto);
 
     /// <summary>Ground-plane squash - sin(elevation) - read off the rendered
     /// tile rather than declared. The hexagon's height over its width is

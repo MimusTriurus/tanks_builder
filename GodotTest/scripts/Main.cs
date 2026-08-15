@@ -217,6 +217,30 @@ public sealed partial class Main : Node2D
 	/// </summary>
 	private bool Ramped => _ramps && _stage3d;
 
+	/// <summary>Whether the board is flooded where the map says it is. See
+	/// --no-water.</summary>
+	private bool _water = true;
+
+	/// <summary>The depth asked for on the command line, or negative for
+	/// whatever the field and panel.json settle on. Parked here rather than
+	/// written straight to the field for --terrain's reason: the flag is read
+	/// before the field exists.</summary>
+	private double _depth = -1.0;
+
+	/// <summary>
+	/// Whether this run gets water at all - which is to say, whether the board is
+	/// being drawn by something that can draw a surface standing above the ground.
+	///
+	/// <b>A stage feature, for <see cref="Ramped"/>'s reason and not a weaker
+	/// one.</b> The 2D board draws a cell as one flat hexagon and has no way to
+	/// express anything standing over it, so the most it could do is tint the
+	/// plate - and a tinted plate with a tank standing dry on top of it is not a
+	/// ford, it is a blue cell. What makes this water is that the tank goes into
+	/// it, and going into it is a height, which is the one thing the flat board
+	/// has never had.
+	/// </summary>
+	private bool Watered => _water && _stage3d;
+
 	/// <summary>
 	/// Whether the board and the tanks are drawn by the depth buffer rather than
 	/// by paint order. See <see cref="Stage3D"/>.
@@ -326,6 +350,7 @@ public sealed partial class Main : Node2D
 			// Whether a ramp exists at all is a property of who draws the board,
 			// so handing the board over is a change to its heights.
 			ApplyRamps();
+			ApplyWater();
 		}
 	}
 
@@ -547,6 +572,48 @@ public sealed partial class Main : Node2D
 		for (int q = 0; q < columns && q < Ramps[r].Length; q++)
 			ramps[r * columns + q] = Ramps[r][q] == 'r';
 		return ramps;
+	}
+
+	/// <summary>
+	/// Which cells are flooded. A third grid beside the levels and the ramps,
+	/// because water is a third statement about a cell and not a shade of either
+	/// of the other two - see <see cref="HexField.SetWater"/>.
+	///
+	/// <b>It is the pit, and putting it there is most of the point.</b> The pit
+	/// already exists, it is already a level down, and it already has exactly one
+	/// way in - so the pond is somewhere a tank has to drive down to rather than a
+	/// puddle standing on the plain, and the first order that reaches it walks a
+	/// ramp and a ford back to back, which is both speed ceilings in one leg.
+	///
+	/// <b>The mouth cell (7,4) is dry, and it has to be.</b> It is the pit's ramp,
+	/// and a slope has no one surface height for water to stand at - the guard
+	/// refuses it rather than wedging the pond, which is the same refusal the ramp
+	/// derivation makes about an undecided high edge. What that leaves is a beach:
+	/// the tank comes down the slope on dry ground and enters the water at (7,5),
+	/// which is where a ford is entered from.
+	///
+	/// <b>Painted onto a flat board it is still legal, and that is the A/B.</b>
+	/// With no relief every level is nought, so the five cells are one flat pond on
+	/// open ground - no ramp under it to refuse and no step between them to be a
+	/// waterfall.
+	/// </summary>
+	private static readonly string[] Water =
+	{
+		"..............",
+		"..............",
+		"..............",
+		"..............",
+		"......w.w.....",
+		"......www.....",
+	};
+
+	public static bool[] WaterMask(int columns, int rows)
+	{
+		var water = new bool[columns * rows];
+		for (int r = 0; r < rows && r < Water.Length; r++)
+		for (int q = 0; q < columns && q < Water[r].Length; q++)
+			water[r * columns + q] = Water[r][q] == 'w';
+		return water;
 	}
 
 	/// <summary>What the terrain dropdown offers: mixed, then whatever loaded.
@@ -1254,6 +1321,25 @@ public sealed partial class Main : Node2D
 			// how the board walked before ramps - see HexField.Passable.
 			else if (userArgs[i] == "--no-ramps")
 				_ramps = false;
+			// The A/B the water is judged by, and the only one there is: the pond
+			// is five cells of one board, so what it costs and what it looks like
+			// are both differences against that same board dry.
+			else if (userArgs[i] == "--no-water")
+				_water = false;
+			// And the way back on, for a run whose panel.json turned it off.
+			else if (userArgs[i] == "--water")
+				_water = true;
+			// How deep, over the row above rather than instead of it: a depth
+			// asked for is water asked for, or the flag would look like one that
+			// did not arrive - the argument --recoil <x> already makes.
+			else if (userArgs[i] == "--depth" && i + 1 < userArgs.Length
+					 && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+										CultureInfo.InvariantCulture, out double sunk))
+			{
+				_depth = sunk;
+				_water = true;
+				i++;
+			}
 			// Height is the whole reason this exists, so asking for the stage
 			// asks for the board that needs it - the argument --grade already
 			// makes for --relief.
@@ -1425,9 +1511,16 @@ public sealed partial class Main : Node2D
 		_field = new HexField { Terrain = _terrain, Paint = _paint, Trees = _trees };
 		if (_grade >= 0.0)
 			_field.StepGrade = _grade;
+		if (_depth >= 0.0)
+			_field.WaterDepth = _depth;
 		if (_relief)
 			_field.SetRelief(ReliefMap(_field.Columns, _field.Rows),
 							 Ramped ? RampMask(_field.Columns, _field.Rows) : null);
+		// After the relief and never before it: the water's guards are asked about
+		// levels and ramps, so water laid on a board that has not got its heights
+		// yet is water judged against a board that does not exist.
+		if (Watered)
+			_field.SetWater(WaterMask(_field.Columns, _field.Rows));
 		AddChild(_field);
 		_marks = new TrackMarks { Enabled = _rutsEnabled };
 		AddChild(_marks);
@@ -1990,6 +2083,10 @@ public sealed partial class Main : Node2D
 		// the surface are the same point - but the clearance is still owed, because
 		// marks are laid on the frame a leg ends too. See HexField.MarkAt.
 		vehicle.Ground = _field.MarkAt(vehicle.Cell);
+		// Not cleared but asked, for the reason OnSlope below is: parking is where
+		// a tank comes to rest in a ford, and that is the case this exists for.
+		vehicle.Waterline = _field.IsWater(vehicle.Cell)
+			? _field.WaterTop(vehicle.Cell) : float.NegativeInfinity;
 		vehicle.Trailing = vehicle.Height;
 		vehicle.Travel = Vector2.Zero;
 		vehicle.Levelling = false;
@@ -2560,17 +2657,51 @@ public sealed partial class Main : Node2D
 	}
 
 	/// <summary>The fastest this tank may cruise at where it is now: its class
-	/// figure on the level, two thirds of it going up or down a step - see
-	/// <see cref="MovementProfile.GradeFraction"/>.
+	/// figure on the level, two thirds of it going up or down a step, 45% of it
+	/// through water - see <see cref="MovementProfile.GradeFraction"/> and
+	/// <see cref="MovementProfile.WaterFraction"/>.
 	///
 	/// A method rather than the expression inlined at the one place it drives the
 	/// speed, because the trace and the panel have to be able to say which of the
 	/// two is in force. A tank crawling up a bank and a tank whose order has gone
 	/// stale are the same picture, and the cap is the only number that tells them
-	/// apart.</summary>
-	private double SpeedCap(Vehicle v) =>
-		v.Moving && _field.IsGrade(v.Cell, v.Path[v.PathStep])
-			? v.Profile.GradeSpeed : v.Profile.TopSpeed;
+	/// apart.
+	///
+	/// <b>The lower of the two where both apply, and never their product.</b> A
+	/// leg is a slope or it is not and it is wet or it is not; multiplying would
+	/// invent a third terrain nothing on the board is made of, and the one place
+	/// the two meet on this map - the beach at the mouth of the pit - is exactly
+	/// where that invention would show.</summary>
+	private double SpeedCap(Vehicle v)
+	{
+		double cap = v.Profile.TopSpeed;
+		if (!v.Moving)
+			return cap;
+		Vector2I next = v.Path[v.PathStep];
+		if (_field.IsGrade(v.Cell, next))
+			cap = Math.Min(cap, v.Profile.GradeSpeed);
+		if (_field.IsWet(v.Cell, next))
+			cap = Math.Min(cap, v.Profile.WaterSpeed);
+		return cap;
+	}
+
+	/// <summary>What is holding this tank back, in one word - or in nothing at all
+	/// where the answer is its own class.
+	///
+	/// <b>Beside <see cref="SpeedCap"/> rather than inside the two places that
+	/// print it</b>, because a cap and the reason for it are one answer: a trace
+	/// reading "160" with the panel reading "on a grade" while the tank is in the
+	/// water is two statements about one number, and the second one is the one
+	/// somebody acts on.</summary>
+	private string SpeedCapWhy(Vehicle v)
+	{
+		if (!v.Moving)
+			return "";
+		Vector2I next = v.Path[v.PathStep];
+		bool grade = _field.IsGrade(v.Cell, next), wet = _field.IsWet(v.Cell, next);
+		return grade && wet ? "wading a grade" : wet ? "wading"
+			: grade ? "grade" : "";
+	}
 
 	private void AdvanceOrder(Vehicle v, double delta)
 	{
@@ -2703,12 +2834,24 @@ public sealed partial class Main : Node2D
 	/// </summary>
 	private void Climb(Vehicle v, Vector2I next)
 	{
-		if (!_field.HasRelief)
-			return;
 		Vector2 from = StandOn(v, v.Cell), goal = StandOn(v, next);
 		float span = (goal - from).Length();
 		float done = span <= 0.001f ? 1.0f
 			: Mathf.Clamp((v.Sprite.Position - from).Length() / span, 0.0f, 1.0f);
+		// Which cell's water it is in, if any - the one its contact point is over,
+		// which changes at the shared edge halfway along the leg. A body of water
+		// is one flat surface, so there is nothing to interpolate: a tank is in it
+		// or it is not, and the moment it becomes so is the shoreline the board
+		// draws.
+		//
+		// Ahead of the relief gate, because a flooded board need not be a raised
+		// one - and because a waterline left over from last frame is a tank still
+		// wading a hundred pixels up the beach.
+		Vector2I under = done >= 0.5f ? next : v.Cell;
+		v.Waterline = _field.IsWater(under) ? _field.WaterTop(under)
+											: float.NegativeInfinity;
+		if (!_field.HasRelief)
+			return;
 		v.Height = _field.HeightBetween(v.Cell, next, done);
 		// And where the ground under it actually is, which the line above is a
 		// chord of - see Vehicle.Ground. Only the belt marks read it, because only
@@ -3065,7 +3208,69 @@ public sealed partial class Main : Node2D
 			return;
 		_field.SetRelief(ReliefMap(_field.Columns, _field.Rows),
 						 Ramped ? RampMask(_field.Columns, _field.Rows) : null);
+		Reflood();
 		Settle();
+	}
+
+	/// <summary>Ask the water's guards again, because what they are asked about
+	/// has just moved. The mask never changes; whether it is legal does - a pond
+	/// that is a flat five cells on a board with no relief is a pond with a ramp
+	/// under it once the pit arrives, and the failure that guard prevents is a
+	/// surface wedged along a slope rather than a refusal.</summary>
+	private void Reflood()
+	{
+		if (_field is not null && _field.HasWater)
+			_field.SetWater(WaterMask(_field.Columns, _field.Rows));
+	}
+
+	/// <summary>Put the water on the board or take it off. <see cref="Settle"/>
+	/// for <see cref="SetRelief"/>'s reason and one of its own: a tank parked in
+	/// the pond has a waterline on it, and the frame after the water goes away it
+	/// must not still be wearing one.</summary>
+	private void SetWater(bool on)
+	{
+		if (on == _field.HasWater)
+			return;
+		_water = on;
+		ApplyWater();
+	}
+
+	/// <summary>Put the board's water where <see cref="Watered"/> says it should
+	/// be. Two ways in, exactly as <see cref="ApplyRamps"/> has: the row, and
+	/// handing the board to the stage or taking it back.</summary>
+	private void ApplyWater()
+	{
+		if (_field is null || Watered == _field.HasWater)
+			return;
+		_field.SetWater(Watered ? WaterMask(_field.Columns, _field.Rows) : null);
+		Settle();
+	}
+
+	/// <summary>How tall a tank is drawn above the ground, at the medium's scale -
+	/// see <see cref="AtlasSet.DrawnHeight"/>. The medium because the depth is one
+	/// number for the board while three tanks of three sizes stand in it, and the
+	/// class that is 1.00 by definition is the one to quote it against.</summary>
+	private float DrawnHeight => _field.Atlas?.DrawnHeight ?? 0.0f;
+
+	/// <summary>Where the depth stops reading as a ford in either direction.
+	/// Named rather than written into the caption, because the check measures
+	/// against them too and a threshold with two copies is a threshold that moves
+	/// in one of them.</summary>
+	public const double ShallowAt = 0.15;
+	public const double SunkAt = 0.45;
+
+	/// <summary>How deep the water stands. Everything settles for
+	/// <see cref="SetGrade"/>'s reason narrowed to one thing: no height on the
+	/// board moves, but every waterline on a tank standing in it does, and those
+	/// are pushed per frame from the cell rather than held - so this is really
+	/// only here to keep the row and the field one answer.</summary>
+	private void SetDepth(double depth)
+	{
+		if (Math.Abs(depth - _field.WaterDepth) < 1e-9)
+			return;
+		_depth = depth;
+		_field.WaterDepth = depth;
+		_field.QueueRedraw();
 	}
 
 	private void SetRelief(bool on)
@@ -3082,6 +3287,7 @@ public sealed partial class Main : Node2D
 		_field.SetRelief(on ? ReliefMap(_field.Columns, _field.Rows) : null,
 						 on && Ramped ? RampMask(_field.Columns, _field.Rows)
 									  : null);
+		Reflood();
 		Settle();
 	}
 
@@ -3972,6 +4178,9 @@ public sealed partial class Main : Node2D
 		["--turret-sound"] = new[] { "sound.turret_motor" },
 		["--relief"] = new[] { "ground.relief" },
 		["--no-ramps"] = new[] { "ground.ramps" },
+		["--no-water"] = new[] { "ground.water" },
+		["--water"] = new[] { "ground.water" },
+		["--depth"] = new[] { "ground.water", "ground.depth" },
 		// The stage asks for height as well as for itself, so it declares both -
 		// the board came up flat the first time because "ground.relief" was not
 		// declared, which from outside looks exactly like a flag that did not
@@ -4134,7 +4343,7 @@ public sealed partial class Main : Node2D
 		ui.Readout("ride.info", () =>
 			$"speed {_speed,6:F0} / {SpeedCap(Active):F0} px/s"
 			+ (SpeedCap(Active) < _profile.TopSpeed
-				? $" on a grade (of {_profile.TopSpeed:F0})" : "")
+				? $" {SpeedCapWhy(Active)} (of {_profile.TopSpeed:F0})" : "")
 			+ $"   ramp {_profile.RampTime:F2}s over {_profile.RampDistance:F0}px\n"
 			+ $"turn {_profile.TurnRate:F0} deg/s   corner {_profile.CornerSpeed:F0} px/s\n"
 			+ $"pitch {_tank.Pitch,7:F4}   roll {_tank.Roll,7:F4}"
@@ -4589,6 +4798,30 @@ public sealed partial class Main : Node2D
 		// would be the quiet half of the same failure.
 		ui.Toggle("ground.ramps", "ramps on the levels  (--no-ramps)",
 			() => _field.HasRamps, SetRamps);
+		// The board rather than the request, for the row above's reason exactly:
+		// outside --3d nothing can draw a surface standing over the ground, so the
+		// box springs back and says so.
+		ui.Toggle("ground.water", "water in the pit  (--no-water)",
+			() => _field.HasWater, SetWater);
+		// How deep it stands, in the units it is authored in and the units it is
+		// judged in. The fraction is what carries across tiles; the pixels and what
+		// they cover are what says whether it reads as a ford, and only the second
+		// pair answers the question the slider is dragged to answer.
+		ui.Slide("ground.depth", "how deep the water is  (--depth)",
+			0.10, 1.20, 0.05,
+			() => _field.WaterDepth, SetDepth,
+			"of a level", () =>
+			{
+				float deep = _field.WaterRise;
+				float tall = DrawnHeight;
+				double part = tall > 0.0f ? deep / tall : 0.0;
+				return $"{deep:F0}px, {part:P0} of a medium's drawn height"
+					   + (part > SunkAt
+						  ? $"   - past {SunkAt:P0} it reads as sinking, not fording"
+						  : part < ShallowAt
+							  ? $"   - under {ShallowAt:P0} there is nothing to see"
+							  : "");
+			});
 		// The number that decides whether a hill reads as one, and the only
 		// reason it is a dial rather than a constant: a level is worth
 		// grade * sqrt(3) * R * cos(e) on screen, and against a hexagon 54.5px
@@ -5032,7 +5265,11 @@ public sealed partial class Main : Node2D
 					 // speed; "grade" is the frame this leg is capped on. See
 					 // Main.SpeedCap.
 					 + (SpeedCap(Active) < _profile.TopSpeed
-						? $"/{SpeedCap(Active),5:F0}grade" : "")
+						? $"/{SpeedCap(Active),5:F0} {SpeedCapWhy(Active)}" : "")
+					 // Whether it is in the water at all, which the cap above does
+					 // not say: a tank parked in a ford is capped by nothing,
+					 // because it is not moving, and it is still wading.
+					 + (Active.Wading ? $"  wet {Active.Waterline,5:F0}" : "")
 					 // The slope under the tank and what it is drawn as. Both,
 					 // because they answer different questions: a grade with no
 					 // angle beside it is a spring that did not arrive, and an angle
