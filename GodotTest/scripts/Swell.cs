@@ -100,6 +100,21 @@ public sealed class Swell
     /// frames, and how many of the four.</summary>
     public float[] Span { get; private set; } = Array.Empty<float>();
 
+    /// <summary>
+    /// Where the tank was when it last stirred each cell, in the tanks' own
+    /// space. Nothing here reads it - the state does not depend on it - but the
+    /// surface does, and that is the point.
+    ///
+    /// <b>A state per cell can only ever draw a cell.</b> The band is constant
+    /// across a hexagon, so anything shaped by it alone comes out hexagonal,
+    /// and foam that stops dead on a cell edge is the water drawing the grid
+    /// instead of hiding it. Measured on the picture, not reasoned about: with
+    /// the noise alone the raft filled its cell to the corners and its neighbour
+    /// stayed clean. So the cell says <i>whether</i> there is foam and this says
+    /// <i>where</i> - the same statement at a resolution a hexagon does not have.
+    /// </summary>
+    public Vector2[] Mark { get; private set; } = Array.Empty<Vector2>();
+
     /// <summary>What a cell is doing, 0 for dry ground as well as for calm water
     /// - a dry cell has no surface to be stirred, so both answers are the same
     /// picture.</summary>
@@ -162,7 +177,7 @@ public sealed class Swell
     /// and a splash happens at every shoreline crossed - including the internal
     /// ones a five-cell pond is made of. The cell changes at each of them.
     /// </summary>
-    public void Note(int who, Vector2I cell, bool moving)
+    public void Note(int who, Vector2I cell, bool moving, Vector2 at = default)
     {
         Size();
         bool moved = _was.TryGetValue(who, out Vector2I before) && before != cell;
@@ -172,7 +187,10 @@ public sealed class Swell
 
         int here = Field.WaterIndex(cell);
         if (here >= 0 && moving)
+        {
             _stirred[here] = true;
+            Mark[here] = at;
+        }
         if (!moved)
             return;
         // Both ends of the step, because leaving a cell throws as much water as
@@ -190,12 +208,14 @@ public sealed class Swell
         {
             _splash[into] = 1.0f;
             _leaving[into] = false;
+            Mark[into] = at;
         }
         int outOf = Field.WaterIndex(before);
         if (outOf >= 0 && outOf != into)
         {
             _splash[outOf] = 1.0f;
             _leaving[outOf] = true;
+            Mark[outOf] = at;
         }
     }
 
@@ -244,6 +264,7 @@ public sealed class Swell
         _stirred = new bool[n];
         State = new float[n];
         Span = new float[n];
+        Mark = new Vector2[n];
         Array.Fill(Span, 1.0f);
         _was.Clear();
     }
@@ -263,6 +284,7 @@ public sealed class Swell
         Array.Clear(_splash);
         Array.Clear(_leaving);
         Array.Clear(State);
+        Array.Clear(Mark);
         Array.Fill(Span, 1.0f);
         _was.Clear();
     }

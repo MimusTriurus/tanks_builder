@@ -268,6 +268,12 @@ public sealed partial class Main : Node2D
 	private double _swellPeriod = Stage3D.SwellPeriodDefault;
 	private bool _swellBlend = Stage3D.SwellBlendDefault;
 
+	/// <summary>How much foam a stirred cell throws, over the strip that already
+	/// said it was stirred. Lives on the bench rather than on a tank for the
+	/// reason every effect switch does: how foamy water is is a question about
+	/// the water, and the pond is one body of it.</summary>
+	private float _foam = Stage3D.FoamDefault;
+
 	/// <summary>How stirred up each flooded cell is. Built with the field, ticked
 	/// here and drawn by the stage - the same division the belt marks have, and for
 	/// the same reason: what the tanks did to the ground is neither the ground's
@@ -1133,9 +1139,27 @@ public sealed partial class Main : Node2D
 
 	private bool Moving => _pathStep < _path.Count;
 
+	/// <summary>
+	/// The step every animated thing on the bench takes, or null to run on the
+	/// real one. Set once a capture or a trace is asked for.
+	///
+	/// <b>Static because the pin has to reach past this node, and once did not.</b>
+	/// It used to be a local in <see cref="_Process"/>, which pinned the tanks and
+	/// left <see cref="Stage3D"/> - a sibling with a _Process of its own - turning
+	/// the pond on the wall clock. So the water was never the same twice under
+	/// --capture, and every A/B taken over it carried that as noise: measured at
+	/// <b>58 446 px, peak 10</b>, in a box that is exactly the pond. Anything the
+	/// bench animates from here on reads this, or it is outside the guarantee
+	/// --capture exists to give.
+	/// </summary>
+	public static double? FixedStep;
+
 	public override void _Ready()
 	{
 		string[] userArgs = OS.GetCmdlineUserArgs();
+		if (Array.IndexOf(userArgs, "--capture") >= 0
+			|| Array.IndexOf(userArgs, "--trace") >= 0)
+			FixedStep = 1.0 / 60.0;
 		// Which panel rows the command line has spoken for, so panel.json does
 		// not then overrule it. The order is compiled-in default, then the file,
 		// then the flag: a flag is the more specific statement, and a capture
@@ -1426,6 +1450,22 @@ public sealed partial class Main : Node2D
 			// this leaves it and takes away the reaction.
 			else if (userArgs[i] == "--still-water")
 				_seaReacts = false;
+			// The pond with the strip doing the talking on its own, which is the
+			// A/B the foam is judged by - and it is the strong form of it: off
+			// has to give back the very same picture, byte for byte, or the foam
+			// is not a detail on the band but a replacement for it.
+			else if (userArgs[i] == "--no-foam")
+				_foam = 0.0f;
+			// How much of it, over the row above rather than instead of it: asking
+			// for an amount is asking for the foam, the argument --recoil <x>
+			// already makes.
+			else if (userArgs[i] == "--foam" && i + 1 < userArgs.Length
+					 && float.TryParse(userArgs[i + 1], NumberStyles.Float,
+									   CultureInfo.InvariantCulture, out float froth))
+			{
+				_foam = Mathf.Max(0.0f, froth);
+				i++;
+			}
 			// How deep, over the row above rather than instead of it: a depth
 			// asked for is water asked for, or the flag would look like one that
 			// did not arrive - the argument --recoil <x> already makes.
@@ -4331,6 +4371,8 @@ public sealed partial class Main : Node2D
 		["--swell"] = new[] { "ground.swell" },
 		["--hard-swell"] = new[] { "ground.swell_blend" },
 		["--still-water"] = new[] { "ground.water_react" },
+		["--no-foam"] = new[] { "ground.foam" },
+		["--foam"] = new[] { "ground.foam" },
 		// The stage asks for height as well as for itself, so it declares both -
 		// the board came up flat the first time because "ground.relief" was not
 		// declared, which from outside looks exactly like a flag that did not
@@ -5018,6 +5060,27 @@ public sealed partial class Main : Node2D
 			return $"{peak:F2} of {Swell.SplashBand:F0} at its busiest, {band}"
 				   + $"   ({_field.WaterCells.Count} cells)";
 		});
+		// A multiplier over none, not an opacity: what the foam is allowed to say
+		// is set by the band under it, and a knob that wrote the amount directly
+		// would let it speak where the strip says calm - which is the one thing it
+		// must not do. The line under it names the rung, because "1.00x" answers
+		// none of the questions the slider gets dragged for.
+		ui.Slide("ground.foam", "foam on stirred water  (--foam / --no-foam)",
+			0.0, 2.0, 0.05,
+			() => _foam, v => _foam = (float)v,
+			"x", () =>
+			{
+				if (_sea is null || _field.WaterCells.Count == 0)
+					return "no water on the board";
+				if (_foam <= 0.0f)
+					return "off - the strip talks on its own, as it did before this";
+				float peak = _sea.Peak;
+				return peak >= Swell.SplashBand - 0.5f
+						   ? "a raft, on the breaking band"
+					   : peak >= Swell.ChurnBand - 0.5f
+						   ? "flecks, on the chop"
+						   : "nothing to foam - calm water takes none by construction";
+			});
 		// The number that decides whether a hill reads as one, and the only
 		// reason it is a dial rather than a constant: a level is worth
 		// grade * sqrt(3) * R * cos(e) on screen, and against a hexagon 54.5px
@@ -5445,7 +5508,7 @@ public sealed partial class Main : Node2D
 		// mid-pivot on either side of a 30 deg sprite boundary and "differed"
 		// by 91k pixels.
 		if (_capturePath is not null || _traceFrames > 0)
-			delta = 1.0 / 60.0;
+			delta = FixedStep ?? 1.0 / 60.0;
 
 		if (_traceFrames > 0)
 		{
@@ -5622,6 +5685,10 @@ public sealed partial class Main : Node2D
 						  // it is no longer standing in, so read off the tank it
 						  // would always be nought.
 						  + $"/{_sea.Mild}mild"
+						  // What the foam is set to, and !off rather than a
+						  // nought, because a pond nobody has stirred and a pond
+						  // with the foam turned off are the same clean picture.
+						  + (_foam > 0.0f ? $"/{_foam:F2}foam" : "/!off")
 						  + (_seaReacts ? "" : "!still"))
 					 // Trees, wooded cells, and how many of those no tank may
 					 // enter. Three numbers because a board with no props, a
@@ -5762,6 +5829,7 @@ public sealed partial class Main : Node2D
 			// while the row it is a view of says something else.
 			_stage.SwellPeriod = (float)_swellPeriod;
 			_stage.SwellBlend = _swellBlend;
+			_stage.Foam = _foam;
 			// Before Place, because the tint a wading tank wears is read off its
 			// own cell's state and Place is where that is pushed at the sprite.
 			if (_sea is not null)
@@ -5778,8 +5846,13 @@ public sealed partial class Main : Node2D
 					// the field answers in its own. Left off, every tank stirs
 					// a cell it is nowhere near, and the pond looks like a pond
 					// that answers nobody.
+					// The point itself as well as the cell it falls in, and in the
+					// tanks' own space: the cell is what the water reacts to, the
+					// point is where the foam sits. Not the origin-less one - the
+					// surface is built in this space too, so the two agree.
 					_sea.Note(i, _field.CellAt(_vehicles[i].GroundPoint - _origin),
-							  _vehicles[i].Speed > Swell.StirAbove);
+							  _vehicles[i].Speed > Swell.StirAbove,
+							  _vehicles[i].GroundPoint);
 				_sea.Tick(delta);
 			}
 			_stage.Place(_vehicles);

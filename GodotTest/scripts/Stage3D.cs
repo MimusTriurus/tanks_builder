@@ -1,4 +1,5 @@
 ﻿using System.Collections.Generic;
+using System.Globalization;
 using Godot;
 
 namespace TankSpriteTest;
@@ -272,6 +273,11 @@ public sealed partial class Stage3D : Node3D
 
     public override void _Process(double delta)
     {
+        // The bench's step when it has pinned one. This node is a sibling of
+        // Main, not a child of its process, so a pin kept local over there left
+        // the pond running on the wall clock through every capture ever taken -
+        // see Main.FixedStep for what that cost.
+        delta = Main.FixedStep ?? delta;
         if (Field.Atlas is null)
             return;
         Aim();
@@ -293,6 +299,13 @@ public sealed partial class Stage3D : Node3D
             _swell = Mathf.PosMod(_swell + (float)delta / SwellPeriod, 1.0f);
         _swellInk?.SetShaderParameter("phase", _swell);
         _swellInk?.SetShaderParameter("blend", SwellBlend ? 1.0f : 0.0f);
+        _swellInk?.SetShaderParameter("foam", Mathf.Max(0.0f, Foam));
+        // Wrapped at a turn for the swell phase's reason: a bench left open all
+        // afternoon keeps the same precision in it as one just started. A turn
+        // is the true period here - the drift is a sine of this angle.
+        _foamClock = Mathf.PosMod(_foamClock + (float)delta * FoamDrift,
+                                  Mathf.Tau);
+        _swellInk?.SetShaderParameter("foam_time", _foamClock);
         PushSwell();
     }
 
@@ -1213,6 +1226,10 @@ void fragment() {{
             halfX = Mathf.Max(halfX, Mathf.Abs(c.X));
             halfZ = Mathf.Max(halfZ, Mathf.Abs(c.Z));
         }
+        // In world units, taken off the hexagon the foam has to stay inside
+        // rather than written down: the tile is a dial, and a reach in pixels
+        // would be right on one setting of it.
+        _pondReach = Mathf.Max(halfX, halfZ) * FoamReach;
         // Pulled in off its own boundary, exactly as the ground faces are - see
         // Bleed, which is this defect solved once already.
         Vector2 inset = drawn
@@ -1334,6 +1351,82 @@ void fragment() {{
     public bool SwellBlend = SwellBlendDefault;
 
     /// <summary>
+    /// How much foam a stirred cell throws, as a multiplier over none.
+    ///
+    /// <b>A detail on the band, never a second opinion about it.</b> What says a
+    /// tank was here is the strip's own ladder - calm, chop, break - and the foam
+    /// is cut by that same state, so it can only agree with it. It is worth having
+    /// beside it because the ladder is quantised to three rungs and foam is not:
+    /// the band cannot say "a smaller splash" at all, which is why leaving a cell
+    /// had to be told from entering one by loop length rather than by strength.
+    ///
+    /// <b>Off is bit-identical to the pond as it was</b>, and that is the whole
+    /// claim this has to earn - measured, not asserted, by capturing the same
+    /// frame twice. It holds twice over: the level multiplies every term, and at
+    /// state zero the noise cannot reach the cutoff in the first place.
+    ///
+    /// On by default, on the contact shadow's argument: an A/B against the thing
+    /// itself is the only case for the layer, and a switch nobody flips is a
+    /// layer nobody looks at.
+    /// </summary>
+    public const float FoamDefault = 1.0f;
+
+    public float Foam = FoamDefault;
+
+    /// <summary>Where the noise has to reach before any foam is drawn, over and
+    /// above whatever the cell's own state adds to it.</summary>
+    public const float FoamCut = 0.92f;
+
+    /// <summary>
+    /// What one rung of the ladder is worth to the foam.
+    ///
+    /// <b>Measured off the noise, and the first cut of it was not.</b> The band
+    /// arrives normalised to 0, 0.5 and 1, and adding that straight to the noise
+    /// moves it by more than the noise's whole spread - p5 to p95 is 0.48 - so
+    /// the top rung saturated and the foam came out as a solid white slab with
+    /// the hexagon's own edges on it. Which is the water drawing the cell
+    /// boundary: the one failure this layer is not allowed to have.
+    ///
+    /// At 0.36 the rungs cover <b>2.9% and 37.9%</b> of a cell - a few flecks
+    /// under a tank driving through, a broken raft where one crossed - and still
+    /// water stays at nought because <see cref="FoamCeiling"/> is below the cut.
+    /// </summary>
+    public const float FoamRung = 0.55f;
+
+    /// <summary>
+    /// The most the three octaves of <c>clumps()</c> can sum to - 0.5 + 0.25 +
+    /// 0.125, because each squared cell distance tops out at one.
+    ///
+    /// Named so the thing it guarantees can be asserted rather than believed:
+    /// this sits below <see cref="FoamCut"/> + 0.5, which is the threshold a cell
+    /// at state zero faces, so calm water takes no foam <i>by construction</i>.
+    /// Raise the cut or add an octave without looking here and the pond starts
+    /// growing foam where nobody has been.
+    /// </summary>
+    public const float FoamCeiling = 0.875f;
+
+
+    /// <summary>How far foam pulls the surface towards opaque. Under one on
+    /// purpose: foam hides the bottom, but taken all the way it stops reading as
+    /// something floating on a ford and starts reading as a hole in it.</summary>
+    public const float FoamLift = 0.55f;
+
+    /// <summary>How fast the bubbles inside a raft drift, in radians a second.
+    /// On the bench's side of the line rather than in the shader, because the
+    /// shader must not read a clock of its own - see <c>foam_time</c>.</summary>
+    public const float FoamDrift = 1.0f;
+
+    /// <summary>How far from the tank foam reaches, as a fraction of the tile's
+    /// own circumradius. Under one so a raft dies out before the cell edge it
+    /// happens to sit in - the point of measuring it from the tank at all - and
+    /// not so far under that a crossing leaves a tidy disc, which is the same
+    /// grid artefact with rounder corners.</summary>
+    public const float FoamReach = 1.10f;
+
+    private float _foamClock;
+    private float _pondReach = 1.0f;
+
+    /// <summary>
     /// How many flooded cells the surface can carry a state for.
     ///
     /// <b>A cap because a shader array has to have one</b>, and named rather than
@@ -1351,7 +1444,13 @@ void fragment() {{
         {
             Shader = new Shader
             {
-                Code = string.Format(SwellShader, MaxWaterCells),
+                // Invariant culture, and it is not pedantry: this machine's
+                // locale writes a comma for the decimal point, and "foam_cut =
+                // 0,7" is a shader that does not compile - the same trap that
+                // once made two captures byte-identical because a float flag
+                // never parsed.
+                Code = string.Format(CultureInfo.InvariantCulture, SwellShader,
+                                     MaxWaterCells, FoamCut, FoamLift, FoamRung),
             },
             RenderPriority = WaterOrder,
         };
@@ -1373,15 +1472,25 @@ void fragment() {{
         int n = Mathf.Min(Field.WaterCells.Count, MaxWaterCells);
         var state = new float[MaxWaterCells];
         var span = new float[MaxWaterCells];
+        var mark = new Vector2[MaxWaterCells];
         for (int i = 0; i < MaxWaterCells; i++)
             span[i] = 1.0f;
         for (int i = 0; i < n; i++)
         {
             state[i] = Sea?.State.Length > i ? Sea.State[i] : 0.0f;
             span[i] = Sea?.Span.Length > i ? Sea.Span[i] : 1.0f;
+            // Through the same mapping the surface's own vertices went through,
+            // because the shader compares it against world.xz. Squashed here
+            // rather than in Swell: the swell keeps the tanks' own coordinates,
+            // and which camera is looking at them is not its business.
+            Vector2 at = Sea?.Mark.Length > i ? Sea.Mark[i] : Vector2.Zero;
+            Vector3 w = World(at, 0.0f);
+            mark[i] = new Vector2(w.X, w.Z);
         }
         _swellInk.SetShaderParameter("state", state);
         _swellInk.SetShaderParameter("span", span);
+        _swellInk.SetShaderParameter("mark", mark);
+        _swellInk.SetShaderParameter("foam_reach", _pondReach);
     }
 
     /// <summary>What each flooded cell is doing. Null leaves the pond calm, which
@@ -1432,6 +1541,84 @@ uniform float phase = 0.0;
 uniform float blend = 1.0;
 uniform float state[{0}];
 uniform float span[{0}];
+uniform vec2 mark[{0}];
+uniform float foam_reach = 1.0;
+uniform float foam = 0.0;
+uniform float foam_scale = 5.0;
+// The foam's own clock, in radians, handed in rather than taken from TIME.
+// TIME is the wall clock, and --capture pins the step to 1/60 for the one
+// reason that two runs have to be comparable: read it here and every capture
+// of the pond comes out different, so any A/B taken near the water measures
+// the hour it was taken at. Wrapped by the bench, the way the swell phase is.
+uniform float foam_time = 0.0;
+uniform float foam_cut = {1};
+uniform float foam_lift = {2};
+uniform float foam_rung = {3};
+uniform vec3 foam_ink : source_color = vec3(1.0, 1.0, 1.0);
+uniform vec3 foam_rim : source_color = vec3(0.0, 0.05, 0.08);
+
+varying vec3 world;
+
+float hash12(vec2 p) {{
+    uvec2 q = uvec2(ivec2(p)) * uvec2(1597334677u, 3812015801u);
+    uint n = (q.x ^ q.y) * 1597334677u;
+    return float(n) * (1.0 / 4294967295.0);
+}}
+
+float vnoise(vec2 p) {{
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash12(i), hash12(i + vec2(1.0, 0.0)), u.x),
+               mix(hash12(i + vec2(0.0, 1.0)), hash12(i + vec2(1.0, 1.0)), u.x),
+               u.y);
+}}
+
+vec2 hash22(vec2 p) {{
+    vec3 q = fract(vec3(p.xyx) * vec3(0.1031, 0.1030, 0.0973));
+    q += dot(q, q.yzx + 33.33);
+    return fract((q.xx + q.yz) * q.zy);
+}}
+
+// Squared distance to the nearest of a drifting set of points, one per grid
+// cell. Cell-shaped rather than blobby, which is what a raft of bubbles is -
+// and it drifts in place instead of flowing, because the pond has no current.
+float cells(vec2 uv) {{
+    vec2 n = floor(uv);
+    vec2 f = fract(uv);
+    float d = 1.0;
+    for (int j = -1; j <= 1; j++) {{
+        for (int i = -1; i <= 1; i++) {{
+            vec2 g = vec2(float(i), float(j));
+            vec2 o = hash22(n + g);
+            o = 0.5 + 0.5 * sin(foam_time + 6.2831 * o);
+            vec2 r = g - f + o;
+            d = min(d, dot(r, r));
+        }}
+    }}
+    return d;
+}}
+
+// Three octaves of it, so the raft has both clumps and the bubbles inside
+// them. Peaks below 0.875 by construction - the sum of the three weights -
+// and that ceiling is what keeps calm water clean of foam, see below.
+float clumps(vec2 uv) {{
+    float v = 0.0;
+    float a = 0.5;
+    mat2 rot = mat2(vec2(0.8776, 0.4794), vec2(-0.4794, 0.8776));
+    for (int i = 0; i < 3; i++) {{
+        float s = 1.0 - cells(uv);
+        v += a * s * s;
+        uv = rot * uv * 2.0 + vec2(100.0);
+        a *= 0.5;
+    }}
+    return v;
+}}
+
+void vertex() {{
+    world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+}}
+
 void fragment() {{
     float total = frames * bands;
     float inset = 0.5 * total / float(textureSize(surf, 0).x);
@@ -1458,8 +1645,52 @@ void fragment() {{
     vec4 hi = mix(texture(surf, vec2((u + b1 * frames + f0) / total, UV.y)),
                   texture(surf, vec2((u + b1 * frames + f1) / total, UV.y)), ft);
     vec4 c = mix(lo, hi, fb);
-    ALBEDO = c.rgb;
-    ALPHA = c.a * tint.a;
+    vec3 rgb = c.rgb;
+    float alpha = c.a * tint.a;
+
+    // Foam, cut by the same state the band was chosen with. It is a detail on
+    // that statement and never a second one: where the strip says calm, there
+    // is none - the sum below cannot reach the cutoff, because clumps() tops
+    // out at 0.875 and the threshold at level zero is 1.2. So still water is
+    // untouched by construction rather than by a branch somebody can move.
+    //
+    // In world XZ, not in UV. Per-hex UVs would repeat the same raft in every
+    // cell and line its edges up with the grid, which is the one thing the
+    // water is on the board to hide.
+    // How much the band allows, and then how near the tank that stirred it we
+    // are. Both, and the second is not a refinement: a state is one number for
+    // a whole hexagon, so a mask made from it alone is hexagonal - the raft
+    // filled its cell to the corners while the neighbour stayed clean, which is
+    // the water drawing the grid it is on the board to hide. The band says
+    // whether, the mark says where.
+    float level = clamp(state[cell] / max(bands - 1.0, 1.0), 0.0, 1.0);
+    level *= 1.0 - smoothstep(0.45 * foam_reach, foam_reach,
+                              distance(world.xz, mark[cell]));
+    // The warp does not move, and that is not a saving. It is here to break the
+    // clump grid up so the raft has no lattice in it; what moves is the points
+    // inside the cells. A drifting warp would be a current, and a pond has none.
+    vec2 flow = world.xz * 0.005;
+    vec2 warp = vec2(vnoise(flow), vnoise(flow + vec2(5.2, 1.3))) - 0.5;
+    vec2 fuv = world.xz * foam_scale * 0.01 + warp;
+    float lit = smoothstep(foam_cut, foam_cut + 0.08,
+                           clumps(fuv) + level * foam_rung);
+    // The same field again, half a clump over: what it covers and the body
+    // does not is the far lip of the raft, and drawing that dark is what gives
+    // flat foam a thickness.
+    float back = clamp(
+        smoothstep(foam_cut, foam_cut + 0.08,
+                   clumps(fuv + vec2(0.35)) + level * foam_rung)
+        - lit, 0.0, 1.0);
+
+    rgb = mix(rgb, foam_rim, back * foam);
+    rgb = mix(rgb, foam_ink, lit * foam);
+    // Foam is denser than the water it sits on, so it hides the bottom the
+    // ford is otherwise showing. Partly, and named: taken all the way it would
+    // read as a hole in the pond rather than as something floating on it.
+    alpha = mix(alpha, 1.0, max(lit, back) * foam * foam_lift);
+
+    ALBEDO = rgb;
+    ALPHA = alpha;
 }}
 ";
 

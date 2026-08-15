@@ -6890,6 +6890,94 @@ public static class SelfTest
                 "the surface runs the whole band whatever it is handed, so "
                 + "leaving a cell looks exactly like entering it");
 
+            // The foam is a detail on the band and never a second opinion about
+            // it, and this is the arithmetic that makes that true rather than
+            // intended: three octaves cannot sum past FoamCeiling, and a cell at
+            // state nought faces FoamCut + 0.5. Add an octave or lift the cut
+            // without coming here and calm water starts growing foam - which is
+            // the pond saying a tank was somewhere no tank has been.
+            Check("calm water cannot reach the foam's cutoff at all",
+                Stage3D.FoamCeiling < Stage3D.FoamCut,
+                $"noise tops out at {Stage3D.FoamCeiling:F3} against a cut of "
+                + $"{Stage3D.FoamCut:F3} on still water");
+
+            // And it is shaped by where the tank was, not only by which cell it
+            // was in. A state is one number for a whole hexagon, so a mask made
+            // from it alone is hexagonal however the noise is tuned - measured
+            // on the picture: the raft filled its cell corner to corner while
+            // the neighbour stayed clean, which is the water drawing the grid it
+            // is on the board to hide. Two goes at the cutoff did not touch it,
+            // because the cutoff was never what made it that shape.
+            Check("and the foam is shaped by where the tank was, not by the cell",
+                Stage3D.SwellShader.Contains("distance(world.xz, mark[cell])")
+                && Stage3D.SwellShader.Contains("level *="),
+                "the foam is cut by the cell's state alone, so it is hexagonal "
+                + "whatever else is done to it");
+
+            // And its reach dies inside the tile. Past that a raft runs to the
+            // cell edge again and the mark has bought nothing.
+            Check("and a raft dies out before the cell it sits in ends",
+                Stage3D.FoamReach is > 0.0f and < 2.0f,
+                $"reach {Stage3D.FoamReach:F2} of the tile's own circumradius");
+
+            // And the state is what cuts it, so the foam can only ever agree with
+            // the frame the strip already chose.
+            Check("and what foam there is is cut by the same state the band is",
+                Stage3D.SwellShader.Contains("state[cell] / max(bands - 1.0")
+                && Stage3D.SwellShader.Contains("clumps(fuv) + level"),
+                "the foam is drawn off something other than the cell's state, so "
+                + "it is a second opinion about what the water is doing");
+
+            // Every term multiplied by the level, which is the whole of what
+            // makes off give the picture back. One line missing it and --no-foam
+            // still tints the pond - and a claim of byte-identity nobody can see
+            // failing is worse than no claim.
+            int paid = 0;
+            foreach (string line in Stage3D.SwellShader.Split('\n'))
+                if (line.Contains("foam_rim") && line.Contains("* foam")
+                    || line.Contains("foam_ink") && line.Contains("* foam")
+                    || line.Contains("foam_lift") && line.Contains("* foam"))
+                    paid++;
+            Check("and turning it off takes every term of it away", paid == 3,
+                $"{paid} of the 3 places foam is applied are multiplied by the "
+                + "level, so nought is not the pond as it was");
+
+            // In world space. Per-hex UVs would stamp the same raft into every
+            // cell and lay its edges along the grid - the water drawing the cell
+            // boundary instead of hiding it, which is the failure the shared
+            // phase exists to avoid and would arrive by another door.
+            Check("and the foam is laid in world space, not per cell",
+                Stage3D.SwellShader.Contains("world.xz * foam_scale")
+                && !Stage3D.SwellShader.Contains("UV * foam_scale"),
+                "foam is laid out in the cell's own UVs, so every hex wears the "
+                + "same raft and the grid shows through the water");
+
+            // And it runs on the clock the bench hands it. TIME is the wall
+            // clock, and --capture pins the step to 1/60 precisely so two runs
+            // can be compared - read it in here and every capture of the pond
+            // comes out different, so any A/B taken near the water measures the
+            // hour it was taken at rather than the thing it was aimed at. Caught
+            // that way round: the first cut of this used TIME, and two captures
+            // on identical flags came back with different hashes.
+            // Asked of the code and not of the file: the paragraph above this in
+            // the shader has to name TIME to say why it is not used, and a plain
+            // search on the source calls that a failure. Comments stripped first.
+            string swellCode = string.Join('\n',
+                Stage3D.SwellShader.Split('\n')
+                    .Select(l => l.Split("//")[0]));
+            Check("and the foam runs on the bench's clock, not the wall's",
+                !swellCode.Contains("TIME")
+                && swellCode.Contains("foam_time"),
+                "the surface reads TIME, so no two captures of the water agree "
+                + "and every A/B near it measures when it was taken");
+
+            // Denser than water but not a lid on it: a ford shows its bottom, and
+            // that is what makes it a ford rather than a hole.
+            Check("and foam hides the bottom without sealing it over",
+                Stage3D.FoamLift is > 0.0f and < 1.0f,
+                $"lift {Stage3D.FoamLift:F2} - at one the pond goes opaque where "
+                + "it foams and the ford stops being one");
+
             // And it settles. A state that stuck would be a pond that had been
             // driven through once and stayed broken for the rest of the session.
             for (int i = 0; i < 60 * 5; i++)
