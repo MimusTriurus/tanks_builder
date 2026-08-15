@@ -1372,9 +1372,16 @@ void fragment() {{
             return;
         int n = Mathf.Min(Field.WaterCells.Count, MaxWaterCells);
         var state = new float[MaxWaterCells];
+        var span = new float[MaxWaterCells];
+        for (int i = 0; i < MaxWaterCells; i++)
+            span[i] = 1.0f;
         for (int i = 0; i < n; i++)
+        {
             state[i] = Sea?.State.Length > i ? Sea.State[i] : 0.0f;
+            span[i] = Sea?.Span.Length > i ? Sea.Span[i] : 1.0f;
+        }
         _swellInk.SetShaderParameter("state", state);
+        _swellInk.SetShaderParameter("span", span);
     }
 
     /// <summary>What each flooded cell is doing. Null leaves the pond calm, which
@@ -1424,17 +1431,24 @@ uniform float bands = 1.0;
 uniform float phase = 0.0;
 uniform float blend = 1.0;
 uniform float state[{0}];
+uniform float span[{0}];
 void fragment() {{
     float total = frames * bands;
     float inset = 0.5 * total / float(textureSize(surf, 0).x);
     float u = clamp(UV.x, inset, 1.0 - inset);
 
-    float t = fract(phase) * frames;
+    int cell = int(UV2.x + 0.5);
+    // How much of the band's loop this cell runs through. One for all of it;
+    // a half leaves a cell that is only being left on the milder two frames of
+    // the breaking band - see Swell.LeavingSpan. The floor keeps a still out of
+    // it, because a still is not a loop.
+    float run = max(1.0, floor(frames * clamp(span[cell], 0.0, 1.0)));
+    float t = fract(phase) * run;
     float f0 = floor(t);
-    float f1 = mod(f0 + 1.0, frames);
+    float f1 = mod(f0 + 1.0, run);
     float ft = fract(t) * blend;
 
-    float s = clamp(state[int(UV2.x + 0.5)], 0.0, bands - 1.0);
+    float s = clamp(state[cell], 0.0, bands - 1.0);
     float b0 = floor(s);
     float b1 = min(b0 + 1.0, bands - 1.0);
     float fb = s - b0;

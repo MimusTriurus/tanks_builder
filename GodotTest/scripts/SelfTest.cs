@@ -6745,7 +6745,7 @@ public static class SelfTest
                 // which is the state's business; a phase offset per cell would be
                 // the swell disagreeing with itself across every shared edge.
                 Check("and the whole pond shows one moment of the same swell",
-                    Stage3D.SwellShader.Contains("fract(phase) * frames")
+                    Stage3D.SwellShader.Contains("fract(phase) * run")
                     && !Stage3D.SwellShader.Contains("phase + UV2"),
                     "the surface takes a phase per cell, so its cells disagree "
                     + "across every edge they share");
@@ -6856,6 +6856,39 @@ public static class SelfTest
             Check("and the cell it left breaks too",
                 sea.StateAt(pond[0]) >= Swell.SplashBand - 0.05f,
                 $"the cell behind is {sea.StateAt(pond[0]):F2}");
+
+            // Exactly the band, not almost it. The splash used to be spent in the
+            // same pass that read it, so the top of the ladder measured 1.96 of 2
+            // and the four frames a crossing is drawn with were never once shown
+            // without a quarter of the chop mixed into them.
+            Check("and a crossing is worth the whole of the breaking band",
+                Mathf.IsEqualApprox(sea.StateAt(pond[1]), Swell.SplashBand),
+                $"{sea.StateAt(pond[1]):F4} of {Swell.SplashBand:F0}, so the "
+                + "band is only ever reached through its neighbour");
+
+            // The two ends are told apart, and on the loop rather than on the
+            // band: dropping the left cell a band would say chop, which is a tank
+            // driving through, not a tank climbing out.
+            Check("and the cell left behind runs the milder half of that band",
+                Mathf.IsEqualApprox(sea.SpanAt(pond[0]), Swell.LeavingSpan)
+                && Mathf.IsEqualApprox(sea.SpanAt(pond[1]), 1.0f),
+                $"left {sea.SpanAt(pond[0]):F2}, entered {sea.SpanAt(pond[1]):F2}"
+                + " - the same span at both ends is one splash drawn twice");
+
+            // And the surface honours it. The band picks which four frames; this
+            // picks how many of the four, so a shader that stepped the whole loop
+            // regardless would leave the two ends identical on screen while the
+            // numbers said otherwise.
+            // Asked as "the run comes out of the span", not as "both words are in
+            // the file": a shader that reads the span and then steps the whole
+            // band anyway contains every string a looser check would look for.
+            // Written the loose way first, and a deliberately broken shader
+            // passed it.
+            Check("and the surface steps only as much of the loop as it is given",
+                Stage3D.SwellShader.Contains("floor(frames * clamp(span[cell]")
+                && Stage3D.SwellShader.Contains("fract(phase) * run"),
+                "the surface runs the whole band whatever it is handed, so "
+                + "leaving a cell looks exactly like entering it");
 
             // And it settles. A state that stuck would be a pond that had been
             // driven through once and stayed broken for the rest of the session.

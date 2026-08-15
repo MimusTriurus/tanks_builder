@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Godot;
 
@@ -65,8 +65,27 @@ public sealed class Swell
     public const float ChurnBand = 1.0f;
     public const float SplashBand = 2.0f;
 
+    /// <summary>
+    /// What a cell that is only being left shows: the milder half of the
+    /// breaking band, frames 9 and 10 of the twelve.
+    ///
+    /// <b>A frame range, not a band, and the difference is the whole of why this
+    /// exists.</b> The band axis says which quartet; the phase says which of the
+    /// four. So "the smaller splash" cannot be said on the band axis at all -
+    /// dropping a band would say chop, which is a tank driving, not a tank
+    /// leaving. It is said on the loop instead: the same band, half as many
+    /// frames, and the two it keeps are the two the sheet drew mildest (spread
+    /// 38.3 and 41.4 against 44.8 and 47.0).
+    ///
+    /// <b>Halving a loop cannot open a seam</b>, which is the one thing worth
+    /// checking before shortening one: a two-frame loop is A, B, A, so its
+    /// closing step and its only inside step are the same step.
+    /// </summary>
+    public const float LeavingSpan = 0.5f;
+
     private float[] _churn = Array.Empty<float>();
     private float[] _splash = Array.Empty<float>();
+    private bool[] _leaving = Array.Empty<bool>();
     private bool[] _stirred = Array.Empty<bool>();
     private readonly Dictionary<int, Vector2I> _was = new();
 
@@ -75,6 +94,12 @@ public sealed class Swell
     /// <see cref="SplashBand"/> for breaking.</summary>
     public float[] State { get; private set; } = Array.Empty<float>();
 
+    /// <summary>How much of its band's loop each cell may run through: all of it,
+    /// or <see cref="LeavingSpan"/> for a cell that is only being left. One array
+    /// beside the other because they are two axes of one picture - which four
+    /// frames, and how many of the four.</summary>
+    public float[] Span { get; private set; } = Array.Empty<float>();
+
     /// <summary>What a cell is doing, 0 for dry ground as well as for calm water
     /// - a dry cell has no surface to be stirred, so both answers are the same
     /// picture.</summary>
@@ -82,6 +107,30 @@ public sealed class Swell
     {
         int i = Field.WaterIndex(cell);
         return i >= 0 && i < State.Length ? State[i] : 0.0f;
+    }
+
+    /// <summary>How much of its loop a cell may run through, whole for dry ground
+    /// as well as for calm water.</summary>
+    public float SpanAt(Vector2I cell)
+    {
+        int i = Field.WaterIndex(cell);
+        return i >= 0 && i < Span.Length ? Span[i] : 1.0f;
+    }
+
+    /// <summary>How many cells are on the milder half of their band right now.
+    /// Reported because a span that is never anything but whole is a distinction
+    /// that is being computed and never drawn, and the picture cannot say which
+    /// of the two it is looking at.</summary>
+    public int Mild
+    {
+        get
+        {
+            int n = 0;
+            foreach (float v in Span)
+                if (v < 1.0f)
+                    n++;
+            return n;
+        }
     }
 
     /// <summary>The busiest cell on the board, for the panel to report. The
@@ -130,11 +179,23 @@ public sealed class Swell
         // entering one, and a shoreline is crossed by exactly one of them being
         // dry. A step from water to water is an internal edge and splashes twice
         // over, which is what a tank ploughing across a pond does.
-        foreach (Vector2I at in new[] { before, cell })
+        //
+        // Told apart, though, and only here: the cell being entered takes the
+        // whole breaking band, the one being left takes its milder half - see
+        // LeavingSpan. Entering wins a tie, because a cell that is both left and
+        // entered in one frame is not a thing one tank can do, and if two tanks
+        // manage it between them the arriving one is the one throwing water.
+        int into = Field.WaterIndex(cell);
+        if (into >= 0)
         {
-            int i = Field.WaterIndex(at);
-            if (i >= 0)
-                _splash[i] = 1.0f;
+            _splash[into] = 1.0f;
+            _leaving[into] = false;
+        }
+        int outOf = Field.WaterIndex(before);
+        if (outOf >= 0 && outOf != into)
+        {
+            _splash[outOf] = 1.0f;
+            _leaving[outOf] = true;
         }
     }
 
@@ -151,9 +212,23 @@ public sealed class Swell
             float rate = want > _churn[i] ? ChurnRise : ChurnFall;
             _churn[i] = Mathf.MoveToward(_churn[i], want,
                                          step / Mathf.Max(rate, 1e-4f));
+            // Read before it is spent, so a crossing is worth the whole of the
+            // breaking band on the frame it happens. Decayed first it never was:
+            // the splash was set to 1 and stepped down in the same pass, so the
+            // top of the ladder was 1.96 of 2 and the picture that a crossing is
+            // supposed to show was never once shown pure.
+            float splash = _splash[i];
+            State[i] = Mathf.Max(_churn[i] * ChurnBand, splash * SplashBand);
+            // Which half of the loop it may use follows whichever source is
+            // drawing the cell: a leaving splash that has decayed under the chop
+            // beneath it is no longer what is on screen, so it stops shortening
+            // the loop as well.
+            Span[i] = _leaving[i] && splash * SplashBand > _churn[i] * ChurnBand
+                          ? LeavingSpan : 1.0f;
             _splash[i] = Mathf.Max(
-                0.0f, _splash[i] - step / Mathf.Max(SplashFor, 1e-4f));
-            State[i] = Mathf.Max(_churn[i] * ChurnBand, _splash[i] * SplashBand);
+                0.0f, splash - step / Mathf.Max(SplashFor, 1e-4f));
+            if (_splash[i] <= 0.0f)
+                _leaving[i] = false;
             _stirred[i] = false;
         }
     }
@@ -165,8 +240,11 @@ public sealed class Swell
             return;
         _churn = new float[n];
         _splash = new float[n];
+        _leaving = new bool[n];
         _stirred = new bool[n];
         State = new float[n];
+        Span = new float[n];
+        Array.Fill(Span, 1.0f);
         _was.Clear();
     }
 
@@ -183,7 +261,9 @@ public sealed class Swell
     {
         Array.Clear(_churn);
         Array.Clear(_splash);
+        Array.Clear(_leaving);
         Array.Clear(State);
+        Array.Fill(Span, 1.0f);
         _was.Clear();
     }
 }

@@ -5615,6 +5615,13 @@ public sealed partial class Main : Node2D
 					 + (_sea is null || _field.WaterCells.Count == 0 ? "  sea -"
 						: $"  sea {_sea.StateAt(_field.CellAt(Active.GroundPoint - _origin)):F2}"
 						  + $"/{_sea.Peak:F2}"
+						  // How many cells are running the milder half of their
+						  // band, which is what a cell being left over shows.
+						  // Counted rather than shown for the driven tank's own
+						  // cell: the cell it is leaving is by definition the one
+						  // it is no longer standing in, so read off the tank it
+						  // would always be nought.
+						  + $"/{_sea.Mild}mild"
 						  + (_seaReacts ? "" : "!still"))
 					 // Trees, wooded cells, and how many of those no tank may
 					 // enter. Three numbers because a board with no props, a
