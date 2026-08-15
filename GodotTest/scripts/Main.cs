@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -1056,6 +1056,18 @@ public sealed partial class Main : Node2D
 	// the keyboard. F12 does the same thing interactively.
 	private string? _capturePath;
 	private int _captureAfter = 4;
+
+	/// <summary>Whether <c>--capture-at</c> was on the line.
+	///
+	/// <b>Named because --drive used to overwrite it and say nothing.</b> An order
+	/// carries its own default frame - ninety, far enough along to be mid-path -
+	/// and it wrote that over an explicit frame whenever --drive came after
+	/// --capture-at on the command line. Which is a flag that works or does not by
+	/// argument order, and it fails in the quietest possible way: the capture is
+	/// taken, of the right board, at the wrong moment. Two frames of a pond that
+	/// nobody had driven into yet compared identical, and the conclusion drawn
+	/// from them was that the water did not answer the tanks.</summary>
+	private bool _captureAsked;
 	private int _frames;
 	private bool _selfTest;
 	private Vector2I? _driveTo;
@@ -1150,7 +1162,10 @@ public sealed partial class Main : Node2D
 				_selfTest = true;
 			else if (userArgs[i] == "--capture-at" && i + 1 < userArgs.Length
 					 && int.TryParse(userArgs[i + 1], out int at))
+			{
 				_captureAfter = at;
+				_captureAsked = true;
+			}
 			else if (userArgs[i] == "--pitch")
 				_pitchEnabled = true;
 			else if (userArgs[i] == "--rumble")
@@ -1518,7 +1533,12 @@ public sealed partial class Main : Node2D
 					&& int.TryParse(parts[1], out int row))
 				{
 					_driveTo = new Vector2I(col, row);
-					_captureAfter = 90;   // long enough to be mid-path
+					// Long enough to be mid-path, and only when nobody said
+					// when - see _captureAsked. Written unconditionally, this
+					// line made --capture-at work or not by which side of
+					// --drive it was written on.
+					if (!_captureAsked)
+						_captureAfter = 90;
 				}
 			}
 		}
@@ -5593,7 +5613,7 @@ public sealed partial class Main : Node2D
 					 // cell are the same still picture, and the trace is the only
 					 // channel that survives --no-ui.
 					 + (_sea is null || _field.WaterCells.Count == 0 ? "  sea -"
-						: $"  sea {_sea.StateAt(_field.CellAt(Active.GroundPoint)):F2}"
+						: $"  sea {_sea.StateAt(_field.CellAt(Active.GroundPoint - _origin)):F2}"
 						  + $"/{_sea.Peak:F2}"
 						  + (_seaReacts ? "" : "!still"))
 					 // Trees, wooded cells, and how many of those no tank may
@@ -5746,7 +5766,12 @@ public sealed partial class Main : Node2D
 				// object, because the swell has no business knowing what a tank
 				// is - see Swell.Note.
 				for (int i = 0; i < _vehicles.Count; i++)
-					_sea.Note(i, _field.CellAt(_vehicles[i].GroundPoint),
+					// Less the origin, like every other read of a ground point
+					// against the board: the point is in the tanks' space and
+					// the field answers in its own. Left off, every tank stirs
+					// a cell it is nowhere near, and the pond looks like a pond
+					// that answers nobody.
+					_sea.Note(i, _field.CellAt(_vehicles[i].GroundPoint - _origin),
 							  _vehicles[i].Speed > Swell.StirAbove);
 				_sea.Tick(delta);
 			}

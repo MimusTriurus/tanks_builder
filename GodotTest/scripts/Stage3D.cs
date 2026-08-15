@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using Godot;
 
 namespace TankSpriteTest;
@@ -793,7 +793,14 @@ void fragment() {{
             var ink = (ShaderMaterial)stand.Quad.MaterialOverride;
             AtlasSet atlas = vehicle.Atlas;
             float scale = vehicle.Sprite.BodyScale;
-            ink.SetShaderParameter("pond", WaterTintAt(Field.CellAt(vehicle.GroundPoint)));
+            // Less Origin, and that omission is what broke the swell: a ground
+            // point is in the tanks' space and CellAt reads the field's own, so
+            // an unshifted point resolves to a cell most of a board away. It
+            // fails quietly in both directions at once - the tank wears some
+            // other cell's water and its own cell is never told it is being
+            // driven through.
+            ink.SetShaderParameter(
+                "pond", WaterTintAt(Field.CellAt(vehicle.GroundPoint - Origin)));
             ink.SetShaderParameter("shore", atlas.Groundline);
             ink.SetShaderParameter("shore_map", new Godot.Vector4(
                 atlas.Anchor.X, atlas.Anchor.Y, scale, PaintSize));

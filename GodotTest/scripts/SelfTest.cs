@@ -4581,6 +4581,26 @@ public static class SelfTest
                     (ground - want).Length() < 0.5,
                     $"contact patch {ground} against cell centre {want}"
                     + $" at {v.Sprite.BodyScale:F2}x");
+                // And the cell that point resolves to is the cell it is on. Two
+                // statements, not one: the first says the tank is drawn on its
+                // hex, this says anything asking the board about that point gets
+                // told the same hex - and that needs the field's own origin
+                // taken off, because a ground point is in the tanks' space.
+                // Left off, the answer is a cell most of a board away, which is
+                // how the pond came to be stirred by tanks nowhere near it while
+                // the tank in the water stirred nothing.
+                //
+                // Asked with the standing height put back, for the reason the
+                // want above takes it off: this topic flattens the board while a
+                // tank may still be carrying a hill's lift, and a flat CellAt
+                // asked at a lifted point answers a row up. Live, the board has
+                // its levels and CellAt does that search itself.
+                Vector2 patch = ground + new Vector2(0.0f, v.Height)
+                                - field.Position;
+                Check($"{v.Tag}'s contact patch resolves to the cell it stands on",
+                    field.CellAt(patch) == v.Cell,
+                    $"{field.CellAt(patch)} against {v.Cell}; without the "
+                    + $"origin taken off it reads {field.CellAt(patch + field.Position)}");
             }
 
             // Depth, not tree order: the tanks move, and whoever was added last
