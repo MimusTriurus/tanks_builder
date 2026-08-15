@@ -306,6 +306,13 @@ public sealed partial class Stage3D : Node3D
         _foamClock = Mathf.PosMod(_foamClock + (float)delta * FoamDrift,
                                   Mathf.Tau);
         _swellInk?.SetShaderParameter("foam_time", _foamClock);
+        // The computed pond's own clock, on the bench's step for the same
+        // reason. Not wrapped at a turn - the surface is a drifting noise field
+        // rather than a sine, so it has no period to wrap at; kept small by the
+        // hour instead, which is all the precision it needs.
+        _deepClock = Mathf.PosMod(_deepClock + (float)delta, 3600.0f);
+        _deepInk?.SetShaderParameter("time", _deepClock);
+        _deepInk?.SetShaderParameter("foam", Mathf.Max(0.0f, Foam));
         PushSwell();
     }
 
@@ -864,7 +871,12 @@ void fragment() {{
     {
         var note = new System.Text.StringBuilder();
         note.Append(Field.Columns).Append('x').Append(Field.Rows)
-            .Append('@').Append(Field.Lift.ToString("F3"));
+            .Append('@').Append(Field.Lift.ToString("F3"))
+            // Which pond, because the material is chosen inside BuildWater and
+            // nowhere else: left out, the panel's own switch for it would move
+            // a field nothing ever reads again, which is a control that does
+            // nothing and says nothing.
+            .Append(Deep ? "|deep" : "|strip");
         for (int q = 0; q < Field.Columns; q++)
         for (int r = 0; r < Field.Rows; r++)
         {
@@ -1210,7 +1222,8 @@ void fragment() {{
     private void BuildWater(Vector3[] corner)
     {
         bool drawn = Surf is { Any: true };
-        _pond.MaterialOverride = drawn ? Swell() : Decal(WaterOrder);
+        _pond.MaterialOverride = Deep ? DeepWater()
+                               : drawn ? Swell() : Decal(WaterOrder);
         if (!Field.HasWater)
         {
             _pond.Mesh = null;
@@ -1436,6 +1449,41 @@ void fragment() {{
     /// </summary>
     public const int MaxWaterCells = 64;
 
+    /// <summary>Whether the pond is computed or drawn. On by default because it
+    /// is what the water is now; the strip stays reachable so the two can be put
+    /// side by side, which is the only way either was ever judged here.</summary>
+    public const bool DeepDefault = true;
+
+    public bool Deep = DeepDefault;
+
+    /// <summary>Where the sun is, as a direction to it. Matched to the key light
+    /// of the rig the sprites were rendered under - 55 degrees above the horizon
+    /// - so the glint on the water and the shading baked into the tanks agree
+    /// about which way is up-sun. Nothing else on the board reads it: every other
+    /// material is unshaded, which is why a real light node was measured to cost
+    /// exactly nothing and was still not used.</summary>
+    public static readonly Vector3 Sun =
+        new Vector3(-0.40f, 0.82f, -0.41f).Normalized();
+
+    private ShaderMaterial? _deepInk;
+    private float _deepClock;
+
+    private ShaderMaterial DeepWater()
+    {
+        _deepInk ??= new ShaderMaterial
+        {
+            Shader = new Shader
+            {
+                Code = string.Format(CultureInfo.InvariantCulture, DeepShader,
+                                     MaxWaterCells, FoamCut, FoamLift, FoamRung),
+            },
+            RenderPriority = WaterOrder,
+        };
+        _deepInk.SetShaderParameter("sun", Sun);
+        _deepInk.SetShaderParameter("bands", (float)WaterArt.Bands);
+        return _deepInk;
+    }
+
     private ShaderMaterial? _swellInk;
 
     private ShaderMaterial Swell()
@@ -1467,7 +1515,8 @@ void fragment() {{
     /// </summary>
     private void PushSwell()
     {
-        if (_swellInk is null)
+        ShaderMaterial? ink = _deepInk ?? _swellInk;
+        if (ink is null)
             return;
         int n = Mathf.Min(Field.WaterCells.Count, MaxWaterCells);
         var state = new float[MaxWaterCells];
@@ -1487,10 +1536,12 @@ void fragment() {{
             Vector3 w = World(at, 0.0f);
             mark[i] = new Vector2(w.X, w.Z);
         }
-        _swellInk.SetShaderParameter("state", state);
-        _swellInk.SetShaderParameter("span", span);
-        _swellInk.SetShaderParameter("mark", mark);
-        _swellInk.SetShaderParameter("foam_reach", _pondReach);
+        ink.SetShaderParameter("state", state);
+        ink.SetShaderParameter("mark", mark);
+        ink.SetShaderParameter("foam_reach", _pondReach);
+        // Only the drawn strip has a loop to run part of; the computed surface
+        // has no frames at all, so a span means nothing to it.
+        _swellInk?.SetShaderParameter("span", span);
     }
 
     /// <summary>What each flooded cell is doing. Null leaves the pond calm, which
@@ -1691,6 +1742,179 @@ void fragment() {{
 
     ALBEDO = rgb;
     ALPHA = alpha;
+}}
+";
+
+    /// <summary>
+    /// Water that is computed rather than drawn: a moving surface, the bottom
+    /// seen through it, and a sun on it.
+    ///
+    /// <b>Two facts made this possible, and both were measured, not assumed.</b>
+    /// The depth texture works in GL Compatibility and already holds the pit
+    /// floor - the ground prisms are opaque, so the buffer has the bottom in it
+    /// without anything being re-rendered. And the tanks draw <i>after</i> the
+    /// water, so they are not in the screen texture the refraction samples:
+    /// bending it cannot smear the one artefact this project judges pixel by
+    /// pixel. Both were the standing objections to doing this at all.
+    ///
+    /// <b>Unshaded with its own highlight, and not a lit material.</b> A light
+    /// node was measured too and costs exactly nothing - every other material on
+    /// the board is unshaded, so a sun cannot touch them - but a lit surface with
+    /// no environment gets its ambient from nowhere, and then the pond's body
+    /// answers to a tonemap the sprites do not. The sun arrives as a direction
+    /// and the highlight is worked out here, where it can be tuned against the
+    /// picture instead of against a rig.
+    ///
+    /// <b>Opaque, and that is what makes it water rather than tinted glass.</b>
+    /// The drawn strip had to be see-through, because showing the bottom was the
+    /// only way it could: a ford that hides its floor is a hole. This samples
+    /// the floor itself, so it can own every pixel it covers - and then absorb,
+    /// tint and refract what it found, which a blend against the ground can only
+    /// approximate.
+    ///
+    /// <b>The surface is a height field, and the mesh never moves.</b> Vertex
+    /// waves want a tessellated plane and would put the pond on two heights,
+    /// which the board forbids in as many words - a body of water is one surface
+    /// - and would leave the tank's waterline arguing with the picture. At 30
+    /// degrees of elevation almost all of what reads as motion is the normal
+    /// anyway, so the height field lives in the fragment and the hexagons stay
+    /// flat.
+    /// </summary>
+    internal const string DeepShader = @"
+shader_type spatial;
+render_mode unshaded, cull_disabled, depth_draw_never;
+
+uniform sampler2D screen : hint_screen_texture, filter_linear_mipmap;
+uniform sampler2D zbuf : hint_depth_texture, filter_linear;
+
+// Our own clock, wrapped, for --capture's reason: TIME is the wall clock and
+// two runs have to land on the same picture. See Main.FixedStep.
+uniform float time = 0.0;
+uniform vec3 sun = vec3(0.0, 1.0, 0.0);
+uniform float wave_scale = 0.02;
+uniform float wave_speed = 1.0;
+uniform float relief = 0.30;
+uniform vec3 shallow : source_color = vec3(0.24, 0.52, 0.50);
+uniform vec3 deep : source_color = vec3(0.06, 0.22, 0.28);
+uniform vec3 absorb : source_color = vec3(0.34, 0.10, 0.06);
+uniform float clarity = 110.0;
+uniform float refraction = 22.0;
+uniform float gloss = 90.0;
+uniform float glint = 0.60;
+uniform float shore = 10.0;
+uniform float foam = 0.0;
+uniform float foam_cut = {1};
+uniform float foam_rung = {3};
+uniform float foam_reach = 1.0;
+uniform vec3 foam_ink : source_color = vec3(1.0, 1.0, 1.0);
+uniform float state[{0}];
+uniform vec2 mark[{0}];
+uniform float bands = 1.0;
+
+varying vec3 world;
+
+float hash12(vec2 p) {{
+    uvec2 q = uvec2(ivec2(p)) * uvec2(1597334677u, 3812015801u);
+    uint n = (q.x ^ q.y) * 1597334677u;
+    return float(n) * (1.0 / 4294967295.0);
+}}
+
+float vnoise(vec2 p) {{
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash12(i), hash12(i + vec2(1.0, 0.0)), u.x),
+               mix(hash12(i + vec2(0.0, 1.0)), hash12(i + vec2(1.0, 1.0)), u.x),
+               u.y);
+}}
+
+// Three octaves, each folded to a ridge and each drifting its own way. The
+// fold is what separates water from cloud: smooth noise has round hills, and
+// a surface pulled taut by its own tension has creases between them. The
+// per-octave drift is what stops the whole field sliding as one sheet.
+float height(vec2 p) {{
+    float h = 0.0;
+    float a = 1.0;
+    float f = 1.0;
+    vec2 drift = vec2(0.35, 0.20) * time * wave_speed;
+    for (int i = 0; i < 3; i++) {{
+        float n = vnoise(p * f + drift);
+        h += a * (1.0 - abs(2.0 * n - 1.0));
+        a *= 0.5;
+        f *= 2.03;
+        drift = vec2(-drift.y, drift.x) * 1.7;
+    }}
+    return h;
+}}
+
+void vertex() {{
+    world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+}}
+
+void fragment() {{
+    vec2 p = world.xz * wave_scale;
+    // Central differences, in the height field's own units. The step is the
+    // one number that decides how crisp the surface reads: too small and it
+    // shimmers on a still frame, too large and the creases go out of it.
+    float e = 0.35;
+    float h = height(p);
+    float hx = height(p + vec2(e, 0.0)) - h;
+    float hz = height(p + vec2(0.0, e)) - h;
+    vec3 n = normalize(vec3(-hx * relief, e, -hz * relief));
+
+    // How much water is in front of the bottom. The prisms are opaque, so this
+    // is the floor of the pit and the wall it climbs at the shore.
+    float own = FRAGCOORD.z;
+    float raw = texture(zbuf, SCREEN_UV).x;
+    vec3 ndc = vec3(SCREEN_UV * 2.0 - 1.0, raw * 2.0 - 1.0);
+    vec4 view = INV_PROJECTION_MATRIX * vec4(ndc, 1.0);
+    float floor_z = -(view.z / view.w);
+    float here_z = -(INV_PROJECTION_MATRIX * vec4(vec3(SCREEN_UV * 2.0 - 1.0,
+                     own * 2.0 - 1.0), 1.0)).z;
+    float thick = max(0.0, floor_z - here_z);
+
+    // Bent by the surface, and the amount falls off in the shallows so the
+    // shoreline does not tear. The tanks are drawn after this pass, so what is
+    // being bent is the ground and nothing else.
+    vec2 bend = n.xz * refraction * clamp(thick / max(clarity, 0.001), 0.0, 1.0);
+    vec2 uv = SCREEN_UV + bend / vec2(textureSize(screen, 0));
+    vec3 bottom = texture(screen, uv).rgb;
+
+    // Beer-Lambert on the way down and back: red goes first, which is the whole
+    // reason open water is blue. Then the volume's own colour over the top of
+    // what is left.
+    float t = clamp(thick / max(clarity, 0.001), 0.0, 1.0);
+    vec3 through = bottom * exp(-thick * absorb / max(clarity, 0.001));
+    vec3 body = mix(shallow, deep, t);
+    vec3 col = mix(through, body, t * 0.55);
+
+    // One sun, worked out here. The camera is orthographic, so the view vector
+    // is the same for every fragment and the highlight is a single dot product
+    // - the one place this projection makes something cheaper instead of harder.
+    vec3 eye = normalize((INV_VIEW_MATRIX * vec4(0.0, 0.0, 1.0, 0.0)).xyz);
+    vec3 half_v = normalize(normalize(sun) + eye);
+    col += vec3(pow(max(dot(n, half_v), 0.0), gloss)) * glint;
+
+    // Foam where the floor comes up to meet the surface - the shore, and every
+    // wall of the pit. This is the half that needed depth and now has it.
+    float lip = 1.0 - smoothstep(0.0, shore, thick);
+    // And foam where a tank went through, off the band and the point it was
+    // standing at - see Swell. Unchanged by any of this: it never needed depth.
+    int cell = int(UV2.x + 0.5);
+    float lv = clamp(state[cell] / max(bands - 1.0, 1.0), 0.0, 1.0);
+    lv *= 1.0 - smoothstep(0.45 * foam_reach, foam_reach,
+                           distance(world.xz, mark[cell]));
+    // Shore and tank, and nothing else. Crest foam in open water was the first
+    // cut and it read as scratches on the surface: the ridge fold makes thin
+    // creases by design, so anything keyed straight off the height field picks
+    // out lines rather than patches. The field is used to break the two real
+    // sources up instead.
+    float froth = clamp(max(lip, lv), 0.0, 1.0);
+    float broken = smoothstep(0.30, 0.80, h / 1.75);
+    col = mix(col, foam_ink, froth * broken * foam);
+
+    ALBEDO = col;
+    ALPHA = 1.0;
 }}
 ";
 

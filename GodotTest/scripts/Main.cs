@@ -274,6 +274,11 @@ public sealed partial class Main : Node2D
 	/// the water, and the pond is one body of it.</summary>
 	private float _foam = Stage3D.FoamDefault;
 
+	/// <summary>Whether the pond is computed or drawn from the strip. See
+	/// --drawn-water: the surface as it was, which is the A/B this is judged by.
+	/// </summary>
+	private bool _deepWater = Stage3D.DeepDefault;
+
 	/// <summary>How stirred up each flooded cell is. Built with the field, ticked
 	/// here and drawn by the stage - the same division the belt marks have, and for
 	/// the same reason: what the tanks did to the ground is neither the ground's
@@ -1454,6 +1459,12 @@ public sealed partial class Main : Node2D
 			// A/B the foam is judged by - and it is the strong form of it: off
 			// has to give back the very same picture, byte for byte, or the foam
 			// is not a detail on the band but a replacement for it.
+			// The drawn strip back, which is the A/B the computed surface is
+			// judged by. Not the same as --flat-water: that one chooses between
+			// two ways of drawing the strip, this chooses whether there is a
+			// strip at all.
+			else if (userArgs[i] == "--drawn-water")
+				_deepWater = false;
 			else if (userArgs[i] == "--no-foam")
 				_foam = 0.0f;
 			// How much of it, over the row above rather than instead of it: asking
@@ -4371,6 +4382,7 @@ public sealed partial class Main : Node2D
 		["--swell"] = new[] { "ground.swell" },
 		["--hard-swell"] = new[] { "ground.swell_blend" },
 		["--still-water"] = new[] { "ground.water_react" },
+		["--drawn-water"] = new[] { "ground.deep" },
 		["--no-foam"] = new[] { "ground.foam" },
 		["--foam"] = new[] { "ground.foam" },
 		// The stage asks for height as well as for itself, so it declares both -
@@ -5048,6 +5060,11 @@ public sealed partial class Main : Node2D
 		// Whether the water answers the tanks at all, and what it is doing right
 		// now - the second is a readout because the bench measures it and nobody
 		// sets it, which is the whole of what a readout is.
+		// Which pond this is. Above the rows that describe the strip, because
+		// with this on most of them are describing something that is not being
+		// drawn.
+		ui.Toggle("ground.deep", "computed surface  (--drawn-water)",
+			() => _deepWater, v => _deepWater = v);
 		ui.Toggle("ground.water_react", "water answers the tanks  (--still-water)",
 			() => _seaReacts, v => _seaReacts = v);
 		ui.Readout("ground.water_state", () =>
@@ -5689,6 +5706,7 @@ public sealed partial class Main : Node2D
 						  // nought, because a pond nobody has stirred and a pond
 						  // with the foam turned off are the same clean picture.
 						  + (_foam > 0.0f ? $"/{_foam:F2}foam" : "/!off")
+						  + (_deepWater ? "/deep" : "/strip")
 						  + (_seaReacts ? "" : "!still"))
 					 // Trees, wooded cells, and how many of those no tank may
 					 // enter. Three numbers because a board with no props, a
@@ -5830,6 +5848,7 @@ public sealed partial class Main : Node2D
 			_stage.SwellPeriod = (float)_swellPeriod;
 			_stage.SwellBlend = _swellBlend;
 			_stage.Foam = _foam;
+			_stage.Deep = _deepWater;
 			// Before Place, because the tint a wading tank wears is read off its
 			// own cell's state and Place is where that is pushed at the sprite.
 			if (_sea is not null)

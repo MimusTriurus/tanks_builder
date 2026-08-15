@@ -6952,6 +6952,50 @@ public static class SelfTest
                 "foam is laid out in the cell's own UVs, so every hex wears the "
                 + "same raft and the grid shows through the water");
 
+            // Which pond a plain run actually draws. Said first because every
+            // assertion about the strip below is describing something nobody
+            // sees once this is on, and a check whose answer goes nowhere is
+            // indistinguishable from a check that is not there.
+            Check("a default run draws the computed surface, not the strip",
+                Stage3D.DeepDefault,
+                "the strip is what comes up, so the computed surface is a mode "
+                + "nobody is looking at");
+
+            // The two facts it stands on, both measured before a line of it was
+            // written: the depth texture works in Compatibility and already
+            // holds the pit floor, and the tanks draw after the water so the
+            // screen texture it bends has no tank in it.
+            Check("and it reads the depth of the bottom and the screen behind it",
+                Stage3D.DeepShader.Contains("hint_depth_texture")
+                && Stage3D.DeepShader.Contains("hint_screen_texture"),
+                "the computed surface samples neither, so it is a flat colour "
+                + "with a noise on it");
+
+            // Opaque, and that is the whole difference in kind from the strip.
+            // The strip had to be see-through because showing the bottom was the
+            // only way it could show it; this samples the bottom itself.
+            Check("and it owns every pixel it covers, rather than blending over one",
+                Stage3D.DeepShader.Contains("ALPHA = 1.0;"),
+                "the computed surface is translucent, which is the strip's "
+                + "bargain with more arithmetic on top");
+
+            // Its own clock, for the reason the foam has one.
+            string deepCode = string.Join('\n',
+                Stage3D.DeepShader.Split('\n').Select(l => l.Split("//")[0]));
+            Check("and it runs on the bench's clock too",
+                !deepCode.Contains("TIME") && deepCode.Contains("uniform float time"),
+                "the computed surface reads the wall clock, so no two captures "
+                + "of the pond agree");
+
+            // And its foam obeys the same two things the strip's does. Two
+            // surfaces that disagree about when water foams would be two answers
+            // to one question, and only one of them is ever on screen.
+            Check("and its foam is cut by the same state and the same mark",
+                Stage3D.DeepShader.Contains("state[cell] / max(bands - 1.0")
+                && Stage3D.DeepShader.Contains("distance(world.xz, mark[cell])"),
+                "the computed surface foams on its own terms, so the two ponds "
+                + "disagree about what a tank does to water");
+
             // And it runs on the clock the bench hands it. TIME is the wall
             // clock, and --capture pins the step to 1/60 precisely so two runs
             // can be compared - read it in here and every capture of the pond
