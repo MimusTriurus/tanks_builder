@@ -832,6 +832,47 @@ void fragment() {{
                 atlas.HexRect.Position.Y + atlas.HexRect.Size.Y * 0.5f,
                 Mathf.Max(atlas.Tile.Y - 1, 1)));
         }
+        // And the waterline round each hull that is in the water. Gathered here
+        // because this is where the tanks are, and pushed even when none of them
+        // is wading - a radius left standing is a ring of foam round a patch of
+        // water nobody is in.
+        if (_deepInk is not null)
+        {
+            var hull = new Vector2[Collars];
+            var fwd = new Vector2[Collars];
+            var half = new Vector2[Collars];
+            int worn = 0;
+            foreach (Vehicle vehicle in vehicles)
+            {
+                if (worn >= Collars || !vehicle.Wading)
+                    continue;
+                Vector3 w = World(vehicle.GroundPoint, 0.0f);
+                hull[worn] = new Vector2(w.X, w.Z);
+                // The hull's own frame: which way it is pointing on the ground,
+                // and how far it reaches along and across. Off the atlas and the
+                // class dial, so the line hugs a tank the size slider made
+                // bigger. HullSpan is the broadside length, and a tank is about
+                // half as wide as it is long.
+                AtlasSet? set = vehicle.Sprite.Atlas;
+                Vector2 along = set?.GroundDirection(vehicle.Sprite.HullFacing)
+                                ?? Vector2.Zero;
+                Vector3 a = World(along, 0.0f);
+                var flat = new Vector2(a.X, a.Z);
+                fwd[worn] = flat.LengthSquared() > 1e-6f ? flat.Normalized()
+                                                         : Vector2.Right;
+                float span = (set?.HullSpan ?? 0) * 0.5f * vehicle.Sprite.BodyScale;
+                // A little wider than the hull, because the ring has to show
+                // outside a sprite that stands up over its own footprint: an
+                // ellipse the size of the tank is drawn entirely underneath it.
+                // Measured that way round - at hull size it moved 83px of the
+                // picture at a peak of 26.
+                half[worn] = new Vector2(span, span * 0.52f) * 1.22f;
+                worn++;
+            }
+            _deepInk.SetShaderParameter("hull", hull);
+            _deepInk.SetShaderParameter("hull_fwd", fwd);
+            _deepInk.SetShaderParameter("hull_half", half);
+        }
         // The mark goes where the tank touches the ground, every frame, for the
         // reason the 2D ring follows the contact patch: a tank spends most of an
         // order between two cells, and a mark on the cell behind it reads as the
@@ -1271,21 +1312,26 @@ void fragment() {{
                 over++;
                 ord = MaxWaterCells - 1;
             }
-            var ordinal = new Vector2(ord, 0.0f);
             Vector2 flat = Origin + Field.FlatAnchor(cell) + Field.CentreOffset;
             Vector3 top = World(flat, Field.WaterTop(cell));
-            for (int i = 1; i + 1 < 6; i++)
-            foreach (int k in new[] { 0, i, i + 1 })
+            // Which of the six corners sit on a shore. A corner counts if
+            // <i>either</i> edge meeting there leaves the water, so the two
+            // triangles sharing it agree about its value - given per edge, they
+            // would disagree along the chord between them and draw a seam from
+            // the corner to the middle of the cell.
+            bool[] beach = Shoreline(cell, corner);
+            // A fan from the middle rather than from a corner, and the surface
+            // needs it. Triangle k then has hexagon edge k as its outer edge and
+            // nothing else, which is what lets a shore be said per edge at all;
+            // fanned from corner 0 the triangles straddle three different edges
+            // apiece and there is nowhere to put the answer.
+            for (int k = 0; k < 6; k++)
             {
-                st.SetColor(Pond);
-                // +Z reads as +v, the same way the ground art is laid on a top
-                // face: two conventions in one scene is how a texture comes out
-                // mirrored on one surface and nobody can say against what.
-                st.SetUV(new Vector2(
-                    0.5f + inset.X * corner[k].X / (2.0f * halfX),
-                    0.5f + inset.Y * corner[k].Z / (2.0f * halfZ)));
-                st.SetUV2(ordinal);
-                st.AddVertex(top + corner[k]);
+                Lay(st, top, Vector3.Zero, ord, 1.0f, halfX, halfZ, inset);
+                Lay(st, top, corner[k], ord, beach[k] ? 0.0f : 1.0f,
+                    halfX, halfZ, inset);
+                Lay(st, top, corner[(k + 1) % 6], ord,
+                    beach[(k + 1) % 6] ? 0.0f : 1.0f, halfX, halfZ, inset);
             }
         }
         if (!any)
@@ -1299,6 +1345,71 @@ void fragment() {{
                            + "slot, so they will churn when it does");
         st.GenerateNormals();
         _pond.Mesh = st.Commit();
+    }
+
+    /// <summary>One vertex of the surface, with its ordinal and how far it is
+    /// from a shore written into UV2.</summary>
+    private static void Lay(SurfaceTool st, Vector3 top, Vector3 off, int ord,
+                            float inland, float halfX, float halfZ, Vector2 inset)
+    {
+        st.SetColor(Pond);
+        // +Z reads as +v, the same way the ground art is laid on a top face:
+        // two conventions in one scene is how a texture comes out mirrored on
+        // one surface and nobody can say against what.
+        st.SetUV(new Vector2(0.5f + inset.X * off.X / (2.0f * halfX),
+                             0.5f + inset.Y * off.Z / (2.0f * halfZ)));
+        st.SetUV2(new Vector2(ord, inland));
+        st.AddVertex(top + off);
+    }
+
+    /// <summary>
+    /// Which corners of a flooded cell stand on a shore.
+    ///
+    /// <b>The edges are matched to their neighbours by direction, not by index.</b>
+    /// Corner order comes from whoever built the hexagon and the headings come
+    /// from the field; assuming the two lists line up would be right on this
+    /// board and wrong on the first one that numbers its corners the other way,
+    /// and the failure - foam along the wrong edges - looks like a tuning problem
+    /// rather than a wiring one.
+    /// </summary>
+    private bool[] Shoreline(Vector2I cell, Vector3[] corner) =>
+        Shoreline(Field, cell, corner, Squash, RiseFactor);
+
+    /// <summary>The same, given its camera terms instead of reading them off the
+    /// field - so it can be asserted without a board, the shape
+    /// <see cref="World(Vector2, float, float, float)"/> is in and for the same
+    /// reason.</summary>
+    internal static bool[] Shoreline(HexField field, Vector2I cell,
+                                     Vector3[] corner, float squash, float rise)
+    {
+        var beach = new bool[6];
+        Vector2 here = field.FlatAnchor(cell);
+        foreach (int heading in HexField.EdgeHeadings)
+        {
+            Vector2I next = HexField.Step(cell, heading);
+            if (field.IsWater(next))
+                continue;
+            // Where that neighbour lies, in the surface's own space, so it can
+            // be compared against the corners it was built from.
+            Vector2 away = field.FlatAnchor(next) - here;
+            Vector3 w = World(away, 0.0f, squash, rise);
+            var want = new Vector2(w.X, w.Z).Normalized();
+            int best = 0;
+            float top = -2.0f;
+            for (int k = 0; k < 6; k++)
+            {
+                Vector3 mid = corner[k] + corner[(k + 1) % 6];
+                float dot = new Vector2(mid.X, mid.Z).Normalized().Dot(want);
+                if (dot > top)
+                {
+                    top = dot;
+                    best = k;
+                }
+            }
+            beach[best] = true;
+            beach[(best + 1) % 6] = true;
+        }
+        return beach;
     }
 
     /// <summary>
@@ -1464,6 +1575,11 @@ void fragment() {{
     /// exactly nothing and was still not used.</summary>
     public static readonly Vector3 Sun =
         new Vector3(-0.40f, 0.82f, -0.41f).Normalized();
+
+    /// <summary>How many hulls the surface can draw a waterline round at once.
+    /// Three tanks and a slot spare; a cap because a shader array needs one.
+    /// </summary>
+    public const int Collars = 4;
 
     private ShaderMaterial? _deepInk;
     private float _deepClock;
@@ -1851,6 +1967,14 @@ uniform float wake_age[{4}];
 uniform float wake_seed = 9.0;
 uniform float wake_spread = 24.0;
 uniform float wake_on = 1.0;
+// Where the wading tanks are and how far their hulls reach, so the surface can
+// put a line round them. It cannot see them any other way: nothing writes depth
+// but the ground, so to the water a tank is not there at all.
+uniform vec2 hull[4];
+uniform vec2 hull_fwd[4];
+uniform vec2 hull_half[4];
+uniform float hull_band = 0.26;
+uniform float beach = 0.10;
 
 varying vec3 world;
 
@@ -1978,9 +2102,19 @@ void fragment() {{
     col += vec3(pow(max(dot(n, half_v), 0.0), gloss)) * glint
          + vec3(pow(max(dot(soft, half_v), 0.0), sheen_gloss)) * sheen;
 
-    // Foam where the floor comes up to meet the surface - the shore, and every
-    // wall of the pit. This is the half that needed depth and now has it.
+    // Foam where the water meets something, and it is asked twice because the
+    // two ways of asking fail in opposite places.
+    //
+    // Along the view ray: how soon the ray hits the bottom. Real foam under a
+    // wall standing behind the water, and <b>nothing at all</b> where the shore
+    // is on the near side, because there the ray carries on down to the floor.
+    // That asymmetry is what left the ramp and the near bank bare.
     float lip = 1.0 - smoothstep(0.0, shore, thick);
+    // And in the plane of the water: how far this fragment is from an edge the
+    // pond actually ends at, written into the mesh by Shoreline. Independent of
+    // where the camera is by construction, which is the whole point - a shore is
+    // where the water stops, not where the eye happens to see the bottom rise.
+    float bank = 1.0 - smoothstep(0.0, beach, UV2.y);
     // And foam where a tank went through, off the band and the point it was
     // standing at - see Swell. Unchanged by any of this: it never needed depth.
     int cell = int(UV2.x + 0.5);
@@ -2019,7 +2153,25 @@ void fragment() {{
     // sitting on moving water. The trail is not: a wake is water that has been
     // churned through, so it holds together as a lane and only takes the
     // surface's texture on top.
-    float edge = clamp(max(lip, lv), 0.0, 1.0) * broken;
+    // And round every hull that is in the water. A ring and not a disc: what is
+    // being drawn is the waterline itself, and filling it in would put foam
+    // under a tank that is displacing the water rather than around it.
+    float collar = 0.0;
+    for (int i = 0; i < 4; i++) {{
+        if (hull_half[i].x <= 0.0)
+            continue;
+        // Into the hull's own frame, so the line is the shape of the tank and
+        // not of a circle drawn round it. A ring in world units is what the
+        // camera flattens into the ellipse a waterline is, so nothing here has
+        // to know about the squash.
+        vec2 d = world.xz - hull[i];
+        vec2 f = hull_fwd[i];
+        vec2 local = vec2(dot(d, f), dot(d, vec2(-f.y, f.x))) / hull_half[i];
+        collar = max(collar,
+                     1.0 - smoothstep(0.0, hull_band, abs(length(local) - 1.0)));
+    }}
+
+    float edge = clamp(max(max(lip, bank), max(lv, collar)), 0.0, 1.0) * broken;
     float lane = trail * mix(broken, 1.0, 0.55);
     col = mix(col, foam_ink, clamp(max(edge, lane), 0.0, 1.0) * foam);
 

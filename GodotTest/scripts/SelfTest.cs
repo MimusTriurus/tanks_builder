@@ -7022,6 +7022,78 @@ public static class SelfTest
                 $"lift {Stage3D.FoamLift:F2} - at one the pond goes opaque where "
                 + "it foams and the ford stops being one");
 
+            // The shoreline. Asked of the board rather than of the view, and
+            // that is the whole of the change: the old edge was "how soon does
+            // the eye hit the bottom", which is real foam under a wall standing
+            // behind the water and nothing at all where the bank is on the near
+            // side. That is why the ramp and the near shore had none.
+            var hex = new Vector3[6];
+            for (int k = 0; k < 6; k++)
+            {
+                float turn = Mathf.Pi / 3.0f * k;
+                hex[k] = new Vector3(Mathf.Cos(turn), 0.0f, Mathf.Sin(turn));
+            }
+            // On the board's own field, because a HexField built bare has no
+            // tile size and every neighbour then sits at the same anchor - all
+            // six headings match one edge and the answer is two corners. The
+            // relief comes off first so the guards will take a made-up mask;
+            // both go back below.
+            var wasWater = Main.WaterMask(field.Columns, field.Rows);
+            field.SetWater(null);
+            field.SetRelief(null, null);
+            var middle = new Vector2I(2, 2);
+
+            int lit = 0;
+            foreach (bool b in Stage3D.Shoreline(field, middle, hex, 1.0f, 1.0f))
+                if (b)
+                    lit++;
+            Check("a cell with dry ground all round it is shore at every corner",
+                lit == 6, $"{lit} of 6 - six headings that do not resolve to six "
+                          + "different edges is the matching being wrong");
+
+            var flood = new bool[field.Columns * field.Rows];
+            for (int i = 0; i < flood.Length; i++)
+                flood[i] = true;
+            field.SetWater(flood);
+            lit = 0;
+            foreach (bool b in Stage3D.Shoreline(field, middle, hex, 1.0f, 1.0f))
+                if (b)
+                    lit++;
+            Check("and one in open water is shore at none of them", lit == 0,
+                $"{lit} corners marked in the middle of a pond");
+
+            // One dry neighbour is one edge, and an edge has two ends. Counted
+            // rather than named, because which corner is which is the hexagon
+            // builder's business - the matching goes by direction for exactly
+            // that reason, and a test that named them would assert the very
+            // assumption the code refuses to make.
+            flood[HexField.Step(middle, HexField.EdgeHeadings[0]).Y * field.Columns
+                  + HexField.Step(middle, HexField.EdgeHeadings[0]).X] = false;
+            field.SetWater(flood);
+            lit = 0;
+            foreach (bool b in Stage3D.Shoreline(field, middle, hex, 1.0f, 1.0f))
+                if (b)
+                    lit++;
+            Check("and a single dry neighbour lights exactly one edge's two ends",
+                lit == 2, $"{lit} corners for one dry neighbour");
+
+            field.SetRelief(Main.ReliefMap(field.Columns, field.Rows),
+                            Main.RampMask(field.Columns, field.Rows));
+            field.SetWater(wasWater);
+
+            // And the surface reads it. The band comes off the mesh, not off the
+            // depth of the water in front of the eye.
+            Check("and the surface takes its shore off the board, not the view",
+                Stage3D.DeepShader.Contains("smoothstep(0.0, beach, UV2.y)"),
+                "the shoreline is still measured along the view ray, so it is "
+                + "there on the far bank and missing on the near one");
+
+            // The waterline round a hull is a ring. Filled in, it would be foam
+            // under a tank rather than round it.
+            Check("and the waterline round a hull is a ring, not a disc",
+                Stage3D.DeepShader.Contains("abs(length(local) - 1.0)"),
+                "the collar is solid, so a wading tank sits in a patch of foam");
+
             // The wake. Its own object because a swell answers "what is this
             // hexagon doing" and a trail is a line across hexagons - two
             // statements about one event at two resolutions, and neither is
