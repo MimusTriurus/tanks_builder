@@ -883,6 +883,7 @@ void fragment() {{
             var pivot = new Vector2[Collars];
             var size = new Vector2[Collars];
             var line = new float[Collars * HullLine];
+            var dip = new float[Collars];
             for (int i = 0; i < line.Length; i++)
                 line[i] = -1.0f;
             int worn = 0;
@@ -902,18 +903,19 @@ void fragment() {{
                 pivot[worn] = set.Anchor;
                 size[worn] = new Vector2(vehicle.Sprite.BodyScale, set.Tile.X);
                 int frame = set.FrameFor(vehicle.Sprite.HullFacing);
-                // The groundline itself, and not the sprite's waterline, which
-                // was the first answer and is invisible by construction: the
-                // waterline is a row up the hull, the sprite is opaque from there
-                // down to its own bottom edge, so a band drawn where the water
-                // plane crosses that row is behind the tank at every column.
-                // Measured: at MTP's own scale it lands 13px above the bottom of
-                // the tracks with 49px of hull drawn over it.
+                // The groundline, and how far the water stands up it. The shape
+                // is the table's, because the outline is what the eye sees of a
+                // tank standing in water - but the height is the waterline's,
+                // and taking the table's own height was drawing the collar
+                // where the tank touches the bottom. Most of that hid behind the
+                // hull, which is why it read as stray white segments beside it
+                // rather than as a line in the wrong place.
                 //
-                // The boundary the eye actually sees between the water and the
-                // tank is the outside of the silhouette, and its lower half - the
-                // bottom edge and the steep ends where it turns up round the
-                // tracks - is exactly what this table is.
+                // The same expression the sprite cuts its tint at, so the half
+                // of the line on the armour and the half on the water are one
+                // measurement and cannot part.
+                dip[worn] = (vehicle.Waterline - vehicle.Height)
+                            / Mathf.Max(vehicle.Sprite.BodyScale, 1e-4f);
                 for (int i = 0; i < HullLine; i++)
                 {
                     int column = Mathf.RoundToInt(
@@ -926,6 +928,7 @@ void fragment() {{
             _deepInk.SetShaderParameter("hull_pivot", pivot);
             _deepInk.SetShaderParameter("hull_size", size);
             _deepInk.SetShaderParameter("hull_line", line);
+            _deepInk.SetShaderParameter("hull_dip", dip);
             _deepInk.SetShaderParameter("hull_band", HullBand);
         }
         // The mark goes where the tank touches the ground, every frame, for the
@@ -2115,10 +2118,18 @@ uniform float wake_on = 1.0;
 // hull_pivot is the atlas anchor inside the tile, hull_size is (body scale, tile
 // width) and hull_line is the groundline resampled to {5} columns across the
 // tile, negative where the tank has no pixel in that column at all.
+//
+// hull_dip is how far up that line the water stands, in the same sprite px, and
+// it is the whole difference between a line and a staircase: the surface meets
+// a tank at its waterline, not where it touches the bottom, so a collar drawn
+// on the table itself sits a whole depth below the one the sprite cuts at and
+// the two halves of one line are drawn a plane apart. It is the sprite's own
+// expression, so they cannot part.
 uniform vec2 hull_at[4];
 uniform vec2 hull_pivot[4];
 uniform vec2 hull_size[4];
 uniform float hull_line[{6}];
+uniform float hull_dip[4];
 uniform float hull_band = 3.0;
 // The two camera terms, so a fragment of the water can be put back into the 2D
 // space the sprites are placed in. Uniforms rather than constants because the
@@ -2362,8 +2373,8 @@ void fragment() {{
         // drawn from the two columns either side of a gap it is not in.
         if (a < 0.0 || b < 0.0)
             continue;
-        collar = max(collar, 1.0 - smoothstep(0.0, hull_band,
-                                              abs(px.y - mix(a, b, fract(f)))));
+        float line = mix(a, b, fract(f)) - hull_dip[i];
+        collar = max(collar, 1.0 - smoothstep(0.0, hull_band, abs(px.y - line)));
     }}
 
     float edge = clamp(max(max(lip, bank), max(lv, collar)), 0.0, 1.0) * broken;

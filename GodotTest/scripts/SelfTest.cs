@@ -7180,6 +7180,16 @@ public static class SelfTest
                 && Stage3D.PaintShader.Contains("uniform sampler2D shore"),
                 "the collar is a shape drawn round the tank rather than the "
                 + "shape of it, so it stands off the nose and cuts the guards");
+            // And it stands where the water stands, not where the tank touches
+            // the bottom. The shape is the outline's and the height is the
+            // waterline's, and taking both from the table drew the two halves of
+            // one line a whole depth apart - measured at 29 board px of water,
+            // which is most of what is drawn of a tank's running gear.
+            Check("and it stands at the waterline, not at the tank's feet",
+                Stage3D.DeepShader.Contains("- hull_dip[i]"),
+                "the collar on the water is drawn where the tank meets the "
+                + "bottom, so it and the line on the armour are one water "
+                + "deep apart");
             // And the half of that line that lies on the tank is drawn by the
             // tank, because those pixels belong to the sprite and to nothing
             // else: the pond is behind it, and a surface drawn before an opaque
