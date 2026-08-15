@@ -1475,11 +1475,14 @@ void fragment() {{
             Shader = new Shader
             {
                 Code = string.Format(CultureInfo.InvariantCulture, DeepShader,
-                                     MaxWaterCells, FoamCut, FoamLift, FoamRung),
+                                     MaxWaterCells, FoamCut, FoamLift, FoamRung,
+                                     Wake.Max),
             },
             RenderPriority = WaterOrder,
         };
         _deepInk.SetShaderParameter("sun", Sun);
+        _deepInk.SetShaderParameter("wake_seed", Wake.Seed);
+        _deepInk.SetShaderParameter("wake_spread", Wake.Spread);
         _deepInk.SetShaderParameter("bands", (float)WaterArt.Bands);
         return _deepInk;
     }
@@ -1542,12 +1545,36 @@ void fragment() {{
         // Only the drawn strip has a loop to run part of; the computed surface
         // has no frames at all, so a span means nothing to it.
         _swellInk?.SetShaderParameter("span", span);
+        if (_deepInk is null)
+            return;
+        // Through the same mapping the surface's own vertices went through, for
+        // the mark's reason: the shader compares these against world.xz, and the
+        // trail lives in the tanks' space until it gets here.
+        var spot = new Vector2[Wake.Max];
+        var age = new float[Wake.Max];
+        // Past its life is the empty slot, so there is no second way of saying
+        // dead that could disagree with the first.
+        for (int i = 0; i < Wake.Max; i++)
+            age[i] = 2.0f;
+        int live = Mathf.Min(Trail?.Count ?? 0, Wake.Max);
+        for (int i = 0; i < live; i++)
+        {
+            Vector3 w = World(Trail!.At[i], 0.0f);
+            spot[i] = new Vector2(w.X, w.Z);
+            age[i] = Trail.Age[i];
+        }
+        _deepInk.SetShaderParameter("wake_at", spot);
+        _deepInk.SetShaderParameter("wake_age", age);
     }
 
     /// <summary>What each flooded cell is doing. Null leaves the pond calm, which
     /// is how it behaved before the water answered anybody - see --still-water.
     /// </summary>
     public Swell? Sea;
+
+    /// <summary>The trail the tanks have left on the water. Null draws none,
+    /// which is the pond before this - see --no-wake.</summary>
+    public Wake? Trail;
 
     /// <summary>
     /// The pond's surface: one frame of the strip, chosen per cell and per
@@ -1799,8 +1826,12 @@ uniform vec3 deep : source_color = vec3(0.06, 0.22, 0.28);
 uniform vec3 absorb : source_color = vec3(0.34, 0.10, 0.06);
 uniform float clarity = 110.0;
 uniform float refraction = 22.0;
-uniform float gloss = 90.0;
-uniform float glint = 0.60;
+uniform float gloss = 210.0;
+uniform float sheen_gloss = 14.0;
+uniform float sheen = 0.07;
+uniform float fine = 3.4;
+uniform float sparkle = 0.55;
+uniform float glint = 0.85;
 uniform float shore = 10.0;
 uniform float foam = 0.0;
 uniform float foam_cut = {1};
@@ -1810,6 +1841,16 @@ uniform vec3 foam_ink : source_color = vec3(1.0, 1.0, 1.0);
 uniform float state[{0}];
 uniform vec2 mark[{0}];
 uniform float bands = 1.0;
+// The trail: where each stamp was laid, and how far through its life it is.
+// Two arrays of the plainest types there are, and not one of vec4, because a
+// vec4 array is quietly not accepted here - the uniform stayed at its default
+// and the trail simply never arrived. Nothing said so: the water rendered, the
+// bench counted its stamps, and the surface drew none of them.
+uniform vec2 wake_at[{4}];
+uniform float wake_age[{4}];
+uniform float wake_seed = 9.0;
+uniform float wake_spread = 24.0;
+uniform float wake_on = 1.0;
 
 varying vec3 world;
 
@@ -1828,21 +1869,43 @@ float vnoise(vec2 p) {{
                u.y);
 }}
 
-// Three octaves, each folded to a ridge and each drifting its own way. The
-// fold is what separates water from cloud: smooth noise has round hills, and
-// a surface pulled taut by its own tension has creases between them. The
-// per-octave drift is what stops the whole field sliding as one sheet.
+// The swell, and only the swell: two folded octaves, drifting apart. The fold
+// is what separates water from cloud - smooth noise has round hills, a surface
+// held by its own tension has creases between them - and the per-octave drift
+// is what stops the field sliding as one sheet.
 float height(vec2 p) {{
     float h = 0.0;
     float a = 1.0;
     float f = 1.0;
     vec2 drift = vec2(0.35, 0.20) * time * wave_speed;
-    for (int i = 0; i < 3; i++) {{
+    for (int i = 0; i < 2; i++) {{
         float n = vnoise(p * f + drift);
         h += a * (1.0 - abs(2.0 * n - 1.0));
         a *= 0.5;
         f *= 2.03;
         drift = vec2(-drift.y, drift.x) * 1.7;
+    }}
+    return h;
+}}
+
+// The chop on top of it: finer, quicker, and <b>not</b> folded. This is what
+// the sun is actually catching, and it is a separate field rather than two
+// more octaves for a reason the measurement gave. A highlight run was 7.93 px
+// across against 3.68 down - a ratio of 2.15, which is exactly the camera's
+// own squash - so the streaks were never anisotropic at all: they were round
+// on the water and flattened by the projection. What made them read as brush
+// strokes was their size, so what fixes it is a smaller feature and a tighter
+// lobe, not a different shape.
+float chop(vec2 p) {{
+    float h = 0.0;
+    float a = 1.0;
+    float f = 1.0;
+    vec2 drift = vec2(-0.22, 0.31) * time * wave_speed;
+    for (int i = 0; i < 2; i++) {{
+        h += a * (vnoise(p * f + drift) - 0.5);
+        a *= 0.5;
+        f *= 2.7;
+        drift = vec2(drift.y, -drift.x) * 2.1;
     }}
     return h;
 }}
@@ -1860,7 +1923,18 @@ void fragment() {{
     float h = height(p);
     float hx = height(p + vec2(e, 0.0)) - h;
     float hz = height(p + vec2(0.0, e)) - h;
-    vec3 n = normalize(vec3(-hx * relief, e, -hz * relief));
+    // And the chop's own slope, at its own step. Sampled apart from the swell
+    // because it is finer than the swell's step can resolve: differenced over
+    // e it would be averaged away, which is how the sparkle got lost into the
+    // creases in the first place.
+    vec2 ce = vec2(0.12, 0.0);
+    vec2 cp = p * fine;
+    float c = chop(cp);
+    float cx = chop(cp + ce) - c;
+    float cz = chop(cp + ce.yx) - c;
+    vec3 n = normalize(vec3(-hx * relief - cx * sparkle,
+                            e,
+                            -hz * relief - cz * sparkle));
 
     // How much water is in front of the bottom. The prisms are opaque, so this
     // is the floor of the pit and the wall it climbs at the shore.
@@ -1893,7 +1967,16 @@ void fragment() {{
     // - the one place this projection makes something cheaper instead of harder.
     vec3 eye = normalize((INV_VIEW_MATRIX * vec4(0.0, 0.0, 1.0, 0.0)).xyz);
     vec3 half_v = normalize(normalize(sun) + eye);
-    col += vec3(pow(max(dot(n, half_v), 0.0), gloss)) * glint;
+    // Two lobes on two normals, and the second normal is the point. Measured
+    // one lobe at a time: the tight spark runs 4.26 px across and reaches 28,
+    // the broad sheen runs 5.47 and reaches 39 - so what read as brush strokes
+    // was the sheen, tracking the same ridge creases the swell is made of. It
+    // gets a flattened normal that the creases barely reach, and stays what it
+    // is for: the surface saying it is wet. The spark keeps the whole normal,
+    // chop and all, because being small and moving is the whole of its job.
+    vec3 soft = normalize(vec3(-hx * relief * 0.25, e, -hz * relief * 0.25));
+    col += vec3(pow(max(dot(n, half_v), 0.0), gloss)) * glint
+         + vec3(pow(max(dot(soft, half_v), 0.0), sheen_gloss)) * sheen;
 
     // Foam where the floor comes up to meet the surface - the shore, and every
     // wall of the pit. This is the half that needed depth and now has it.
@@ -1909,9 +1992,36 @@ void fragment() {{
     // creases by design, so anything keyed straight off the height field picks
     // out lines rather than patches. The field is used to break the two real
     // sources up instead.
-    float froth = clamp(max(lip, lv), 0.0, 1.0);
+    // And the trail behind whoever drove through. Combined by max and never by
+    // sum: stamps overlap along the path by construction - that is what makes
+    // the line continuous - so adding them would put a bright bead at every
+    // spacing and read as the trail being made of dots after all.
+    float trail = 0.0;
+    for (int i = 0; i < {4}; i++) {{
+        float age = wake_age[i];
+        if (age >= 1.0)
+            continue;
+        float r = mix(wake_seed, wake_spread, age);
+        // Fades as it spreads, and the two together are what a wake does: the
+        // same water spread over more of the surface.
+        // Held longer than linear, the tracer smoke's argument in the same
+        // words: the stamp grows as it ages, so taking its opacity away in step
+        // with time removes it exactly as its width arrives, and the wide half
+        // of the trail is never seen.
+        trail = max(trail, pow(1.0 - age, 0.7)
+                          * (1.0 - smoothstep(r * 0.35, r,
+                                              distance(world.xz, wake_at[i]))));
+    }}
+    trail *= wake_on;
+
     float broken = smoothstep(0.30, 0.80, h / 1.75);
-    col = mix(col, foam_ink, froth * broken * foam);
+    // The shore and the tank's own patch are broken up hard - they are foam
+    // sitting on moving water. The trail is not: a wake is water that has been
+    // churned through, so it holds together as a lane and only takes the
+    // surface's texture on top.
+    float edge = clamp(max(lip, lv), 0.0, 1.0) * broken;
+    float lane = trail * mix(broken, 1.0, 0.55);
+    col = mix(col, foam_ink, clamp(max(edge, lane), 0.0, 1.0) * foam);
 
     ALBEDO = col;
     ALPHA = 1.0;

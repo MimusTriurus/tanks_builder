@@ -285,6 +285,14 @@ public sealed partial class Main : Node2D
 	/// business nor the renderer's.</summary>
 	private Swell? _sea;
 
+	/// <summary>The trail the tanks leave on the water. Built beside the swell
+	/// and for the same division of labour: what the tanks did to the water is
+	/// neither the water's business nor the renderer's.</summary>
+	private Wake? _wake;
+
+	/// <summary>Whether a trail is laid at all. See --no-wake.</summary>
+	private bool _wakes = true;
+
 	/// <summary>Whether the water answers the tanks. See --still-water: the pond
 	/// as it was, which is the A/B this is judged by.</summary>
 	private bool _seaReacts = true;
@@ -1463,6 +1471,12 @@ public sealed partial class Main : Node2D
 			// judged by. Not the same as --flat-water: that one chooses between
 			// two ways of drawing the strip, this chooses whether there is a
 			// strip at all.
+			// The water without a trail on it, which is the A/B the wake is
+			// judged by. Its own flag rather than a share of --still-water: the
+			// swell is what a cell is doing and this is a line across cells, and
+			// one switch for both would measure two things.
+			else if (userArgs[i] == "--no-wake")
+				_wakes = false;
 			else if (userArgs[i] == "--drawn-water")
 				_deepWater = false;
 			else if (userArgs[i] == "--no-foam")
@@ -1677,6 +1691,7 @@ public sealed partial class Main : Node2D
 		// After the mask, because the cells it keeps a state for are the field's
 		// list and that list is settled by SetWater.
 		_sea = new Swell { Field = _field, Enabled = _seaReacts };
+		_wake = new Wake { Enabled = _wakes };
 		AddChild(_field);
 		_marks = new TrackMarks { Enabled = _rutsEnabled };
 		AddChild(_marks);
@@ -4383,6 +4398,7 @@ public sealed partial class Main : Node2D
 		["--hard-swell"] = new[] { "ground.swell_blend" },
 		["--still-water"] = new[] { "ground.water_react" },
 		["--drawn-water"] = new[] { "ground.deep" },
+		["--no-wake"] = new[] { "ground.wake" },
 		["--no-foam"] = new[] { "ground.foam" },
 		["--foam"] = new[] { "ground.foam" },
 		// The stage asks for height as well as for itself, so it declares both -
@@ -5065,6 +5081,8 @@ public sealed partial class Main : Node2D
 		// drawn.
 		ui.Toggle("ground.deep", "computed surface  (--drawn-water)",
 			() => _deepWater, v => _deepWater = v);
+		ui.Toggle("ground.wake", "tanks leave a wake  (--no-wake)",
+			() => _wakes, v => _wakes = v);
 		ui.Toggle("ground.water_react", "water answers the tanks  (--still-water)",
 			() => _seaReacts, v => _seaReacts = v);
 		ui.Readout("ground.water_state", () =>
@@ -5707,6 +5725,7 @@ public sealed partial class Main : Node2D
 						  // with the foam turned off are the same clean picture.
 						  + (_foam > 0.0f ? $"/{_foam:F2}foam" : "/!off")
 						  + (_deepWater ? "/deep" : "/strip")
+						  + (_wakes ? $"/{_wake?.Count ?? 0}wake" : "/!nowake")
 						  + (_seaReacts ? "" : "!still"))
 					 // Trees, wooded cells, and how many of those no tank may
 					 // enter. Three numbers because a board with no props, a
@@ -5849,6 +5868,7 @@ public sealed partial class Main : Node2D
 			_stage.SwellBlend = _swellBlend;
 			_stage.Foam = _foam;
 			_stage.Deep = _deepWater;
+			_stage.Trail = _wake;
 			// Before Place, because the tint a wading tank wears is read off its
 			// own cell's state and Place is where that is pushed at the sprite.
 			if (_sea is not null)
@@ -5860,6 +5880,7 @@ public sealed partial class Main : Node2D
 				// object, because the swell has no business knowing what a tank
 				// is - see Swell.Note.
 				for (int i = 0; i < _vehicles.Count; i++)
+				{
 					// Less the origin, like every other read of a ground point
 					// against the board: the point is in the tanks' space and
 					// the field answers in its own. Left off, every tank stirs
@@ -5872,7 +5893,17 @@ public sealed partial class Main : Node2D
 					_sea.Note(i, _field.CellAt(_vehicles[i].GroundPoint - _origin),
 							  _vehicles[i].Speed > Swell.StirAbove,
 							  _vehicles[i].GroundPoint);
+					// And the trail, off the same point and the same threshold.
+					// In water rather than in a flooded cell: what a wake needs
+					// is a surface to be left on, which is the same question the
+					// waterline already answers.
+					_wake?.Note(i, _vehicles[i].GroundPoint,
+								_vehicles[i].Speed > Wake.DriveAbove,
+								_field.IsWater(_field.CellAt(
+									_vehicles[i].GroundPoint - _origin)));
+				}
 				_sea.Tick(delta);
+				_wake?.Tick(delta);
 			}
 			_stage.Place(_vehicles);
 		}

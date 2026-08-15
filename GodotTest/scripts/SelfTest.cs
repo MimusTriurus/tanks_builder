@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Godot;
@@ -7021,6 +7021,77 @@ public static class SelfTest
                 Stage3D.FoamLift is > 0.0f and < 1.0f,
                 $"lift {Stage3D.FoamLift:F2} - at one the pond goes opaque where "
                 + "it foams and the ford stops being one");
+
+            // The wake. Its own object because a swell answers "what is this
+            // hexagon doing" and a trail is a line across hexagons - two
+            // statements about one event at two resolutions, and neither is
+            // recoverable from the other.
+            var trail = new Wake();
+            Check("a fresh wake stamp is wider than the gap to the next one",
+                2.0f * Wake.Seed > Wake.Step,
+                $"a stamp is {Wake.Seed:F0} across and they are {Wake.Step:F0} "
+                + "apart, so the trail is a row of dots and no opacity fixes it");
+
+            // Distance and not time. A stamp every so many seconds is dense
+            // behind a crawling tank and dotted behind a fast one - the ruts and
+            // the belt phase are laid off distance for the same reason.
+            for (int i = 0; i < 30; i++)
+                trail.Note(0, new Vector2(100.0f, 100.0f), true, true);
+            Check("and standing still in the water lays exactly one",
+                trail.Count == 1, $"{trail.Count} stamps without moving an inch");
+
+            var was = trail.At[0];
+            for (int i = 1; i <= 6; i++)
+                trail.Note(0, new Vector2(100.0f + i * Wake.Step * 1.1f, 100.0f),
+                           true, true);
+            Check("and driving on lays one for every step of ground covered",
+                trail.Count == 7, $"{trail.Count} stamps over six steps");
+
+            // The comet test. A stamp hung at a fixed offset behind the hull
+            // travels with it, and on a still frame the two are the same
+            // picture - which is why this is asserted rather than looked at.
+            Check("and the ones already laid stay where they were laid",
+                trail.At[0] == was, $"the first stamp moved to {trail.At[0]}");
+
+            // Out of the water lays nothing, and coming back does not draw a
+            // line across the dry ground in between.
+            // Asked at close quarters, because at long range it is not a test:
+            // a tank that leaves the water and comes back far away lays a stamp
+            // either way, on distance alone. The version of this that walked out
+            // to (900,900) and back passed with the forgetting taken out - it
+            // was asserting the distance rule twice and the thing it named not
+            // at all.
+            Vector2 edge = trail.At[trail.Count - 1];
+            int ashore = trail.Count;
+            trail.Note(0, edge + new Vector2(Wake.Step * 0.3f, 0.0f), true, false);
+            trail.Note(0, edge + new Vector2(Wake.Step * 0.6f, 0.0f), true, true);
+            Check("and coming back to the water starts the trail again at once",
+                ashore == 7 && trail.Count == 8,
+                $"{trail.Count} stamps against {ashore} before - the tank was "
+                + "remembered while it was on dry land, so the first stretch "
+                + "back in the water leaves no mark");
+
+            // And they go. A trail that stuck would be a pond wearing the marks
+            // of every crossing of the session.
+            for (int i = 0; i < 60 * 6; i++)
+                trail.Tick(1.0 / 60.0);
+            Check("and a wake fades off the water", trail.Count == 0,
+                $"{trail.Count} stamps six seconds after the last one was laid");
+
+            // One threshold for both, because a tank that stirs the water it
+            // stands in and leaves no trail through it is two answers to one
+            // question.
+            Check("and what counts as driving is the same for the swell and the wake",
+                Mathf.IsEqualApprox(Wake.DriveAbove, Swell.StirAbove),
+                $"wake {Wake.DriveAbove:F2} against swell {Swell.StirAbove:F2}");
+
+            // Combined by max in the shader. Stamps overlap along the path by
+            // construction - that is what makes the line continuous - so summing
+            // them puts a bright bead at every spacing, which reads as the
+            // trail being made of dots after all.
+            Check("and the surface combines its stamps by max, never by sum",
+                Stage3D.DeepShader.Contains("trail = max(trail,"),
+                "overlapping stamps add up, so the trail beads at its own spacing");
 
             // And it settles. A state that stuck would be a pond that had been
             // driven through once and stayed broken for the rest of the session.
