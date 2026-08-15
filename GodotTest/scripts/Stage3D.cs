@@ -838,40 +838,56 @@ void fragment() {{
         // water nobody is in.
         if (_deepInk is not null)
         {
-            var hull = new Vector2[Collars];
-            var fwd = new Vector2[Collars];
-            var half = new Vector2[Collars];
+            var at = new Vector2[Collars];
+            // Two vec2 and not one vec4: a vec4 uniform array is quietly not
+            // accepted here, the trap that once left the wake never arriving.
+            var pivot = new Vector2[Collars];
+            var size = new Vector2[Collars];
+            var line = new float[Collars * HullLine];
+            for (int i = 0; i < line.Length; i++)
+                line[i] = -1.0f;
             int worn = 0;
             foreach (Vehicle vehicle in vehicles)
             {
                 if (worn >= Collars || !vehicle.Wading)
                     continue;
-                Vector3 w = World(vehicle.GroundPoint, 0.0f);
-                hull[worn] = new Vector2(w.X, w.Z);
-                // The hull's own frame: which way it is pointing on the ground,
-                // and how far it reaches along and across. Off the atlas and the
-                // class dial, so the line hugs a tank the size slider made
-                // bigger. HullSpan is the broadside length, and a tank is about
-                // half as wide as it is long.
-                AtlasSet? set = vehicle.Sprite.Atlas;
-                Vector2 along = set?.GroundDirection(vehicle.Sprite.HullFacing)
-                                ?? Vector2.Zero;
-                Vector3 a = World(along, 0.0f);
-                var flat = new Vector2(a.X, a.Z);
-                fwd[worn] = flat.LengthSquared() > 1e-6f ? flat.Normalized()
-                                                         : Vector2.Right;
-                float span = (set?.HullSpan ?? 0) * 0.5f * vehicle.Sprite.BodyScale;
-                // A little wider than the hull, because the ring has to show
-                // outside a sprite that stands up over its own footprint: an
-                // ellipse the size of the tank is drawn entirely underneath it.
-                // Measured that way round - at hull size it moved 83px of the
-                // picture at a peak of 26.
-                half[worn] = new Vector2(span, span * 0.52f) * 1.22f;
+                AtlasSet set = vehicle.Atlas;
+                if (set.Groundline is null)
+                    continue;
+                // The sprite's own anchor, in the harness's 2D px - the space the
+                // groundline is measured in, and the one the shader puts a
+                // fragment of the water back into. Not GroundPoint: that is the
+                // contact patch, which is the anchor already moved by the very
+                // offset the table's rows are counted from.
+                at[worn] = vehicle.Sprite.Position;
+                pivot[worn] = set.Anchor;
+                size[worn] = new Vector2(vehicle.Sprite.BodyScale, set.Tile.X);
+                int frame = set.FrameFor(vehicle.Sprite.HullFacing);
+                // The groundline itself, and not the sprite's waterline, which
+                // was the first answer and is invisible by construction: the
+                // waterline is a row up the hull, the sprite is opaque from there
+                // down to its own bottom edge, so a band drawn where the water
+                // plane crosses that row is behind the tank at every column.
+                // Measured: at MTP's own scale it lands 13px above the bottom of
+                // the tracks with 49px of hull drawn over it.
+                //
+                // The boundary the eye actually sees between the water and the
+                // tank is the outside of the silhouette, and its lower half - the
+                // bottom edge and the steep ends where it turns up round the
+                // tracks - is exactly what this table is.
+                for (int i = 0; i < HullLine; i++)
+                {
+                    int column = Mathf.RoundToInt(
+                        i * (set.Tile.X - 1) / (float)(HullLine - 1));
+                    line[worn * HullLine + i] = set.GroundlineAt(frame, column);
+                }
                 worn++;
             }
-            _deepInk.SetShaderParameter("hull", hull);
-            _deepInk.SetShaderParameter("hull_fwd", fwd);
-            _deepInk.SetShaderParameter("hull_half", half);
+            _deepInk.SetShaderParameter("hull_at", at);
+            _deepInk.SetShaderParameter("hull_pivot", pivot);
+            _deepInk.SetShaderParameter("hull_size", size);
+            _deepInk.SetShaderParameter("hull_line", line);
+            _deepInk.SetShaderParameter("hull_band", HullBand);
         }
         // The mark goes where the tank touches the ground, every frame, for the
         // reason the 2D ring follows the contact patch: a tank spends most of an
@@ -1294,6 +1310,8 @@ void fragment() {{
         st.Begin(Mesh.PrimitiveType.Triangles);
         bool any = false;
         int over = 0;
+        var hub = new Vector2[MaxWaterCells];
+        var mask = new float[MaxWaterCells];
         for (int q = 0; q < Field.Columns; q++)
         for (int r = 0; r < Field.Rows; r++)
         {
@@ -1314,24 +1332,22 @@ void fragment() {{
             }
             Vector2 flat = Origin + Field.FlatAnchor(cell) + Field.CentreOffset;
             Vector3 top = World(flat, Field.WaterTop(cell));
-            // Which of the six corners sit on a shore. A corner counts if
-            // <i>either</i> edge meeting there leaves the water, so the two
-            // triangles sharing it agree about its value - given per edge, they
-            // would disagree along the chord between them and draw a seam from
-            // the corner to the middle of the cell.
-            bool[] beach = Shoreline(cell, corner);
-            // A fan from the middle rather than from a corner, and the surface
-            // needs it. Triangle k then has hexagon edge k as its outer edge and
-            // nothing else, which is what lets a shore be said per edge at all;
-            // fanned from corner 0 the triangles straddle three different edges
-            // apiece and there is nowhere to put the answer.
+            // Which of the six edges leave the water, and where the middle of
+            // this cell is - the two things the surface needs to work out how far
+            // any fragment of it is from a shore. Both go to the shader by cell
+            // rather than by vertex: see the fragment, where trying to carry the
+            // answer on the corners is what put foam round the whole rim.
+            hub[ord] = new Vector2(top.X, top.Z);
+            mask[ord] = Edges(cell, corner);
+            // A fan from the middle rather than from a corner. Nothing in the
+            // shading needs it any more, but it is the shape that keeps a
+            // triangle inside one edge's business, and rebuilding it the other
+            // way round would be churn for a mesh that is correct.
             for (int k = 0; k < 6; k++)
             {
-                Lay(st, top, Vector3.Zero, ord, 1.0f, halfX, halfZ, inset);
-                Lay(st, top, corner[k], ord, beach[k] ? 0.0f : 1.0f,
-                    halfX, halfZ, inset);
-                Lay(st, top, corner[(k + 1) % 6], ord,
-                    beach[(k + 1) % 6] ? 0.0f : 1.0f, halfX, halfZ, inset);
+                Lay(st, top, Vector3.Zero, ord, halfX, halfZ, inset);
+                Lay(st, top, corner[k], ord, halfX, halfZ, inset);
+                Lay(st, top, corner[(k + 1) % 6], ord, halfX, halfZ, inset);
             }
         }
         if (!any)
@@ -1345,12 +1361,26 @@ void fragment() {{
                            + "slot, so they will churn when it does");
         st.GenerateNormals();
         _pond.Mesh = st.Commit();
+        // Where each cell is and which of its edges are shore. With the board,
+        // not with the frame: this is the pond's shape, and the shape is exactly
+        // what Build is gated on changing.
+        if (_deepInk is not null)
+        {
+            (Vector2[] normal, float[] stand, float inradius) = Rim(corner);
+            _deepInk.SetShaderParameter("hub", hub);
+            _deepInk.SetShaderParameter("rim_mask", mask);
+            _deepInk.SetShaderParameter("rim_n", normal);
+            _deepInk.SetShaderParameter("rim_d", stand);
+            _deepInk.SetShaderParameter("rim_span", inradius);
+            _deepInk.SetShaderParameter("squash", Squash);
+            _deepInk.SetShaderParameter("rise", RiseFactor);
+        }
     }
 
-    /// <summary>One vertex of the surface, with its ordinal and how far it is
-    /// from a shore written into UV2.</summary>
+    /// <summary>One vertex of the surface, with the ordinal of the cell it
+    /// belongs to written into UV2.</summary>
     private static void Lay(SurfaceTool st, Vector3 top, Vector3 off, int ord,
-                            float inland, float halfX, float halfZ, Vector2 inset)
+                            float halfX, float halfZ, Vector2 inset)
     {
         st.SetColor(Pond);
         // +Z reads as +v, the same way the ground art is laid on a top face:
@@ -1358,12 +1388,26 @@ void fragment() {{
         // one surface and nobody can say against what.
         st.SetUV(new Vector2(0.5f + inset.X * off.X / (2.0f * halfX),
                              0.5f + inset.Y * off.Z / (2.0f * halfZ)));
-        st.SetUV2(new Vector2(ord, inland));
+        st.SetUV2(new Vector2(ord, 0.0f));
         st.AddVertex(top + off);
     }
 
+    /// <summary>Which edges of a flooded cell leave the water, as the six-bit
+    /// number the shader carries per cell. Packed rather than passed as six
+    /// arrays for the reason a shader uniform array is capped at all: one float
+    /// per cell says the same thing.</summary>
+    private float Edges(Vector2I cell, Vector3[] corner)
+    {
+        bool[] shore = Shoreline(cell, corner);
+        float mask = 0.0f;
+        for (int k = 0; k < 6; k++)
+            if (shore[k])
+                mask += 1 << k;
+        return mask;
+    }
+
     /// <summary>
-    /// Which corners of a flooded cell stand on a shore.
+    /// Which edges of a flooded cell leave the water.
     ///
     /// <b>The edges are matched to their neighbours by direction, not by index.</b>
     /// Corner order comes from whoever built the hexagon and the headings come
@@ -1407,9 +1451,41 @@ void fragment() {{
                 }
             }
             beach[best] = true;
-            beach[(best + 1) % 6] = true;
         }
         return beach;
+    }
+
+    /// <summary>
+    /// The hexagon a cell's edges belong to: the outward unit normal of each
+    /// edge and how far it stands off the middle, in world units, plus the
+    /// inradius the foam band is a fraction of.
+    ///
+    /// <b>Off the corners the mesh was built from, not from an angle.</b> Corner
+    /// order is whoever built the hexagon's business, and the camera squashes it
+    /// in z besides - so a normal reasoned from "every sixty degrees" would be
+    /// right on this board and quietly wrong on the first one that numbers its
+    /// corners the other way or looks at it from a different height.
+    /// </summary>
+    internal static (Vector2[], float[], float) Rim(Vector3[] corner)
+    {
+        var normal = new Vector2[6];
+        var off = new float[6];
+        float inradius = float.MaxValue;
+        for (int k = 0; k < 6; k++)
+        {
+            var a = new Vector2(corner[k].X, corner[k].Z);
+            var b = new Vector2(corner[(k + 1) % 6].X, corner[(k + 1) % 6].Z);
+            Vector2 along = b - a;
+            var out_ = new Vector2(along.Y, -along.X).Normalized();
+            // Oriented by the midpoint, because which way the perpendicular of a
+            // segment points depends on which way round the segment was given.
+            if (out_.Dot((a + b) * 0.5f) < 0.0f)
+                out_ = -out_;
+            normal[k] = out_;
+            off[k] = a.Dot(out_);
+            inradius = Mathf.Min(inradius, Mathf.Abs(off[k]));
+        }
+        return (normal, off, inradius);
     }
 
     /// <summary>
@@ -1581,6 +1657,20 @@ void fragment() {{
     /// </summary>
     public const int Collars = 4;
 
+    /// <summary>How many columns of the groundline the waterline round a hull is
+    /// drawn from. Not the table's own 256: what goes to the shader is one
+    /// heading's row, resampled, and 64 of them across a 183px hull is a sample
+    /// every three pixels of a curve the band is three pixels wide - interpolated
+    /// between, the quantisation lands under the line's own thickness. The whole
+    /// board's worth is <see cref="Collars"/> times this, which is what fits in a
+    /// uniform array without asking what the driver's limit is.</summary>
+    public const int HullLine = 64;
+
+    /// <summary>How wide the waterline round a hull is, in the sprite's own
+    /// pixels - so it grows with the tank the size dial made bigger rather than
+    /// staying a fixed smear on screen.</summary>
+    public const float HullBand = 6.0f;
+
     private ShaderMaterial? _deepInk;
     private float _deepClock;
 
@@ -1592,7 +1682,7 @@ void fragment() {{
             {
                 Code = string.Format(CultureInfo.InvariantCulture, DeepShader,
                                      MaxWaterCells, FoamCut, FoamLift, FoamRung,
-                                     Wake.Max),
+                                     Wake.Max, HullLine, Collars * HullLine),
             },
             RenderPriority = WaterOrder,
         };
@@ -1967,13 +2057,32 @@ uniform float wake_age[{4}];
 uniform float wake_seed = 9.0;
 uniform float wake_spread = 24.0;
 uniform float wake_on = 1.0;
-// Where the wading tanks are and how far their hulls reach, so the surface can
-// put a line round them. It cannot see them any other way: nothing writes depth
-// but the ground, so to the water a tank is not there at all.
-uniform vec2 hull[4];
-uniform vec2 hull_fwd[4];
-uniform vec2 hull_half[4];
-uniform float hull_band = 0.26;
+// Where the wading tanks are drawn, and the shape of the line each one makes
+// where it meets the ground. It cannot see them any other way: nothing writes
+// depth but the ground, so to the water a tank is not there at all - but the
+// atlas already measured that line, one row per column per heading, and that is
+// what these carry. hull_at is the sprite's anchor in the harness's own 2D px,
+// hull_pivot is the atlas anchor inside the tile, hull_size is (body scale, tile
+// width) and hull_line is the groundline resampled to {5} columns across the
+// tile, negative where the tank has no pixel in that column at all.
+uniform vec2 hull_at[4];
+uniform vec2 hull_pivot[4];
+uniform vec2 hull_size[4];
+uniform float hull_line[{6}];
+uniform float hull_band = 3.0;
+// The two camera terms, so a fragment of the water can be put back into the 2D
+// space the sprites are placed in. Uniforms rather than constants because the
+// field owns them and a second copy is a second thing to keep in agreement.
+uniform float squash = 0.5;
+uniform float rise = 1.0;
+// Where each flooded cell's middle is, which of its six edges leave the water,
+// and the hexagon those edges belong to: outward normals and how far each edge
+// stands off the middle, in world units.
+uniform vec2 hub[{0}];
+uniform float rim_mask[{0}];
+uniform vec2 rim_n[6];
+uniform float rim_d[6];
+uniform float rim_span = 1.0;
 uniform float beach = 0.10;
 
 varying vec3 world;
@@ -2111,13 +2220,29 @@ void fragment() {{
     // That asymmetry is what left the ramp and the near bank bare.
     float lip = 1.0 - smoothstep(0.0, shore, thick);
     // And in the plane of the water: how far this fragment is from an edge the
-    // pond actually ends at, written into the mesh by Shoreline. Independent of
-    // where the camera is by construction, which is the whole point - a shore is
-    // where the water stops, not where the eye happens to see the bottom rise.
-    float bank = 1.0 - smoothstep(0.0, beach, UV2.y);
+    // pond actually ends at. Independent of where the camera is by construction,
+    // which is the whole point - a shore is where the water stops, not where the
+    // eye happens to see the bottom rise.
+    //
+    // <b>Worked out here from the cell's edge mask, not carried on the vertices.</b>
+    // Carried, the answer had to live on the corners so the two triangles sharing
+    // one agreed about it - and a corner belongs to two edges, so one dry edge
+    // wet the ends of both its neighbours. On a pond whose cells have two water
+    // neighbours apiece that marks all six corners of nearly every cell, which is
+    // foam round the whole rim: exactly the failure, and it was in the resolution
+    // rather than in the wiring. A distance to a line is exact, seamless and says
+    // nothing about the edges next to it.
+    int cell = int(UV2.x + 0.5);
+    vec2 off = world.xz - hub[cell];
+    float near = 1e9;
+    for (int k = 0; k < 6; k++) {{
+        if (mod(floor(rim_mask[cell] / exp2(float(k))), 2.0) < 0.5)
+            continue;
+        near = min(near, rim_d[k] - dot(off, rim_n[k]));
+    }}
+    float bank = 1.0 - smoothstep(0.0, beach * rim_span, near);
     // And foam where a tank went through, off the band and the point it was
     // standing at - see Swell. Unchanged by any of this: it never needed depth.
-    int cell = int(UV2.x + 0.5);
     float lv = clamp(state[cell] / max(bands - 1.0, 1.0), 0.0, 1.0);
     lv *= 1.0 - smoothstep(0.45 * foam_reach, foam_reach,
                            distance(world.xz, mark[cell]));
@@ -2153,22 +2278,42 @@ void fragment() {{
     // sitting on moving water. The trail is not: a wake is water that has been
     // churned through, so it holds together as a lane and only takes the
     // surface's texture on top.
-    // And round every hull that is in the water. A ring and not a disc: what is
-    // being drawn is the waterline itself, and filling it in would put foam
-    // under a tank that is displacing the water rather than around it.
+    // And round every hull that is in the water, along the line the tank
+    // actually meets the ground at.
+    //
+    // <b>The tank's own silhouette, not an ellipse drawn round it.</b> An oval
+    // sized off the hull is right about where the tank is and wrong about its
+    // shape everywhere - it stands off the nose and cuts through the track guards
+    // - and no amount of fitting makes an ellipse into a tank. What it should
+    // follow is already measured: AtlasSet.Groundline is the bottom of the
+    // silhouette per column per heading, which is where the near surface of the
+    // tank meets the ground, and it is the same table the sprite's own waterline
+    // is cut by. So the two lines are one measurement and cannot disagree.
+    //
+    // Done in the harness's 2D px rather than in world units, because that is the
+    // space the table is in and the mapping back is exact: this projection puts a
+    // world point at (x, z*squash - y*rise) and nothing else. The band is in the
+    // sprite's own pixels, so it grows with the tank the size dial made bigger.
+    vec2 plane = vec2(world.x, world.z * squash - world.y * rise);
     float collar = 0.0;
     for (int i = 0; i < 4; i++) {{
-        if (hull_half[i].x <= 0.0)
+        if (hull_size[i].x <= 0.0)
             continue;
-        // Into the hull's own frame, so the line is the shape of the tank and
-        // not of a circle drawn round it. A ring in world units is what the
-        // camera flattens into the ellipse a waterline is, so nothing here has
-        // to know about the squash.
-        vec2 d = world.xz - hull[i];
-        vec2 f = hull_fwd[i];
-        vec2 local = vec2(dot(d, f), dot(d, vec2(-f.y, f.x))) / hull_half[i];
-        collar = max(collar,
-                     1.0 - smoothstep(0.0, hull_band, abs(length(local) - 1.0)));
+        vec2 px = (plane - hull_at[i]) / hull_size[i].x + hull_pivot[i];
+        float u = px.x / max(hull_size[i].y, 1.0);
+        if (u < 0.0 || u > 1.0)
+            continue;
+        float f = u * float({5} - 1);
+        int k = int(floor(f));
+        float a = hull_line[i * {5} + k];
+        float b = hull_line[i * {5} + min(k + 1, {5} - 1)];
+        // No entry means no tank in that column - the gun swung out past the
+        // tracks is the case it is there for - and a line through it would be
+        // drawn from the two columns either side of a gap it is not in.
+        if (a < 0.0 || b < 0.0)
+            continue;
+        collar = max(collar, 1.0 - smoothstep(0.0, hull_band,
+                                              abs(px.y - mix(a, b, fract(f)))));
     }}
 
     float edge = clamp(max(max(lip, bank), max(lv, collar)), 0.0, 1.0) * broken;

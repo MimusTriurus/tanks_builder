@@ -7033,11 +7033,88 @@ public static class SelfTest
                 float turn = Mathf.Pi / 3.0f * k;
                 hex[k] = new Vector3(Mathf.Cos(turn), 0.0f, Mathf.Sin(turn));
             }
+            // The hexagon those edges belong to, worked out from the corners the
+            // mesh was built from rather than from an angle: corner order is
+            // whoever built it business and the camera squashes it besides.
+            (Vector2[] outward, float[] stand, float inradius) = Stage3D.Rim(hex);
+            bool sane = true;
+            for (int k = 0; k < 6; k++)
+            {
+                // Asked the way the shader asks it, and that matters: a normal
+                // and an offset that are each reasonable on their own but do not
+                // belong to the same line put the band anywhere. So the edge's
+                // own midpoint has to come out at nought distance from it, and
+                // the middle of the cell at the inradius.
+                Vector3 span3 = hex[k] + hex[(k + 1) % 6];
+                var mid = new Vector2(span3.X, span3.Z) * 0.5f;
+                sane &= Mathf.Abs(outward[k].Length() - 1.0f) < 1e-4f
+                        && stand[k] > 0.0f
+                        && Mathf.Abs(stand[k] - inradius) < 1e-3f
+                        && Mathf.Abs(stand[k] - mid.Dot(outward[k])) < 1e-3f;
+            }
+            Check("a cell's edges are found from its corners, not from an angle",
+                sane && Mathf.Abs(inradius - Mathf.Sqrt(3.0f) * 0.5f) < 1e-3f,
+                $"inradius {inradius:F3} against 0.866 - a normal that is not "
+                + "unit, does not point out, or does not match its fellows is a "
+                + "shore band of a different width on every edge, and a "
+                + "circumradius here is the corner direction mistaken for the "
+                + "edge one");
+
+            // And the same hexagon wound the other way gives the same answer.
+            // Which way the perpendicular of a segment points depends on which
+            // way round the segment was handed over, so without the orientation
+            // step every normal here would point inward and every shore band
+            // would be measured from outside the cell - a failure this board's
+            // own winding cannot show, because it happens to be the one that
+            // comes out right.
+            var back = new Vector3[6];
+            for (int k = 0; k < 6; k++)
+                back[k] = hex[5 - k];
+            (Vector2[] mirror, float[] far, float span) = Stage3D.Rim(back);
+            bool same = Mathf.Abs(span - inradius) < 1e-4f;
+            for (int k = 0; k < 6; k++)
+                same &= far[k] > 0.0f && Mathf.Abs(far[k] - span) < 1e-3f
+                        && mirror[k].Length() > 0.9f;
+            Check("and a hexagon wound the other way gives the same edges",
+                same, $"inradius {span:F3} against {inradius:F3} - the normals "
+                      + "follow the winding, so a board that numbers its corners "
+                      + "the other way measures its shores from outside");
+
+            // The board's own pond, and this is the measurement the whole change
+            // rests on. Carried on the vertices, a shore had to be marked on the
+            // corners so the two triangles sharing one agreed - and a corner
+            // belongs to two edges. Here every cell has two water neighbours at
+            // most, so that spread marks all six corners of all five of them,
+            // which is foam round the whole rim. Said per edge it is not.
+            int edged = 0, cornered = 0;
+            foreach (Vector2I pool in field.WaterCells)
+            {
+                bool[] shore = Stage3D.Shoreline(field, pool, hex, 1.0f, 1.0f);
+                var ends = new bool[6];
+                for (int k = 0; k < 6; k++)
+                    if (shore[k])
+                    {
+                        edged++;
+                        ends[k] = true;
+                        ends[(k + 1) % 6] = true;
+                    }
+                foreach (bool e in ends)
+                    if (e)
+                        cornered++;
+            }
+            int all = field.WaterCells.Count * 6;
+            Check("and the board's pond is shore at every corner but not at "
+                  + "every edge",
+                field.WaterCells.Count > 0 && cornered == all && edged < all,
+                $"{edged} edges and {cornered} corners of {all} - if these agree "
+                + "the pond has stopped being the case that showed the "
+                + "difference, and this check has stopped saying anything");
+
             // On the board's own field, because a HexField built bare has no
             // tile size and every neighbour then sits at the same anchor - all
-            // six headings match one edge and the answer is two corners. The
-            // relief comes off first so the guards will take a made-up mask;
-            // both go back below.
+            // six headings match one edge and the answer is one. The relief
+            // comes off first so the guards will take a made-up mask; both go
+            // back below.
             var wasWater = Main.WaterMask(field.Columns, field.Rows);
             field.SetWater(null);
             field.SetRelief(null, null);
@@ -7047,7 +7124,7 @@ public static class SelfTest
             foreach (bool b in Stage3D.Shoreline(field, middle, hex, 1.0f, 1.0f))
                 if (b)
                     lit++;
-            Check("a cell with dry ground all round it is shore at every corner",
+            Check("a cell with dry ground all round it is shore on every edge",
                 lit == 6, $"{lit} of 6 - six headings that do not resolve to six "
                           + "different edges is the matching being wrong");
 
@@ -7059,14 +7136,15 @@ public static class SelfTest
             foreach (bool b in Stage3D.Shoreline(field, middle, hex, 1.0f, 1.0f))
                 if (b)
                     lit++;
-            Check("and one in open water is shore at none of them", lit == 0,
-                $"{lit} corners marked in the middle of a pond");
+            Check("and one in open water is shore on none of them", lit == 0,
+                $"{lit} edges marked in the middle of a pond");
 
-            // One dry neighbour is one edge, and an edge has two ends. Counted
-            // rather than named, because which corner is which is the hexagon
-            // builder's business - the matching goes by direction for exactly
-            // that reason, and a test that named them would assert the very
-            // assumption the code refuses to make.
+            // One dry neighbour is one edge and nothing else. Counted rather
+            // than named, because which edge is which is the hexagon builder's
+            // business - the matching goes by direction for exactly that reason,
+            // and a test that named them would assert the very assumption the
+            // code refuses to make. Two here is the old answer, which is what
+            // put foam along the edges either side of the one that was dry.
             flood[HexField.Step(middle, HexField.EdgeHeadings[0]).Y * field.Columns
                   + HexField.Step(middle, HexField.EdgeHeadings[0]).X] = false;
             field.SetWater(flood);
@@ -7074,8 +7152,8 @@ public static class SelfTest
             foreach (bool b in Stage3D.Shoreline(field, middle, hex, 1.0f, 1.0f))
                 if (b)
                     lit++;
-            Check("and a single dry neighbour lights exactly one edge's two ends",
-                lit == 2, $"{lit} corners for one dry neighbour");
+            Check("and a single dry neighbour lights exactly one edge",
+                lit == 1, $"{lit} edges for one dry neighbour");
 
             field.SetRelief(Main.ReliefMap(field.Columns, field.Rows),
                             Main.RampMask(field.Columns, field.Rows));
@@ -7084,15 +7162,31 @@ public static class SelfTest
             // And the surface reads it. The band comes off the mesh, not off the
             // depth of the water in front of the eye.
             Check("and the surface takes its shore off the board, not the view",
-                Stage3D.DeepShader.Contains("smoothstep(0.0, beach, UV2.y)"),
-                "the shoreline is still measured along the view ray, so it is "
-                + "there on the far bank and missing on the near one");
+                Stage3D.DeepShader.Contains("rim_d[k] - dot(off, rim_n[k])"),
+                "the shoreline is not being measured against the cell's own "
+                + "edges, so it is either back on the view ray - there on the "
+                + "far bank and missing on the near one - or back on the "
+                + "corners, where one dry edge wets the two beside it");
+            Check("and it says so per edge, so a corner cannot wet its "
+                  + "neighbours",
+                !Stage3D.DeepShader.Contains("beach, UV2.y"),
+                "the band is still interpolated off the vertices");
 
-            // The waterline round a hull is a ring. Filled in, it would be foam
-            // under a tank rather than round it.
-            Check("and the waterline round a hull is a ring, not a disc",
-                Stage3D.DeepShader.Contains("abs(length(local) - 1.0)"),
-                "the collar is solid, so a wading tank sits in a patch of foam");
+            // The waterline round a hull is the tank's own outline, and it is
+            // the same table the sprite's own waterline is cut by - which is
+            // what makes them one measurement rather than two that agree today.
+            Check("and the waterline round a hull is the tank's own outline",
+                Stage3D.DeepShader.Contains("hull_line[i * ")
+                && Stage3D.PaintShader.Contains("uniform sampler2D shore"),
+                "the collar is a shape drawn round the tank rather than the "
+                + "shape of it, so it stands off the nose and cuts the guards");
+            // Off the atlas rather than re-derived: a set that could not be
+            // measured has no line to draw and must draw none.
+            Check("and the line it follows is the one the atlas measured",
+                field.Atlas is null || field.Atlas.Groundline is null
+                || field.Atlas.GroundlineAt(0, field.Atlas.Tile.X / 2) > field.Atlas.Anchor.Y,
+                "the groundline at the middle of the tank is not below its "
+                + "anchor, so what the collar would follow is not the ground");
 
             // The wake. Its own object because a swell answers "what is this
             // hexagon doing" and a trail is a line across hexagons - two
