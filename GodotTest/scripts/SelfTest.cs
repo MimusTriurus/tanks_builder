@@ -7180,6 +7180,36 @@ public static class SelfTest
                 && Stage3D.PaintShader.Contains("uniform sampler2D shore"),
                 "the collar is a shape drawn round the tank rather than the "
                 + "shape of it, so it stands off the nose and cuts the guards");
+            // And the half of that line that lies on the tank is drawn by the
+            // tank, because those pixels belong to the sprite and to nothing
+            // else: the pond is behind it, and a surface drawn before an opaque
+            // one cannot show through it. This is the same waterline the tint is
+            // cut at - one expression, so they cannot part.
+            string paint = string.Join('\n',
+                Stage3D.PaintShader.Split('\n').Select(l => l.Split("//")[0]));
+            Check("and the foam at the hull is drawn by the hull, at the same "
+                  + "line the tint is cut at",
+                paint.Contains("float line = bottom - shore_cut.x / scale;")
+                && paint.Contains("tile.y > line")
+                && paint.Contains("tile.y - (line"),
+                "the sprite either draws no foam at its waterline or draws it "
+                + "at a line of its own, which is a second opinion about where "
+                + "the water is");
+            Check("and it goes out with the pond's own foam",
+                paint.Contains("foam_lap.a"),
+                "a tank keeps a white collar in water that has stopped foaming");
+            Check("and it runs on the bench's clock, like every other foam",
+                !paint.Contains("TIME") && paint.Contains("lap_time"),
+                "the line at the hull reads the wall clock, so no two captures "
+                + "of a wading tank agree");
+            // Narrower than the one on the water, and the reason is what it is
+            // drawn on: a wide band here is not foam, it is a repaint.
+            Check("and the line on the paint is narrower than the one on the "
+                  + "water",
+                Stage3D.LapBand < Stage3D.HullBand,
+                $"{Stage3D.LapBand:F1}px on the hull against "
+                + $"{Stage3D.HullBand:F1}px on the water");
+
             // Off the atlas rather than re-derived: a set that could not be
             // measured has no line to draw and must draw none.
             Check("and the line it follows is the one the atlas measured",

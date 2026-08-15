@@ -446,6 +446,16 @@ uniform vec4 shore_map = vec4(0.0);
 // water over the sprite's own ground in board px, this heading's row of the
 // table, the tile row the ground sits on, and the tile's last row
 uniform vec4 shore_cut = vec4(-1.0);
+// The foam lapping at the hull: rgb the water's own foam colour, a its level,
+// so the pond's dial and --no-foam take this with them rather than leaving a
+// white line on a tank standing in water that has stopped foaming.
+uniform vec4 foam_lap = vec4(0.0);
+uniform float lap_band = 2.5;
+// The pond's own foam clock, handed in rather than taken from TIME - the rule
+// the water already obeys, and for the same reason: --capture pins the step so
+// that two runs are comparable, and a shader reading the wall clock makes every
+// A/B near a wading tank measure the hour it was taken at.
+uniform float lap_time = 0.0;
 void fragment() {{
     vec4 c = texture(picture, UV);
     ALPHA = c.a;
@@ -461,8 +471,29 @@ void fragment() {{
             if (s.a > 0.5)
                 bottom = s.r * shore_cut.w;
         }}
-        if (tile.y > bottom - shore_cut.x / scale)
+        float line = bottom - shore_cut.x / scale;
+        if (tile.y > line)
             ALBEDO = mix(c.rgb, pond.rgb * c.a, pond.a);
+        // And the foam at that line, drawn here because these pixels belong to
+        // the sprite and to nothing else. The pond cannot put it here: it is
+        // behind the tank, and a surface drawn before an opaque one cannot show
+        // through it. Asymmetric on purpose - foam sits on the water and licks a
+        // little way up the paint, so most of the band is on the wet side.
+        //
+        // It ripples along the hull, and that is what stops it reading as a
+        // stripe painted on the tank. Two frequencies that never line up, an
+        // amplitude near a pixel: the tank stands still and the water does not,
+        // so a line that is perfectly straight and perfectly still is the one
+        // thing this cannot be.
+        float wob = sin(tile.x * 0.55 + lap_time * 1.7) * 0.6
+                  + sin(tile.x * 0.23 - lap_time * 1.1) * 0.5;
+        float d = tile.y - (line + wob);
+        float lap = d >= 0.0 ? 1.0 - smoothstep(0.0, lap_band, d)
+                             : 1.0 - smoothstep(0.0, lap_band * 0.4, -d);
+        // Premultiplied, like the tint above it: this pass blends that way, and
+        // an unmultiplied colour here would glow through the sprite's own edge.
+        ALBEDO = mix(ALBEDO, foam_lap.rgb * c.a,
+                     clamp(lap, 0.0, 1.0) * foam_lap.a);
     }}
 }}
 ";
@@ -831,6 +862,14 @@ void fragment() {{
                       / Mathf.Max(atlas.Count, 1),
                 atlas.HexRect.Position.Y + atlas.HexRect.Size.Y * 0.5f,
                 Mathf.Max(atlas.Tile.Y - 1, 1)));
+            // The water's own foam colour and level, so this line and the pond's
+            // are one dial: a tank still wearing a white collar in water that
+            // has stopped foaming would be the reading nobody could explain.
+            ink.SetShaderParameter("foam_lap", new Godot.Vector4(
+                FoamInk.R, FoamInk.G, FoamInk.B,
+                vehicle.Wading ? Mathf.Max(0.0f, Foam) : 0.0f));
+            ink.SetShaderParameter("lap_band", LapBand);
+            ink.SetShaderParameter("lap_time", _foamClock);
         }
         // And the waterline round each hull that is in the water. Gathered here
         // because this is where the tanks are, and pushed even when none of them
@@ -1670,6 +1709,17 @@ void fragment() {{
     /// pixels - so it grows with the tank the size dial made bigger rather than
     /// staying a fixed smear on screen.</summary>
     public const float HullBand = 6.0f;
+
+    /// <summary>How far the foam licks up the paint at the waterline, in the
+    /// sprite's own pixels. Narrower than <see cref="HullBand"/> because this
+    /// one is drawn on the tank rather than on the water: a wide band here is
+    /// not foam, it is a repaint of the hull.</summary>
+    public const float LapBand = 2.5f;
+
+    /// <summary>The colour of foam, wherever it is drawn. One constant because
+    /// the line at the hull and the line at the bank are the same water, and two
+    /// would be two things to keep in agreement.</summary>
+    public static readonly Color FoamInk = new(1.0f, 1.0f, 1.0f);
 
     private ShaderMaterial? _deepInk;
     private float _deepClock;
