@@ -367,27 +367,56 @@ public sealed partial class Stage3D : Node3D
     /// submerged half away rather than tint it. A tank with its running gear
     /// missing reads as a bug; a tank seen dimly through water reads as a ford.
     ///
-    /// So the surface is a height in the world and every fragment below it is
-    /// composited as though the pond lay over that fragment alone. The colour is
-    /// the pond's own, handed in rather than written here, because the plane and
-    /// the tint are one statement and two copies of a colour part company.
-    /// <c>c.rgb</c> is premultiplied, so mixing toward <c>pond.rgb * c.a</c> is the
-    /// same blend the plane would have done.
+    /// <b>And the cut is not one row, which is the second half and cost a
+    /// picture.</b> A sprite pixel's screen row is <c>height*cos(e) +
+    /// depth*sin(e)</c>, and a billboard knows only the sum, so the far end of the
+    /// hull is drawn 93px higher than the near one on MTP without being higher at
+    /// all - against 36px of water. Cut at one row, the tail stands dry in the
+    /// pond the nose is under, which is what the first pond looked like. So the
+    /// threshold is per column, taken off
+    /// <see cref="AtlasSet.Groundline"/>: the visible surface at a column is the
+    /// near one, and where that meets the ground is the bottom of the silhouette
+    /// there. Where the table has no answer - the gun swung out past the tracks -
+    /// it falls back to the flat cut, which is far below the tube.
+    ///
+    /// The colour is the pond's own, handed in rather than written here, because
+    /// the plane and the tint are one statement and two copies of a colour part
+    /// company. <c>c.rgb</c> is premultiplied, so mixing toward
+    /// <c>pond.rgb * c.a</c> is the same blend the plane would have done.
+    ///
+    /// What it does not carry is the shear: pitch, roll and tremble move the drawn
+    /// sprite and not this mapping, so the line is off by however far the body is
+    /// leaning - a couple of pixels at the amplitudes in use.
     /// </remarks>
     internal const string PaintShader = @"
 shader_type spatial;
 render_mode unshaded, blend_premul_alpha, depth_draw_never, cull_disabled{0};
 uniform sampler2D picture : source_color, filter_nearest;
-uniform float water = -100000.0;
+uniform sampler2D shore : filter_nearest, repeat_disable;
 uniform vec4 pond = vec4(0.0);
-varying float height;
-void vertex() {{
-    height = (MODEL_MATRIX * vec4(VERTEX, 1.0)).y;
-}}
+// anchor.x, anchor.y, class scale, the render target's size
+uniform vec4 shore_map = vec4(0.0);
+// water over the sprite's own ground in board px, this heading's row of the
+// table, the tile row the ground sits on, and the tile's last row
+uniform vec4 shore_cut = vec4(-1.0);
 void fragment() {{
     vec4 c = texture(picture, UV);
-    ALBEDO = height < water ? mix(c.rgb, pond.rgb * c.a, pond.a) : c.rgb;
     ALPHA = c.a;
+    ALBEDO = c.rgb;
+    if (shore_cut.x >= 0.0) {{
+        float scale = max(shore_map.z, 0.0001);
+        vec2 tile = (UV * shore_map.w - shore_map.w * 0.5) / scale + shore_map.xy;
+        float bottom = shore_cut.z;
+        if (shore_cut.y >= 0.0) {{
+            vec4 s = texture(shore, vec2((tile.x + 0.5)
+                                         / float(textureSize(shore, 0).x),
+                                         shore_cut.y));
+            if (s.a > 0.5)
+                bottom = s.r * shore_cut.w;
+        }}
+        if (tile.y > bottom - shore_cut.x / scale)
+            ALBEDO = mix(c.rgb, pond.rgb * c.a, pond.a);
+    }}
 }}
 ";
 
@@ -724,14 +753,27 @@ void fragment() {{
                     Paint(stand.Paint.GetTexture(), over);
                 stand.Over = over;
             }
-            // The waterline in the quad's own space, which is the world's: the
-            // quad stands at the contact point and its upright face is measured
-            // in world height off it, so this is the same y the pond's own
-            // vertices carry. After the swap above, never before it - a new
-            // material is a new set of uniforms.
-            ((ShaderMaterial)stand.Quad.MaterialOverride).SetShaderParameter(
-                "water", vehicle.Wading
-                    ? vehicle.Waterline / RiseFactor : -100000.0f);
+            // The waterline, in the sprite's own frame rather than the world's -
+            // see PaintShader for why it cannot be one row. After the swap above,
+            // never before it: a new material is a new set of uniforms.
+            //
+            // Off Height and not Standing, because this is measured against where
+            // the sprite is *drawn* touching the ground: Standing is the depth
+            // promotion and is deliberately stepped, so a leg with one end on a
+            // ramp would put the line most of a level out.
+            var ink = (ShaderMaterial)stand.Quad.MaterialOverride;
+            AtlasSet atlas = vehicle.Atlas;
+            float scale = vehicle.Sprite.BodyScale;
+            ink.SetShaderParameter("shore", atlas.Groundline);
+            ink.SetShaderParameter("shore_map", new Godot.Vector4(
+                atlas.Anchor.X, atlas.Anchor.Y, scale, PaintSize));
+            ink.SetShaderParameter("shore_cut", new Godot.Vector4(
+                vehicle.Wading ? vehicle.Waterline - vehicle.Height : -1.0f,
+                atlas.Groundline is null ? -1.0f
+                    : (atlas.FrameFor(vehicle.Sprite.HullFacing) + 0.5f)
+                      / Mathf.Max(atlas.Count, 1),
+                atlas.HexRect.Position.Y + atlas.HexRect.Size.Y * 0.5f,
+                Mathf.Max(atlas.Tile.Y - 1, 1)));
         }
         // The mark goes where the tank touches the ground, every frame, for the
         // reason the 2D ring follows the contact patch: a tank spends most of an

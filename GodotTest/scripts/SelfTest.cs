@@ -6579,10 +6579,55 @@ public static class SelfTest
             // rather than on a rendered pixel, the way the premultiplied blend
             // already is.
             Check("and the submerged half is tinted by the sprite's own shader",
-                Stage3D.PaintShader.Contains("uniform float water")
-                && Stage3D.PaintShader.Contains("height < water"),
+                Stage3D.PaintShader.Contains("uniform sampler2D shore")
+                && Stage3D.PaintShader.Contains("bottom - shore_cut.x"),
                 "the paint shader has no waterline in it, so the pond can only "
                 + "tint the whole tank or none of it");
+
+            // The table the waterline is cut against, and the three things about
+            // it that decide whether it can be trusted: that it exists, that it
+            // is the tank's own bottom rather than the frame's, and that it stays
+            // inside the hull so the gun cannot be dipped in it.
+            AtlasSet? art = field.Atlas;
+            int spread = 0, aboveAnchor = 0, widest = 0;
+            var atHeading = "";
+            if (art?.Groundline is not null)
+                for (int f = 0; f < art.Count; f++)
+                {
+                    int low = int.MaxValue, high = int.MinValue, wide = 0;
+                    for (int x = 0; x < art.Tile.X; x++)
+                    {
+                        int row = art.GroundlineAt(f, x);
+                        if (row < 0)
+                            continue;
+                        wide++;
+                        low = Math.Min(low, row);
+                        high = Math.Max(high, row);
+                        if (row <= art.Anchor.Y)
+                            aboveAnchor++;
+                    }
+                    widest = Math.Max(widest, wide);
+                    if (wide > 0 && high - low > spread)
+                    {
+                        spread = high - low;
+                        atHeading = $"frame {f}";
+                    }
+                }
+            Check("the atlas carries a groundline to cut the waterline against",
+                art?.Groundline is not null,
+                "with none the cut falls back to one row for the whole sprite, "
+                + "which is what put the tail dry in the pond the nose was under");
+            Check("and it is the tank's own bottom, under the anchor everywhere",
+                aboveAnchor == 0,
+                $"{aboveAnchor} columns claim ground above the turret axis");
+            Check("and it stays inside the hull, so the gun cannot be dipped",
+                widest > 0 && widest <= art!.HullSpan + 8,
+                $"{widest} columns carry ground against a {art?.HullSpan ?? 0}px "
+                + "hull - a table that reaches the muzzle would wet it");
+            Check("and it varies by more than a flat cut can express",
+                spread >= 8,
+                $"the worst heading spreads {spread}px ({atHeading}); under this "
+                + "the per-column cut is a flat cut with extra machinery");
 
             int wooded = pond.Count(c => grove?.IsForest(c) ?? false);
             Check("nothing grows in the water", wooded == 0,

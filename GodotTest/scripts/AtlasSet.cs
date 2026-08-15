@@ -1053,6 +1053,9 @@ public sealed class AtlasSet
             atlas.FindMuzzles(turretImage, "turret", MuzzleErode);
         if (hullImage is not null)
             atlas.MeasureHull(hullImage, "hull");
+        // Last, because it reads the tile, the count and the anchor that were only
+        // just settled off the hull's own metadata.
+        atlas.TakeGroundline();
         return atlas;
     }
 
@@ -1085,6 +1088,127 @@ public sealed class AtlasSet
     /// Broadside is the same view of every tank, so it is the one that compares.
     /// </summary>
     public int HullSpan { get; private set; }
+
+    /// <summary>
+    /// Where the tank meets the ground in each column of each heading, in tile
+    /// rows - the table a waterline is cut against.
+    ///
+    /// <b>It exists because a billboard has no depth, and the water is the first
+    /// thing that wanted some.</b> A sprite pixel's screen row is
+    /// <c>height*cos(e) + depth*sin(e)</c> and the sprite knows only the sum, so
+    /// the end of the hull further from the camera is drawn higher without being
+    /// higher: measured on MTP, 183px of hull along the ground lands as 93px of
+    /// screen row nose-on, against 36px of water. A cut at one row is therefore
+    /// not an approximation of the right answer, it is a different one - the tail
+    /// stands dry in the same pond the nose is under.
+    ///
+    /// <b>What fixes it is already in the pixels.</b> The visible surface of a
+    /// tank at any column is its near one, and where that surface meets the
+    /// ground is exactly the bottom of the silhouette in that column. So the
+    /// waterline is "this far above the bottom of the tank in this column", which
+    /// follows the hull round every heading with no geometry and no re-render -
+    /// the same trick <see cref="FindMuzzles"/>, <see cref="MeasureHull"/> and
+    /// <see cref="BeltCentres"/> already play on the loaded atlas.
+    ///
+    /// <b>Only the layers that stand on the ground go into it</b>, and leaving the
+    /// gun out is the whole of why it can be trusted. A barrel swung out past the
+    /// tracks is the one part whose lowest pixel is nowhere near the ground it
+    /// hangs over; excluded, its columns hold no entry at all and fall back to the
+    /// flat cut, which is far below it - so the tube stays dry instead of dipping.
+    ///
+    /// Stored as one row per heading, R being the row and A saying whether there
+    /// is an answer at all. A byte per column is a pixel of quantisation on a
+    /// boundary that is one pixel wide anyway.
+    /// </summary>
+    private ImageTexture? _shore;
+
+    /// <summary>The groundline table, or null on a set this could not be built
+    /// from - in which case the waterline falls back to the flat cut, which is
+    /// how it behaved before this existed.</summary>
+    public Texture2D? Groundline => _shore;
+
+    /// <summary>The table's own answer for one column of one heading, in tile
+    /// rows, or -1 where it has none. Named so the check can ask it the same
+    /// question the shader asks rather than re-deriving the packing.</summary>
+    public int GroundlineAt(int frame, int column) =>
+        _shoreRows is null || frame < 0 || frame >= Count
+        || column < 0 || column >= Tile.X
+            ? -1 : _shoreRows[frame * Tile.X + column];
+
+    private int[]? _shoreRows;
+
+    private void TakeGroundline()
+    {
+        if (Tile.X <= 0 || Tile.Y <= 1 || Count <= 0)
+            return;
+        var bottom = new int[Count * Tile.X];
+        Array.Fill(bottom, -1);
+        bool any = false;
+        foreach (string layer in new[] { "hull" }.Concat(TrackNames))
+        {
+            if (!_textures.TryGetValue(layer, out ImageTexture? texture))
+                continue;
+            Vector2I tile = TileOf(layer);
+            // Into the hull frame's own pixels. The layers of one size share an
+            // anchor - one render_set job gives them one - so this is a no-op
+            // today; written out because a set where it is not would otherwise
+            // put the shoreline a few pixels up the wrong layer, silently.
+            Vector2 shift = AnchorOf(layer) - Anchor;
+            Image source = texture.GetImage();
+            source.Convert(Image.Format.Rgba8);
+            int count = Math.Min(Count, CountOf(layer));
+            for (int frame = 0; frame < count; frame++)
+            {
+                // Phase 0 of a belt, because the loop's own cycle moves the tread
+                // and not the ground it stands on - the same fixing the check
+                // sheets do for the same reason.
+                byte[] data = TileFrom(source, layer, frame).GetData();
+                for (int x = 0; x < tile.X; x++)
+                {
+                    int col = (int)Math.Round(x - shift.X);
+                    if (col < 0 || col >= Tile.X)
+                        continue;
+                    for (int y = tile.Y - 1; y >= 0; y--)
+                    {
+                        if (!Opaque(data, tile.X, x, y))
+                            continue;
+                        int row = (int)Math.Round(y - shift.Y);
+                        // Anything whose own lowest pixel is above the turret axis
+                        // is not standing on the ground - an aerial, a hatch
+                        // handle, a tow cable clear of the hull below it. Six
+                        // columns of MTP are like that, and left in they would put
+                        // a wet band across an aerial. Same failure the gun has,
+                        // arriving through a part that could not simply be left
+                        // out of the layer list.
+                        if (row <= Anchor.Y)
+                            break;
+                        int at = frame * Tile.X + col;
+                        if (row > bottom[at])
+                        {
+                            bottom[at] = row;
+                            any = true;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+        if (!any)
+            return;
+
+        int max = Tile.Y - 1;
+        var bytes = new byte[bottom.Length * 4];
+        for (int i = 0; i < bottom.Length; i++)
+        {
+            if (bottom[i] < 0)
+                continue;
+            bytes[i * 4] = (byte)Math.Clamp(bottom[i] * 255 / max, 0, 255);
+            bytes[i * 4 + 3] = 255;
+        }
+        _shoreRows = bottom;
+        _shore = ImageTexture.CreateFromImage(Image.CreateFromData(
+            Tile.X, Count, false, Image.Format.Rgba8, bytes));
+    }
 
     private void MeasureHull(Image image, string layer)
     {
