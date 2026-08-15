@@ -6668,6 +6668,77 @@ public static class SelfTest
                 $"({over.X},{over.Y}) on {field.LevelAt(over)} was allowed beside "
                 + $"({pond[0].X},{pond[0].Y}) on {field.LevelAt(pond[0])}");
 
+            // The drawn surface, loaded here off the real folder against the real
+            // tile, because what is being asserted is the loader's judgement of
+            // the shipped file and a hand-built stand-in would assert nothing.
+            // Skipped whole when there is no strip on disk - the same courtesy the
+            // sounds get, and for the same reason: a bench with no art still shows
+            // everything it claims to.
+            WaterArt surf = art is null
+                ? WaterArt.Load(Main.WaterRoot, default)
+                : WaterArt.Load(Main.WaterRoot, art.HexRect);
+            if (!surf.Any)
+            {
+                GD.Print("  skip  water art: " + surf.Note);
+            }
+            else
+            {
+                // Two frames is the least that can be a loop. One is a picture,
+                // and the flat colour is already a picture for less machinery -
+                // so a one-frame strip is not a cheap surface, it is a surface
+                // that quietly stopped being the thing it was added for.
+                Check("the drawn water is a loop rather than a still",
+                    surf.Frames > 1,
+                    $"{surf.Frames} frame(s) in {surf.Frame.X}x{surf.Frame.Y}");
+
+                // The camera check, restated as the thing that actually breaks: a
+                // frame has to be the hexagon's own shape or the corners of the
+                // mesh do not land on the corners of the picture. The sheet as
+                // delivered is drawn at 36.4 degrees against the board's 30, so
+                // this is the guard that squash exists to satisfy.
+                float want = art!.HexRect.Size.Y / (float)art.HexRect.Size.X;
+                float got = surf.Frame.Y / (float)surf.Frame.X;
+                Check("and a frame is the tile's own hexagon, not the artist's",
+                    Math.Abs(got - want) / want <= 0.02f,
+                    $"the art is {got:F4} against the tile's {want:F4} - "
+                    + $"{Math.Abs(got - want) / want:P1} out, see water_sheet.py");
+
+                // The one thing a single mesh cannot say for itself. Every clock
+                // in this bench is per tank for this reason; the pond is drawn as
+                // one surface, so the phase has to be carried per cell or five
+                // hexagons breathe together and read as one animation played five
+                // times.
+                var phases = pond.Select(Stage3D.SwellAt).ToList();
+                Check("and each flooded cell starts its loop somewhere else",
+                    phases.Distinct().Count() == phases.Count,
+                    $"{phases.Count - phases.Distinct().Count()} of "
+                    + $"{phases.Count} cells share a phase with another");
+
+                // The step is taken in the shader, off UV2, and not by rewriting
+                // the mesh: Build is deliberately gated on the board changing at
+                // all, so a surface that advanced its frames through its UVs would
+                // rebuild the whole board sixty times a second.
+                Check("and the frame steps in the shader rather than in the mesh",
+                    Stage3D.SwellShader.Contains("UV2.x")
+                    && Stage3D.SwellShader.Contains("(u + step) / frames"),
+                    "the surface shader does not step frames, so the loop can "
+                    + "only move by the board being rebuilt");
+
+                // The flat fallback and the art have to be the same water. This
+                // is what makes --flat-water an A/B about the texture: a fallback
+                // in its own colour would make the toggle a colour swap wearing a
+                // texture swap's name, and every measurement taken across it would
+                // be measuring both.
+                float off = Math.Max(Math.Abs(surf.Mean.R - Stage3D.Pond.R),
+                    Math.Max(Math.Abs(surf.Mean.G - Stage3D.Pond.G),
+                             Math.Abs(surf.Mean.B - Stage3D.Pond.B)));
+                Check("and the flat colour under it is that surface's own average",
+                    off <= 0.01f,
+                    $"the fallback is {Stage3D.Pond.ToHtml(false)} against a "
+                    + $"measured {surf.Mean.ToHtml(false)}, {off:F3} apart - "
+                    + "--flat-water would be swapping the colour too");
+            }
+
             // The one number the belts read, and the whole of what stops a rut
             // being laid in a pond. Two halves of one field rather than a flag
             // beside a height, because a pair is a pair that can disagree.

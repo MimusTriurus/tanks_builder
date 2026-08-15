@@ -132,6 +132,24 @@ public sealed partial class Stage3D : Node3D
     /// leaves the ground bare, which is how the stage behaved while the trees
     /// were still only canvas items - see <see cref="BuildTrees"/>.</summary>
     public Grove? Wood;
+
+    /// <summary>The drawn water surface. Null leaves the pond the flat colour
+    /// it was before the art arrived, which is the A/B the toggle exists for -
+    /// see <see cref="Pond"/>.</summary>
+    public WaterArt? Surf;
+
+    /// <summary>
+    /// Where the pond's loop has got to, 0..1 over one turn of the four frames.
+    ///
+    /// <b>Integrated, not clock times rate</b>, for the reason
+    /// <see cref="ExhaustLoop"/> gives: a rate that changes moves the whole wave,
+    /// and the wave is the only thing here that a viewer can see. Nothing changes
+    /// this rate today, and the day something does - a wind, a wake - is the day
+    /// the other spelling would jump the pond by however long the board had been
+    /// open.
+    /// </summary>
+    private float _swell;
+
     private bool _showEdges = true;
     private readonly Dictionary<Vehicle, Stand> _stands = new();
     private string _built = "";
@@ -267,6 +285,12 @@ public sealed partial class Stage3D : Node3D
             Build();
             _built = want;
         }
+        // Outside the rebuild gate on purpose: the swell moves every frame and
+        // the board does not, which is exactly the split the gate is there to
+        // make. Wrapped rather than left to grow, so a bench left open all
+        // afternoon keeps the same precision in the fraction as one just started.
+        _swell = Mathf.PosMod(_swell + (float)delta / SwellPeriod, 1.0f);
+        _swellInk?.SetShaderParameter("phase", _swell);
     }
 
     private void Aim()
@@ -438,11 +462,13 @@ void fragment() {{
     {
         var ink = new ShaderMaterial { Shader = overGround ? Free : Tested };
         ink.SetShaderParameter("picture", picture);
-        // The colour once, here, because it never changes; the line every frame,
-        // in Place, because it does. Set the other way round a tank that crossed
-        // a slope mid-ford would come back from the material swap with no water in
-        // it at all.
-        ink.SetShaderParameter("pond", Pond);
+        // Nothing about the water is set here, and the tint used to be: it was
+        // one constant and looked like it never changed. It does now - the art
+        // carries its own average, and the toggle swaps between that and the flat
+        // colour - so it goes where the waterline already goes, in Place, every
+        // frame. Set here instead, a tank that crossed a slope mid-ford would come
+        // back from the material swap wearing whichever water was current when it
+        // was built.
         return ink;
     }
 
@@ -764,6 +790,7 @@ void fragment() {{
             var ink = (ShaderMaterial)stand.Quad.MaterialOverride;
             AtlasSet atlas = vehicle.Atlas;
             float scale = vehicle.Sprite.BodyScale;
+            ink.SetShaderParameter("pond", WaterTint);
             ink.SetShaderParameter("shore", atlas.Groundline);
             ink.SetShaderParameter("shore_map", new Godot.Vector4(
                 atlas.Anchor.X, atlas.Anchor.Y, scale, PaintSize));
@@ -834,6 +861,10 @@ void fragment() {{
         // The depth as well, and not only where the water is: it is a slider, and
         // moving it moves the surface without moving a single cell of the mask.
         note.Append('@').Append(Field.WaterRise.ToString("F3"));
+        // And whether it is painted, because that swaps the surface's material
+        // and the mesh's UVs at once - a toggle that only changed the shader
+        // would leave the drawn pond wearing no texture coordinates at all.
+        note.Append(Surf is { Any: true } ? '#' : '=');
         // Whether there is a ring, not where it is: it is cut about its own
         // origin and driven every frame, so the cell it stands on is not
         // something the board has to be rebuilt for.
@@ -884,22 +915,47 @@ void fragment() {{
     private static readonly Color Earth = new(0.42f, 0.30f, 0.20f);
 
     /// <summary>
-    /// What water is, as one colour read twice: the surface plane's own vertex
-    /// colour, and the tint the submerged part of a tank is composited with in
-    /// <see cref="PaintShader"/>.
+    /// What water is on a board with no art on disk: the surface plane's own
+    /// vertex colour, and the tint the submerged part of a tank is composited
+    /// with in <see cref="PaintShader"/>.
     ///
     /// <b>One constant because it is one statement.</b> The tint exists precisely
     /// to stand in for the plane over that fragment, so a second colour beside it
     /// would be the same water disagreeing with itself - and the way that shows is
     /// a hull that is a different water from the water it is in, which reads as the
-    /// tank being lit rather than as it being wet.
+    /// tank being lit rather than as it being wet. With art loaded that one
+    /// statement moves to <see cref="WaterTint"/>, which reads it off the strip.
     ///
-    /// Dark and two thirds opaque. The ground here is pale - that is the argument
-    /// every additive layer in this project has already had with it - so water
-    /// that let most of the bottom through would read as a stain on the grass, and
-    /// water that let none through would read as a hole.
+    /// <b>The number is the drawn surface's average, and it was a colour picked by
+    /// eye.</b> This is the flat half of an A/B, so the two halves must differ by
+    /// the texture and by nothing else; a fallback in its own blue would make the
+    /// toggle a colour swap wearing a texture swap's name. Measured at (55, 96, 94)
+    /// encoded - see <c>water_sheet.py</c> - which is darker and greener than the
+    /// blue that stood here.
+    ///
+    /// Two thirds opaque, and that part is unchanged. The ground here is pale -
+    /// that is the argument every additive layer in this project has already had
+    /// with it - so water that let most of the bottom through would read as a stain
+    /// on the grass, and water that let none through would read as a hole.
     /// </summary>
-    public static readonly Color Pond = new(0.13f, 0.26f, 0.31f, 0.66f);
+    public static readonly Color Pond = new(0.038f, 0.117f, 0.112f, 0.66f);
+
+    /// <summary>
+    /// What a wading tank's submerged half is tinted with: the drawn surface's
+    /// own average when there is one, and <see cref="Pond"/> when there is not.
+    ///
+    /// <b>Measured off the loaded strip rather than typed in beside it.</b> The
+    /// tint's whole job is to be the surface over a fragment the shader cannot
+    /// sample - so the one thing it must never be is a second opinion about what
+    /// that surface looks like. Redraw the sheet and this follows; type the
+    /// number here and it follows only when somebody remembers.
+    ///
+    /// The opacity stays this side of it either way. How much of the bottom
+    /// shows through is a statement about the ford, not about the paint.
+    /// </summary>
+    public Color WaterTint =>
+        Surf is { Any: true } s
+            ? new Color(s.Mean.R, s.Mean.G, s.Mean.B, Pond.A) : Pond;
 
     /// <summary>
     /// How much a ramp's top face is darkened against the flat ground.
@@ -1107,10 +1163,22 @@ void fragment() {{
     /// </summary>
     private void BuildWater(Vector3[] corner)
     {
+        bool drawn = Surf is { Any: true };
+        _pond.MaterialOverride = drawn ? Swell() : Decal(WaterOrder);
         if (!Field.HasWater)
         {
             _pond.Mesh = null;
             return;
+        }
+        // Half the hexagon, so a corner maps to a corner of the frame. Not the
+        // camera's squash: the frame was cut to the tile's own shape by
+        // water_sheet.py, so the two agree by construction and a sine here
+        // would be a second opinion about it.
+        float halfX = 0.0f, halfZ = 0.0f;
+        foreach (Vector3 c in corner)
+        {
+            halfX = Mathf.Max(halfX, Mathf.Abs(c.X));
+            halfZ = Mathf.Max(halfZ, Mathf.Abs(c.Z));
         }
         var st = new SurfaceTool();
         st.Begin(Mesh.PrimitiveType.Triangles);
@@ -1124,10 +1192,17 @@ void fragment() {{
             any = true;
             Vector2 flat = Origin + Field.FlatAnchor(cell) + Field.CentreOffset;
             Vector3 top = World(flat, Field.WaterTop(cell));
+            var offset = new Vector2(SwellAt(cell), 0.0f);
             for (int i = 1; i + 1 < 6; i++)
             foreach (int k in new[] { 0, i, i + 1 })
             {
                 st.SetColor(Pond);
+                // +Z reads as +v, the same way the ground art is laid on a top
+                // face: two conventions in one scene is how a texture comes out
+                // mirrored on one surface and nobody can say against what.
+                st.SetUV(new Vector2(0.5f + corner[k].X / (2.0f * halfX),
+                                     0.5f + corner[k].Z / (2.0f * halfZ)));
+                st.SetUV2(offset);
                 st.AddVertex(top + corner[k]);
             }
         }
@@ -1139,6 +1214,94 @@ void fragment() {{
         st.GenerateNormals();
         _pond.Mesh = st.Commit();
     }
+
+    /// <summary>
+    /// Where in the loop a cell starts, 0..1.
+    ///
+    /// <b>Per cell, because five hexagons breathing together are one animation
+    /// played five times.</b> That is the objection every clock in this project
+    /// has already answered - the three tanks have their own tremble, their own
+    /// exhaust, their own gunner - arriving at the one surface that is drawn as a
+    /// single mesh and would otherwise pulse as one.
+    ///
+    /// Hashed off the cell rather than drawn from a generator, for
+    /// <see cref="TerrainSet.MixedAt"/>'s reason: --capture and --trace fix the
+    /// time step so two runs can be diffed, and a pond that reshuffled itself
+    /// would be measuring itself.
+    /// </summary>
+    public static float SwellAt(Vector2I cell)
+    {
+        int h = cell.X * 73856093 ^ cell.Y * 19349663;
+        h = (h ^ (h >> 13)) * 1274126177;
+        h ^= h >> 16;
+        return ((uint)h % 1000u) / 1000.0f;
+    }
+
+    /// <summary>
+    /// How long one turn of the water's frames takes, in seconds.
+    ///
+    /// <b>The period rather than a rate, because what was measured is a period.</b>
+    /// The four frames are a swell going by, not a mechanism turning: at 2.4s they
+    /// step about every 0.6s, which is slow enough that the loop reads as water
+    /// moving and fast enough that a stopped board does not read as ice. Faster and
+    /// the quartet reads as a flicker - there are four frames, not twelve, and
+    /// nothing here can be blurred into its own average the way a track can.
+    /// </summary>
+    private const float SwellPeriod = 2.4f;
+
+    private ShaderMaterial? _swellInk;
+
+    private ShaderMaterial Swell()
+    {
+        if (_swellInk is null)
+        {
+            _swellInk = new ShaderMaterial
+            {
+                Shader = new Shader { Code = SwellShader },
+                RenderPriority = WaterOrder,
+            };
+        }
+        _swellInk.SetShaderParameter("surf", Surf!.Texture);
+        _swellInk.SetShaderParameter("frames", (float)Surf!.Frames);
+        _swellInk.SetShaderParameter("tint", WaterTint);
+        return _swellInk;
+    }
+
+    /// <summary>
+    /// The pond's surface: one frame of the strip, chosen per cell and per
+    /// moment, at the flat colour's own opacity.
+    ///
+    /// <b>The step is taken in the shader and not in the mesh</b>, which is the
+    /// whole reason the phase rides in UV2. Advancing the frame by rewriting the
+    /// UVs would rebuild the board's geometry sixty times a second for a picture
+    /// that has not changed shape - and <see cref="Build"/> is deliberately gated
+    /// on the board changing at all.
+    ///
+    /// <b>Inset by half a texel.</b> A frame is exactly the plate, so the
+    /// hexagon's left and right vertices sit on the frame's own boundary, and a
+    /// linear sample there reaches into the next frame along - which is the next
+    /// moment of the same water, so it does not look like corruption; it looks
+    /// like nothing, until the strip is one day cut from frames that differ.
+    ///
+    /// The opacity stays the flat colour's: the bottom has to show through, which
+    /// is what makes a ford a ford rather than a hole.
+    /// </summary>
+    internal const string SwellShader = @"
+shader_type spatial;
+render_mode unshaded, cull_disabled, depth_draw_never;
+uniform sampler2D surf : source_color, filter_linear_mipmap;
+uniform vec4 tint = vec4(0.0);
+uniform float frames = 1.0;
+uniform float phase = 0.0;
+void fragment() {
+    float step = floor(fract(phase + UV2.x) * frames);
+    float inset = 0.5 * frames / float(textureSize(surf, 0).x);
+    float u = clamp(UV.x, inset, 1.0 - inset);
+    vec4 c = texture(surf, vec2((u + step) / frames, UV.y));
+    ALBEDO = c.rgb;
+    ALPHA = c.a * tint.a;
+}
+";
 
     /// <summary>The plain board when there is no art, tinted by whatever the
     /// cell is wearing. Only ever seen on a run with no terrain on disk, which

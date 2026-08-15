@@ -33,6 +33,12 @@ public sealed partial class Main : Node2D
 	/// else is unchanged.</summary>
 	private const string TerrainsRoot = "D:/Projects/AgentCoding/BlenderMCP/Images/Terrains";
 	private const string PropsRoot = "D:/Projects/AgentCoding/BlenderMCP/Images/Vegetation";
+
+	/// <summary>The pond's drawn surface. Its own folder rather than a file in
+	/// Terrains, because TerrainSet reads that folder as kinds of ground and a
+	/// kind is picked by hash - which would scatter open water across the
+	/// hilltops. Water is a map, not paint; see <see cref="WaterArt"/>.</summary>
+	internal const string WaterRoot = "D:/Projects/AgentCoding/BlenderMCP/Images/Water";
 	/// <summary>The tanks to look for on disk, in key order: one per class,
 	/// all three built from separate parts - hull, turret, barrel, engine and
 	/// two belts as their own meshes.
@@ -241,6 +247,19 @@ public sealed partial class Main : Node2D
 	/// </summary>
 	private bool Watered => _water && _stage3d;
 
+	/// <summary>The drawn surface, once the tile it is checked against exists.
+	/// </summary>
+	private WaterArt? _waterArt;
+
+	/// <summary>Whether the pond wears its art or the flat colour. See
+	/// --flat-water: the fallback colour is the art's own average, so this
+	/// toggle swaps the texture and nothing else.</summary>
+	private bool _waterPaint = true;
+
+	/// <summary>What the stage is handed: the strip, or nothing when the toggle
+	/// is off or the file is not on disk.</summary>
+	private WaterArt? Surf => _waterPaint ? _waterArt : null;
+
 	/// <summary>
 	/// Whether the board and the tanks are drawn by the depth buffer rather than
 	/// by paint order. See <see cref="Stage3D"/>.
@@ -372,6 +391,10 @@ public sealed partial class Main : Node2D
 			// depth buffer can judge them. No shift to hand over - a PropNode's
 			// own position already carries Origin.
 			Wood = _grove,
+			// The pond's surface, by the same division as the wood: the field goes
+			// on deciding which cells are wet and how deep, the stage draws the
+			// surface over them.
+			Surf = Surf,
 		};
 		AddChild(_stage);
 		foreach (Vehicle vehicle in _vehicles)
@@ -1124,6 +1147,12 @@ public sealed partial class Main : Node2D
 				_shadowEnabled = false;
 			else if (userArgs[i] == "--no-sound")
 				_soundEnabled = false;
+			// Off unless asked for, and that is the point rather than caution: the
+			// connection services calls between frames, and almost everything here
+			// is measured as a pixel difference between two captures. A capture has
+			// to be able to say nothing was listening. See Main.Mcp.cs.
+			else if (userArgs[i] == "--mcp")
+				_mcpEnabled = true;
 			// Both off by default, so both flags switch *on* - the opposite
 			// shape to --no-tracks and its neighbours, and the same shape as
 			// --pitch and --rumble, which are also off.
@@ -1329,6 +1358,13 @@ public sealed partial class Main : Node2D
 			// And the way back on, for a run whose panel.json turned it off.
 			else if (userArgs[i] == "--water")
 				_water = true;
+			// The pond wearing the flat colour instead of its own surface. A
+			// second A/B inside the first, and a narrow one on purpose: the
+			// fallback colour is the strip's measured average, so the two frames
+			// differ by the texture and by nothing else. Anything the paint is
+			// blamed for that survives this flag is the water, not the art.
+			else if (userArgs[i] == "--flat-water")
+				_waterPaint = false;
 			// How deep, over the row above rather than instead of it: a depth
 			// asked for is water asked for, or the flag would look like one that
 			// did not arrive - the argument --recoil <x> already makes.
@@ -1682,6 +1718,12 @@ public sealed partial class Main : Node2D
 		// drawn at another elevation stops the hexagon on screen being the cell
 		// under the mouse, and the miss grows toward the board's edge rather
 		// than showing up in the middle where anyone would look.
+		// The pond's surface, here rather than beside the terrain, because it is
+		// checked against the rendered tile and the tile is only settled on the
+		// line above. Optional the same way: no strip on disk leaves the water the
+		// flat colour it was, which is the A/B the toggle is for.
+		_waterArt = WaterArt.Load(WaterRoot, _field.Atlas.HexRect);
+		GD.Print("water: " + _waterArt.Note);
 		if (_terrain is not null && _terrain.Any
 			&& !_terrain.CameraAgrees(_field.Atlas.HexRect))
 			GD.PushWarning(
@@ -1838,6 +1880,11 @@ public sealed partial class Main : Node2D
 			Fire();
 		if (_hitAtStart is not null)
 			TakeHit(_hitAtStart.Value);
+
+		// Last, after every start-up flag has landed. An agent's first call is for
+		// the state, and a connection opened before --drive or --destroy had been
+		// applied would answer about a board still being set up.
+		StartMcp();
 	}
 
 	private string CurrentTag() => Active.Tag;
@@ -3246,6 +3293,19 @@ public sealed partial class Main : Node2D
 		Settle();
 	}
 
+	/// <summary>Paint the pond or leave it flat. No <see cref="Settle"/> and no
+	/// reflood: nothing about the board's shape, its depths or anybody's waterline
+	/// moves - this swaps a texture for a colour that was measured off that same
+	/// texture, which is the whole point of it being an A/B. The stage notices on
+	/// its own, because whether the surface is drawn is part of its signature.
+	/// </summary>
+	private void SetWaterPaint(bool on)
+	{
+		_waterPaint = on;
+		if (_stage is not null)
+			_stage.Surf = Surf;
+	}
+
 	/// <summary>How tall a tank is drawn above the ground, at the medium's scale -
 	/// see <see cref="AtlasSet.DrawnHeight"/>. The medium because the depth is one
 	/// number for the board while three tanks of three sizes stand in it, and the
@@ -4181,6 +4241,7 @@ public sealed partial class Main : Node2D
 		["--no-water"] = new[] { "ground.water" },
 		["--water"] = new[] { "ground.water" },
 		["--depth"] = new[] { "ground.water", "ground.depth" },
+		["--flat-water"] = new[] { "ground.water_paint" },
 		// The stage asks for height as well as for itself, so it declares both -
 		// the board came up flat the first time because "ground.relief" was not
 		// declared, which from outside looks exactly like a flag that did not
@@ -4822,6 +4883,12 @@ public sealed partial class Main : Node2D
 							  ? $"   - under {ShallowAt:P0} there is nothing to see"
 							  : "");
 			});
+		// Reads the flag rather than the stage, and that is not laziness: the row
+		// has to say what was asked for even on a run where there is no strip on
+		// disk to draw, or a bench with the art missing would show the box ticking
+		// itself off and blame the toggle for the file.
+		ui.Toggle("ground.water_paint", "drawn water surface  (--flat-water)",
+			() => _waterPaint, SetWaterPaint);
 		// The number that decides whether a hill reads as one, and the only
 		// reason it is a dial rather than a constant: a level is worth
 		// grade * sqrt(3) * R * cos(e) on screen, and against a hexagon 54.5px
