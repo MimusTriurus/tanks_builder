@@ -654,8 +654,9 @@ public static class SelfTest
         Check("the scan is at least one frame step wide", scanPeak >= scanStep - 1e-6,
             $"{scanPeak:F1} deg against a {scanStep:F1} deg step");
         Check("it traverses rather than snapping",
-            biggestMove <= scan.SlewRate * dt + 1e-9,
-            $"biggest step {biggestMove:F3} deg in a frame");
+            biggestMove <= scan.PeakRate * dt + 1e-9,
+            $"biggest step {biggestMove:F3} deg in a frame, ceiling"
+            + $" {scan.PeakRate * dt:F3}");
         // Mostly parked. A turret in constant motion reads as a search radar.
         Check("it spends most of its time dwelling",
             movingFrames < 3600 * 0.6, $"{movingFrames} of 3600 frames traversing");
@@ -675,6 +676,54 @@ public static class SelfTest
             .Count(k => Math.Abs((k * scanStep) % 60.0) < 1e-6);
         Check("no leg of the sway lands on another firing lane", onLane == 0,
             $"{onLane} of {scan.MaxSteps} steps are a multiple of 60 deg");
+        // Three gunners, not one gunner three times. Everything here is hashed
+        // on the leg so a capture replays, and with nothing else in the hash
+        // every tank drew the same legs from the same leg zero at the same
+        // moment - the objection the per-vehicle clocks exist for, arriving at
+        // the one clock that had been left sharing.
+        var sweeps = Enumerable.Range(1, 3).Select(k =>
+        {
+            var s = new TurretScan { Seed = (ulong)k };
+            s.Rest(0.0);
+            return s;
+        }).ToArray();
+        var arcs = sweeps.Select(_ => new List<double>()).ToArray();
+        for (int i = 0; i < 1800; i++)
+            for (int k = 0; k < sweeps.Length; k++)
+            {
+                sweeps[k].Advance(scanStep, dt);
+                arcs[k].Add(sweeps[k].Offset);
+            }
+        int abreast = Enumerable.Range(0, arcs[0].Count)
+            .Count(i => arcs.All(w => Math.Abs(w[i] - arcs[0][i]) < 1e-9));
+        Check("three tanks do not sway in step",
+            abreast < arcs[0].Count / 2,
+            $"{abreast} of {arcs[0].Count} frames with all three on the same"
+            + " bearing");
+        // The other half of the same property, and the reason this is a seed and
+        // not a clock: --capture and --trace fix the timestep precisely so two
+        // runs can be diffed, and a scan that differed between runs would be
+        // measuring itself.
+        var rerun = new TurretScan { Seed = 2UL };
+        rerun.Rest(0.0);
+        bool replays = true;
+        for (int i = 0; i < 1800; i++)
+        {
+            rerun.Advance(scanStep, dt);
+            if (Math.Abs(rerun.Offset - arcs[1][i]) > 1e-12)
+                replays = false;
+        }
+        Check("but the same tank sways the same way twice", replays,
+            "a scan that differs between runs makes every capture diff its own");
+        // The traverse rate varies by leg, which is most of what there is to
+        // vary: the sway is two snaps and a wait, so when the snap lands is the
+        // texture. Never stalled and never backwards, whatever the jitter says.
+        double[] rates = Enumerable.Range(0, 40)
+            .Select(k => scan.RateOn(k)).ToArray();
+        Check("no two legs traverse at quite the same rate",
+            rates.Distinct().Count() > 30 && rates.All(r => r > 0.0),
+            $"{rates.Distinct().Count()} distinct rates in 40 legs,"
+            + $" {rates.Min():F1} to {rates.Max():F1} deg/s");
         // The base is announced, never assumed. Without one the offset would be
         // measured from a bearing nobody chose - the way it was measured from
         // wherever the turret happened to be when the harness started.

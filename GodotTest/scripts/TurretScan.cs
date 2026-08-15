@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 
 namespace TankSpriteTest;
 
@@ -54,6 +54,33 @@ public sealed class TurretScan
 
     public double DwellMin = 1.2;
     public double DwellMax = 3.6;
+
+    /// <summary>
+    /// How much the traverse rate varies from leg to leg, as a fraction of
+    /// <see cref="SlewRate"/>.
+    ///
+    /// The rate only decides when the frame change lands, which is exactly why
+    /// varying it is worth anything: the whole sway is two snaps and a wait, so
+    /// when the snap comes is most of what there is to see. A gunner does not
+    /// traverse at one speed twice running.
+    /// </summary>
+    public double SlewJitter = 0.35;
+
+    /// <summary>
+    /// What makes this gunner not the same gunner as the one on the next tank.
+    ///
+    /// Everything here is hashed on the leg number so that a trace or a capture
+    /// replays the same scan - and with nothing else in the hash, every tank on
+    /// the board drew the same sequence of dwells and the same legs, from the
+    /// same leg zero, at the same moment. Three turrets swaying in step read as
+    /// one animation played three times, which is the objection the per-vehicle
+    /// clocks were split up over in the first place: a shared
+    /// <see cref="EngineTremble"/> would have three tanks shivering in time.
+    ///
+    /// It is a number the caller assigns, not one taken from the clock, because
+    /// the replay is the point: same board, same frame, same picture.
+    /// </summary>
+    public ulong Seed;
 
     /// <summary>How far either side of the base bearing the sway may get, in
     /// frame steps. One - see the class note: at twenty-four headings that is 15
@@ -131,10 +158,25 @@ public sealed class TurretScan
             return 0.0;
         }
 
-        double move = Math.Sign(gap) * Math.Min(Math.Abs(gap), SlewRate * delta);
+        double move = Math.Sign(gap) * Math.Min(Math.Abs(gap), RateOn(_leg) * delta);
         Offset += move;
         return move;
     }
+
+    /// <summary>The traverse rate for one leg. Hashed on the leg rather than
+    /// rolled per frame: a rate that changed mid-traverse would be an
+    /// acceleration, and what is wanted is that this swing is not the same swing
+    /// as the last one. Never zero or negative, whatever the jitter is set
+    /// to.</summary>
+    public double RateOn(long leg) =>
+        SlewRate * Math.Max(0.1,
+            1.0 + Math.Clamp(SlewJitter, 0.0, 0.9) * (2.0 * Unit(leg, 0x2545F4914F6CDD1DUL) - 1.0));
+
+    /// <summary>The fastest a leg can traverse. Named so "it traverses rather
+    /// than snapping" can be asserted against what the jitter actually allows
+    /// instead of against the nominal rate, which the jitter is meant to
+    /// exceed.</summary>
+    public double PeakRate => SlewRate * (1.0 + Math.Clamp(SlewJitter, 0.0, 0.9));
 
     /// <summary>A bearing a whole number of frame steps from the rest bearing,
     /// never the one it is already on. Landing on a step matters: it means the
@@ -161,12 +203,15 @@ public sealed class TurretScan
 
     /// <summary>A value in [0, 1) for leg number <paramref name="index"/>.
     /// Hashed rather than random so a trace or a screenshot comparison replays
-    /// the same scan.</summary>
-    private static double Unit(long index, ulong salt)
+    /// the same scan - and hashed on <see cref="Seed"/> as well, so that
+    /// replaying the same scan does not mean every tank replaying one
+    /// scan.</summary>
+    private double Unit(long index, ulong salt)
     {
         unchecked
         {
-            var x = ((ulong)index ^ salt) * 0x9E3779B97F4A7C15UL;
+            var x = ((ulong)index ^ salt ^ (Seed * 0xD1342543DE82EF95UL))
+                    * 0x9E3779B97F4A7C15UL;
             x ^= x >> 29;
             x *= 0xBF58476D1CE4E5B9UL;
             x ^= x >> 32;
@@ -174,3 +219,4 @@ public sealed class TurretScan
         }
     }
 }
+

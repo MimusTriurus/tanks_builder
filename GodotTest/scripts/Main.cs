@@ -1495,6 +1495,13 @@ public sealed partial class Main : Node2D
 				belt.Phases = vehicle.Atlas.TrackPhases;
 				belt.Pitch = vehicle.Atlas.TrackPitch;
 			}
+			// What stops three turrets swaying in step - see TurretScan.Seed.
+			// Its place in the list rather than its tag: the identity wanted here
+			// is "which machine on this board", and --sprites can put three
+			// machines on one tank's pixels without making them one machine.
+			// Not zero for the first, so a seed left unset is distinguishable
+			// from a seed meant to be the first tank's.
+			vehicle.Scan.Seed = (ulong)i + 1UL;
 			vehicle.Exhaust.Phases = vehicle.Atlas.ExhaustPhases;
 			vehicle.Burn.Phases = vehicle.Atlas.BurnPhases;
 			// The tube's poses, read off the layer like every other count: the
