@@ -93,6 +93,22 @@ CONFIG = {
     # how every set shipped before it existed and what such a set falls back to.
     "height": True,
     "wreck": {},
+
+    # Per-tank overrides for `ground_shadow.CONFIG`, or None for its own.
+    #
+    # <b>It existed in `parts_render.CONFIG` and nothing forwarded it here</b>,
+    # so from `run()` there was no way to say anything about the shadow at all -
+    # a knob that does nothing, which from outside is indistinguishable from a
+    # knob that did not help. Found while asking what a new tank would need.
+    #
+    # What it is for is `camera_reach`. Every other setting there describes the
+    # sun, and the sun belongs to the board, not to a model - but that one is a
+    # dodge around an EEVEE artefact whose trigger is a distance, and whether a
+    # given tank lands on a bad one is a property of that tank's size. When
+    # `shadow_interior_min` fails on a new model this is the lever, and moving
+    # it cannot change the picture: for an orthographic camera the distance is
+    # free (see sprite_atlas, where it is applied after the fit).
+    "shadow_cfg": None,
     "flash": "Flash",
     "smoke": "Smoke",
     "plume": "Plume",
@@ -558,6 +574,7 @@ def _body_layers(cfg, have):
                             rebuild=cfg["rebuild"],
                             reshape=cfg["reshape"],
                             recoil_phases=cfg["recoil_phases"],
+                            shadow_cfg=cfg["shadow_cfg"],
                             wreck=cfg["wreck"]))
         return list(body.layers), body
 
