@@ -7241,6 +7241,72 @@ public static class SelfTest
                             Main.RampMask(field.Columns, field.Rows));
             field.SetWater(wasWater);
 
+            // The flank under the free edges, and the two things it has to be
+            // told apart from. Every edge that earns one is a shore - the water
+            // stops there - but not every shore earns one, and the far bank is
+            // why: there the ground stands a whole level over the surface and it
+            // is the bank's own wall the water meets, so a flank would be a sheet
+            // of water drawn in the sand's plane and fighting it for the depth
+            // test. Strictly fewer, and the day the two agree the far bank has
+            // started being drawn.
+            int shored = 0, freed = 0, level = 0;
+            bool inside = true;
+            foreach (Vector2I pool in field.WaterCells)
+            {
+                bool[] shore = Stage3D.Shoreline(field, pool, hex, 1.0f, 1.0f);
+                bool[] open = Stage3D.Freeboard(field, pool, hex, 1.0f, 1.0f);
+                Vector2I[] beside = Stage3D.Beside(field, pool, hex, 1.0f, 1.0f);
+                for (int k = 0; k < 6; k++)
+                {
+                    if (shore[k])
+                        shored++;
+                    if (!open[k])
+                        continue;
+                    freed++;
+                    inside &= shore[k];
+                    if (field.InBounds(beside[k])
+                        && field.LevelAt(beside[k]) == field.LevelAt(pool))
+                        level++;
+                }
+            }
+            Check("every edge the pond wants a flank on is a shore of it",
+                freed > 0 && inside,
+                $"{freed} free edges, and one of them is not a shore - the flank "
+                + "and the foam would then be drawn along different edges of the "
+                + "same water");
+            Check("and not every shore wants one, because the far bank holds the "
+                  + "water in",
+                freed < shored,
+                $"{freed} of {shored} shore edges - all of them means a flank is "
+                + "being stood in the far bank's own plane, where it has nothing "
+                + "to be the side of");
+            // And the one that decides whether the test is about the surface or
+            // about the cell. The pit's mouth is dry ground on the pond's own
+            // level, so a flank asked for on "the neighbour is lower" would miss
+            // it entirely and the beach would keep its floating sheet.
+            Check("and the pit's mouth earns one at the pond's own level",
+                level > 0,
+                "no free edge has a neighbour on the water's own level, so the "
+                + "test is comparing levels rather than the surface against the "
+                + "ground beside it, and the beach keeps its gap");
+            // Three of six face the eye, which is the ground prisms' arithmetic
+            // and the reason theirs need no list. Here the cull is needed rather
+            // than saved: a flank on a far edge is behind the surface's own
+            // hexagon, but it is opaque and writes depth, so the surface would
+            // read it as the bottom, find the water paper-thin, and lay foam
+            // along the whole of that edge.
+            var toEye = new Vector3(0.0f, field.Squash, field.RiseFactor);
+            int seen = 0;
+            foreach (Vector2 out_ in outward)
+                if (new Vector3(out_.X, 0.0f, out_.Y).Dot(toEye) > 0.0f)
+                    seen++;
+            Check("and half a cell's flanks face the eye and half stand behind "
+                  + "its own surface",
+                seen == 3,
+                $"{seen} of 6 edges face the camera - the cull is either taking "
+                + "everything, which puts a false bottom under the far shore, or "
+                + "nothing, which leaves the near one open");
+
             // And the surface reads it. The band comes off the mesh, not off the
             // depth of the water in front of the eye.
             Check("and the surface takes its shore off the board, not the view",

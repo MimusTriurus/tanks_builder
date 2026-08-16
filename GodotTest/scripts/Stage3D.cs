@@ -117,6 +117,7 @@ public sealed partial class Stage3D : Node3D
     private MeshInstance3D _edges = null!;
     private MeshInstance3D _ruts = null!;
     private MeshInstance3D _pond = null!;
+    private MeshInstance3D _flank = null!;
 
     /// <summary>The belt marks, redrawn as geometry lying on the board. Null
     /// leaves the ground bare, which is how the stage behaved while the ruts were
@@ -246,8 +247,10 @@ public sealed partial class Stage3D : Node3D
         // same polylines every frame too, so the cost is not new.
         _ruts = new MeshInstance3D { Mesh = new ImmediateMesh() };
         _pond = new MeshInstance3D();
+        _flank = new MeshInstance3D();
         AddChild(_tops);
         AddChild(_sides);
+        AddChild(_flank);
         AddChild(_ruts);
         AddChild(_ring);
         AddChild(_pond);
@@ -702,6 +705,8 @@ void fragment() {{
         _edges.Mesh = null;
         _ruts.Mesh = null;
         _pond.Mesh = null;
+        _flank.Mesh = null;
+        _flank.MaterialOverride = null;
         _tops.MaterialOverride = null;
         _sides.MaterialOverride = null;
         _ring.MaterialOverride = null;
@@ -1261,6 +1266,52 @@ void fragment() {{
     public static readonly Color Pond = new(0.038f, 0.114f, 0.110f, 0.66f);
 
     /// <summary>
+    /// The water at its own surface, which is what the flank of the pond is
+    /// graded down from - see <see cref="BuildWater"/>.
+    ///
+    /// <b>Measured off the rendered surface, not picked beside it.</b> The flank
+    /// stands directly under the surface's near edge and the two share that edge,
+    /// so any disagreement about the colour draws itself as a line there. The
+    /// surface's own pixels along that edge measure (82, 101, 83); this is a
+    /// quarter under them, which is what says the flank is the side of the water
+    /// and not more of the top of it. Matched exactly the pond would go back to
+    /// reading as a sheet, only a taller one.
+    ///
+    /// On screen as written: a vertex colour on an unshaded material comes out
+    /// encoded, so this is the value a screenshot reports and not a linear one.
+    /// </summary>
+    public static readonly Color Brim = new(0.243f, 0.329f, 0.306f);
+
+    /// <summary>
+    /// The same for the drawn strip, which is a different water and measures
+    /// (48, 67, 59) at the same edge.
+    ///
+    /// <b>A second measurement rather than <see cref="WaterTint"/>, and the first
+    /// try was WaterTint.</b> That is the mean of the <i>art</i>, and the art is
+    /// laid two thirds opaque over pale ground - so the number is far under what
+    /// the strip actually comes out at, and the flank went nearly black. A hole,
+    /// which is the one thing the flank exists to stop being.
+    ///
+    /// Two constants and not one because there are two surfaces. A single colour
+    /// would be a quarter under one of them and a third over the other, and which
+    /// one it flattered would depend on a flag.
+    /// </summary>
+    public static readonly Color BrimDrawn = new(0.150f, 0.211f, 0.185f);
+
+    /// <summary>
+    /// How much darker the water is at the bottom of the flank than at its top.
+    ///
+    /// <b>A fraction of the surface's colour rather than a second colour</b>, for
+    /// the reason every size in this project is a fraction: the flank has to
+    /// follow whichever water is switched on, and a pair of absolutes would be
+    /// right under one of them. What the gradient says is the only thing a
+    /// cross-section of water can say without a texture - that there is less light
+    /// further down - and that is the whole of it being a volume rather than a
+    /// sheet.
+    /// </summary>
+    public const float Bed = 0.45f;
+
+    /// <summary>
     /// What a wading tank's submerged half is tinted with: the drawn surface's
     /// own average when there is one, and <see cref="Pond"/> when there is not.
     ///
@@ -1512,6 +1563,7 @@ void fragment() {{
         if (!Field.HasWater)
         {
             _pond.Mesh = null;
+            _flank.Mesh = null;
             return;
         }
         // Half the hexagon, so a corner maps to a corner of the frame. Not the
@@ -1536,6 +1588,16 @@ void fragment() {{
             : Vector2.One;
         var st = new SurfaceTool();
         st.Begin(Mesh.PrimitiveType.Triangles);
+        var flanks = new SurfaceTool();
+        flanks.Begin(Mesh.PrimitiveType.Triangles);
+        (Vector2[] normal, float[] stand, float inradius) = Rim(corner);
+        // How far the surface stands over its own bottom, and which way the eye
+        // is - see the flanks below.
+        var sole = new Vector3(0.0f, Field.WaterRise / RiseFactor, 0.0f);
+        var eye = new Vector3(0.0f, Squash, RiseFactor);
+        Color brim = Deep ? Brim : BrimDrawn;
+        var bed = new Color(brim.R * Bed, brim.G * Bed, brim.B * Bed, 1.0f);
+        bool walled = false;
         bool any = false;
         int over = 0;
         var hub = new Vector2[MaxWaterCells];
@@ -1577,11 +1639,63 @@ void fragment() {{
                 Lay(st, top, corner[k], ord, halfX, halfZ, inset);
                 Lay(st, top, corner[(k + 1) % 6], ord, halfX, halfZ, inset);
             }
+
+            // And the flank under the free edges: the water's own cross-section,
+            // from the surface down to the bottom it stands on. Without it the
+            // pond is a sheet held up over its floor, and at the board's cut you
+            // see the floor in the gap - which is what the near shore was.
+            //
+            // <b>Only the edges facing the eye, and the cull is needed rather than
+            // saved.</b> A flank on a far edge is behind the surface's own hexagon
+            // and the surface would draw over it - but it is opaque and it writes
+            // depth, so the deep shader would read it as the bottom, find the water
+            // paper-thin there, and lay foam along the whole of that edge. The
+            // three that face away are the ground prisms' three, for the same
+            // reason and by the same arithmetic.
+            bool[] open = Freeboard(cell, corner);
+            for (int k = 0; k < 6; k++)
+            {
+                if (!open[k]
+                    || new Vector3(normal[k].X, 0.0f, normal[k].Y).Dot(eye) <= 0.0f)
+                    continue;
+                walled = true;
+                Vector3 a = top + corner[k], b = top + corner[(k + 1) % 6];
+                Vector3 af = a - sole, bf = b - sole;
+                foreach ((Vector3 v, Color ink) in new[]
+                         {
+                             (a, brim), (b, brim), (bf, bed),
+                             (a, brim), (bf, bed), (af, bed),
+                         })
+                {
+                    flanks.SetColor(ink);
+                    flanks.AddVertex(v);
+                }
+            }
         }
         if (!any)
         {
             _pond.Mesh = null;
+            _flank.Mesh = null;
             return;
+        }
+        if (walled)
+        {
+            flanks.GenerateNormals();
+            _flank.Mesh = flanks.Commit();
+            // Opaque, where the surface over it need not be. What a see-through
+            // surface buys is the ford's floor showing; behind a flank there is
+            // the void the board is cut against, or the pond's own bottom, and
+            // neither is worth showing through water.
+            _flank.MaterialOverride = new StandardMaterial3D
+            {
+                ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+                VertexColorUseAsAlbedo = true,
+                CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+            };
+        }
+        else
+        {
+            _flank.Mesh = null;
         }
         if (over > 0)
             GD.PushWarning($"{over} flooded cells past the {MaxWaterCells} the "
@@ -1594,7 +1708,6 @@ void fragment() {{
         // what Build is gated on changing.
         if (_deepInk is not null)
         {
-            (Vector2[] normal, float[] stand, float inradius) = Rim(corner);
             _deepInk.SetShaderParameter("hub", hub);
             _deepInk.SetShaderParameter("rim_mask", mask);
             _deepInk.SetShaderParameter("rim_n", normal);
@@ -1647,6 +1760,9 @@ void fragment() {{
     private bool[] Shoreline(Vector2I cell, Vector3[] corner) =>
         Shoreline(Field, cell, corner, Squash, RiseFactor);
 
+    private bool[] Freeboard(Vector2I cell, Vector3[] corner) =>
+        Freeboard(Field, cell, corner, Squash, RiseFactor);
+
     /// <summary>The same, given its camera terms instead of reading them off the
     /// field - so it can be asserted without a board, the shape
     /// <see cref="World(Vector2, float, float, float)"/> is in and for the same
@@ -1654,13 +1770,35 @@ void fragment() {{
     internal static bool[] Shoreline(HexField field, Vector2I cell,
                                      Vector3[] corner, float squash, float rise)
     {
+        Vector2I[] next = Beside(field, cell, corner, squash, rise);
         var beach = new bool[6];
+        for (int k = 0; k < 6; k++)
+            beach[k] = !field.IsWater(next[k]);
+        return beach;
+    }
+
+    /// <summary>
+    /// Which cell lies over each of the hexagon's six edges.
+    ///
+    /// The matching by direction that <see cref="Shoreline"/>'s note argues for,
+    /// pulled out because two questions are asked of it now - which edges leave
+    /// the water, and which of those have nothing holding the water in. One
+    /// answer, so the two cannot disagree about which edge is which.
+    ///
+    /// An edge no heading claims keeps the cell itself, which is the identity
+    /// every caller wants: it is water if this cell is, and it stands at this
+    /// cell's own height.
+    /// </summary>
+    internal static Vector2I[] Beside(HexField field, Vector2I cell,
+                                      Vector3[] corner, float squash, float rise)
+    {
+        var beside = new Vector2I[6];
+        for (int k = 0; k < 6; k++)
+            beside[k] = cell;
         Vector2 here = field.FlatAnchor(cell);
         foreach (int heading in HexField.EdgeHeadings)
         {
             Vector2I next = HexField.Step(cell, heading);
-            if (field.IsWater(next))
-                continue;
             // Where that neighbour lies, in the surface's own space, so it can
             // be compared against the corners it was built from.
             Vector2 away = field.FlatAnchor(next) - here;
@@ -1678,9 +1816,35 @@ void fragment() {{
                     best = k;
                 }
             }
-            beach[best] = true;
+            beside[best] = next;
         }
-        return beach;
+        return beside;
+    }
+
+    /// <summary>
+    /// Which edges of a flooded cell have the water standing free above the
+    /// ground beside them - the edges that need a flank.
+    ///
+    /// <b>Not the same question as <see cref="Shoreline"/>, and the far bank is
+    /// what tells them apart.</b> Every dry neighbour is a shore, but at the far
+    /// bank the ground stands a whole level over the surface and it is the bank's
+    /// own wall that the water meets: a flank there would be a sheet of water
+    /// drawn in the same plane as the sand, fighting it for the depth test. What
+    /// earns a flank is a neighbour whose top is <i>below</i> the surface - the
+    /// pit's mouth, where the pond stands half a level over the beach, and the
+    /// board's own outer edge, where the world is cut through and there is no
+    /// neighbour at all.
+    /// </summary>
+    internal static bool[] Freeboard(HexField field, Vector2I cell,
+                                     Vector3[] corner, float squash, float rise)
+    {
+        Vector2I[] next = Beside(field, cell, corner, squash, rise);
+        var open = new bool[6];
+        float top = field.WaterTop(cell);
+        for (int k = 0; k < 6; k++)
+            open[k] = !field.IsWater(next[k])
+                      && (!field.InBounds(next[k]) || field.TopAt(next[k]) < top);
+        return open;
     }
 
     /// <summary>
