@@ -894,8 +894,14 @@ public sealed partial class HexField : Node2D
     /// sin(elevation), so the squash is undone before the standard flat-top
     /// pixel-to-hex conversion. Rounding is done in cube coordinates: rounding
     /// col and row independently would pick the wrong cell along every slanted
-    /// edge, which is most of the border.</summary>
-    private Vector2I FlatCellAt(Vector2 local)
+    /// edge, which is most of the border.
+    ///
+    /// <b>Public as the unclamped half of <see cref="CellUnder"/>.</b> That one
+    /// clamps on purpose, for a shape whose far corner has strayed off the
+    /// board; a probe stepping a radius across the ground wants the opposite -
+    /// off the board is nothing at all, and clamping would have it reach into
+    /// the edge cell it never touched.</summary>
+    public Vector2I FlatCellAt(Vector2 local)
     {
         if (Atlas is null)
             return Vector2I.Zero;

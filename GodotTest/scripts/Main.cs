@@ -2401,6 +2401,22 @@ public sealed partial class Main : Node2D
 	/// shape - the trap <see cref="Grove.EdgeRoom"/> already names from the
 	/// other side.
 	///
+	/// <b>And that patch is stepped in flat space, never on the screen.</b> The
+	/// keep-out is a distance across the ground, while
+	/// <see cref="HexField.CellAt"/> is the picker - which cell is <i>drawn</i> at
+	/// this pixel - and the two stop agreeing the moment the tank is standing a
+	/// level down. Measured, parked in the ford at (6,5): the lift is 64.8px, and
+	/// the probe going straight left carries no vertical offset at all
+	/// (<c>sin(pi) = 0</c>), so it walks the whole 83px along the tank's own drawn
+	/// row - which is exactly the row the bank at (5,5) is drawn on. The picker
+	/// answered (5,5) honestly, being the nearer cell painted there, and the wood
+	/// on the bank opened for a tank that was a level below it and a cell away.
+	/// With the lift put back the same six probes all answer (6,5).
+	///
+	/// The same trap the selection ring and the pond already carry, and the third
+	/// place it has been paid: see <see cref="HexField.Bare"/>, which is what a
+	/// drawn row is turned back into a ground row with.
+	///
 	/// <b>Where it is headed</b> is the step it is on, taken from the order the
 	/// moment it starts rather than when the patch first touches. At rest the
 	/// patch reaches 88 ground px and the neighbour's edge is 107 away, so a
@@ -2415,22 +2431,47 @@ public sealed partial class Main : Node2D
 		double squash = _grove?.Squash ?? 0.5;
 		foreach (Vehicle vehicle in _vehicles)
 		{
-			Vector2 at = vehicle.GroundPoint - _origin;
-			cells.Add(_field.ClampCell(_field.CellAt(at)));
-			for (int k = 0; k < 6; k++)
-			{
-				double a = Math.PI * k / 3.0;
-				var rim = new Vector2(
-					at.X + (float)(Math.Cos(a) * reach),
-					at.Y + (float)(Math.Sin(a) * reach * squash));
-				Vector2I cell = _field.CellAt(rim);
-				if (_field.InBounds(cell))
-					cells.Add(cell);
-			}
+			foreach (Vector2I cell in Patch(_field, vehicle.GroundPoint - _origin,
+											_field.Bare(vehicle.Ground),
+											reach, squash))
+				cells.Add(cell);
 			if (vehicle.Moving)
 				cells.Add(vehicle.Path[vehicle.PathStep]);
 		}
 		return cells;
+	}
+
+	/// <summary>
+	/// The cells one contact patch covers: the point it stands on and six probes
+	/// a keep-out radius around it, all in flat space.
+	///
+	/// Named and static so the flat-space rule above can be checked rather than
+	/// looked at - the same reason <see cref="Stage3D.Covers"/> and
+	/// <see cref="Stage3D.Overlook"/> are. It is the whole of the failure: a
+	/// picker answering a screen point is right about the picture and wrong about
+	/// the ground, and both answers are cells on the board, so nothing downstream
+	/// can tell them apart.
+	///
+	/// The centre is clamped and the rim is not, and that is
+	/// <see cref="HexField.CellUnder"/> against
+	/// <see cref="HexField.FlatCellAt"/>: a tank is always somewhere, a probe
+	/// stepping off the board is nowhere.
+	/// </summary>
+	internal static IEnumerable<Vector2I> Patch(HexField field, Vector2 at,
+											   float lift, double reach,
+											   double squash)
+	{
+		yield return field.CellUnder(new Vector2(at.X, at.Y + lift));
+		for (int k = 0; k < 6; k++)
+		{
+			double a = Math.PI * k / 3.0;
+			var rim = new Vector2(
+				at.X + (float)(Math.Cos(a) * reach),
+				at.Y + (float)(Math.Sin(a) * reach * squash) + lift);
+			Vector2I cell = field.FlatCellAt(rim);
+			if (field.InBounds(cell))
+				yield return cell;
+		}
 	}
 
 	/// <summary>Cells carrying trees.</summary>

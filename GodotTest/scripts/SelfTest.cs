@@ -2256,6 +2256,47 @@ public static class SelfTest
                 grove.Trees.All(t => t.Modulate.A > 0.99f),
                 "the fade is a view of the ground, not a change to it");
 
+            // And the patch that decides all of the above is stepped across the
+            // ground, never across the screen. A tank standing a level down is
+            // drawn a lift lower than its own cell, so a probe walking the
+            // keep-out sideways ends up over the bank that is drawn on that row -
+            // and the picker names it, honestly, because it is the nearer cell
+            // painted there. The wood then opens on a cell nobody is on.
+            //
+            // Both halves asserted, because a check that only says "the ground
+            // answer is right" passes on the screen answer wherever the two
+            // happen to agree - which is everywhere on a flat board and on five
+            // of these six probes.
+            {
+                var pit = new Vector2I(6, 5);
+                var bank = new Vector2I(5, 5);
+                field.SetRelief(Main.ReliefMap(field.Columns, field.Rows),
+                                Main.RampMask(field.Columns, field.Rows));
+                Vector2 stand = field.CellCentre(pit);
+                float drop = field.TopAt(pit);
+                var ground = Main.Patch(field, stand, drop,
+                                        grove.KeepOut, grove.Squash).ToHashSet();
+                var screen = new HashSet<Vector2I>();
+                for (int k = 0; k < 6; k++)
+                {
+                    double a = Math.PI * k / 3.0;
+                    screen.Add(field.CellAt(new Vector2(
+                        stand.X + (float)(Math.Cos(a) * grove.KeepOut),
+                        stand.Y + (float)(Math.Sin(a) * grove.KeepOut
+                                          * grove.Squash))));
+                }
+                Check("the wood opens for the ground a tank covers, not the "
+                      + "pixels it is drawn over",
+                    field.LevelAt(pit) < field.LevelAt(bank)
+                    && ground.Count == 1 && ground.Contains(pit)
+                    && screen.Contains(bank),
+                    $"a tank in the ford at {pit.X},{pit.Y} covers "
+                    + string.Join(" ", ground.Select(c => $"{c.X},{c.Y}"))
+                    + "; read off the screen it covers "
+                    + string.Join(" ", screen.Select(c => $"{c.X},{c.Y}")));
+                field.SetRelief(null);
+            }
+
             // --- the wind ------------------------------------------------
             //
             // Stepped rather than clocked off the wall, so this runs the same
