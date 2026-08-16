@@ -2071,6 +2071,79 @@ public static class SelfTest
                 $"ruts {Stage3D.RutOrder}, ring {Stage3D.RingOrder} against a "
                 + "tree at 0");
 
+            // --- and the same tree laid down the sun ----------------------
+            //
+            // The shadow is the standing quad through one more map, so what has
+            // to hold is what that map claims: it starts where the tree does, it
+            // has no height left, and what height it had went down-sun by
+            // cot(elevation). Asserted against Sun itself rather than against
+            // the numbers SunCast happens to hold, because a cast length that
+            // has drifted off the sun is a board lit by two of them.
+            Vector3 toSun = Stage3D.Sun;
+            float cot = new Vector2(toSun.X, toSun.Z).Length() / toSun.Y;
+            Check("the cast a shadow is laid along is the sun's own",
+                Math.Abs(Stage3D.SunCast.Length() - cot) < 1e-4f
+                && Stage3D.SunCast.X * toSun.X
+                   + Stage3D.SunCast.Y * toSun.Z < 0.0f,
+                $"cast {Stage3D.SunCast.Length():F4} against cot(elevation) "
+                + $"{cot:F4}, running {(Stage3D.SunCast.X * toSun.X + Stage3D.SunCast.Y * toSun.Z < 0.0f ? "away from" : "toward")} "
+                + "the sun - and away is the only one of those that is a shadow");
+
+            Transform3D upright = Stage3D.Trunk(planted.Ground, storey, 0.0f,
+                                              squashed, risen);
+            Transform3D flattened = Stage3D.Cast(planted.Ground, storey, 0.0f,
+                                            squashed, risen, Stage3D.SunCast);
+            Check("a tree's shadow starts at the tree's own foot",
+                flattened.Origin.IsEqualApprox(upright.Origin),
+                $"{flattened.Origin} against {upright.Origin} - a shadow that begins "
+                + "anywhere else is a shadow of something that is not there");
+
+            // A hundred screen px of crown, and where it lands. Flat is the
+            // first half and the whole reason this is a transform: any height
+            // left in it would put the mark above the ground it is painted on.
+            var aloft = new Vector3(0.0f, 100.0f / risen, 0.0f);
+            Vector3 landed = flattened * aloft;
+            float run = 100.0f / risen;
+            Check("and the crown lands flat on the ground, down the sun",
+                Math.Abs(landed.Y - flattened.Origin.Y) < 1e-3f
+                && Math.Abs(landed.X - flattened.Origin.X
+                            - run * Stage3D.SunCast.X) < 0.01f
+                && Math.Abs(landed.Z - flattened.Origin.Z
+                            - run * Stage3D.SunCast.Y) < 0.01f,
+                $"{landed.Y - flattened.Origin.Y:F3} of height left, and "
+                + $"({landed.X - flattened.Origin.X:F1}, {landed.Z - flattened.Origin.Z:F1}) "
+                + $"of run against ({run * Stage3D.SunCast.X:F1}, "
+                + $"{run * Stage3D.SunCast.Y:F1})");
+
+            // The board's own decision, and the one thing here a reader cannot
+            // get back from a still frame: a sign flip in either term is a sun
+            // moved to the other side, and the picture it makes is plausible.
+            Check("and it falls toward the viewer and to the right",
+                landed.X > flattened.Origin.X
+                && Row(landed) > Row(flattened.Origin),
+                $"{landed.X - flattened.Origin.X:F1}px across and "
+                + $"{Row(landed) - Row(flattened.Origin):F1} down the screen - a sun on "
+                + "the camera's side throws both the other way, and the shadow "
+                + "goes under the crown that cast it");
+
+            // The gust rides along for free, and that it does is the whole
+            // argument for folding the flattening into the same basis: a shadow
+            // that stayed put while its tree bent is two trees.
+            Transform3D gusted = Stage3D.Cast(planted.Ground, storey, 0.05f,
+                                            squashed, risen, Stage3D.SunCast);
+            Check("and it bends with the tree in a gust",
+                Math.Abs((gusted * aloft).X - landed.X - 5.0f) < 0.01f
+                && gusted.Origin.IsEqualApprox(flattened.Origin),
+                $"{(gusted * aloft).X - landed.X:F2}px of extra drift 100px up at a "
+                + "0.05 shear, about a foot that has not moved");
+
+            Check("and a shadow lies over the ruts and under the ring",
+                Stage3D.RutOrder < Stage3D.ShadowOrder
+                && Stage3D.ShadowOrder < Stage3D.RingOrder,
+                $"ruts {Stage3D.RutOrder}, shadow {Stage3D.ShadowOrder}, ring "
+                + $"{Stage3D.RingOrder} - a rut drawn over its own shadow is a "
+                + "belt mark that glows out of the dark");
+
             // What tells somebody drawing this wood that it is a different wood.
             // The count cannot: a re-roll moves every tree and can leave the
             // total exactly where it was, and billboards built for trees that

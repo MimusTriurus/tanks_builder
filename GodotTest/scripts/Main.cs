@@ -279,6 +279,14 @@ public sealed partial class Main : Node2D
 	/// </summary>
 	private bool _deepWater = Stage3D.DeepDefault;
 
+	/// <summary>Whether the board's own things cast shadows along the sun. Apart
+	/// from the tank's contact shadow, which is a different claim: that one says
+	/// "a tank is standing here" and commits to no direction at all, this one is
+	/// the board saying where the sun is. Two switches because they are two
+	/// statements, and because the A/B for either is a pair of frames the other
+	/// must not be moving in.</summary>
+	private bool _castShadows = true;
+
 	/// <summary>How stirred up each flooded cell is. Built with the field, ticked
 	/// here and drawn by the stage - the same division the belt marks have, and for
 	/// the same reason: what the tanks did to the ground is neither the ground's
@@ -1217,6 +1225,8 @@ public sealed partial class Main : Node2D
 				_tracksEnabled = false;
 			else if (userArgs[i] == "--no-shadow")
 				_shadowEnabled = false;
+			else if (userArgs[i] == "--no-cast-shadows")
+				_castShadows = false;
 			else if (userArgs[i] == "--no-sound")
 				_soundEnabled = false;
 			// On, so the shape here is --no-mcp turning it off - and --mcp kept
@@ -4423,6 +4433,7 @@ public sealed partial class Main : Node2D
 		["--grade"] = new[] { "ground.relief", "ground.grade" },
 		["--terrain"] = new[] { "ground.terrain" },
 		["--no-forest"] = new[] { "ground.forest" },
+		["--no-cast-shadows"] = new[] { "ground.shadows" },
 		["--ghost"] = new[] { "ground.ghost" },
 		["--clear-front"] = new[] { "ground.clearfront" },
 		["--wind"] = new[] { "ground.wind" },
@@ -5204,6 +5215,8 @@ public sealed partial class Main : Node2D
 		// calibre: this is not something a round carries, it is how the wood is
 		// being drawn right now, and dragging it while a tank sits in the trees
 		// is exactly how it gets judged.
+		ui.Toggle("ground.shadows", "cast shadows  (--no-cast-shadows)",
+			() => _castShadows, on => _castShadows = on);
 		ui.Slide("ground.ghost", "trees over a tank in them  (--ghost)",
 			0.0, 1.0, 0.05,
 			() => _grove?.Ghost ?? 0.0,
@@ -5868,6 +5881,7 @@ public sealed partial class Main : Node2D
 			_stage.SwellBlend = _swellBlend;
 			_stage.Foam = _foam;
 			_stage.Deep = _deepWater;
+			_stage.CastShadows = _castShadows;
 			_stage.Trail = _wake;
 			// Before Place, because the tint a wading tank wears is read off its
 			// own cell's state and Place is where that is pushed at the sprite.

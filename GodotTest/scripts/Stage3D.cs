@@ -2035,14 +2035,58 @@ void fragment() {{
 
     public bool Deep = DeepDefault;
 
-    /// <summary>Where the sun is, as a direction to it. Matched to the key light
-    /// of the rig the sprites were rendered under - 55 degrees above the horizon
-    /// - so the glint on the water and the shading baked into the tanks agree
-    /// about which way is up-sun. Nothing else on the board reads it: every other
-    /// material is unshaded, which is why a real light node was measured to cost
-    /// exactly nothing and was still not used.</summary>
+    /// <summary>
+    /// Where the sun is, as a direction to it. <b>The board's one sun</b>: the
+    /// glint on the water, every shadow cast on the ground and the pass the
+    /// tank's own shadow is baked under all read this and nothing else.
+    ///
+    /// <b>55 degrees up, which is the rig's key light - and the azimuth is the
+    /// board's own, which the rig's is not.</b> The docstring used to claim both
+    /// were matched. Worked back out of the code rather than remembered: a sun
+    /// at rest points down -Z and <c>build_lighting</c> orients it by
+    /// <c>Rz(az)*Rx(90-elev)</c>, so the key at <c>az -35, elev 55</c> points to
+    /// <c>(-0.329, -0.470, 0.819)</c> in Blender; <c>camera_matrix(0, 30)</c>
+    /// stands the camera at <c>(0, -0.866d, +0.5d)</c>, so Blender's -Y is
+    /// toward the camera and this board's +Z is too. That makes the rig's key
+    /// <c>(-0.329, 0.819, +0.470)</c> here - the same height, the same side, and
+    /// <b>the opposite sign in Z</b>.
+    ///
+    /// The rig's key sits on the camera's side, as a three-point key does, and a
+    /// sun there throws every shadow <i>up</i> the screen, behind the thing
+    /// casting it: a tree 100px tall would put its shadow 33px up, which is
+    /// under its own crown. So the board keeps the sun behind it and the shadows
+    /// come toward the viewer, where they can be seen. What is given up is the
+    /// azimuth of the key highlight on 183px of armour, which is not a thing the
+    /// eye reads; what is bought is the direction of every shadow, which it is.
+    ///
+    /// This is not two suns quietly disagreeing: <c>ground_shadow</c> replaces
+    /// the rig wholesale for its own pass - one sun, no fill - so the shadow's
+    /// sun and the beauty rig's key have always been separate objects. This is
+    /// the shadow's, and it is declared here.
+    /// </summary>
     public static readonly Vector3 Sun =
         new Vector3(-0.40f, 0.82f, -0.41f).Normalized();
+
+    /// <summary>
+    /// Where a point one world unit above the ground throws its shadow, as an
+    /// offset in the ground's own XZ.
+    ///
+    /// The ray from a point at height <c>h</c> reaches <c>y=0</c> after
+    /// <c>h/Sun.y</c>, so the offset is <c>-h*Sun.xz/Sun.y</c> and this is that
+    /// per unit. Its length is <c>cot(elevation)</c> - 0.70 at 55 degrees - and
+    /// <b>that number is the whole reason terrain shadows on this board are a
+    /// hem rather than a shadow</b>: a level stands 53.7 world units at the
+    /// default grade, so a one-level wall throws 37.6 units, which is 0.18 of a
+    /// cell. Named here so the next person to find the relief unconvincing
+    /// lowers the sun on purpose rather than by accident - and pays for it in
+    /// the water's glint and in a re-render of every tank's shadow, because
+    /// those read this too.
+    ///
+    /// A tree is the case this does work for: 100px of screen height is 115
+    /// world units, which throws 80 - 0.37 of a cell, and clear of the crown.
+    /// </summary>
+    public static readonly Vector2 SunCast =
+        new(-Sun.X / Sun.Y, -Sun.Z / Sun.Y);
 
     /// <summary>How many hulls the surface can draw a waterline round at once.
     /// Three tanks and a slot spare; a cap because a shader array needs one.
@@ -2958,7 +3002,17 @@ void fragment() {{
     /// answer for a whole surface.</summary>
     public const int WaterOrder = -1;
     public const int RingOrder = -2;
-    public const int RutOrder = -3;
+
+    /// <summary>Where a cast shadow sorts: over the ruts and under the ring.
+    ///
+    /// <b>Over the ruts because a shadow is light not arriving, and it does not
+    /// arrive at the churned soil either.</b> A rut drawn over its own shadow is
+    /// a belt mark that glows out of the dark, which is the one thing a mark
+    /// pressed into dirt cannot do. Under the ring for the ring's own reason -
+    /// it is a marker laid over the terrain, and terrain is what a shadow is
+    /// painted on.</summary>
+    public const int ShadowOrder = -3;
+    public const int RutOrder = -4;
 
     /// <summary>
     /// The belt marks, as strips lying on the board.
@@ -3149,6 +3203,53 @@ void fragment() {{
     private readonly Dictionary<(int Species, bool Mirrored), ArrayMesh> _stems = new();
     private int _sown = -1;
 
+    /// <summary>The same trees again, laid down the sun onto the ground.
+    ///
+    /// <b>The mesh is the standing tree's own</b>, not a second one: the whole of
+    /// the flattening is in the transform, so a wood of 203 trees adds 203 nodes
+    /// and not one vertex. The material is per tree for the standing tree's
+    /// reason - the fade is per tree and this renderer ignores the per-instance
+    /// answer.</summary>
+    private readonly Dictionary<PropNode, MeshInstance3D> _shading = new();
+
+    /// <summary>Whether anything on this board casts a shadow along
+    /// <see cref="Sun"/>. On by default, on the contact shadow's argument: the
+    /// A/B is the whole case for the layer, and a switch that has to be found
+    /// before the thing can be seen is a switch nobody reaches for.</summary>
+    public bool CastShadows = true;
+
+    /// <summary>
+    /// How dark a cast shadow is where the thing casting it is opaque.
+    ///
+    /// <b>Multiplied into the art's own alpha, which is what makes a crown read
+    /// as a crown.</b> The mask is the tree's texture, so gaps between the leaves
+    /// come through as gaps in the shadow for nothing - the dapple is the art's,
+    /// not a pattern invented here.
+    ///
+    /// Black rather than a tinted dark: this lies on grass, on soil and on the
+    /// plain <see cref="SoilInk"/> of a run with no terrain art at all, and a
+    /// shadow that carried a hue would be right against one of those three.
+    ///
+    /// <b>Two shadows do compound here, and that is the thing
+    /// <c>ground_shadow</c> refused for the tank - so why it is allowed is worth
+    /// saying.</b> Ordinary blending stacks: two of these over one another give
+    /// 0.70 and three give 0.83, and the wood is dense enough to do it. Measured
+    /// on <c>--terrain mixed</c> against the same frame with the switch off:
+    /// 70199px of the picture move, 12162 of them by 60 levels or more - which
+    /// is one full-strength shadow on this ground - and only 2513 past that,
+    /// 362 past 100. So 3.6% of the shadowed ground is stacked and the deepest
+    /// is about two and a half layers.
+    ///
+    /// What made it unacceptable on the tank was not the darkness but that the
+    /// dark patch <i>moved</i>: hull and turret shadows overlapped differently
+    /// at every turret bearing, so a blot slid about the tank as the gun came
+    /// round. Two trees do not move relative to each other, so what this makes
+    /// is a fixed deeper shade under a clump, which is what a clump has. Named
+    /// rather than fixed, because the fix is a shadow mask taken as a maximum,
+    /// and that is the terrain pass's machinery - worth building once, for both.
+    /// </summary>
+    public static readonly Color ShadowInk = new(0.0f, 0.0f, 0.0f, 0.45f);
+
     /// <summary>
     /// The forest, as upright quads standing on the board.
     ///
@@ -3215,6 +3316,19 @@ void fragment() {{
             if (stem.MaterialOverride is StandardMaterial3D bark)
                 bark.AlbedoColor = new Color(1.0f, 1.0f, 1.0f, tree.Modulate.A);
         }
+        foreach ((PropNode tree, MeshInstance3D cast) in _shading)
+        {
+            cast.Visible = CastShadows;
+            if (!CastShadows)
+                continue;
+            cast.Transform = Shaded(tree);
+            // The same fade, and it has to be the same one: a tree that has gone
+            // half transparent for the tank on its cell keeping a full-strength
+            // shadow reads as the shadow of a tree that is not there.
+            if (cast.MaterialOverride is StandardMaterial3D ink)
+                ink.AlbedoColor = new Color(ShadowInk.R, ShadowInk.G, ShadowInk.B,
+                                            ShadowInk.A * tree.Modulate.A);
+        }
     }
 
     private void Sow()
@@ -3237,6 +3351,19 @@ void fragment() {{
             };
             AddChild(stem);
             _standing[tree] = stem;
+
+            // The shadow goes in first, so that between two trees whose feet
+            // sort equal the ground mark is the one underneath. The priority
+            // already says so; the order says it again for free.
+            var cast = new MeshInstance3D
+            {
+                Mesh = shape,
+                SortingUseAabbCenter = false,
+                MaterialOverride = Shadow(tree.Art),
+                Visible = CastShadows,
+            };
+            AddChild(cast);
+            _shading[tree] = cast;
         }
     }
 
@@ -3248,7 +3375,14 @@ void fragment() {{
             stem.MaterialOverride = null;
             stem.QueueFree();
         }
+        foreach (MeshInstance3D cast in _shading.Values)
+        {
+            cast.Mesh = null;
+            cast.MaterialOverride = null;
+            cast.QueueFree();
+        }
         _standing.Clear();
+        _shading.Clear();
         _stems.Clear();
     }
 
@@ -3289,6 +3423,50 @@ void fragment() {{
                              new Vector3(lean * rise, 1.0f, 0.0f),
                              new Vector3(0.0f, 0.0f, 1.0f));
         return new Transform3D(bend, at);
+    }
+
+    /// <summary>One tree's shadow, from where it stands on this board.</summary>
+    private Transform3D Shaded(PropNode tree) =>
+        Cast(Origin + tree.Ground, Field.LevelAt(tree.Cell) * Field.Lift,
+             tree.Lean, Squash, RiseFactor, SunCast);
+
+    /// <summary>
+    /// The same tree laid down the sun: <see cref="Trunk"/>'s transform with the
+    /// height folded into the ground.
+    ///
+    /// <b>One map, not a second piece of geometry.</b> A point <c>h</c> above the
+    /// foot lands at <c>h*<see cref="SunCast"/></c> across the ground, so the
+    /// column that carried height carries that instead and everything else is
+    /// unchanged - which means the lean rides along for free. A gust bends the
+    /// shadow exactly as far as it bends the tree, because it is the same number
+    /// in the same column.
+    ///
+    /// <b>The z column is arbitrary and has to be.</b> Flattening onto the ground
+    /// is a projection, so any basis that does it is singular; the quad is planar
+    /// in z, so that column moves no vertex at all. Up rather than the
+    /// projection's own zero, which would leave the engine sorting and culling a
+    /// box with no thickness.
+    ///
+    /// <b>The origin is the standing tree's, clearance and all.</b> The foot is
+    /// on the ground already, so the shadow needs no place of its own - and it
+    /// wants exactly the same nudge off the face, for exactly the same coin toss.
+    ///
+    /// What this does not do is follow the ground it falls on: the shadow stays
+    /// in the plane of the cell the tree stands in, so one that runs over a step
+    /// lies flat across it. At 0.37 of a cell, and with nothing growing on a
+    /// ramp, that is a few cells' worth of edge on the board - named rather than
+    /// fixed, because fixing it means marching the same height map the terrain's
+    /// own shadow marches and that is worth doing once, for both.
+    /// </summary>
+    public static Transform3D Cast(Vector2 foot, float lift, float lean,
+                                   float squash, float rise, Vector2 sun)
+    {
+        Vector3 at = World(foot + new Vector2(0.0f, lift), lift, squash, rise)
+                     + Clear(squash, rise);
+        var flat = new Basis(new Vector3(1.0f, 0.0f, 0.0f),
+                             new Vector3(lean * rise + sun.X, 0.0f, sun.Y),
+                             new Vector3(0.0f, 1.0f, 0.0f));
+        return new Transform3D(flat, at);
     }
 
     /// <summary>
@@ -3341,6 +3519,25 @@ void fragment() {{
         Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
         TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps,
         CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+    };
+
+    /// <summary>What a tree's shadow is painted with: the same art used as a
+    /// mask and nothing else. <see cref="ShadowInk"/> is an albedo multiply, so
+    /// the rgb goes to black and the alpha comes out as the art's own times the
+    /// strength - which is why the leaves' gaps are the shadow's gaps.
+    ///
+    /// <b>Its own material rather than the bark's with a modulate</b>, because
+    /// the two carry different alphas: the fade under a tank multiplies both,
+    /// and the shadow's own strength multiplies only this one.</summary>
+    private static StandardMaterial3D Shadow(Texture2D art) => new()
+    {
+        ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+        AlbedoTexture = art,
+        AlbedoColor = ShadowInk,
+        Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+        TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps,
+        CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+        RenderPriority = ShadowOrder,
     };
 
     /// <summary>Where the line runs, as a fraction of the cell, and the two
