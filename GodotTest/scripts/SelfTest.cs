@@ -2683,13 +2683,54 @@ public static class SelfTest
             Check("the shadow shares the tank's anchor, in frame fractions",
                 (mine - anchorFrac).Length() < 1e-4,
                 $"{mine} against {anchorFrac}");
-            // Its catcher is a disc of the tile's own inradius, so it cannot
-            // want room the tank does not already have. A wider frame here
-            // would mean it had quietly become a cast shadow.
-            Check("the shadow needs no wider frame than the tank",
-                shadowed.TileOf(AtlasSet.ShadowName) == shadowed.Tile,
-                $"{shadowed.TileOf(AtlasSet.ShadowName).X}px against tank "
-                + $"{shadowed.Tile.X}px");
+            // IT DOES WANT A WIDER FRAME NOW, and this check used to say the
+            // opposite. The old one read "the shadow needs no wider frame than
+            // the tank", on the grounds that its catcher was a disc of the
+            // tile's own inradius and so it could not want room the tank did
+            // not already have - a wider frame would have meant it had quietly
+            // become a cast shadow. It is one: the board declares a sun, the
+            // pass is baked under it, and at 55 degrees the thing reaches past
+            // the cell by construction.
+            //
+            // So what is worth asserting is the other half of that bargain -
+            // that the width is being used. A wider frame that the shadow does
+            // not fill is memory spent on nothing, and it is exactly what would
+            // be left behind if the sun ever went back overhead.
+            Vector2I frame = shadowed.TileOf(AtlasSet.ShadowName);
+            // FROM THE ANCHOR, not from the corner of the frame, and getting
+            // that wrong is this layer's standing trap now that its tile is not
+            // the tank's: an offset read raw comes out a plausible number that
+            // is mostly half the frame. The same slip was measured and fixed on
+            // the render side, where it made the shadow look 128px displaced.
+            Vector2 seat = shadowed.AnchorOf(AtlasSet.ShadowName);
+            float reach = 0.0f;
+            for (int f = 0; f < shadowed.CountOf(AtlasSet.ShadowName); f++)
+            {
+                Vector2 off = shadowed.OffsetOf(AtlasSet.ShadowName, f) - seat;
+                Vector2 size = shadowed.SizeOf(AtlasSet.ShadowName, f);
+                reach = Math.Max(reach, Math.Max(off.X + size.X, off.Y + size.Y));
+            }
+            // What this can honestly claim, and the first draft of it claimed
+            // more. "It wants a wider frame and fills it" sounded right and is
+            // false: the shadow reaches 120px from the anchor against the 128
+            // a 256 frame gives, so it fits the tank's own frame - with eight
+            // pixels to spare, which is the margin the wider frame buys rather
+            // than a reach that needs it. The old note that justified 512 said
+            // 207px, and that number was the whole tank's height; only the hull
+            // and the belts cast.
+            //
+            // So what is asserted is the pair that is true and would break:
+            // this layer is given room of its own, and it is not up against the
+            // edge of it. The frame costs nothing either way - `atlas_pack`
+            // keeps the trimmed rect - so there is no waste to guard against,
+            // only clipping.
+            float half = frame.X / 2.0f;
+            Check("the shadow is cast, so it has room of its own and is inside it",
+                frame.X > shadowed.Tile.X && reach < half - 8.0f,
+                $"a {frame.X}px frame against the tank's {shadowed.Tile.X}px, "
+                + $"with the shadow reaching {reach:F0}px from the anchor - "
+                + $"{half}px is where its own frame cuts and "
+                + $"{shadowed.Tile.X / 2}px is where the tank's would");
             Check("the shadow was rendered at every heading",
                 shadowed.CountOf(AtlasSet.ShadowName) == shadowed.Count,
                 $"{shadowed.CountOf(AtlasSet.ShadowName)} against "

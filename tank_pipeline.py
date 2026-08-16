@@ -221,6 +221,24 @@ CONFIG = {
     # right for it to be the quietest layer in the set. Below this the tank is
     # back to reading as a decal, which is the whole complaint it answers.
     "shadow_contrast_min": 12.0,
+
+    # Least of the tank's own columns that must have shadow under them.
+    #
+    # A cast shadow is mostly outside the tank by construction - at 55 degrees
+    # it reaches 110px sideways - so this cannot be the old "nine tenths of the
+    # shadow is under the tank", which was what an overhead lamp gave. What is
+    # left of that check, and it is the half that mattered, is that the tank is
+    # standing on the near end of the thing: a layer fitted against a different
+    # camera sits beside the tank instead of under it, and every heading looks
+    # plausible on its own.
+    #
+    # Measured across the three tanks and the four checked headings, the
+    # footing runs 0.84-0.98 of the hull's columns - high, because the shadow
+    # of a slab is the slab's own footprint pushed along the ground, so most of
+    # the tank keeps some of it underneath however far the tail reaches. Half
+    # is a floor with a lot of room under the worst of them and none at all for
+    # a shadow that has come adrift, which is the only thing this is for.
+    "shadow_footing_min": 0.5,
     # Least the flame may stay red by, in levels of 255: how much more red than
     # green-and-blue the picture becomes once the layer is added over the ground.
     # Brightness is not the thing that fails here - a fire that clips to white
@@ -1521,16 +1539,23 @@ def check(cfg=None):
     # left the turret layer, so the turret's clean edge stopped saying anything
     # about the tube, and the one layer that moves outward on its own axis was
     # the one nobody asked
-    # the shadow is in this list rather than with the effects because it cannot
-    # be a budget question: its catcher is a disc of the tile's own inradius, so
-    # it is clipped to ground the tile covers, and a shadow at the frame edge
-    # means the tile is wrong rather than that the shadow is too big
-    # the wreck is in this list and not with the effects for the same reason the
-    # shadow is: it is the tank, in another pose, so an edge it touches is a
-    # framing bug and not a budget. It is also the pose most likely to reach
-    # further than the live one - a canted turret stands higher than a seated
-    # one - so it is exactly the layer this test exists for.
-    for name in (("hull", "turret", "barrel", "hex", "shadow")
+    # THE SHADOW IS NOT IN THIS LIST ANY MORE, and that is a decision rather
+    # than an omission. It used to be, and the reason it was is that it could
+    # not be a budget question: the catcher was a disc of the tile's own
+    # inradius, so the shadow was clipped to ground the tile covers and an edge
+    # it touched meant the tile was wrong. That held because the sun was
+    # straight overhead. It is now the board's sun, 55 degrees up, and a cast
+    # shadow that stopped at the cell boundary would be a shadow with a hexagon
+    # cut out of it - so leaving the tile is what this layer does, and the rule
+    # that says otherwise would fail on correct output. Its own frame is what
+    # holds it: `tile_scale` 2 in ground_shadow.layer, and the effects' edge
+    # test below, which is the one that means "too big for its frame".
+    # the wreck is in this list because it is the tank, in another pose, so an
+    # edge it touches is a framing bug and not a budget. It is also the pose
+    # most likely to reach further than the live one - a canted turret stands
+    # higher than a seated one - so it is exactly the layer this test exists
+    # for.
+    for name in (("hull", "turret", "barrel", "hex")
                  + TRACK_LAYERS + WRECK_LAYERS):
         if name not in layers:
             continue
@@ -1549,6 +1574,19 @@ def check(cfg=None):
     # over is all the flash may have. That distance differs per tank, so an
     # effect sized in radii can fit on one gun and be cut on another - this is
     # the one thing tuning on a bench cannot tell you.
+    # The shadow is asked here now, and the question it is being asked has
+    # changed with it: not "is it off the tile" - it is meant to be - but "is
+    # its own frame holding it". The catcher is a disc, so what a touched edge
+    # means here is that `reach` has outgrown `tile_scale`, and the frame is
+    # what would be cropping a shadow that the disc was happy to catch.
+    if "shadow" in layers:
+        worst = _edge_alpha(layers, "shadow")
+        report["shadow_edge_alpha"] = round(worst, 4)
+        if worst > 0.02:
+            report["problems"].append(
+                "the shadow reaches its frame edge (alpha %.3f) and is being "
+                "cut off - raise tile_scale in ground_shadow.layer, or lower "
+                "reach" % worst)
     if "flash" in layers:
         worst = _edge_alpha(layers, "flash")
         report["flash_edge_alpha"] = round(worst, 4)
@@ -1602,25 +1640,87 @@ def check(cfg=None):
                 "in the alpha and not on the screen. Lower `reach` or widen "
                 "`softness` in ground_shadow.CONFIG"
                 % report["shadow_contrast"])
-        adrift = []
+        # WHAT THIS ASKS CHANGED WITH THE SUN, and the old question would now
+        # fail on correct output. It was "is nine tenths of the shadow inside
+        # the tank's own column span", which is what an overhead lamp gives and
+        # is exactly what a cast shadow does not: at 55 degrees the thing
+        # reaches 110px sideways, and most of it is meant to be out there.
+        #
+        # The failure it was written for is still the one that matters, and it
+        # is still the whole point of a layered pipeline: the layer is drawn on
+        # the shared anchor, so a shadow fitted against a different camera sits
+        # beside the tank rather than under it and every heading looks plausible
+        # on its own. So it is asked the two ways a cast shadow can say it:
+        #
+        #   the tank stands on it - the near end covers the tank's own columns;
+        #   and it runs the way the sun says - which is a direction, and until
+        #   now nothing on this bench measured one at all.
+        # Off the layer's own metadata, not out of ground_shadow.CONFIG: what
+        # is being judged is the atlas on disk, and the config is what it will
+        # be baked with next time. Those are the same number until somebody
+        # changes one, which is the only moment this matters.
+        run = (layers["shadow"][1].get("sun") or {}).get("run")
+        elev = math.radians(float(cfg["elevation"]))
+        # The rig is oriented relative to the camera and the model spins inside
+        # it, so the shadow's screen direction is the same on every frame. A
+        # world offset (dx, dy) projects to (dx, -dy*sin(elevation)) with the
+        # row index counting down the image.
+        want = (run[0], -run[1] * math.sin(elev)) if run else None
+        # THE TWO FRAMES ARE NOT THE SAME ONE ANY MORE, and forgetting it is
+        # the trap this layer now sets for every measurement made against it:
+        # the shadow is rendered at twice the tile, so a column index means a
+        # different place in each buffer. The anchors agree in frame fractions
+        # - which is asserted elsewhere and is what lets the game stack them -
+        # so the shift between them is the difference of the anchors and
+        # nothing else. Read raw, the offset came out a suspiciously round
+        # 128px, which is half the tile and not a shadow at all.
+        smeta = layers["shadow"][1]
+        ssize, tsize = smeta["tile"][0], meta["tile"][0]
+        dcol = smeta["anchor_px"][0] - meta["anchor_px"][0]
+        # the buffers count up from the bottom and anchors down from the top
+        drow = (ssize - smeta["anchor_px"][1]) - (tsize - meta["anchor_px"][1])
+        adrift, askew, footing = [], [], []
         for heading in headings:
             shade = _tile_of(layers, "shadow", heading)[:, :, 3] > 0.15
             tank = _tank_alpha(layers, heading) > 0.5
             if not shade.any():
                 adrift.append([heading, 0.0])
                 continue
-            # the tank's own column span, not its silhouette: the shadow is on
-            # the ground and the tank is above it, so they overlap in x and
-            # need not in y
+            srow, scol = np.nonzero(shade)
+            srow, scol = srow - drow, scol - dcol
+            trow, tcol = np.nonzero(tank)
             cols = np.nonzero(tank.any(axis=0))[0]
-            on = float(shade[:, cols.min():cols.max() + 1].sum()) / shade.sum()
-            if on < 0.9:
+            # The tank's own columns that have shadow under them. Not the
+            # shadow's own area, which is mostly and rightly outside: what is
+            # being asked is that the tank stands on the near end of it, which
+            # is the half a shadow fitted against a different camera loses.
+            seen = np.zeros(tsize, dtype=bool)
+            keep = (scol >= 0) & (scol < tsize)
+            seen[scol[keep].astype(int)] = True
+            on = float(seen[cols.min():cols.max() + 1].mean())
+            footing.append(round(on, 3))
+            if on < cfg["shadow_footing_min"]:
                 adrift.append([heading, round(on, 3)])
+            if want is None:
+                continue
+            # Where the shadow sits against where the tank does. The sign is
+            # the whole assertion; the length is not asked, because it is the
+            # hull's height and this test has no way to know it.
+            off = (scol.mean() - tcol.mean(), -(srow.mean() - trow.mean()))
+            if off[0] * want[0] <= 0.0 or off[1] * want[1] <= 0.0:
+                askew.append([heading, [round(v, 1) for v in off]])
+        report["shadow_footing"] = footing
         report["shadow_under_tank"] = not adrift
+        report["shadow_runs"] = [round(v, 4) for v in want] if want else None
         if adrift:
             report["problems"].append(
-                "the shadow falls outside the tank's own span at %s - it is "
-                "not fitted with the tank" % adrift)
+                "the tank is not standing on its own shadow at %s - the layer "
+                "is not fitted with the tank" % adrift)
+        if askew:
+            report["problems"].append(
+                "the shadow runs the wrong way at %s against a sun that puts "
+                "it at %s - the azimuth in ground_shadow.CONFIG and the "
+                "board's own sun have parted" % (askew, want))
 
     # --- the tank stands on the tile, rather than the tile cutting through ---
     # On a parts scene the lowest thing on the tank is a belt, not the hull -
@@ -2062,6 +2162,12 @@ def run(cfg=None):
         "shadow": body.get("shadow"),
         "shadow_contrast": checked.get("shadow_contrast"),
         "shadow_under_tank": checked.get("shadow_under_tank"),
+        # Both named, because a key computed and not named here is a check
+        # whose answer goes nowhere - and from outside that is indistinguishable
+        # from a check that was never written.
+        "shadow_runs": checked.get("shadow_runs"),
+        "shadow_footing": checked.get("shadow_footing"),
+        "shadow_edge_alpha": checked.get("shadow_edge_alpha"),
         "tiles": checked["tiles"],
         "problems": problems,
     }
