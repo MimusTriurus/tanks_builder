@@ -239,6 +239,24 @@ CONFIG = {
     # is a floor with a lot of room under the worst of them and none at all for
     # a shadow that has come adrift, which is the only thing this is for.
     "shadow_footing_min": 0.5,
+
+    # How opaque the middle of the shadow has to be, as a fraction of full, and
+    # how far in from its own edge that middle starts.
+    #
+    # The erosion is the load-bearing half. The penumbra ramps to zero at the
+    # silhouette by construction, so the minimum over the whole shape is always
+    # zero and always means nothing; the question is only worth asking inside.
+    # Wider than the ramp - a few pixels at 8 degrees - and far narrower than a
+    # real hole, which was 38 across when this shipped broken.
+    #
+    # The floor is set from the measurement rather than from taste: with the
+    # blur off and the sun jittered the darkest interior pixel runs 99-155 of
+    # 255 across headings, and the worst of those is the belly, where the
+    # occluder is closest and always will be. 0.30 sits under that with room
+    # and a long way over the 1 of 255 the broken atlas read.
+    "shadow_interior_min": 0.30,
+    "shadow_interior_erode": 8,
+
     # Least the flame may stay red by, in levels of 255: how much more red than
     # green-and-blue the picture becomes once the layer is added over the ground.
     # Brightness is not the thing that fails here - a fire that clips to white
@@ -1640,6 +1658,68 @@ def check(cfg=None):
                 "in the alpha and not on the screen. Lower `reach` or widen "
                 "`softness` in ground_shadow.CONFIG"
                 % report["shadow_contrast"])
+
+        # --- and it is solid in the middle ----------------------------------
+        #
+        # <b>The number that was missing when the shadow came out with two
+        # holes in it.</b> Every other measure here passed: the contrast was
+        # 160, the footing 0.84-0.98, the edge alpha 0, the framing identical
+        # and the anchor bit for bit - and the picture had a wedge of bare
+        # ground in the middle of each tank's shadow. Contrast is a *mean* over
+        # the tile, so a hole a fiftieth of the tile across moves it by nothing
+        # at all; footing asks where the shadow is, not whether it is there.
+        #
+        # Asked of the interior and not of the whole, because the edge is
+        # *meant* to be soft - the penumbra ramps to zero by construction, so
+        # the minimum over the silhouette is always zero and always says
+        # nothing. Eroded by `shadow_interior_erode`, which has to be wider
+        # than the penumbra and narrower than any real hole: at 8 degrees and
+        # this throw the ramp is a few pixels, and the wedge that shipped was
+        # 38 across.
+        #
+        # The failure it names is EEVEE's shadow-map blur leaking light under a
+        # close occluder - see `blur` in ground_shadow.CONFIG - and it is
+        # worth knowing that it is a property of the *receiver*: it repeats in
+        # the same pixels at every heading while the tank turns above it, so a
+        # glance at one frame and a glance at all twenty-four say the same
+        # thing and neither says which end is at fault.
+        # <b>The interior is the silhouette with its holes filled, and taking
+        # it as the opaque part instead is a check that cannot fail.</b> A hole
+        # is not dense, so a mask built from density leaves the hole out of the
+        # region being examined and reports the density of everything else:
+        # written that way, this returned 244 of 255 on the very atlas whose
+        # hole it was written for. Filled by asking each pixel whether the
+        # silhouette lies on both sides of it along its row and along its
+        # column, which is exact for a shape with no concavity deeper than it
+        # is wide - and a slab's footprint pushed along the ground is that.
+        floor, worst = 1.0, None
+        for heading in headings:
+            a = _tile_of(layers, "shadow", heading)[:, :, 3]
+            seen = a > 0.02
+            core = (np.maximum.accumulate(seen, axis=1)
+                    & np.maximum.accumulate(seen[:, ::-1], axis=1)[:, ::-1]
+                    & np.maximum.accumulate(seen, axis=0)
+                    & np.maximum.accumulate(seen[::-1], axis=0)[::-1])
+            for _ in range(int(cfg["shadow_interior_erode"])):
+                e = core.copy()
+                e[1:, :] &= core[:-1, :]
+                e[:-1, :] &= core[1:, :]
+                e[:, 1:] &= core[:, :-1]
+                e[:, :-1] &= core[:, 1:]
+                core = e
+            if not core.any():
+                continue
+            low = float(a[core].min())
+            if low < floor:
+                floor, worst = low, heading
+        report["shadow_interior_min"] = round(floor * 255.0, 1)
+        if worst is not None and floor < cfg["shadow_interior_min"]:
+            report["problems"].append(
+                "the shadow is see-through in its own middle at heading %d - "
+                "%.1f levels of 255 where it should be opaque. EEVEE's "
+                "shadow-map blur leaks light under an occluder as close to the "
+                "ground as a hull; see `blur` and `jitter` in "
+                "ground_shadow.CONFIG" % (worst, floor * 255.0))
         # WHAT THIS ASKS CHANGED WITH THE SUN, and the old question would now
         # fail on correct output. It was "is nine tenths of the shadow inside
         # the tank's own column span", which is what an overhead lamp gives and
@@ -2168,6 +2248,7 @@ def run(cfg=None):
         "shadow_runs": checked.get("shadow_runs"),
         "shadow_footing": checked.get("shadow_footing"),
         "shadow_edge_alpha": checked.get("shadow_edge_alpha"),
+        "shadow_interior_min": checked.get("shadow_interior_min"),
         "tiles": checked["tiles"],
         "problems": problems,
     }

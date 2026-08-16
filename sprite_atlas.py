@@ -282,6 +282,21 @@ def build_lighting(cfg, cam):
     down -Z at rest, so the two are complements and the rig's 35 deg of tilt is
     a sun 55 deg up. Getting that backwards costs nothing until something wants
     to reason about shadow length, and then it costs the whole argument.
+
+    <b>`blur` and `jitter` are applied only when the spec names them</b>, and
+    that is the whole of why they are optional rather than given a default
+    here. They belong to one pass - the ground shadow, which is the only one
+    that renders an occluder's *shadow* rather than an object lit by one - and
+    a default would silently reshade every sprite in the project, so every
+    atlas would have to be re-rendered to stay comparable with itself. Left
+    unnamed, the light keeps Blender's own values and the pass comes out bit
+    identical to what shipped.
+
+    What they are for is in `ground_shadow.rig`: EEVEE's shadow-map lookup is
+    blurred by `shadow_filter_radius`, and the blur leaks light in proportion
+    to how *close* the occluder stands to the receiver. A tank's belly is
+    0.065 above the ground it stands on, which is close enough that the leak
+    is a hole in the middle of its own shadow.
     """
     made = []
     rig = cfg.get("light_rig") or (
@@ -297,6 +312,10 @@ def build_lighting(cfg, cam):
         data = bpy.data.lights.new("_atlas_%s" % tag, type="SUN")
         data.energy = spec["energy"]
         data.angle = math.radians(spec.get("angle", 6.0))
+        if spec.get("blur") is not None:
+            data.shadow_filter_radius = float(spec["blur"])
+        if spec.get("jitter") is not None:
+            data.use_shadow_jitter = bool(spec["jitter"])
         ob = bpy.data.objects.new("_atlas_%s" % tag, data)
         bpy.context.scene.collection.objects.link(ob)
         offset = (Matrix.Rotation(math.radians(spec["azimuth"]), 4, "Z")
@@ -599,6 +618,33 @@ def render_atlas(cfg):
         ortho_scale, shift_y = fit_camera(cfg, cam, pivot, spun_corners,
                                           static_corners, fit_angles, distance)
 
+        # ---- and only now, how far back it actually stands -----------------
+        #
+        # <b>How far back the camera stands changes nothing in an orthographic
+        # picture, and it changes EEVEE's sun shadows a great deal.</b> A sun's
+        # shadow lives in a clipmap centred on the view whose levels grow with
+        # distance from it, so where a level boundary falls across the ground
+        # depends on where the camera is - and a boundary crossing a receiver
+        # leaks light along itself, as a band of constant depth. `ground_shadow`
+        # is the one pass that has to care; see `camera_reach` there for the 36
+        # distances this was measured over.
+        #
+        # <b>After the fit and never before it, which is the whole reason this
+        # is four lines instead of one.</b> Written into `distance` above, the
+        # bigger translation costs bits in `matrix_world.inverted()`, and the
+        # anchor came out 4.4e-7 of a frame from the one the set shipped with -
+        # 0.00017px, nothing to look at and enough to turn `framing_identical`
+        # false, because that check is exact on purpose. Moving the camera along
+        # its own view axis afterwards cannot touch a fit that is already
+        # decided: `ortho_scale` and `shift_y` live on the camera data, and for
+        # an orthographic projection the picture does not know the difference.
+        stand = reach * float(cfg.get("camera_reach") or 6.0) + 1.0
+        if stand != distance:
+            cam.matrix_world = camera_matrix(pivot, cfg["azimuth"],
+                                             cfg["elevation"], stand)
+            cam_data.clip_start = max(stand * 0.01, 1e-4)
+            cam_data.clip_end = stand * 4.0
+
         # widen the frame without changing what a pixel is worth. The factor is
         # recomputed from the rounded tile, so units_per_pixel comes out bit
         # identical to the unscaled layers rather than nearly so
@@ -641,7 +687,7 @@ def render_atlas(cfg):
                         ob.matrix_world = spin @ rest
                 else:
                     cam.matrix_world = camera_matrix(pivot, cfg["azimuth"] + angle,
-                                                     cfg["elevation"], distance)
+                                                     cfg["elevation"], stand)
                 bpy.context.view_layer.update()
 
                 i = phase * len(angles) + j

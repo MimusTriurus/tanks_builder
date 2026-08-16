@@ -153,6 +153,65 @@ CONFIG = {
     # painted, not photographed, and the trees beside it wear a soft edge too.
     "softness": 8.0,
 
+    # How much EEVEE blurs its shadow-map lookup, in shadow-map pixels, and
+    # whether the softness is sampled instead of faked.
+    #
+    # <b>Zero, and the sun jittered, because the blur is what put a hole in the
+    # middle of the shadow.</b> Blender's default is 1.0, and a blurred lookup
+    # leaks light in proportion to how *close* the occluder stands to the
+    # receiver - so it is free on a tree and ruinous on a tank, whose belly is
+    # 0.065 above the ground it stands on. Measured on the cleanest case there
+    # is: a plain plate at belly height casts a shadow with **not one pixel**
+    # of full density, and the same plate a whole unit up casts a clean black
+    # one. On the tank it came out as two crisp triangles, which is what it was
+    # reported as.
+    #
+    # The reason that took so long to find is that it is a property of the
+    # *receiver*, and every instinct here says occluder. The disc does not
+    # move, so the leak repeats to within half a pixel at all 24 headings while
+    # the tank turns above it - which reads exactly like something welded to
+    # the frame, and made a belly plate, a dropped skirt, a smaller disc and a
+    # narrower lamp all come back byte-identical. Turning the *camera* instead
+    # of the tank is what settled it: the leak went with the world.
+    #
+    # <b>Both, and neither alone.</b> The blur was carrying the softness, so
+    # zeroing it on its own leaves the shadow-map texel staircase along the
+    # edge. `jitter` makes the 8 degrees above a thing that is sampled, and the
+    # 64 samples this pass already renders average it into a real penumbra.
+    # Measured over three headings, the darkest pixel inside the shadow went
+    # 62 -> 151, 53 -> 99 and 66 -> 155 of 255; the shipped atlas reads 1.
+    #
+    # It also makes the shadow *smaller* - 163x94 px to 153x90 - because the
+    # blur was inflating its own silhouette. That is margin against the frame
+    # edge, not a loss.
+    "blur": 0.0,
+    "jitter": True,
+
+    # How far back the camera stands, as a multiple of what it has to frame.
+    #
+    # <b>A second leak, with the same cause and a different trigger, and this
+    # is the only lever that touches it.</b> Zeroing the blur leaves a band of
+    # light across the shadow at *some* camera distances and not others: EEVEE
+    # keeps a sun's shadow in a clipmap centred on the view, its levels grow
+    # with distance from the camera, and a level boundary crossing the ground
+    # leaks along itself - as a horizontal band, because a band of constant
+    # depth is what a boundary looks like from an isometric camera.
+    #
+    # Nothing on the light moves it. Measured at a bad distance: ray count,
+    # step count, resolution scale, pool size, maximum resolution, cascade
+    # count, cascade distance, cascade exponent, shadow clip start and the blur
+    # itself all return the same number to the level. Only where the camera
+    # stands does, and for an orthographic projection that is free.
+    #
+    # 6.0 is what every other pass uses. Measured over 36 distances on
+    # LT_PARTS: 6.4, 6.9, 10.1 and 20.2 leak - each about twice the last, which
+    # is what a clipmap does - and every multiple from 24 to 184 is clean. 40
+    # sits in the middle of that on a log scale, two doublings clear of the
+    # worst measured roll. It is not proof against a future model landing badly
+    # - `shadow_interior_min` is what would say so - but it is the far side of
+    # the range where landing badly is common.
+    "camera_reach": 40.0,
+
     # Sun irradiance. pi exactly, so that a white lambertian plate lit square
     # on comes back at 1.0 and the occlusion needs no reference measured off
     # the frame. Do not tune this - tune `strength` below, or the material
@@ -302,7 +361,12 @@ def rig(cfg=None):
              "energy": float(cfg["irradiance"]) / max(square, 1e-6),
              "azimuth": float(cfg["azimuth"]),
              "elevation": float(cfg["elevation"]),
-             "angle": float(cfg["softness"])}]
+             "angle": float(cfg["softness"]),
+             # named, so `build_lighting` applies them here and nowhere else -
+             # see the CONFIG entries, and see that docstring for why a default
+             # over there would have re-lit every sprite in the project
+             "blur": float(cfg["blur"]),
+             "jitter": bool(cfg["jitter"])}]
 
 
 def layer(catcher, casters, cfg=None):
@@ -333,6 +397,8 @@ def layer(catcher, casters, cfg=None):
         # the rounded tile so `units_per_pixel` comes out bit identical to the
         # layers around it rather than nearly so.
         "tile_scale": 1.5,
+        # see the CONFIG entry: free in an ortho picture, decisive for the sun
+        "camera_reach": float(cfg["camera_reach"]),
         # The sun this layer was baked under, written into its own JSON.
         #
         # <b>So that the atlas carries it and nobody has to be told.</b> The
