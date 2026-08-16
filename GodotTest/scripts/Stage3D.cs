@@ -435,6 +435,105 @@ public sealed partial class Stage3D : Node3D
     /// sprite and not this mapping, so the line is off by however far the body is
     /// leaning - a couple of pixels at the amplitudes in use.
     /// </remarks>
+    /// <summary>
+    /// The crumple every foam edge is displaced by, as GLSL shared verbatim
+    /// between the surface and the sprite.
+    ///
+    /// <b>It displaces the edge rather than dimming it, and that is the whole of
+    /// it.</b> The surface already multiplied its foam by the swell's own ridge
+    /// field, which breaks a band up into patches and leaves the band exactly
+    /// where it was - so a shore that runs along a hexagon's edge stays a
+    /// straight line with holes in it, and reads as the cell boundary showing
+    /// through the water. Pushing the distance instead moves the line itself, and
+    /// a wandering line says nothing about the grid underneath it.
+    ///
+    /// <b>Displacement is a fraction of the band, never a length.</b> The three
+    /// edges are measured in two different spaces - the shore in world units, the
+    /// collar and the lap in the sprite's own pixels - so a crumple in either unit
+    /// would have to be converted at two of the three call sites, and the
+    /// conversion is exactly the kind of second copy that parts company. As a
+    /// fraction it needs no units at all: one dial sets how ragged every edge is,
+    /// and each edge stays as ragged as it is wide.
+    ///
+    /// <b>Sampled in world XZ at all three, including on the armour.</b> The
+    /// sprite is a billboard and knows only its own pixels, but the line it draws
+    /// lies on the water plane by definition - that is what a waterline is - so
+    /// the plane's own height closes the projection and the fragment can be put
+    /// back where it is in the world. Without that the tank's half of the line
+    /// would crumple to a different rhythm than the water's half against it, and
+    /// the two would part at the silhouette, which is the one place they are seen
+    /// touching.
+    ///
+    /// Its own clock, handed in, for the reason everything here has one: TIME is
+    /// the wall clock and --capture pins the step so two runs agree.
+    /// </summary>
+    internal const string FoamEdge = @"
+float hash12(vec2 p) {
+    uvec2 q = uvec2(ivec2(p)) * uvec2(1597334677u, 3812015801u);
+    uint n = (q.x ^ q.y) * 1597334677u;
+    return float(n) * (1.0 / 4294967295.0);
+}
+
+float vnoise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash12(i), hash12(i + vec2(1.0, 0.0)), u.x),
+               mix(hash12(i + vec2(0.0, 1.0)), hash12(i + vec2(1.0, 1.0)), u.x),
+               u.y);
+}
+
+// Two octaves drifting apart, signed, roughly in -1..1. Not folded like the
+// swell: a fold makes creases, and a crease in an edge is a spike. What an edge
+// wants is a lobe - a tongue of foam reaching further in one place than the
+// next - which is what plain noise gives.
+float crumple(vec2 p, float t) {
+    vec2 drift = vec2(0.21, -0.13) * t;
+    return (vnoise(p + drift) - 0.5) * 1.30
+         + (vnoise(p * 2.17 - drift * 1.40) - 0.5) * 0.60;
+}
+
+// The swell, and only the swell: two folded octaves, drifting apart. The fold
+// is what separates water from cloud - smooth noise has round hills, a surface
+// held by its own tension has creases between them - and the per-octave drift
+// is what stops the field sliding as one sheet.
+//
+// Its clock and speed come in as arguments rather than off a uniform, which is
+// the whole reason it lives here: the sprite has to evaluate this same field to
+// tear its own half of the waterline, and it is a different material with a
+// different set of uniforms.
+float height(vec2 p, float t, float speed) {
+    float h = 0.0;
+    float a = 1.0;
+    float f = 1.0;
+    vec2 drift = vec2(0.35, 0.20) * t * speed;
+    for (int i = 0; i < 2; i++) {
+        float n = vnoise(p * f + drift);
+        h += a * (1.0 - abs(2.0 * n - 1.0));
+        a *= 0.5;
+        f *= 2.03;
+        drift = vec2(-drift.y, drift.x) * 1.7;
+    }
+    return h;
+}
+
+// And what that field does to foam: tears it into patches. Every foam edge in
+// the bench is multiplied by this, so a band is never a solid stripe.
+//
+// <b>Displacement and tearing are two jobs and this is the second.</b> Tearing
+// alone leaves the band where it was and only punches holes in it - which is
+// what drew hexagons along the shore. Displacement alone gives a wandering line
+// of even weight, which reads as piping. Foam is both, and it has to be the same
+// two everywhere or the halves of one line do not match.
+//
+// Sampled at the fragment, unlike the crumple: a multiplier cannot fold a band,
+// and taken on the line instead it would come out as streaks combed down the
+// column.
+float shred(vec2 xz, float t, float scale, float speed) {
+    return smoothstep(0.30, 0.80, height(xz * scale, t, speed) / 1.75);
+}
+";
+
     internal const string PaintShader = @"
 shader_type spatial;
 render_mode unshaded, blend_premul_alpha, depth_draw_never, cull_disabled{0};
@@ -467,6 +566,20 @@ uniform float lap_band = 2.5;
 // that two runs are comparable, and a shader reading the wall clock makes every
 // A/B near a wading tank measure the hour it was taken at.
 uniform float lap_time = 0.0;
+// What it takes to put a fragment of the armour back in the world, so that the
+// crumple on this half of the line is the same field as the crumple on the
+// water's half: the sprite's own position in the harness's 2D px, the camera's
+// two terms, and the height of the water plane. The plane's height is what makes
+// it solvable at all - a billboard fragment is a ray, and the waterline is by
+// definition the one place that ray is known to meet the water.
+uniform vec4 lap_world = vec4(0.0);
+uniform float lap_plane = 0.0;
+// How fine the crumple is in world units, how far it pushes the line as a
+// fraction of the band, and the swell's own scale and speed for the tearing.
+// All four shared with the surface: a second set would be a second answer about
+// how ragged one line is.
+uniform vec4 lap_crumple = vec4(0.05, 0.45, 0.02, 1.0);
+{1}
 void fragment() {{
     vec4 c = texture(picture, UV);
     ALPHA = c.a;
@@ -492,15 +605,45 @@ void fragment() {{
         // little way up the paint, so most of the band is on the wet side.
         //
         // It ripples along the hull, and that is what stops it reading as a
-        // stripe painted on the tank. Two frequencies that never line up, an
-        // amplitude near a pixel: the tank stands still and the water does not,
-        // so a line that is perfectly straight and perfectly still is the one
-        // thing this cannot be.
-        float wob = sin(tile.x * 0.55 + lap_time * 1.7) * 0.6
-                  + sin(tile.x * 0.23 - lap_time * 1.1) * 0.5;
+        // stripe painted on the tank: the tank stands still and the water does
+        // not, so a line that is perfectly straight and perfectly still is the
+        // one thing this cannot be.
+        //
+        // <b>The water's own crumple and not a pair of sines.</b> Two sines along
+        // tile.x were the first cut and they are wrong twice over. They run along
+        // the sprite, so the ripple is pinned to the hull and swims with it
+        // instead of staying in the water; and they are a different field from
+        // the one the surface crumples its shore and its collar by, so the half
+        // of this line on the paint and the half on the water beside it wandered
+        // to two different rhythms and parted at the silhouette - the one place
+        // the two halves are seen touching. Put back in the world, sampled from
+        // the shared field, they are one line.
+        //
+        // At the line's own row and not at this fragment's, which is the same
+        // rule the surface follows and for the same reason: read at the fragment
+        // the push varies across the band as well as along it, the band's width
+        // becomes a function of the field, and where the gradient reaches one the
+        // whole thing folds into hard teeth. On the line it is constant across
+        // the band by construction.
+        vec2 flat_px = (vec2(tile.x, line) - shore_map.xy) * scale
+                       + lap_world.xy;
+        vec2 sea = vec2(flat_px.x, (flat_px.y + lap_plane * lap_world.w)
+                                   / max(lap_world.z, 0.0001));
+        float wob = crumple(sea * lap_crumple.x, lap_time) * lap_band
+                    * lap_crumple.y;
         float d = tile.y - (line + wob);
         float lap = d >= 0.0 ? 1.0 - smoothstep(0.0, lap_band, d)
                              : 1.0 - smoothstep(0.0, lap_band * 0.4, -d);
+        // And torn by the swell, exactly as every foam edge on the water is. Left
+        // out, this half alone was solid while the half beside it was in patches,
+        // and no width or colour would have made them one line: the surface dims
+        // its foam by this field everywhere, so a band that skips it is simply
+        // the brightest thing in the pond. Read at the fragment's own place, not
+        // at the line's - see shred.
+        vec2 spot = (tile - shore_map.xy) * scale + lap_world.xy;
+        lap *= shred(vec2(spot.x, (spot.y + lap_plane * lap_world.w)
+                                  / max(lap_world.z, 0.0001)),
+                     lap_time, lap_crumple.z, lap_crumple.w);
         // Premultiplied, like the tint above it: this pass blends that way, and
         // an unmultiplied colour here would glow through the sprite's own edge.
         ALBEDO = mix(ALBEDO, foam_lap.rgb * c.a,
@@ -515,12 +658,12 @@ void fragment() {{
     /// set.</summary>
     private static readonly Shader Tested = new()
     {
-        Code = string.Format(PaintShader, ""),
+        Code = string.Format(PaintShader, "", FoamEdge),
     };
 
     private static readonly Shader Free = new()
     {
-        Code = string.Format(PaintShader, ", depth_test_disabled"),
+        Code = string.Format(PaintShader, ", depth_test_disabled", FoamEdge),
     };
 
     private static ShaderMaterial Paint(Texture2D picture, bool overGround)
@@ -861,8 +1004,8 @@ void fragment() {{
             // fails quietly in both directions at once - the tank wears some
             // other cell's water and its own cell is never told it is being
             // driven through.
-            ink.SetShaderParameter(
-                "pond", WaterTintAt(Field.CellAt(vehicle.GroundPoint - Origin)));
+            Vector2I wet = Field.CellAt(vehicle.GroundPoint - Origin);
+            ink.SetShaderParameter("pond", WaterTintAt(wet));
             // Which table, and what it still owes: the height map's is already
             // the waterline and is handed nought to lift it by, the groundline's
             // is where the tank meets the bottom and is handed the depth. One
@@ -889,7 +1032,29 @@ void fragment() {{
                 FoamInk.R, FoamInk.G, FoamInk.B,
                 vehicle.Wading ? Mathf.Max(0.0f, Foam) : 0.0f));
             ink.SetShaderParameter("lap_band", LapBand);
-            ink.SetShaderParameter("lap_time", _foamClock);
+            // <b>The surface's clock and not the strip's.</b> This half of the
+            // line is displaced and torn by the same two fields the water's half
+            // is, and a field is only the same field if it is read at the same
+            // moment: on _foamClock the armour crumpled to one rhythm and the
+            // collar an inch away to another, which is the parting this whole
+            // arrangement exists to prevent. _foamClock stays what it was for -
+            // the sheet water, which has no computed surface to agree with.
+            ink.SetShaderParameter("lap_time", _deepClock);
+            // What the sprite needs to put a fragment of its own armour back in
+            // the world, so that its half of the waterline crumples to the same
+            // field as the water's half beside it. The sprite's position and not
+            // GroundPoint, for the reason the collar takes the same: the contact
+            // patch is the anchor already moved by the offset these rows are
+            // counted from.
+            ink.SetShaderParameter("lap_world", new Godot.Vector4(
+                vehicle.Sprite.Position.X, vehicle.Sprite.Position.Y,
+                Squash, RiseFactor));
+            // The water plane's own height in world units - the third equation,
+            // and the only reason a billboard fragment can be placed at all.
+            ink.SetShaderParameter("lap_plane", vehicle.Wading
+                ? Field.WaterTop(wet) / RiseFactor : 0.0f);
+            ink.SetShaderParameter("lap_crumple", new Godot.Vector4(
+                EdgeCrumple.X, EdgeCrumple.Y, Swell2D.X, Swell2D.Y));
         }
         // And the waterline round each hull that is in the water. Gathered here
         // because this is where the tanks are, and pushed even when none of them
@@ -1735,10 +1900,69 @@ void fragment() {{
     public const float HullBand = 6.0f;
 
     /// <summary>How far the foam licks up the paint at the waterline, in the
-    /// sprite's own pixels. Narrower than <see cref="HullBand"/> because this
-    /// one is drawn on the tank rather than on the water: a wide band here is
-    /// not foam, it is a repaint of the hull.</summary>
-    public const float LapBand = 2.5f;
+    /// sprite's own pixels.
+    ///
+    /// <b>It is not the whole band and never was, which is what makes this
+    /// number readable next to <see cref="HullBand"/>.</b> The profile is
+    /// asymmetric - foam sits on the water and only licks a little way up the
+    /// paint - so of this figure the wet side gets all of it and the dry side
+    /// four tenths. At 5.0 that is 7.0px across the silhouette against the
+    /// collar's 6.0 beside it, which is the point: the two halves of one line
+    /// now read as one thickness. It was 2.5, giving 3.5 against 6.0, and the
+    /// line visibly thinned as it crossed onto the armour.
+    ///
+    /// Wider than this and the old warning holds - a wide band here is not foam,
+    /// it is a repaint of the hull - but the ceiling is the dry side's 0.4 of it,
+    /// and 2.0px up a hull drawn 49px tall is a lick.</summary>
+    public const float LapBand = 5.0f;
+
+    /// <summary>The swell's own scale and speed, as the foam's tearing reads
+    /// them. Named here because two materials evaluate that field now - the
+    /// surface for its normals and its foam, the sprite for the half of the
+    /// waterline that lies on the armour - and a second copy of either number is
+    /// two rhythms in one line.</summary>
+    public static readonly Vector2 Swell2D = new(0.02f, 1.0f);
+
+    /// <summary>How fine the crumple that displaces every foam edge is, in world
+    /// units, and how far it pushes as a fraction of that edge's own band.
+    ///
+    /// <b>One pair for all three edges, which is the whole of the unification.</b>
+    /// The shore is measured in world units and the collar and the lap in sprite
+    /// pixels; as a fraction the dial needs no conversion at either, so there is
+    /// one answer to "how ragged is the water's edge" rather than three that
+    /// drift apart.
+    ///
+    /// The scale is a feature every ~20 world units against a hex some 93 across,
+    /// so a cell's edge carries several lobes and never reads as one straight
+    /// line. Finer and the edge frays into noise at this zoom; coarser and a
+    /// whole edge bows one way, which reads as the hexagon again with a bend in
+    /// it.
+    ///
+    /// The push is under a half deliberately, and the pair moved together. At
+    /// 0.6 over a 12-unit cell the hull's line zigzagged three pixels every six -
+    /// not a shore but a row of teeth - and the answer to that is a longer
+    /// wavelength <i>and</i> a shorter push, because either alone just trades one
+    /// wrong reading for the other.</summary>
+    public static readonly Vector2 EdgeCrumple = new(0.05f, 0.45f);
+
+    /// <summary>How wide the shore's own band is, as a fraction of a tile's
+    /// inradius.
+    ///
+    /// <b>Halved, and paid for by the crumple rather than given up.</b> It was
+    /// 0.10, and at that width the bank read as a haze standing off the water's
+    /// edge rather than as foam on it - wide enough that the eye took the whole
+    /// gradient for the edge, and straight enough along a hexagon's side that
+    /// what it drew was the cell. Displacing the distance buys back the raggedness
+    /// that width was standing in for, so the band can be the thing it is:
+    /// narrow, and where the water actually stops.</summary>
+    public const float Beach = 0.05f;
+
+    /// <summary>How deep the water has to be before the view-ray half of the
+    /// shore stops foaming, in world units. Halved with <see cref="Beach"/> and
+    /// for the same reason - the two are the same edge asked two ways, and
+    /// narrowing one alone would leave the far walls wearing the old haze while
+    /// the near banks wore the new line.</summary>
+    public const float ShoreDepth = 5.0f;
 
     /// <summary>The colour of foam, wherever it is drawn. One constant because
     /// the line at the hull and the line at the bank are the same water, and two
@@ -1756,7 +1980,8 @@ void fragment() {{
             {
                 Code = string.Format(CultureInfo.InvariantCulture, DeepShader,
                                      MaxWaterCells, FoamCut, FoamLift, FoamRung,
-                                     Wake.Max, HullLine, Collars * HullLine),
+                                     Wake.Max, HullLine, Collars * HullLine,
+                                     FoamEdge),
             },
             RenderPriority = WaterOrder,
         };
@@ -1764,6 +1989,15 @@ void fragment() {{
         _deepInk.SetShaderParameter("wake_seed", Wake.Seed);
         _deepInk.SetShaderParameter("wake_spread", Wake.Spread);
         _deepInk.SetShaderParameter("bands", (float)WaterArt.Bands);
+        // Named here as well as defaulted in the shader, because the sprite is
+        // handed the same two numbers from the same constants: a default living
+        // only in the GLSL would be one of the pair set from C# and the other
+        // not, which is how the two halves of this line would part again.
+        _deepInk.SetShaderParameter("edge_crumple", EdgeCrumple);
+        _deepInk.SetShaderParameter("beach", Beach);
+        _deepInk.SetShaderParameter("shore", ShoreDepth);
+        _deepInk.SetShaderParameter("wave_scale", Swell2D.X);
+        _deepInk.SetShaderParameter("wave_speed", Swell2D.Y);
         return _deepInk;
     }
 
@@ -2112,7 +2346,7 @@ uniform float sheen = 0.07;
 uniform float fine = 3.4;
 uniform float sparkle = 0.55;
 uniform float glint = 0.85;
-uniform float shore = 10.0;
+uniform float shore = 5.0;
 uniform float foam = 0.0;
 uniform float foam_cut = {1};
 uniform float foam_rung = {3};
@@ -2165,43 +2399,17 @@ uniform float rim_mask[{0}];
 uniform vec2 rim_n[6];
 uniform float rim_d[6];
 uniform float rim_span = 1.0;
-uniform float beach = 0.10;
+// Half what it was, and the halving is the shore meeting the hull's line rather
+// than the hull's line being let out to meet a haze. See Stage3D.Beach.
+uniform float beach = 0.05;
+// How fine the foam's crumple is in world units, and how far it pushes an edge
+// as a fraction of that edge's own band. Shared verbatim with the sprite, which
+// draws the half of the waterline that lies on the armour.
+uniform vec2 edge_crumple = vec2(0.08, 0.6);
 
 varying vec3 world;
 
-float hash12(vec2 p) {{
-    uvec2 q = uvec2(ivec2(p)) * uvec2(1597334677u, 3812015801u);
-    uint n = (q.x ^ q.y) * 1597334677u;
-    return float(n) * (1.0 / 4294967295.0);
-}}
-
-float vnoise(vec2 p) {{
-    vec2 i = floor(p);
-    vec2 f = fract(p);
-    vec2 u = f * f * (3.0 - 2.0 * f);
-    return mix(mix(hash12(i), hash12(i + vec2(1.0, 0.0)), u.x),
-               mix(hash12(i + vec2(0.0, 1.0)), hash12(i + vec2(1.0, 1.0)), u.x),
-               u.y);
-}}
-
-// The swell, and only the swell: two folded octaves, drifting apart. The fold
-// is what separates water from cloud - smooth noise has round hills, a surface
-// held by its own tension has creases between them - and the per-octave drift
-// is what stops the field sliding as one sheet.
-float height(vec2 p) {{
-    float h = 0.0;
-    float a = 1.0;
-    float f = 1.0;
-    vec2 drift = vec2(0.35, 0.20) * time * wave_speed;
-    for (int i = 0; i < 2; i++) {{
-        float n = vnoise(p * f + drift);
-        h += a * (1.0 - abs(2.0 * n - 1.0));
-        a *= 0.5;
-        f *= 2.03;
-        drift = vec2(-drift.y, drift.x) * 1.7;
-    }}
-    return h;
-}}
+{7}
 
 // The chop on top of it: finer, quicker, and <b>not</b> folded. This is what
 // the sun is actually catching, and it is a separate field rather than two
@@ -2235,9 +2443,9 @@ void fragment() {{
     // one number that decides how crisp the surface reads: too small and it
     // shimmers on a still frame, too large and the creases go out of it.
     float e = 0.35;
-    float h = height(p);
-    float hx = height(p + vec2(e, 0.0)) - h;
-    float hz = height(p + vec2(0.0, e)) - h;
+    float h = height(p, time, wave_speed);
+    float hx = height(p + vec2(e, 0.0), time, wave_speed) - h;
+    float hz = height(p + vec2(0.0, e), time, wave_speed) - h;
     // And the chop's own slope, at its own step. Sampled apart from the swell
     // because it is finer than the swell's step can resolve: differenced over
     // e it would be averaged away, which is how the sparkle got lost into the
@@ -2300,7 +2508,24 @@ void fragment() {{
     // wall standing behind the water, and <b>nothing at all</b> where the shore
     // is on the near side, because there the ray carries on down to the floor.
     // That asymmetry is what left the ramp and the near bank bare.
-    float lip = 1.0 - smoothstep(0.0, shore, thick);
+    //
+    // <b>Every edge below is pushed by the crumple rather than dimmed by it.</b>
+    // The ridge field still breaks the foam into patches further down, and that
+    // was all there was: a band multiplied by a mask keeps its own shape, so a
+    // shore lying along a hexagon's edge stayed a straight line with holes in it
+    // and read as the grid showing through the water.
+    //
+    // <b>And each is sampled on its own edge, never at the fragment.</b> Sampled
+    // at the fragment the displacement varies across the band as well as along
+    // it, so the band's width becomes a function of the field: where the gradient
+    // approaches one the mapping folds and the line comes back as hard teeth.
+    // Measured before it was believed - band 5px, field pushing 3px over a 12px
+    // cell, which puts the gradient at 0.9 and the fold one step away. Taken at
+    // the point on the edge itself the displacement is constant across the band
+    // by construction, so no setting of the two dials can fold it.
+    float lip = 1.0 - smoothstep(0.0, shore, thick
+                 + crumple(world.xz * edge_crumple.x, time) * edge_crumple.y
+                   * shore);
     // And in the plane of the water: how far this fragment is from an edge the
     // pond actually ends at. Independent of where the camera is by construction,
     // which is the whole point - a shore is where the water stops, not where the
@@ -2317,12 +2542,22 @@ void fragment() {{
     int cell = int(UV2.x + 0.5);
     vec2 off = world.xz - hub[cell];
     float near = 1e9;
+    // And where on that edge the nearest point is, which is where its crumple is
+    // read - see above. Costs one vec2 in a loop of six.
+    vec2 foot = world.xz;
     for (int k = 0; k < 6; k++) {{
         if (mod(floor(rim_mask[cell] / exp2(float(k))), 2.0) < 0.5)
             continue;
-        near = min(near, rim_d[k] - dot(off, rim_n[k]));
+        float span = rim_d[k] - dot(off, rim_n[k]);
+        if (span < near) {{
+            near = span;
+            foot = world.xz + rim_n[k] * span;
+        }}
     }}
-    float bank = 1.0 - smoothstep(0.0, beach * rim_span, near);
+    float bank_band = beach * rim_span;
+    float bank = 1.0 - smoothstep(0.0, bank_band, near
+                  + crumple(foot * edge_crumple.x, time) * edge_crumple.y
+                    * bank_band);
     // And foam where a tank went through, off the band and the point it was
     // standing at - see Swell. Unchanged by any of this: it never needed depth.
     float lv = clamp(state[cell] / max(bands - 1.0, 1.0), 0.0, 1.0);
@@ -2355,7 +2590,7 @@ void fragment() {{
     }}
     trail *= wake_on;
 
-    float broken = smoothstep(0.30, 0.80, h / 1.75);
+    float broken = shred(world.xz, time, wave_scale, wave_speed);
     // The shore and the tank's own patch are broken up hard - they are foam
     // sitting on moving water. The trail is not: a wake is water that has been
     // churned through, so it holds together as a lane and only takes the
@@ -2394,7 +2629,21 @@ void fragment() {{
         // drawn from the two columns either side of a gap it is not in.
         if (a < 0.0 || b < 0.0)
             continue;
+        // Pushed by the same field as the shore and in the same coin - a fraction
+        // of its own band - and read at the line rather than at the fragment, for
+        // the reason given up there: read at the fragment this one folds first,
+        // being the narrowest of the three.
+        //
+        // The line's own point is put back in the world by inverting the mapping
+        // that brought the fragment here, and the height it needs is this
+        // fragment's own: the collar is drawn on the water, so world.y is already
+        // the plane the waterline lies in. The sprite's half does the same
+        // inversion from the other side, which is what makes the two one line.
         float line = mix(a, b, fract(f)) - hull_dip[i];
+        vec2 seat = (vec2(px.x, line) - hull_pivot[i]) * hull_size[i].x
+                    + hull_at[i];
+        vec2 sea = vec2(seat.x, (seat.y + world.y * rise) / max(squash, 0.0001));
+        line += crumple(sea * edge_crumple.x, time) * edge_crumple.y * hull_band;
         collar = max(collar, 1.0 - smoothstep(0.0, hull_band, abs(px.y - line)));
     }}
 

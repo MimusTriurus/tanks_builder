@@ -7254,6 +7254,45 @@ public static class SelfTest
                 !Stage3D.DeepShader.Contains("beach, UV2.y"),
                 "the band is still interpolated off the vertices");
 
+            // Every foam edge on the board is one field, and the two shaders that
+            // draw them get it as the same text. Asked of the *formatted* source
+            // and not of the constants, because that is what the driver compiles:
+            // a shader that stopped taking the shared module would still name
+            // crumple and shred in its own copy, and a copy is the whole failure.
+            string litWater = string.Format(
+                System.Globalization.CultureInfo.InvariantCulture,
+                Stage3D.DeepShader, 8, 0.9f, 0.5f, 0.5f, 8, 64, 256,
+                Stage3D.FoamEdge);
+            string litPaint = string.Format(Stage3D.PaintShader, "",
+                                            Stage3D.FoamEdge);
+            Check("and the water's edge is one field, shared as one text",
+                litWater.Contains(Stage3D.FoamEdge)
+                && litPaint.Contains(Stage3D.FoamEdge),
+                "the surface and the sprite carry their own copies of the field "
+                + "that shapes a foam edge, so the half of the waterline on the "
+                + "armour and the half on the water beside it drift apart at the "
+                + "one place they are seen touching");
+            // Displacement and tearing are two jobs and both halves do both.
+            // Tearing alone leaves a band where it was and only punches holes in
+            // it, which is what drew hexagons along the shore; displacing alone
+            // gives an even line that reads as piping.
+            Check("and every edge is both pushed and torn by it",
+                litWater.Contains("crumple(") && litWater.Contains("shred(")
+                && litPaint.Contains("crumple(") && litPaint.Contains("shred("),
+                "one of the two edges is only dimmed or only moved, so the shore "
+                + "and the collar are not the same material");
+            // And the push is read on the line rather than at the fragment. At
+            // the fragment it varies across the band as well as along it, so the
+            // band's width becomes a function of the field and folds into hard
+            // teeth once the gradient reaches one - measured at 0.9 on the hull's
+            // own band before this was moved.
+            Check("and it is read on the line, so no dial can fold the band",
+                Stage3D.PaintShader.Contains("vec2(tile.x, line)")
+                && Stage3D.DeepShader.Contains("vec2(px.x, line)"),
+                "a foam band is displaced by the field sampled under the "
+                + "fragment, so it pinches where the gradient is steep and comes "
+                + "back as a row of teeth rather than a shore");
+
             // The waterline round a hull is the tank's own outline, and it is
             // the same table the sprite's own waterline is cut by - which is
             // what makes them one measurement rather than two that agree today.
