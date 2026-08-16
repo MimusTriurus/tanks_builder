@@ -2667,6 +2667,20 @@ public static class SelfTest
             TankSprite.LayerOrder.Length > 0
             && TankSprite.LayerOrder[0] == AtlasSet.ShadowName,
             "it is the ground, and everything else is above the ground");
+        // ONE INK ON THE BOARD, and the tank's shadow is the one that can walk
+        // away from it: the trees and the relief both read Stage3D.ShadowInk,
+        // and this layer once carried no tint at all and so landed at whatever
+        // the atlas said. That is a measurement of lost sun, which is a fine
+        // thing for an atlas to be and full black on a field - a tree shadow
+        // takes 0.449 of the ground and this took 1.000.
+        //
+        // Asked as an equality against the same field, so it is the *coupling*
+        // being asserted and not a number copied here to drift on its own.
+        Check("a tank darkens the ground by the board's own ink, as a tree does",
+            Mathf.Abs(EffectLayer.DensityOf(EffectLayer.Clocks.Shadow, null)
+                      - Stage3D.ShadowInk.A) < 1e-6f,
+            $"{EffectLayer.DensityOf(EffectLayer.Clocks.Shadow, null)} against "
+            + $"{Stage3D.ShadowInk.A} - two suns of different strengths");
 
         AtlasSet? shadowed = atlases?.Values.FirstOrDefault(a => a.HasShadow)
                              ?? (atlas.HasShadow ? atlas : null);

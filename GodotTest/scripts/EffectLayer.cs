@@ -458,6 +458,44 @@ void fragment() {
     /// the same dozen-odd pixels the hull's nose rises - the two agree to three
     /// percent by construction, which is why one of them moving alone shows.
     /// </summary>
+    /// <summary>
+    /// How opaque a layer lands, by what its clock is.
+    ///
+    /// Three of these are densities the tank is showing - the throttle in the
+    /// plume, and the two ends of a fire, which are separate numbers because
+    /// they finish differently. <b>The shadow's is not a density at all: it is
+    /// the board's own ink.</b> The trees and the relief darken the ground by
+    /// <see cref="Stage3D.ShadowInk"/>, and a tank has to darken it by the
+    /// same or the board is lit by two suns of different strengths.
+    ///
+    /// Measured before it read that: a tree shadow takes 0.449 of the ground
+    /// under it and the tank's took <b>1.000</b> - it blacked the field out
+    /// where it fell. That is what the atlas honestly says, and it is not what
+    /// a shadow looks like. With the ink it takes 0.449 as well, and the edge
+    /// needed nothing: the ramp was already 8px against the trees' 8px, so the
+    /// whole of "harder than the trees" was opacity.
+    ///
+    /// <b>Here and not in `strength` in ground_shadow.CONFIG</b>, which would
+    /// darken it just as well. The atlas is a *measurement* of how much sun the
+    /// ground lost - that is what makes `shadow_interior_min` mean anything,
+    /// and what lets this be judged against the trees on the screen where both
+    /// are drawn. Baked into the render it would sit in another file, out of
+    /// sight of the one number it has to match, and cost a re-render of three
+    /// tanks every time the two were compared.
+    ///
+    /// Named rather than left inline in the draw so that arm can be asserted;
+    /// nothing else here would notice it drifting. <paramref name="tank"/> is
+    /// read only by the arms that are densities.
+    /// </summary>
+    public static float DensityOf(Clocks clock, TankSprite tank) => clock switch
+    {
+        Clocks.Exhaust => tank.ExhaustDensity,
+        Clocks.BurningFire => tank.FireDensity,
+        Clocks.BurningSmoke => tank.SmokeDensity,
+        Clocks.Shadow => Stage3D.ShadowInk.A,
+        _ => 1.0f,
+    };
+
     public static EffectLayer Shadow(string layer) => new()
     {
         Layer = layer,
@@ -671,13 +709,7 @@ void fragment() {
         // smoking, so the flame fades out and the column thins to a floor. The
         // two are separate numbers because they end differently, which is the
         // same reason they are two layers.
-        var tint = new Color(1.0f, 1.0f, 1.0f, Clock switch
-        {
-            Clocks.Exhaust => Tank.ExhaustDensity,
-            Clocks.BurningFire => Tank.FireDensity,
-            Clocks.BurningSmoke => Tank.SmokeDensity,
-            _ => 1.0f,
-        });
+        var tint = new Color(1.0f, 1.0f, 1.0f, DensityOf(Clock, Tank));
         // The one layer drawn away from the anchor, and it is pulled here for
         // the reason the phase is - a child redraws on its own schedule. So is
         // the calibre, which is a scale on the rect rather than on the node:
