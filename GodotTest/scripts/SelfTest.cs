@@ -34,7 +34,8 @@ public static class SelfTest
                           SoundSet? common = null,
                           IReadOnlyDictionary<string, SoundSet>? sounds = null,
                           ControlPanel? livePanel = null,
-                          Grove? grove = null)
+                          Grove? grove = null,
+                          Stage3D? stage = null)
     {
         int failed = 0;
 
@@ -159,7 +160,7 @@ public static class SelfTest
             bad == 0, $"{bad} bad, first {badDetail}");
 
         Relief(field, grove, Check);
-        Ramps(field, Check);
+        Ramps(field, stage, Check);
         Water(field, grove, Check);
         Climbing(field, tank, Check);
 
@@ -6048,7 +6049,8 @@ public static class SelfTest
     /// screenshot, because a seam of a fraction of a pixel looks like a seam of
     /// none.
     /// </summary>
-    private static void Ramps(HexField field, Action<string, bool, string> Check)
+    private static void Ramps(HexField field, Stage3D? stage,
+                              Action<string, bool, string> Check)
     {
         GD.Print("ramps: the level changes where the map says it may");
         try
@@ -6506,6 +6508,74 @@ public static class SelfTest
             Check("but no ramp of the ring may be driven onto its neighbour",
                 ringToRing == 0,
                 $"{ringToRing} steps go straight from one ramp to another");
+
+            // --- the shadow the ground itself throws --------------------------
+            //
+            // The ground shader marches a height map toward the sun, so the one
+            // thing to establish about that map is that it is the ground.
+            // Everything else it could be is a board slightly other than the one
+            // being drawn, which shades perfectly convincingly and is wrong at
+            // every fragment.
+            //
+            // Baked here rather than read off whatever the stage happened to
+            // have: a --selftest run quits before the stage's first frame, so
+            // the map asked for without this is the map of a board that was
+            // never built - and "there is no map" is a pass, which makes it a
+            // check that cannot fail. Survey is the same call Build makes, with
+            // the same argument.
+            if (stage is not null)
+            {
+                stage.Survey();
+                int wrong = 0;
+                float worst = 0.0f;
+                for (int q = 0; q < field.Columns; q++)
+                for (int r = 0; r < field.Rows; r++)
+                {
+                    var cell = new Vector2I(q, r);
+                    // The cell's own middle, where a flat top and a ramp's
+                    // tilted one both agree with TopAt exactly - away from the
+                    // corners, so the texel grid has nothing to argue about.
+                    Vector2 onGround = stage.Origin + field.FlatAnchor(cell)
+                                       + field.CentreOffset;
+                    Vector3 mid = Stage3D.World(onGround,
+                                                field.LevelAt(cell) * field.Lift,
+                                                field.Squash, field.RiseFactor);
+                    float? said = stage.MapHeight(mid.X, mid.Z);
+                    if (said is null)
+                        continue;
+                    float off = Math.Abs(said.Value
+                                         - field.TopAt(cell) / field.RiseFactor);
+                    worst = Math.Max(worst, off);
+                    if (off > 1.5f)
+                        wrong++;
+                }
+                Check("the height map the ground marches is the ground",
+                    stage.ShadowReach > 0.0f && wrong == 0,
+                    $"{wrong} cells disagree with their own top, worst "
+                    + $"{worst:F2} world units, over a reach of "
+                    + $"{stage.ShadowReach:F1}");
+
+                // A fixed number of samples spread over exactly this, so a reach
+                // short of what the relief can throw is a shadow that stops in
+                // the middle of itself - and one that stops short reads as a
+                // shorter shadow rather than as a broken one, which is why no
+                // picture would report it.
+                (int low, int high) = field.LevelRange;
+                float relief = (high - low) * field.Lift / field.RiseFactor;
+                Check("and it reaches as far as the tallest step can throw",
+                    stage.ShadowReach
+                        >= relief * Stage3D.SunCast.Length() - 0.01f,
+                    $"reach {stage.ShadowReach:F1} against {relief:F1} of relief "
+                    + $"at cot {Stage3D.SunCast.Length():F3}");
+
+                // And a board with nothing to cast bakes nothing at all, which
+                // is what keeps 24 samples off every fragment of the flat one.
+                field.SetRelief(null);
+                stage.Survey();
+                Check("and a flat board bakes no map and marches nothing",
+                    stage.ShadowReach == 0.0f && stage.MapHeight(0.0f, 0.0f) is null,
+                    "there is a height map on a board with no relief in it");
+            }
 
             // The fallback, which is what keeps every relief assertion written
             // before ramps existed describing the board it was written for.

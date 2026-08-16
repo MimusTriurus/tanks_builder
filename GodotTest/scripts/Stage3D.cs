@@ -294,6 +294,16 @@ public sealed partial class Stage3D : Node3D
             Build();
             _built = want;
         }
+        // Outside the gate too, and for the swell's reason: the switch is not
+        // part of what the board is made of, so folding it into the signature
+        // would rebuild every prism to answer a checkbox - and leaving it in
+        // Build alone would leave the ground lit while the wood's shadows had
+        // already gone.
+        float lit = CastShadows ? ShadowInk.A : 0.0f;
+        if (_tops.MaterialOverride is ShaderMaterial turf)
+            turf.SetShaderParameter("shade", lit);
+        if (_sides.MaterialOverride is ShaderMaterial flank)
+            flank.SetShaderParameter("shade", lit);
         // Outside the rebuild gate on purpose: the swell moves every frame and
         // the board does not, which is exactly the split the gate is there to
         // make. Wrapped rather than left to grow, so a bench left open all
@@ -1519,22 +1529,337 @@ void fragment() {{
             // it.
             RenderPriority = -1,
         };
-        _tops.MaterialOverride = new StandardMaterial3D
-        {
-            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
-            VertexColorUseAsAlbedo = true,
-            AlbedoTexture = art,
-            TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps,
-            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
-        };
-        _sides.MaterialOverride = new StandardMaterial3D
-        {
-            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
-            VertexColorUseAsAlbedo = true,
-            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
-        };
+        // Before the materials, because they carry it: the map is baked off the
+        // same corners the faces above were built from, so it cannot describe a
+        // different board than the one it shades.
+        BakeHeights(corner);
+        _tops.MaterialOverride = Turf(art);
+        // No art: the sides never had a texture, and the shader's default-white
+        // sampler is what lets one material serve both.
+        _sides.MaterialOverride = Turf(null);
         BuildRing(corner);
         BuildWater(corner);
+    }
+
+    // --- what the sun cannot see ---------------------------------------------
+
+    /// <summary>How many samples a fragment takes along the sun.
+    ///
+    /// <b>Fixed, with the stride adapting instead</b>, and that is the trade
+    /// rather than the obvious one. The march has to reach as far as the tallest
+    /// thing on the board can throw - <c>(highest-lowest)*cot(elevation)</c> -
+    /// so a taller board wants either more samples or longer ones. More samples
+    /// means a loop bound that changes, and this bench drags a grade slider, so
+    /// that is a shader recompiled mid-drag. Longer samples means a shadow's edge
+    /// gets coarser on a tall board, which is a picture getting slightly worse
+    /// rather than a frame getting lost.
+    ///
+    /// 24 across the whole reach is 4.7 world units a step on a three-level
+    /// board, against a cell 215 across - so the step is finer than a shadow's
+    /// own soft edge and nothing thinner than a fifth of a cell can be stepped
+    /// over.</summary>
+    private const int Marches = 24;
+
+    /// <summary>How far a shadow's edge is smeared, in world units.
+    ///
+    /// A penumbra rather than a hard line, and it is nearly free: the march
+    /// already knows how far under the ray the blocker stands, so the edge is a
+    /// smoothstep on a number it has. Named in world units because that is what
+    /// the march is in - in pixels it would sharpen as the board is zoomed, and
+    /// a shadow that sharpens with the zoom is a shadow drawn on the lens.
+    /// </summary>
+    private const float Penumbra = 7.0f;
+
+    /// <summary>How coarse the height map is, in world units to a texel.
+    ///
+    /// <b>This is what a shadow's edge is made of, and six was visibly too
+    /// coarse.</b> The reasoning that picked it - finer than
+    /// <see cref="Penumbra"/>, so invisible - was about the height a shadow
+    /// falls from, and the eye does not look at that. It looks at where the
+    /// shadow stops, and that edge is a contour of this grid: at six units the
+    /// hem beside a wall came out in stair steps about nine world units across,
+    /// which at this zoom is five screen pixels of visible staircase.
+    ///
+    /// Two is about a screen pixel at the bench's own zoom, and the whole board
+    /// is then a couple of megabytes of one-byte texels - which is only
+    /// affordable because the bake writes a byte array rather than calling
+    /// <c>SetPixel</c> a million and a half times.</summary>
+    private const float Grain = 2.0f;
+
+    private ImageTexture? _heights;
+    private Vector4 _mapAt;
+    private Vector2 _mapSpan;
+    private float _mapReach;
+    private byte[]? _map;
+    private int _mapWide, _mapTall;
+
+    /// <summary>How far the tallest thing on this board can throw, in world
+    /// units on the ground. Nought on a board with no relief, which is also the
+    /// board that bakes no map and marches no fragment.</summary>
+    internal float ShadowReach => _mapReach;
+
+    /// <summary>
+    /// What the height map says the surface is at a point of the world, or null
+    /// where there is no map.
+    ///
+    /// Kept so the map can be asked the one question that matters about it -
+    /// whether it is the ground - rather than only inspected as pixels. A map
+    /// that describes a board slightly other than the one being drawn shades
+    /// perfectly convincingly and is wrong everywhere, which is the failure this
+    /// bench keeps refusing to leave to the eye.
+    /// </summary>
+    internal float? MapHeight(float x, float z)
+    {
+        if (_map is null)
+            return null;
+        int at = Mathf.Clamp(Mathf.FloorToInt((x - _mapAt.X) * _mapAt.Z * _mapWide),
+                             0, _mapWide - 1);
+        int down = Mathf.Clamp(Mathf.FloorToInt((z - _mapAt.Y) * _mapAt.W * _mapTall),
+                               0, _mapTall - 1);
+        return _mapSpan.X + _map[down * _mapWide + at] / 255.0f * _mapSpan.Y;
+    }
+
+    /// <summary>
+    /// The board's own top surface as a height map, baked off the very triangles
+    /// the ground is built from.
+    ///
+    /// <b>Rasterised from the mesh's own corners rather than asked of the field
+    /// again.</b> A second description of where the ground is would be a second
+    /// thing to keep in agreement, and it would go wrong exactly where the two
+    /// are hardest to compare - on a ramp, whose top is a tilted plane the field
+    /// states per corner. Taken off <see cref="CellTop"/> and
+    /// <see cref="CornerLift"/>, the map <i>is</i> the ground the shader shades,
+    /// slopes and all, by construction.
+    ///
+    /// <b>A byte a texel, with the range carried beside it.</b> The whole board's
+    /// relief is a few levels, so 256 codes over it is a quarter of a world unit
+    /// - far under <see cref="Penumbra"/>, and therefore under anything the eye
+    /// could find. Outside the board it reads as the lowest ground there is,
+    /// which is the right answer: nothing out there casts anything.
+    /// </summary>
+    private void BakeHeights(Vector3[] corner)
+    {
+        _heights = null;
+        _map = null;
+        _mapReach = 0.0f;
+        if (Field.Atlas is null)
+            return;
+
+        float loX = float.MaxValue, hiX = float.MinValue;
+        float loZ = float.MaxValue, hiZ = float.MinValue;
+        float loY = float.MaxValue, hiY = float.MinValue;
+        for (int q = 0; q < Field.Columns; q++)
+        for (int r = 0; r < Field.Rows; r++)
+        {
+            Vector3 top = CellTop(new Vector2I(q, r));
+            Vector3[] up = CornerLift(new Vector2I(q, r));
+            for (int i = 0; i < 6; i++)
+            {
+                float x = top.X + corner[i].X, z = top.Z + corner[i].Z;
+                float y = top.Y + up[i].Y;
+                loX = Mathf.Min(loX, x); hiX = Mathf.Max(hiX, x);
+                loZ = Mathf.Min(loZ, z); hiZ = Mathf.Max(hiZ, z);
+                loY = Mathf.Min(loY, y); hiY = Mathf.Max(hiY, y);
+            }
+        }
+        if (loX > hiX)
+            return;
+
+        // A flat board casts nothing, and saying so here is what keeps the
+        // march off every fragment of it rather than having it run 24 samples
+        // to discover the ground is where it started.
+        float relief = hiY - loY;
+        if (relief < 0.001f)
+            return;
+
+        int wide = Mathf.Clamp(Mathf.CeilToInt((hiX - loX) / Grain), 8, 4096);
+        int tall = Mathf.Clamp(Mathf.CeilToInt((hiZ - loZ) / Grain), 8, 4096);
+        var map = new byte[wide * tall];
+
+        float perX = wide / (hiX - loX), perZ = tall / (hiZ - loZ);
+        for (int q = 0; q < Field.Columns; q++)
+        for (int r = 0; r < Field.Rows; r++)
+        {
+            var cell = new Vector2I(q, r);
+            Vector3 top = CellTop(cell);
+            Vector3[] up = CornerLift(cell);
+            // The same fan the top face is built from, so what is rasterised is
+            // the face and not a hexagon that happens to sit near it.
+            for (int i = 1; i + 1 < 6; i++)
+                Etch(map, wide, tall, loX, loZ, perX, perZ, loY, relief,
+                     Peak(top, corner[0], up[0]),
+                     Peak(top, corner[i], up[i]),
+                     Peak(top, corner[i + 1], up[i + 1]));
+        }
+
+        _heights = ImageTexture.CreateFromImage(
+            Image.CreateFromData(wide, tall, false, Image.Format.R8, map));
+        _map = map;
+        _mapWide = wide;
+        _mapTall = tall;
+        _mapAt = new Vector4(loX, loZ, 1.0f / (hiX - loX), 1.0f / (hiZ - loZ));
+        _mapSpan = new Vector2(loY, relief);
+        _mapReach = relief * SunCast.Length();
+    }
+
+    /// <summary>Bake the map for the board as it stands now. The same call
+    /// <see cref="Build"/> makes with the same argument, exposed so the map can
+    /// be asserted against the field without a built stage under it - a
+    /// <c>--selftest</c> run quits before this node's first frame.</summary>
+    internal void Survey()
+    {
+        if (Field.Atlas is not null)
+            BakeHeights(Corners());
+    }
+
+    /// <summary>One corner of a top face, as the map wants it: where it is on the
+    /// ground and how high it stands.</summary>
+    private static Vector3 Peak(Vector3 top, Vector3 corner, Vector3 up) =>
+        new(top.X + corner.X, top.Y + up.Y, top.Z + corner.Z);
+
+    /// <summary>One triangle of the top surface into the map, keeping the higher
+    /// answer where two overlap - which along a shared edge is the same answer
+    /// twice, and at a corner is the one that matters.</summary>
+    private static void Etch(byte[] map, int wide, int tall, float loX, float loZ,
+                             float perX, float perZ, float loY, float relief,
+                             Vector3 a, Vector3 b, Vector3 c)
+    {
+        Vector2 pa = new((a.X - loX) * perX, (a.Z - loZ) * perZ);
+        Vector2 pb = new((b.X - loX) * perX, (b.Z - loZ) * perZ);
+        Vector2 pc = new((c.X - loX) * perX, (c.Z - loZ) * perZ);
+        float area = (pb.X - pa.X) * (pc.Y - pa.Y) - (pb.Y - pa.Y) * (pc.X - pa.X);
+        if (Mathf.Abs(area) < 1e-6f)
+            return;
+        int x0 = Mathf.Clamp(Mathf.FloorToInt(Mathf.Min(pa.X, Mathf.Min(pb.X, pc.X))),
+                             0, wide - 1);
+        int x1 = Mathf.Clamp(Mathf.CeilToInt(Mathf.Max(pa.X, Mathf.Max(pb.X, pc.X))),
+                             0, wide - 1);
+        int y0 = Mathf.Clamp(Mathf.FloorToInt(Mathf.Min(pa.Y, Mathf.Min(pb.Y, pc.Y))),
+                             0, tall - 1);
+        int y1 = Mathf.Clamp(Mathf.CeilToInt(Mathf.Max(pa.Y, Mathf.Max(pb.Y, pc.Y))),
+                             0, tall - 1);
+        for (int y = y0; y <= y1; y++)
+        for (int x = x0; x <= x1; x++)
+        {
+            // The texel's middle, because that is the point the shader's
+            // bilinear fetch is centred on.
+            float px = x + 0.5f, py = y + 0.5f;
+            float wa = ((pb.X - px) * (pc.Y - py) - (pb.Y - py) * (pc.X - px)) / area;
+            float wb = ((pc.X - px) * (pa.Y - py) - (pc.Y - py) * (pa.X - px)) / area;
+            float wc = 1.0f - wa - wb;
+            // A hair of slack, so that a texel centre landing exactly on a
+            // shared edge is claimed by both triangles rather than by neither.
+            if (wa < -0.001f || wb < -0.001f || wc < -0.001f)
+                continue;
+            float high = wa * a.Y + wb * b.Y + wc * c.Y;
+            var code = (byte)Mathf.RoundToInt(
+                Mathf.Clamp((high - loY) / relief, 0.0f, 1.0f) * 255.0f);
+            int at = y * wide + x;
+            if (code > map[at])
+                map[at] = code;
+        }
+    }
+
+    /// <summary>
+    /// What the ground is painted with: the art and the vertex colour it always
+    /// wore, times how much of the sun reaches it.
+    ///
+    /// <b>The march is the whole of it, and it answers for the walls too without
+    /// being told about them.</b> A fragment steps toward the sun and asks the
+    /// height map whether the ground there has got above the ray; a point on a
+    /// wall facing away from the sun leaves its own cell's top standing over the
+    /// ray on the first step, so it comes out dark, and one on a wall facing the
+    /// sun steps out over the lower neighbour and comes out lit. Neither needed a
+    /// normal, which is as well: the sides carry no UV and their facing is a
+    /// thing <see cref="WallInk"/> states per heading.
+    ///
+    /// <b>The art is sampled through a default-white texture rather than through
+    /// a branch.</b> A board with no terrain art on disk hands over nothing, and
+    /// nothing samples white, so the vertex colour comes through untouched -
+    /// which is exactly what the <see cref="StandardMaterial3D"/> this replaces
+    /// did with a null albedo.
+    ///
+    /// The darkening is <see cref="ShadowInk"/>'s own alpha, and it has to be:
+    /// a hill's shadow and a tree's shadow are the same shadow, and two numbers
+    /// for it would be the board lit by two suns of different strengths.
+    /// </summary>
+    internal const string SoilShader = @"
+shader_type spatial;
+render_mode unshaded, cull_disabled;
+
+uniform sampler2D art : source_color, filter_linear_mipmap, hint_default_white;
+uniform sampler2D height : filter_linear, hint_default_black;
+// The map's own corner in world XZ, and one over its extent there.
+uniform vec4 map = vec4(0.0, 0.0, 1.0, 1.0);
+// The lowest ground on the board and how far the relief reaches above it.
+uniform vec2 span = vec2(0.0, 1.0);
+// Where the sun is, as a direction to it.
+uniform vec3 sun = vec3(0.0, 1.0, 0.0);
+// How far along the ground one sample steps, how far a shadow's edge is
+// smeared, how dark a blocked fragment goes, and how many samples to take.
+// The count is a uniform and not a constant so that a board growing taller
+// does not recompile this in the middle of a slider drag.
+uniform float step_run = 0.0;
+uniform float soft = 1.0;
+uniform float shade = 0.0;
+uniform int steps = 0;
+
+varying vec3 ground;
+
+void vertex() {
+    ground = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+}
+
+void fragment() {
+    vec4 paint = texture(art, UV) * COLOR;
+    float blocked = 0.0;
+    if (shade > 0.0 && steps > 0) {
+        vec2 flat_run = normalize(sun.xz) * step_run;
+        float climb = step_run * sun.y / length(sun.xz);
+        for (int k = 1; k <= steps; k++) {
+            vec2 at = ground.xz + flat_run * float(k);
+            vec2 uv = (at - map.xy) * map.zw;
+            // Off the board is the lowest ground there is - nothing out there
+            // stands over anything.
+            float over = span.x;
+            if (uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0)
+                over = span.x + texture(height, uv).r * span.y;
+            blocked = max(blocked,
+                          smoothstep(0.0, soft, over - (ground.y + climb * float(k))));
+        }
+    }
+    ALBEDO = paint.rgb * (1.0 - shade * blocked);
+    // ALPHA is deliberately not written. The ground is opaque and the material
+    // this replaced said so by leaving transparency off; a spatial shader that
+    // writes ALPHA at all is taken for a transparent surface, drops out of the
+    // opaque pass and stops settling the things standing on it. Measured, and
+    // it does not look like a depth bug: the ground itself came out identical
+    // to the pixel, and what moved was every transparent thing over it - trees,
+    // tanks, the pond and the cell outlines, 215227px of them.
+}
+";
+
+    private static readonly Shader Soil = new() { Code = SoilShader };
+
+    /// <summary>The ground's material, with the map this board baked in it.
+    /// Handed the art or nothing; nothing samples white.</summary>
+    private ShaderMaterial Turf(Texture2D? art)
+    {
+        var ink = new ShaderMaterial { Shader = Soil };
+        if (art is not null)
+            ink.SetShaderParameter("art", art);
+        if (_heights is not null)
+        {
+            ink.SetShaderParameter("height", _heights);
+            ink.SetShaderParameter("map", _mapAt);
+            ink.SetShaderParameter("span", _mapSpan);
+            ink.SetShaderParameter("sun", Sun);
+            ink.SetShaderParameter("soft", Penumbra);
+            ink.SetShaderParameter("steps", Marches);
+            ink.SetShaderParameter("step_run", _mapReach / Marches);
+        }
+        ink.SetShaderParameter("shade", CastShadows ? ShadowInk.A : 0.0f);
+        return ink;
     }
 
     /// <summary>
