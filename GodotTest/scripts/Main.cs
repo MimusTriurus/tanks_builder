@@ -3644,7 +3644,7 @@ public sealed partial class Main : Node2D
 	{
 		if (!_field.HasRelief)
 			return Vector2.Zero;
-		Vector2I next = v.Moving ? v.Path[v.PathStep] : v.Cell;
+		Vector2I next = v.Onto;
 		// Mixed between the two cells by how much of the hull has crossed, not
 		// taken from whichever of them is a ramp - see Vehicle.LegBlend. Driving
 		// onto a face this rises from nothing as the nose reaches it; cresting

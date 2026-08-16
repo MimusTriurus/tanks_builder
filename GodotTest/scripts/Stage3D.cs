@@ -238,7 +238,11 @@ public sealed partial class Stage3D : Node3D
 
         _tops = new MeshInstance3D();
         _sides = new MeshInstance3D();
-        _ring = new MeshInstance3D();
+        // An ImmediateMesh for the ruts' reason, arrived at from the other side:
+        // the ring is cut about the tank rather than about a cell, and now that
+        // each of its corners takes the height of the ground under itself, the
+        // shape changes as the tank crosses a slope and not only its position.
+        _ring = new MeshInstance3D { Mesh = new ImmediateMesh() };
         _edges = new MeshInstance3D { Visible = _showEdges };
         // An ImmediateMesh rather than an ArrayMesh rebuilt through a SurfaceTool:
         // the trail grows, fades and is forgotten from the front, so this is the
@@ -256,6 +260,7 @@ public sealed partial class Stage3D : Node3D
         AddChild(_pond);
         AddChild(_edges);
         _ruts.MaterialOverride = Decal(RutOrder);
+        _ring.MaterialOverride = RingDecal();
         _pond.MaterialOverride = Decal(WaterOrder);
     }
 
@@ -1159,8 +1164,7 @@ void fragment() {{
         // reason the 2D ring follows the contact patch: a tank spends most of an
         // order between two cells, and a mark on the cell behind it reads as the
         // selection lagging.
-        if (Selected is not null)
-            _ring.Position = Contact(Selected);
+        BuildRing();
         // Every frame, and not only when a tank moves: the trail fades by age and
         // is forgotten from the front, so a mesh left standing is a trail that
         // stopped weathering the moment the tank parked.
@@ -1223,10 +1227,9 @@ void fragment() {{
         // and the mesh's UVs at once - a toggle that only changed the shader
         // would leave the drawn pond wearing no texture coordinates at all.
         note.Append(Surf is { Any: true } ? '#' : '=');
-        // Whether there is a ring, not where it is: it is cut about its own
-        // origin and driven every frame, so the cell it stands on is not
-        // something the board has to be rebuilt for.
-        note.Append(Selected is null ? '-' : '+');
+        // Nothing about the ring: it is cut fresh every frame about the tank it
+        // marks, so neither whether there is one nor where it stands is anything
+        // the board has to be rebuilt for.
         return note.ToString();
     }
 
@@ -1560,7 +1563,6 @@ void fragment() {{
         // No art: the sides never had a texture, and the shader's default-white
         // sampler is what lets one material serve both.
         _sides.MaterialOverride = Turf(null);
-        BuildRing(corner);
         BuildWater(corner);
     }
 
@@ -3395,23 +3397,111 @@ void fragment() {{
     /// Its far side disappearing behind the hull is not a side effect: it is what
     /// makes the ring read as lying on the ground rather than hovering over it.
     ///
-    /// <b>Cut about its own origin and moved by <see cref="Place"/>, not built on
-    /// a cell.</b> Built on <c>Selected.Cell</c> it sat on the last cell reached
-    /// and a tank spends most of an order between two - so it trailed a whole
-    /// cell behind the tank it was marking, which reads as the selection lagging.
-    /// That is the same thing <see cref="SelectionRing"/> says in 2D, and it says
-    /// it about the contact patch, which is what this is placed on now.
+    /// <b>Cut about the contact patch every frame, not built on a cell.</b> Built
+    /// on <c>Selected.Cell</c> it sat on the last cell reached and a tank spends
+    /// most of an order between two - so it trailed a whole cell behind the tank
+    /// it was marking, which reads as the selection lagging. That is the same
+    /// thing <see cref="SelectionRing"/> says in 2D, and it says it about the
+    /// contact patch, which is what this is cut about now.
+    ///
+    /// <b>It lies in the face, and one height for the whole band cannot.</b>
+    /// <c>World(row + L, L)</c> lands on the same pixel for every L, so six corners
+    /// sharing an L are on screen the flat hexagon the 2D ring draws - and on a
+    /// face that tilts a level across itself that is the wrong shape twice over: it
+    /// reads as a decal hovering over the slope rather than painted on it, and at
+    /// the tank's own height it sank into the uphill half and the face hid it.
+    /// Measured, parked on the ramp at (3,4): 922 px of ring in a 218x53 box where
+    /// a flat board draws 1482 in 218x96. The band now takes the plane of the face
+    /// the tank is on - <see cref="HexField.TopOn"/>, one named cell - so it
+    /// comes out congruent to the hexagon of that face, which is what the tilted
+    /// cell outline beside it is drawn as. The cell is named rather than asked per
+    /// corner because a band a cell wide overhangs its own cell the moment the tank
+    /// is between two, and both ways of letting the corners answer for themselves
+    /// were built and measured worse: see <see cref="HexField.TopOn"/>.
+    ///
+    /// <b>What that costs is the uphill arc while climbing, and it is the honest
+    /// cost.</b> A cell-sized ring on a ramp has its far side a level above the
+    /// tank's feet, which on an isometric board is behind the hull - measured
+    /// mid-climb, 750 px of ring against 1341 drawn flat. Behind the hull is where
+    /// the far side of this mark has always gone; on a slope there is more of it.
+    ///
+    /// <b>The face, and in a ford that means the bed rather than the water.</b> A
+    /// wading tank stands on the bottom, and what the mark says is which cell it
+    /// is standing on - so it lies on the ground there like everywhere else, and
+    /// the water is simply drawn under it. That is the whole of the water fix:
+    /// under the surface the band was not dimmed but painted out, the pond being
+    /// sorted after it - measured, parked in the ford, <b>0 px</b> of it survived
+    /// against 1482 on the same cell with <c>--no-water</c> - and
+    /// <see cref="RingOrder"/> now puts the mark over the water, where a mark
+    /// belongs. Floating it on the surface instead was tried and is a second
+    /// statement about where the tank is: the hull is drawn standing on the bed
+    /// and the ring would be drawn round its waterline.
     /// </summary>
-    private void BuildRing(Vector3[] corner)
+    private void BuildRing()
     {
-        if (Selected is null)
-        {
-            _ring.Mesh = null;
+        var mesh = (ImmediateMesh)_ring.Mesh;
+        mesh.ClearSurfaces();
+        if (Selected is null || Field.Atlas is null)
             return;
-        }
-        Vector3 top = Clear(Squash, RiseFactor);
-        var st = new SurfaceTool();
-        st.Begin(Mesh.PrimitiveType.Triangles);
+        Vector3[] corner = Corners();
+        Vector3 lie = Clear(Squash, RiseFactor);
+        // Where the tank touches the ground, in flat space - the drawn row with
+        // its lift put back on, which is the space World and HexField read.
+        //
+        // <b>The ground's own height, and Standing is the one number here that
+        // must not be used.</b> Standing is a depth promoted to the crown while
+        // the tank is on a wall: it costs nothing to a shape that carries its own
+        // height, and a whole level to one that looks its height up, because the
+        // row it hands the board is a level out and every corner is then answered
+        // by the ground a cell away. Ground is the number laid under a tank, bare
+        // because the clearance in it is for things laid at a height rather than
+        // for things asking for one.
+        var at = new Vector2(Selected.GroundPoint.X,
+                             Selected.GroundPoint.Y + Field.Bare(Selected.Ground));
+        // Which face it is lying in, and it is two of them while the hull is over
+        // the seam. Mixed by the same LegBlend the body's own lean is mixed by -
+        // see Main.SurfaceSlope - so the mark tilts with the tank rather than
+        // snapping a frame before or after it. Named as one cell instead, the band
+        // jumped 32px at the moment the near cell changed; the lerp of two planes
+        // is a plane, so the shape stays a hexagon all the way across.
+        Vector2I near = Selected.Cell, onto = Selected.Onto;
+        float cross = Selected.LegBlend;
+        // How high the cell it is standing on stands, for the rule in Lie.
+        float seat = Mathf.Lerp(Field.TopAt(near), Field.TopAt(onto), cross);
+        // <b>And how far forward the band has to stand to be in a ford at all.</b>
+        // A wading tank's mark lies on the bed, and what stands between the bed
+        // and the eye is the pond's own side - opaque, depth-writing, and exactly
+        // as tall as the water is deep. Measured, parked in the ford: 476 px of
+        // ring, and 1479 with that side taken away. So the band is pushed toward
+        // the camera by that same depth, which is a nudge and not a lift:
+        // World(row + L, L) draws at the same pixel, so this moves nothing on
+        // screen and buys depth alone - the trick Clear is already made of.
+        //
+        // <b>By the water's depth and not by more</b>, because the next thing in
+        // front of a mark is a hex standing over it, and a level is nearly twice
+        // this. That occlusion is wanted; this one is the water occluding its own
+        // floor.
+        //
+        // <b>And not on the corners a rising neighbour stands in front of, which
+        // is the same occlusion arriving by the other door.</b> Half a level is
+        // plenty to clear the low end of a ramp: the pit's mouth comes down to
+        // the bed at the edge it shares with the water, so the nudge carried the
+        // band out in front of the slope, and the same tank parked one level up
+        // on dry ground - no nudge to spend - had that half properly cut. Two
+        // pictures of one hex, and the water was the only difference.
+        //
+        // Spent per corner, so what it costs is the corners facing that
+        // neighbour and nothing else. Free in shape: the nudge moves no pixel by
+        // construction, so corners carrying different ones still draw one
+        // hexagon.
+        float wade = Selected.Wading ? Field.WaterRise : 0.0f;
+        // The hexagon's own edges and what stands over the bed across each of
+        // them. Read once - the six are the same for every corner.
+        (Vector2[] side, float[] reach, _) = Rim(corner);
+        float[]? overNear = wade > 0.0f ? Overlook(near, corner) : null;
+        float[]? overOnto = wade > 0.0f && onto != near
+            ? Overlook(onto, corner) : overNear;
+        mesh.SurfaceBegin(Mesh.PrimitiveType.Triangles);
         // Dark, cyan, dark - the 2D ring's five-pixel backing under its two-pixel
         // line, as three strips of one mesh rather than two coplanar transparent
         // bands with nothing to order them. The lesson is the additive effect
@@ -3429,18 +3519,155 @@ void fragment() {{
             Vector3 a = corner[i], b = corner[(i + 1) % 6];
             foreach (Vector3 v in new[]
                      {
-                         top + a * to, top + b * to, top + b * from,
-                         top + a * to, top + b * from, top + a * from,
+                         a * to, b * to, b * from,
+                         a * to, b * from, a * from,
                      })
             {
-                st.SetColor(ink);
-                st.AddVertex(v);
+                mesh.SurfaceSetColor(ink);
+                Vector2 on = Flat(at, v);
+                float high = Lie(on, near, onto, cross, seat);
+                float sunk = Sunk(on, near, onto, wade, side, reach,
+                                  overNear, overOnto);
+                mesh.SurfaceAddVertex(
+                    World(new Vector2(on.X, on.Y + sunk), high + sunk) + lie);
             }
         }
-        st.GenerateNormals();
-        _ring.Mesh = st.Commit();
-        _ring.MaterialOverride = Decal(RingOrder);
+        mesh.SurfaceEnd();
     }
+
+    /// <summary>How far the ground across each of a cell's six edges stands over
+    /// that cell's own top - nought where it is level with it or lower, which is
+    /// the answer for the board's cut too. What <see cref="Sunk"/> asks to find
+    /// out whether a corner has a neighbour in front of it or only water.</summary>
+    private float[] Overlook(Vector2I cell, Vector3[] corner) =>
+        Overlook(Field, cell, corner, Squash, RiseFactor);
+
+    /// <summary>The same, given its camera terms instead of reading them off the
+    /// field - so it can be asserted without a board, for
+    /// <see cref="Shoreline"/>'s reason.</summary>
+    internal static float[] Overlook(HexField field, Vector2I cell,
+                                     Vector3[] corner, float squash, float rise)
+    {
+        Vector2I[] next = Beside(field, cell, corner, squash, rise);
+        var over = new float[6];
+        float bed = field.TopAt(cell);
+        for (int k = 0; k < 6; k++)
+            over[k] = field.InBounds(next[k]) && next[k] != cell
+                ? Mathf.Max(0.0f, field.TopAt(next[k]) - bed) : 0.0f;
+        return over;
+    }
+
+    /// <summary>
+    /// How far toward the eye one corner of the ring stands: the water's own
+    /// depth where the pond's side is all that hides the bed, and nothing where
+    /// the ground next door is what hides it.
+    ///
+    /// <b>Capped by the distance to the edge, not switched off at it.</b> The
+    /// nudge is depth and nothing else, so what it has to stay behind is the
+    /// wall standing at that edge: a corner <c>d</c> in from it may come forward
+    /// by <c>d</c> and no further, and one far enough in is behind nothing and
+    /// takes the lot. Written as a switch instead it took the whole of the ring
+    /// on any side with a level over it - measured on (8,5), 507 px down to 199,
+    /// because a cell of the pit's floor has dry ground a full level up along
+    /// half of it and one level is wider than the ring.
+    ///
+    /// A neighbour level with the bed hides nothing, caps nothing, and the
+    /// board's cut is that case too.
+    /// </summary>
+    private float Sunk(Vector2 on, Vector2I near, Vector2I onto, float wade,
+                      Vector2[] side, float[] reach, float[]? overNear,
+                      float[]? overOnto)
+    {
+        if (wade <= 0.0f || overNear is null)
+            return 0.0f;
+        Vector2 flat = on - Origin;
+        Vector2I under = Field.CellUnder(flat);
+        float[]? over = under == near ? overNear
+            : under == onto ? overOnto : null;
+        // Out of the pond the nudge buys nothing it is entitled to: what stands
+        // between such a corner and the eye is ground, not this tank's water.
+        if (over is null || !Field.IsWater(under))
+            return 0.0f;
+        // The corner about its own cell's middle, unsquashed - the space the
+        // hexagon's edges were measured in.
+        Vector2 mid = Field.FlatAnchor(under) + Field.CentreOffset + Origin;
+        var point = new Vector2(on.X - mid.X, (on.Y - mid.Y) / Squash);
+        float sunk = wade;
+        for (int k = 0; k < 6; k++)
+            if (over[k] > 0.0f)
+                sunk = Mathf.Min(
+                    sunk, (reach[k] - point.Dot(side[k])) * Squash);
+        return Mathf.Max(0.0f, sunk);
+    }
+
+    /// <summary>
+    /// How high one point of the ring lies: the face's own plane, and never under
+    /// ground that is not standing over the tank.
+    ///
+    /// <b>The plane is the shape and the clamp is what the ground is allowed to do
+    /// about it.</b> A band a cell wide overhangs its own cell, and the plane it
+    /// lies in carries on going: downhill it passes under whatever is out there,
+    /// so the ground swallowed it - measured on the descent into the pit, 262 px
+    /// of ring left of 1482, and 476 parked in a ford where the pond's own opaque
+    /// side stands in front of the bed. That is not occlusion, it is the mark
+    /// falling out of the world at the edges.
+    ///
+    /// <b>Occlusion by higher cells is a different thing and is wanted.</b> A hex
+    /// standing above the one the tank is on really is in front of the ring, and
+    /// the ring drawn over its wall reads as painted up the side of the hill.
+    /// So the clamp asks the level: ground on cells no higher than the tank's own
+    /// lifts the band up onto itself and cannot bury it, and ground on cells
+    /// standing over it does not - it keeps its depth and takes the band, which is
+    /// the picture that was asked for.
+    ///
+    /// Not a fraction of a level, not a tolerance: whether the cell under this
+    /// corner stands over the cell under the tank is a question with an answer,
+    /// and the answer is <see cref="HexField.TopAt"/> either side. Blended across
+    /// the seam by the same LegBlend as the plane, so the test does not flip a
+    /// frame before the shape does.
+    ///
+    /// <b>Except the two cells the tank is standing across, which are never in
+    /// front of it: it is on them.</b> A step onto a ramp is a step onto ground
+    /// that stands over the ground left behind - by the whole of a level by the
+    /// end of it - so the plain test called the cell being climbed onto a wall and
+    /// let it take the half of the ring lying on it. Measured on the climb up
+    /// column 3, far half gone: 1084 px of ring in a 218x69 box against the 1482
+    /// in 218x96 that a whole one draws, and 1409 in 216x106 coming off the ramp
+    /// onto the plateau, where it is the near half that goes instead.
+    ///
+    /// The clamp is what makes that half right rather than merely present: lifted
+    /// onto the ground it overhangs, the band bends over the ramp's edge, which is
+    /// the shape the surface has there. And exempting these two cannot cost the
+    /// occlusion this rule is for - a hex to the side is neither of them.
+    /// </summary>
+    private float Lie(Vector2 on, Vector2I near, Vector2I onto, float cross,
+                     float seat)
+    {
+        Vector2 flat = on - Origin;
+        float plane = Mathf.Lerp(Field.TopOn(near, flat),
+                                 Field.TopOn(onto, flat), cross);
+        Vector2I under = Field.CellUnder(flat);
+        return Covers(under, near, onto, Field.TopAt(under), seat)
+            ? plane
+            : Mathf.Max(plane, Field.TopAtPoint(flat));
+    }
+
+    /// <summary>Whether the cell under one point of the ring is allowed to stand
+    /// in front of it: it is, when it stands over the tank and is not one of the
+    /// two the tank is standing across. Named and static so the rule can be
+    /// asserted about a board rather than read off a picture - the half a ramp
+    /// took is a half that is simply absent, which no number about the ring
+    /// reports.</summary>
+    public static bool Covers(Vector2I under, Vector2I near, Vector2I onto,
+                             float top, float seat) =>
+        under != near && under != onto && top > seat + 0.01f;
+
+    /// <summary>A point of the ground plane offset from another, in flat space.
+    /// The offset arrives as a world XZ vector and flat space is that squashed, so
+    /// the two terms of the row are told apart here rather than at every call -
+    /// the same distinction <see cref="World"/> exists to keep.</summary>
+    private Vector2 Flat(Vector2 at, Vector3 offset) =>
+        new(at.X + offset.X, at.Y + offset.Z * Squash);
 
     /// <summary>
     /// What everything painted on the ground is made of: unshaded, coloured per
@@ -3459,6 +3686,23 @@ void fragment() {{
     /// indices - ruts at -101 under a ring at -99 under everything standing on
     /// the ground.
     /// </summary>
+    /// <summary>
+    /// The ring's own, and it tests depth like everything else on the ground.
+    ///
+    /// <b>Standing it off the depth buffer was tried and it takes away the half of
+    /// the picture that was right.</b> It cures the mark falling under the ground
+    /// at the edges - but a hex standing over the one the tank is on really is in
+    /// front of the ring, and the band drawn over its wall reads as painted up the
+    /// side of the hill. The falling-under is cured where it is caused instead, in
+    /// <see cref="Lie"/>, and this stays a decal.
+    /// </summary>
+    private static StandardMaterial3D RingDecal() => Decal(RingOrder);
+
+    /// <summary>Whether the ring's material takes the terrain's depth test, so the
+    /// rule above is asserted rather than read off a picture: cells standing over
+    /// the tank's own are what may cover the mark.</summary>
+    public static bool RingTakesDepth => !RingDecal().NoDepthTest;
+
     private static StandardMaterial3D Decal(int order) => new()
     {
         ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
@@ -3473,15 +3717,25 @@ void fragment() {{
     /// <see cref="TrackMarks.MarksZ"/>: a rut is terrain and the ring is a marker
     /// laid over it. All under the tanks, which sort at the default.
     ///
-    /// <b>The water is the top rung of the ladder and still under them</b>, which
-    /// is the whole statement: a rut and a ring lie on the bottom, so the water
-    /// goes over both, and a tank standing in it is drawn over the surface and
-    /// tints its own submerged half - see <see cref="PaintShader"/>. Drawn over
-    /// the tanks instead it would be right for the near half of its own cell and
-    /// wrong for every tank in front of that cell, because one sort key is one
-    /// answer for a whole surface.</summary>
-    public const int WaterOrder = -1;
-    public const int RingOrder = -2;
+    /// <b>The water goes over the ruts and under the ring, and the ring is the
+    /// rung that moved.</b> A rut is terrain, so water lying on it is water lying
+    /// on it. The ring is not terrain at all - it is a marker saying which tank
+    /// the keys drive - and under the water it was not dimmed but <b>gone</b>: the
+    /// surface is drawn after it and paints over it whole. Measured, parked in the
+    /// ford, <b>0 px</b> of ring against 1482 on the same cell with
+    /// <c>--no-water</c>, so a tank driven into the water stopped being the tank
+    /// that was selected. Painted on the surface instead, it says what it has
+    /// always said, and there is nothing it can be wrong about: it only ever meets
+    /// water at a shore or in a ford, and it is a mark in both.
+    ///
+    /// <b>The water is still under every tank</b>, which is the half of the
+    /// statement that has not changed: a tank standing in it is drawn over the
+    /// surface and tints its own submerged half - see <see cref="PaintShader"/>.
+    /// Drawn over the tanks instead it would be right for the near half of its own
+    /// cell and wrong for every tank in front of that cell, because one sort key is
+    /// one answer for a whole surface.</summary>
+    public const int RingOrder = -1;
+    public const int WaterOrder = -2;
 
     /// <summary>Where a cast shadow sorts: over the ruts and under the ring.
     ///
@@ -4021,11 +4275,22 @@ void fragment() {{
     };
 
     /// <summary>Where the line runs, as a fraction of the cell, and the two
-    /// half-widths about it - <see cref="SelectionRing.Inset"/>'s 0.86 and its
-    /// 2px line inside a 5px backing, in the cell's own units so the whole thing
-    /// is one statement of the same shape. Off the cell, never off the tank: it
-    /// says where this tank stands, and a ring that grew with the class would be
-    /// a second claim about size arguing with the one the tanks make.
+    /// half-widths about it - a 2px line inside a 5px backing, in the cell's own
+    /// units so the whole thing is one statement of the same shape. Off the cell,
+    /// never off the tank: it says where this tank stands, and a ring that grew
+    /// with the class would be a second claim about size arguing with the one the
+    /// tanks make.
+    ///
+    /// <b>Inset further than the flat board's <see cref="SelectionRing.Inset"/>,
+    /// and the relief is what buys the difference.</b> At 0.86 a corner stands
+    /// <c>0.86*cos30 = 0.745</c> of the circumradius off the middle against an
+    /// edge at 0.866 - about 15px of a 248px tile - and on flat ground nothing is
+    /// drawn in that margin, so it costs nothing there. At a pond it is exactly
+    /// where the water's own side and the beach beyond it are painted, and a mark
+    /// standing in it reads as climbing the slope next door even though it never
+    /// leaves its own cell. Measured on (8,5): with the ford nudge taken away
+    /// entirely the same arc is drawn in the same pixels, so this is the margin
+    /// and not the depth. 0.75 doubles it to about 30px.
     ///
     /// <b>Those widths are on the ground, and the camera squashes the ground.</b>
     /// A band 2 units wide keeps its 2px across the edges that run up the screen
@@ -4035,7 +4300,7 @@ void fragment() {{
     /// it on a flat board: the same colour to a level (76,216,255 against
     /// 76,217,255) in the same 218x73 box to a pixel, over 433 fully saturated
     /// pixels rather than 1030.</summary>
-    private const float Ring = 0.86f;
+    public const float Ring = 0.75f;
     private const float Line = 0.008f;
     private const float Fringe = 0.020f;
 

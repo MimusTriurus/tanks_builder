@@ -46,6 +46,13 @@ public sealed class Vehicle
     public int PathStep;
     public double Speed;
 
+    /// <summary>The cell it is driving onto, or the one it is standing in while
+    /// parked. Named here because two things now mix the two cells' faces by
+    /// <see cref="LegBlend"/> - the body's lean and the mark under it - and the
+    /// pair has to be the same pair, or the ring lies on one slope while the tank
+    /// stands on another.</summary>
+    public Vector2I Onto => Moving ? Path[PathStep] : Cell;
+
     /// <summary>
     /// Hull heading as of the end of last frame, so this frame can tell how far
     /// it swung.

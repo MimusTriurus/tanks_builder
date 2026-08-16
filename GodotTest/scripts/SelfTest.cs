@@ -6792,15 +6792,19 @@ public static class SelfTest
                 + $"{medium.GradeSpeed * MovementProfile.WaterFraction:F0}");
 
             // Where it sits in the ladder of things lying on the board. Over the
-            // marks because they are on the bottom, under the tanks because a
-            // surface has one sort key and a tank standing in front of the pond
-            // would lose to it.
-            Check("the water sorts over the ground marks and under every tank",
-                Stage3D.RutOrder < Stage3D.RingOrder
-                && Stage3D.RingOrder < Stage3D.WaterOrder
-                && Stage3D.WaterOrder < 0,
-                $"ruts {Stage3D.RutOrder}, ring {Stage3D.RingOrder}, water "
-                + $"{Stage3D.WaterOrder}");
+            // marks because they are terrain and it lies on them, under the tanks
+            // because a surface has one sort key and a tank standing in front of
+            // the pond would lose to it - and under the selection ring, which is
+            // the one thing here that is not ground at all. These are drawn by
+            // priority and not by depth, so under the water is not dimmed by it
+            // but painted out by it: measured, a tank parked in the ford kept 0 px
+            // of its own ring.
+            Check("the water sorts over the ground marks, under the ring and under every tank",
+                Stage3D.RutOrder < Stage3D.WaterOrder
+                && Stage3D.WaterOrder < Stage3D.RingOrder
+                && Stage3D.RingOrder < 0,
+                $"ruts {Stage3D.RutOrder}, water {Stage3D.WaterOrder}, ring "
+                + $"{Stage3D.RingOrder}");
 
             // The cut is the shader's, and it has to be: a horizontal surface
             // crossing an upright billboard has half of itself in front of the
@@ -7517,6 +7521,238 @@ public static class SelfTest
                   + "neighbours",
                 !Stage3D.DeepShader.Contains("beach, UV2.y"),
                 "the band is still interpolated off the vertices");
+
+            // Where the ground is under a *point* of it, which is what anything
+            // laid across a whole cell has to ask before it can pick a height at
+            // all. A ramp's face tilts a level across itself, so the tank's own
+            // height is not the ground under the far half of a cell-sized shape:
+            // a flat hexagon laid at it sank into the face uphill and the face hid
+            // that half - measured, 922 px of selection ring in a 218x53 box where
+            // a flat board draws 1482 in 218x96. The ring takes the highest of
+            // these, which is the one height nothing under it can be in front of.
+            Vector2I slope = new(-1, -1);
+            for (int q = 0; q < field.Columns && slope.X < 0; q++)
+            for (int r = 0; r < field.Rows && slope.X < 0; r++)
+                if (field.IsRamp(new Vector2I(q, r)))
+                    slope = new Vector2I(q, r);
+            if (slope.X >= 0 && field.Atlas is not null)
+            {
+                Vector2 mid = field.FlatAnchor(slope) + field.CentreOffset;
+                float[] top = field.TopCorners(slope);
+                // The ring's own corners, off the shape it is actually cut to -
+                // a check that reached for a radius of its own would stop being
+                // about the ring the moment the ring moved.
+                Vector2[] hoop = SelectionRing.Outline(
+                    field.Atlas.HexRect.Size.X, field.Atlas.HexRect.Size.Y,
+                    Stage3D.Ring);
+                float low = float.PositiveInfinity, high = float.NegativeInfinity;
+                foreach (Vector2 point in hoop)
+                {
+                    float at = field.TopAtPoint(mid + point);
+                    low = Math.Min(low, at);
+                    high = Math.Max(high, at);
+                }
+                Check("a ramp answers a shape laid across it with a spread of "
+                      + "heights, not one",
+                    high - low > field.Lift * 0.5f,
+                    $"the ring spans {high - low:F1}px of height across a face "
+                    + $"that rises {field.Lift:F1} - no spread here and the "
+                    + "highest of them is the tank's own height, which is what "
+                    + "buried the uphill half");
+                // And what it reads there is the face's own plane, sampled along
+                // each corner ray rather than at the corner itself: a corner is
+                // shared by three cells and a ramp's high corner stands a level
+                // over the flat one touching it, so the point is genuinely two
+                // heights and which one comes back is the rounding's business.
+                // The band never asks there - it is inset to 0.86 - and neither
+                // does this.
+                //
+                // The two corner tables start at opposite corners, the ring's
+                // outline opening at (-w/2, 0) where TopCorners opens at
+                // (+w/2, 0), so the index is rotated by three rather than shared.
+                float worst = 0.0f;
+                Vector2[] ledge = SelectionRing.Outline(
+                    field.Atlas.HexRect.Size.X, field.Atlas.HexRect.Size.Y, 0.9f);
+                for (int k = 0; k < 6; k++)
+                {
+                    float want = field.TopAt(slope)
+                        + 0.9f * (top[(k + 3) % 6] - field.TopAt(slope));
+                    worst = Math.Max(worst,
+                        Math.Abs(field.TopAtPoint(mid + ledge[k]) - want));
+                }
+                Check("and the height it reads there is that corner's own",
+                    worst < 0.01f && Math.Abs(field.TopAtPoint(mid)
+                                              - field.TopAt(slope)) < 0.01f,
+                    $"worst corner off by {worst:F3}px, centre off by "
+                    + $"{Math.Abs(field.TopAtPoint(mid) - field.TopAt(slope)):F3}");
+                // Asked of a named cell it keeps that cell's plane going, which
+                // is what a shape a cell wide needs: the ring overhangs its own
+                // cell the moment the tank is between two, and a corner that
+                // took the ground it happens to be over would drop a level onto
+                // the flat beside a ramp and stop being part of a hexagon.
+                Vector2I beside = HexField.Step(slope, HexField.EdgeHeadings[0]);
+                if (field.InBounds(beside) && !field.IsRamp(beside))
+                {
+                    Vector2 apart = field.FlatAnchor(beside) + field.CentreOffset;
+                    Check("and a named cell's face carries on past its own edge",
+                        Math.Abs(field.TopOn(slope, apart)
+                                 - field.TopAtPoint(apart)) > 1.0f
+                        && Math.Abs(field.TopAtPoint(apart)
+                                    - field.TopAt(beside)) < 0.01f,
+                        "the plane of one cell read over the next gives the next "
+                        + "cell's own height, so naming the cell buys nothing and "
+                        + "the ring is back to following whatever it is over");
+                    // Which is also why the band has to be clamped up to the
+                    // ground on its low side: carried on, the face passes under
+                    // the ground out there, and ground over the mark is ground
+                    // that swallows it. See Stage3D.Lie, where that clamp is
+                    // refused to cells standing over the tank's own - those are
+                    // in front of the mark and are meant to cover it.
+                    Vector2I foot = HexField.Step(
+                        slope, HexField.Reverse(field.RampHeading(slope)));
+                    if (field.InBounds(foot))
+                    {
+                        Vector2 down = field.FlatAnchor(foot) + field.CentreOffset;
+                        Check("and past the low edge it passes under the ground "
+                              + "out there",
+                            field.TopOn(slope, down) < field.TopAtPoint(down)
+                                                       - 1.0f,
+                            $"{field.TopOn(slope, down):F1} against ground at "
+                            + $"{field.TopAtPoint(down):F1} - nothing to clamp "
+                            + "means the clamp is untested, not unneeded");
+                    }
+                }
+                // Continuous into the next cell, which is what lets a corner
+                // stray off this face and still land on the ground: the two
+                // planes agree along the edge they share, and the ring at a
+                // cell boundary is answered by whichever cell claims the point.
+                Vector2I above = HexField.Step(slope, field.RampHeading(slope));
+                if (field.InBounds(above))
+                {
+                    Vector2 seam = (mid + field.FlatAnchor(above)
+                                    + field.CentreOffset) * 0.5f;
+                    Check("and it is the same height read from either side of a "
+                          + "shared edge",
+                        Math.Abs(field.TopAtPoint(seam)
+                                 - field.EdgeTop(slope, above)) < 0.01f,
+                        $"{field.TopAtPoint(seam):F2} at the seam against "
+                        + $"{field.EdgeTop(slope, above):F2} - a step here is a "
+                        + "step in anything laid across it");
+                }
+                // And the cell being climbed onto is never in front of the mark,
+                // however much it stands over the one being left. A ramp is half
+                // a level up by TopAt, so the plain "higher ground covers it"
+                // test called it a wall and took the uphill half of the ring with
+                // it - measured on the climb up column 3, 1084 px of ring in a
+                // 218x69 box where a whole one draws 1482 in 218x96.
+                //
+                // Both halves are asserted, and the first is the one that keeps
+                // this honest: without it the exemption could be excusing a cell
+                // that was never going to occlude anything.
+                Vector2I under = HexField.Step(
+                    slope, HexField.Reverse(field.RampHeading(slope)));
+                if (field.InBounds(under))
+                {
+                    // Early in the step onto it, which is where it hurts: the
+                    // seat is still nearly the flat ground behind.
+                    float toe = Mathf.Lerp(field.TopAt(under),
+                                           field.TopAt(slope), 0.1f);
+                    Check("and a ramp climbed onto is not a wall in front of the "
+                          + "mark",
+                        field.TopAt(slope) > toe + 0.01f
+                        && !Stage3D.Covers(slope, under, slope,
+                                           field.TopAt(slope), toe),
+                        $"a ramp at {field.TopAt(slope):F1} over a seat of "
+                        + $"{toe:F1} - either it never stood over the tank, so "
+                        + "this proves nothing, or it still covers the half of "
+                        + "the ring lying on it");
+                    // And the exemption is exactly two cells wide: anything to
+                    // the side keeps the occlusion the rule is for.
+                    Vector2I flank = HexField.Step(slope,
+                        HexField.EdgeHeadings[2]);
+                    Check("and it stays a wall when it is not being driven onto",
+                        Stage3D.Covers(flank, under, slope,
+                                       field.TopAt(slope), toe),
+                        "a cell the tank is on neither side of is exempt too, so "
+                        + "nothing on the board can cover the ring any more");
+                }
+                // A flat cell has nothing to interpolate and must say so, or
+                // every mark on the board starts wobbling for no reason.
+                Vector2I plain = new(0, 0);
+                Vector2 plainAt = field.FlatAnchor(plain) + field.CentreOffset;
+                Check("and a flat cell is one height all over",
+                    !field.IsRamp(plain)
+                    && Math.Abs(field.TopAtPoint(plainAt + hoop[0])
+                                - field.TopAtPoint(plainAt + hoop[3])) < 0.01f,
+                    "opposite corners of a level cell disagree about where the "
+                    + "ground is");
+            }
+
+            // And in a ford the ground is the bed, water or no water. A wading
+            // tank stands on the bottom and the mark says which cell it stands
+            // on, so it lies there and the pond is drawn under it - which is the
+            // whole of why the ladder above puts the ring over the water: under
+            // the surface the band was not dimmed but painted out, measured at
+            // 0 px in the ford against 1482 on the same cell with --no-water.
+            if (field.WaterCells.Count > 0 && field.Atlas is not null)
+            {
+                Vector2I pool = field.WaterCells[0];
+                Vector2 pondAt = field.FlatAnchor(pool) + field.CentreOffset;
+                Check("a mark laid in a ford lies on the bed, not on the surface",
+                    Math.Abs(field.TopAtPoint(pondAt) - field.TopAt(pool)) < 0.01f
+                    && field.TopAtPoint(pondAt) < field.WaterTop(pool)
+                    && Stage3D.WaterOrder < Stage3D.RingOrder,
+                    $"{field.TopAtPoint(pondAt):F1} against a bed at "
+                    + $"{field.TopAt(pool):F1} and a surface at "
+                    + $"{field.WaterTop(pool):F1} - and it is only visible down "
+                    + "there because the water sorts under it");
+                // And it is a decal, not an overlay: a hex standing over the one
+                // the tank is on is in front of the mark and covers it. What it
+                // must not be covered by is ground it merely dips under at the
+                // edges, which is Stage3D.Lie's clamp and not the depth test's
+                // business - stood off the buffer altogether, the band came out
+                // painted up the walls of its own pit.
+                Check("and the ring is a decal, so higher ground covers it",
+                    Stage3D.RingTakesDepth,
+                    "the mark ignores the depth buffer, so it is drawn over every "
+                    + "hex standing above the one the tank is on");
+                // And the nudge that carries it clear of the water's own side is
+                // capped by whatever ground stands over that bed, so it cannot
+                // carry it clear of the beach as well. Asked of the pond cell
+                // beside the pit's mouth, which is the one that showed it: half a
+                // level of ramp is plenty to be in front of, and the same tank on
+                // dry ground - with no nudge to spend - had that half cut.
+                var ring = new Vector3[6];
+                for (int k = 0; k < 6; k++)
+                {
+                    float turn = Mathf.Pi / 3.0f * k;
+                    ring[k] = new Vector3(Mathf.Cos(turn), 0.0f, Mathf.Sin(turn));
+                }
+                Vector2I mouth = new(7, 4);
+                Vector2I beside = new(8, 5);
+                if (field.InBounds(mouth) && field.InBounds(beside)
+                    && field.IsWater(beside) && !field.IsWater(mouth))
+                {
+                    float[] stands = Stage3D.Overlook(
+                        field, beside, ring, 1.0f, 1.0f);
+                    Vector2I[] next = Stage3D.Beside(
+                        field, beside, ring, 1.0f, 1.0f);
+                    float lip = 0.0f, pool2 = -1.0f;
+                    for (int k = 0; k < 6; k++)
+                    {
+                        if (next[k] == mouth) lip = stands[k];
+                        if (field.IsWater(next[k]) && next[k] != beside)
+                            pool2 = Math.Max(pool2, stands[k]);
+                    }
+                    Check("and the water is not allowed to carry the mark in "
+                          + "front of the beach",
+                        lip > 0.0f && pool2 == 0.0f,
+                        $"the mouth stands {lip:F1}px over this bed and the "
+                        + $"deepest water neighbour {pool2:F1} - the first is what "
+                        + "caps the nudge, and the second must cap nothing or "
+                        + "the pond stops clearing its own side");
+                }
+            }
 
             // Every foam edge on the board is one field, and the two shaders that
             // draw them get it as the same text. Asked of the *formatted* source

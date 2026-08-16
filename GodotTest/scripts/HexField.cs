@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Godot;
@@ -193,6 +193,76 @@ public sealed partial class HexField : Node2D
 
     private static readonly float[] RampCorner =
         { 1.0f, 1.0f, 0.5f, 0.0f, 0.0f, 0.5f };
+
+    /// <summary>
+    /// How high the surface stands at a <b>point</b> of the ground rather than at
+    /// a cell, in screen px off the datum. The flat-space point, which is the
+    /// drawn one with its lift put back on - <see cref="CellAt"/>'s convention
+    /// inverted, and the one <c>Stage3D.World</c> reads.
+    ///
+    /// <b>A cell answers for a cell, and a ramp's face is not one height.</b>
+    /// <see cref="TopAt"/> is the centre of the face and <see cref="EdgeTop"/> is
+    /// the middle of one edge; anything laid across a whole cell - the selection
+    /// ring is the case that wanted this - needs the height under each of its own
+    /// corners, and on a ramp those differ by a full level. Given one height, such
+    /// a thing lies flat while the face beneath it tilts, and the uphill half
+    /// sinks under the face and is hidden by it. That is the same failure
+    /// <see cref="MarkBetween"/> records for the belt marks, in the other axis:
+    /// there the chord ran under the face along the path, here the shape runs
+    /// under it across the cell.
+    ///
+    /// <b>One plane, so one triangle of it is the whole of it.</b> A ramp's top
+    /// rises linearly from its low edge to its high one, so the height is affine
+    /// in position: read off the centre and two corners, it is exact everywhere on
+    /// the face and exact <i>off</i> it too. That matters, because a shape centred
+    /// on a tank between cells has corners over the neighbours, and the neighbour's
+    /// own plane agrees with this one along the edge they share -
+    /// <see cref="EdgeTop"/> is why - so extrapolating and switching cells give the
+    /// same number and the result is continuous either way.
+    /// </summary>
+    public float TopAtPoint(Vector2 flat) =>
+        Atlas is null ? 0.0f : TopOn(CellUnder(flat), flat);
+
+    /// <summary>The same plane read for a <b>named</b> cell, which is how anything
+    /// that has to keep its shape asks.
+    ///
+    /// <b>Extrapolating one cell's face beats sampling whatever each point is
+    /// over, and both were built.</b> A shape a cell wide has corners past its own
+    /// cell whenever the thing carrying it stands between two, and asked point by
+    /// point those corners take the ground they are over - so a ring crossing a
+    /// ramp's rim had four of its six on the flat either side and stopped being a
+    /// hexagon at all. Measured mid-climb: 750 px of band left of 1341, and fitting
+    /// one plane through the six samples instead was worse still, 0 px at the worst
+    /// frame, because four low corners drag the whole plane under the face. The
+    /// face a tank is on is one plane and the mark on it is that plane's hexagon;
+    /// where it overhangs, it overhangs.</summary>
+    public float TopOn(Vector2I cell, Vector2 flat)
+    {
+        if (Atlas is null)
+            return 0.0f;
+        float middle = TopAt(cell);
+        if (!IsRamp(cell))
+            return middle;
+        float[] top = TopCorners(cell);
+        Vector2[] corner = Corners();
+        Vector2 d = flat - (FlatAnchor(cell) + CentreOffset);
+        // d in the basis of the first two corner offsets; the pair spans the
+        // plane because no two corners of a hexagon are colinear with its centre.
+        float det = corner[0].X * corner[1].Y - corner[0].Y * corner[1].X;
+        if (Mathf.Abs(det) < 1e-6f)
+            return middle;
+        float a = (d.X * corner[1].Y - d.Y * corner[1].X) / det;
+        float b = (corner[0].X * d.Y - corner[0].Y * d.X) / det;
+        return middle + a * (top[0] - middle) + b * (top[1] - middle);
+    }
+
+    /// <summary>Which cell a point of the ground lies on, the point given in flat
+    /// space - <see cref="CellAt"/> with the lift already put back on rather than
+    /// hunted for a level at a time. Clamped, so a shape whose far corner has
+    /// strayed off the board is answered by the edge cell rather than by
+    /// nothing.</summary>
+    public Vector2I CellUnder(Vector2 flat) => ClampCell(FlatCellAt(flat));
+
 
     /// <summary>Which edge of <see cref="Corners"/> faces a world heading. Corner
     /// i and i+1 span the edge facing <c>330 - 60i</c>, so this inverts that -
@@ -1406,6 +1476,26 @@ public sealed partial class HexField : Node2D
     /// with the ribbon under them intact.</summary>
     public float MarkAt(Vector2I cell) =>
         TopAt(cell) + (HasRamps ? Lift * MarkClear : 0.0f);
+
+    /// <summary>
+    /// The clearance taken back off again: the ground a mark is really on, given
+    /// the height it is laid at.
+    ///
+    /// <b>For anything that reads its own height off the ground rather than being
+    /// laid at one.</b> The selection ring asks the board how high it is under
+    /// each of its own corners - see <see cref="TopAtPoint"/> - so all it wants
+    /// from the tank is <i>where</i> the tank is, and a height is how that is
+    /// said: a drawn row is the flat row with the lift taken out of it, so the
+    /// lift has to go back on before the board can be asked which cell the point
+    /// is over. Given the cleared height it would come back a quarter level along
+    /// the face, which on a slope is the mark drawn off the tank.
+    ///
+    /// Named here rather than subtracted at the caller because it is
+    /// <see cref="MarkClear"/> read backwards, and two spellings of one constant
+    /// drift the first time one of them is tuned.
+    /// </summary>
+    public float Bare(float cleared) =>
+        cleared - (HasRamps ? Lift * MarkClear : 0.0f);
 
     /// <summary>
     /// Whether driving from one cell to the next goes up or down at all.
