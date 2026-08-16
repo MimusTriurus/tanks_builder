@@ -301,6 +301,10 @@ public sealed partial class Main : Node2D
 	/// <summary>Whether a trail is laid at all. See --no-wake.</summary>
 	private bool _wakes = true;
 
+	/// <summary>Whether the water piles up ahead of a wading hull. See --no-bow.
+	/// </summary>
+	private bool _bows = true;
+
 	/// <summary>Whether the water answers the tanks. See --still-water: the pond
 	/// as it was, which is the A/B this is judged by.</summary>
 	private bool _seaReacts = true;
@@ -1487,6 +1491,13 @@ public sealed partial class Main : Node2D
 			// one switch for both would measure two things.
 			else if (userArgs[i] == "--no-wake")
 				_wakes = false;
+			// And the water without a crest ahead of the hull, which is the A/B
+			// the bow is judged by. Its own flag beside --no-wake and not a share
+			// of it: what the water does in front of a tank and what it does
+			// behind are two statements, and an A/B of either wants the other to
+			// hold still.
+			else if (userArgs[i] == "--no-bow")
+				_bows = false;
 			else if (userArgs[i] == "--drawn-water")
 				_deepWater = false;
 			else if (userArgs[i] == "--no-foam")
@@ -2423,6 +2434,21 @@ public sealed partial class Main : Node2D
 	}
 
 	/// <summary>Cells carrying trees.</summary>
+	/// <summary>How hard the driven tank is shouldering the water, 0 parked
+	/// through 1 at the ford's own ceiling, and nought when it is not in the
+	/// water at all. For the trace: the crest is drawn by the surface out of a
+	/// vector nothing else prints, so a bow that never appears could be the
+	/// switch, the shader or a tank that is dry, and those are three fixes.
+	/// </summary>
+	private float BowPush()
+	{
+		Vehicle? v = Active;
+		if (v is null || !v.Wading)
+			return 0.0f;
+		return Mathf.Clamp(
+			(float)(v.Speed / Math.Max(v.Profile.WaterSpeed, 1e-4)), 0.0f, 1.0f);
+	}
+
 	private int Wooded()
 	{
 		if (_grove is null)
@@ -4410,6 +4436,7 @@ public sealed partial class Main : Node2D
 		["--still-water"] = new[] { "ground.water_react" },
 		["--drawn-water"] = new[] { "ground.deep" },
 		["--no-wake"] = new[] { "ground.wake" },
+	["--no-bow"] = new[] { "ground.bow" },
 		["--no-foam"] = new[] { "ground.foam" },
 		["--foam"] = new[] { "ground.foam" },
 		// The stage asks for height as well as for itself, so it declares both -
@@ -5095,6 +5122,8 @@ public sealed partial class Main : Node2D
 			() => _deepWater, v => _deepWater = v);
 		ui.Toggle("ground.wake", "tanks leave a wake  (--no-wake)",
 			() => _wakes, v => _wakes = v);
+		ui.Toggle("ground.bow", "water piles up at the bow  (--no-bow)",
+			() => _bows, v => _bows = v);
 		ui.Toggle("ground.water_react", "water answers the tanks  (--still-water)",
 			() => _seaReacts, v => _seaReacts = v);
 		ui.Readout("ground.water_state", () =>
@@ -5740,6 +5769,10 @@ public sealed partial class Main : Node2D
 						  + (_foam > 0.0f ? $"/{_foam:F2}foam" : "/!off")
 						  + (_deepWater ? "/deep" : "/strip")
 						  + (_wakes ? $"/{_wake?.Count ?? 0}wake" : "/!nowake")
+						  // How hard the driven tank is shouldering the water,
+						  // because a crest that is not there and a crest whose
+						  // push came out nought are the same still water.
+						  + (_bows ? $"/{BowPush():F2}bow" : "/!nobow")
 						  + (_seaReacts ? "" : "!still"))
 					 // Trees, wooded cells, and how many of those no tank may
 					 // enter. Three numbers because a board with no props, a
@@ -5884,6 +5917,7 @@ public sealed partial class Main : Node2D
 			_stage.Deep = _deepWater;
 			_stage.CastShadows = _castShadows;
 			_stage.Trail = _wake;
+			_stage.Bows = _bows;
 			// Before Place, because the tint a wading tank wears is read off its
 			// own cell's state and Place is where that is pushed at the sprite.
 			if (_sea is not null)

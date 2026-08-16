@@ -7561,7 +7561,8 @@ public static class SelfTest
             // the same table the sprite's own waterline is cut by - which is
             // what makes them one measurement rather than two that agree today.
             Check("and the waterline round a hull is the tank's own outline",
-                Stage3D.DeepShader.Contains("hull_line[i * ")
+                Stage3D.DeepShader.Contains("hull_line[lo]")
+                && Stage3D.DeepShader.Contains("int lo = who * ")
                 && Stage3D.PaintShader.Contains("uniform sampler2D shore"),
                 "the collar is a shape drawn round the tank rather than the "
                 + "shape of it, so it stands off the nose and cuts the guards");
@@ -7571,7 +7572,7 @@ public static class SelfTest
             // one line a whole depth apart - measured at 29 board px of water,
             // which is most of what is drawn of a tank's running gear.
             Check("and it stands at the waterline, not at the tank's feet",
-                Stage3D.DeepShader.Contains("- hull_dip[i]"),
+                Stage3D.DeepShader.Contains("(hem ? 0.0 : hull_dip[who])"),
                 "the collar on the water is drawn where the tank meets the "
                 + "bottom, so it and the line on the armour are one water "
                 + "deep apart");
@@ -7612,6 +7613,75 @@ public static class SelfTest
                 || field.Atlas.GroundlineAt(0, field.Atlas.Tile.X / 2) > field.Atlas.Anchor.Y,
                 "the groundline at the middle of the tank is not below its "
                 + "anchor, so what the collar would follow is not the ground");
+
+            // The bow. What the water does in front of a driving hull, and it
+            // is the collar's own line dilated along the way the tank is going -
+            // so the two cannot disagree about where the tank is, and the crest
+            // needs no test for which end is the bow.
+            Check("the crest ahead of a hull is the tank's own outline, pushed",
+                Stage3D.DeepShader.Contains("shoreline(i, back, true)")
+                && Stage3D.DeepShader.Contains(
+                    "px - normalize(hull_run[i]) * half_swell"),
+                "the bow wave is a shape drawn in front of the tank rather than "
+                + "the shape of it pushed along, which is the objection an "
+                + "ellipse round the hull already lost to");
+            // And it is dilated off the *bottom* of that silhouette while the
+            // collar is drawn at the waterline. Two halves of one scan, and the
+            // reason is where the drawn water starts: the waterline runs up the
+            // armour, so a crest dilated off it lands under the sprite - measured
+            // at 6 changed pixels in the whole pond, which is nothing.
+            Check("and off the bottom of it, where the drawn water starts",
+                Stage3D.DeepShader.Contains("shoreline(i, px, false)")
+                && Stage3D.DeepShader.Contains("shoreline(i, back, true)")
+                && Stage3D.DeepShader.Contains("hem ? hull_hem[lo]"),
+                "the crest and the collar read the same row of the same table, "
+                + "so one of them is drawn where it cannot be seen");
+            // Offset and spread are one number, halved: equal is the single
+            // setting that fills the crest from the hull outward. Less opens a
+            // gap of clean water beside the tank, more draws the inner half
+            // under the sprite.
+            Check("and it stands off by exactly what it spreads by",
+                Stage3D.DeepShader.Contains("normalize(hull_run[i]) * half_swell")
+                && Stage3D.DeepShader.Contains("smoothstep(0.0, half_swell,"),
+                "the crest is offset by one number and spread by another, so it "
+                + "either leaves clean water at the hull or wastes its inner "
+                + "half behind the sprite");
+            // The projection belongs to the reach and not to the opacity. Both
+            // is the same reason counted twice, and it costs the heading that
+            // shows a bow best: driving into the camera GroundDirection is only
+            // sin(elevation) long, so the crest came out half as far and half as
+            // white at once.
+            var across = new Vector2(1.0f, 0.0f);
+            var intoEye = new Vector2(0.0f, 0.5f);
+            Check("and a bow driven across the screen reaches further than one "
+                  + "driven into it",
+                Stage3D.BowStandoff(across) > Stage3D.BowStandoff(intoEye) * 1.5f,
+                $"across {Stage3D.BowStandoff(across):F1}px against "
+                + $"{Stage3D.BowStandoff(intoEye):F1}px into the camera, so the "
+                + "crest does not foreshorten with the ground it stands on");
+            Check("and it reaches further the harder the tank is pushing, and "
+                  + "not at all parked",
+                Stage3D.BowStandoff(across * 0.5f)
+                    < Stage3D.BowStandoff(across) - 1.0f
+                && Stage3D.BowStandoff(Vector2.Zero) == 0.0f,
+                $"half push stands off {Stage3D.BowStandoff(across * 0.5f):F1}px "
+                + $"against {Stage3D.BowStandoff(across):F1}px at full");
+            Check("but how white it is comes off the push alone",
+                Stage3D.DeepShader.Contains("float push = hull_push[i] * bow_on;")
+                && Stage3D.DeepShader.Contains("prow = max(prow, push"),
+                "the crest's opacity carries the projection as well as its "
+                + "reach, so a tank driving into the camera - the heading that "
+                + "shows a bow best - all but stops making one");
+            // Its own switch beside the wake's, because the two are different
+            // statements: one is what the water does behind a tank and one is
+            // what it does in front, and an A/B of either wants the other to
+            // hold still.
+            Check("and the bow and the wake are switched apart",
+                Stage3D.DeepShader.Contains("bow_on")
+                && Stage3D.DeepShader.Contains("wake_on")
+                && !Stage3D.DeepShader.Contains("prow * wake_on"),
+                "one switch takes both, so neither can be judged against the "
+                + "picture without the other");
 
             // The wake. Its own object because a swell answers "what is this
             // hexagon doing" and a trail is a line across hexagons - two

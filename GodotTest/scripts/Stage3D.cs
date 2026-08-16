@@ -1083,9 +1083,15 @@ void fragment() {{
             var pivot = new Vector2[Collars];
             var size = new Vector2[Collars];
             var line = new float[Collars * HullLine];
+            var hem = new float[Collars * HullLine];
             var dip = new float[Collars];
+            var run = new Vector2[Collars];
+            var push = new float[Collars];
             for (int i = 0; i < line.Length; i++)
+            {
                 line[i] = -1.0f;
+                hem[i] = -1.0f;
+            }
             int worn = 0;
             foreach (Vehicle vehicle in vehicles)
             {
@@ -1115,6 +1121,18 @@ void fragment() {{
                 // as stray white beside the tank rather than as a line in the
                 // wrong place.
                 dip[worn] = mapped ? 0.0f : wetPx;
+                // How hard this one is pushing, against the ford's own ceiling
+                // and not against its top speed: what a tank can do in water is
+                // what full push through water means, and normalising by a speed
+                // it cannot reach here would leave every bow wave at two fifths
+                // of itself for a reason nothing on screen could show.
+                float shove = Mathf.Clamp(
+                    (float)(vehicle.Speed
+                            / Mathf.Max(vehicle.Profile.WaterSpeed, 1e-4)),
+                    0.0f, 1.0f);
+                push[worn] = shove;
+                run[worn] = set.GroundDirection(vehicle.Sprite.HullFacing)
+                            * shove;
                 for (int i = 0; i < HullLine; i++)
                 {
                     int column = Mathf.RoundToInt(
@@ -1122,6 +1140,7 @@ void fragment() {{
                     line[worn * HullLine + i] = mapped
                         ? set.WaterlineAt(frame, column)
                         : set.GroundlineAt(frame, column);
+                    hem[worn * HullLine + i] = set.GroundlineAt(frame, column);
                 }
                 worn++;
             }
@@ -1129,8 +1148,12 @@ void fragment() {{
             _deepInk.SetShaderParameter("hull_pivot", pivot);
             _deepInk.SetShaderParameter("hull_size", size);
             _deepInk.SetShaderParameter("hull_line", line);
+            _deepInk.SetShaderParameter("hull_hem", hem);
             _deepInk.SetShaderParameter("hull_dip", dip);
             _deepInk.SetShaderParameter("hull_band", HullBand);
+            _deepInk.SetShaderParameter("hull_run", run);
+            _deepInk.SetShaderParameter("hull_push", push);
+            _deepInk.SetShaderParameter("bow_on", Bows ? 1.0f : 0.0f);
         }
         // The mark goes where the tank touches the ground, every frame, for the
         // reason the 2D ring follows the contact patch: a tank spends most of an
@@ -2432,6 +2455,58 @@ void fragment() {
     /// staying a fixed smear on screen.</summary>
     public const float HullBand = 6.0f;
 
+    /// <summary>
+    /// Whether the water piles up ahead of a hull that is driving through it.
+    /// Off leaves the pond as it was before this - see --no-bow, which is the
+    /// A/B it is judged by. Separate from the wake's own switch because they are
+    /// two statements: one is what the water does behind a tank and one is what
+    /// it does in front, and an A/B of either wants the other to hold still.
+    /// </summary>
+    public bool Bows = true;
+
+    /// <summary>
+    /// How far ahead of its own waterline the bow crest stands, in the sprite's
+    /// own pixels, at full push.
+    ///
+    /// <b>The crest is that line pushed along the way the tank is going, and not
+    /// a shape drawn in front of it.</b> A prow arc hung off the hull would be
+    /// right about where the tank is and wrong about its shape everywhere - the
+    /// same objection an ellipse round the hull already lost to, and the same
+    /// answer: the silhouette is already measured, one row per column per
+    /// heading, so the crest is a directional dilation of it and cannot disagree
+    /// with the collar an inch away.
+    ///
+    /// <b>Which side is the bow needs no test, and that is what the offset buys.</b>
+    /// Stepping <i>back</i> along the travel direction and asking the table there
+    /// puts the band outside the silhouette at the leading end and inside it at
+    /// the trailing one - and inside is behind the sprite, which is drawn over
+    /// the water. So the stern's half hides itself, exactly as a hull does.
+    ///
+    /// <b>One number and not two, and that is a derivation rather than a
+    /// tidy-up.</b> The dilation offsets by so much and spreads by so much, and
+    /// the crest is filled from the hull outward exactly when those two are
+    /// equal: any less and it opens a gap of clean water between the foam and
+    /// the tank, any more and its inner half is drawn under the sprite, where
+    /// nothing is ever seen. So the pair is one dial, and this is what it
+    /// measures - how far past the silhouette the water is thrown.
+    ///
+    /// <b>Judged against the wake and not against the collar.</b> A waterline is
+    /// 6px because it is a line; a bow wave is a body of churned water and its
+    /// neighbour on the far side of the hull is a wake stamp 40 world units
+    /// across. At 36 sprite px of a hull drawn some 180 wide the crest is a fifth
+    /// of the tank, which is where it stops reading as a thick collar.
+    /// </summary>
+    public const float BowSwell = 36.0f;
+
+    /// <summary>Where the crest's peak stands, in the sprite's own px, for a hull
+    /// whose travel is <paramref name="run"/> - GroundDirection times the share
+    /// of the ford's ceiling it is doing. The shader's own expression, named here
+    /// because this is the half of the pair the projection belongs to and the
+    /// check has to be able to ask for it: a bow that foreshortens its opacity
+    /// instead of its reach looks identical in the source and is invisible
+    /// head-on, which is the heading that shows a bow best.</summary>
+    public static float BowStandoff(Vector2 run) => 0.5f * BowSwell * run.Length();
+
     /// <summary>How far the foam licks up the paint at the waterline, in the
     /// sprite's own pixels.
     ///
@@ -2521,6 +2596,7 @@ void fragment() {
         _deepInk.SetShaderParameter("sun", Sun);
         _deepInk.SetShaderParameter("wake_seed", Wake.Seed);
         _deepInk.SetShaderParameter("wake_spread", Wake.Spread);
+        _deepInk.SetShaderParameter("bow_swell", BowSwell);
         _deepInk.SetShaderParameter("bands", (float)WaterArt.Bands);
         // Named here as well as defaulted in the shader, because the sprite is
         // handed the same two numbers from the same constants: a default living
@@ -2917,8 +2993,30 @@ uniform vec2 hull_at[4];
 uniform vec2 hull_pivot[4];
 uniform vec2 hull_size[4];
 uniform float hull_line[{6}];
+// And the bottom of that same silhouette, which is a different line and is here
+// for a reason worth stating. hull_line is where the water meets the hull *in
+// the world*, and it runs up the armour - so the crest dilated off it lands
+// inside the sprite, which is drawn over the water, and is never seen. What the
+// eye takes for the water in front of a tank starts where the sprite stops, and
+// that is this. Same table, same scan, one row lower down the same column: the
+// collar is a line with a half on the armour, the crest is foam on water the eye
+// can actually see, and they want different halves of one measurement.
+uniform float hull_hem[{6}];
 uniform float hull_dip[4];
 uniform float hull_band = 3.0;
+// Which way each hull is going, in the harness's own 2D px, and how hard it is
+// pushing. Two things and not one, and the first cut of it folded them into a
+// single unnormalised vector on the flash's precedent - wrongly. That precedent
+// is about *lengths on the ground*: GroundDirection's own length is the share of
+// a ground movement the projection left, so it belongs to how far the crest
+// stands off, which is a ground length, and speed belongs there too. It does not
+// belong to how white the foam is. Folded, a tank driving into the camera lost
+// half its reach and half its opacity for one reason counted twice, and head-on
+// - the heading that shows the bow best - the crest all but vanished.
+uniform vec2 hull_run[4];
+uniform float hull_push[4];
+uniform float bow_swell = 36.0;
+uniform float bow_on = 1.0;
 // The two camera terms, so a fragment of the water can be put back into the 2D
 // space the sprites are placed in. Uniforms rather than constants because the
 // field owns them and a second copy is a second thing to keep in agreement.
@@ -2964,6 +3062,31 @@ float chop(vec2 p) {{
         drift = vec2(drift.y, -drift.x) * 2.1;
     }}
     return h;
+}}
+
+// Where tank `who` meets the water in the column a point of its tile falls in,
+// in the sprite's own px, or -1 where it has no pixel in that column at all.
+//
+// A function because two things ask it now - the collar at the fragment, and
+// the bow crest at the fragment stepped back along the way the tank is going -
+// and a second copy of this lookup would be a second answer to where the
+// waterline is, which is the one thing the whole arrangement exists to prevent.
+float shoreline(int who, vec2 px, bool hem) {{
+    float u = px.x / max(hull_size[who].y, 1.0);
+    if (u < 0.0 || u > 1.0)
+        return -1.0;
+    float f = u * float({5} - 1);
+    int k = int(floor(f));
+    int lo = who * {5} + k;
+    int hi = who * {5} + min(k + 1, {5} - 1);
+    float a = hem ? hull_hem[lo] : hull_line[lo];
+    float b = hem ? hull_hem[hi] : hull_line[hi];
+    // No entry means no tank in that column - the gun swung out past the tracks
+    // is the case it is there for - and a line through it would be drawn from
+    // the two columns either side of a gap it is not in.
+    if (a < 0.0 || b < 0.0)
+        return -1.0;
+    return mix(a, b, fract(f)) - (hem ? 0.0 : hull_dip[who]);
 }}
 
 void vertex() {{
@@ -3146,42 +3269,74 @@ void fragment() {{
     // sprite's own pixels, so it grows with the tank the size dial made bigger.
     vec2 plane = vec2(world.x, world.z * squash - world.y * rise);
     float collar = 0.0;
+    float prow = 0.0;
     for (int i = 0; i < 4; i++) {{
         if (hull_size[i].x <= 0.0)
             continue;
         vec2 px = (plane - hull_at[i]) / hull_size[i].x + hull_pivot[i];
-        float u = px.x / max(hull_size[i].y, 1.0);
-        if (u < 0.0 || u > 1.0)
-            continue;
-        float f = u * float({5} - 1);
-        int k = int(floor(f));
-        float a = hull_line[i * {5} + k];
-        float b = hull_line[i * {5} + min(k + 1, {5} - 1)];
-        // No entry means no tank in that column - the gun swung out past the
-        // tracks is the case it is there for - and a line through it would be
-        // drawn from the two columns either side of a gap it is not in.
-        if (a < 0.0 || b < 0.0)
-            continue;
-        // Pushed by the same field as the shore and in the same coin - a fraction
-        // of its own band - and read at the line rather than at the fragment, for
-        // the reason given up there: read at the fragment this one folds first,
-        // being the narrowest of the three.
+        float line = shoreline(i, px, false);
+        if (line >= 0.0) {{
+            // Pushed by the same field as the shore and in the same coin - a
+            // fraction of its own band - and read at the line rather than at the
+            // fragment, for the reason given up there: read at the fragment this
+            // one folds first, being the narrowest of the three.
+            //
+            // The line's own point is put back in the world by inverting the
+            // mapping that brought the fragment here, and the height it needs is
+            // this fragment's own: the collar is drawn on the water, so world.y
+            // is already the plane the waterline lies in. The sprite's half does
+            // the same inversion from the other side, which is what makes the
+            // two one line.
+            vec2 seat = (vec2(px.x, line) - hull_pivot[i]) * hull_size[i].x
+                        + hull_at[i];
+            vec2 sea = vec2(seat.x,
+                            (seat.y + world.y * rise) / max(squash, 0.0001));
+            line += crumple(sea * edge_crumple.x, time) * edge_crumple.y
+                    * hull_band;
+            collar = max(collar,
+                         1.0 - smoothstep(0.0, hull_band, abs(px.y - line)));
+        }}
+        // And the water piled up ahead of it, which is that same line dilated
+        // along the way the tank is going. Stepping the sample point *back* down
+        // the travel direction is the whole of it: where this fragment is ahead
+        // of the hull the stepped point lands on the line and the crest is drawn,
+        // where it is behind it lands inside the silhouette - and inside is under
+        // the sprite, which is drawn over the water. No side test, and the stern
+        // hides its own half exactly as a hull does.
         //
-        // The line's own point is put back in the world by inverting the mapping
-        // that brought the fragment here, and the height it needs is this
-        // fragment's own: the collar is drawn on the water, so world.y is already
-        // the plane the waterline lies in. The sprite's half does the same
-        // inversion from the other side, which is what makes the two one line.
-        float line = mix(a, b, fract(f)) - hull_dip[i];
-        vec2 seat = (vec2(px.x, line) - hull_pivot[i]) * hull_size[i].x
+        // A direction in the plane is the same direction in tile px, because the
+        // mapping between them is one uniform scale; only the length has to be
+        // said in the space it is measured in, and reach is in the sprite's px
+        // like the band it is judged against.
+        float push = hull_push[i] * bow_on;
+        if (push <= 0.0 || length(hull_run[i]) <= 0.0)
+            continue;
+        // Half the swell each way: offset by it, spread by it. See BowSwell -
+        // equal is the one setting that fills the crest from the hull outward
+        // with nothing wasted under the sprite and no clean gap beside it.
+        float half_swell = 0.5 * bow_swell * length(hull_run[i]);
+        vec2 back = px - normalize(hull_run[i]) * half_swell;
+        float ahead = shoreline(i, back, true);
+        if (ahead < 0.0)
+            continue;
+        vec2 rest = (vec2(back.x, ahead) - hull_pivot[i]) * hull_size[i].x
                     + hull_at[i];
-        vec2 sea = vec2(seat.x, (seat.y + world.y * rise) / max(squash, 0.0001));
-        line += crumple(sea * edge_crumple.x, time) * edge_crumple.y * hull_band;
-        collar = max(collar, 1.0 - smoothstep(0.0, hull_band, abs(px.y - line)));
+        vec2 brine = vec2(rest.x,
+                          (rest.y + world.y * rise) / max(squash, 0.0001));
+        ahead += crumple(brine * edge_crumple.x, time) * edge_crumple.y
+                 * half_swell;
+        prow = max(prow, push
+                         * (1.0 - smoothstep(0.0, half_swell,
+                                             abs(back.y - ahead))));
     }}
 
     float edge = clamp(max(max(lip, bank), max(lv, collar)), 0.0, 1.0) * broken;
-    float lane = trail * mix(broken, 1.0, 0.55);
+    // The trail and the crest take the surface's texture only on top, and for
+    // one reason: both are water that is being churned through right now, so
+    // they hold together as a body. Broken as hard as the shore is, a crest that
+    // is a few pixels wide comes apart into speckle and reads as noise rather
+    // than as a bow.
+    float lane = max(trail, prow) * mix(broken, 1.0, 0.55);
     col = mix(col, foam_ink, clamp(max(edge, lane), 0.0, 1.0) * foam);
 
     ALBEDO = col;
