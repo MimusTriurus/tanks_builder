@@ -1827,7 +1827,9 @@ public static class SelfTest
             // paint and forgets to sow leaves woods on soil and soil where the
             // woods were, and every other check here would pass, because they
             // all plant first.
-            var sownOn = new HashSet<Vector2I>(grove.Trees.Select(t => t.Cell));
+            var sownOn = new HashSet<Vector2I>(
+                grove.Standing.Where(t => t.Tier.Name == PropTier.Trees)
+                              .Select(t => t.Cell));
             var wooded = new HashSet<Vector2I>();
             for (int q = 0; q < field.Columns; q++)
             for (int r = 0; r < field.Rows; r++)
@@ -1838,32 +1840,62 @@ public static class SelfTest
                 $"{sownOn.Count} cells carry trees, {wooded.Count} are wooded");
 
             Check("every tree stands on a wooded cell",
-                grove.Trees.All(t => grove.IsForest(t.Cell)),
-                $"{grove.Trees.Count(t => !grove.IsForest(t.Cell))} of "
+                grove.Standing.Where(t => t.Tier.Name == PropTier.Trees)
+                              .All(t => grove.IsForest(t.Cell)),
+                $"{grove.Standing.Count(t => t.Tier.Name == PropTier.Trees
+                                             && !grove.IsForest(t.Cell))} of "
                 + $"{grove.Planted} grew on open ground");
+
+            // And the general form of the same statement, which is the one that
+            // survives a second tier: whatever a prop is, its cell has to have
+            // asked for that tier. Written apart from the wood's because the two
+            // fail differently - a bush on a cell whose budget has no bush row is
+            // a table that did not reach the sower, and a tree on open ground is
+            // the paint and the wood out of step.
+            var misplaced = grove.Standing.Where(
+                t => !grove.Growth(t.Cell).Any(g => g.Tier == t.Tier)).ToList();
+            Check("every prop stands on ground its tier is budgeted for",
+                misplaced.Count == 0,
+                $"{misplaced.Count} of {grove.Planted}: "
+                + string.Join(", ", misplaced.Take(3).Select(
+                    t => $"{t.Tier.Name} on {field.KindAt(t.Cell)} {t.Cell}")));
 
             // The foot decides the cell, so a tree near a border belongs to the
             // hexagon it stands in - and to that one only. Planted per cell off
             // a global lattice, so this is what says the two agree.
             Check("a tree is planted by the cell it stands in",
-                grove.Trees.All(t => field.CellAt(t.Ground) == t.Cell),
-                $"{grove.Trees.Count(t => field.CellAt(t.Ground) != t.Cell)} "
+                grove.Standing.All(t => field.CellAt(t.Ground) == t.Cell),
+                $"{grove.Standing.Count(t => field.CellAt(t.Ground) != t.Cell)} "
                 + "stand outside the cell that planted them");
 
             // The rule the whole arrangement rests on, and with no thicket to be
             // exempt there is now nothing it does not cover: every wooded cell
             // has a clearing in it, so every cell on the board is drivable.
+            //
+            // Asked of the tiers that claim it, which is not a loophole: a tier
+            // that opts out is one a tank drives over rather than into, and
+            // holding grass to the keep-out would clear a disc of turf out of
+            // the middle of every cell. Both halves are asserted, because a
+            // check that only asked the claimants would pass a board where every
+            // tier had quietly opted out.
             float squash = grove.Squash;
-            var intruders = grove.Trees.Where(t =>
+            var intruders = grove.Standing.Where(t =>
             {
+                if (t.Tier.Clearing <= 0.0)
+                    return false;
                 Vector2 centre = field.CellCentre(t.Cell);
                 var a = new Vector2(t.Ground.X, t.Ground.Y / squash);
                 var b = new Vector2(centre.X, centre.Y / squash);
-                return a.DistanceTo(b) < grove.KeepOut - 0.5;
+                return a.DistanceTo(b) < grove.KeepOut * t.Tier.Clearing - 0.5;
             }).ToList();
-            Check("nothing grows where a tank stands",
+            Check("nothing that a tank cannot drive over grows where it stands",
                 intruders.Count == 0,
                 $"{intruders.Count} inside the {grove.KeepOut:F0}px keep-out");
+
+            Check("and the tier that stands in the way is one of them",
+                grove.Standing.Any(t => t.Tier.Clearing > 0.0),
+                "every tier on the board opted out of the keep-out, which is a "
+                + "board with no clearing rule at all rather than a clear one");
 
             // The foot being inside was never enough - the base is wider than
             // the point it is measured at - and asking which cell the base's
@@ -1874,113 +1906,271 @@ public static class SelfTest
             double root3 = Math.Sqrt(3.0);
             double radius = field.Atlas!.HexRect.Size.X * 0.5;
             float sq = grove.Squash;
-            var straddling = grove.Trees.Where(t =>
+            var straddling = grove.Standing.Where(t =>
             {
+                if (!t.Tier.MindsBorder)
+                    return false;
                 Vector2 c = field.CellCentre(t.Cell);
                 double dx = Math.Abs(t.Ground.X - c.X);
                 double dy = Math.Abs((t.Ground.Y - c.Y) / sq);
                 double edge = Math.Min(root3 * radius * 0.5 - dy,
                                        (root3 * radius - root3 * dx - dy) * 0.5);
                 return edge < grove.Props!.RootOf(t.Species) * t.Pixels
-                              + grove.Clearance - 0.5;
+                              + grove.Clearance
+                              + t.Tier.Inset * root3 * radius * 0.5 - 0.5;
             }).ToList();
             Check("no tree stands on the border of its cell",
                 straddling.Count == 0,
                 $"{straddling.Count} are within their own base of the edge");
 
+            // --- and a tier that fills its cell fills it ---------------------
+            //
+            // The complaint this answers looked like a distribution and was two
+            // rules: the keep-out, which leaves a band 24 ground px deep out of
+            // a 107px radius, and the ceiling's tie-break, which sorted equal
+            // candidates by screen row and so kept the topmost - the back edge
+            // of every cell, the same edge on every cell.
+            //
+            // Two numbers, because those are two different pictures and either
+            // alone passes the other. A ring has its centroid dead on the cell
+            // centre; a line banked against one edge has a perfectly ordinary
+            // mean radius.
+            double inradius = root3 * radius * 0.5;
+            foreach (PropTier tier in grove.Props!.Tiers)
+            {
+                var mine = grove.Standing.Where(p => p.Tier == tier).ToList();
+                if (mine.Count < 20)
+                    continue;
+                var offsets = mine.Select(p =>
+                {
+                    Vector2 c = field.CellCentre(p.Cell);
+                    return new Vector2(p.Ground.X - c.X,
+                                       (p.Ground.Y - c.Y) / squash);
+                }).ToList();
+                double meanRadius = offsets.Average(o => o.Length()) / inradius;
+                double pull = (offsets.Aggregate(Vector2.Zero, (a, b) => a + b)
+                               / offsets.Count).Length() / inradius;
+
+                // Measured on the three tiers in hand: a tier spread over its
+                // hexagon means 0.61 to 0.63 of the inradius, and one held out
+                // of the tank's patch means 0.91 - the band it is allowed is 24
+                // ground px deep out of 107, so a ring is all it can be. The
+                // threshold between is not tuned, there is nothing in between.
+                if (tier.Clearing <= 0.0)
+                    Check($"the {tier.Name} tier spreads over its cells rather than ringing them",
+                        meanRadius < 0.72,
+                        $"mean radius {meanRadius:F2} of the inradius over "
+                        + $"{mine.Count} props - a keep-out this tier honours "
+                        + "leaves it nowhere but the rim");
+
+                // And the other half, which every tier owes whatever its
+                // clearing: a ring has its centroid dead on the cell centre, so
+                // the measurement above cannot see a tier banked against one
+                // edge - and banked against one edge is what the ceiling used to
+                // produce, because it broke ties between equally-preferred spots
+                // by screen row and so kept the topmost. Measured both ways on
+                // this board: 0.76 to 0.78 of the inradius with that tie-break,
+                // 0.07 to 0.14 with the hash that replaced it.
+                //
+                // Not zero, and it cannot be while the check above about props
+                // standing in the cell that planted them fails: CellAt is a
+                // screen picker, so a raised cell loses the candidates along its
+                // near edge to the cell drawn in front of it, and every tier
+                // leans the same few pixels away from the camera for it.
+                Check($"and the {tier.Name} tier is not banked against one edge",
+                    pull < 0.25,
+                    $"centroid {pull:F2} of the inradius off centre over "
+                    + $"{mine.Count} props");
+            }
+
             // A wooded cell is wooded. The minimum overrides the edge fade,
             // which is a preference among legal spots, and cannot override the
             // keep-out or the border, which are what make the cell drivable and
             // the tree one cell's tree.
-            var perCell = new Dictionary<Vector2I, int>();
-            foreach (PropNode tree in grove.Trees)
-                perCell[tree.Cell] = perCell.GetValueOrDefault(tree.Cell) + 1;
-            var thin = new List<Vector2I>();
+            //
+            // Counted per (cell, tier), because the budget is: a cell holding
+            // four trees and no bushes reads as full against a total and is
+            // short of what its ground asked for.
+            Dictionary<(Vector2I, PropTier), int> Census()
+            {
+                var by = new Dictionary<(Vector2I, PropTier), int>();
+                foreach (PropNode p in grove.Standing)
+                    by[(p.Cell, p.Tier)] = by.GetValueOrDefault((p.Cell, p.Tier)) + 1;
+                return by;
+            }
+
+            Dictionary<(Vector2I, PropTier), int> perCell = Census();
+            var thin = new List<string>();
+            var overfull = new List<string>();
             for (int q = 0; q < field.Columns; q++)
             for (int r = 0; r < field.Rows; r++)
             {
                 var cell = new Vector2I(q, r);
-                if (grove.IsForest(cell)
-                    && perCell.GetValueOrDefault(cell) < grove.Minimum)
-                    thin.Add(cell);
+                foreach ((PropTier tier, int least, int most) in grove.Growth(cell))
+                {
+                    int got = perCell.GetValueOrDefault((cell, tier));
+                    if (got < least)
+                        thin.Add($"{cell} {tier.Name} {got}/{least}");
+                    if (most > 0 && got > most)
+                        overfull.Add($"{cell} {tier.Name} {got}/{most}");
+                }
             }
-            Check($"every wooded cell carries at least {grove.Minimum} trees",
+            Check("every cell carries the floor its ground asks for, tier by tier",
                 thin.Count == 0,
-                $"{thin.Count} cells came out thinner than that");
+                $"{thin.Count} short: " + string.Join(", ", thin.Take(4)));
 
-            Check($"and at most {grove.Maximum}",
-                grove.Maximum <= 0
-                || perCell.Values.All(n => n <= grove.Maximum),
-                $"the fullest carries "
-                + $"{(perCell.Count == 0 ? 0 : perCell.Values.Max())}");
+            Check("and none is over its ceiling",
+                overfull.Count == 0,
+                $"{overfull.Count} over: " + string.Join(", ", overfull.Take(4)));
 
             // Both ends move, and both still hold when they are set to the same
             // number - which is the case that catches a floor filled after the
             // ceiling was applied, or a ceiling that trims a cell back under
-            // its floor.
+            // its floor. The wood's two ends specifically: they are the pair
+            // that stayed fields, so they are the pair a slider can move.
             int wasLeast = grove.Minimum, wasMost = grove.Maximum;
             grove.Minimum = 6;
             grove.Maximum = 6;
             grove.Plant();
-            var counted = new Dictionary<Vector2I, int>();
-            foreach (PropNode tree in grove.Trees)
-                counted[tree.Cell] = counted.GetValueOrDefault(tree.Cell) + 1;
+            var counted = Census()
+                .Where(e => e.Key.Item2.Name == PropTier.Trees).ToList();
             Check("a floor equal to the ceiling puts exactly that many on a cell",
-                counted.Values.All(n => n == 6),
-                $"{counted.Values.Count(n => n != 6)} cells missed six");
+                counted.All(e => e.Value == 6),
+                $"{counted.Count(e => e.Value != 6)} cells missed six");
             grove.Minimum = wasLeast;
             grove.Maximum = wasMost;
             grove.Plant();
 
             // A prop that never gets planted is one nobody notices is missing -
-            // and with the spot choosing among the trees that fit it, the way a
+            // and with the spot choosing among the props that fit it, the way a
             // prop goes missing is by being too wide for every legal spot on
             // the board rather than by being left out of a list. Measured on
-            // the four in hand: the bases want 11.3 to 18.3px of room against a
-            // ring 24 deep at its narrowest, so the largest is the one at risk.
-            var grown = new HashSet<int>(grove.Trees.Select(t => t.Species));
-            Check("every kind of tree is somewhere on the board",
-                grove.Planted < grove.Props!.Count * 4
-                || grown.Count == grove.Props.Count,
-                $"{grown.Count} of {grove.Props.Count} appeared in "
-                + $"{grove.Planted} trees; missing "
-                + string.Join(", ", Enumerable.Range(0, grove.Props.Count)
-                    .Where(k => !grown.Contains(k))
+            // the four trees in hand: the bases want 11.3 to 18.3px of room
+            // against a ring 24 deep at its narrowest, so the largest is at risk.
+            //
+            // Asked of the tiers the board actually grows. A tier with art and no
+            // budget row is a different failure and gets its own check below -
+            // folded in here it would read as art that is too wide, which is the
+            // thing this one is for.
+            var grown = new HashSet<int>(grove.Standing.Select(t => t.Species));
+            var budgeted = new HashSet<PropTier>(grove.Standing.Select(t => t.Tier));
+            var wanted = Enumerable.Range(0, grove.Props!.Count)
+                .Where(k => budgeted.Contains(grove.Props.TierOf(k))).ToList();
+            Check("every kind of prop its board grows is somewhere on it",
+                grove.Planted < wanted.Count * 4
+                || wanted.All(k => grown.Contains(k)),
+                $"{grown.Count} of {wanted.Count} appeared in "
+                + $"{grove.Planted} props; missing "
+                + string.Join(", ", wanted.Where(k => !grown.Contains(k))
                     .Select(k => $"{grove.Props.NameOf(k)} "
                                  + $"(base {grove.Props.RootOf(k) * grove.DrawScale:F1}px)")));
+
+            // The quiet half: art on disk that no kind of ground carries. It
+            // loads, it is counted in the note, and it never appears - which
+            // from outside is indistinguishable from art that failed to load.
+            var idleTiers = grove.Props.Tiers.Where(t => !budgeted.Contains(t)).ToList();
+            Check("no tier loaded art that no ground has a budget for",
+                idleTiers.Count == 0,
+                $"{string.Join(", ", idleTiers.Select(t => t.Name))} loaded and never "
+                + "planted - add a row to Grove.Budget or the folder is dead art");
 
             // Ground space, not screen: the lattice is square on the ground, and
             // measuring the spacing on screen would call every north-south pair
             // too close by the squash.
-            double closest = double.MaxValue;
-            for (int i = 0; i < grove.Trees.Count; i++)
-            for (int j = i + 1; j < grove.Trees.Count; j++)
+            //
+            // Within a tier and never across one, because that is exactly what
+            // the sowing promises: two props off the same jittered lattice
+            // cannot meet, and two off different lattices have no relationship
+            // for a lattice rule to assert. Asked across, this check would fail
+            // on a correct board the moment a second tier existed - and the
+            // temptation to loosen the bound until it passed would have thrown
+            // away the guarantee it is here for.
+            Vector2 Flat(PropNode p) => new(p.Ground.X, p.Ground.Y / squash);
+            var tight = new List<string>();
+            foreach (PropTier tier in grove.Props.Tiers)
             {
-                var a = new Vector2(grove.Trees[i].Ground.X,
-                                    grove.Trees[i].Ground.Y / squash);
-                var b = new Vector2(grove.Trees[j].Ground.X,
-                                    grove.Trees[j].Ground.Y / squash);
-                closest = Math.Min(closest, a.DistanceTo(b));
+                var mine = grove.Standing.Where(p => p.Tier == tier).ToList();
+                double near = double.MaxValue;
+                for (int i = 0; i < mine.Count; i++)
+                for (int j = i + 1; j < mine.Count; j++)
+                    near = Math.Min(near, Flat(mine[i]).DistanceTo(Flat(mine[j])));
+                // Half the step, because a cell short of its floor is gone over
+                // again at half - so the guarantee is the finer lattice's, and
+                // saying otherwise here would be asserting a spacing the sowing
+                // does not promise.
+                double gap = grove.StepOf(tier) * 0.5 * (1.0 - 2.0 * grove.Jitter);
+                if (mine.Count > 1 && near < gap - 0.5)
+                    tight.Add($"{tier.Name} {near:F1}px against {gap:F1}px");
             }
-            // The lattice guarantees it whatever the cells decide, which is the
-            // point of sowing globally: two neighbouring hexagons cannot plant
-            // two trees a pixel apart across their shared edge. Half the step,
-            // because a cell short of its floor is gone over again at half - so
-            // the guarantee is the finer lattice's, and saying otherwise here
-            // would be asserting a spacing the sowing does not promise.
-            double floorGap = grove.Spacing * 0.5 * (1.0 - 2.0 * grove.Jitter);
-            Check("no two trees are closer than the lattice allows",
-                closest >= floorGap - 0.5,
-                $"closest {closest:F1}px against {floorGap:F1}px");
+            Check("no two props of a tier are closer than its lattice allows",
+                tight.Count == 0, string.Join(", ", tight));
+
+            // And the rule that takes over where the lattice stops. Trees are
+            // sown first into an empty board, so this asserts nothing about them
+            // and everything about what comes after: a bush is refused a spot
+            // whose base overlaps a trunk's, and there is nothing else in the
+            // sowing that could have kept the two apart.
+            var overlapping = new List<string>();
+            foreach (PropNode a in grove.Standing)
+            foreach (PropNode b in grove.Standing)
+            {
+                if (a.Tier == b.Tier)
+                    continue;
+                double reach = grove.Props.RootOf(a.Species) * a.Pixels
+                               + grove.Props.RootOf(b.Species) * b.Pixels;
+                if (Flat(a).DistanceTo(Flat(b)) < reach - 0.5)
+                    overlapping.Add($"{a.Tier.Name} on {b.Tier.Name} at {a.Cell}");
+            }
+            Check("nothing of one tier stands in the base of another",
+                overlapping.Count == 0,
+                $"{overlapping.Count / 2} pairs overlap: "
+                + string.Join(", ", overlapping.Take(4)));
+
+            // The order the whole arrangement above rests on. Measured off the
+            // art rather than declared, so a folder of saplings taller than the
+            // trees reorders itself - and a list that had drifted out of height
+            // order would put a trunk down on a bush with nothing to notice.
+            Check("the tiers are sown tallest first",
+                grove.Props.Tiers.Zip(grove.Props.Tiers.Skip(1)).All(p =>
+                    grove.Props.Species(p.First).Max(k => grove.Props.RiseOf(k))
+                    >= grove.Props.Species(p.Second).Max(k => grove.Props.RiseOf(k))),
+                string.Join(" then ", grove.Props.Tiers.Select(t =>
+                    $"{t.Name} {grove.Props.Species(t).Max(k => grove.Props.RiseOf(k)):F0}")));
+
+            // The tallest tier is sown into an empty board, so what it plants
+            // cannot depend on what comes after it. Asserted by taking the rest
+            // of the budget away and re-sowing: every tree has to come back in
+            // the same place, which is what says a folder of rocks appearing on
+            // disk does not move a single trunk on a board rendered last year.
+            var tallBefore = grove.Standing.Where(p => p.Tier == grove.Props.Tiers[0])
+                              .Select(p => p.Ground).OrderBy(v => v.Y)
+                              .ThenBy(v => v.X).ToList();
+            var kept = grove.Budget.ToDictionary(e => e.Key, e => e.Value.ToList());
+            foreach (List<Sprouts> rows in grove.Budget.Values)
+                rows.RemoveAll(s => !string.Equals(s.Tier, grove.Props.Tiers[0].Name,
+                                                   StringComparison.OrdinalIgnoreCase));
+            grove.Plant();
+            var alone = grove.Standing.Select(p => p.Ground).OrderBy(v => v.Y)
+                             .ThenBy(v => v.X).ToList();
+            Check("the tallest tier stands where it would with no other tier at all",
+                tallBefore.Count == alone.Count
+                && tallBefore.Zip(alone).All(p => p.First.DistanceTo(p.Second) < 0.001f),
+                $"{tallBefore.Count} with the rest of the budget, {alone.Count} without");
+            foreach ((string kind, List<Sprouts> rows) in kept)
+                grove.Budget[kind] = rows;
+            grove.Plant();
 
             // Same rule as a vehicle's, in the same space - that is what lets a
             // tree and a tank sort against each other at all.
+            // Of what still sorts. The dressing gave the sort up rather than got
+            // it wrong, and the two checks below it are its own, three down.
+            var sorting = grove.Standing.Where(p => !p.Tier.UnderTanks).ToList();
             Check("a tree's depth is its foot",
-                grove.Trees.All(t => t.ZIndex == Mathf.RoundToInt(t.Ground.Y)),
+                sorting.All(t => t.ZIndex == Mathf.RoundToInt(t.Ground.Y)),
                 "depth off anything but the foot puts a leaning canopy in front "
                 + "of what it grows behind");
             Check("a tree in front of another draws over it",
-                grove.Trees.Zip(grove.Trees.Skip(1))
+                sorting.Zip(sorting.Skip(1))
                      .All(p => p.First.ZIndex <= p.Second.ZIndex),
                 "the planted list is kept in depth order so a tie resolves back "
                 + "to front rather than by which cell was walked first");
@@ -1988,10 +2178,111 @@ public static class SelfTest
             // Not decoration and not an effect: a tree is an object on the
             // ground, so it belongs over the ruts and the ring rather than
             // among them.
-            Check("trees stand over the ground marks", grove.Trees.All(
+            Check("trees stand over the ground marks", grove.Standing.All(
                     t => t.ZIndex > TrackMarks.MarksZ
                          && t.ZIndex > SelectionRing.GroundZ),
                 "a trunk under the paint is paint");
+
+            // --- and the dressing under everything that stands ---------------
+            //
+            // A tier that keeps none of the tank's patch stands in the middle of
+            // the cell a tank parks in, where sorting the two by their feet has
+            // no honest answer - half the scatter over the hull and half under
+            // it, reshuffling as it turns. So the tier leaves the sort and takes
+            // a band. Asserted at both edges, because a band with only one is
+            // a number: over the marks pressed into the dirt, under everything
+            // that stands on it.
+            Check("a tier that stands where a tank parks gives up the depth sort",
+                grove.Props.Tiers.All(t => t.Clearing > 0.0 || t.UnderTanks),
+                string.Join(", ", grove.Props.Tiers
+                    .Where(t => t.Clearing <= 0.0 && !t.UnderTanks)
+                    .Select(t => t.Name))
+                + " keeps none of the keep-out and still sorts by its foot");
+
+            Check("the dressing draws under every tree and every tank",
+                grove.Standing.Where(p => p.Tier.UnderTanks)
+                     .All(p => p.ZIndex == Grove.DressZ)
+                && grove.Standing.Where(p => !p.Tier.UnderTanks)
+                        .All(p => p.ZIndex > Grove.DressZ)
+                && vehicles.All(v => v.Sprite.ZIndex > Grove.DressZ),
+                $"band at {Grove.DressZ}, "
+                + $"{grove.Standing.Count(p => p.Tier.UnderTanks)} props in it");
+
+            Check("and over the marks pressed into the ground",
+                Grove.DressZ > TrackMarks.MarksZ
+                && Grove.DressZ > SelectionRing.GroundZ
+                && Grove.DressZ > TankSprite.ShadowZ,
+                $"{Grove.DressZ} against ruts {TrackMarks.MarksZ}, ring "
+                + $"{SelectionRing.GroundZ}, shadow {TankSprite.ShadowZ} - a "
+                + "stone under the dirt it stands on is dirt");
+
+            // The band only settles the dressing against what stands; two stones
+            // still settle against each other, and they do it by falling back to
+            // tree order, which Plant leaves in depth order. Nothing sets that
+            // twice, so this is the check that it was set once.
+            var dressed = grove.Standing.Where(p => p.Tier.UnderTanks).ToList();
+            Check("and two of it still settle each other by depth",
+                dressed.Zip(dressed.Skip(1)).All(p =>
+                    p.First.Depth <= p.Second.Depth
+                    && p.First.GetIndex() < p.Second.GetIndex()),
+                "sharing a z-index, siblings draw in tree order - so the planted "
+                + "list being sorted by depth is the whole of their sort");
+
+            // The same statement on the stage, where the ladder is render
+            // priority rather than z-index and the rungs are named apart for it.
+            Check("the stage puts the dressing under what stands, and both over the ground",
+                Stage3D.DressOrder < Stage3D.StandOrder
+                && Stage3D.DressOrder > Stage3D.RingOrder
+                && Stage3D.RingOrder > Stage3D.WaterOrder
+                && Stage3D.WaterOrder > Stage3D.ShadowOrder
+                && Stage3D.ShadowOrder > Stage3D.RutOrder,
+                $"stand {Stage3D.StandOrder}, dress {Stage3D.DressOrder}, ring "
+                + $"{Stage3D.RingOrder}, water {Stage3D.WaterOrder}, shadow "
+                + $"{Stage3D.ShadowOrder}, rut {Stage3D.RutOrder}");
+
+            // --- and each tier by its own rules -----------------------------
+            //
+            // The flags are copied onto the node at planting - see the sowing -
+            // so the first thing to say is that the copy is the tier's. A copy
+            // that went stale would leave a rock swaying and every check below
+            // it agreeing, because they all read the same copy.
+            Check("a prop carries its own tier's rules",
+                grove.Standing.All(p => p.Sways == p.Tier.Sways
+                                        && p.Fades == p.Tier.Fades),
+                $"{grove.Standing.Count(p => p.Sways != p.Tier.Sways || p.Fades != p.Tier.Fades)}"
+                + " of the planted disagree with the tier they were planted from");
+
+            // Both halves, and the second is the one that keeps the first
+            // honest: a Blow that returned early would leave every prop at zero
+            // lean and pass "the rock does not move" outright.
+            double wasGale = grove.Wind;
+            grove.Wind = 8.0;
+            grove.Calm();
+            for (int i = 0; i < 30; i++)
+                grove.Blow(1.0 / 60.0);
+            Check("the wind moves what sways and nothing else",
+                grove.Standing.Where(p => !p.Sways).All(p => p.Lean == 0.0f)
+                && grove.Standing.Any(p => p.Sways && Math.Abs(p.Lean) > 1e-4f),
+                $"{grove.Standing.Count(p => !p.Sways && p.Lean != 0.0f)} still "
+                + $"props leaning, {grove.Standing.Count(p => p.Sways && Math.Abs(p.Lean) > 1e-4f)}"
+                + $" of {grove.Standing.Count(p => p.Sways)} swaying ones bent");
+            grove.Wind = wasGale;
+            grove.Calm();
+            grove.Blow(1.0 / 60.0);
+
+            // The same shape for the fade, and the same reason for asserting
+            // both ends: every cell is occupied here, so a Reveal that did
+            // nothing at all would pass the half about the kerbstone.
+            var everywhere = new HashSet<Vector2I>(grove.Standing.Select(p => p.Cell));
+            for (int i = 0; i < 60; i++)
+                grove.Reveal(everywhere, 1.0 / 60.0);
+            Check("a tank fades what could have hidden it and nothing else",
+                grove.Standing.Where(p => !p.Fades).All(p => p.Modulate.A >= 0.999f)
+                && grove.Standing.Where(p => p.Fades)
+                        .All(p => p.Modulate.A <= grove.Ghost + 0.01f),
+                $"{grove.Standing.Count(p => !p.Fades && p.Modulate.A < 0.999f)} "
+                + "that could hide nothing went translucent");
+            grove.Reveal(new HashSet<Vector2I>(), 10.0);
 
             // --- and the same wood, drawn by the stage --------------------
             //
@@ -2002,7 +2293,7 @@ public static class SelfTest
             // terms rather than reading a board.
             const float squashed = 0.5077f, risen = 0.8616f;
             float Row(Vector3 at) => at.Z * squashed - at.Y * risen;
-            PropNode planted = grove.Trees[0];
+            PropNode planted = grove.Standing[0];
             float storey = field.LevelAt(planted.Cell) * field.Lift;
             Vector3 root = Stage3D.Trunk(planted.Ground, storey, 0.0f,
                                          squashed, risen).Origin;
@@ -2145,6 +2436,223 @@ public static class SelfTest
                 + $"{Stage3D.RingOrder} - a rut drawn over its own shadow is a "
                 + "belt mark that glows out of the dark");
 
+            // --- how much of a sprite is height ---------------------------
+            //
+            // The one number in a tier that no measurement can produce, so what
+            // is asserted is that it behaves like the share it claims to be. A
+            // value outside (0,1] is not a share: above one throws a shadow
+            // longer than the sprite is tall, and zero or below is a prop with
+            // no shadow at all, which is what a missing entry looks like.
+            Check("every tier throws a share of what is drawn, and only a share",
+                PropTier.Known.Values.All(t => t.Stands > 0.0 && t.Stands <= 1.0),
+                string.Join(", ", PropTier.Known.Values.Select(
+                    t => $"{t.Name} {t.Stands:F2}"))
+                + $"; unknown {PropTier.Unknown("x", 0).Stands:F2}");
+
+            // The whole of it, and it has to be: every board rendered before
+            // there was a share was rendered at one, so anything else here is a
+            // wood whose shadows moved without anybody asking.
+            Check("and a tree throws the whole of it",
+                PropTier.Known[PropTier.Trees].Stands == 1.0,
+                $"{PropTier.Known[PropTier.Trees].Stands:F2} - the arrangement "
+                + "the cast was designed for, and the one every existing board "
+                + "was drawn with");
+
+            // The order is the argument: a tree is height, a bush is about as
+            // deep as it is tall, a stone is wider than it is high and most of
+            // what is drawn above its near edge is its own far edge lying on the
+            // same ground. Ordered rather than pinned to three numbers, because
+            // the numbers are a judgement and the order is not.
+            Check("and the flatter a tier lies, the less of it it throws",
+                PropTier.Known[PropTier.Trees].Stands
+                    > PropTier.Known[PropTier.Bushes].Stands
+                && PropTier.Known[PropTier.Bushes].Stands
+                    > PropTier.Known[PropTier.Rocks].Stands,
+                $"tree {PropTier.Known[PropTier.Trees].Stands:F2}, bush "
+                + $"{PropTier.Known[PropTier.Bushes].Stands:F2}, rock "
+                + $"{PropTier.Known[PropTier.Rocks].Stands:F2}");
+
+            // What the share does to the map, and the half of it that must not
+            // move: the run shortens by exactly the share and the foot does not
+            // budge. A share applied to the origin instead would slide every low
+            // prop off its own shadow, which is the fault this was written to
+            // remove rather than a new way of having it.
+            Transform3D shortened = Stage3D.Cast(planted.Ground, storey, 0.0f,
+                                            squashed, risen, Stage3D.SunCast,
+                                            0.45f);
+            Vector3 nearer = shortened * aloft;
+            Check("a smaller share puts the same crown nearer the same foot",
+                shortened.Origin.IsEqualApprox(flattened.Origin)
+                && Math.Abs((nearer.X - shortened.Origin.X)
+                            - 0.45f * (landed.X - flattened.Origin.X)) < 0.01f
+                && Math.Abs((nearer.Z - shortened.Origin.Z)
+                            - 0.45f * (landed.Z - flattened.Origin.Z)) < 0.01f,
+                $"{nearer.X - shortened.Origin.X:F1} across at 0.45 against "
+                + $"{landed.X - flattened.Origin.X:F1} at one, about a foot "
+                + $"{(shortened.Origin - flattened.Origin).Length():F3} away");
+
+            // And the half of the basis the share must keep its hands off. The
+            // lean is a real sideways drift of a point the sprite has already
+            // put at that height, so it moves the shadow by the same amount
+            // whatever the thing is made of - scale it too and a stone in a gust
+            // bends less than the stone it is the shadow of.
+            Transform3D shortGust = Stage3D.Cast(planted.Ground, storey, 0.05f,
+                                            squashed, risen, Stage3D.SunCast,
+                                            0.45f);
+            Check("and the wind still bends it by the whole of the lean",
+                Math.Abs((shortGust * aloft).X - nearer.X - 5.0f) < 0.01f,
+                $"{(shortGust * aloft).X - nearer.X:F2}px of extra drift 100px "
+                + "up at a 0.05 shear, the same 5 the full share gets");
+
+            // --- and the ground under the foot ----------------------------
+            //
+            // A second claim about the same prop, so the first thing to hold is
+            // that it is made about the same point. All three transforms come
+            // off one expression for exactly this reason; a patch that worked
+            // its own origin out is a second answer waiting to disagree.
+            float pool = Stage3D.Seating(planted.Root, planted.Rise, planted.Spread);
+            Transform3D seated = Stage3D.Footing(planted.Ground, storey,
+                                                 squashed, risen, pool);
+            Check("the patch under a prop sits on the prop's own foot",
+                seated.Origin.IsEqualApprox(upright.Origin),
+                $"{seated.Origin} against {upright.Origin}");
+
+            // Flat, and flat is the whole reason this is a transform too: any
+            // height left in it puts the patch above the ground it is painted
+            // on, and the coin toss that follows is hit_scar's.
+            Vector3[] rim =
+            {
+                seated * new Vector3(-1.0f, -1.0f, 0.0f),
+                seated * new Vector3(1.0f, -1.0f, 0.0f),
+                seated * new Vector3(1.0f, 1.0f, 0.0f),
+                seated * new Vector3(-1.0f, 1.0f, 0.0f),
+            };
+            Check("and lies in the ground, with no height left in it",
+                rim.All(c => Math.Abs(c.Y - seated.Origin.Y) < 1e-3f),
+                string.Join(", ", rim.Select(
+                    c => $"{c.Y - seated.Origin.Y:F3}")) + " of height at the rim");
+
+            // Round on the ground, which is what makes it an ellipse on the
+            // screen without anybody squashing it by hand. Written the other way
+            // round it would need this class's own squash quoted twice, and the
+            // day the tile is re-rendered one of the two would be stale.
+            float wide = rim[1].X - rim[0].X;
+            float deep = rim[1].Z - rim[2].Z;
+            float tall = Row(rim[1]) - Row(rim[2]);
+            Check("and is a disc on the ground, so an ellipse on the screen",
+                Math.Abs(wide - deep) < 1e-3f
+                && Math.Abs(tall / wide - squashed) < 1e-3f,
+                $"{wide:F1} by {deep:F1} on the ground, {wide:F1} by {tall:F1} "
+                + $"on the screen - {tall / wide:F4} against a squash of "
+                + $"{squashed:F4}");
+
+            // Both terms, and each one asserted by what it is for. The contact
+            // is where the thing touches and it is measured; the reach is how
+            // far the darkening carries and it comes off the height.
+            Check("and it is the measured contact widened by the prop's height",
+                Stage3D.Seating(planted.Root, 0.0f, 0.0f) == planted.Root
+                && Stage3D.Seating(planted.Root, 100.0f, 0.0f)
+                    > Stage3D.Seating(planted.Root, 50.0f, 0.0f)
+                && Stage3D.Seating(10.0f, planted.Rise, 0.0f)
+                    > Stage3D.Seating(4.0f, planted.Rise, 0.0f),
+                $"{planted.Root:F1}px of contact and {planted.Rise:F0}px of "
+                + $"height make a {pool:F1}px radius");
+
+            // And the floor under both, which is what a thing lying on the
+            // ground gets instead. A max rather than a sum: the two are the same
+            // question answered from opposite ends, and a max is also the only
+            // form that cannot shrink a patch that already looked right.
+            Check("and never smaller than what the prop has on the ground",
+                Stage3D.Seating(2.0f, 10.0f, 9.0f) == 9.0f
+                && Stage3D.Seating(planted.Root, planted.Rise, 0.0f)
+                    == Stage3D.Seating(planted.Root, planted.Rise,
+                                       planted.Root * 0.5f)
+                && Stage3D.Seating(2.0f, 10.0f, 9.0f)
+                    < Stage3D.Seating(2.0f, 10.0f, 9.0f) + 2.0f,
+                $"a 2px contact 10px tall gets "
+                + $"{Stage3D.Seating(2.0f, 10.0f, 9.0f):F1} against a 9px "
+                + "footprint - the boulder case, where the contact band is the "
+                + "bottom row of a rounded thing and the height cannot make it up");
+
+            // The measurement behind that floor, on the art actually loaded: a
+            // tree declares itself all height, so its band is empty and its
+            // spread is the bottom row, which is what leaves every wood where it
+            // was. Anything that lies down has a band and fills it.
+            Check("and a tree's footprint is nothing, while a stone's is itself",
+                grove.Standing.Where(t => t.Tier.Stands >= 1.0)
+                     .All(t => t.Spread <= t.Root)
+                && grove.Standing.Where(t => t.Tier.Stands < 1.0)
+                        .All(t => t.Spread > t.Root),
+                string.Join("; ", grove.Standing
+                    .GroupBy(t => t.Tier.Name)
+                    .Select(g => $"{g.Key} spread {g.Min(t => t.Spread):F1}-"
+                                 + $"{g.Max(t => t.Spread):F1} against contact "
+                                 + $"{g.Min(t => t.Root):F1}-{g.Max(t => t.Root):F1}")));
+
+            // Two claims, two switches: the cast says where the sun is, the
+            // patch says the thing is touching the ground, and the A/B of either
+            // is a pair of frames in which the other must not move.
+            Check("and the patch and the cast are separate switches",
+                new Stage3D().CastShadows && new Stage3D().ContactShadows,
+                "both on by default, on the argument that a layer whose whole "
+                + "case is the A/B has to be there to be turned off");
+
+            // One ink, not two kept equal - and the check is for the second,
+            // because that is what was here and what looked wrong. A patch
+            // lighter than the streak leaving the same foot makes the ground
+            // brighten as it approaches the thing casting the shadow, which is
+            // backwards however soft an occlusion is meant to be. Identity also
+            // buys the thing the order does not have to be argued about: both
+            // are black, and a + b - ab is symmetric.
+            // --- and it paints only the ground the cast has not -----------
+            //
+            // Two shadows of one object must not compound: this board has one
+            // sun and no ambient term, so the second darkening stands for
+            // nothing. Measured before the clip, 14% of the shadowed ground came
+            // out at 0.68 of the ground colour against a single shadow's 0.45.
+            //
+            // Asserted on the shader's own text, for FoamEdge's reason: a patch
+            // that quietly went back to painting its whole blot would still
+            // draw, still be black and still be the right size, and the only
+            // thing that changed would be the two lines named here.
+            Check("the patch keeps off the ground its own cast already has",
+                Stage3D.SeatShader.Contains("texture(art, uv).a * ink * clip")
+                && Stage3D.SeatShader.Contains("dz / run.y"),
+                "the inverse of Cast, and one sample of the art the prop is "
+                + "already holding - " + (Stage3D.SeatShader.Contains("dz / run.y")
+                    ? "present" : "GONE"));
+
+            // The difference and not the maximum, because it is composited over
+            // the cast rather than instead of it. Which of the two draws first
+            // does not matter, and that is what makes the inversion legal - so
+            // the identity it rests on is worth asserting on its own.
+            Check("and lays down the difference, so the pair ends at the max",
+                Stage3D.SeatShader.Contains(
+                    "1.0 - (1.0 - max(cast, blot)) / (1.0 - cast)")
+                && Math.Abs((0.45f + 0.30f - 0.45f * 0.30f)
+                            - (0.30f + 0.45f - 0.30f * 0.45f)) < 1e-6f,
+                "1-(1-a)(1-b) is the same either way round, which is why the "
+                + "second layer can be solved for");
+
+            // The half of it that is easy to leave out: with no cast on the
+            // board there is nothing to stand aside for, and a patch that went
+            // on standing aside would show a bite taken out of it by a shadow
+            // nobody can see. Measured: 26 198px of patch on a board with the
+            // cast switched off, against 6 639 while it was clipping regardless.
+            Check("and stops keeping off when there is no cast to keep off",
+                Stage3D.SeatShader.Contains("uniform float clip"),
+                "the guard the --no-cast-shadows A/B needs");
+
+            Check("and the patch is the cast's own ink, not a second one",
+                Stage3D.SeatInk == Stage3D.ShadowInk
+                && Stage3D.SeatInk.R == 0.0f && Stage3D.SeatInk.G == 0.0f
+                && Stage3D.SeatInk.B == 0.0f,
+                $"patch {Stage3D.SeatInk.A:F2} against cast "
+                + $"{Stage3D.ShadowInk.A:F2}, compounding to "
+                + $"{1.0f - (1.0f - Stage3D.SeatInk.A) * (1.0f - Stage3D.ShadowInk.A):F2} "
+                + "where they overlap - and never to less than the streak "
+                + "beside it, which is the fault this replaced");
+
             // What tells somebody drawing this wood that it is a different wood.
             // The count cannot: a re-roll moves every tree and can leave the
             // total exactly where it was, and billboards built for trees that
@@ -2161,10 +2669,10 @@ public static class SelfTest
             // Hashed, not generated: --capture fixes the time step so two runs
             // can be diffed, and a board that reshuffled itself would be
             // measuring itself.
-            var sown = grove.Trees.Select(t => (t.Ground, t.Species)).ToList();
+            var sown = grove.Standing.Select(t => (t.Ground, t.Species)).ToList();
             grove.Plant();
             Check("sowing twice gives the same forest",
-                grove.Trees.Select(t => (t.Ground, t.Species)).SequenceEqual(sown),
+                grove.Standing.Select(t => (t.Ground, t.Species)).SequenceEqual(sown),
                 $"{sown.Count} then {grove.Planted}");
 
             // The rule that cannot be had, asserted as a rule anyway: with it on
@@ -2174,7 +2682,7 @@ public static class SelfTest
             grove.ClearFront = true;
             grove.Plant();
             Check("with the clearance rule on, no tree crosses its own cell's tank",
-                grove.Trees.All(t =>
+                grove.Standing.All(t =>
                 {
                     double d = t.Ground.Y - field.CellCentre(t.Cell).Y;
                     return d <= 0.0 || t.Rise < d - grove.TankBelow;
@@ -2219,14 +2727,17 @@ public static class SelfTest
             // test would blink as it turned on the spot.
             field.Paint = TerrainSet.Forest;
             grove.Plant();
-            Vector2I stood = grove.Trees[0].Cell;
+            Vector2I stood = grove.Standing[0].Cell;
             var busy = new HashSet<Vector2I> { stood };
             for (int i = 0; i < 240; i++)
                 grove.Reveal(busy, 1.0 / 60.0);
+            // Of the tiers that fade. A rock on the same cell staying solid is
+            // the rule working, not the fade missing one - and folded together
+            // the two are one average that means neither.
             Check("trees fade for a tank standing in them",
-                grove.Trees.Where(t => t.Cell == stood)
+                grove.Standing.Where(t => t.Cell == stood && t.Fades)
                      .All(t => Math.Abs(t.Modulate.A - grove.Ghost) < 0.01f)
-                && grove.Trees.Where(t => t.Cell != stood)
+                && grove.Standing.Where(t => t.Cell != stood)
                         .All(t => t.Modulate.A > 0.99f),
                 $"ghost {grove.Ghost:F2}");
             // The named default, not the live value: a session that dragged the
@@ -2246,14 +2757,14 @@ public static class SelfTest
             for (int i = 0; i < 240; i++)
                 grove.Reveal(busy, 1.0 / 60.0);
             Check("the fade settles wherever the setting says",
-                grove.Trees.Where(t => t.Cell == stood)
+                grove.Standing.Where(t => t.Cell == stood && t.Fades)
                      .All(t => Math.Abs(t.Modulate.A - 0.75f) < 0.01f),
                 "a fade that ignored the dial would still look like a fade");
             grove.Ghost = wasGhost;
             for (int i = 0; i < 240; i++)
                 grove.Reveal(new HashSet<Vector2I>(), 1.0 / 60.0);
             Check("and come back when it drives off",
-                grove.Trees.All(t => t.Modulate.A > 0.99f),
+                grove.Standing.All(t => t.Modulate.A > 0.99f),
                 "the fade is a view of the ground, not a change to it");
 
             // And the patch that decides all of the above is stepped across the
@@ -2306,14 +2817,14 @@ public static class SelfTest
             for (int i = 0; i < 40; i++)
                 grove.Blow(1.0 / 60.0);
             Check("the wind leans the trees",
-                grove.Trees.Any(t => Math.Abs(t.Drift) > 0.2f),
-                $"widest lean {grove.Trees.Max(t => Math.Abs(t.Drift)):F2}px");
+                grove.Standing.Any(t => Math.Abs(t.Drift) > 0.2f),
+                $"widest lean {grove.Standing.Max(t => Math.Abs(t.Drift)):F2}px");
 
             // The whole point of hashing a phase per tree. A wood that leans as
             // one body is a wood on a hinge.
             Check("and not all of them the same way",
-                grove.Trees.Any(t => t.Lean > 0.0f)
-                && grove.Trees.Any(t => t.Lean < 0.0f),
+                grove.Standing.Any(t => t.Lean > 0.0f)
+                && grove.Standing.Any(t => t.Lean < 0.0f),
                 "every tree leaning the same way at once is one hinge, not wind");
 
             // Drift is the shear times the height, which is what makes a taller
@@ -2321,7 +2832,7 @@ public static class SelfTest
             // rather than chosen, and the half that would go quietly if someone
             // made the drift a fixed number of pixels.
             Check("a taller tree leans further, because the lean is a shear",
-                grove.Trees.All(t => Math.Abs(t.Drift - t.Lean * t.Rise) < 1e-4),
+                grove.Standing.All(t => Math.Abs(t.Drift - t.Lean * t.Rise) < 1e-4),
                 "drift is the shear times the height, or it is not a lean");
 
             // The trunk is planted, and this is the matrix that has to say so:
@@ -2329,7 +2840,7 @@ public static class SelfTest
             // contact does not move. Asked of the transform the draw call
             // actually uses - the shear on the wrong axis, or an origin left in
             // it, both slide the tree and both look like wind.
-            PropNode bent = grove.Trees.OrderByDescending(t => Math.Abs(t.Lean))
+            PropNode bent = grove.Standing.OrderByDescending(t => Math.Abs(t.Lean))
                                        .First();
             Vector2 foot = bent.Bend * Vector2.Zero;
             Vector2 crown = bent.Bend * new Vector2(0.0f, -bent.Rise);
@@ -2349,12 +2860,12 @@ public static class SelfTest
             grove.Weather = 0.0;
             for (int i = 0; i < 40; i++)
                 grove.Blow(1.0 / 60.0);
-            var leaning = grove.Trees.Select(t => t.Lean).ToList();
+            var leaning = grove.Standing.Select(t => t.Lean).ToList();
             grove.Weather = 0.0;
             for (int i = 0; i < 20; i++)
                 grove.Blow(2.0 / 60.0);
             Check("the same seconds of wind bend it the same way",
-                grove.Trees.Select(t => t.Lean).Zip(leaning)
+                grove.Standing.Select(t => t.Lean).Zip(leaning)
                      .All(p => Math.Abs(p.First - p.Second) < 1e-5f),
                 "a phase stepped per frame rather than per second sways at "
                 + "whatever rate the machine runs at");
@@ -2364,8 +2875,8 @@ public static class SelfTest
             for (int i = 0; i < 40; i++)
                 grove.Blow(1.0 / 60.0);
             Check("no wind, no lean at all",
-                grove.Trees.All(t => t.Lean == 0.0f),
-                $"{grove.Trees.Count(t => t.Lean != 0.0f)} still leaning");
+                grove.Standing.All(t => t.Lean == 0.0f),
+                $"{grove.Standing.Count(t => t.Lean != 0.0f)} still leaning");
 
             // --- the blast wave ------------------------------------------
             //
@@ -2377,7 +2888,7 @@ public static class SelfTest
 
             float flat = grove.Squash;
             Vector2 Ground(Vector2 screen) => new(screen.X, screen.Y / flat);
-            Vector2 seat = Ground(field.CellCentre(grove.Trees[0].Cell));
+            Vector2 seat = Ground(field.CellCentre(grove.Standing[0].Cell));
 
             // Ten crown pixels at the source, which is twice the shell's own
             // and well clear of the threshold the flinch settles at.
@@ -2385,18 +2896,18 @@ public static class SelfTest
             {
                 grove.Calm();
                 for (int s = 0; s < shots; s++)
-                    grove.Shock(field.CellCentre(grove.Trees[0].Cell), pixels);
-                var reached = new int[grove.Trees.Count];
-                var sign = new int[grove.Trees.Count];
-                var peak = new float[grove.Trees.Count];
+                    grove.Shock(field.CellCentre(grove.Standing[0].Cell), pixels);
+                var reached = new int[grove.Standing.Count];
+                var sign = new int[grove.Standing.Count];
+                var peak = new float[grove.Standing.Count];
                 for (int i = 0; i < reached.Length; i++)
                     reached[i] = -1;
                 for (int f = 0; f < 300; f++)
                 {
                     grove.Blow(1.0 / 60.0);
-                    for (int i = 0; i < grove.Trees.Count; i++)
+                    for (int i = 0; i < grove.Standing.Count; i++)
                     {
-                        float now = grove.Trees[i].Flinch;
+                        float now = grove.Standing[i].Flinch;
                         if (reached[i] < 0 && now != 0.0f)
                         {
                             reached[i] = f;
@@ -2421,9 +2932,15 @@ public static class SelfTest
             double perFrame = grove.BlastSpeed / 60.0;
             int first = int.MaxValue, last = -1;
             bool timed = true;
-            for (int i = 0; i < grove.Trees.Count; i++)
+            for (int i = 0; i < grove.Standing.Count; i++)
             {
-                double d = Ground(grove.Trees[i].Ground).DistanceTo(seat);
+                // A tier that does not sway never answers a front, and a wave
+                // that never reached it is the rule rather than a gap in the
+                // wave. Left in, it reports frame -1 and makes the spread the
+                // whole run.
+                if (!grove.Standing[i].Sways)
+                    continue;
+                double d = Ground(grove.Standing[i].Ground).DistanceTo(seat);
                 if (d >= grove.BlastReach)
                     continue;
                 int want = Math.Max(0, (int)Math.Ceiling(d / perFrame) - 1);
@@ -2441,8 +2958,8 @@ public static class SelfTest
                 + "that arrived all at once would have those two the same");
 
             Check("nothing past its reach feels it",
-                Enumerable.Range(0, grove.Trees.Count).All(
-                    i => Ground(grove.Trees[i].Ground).DistanceTo(seat)
+                Enumerable.Range(0, grove.Standing.Count).All(
+                    i => Ground(grove.Standing[i].Ground).DistanceTo(seat)
                          < grove.BlastReach || wave.Peak[i] == 0.0f),
                 $"reach {grove.BlastReach:F0}px of ground");
 
@@ -2452,9 +2969,11 @@ public static class SelfTest
             // sideways in their bearing are left out of the test for the same
             // reason they barely move.
             Check("and every tree is shoved away from it, not toward it",
-                Enumerable.Range(0, grove.Trees.Count).All(i =>
+                Enumerable.Range(0, grove.Standing.Count).All(i =>
                 {
-                    Vector2 g = Ground(grove.Trees[i].Ground);
+                    if (!grove.Standing[i].Sways)
+                        return true;
+                    Vector2 g = Ground(grove.Standing[i].Ground);
                     double d = g.DistanceTo(seat);
                     if (d >= grove.BlastReach || Math.Abs(g.X - seat.X) < 0.4 * d)
                         return true;
@@ -2465,10 +2984,10 @@ public static class SelfTest
             // Asked for crown pixels, delivers crown pixels - which is what the
             // unit-impulse integrator is for, and the thing a closed-form
             // normalisation would get wrong by enough to matter.
-            int loudest = Enumerable.Range(0, grove.Trees.Count)
+            int loudest = Enumerable.Range(0, grove.Standing.Count)
                                     .OrderByDescending(i => wave.Peak[i]).First();
             {
-                Vector2 g = Ground(grove.Trees[loudest].Ground);
+                Vector2 g = Ground(grove.Standing[loudest].Ground);
                 double d = g.DistanceTo(seat);
                 double want = 10.0 * (1.0 - d / grove.BlastReach)
                               * Math.Abs(g.X - seat.X) / d;
@@ -2479,7 +2998,7 @@ public static class SelfTest
             }
 
             Check("and rings down to nothing",
-                grove.Trees.All(t => t.Flinch == 0.0f && t.FlinchRate == 0.0f),
+                grove.Standing.All(t => t.Flinch == 0.0f && t.FlinchRate == 0.0f),
                 "a spring left holding a pose bends the board for good");
 
             // Two guns in one frame is twice one gun. The compounding statement
@@ -2525,16 +3044,16 @@ public static class SelfTest
             grove.Wind = 3.0;
             grove.Calm();
             double markWeather = grove.Weather;
-            grove.Shock(field.CellCentre(grove.Trees[0].Cell), 10.0);
+            grove.Shock(field.CellCentre(grove.Standing[0].Cell), 10.0);
             for (int f = 0; f < 30; f++)
                 grove.Blow(1.0 / 60.0);
-            var mixed = grove.Trees.Select(t => (t.Lean, t.Flinch)).ToList();
+            var mixed = grove.Standing.Select(t => (t.Lean, t.Flinch)).ToList();
             grove.Calm();
             grove.Weather = markWeather;
             for (int f = 0; f < 30; f++)
                 grove.Blow(1.0 / 60.0);
             Check("the wind goes on blowing through a blast",
-                grove.Trees.Select(t => t.Lean).Zip(mixed)
+                grove.Standing.Select(t => t.Lean).Zip(mixed)
                      .All(p => Math.Abs(p.First + p.Second.Flinch
                                         - p.Second.Lean) < 1e-5f)
                 && mixed.Any(m => m.Flinch != 0.0f),
@@ -2547,7 +3066,7 @@ public static class SelfTest
             // rather than an impulse once. Driven at the reference cruise, from
             // 40 ground px to the left of a tree, so what it should do is push
             // that tree to the right and hold it there while the hull stays.
-            PropNode brushed = grove.Trees[0];
+            PropNode brushed = grove.Standing[0];
             Vector2 hull = brushed.Ground - new Vector2(40.0f, 0.0f);
             Vector2 step = new((float)(grove.BrushSpeed / 60.0), 0.0f);
 
@@ -2584,7 +3103,7 @@ public static class SelfTest
             // travel instead would leave a tank driving up-board pushing every
             // tree at the camera, which a shear cannot draw.
             Check("and parts it, rather than pushing it the way it is going",
-                grove.Trees.All(t =>
+                grove.Standing.All(t =>
                 {
                     double d = Ground(t.Ground).DistanceTo(Ground(hull));
                     if (d >= grove.BrushReach || t.Flinch == 0.0f)
@@ -2595,7 +3114,7 @@ public static class SelfTest
                 "a tree leaning into the hull is the sign of the shove lost");
 
             Check("nothing past its reach gives at all",
-                grove.Trees.All(
+                grove.Standing.All(
                     t => Ground(t.Ground).DistanceTo(Ground(hull))
                          < grove.BrushReach || t.Flinch == 0.0f),
                 $"reach {grove.BrushReach:F0}px of ground");
@@ -2659,12 +3178,12 @@ public static class SelfTest
             // grove that holds a pose with nothing driving it, and a front
             // still crossing would arrive at a board that had just been put
             // back. The wind is deliberately not reset - it is weather.
-            grove.Shock(field.CellCentre(grove.Trees[0].Cell), 10.0);
+            grove.Shock(field.CellCentre(grove.Standing[0].Cell), 10.0);
             grove.Blow(1.0 / 60.0);
             grove.Calm();
             Check("and calming it stops every front and every flinch",
                 grove.Waves == 0
-                && grove.Trees.All(t => t.Flinch == 0.0f && t.FlinchRate == 0.0f),
+                && grove.Standing.All(t => t.Flinch == 0.0f && t.FlinchRate == 0.0f),
                 "a wave in flight through a reset lands on a repaired board");
 
             grove.Wind = wasWind;
@@ -6074,7 +6593,10 @@ public static class SelfTest
         {
             field.Paint = TerrainSet.Forest;
             grove.Plant();
-            var trees = grove.Trees;
+            // Only what still sorts by its foot. The dressing tiers were taken out
+            // of the sort on purpose - see PropTier.UnderTanks - so a projection
+            // rule asked of them is a rule asked of the wrong thing.
+            var trees = grove.Standing.Where(p => !p.Tier.UnderTanks).ToList();
             int levels = 0;
             foreach (PropNode tree in trees)
                 if (field.LevelAt(tree.Cell) != 0)

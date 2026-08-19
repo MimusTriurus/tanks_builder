@@ -33,6 +33,23 @@ namespace TankSpriteTest;
 /// move the trunk, which is the one point that must not move. Two textures of
 /// 179x446 cost 0.6MB for the pair; the arithmetic it removes would have been
 /// wrong in exactly the way that reads as trees sliding sideways.
+///
+/// <b>A prop belongs to a tier, and the tier is the folder it was found in.</b>
+/// See <see cref="PropTier"/>: a species is which picture, a tier is which
+/// rules. PNGs loose in the root are trees - which is what every prop was
+/// before tiers existed, so a props folder nobody has reorganised loads exactly
+/// as it did and every board rendered from it is unchanged.
+///
+/// <b>The index stays flat across tiers.</b> <c>Species</c> is a position in one
+/// list rather than a pair, because that index is a key elsewhere -
+/// <see cref="Stage3D"/> caches one billboard mesh per <c>(species, mirrored)</c> -
+/// and a two-part key is a second thing to hold in agreement for nothing.
+///
+/// <b>Tiers are ordered by measurement, not by the order they are declared
+/// in.</b> Tallest first, off the tallest prop each one loaded, because that is
+/// the order they have to be sown in: undergrowth tests against what is already
+/// standing (see <see cref="Grove"/>), and a list that said otherwise would put
+/// a bush down and a tree on top of it.
 /// </summary>
 public sealed class PropSet
 {
@@ -65,6 +82,7 @@ public sealed class PropSet
     private sealed class Prop
     {
         public string Name = "";
+        public PropTier Tier = null!;
         public Texture2D Art = null!;
         public Texture2D Mirror = null!;
         public Vector2 Foot;        // image px, in the unmirrored art
@@ -72,13 +90,19 @@ public sealed class PropSet
         public Vector2 Size;        // image px
         public float Rise;          // image px above the foot
         public float Root;          // image px, half the ground contact's width
+        public float Spread;        // image px, half the footprint's width
     }
 
     private readonly List<Prop> _props = new();
+    private readonly List<PropTier> _tiers = new();
 
     public IReadOnlyList<string> Names => _props.Select(p => p.Name).ToList();
     public int Count => _props.Count;
     public bool Any => _props.Count > 0;
+
+    /// <summary>The tiers that loaded art, tallest first - the order they have
+    /// to be sown in. See the class remarks.</summary>
+    public IReadOnlyList<PropTier> Tiers => _tiers;
 
     public string Note { get; private set; } = "no props";
 
@@ -94,36 +118,83 @@ public sealed class PropSet
         }
 
         var refused = new List<string>();
-        foreach (string path in Directory.GetFiles(root, "*.png").OrderBy(p => p))
+
+        // The root first and by its own name, so a folder that predates tiers
+        // loads as the trees it has always been. Subdirectories after, in name
+        // order, so which ordinal an undeclared tier gets - and therefore its
+        // salt - does not depend on the filesystem's enumeration order.
+        set.Sow(root, PropTier.Trees, 0, refused);
+        var folders = Directory.GetDirectories(root)
+                               .Select(Path.GetFileName)
+                               .Where(n => !string.IsNullOrEmpty(n))
+                               .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+                               .ToList();
+        for (int i = 0; i < folders.Count; i++)
+            set.Sow(Path.Combine(root, folders[i]!), folders[i]!.ToLowerInvariant(),
+                    i + 1, refused);
+
+        // Tallest first, measured. Ties go to the tier that loaded first, which
+        // is the root's, so nothing about the existing wood depends on a
+        // comparison between two numbers that happened to be equal.
+        set._tiers.Sort((a, b) =>
+        {
+            float ta = set.Tallest(a), tb = set.Tallest(b);
+            return ta == tb ? 0 : tb.CompareTo(ta);
+        });
+
+        set.Note = set._props.Count == 0
+            ? $"no props in {root}"
+            : $"{set._props.Count} props at x{Detail} in "
+              + $"{set._tiers.Count} tier{(set._tiers.Count == 1 ? "" : "s")}: "
+              + string.Join("; ", set._tiers.Select(t =>
+                    $"{t.Name}{(t.Declared ? "" : " (undeclared)")} step {t.Step:F0} ["
+                    + string.Join(", ", set._props.Where(p => p.Tier == t).Select(
+                          p => $"{p.Name} {p.Size.X}x{p.Size.Y} rise {p.Rise:F0}"))
+                    + "]"))
+              + (refused.Count == 0 ? "" : "; refused " + string.Join("; ", refused));
+        return set;
+    }
+
+    /// <summary>Every PNG directly in one folder, as one tier. A folder with no
+    /// readable art adds no tier at all - an empty <c>Rock/</c> is not a tier
+    /// with nothing in it, it is a tier nobody has drawn yet, and the budget
+    /// table skips what did not load.</summary>
+    private void Sow(string folder, string tierName, int ordinal, List<string> refused)
+    {
+        if (!Directory.Exists(folder))
+            return;
+        PropTier tier = PropTier.For(tierName, ordinal);
+        bool added = false;
+        foreach (string path in Directory.GetFiles(folder, "*.png").OrderBy(p => p))
         {
             string name = Path.GetFileNameWithoutExtension(path);
             Image? art = Image.LoadFromFile(path);
             if (art is null)
             {
-                refused.Add($"{name} unreadable");
+                refused.Add($"{tierName}/{name} unreadable");
                 continue;
             }
             Rect2I box = art.GetUsedRect();
             if (box.Size.X <= 0 || box.Size.Y <= 0)
             {
-                refused.Add($"{name} is empty");
+                refused.Add($"{tierName}/{name} is empty");
                 continue;
             }
-            set.Add(name, art, box);
+            Add(name, tier, art, box);
+            added = true;
         }
-
-        set.Note = set._props.Count == 0
-            ? $"no props in {root}"
-            : $"{set._props.Count} props ({string.Join(", ", set._props.Select(
-                p => $"{p.Name} {p.Size.X}x{p.Size.Y} rise {p.Rise:F0}"))})"
-              + $" at x{Detail}"
-              + (refused.Count == 0 ? "" : "; refused " + string.Join("; ", refused));
-        return set;
+        if (added)
+            _tiers.Add(tier);
     }
 
-    private void Add(string name, Image art, Rect2I box)
+    private float Tallest(PropTier tier) =>
+        _props.Where(p => p.Tier == tier).Select(p => p.Rise).DefaultIfEmpty(0.0f).Max();
+
+    private void Add(string name, PropTier tier, Image art, Rect2I box)
     {
         (Vector2 foot, float root) = FootOf(art, box);
+        float rise = foot.Y - box.Position.Y + 1;
+        float spread = SpreadOf(art, box, rise * (1.0f - (float)tier.Stands));
         var mirror = (Image)art.Duplicate();
         mirror.FlipX();
 
@@ -136,13 +207,15 @@ public sealed class PropSet
         _props.Add(new Prop
         {
             Name = name,
+            Tier = tier,
             Art = ImageTexture.CreateFromImage(art),
             Mirror = ImageTexture.CreateFromImage(mirror),
             Foot = foot,
             MirrorFoot = mirrorFoot,
             Size = new Vector2(art.GetWidth(), art.GetHeight()),
-            Rise = foot.Y - box.Position.Y + 1,
+            Rise = rise,
             Root = root,
+            Spread = spread,
         });
     }
 
@@ -181,7 +254,59 @@ public sealed class PropSet
                 (most - least) * 0.5f);
     }
 
+    /// <summary>
+    /// Half the width of what the prop has lying on the ground, in image px.
+    ///
+    /// <b>The band it is measured over is <see cref="PropTier.Stands"/>'s
+    /// leftover</b>, and that is the whole idea: the tier already declares what
+    /// share of the drawn extent is height, so what is left is footprint drawn
+    /// in isometric, and the sprite's width across it is the footprint's width.
+    /// A tree declares itself all height, so its band is empty and this is the
+    /// bottom row - which is why nothing about a wood moves.
+    ///
+    /// <b>Why <see cref="FootOf"/>'s contact will not do the job.</b> That band
+    /// is three percent of the sprite's height, so it scales with the art: 4.2
+    /// screen px of band on <c>Tree_1</c>, 1.0 on a bush, <b>0.45 on a
+    /// stone</b> - the bottom row and nothing else. On a rounded boulder that
+    /// samples a chip: 2.1 against a widest half-width of 9.4. The contact is
+    /// still the right answer to <i>what touches</i>, which is what the sower
+    /// keeps props off each other by; it is the wrong answer to <i>what lies on
+    /// the ground</i>, and only a prop with no height to speak of makes the two
+    /// differ enough to see.
+    /// </summary>
+    private static float SpreadOf(Image art, Rect2I box, float band)
+    {
+        int bottom = box.Position.Y + box.Size.Y - 1;
+        int top = Math.Max(box.Position.Y, bottom - Mathf.RoundToInt(band));
+        int least = int.MaxValue, most = int.MinValue;
+        for (int y = top; y <= bottom; y++)
+        for (int x = box.Position.X; x < box.Position.X + box.Size.X; x++)
+        {
+            if (art.GetPixel(x, y).A <= 0.03f)
+                continue;
+            least = Math.Min(least, x);
+            most = Math.Max(most, x);
+        }
+        return least == int.MaxValue ? 0.0f : (most - least) * 0.5f;
+    }
+
     public string NameOf(int i) => _props[Wrap(i)].Name;
+
+    /// <summary>Which rules this prop plays by. See <see cref="PropTier"/>.
+    /// </summary>
+    public PropTier TierOf(int i) => _props[Wrap(i)].Tier;
+
+    /// <summary>The species in one tier, as indices into the flat list. The
+    /// sower picks among these and never across them: a spot that fits no bush
+    /// is a spot with no bush on it, not a spot that gets a tree instead.
+    /// </summary>
+    public IReadOnlyList<int> Species(PropTier tier) =>
+        Enumerable.Range(0, _props.Count).Where(i => _props[i].Tier == tier).ToList();
+
+    public bool Has(string tierName) =>
+        _tiers.Any(t => string.Equals(t.Name, tierName,
+                                      StringComparison.OrdinalIgnoreCase));
+
 
     public Texture2D ArtOf(int i, bool mirrored) =>
         mirrored ? _props[Wrap(i)].Mirror : _props[Wrap(i)].Art;
@@ -199,6 +324,12 @@ public sealed class PropSet
     /// mirroring - the foot moves with the picture, the extent around it does
     /// not.</summary>
     public float RootOf(int i) => _props[Wrap(i)].Root;
+
+    /// <summary>Half the footprint's width, in image px. See
+    /// <see cref="SpreadOf"/>: the contact says what touches, this says what
+    /// lies on the ground, and on anything but a tree they are different
+    /// numbers.</summary>
+    public float SpreadOf(int i) => _props[Wrap(i)].Spread;
 
     private int Wrap(int i) => _props.Count == 0 ? 0 : ((i % _props.Count) + _props.Count) % _props.Count;
 }

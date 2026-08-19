@@ -687,6 +687,10 @@ void fragment() {{
     private static ShaderMaterial Paint(Texture2D picture, bool overGround)
     {
         var ink = new ShaderMaterial { Shader = overGround ? Free : Tested };
+        // A tank stands on the board, so it shares the trees' rung and settles
+        // against them by depth. Said rather than left at the default, because
+        // the rung below it now has a tier on it.
+        ink.RenderPriority = StandOrder;
         ink.SetShaderParameter("picture", picture);
         // Nothing about the water is set here, and the tint used to be: it was
         // one constant and looked like it never changed. It does now - the art
@@ -3749,6 +3753,25 @@ void fragment() {{
     public const int RutOrder = -4;
 
     /// <summary>
+    /// The two rungs above the ground, and they are a rung apart rather than
+    /// both at the default because the difference is the whole statement.
+    ///
+    /// <see cref="StandOrder"/> is what stands on the board - the tanks and the
+    /// trees - and inside it the camera sorts by each thing's own foot, which is
+    /// the rule the 2D layer states as a z-index. <see cref="DressOrder"/> is the
+    /// tiers that gave up that sort because they stand where a tank parks; see
+    /// <see cref="PropTier.UnderTanks"/>.
+    ///
+    /// <b>Added above rather than pushing the ground down.</b> Shifting the four
+    /// rungs below would restate every one of their arguments in new numbers for
+    /// no gain; a tank and a tree were never at a priority anybody chose, they
+    /// were at the default, so naming that rung is a gain on its own.
+    /// </summary>
+    public const int DressOrder = 0;
+
+    public const int StandOrder = 1;
+
+    /// <summary>
     /// The belt marks, as strips lying on the board.
     ///
     /// <b>Geometry rather than the canvas item that already draws them, for the
@@ -3946,6 +3969,14 @@ void fragment() {{
     /// answer.</summary>
     private readonly Dictionary<PropNode, MeshInstance3D> _shading = new();
 
+    /// <summary>And a patch of darkened ground under each one's foot. One shared
+    /// quad and one shared blot for the whole board - the size is in the
+    /// transform, so a wood of 203 props adds 203 nodes and one 64px texture.
+    /// The material is per prop for the fade's reason, the same as the other
+    /// two.</summary>
+    private readonly Dictionary<PropNode, MeshInstance3D> _seating = new();
+    private ArrayMesh? _sole;
+
     /// <summary>Whether anything on this board casts a shadow along
     /// <see cref="Sun"/>. On by default, on the contact shadow's argument: the
     /// A/B is the whole case for the layer, and a switch that has to be found
@@ -3983,6 +4014,80 @@ void fragment() {{
     /// and that is the terrain pass's machinery - worth building once, for both.
     /// </summary>
     public static readonly Color ShadowInk = new(0.0f, 0.0f, 0.0f, 0.45f);
+
+    /// <summary>
+    /// Whether a prop also darkens the ground it is standing on, right at its
+    /// foot.
+    ///
+    /// <b>Its own switch and not <see cref="CastShadows"/>'s, because the two
+    /// say different things.</b> The cast declares where the sun is; this
+    /// declares that the thing is touching the ground - the split
+    /// <c>ground_shadow</c> already draws for the tank, arriving late for the
+    /// wood. Separate also because the A/B of either is a pair of frames in
+    /// which the other must not move.
+    ///
+    /// On by default, on the cast's own argument: a layer whose whole case is
+    /// the A/B is a layer that has to be there to be turned off.
+    /// </summary>
+    public bool ContactShadows = true;
+
+    /// <summary>
+    /// How dark the patch under a foot is: <see cref="ShadowInk"/>, and the
+    /// same object rather than a number equal to it.
+    ///
+    /// <b>A second constant was wrong, and wrong in the one direction that
+    /// reads as a fault.</b> It was set lighter than the cast on the argument
+    /// that contact is ambient occlusion and a softer thing - which put a patch
+    /// of 0.35 grey against a streak of 0.45 leaving the same foot, so the
+    /// ground got <i>lighter</i> as it approached the thing casting it. A
+    /// shadow that fades toward its own object is backwards however soft it is.
+    ///
+    /// One ink is not the same as two numbers kept equal, and this is a project
+    /// with a graveyard of the second: a hill's shadow, a tree's shadow and the
+    /// ground a prop stands on are one statement about one sun, and the density
+    /// belongs to the sun.
+    ///
+    /// <b>What the patch still adds is where the two overlap</b>, which is most
+    /// of the down-sun half of it: ordinary blending compounds them to
+    /// <c>1-(1-0.45)^2 = 0.70</c>. That is the right shape and it is not chosen
+    /// - the contact is the darkest part of any shadow, and here it comes out
+    /// darker without a third number for it. Which of the two draws first still
+    /// does not matter: <c>a + b - ab</c> is symmetric, and both are black.
+    /// </summary>
+    public static Color SeatInk => ShadowInk;
+
+    /// <summary>
+    /// How far past the measured ground contact the patch reaches, as a share of
+    /// the prop's drawn height.
+    ///
+    /// <b>Two terms, because the patch answers two things at once.</b> Where it
+    /// sits and how much actually touches is <see cref="PropSet.RootOf"/> - the
+    /// half-width of the bottom contact band, the one thing about a prop's
+    /// footprint that was measured rather than declared, and the same pair the
+    /// sower keeps props off each other by. How far the darkening reaches out
+    /// from there is not that: it is set by how much of the thing is standing
+    /// over the ground, which is its height.
+    ///
+    /// The second term is what makes one number serve both ends of the tier
+    /// list. A boulder's drawn height is mostly its own footprint lying on the
+    /// same ground - <see cref="PropTier.Stands"/>'s whole point - so a share of
+    /// it comes out at roughly the footprint, which is what a boulder shades. A
+    /// tree's is height, and a share of it comes out at roughly how far the crown
+    /// reaches, which is what a tree shades.
+    ///
+    /// Measured at 0.14: <c>Tree_1</c> gets 13.2 of contact plus 19.5 of reach,
+    /// so 33px of radius - an ellipse 65 by 33 on screen, of which the camera
+    /// sees the near half, and that near half is what closes the 26px the canopy
+    /// shadow lands away from the trunk. A bush gets 12, a stone gets 4, and a
+    /// stone needs no more: its cast already touches it.
+    /// </summary>
+    public const float SeatReach = 0.14f;
+
+    /// <summary>Where the sprite's own alpha stops mattering to the patch. The
+    /// core is flat and the rim is a smooth run out to nothing - a hard-edged
+    /// disc under a tree reads as a plate, and a Gaussian with no core reads as
+    /// dirt.</summary>
+    private const float SeatCore = 0.34f;
 
     /// <summary>
     /// The forest, as upright quads standing on the board.
@@ -4050,6 +4155,30 @@ void fragment() {{
             if (stem.MaterialOverride is StandardMaterial3D bark)
                 bark.AlbedoColor = new Color(1.0f, 1.0f, 1.0f, tree.Modulate.A);
         }
+        foreach ((PropNode tree, MeshInstance3D seat) in _seating)
+        {
+            seat.Visible = ContactShadows;
+            if (!ContactShadows)
+                continue;
+            // The patch neither leans nor knows where the sun is, so its
+            // transform only moves when the board does - written every frame
+            // anyway, for the standing quad's reason: a prop moves when the
+            // grade slider does, and a patch left behind reads as a tree that
+            // has stepped off its own shadow.
+            seat.Transform = Seated(tree);
+            // The fade, and the lean the inverse map needs - the second is why
+            // this cannot be set once at sowing: a gust moves the cast, so the
+            // ground the patch is allowed to paint moves with it.
+            if (seat.MaterialOverride is ShaderMaterial sole)
+            {
+                sole.SetShaderParameter("ink", SeatInk.A * tree.Modulate.A);
+                sole.SetShaderParameter("clip", CastShadows ? 1.0f : 0.0f);
+                sole.SetShaderParameter("run", new Godot.Vector2(
+                    tree.Lean * RiseFactor
+                        + SunCast.X * (float)tree.Tier.Stands,
+                    SunCast.Y * (float)tree.Tier.Stands));
+            }
+        }
         foreach ((PropNode tree, MeshInstance3D cast) in _shading)
         {
             cast.Visible = CastShadows;
@@ -4067,7 +4196,7 @@ void fragment() {{
 
     private void Sow()
     {
-        foreach (PropNode tree in Wood!.Trees)
+        foreach (PropNode tree in Wood!.Standing)
         {
             (int, bool) kind = (tree.Species, tree.Mirrored);
             if (!_stems.TryGetValue(kind, out ArrayMesh? shape))
@@ -4081,10 +4210,34 @@ void fragment() {{
                 // ZIndex stated. By its box it would be the middle of the crown,
                 // and a crown leans.
                 SortingUseAabbCenter = false,
-                MaterialOverride = Bark(tree.Art),
+                MaterialOverride = Bark(tree.Art,
+                    tree.Tier.UnderTanks ? DressOrder : StandOrder),
             };
             AddChild(stem);
             _standing[tree] = stem;
+
+            // The patch first of the three, on the same argument as the cast
+            // below it: between two props whose feet sort equal, what is painted
+            // on the ground is what goes under.
+            _sole ??= Sole();
+            ShaderMaterial blot = Blot();
+            blot.SetShaderParameter("art", tree.Art);
+            blot.SetShaderParameter("foot", tree.Foot);
+            blot.SetShaderParameter("span", tree.Size);
+            blot.SetShaderParameter("pixels", tree.Pixels);
+            blot.SetShaderParameter("rise", RiseFactor);
+            blot.SetShaderParameter("radius",
+                Seating(tree.Root, tree.Rise, tree.Spread));
+            blot.SetShaderParameter("core", SeatCore);
+            var seat = new MeshInstance3D
+            {
+                Mesh = _sole,
+                SortingUseAabbCenter = false,
+                MaterialOverride = blot,
+                Visible = ContactShadows,
+            };
+            AddChild(seat);
+            _seating[tree] = seat;
 
             // The shadow goes in first, so that between two trees whose feet
             // sort equal the ground mark is the one underneath. The priority
@@ -4115,8 +4268,15 @@ void fragment() {{
             cast.MaterialOverride = null;
             cast.QueueFree();
         }
+        foreach (MeshInstance3D seat in _seating.Values)
+        {
+            seat.Mesh = null;
+            seat.MaterialOverride = null;
+            seat.QueueFree();
+        }
         _standing.Clear();
         _shading.Clear();
+        _seating.Clear();
         _stems.Clear();
     }
 
@@ -4159,10 +4319,200 @@ void fragment() {{
         return new Transform3D(bend, at);
     }
 
+    /// <summary>The patch of ground one prop is standing on, from where it
+    /// stands on this board.</summary>
+    private Transform3D Seated(PropNode tree) =>
+        Footing(Origin + tree.Ground, Field.LevelAt(tree.Cell) * Field.Lift,
+                Squash, RiseFactor,
+                Seating(tree.Root, tree.Rise, tree.Spread));
+
+    /// <summary>
+    /// How wide the patch under one prop is, in screen px of ground: the contact
+    /// widened by a share of the height, and never less than what the prop has
+    /// lying on the ground.
+    ///
+    /// <b>The floor is not a safety net, it is the answer for anything that is
+    /// mostly footprint.</b> The first two terms are written for a thing that
+    /// stands: a narrow contact and a body up in the air that shades out from
+    /// it. A stone has neither - <see cref="PropSet.SpreadOf"/>'s remarks for
+    /// how badly the contact reads a boulder, and its 10 to 19px of drawn height
+    /// cannot make it up, so the pair came out at 4 to 7px of radius under a
+    /// stone drawn 17 to 24 wide. Two or three pixels showing below the foot,
+    /// which is nothing at all, and the share it now also throws a shorter cast
+    /// by made that twice over.
+    ///
+    /// <b>A max rather than a sum, and rather than a new term.</b> The two are
+    /// answers to the same question from opposite ends - what a standing thing
+    /// shades, what a lying thing covers - and a thing is one or the other, so
+    /// adding them would double-count whatever is both. A max can also only make
+    /// a patch bigger, so nothing that already looked right can be spoilt by it:
+    /// a tree's band is empty by declaration, its spread is the bottom row, and
+    /// its radius is the one it had.
+    ///
+    /// Measured: trees unchanged at 23 to 33, bushes 10/12/15 to 15/19/23, and
+    /// stones 6.4/4.2/6.6 to 8.8/9.4/11.9 - each of the last two now the width
+    /// of the thing standing on it.
+    /// </summary>
+    public static float Seating(float root, float rise, float spread) =>
+        Mathf.Max(root + SeatReach * rise, spread);
+
+    /// <summary>
+    /// A disc of ground at a prop's foot, lying in the plane the prop stands on.
+    ///
+    /// <b>The origin is the standing prop's, clearance and all</b> - the same
+    /// expression <see cref="Trunk"/> and <see cref="Cast"/> use, because all
+    /// three are claims about one point, and a patch that worked its own out is
+    /// a second answer waiting to disagree.
+    ///
+    /// <b>A disc on the ground and never an ellipse on the screen.</b> The
+    /// squash is the camera's, so laying the quad flat and letting the
+    /// projection do it keeps the patch as round as the ground is - and keeps it
+    /// round the day somebody re-renders the tile the camera angle is read off.
+    /// Written as an ellipse in screen px it would have to be squashed by hand,
+    /// against a number this class is already holding.
+    ///
+    /// <b>The column carrying the quad's normal is up, and it moves no
+    /// vertex.</b> <see cref="Cast"/>'s point again: the quad is planar in its
+    /// own z, so that column is free, and up rather than zero keeps the engine
+    /// from sorting a box with no thickness.
+    /// </summary>
+    public static Transform3D Footing(Vector2 foot, float lift, float squash,
+                                      float rise, float radius)
+    {
+        Vector3 at = World(foot + new Vector2(0.0f, lift), lift, squash, rise)
+                     + Clear(squash, rise);
+        var lie = new Basis(new Vector3(radius, 0.0f, 0.0f),
+                            new Vector3(0.0f, 0.0f, -radius),
+                            new Vector3(0.0f, 1.0f, 0.0f));
+        return new Transform3D(lie, at);
+    }
+
+    /// <summary>The unit square the patch is painted on, centred on the foot.
+    /// One for the board: all that differs between props is a scale, and a scale
+    /// is the transform's business.</summary>
+    private static ArrayMesh Sole()
+    {
+        var st = new SurfaceTool();
+        st.Begin(Mesh.PrimitiveType.Triangles);
+        (Vector3 At, Vector2 Uv)[] corner =
+        {
+            (new Vector3(-1.0f, 1.0f, 0.0f), new Vector2(0.0f, 0.0f)),
+            (new Vector3(1.0f, 1.0f, 0.0f), new Vector2(1.0f, 0.0f)),
+            (new Vector3(1.0f, -1.0f, 0.0f), new Vector2(1.0f, 1.0f)),
+            (new Vector3(-1.0f, -1.0f, 0.0f), new Vector2(0.0f, 1.0f)),
+        };
+        foreach (int k in new[] { 0, 1, 2, 0, 2, 3 })
+        {
+            st.SetNormal(Vector3.Back);
+            st.SetUV(corner[k].Uv);
+            st.AddVertex(corner[k].At);
+        }
+        return st.Commit();
+    }
+
+    /// <summary>
+    /// What the patch is painted with: black, at <see cref="ShadowInk"/>'s
+    /// strength, over exactly the ground the cast does not already have.
+    ///
+    /// <b>Two shadows of one object must not compound, and ordinary blending is
+    /// the only thing that was making them.</b> This board has one sun and no
+    /// ambient term at all - <see cref="ShadowInk"/> measures sun that did not
+    /// arrive - so a second darkening from the same prop stands for nothing.
+    /// Measured before this: 14% of the shadowed ground came out at 0.68 of the
+    /// ground colour instead of 0.45, a pool at every foot that nobody chose.
+    /// <c>ground_shadow</c> refused to draw a hull and a turret separately for
+    /// this reason, and <see cref="ShadowInk"/> names the general fix as a mask
+    /// taken as a maximum.
+    ///
+    /// <b>This is that maximum, per fragment and without a second pass, and it
+    /// is affordable because the cast's map is invertible.</b> A fragment of the
+    /// patch knows its own ground offset from the foot; <see cref="Cast"/> puts
+    /// a sprite pixel at <c>(x + t*run.x, t*run.y)</c>, so <c>t</c> and <c>x</c>
+    /// come straight back out of it and name the texel that threw the shadow
+    /// there. One extra sample of art the prop is already holding.
+    ///
+    /// <b>The patch then paints the difference rather than the maximum</b>,
+    /// because it is composited over the cast rather than instead of it: for the
+    /// pair to end at <c>max(cast, blot)</c> the second one has to lay down
+    /// <c>1 - (1-max)/(1-cast)</c>. Which of the two draws first still does not
+    /// matter - both are black, so the pair ends at
+    /// <c>1-(1-a)(1-b)</c> either way round, and that is what this inverts.
+    ///
+    /// <b>Depth and stencil cannot do it, and it is worth saying why</b>, since
+    /// both look like the cheap answer: they mask per fragment regardless of
+    /// alpha, so the cast would be cut by the patch's whole quad - or, with an
+    /// alpha scissor, by a hard disc, punching a hole in the streak exactly
+    /// where the patch's own rim has faded to nothing.
+    ///
+    /// <b>The blot is arithmetic rather than a texture now.</b> It was a 64px
+    /// image; a fragment shader that is already computing an inverse map can
+    /// take a smoothstep, and one falloff written down twice is one too many.
+    ///
+    /// <b>Its own material per prop</b>, for the cast's reason: the fade under a
+    /// tank multiplies this alpha and nothing else's - and here also because the
+    /// lean, which the inverse map needs, is a different number for every prop
+    /// on every frame.
+    /// </summary>
+    private static ShaderMaterial Blot() =>
+        new()
+        {
+            Shader = _seatShader ??= new Shader { Code = SeatShader },
+            RenderPriority = ShadowOrder,
+        };
+
+    private static Shader? _seatShader;
+
+    /// <summary>Internal so the check can read it: that the patch samples the
+    /// prop's own art through the inverse cast, and that what it lays down is
+    /// the difference and not the whole blot, are the two claims that make this
+    /// a maximum rather than a second shadow.</summary>
+    internal const string SeatShader = @"
+shader_type spatial;
+render_mode unshaded, cull_disabled, depth_draw_never;
+
+uniform sampler2D art : filter_linear_mipmap, source_color;
+uniform vec2 foot = vec2(0.0);   // image px of the prop's foot within art
+uniform vec2 span = vec2(1.0);   // image px, the art's size
+uniform float pixels = 1.0;      // image px to screen px
+uniform float rise = 1.0;        // cos(elevation)
+uniform vec2 run = vec2(0.0);    // Cast's own column: lean*rise + sun*stands
+uniform float radius = 1.0;      // the patch's own reach, in ground px
+uniform float ink = 0.0;         // ShadowInk.A, times this prop's fade
+uniform float core = 0.34;       // where the blot stops being flat
+// Whether there is a cast to keep off. Nothing to stand aside for when the cast
+// is switched off, and a patch that went on standing aside would show a bite
+// out of itself taken by a shadow that is not on the board.
+uniform float clip = 1.0;
+
+void fragment() {
+    // The quad is Sole(): local x across, local y up the ground away from the
+    // camera, and Footing scales both by the radius.
+    float lx = UV.x * 2.0 - 1.0;
+    float ly = 1.0 - UV.y * 2.0;
+    float blot = (1.0 - smoothstep(core, 1.0, length(vec2(lx, ly)))) * ink;
+
+    // Cast, run backwards. dz is what the height became, so it names the height;
+    // the height then names how much of dx was the sun and how much was the
+    // sprite's own width.
+    float dx = radius * lx;
+    float dz = -radius * ly;
+    float t = run.y == 0.0 ? -1.0 : dz / run.y;
+    vec2 uv = (foot + vec2(dx - t * run.x, -t * rise) / pixels) / span;
+    float cast = 0.0;
+    if (t > 0.0 && uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0)
+        cast = texture(art, uv).a * ink * clip;
+
+    ALBEDO = vec3(0.0);
+    ALPHA = cast >= 0.9995
+        ? 0.0
+        : clamp(1.0 - (1.0 - max(cast, blot)) / (1.0 - cast), 0.0, 1.0);
+}
+";
+
     /// <summary>One tree's shadow, from where it stands on this board.</summary>
     private Transform3D Shaded(PropNode tree) =>
         Cast(Origin + tree.Ground, Field.LevelAt(tree.Cell) * Field.Lift,
-             tree.Lean, Squash, RiseFactor, SunCast);
+             tree.Lean, Squash, RiseFactor, SunCast, (float)tree.Tier.Stands);
 
     /// <summary>
     /// The same tree laid down the sun: <see cref="Trunk"/>'s transform with the
@@ -4185,6 +4535,15 @@ void fragment() {{
     /// on the ground already, so the shadow needs no place of its own - and it
     /// wants exactly the same nudge off the face, for exactly the same coin toss.
     ///
+    /// <b>The share of the drawn extent that is thrown is the tier's, and the
+    /// lean's is not.</b> <see cref="PropTier.Stands"/> says how much of a
+    /// sprite's height is height rather than footprint drawn in isometric, and
+    /// only the sun's column is scaled by it: the lean is a real horizontal
+    /// drift of a point the sprite has already put at that height, so it moves
+    /// the shadow by exactly as much whatever the thing is made of. One means
+    /// what the board did before there was a share at all, which is why it is
+    /// the default and why the wood is unchanged.
+    ///
     /// What this does not do is follow the ground it falls on: the shadow stays
     /// in the plane of the cell the tree stands in, so one that runs over a step
     /// lies flat across it. At 0.37 of a cell, and with nothing growing on a
@@ -4193,12 +4552,14 @@ void fragment() {{
     /// own shadow marches and that is worth doing once, for both.
     /// </summary>
     public static Transform3D Cast(Vector2 foot, float lift, float lean,
-                                   float squash, float rise, Vector2 sun)
+                                   float squash, float rise, Vector2 sun,
+                                   float stands = 1.0f)
     {
         Vector3 at = World(foot + new Vector2(0.0f, lift), lift, squash, rise)
                      + Clear(squash, rise);
         var flat = new Basis(new Vector3(1.0f, 0.0f, 0.0f),
-                             new Vector3(lean * rise + sun.X, 0.0f, sun.Y),
+                             new Vector3(lean * rise + sun.X * stands,
+                                         0.0f, sun.Y * stands),
                              new Vector3(0.0f, 1.0f, 0.0f));
         return new Transform3D(flat, at);
     }
@@ -4246,13 +4607,18 @@ void fragment() {{
     /// it arrived lit, and mipmapped because it is painted at four times the size
     /// it is drawn at - <see cref="PropNode._Ready"/>'s reason, unchanged. One per
     /// tree, because the fade is per tree; see <see cref="BuildTrees"/>.</summary>
-    private static StandardMaterial3D Bark(Texture2D art) => new()
+    private static StandardMaterial3D Bark(Texture2D art, int order) => new()
     {
         ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
         AlbedoTexture = art,
         Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
         TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps,
         CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+        // The tier's rung. Priority beats depth for transparent surfaces, which
+        // is exactly what is wanted: a bush standing in the cell a tank parks in
+        // has no honest depth answer, so it is taken out of the sort rather than
+        // given a better place in it.
+        RenderPriority = order,
     };
 
     /// <summary>What a tree's shadow is painted with: the same art used as a

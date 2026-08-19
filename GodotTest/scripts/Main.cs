@@ -287,6 +287,12 @@ public sealed partial class Main : Node2D
 	/// must not be moving in.</summary>
 	private bool _castShadows = true;
 
+	/// <summary>Whether a prop darkens the ground right at its foot. Its own
+	/// field beside the cast's, because they are two claims - see
+	/// <see cref="Stage3D.ContactShadows"/> - and the A/B of either wants the
+	/// other to sit still.</summary>
+	private bool _propContact = true;
+
 	/// <summary>How stirred up each flooded cell is. Built with the field, ticked
 	/// here and drawn by the stage - the same division the belt marks have, and for
 	/// the same reason: what the tanks did to the ground is neither the ground's
@@ -1231,6 +1237,8 @@ public sealed partial class Main : Node2D
 				_shadowEnabled = false;
 			else if (userArgs[i] == "--no-cast-shadows")
 				_castShadows = false;
+			else if (userArgs[i] == "--no-prop-contact")
+				_propContact = false;
 			else if (userArgs[i] == "--no-sound")
 				_soundEnabled = false;
 			// On, so the shape here is --no-mcp turning it off - and --mcp kept
@@ -2568,7 +2576,7 @@ public sealed partial class Main : Node2D
 		if (_grove is null || _grove.Planted == 0)
 			return 0;
 		var counts = new Dictionary<Vector2I, int>();
-		foreach (PropNode tree in _grove.Trees)
+		foreach (PropNode tree in _grove.Standing)
 			counts[tree.Cell] = counts.GetValueOrDefault(tree.Cell) + 1;
 		int found = least ? int.MaxValue : 0;
 		for (int q = 0; q < _field.Columns; q++)
@@ -4575,6 +4583,7 @@ public sealed partial class Main : Node2D
 		["--terrain"] = new[] { "ground.terrain" },
 		["--no-forest"] = new[] { "ground.forest" },
 		["--no-cast-shadows"] = new[] { "ground.shadows" },
+		["--no-prop-contact"] = new[] { "ground.prop_contact" },
 		["--ghost"] = new[] { "ground.ghost" },
 		["--clear-front"] = new[] { "ground.clearfront" },
 		["--wind"] = new[] { "ground.wind" },
@@ -5360,6 +5369,9 @@ public sealed partial class Main : Node2D
 		// is exactly how it gets judged.
 		ui.Toggle("ground.shadows", "cast shadows  (--no-cast-shadows)",
 			() => _castShadows, on => _castShadows = on);
+		ui.Toggle("ground.prop_contact",
+			"ground darkened under a prop  (--no-prop-contact)",
+			() => _propContact, on => _propContact = on);
 		ui.Slide("ground.ghost", "trees over a tank in them  (--ghost)",
 			0.0, 1.0, 0.05,
 			() => _grove?.Ghost ?? 0.0,
@@ -5368,7 +5380,7 @@ public sealed partial class Main : Node2D
 			{
 				if (_grove is null)
 					return "";
-				int hidden = _grove.Trees.Count(t => t.Modulate.A < 0.99f);
+				int hidden = _grove.Standing.Count(t => t.Modulate.A < 0.99f);
 				return $"{hidden} trees faded now"
 					   + (_grove.Ghost <= 0.001f
 						  ? "   - gone: a tank standing in a field"
@@ -5412,7 +5424,7 @@ public sealed partial class Main : Node2D
 			if (_props is null || !_props.Any)
 				return "no tree art";
 			var grown = new int[_props.Count];
-			foreach (PropNode tree in _grove?.Trees ?? new List<PropNode>())
+			foreach (PropNode tree in _grove?.Standing ?? new List<PropNode>())
 				grown[tree.Species]++;
 			return string.Join("\n", Enumerable.Range(0, _props.Count).Select(
 				k => $"{_props.NameOf(k)}  {grown[k]} grown, "
@@ -5435,7 +5447,7 @@ public sealed partial class Main : Node2D
 			{
 				if (_grove is null || _grove.Planted == 0)
 					return "";
-				double most = _grove.Trees.Max(t => Math.Abs(t.Drift));
+				double most = _grove.Standing.Max(t => Math.Abs(t.Drift));
 				return _grove.Wind <= 0.0
 					? "still - the board is a photograph of a board"
 					: $"{most:F1}px at the most leaning crown just now";
@@ -5457,7 +5469,7 @@ public sealed partial class Main : Node2D
 					return "";
 				if (_grove.Blast <= 0.0)
 					return "deaf - a gun goes off in the wood and nothing moves";
-				double most = _grove.Trees.Max(t => Math.Abs(t.Flinch * t.Rise));
+				double most = _grove.Standing.Max(t => Math.Abs(t.Flinch * t.Rise));
 				return $"{_grove.ShotBlast * _profile.ShotShake * _grove.Blast:F1}"
 					   + $"/{_grove.HitBlast * _grove.Blast:F0}"
 					   + $"/{_grove.DeathBlast * _grove.Blast:F0}px"
@@ -5898,7 +5910,7 @@ public sealed partial class Main : Node2D
 					 // neither end is visible in a still frame: the fade is
 					 // gradual by design, so a screenshot shows a state and not
 					 // the moment it started.
-					 + $"/{_grove?.Trees.Count(t => t.Modulate.A < 0.99f) ?? 0}fade"
+					 + $"/{_grove?.Standing.Count(t => t.Modulate.A < 0.99f) ?? 0}fade"
 					 + (_grove?.Enabled == true ? "" : "!off")
 					 + (_grove?.ClearFront == true ? "!clear" : "")
 					 // The blast: fronts still crossing and the hardest-shoved
@@ -5910,7 +5922,7 @@ public sealed partial class Main : Node2D
 					 // '!deaf' rather than nothing, for the shake's reason -
 					 // switched off and nothing having gone off are two zeroes.
 					 + $"  blast {_grove?.Waves ?? 0}w/"
-					 + $"{(_grove is { Planted: > 0 } g ? g.Trees.Max(t => Math.Abs(t.Flinch * t.Rise)) : 0.0f):F1}px"
+					 + $"{(_grove is { Planted: > 0 } g ? g.Standing.Max(t => Math.Abs(t.Flinch * t.Rise)) : 0.0f):F1}px"
 					 + (_grove is null || _grove.Blast > 0.0 ? "" : "!deaf")
 					 // '!off' rather than nothing, because a still camera and a
 					 // switched-off one are the same two zeroes - the marker the
@@ -6029,6 +6041,7 @@ public sealed partial class Main : Node2D
 			_stage.Foam = _foam;
 			_stage.Deep = _deepWater;
 			_stage.CastShadows = _castShadows;
+			_stage.ContactShadows = _propContact;
 			_stage.Trail = _wake;
 			_stage.Bows = _bows;
 			// Before Place, because the tint a wading tank wears is read off its

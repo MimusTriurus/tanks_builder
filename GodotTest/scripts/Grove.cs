@@ -6,7 +6,31 @@ using Godot;
 namespace TankSpriteTest;
 
 /// <summary>
-/// The forest: trees sown across the board and sorted in among the tanks.
+/// What stands on the board: trees, and whatever else is drawn beside them,
+/// sown across it and sorted in among the tanks.
+///
+/// <b>Tiers, not one wood.</b> A prop plays by its tier's rules - see
+/// <see cref="PropTier"/> - and the tiers are sown one after another, tallest
+/// first, over the whole board rather than cell by cell. Whole board because
+/// the order has to be global: sowing a cell's undergrowth before the next
+/// cell's trees lets a trunk come down on a bush already standing, and nothing
+/// planted later can see what was planted earlier if "earlier" means "in
+/// another cell".
+///
+/// <b>Inside a tier the lattice is the spacing, and between tiers nothing is.</b>
+/// That asymmetry is the whole of the collision rule. Two trees cannot meet
+/// because the jittered lattice they both came off will not put them nearer
+/// than <c>step*(1-2*jitter)</c>; a tree and a bush came off different lattices
+/// with no relationship at all, so the only thing left to ask is whether their
+/// measured bases overlap. So: no test within a tier - adding one would refuse
+/// trees the lattice already allows, and every board rendered so far is those
+/// trees - and a disc test against everything already standing, between them.
+///
+/// <b>How many of each is the terrain paint, not a second dial.</b>
+/// <see cref="Growth"/> is a table by kind of ground, for
+/// <see cref="IsForest"/>'s reason restated: "how much forest" is chosen where
+/// the kinds are chosen, and a slider arguing with the paint is two answers to
+/// one question.
 ///
 /// <b>Sown globally, harvested per cell.</b> Candidates are the nodes of a
 /// jittered lattice laid over the whole board in ground space, and a tree
@@ -55,7 +79,7 @@ namespace TankSpriteTest;
 public sealed partial class Grove : Node2D
 {
     /// <summary>
-    /// Ground px between lattice nodes before jitter.
+    /// Ground px between lattice nodes before jitter, for the tree tier.
     ///
     /// Thirty rather than something rounder because the band a tree may stand
     /// in is thin and measured: the keep-out ends at 83 and the hexagon's near
@@ -63,8 +87,19 @@ public sealed partial class Grove : Node2D
     /// of room in the narrow direction. At 46 the emptiest wooded cell came out
     /// with one tree on it and the minimum could not fill it, because the
     /// minimum draws from candidates and there were none to draw.
+    ///
+    /// Every other tier carries its own in <see cref="PropTier.Step"/>. This one
+    /// stays a field because it is the one that was tuned by looking and the one
+    /// the panel and the checks reach for; <see cref="StepOf"/> is where the two
+    /// meet, so there is one place that decides and not two.
     /// </summary>
     public double Spacing = 30.0;
+
+    /// <summary>The lattice step a tier is sown on. The tree tier answers
+    /// <see cref="Spacing"/> so that dragging that setting still moves the wood;
+    /// everything else answers its own.</summary>
+    public double StepOf(PropTier tier) =>
+        tier.Name == PropTier.Trees ? Spacing : tier.Step;
 
     /// <summary>How far a node may wander from its lattice point, as a fraction
     /// of the spacing. Under 0.5 by construction: at 0.5 two neighbours can
@@ -90,6 +125,10 @@ public sealed partial class Grove : Node2D
 
     /// <summary>
     /// Trees a wooded cell gets whatever the edge fade thinks.
+    ///
+    /// The tree tier's floor specifically, and it stays a field rather than
+    /// moving into <see cref="Budget"/> because it is the one both the checks
+    /// and any future slider reach for. <see cref="Growth"/> substitutes it in.
     ///
     /// Four, because three read as a cell with some trees on it and four read as
     /// woods - and because the fade is a preference among legal spots rather
@@ -149,13 +188,41 @@ public sealed partial class Grove : Node2D
     /// which is what makes the two comparable.</summary>
     public Vector2 Origin;
 
+    /// <summary>
+    /// Where a tier that gave up depth sorting draws - see
+    /// <see cref="PropTier.UnderTanks"/> for why one does.
+    ///
+    /// A band rather than a depth, and that is the whole of it: everything that
+    /// stands on the board sorts by its foot and lands at a positive
+    /// <see cref="HexField.Depth"/>, so one number below all of them puts the
+    /// dressing under every tank and every tree at once, with nothing to keep in
+    /// step as either moves. Above the marks pressed into the ground
+    /// (<see cref="TrackMarks.MarksZ"/> at -101, <see cref="SelectionRing.GroundZ"/>
+    /// at -99, <see cref="TankSprite.ShadowZ"/> at -98), because a stone stands on
+    /// the dirt those are painted into.
+    ///
+    /// Fifty rather than -97, so the gap either side is wide enough to read as a
+    /// band and to put something else in later. The checks assert both edges of
+    /// it rather than the number.
+    ///
+    /// <b>Within the band the props still settle each other by depth</b>, and
+    /// for free: <see cref="Plant"/> leaves the planted list in depth order and
+    /// moves the children to match, so siblings sharing a z-index fall back to
+    /// tree order, which is that order.
+    /// </summary>
+    public const int DressZ = -50;
+
     private readonly List<PropNode> _planted = new();
 
     public int Planted => _planted.Count;
 
-    /// <summary>Every planted tree, for the checks. Ground point is field-local,
-    /// which is the space the depth rule is written in.</summary>
-    public IReadOnlyList<PropNode> Trees => _planted;
+    /// <summary>Every planted prop, whatever tier, for the checks. Ground point
+    /// is field-local, which is the space the depth rule is written in.
+    ///
+    /// Named for what it holds rather than for what it used to hold: this list
+    /// carries rocks now, and a property called <c>Trees</c> that returns them
+    /// is the kind of name a check reads past.</summary>
+    public IReadOnlyList<PropNode> Standing => _planted;
 
     /// <summary>
     /// How many times the board has been sown, so somebody drawing this wood
@@ -188,9 +255,102 @@ public sealed partial class Grove : Node2D
     /// draw; a mature wood is not, and the paint has no way to know the cell is
     /// under water because the water is not paint.</remarks>
     public bool IsForest(Vector2I cell) =>
-        Enabled && Field is not null && !Field.IsRamp(cell)
-        && !Field.IsWater(cell)
-        && Field.KindAt(cell) == TerrainSet.Forest;
+        Grows(cell) && Field!.KindAt(cell) == TerrainSet.Forest;
+
+    /// <summary>
+    /// Whether a cell can carry anything standing at all.
+    ///
+    /// The two refusals in <see cref="IsForest"/>'s remarks are about a prop
+    /// having one height to stand at and not about it being a tree, so they
+    /// belong here, above the tiers: a boulder on a ramp sinks into the slope
+    /// exactly the way a trunk does, and a bush in the pond is the wood growing
+    /// out of the water again at knee height.
+    /// </summary>
+    public bool Grows(Vector2I cell) =>
+        Enabled && Field is not null && !Field.IsRamp(cell) && !Field.IsWater(cell);
+
+    /// <summary>The key in <see cref="Budget"/> for any drawn ground that is not
+    /// named in it. A fallback rather than a wildcard to union in: a kind gets
+    /// one row, so what it carries can be read off one line.</summary>
+    public const string AnyGround = "*";
+
+    /// <summary>
+    /// What each kind of ground carries, by tier.
+    ///
+    /// <b>Entries for tiers nobody drew art for cost nothing</b> -
+    /// <see cref="Growth"/> intersects this with what loaded - so the table can
+    /// say what a forest floor is before there is a bush to put on it, and the
+    /// day the folder appears the board answers without a code change. That is
+    /// the same arrangement <c>classes.json</c> has and the opposite of the
+    /// failure it guards: a row with no code behind it is a control that does
+    /// nothing, and here the row <i>is</i> the code.
+    ///
+    /// <b>Floors are zero outside the wood, and that is a statement.</b> A
+    /// forest cell is wooded or it is not a forest cell, so its trees have a
+    /// floor; scatter on open ground is variety, and a floor on variety is a
+    /// cell where four rocks were placed because four was written down. The
+    /// ceiling is what does the work out there.
+    ///
+    /// <b>Grass is not in it</b>, for <see cref="PropTier"/>'s reason: it is
+    /// paint. A folder of it would load and sit at nothing until somebody adds
+    /// the row, which is the right amount of friction for a decision this
+    /// document argues against.
+    /// </summary>
+    public readonly Dictionary<string, List<Sprouts>> Budget = new()
+    {
+        // The tree numbers here are placeholders that Growth overwrites from
+        // Minimum and Maximum. Written out anyway rather than left implicit,
+        // because a reader asking "what is on a forest cell" should not have to
+        // know that one of the three rows comes from somewhere else.
+        [TerrainSet.Forest] = new()
+        {
+            new Sprouts(PropTier.Trees, 4, 12),
+            new Sprouts(PropTier.Bushes, 2, 6),
+            new Sprouts(PropTier.Rocks, 0, 1),
+        },
+        // The bare template. Nothing: it is the frame every other kind is
+        // aligned to, and scatter on it would be scatter on the thing the
+        // scatter is measured against.
+        [TerrainSet.Plain] = new(),
+        [AnyGround] = new()
+        {
+            new Sprouts(PropTier.Bushes, 0, 2),
+            new Sprouts(PropTier.Rocks, 0, 2),
+        },
+    };
+
+    /// <summary>
+    /// What this cell grows, in the order it has to be sown: tallest tier
+    /// first, off <see cref="PropSet.Tiers"/>, which measured it.
+    ///
+    /// Skips tiers with no art, so a budget may name more than a board can
+    /// grow and the note reports what actually stood up. Skips empty rows too -
+    /// a ceiling of zero is a tier this ground does not carry, and walking it
+    /// would cost a pass over the board to plant nothing.
+    /// </summary>
+    public IEnumerable<(PropTier Tier, int Least, int Most)> Growth(Vector2I cell)
+    {
+        if (Props is null || !Grows(cell) || Field is null)
+            yield break;
+        string kind = Field.KindAt(cell);
+        if (!Budget.TryGetValue(kind, out List<Sprouts>? rows)
+            && !Budget.TryGetValue(AnyGround, out rows))
+            yield break;
+        foreach (PropTier tier in Props.Tiers)
+        {
+            Sprouts? row = rows.FirstOrDefault(s => string.Equals(
+                s.Tier, tier.Name, StringComparison.OrdinalIgnoreCase));
+            if (row is null)
+                continue;
+            // The wood's two ends stay where they were tuned and where the
+            // checks read them, whatever the table happens to say.
+            int least = tier.Name == PropTier.Trees ? Minimum : row.Least;
+            int most = tier.Name == PropTier.Trees ? Maximum : row.Most;
+            if (least <= 0 && most == 0)
+                continue;
+            yield return (tier, least, most);
+        }
+    }
 
     /// <summary>Ground-plane squash, measured off the rendered tile rather than
     /// taken from the elevation: a flat-top hexagon is (sqrt(3)/2)*sin(e) as
@@ -224,20 +384,26 @@ public sealed partial class Grove : Node2D
     /// <summary>What grew, for the log. The counts by kind rather than the
     /// total, because the total cannot say that a prop is too wide for every
     /// legal spot on the board - which is how a prop goes missing now that the
-    /// spot picks among the trees that fit it.</summary>
+    /// spot picks among the trees that fit it. Grouped by tier for the same
+    /// reason one level up: a tier that planted nothing is art on disk that
+    /// never reaches the board, and a total says it grew.</summary>
     public string Note()
     {
         if (Props is null || !Props.Any)
-            return "no tree art";
+            return "no prop art";
         var grown = new int[Props.Count];
-        foreach (PropNode tree in _planted)
-            grown[tree.Species]++;
-        return $"{_planted.Count} trees, keep-out {KeepOut:F0}px, "
+        foreach (PropNode prop in _planted)
+            grown[prop.Species]++;
+        return $"{_planted.Count} props, keep-out {KeepOut:F0}px, "
                + $"clearance {Clearance:F0}px: "
-               + string.Join(", ", Enumerable.Range(0, Props.Count).Select(
-                   k => $"{Props.NameOf(k)} {grown[k]}"
-                        + $" ({Props.RiseOf(k) * DrawScale:F0}px tall,"
-                        + $" base {Props.RootOf(k) * DrawScale:F1})"));
+               + string.Join("; ", Props.Tiers.Select(t =>
+                   $"{t.Name} x{Props.Species(t).Sum(k => grown[k])} "
+                   + $"@{StepOf(t):F0}px ["
+                   + string.Join(", ", Props.Species(t).Select(
+                       k => $"{Props.NameOf(k)} {grown[k]}"
+                            + $" ({Props.RiseOf(k) * DrawScale:F0}px tall,"
+                            + $" base {Props.RootOf(k) * DrawScale:F1})"))
+                   + "]"));
     }
 
     public void Clear()
@@ -267,14 +433,30 @@ public sealed partial class Grove : Node2D
 
         float squash = Squash;
         float scale = DrawScale;
+        _taken.Clear();
 
-        for (int q = 0; q < Field.Columns; q++)
-        for (int r = 0; r < Field.Rows; r++)
+        // Tier by tier over the whole board, tallest first, and the loop nesting
+        // is the rule rather than an implementation of it: the undergrowth tests
+        // against what is already standing, so every tree on the board has to be
+        // down before the first bush is. Cell-major - the obvious nesting - puts
+        // one cell's bush under the next cell's trunk, and nothing planted later
+        // can see it, because "later" there means "in another cell".
+        foreach (PropTier tier in Props.Tiers)
         {
-            var cell = new Vector2I(q, r);
-            if (!IsForest(cell))
-                continue;
-            SowCell(cell, squash, scale);
+            int first = _planted.Count;
+            for (int q = 0; q < Field.Columns; q++)
+            for (int r = 0; r < Field.Rows; r++)
+            {
+                var cell = new Vector2I(q, r);
+                foreach ((PropTier t, int least, int most) in Growth(cell))
+                    if (t == tier)
+                        SowTier(cell, tier, least, most, squash, scale);
+            }
+            // Only now: within a tier the lattice is the spacing statement, and
+            // adding the disc test to it would refuse trees the lattice allows.
+            // See the class remarks - this line is that asymmetry.
+            for (int i = first; i < _planted.Count; i++)
+                Occupy(_planted[i], squash, scale);
         }
 
         // Depth decides overlap, so the tree list is kept in that order too. Not
@@ -289,18 +471,31 @@ public sealed partial class Grove : Node2D
     /// <summary>One candidate that survived every rule that cannot bend, held
     /// with the roll that decides whether it takes.</summary>
     private readonly record struct Seedling(
-        Vector2 At, int Species, bool Mirrored, double Roll, double Fade);
+        Vector2 At, int Species, bool Mirrored, double Roll, double Fade,
+        double Shuffle);
 
-    private void SowCell(Vector2I cell, float squash, float scale)
+    private void SowTier(Vector2I cell, PropTier tier, int least, int most,
+                         float squash, float scale)
     {
         Vector2 centre = Field!.CellCentre(cell);
         Vector2 ground = new(centre.X, centre.Y / squash);
         Vector2I hex = Field.Atlas!.HexRect.Size;
         double halfX = hex.X * 0.5;
         double halfY = hex.Y * 0.5 / squash;
+        double step0 = StepOf(tier);
+        IReadOnlyList<int> species = Props!.Species(tier);
+        if (species.Count == 0)
+            return;
+        // The tier's own two distances, resolved once: how much of the tank's
+        // patch it keeps free, and how far inside the border it sits back. Both
+        // in ground px, which is what EdgeRoom answers in - the inradius is
+        // sqrt(3)/2 of the circumradius the tile's width gives.
+        double clearing = KeepOut * tier.Clearing;
+        double inset = tier.Inset * Math.Sqrt(3.0) * 0.5 * (hex.X * 0.5);
 
         List<Seedling> Gather(double step, int salt)
         {
+            salt += tier.Salt;
             var found = new List<Seedling>();
             int i0 = (int)Math.Floor((ground.X - halfX) / step) - 1;
             int i1 = (int)Math.Ceiling((ground.X + halfX) / step) + 1;
@@ -320,10 +515,15 @@ public sealed partial class Grove : Node2D
                 if (Field.CellAt(at) != cell)
                     continue;
 
-                if (seed.DistanceTo(ground) < KeepOut)
+                // The keep-out is about a tank being able to park here, so a
+                // tier a tank drives over or through keeps none of it. See
+                // PropTier.Clearing - and note that this test is what decides
+                // whether a tier rings its cell or fills it, because the band
+                // outside the keep-out is 24 ground px of a 107px radius.
+                if (clearing > 0.0 && seed.DistanceTo(ground) < clearing)
                     continue;
 
-                // The spot says which trees can stand in it, and only then does
+                // The spot says which props can stand in it, and only then does
                 // the hash say which of those does. The other order - hash a
                 // species, then refuse the spot if it does not fit - throws away
                 // a place a smaller tree could have taken, and quietly thins the
@@ -331,23 +531,28 @@ public sealed partial class Grove : Node2D
                 // planting anything in their place. Measured on the four trees
                 // in hand: the base wants 11.3px of room at the smallest and
                 // 18.3 at the largest, against a ring 24 deep at its narrowest.
-                double room = EdgeRoom(cell, seed);
+                //
+                // Among this tier's species and never across tiers: a spot no
+                // bush fits is a spot with no bush in it, not a spot that gets a
+                // pebble instead.
+                double room = tier.MindsBorder
+                    ? EdgeRoom(cell, seed) - inset : double.PositiveInfinity;
                 int fits = 0;
-                for (int k = 0; k < Props!.Count; k++)
+                foreach (int k in species)
                     if (Props.RootOf(k) * scale + Clearance <= room)
                         fits++;
                 if (fits == 0)
                     continue;
 
                 int wanted = (int)(Hash01(i, j, 4051 + salt) * fits);
-                int species = 0;
-                for (int k = 0; k < Props.Count; k++)
+                int chosen = species[0];
+                foreach (int k in species)
                 {
                     if (Props.RootOf(k) * scale + Clearance > room)
                         continue;
                     if (wanted-- == 0)
                     {
-                        species = k;
+                        chosen = k;
                         break;
                     }
                 }
@@ -356,18 +561,27 @@ public sealed partial class Grove : Node2D
                 if (ClearFront)
                 {
                     double d = at.Y - centre.Y;
-                    if (d > 0.0 && Props.RiseOf(species) * scale >= d - TankBelow)
+                    if (d > 0.0 && Props.RiseOf(chosen) * scale >= d - TankBelow)
                         continue;
                 }
 
-                found.Add(new Seedling(at, species, mirrored,
+                // And the one test that has no lattice behind it: this tier came
+                // off its own grid, so whether it lands on something a taller
+                // tier already planted is a question only the measured bases can
+                // answer. Empty until the second tier, which is why the trees are
+                // untouched by any of this.
+                if (Crowded(seed, Props.RootOf(chosen) * scale))
+                    continue;
+
+                found.Add(new Seedling(at, chosen, mirrored,
                                        Hash01(i, j, 3037 + salt),
-                                       EdgeFade(cell, seed, squash)));
+                                       EdgeFade(cell, seed, squash, tier),
+                                       Hash01(i, j, 6091 + salt)));
             }
             return found;
         }
 
-        var pool = Gather(Spacing, 0);
+        var pool = Gather(step0, 0);
 
         // The edge fade is a preference, not a rule, and this is where the
         // difference shows. Everything above rejects outright: a tree inside the
@@ -376,11 +590,11 @@ public sealed partial class Grove : Node2D
         // too many, the best of what it refused comes back rather than the cell
         // coming out as a field with four trees short of being woods.
         var taking = pool.Where(s => s.Roll < s.Fade).ToList();
-        if (taking.Count < Minimum)
+        if (taking.Count < least)
             taking.AddRange(pool.Where(s => s.Roll >= s.Fade)
                                 .OrderByDescending(s => s.Fade)
-                                .ThenBy(s => s.At.Y).ThenBy(s => s.At.X)
-                                .Take(Minimum - taking.Count));
+                                .ThenBy(s => s.Shuffle)
+                                .Take(least - taking.Count));
 
         // And if the whole cell had fewer legal spots than the floor asks for -
         // which happens, the ring is thin - go over it again at half the step.
@@ -391,21 +605,21 @@ public sealed partial class Grove : Node2D
         // Only where it is short, so the spacing everywhere else is the spacing
         // that was set - and only ever finer, so nothing that was legal at the
         // coarse step stops being legal.
-        if (taking.Count < Minimum)
+        if (taking.Count < least)
         {
             var seen = new HashSet<Vector2>(taking.Select(s => s.At));
-            taking.AddRange(Gather(Spacing * 0.5, 617)
+            taking.AddRange(Gather(step0 * 0.5, 617)
                             .Where(s => !seen.Contains(s.At)
                                         && taking.All(t => t.At.DistanceTo(s.At)
-                                                           > Spacing * 0.25))
+                                                           > step0 * 0.25))
                             .OrderByDescending(s => s.Fade)
-                            .ThenBy(s => s.At.Y).ThenBy(s => s.At.X)
-                            .Take(Minimum - taking.Count));
+                            .ThenBy(s => s.Shuffle)
+                            .Take(least - taking.Count));
         }
-        if (Maximum > 0 && taking.Count > Maximum)
+        if (most > 0 && taking.Count > most)
             taking = taking.OrderByDescending(s => s.Fade)
-                           .ThenBy(s => s.At.Y).ThenBy(s => s.At.X)
-                           .Take(Maximum).ToList();
+                           .ThenBy(s => s.Shuffle)
+                           .Take(most).ToList();
 
         // How high this cell stands, in screen px. The foot is already drawn
         // lifted - it came off CellCentre - so this is only ever wanted to take
@@ -421,14 +635,30 @@ public sealed partial class Grove : Node2D
                 Foot = Props.FootOf(s.Species, s.Mirrored),
                 Size = Props.SizeOf(s.Species),
                 RiseImage = Props.RiseOf(s.Species),
+                RootImage = Props.RootOf(s.Species),
+                SpreadImage = Props.SpreadOf(s.Species),
                 Pixels = scale,
                 Ground = s.At,
                 Species = s.Species,
                 Mirrored = s.Mirrored,
                 Cell = cell,
+                Tier = tier,
+                // Copied onto the node rather than reached for through the set,
+                // because everything that reads them walks the planted list
+                // every frame: Blow, Rush, Brush and Reveal between them touch
+                // each prop four times a frame, and a dictionary lookup per
+                // touch buys nothing over two bools.
+                Sways = tier.Sways,
+                Fades = tier.Fades,
                 Position = Origin + s.At,
                 Depth = Field.Depth(s.At.Y + lift, lift),
-                ZIndex = Mathf.RoundToInt(Field.Depth(s.At.Y + lift, lift)),
+                // Ground dressing goes in the band; everything that stands sorts
+                // by its foot. Depth above is filled in either way - the checks
+                // read it, the list is sorted by it, and inside the band it is
+                // still what settles two stones against each other.
+                ZIndex = tier.UnderTanks
+                    ? DressZ
+                    : Mathf.RoundToInt(Field.Depth(s.At.Y + lift, lift)),
                 // Hashed off where the tree stands rather than off its place in
                 // any list, so the wood sways the same way twice and a tree
                 // keeps its phase when the sowing around it changes. Its own
@@ -442,6 +672,73 @@ public sealed partial class Grove : Node2D
             AddChild(node);
             _planted.Add(node);
         }
+    }
+
+    // ---- what is already standing ---------------------------------------
+
+    /// <summary>
+    /// The bases of everything planted by a taller tier, in ground space,
+    /// bucketed so a candidate asks about its own neighbourhood rather than
+    /// about the board.
+    ///
+    /// A grid rather than a list, and it is not premature: a mixed board sows
+    /// six hundred props, and the shortest tier walks a lattice ten ground px
+    /// across, so the pairing is the one place here that grows as the square.
+    /// The bucket is <see cref="Bucket"/> wide and a lookup reads nine of them,
+    /// which covers any pair that could touch as long as no base is wider than
+    /// a bucket - and <see cref="Occupy"/> asserts exactly that by widening the
+    /// bucket rather than by hoping.
+    /// </summary>
+    private readonly Dictionary<Vector2I, List<(Vector2 At, float Root)>> _taken = new();
+
+    /// <summary>Ground px across one bucket. Sixty is over twice the widest base
+    /// measured (18.3px) plus the clearance, so nine buckets always contain
+    /// every neighbour that could overlap.</summary>
+    private const double Bucket = 60.0;
+
+    private static Vector2I Cellule(Vector2 ground) =>
+        new((int)Math.Floor(ground.X / Bucket), (int)Math.Floor(ground.Y / Bucket));
+
+    /// <summary>Record a planted prop's base, so shorter tiers can see it. Takes
+    /// the node rather than a point and a radius, so the ground space and the
+    /// scale are converted in one place and cannot disagree with the sowing's.
+    /// </summary>
+    private void Occupy(PropNode node, float squash, float scale)
+    {
+        var ground = new Vector2(node.Ground.X, node.Ground.Y / squash);
+        float root = Props!.RootOf(node.Species) * scale;
+        Vector2I key = Cellule(ground);
+        if (!_taken.TryGetValue(key, out List<(Vector2, float)>? bin))
+            _taken[key] = bin = new List<(Vector2, float)>();
+        bin.Add((ground, root));
+    }
+
+    /// <summary>
+    /// Whether a base of <paramref name="root"/> at <paramref name="ground"/>
+    /// would overlap something a taller tier already planted.
+    ///
+    /// Both radii and the clearance, because the question is whether the two
+    /// bases touch and a base has a width at both ends of the pair. The same
+    /// <see cref="Clearance"/> the border uses: what it means there is "the
+    /// drawn seam is not touched", and what it means here is the same slack
+    /// against the other prop's own drawn edge.
+    /// </summary>
+    private bool Crowded(Vector2 ground, float root)
+    {
+        if (_taken.Count == 0)
+            return false;
+        Vector2I key = Cellule(ground);
+        for (int dx = -1; dx <= 1; dx++)
+        for (int dy = -1; dy <= 1; dy++)
+        {
+            if (!_taken.TryGetValue(key + new Vector2I(dx, dy),
+                                    out List<(Vector2 At, float Root)>? bin))
+                continue;
+            foreach ((Vector2 at, float other) in bin)
+                if (ground.DistanceTo(at) < root + other + Clearance)
+                    return true;
+        }
+        return false;
     }
 
     /// <summary>
@@ -519,6 +816,12 @@ public sealed partial class Grove : Node2D
         Rush(delta);
         foreach (PropNode tree in _planted)
         {
+            // A rock is not weather. Skipped here rather than given a zero
+            // amplitude, so nothing about it enters the redraw list either -
+            // and skipped before the flinch too, because a spring that is never
+            // driven still costs the test that finds that out.
+            if (!tree.Sways)
+                continue;
             float lean = 0.0f;
             if (Wind > 0.0)
             {
@@ -808,6 +1111,8 @@ public sealed partial class Grove : Node2D
         double push = Brushing * Math.Min(1.0, moved / delta / BrushSpeed);
         foreach (PropNode tree in _planted)
         {
+            if (!tree.Sways)
+                continue;               // a hull does not shoulder a boulder aside
             var g = new Vector2(tree.Ground.X, tree.Ground.Y / squash);
             double d = g.DistanceTo(src);
             if (d >= BrushReach || d <= 0.001)
@@ -870,6 +1175,8 @@ public sealed partial class Grove : Node2D
             wave.Front += BlastSpeed * delta;
             foreach (PropNode tree in _planted)
             {
+                if (!tree.Sways)
+                    continue;
                 var g = new Vector2(tree.Ground.X, tree.Ground.Y / squash);
                 double d = g.DistanceTo(wave.Ground);
                 // Passed this frame, and once: the front only ever advances, so
@@ -914,7 +1221,10 @@ public sealed partial class Grove : Node2D
                  : 1.0 - Math.Exp(-delta / FadeTime);
         foreach (PropNode tree in _planted)
         {
-            float want = occupied.Contains(tree.Cell) ? Ghost : 1.0f;
+            // Only what could have been in the way. A kerbstone going
+            // translucent for a tank parked beside it is the ground admitting to
+            // being a view of itself for no gain - nothing was hidden.
+            float want = tree.Fades && occupied.Contains(tree.Cell) ? Ghost : 1.0f;
             float now = tree.Modulate.A;
             float next = (float)(now + (want - now) * k);
             if (Math.Abs(next - now) < 0.001f)
@@ -934,8 +1244,16 @@ public sealed partial class Grove : Node2D
     /// Measured against the neighbouring cell's centre rather than the border
     /// itself, because the six neighbours of a flat-top hex all sit the same
     /// 214 ground px away, so one distance covers every direction.
+    ///
+    /// <b>Per tier, because the edge it fades at is that tier's own.</b> A wood
+    /// thins where the trees stop; the bushes on the same cells thin where the
+    /// bushes stop, and the two boundaries are the same only while one table row
+    /// names both. Asking <see cref="IsForest"/> for all of them would fade the
+    /// scatter on open ground out at every border it has, which is all of them -
+    /// so every cell that was not a forest would come out with its ceiling
+    /// unreachable and nothing on it.
     /// </summary>
-    private double EdgeFade(Vector2I cell, Vector2 ground, float squash)
+    private double EdgeFade(Vector2I cell, Vector2 ground, float squash, PropTier tier)
     {
         double nearest = double.MaxValue;
         foreach (int heading in HexField.EdgeHeadings)
@@ -943,8 +1261,8 @@ public sealed partial class Grove : Node2D
             Vector2I next = HexField.Step(cell, heading);
             if (next == cell)
                 continue;
-            if (Field!.InBounds(next) && IsForest(next))
-                continue;                       // more forest, or off the board
+            if (Field!.InBounds(next) && Growth(next).Any(g => g.Tier == tier))
+                continue;                       // the same tier next door, or off the board
             Vector2 c = Field.CellCentre(next);
             nearest = Math.Min(nearest, ground.DistanceTo(new Vector2(c.X, c.Y / squash)));
         }
@@ -982,6 +1300,22 @@ public sealed partial class PropNode : Node2D
     public bool Mirrored;
     public Vector2I Cell;
 
+    /// <summary>Which rules this one plays by. Carried for the checks and the
+    /// trace - the two flags below are what the frame loops actually read.
+    /// </summary>
+    public PropTier Tier = null!;
+
+    /// <summary>Whether the wind, a blast and a passing hull move it. False on a
+    /// rock, and that is the difference a board can see: a boulder leaning in a
+    /// gust is the one thing on screen announcing that all of this is a shear on
+    /// a sprite.</summary>
+    public bool Sways = true;
+
+    /// <summary>Whether it ghosts while a tank is on its cell. False on anything
+    /// that cannot hide a tank - fading what was never in the way reads as the
+    /// ground going translucent rather than as a view through a wood.</summary>
+    public bool Fades = true;
+
     /// <summary>
     /// How near the camera this tree is - <see cref="HexField.Depth"/> of its
     /// foot, and what its <c>ZIndex</c> is rounded from.
@@ -1003,6 +1337,25 @@ public sealed partial class PropNode : Node2D
     /// <summary>Height above the foot, on screen. What the clearance rule and
     /// the checks are written in.</summary>
     public float Rise => RiseImage * Pixels;
+
+    /// <summary>Half the ground contact's width in image px, straight from the
+    /// set - the same number the sower keeps props off each other by, carried so
+    /// the stage can size the patch of ground under the foot without asking the
+    /// set again. Unchanged by mirroring: the foot moves with the picture, the
+    /// extent around it does not.</summary>
+    public float RootImage;
+
+    /// <summary>That contact on screen. See <see cref="Stage3D.Seat"/>: it is
+    /// what the contact shadow is sized off, because it is the only thing about
+    /// a prop's footprint that was measured rather than declared.</summary>
+    public float Root => RootImage * Pixels;
+
+    /// <summary>Half the footprint's width in image px, and on screen. What the
+    /// contact patch is never smaller than - see
+    /// <see cref="Stage3D.Seating"/>.</summary>
+    public float SpreadImage;
+
+    public float Spread => SpreadImage * Pixels;
 
     /// <summary>Where this tree is in the sway, and how fast it goes round.
     /// Hashed off its own foot at planting - see <see cref="Grove.Blow"/>.
