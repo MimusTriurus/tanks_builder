@@ -241,6 +241,26 @@ public sealed class Vehicle
     /// the two corners off.</summary>
     public float LegBlend;
 
+    /// <summary>
+    /// How far along the current leg the tank is, nought at the near cell and one
+    /// at the far one. Zero while parked.
+    ///
+    /// <b>Driven rather than read back off the position, and that is the whole of
+    /// why it exists.</b> Every other progress here is derived - the belts read
+    /// their travel off the heading, the height used to be read off the drawn
+    /// position - because a stored copy is a copy to keep in step. This one cannot
+    /// be: the drawn path is no longer a straight line between the two anchors but
+    /// the ground's own surface, which bends at the shared edge, so "how far along"
+    /// is not recoverable from a screen position without inverting that bend. The
+    /// leg is the one place where the progress is the cause and the position the
+    /// effect.
+    ///
+    /// In the leg's <b>flat</b> length, so it is the ground the tank covers rather
+    /// than the pixels its picture crosses. The two are the same number on every
+    /// leg with no ramp at either end, which is every leg of a board without them.
+    /// </summary>
+    public float LegDone;
+
     /// <summary>The screen direction of the current leg, zero while parked.
     /// What lets the stage lay <see cref="Trailing"/> along the axis the hull
     /// actually spans rather than across the whole billboard - and what fades

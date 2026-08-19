@@ -6296,6 +6296,69 @@ public static class SelfTest
             }
             Check("both cells agree how high the edge between them is",
                 edgeSplit == 0, $"{edgeSplit} disagree, first {firstEdge}");
+            // And the tank is driven on that ground rather than on the chord of it,
+            // which is what the belt marks caught it doing. The claim is asked of
+            // the board's own faces - TopAtPoint reads the corner planes where
+            // SurfaceBetween reads edge means - so this is two descriptions agreeing
+            // and not one restating itself.
+            //
+            // The failure it exists for is not the vertical error but what that
+            // error is on a diagonal leg: a screen row is a place on the ground, so
+            // a quarter level of it slides the boundary crossing along the shared
+            // edge - measured on (9,2)->(10,3), 21.6px, 52% of the way to the
+            // corner. Off the chord the tank drove into the hex through the wrong
+            // part of its face. The discriminating count is reported because on a
+            // flat leg the chord is the ground, so a board of flat tops would pass
+            // this either way.
+            int offGround = 0, discriminates = 0;
+            float worstOff = 0.0f;
+            var firstOff = "";
+            for (int q = 0; q < field.Columns; q++)
+            for (int r = 0; r < field.Rows; r++)
+            {
+                var cell = new Vector2I(q, r);
+                foreach (int heading in HexField.EdgeHeadings)
+                {
+                    Vector2I next = HexField.Step(cell, heading);
+                    if (!field.InBounds(next) || !field.Passable(cell, heading))
+                        continue;
+                    for (int step = 0; step <= 8; step++)
+                    {
+                        float f = step / 8.0f;
+                        // Where the drive puts the contact point, and the flat point
+                        // it is over - the horizontal part carries no lift at all,
+                        // so it is the same both ways.
+                        Vector2 at = Main.GroundBetween(field, cell, next, f);
+                        Vector2 flat = field.FlatAnchor(cell.X, cell.Y).Lerp(
+                                           field.FlatAnchor(next.X, next.Y), f)
+                                       + field.CentreOffset;
+                        float laid = flat.Y - at.Y;
+                        float want = field.TopAtPoint(flat);
+                        float off = Math.Abs(laid - want);
+                        if (off > 0.01f)
+                        {
+                            offGround++;
+                            if (firstOff.Length == 0)
+                                firstOff = $"({q},{r}) to ({next.X},{next.Y}) at "
+                                           + $"{f:F2} stands {laid:F2} on ground "
+                                           + $"{want:F2}";
+                        }
+                        worstOff = Math.Max(worstOff, off);
+                        // Would the chord have been caught here? Only where the
+                        // ground is tilted, which is the whole of why this was
+                        // invisible on a flat board.
+                        if (Math.Abs(field.HeightBetween(cell, next, f) - want) > 1.0f)
+                            discriminates++;
+                    }
+                }
+            }
+            Check("a tank is driven on the ground, not on the chord of it",
+                offGround == 0 && discriminates > 0,
+                offGround > 0
+                    ? $"{offGround} places off by up to {worstOff:F2}px, first "
+                      + firstOff
+                    : $"clean on every leg, and it would have caught the chord in "
+                      + $"{discriminates} places");
             Check("the ground under a step runs centre to edge to centre",
                 dipped == 0, $"{dipped} legs do not pass through their own edge");
             // The clearance a flat mark is given on tilted ground, and the two

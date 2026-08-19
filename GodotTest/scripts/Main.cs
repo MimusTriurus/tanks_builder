@@ -2263,6 +2263,54 @@ public sealed partial class Main : Node2D
 		_origin + _field.CellAnchor(cell) + _field.CentreOffset
 		- vehicle.Atlas.GroundOffset * vehicle.Sprite.BodyScale;
 
+	/// <summary>
+	/// The same place part way from one cell to the next: the contact point on the
+	/// <b>ground</b> between them.
+	///
+	/// <b>It replaces driving along the straight line between the two anchors, and
+	/// the belt marks are what proved that line wrong.</b> The straight line is the
+	/// chord of <see cref="HexField.HeightBetween"/>, and a ramp's surface is not a
+	/// chord - it runs centre to shared edge to centre, a quarter of a level above
+	/// the chord at the boundary (see <see cref="HexField.SurfaceBetween"/>, which
+	/// already carried this for anything lying in the ground). The chord was kept
+	/// because for a billboard it looked like a fine approximation: the error is
+	/// vertical, and a card drawn 16px low still stands on its hex.
+	///
+	/// <b>It is not vertical once the leg is diagonal, and that is the measurement
+	/// that retired it.</b> A screen row is a place on the ground, so 16.19px of
+	/// row is 32px of ground along the view. On a leg straight up or down the screen
+	/// that slides the tank along its own path and shows as nothing; on a diagonal
+	/// leg the shared edge is a slanted line, so the same error slides the crossing
+	/// <i>along that edge</i> - measured on (9,2)->(10,3) of this board, 21.6px off
+	/// the edge's midpoint, 52% of the way to its corner. The tank drove into the
+	/// hex through the wrong part of its face, and the ruts, laid at the contact
+	/// point, drew it.
+	///
+	/// The two ends are untouched: <see cref="HexField.SurfaceBetween"/> is
+	/// <c>TopAt</c> at nought and at one, so this is <see cref="StandOn"/> there and
+	/// arriving still parks on the same pixel it always did.
+	/// </summary>
+	private Vector2 StandBetween(Vehicle vehicle, Vector2I from, Vector2I onto,
+								 float done) =>
+		_origin + GroundBetween(_field, from, onto, done)
+		- vehicle.Atlas.GroundOffset * vehicle.Sprite.BodyScale;
+
+	/// <summary>The contact point itself, in the field's own space and with no tank
+	/// in it: the flat line between the two centres, dropped by the ground's height
+	/// along it.
+	///
+	/// A static of the field for <see cref="StepHeights"/>'s reason - the check has
+	/// to be able to ask the same question. It asks it of the board's own faces
+	/// (<see cref="HexField.TopAtPoint"/> reads the corner planes, not the edge
+	/// means), so that "the tank is driven on the ground" is two descriptions
+	/// agreeing rather than one restating itself.</summary>
+	public static Vector2 GroundBetween(HexField field, Vector2I from,
+										Vector2I onto, float done) =>
+		field.FlatAnchor(from.X, from.Y).Lerp(field.FlatAnchor(onto.X, onto.Y),
+											  Mathf.Clamp(done, 0.0f, 1.0f))
+		+ field.CentreOffset
+		- new Vector2(0.0f, field.SurfaceBetween(from, onto, done));
+
 	/// <param name="placed">Whether the tank is being <i>put</i> here rather than
 	/// having driven here. It decides one thing - whether the body is sat on the
 	/// face it stands on or left to the spring - and getting it wrong is loud: a
@@ -2303,6 +2351,11 @@ public sealed partial class Main : Node2D
 		// one anyway - but the next leg's first frame must not begin already
 		// crossed.
 		vehicle.LegBlend = 0.0f;
+		// And the leg's own progress, for the same reason and one more: it is what
+		// the position is now derived from, so a leg that began with the previous
+		// one's progress would put the tank part way along itself on its first
+		// frame - see StandBetween.
+		vehicle.LegDone = 0.0f;
 		// Sat on the face it is standing on rather than sprung up to it, but only
 		// for a tank being put here - see the parameter. Asked after the position,
 		// because SurfaceGrade reads the heading off the sprite.
@@ -3046,7 +3099,16 @@ public sealed partial class Main : Node2D
 		Vector2 goal = StandOn(v, next);
 		Vector2 to = goal - v.Sprite.Position;
 		var budgetPx = (float)(v.Speed * delta);
-		if (to.Length() <= budgetPx || (budgetPx <= 0.0f && to.Length() < 0.5f))
+		// Along the leg rather than toward the goal, because the drawn path is the
+		// ground's surface and bends at the shared edge - see StandBetween. The
+		// budget is spent on the leg's flat length, which is the ground the tank
+		// covers; on a leg with no ramp at either end that is the straight line the
+		// march used to walk, so nothing off a ramp changes by a pixel.
+		float legSpan = (_field.FlatAnchor(next.X, next.Y)
+						 - _field.FlatAnchor(v.Cell.X, v.Cell.Y)).Length();
+		float legStep = legSpan > 0.001f ? budgetPx / legSpan : 1.0f;
+		if (v.LegDone + legStep >= 1.0f
+			|| (budgetPx <= 0.0f && to.Length() < 0.5f))
 		{
 			v.Cell = next;
 			v.PathStep++;
@@ -3063,7 +3125,8 @@ public sealed partial class Main : Node2D
 		}
 		else if (budgetPx > 0.0f)
 		{
-			v.Sprite.Position += to.Normalized() * budgetPx;
+			v.LegDone += legStep;
+			v.Sprite.Position = StandBetween(v, v.Cell, next, v.LegDone);
 			Climb(v, next);
 			Depth(v);
 		}
@@ -3077,10 +3140,16 @@ public sealed partial class Main : Node2D
 	/// is rather than integrated frame by frame, for the reason the belts read
 	/// their travel back off the heading: a height stepped forward alongside the
 	/// driving would have to be remembered by everything else that moves a tank -
-	/// the W/S keys, a reset, an order cancelled mid-step. Read off the position
-	/// it is exact at both ends of the leg whatever happened in between, and the
-	/// drive between two lifted anchors is a straight line, so linear is not an
-	/// approximation of it.
+	/// the W/S keys, a reset, an order cancelled mid-step. It is exact at both ends
+	/// of the leg whatever happened in between.
+	///
+	/// <b>It is the surface and no longer a chord of it, and it has to be the same
+	/// expression <see cref="StandBetween"/> drew with.</b> Height means the lift
+	/// baked into the drawn position - <see cref="Depth"/> subtracts it back out to
+	/// recover the flat row, and the waterline takes its depth off it - so a height
+	/// that disagreed with the position would not be an approximation, it would be
+	/// a wrong answer about which row the tank is standing on. That the two used to
+	/// be the same chord is why nothing noticed.
 	///
 	/// <b>One height, and there were two.</b> The occlusion rule used to be asked
 	/// against the higher of the two ends, so that a tank halfway up a wall was
@@ -3096,8 +3165,10 @@ public sealed partial class Main : Node2D
 	{
 		Vector2 from = StandOn(v, v.Cell), goal = StandOn(v, next);
 		float span = (goal - from).Length();
-		float done = span <= 0.001f ? 1.0f
-			: Mathf.Clamp((v.Sprite.Position - from).Length() / span, 0.0f, 1.0f);
+		// The leg's own progress rather than a distance read back off the drawn
+		// position: the drawn path bends at the shared edge now, so the position no
+		// longer says how far along it is - see Vehicle.LegDone.
+		float done = Mathf.Clamp(v.LegDone, 0.0f, 1.0f);
 		// Which cell's water it is in, if any - the one its contact point is over,
 		// which changes at the shared edge halfway along the leg. A body of water
 		// is one flat surface, so there is nothing to interpolate: a tank is in it
@@ -3112,10 +3183,11 @@ public sealed partial class Main : Node2D
 											: float.NegativeInfinity;
 		if (!_field.HasRelief)
 			return;
-		v.Height = _field.HeightBetween(v.Cell, next, done);
-		// And where the ground under it actually is, which the line above is a
-		// chord of - see Vehicle.Ground. Only the belt marks read it, because only
-		// they lie in the ground rather than standing on it.
+		v.Height = _field.SurfaceBetween(v.Cell, next, done);
+		// And the same ground with the flat mark's clearance on it - see
+		// Vehicle.Ground. The two used to be a quarter of a level apart because this
+		// one was the surface and that one a chord of it; now they differ by the
+		// clearance alone, which is what HexField.MarkClear says it is for.
 		v.Ground = _field.MarkBetween(v.Cell, next, done);
 		// The heights are the step's, not the frame's - see StepHeights, which
 		// carries the whole of why the two ends of one hull are two numbers.
