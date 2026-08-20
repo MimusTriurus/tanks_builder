@@ -3875,10 +3875,15 @@ public sealed partial class Main : Node2D
 		// rather than drawn space - the lift goes back on, the way every other
 		// caller that asks the board about a point puts it back. See
 		// BodyRumble.Advance and HexField.Bare.
-		v.Rumble.Advance(new Vector2(v.GroundPoint.X - _origin.X,
-									 v.GroundPoint.Y - _origin.Y
-									 + _field.Bare(v.Ground)),
-						 v.Speed);
+		var ground = new Vector2(v.GroundPoint.X - _origin.X,
+								 v.GroundPoint.Y - _origin.Y + _field.Bare(v.Ground));
+		// And what that ground is made of, asked of the field rather than worked
+		// out here: HexField.KindAt is the one answer to which kind a cell is, and
+		// a second one would disagree with the picture on the mixed board. Clamped
+		// (CellUnder, not FlatCellAt) because a tank is always standing somewhere.
+		v.Rumble.Roughness = _terrain is null ? 1.0
+			: _terrain.RideOf(_field.KindAt(_field.CellUnder(ground)));
+		v.Rumble.Advance(ground, v.Speed);
 		v.Sprite.Shake = v.Rumble.Heave;
 		v.Sprite.Roll = v.Rumble.Roll;
 	}

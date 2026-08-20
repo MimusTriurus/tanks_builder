@@ -440,6 +440,24 @@ public static class SelfTest
             $"{perThousand.Min():F1} to {perThousand.Max():F1} bumps per 1000px "
             + $"({perThousand.Max() / perThousand.Min():F2}x)");
 
+        // The kind of ground is its own multiplier beside the water's, because
+        // they are two statements about one patch. Identity first: a board with no
+        // art behind a kind rides as it always did.
+        var plainRide = new BodyRumble();
+        var rough = new BodyRumble { Roughness = 1.3 };
+        var soaked = new BodyRumble { Roughness = 1.3, Damping = 0.35 };
+        Vector2 stone = new Vector2(913.0f, 77.0f);
+        plainRide.Advance(stone, 240.0);
+        rough.Advance(stone, 240.0);
+        soaked.Advance(stone, 240.0);
+        Check("rougher ground gives a bigger jolt off the same patch",
+            Math.Abs(rough.Heave - plainRide.Heave * 1.3) < 1e-9
+            && Math.Abs(plainRide.Heave) > 1e-9,
+            $"{plainRide.Heave:F4} against {rough.Heave:F4}");
+        Check("and the ford still damps it on top",
+            Math.Abs(soaked.Heave - rough.Heave * 0.35) < 1e-9,
+            $"{rough.Heave:F4} against {soaked.Heave:F4}");
+
         var stopped = new BodyRumble();
         stopped.Advance(Vector2.Zero, 0.0);
         Check("it is still when the tank is",
@@ -1941,6 +1959,36 @@ public static class SelfTest
                 $"frame {set.Frame.X}x{set.Frame.Y}, kinds "
                 + string.Join(", ", set.Names.Select(
                     n => $"{n} x{set.Detail(n)} {set.Texture(n)!.GetSize()}")));
+
+            // What the ride is taken from, and it is taken from the picture: a
+            // table of names would need editing every time somebody paints a hex,
+            // and a kind missing from it would ride like nothing in particular.
+            // Two halves. The ordering, because that is the whole claim - coarse
+            // ground rides coarse - and a spread, because a set whose kinds all
+            // ride alike is a feature that does nothing while looking present.
+            var byGrain = set.Names.OrderBy(n => set.GrainOf(n)).ToList();
+            var byRide = set.Names.OrderBy(n => set.RideOf(n)).ToList();
+            Check("the ride a kind gives follows the grain of its art",
+                byGrain.SequenceEqual(byRide),
+                string.Join(", ", set.Names.Select(
+                    n => $"{n} grain {set.GrainOf(n):F1} ride {set.RideOf(n):F2}")));
+            Check("and the kinds on this board do not all ride alike",
+                set.Names.Count < 2
+                || set.RideOf(byRide[^1]) - set.RideOf(byRide[0]) > 0.1f,
+                string.Join(", ", set.Names.Select(n => $"{n} {set.RideOf(n):F2}")));
+            // Inside the band by construction, and worth saying because the cap is
+            // a guard rather than the operating point: art nobody has drawn yet
+            // cannot double the ride, and nothing on this board is near it.
+            Check("every kind rides inside the band",
+                set.Names.All(n => set.RideOf(n) >= TerrainSet.SmoothRide
+                                   && set.RideOf(n) <= TerrainSet.RoughRide),
+                string.Join(", ", set.Names.Select(n => $"{n} {set.RideOf(n):F2}")));
+            // A forest cell is soil with trees on it: the kind has no art, so
+            // there is nothing to measure and it rides as normal ground.
+            Check("a kind with no art behind it rides at one",
+                Math.Abs(set.RideOf(TerrainSet.Forest) - 1.0f) < 1e-6
+                && Math.Abs(set.RideOf("no such hex") - 1.0f) < 1e-6,
+                $"forest {set.RideOf(TerrainSet.Forest):F2}");
 
             // Not the silhouette's centre - the template's plate. A kind whose
             // grass grew would otherwise move its whole cell.

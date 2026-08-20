@@ -146,6 +146,22 @@ public sealed class BodyRumble
     /// and not a decision the class has to make twice.</summary>
     public double Damping = 1.0;
 
+    /// <summary>
+    /// How rough the kind of ground under the tank is, as a multiplier on the
+    /// jolt: <see cref="TerrainSet.RideOf"/>, which measures it off the art.
+    ///
+    /// <b>Its own number beside the damping rather than folded into it</b>, for
+    /// the reason the board keeps two shadow switches: they are two statements -
+    /// what the ground is made of, and whether it is under water - and a single
+    /// figure could not say which of them made a ride soft. Water wins where they
+    /// meet by being much the smaller.
+    ///
+    /// This is what the lattice was for. While the bump was an odometer reading
+    /// there was nowhere to ask the question: a patch of ground had no place, so
+    /// it had no kind.
+    /// </summary>
+    public double Roughness = 1.0;
+
     /// <summary>Below this the tank counts as stopped and the body comes level.
     /// Not a threshold the effect switches on at - the strength is
     /// <see cref="FullSpeed"/>'s business and shrinks smoothly - this is only
@@ -227,7 +243,7 @@ public sealed class BodyRumble
             Patch = square;
             Bump++;
             _gain = Math.Clamp(GainFloor + (1.0 - GainFloor) * moving / FullSpeed,
-                               0.0, 1.0) * Damping;
+                               0.0, 1.0) * Damping * Roughness;
         }
         // And the hold has to end when the motion does, or the latch outlives
         // it: a tank braking to a halt half way over a bump would settle with

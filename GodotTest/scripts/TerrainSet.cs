@@ -85,6 +85,7 @@ public sealed class TerrainSet
 
     private readonly Dictionary<string, Texture2D> _art = new();
     private readonly Dictionary<string, int> _detail = new();
+    private readonly Dictionary<string, float> _grain = new();
     private readonly List<string> _names = new();
 
     /// <summary>The kinds that loaded, template first.</summary>
@@ -188,8 +189,84 @@ public sealed class TerrainSet
         return x == frame.Y / template.Y ? x : 0;
     }
 
+    /// <summary>
+    /// How grainy a kind's art is, in levels of luminance per pixel step.
+    ///
+    /// <b>Measured off the art rather than declared in a table, and that is what
+    /// keeps a new hex a file drop.</b> A table of names would have to be edited
+    /// every time somebody paints one, and a kind missing from it rides like
+    /// nothing in particular - the same quiet failure a paint list built by hand
+    /// would be. This asks the picture: ground drawn coarse rides coarse.
+    ///
+    /// Neighbouring pixels, sampled every fourth: the differences are between
+    /// adjacent pixels because that is what grain is, while which pairs get asked
+    /// is a sixteenth of them because the answer is a mean over a megapixel.
+    /// Transparent pixels sit out - a hexagon is a third of its own frame.
+    /// </summary>
+    private static float Grain(Image art)
+    {
+        var probe = (Image)art.Duplicate();
+        if (probe.GetFormat() != Image.Format.Rgba8)
+            probe.Convert(Image.Format.Rgba8);
+        byte[] px = probe.GetData();
+        int w = probe.GetWidth(), h = probe.GetHeight();
+        double sum = 0.0;
+        long pairs = 0;
+        for (int y = 0; y + 1 < h; y += 4)
+        for (int x = 0; x + 1 < w; x += 4)
+        {
+            int i = (y * w + x) * 4;
+            if (px[i + 3] < 200)
+                continue;
+            double here = Luma(px, i);
+            int right = i + 4, down = i + w * 4;
+            if (px[right + 3] >= 200)
+            {
+                sum += Math.Abs(here - Luma(px, right));
+                pairs++;
+            }
+            if (down + 3 < px.Length && px[down + 3] >= 200)
+            {
+                sum += Math.Abs(here - Luma(px, down));
+                pairs++;
+            }
+        }
+        return pairs == 0 ? 0.0f : (float)(sum / pairs);
+    }
+
+    private static double Luma(byte[] px, int i) =>
+        0.2126 * px[i] + 0.7152 * px[i + 1] + 0.0722 * px[i + 2];
+
+    /// <summary>The smoothest ride any ground gives, and how many levels of
+    /// grain per pixel step buy a full one on top of it. Measured on the three
+    /// kinds on disk: the rendered plain tile grains 0.3 and rides 0.76, soil
+    /// grains 5.9 and rides 1.00, the hill grains 13.0 and rides 1.29. The cap is
+    /// a guard against art nobody has drawn yet rather than the operating point -
+    /// nothing here reaches it.</summary>
+    public const float SmoothRide = 0.75f;
+    public const float RideGrain = 24.0f;
+    public const float RoughRide = 1.45f;
+
+    /// <summary>How rough a ride a kind of ground gives, as a multiplier on the
+    /// jolt. 1.0 for anything with no art behind it - a forest cell is soil with
+    /// trees on it, and a kind nobody has painted has nothing to measure.
+    /// </summary>
+    /// <summary>The grain itself, for the check that the ride follows it and for
+    /// the note. Nought for a kind with no art.</summary>
+    public float GrainOf(string name) =>
+        _grain.TryGetValue(name, out float grain) ? grain : 0.0f;
+
+    public float RideOf(string name) =>
+        _grain.TryGetValue(name, out float grain)
+            ? Math.Min(SmoothRide + grain / RideGrain, RoughRide)
+            : 1.0f;
+
     private void Add(string name, Image image, int detail)
     {
+        // Before the mipmaps and before the texture: GenerateMipmaps changes the
+        // image in place, and the grain of the ground is the grain of the ground
+        // as drawn.
+        _grain[name] = Grain(image);
         // Mipmaps for anything that will be drawn smaller than it was painted.
         // Without them a 4x kind is point-sampled down to a quarter and the
         // gravel crawls as the board pans - the ground reads as noise rather
@@ -216,8 +293,13 @@ public sealed class TerrainSet
     /// told and the note can say so.</summary>
     public bool AnyDetailed => _detail.Values.Any(d => d > 1);
 
+    /// <summary>What a kind is called in the note, with the two numbers that
+    /// were measured off it. In the trace rather than nowhere, for the reason
+    /// every other loaded number is: a ride that came out wrong is otherwise a
+    /// tank that feels odd on some cells.</summary>
     private IEnumerable<string> Listed() =>
-        _names.Select(n => Detail(n) > 1 ? $"{n} x{Detail(n)}" : n);
+        _names.Select(n => (Detail(n) > 1 ? $"{n} x{Detail(n)}" : n)
+                           + $" ride {RideOf(n):F2}");
 
     /// <summary>What the art has to be multiplied by to sit on the rendered
     /// tile. Off the width, because the width is the load-bearing number: the
