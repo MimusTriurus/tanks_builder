@@ -726,12 +726,12 @@ void fragment() {
         // built here out of whole tiles - so it keeps the tile rect.
         // Grounded goes in, and it is the one thing about a bump this layer
         // knows that the tank does not: a mark printed on the ground does not
-        // ride the hull up over a stone. See TankSprite.HeaveFor.
-        Rect2 rect = Frame(anchor, atlas.TileOf(Layer),
-            place + new Vector2(0.0f, Tank.HeaveFor(turret, Grounded)), size);
+        // ride the hull up over a stone, it slides along the sun. See
+        // TankSprite.HeaveShift.
+        Vector2 bump = Tank.HeaveShift(turret, Grounded);
+        Rect2 rect = Frame(anchor, atlas.TileOf(Layer), place + bump, size);
         Rect2 drawn = Frame(anchor - atlas.OffsetOf(Layer, frame),
-            atlas.SizeOf(Layer, frame),
-            place + new Vector2(0.0f, Tank.HeaveFor(turret, Grounded)), size);
+            atlas.SizeOf(Layer, frame), place + bump, size);
         if (drawn.Size.X > 0.0f && drawn.Size.Y > 0.0f)
             DrawTextureRectRegion(atlas.Texture(Layer), drawn,
                 atlas.Region(Layer, frame), tint);

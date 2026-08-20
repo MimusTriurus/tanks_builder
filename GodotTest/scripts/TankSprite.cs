@@ -1129,8 +1129,38 @@ public sealed partial class TankSprite : Node2D
     /// separate measurement. Not moving is the right answer to the wrong one that
     /// was there; sliding it is the next question.
     /// </summary>
-    public float HeaveFor(bool turret, bool grounded = false) =>
-        grounded ? 0.0f : Heave;
+    public float HeaveFor(bool turret) => Heave;
+
+    /// <summary>
+    /// Where a bump displaces a layer to: straight up the screen for anything the
+    /// hull carries, along the sun's run for anything printed on the ground.
+    ///
+    /// <b>A directional sun makes this a translation and nothing else.</b> Lifting
+    /// a caster under parallel light slides its shadow along the run and does not
+    /// change its shape, so the baked silhouette stays exactly right - which is
+    /// what makes the answer affordable at all.
+    ///
+    /// The arithmetic is the board's own, in the two steps it already uses
+    /// elsewhere: a screen row of height is <c>1/cos(elevation)</c> world units
+    /// (the same conversion <see cref="Stage3D.SunCast"/>'s note makes when it
+    /// says 100px of tree is 115 units), the run per unit of height is SunCast,
+    /// and a ground offset reaches the screen with its second axis squashed. No
+    /// new constant: the squash comes off the atlas the way
+    /// <see cref="ShearFor"/> takes it, and the cosine follows from it.
+    /// </summary>
+    public Vector2 HeaveShift(bool turret, bool grounded)
+    {
+        float heave = HeaveFor(turret);
+        if (!grounded)
+            return new Vector2(0.0f, heave);
+        if (Atlas is null || Math.Abs(heave) < 1e-6f)
+            return Vector2.Zero;
+        float squash = -Atlas.GroundDirection(90.0).Y;
+        float rise = Mathf.Sqrt(Math.Max(1.0f - squash * squash, 1e-6f));
+        float lifted = -heave / rise;            // screen rows up, as world height
+        return new Vector2(Stage3D.SunCast.X * lifted,
+                           Stage3D.SunCast.Y * lifted * squash);
+    }
 
     /// <summary>
     /// The one shear a layer is drawn through, for both pivots at once.

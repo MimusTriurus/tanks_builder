@@ -5150,13 +5150,23 @@ public static class SelfTest
             tank.HeaveFor(true) == tank.HeaveFor(false) && tank.HeaveFor(true) == tank.Shake,
             $"{tank.HeaveFor(true)} vs {tank.HeaveFor(false)}");
 
-        // And the one part that is not part of the tank sits it out. Both halves,
-        // because the first alone passes on a tank that is not being jolted at
-        // all - which is every tank, the rumble being off by default.
-        Check("a bump lifts the tank and not the ground under it",
-            Math.Abs(tank.HeaveFor(false, grounded: true)) < 1e-9
-            && Math.Abs(tank.HeaveFor(false)) > 0.5,
-            $"shadow {tank.HeaveFor(false, grounded: true)}, hull {tank.HeaveFor(false)}");
+        // And the one part that is not part of the tank takes the bump the way a
+        // shadow takes it: along the sun rather than up the screen. Both halves,
+        // because either alone passes on a tank that is not being jolted at all -
+        // which is every tank, the rumble being off by default.
+        Vector2 hullBump = tank.HeaveShift(false, grounded: false);
+        Vector2 groundBump = tank.HeaveShift(false, grounded: true);
+        Check("a bump lifts the tank straight up",
+            Math.Abs(hullBump.X) < 1e-9 && Math.Abs(hullBump.Y) > 0.5,
+            $"{hullBump}");
+        // Lifted, so the shadow runs away from the tank along the sun - the same
+        // direction and the same 0.70 per unit of height that every prop on the
+        // board casts by.
+        Check("and slides its shadow along the sun instead of lifting that too",
+            groundBump.X * Stage3D.SunCast.X > 0.0
+            && groundBump.Y * Stage3D.SunCast.Y > 0.0
+            && groundBump.Length() > 0.5f && groundBump.Length() < 2.0f,
+            $"{groundBump} for a {hullBump.Y}px jolt");
 
         // The tremble goes the other way: the turret is exempt from it too, so
         // the aerial stops swinging. Affordable only because the seam cost is
