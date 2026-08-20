@@ -219,6 +219,45 @@ public sealed class BodyRumble
     public double StillSpeed = 1.0;
 
     /// <summary>
+    /// How long the body carries a bump before it comes level again, whether or
+    /// not it has driven off the patch.
+    ///
+    /// <b>A bump used to be held until the next one arrived, and at a crawl the
+    /// next one is a second away.</b> Measured at 20px/s: the offset stood for
+    /// 83 frames at a stretch, 270 at the worst, and the tank was displaced a
+    /// quarter of the time. That is not a jolt, it is a lean - and it is where
+    /// the standing complaint about this effect actually lives.
+    ///
+    /// <b>A time rather than a fraction of the patch, and that is arithmetic
+    /// rather than taste.</b> Holding the first third of each bump is the
+    /// obvious spelling and it is impossible at speed: at cruise a patch is
+    /// crossed in 5.8 frames, so a third of it is 1.9 - the flicker this class
+    /// rejects rounding a continuous wave for. Nor is there a fraction that
+    /// works: a jolt needs three frames to read and so does the return, and
+    /// 5.8 frames cannot be cut into two threes. The fraction is undoable
+    /// exactly where the complaint was written down, and unnecessary exactly
+    /// where it is real.
+    ///
+    /// So the split is the honest one: the ground says <em>where</em> and
+    /// <em>how hard</em>, the body says <em>how long</em>. Holding until the
+    /// next patch put both of those in the ground.
+    ///
+    /// <b>0.20s is bounded from below by the road.</b> It has to outlast the
+    /// longest bump interval any tank meets at cruise, or the ride on a road
+    /// starts blinking: that worst case is a heavy along a lattice axis, where
+    /// the crossing is the full <see cref="BumpSpacing"/> and the interval
+    /// 30/175 = 0.171s. Measured against an uncapped run on that heading, 0.20
+    /// changes nothing on any of the three - not one frame in six thousand -
+    /// and 0.15 changes 418 frames of a heavy's. It also lands where
+    /// <see cref="BodyPitch"/>'s spring peaks, 0.16s, which is what makes it a
+    /// figure about suspension rather than a fudge.
+    ///
+    /// What it buys, at 20px/s: displaced frames 24.4% -> 4.6%, longest run
+    /// 270 -> 20, mean run 83 -> 12. At cruise, by construction, nothing.
+    /// </summary>
+    public double HoldSeconds = 0.20;
+
+    /// <summary>
     /// Shear amplitude of the roll - one track riding up over a bump, which is
     /// now what it is rather than what it was called: the roll is half the
     /// difference of the two track heights, so a pure roll is one track up and
@@ -265,6 +304,11 @@ public sealed class BodyRumble
 
     private double _gain;
 
+    /// <summary>Seconds since this bump arrived, which is what
+    /// <see cref="HoldSeconds"/> spends. Zero on the frame it arrives, so the
+    /// bump always gets at least that frame.</summary>
+    private double _age;
+
     /// <summary>
     /// Where the tank is standing, in the field's own pixels, and how fast it is
     /// going.
@@ -275,7 +319,7 @@ public sealed class BodyRumble
     /// fourth place this board has charged for that difference, after the
     /// selection ring, the pond and the wood. See <see cref="HexField.Bare"/>.
     /// </summary>
-    public void Advance(Vector2 ground, double speed)
+    public void Advance(Vector2 ground, double speed, double dt)
     {
         double moving = Math.Abs(speed);
         double qx = ground.X / BumpSpacing, qy = ground.Y / BumpSpacing;
@@ -295,12 +339,20 @@ public sealed class BodyRumble
             Bump++;
             _gain = Math.Clamp(GainFloor + (1.0 - GainFloor) * moving / FullSpeed,
                                0.0, 1.0) * Damping * Roughness;
+            _age = 0.0;
         }
+        else
+            _age += dt;
         // And the hold has to end when the motion does, or the latch outlives
         // it: a tank braking to a halt half way over a bump would settle with
         // the jolt still under it and keep it until it drove on. A stopped tank
         // is level - see StillSpeed.
-        double held = moving > StillSpeed ? _gain : 0.0;
+        //
+        // It also ends when the body has carried the bump long enough, which is
+        // the suspension's business rather than the ground's - see HoldSeconds.
+        // Letting go is not a second decision about the bump: the gain is not
+        // read again, it is dropped.
+        double held = moving > StillSpeed && _age < HoldSeconds ? _gain : 0.0;
         // The height this patch presents to each track, and the body is their
         // sum and their difference. The same two draws as before - they used to
         // be the heave and the roll outright - so the ground has not moved,
@@ -315,6 +367,7 @@ public sealed class BodyRumble
         Patch = Nowhere;
         Bump = 0;
         _gain = 0.0;
+        _age = 0.0;
         Heave = 0.0;
         Roll = 0.0;
     }

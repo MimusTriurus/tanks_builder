@@ -3875,7 +3875,9 @@ public sealed partial class Main : Node2D
 		// (CellUnder, not FlatCellAt) because a tank is always standing somewhere.
 		v.Rumble.Roughness = _terrain is null ? 1.0
 			: _terrain.RideOf(_field.KindAt(_field.CellUnder(ground)));
-		v.Rumble.Advance(ground, v.Speed);
+		// The delta goes in for the hold, not for the bump: which bump is the
+		// place, how long the body carries it is time - see BodyRumble.HoldSeconds.
+		v.Rumble.Advance(ground, v.Speed, delta);
 		v.Sprite.Shake = v.Rumble.Heave;
 		v.Sprite.Roll = v.Rumble.Roll;
 	}

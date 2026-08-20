@@ -259,7 +259,7 @@ public static class SelfTest
         void Roll(BodyRumble r, ref Vector2 at, double speed, double step)
         {
             at += course * (float)(speed * step);
-            r.Advance(at, speed);
+            r.Advance(at, speed, step);
         }
         var rumble = new BodyRumble();
         Vector2 rumbleAt = start;
@@ -326,11 +326,19 @@ public static class SelfTest
         // One bump is one decision, and the gain is half of that decision: read
         // live it moves inside the bump, which is what the hold is for. This is
         // the ramp from rest, where it happened on every class.
+        //
+        // Two things may happen inside one bump and no third: the latched value,
+        // and letting go of it once the body has carried it long enough. So what
+        // is forbidden is a different value, and coming back after coming level -
+        // dropping the offset is not a decision about the ground, and a ramp from
+        // rest crosses a patch in more frames than the hold lasts, so this is the
+        // run where the release happens.
         var ramp = new BodyRumble { FullSpeed = 155.0 };
         Vector2 rampAt = start;
         double climbing = 0.0;
         long onBump = long.MinValue;
         double heldAt = 0.0;
+        bool released = false;
         var slid = "";
         for (int i = 0; i < 240; i++)
         {
@@ -340,7 +348,12 @@ public static class SelfTest
             {
                 onBump = ramp.Bump;
                 heldAt = ramp.Heave;
+                released = false;
             }
+            else if (Math.Abs(ramp.Heave) < 1e-12)
+                released = true;
+            else if (released)
+                slid = $"bump {onBump} came back to {ramp.Heave:F4} after letting go";
             else if (Math.Abs(ramp.Heave - heldAt) > 1e-12)
                 slid = $"bump {onBump} slid to {ramp.Heave:F4} from {heldAt:F4}";
         }
@@ -363,7 +376,7 @@ public static class SelfTest
             haltedFrames++;
         }
         double rolling = halted.Heave;
-        halted.Advance(haltedAt, 0.0);
+        halted.Advance(haltedAt, 0.0, dt);
         Check("a tank that stops mid-bump comes level",
             Math.Abs(rolling) > 0.5 && Math.Abs(halted.Heave) < 1e-9,
             $"was {rolling:F3} after {haltedFrames} frames, left at {halted.Heave:F3}");
@@ -417,8 +430,8 @@ public static class SelfTest
         Vector2 wandering = new Vector2(-190.0f, 640.0f);
         for (int i = 0; i < 300; i++)
             Roll(there, ref wandering, 240.0, dt);
-        here.Advance(spot, 240.0);
-        there.Advance(spot, 240.0);
+        here.Advance(spot, 240.0, dt);
+        there.Advance(spot, 240.0, dt);
         Check("two tanks on one patch of ground are jolted alike",
             Math.Abs(here.Heave - there.Heave) < 1e-12
             && Math.Abs(here.Roll - there.Roll) < 1e-12
@@ -440,7 +453,7 @@ public static class SelfTest
             for (int i = 0; i < 3000; i++)
             {
                 at += way * (float)(240.0 * dt);
-                along.Advance(at, 240.0);
+                along.Advance(at, 240.0, dt);
                 if (along.Bump != was) { was = along.Bump; bumps++; }
             }
             perThousand.Add(bumps * 1000.0 / (240.0 * 3000.0 * dt));
@@ -457,9 +470,9 @@ public static class SelfTest
         var rough = new BodyRumble { Roughness = 1.3 };
         var soaked = new BodyRumble { Roughness = 1.3, Damping = 0.35 };
         Vector2 stone = new Vector2(913.0f, 77.0f);
-        plainRide.Advance(stone, 240.0);
-        rough.Advance(stone, 240.0);
-        soaked.Advance(stone, 240.0);
+        plainRide.Advance(stone, 240.0, dt);
+        rough.Advance(stone, 240.0, dt);
+        soaked.Advance(stone, 240.0, dt);
         Check("rougher ground gives a bigger jolt off the same patch",
             Math.Abs(rough.Heave - plainRide.Heave * 1.3) < 1e-9
             && Math.Abs(plainRide.Heave) > 1e-9,
@@ -469,7 +482,7 @@ public static class SelfTest
             $"{rough.Heave:F4} against {soaked.Heave:F4}");
 
         var stopped = new BodyRumble();
-        stopped.Advance(Vector2.Zero, 0.0);
+        stopped.Advance(Vector2.Zero, 0.0, dt);
         Check("it is still when the tank is",
             Math.Abs(stopped.Heave) < 1e-9 && Math.Abs(stopped.Roll) < 1e-9,
             $"heave {stopped.Heave:F5}, roll {stopped.Roll:F5}");
@@ -612,6 +625,60 @@ public static class SelfTest
         double wet = Showing(BodyRumble.WetDamping, 108.0);
         Check("the same tank at the same speed rides softer in a ford",
             wet > 0.0 && wet < dry / 2.0, $"{wet:P0} of bumps show wading, {dry:P0} dry");
+
+        // The hold belongs to the body, not to the ground. Held until the next
+        // patch, a bump at a crawl stood for 83 frames at a stretch and 270 at
+        // the worst - a lean, not a jolt, and the one place the complaint about
+        // this effect is real. Both halves again: nought frames would satisfy a
+        // bound on its own, and nought is a rumble that has stopped.
+        int Longest(double speed, double hold)
+        {
+            var probe = new BodyRumble { FullSpeed = 120.0, HoldSeconds = hold };
+            Vector2 at = start;
+            int worst = 0, run = 0;
+            for (int i = 0; i < 6000; i++)
+            {
+                Roll(probe, ref at, speed, dt);
+                if (Shown(probe) != 0)
+                {
+                    run++;
+                    worst = Math.Max(worst, run);
+                }
+                else run = 0;
+            }
+            return worst;
+        }
+        // The bound is a number of frames rather than the setting read back.
+        // Written as "no longer than HoldSeconds" it is true of any hold at all,
+        // including no hold - which is the very thing it is here to forbid, and
+        // it passed on it. A third of a second is the claim: it was a second and
+        // a half, and the same run uncapped still measures 180 frames.
+        int crawlRun = Longest(20.0, new BodyRumble().HoldSeconds);
+        Check("a bump does not outstay the suspension",
+            crawlRun > 3 && crawlRun < 25,
+            $"longest jolt at a crawl is {crawlRun} frames");
+        // And it costs the road nothing, which is the whole of why the hold is a
+        // time and not a fraction of the patch: at cruise the next bump arrives
+        // before the hold runs out, so the ride is the same frame for frame. It
+        // has to be the same for the worst case rather than for the average one -
+        // the slowest cruise on the heading where a patch takes longest to cross,
+        // which is a heavy along a lattice axis at 30px per bump. Not the shared
+        // course, because that one is deliberately off the axis.
+        var letGo = new BodyRumble { FullSpeed = 175.0 * 0.5 };
+        var holdOn = new BodyRumble { FullSpeed = 175.0 * 0.5, HoldSeconds = 1e9 };
+        Vector2 letGoAt = start, holdOnAt = start;
+        int roadDrift = 0;
+        for (int i = 0; i < 3000; i++)
+        {
+            var axis = new Vector2((float)(175.0 * dt), 0.0f);
+            letGoAt += axis;
+            holdOnAt += axis;
+            letGo.Advance(letGoAt, 175.0, dt);
+            holdOn.Advance(holdOnAt, 175.0, dt);
+            if (Shown(letGo) != Shown(holdOn)) roadDrift++;
+        }
+        Check("and letting go costs the ride at cruise nothing", roadDrift == 0,
+            $"{roadDrift} of 3000 frames differ, heavy along a lattice axis");
 
         // The whole-pixel claim, made about the buffer the sprite is rasterised
         // into rather than about the sprite's own space. The node carries the
