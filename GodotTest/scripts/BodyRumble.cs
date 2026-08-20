@@ -33,6 +33,30 @@ namespace TankSpriteTest;
 /// it is held per bump - so the rounding downstream makes one decision per bump
 /// as well.
 ///
+/// One bump, two tracks. The heave and the roll were two independent draws
+/// off the patch, which left the hull free to lift straight up while tipping
+/// any which way: <see cref="RollAmplitude"/> called itself "one track riding
+/// up over a bump" and no line of code said so. Now the patch gives a height
+/// to each track and the body is their sum and their difference -
+/// <c>heave = (l+r)/2</c>, <c>roll = (l-r)/2</c>, off the two salts that used
+/// to be the two effects. Nothing new is configured; the two become one event.
+///
+/// It shows as a bound rather than as a correlation. The two are still
+/// uncorrelated - sign agreement measured 0.505 over 34668 bumps - but their
+/// joint support is now a diamond, <c>|heave|/Amplitude + |roll|/RollAmplitude
+/// &lt;= 1</c>, where before it was the whole square with half of every bump
+/// outside that diamond. Which is the physical statement: lifting the whole
+/// tank takes both tracks agreeing, so one bump cannot be a full lift and a
+/// full tip at once.
+///
+/// Two draws off one patch, not one draw off two places. The tracks are two
+/// places really - the gauge is 69 to 84 field pixels, two or three lattice
+/// squares - so a sample under each would come out fully independent anyway,
+/// and would fire a bump whenever either track crossed: twice the rate, and
+/// the heading and the atlas gauge dragged in to buy the same distribution.
+/// The lattice is coarser than the tank, so a patch is the ground the tank is
+/// on, and what it presents to each side of it.
+///
 /// Each bump is sampled once and held, rather than rounding a continuous wave.
 /// That was the first attempt and it buzzes: a smooth signal crosses the
 /// rounding threshold several times per cycle, so the picture changed every two
@@ -43,16 +67,30 @@ namespace TankSpriteTest;
 /// </summary>
 public sealed class BodyRumble
 {
-    /// <summary>Peak of the signal in pixels before rounding.
+    /// <summary>Peak of the signal in pixels before rounding - the height one
+    /// track can ride up, which the body reaches only when both of them do.
     ///
     /// 1.4 caps the offset at one pixel and that is invisible at 1:1 - one
     /// pixel on a tank nearly two hundred tall is half a percent, and "a one
     /// pixel jitter" is better read as the floor of the effect than as the
     /// target. 2.2 was legible but spent a third of its bumps at two pixels,
-    /// which starts to read as hopping. 1.7 lands between: about three fifths
-    /// of bumps at one pixel, a tenth at two, the rest level, so the jolts
-    /// differ in size without any of them being a lurch.</summary>
-    public double Amplitude = 1.7;
+    /// which starts to read as hopping. 1.7 landed between: three fifths of
+    /// bumps at one pixel, an eighth at two, the rest level.
+    ///
+    /// <b>Then the pair rehabilitated the number that had been rejected.</b>
+    /// Those fractions describe a flat draw, and the mean of two is triangular,
+    /// so the same peak buys far fewer extremes: 1.7 paired measures level
+    /// 0.50, one pixel 0.49, two pixels 0.015 - the two-pixel jolt is not
+    /// quieter, it is gone, and the check that asks for more than one step is
+    /// what finds that. 2.2 paired measures 0.40 / 0.50 / 0.100, putting the
+    /// tenth back where it was tuned. The objection to 2.2 was never its peak,
+    /// it was how often the peak came up.
+    ///
+    /// What does not come back is the level share - 0.29 before, 0.40 now,
+    /// because what the heave gave up is in the roll instead. That is the
+    /// direction the duty cycle wants anyway: two thirds of frames displaced is
+    /// the standing complaint about this effect.</summary>
+    public double Amplitude = 2.2;
 
     /// <summary>How wide a patch of ground is, in field pixels. At full speed a
     /// tank crosses about 8 a second, a handful per hex cell; at a crawl it is a
@@ -112,9 +150,14 @@ public sealed class BodyRumble
     ///
     /// <b>0.35 rather than something smaller, and that is arithmetic.</b> A jolt
     /// only shows once the signal can round to a pixel, which needs
-    /// <c>gain > 0.5 / Amplitude</c> = 0.294: below that the floor does nothing
-    /// whatever. So this is the first setting on which the lever works at all,
-    /// and it puts about a sixth of a crawling tank's bumps at one pixel.
+    /// <c>gain > 0.5 / Amplitude</c>: below that the floor does nothing
+    /// whatever. That was 0.294 while the amplitude was 1.7, so 0.35 was the
+    /// first setting on which the lever worked at all. The pair raised the
+    /// amplitude to 2.2 and the threshold fell with it to 0.227, so there is
+    /// headroom under this figure now - left where it was measured, because it
+    /// is the one number keeping a crawl from being silent. It puts about an
+    /// eighth of a crawling tank's bumps at one pixel, a sixth before the
+    /// pair.
     /// </summary>
     public double GainFloor = 0.35;
 
@@ -135,7 +178,11 @@ public sealed class BodyRumble
     /// already carried by three different cruises.
     ///
     /// 0.35 leaves about a tenth of a wading tank's bumps showing one pixel,
-    /// against two thirds of them on dry land at the same speed.
+    /// against well over half of them on dry land at the same speed. The pair
+    /// barely touched this one - 0.101 before it, 0.092 after - because at this
+    /// gain the signal is small enough that the shape of the draw decides
+    /// little; what it moved is the dry figure beside it, down from two
+    /// thirds.
     /// </summary>
     public const double WetDamping = 0.35;
 
@@ -172,7 +219,10 @@ public sealed class BodyRumble
     public double StillSpeed = 1.0;
 
     /// <summary>
-    /// Shear amplitude of the roll - one track riding up over a bump.
+    /// Shear amplitude of the roll - one track riding up over a bump, which is
+    /// now what it is rather than what it was called: the roll is half the
+    /// difference of the two track heights, so a pure roll is one track up and
+    /// the other not.
     ///
     /// Heave alone is invisible half the time. A bump lifts the tank in world
     /// space, and world vertical projects to screen vertical at every heading,
@@ -189,8 +239,9 @@ public sealed class BodyRumble
     /// </summary>
     public double RollAmplitude = 0.025;
 
-    /// <summary>Pixels of vertical jolt, before the draw lands it on a whole
-    /// pixel of the buffer it is rasterised into. Held per bump, like the roll.
+    /// <summary>Pixels of vertical jolt - the mean of the two track heights -
+    /// before the draw lands it on a whole pixel of the buffer it is rasterised
+    /// into. Held per bump, like the roll.
     ///
     /// <b>This was an <c>int</c>, and the type was the defect rather than the
     /// guarantee it was documented as.</b> A whole number here is whole in the
@@ -205,8 +256,8 @@ public sealed class BodyRumble
     /// one place the rule was broken was the one that found it.</summary>
     public double Heave { get; private set; }
 
-    /// <summary>Shear amplitude of the roll, positive displacing the top of the
-    /// hull to its left - the shear runs along GroundDirection(heading + 90),
+    /// <summary>Shear amplitude of the roll - half the difference of the two
+    /// track heights - positive displacing the top of the hull to its left - the shear runs along GroundDirection(heading + 90),
     /// and headings count anticlockwise. Not quantised - it feeds a shear, which resamples whatever
     /// the value is - but held per bump, so it changes as rarely as the
     /// heave.</summary>
@@ -250,10 +301,13 @@ public sealed class BodyRumble
         // the jolt still under it and keep it until it drove on. A stopped tank
         // is level - see StillSpeed.
         double held = moving > StillSpeed ? _gain : 0.0;
-        Heave = Sample(Patch, 0UL) * Amplitude * held;
-        // a separate draw off the same patch: the same ground, but which track
-        // caught it is not tied to how hard it hit
-        Roll = Sample(Patch, 0x632BE59BD9B4E019UL) * RollAmplitude * held;
+        // The height this patch presents to each track, and the body is their
+        // sum and their difference. The same two draws as before - they used to
+        // be the heave and the roll outright - so the ground has not moved,
+        // only what the tank does with it. See the pair in the class note.
+        double left = Sample(Patch, LeftTrack), right = Sample(Patch, RightTrack);
+        Heave = (left + right) * 0.5 * Amplitude * held;
+        Roll = (left - right) * 0.5 * RollAmplitude * held;
     }
 
     public void Reset()
@@ -282,6 +336,15 @@ public sealed class BodyRumble
     /// its first bump.</summary>
     private static readonly Vector2I Nowhere =
         new Vector2I(int.MinValue, int.MinValue);
+
+    /// <summary>Which track a draw belongs to. Two named salts rather than one
+    /// hashed against an index, so that the pair is the pair that was already
+    /// here before the tracks were: the same patch gives back the same two
+    /// numbers it always did.</summary>
+    private const ulong LeftTrack = 0UL;
+
+    /// <inheritdoc cref="LeftTrack"/>
+    private const ulong RightTrack = 0x632BE59BD9B4E019UL;
 
     /// <summary>A value in [-1, 1) for a patch of ground.
     /// <paramref name="salt"/> gives independent draws off the same patch.

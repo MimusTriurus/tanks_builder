@@ -351,12 +351,22 @@ public static class SelfTest
         // the hold, and would sit there jolted until it drove on.
         var halted = new BodyRumble();
         Vector2 haltedAt = start;
-        for (int i = 0; i < 40; i++) Roll(halted, ref haltedAt, 240.0, dt);
+        // Driven until it is on a jolt worth showing, rather than for a fixed
+        // forty frames. Which patch a frame count lands on is the draw's
+        // business, and the pair put two fifths of them level - so the fixed
+        // count picked a bump of -0.068 and the check read as failing when what
+        // it had actually done was stop on flat ground.
+        int haltedFrames = 0;
+        while (Math.Abs(halted.Heave) <= 0.5 && haltedFrames < 600)
+        {
+            Roll(halted, ref haltedAt, 240.0, dt);
+            haltedFrames++;
+        }
         double rolling = halted.Heave;
         halted.Advance(haltedAt, 0.0);
         Check("a tank that stops mid-bump comes level",
-            Math.Abs(rolling) > 0.1 && Math.Abs(halted.Heave) < 1e-9,
-            $"was {rolling:F3}, left at {halted.Heave:F3}");
+            Math.Abs(rolling) > 0.5 && Math.Abs(halted.Heave) < 1e-9,
+            $"was {rolling:F3} after {haltedFrames} frames, left at {halted.Heave:F3}");
 
         // Three tanks on parallel routes must not be jolted in step, and this is
         // what the lattice buys instead of a per-tank seed: they are in different
@@ -465,20 +475,42 @@ public static class SelfTest
             $"heave {stopped.Heave:F5}, roll {stopped.Roll:F5}");
 
         // Roll must not just track the heave, or it adds nothing the heave has
-        // not already said.
+        // not already said. The pair makes this half cheap - the mean and the
+        // half difference of two draws agree in sign exactly half the time by
+        // construction - so it is kept as the floor it now is: a roll copied
+        // off the heave agrees always, a roll negated from it never. What the
+        // pair itself claims is the check under this one.
         var pair = new BodyRumble();
         Vector2 pairAt = start;
         int agree = 0, samples = 0;
+        double worstJoint = 0.0;
         for (int i = 0; i < 400; i++)
         {
             Roll(pair, ref pairAt, 240.0, dt);
             if (Math.Abs(pair.Heave) < 1e-9) continue;
             samples++;
             if (Math.Sign(pair.Roll) == Math.Sign(pair.Heave)) agree++;
+            worstJoint = Math.Max(worstJoint,
+                Math.Abs(pair.Heave) / pair.Amplitude
+                + Math.Abs(pair.Roll) / pair.RollAmplitude);
         }
-        Check("roll is drawn independently of the heave",
+        Check("roll is not derived from the heave",
             samples > 50 && agree > samples * 0.25 && agree < samples * 0.75,
             $"{agree} of {samples} bumps agreed in sign");
+        // And yet both come off one pair of track heights, which shows as a
+        // bound rather than as a correlation. Heave is their mean and roll their
+        // half difference, so the two normalised and added come to the taller of
+        // the two tracks exactly - and a track cannot ride up by more than the
+        // amplitude. Lifting the whole tank takes both tracks agreeing, so one
+        // bump cannot be a full lift and a full tip at once.
+        //
+        // Both halves again. Two independent draws fill the square instead and
+        // put half of every bump outside this diamond, which is what was here
+        // before and what the upper bound catches; the lower one is against a
+        // rumble that has quietly stopped, since nought passes a bound.
+        Check("but both come off one pair of track heights",
+            worstJoint <= 1.0 + 1e-9 && worstJoint > 0.9,
+            $"worst normalised |heave| + |roll| is {worstJoint:F3} over {samples} bumps");
 
         // The point of having roll at all. A bump lifts the tank straight up in
         // world space, which is straight up on screen at every heading, so the
@@ -607,7 +639,7 @@ public static class SelfTest
         // one pixel decided in the sprite's own space, drawn through a light's
         // scale, is 0.85 of a pixel. Written out rather than described, so the
         // pair is falsifiable in both directions.
-        double wasDrawn = Math.Round(1.7 * 0.9) * 0.85f;
+        double wasDrawn = Math.Round(new BodyRumble().Amplitude * 0.9) * 0.85f;
         Check("and deciding it before the class scale does not",
             Math.Abs(wasDrawn - Math.Round(wasDrawn)) > 1e-4, $"drew {wasDrawn:F3}px");
 
