@@ -1167,6 +1167,7 @@ public sealed partial class Main : Node2D
 	private bool _deadAtStart;
 	private double _recoilAtStart = 1.0;
 	private bool _rollOnly;
+	private bool _heaveOnly;
 
 	private bool Moving => _pathStep < _path.Count;
 
@@ -1421,6 +1422,19 @@ public sealed partial class Main : Node2D
 				// per-vehicle flag values above.
 				_rumbleEnabled = true;
 				_rollOnly = true;
+			}
+			else if (userArgs[i] == "--heave-only")
+			{
+				// The other half of the pair above, and it is here because a
+				// half of an A/B that cannot be taken is not an A/B. The roll
+				// had a flag and the heave did not, so every measurement of the
+				// heave so far was taken with the roll resampling the sprite
+				// underneath it.
+				//
+				// Silences the roll rather than the heave: same reason, other
+				// side. The amplitude waits for the tanks to exist.
+				_rumbleEnabled = true;
+				_heaveOnly = true;
 			}
 			else if (userArgs[i] == "--trace" && i + 1 < userArgs.Length
 					 && int.TryParse(userArgs[i + 1], out int frames))
@@ -2012,6 +2026,8 @@ public sealed partial class Main : Node2D
 			vehicle.Recoil.Level = _recoilAtStart;
 			if (_rollOnly)
 				vehicle.Rumble.Amplitude = 0.0;
+			if (_heaveOnly)
+				vehicle.Rumble.RollAmplitude = 0.0;
 		}
 		// Said out loud rather than left to the row claim: --no-3d works because
 		// FlagRows keeps panel.json's default off view.stage, and a table entry is
@@ -4520,6 +4536,7 @@ public sealed partial class Main : Node2D
 		["--pitch"] = new[] { "ride.pitch" },
 		["--rumble"] = new[] { "ride.rumble" },
 		["--roll-only"] = new[] { "ride.rumble" },
+		["--heave-only"] = new[] { "ride.rumble" },
 		["--no-tremble"] = new[] { "ride.tremble" },
 		["--tremble"] = new[] { "ride.tremble_level" },
 		["--no-shadow"] = new[] { "effects.shadow" },
