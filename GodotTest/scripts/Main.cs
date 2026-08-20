@@ -3846,15 +3846,21 @@ public sealed partial class Main : Node2D
 
 	private void UpdateRumble(Vehicle v, double delta)
 	{
+		// What the jolt has to be whole against, and it is pushed rather than
+		// pulled because the sprite has no business reading the camera. Every
+		// frame, for the reason the tremble level is: a tank built after a zoom
+		// would otherwise sit on the old factor.
+		v.Sprite.ViewZoom = _camera.Zoom.X;
+		v.Sprite.Painted = Staged;
 		if (!_rumbleEnabled)
 		{
 			v.Rumble.Reset();
-			v.Sprite.Shake = 0;
+			v.Sprite.Shake = 0.0;
 			v.Sprite.Roll = 0.0;
 			return;
 		}
 		v.Rumble.Advance(v.Speed * delta, v.Speed);
-		v.Sprite.Shake = v.Rumble.Offset;
+		v.Sprite.Shake = v.Rumble.Heave;
 		v.Sprite.Roll = v.Rumble.Roll;
 	}
 
@@ -4745,7 +4751,7 @@ public sealed partial class Main : Node2D
 			+ $"   ramp {_profile.RampTime:F2}s over {_profile.RampDistance:F0}px\n"
 			+ $"turn {_profile.TurnRate:F0} deg/s   corner {_profile.CornerSpeed:F0} px/s\n"
 			+ $"pitch {_tank.Pitch,7:F4}   roll {_tank.Roll,7:F4}"
-			+ $"   heave {_tank.Shake,2}px\n"
+			+ $"   heave {_tank.Heave,4:F1}px of {_tank.Shake,5:F2}\n"
 			+ $"tremble {_tank.TremblePitch,7:F4} / {_tank.TrembleYaw,7:F4}"
 			+ $" at {_tremble.PitchRateAt(_speed),4:F1} Hz\n"
 			// Where it lands, which the two amplitudes above do not say: the
@@ -5768,7 +5774,7 @@ public sealed partial class Main : Node2D
 					 // ramp feels no slope along its heading and is still standing on
 					 // one. See Vehicle.OnSlope.
 					 + (Active.Levelling || Active.OnSlope ? " over" : " depth")
-					 + $"  pitch {_tank.Pitch,8:F5}  shake {_tank.Shake,2}"
+					 + $"  pitch {_tank.Pitch,8:F5}  shake {_tank.Heave,4:F1}"
 					 + $"  roll {_tank.Roll,8:F5}  trem {_tank.TremblePitch,8:F5}"
 					 + $"/{_tank.TrembleYaw,8:F5}"
 					 // The two ends, because the amplitudes beside them cannot say
@@ -5964,7 +5970,7 @@ public sealed partial class Main : Node2D
 		{
 			if (v.Moving)
 				AdvanceOrder(v, delta);
-			else if (v.Pitch.Angle != 0.0 || v.Speed != 0.0 || v.Sprite.Shake != 0)
+			else if (v.Pitch.Angle != 0.0 || v.Speed != 0.0 || v.Sprite.Shake != 0.0)
 			{
 				// let the body settle after the stop instead of snapping level
 				v.Speed = 0.0;
@@ -6418,7 +6424,7 @@ public sealed partial class Main : Node2D
 			v.Pitch.Reset();
 			s.Pitch = 0.0;
 			v.Rumble.Reset();
-			s.Shake = 0;
+			s.Shake = 0.0;
 			s.Roll = 0.0;
 			v.Tremble.Reset();
 			s.TremblePitch = 0.0;

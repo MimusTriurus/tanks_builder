@@ -243,15 +243,21 @@ public static class SelfTest
             $"peak {Math.Abs(minAccel):F4}");
 
         GD.Print("ground rumble");
+        // What a tank drawn at 1:1 shows. The class holds the amplitude now and
+        // the draw does the rounding - see TankSprite.SnapHeave - so every claim
+        // below about pixels has to be made about the drawn figure, not about the
+        // held one.
+        static int Shown(BodyRumble r, float scale = 1.0f) =>
+            (int)Math.Round(TankSprite.SnapHeave(r.Heave, scale) * scale);
         var rumble = new BodyRumble();
         var seen = new HashSet<int>();
         int changes = 0, previous = 0;
         for (int i = 0; i < 300; i++)
         {
             rumble.Advance(240.0 * dt, 240.0);
-            seen.Add(rumble.Offset);
-            if (rumble.Offset != previous) changes++;
-            previous = rumble.Offset;
+            seen.Add(Shown(rumble));
+            if (Shown(rumble) != previous) changes++;
+            previous = Shown(rumble);
         }
         Check("the jolt is whole pixels and stays small",
             seen.All(v => v is >= -2 and <= 2), $"saw {string.Join(",", seen.OrderBy(v => v))}");
@@ -288,10 +294,10 @@ public static class SelfTest
             var fine = new BodyRumble();
             for (int i = 0; i < 20; i++) coarse.Advance(total / 20.0, 240.0);
             for (int i = 0; i < 137; i++) fine.Advance(total / 137.0, 240.0);
-            if (coarse.Offset != fine.Offset)
+            if (Math.Abs(coarse.Heave - fine.Heave) > 1e-12)
             {
                 driftOk = false;
-                mismatch = $"at {total}px: {coarse.Offset} vs {fine.Offset}";
+                mismatch = $"at {total}px: {coarse.Heave:F6} vs {fine.Heave:F6}";
             }
         }
         Check("phase follows distance, not the frame clock", driftOk, mismatch);
@@ -299,8 +305,8 @@ public static class SelfTest
         var stopped = new BodyRumble();
         stopped.Advance(0.0, 0.0);
         Check("it is still when the tank is",
-            stopped.Offset == 0 && Math.Abs(stopped.Roll) < 1e-9,
-            $"offset {stopped.Offset}, roll {stopped.Roll:F5}");
+            Math.Abs(stopped.Heave) < 1e-9 && Math.Abs(stopped.Roll) < 1e-9,
+            $"heave {stopped.Heave:F5}, roll {stopped.Roll:F5}");
 
         // Roll must not just track the heave, or it adds nothing the heave has
         // not already said.
@@ -309,9 +315,9 @@ public static class SelfTest
         for (int i = 0; i < 400; i++)
         {
             pair.Advance(240.0 * dt, 240.0);
-            if (pair.Offset == 0) continue;
+            if (Math.Abs(pair.Heave) < 1e-9) continue;
             samples++;
-            if (Math.Sign(pair.Roll) == Math.Sign(pair.Offset)) agree++;
+            if (Math.Sign(pair.Roll) == Math.Sign(pair.Heave)) agree++;
         }
         Check("roll is drawn independently of the heave",
             samples > 50 && agree > samples * 0.25 && agree < samples * 0.75,
@@ -350,12 +356,41 @@ public static class SelfTest
         for (int i = 0; i < 600; i++)
         {
             crawl.Advance(20.0 * dt, 20.0);
-            if (crawl.Offset != 0) crawlNonZero++;
+            if (Shown(crawl) != 0) crawlNonZero++;
             fast.Advance(240.0 * dt, 240.0);
-            if (fast.Offset != 0) fastNonZero++;
+            if (Shown(fast) != 0) fastNonZero++;
         }
         Check("it thins out at a crawl instead of switching off",
             crawlNonZero < fastNonZero / 3, $"{crawlNonZero} vs {fastNonZero} frames jolted");
+
+        // The whole-pixel claim, made about the buffer the sprite is rasterised
+        // into rather than about the sprite's own space. The node carries the
+        // class scale, so a whole pixel here is 0.85 of one on a light and 1.15
+        // on a heavy - and the zoom multiplies both. Every scale the bench uses
+        // against every zoom it reaches.
+        var heaveOffGrid = "";
+        foreach (float body in new[] { 0.85f, 1.00f, 1.15f })
+            foreach (float zoom in new[] { 0.25f, 1.0f, 2.0f, 3.5f, 8.0f })
+            {
+                float factor = body * zoom;
+                var probe = new BodyRumble();
+                for (int i = 0; i < 200; i++)
+                {
+                    probe.Advance(240.0 * dt, 240.0);
+                    double drawn = TankSprite.SnapHeave(probe.Heave, factor) * factor;
+                    if (Math.Abs(drawn - Math.Round(drawn)) > 1e-4)
+                        heaveOffGrid = $"{body:F2}x at zoom {zoom:F2} draws {drawn:F3}px";
+                }
+            }
+        Check("the jolt lands on whole pixels of what it is drawn into",
+            heaveOffGrid.Length == 0, heaveOffGrid);
+        // And the answer it replaced fails that, which is the whole of the fix:
+        // one pixel decided in the sprite's own space, drawn through a light's
+        // scale, is 0.85 of a pixel. Written out rather than described, so the
+        // pair is falsifiable in both directions.
+        double wasDrawn = Math.Round(1.7 * 0.9) * 0.85f;
+        Check("and deciding it before the class scale does not",
+            Math.Abs(wasDrawn - Math.Round(wasDrawn)) > 1e-4, $"drew {wasDrawn:F3}px");
 
         GD.Print("engine tremble");
         var tremble = new EngineTremble();

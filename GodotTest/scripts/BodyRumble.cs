@@ -12,11 +12,17 @@ namespace TankSpriteTest;
 /// tank at half speed should meet half as many per second. Driven off a clock
 /// instead, the rate is the same at every speed and reads as an idling engine.
 ///
-/// The offset is a whole number of pixels. A fractional offset resamples the
-/// sprite every frame - the tank layer filters linearly, for reasons the pitch
-/// shear needed - and that softens it into a shimmer. On whole pixels nothing
-/// is resampled at all: the sprite is either where it was or one pixel off,
-/// which is what a jolt looks like.
+/// The offset lands on a whole pixel. A fractional offset resamples the sprite
+/// every frame - the tank layer filters linearly, for reasons the pitch shear
+/// needed - and that softens it into a shimmer. On whole pixels nothing is
+/// resampled at all: the sprite is either where it was or one pixel off, which
+/// is what a jolt looks like.
+///
+/// A whole pixel <em>of the buffer the sprite is rasterised into</em>, which is
+/// not this class's business and used to be: see <see cref="Heave"/> and
+/// <see cref="TankSprite.SnapHeave"/>. What is held here is the amplitude, and
+/// it is held per bump - so the rounding downstream makes one decision per bump
+/// as well.
 ///
 /// Each bump is sampled once and held, rather than rounding a continuous wave.
 /// That was the first attempt and it buzzes: a smooth signal crosses the
@@ -66,9 +72,21 @@ public sealed class BodyRumble
     /// </summary>
     public double RollAmplitude = 0.025;
 
-    /// <summary>Whole pixels of vertical offset. Integer on purpose: it is the
-    /// type that guarantees no resampling.</summary>
-    public int Offset { get; private set; }
+    /// <summary>Pixels of vertical jolt, before the draw lands it on a whole
+    /// pixel of the buffer it is rasterised into. Held per bump, like the roll.
+    ///
+    /// <b>This was an <c>int</c>, and the type was the defect rather than the
+    /// guarantee it was documented as.</b> A whole number here is whole in the
+    /// sprite's <em>own</em> space, and the node carries the class scale - 0.85
+    /// for a light, 1.15 for a heavy - so one pixel of jolt was drawn as 0.85
+    /// and as 1.15 of a screen pixel on two tanks out of three, resampled,
+    /// which is the shimmer this class exists to avoid. The rounding belongs
+    /// where the scale is known.
+    ///
+    /// <see cref="CameraShake"/> cites this class for the rule and then gets it
+    /// right - it snaps in screen pixels "because zoom is between the two". The
+    /// one place the rule was broken was the one that found it.</summary>
+    public double Heave { get; private set; }
 
     /// <summary>Shear amplitude of the roll, positive displacing the top of the
     /// hull to its left - the shear runs along GroundDirection(heading + 90),
@@ -84,7 +102,7 @@ public sealed class BodyRumble
         _phase += distance / BumpSpacing;
         double gain = Math.Clamp(Math.Abs(speed) / FullSpeed, 0.0, 1.0);
         var bump = (long)Math.Floor(_phase);
-        Offset = (int)Math.Round(Sample(bump, 0UL) * Amplitude * gain);
+        Heave = Sample(bump, 0UL) * Amplitude * gain;
         // a separate draw off the same bump: the same ground, but which track
         // caught it is not tied to how hard it hit
         Roll = Sample(bump, 0x632BE59BD9B4E019UL) * RollAmplitude * gain;
@@ -93,7 +111,7 @@ public sealed class BodyRumble
     public void Reset()
     {
         _phase = 0.0;
-        Offset = 0;
+        Heave = 0.0;
         Roll = 0.0;
     }
 

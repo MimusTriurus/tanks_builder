@@ -121,10 +121,12 @@ public sealed partial class TankSprite : Node2D
     /// See <see cref="PitchTransform"/> for why a shear and not a rotation.</summary>
     public double Pitch;
 
-    /// <summary>Whole pixels of vertical jolt from the ground. Applied to the
-    /// draw rect rather than to Position, which the movement code compares
-    /// against cell anchors and must stay exact.</summary>
-    public int Shake;
+    /// <summary>Pixels of vertical jolt from the ground, unrounded. Applied to
+    /// the draw rect rather than to Position, which the movement code compares
+    /// against cell anchors and must stay exact. What is actually drawn is
+    /// <see cref="Heave"/>, which is this put on the pixel grid of the buffer
+    /// the sprite lands in.</summary>
+    public double Shake;
 
     /// <summary>Roll, as a shear amplitude, positive displacing the top of the
     /// hull to its left: the shear runs along GroundDirection(HullFacing + 90)
@@ -1065,9 +1067,46 @@ public sealed partial class TankSprite : Node2D
         Math.Abs(Climb) > 1e-6 || Math.Abs(Rise - 1.0f) > 1e-6
         || Slope != Vector2.Zero;
 
+    /// <summary>The harness's view scale, pushed in every frame rather than
+    /// read from here, because this node has no business knowing about the
+    /// camera - and pushed every frame rather than once, for the reason the
+    /// tremble level is: a tank built later would sit on the old figure.
+    /// </summary>
+    public float ViewZoom = 1.0f;
+
+    /// <summary>Whether the sprite is rasterised into the stage's paint target
+    /// instead of straight into the screen. It changes which buffer the jolt has
+    /// to land whole in - see <see cref="HeaveScale"/>.</summary>
+    public bool Painted;
+
+    /// <summary>
+    /// Local pixels to pixels of the buffer this sprite is rasterised into: the
+    /// factor the jolt has to be whole against.
+    ///
+    /// <b>Two branches, because there are two buffers.</b> In 2D the sprite is
+    /// drawn straight into the screen, so the factor is the class scale and the
+    /// zoom together. On the 3D stage it is drawn into a 512 target at the class
+    /// scale, and the quad is sampled from there by a camera whose size carries
+    /// the zoom; a fractional zoom resamples the <em>whole</em> tank whatever the
+    /// jolt does, so snapping to screen pixels there buys nothing and the target's
+    /// own texels are what to land on.
+    /// </summary>
+    public float HeaveScale => BodyScale * (Painted ? 1.0f : ViewZoom);
+
+    /// <summary>A jolt put on the pixel grid of what it is drawn into. Static and
+    /// given its factor, so the self-test can ask it without a board - the reason
+    /// <see cref="ClimbLean.Print"/> and its neighbours are shaped this way.
+    /// </summary>
+    public static double SnapHeave(double heave, float scale) =>
+        scale <= 1e-6f ? 0.0 : Math.Round(heave * scale) / scale;
+
+    /// <summary>What the layers are drawn with: <see cref="Shake"/> on the
+    /// grid.</summary>
+    public float Heave => (float)SnapHeave(Shake, HeaveScale);
+
     /// <summary>Heave a layer receives. Never depends on the layer - see
     /// <see cref="TurretStabilised"/>.</summary>
-    public int HeaveFor(bool turret) => Shake;
+    public float HeaveFor(bool turret) => Heave;
 
     /// <summary>
     /// The one shear a layer is drawn through, for both pivots at once.
@@ -1288,7 +1327,7 @@ public sealed partial class TankSprite : Node2D
             return;
         DrawTextureRectRegion(Atlas.Texture(layer),
             new Rect2(-Atlas.Anchor + Atlas.OffsetOf(layer, index)
-                      + new Vector2(0.0f, Shake), size),
+                      + new Vector2(0.0f, Heave), size),
             Atlas.Region(layer, index));
     }
 
