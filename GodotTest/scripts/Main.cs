@@ -18,27 +18,19 @@ namespace TankSpriteTest;
 /// </summary>
 public sealed partial class Main : Node2D
 {
-	private const string SpritesRoot = "D:/Projects/AgentCoding/BlenderMCP/Sprites";
-
-	/// <summary>Where <c>stage_sounds.sh</c> puts the audio. Off an absolute path
-	/// for the reason the atlases are, and one more besides: the bytes are not in
-	/// this repository - see the script - so this directory is often simply
-	/// absent, and everything downstream of it has to be happy about that.
-	/// </summary>
-	private const string SoundsRoot = "D:/Projects/AgentCoding/BlenderMCP/Sounds";
-
-	/// <summary>The hand-drawn ground. Absolute for the reason the atlases are -
-	/// redraw a hex, restart, see it - and optional for the reason the sounds
-	/// are: without it the field falls back to the rendered tile and everything
-	/// else is unchanged.</summary>
-	private const string TerrainsRoot = "D:/Projects/AgentCoding/BlenderMCP/Images/Terrains";
-	private const string PropsRoot = "D:/Projects/AgentCoding/BlenderMCP/Images/Vegetation";
-
-	/// <summary>The pond's drawn surface. Its own folder rather than a file in
-	/// Terrains, because TerrainSet reads that folder as kinds of ground and a
-	/// kind is picked by hash - which would scatter open water across the
-	/// hilltops. Water is a map, not paint; see <see cref="WaterArt"/>.</summary>
-	internal const string WaterRoot = "D:/Projects/AgentCoding/BlenderMCP/Images/Water";
+	/// <summary>The five folders the bench reads, all off <see cref="AssetRoot"/>
+	/// - which derives them from where this project sits rather than naming a
+	/// machine. They were literals until the repository moved and renamed all
+	/// five at once; see AssetRoot for what that costs and why nothing said so.
+	///
+	/// Internal rather than private because <c>SelfTest</c> loads atlases of its
+	/// own, and it used to carry its own copy of the path: fix one and the other
+	/// stays broken, which is the whole reason there is one name now.</summary>
+	internal static readonly string SpritesRoot = AssetRoot.Sprites;
+	private static readonly string SoundsRoot = AssetRoot.Sounds;
+	private static readonly string TerrainsRoot = AssetRoot.Terrains;
+	private static readonly string PropsRoot = AssetRoot.Props;
+	internal static readonly string WaterRoot = AssetRoot.Water;
 	/// <summary>The tanks to look for on disk, in key order: one per class,
 	/// all three built from separate parts - hull, turret, barrel, engine and
 	/// two belts as their own meshes.

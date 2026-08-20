@@ -1583,7 +1583,7 @@ public static class SelfTest
             string lender = atlases.Keys.First();
             string borrower = atlases.Keys.First(k => k != lender);
             AtlasSet worn = AtlasSet.Load(
-                "D:/Projects/AgentCoding/BlenderMCP/Sprites", borrower, lender);
+                Main.SpritesRoot, borrower, lender);
             Check("a borrowed atlas keeps the tag it was asked for",
                 worn.Error.Length == 0 && worn.Tag == borrower,
                 $"asked for {borrower}, wearing {lender}, tag came back "
@@ -7756,7 +7756,7 @@ public static class SelfTest
             foreach (string tag in Main.Tags)
             {
                 AtlasSet set = AtlasSet.Load(
-                    "D:/Projects/AgentCoding/BlenderMCP/Sprites", tag, tag);
+                    Main.SpritesRoot, tag, tag);
                 if (set.Error.Length > 0)
                     continue;
                 if (!set.HasHeights)
@@ -7823,7 +7823,7 @@ public static class SelfTest
                 deepTale.Length == 0, deepTale);
             Check("and a set without one still has a groundline to fall back on",
                 bare.All(t => AtlasSet.Load(
-                    "D:/Projects/AgentCoding/BlenderMCP/Sprites", t, t)
+                    Main.SpritesRoot, t, t)
                     .Groundline is not null),
                 $"{string.Join(", ", bare)} would lose the waterline entirely");
 
