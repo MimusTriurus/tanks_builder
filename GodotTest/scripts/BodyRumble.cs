@@ -54,6 +54,30 @@ public sealed class BodyRumble
     /// thins out by itself rather than switching on.</summary>
     public double FullSpeed = 120.0;
 
+    /// <summary>
+    /// What is left of the jolt when the tank is barely moving.
+    ///
+    /// <b>Without it the crawl is not thin, it is empty.</b> The harness sets
+    /// FullSpeed to half of cruise and a tank creeping through a bend does 0.12
+    /// of cruise, so the gain was 0.24 and the signal 0.41px - and no sample can
+    /// round that to a pixel, because the sample is in [-1, 1). Measured: 1200
+    /// frames of crawling gave exactly nought on all three classes, and the check
+    /// that says otherwise was one-sided and passed on nought.
+    ///
+    /// <b>The physics is on this side of the argument too.</b> How far a bump
+    /// lifts the hull is the geometry of a track riding over an obstacle and
+    /// hardly depends on speed; what grows with speed is the vertical
+    /// acceleration, not the travel. And the rate already comes from the distance,
+    /// so speed is in the effect twice over.
+    ///
+    /// <b>0.35 rather than something smaller, and that is arithmetic.</b> A jolt
+    /// only shows once the signal can round to a pixel, which needs
+    /// <c>gain > 0.5 / Amplitude</c> = 0.294: below that the floor does nothing
+    /// whatever. So this is the first setting on which the lever works at all,
+    /// and it puts about a sixth of a crawling tank's bumps at one pixel.
+    /// </summary>
+    public double GainFloor = 0.35;
+
     /// <summary>Below this the tank counts as stopped and the body comes level.
     /// Not a threshold the effect switches on at - the strength is
     /// <see cref="FullSpeed"/>'s business and shrinks smoothly - this is only
@@ -122,7 +146,8 @@ public sealed class BodyRumble
         if (bump != Bump)
         {
             Bump = bump;
-            _gain = Math.Clamp(moving / FullSpeed, 0.0, 1.0);
+            _gain = Math.Clamp(GainFloor + (1.0 - GainFloor) * moving / FullSpeed,
+                               0.0, 1.0);
         }
         // And the hold has to end when the motion does, or the latch outlives
         // it: a tank braking to a halt half way over a bump would settle with

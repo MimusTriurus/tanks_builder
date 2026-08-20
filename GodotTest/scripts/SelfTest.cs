@@ -383,18 +383,54 @@ public static class SelfTest
             worstAxis > 0.5,
             $"worst is {worstHeading} deg at {worstAxis:F2}");
 
+        // Counted per bump rather than per frame, and that is not tidying: a
+        // bump at 20px/s is held for ninety frames and one at cruise for seven,
+        // so a frame count over a fixed number of frames compares thirteen bumps
+        // against a hundred and sixty. It read 360 against 387 - a ratio of noise
+        // over noise, the same shape of mistake the cycle-seam check made when it
+        // divided one median by another.
         var crawl = new BodyRumble();
-        int crawlNonZero = 0, fastNonZero = 0;
         var fast = new BodyRumble();
-        for (int i = 0; i < 600; i++)
+        int crawlBumps = 0, crawlShown = 0, fastBumps = 0, fastShown = 0;
+        long onCrawl = long.MinValue, onFast = long.MinValue;
+        for (int i = 0; i < 12000; i++)
         {
             crawl.Advance(20.0 * dt, 20.0);
-            if (Shown(crawl) != 0) crawlNonZero++;
+            if (crawl.Bump != onCrawl)
+            {
+                onCrawl = crawl.Bump;
+                crawlBumps++;
+                if (Shown(crawl) != 0) crawlShown++;
+            }
             fast.Advance(240.0 * dt, 240.0);
-            if (Shown(fast) != 0) fastNonZero++;
+            if (fast.Bump != onFast)
+            {
+                onFast = fast.Bump;
+                fastBumps++;
+                if (Shown(fast) != 0) fastShown++;
+            }
         }
+        double crawlShare = (double)crawlShown / Math.Max(crawlBumps, 1);
+        double fastShare = (double)fastShown / Math.Max(fastBumps, 1);
+        // Both halves, and the left one is the point: written as "fewer than a
+        // third" alone this passed on nought, which is what a crawl actually got
+        // - the gain could not reach the half pixel a jolt needs. A claim about
+        // thinning out that is satisfied by silence is not a claim.
         Check("it thins out at a crawl instead of switching off",
-            crawlNonZero < fastNonZero / 3, $"{crawlNonZero} vs {fastNonZero} frames jolted");
+            crawlShare > 0.0 && crawlShare < fastShare * 3 / 4,
+            $"{crawlShare:P0} of {crawlBumps} bumps show against {fastShare:P0} of {fastBumps}");
+        // And the harness's own crawl, which is the speed this was measured
+        // failing at: a tank creeping through a bend does 0.12 of cruise against
+        // a FullSpeed of half of it.
+        var bend = new BodyRumble { FullSpeed = 240.0 * 0.5 };
+        int bendJolts = 0;
+        for (int i = 0; i < 1200; i++)
+        {
+            bend.Advance(240.0 * 0.12 * dt, 240.0 * 0.12);
+            if (Shown(bend) != 0) bendJolts++;
+        }
+        Check("a tank creeping through a bend still meets the ground",
+            bendJolts > 0, $"{bendJolts} of 1200 frames jolted at the corner speed");
 
         // The whole-pixel claim, made about the buffer the sprite is rasterised
         // into rather than about the sprite's own space. The node carries the
