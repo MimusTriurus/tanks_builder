@@ -302,6 +302,39 @@ public static class SelfTest
         }
         Check("phase follows distance, not the frame clock", driftOk, mismatch);
 
+        // One bump is one decision, and the gain is half of that decision: read
+        // live it moves inside the bump, which is what the hold is for. This is
+        // the ramp from rest, where it happened on every class.
+        var ramp = new BodyRumble { FullSpeed = 155.0 };
+        double climbing = 0.0;
+        long onBump = long.MinValue;
+        double heldAt = 0.0;
+        var slid = "";
+        for (int i = 0; i < 240; i++)
+        {
+            climbing = Math.Min(climbing + 620.0 * dt, 310.0);
+            ramp.Advance(climbing * dt, climbing);
+            if (ramp.Bump != onBump)
+            {
+                onBump = ramp.Bump;
+                heldAt = ramp.Heave;
+            }
+            else if (Math.Abs(ramp.Heave - heldAt) > 1e-12)
+                slid = $"bump {onBump} slid to {ramp.Heave:F4} from {heldAt:F4}";
+        }
+        Check("one bump is one decision, even while the throttle is opening",
+            slid.Length == 0, slid);
+        // And the latch must not outlive the motion. A tank that brakes to a
+        // halt half way over a bump keeps the latched gain unless something ends
+        // the hold, and would sit there jolted until it drove on.
+        var halted = new BodyRumble();
+        for (int i = 0; i < 40; i++) halted.Advance(240.0 * dt, 240.0);
+        double rolling = halted.Heave;
+        halted.Advance(0.0, 0.0);
+        Check("a tank that stops mid-bump comes level",
+            Math.Abs(rolling) > 0.1 && Math.Abs(halted.Heave) < 1e-9,
+            $"was {rolling:F3}, left at {halted.Heave:F3}");
+
         var stopped = new BodyRumble();
         stopped.Advance(0.0, 0.0);
         Check("it is still when the tank is",

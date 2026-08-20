@@ -54,6 +54,15 @@ public sealed class BodyRumble
     /// thins out by itself rather than switching on.</summary>
     public double FullSpeed = 120.0;
 
+    /// <summary>Below this the tank counts as stopped and the body comes level.
+    /// Not a threshold the effect switches on at - the strength is
+    /// <see cref="FullSpeed"/>'s business and shrinks smoothly - this is only
+    /// what ends the hold: a bump's gain is latched when the bump arrives, and a
+    /// tank that stops half way over it must not keep the jolt for ever. An
+    /// arriving tank spends a few frames at hundredths of a pixel a second, so
+    /// zero would leave it twitching at the end of every order.</summary>
+    public double StillSpeed = 1.0;
+
     /// <summary>
     /// Shear amplitude of the roll - one track riding up over a bump.
     ///
@@ -96,24 +105,49 @@ public sealed class BodyRumble
     public double Roll { get; private set; }
 
     private double _phase;
+    private double _gain;
 
     public void Advance(double distance, double speed)
     {
         _phase += distance / BumpSpacing;
-        double gain = Math.Clamp(Math.Abs(speed) / FullSpeed, 0.0, 1.0);
+        double moving = Math.Abs(speed);
         var bump = (long)Math.Floor(_phase);
-        Heave = Sample(bump, 0UL) * Amplitude * gain;
+        // Latched when the bump arrives rather than read live, and this is the
+        // sample-and-hold the class promises rather than an optimisation. The
+        // gain is what the sample is worth, so a gain that moves inside a bump
+        // is a second decision about the same bump. Measured on the ramp before
+        // it was latched: bump zero went 0 -> -1 -> -2 while the tank was still
+        // on it, on all three classes - that is every start from rest, not an
+        // edge case.
+        if (bump != Bump)
+        {
+            Bump = bump;
+            _gain = Math.Clamp(moving / FullSpeed, 0.0, 1.0);
+        }
+        // And the hold has to end when the motion does, or the latch outlives
+        // it: a tank braking to a halt half way over a bump would settle with
+        // the jolt still under it and keep it until it drove on. A stopped tank
+        // is level - see StillSpeed.
+        double held = moving > StillSpeed ? _gain : 0.0;
+        Heave = Sample(bump, 0UL) * Amplitude * held;
         // a separate draw off the same bump: the same ground, but which track
         // caught it is not tied to how hard it hit
-        Roll = Sample(bump, 0x632BE59BD9B4E019UL) * RollAmplitude * gain;
+        Roll = Sample(bump, 0x632BE59BD9B4E019UL) * RollAmplitude * held;
     }
 
     public void Reset()
     {
         _phase = 0.0;
+        Bump = long.MinValue;
+        _gain = 0.0;
         Heave = 0.0;
         Roll = 0.0;
     }
+
+    /// <summary>Which bump the tank is on. Public because "one bump, one
+    /// decision" is the claim this class is built on, and a claim about bumps
+    /// cannot be asserted without being able to see one.</summary>
+    public long Bump { get; private set; } = long.MinValue;
 
     /// <summary>A value in [-1, 1) for bump number <paramref name="index"/>.
     /// <paramref name="salt"/> gives independent draws off the same bump.
