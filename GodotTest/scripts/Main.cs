@@ -2697,7 +2697,15 @@ public sealed partial class Main : Node2D
 	private void RumbleChanged()
 	{
 		foreach (Vehicle v in _vehicles)
+		{
 			UpdateRumble(v, 0.0);
+			// Asked for here, the way ShadowChanged asks. Without it the switch
+			// leans on the tremble redrawing every frame - that is, on a
+			// different effect being on - and with both off the last jolt stays
+			// on screen. Latent rather than live today, which is exactly the
+			// sort of thing that stops being latent later.
+			v.Sprite.QueueRedraw();
+		}
 	}
 
 	private void TrembleChanged()
