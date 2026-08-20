@@ -1809,10 +1809,6 @@ public sealed partial class Main : Node2D
 			// Not zero for the first, so a seed left unset is distinguishable
 			// from a seed meant to be the first tank's.
 			vehicle.Scan.Seed = (ulong)i + 1UL;
-			// And the same for the ground it meets, for the same reason: the bump
-			// index is the odometer, so without a seed two tanks that have driven
-			// the same distance are jolted identically wherever they are.
-			vehicle.Rumble.Seed = (ulong)i + 1UL;
 			vehicle.Exhaust.Phases = vehicle.Atlas.ExhaustPhases;
 			vehicle.Burn.Phases = vehicle.Atlas.BurnPhases;
 			// The tube's poses, read off the layer like every other count: the
@@ -3875,7 +3871,14 @@ public sealed partial class Main : Node2D
 		// see BodyRumble.WetDamping, which also says what the ford's full ride
 		// was doing to the waterline.
 		v.Rumble.Damping = v.Wading ? BodyRumble.WetDamping : 1.0;
-		v.Rumble.Advance(v.Speed * delta, v.Speed);
+		// Where it is standing rather than how far it has come, and in flat space
+		// rather than drawn space - the lift goes back on, the way every other
+		// caller that asks the board about a point puts it back. See
+		// BodyRumble.Advance and HexField.Bare.
+		v.Rumble.Advance(new Vector2(v.GroundPoint.X - _origin.X,
+									 v.GroundPoint.Y - _origin.Y
+									 + _field.Bare(v.Ground)),
+						 v.Speed);
 		v.Sprite.Shake = v.Rumble.Heave;
 		v.Sprite.Roll = v.Rumble.Roll;
 	}

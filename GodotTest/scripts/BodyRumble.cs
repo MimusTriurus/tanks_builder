@@ -1,16 +1,25 @@
 using System;
+using Godot;
 
 namespace TankSpriteTest;
 
 /// <summary>
-/// The jolt of driving over uneven ground: a whole-pixel vertical offset that
-/// advances with distance travelled.
+/// The jolt of driving over uneven ground: a whole-pixel vertical offset, drawn
+/// from the patch of ground the tank is standing on.
 ///
 /// Three things make this read as ground rather than as a defect.
 ///
-/// Phase comes from distance, not from time. Bumps are in the terrain, so a
-/// tank at half speed should meet half as many per second. Driven off a clock
-/// instead, the rate is the same at every speed and reads as an idling engine.
+/// A bump is a place, not a distance. It used to be an odometer - the index was
+/// <c>floor(travelled / BumpSpacing)</c> - and that is a clock in disguise: it
+/// gave the right <em>rate</em> (half the speed, half the bumps a second, which
+/// a real clock cannot do) and the wrong <em>ground</em>. Two tanks that had
+/// driven the same distance met bit-identical bumps wherever they were, driving
+/// the same route twice met different ones, and <c>Reset</c> re-rolled the
+/// board. Now the ground is a lattice on the field, <see cref="BumpSpacing"/>
+/// across, and the index is which square the contact patch is in: crossing into
+/// the next square is a bump, so the rate still follows the speed, but a place
+/// keeps what it had. It is also what makes ground <em>kinds</em> possible at
+/// all - a patch can now be asked what it is made of.
 ///
 /// The offset lands on a whole pixel. A fractional offset resamples the sprite
 /// every frame - the tank layer filters linearly, for reasons the pitch shear
@@ -45,9 +54,40 @@ public sealed class BodyRumble
     /// differ in size without any of them being a lurch.</summary>
     public double Amplitude = 1.7;
 
-    /// <summary>Pixels of travel per bump. At full speed this is about 8 bumps
-    /// a second, a handful per hex cell; at a crawl it is a slow judder.</summary>
+    /// <summary>How wide a patch of ground is, in field pixels. At full speed a
+    /// tank crosses about 8 a second, a handful per hex cell; at a crawl it is a
+    /// slow judder.
+    ///
+    /// <b>A square lattice, and what that costs is a rate that leans on the
+    /// heading.</b> A straight line of length L crosses <c>L(|cos|+|sin|)/s</c>
+    /// squares, so a tank driving into a corner of the lattice meets sqrt(2) as
+    /// many bumps as one driving along it. Measured across the six hex headings
+    /// the spread comes to about 1.2, which is under the 1.5 a hex lattice would
+    /// have been worth building for.</summary>
     public double BumpSpacing = 30.0;
+
+    /// <summary>
+    /// <b>There is no hysteresis on the boundary, and that is a decision that was
+    /// made twice.</b> It was built - a dead zone, so that a tank running along a
+    /// boundary could not cross it back and forth - and it has to come out,
+    /// because any margin makes the patch a function of the <em>path</em> rather
+    /// than of the place: a coarse walk and a fine walk down one line end on
+    /// different ground (measured, -0.649 against -0.232 at 512px), which is the
+    /// frame-rate invariance this class is built on. Both spellings were tried,
+    /// gate the entry or make the patch sticky, and both fail it for the same
+    /// reason.
+    ///
+    /// What it was protecting against turns out not to exist. Chatter needs a
+    /// position that wobbles across a boundary, and a contact patch does not
+    /// wobble: it walks a straight line between cell anchors, and the jolt is a
+    /// draw offset that never feeds back into it. A line either crosses a
+    /// boundary once or runs parallel to it, and a constant coordinate floors to
+    /// a constant square.
+    ///
+    /// Re-entering a patch is safe anyway, which is the other half of why a
+    /// lattice is affordable: the sample is a function of the square, so backing
+    /// over a boundary gives back the same bump rather than a new one.
+    /// </summary>
 
     /// <summary>Speed at which the jolt reaches full strength. Below it the
     /// signal shrinks, so rounding leaves more bumps at zero and the rumble
@@ -156,14 +196,25 @@ public sealed class BodyRumble
     /// heave.</summary>
     public double Roll { get; private set; }
 
-    private double _phase;
     private double _gain;
 
-    public void Advance(double distance, double speed)
+    /// <summary>
+    /// Where the tank is standing, in the field's own pixels, and how fast it is
+    /// going.
+    ///
+    /// <b>The flat ground point, not the drawn one.</b> A tank a level down is
+    /// drawn 64.8px above the row its ground is on, so a lattice indexed off the
+    /// drawn row would hand two tanks at different heights the same square - the
+    /// fourth place this board has charged for that difference, after the
+    /// selection ring, the pond and the wood. See <see cref="HexField.Bare"/>.
+    /// </summary>
+    public void Advance(Vector2 ground, double speed)
     {
-        _phase += distance / BumpSpacing;
         double moving = Math.Abs(speed);
-        var bump = (long)Math.Floor(_phase);
+        double qx = ground.X / BumpSpacing, qy = ground.Y / BumpSpacing;
+        var square = new Vector2I((int)Math.Floor(qx), (int)Math.Floor(qy));
+        // Which square, and nothing about how it got here: see the note where
+        // the hysteresis used to be.
         // Latched when the bump arrives rather than read live, and this is the
         // sample-and-hold the class promises rather than an optimisation. The
         // gain is what the sample is worth, so a gain that moves inside a bump
@@ -171,9 +222,10 @@ public sealed class BodyRumble
         // it was latched: bump zero went 0 -> -1 -> -2 while the tank was still
         // on it, on all three classes - that is every start from rest, not an
         // edge case.
-        if (bump != Bump)
+        if (square != Patch)
         {
-            Bump = bump;
+            Patch = square;
+            Bump++;
             _gain = Math.Clamp(GainFloor + (1.0 - GainFloor) * moving / FullSpeed,
                                0.0, 1.0) * Damping;
         }
@@ -182,57 +234,50 @@ public sealed class BodyRumble
         // the jolt still under it and keep it until it drove on. A stopped tank
         // is level - see StillSpeed.
         double held = moving > StillSpeed ? _gain : 0.0;
-        Heave = Sample(bump, 0UL) * Amplitude * held;
-        // a separate draw off the same bump: the same ground, but which track
+        Heave = Sample(Patch, 0UL) * Amplitude * held;
+        // a separate draw off the same patch: the same ground, but which track
         // caught it is not tied to how hard it hit
-        Roll = Sample(bump, 0x632BE59BD9B4E019UL) * RollAmplitude * held;
+        Roll = Sample(Patch, 0x632BE59BD9B4E019UL) * RollAmplitude * held;
     }
 
     public void Reset()
     {
-        _phase = 0.0;
-        Bump = long.MinValue;
+        Patch = Nowhere;
+        Bump = 0;
         _gain = 0.0;
         Heave = 0.0;
         Roll = 0.0;
     }
 
-    /// <summary>
-    /// Which tank this is, so that two of them do not meet the same ground.
-    ///
-    /// <b>The index is the odometer and nothing else, so without this two tanks
-    /// that have driven the same distance get bit-identical bumps</b> - whatever
-    /// route they took, wherever they are on the board. Ordered onto parallel
-    /// routes, three tanks jolt as one, which is one animation played three
-    /// times: exactly the fault <see cref="TurretScan.Seed"/> was added for, in
-    /// the last of the harness's clocks that was still shared.
-    ///
-    /// A seed rather than a clock, and that half is not optional: --capture and
-    /// --trace pin the time step so two runs can be diffed, so the same tank has
-    /// to meet the same ground twice while different tanks do not. Both halves
-    /// are asserted.
-    ///
-    /// Not zero for the first tank, so a seed left unset is distinguishable from
-    /// a seed meant to be the first tank's - the reason the scan's is set that
-    /// way too.
-    /// </summary>
-    public ulong Seed;
+    /// <summary>Which patch of ground the tank is standing on. Public because
+    /// what the ground gives is now a function of this and nothing else, which
+    /// is the claim worth being able to check.</summary>
+    public Vector2I Patch { get; private set; } = Nowhere;
 
-    /// <summary>Which bump the tank is on. Public because "one bump, one
+    /// <summary>How many bumps have been decided. Public because "one bump, one
     /// decision" is the claim this class is built on, and a claim about bumps
-    /// cannot be asserted without being able to see one.</summary>
-    public long Bump { get; private set; } = long.MinValue;
+    /// cannot be asserted without being able to see one. A count rather than the
+    /// patch itself, so that leaving a patch and coming back is two decisions
+    /// about the same ground - which is what it is.</summary>
+    public long Bump { get; private set; }
 
-    /// <summary>A value in [-1, 1) for bump number <paramref name="index"/>.
-    /// <paramref name="salt"/> gives independent draws off the same bump.
+    /// <summary>No patch yet, so that the first one latches wherever it is -
+    /// including inside a dead zone, which is otherwise a tank that never gets
+    /// its first bump.</summary>
+    private static readonly Vector2I Nowhere =
+        new Vector2I(int.MinValue, int.MinValue);
+
+    /// <summary>A value in [-1, 1) for a patch of ground.
+    /// <paramref name="salt"/> gives independent draws off the same patch.
     /// A hash rather than a random generator so a replay - or a screenshot
-    /// comparison - lands on the same ground twice.</summary>
-    private double Sample(long index, ulong salt)
+    /// comparison, or the same tank coming back this way - lands on the same
+    /// ground again.</summary>
+    private static double Sample(Vector2I patch, ulong salt)
     {
         unchecked
         {
-            var x = ((ulong)index ^ salt ^ (Seed * 0xD1342543DE82EF95UL))
-                    * 0x9E3779B97F4A7C15UL;
+            var x = ((ulong)(uint)patch.X * 0x9E3779B97F4A7C15UL)
+                    ^ ((ulong)(uint)patch.Y * 0xC2B2AE3D27D4EB4FUL) ^ salt;
             x ^= x >> 29;
             x *= 0xBF58476D1CE4E5B9UL;
             x ^= x >> 32;
