@@ -8,15 +8,15 @@
 
 config_version=5
 
+[animation]
+
+compatibility/default_parent_skeleton_in_mesh_instance_3d=true
+
 [application]
 
 config/name="Tank Sprite Test"
 run/main_scene="res://Main.tscn"
-config/features=PackedStringArray("4.5", "C#", "GL Compatibility")
-
-[editor_plugins]
-
-enabled=PackedStringArray("res://addons/godot_mcp/plugin.cfg")
+config/features=PackedStringArray("4.6", "C#", "GL Compatibility")
 
 [display]
 
@@ -27,6 +27,10 @@ window/stretch/mode="canvas_items"
 [dotnet]
 
 project/assembly_name="TankSpriteTest"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/godot_mcp/plugin.cfg")
 
 [rendering]
 
