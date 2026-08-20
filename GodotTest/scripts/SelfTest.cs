@@ -432,6 +432,28 @@ public static class SelfTest
         Check("a tank creeping through a bend still meets the ground",
             bendJolts > 0, $"{bendJolts} of 1200 frames jolted at the corner speed");
 
+        // And a pond bottom is not a field. Per bump and at one speed, so what is
+        // being compared is the ground rather than the ford's own speed cap.
+        static double Showing(double damping, double speed)
+        {
+            var probe = new BodyRumble { FullSpeed = 120.0, Damping = damping };
+            long on = long.MinValue;
+            int bumps = 0, shown = 0;
+            for (int i = 0; i < 12000; i++)
+            {
+                probe.Advance(speed * (1.0 / 60.0), speed);
+                if (probe.Bump == on) continue;
+                on = probe.Bump;
+                bumps++;
+                if (Math.Abs(TankSprite.SnapHeave(probe.Heave, 1.0f)) > 0.5) shown++;
+            }
+            return (double)shown / Math.Max(bumps, 1);
+        }
+        double dry = Showing(1.0, 108.0);
+        double wet = Showing(BodyRumble.WetDamping, 108.0);
+        Check("the same tank at the same speed rides softer in a ford",
+            wet > 0.0 && wet < dry / 2.0, $"{wet:P0} of bumps show wading, {dry:P0} dry");
+
         // The whole-pixel claim, made about the buffer the sprite is rasterised
         // into rather than about the sprite's own space. The node carries the
         // class scale, so a whole pixel here is 0.85 of one on a light and 1.15

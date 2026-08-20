@@ -78,6 +78,34 @@ public sealed class BodyRumble
     /// </summary>
     public double GainFloor = 0.35;
 
+    /// <summary>
+    /// What is left of a bump when the ground under the tank is a pond bottom.
+    ///
+    /// <b>The ford was getting a nearly full ride, and it is the one place the
+    /// jolt argues with something.</b> The harness caps a wading tank at 0.45 of
+    /// cruise against a FullSpeed of half of it, so the gain came out 0.935 - and
+    /// the waterline is cut per column from a table in the sprite's own tile
+    /// space, which the heave moves the sprite <em>inside</em>: every jolt slid
+    /// the wet edge a pixel or two along the hull. Damping the ride answers that
+    /// and the ride at the same time, which is why it is done here rather than by
+    /// handing the offset to the shader.
+    ///
+    /// One number for all three classes, by <see cref="MovementProfile.WaterFraction"/>'s
+    /// argument: the water is the same water under all of them, and the spread is
+    /// already carried by three different cruises.
+    ///
+    /// 0.35 leaves about a tenth of a wading tank's bumps showing one pixel,
+    /// against two thirds of them on dry land at the same speed.
+    /// </summary>
+    public const double WetDamping = 0.35;
+
+    /// <summary>What the ground is doing to the ride: 1 on dry land,
+    /// <see cref="WetDamping"/> in a ford. Pushed in by the harness every frame,
+    /// the way the tremble's level is, and read at the latch rather than live -
+    /// so entering the water mid-bump finishes that bump dry, which is one bump
+    /// and not a decision the class has to make twice.</summary>
+    public double Damping = 1.0;
+
     /// <summary>Below this the tank counts as stopped and the body comes level.
     /// Not a threshold the effect switches on at - the strength is
     /// <see cref="FullSpeed"/>'s business and shrinks smoothly - this is only
@@ -147,7 +175,7 @@ public sealed class BodyRumble
         {
             Bump = bump;
             _gain = Math.Clamp(GainFloor + (1.0 - GainFloor) * moving / FullSpeed,
-                               0.0, 1.0);
+                               0.0, 1.0) * Damping;
         }
         // And the hold has to end when the motion does, or the latch outlives
         // it: a tank braking to a halt half way over a bump would settle with

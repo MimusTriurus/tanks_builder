@@ -3867,6 +3867,10 @@ public sealed partial class Main : Node2D
 			v.Sprite.Roll = 0.0;
 			return;
 		}
+		// What the ground is doing to the ride. A pond bottom is not a field -
+		// see BodyRumble.WetDamping, which also says what the ford's full ride
+		// was doing to the waterline.
+		v.Rumble.Damping = v.Wading ? BodyRumble.WetDamping : 1.0;
 		v.Rumble.Advance(v.Speed * delta, v.Speed);
 		v.Sprite.Shake = v.Rumble.Heave;
 		v.Sprite.Roll = v.Rumble.Roll;
