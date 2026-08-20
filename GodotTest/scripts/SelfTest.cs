@@ -5092,6 +5092,14 @@ public static class SelfTest
             tank.HeaveFor(true) == tank.HeaveFor(false) && tank.HeaveFor(true) == tank.Shake,
             $"{tank.HeaveFor(true)} vs {tank.HeaveFor(false)}");
 
+        // And the one part that is not part of the tank sits it out. Both halves,
+        // because the first alone passes on a tank that is not being jolted at
+        // all - which is every tank, the rumble being off by default.
+        Check("a bump lifts the tank and not the ground under it",
+            Math.Abs(tank.HeaveFor(false, grounded: true)) < 1e-9
+            && Math.Abs(tank.HeaveFor(false)) > 0.5,
+            $"shadow {tank.HeaveFor(false, grounded: true)}, hull {tank.HeaveFor(false)}");
+
         // The tremble goes the other way: the turret is exempt from it too, so
         // the aerial stops swinging. Affordable only because the seam cost is
         // sub-pixel at the tremble amplitude - checked below - which is the whole

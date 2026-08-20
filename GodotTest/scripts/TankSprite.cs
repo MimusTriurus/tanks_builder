@@ -1104,9 +1104,33 @@ public sealed partial class TankSprite : Node2D
     /// grid.</summary>
     public float Heave => (float)SnapHeave(Shake, HeaveScale);
 
-    /// <summary>Heave a layer receives. Never depends on the layer - see
-    /// <see cref="TurretStabilised"/>.</summary>
-    public float HeaveFor(bool turret) => Heave;
+    /// <summary>
+    /// Heave a layer receives. It does not depend on which part of the tank the
+    /// layer is - see <see cref="TurretStabilised"/> for why the turret shares it
+    /// - but it does depend on whether the layer is part of the tank at all.
+    ///
+    /// <b>A layer printed on the ground gets none of it, and the argument that
+    /// lets the shadow follow the pitch does not reach this far.</b> A pitch turns
+    /// the body about its contact patch and so leaves the patch where it was,
+    /// which is why the shadow is allowed to take it: two pixels of shear reads as
+    /// the tank pressing into the ground. A heave <em>translates</em> the body,
+    /// patch included, and a shadow that goes up with it is a shadow that has left
+    /// the ground - which reads as the camera twitching rather than as the tank
+    /// bouncing.
+    ///
+    /// It also puts the shadow back with the rest of the ground: the selection
+    /// ring, the ruts, the wake and the pond's swell are all keyed on
+    /// <see cref="Vehicle.GroundPoint"/> and stand still through a bump. The
+    /// shadow was the one thing on the ground that jumped.
+    ///
+    /// What it does <em>not</em> do is move the shadow the way a real one moves.
+    /// A body lifted by h throws its shadow 0.70h along the sun's run at 55
+    /// degrees - sideways, not up - and that is a separate claim needing a
+    /// separate measurement. Not moving is the right answer to the wrong one that
+    /// was there; sliding it is the next question.
+    /// </summary>
+    public float HeaveFor(bool turret, bool grounded = false) =>
+        grounded ? 0.0f : Heave;
 
     /// <summary>
     /// The one shear a layer is drawn through, for both pivots at once.
