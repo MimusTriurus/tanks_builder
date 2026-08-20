@@ -335,6 +335,36 @@ public static class SelfTest
             Math.Abs(rolling) > 0.1 && Math.Abs(halted.Heave) < 1e-9,
             $"was {rolling:F3}, left at {halted.Heave:F3}");
 
+        // Three tanks must not be jolted in step, and one tank must be jolted
+        // the same way twice. Both, because the seed is what buys the first and
+        // the pinned step is what --capture needs for the second: a rumble that
+        // differed between runs would be measuring itself in every A/B.
+        var groundPer = new List<List<double>>();
+        for (ulong seed = 1; seed <= 3; seed++)
+        {
+            var own = new BodyRumble { Seed = seed };
+            var track = new List<double>();
+            for (int i = 0; i < 200; i++)
+            {
+                own.Advance(240.0 * dt, 240.0);
+                track.Add(own.Heave);
+            }
+            groundPer.Add(track);
+        }
+        Check("three tanks do not meet the same ground",
+            !groundPer[0].SequenceEqual(groundPer[1]) && !groundPer[1].SequenceEqual(groundPer[2])
+            && !groundPer[0].SequenceEqual(groundPer[2]),
+            "two of the three were jolted identically");
+        var again = new BodyRumble { Seed = 2 };
+        var replay = new List<double>();
+        for (int i = 0; i < 200; i++)
+        {
+            again.Advance(240.0 * dt, 240.0);
+            replay.Add(again.Heave);
+        }
+        Check("and one tank meets it twice", replay.SequenceEqual(groundPer[1]),
+            "the same tank was jolted differently on a second run");
+
         var stopped = new BodyRumble();
         stopped.Advance(0.0, 0.0);
         Check("it is still when the tank is",

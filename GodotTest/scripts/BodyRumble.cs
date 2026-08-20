@@ -197,6 +197,27 @@ public sealed class BodyRumble
         Roll = 0.0;
     }
 
+    /// <summary>
+    /// Which tank this is, so that two of them do not meet the same ground.
+    ///
+    /// <b>The index is the odometer and nothing else, so without this two tanks
+    /// that have driven the same distance get bit-identical bumps</b> - whatever
+    /// route they took, wherever they are on the board. Ordered onto parallel
+    /// routes, three tanks jolt as one, which is one animation played three
+    /// times: exactly the fault <see cref="TurretScan.Seed"/> was added for, in
+    /// the last of the harness's clocks that was still shared.
+    ///
+    /// A seed rather than a clock, and that half is not optional: --capture and
+    /// --trace pin the time step so two runs can be diffed, so the same tank has
+    /// to meet the same ground twice while different tanks do not. Both halves
+    /// are asserted.
+    ///
+    /// Not zero for the first tank, so a seed left unset is distinguishable from
+    /// a seed meant to be the first tank's - the reason the scan's is set that
+    /// way too.
+    /// </summary>
+    public ulong Seed;
+
     /// <summary>Which bump the tank is on. Public because "one bump, one
     /// decision" is the claim this class is built on, and a claim about bumps
     /// cannot be asserted without being able to see one.</summary>
@@ -206,11 +227,12 @@ public sealed class BodyRumble
     /// <paramref name="salt"/> gives independent draws off the same bump.
     /// A hash rather than a random generator so a replay - or a screenshot
     /// comparison - lands on the same ground twice.</summary>
-    private static double Sample(long index, ulong salt)
+    private double Sample(long index, ulong salt)
     {
         unchecked
         {
-            var x = ((ulong)index ^ salt) * 0x9E3779B97F4A7C15UL;
+            var x = ((ulong)index ^ salt ^ (Seed * 0xD1342543DE82EF95UL))
+                    * 0x9E3779B97F4A7C15UL;
             x ^= x >> 29;
             x *= 0xBF58476D1CE4E5B9UL;
             x ^= x >> 32;

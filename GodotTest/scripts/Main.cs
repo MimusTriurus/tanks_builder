@@ -1809,6 +1809,10 @@ public sealed partial class Main : Node2D
 			// Not zero for the first, so a seed left unset is distinguishable
 			// from a seed meant to be the first tank's.
 			vehicle.Scan.Seed = (ulong)i + 1UL;
+			// And the same for the ground it meets, for the same reason: the bump
+			// index is the odometer, so without a seed two tanks that have driven
+			// the same distance are jolted identically wherever they are.
+			vehicle.Rumble.Seed = (ulong)i + 1UL;
 			vehicle.Exhaust.Phases = vehicle.Atlas.ExhaustPhases;
 			vehicle.Burn.Phases = vehicle.Atlas.BurnPhases;
 			// The tube's poses, read off the layer like every other count: the
