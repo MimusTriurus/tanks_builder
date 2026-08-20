@@ -3873,11 +3873,15 @@ public sealed partial class Main : Node2D
 		// out here: HexField.KindAt is the one answer to which kind a cell is, and
 		// a second one would disagree with the picture on the mixed board. Clamped
 		// (CellUnder, not FlatCellAt) because a tank is always standing somewhere.
+		Vector2I patchCell = _field.CellUnder(ground);
 		v.Rumble.Roughness = _terrain is null ? 1.0
-			: _terrain.RideOf(_field.KindAt(_field.CellUnder(ground)));
-		// The delta goes in for the hold, not for the bump: which bump is the
-		// place, how long the body carries it is time - see BodyRumble.HoldSeconds.
-		v.Rumble.Advance(ground, v.Speed, delta);
+			: _terrain.RideOf(_field.KindAt(patchCell));
+		// The cell goes in with the point, and it is the same cell the kind was
+		// just read off - the patch is the square and the cell, so the kind takes
+		// effect at the edge where it changes rather than at the next square. The
+		// delta goes in for the hold, not for the bump: which bump is the place,
+		// how long the body carries it is time - see BodyRumble.HoldSeconds.
+		v.Rumble.Advance(ground, patchCell, v.Speed, delta);
 		v.Sprite.Shake = v.Rumble.Heave;
 		v.Sprite.Roll = v.Rumble.Roll;
 	}

@@ -256,10 +256,14 @@ public static class SelfTest
         // a fine one are not being compared across a dead zone.
         var course = new Vector2(0.6f, 0.8f);
         var start = new Vector2(7.3f, 11.7f);
+        // One cell for every claim about the lattice: which cell the patch is on
+        // is the other half of it, and holding it still is what leaves these
+        // measuring the square. The claims about the cell are their own, below.
+        var oneCell = new Vector2I(4, 4);
         void Roll(BodyRumble r, ref Vector2 at, double speed, double step)
         {
             at += course * (float)(speed * step);
-            r.Advance(at, speed, step);
+            r.Advance(at, oneCell, speed, step);
         }
         var rumble = new BodyRumble();
         Vector2 rumbleAt = start;
@@ -376,7 +380,7 @@ public static class SelfTest
             haltedFrames++;
         }
         double rolling = halted.Heave;
-        halted.Advance(haltedAt, 0.0, dt);
+        halted.Advance(haltedAt, oneCell, 0.0, dt);
         Check("a tank that stops mid-bump comes level",
             Math.Abs(rolling) > 0.5 && Math.Abs(halted.Heave) < 1e-9,
             $"was {rolling:F3} after {haltedFrames} frames, left at {halted.Heave:F3}");
@@ -430,8 +434,8 @@ public static class SelfTest
         Vector2 wandering = new Vector2(-190.0f, 640.0f);
         for (int i = 0; i < 300; i++)
             Roll(there, ref wandering, 240.0, dt);
-        here.Advance(spot, 240.0, dt);
-        there.Advance(spot, 240.0, dt);
+        here.Advance(spot, oneCell, 240.0, dt);
+        there.Advance(spot, oneCell, 240.0, dt);
         Check("two tanks on one patch of ground are jolted alike",
             Math.Abs(here.Heave - there.Heave) < 1e-12
             && Math.Abs(here.Roll - there.Roll) < 1e-12
@@ -453,7 +457,7 @@ public static class SelfTest
             for (int i = 0; i < 3000; i++)
             {
                 at += way * (float)(240.0 * dt);
-                along.Advance(at, 240.0, dt);
+                along.Advance(at, oneCell, 240.0, dt);
                 if (along.Bump != was) { was = along.Bump; bumps++; }
             }
             perThousand.Add(bumps * 1000.0 / (240.0 * 3000.0 * dt));
@@ -470,9 +474,9 @@ public static class SelfTest
         var rough = new BodyRumble { Roughness = 1.3 };
         var soaked = new BodyRumble { Roughness = 1.3, Damping = 0.35 };
         Vector2 stone = new Vector2(913.0f, 77.0f);
-        plainRide.Advance(stone, 240.0, dt);
-        rough.Advance(stone, 240.0, dt);
-        soaked.Advance(stone, 240.0, dt);
+        plainRide.Advance(stone, oneCell, 240.0, dt);
+        rough.Advance(stone, oneCell, 240.0, dt);
+        soaked.Advance(stone, oneCell, 240.0, dt);
         Check("rougher ground gives a bigger jolt off the same patch",
             Math.Abs(rough.Heave - plainRide.Heave * 1.3) < 1e-9
             && Math.Abs(plainRide.Heave) > 1e-9,
@@ -482,7 +486,7 @@ public static class SelfTest
             $"{rough.Heave:F4} against {soaked.Heave:F4}");
 
         var stopped = new BodyRumble();
-        stopped.Advance(Vector2.Zero, 0.0, dt);
+        stopped.Advance(Vector2.Zero, oneCell, 0.0, dt);
         Check("it is still when the tank is",
             Math.Abs(stopped.Heave) < 1e-9 && Math.Abs(stopped.Roll) < 1e-9,
             $"heave {stopped.Heave:F5}, roll {stopped.Roll:F5}");
@@ -673,12 +677,33 @@ public static class SelfTest
             var axis = new Vector2((float)(175.0 * dt), 0.0f);
             letGoAt += axis;
             holdOnAt += axis;
-            letGo.Advance(letGoAt, 175.0, dt);
-            holdOn.Advance(holdOnAt, 175.0, dt);
+            letGo.Advance(letGoAt, oneCell, 175.0, dt);
+            holdOn.Advance(holdOnAt, oneCell, 175.0, dt);
             if (Shown(letGo) != Shown(holdOn)) roadDrift++;
         }
         Check("and letting go costs the ride at cruise nothing", roadDrift == 0,
             $"{roadDrift} of 3000 frames differ, heavy along a lattice axis");
+
+        // A cell edge is a bump, and the reason is the kind rather than the
+        // event. What the ground is made of changes at an edge and the gain is
+        // latched per bump, so with the square alone a tank that has driven onto
+        // stony ground goes on riding the soft kind until the next square - up to
+        // a quarter of a cell late, and the same distance of dry ride past the
+        // edge of a ford. Asserted where it is hardest: the position does not
+        // move at all, so the square cannot be what decides.
+        var acrossEdge = new BodyRumble { FullSpeed = 120.0, Roughness = 0.0 };
+        Vector2 kindAt = start;
+        for (int i = 0; i < 3; i++)
+            Roll(acrossEdge, ref kindAt, 240.0, dt);
+        double onSoft = acrossEdge.Heave;
+        long softBumps = acrossEdge.Bump;
+        acrossEdge.Roughness = 1.0;
+        acrossEdge.Advance(kindAt, new Vector2I(oneCell.X + 1, oneCell.Y), 240.0, dt);
+        Check("a cell edge is a bump, so the kind of ground takes effect there",
+            acrossEdge.Bump == softBumps + 1
+            && Math.Abs(onSoft) < 1e-12 && Math.Abs(acrossEdge.Heave) > 1e-9,
+            $"{softBumps} bumps and {onSoft:F4} on the soft kind, "
+            + $"{acrossEdge.Bump} and {acrossEdge.Heave:F4} across the edge");
 
         // The whole-pixel claim, made about the buffer the sprite is rasterised
         // into rather than about the sprite's own space. The node carries the

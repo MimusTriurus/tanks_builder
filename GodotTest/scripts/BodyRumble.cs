@@ -33,6 +33,25 @@ namespace TankSpriteTest;
 /// it is held per bump - so the rounding downstream makes one decision per bump
 /// as well.
 ///
+/// A patch is a square of the lattice <em>and</em> the cell it is on, and the
+/// second half is there for the kinds. What the ground is made of changes at a
+/// cell edge, and the gain is latched per bump - so with the square alone a tank
+/// that had driven onto stony ground went on riding the soft kind until the next
+/// square, up to a quarter of a cell late, and a tank entering a ford kept its
+/// dry ride for the same distance past the water's edge. Crossing an edge is a
+/// decision, so the kind takes effect where it changes.
+///
+/// It also gives the board's cells a jolt of their own, which the plan asked for
+/// under the heading of relief - and it is the half of that heading which
+/// survives measurement. There is no step in the surface anywhere on this board:
+/// ramps exist so that the ground stays continuous, so a jolt at a height
+/// discontinuity would never once fire. And a climb is not silent already: the
+/// harness indexes the lattice in flat space, which carries the tank's own
+/// height, so going up a ramp adds that height to the distance walked across the
+/// lattice and meets about a sixth more bumps for it. What relief has left over
+/// is a break in the <em>grade</em> - the foot of a ramp and its crest - and that
+/// is the one place the board already answers, by springing the surface plane.
+///
 /// One bump, two tracks. The heave and the roll were two independent draws
 /// off the patch, which left the hull free to lift straight up while tipping
 /// any which way: <see cref="RollAmplitude"/> called itself "one track riding
@@ -319,7 +338,7 @@ public sealed class BodyRumble
     /// fourth place this board has charged for that difference, after the
     /// selection ring, the pond and the wood. See <see cref="HexField.Bare"/>.
     /// </summary>
-    public void Advance(Vector2 ground, double speed, double dt)
+    public void Advance(Vector2 ground, Vector2I cell, double speed, double dt)
     {
         double moving = Math.Abs(speed);
         double qx = ground.X / BumpSpacing, qy = ground.Y / BumpSpacing;
@@ -333,9 +352,10 @@ public sealed class BodyRumble
         // it was latched: bump zero went 0 -> -1 -> -2 while the tank was still
         // on it, on all three classes - that is every start from rest, not an
         // edge case.
-        if (square != Patch)
+        if (square != Patch || cell != Cell)
         {
             Patch = square;
+            Cell = cell;
             Bump++;
             _gain = Math.Clamp(GainFloor + (1.0 - GainFloor) * moving / FullSpeed,
                                0.0, 1.0) * Damping * Roughness;
@@ -357,7 +377,7 @@ public sealed class BodyRumble
         // sum and their difference. The same two draws as before - they used to
         // be the heave and the roll outright - so the ground has not moved,
         // only what the tank does with it. See the pair in the class note.
-        double left = Sample(Patch, LeftTrack), right = Sample(Patch, RightTrack);
+        double left = Sample(Patch, Cell, LeftTrack), right = Sample(Patch, Cell, RightTrack);
         Heave = (left + right) * 0.5 * Amplitude * held;
         Roll = (left - right) * 0.5 * RollAmplitude * held;
     }
@@ -365,6 +385,7 @@ public sealed class BodyRumble
     public void Reset()
     {
         Patch = Nowhere;
+        Cell = Nowhere;
         Bump = 0;
         _gain = 0.0;
         _age = 0.0;
@@ -376,6 +397,13 @@ public sealed class BodyRumble
     /// what the ground gives is now a function of this and nothing else, which
     /// is the claim worth being able to check.</summary>
     public Vector2I Patch { get; private set; } = Nowhere;
+
+    /// <summary>Which cell of the board the tank is standing on, the other half
+    /// of the patch. Pushed in rather than worked out here: which cell a point is
+    /// on is <see cref="HexField"/>'s one answer, and a second one derived from a
+    /// position would disagree with the picture the moment the board gained a
+    /// level.</summary>
+    public Vector2I Cell { get; private set; } = Nowhere;
 
     /// <summary>How many bumps have been decided. Public because "one bump, one
     /// decision" is the claim this class is built on, and a claim about bumps
@@ -399,17 +427,21 @@ public sealed class BodyRumble
     /// <inheritdoc cref="LeftTrack"/>
     private const ulong RightTrack = 0x632BE59BD9B4E019UL;
 
-    /// <summary>A value in [-1, 1) for a patch of ground.
+    /// <summary>A value in [-1, 1) for a patch of ground - which is the lattice
+    /// square and the cell, so that an edge crossing draws new ground rather than
+    /// merely re-latching the gain.
     /// <paramref name="salt"/> gives independent draws off the same patch.
     /// A hash rather than a random generator so a replay - or a screenshot
     /// comparison, or the same tank coming back this way - lands on the same
     /// ground again.</summary>
-    private static double Sample(Vector2I patch, ulong salt)
+    private static double Sample(Vector2I patch, Vector2I cell, ulong salt)
     {
         unchecked
         {
             var x = ((ulong)(uint)patch.X * 0x9E3779B97F4A7C15UL)
-                    ^ ((ulong)(uint)patch.Y * 0xC2B2AE3D27D4EB4FUL) ^ salt;
+                    ^ ((ulong)(uint)patch.Y * 0xC2B2AE3D27D4EB4FUL)
+                    ^ ((ulong)(uint)cell.X * 0xD6E8FEB86659FD93UL)
+                    ^ ((ulong)(uint)cell.Y * 0xA24BAED4963EE407UL) ^ salt;
             x ^= x >> 29;
             x *= 0xBF58476D1CE4E5B9UL;
             x ^= x >> 32;
