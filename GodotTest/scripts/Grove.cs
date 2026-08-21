@@ -1560,11 +1560,16 @@ public sealed partial class PropNode : Node2D
     /// <see cref="Grove.Smoulder"/> and read by whoever draws.</summary>
     public Wildfire.Coat Coat = Wildfire.Green;
 
-    /// <summary>Whether it is standing in its burnt art rather than the one it
-    /// grew in. False for a kind nobody drew a burnt state for, however long it
-    /// burns - <c>EffectLayer.StandIn</c>'s rule: a board whose art predates the
-    /// state loses nothing, it just chars and keeps its shape.</summary>
-    public bool Charred => Coat.Burnt && BurntArt is not null;
+    /// <summary>Whether the burnt art is on it at all - which is a question about
+    /// the picture and so it reads <see cref="Wildfire.Coat.Swap"/>, not
+    /// <c>Burnt</c>. The two part company on purpose: the handover happens inside
+    /// the burn, while the state arrives at the end of it, so a tree is standing in
+    /// its charcoal for the last stretch of its own fire.
+    ///
+    /// False for a kind nobody drew a burnt state for, however long it burns -
+    /// <c>EffectLayer.StandIn</c>'s rule: a board whose art predates the state
+    /// loses nothing, it just chars and keeps its shape.</summary>
+    public bool Charred => Coat.Swap > 0.0f && BurntArt is not null;
 
     /// <summary>
     /// How far the living picture is charred, and it only ever goes up.
@@ -1581,13 +1586,14 @@ public sealed partial class PropNode : Node2D
     /// cell - the one thing on the board saying the fire had not really been
     /// there.
     /// </summary>
-    public float Scorch => Coat.Burnt ? 1.0f : Coat.Char;
+    public float Scorch => Coat.Burnt ? 1.0f : Mathf.Clamp(Coat.Char, 0.0f, 1.0f);
 
     /// <summary>How far the burnt picture has taken over, 0 to 1. Zero for
     /// anything that has not begun to swap and for every kind nobody drew a
     /// burnt state for - <see cref="Charred"/>'s rule as a number: there is
     /// nothing to fade to, so nothing fades.</summary>
-    public float Swap => Charred ? Mathf.Clamp(Coat.Swap, 0.0f, 1.0f) : 0.0f;
+    public float Swap =>
+        BurntArt is null ? 0.0f : Mathf.Clamp(Coat.Swap, 0.0f, 1.0f);
 
     /// <summary>Whether both pictures are on it at once.</summary>
     public bool Swapping => Swap > 0.0f && Swap < 1.0f;

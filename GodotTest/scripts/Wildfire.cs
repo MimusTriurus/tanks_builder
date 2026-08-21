@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Godot;
 
@@ -76,14 +76,36 @@ public sealed class Wildfire
     /// complaint the same way, charring over a second and a half rather than at
     /// the hit.
     ///
-    /// <b>Judged against the smoke, and that is why it can be short.</b> The
-    /// column is at full strength exactly at the swap - <see cref="Of"/> starts
-    /// its fade there - so the handover happens under the thickest thing on the
-    /// tree. Same argument as the muzzle flash covering the recoil: the frames
-    /// that would show the change are the frames something else is standing in
-    /// front of.
+    /// <b>Judged against the flame, and that is why it can be short.</b> The
+    /// handover sits inside the flame's own plateau - see <see cref="SwapAt"/> -
+    /// so it happens under the brightest thing on the tree. Same argument as the
+    /// muzzle flash covering the recoil: the frames that would show the change are
+    /// the frames something else is standing in front of.
     /// </summary>
     public float SwapFor = 1.2f;
+
+    /// <summary>
+    /// How far into the burn the handover starts, as a share of it.
+    ///
+    /// <b>The tree turns to charcoal while it is still burning, not when it has
+    /// finished.</b> Handing over at the end made the burnt picture the thing that
+    /// arrived after the fire went out, so the fire was only ever on the green
+    /// tree - a tree that burns without changing and then changes without burning.
+    /// The state is what happens at the end; the picture is what happens during.
+    ///
+    /// <b>Inside the flame's plateau, and that is what picks the number.</b> The
+    /// flame is at full strength from 0.18 of the burn to 0.55 of it, so a window
+    /// opening at 0.45 runs under the fire and closes just as it starts to drop -
+    /// and then the charcoal stands in its own flame for the rest of the burn,
+    /// which is the whole of what was asked for. Later than 0.55 and the handover
+    /// happens as the fire dies, which is the frames it exists to hide behind.
+    ///
+    /// <b>The char has to reach one here and not at the end</b>, because it
+    /// belongs to the outgoing picture: a living tree still half green, cross-faded
+    /// into charcoal, is two different trees on screen at once rather than one
+    /// turning.
+    /// </summary>
+    public float SwapAt = 0.45f;
 
     /// <summary>How much later than its cell a tree may catch, in seconds. Read
     /// through a hash of where the tree stands, so it is the same tree every run
@@ -284,11 +306,17 @@ public sealed class Wildfire
             return Green;
         float burn = Mathf.Max(BurnFor, 1e-4f);
         bool burnt = t >= burn;
-        // The paint blackens over the whole burn, and it is the living art it
+        // Where the picture starts handing over - see SwapAt. Everything about the
+        // char and the swap is measured from here, and only Burnt is measured from
+        // the end of the burn.
+        float handing = burn * Mathf.Clamp(SwapAt, 0.02f, 1.0f);
+        // The paint blackens up to the handover, and it is the living art it
         // blackens - so it holds at one afterwards rather than coming off: that
         // picture is still on screen, fading out, and it has to stay charcoal
-        // for the whole of it.
-        float charred = Mathf.Min(1.0f, t / burn);
+        // for the whole of it. Up to the handover and not over the whole burn,
+        // because a picture that is still half green when it starts to fade puts
+        // two different trees on screen at once.
+        float charred = Mathf.Min(1.0f, t / handing);
         float flame = burnt
             ? 0.0f
             : Mathf.Min(1.0f, t / (0.18f * burn))        // up in a fifth of it
@@ -298,16 +326,17 @@ public sealed class Wildfire
             ? Mathf.Clamp(1.0f - (t - burn) / Mathf.Max(SmokeFor, 1e-4f),
                           0.0f, 1.0f)
             : Mathf.Min(1.0f, t / (0.25f * burn));
-        // How far the burnt picture has taken over. Starts where Burnt does and
-        // not before it: the char is the transition up to that point, this is
-        // the transition through it.
+        // How far the burnt picture has taken over. Starts inside the burn and
+        // not at the end of it: the char is the transition up to the handover,
+        // this is the transition through it, and both are over while the tree is
+        // still in flame.
         // No window means no window, said rather than divided by an epsilon: at
         // a tiny SwapFor the age lands inside it about as often as not, so the
         // hard swap would keep catching a frame or two halfway - which is the
         // one picture it exists to rule out.
-        float swap = !burnt ? 0.0f
+        float swap = t < handing ? 0.0f
                      : SwapFor <= 0.0f ? 1.0f
-                     : Mathf.Clamp((t - burn) / SwapFor, 0.0f, 1.0f);
+                     : Mathf.Clamp((t - handing) / SwapFor, 0.0f, 1.0f);
         return new Coat(charred, flame, smoke, burnt, swap);
     }
 

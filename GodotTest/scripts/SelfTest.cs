@@ -7109,23 +7109,43 @@ public static class SelfTest
             clock.AshAt(lit) >= 1.0f, "");
 
         // The swap is a window and not a frame, which is the whole of what the
-        // crossfade is. Its own clock, so the ages are exact.
+        // crossfade is - and it opens inside the burn, which is the whole of what
+        // the tree turning to charcoal while it is still alight is. Its own clock,
+        // so the ages are exact.
         var handing = new Wildfire { Field = field, Wooded = wooded.Contains };
         handing.Light(lit);
-        handing.Tick(handing.BurnFor);
+        handing.Tick(handing.BurnFor * handing.SwapAt);
         Wildfire.Coat began = handing.Of(lit, 0.0);
-        Check("the picture has not moved on the frame the state arrives",
-            began.Burnt && began.Swap <= 0.02f,
+        Check("the picture has not moved on the frame the handover opens",
+            !began.Burnt && began.Swap <= 0.02f,
             $"swap {began.Swap:F2} - a silhouette that changes between two frames "
             + "reads as a tree replaced rather than one burnt down");
+        Check("and the outgoing picture is fully charred before it starts to go",
+            began.Char >= 1.0f,
+            $"char {began.Char:F2} - a tree still half green, cross-faded into "
+            + "charcoal, is two trees on screen at once rather than one turning");
         handing.Tick(handing.SwapFor * 0.5f);
         Wildfire.Coat half = handing.Of(lit, 0.0);
         Check("halfway through the window it is part way between the two",
             half.Swap > 0.3f && half.Swap < 0.7f, $"swap {half.Swap:F2}");
         handing.Tick(handing.SwapFor);
+        Wildfire.Coat swapped = handing.Of(lit, 0.0);
         Check("and it ends on the burnt picture exactly",
-            handing.Of(lit, 0.0).Swap >= 1.0f,
+            swapped.Swap >= 1.0f,
             "short of one it is a crown that never quite goes");
+        // The whole point of moving it: the charcoal stands in its own fire, rather
+        // than arriving after the fire has gone out. Asserted on the flame and not
+        // on the clock, because a window that opens early and a burn that ends early
+        // are the same two numbers read the other way round.
+        Check("and the tree is standing in its charcoal while it is still burning",
+            !swapped.Burnt && swapped.Flame > 0.5f,
+            $"flame {swapped.Flame:F2} at a finished swap - handed over at the end "
+            + "of the burn, the fire only ever plays on the green tree: it burns "
+            + "without changing and then changes without burning");
+        handing.Tick(handing.BurnFor);
+        Check("and it is still the burnt picture once the fire is out",
+            handing.Of(lit, 0.0) is { Burnt: true, Swap: >= 1.0f },
+            "the state arrives at the end, the picture arrived during");
 
         // Shutting the window is the swap this replaced, to the frame: the A/B
         // the crossfade is judged by, and --hard-swap is that switch. Walked at
@@ -7137,16 +7157,22 @@ public static class SelfTest
         };
         cut.Light(lit);
         bool between = false;
+        bool alight = false;
         for (int f = 0; f < 900; f++)
         {
             cut.Tick(1.0 / 60.0);
-            float sw = cut.Of(lit, 0.0).Swap;
-            between |= sw > 0.0f && sw < 1.0f;
+            Wildfire.Coat shut = cut.Of(lit, 0.0);
+            between |= shut.Swap > 0.0f && shut.Swap < 1.0f;
+            alight |= shut.Swap >= 1.0f && !shut.Burnt;
         }
         Check("shutting the window is the one-frame swap it replaced",
             !between,
             "a hard swap caught halfway is a third picture rather than the one "
             + "the crossfade is measured against");
+        Check("and it still swaps inside the burn, window or no window",
+            alight,
+            "the A/B has to differ by the crossfade and nothing else, so the hard "
+            + "swap keeps the moment and drops only the fade");
 
         clock.Douse();
         Check("dousing puts the wood back green",
@@ -7166,6 +7192,142 @@ public static class SelfTest
         Check("and never swaps, because it has nothing to swap to",
             stump.Swap <= 0.0f,
             "a fade to nothing is worse than no fade");
+
+        // The flame's own shape, asked of the shader's text for FoamEdge's reason:
+        // this is what the driver compiles, and all three of these are mistakes that
+        // were made once and cost a render each to find.
+        string flame = Stage3D.FlameShader;
+        Check("the flame's elements composite over each other, they do not sum",
+            flame.Contains("flame_over(") && !flame.Contains("fire +="),
+            "added instead, the dark lip that keeps the licks apart brightens what "
+            + "is behind it - additive light cannot darken anything - and twenty-two "
+            + "elements melt into one bar; measured, a fifth of the flame pinned "
+            + "red at 255 and it read as lava");
+        Check("and their falloff is on the facing, not on the radius",
+            flame.Contains("pow(facing, rim_falloff)"),
+            "engine_fire's alpha goes as Layer Weight's Facing to that power, and "
+            + "facing is sqrt(1 - r^2): writing pow(1 - r^2, ...) instead is the "
+            + "exponent twice over, so every element comes out half as soft");
+        Check("the three widths are ratios of the rise, so one knob is the size",
+            flame.Contains("rise * seat_ratio")
+            && flame.Contains("rise * sway_ratio")
+            && flame.Contains("rise * ember_sway_ratio"),
+            "written as absolutes they have to be moved by hand with the rise, and "
+            + "a fire scaled in one direction stops being the same fire");
+
+        // No stop in the ramp is near white. engine_fire's rule, and it is the one
+        // an editing hand breaks: red saturating is not the failure, green and blue
+        // coming up with it is, and a yellow stop anywhere near the mass guarantees
+        // it. Read off the stops themselves so a hand-picked colour cannot slip in.
+        int ramp = flame.IndexOf("vec4 flame_ramp", System.StringComparison.Ordinal);
+        int after = ramp < 0 ? -1 : flame.IndexOf("\nfloat flame_life", ramp,
+                                                 System.StringComparison.Ordinal);
+        var pale = new System.Collections.Generic.List<string>();
+        int stops = 0;
+        for (int at = ramp; ramp >= 0 && after > ramp;)
+        {
+            at = flame.IndexOf("vec3(", at + 1, System.StringComparison.Ordinal);
+            if (at < 0 || at > after)
+                break;
+            int shut = flame.IndexOf(')', at);
+            string[] bits = flame.Substring(at + 5, shut - at - 5).Split(',');
+            if (bits.Length != 3)
+                continue;
+            stops++;
+            float[] c = new float[3];
+            for (int j = 0; j < 3; j++)
+                c[j] = float.Parse(bits[j].Trim(),
+                                   System.Globalization.CultureInfo.InvariantCulture);
+            if (c[1] > 0.55f || c[2] > 0.30f || c[1] >= c[0])
+                pale.Add($"({c[0]:F2},{c[1]:F2},{c[2]:F2})");
+        }
+
+        // The quad has to hold the fire, and the bounds that size it live in C#
+        // while the fire's own numbers live in the shader. Two copies of one bound
+        // is exactly how a frame starts clipping quietly, so the shader is read back
+        // and the bounds are asserted against what it says.
+        (float lift, float flank, float seated, float fade) = Stage3D.PyreBounds;
+        float seatR = Uniform(flame, "seat_ratio");
+        float swayR = Uniform(flame, "sway_ratio");
+        float emberR = Uniform(flame, "ember_sway_ratio");
+        float reach = Uniform(flame, "ember_reach");
+        float spark = Uniform(flame, "ember_size");
+        float draw = Uniform(flame, "stretch");
+        float spare = Uniform(flame, "vary");
+        float born = Uniform(flame, "born_scatter");
+        float sparkR = spark * seatR * 1.5f;
+        float wantsUp = reach + (sparkR * 1.6f);
+        float wantsOut = Mathf.Max(emberR + sparkR,
+                                   (seatR * born) + swayR + (seatR * (1.0f + spare)));
+        Check("the flame's quad holds the fire the shader draws in it",
+            lift >= wantsUp && flank >= wantsOut,
+            $"quad {lift:F2}/{flank:F2} against {wantsUp:F2} up, {wantsOut:F2} out "
+            + "- the embers drift furthest on both axes, and a quad measured "
+            + "against the tree instead printed its own rectangle as soon as a "
+            + "taller flame was asked for");
+        Check("and it holds the lift as well as the fire standing on it",
+            Mathf.Abs(Stage3D.PyreQuad(
+                          new PropNode { Size = Vector2.One, Foot = Vector2.One },
+                          1.0f).Size.Y - (lift + seated)) < 0.001f,
+            $"a quad {lift:F2} tall carrying a fire lifted {seated:F2} is a fire with "
+            + "its embers out of the frame - the lift buys the cut off the bottom "
+            + "and pays for it at the top");
+        // The fade band lives above the contact point, and the seat above the band.
+        // Below that point nothing draws at all - the depth a fragment loses is
+        // y/sin(e), so "under the ground" and "behind the ground" are one test - so a
+        // band spent under the line is a band that was never asked, which is exactly
+        // what the flame did while it was reaching 0.40 of a rise down and fading
+        // over three quarters of it.
+        Check("the flame fades out above the ground line, not below it",
+            fade > 0.0f && seated > 0.0f && fade < seated
+            && flame.Contains("smoothstep(0.0, max(floor_fade")
+            && flame.Contains("* tall - root"),
+            $"fade {fade:F2} against a lift of {seated:F2} - a straight cut across a "
+            + "fire is the one thing that says rectangle out loud, and no room under "
+            + "the foot can fix it because those fragments are behind the cell the "
+            + "tree stands on");
+        Check("and the quad keeps no room under the foot, because none can be drawn",
+            Mathf.Abs(Stage3D.PyreQuad(
+                          new PropNode { Size = Vector2.One, Foot = Vector2.One },
+                          1.0f).Foot.Y
+                      - Stage3D.PyreQuad(
+                          new PropNode { Size = Vector2.One, Foot = Vector2.One },
+                          1.0f).Size.Y) < 0.001f,
+            "rows below the contact point are fill spent on fragments the ground "
+            + "buries, and a fade written into them reads as one that works");
+        Check("and it is centred on the trunk, not on the art's own foot",
+            Mathf.Abs(Stage3D.PyreQuad(
+                new PropNode { Size = new Vector2(400.0f, 1000.0f),
+                               Foot = new Vector2(90.0f, 1000.0f) },
+                Stage3D.FlameRiseDefault).Foot.X * 2.0f
+                - Stage3D.PyreQuad(
+                    new PropNode { Size = new Vector2(400.0f, 1000.0f),
+                                   Foot = new Vector2(90.0f, 1000.0f) },
+                    Stage3D.FlameRiseDefault).Size.X) < 0.001f,
+            "the shader reads across from the middle of the quad, so a quad built "
+            + "around a foot that is not its middle stands the whole flame beside "
+            + "its own tree");
+
+        // The section across an element: a shift on the same ramp, and a shoulder
+        // that is brighter and not only yellower.
+        Check("the section across an element is a shift on that same ramp",
+            flame.Contains("core_hue * across"),
+            "a second set of colours is a second place the flame's colour is "
+            + "written, and the one that is not checked for white");
+        Check("and its shoulder is brighter, not only yellower",
+            flame.Contains("shell_gain") && Uniform(flame, "shell_gain") > 1.0f
+            && Uniform(flame, "rim_reach") < 0.5f,
+            "hue alone does not read: both the lip and the alpha fall off from the "
+            + "middle, so a yellower shoulder still comes out darker and the eye "
+            + "sees one dimming body - measured, and the lip has to be pulled in "
+            + "close to the rim to leave room for the shoulder");
+
+        Check("and no stop in its ramp is anywhere near white",
+            stops >= 4 && pale.Count == 0,
+            stops < 4 ? $"only {stops} stops found, so this checked nothing"
+                : $"{string.Join(" ", pale)} - the first pass at the tank's fire "
+                  + "opened on (1.00, 0.86, 0.48) and the whole flame came out the "
+                  + "colour of a lightbulb");
 
         if (grove?.Props is not null && grove.Props.Any)
         {
@@ -7299,6 +7461,22 @@ public static class SelfTest
         Check("the smoke is given more room than the flame",
             Stage3D.PlumeReach > Stage3D.PyreReach,
             $"{Stage3D.PlumeReach:F2} against {Stage3D.PyreReach:F2}");
+    }
+
+    /// <summary>One uniform's default out of a shader's own text. Read back rather
+    /// than mirrored in C#, because a mirrored bound is the thing that goes stale.
+    /// </summary>
+    private static float Uniform(string src, string name)
+    {
+        int at = src.IndexOf("uniform float " + name + " = ",
+                             System.StringComparison.Ordinal);
+        if (at < 0)
+            return float.NaN;
+        at += 14 + name.Length + 3;
+        int shut = src.IndexOf(';', at);
+        return shut < 0 ? float.NaN
+            : float.Parse(src.Substring(at, shut - at).Trim(),
+                          System.Globalization.CultureInfo.InvariantCulture);
     }
 
     private static void Woods(HexField field, Grove? grove, double elevation,

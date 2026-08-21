@@ -113,6 +113,30 @@ public sealed partial class WoodBench : Node2D
     /// picture arrives on and nothing is left to round.</summary>
     private bool _hardSwap;
 
+    /// <summary>Wear the tank's own rendered fire instead of the procedural one -
+    /// <see cref="Stage3D.TankFire"/>. Off by default because it is the probe and
+    /// the procedural one is the baseline it is measured against; a comparison whose
+    /// two halves both need a flag is a comparison nobody makes.</summary>
+    private bool _tankFire;
+
+    /// <summary>Whether the wood can catch at all - <c>--no-tree-fire</c>, the
+    /// harness's own flag and here for the harness's reason. On this bench it is
+    /// also the only honest baseline: every number the fire is judged by is a
+    /// per-pixel difference against the same board not burning, and without it the
+    /// nearest thing available is a green wood, whose trees differ by their char as
+    /// well.</summary>
+    private bool _woodFire = true;
+
+    /// <summary>How much fire there is, in tree heights - <c>--flame</c> and
+    /// <see cref="Stage3D.FlameRise"/>. Null leaves the tuned value alone.
+    ///
+    /// A flag rather than a rebuild for the reason every other one here is: this is
+    /// the number the picture is judged on, and taking the same shot twice at two
+    /// values should not need a hand on the mouse. It is also the only size in the
+    /// flame - every other number about its shape is a ratio to it - so a sweep of
+    /// this is a sweep of the whole effect rather than of one of its parts.</summary>
+    private float? _flameRise;
+
     private bool _noUi;
     private bool _showUi;
 
@@ -155,6 +179,17 @@ public sealed partial class WoodBench : Node2D
             }
             else if (args[i] == "--hard-swap")
                 _hardSwap = true;
+            else if (args[i] == "--tank-fire")
+                _tankFire = true;
+            else if (args[i] == "--no-tree-fire")
+                _woodFire = false;
+            else if (args[i] == "--flame" && i + 1 < args.Length
+                     && float.TryParse(args[i + 1], NumberStyles.Float,
+                                       CultureInfo.InvariantCulture, out float lit))
+            {
+                _flameRise = Mathf.Clamp(lit, 0.05f, 2.0f);
+                i++;
+            }
             else if (args[i] == "--no-ui")
                 _noUi = true;
             else if (args[i] == "--ui")
@@ -225,7 +260,10 @@ public sealed partial class WoodBench : Node2D
         // After the wood, because what can catch is what is standing - see
         // Grove.Carrying. A cell whose trees all fell to the budget's ceiling has
         // nothing to burn, and a fire on it would blacken a field.
-        _fire = new Wildfire { Field = _field, Wooded = _grove.Carrying };
+        _fire = new Wildfire
+        {
+            Field = _field, Enabled = _woodFire, Wooded = _grove.Carrying,
+        };
         _grove.Fire = _fire;
 
         _camera = new Camera2D
@@ -257,8 +295,10 @@ public sealed partial class WoodBench : Node2D
         _stage = new Stage3D
         {
             Field = _field, Origin = Vector2.Zero, Eye = _camera,
-            Wood = _grove, Blaze = _fire,
+            Wood = _grove, Blaze = _fire, TankFire = _tankFire,
         };
+        if (_flameRise is float high)
+            _stage.FlameRise = high;
         AddChild(_stage);
         _field.ShowField = false;
         _grove.Visible = false;

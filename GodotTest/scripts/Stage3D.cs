@@ -4023,6 +4023,8 @@ void fragment() {{
     private readonly Dictionary<PropNode, MeshInstance3D> _smoking = new();
     private readonly Dictionary<(int Species, bool Mirrored), ArrayMesh> _pyres = new();
     private readonly Dictionary<(int Species, bool Mirrored), ArrayMesh> _plumes = new();
+    private readonly Dictionary<string, Borrowed?> _loans = new();
+    private double? _upright;
     private float _fireClock;
     private int _sown = -1;
 
@@ -4481,25 +4483,67 @@ float ember_fbm(vec2 p) {
 ";
 
     /// <summary>
-    /// The flame on one tree: a tapering body about the trunk, torn into tongues
-    /// by noise scrolling up it.
+    /// The flame on one tree: <c>engine_fire</c>'s model, in a fragment.
     ///
-    /// <b>Additive, and therefore not allowed a white stop anywhere in it.</b> The
-    /// muzzle flash and the tank's engine fire both learnt this the same way: an
-    /// additive pixel of low alpha on pale ground is that ground very slightly
-    /// warmer, so a ramp that saturates comes out as a light bulb and the picture
-    /// is grey. Red saturates and green and blue stay low, and what white there is
-    /// the addition makes for itself where two tongues cross.
+    /// <b>Not the tank's pixels - the tank's construction.</b> Borrowing the
+    /// rendered atlas was tried first and measured: worn at a tree's size it covers
+    /// 3.3x the area at three quarters the redness, because that flame is
+    /// proportioned to be backed by its own column and by dark armour. What carries
+    /// over is the way it is built, and every line below is one of the things
+    /// <c>engine_fire</c> says makes a fire rather than an orange bar:
     ///
-    /// <b>The tips taper rather than fade</b>, for the same reason and stated in the
-    /// engine fire's words: a tongue that thins to nothing stays the colour it was,
-    /// and one that dims to nothing turns into steam.
+    /// <b>Elements with an age, not analytic tongues.</b> Each one's age advances by
+    /// the same step and wraps, and where it is, how big, how solid and what colour
+    /// are all functions of that one age - so the loop closes by construction, the
+    /// way the plume's does. The three smooth ribbons this replaced had their
+    /// variation inside a silhouette that stood still; the eye reads the silhouette.
+    ///
+    /// <b>Every element has a cross-section.</b> The old licks were the distance to
+    /// a vertical line: flat inside, blurred at the sides, a ribbon. These are
+    /// ellipses shaded from the middle out, which is what the tank's spheres get
+    /// from their own curvature and the single biggest difference in the picture.
+    ///
+    /// <b>They are stretched along the flow, not round</b> - <c>stretch</c>, and
+    /// engine_fire calls it most of what stops a fire reading as a stack of orange
+    /// balls.
+    ///
+    /// <b>They crowd at the seat.</b> Speed along the path is <c>exp(gather * age)</c>,
+    /// so elements bunch at the bottom and pull apart toward the tips: the dense
+    /// base and the thin licks come out of the path rather than out of a size table.
+    /// For a tree the path is a straight line up, so that integral has a closed form
+    /// and costs one exp - the tank has to march it because its port points
+    /// somewhere else.
+    ///
+    /// <b>They end by shrinking, never by fading</b> - <c>taper</c>. Forced by the
+    /// blend mode rather than chosen: this layer is added, so a low-alpha pixel over
+    /// the pale hex is that hex very slightly tinted, whatever colour it was meant
+    /// to be. Fading a tip out turns it into steam; shrinking removes it while every
+    /// pixel left is still saturated.
+    ///
+    /// <b>The elements composite over each other; only the layer is added.</b> This
+    /// is the one that had to be found rather than read, and it is what the dark rim
+    /// is for. In Blender the blobs are surfaces stacked along a ray and they blend
+    /// with alpha, so an element in front puts its dark lip over the bright middle of
+    /// the one behind - which is the edge that keeps the licks apart. Summing them
+    /// instead, which is what the game does to the finished layer, makes the lip
+    /// *add* a little dark red: additive light cannot darken anything, so every
+    /// overlap brightened and twenty-two elements melted into one bar. Composited in
+    /// the shader and handed over premultiplied, the layer still adds exactly once.
+    ///
+    /// <b>No stop in the ramp is near white</b>, and green and blue are held low the
+    /// whole way. The ramp is engine_fire's own, stop for stop: red saturating is
+    /// not the failure, green and blue coming up with it is, and a yellow stop
+    /// anywhere near the mass guarantees it.
+    ///
+    /// <b>Sizes in tree heights, never in pixels</b>, the way engine_fire quotes
+    /// everything in hull lengths - so one config fits four kinds of tree and
+    /// whatever a slider does to their size. <c>span</c> and <c>wide</c> are what
+    /// carry the quad into those units.
     ///
     /// <b>Time is a uniform, not TIME.</b> The bench fixes its step so two runs can
-    /// be compared - a flame on the wall clock makes every screenshot of a burning
-    /// wood a different picture.
+    /// be compared.
     /// </summary>
-    private const string FlameShader = @"
+    internal const string FlameShader = @"
 shader_type spatial;
 render_mode unshaded, cull_disabled, blend_add, depth_draw_never;
 
@@ -4509,84 +4553,313 @@ uniform float foot_v = 0.9;
 uniform float seed = 0.0;
 uniform float level = 0.0;
 uniform float time = 0.0;
-// How many separate tongues, and how tall the tallest of them stands over the
-// tree's own height. Three, because two read as a pair and four on a 27px trunk
-// merge back into the bar this replaced.
-uniform int licks = 3;
-uniform float reach = 0.62;
+// The quad in tree heights - its own height and width, and how far of it hangs
+// below the foot. Everything below is then quoted the way engine_fire quotes against
+// the hull. Measured rather than derived from a span, because the quad is no longer
+// the tree's own rectangle: it reaches under the ground line so the seat and the
+// youngest licks are not sliced off by its edge.
+uniform float tall = 1.42;
+uniform float wideq = 1.12;
+// How far above the contact point the fire's own seat sits, and the band it fades
+// out over on the way down to that point - both in tree heights, see PyreRoot.
+uniform float root = 0.18;
+uniform float floor_fade = 0.14;
+
+// How many of each. Fewer than the tank's thirty licks, because there each one is
+// geometry the rasteriser skips and here each one is work every fragment does; the
+// count is what to cut first if a burning forest costs too much.
+uniform int licks = 22;
+uniform int seat_blobs = 4;
+uniform int embers = 6;
+
+// How much fire there is, in tree heights - the one size knob, and the only
+// number here that is a size at all.
+uniform float rise = 0.44;
+uniform float gather = 0.70;
+// The three widths, as ratios to the rise. That is the only form engine_fire's
+// numbers port in - it quotes all four against the hull, so on MT seat/rise is
+// 0.167, sway/rise 0.207 and ember sway/rise 0.714 - and it is also what keeps
+// rise a single knob: written as absolutes they have to be moved by hand with it,
+// and a fire scaled in one direction stops being the same fire.
+//
+// Reading engine_fire's 0.032 and 0.058 as fractions of a tree instead, which is
+// what this did first, made the sway a third of what it should be: elements that
+// cannot get out of each other's way merge into one bar however many there are.
+uniform float seat_ratio = 0.167;
+uniform float sway_ratio = 0.207;
+uniform float ember_sway_ratio = 0.714;
+uniform float taper = 0.26;
+uniform float taper_power = 0.90;
+uniform float stretch = 2.30;
+uniform float vary = 0.40;
+uniform float wobble = 0.28;
+uniform float gradient = 0.20;
+uniform float stagger = 0.42;
+uniform float alpha = 0.70;
+uniform float onset = 0.07;
+uniform float fade = 0.55;
+uniform float born_scatter = 1.05;
+// The element's own cross-section, and both halves of it are engine_fire's
+// material rather than a guess at one.
+//
+// <b>The exponent is on the facing, not on the radius.</b> There alpha goes as
+// Layer Weight's Facing to this power, and for a sphere facing is sqrt(1 - r^2);
+// writing pow(1 - r^2, 1.15) instead - which is what this did - is facing^2.3, so
+// every element came out half as soft and a size smaller than it was asked for.
+//
+// <b>The dark lip is load-bearing.</b> engine_fire keeps one for exactly the
+// failure seen here: without it the licks melt into each other instead of keeping
+// a shape. The plume wants the opposite and has its rim nearly the body's colour,
+// because there shapes are the problem.
+uniform float rim_falloff = 1.15;
+uniform float rim_reach = 0.32;
+uniform vec3 rim_colour = vec3(0.35, 0.03, 0.01);
+uniform float opacity = 0.72;
+// The section across one element, in three bands: a deep core, a bright shoulder,
+// and the dark lip at the very edge.
+//
+// <b>Hue alone does not read, and that was measured.</b> Shifting the ramp across
+// the element makes the shoulder yellower and leaves it *darker*, because both the
+// lip and the alpha fall off monotonically from the middle - so the eye sees one
+// dimming body, not a light edge. The shoulder has to be brighter as well as
+// yellower, which is what shell_gain buys, and the lip has to be pulled in close to
+// the rim to leave room for it - rim_reach 0.32 against the 0.60 it was.
+//
+// <b>The lip stays, and it still has to do its job.</b> It is what keeps the licks
+// from melting into each other, measured; a bright shoulder that reached the edge
+// would light its neighbour's and put the bar back.
+//
+// Where the shoulder sits and how wide it is, in facing: 1 is dead centre, 0 the rim.
+uniform float shell_at = 0.55;
+uniform float shell_gain = 1.35;
+uniform float shell_width = 0.34;
+// And how far the middle of an element and its shoulders sit apart on the ramp: plus
+// this at dead centre, minus it at the rim.
+//
+// <b>A shift along the ramp, not a second set of colours.</b> The ramp already runs
+// from a bright orange at 0 to a deep red at 1, so a cross section is one number on
+// the same curve - which keeps the no-stop-near-white rule true by construction
+// and leaves one place where the flame's colour is written.
+//
+// <b>It does not replace the dark lip, it sits inside it.</b> The lip is what keeps
+// the licks from melting into each other and that was measured; so the section
+// reads middle deep, shoulders bright, and then the lip at the very edge. Three
+// bands out of two numbers.
+uniform float core_hue = 0.26;
+uniform float rate = 0.85;
+
+uniform float seat_size = 1.15;
+uniform float seat_stretch = 1.15;
+uniform float seat_scatter = 0.60;
+uniform float seat_flicker = 0.45;
+uniform float seat_gain = 0.95;
+
+uniform float ember_reach = 1.15;
+uniform float ember_size = 0.26;
+uniform float ember_gain = 0.85;
+uniform float ember_fade = 1.10;
+uniform vec3 ember_colour = vec3(1.00, 0.38, 0.08);
 
 FLAME_NOISE
+
+// engine_fire's ramp, stop for stop, strength in w. Nothing near white anywhere.
+vec4 flame_ramp(float t) {
+    vec3 c;
+    float s;
+    if (t < 0.08) {
+        float f = t / 0.08;
+        c = mix(vec3(1.00, 0.50, 0.13), vec3(1.00, 0.26, 0.05), f);
+        s = mix(1.00, 0.95, f);
+    } else if (t < 0.22) {
+        float f = (t - 0.08) / 0.14;
+        c = mix(vec3(1.00, 0.26, 0.05), vec3(1.00, 0.15, 0.03), f);
+        s = mix(0.95, 0.92, f);
+    } else if (t < 0.60) {
+        float f = (t - 0.22) / 0.38;
+        c = mix(vec3(1.00, 0.15, 0.03), vec3(0.85, 0.09, 0.02), f);
+        s = mix(0.92, 0.66, f);
+    } else {
+        float f = (t - 0.60) / 0.40;
+        c = mix(vec3(0.85, 0.09, 0.02), vec3(0.55, 0.04, 0.01), f);
+        s = mix(0.66, 0.26, f);
+    }
+    return vec4(c, s);
+}
+
+// Up from nothing at age 0, back to nothing at age 1 - both ends exactly, or the
+// lap shows a seam.
+float flame_life(float age, float ends) {
+    return (1.0 - exp(-age / max(onset, 1e-4)))
+           * pow(max(1.0 - age, 0.0), ends);
+}
+
+// How far along the path an element of this age has got, as a fraction of the
+// reach. The integral of exp(gather * a), normalised on the end point - see the
+// summary for why it is in closed form here and marched on the tank.
+float flame_climb(float age) {
+    float g = max(gather, 1e-3);
+    return (exp(g * age) - 1.0) / (exp(g) - 1.0);
+}
+
+// One element, premultiplied colour in rgb and its coverage in a. `at` is the
+// fragment in tree heights from the foot, `centre` the element, `half_w` its
+// half-width, `along` its half-length. `body` is its colour in the middle; the rim
+// takes it toward rim_colour.
+//
+// Ellipse rather than a distance to a line, and that is the single biggest thing
+// in the picture: the licks this replaced were flat inside and blurred at the
+// sides, which is a ribbon. A sphere is bright in the middle and dark and thin at
+// its edge, and that is what makes it read as a body.
+// How far into an element this fragment is: 1 dead centre, 0 at its rim, and 0
+// outside it. `down` comes back as +1 at the leading end and -1 at the trailing one.
+float flame_facing(vec2 at, vec2 centre, float half_w, float along, float lump_seed,
+                   out float down) {
+    vec2 d = vec2((at.x - centre.x) / max(half_w, 1e-5),
+                  (at.y - centre.y) / max(along, 1e-5));
+    down = clamp(d.y, -1.0, 1.0);
+    float q = dot(d, d);
+    // Cheap bail before the noise: most fragments are outside most elements.
+    if (q > 2.25) {
+        return 0.0;
+    }
+    float lump = 1.0 + wobble * (ember_noise(vec2(d.x * 1.6 + lump_seed * 7.3,
+                                                  d.y * 1.6 + lump_seed * 3.1))
+                                 - 0.5);
+    q /= max(lump * lump, 1e-3);
+    return q >= 1.0 ? 0.0 : sqrt(1.0 - q);
+}
+
+// One element, premultiplied colour in rgb and its coverage in a. `age` is where it
+// sits on the ramp; the length of it and the section across it both shift that -
+// read once per element the ramp is a flat colour per blob, which is what a stack of
+// coloured balls looks like.
+vec4 flame_blob(vec2 at, vec2 centre, float half_w, float along, float lump_seed,
+                float age, float gain) {
+    float down;
+    float facing = flame_facing(at, centre, half_w, along, lump_seed, down);
+    if (facing <= 0.0) {
+        return vec4(0.0);
+    }
+    float across = clamp((facing - 0.5) * 2.0, -1.0, 1.0);
+    vec4 c = flame_ramp(clamp(age + gradient * (down + 1.0) * 0.5
+                              + core_hue * across, 0.0, 1.0));
+    float shell = 1.0 + ((shell_gain - 1.0)
+                         * max(0.0, 1.0 - (abs(facing - shell_at)
+                                           / max(shell_width, 1e-3))));
+    vec3 col = mix(rim_colour, c.rgb, pow(facing, rim_reach));
+    float a = clamp(pow(facing, rim_falloff) * c.w * shell * gain * opacity,
+                    0.0, 1.0);
+    return vec4(col * a, a);
+}
+
+// An ember: the same body, one flat colour. engine_fire gives them their own rather
+// than a place on the ramp, because they are what is left rather than what is
+// burning - and the lip still applies, so they keep an edge.
+vec4 flame_spark(vec2 at, vec2 centre, float half_w, float along, float lump_seed,
+                 vec3 body, float gain) {
+    float down;
+    float facing = flame_facing(at, centre, half_w, along, lump_seed, down);
+    if (facing <= 0.0) {
+        return vec4(0.0);
+    }
+    vec3 col = mix(rim_colour, body, pow(facing, rim_reach));
+    float a = clamp(pow(facing, rim_falloff) * gain * opacity, 0.0, 1.0);
+    return vec4(col * a, a);
+}
+
+// One element over what is already there.
+vec4 flame_over(vec4 acc, vec4 e) {
+    return vec4(e.rgb + (1.0 - e.a) * acc.rgb, e.a + (1.0 - e.a) * acc.a);
+}
 
 void fragment() {
     if (level <= 0.0) {
         ALBEDO = vec3(0.0);
         ALPHA = 0.0;
     } else {
-        // Height above the foot, over the quad's own reach. Below the foot there
-        // is nothing to burn - that part of the sprite is the far side of the
-        // ground the tree stands on.
-        float h = (foot_v - UV.y) / max(foot_v, 0.0001);
-        float x = UV.x - 0.5;
-        float t = time + seed * 37.0;
-        float mask = 0.0;
-        float up = 0.0;
-        // A few tongues of different heights rather than one body, and this is
-        // the whole difference between a fire and an orange bar: a single
-        // tapering column with noise cut into it is still a column, because the
-        // noise moves through it while the silhouette stays put. Separate licks
-        // put the variation in the outline, where the eye is reading it.
+        // Tree heights across, and up from the fire's own seat - which stands root
+        // above the point the tree touches the ground. Below that point nothing can
+        // be drawn at all: under this camera below the contact point and behind the
+        // ground are the same test, so a fire reaching down there is not faded by
+        // anything, it is sliced off flat by the cell it is standing on.
+        vec2 at = vec2((UV.x - 0.5) * wideq, (foot_v - UV.y) * tall - root);
+        float t = time * rate + seed;
+        float seat = rise * seat_ratio;
+        float spread = rise * sway_ratio;
+        float ember_spread = rise * ember_sway_ratio;
+        vec4 fire = vec4(0.0);
+
+        // The seat: a squat bright body on the ground in every phase. Without it the
+        // elements fade in from nothing at age 0 and a flame with no hot seat reads
+        // as fog - the muzzle flash's lesson.
+        for (int k = 0; k < seat_blobs; k++) {
+            float fk = float(k);
+            float off = seat * seat_scatter * (2.0 * ember_hash(vec2(fk, 21.0)) - 1.0);
+            float lift = seat * 0.35 * ember_hash(vec2(fk, 22.0));
+            float size = seat * seat_size * (0.7 + 0.6 * ember_hash(vec2(fk, 23.0)));
+            // Flickers in place rather than moving, on a whole number of cycles per
+            // lap so it cannot jump at the wrap.
+            float turns = 1.0 + mod(fk, 3.0);
+            float wave = 0.5 + 0.5 * cos(6.283185 * (turns * t
+                                                     + ember_hash(vec2(fk, 24.0))));
+            float gain = 1.0 - seat_flicker + seat_flicker * wave;
+            fire = flame_over(fire,
+                              flame_blob(at, vec2(off, lift), size,
+                                         size * seat_stretch, fk + 3.0, 0.0,
+                                         seat_gain * gain * alpha));
+        }
+
+        // The licks.
         for (int k = 0; k < licks; k++) {
             float fk = float(k);
-            float side = (ember_hash(vec2(seed * 13.0 + fk, 3.7)) - 0.5) * 0.30;
-            float phase = ember_hash(vec2(seed * 7.0 + fk, 9.1)) * 6.283;
-            // Its own height, and the fire's own strength in it: a tree that has
-            // just caught throws short tongues and one at full burn throws them
-            // through its crown, which is the difference between a fire that is
-            // taking hold and one that is established. Tied to the level rather
-            // than to the age, because the level is what the fade at the end of
-            // the burn is written on - so the tongues drop back as it dies.
-            float tall = reach * (0.45 + 0.55 * ember_hash(vec2(seed * 3.0 + fk, 5.5)))
-                         * (0.55 + 0.45 * level);
-            float own = clamp(h / max(tall, 0.0001), 0.0, 1.0);
-            // Whips harder the higher it goes, and never at the seat: a flame
-            // that waves at its own base has come loose from the fuel.
-            float whip = 0.055 * sin(6.283 * own * 1.1 - t * 2.6 + phase) * own;
-            float wide = mix(0.085, 0.010, pow(own, 0.65));
-            float lick = 1.0 - smoothstep(wide * 0.20, wide, abs(x - side - whip));
-            // Torn along its own length, so the tip breaks into embers instead of
-            // ending on a line.
-            float torn = ember_fbm(vec2(fk * 17.0 + seed * 21.0,
-                                        own * 3.4 - t * 2.2));
-            lick *= smoothstep(0.18, 0.62, torn + 0.45 * (1.0 - own));
-            // And each one breathes on its own clock, which is what keeps three
-            // of them from reading as one shape with three prongs.
-            lick *= 0.55 + 0.45 * ember_noise(vec2(fk * 3.1 + seed * 11.0, t * 1.9));
-            lick *= 1.0 - smoothstep(0.80, 1.0, own);
-            if (lick > mask) {
-                mask = lick;
-                up = own;
-            }
+            float n = float(licks);
+            float age = fract((fk + 0.5) / n
+                              + stagger * (2.0 * ember_hash(vec2(fk, 11.0)) - 1.0) / n
+                              + t);
+            float life = flame_life(age, fade);
+            float up = rise * flame_climb(age);
+            float r = seat * (1.0 - (1.0 - taper) * pow(age, taper_power))
+                      * (1.0 - vary + 2.0 * vary * ember_hash(vec2(fk, 12.0)));
+            // Sway, and born off the middle of the trunk: every lick leaving through
+            // the exact centre makes the base of the column a needle.
+            float sway = spread * pow(age, 0.8) * ember_hash(vec2(fk, 13.0))
+                         * cos(6.283185 * ember_hash(vec2(fk, 14.0)));
+            float born = seat * born_scatter
+                         * (2.0 * ember_hash(vec2(fk, 15.0)) - 1.0);
+            fire = flame_over(fire,
+                              flame_blob(at, vec2(born + sway, up), r, r * stretch,
+                                         fk + 20.0, age, alpha * life));
         }
-        // The seat: a low wide glow where the trunk meets the ground, which is
-        // what stops the tongues looking like they are hovering.
-        float seat = (1.0 - smoothstep(0.06, 0.20, abs(x)))
-                     * (1.0 - smoothstep(0.02, 0.13, h))
-                     * smoothstep(-0.01, 0.02, h);
-        if (seat > mask) {
-            mask = seat;
-            up = 0.0;
+
+        // The embers: small, red, and further out than the flame. Named in practice
+        // as one of the things separating a mediocre fire from a good one, and here
+        // they are the same queue with a longer reach.
+        for (int k = 0; k < embers; k++) {
+            float fk = float(k);
+            float n = float(embers);
+            float age = fract((fk + 0.5) / n
+                              + stagger * (2.0 * ember_hash(vec2(fk, 31.0)) - 1.0) / n
+                              + t);
+            float life = flame_life(age, ember_fade);
+            float up = rise * ember_reach * flame_climb(age);
+            float r = seat * ember_size * (0.5 + ember_hash(vec2(fk, 32.0)));
+            float sway = ember_spread * pow(age, 0.9)
+                         * ember_hash(vec2(fk, 33.0))
+                         * cos(6.283185 * ember_hash(vec2(fk, 34.0)));
+            fire = flame_over(fire,
+                              flame_spark(at, vec2(sway, up), r, r * 1.6, fk + 40.0,
+                                          ember_colour, ember_gain * life));
         }
-        mask = clamp(mask * level, 0.0, 1.0);
-        // Deep red at the tips, orange through the middle, hottest at the seat -
-        // and green and blue held down the whole way. No white stop anywhere: an
-        // additive ramp that saturates comes out as a light bulb on pale ground.
-        vec3 hot = vec3(1.00, 0.48, 0.12);
-        vec3 mid = vec3(0.96, 0.22, 0.04);
-        vec3 tip = vec3(0.44, 0.05, 0.02);
-        vec3 fire = up < 0.5 ? mix(hot, mid, up / 0.5)
-                             : mix(mid, tip, (up - 0.5) / 0.5);
-        ALBEDO = fire;
-        ALPHA = mask;
+
+        // Out before the ground line rather than at it, and the band is above the
+        // line because there is no below - see the note on at. The seat is lifted
+        // clear of the band so the fire's bright base is at full strength.
+        float footing = smoothstep(0.0, max(floor_fade, 1e-4), at.y + root);
+        // Already premultiplied by the compositing above, so the alpha is spent and
+        // a solid one is handed over: blend_add lays down colour times alpha, which
+        // adds this layer exactly once - the way the game adds the tank's.
+        ALBEDO = fire.rgb * (level * footing);
+        ALPHA = 1.0;
     }
 }
 ";
@@ -4658,6 +4931,52 @@ void fragment() {
 
     private static readonly Shader Smoking =
         new() { Code = SmokeShader.Replace("FLAME_NOISE", EmberNoise) };
+
+    /// <summary>
+    /// A borrowed layer on a tree: one column of the strip, picked by phase.
+    ///
+    /// <b>The blend mode is substituted rather than parameterised</b>, because it is
+    /// not a parameter: the fire adds light and the column takes it away, and in
+    /// Godot the mode lives on the material. Two shaders off one text, the way the
+    /// flame and the smoke already share their noise.
+    ///
+    /// <b>The column is clamped half a texel in from its own pad.</b> The frames sit
+    /// side by side with a transparent pixel between them, so linear filtering at
+    /// the seam reaches the gutter rather than the next phase - which would be one
+    /// phase of the fire faintly printed on the next.
+    /// </summary>
+    private const string LoanShader = @"
+shader_type spatial;
+render_mode unshaded, cull_disabled, BLEND_MODE, depth_draw_never;
+
+uniform sampler2D art : source_color, filter_linear, hint_default_transparent;
+// Where this phase's column starts in the strip and how wide it is, both as a
+// fraction of the whole - so the shader never learns how many phases there are.
+uniform float stride = 1.0;
+uniform float pad = 0.0;
+uniform float span = 1.0;
+uniform float phase = 0.0;
+uniform float level = 0.0;
+
+void fragment() {
+    if (level <= 0.0) {
+        ALBEDO = vec3(0.0);
+        ALPHA = 0.0;
+    } else {
+        float u = phase * stride + pad + clamp(UV.x, 0.0, 1.0) * span;
+        vec4 c = texture(art, vec2(u, UV.y));
+        ALBEDO = c.rgb;
+        ALPHA = c.a * level;
+    }
+}
+";
+
+    private static readonly Shader Lending =
+        new() { Code = LoanShader.Replace("BLEND_MODE", "blend_add") };
+
+    private static readonly Shader Fuming =
+        new() { Code = LoanShader.Replace("BLEND_MODE, ", string.Empty) };
+
 
     /// <summary>
     /// The quad a tree of this kind stands on: the union of its living picture
@@ -4790,11 +5109,345 @@ void fragment() {
     private const float PyreSpan = 1.20f;
     private const float PlumeSpan = 1.85f;
 
+    /// <summary>
+    /// The flame's quad, as multiples of its own rise: how far it reaches over the
+    /// foot, how far to either side of the trunk, how far under the ground line, and
+    /// how much of that last it spends fading out.
+    ///
+    /// <b>Measured against the fire, not against the tree, and that is the whole of
+    /// it.</b> The quad used to be the tree's own rectangle scaled by a span, which
+    /// holds only while the fire is smaller than the tree: asked for a taller flame
+    /// it printed its own rectangle on the board, because the embers drift 0.71 of
+    /// the rise sideways and 1.15 of it up. Same lesson as the tank's smoke frame -
+    /// the effect that buys room has to be the one the room is measured on.
+    ///
+    /// Up and flank come out of the shader's own numbers and nothing else: up is
+    /// <c>ember_reach</c> plus an ember's half-length, flank is
+    /// <c>ember_sway_ratio</c> plus its half-width - the licks want less, 0.62.
+    /// There is a check that reads those uniforms back and asserts these still cover
+    /// them, because two copies of one bound is exactly how a frame starts clipping
+    /// quietly.
+    /// </summary>
+    private const float PyreLift = 1.30f;
+    private const float PyreFlank = 0.90f;
+
+    /// <summary>
+    /// How far above the point the tree touches the ground the fire's seat sits, and
+    /// the band it fades out over on the way back down to that point - both as
+    /// multiples of the rise.
+    ///
+    /// <b>The flame was being sliced off flat along the hex, and no amount of room
+    /// under the foot could ever have helped.</b> Under this camera "below the
+    /// contact point" and "behind the ground" are the same test - the depth a
+    /// fragment loses is <c>y/sin(e)</c> and nothing else in the expression
+    /// survives, which is the finding that bent the tank's own quad flat along the
+    /// ground, and moving the quad about cannot help because shifting it in z moves
+    /// the ground it covers by the same amount. So the room the quad used to hang
+    /// below the foot, and the fade spent inside it, bought nothing whatsoever:
+    /// every one of those fragments was behind the cell the tree stands on before
+    /// the fade was ever asked. Measured on the board - the flame's bottom edge sat
+    /// on one row for 26 columns out of 51, and on a second row for 9 more, those
+    /// being the columns hanging past the hex where there is no ground to be behind.
+    ///
+    /// <b>So the fire is lifted instead, and the fade band moves above the
+    /// line.</b> The seat stands clear of the band and burns at full strength; what
+    /// still hangs below it - the widest seat blob reaches 0.29 of a rise down, the
+    /// youngest lick nearly half of one - fades out and is zero by the time it
+    /// reaches the ground. Nothing is cut because nothing is left to cut.
+    ///
+    /// <b>What that gives up is the fire spreading on the ground at its base</b>,
+    /// which reads well and was never once drawn. Getting it needs the tank's
+    /// answer - the quad bent flat along the ground below the contact line - and
+    /// that is its own piece of work rather than a constant.
+    /// </summary>
+    private const float PyreRoot = 0.18f;
+    private const float PyreFade = 0.14f;
+
+    /// <summary>
+    /// How much fire there is, in tree heights - the one size knob, and the only
+    /// number in the flame that is a size at all. Everything else about its shape is
+    /// a ratio to this, so moving it scales the fire rather than stretching it.
+    /// </summary>
+    public const float FlameRiseDefault = 0.80f;
+
+    public float FlameRise { get; set; } = FlameRiseDefault;
+
+    /// <summary>How far over the foot a flame of this rise reaches, for the checks.
+    /// </summary>
+    public static float PyreReachAt(float rise) => rise * PyreLift;
+
+    /// <summary>The four bounds, for the check that reads the shader back.</summary>
+    public static (float Lift, float Flank, float Root, float Fade) PyreBounds =>
+        (PyreLift, PyreFlank, PyreRoot, PyreFade);
+
     /// <summary>The same two, for the checks: a claim about which of them is the
     /// roomier is worth asserting, and a private constant cannot be asked.
     /// </summary>
-    public static float PyreReach => PyreSpan;
+    public static float PyreReach => PyreReachAt(FlameRiseDefault);
     public static float PlumeReach => PlumeSpan;
+
+    /// <summary>
+    /// Dress the trees in the tank's own rendered fire instead of the procedural
+    /// one - the probe, not a destination.
+    ///
+    /// <b>It costs no render at all, and that is the whole of why it is worth
+    /// having:</b> <c>fire_atlas</c> and <c>burn_atlas</c> are already on disk, so
+    /// this answers the question that has to be asked before anything is built -
+    /// whether the tank's fire is even what a tree wants. The tank's is a jet out
+    /// of a deck port, seated and columnar; a tree burns as a crown. If those pull
+    /// apart, they pull apart here, for the price of a flag.
+    ///
+    /// <b>What it cannot answer is proportion.</b> The frames are sized against the
+    /// tank's own tile, so wearing them at a tree's size is a resample either way;
+    /// they are scaled to the height the procedural flame reaches, so the A/B is
+    /// about shape rather than size.
+    /// </summary>
+    public bool TankFire { get; set; }
+
+    /// <summary>How tall the borrowed flame is made, as a fraction of the tree's
+    /// own drawn height - the procedural <c>reach</c>, so that the two are the same
+    /// size and the comparison is about everything else. The column comes with it
+    /// on the same factor, never its own: the flame and the thing that holds it up
+    /// are one effect, and scaling them apart is the one way to lose the reason the
+    /// column exists.</summary>
+    private const float LoanReach = 0.62f;
+
+    /// <summary>
+    /// One borrowed layer, laid out as a strip of its phases.
+    ///
+    /// <b>A strip rather than the atlas's own rects, because the frames are
+    /// trimmed</b> and each one sits at its own offset in the tile. Pasting them
+    /// back into a tile and cropping the union of the twelve turns twelve
+    /// rectangles into one: the quad is that crop, and the shader only has to pick
+    /// a column. The same trick the burnt-art swap uses, for the same reason.
+    ///
+    /// <b>A transparent pad between the columns</b>, so linear filtering cannot
+    /// reach into the next phase - <c>atlas_pack</c>'s gutter, and its argument
+    /// word for word.
+    /// </summary>
+    private sealed record Borrowed(ImageTexture Strip, int Phases, Vector2 Cell,
+                                  Vector2 Base, float Body, float Stride, float Pad,
+                                  float Width);
+
+    /// <summary>Where a borrowed layer stops being flame and starts being embers:
+    /// the alpha its dense body is measured at.
+    ///
+    /// <b>The crop is not the fire.</b> The union of twelve phases is 63x96 on MT
+    /// and the part of it carrying real density is 58x73 - three quarters. Sizing
+    /// and seating by the crop, which is what this did first, therefore drew the
+    /// body a quarter small and stood it on its own sparks: measured, the seat came
+    /// out ten pixels above the bottom row of the crop.</summary>
+    private const float LoanBody = 0.43f;
+
+    private readonly Dictionary<string, (byte[] Data, int Width)> _sheets = new();
+
+    /// <summary>
+    /// The heading both borrowed layers are taken at, and it has to be measured.
+    ///
+    /// <b>The tank's smoke leans</b>, because the port on MT looks back and up at
+    /// 71.8 degrees, so the column stands upright on some headings and comes at the
+    /// camera foreshortened on others - 116px over the anchor at one end of the
+    /// carousel and 40 at the other. A tree is a billboard with no heading of its
+    /// own, so a leaning column on it is wind that is not blowing.
+    ///
+    /// <b>One heading for both layers, not the best of each.</b> The flame and the
+    /// column are one effect - the column is what the additive flame is composited
+    /// on - so picking them apart would stand the smoke beside the fire.
+    ///
+    /// Width is the wrong measure and was the first one tried: the widest heading
+    /// of the column is the one pointed at the camera, which is the worst of the
+    /// twenty-four.
+    /// </summary>
+    private double Standing(AtlasSet set)
+    {
+        if (_upright is double had)
+            return had;
+        IReadOnlyList<int> facings = set.RenderedFacings();
+        double best = facings.Count > 0 ? facings[0] : 0.0;
+        float least = float.MaxValue;
+        foreach (int facing in facings)
+        {
+            float lean = Lean(set, AtlasSet.FireName, facing)
+                         + Lean(set, AtlasSet.BurnName, facing);
+            if (lean < least)
+            {
+                least = lean;
+                best = facing;
+            }
+        }
+        _upright = best;
+        GD.Print($"wood: tank fire borrowed at heading {best:F0} deg, lean {least:F1}px");
+        return best;
+    }
+
+    /// <summary>How far a layer's mass at this heading drifts sideways from its own
+    /// foot to its own tip, over all its phases folded together. Zero is upright.
+    /// Read off the atlas bytes rather than through GetPixel, because this walks
+    /// every phase of every heading of two layers to make one choice.</summary>
+    private float Lean(AtlasSet set, string layer, double facing)
+    {
+        if (!set.Has(layer))
+            return 0.0f;
+        if (!_sheets.TryGetValue(layer, out (byte[] Data, int Width) sheet))
+        {
+            Image whole = set.Texture(layer).GetImage();
+            if (whole.GetFormat() != Image.Format.Rgba8)
+                whole.Convert(Image.Format.Rgba8);
+            _sheets[layer] = sheet = (whole.GetData(), whole.GetWidth());
+        }
+        int phases = set.PhasesOf(layer);
+        int top = int.MaxValue, low = int.MinValue;
+        for (int pass = 0; pass < 2; pass++)
+        {
+            double tipX = 0.0, tipN = 0.0, footX = 0.0, footN = 0.0;
+            int band = pass == 0 ? 0 : Math.Max(3, (low - top + 1) / 8);
+            for (int phase = 0; phase < phases; phase++)
+            {
+                int index = set.EffectFrame(layer, phase, facing);
+                Rect2 region = set.Region(layer, index);
+                if (region.Size.X <= 0.0f || region.Size.Y <= 0.0f)
+                    continue;
+                Vector2 off = set.OffsetOf(layer, index);
+                var at = (Vector2I)region.Position;
+                var span = (Vector2I)region.Size;
+                for (int y = 0; y < span.Y; y++)
+                {
+                    int row = (at.Y + y) * sheet.Width + at.X;
+                    int tile = (int)off.Y + y;
+                    for (int x = 0; x < span.X; x++)
+                    {
+                        if (sheet.Data[((row + x) * 4) + 3] <= 2)
+                            continue;
+                        if (pass == 0)
+                        {
+                            top = Math.Min(top, tile);
+                            low = Math.Max(low, tile);
+                            continue;
+                        }
+
+                        double col = off.X + x;
+                        if (tile <= top + band)
+                        {
+                            tipX += col;
+                            tipN += 1.0;
+                        }
+                        else if (tile >= low - band)
+                        {
+                            footX += col;
+                            footN += 1.0;
+                        }
+                    }
+                }
+            }
+
+            if (pass == 0 && low < top)
+                return 0.0f;
+            if (pass == 1)
+                return tipN <= 0.0 || footN <= 0.0
+                    ? 0.0f : Mathf.Abs((float)((tipX / tipN) - (footX / footN)));
+        }
+
+        return 0.0f;
+    }
+
+    /// <summary>
+    /// One borrowed layer, pasted back into tiles and cropped to the union of its
+    /// phases - see <see cref="Borrowed"/>.
+    /// </summary>
+    private Borrowed? Loan(string layer)
+    {
+        if (_loans.TryGetValue(layer, out Borrowed? had))
+            return had;
+        _loans[layer] = null;
+        AtlasSet? set = Field?.Atlas;
+        if (set is null || !set.Has(layer) || set.PhasesOf(layer) <= 0)
+            return null;
+        double facing = Standing(set);
+        int phases = set.PhasesOf(layer);
+        var tiles = new Image[phases];
+        var used = new Rect2I();
+        for (int phase = 0; phase < phases; phase++)
+        {
+            tiles[phase] = set.TileImage(layer, set.EffectFrame(layer, phase, facing));
+            Rect2I box = tiles[phase].GetUsedRect();
+            if (box.Size.X <= 0 || box.Size.Y <= 0)
+                continue;
+            used = used.Size.X <= 0 ? box : used.Merge(box);
+        }
+
+        if (used.Size.X <= 0 || used.Size.Y <= 0)
+            return null;
+        const int pad = 1;
+        int stride = used.Size.X + (pad * 2);
+        Image strip = Image.CreateEmpty(stride * phases, used.Size.Y, false,
+                                        Image.Format.Rgba8);
+        var seen = new float[used.Size.X * used.Size.Y];
+        for (int phase = 0; phase < phases; phase++)
+        {
+            strip.BlitRect(tiles[phase], used, new Vector2I((phase * stride) + pad, 0));
+            for (int y = 0; y < used.Size.Y; y++)
+            {
+                for (int x = 0; x < used.Size.X; x++)
+                    seen[(y * used.Size.X) + x] = Mathf.Max(
+                        seen[(y * used.Size.X) + x],
+                        tiles[phase].GetPixel(used.Position.X + x,
+                                              used.Position.Y + y).A);
+            }
+        }
+
+        // Where its own foot is across the crop, so the flame sits on the trunk
+        // rather than on the middle of a rectangle: the crop is the union of twelve
+        // phases and the fire does not stand in the centre of it.
+        double footX = 0.0, footN = 0.0;
+        int lowest = used.Size.Y - 1;
+        int reach = Math.Max(3, used.Size.Y / 8);
+        for (int y = Math.Max(0, lowest - reach); y <= lowest; y++)
+        {
+            for (int x = 0; x < used.Size.X; x++)
+            {
+                if (seen[(y * used.Size.X) + x] > 0.008f)
+                {
+                    footX += x;
+                    footN += 1.0;
+                }
+            }
+        }
+
+        float across = footN > 0.0 ? (float)(footX / footN) : used.Size.X * 0.5f;
+
+        // The dense body inside the crop: what has to be made the size asked for,
+        // and what has to stand on the ground. See LoanBody.
+        int rise = -1, sits = -1;
+        for (int y = 0; y < used.Size.Y; y++)
+        {
+            bool solid = false;
+            for (int x = 0; x < used.Size.X && !solid; x++)
+                solid = seen[(y * used.Size.X) + x] >= LoanBody;
+            if (!solid)
+                continue;
+            if (rise < 0)
+                rise = y;
+            sits = y;
+        }
+
+        if (rise < 0)
+        {
+            rise = 0;
+            sits = used.Size.Y - 1;
+        }
+
+        var loan = new Borrowed(
+            ImageTexture.CreateFromImage(strip), phases,
+            new Vector2(used.Size.X, used.Size.Y),
+            new Vector2(across, sits + 1), sits - rise + 1,
+            stride / (float)strip.GetWidth(), pad / (float)strip.GetWidth(),
+            used.Size.X / (float)strip.GetWidth());
+        _loans[layer] = loan;
+        GD.Print($"wood: {layer} on loan, crop {used.Size.X}x{used.Size.Y} x{phases} "
+                 + $"phases, body {loan.Body:F0}px seated {used.Size.Y - 1 - sits}px "
+                 + $"off its bottom, foot {across:F0}px across");
+        return loan;
+    }
 
     /// <summary>
     /// The flame and the smoke over one burning tree.
@@ -4821,18 +5474,40 @@ void fragment() {
         if (coat.Flame <= 0.0f && coat.Smoke <= 0.0f && !_burning.ContainsKey(tree))
             return;
         (int, bool) kind = (tree.Species, tree.Mirrored);
+        Borrowed? blaze = TankFire ? Loan(AtlasSet.FireName) : null;
+        Borrowed? column = TankFire ? Loan(AtlasSet.BurnName) : null;
+        bool lent = blaze is not null && column is not null;
         if (!_burning.TryGetValue(tree, out MeshInstance3D? fire))
         {
-            if (!_pyres.TryGetValue(kind, out ArrayMesh? pyre))
-                _pyres[kind] = pyre = Stem(tree.Foot * tree.Pixels * PyreSpan,
-                                           tree.Size * tree.Pixels * PyreSpan,
-                                           RiseFactor);
-            if (!_plumes.TryGetValue(kind, out ArrayMesh? plume))
-                _plumes[kind] = plume = Stem(tree.Foot * tree.Pixels * PlumeSpan,
-                                             tree.Size * tree.Pixels * PlumeSpan,
-                                             RiseFactor);
-            _smoking[tree] = Lick(plume, Fumes(tree));
-            _burning[tree] = fire = Lick(pyre, Flames(tree));
+            if (lent)
+            {
+                // One factor off the flame, and the column rides it - see LoanReach.
+                float k = blaze!.Body <= 0.0f ? 1.0f
+                    : tree.Size.Y * tree.Pixels * LoanReach / blaze.Body;
+                if (!_pyres.TryGetValue(kind, out ArrayMesh? worn))
+                    _pyres[kind] = worn = Stem(blaze.Base * k, blaze.Cell * k,
+                                               RiseFactor);
+                if (!_plumes.TryGetValue(kind, out ArrayMesh? veil))
+                    _plumes[kind] = veil = Stem(column!.Base * k, column.Cell * k,
+                                                RiseFactor);
+                _smoking[tree] = Lick(veil, Loaned(column!, Fuming));
+                _burning[tree] = fire = Lick(worn, Loaned(blaze, Lending));
+            }
+            else
+            {
+                if (!_pyres.TryGetValue(kind, out ArrayMesh? pyre))
+                {
+                    (Vector2 foot, Vector2 size) = Pyre(tree);
+                    _pyres[kind] = pyre = Stem(foot * tree.Pixels,
+                                               size * tree.Pixels, RiseFactor);
+                }
+                if (!_plumes.TryGetValue(kind, out ArrayMesh? plume))
+                    _plumes[kind] = plume = Stem(tree.Foot * tree.Pixels * PlumeSpan,
+                                                 tree.Size * tree.Pixels * PlumeSpan,
+                                                 RiseFactor);
+                _smoking[tree] = Lick(plume, Fumes(tree));
+                _burning[tree] = fire = Lick(_pyres[kind], Flames(tree));
+            }
         }
         MeshInstance3D smoke = _smoking[tree];
         Transform3D at = Rooted(tree);
@@ -4845,11 +5520,16 @@ void fragment() {
         {
             fumes.SetShaderParameter("time", _fireClock);
             fumes.SetShaderParameter("level", coat.Smoke);
+            if (lent)
+                fumes.SetShaderParameter("phase", Turn(tree, column!, SmokeRate));
         }
+
         if (fire.MaterialOverride is ShaderMaterial flames)
         {
             flames.SetShaderParameter("time", _fireClock);
             flames.SetShaderParameter("level", coat.Flame);
+            if (lent)
+                flames.SetShaderParameter("phase", Turn(tree, blaze!, FireRate));
         }
     }
 
@@ -4879,10 +5559,75 @@ void fragment() {
                                (float)Grove.Hash01(tree.Seed, tree.Species, 733_003));
     }
 
+    /// <summary>The tank's own tempo for the borrowed pair - <c>BurnLoop</c>'s two
+    /// rates, because how fast the cycle runs is part of what is being judged. The
+    /// flame flickers and the column drifts, and one rate for both would pick
+    /// between a smouldering fire and a column going up like a jet.</summary>
+    private const float FireRate = 10.0f;
+    private const float SmokeRate = 5.0f;
+
+    /// <summary>Which phase this tree is showing. The seed offsets it, for the
+    /// reason three tanks' clocks are separate: a stand of trees stepping through
+    /// one cycle together is one animation played eight times.</summary>
+    private float Turn(PropNode tree, Borrowed loan, float rate)
+    {
+        float seed = (float)Grove.Hash01(tree.Seed, tree.Species, 733_003);
+        return Mathf.Floor(Mathf.PosMod((_fireClock * rate) + (seed * loan.Phases),
+                                        loan.Phases));
+    }
+
+    private static ShaderMaterial Loaned(Borrowed loan, Shader how)
+    {
+        var ink = new ShaderMaterial { Shader = how, RenderPriority = StandOrder };
+        ink.SetShaderParameter("art", loan.Strip);
+        ink.SetShaderParameter("stride", loan.Stride);
+        ink.SetShaderParameter("pad", loan.Pad);
+        ink.SetShaderParameter("span", loan.Width);
+        ink.SetShaderParameter("phase", 0.0f);
+        ink.SetShaderParameter("level", 0.0f);
+        return ink;
+    }
+
+    /// <summary>
+    /// The flame's quad, in art pixels - sized by the fire it has to hold, in tree
+    /// heights, so it scales with the kind the way every other measurement here does.
+    ///
+    /// <b>Centred on the trunk, not on the art's own foot.</b> The shader reads
+    /// across from <c>UV.x - 0.5</c>, so the middle of the quad is where it puts the
+    /// fire; built around <c>tree.Foot.X</c> instead, which is not the middle of any
+    /// of the four kinds, the whole flame stood beside its own tree by however far
+    /// off centre that foot was.
+    /// </summary>
+    public static (Vector2 Foot, Vector2 Size) PyreQuad(PropNode tree, float rise)
+    {
+        float high = tree.Size.Y <= 0.0f ? 1.0f : tree.Size.Y;
+        float half = rise * PyreFlank * high;
+        // The fire's own reach plus the lift it stands on, and not one row below the
+        // foot: those rows cannot be drawn at all - see PyreRoot.
+        float up = rise * (PyreLift + PyreRoot) * high;
+        return (new Vector2(half, up), new Vector2(half * 2.0f, up));
+    }
+
+    private (Vector2 Foot, Vector2 Size) Pyre(PropNode tree) =>
+        PyreQuad(tree, FlameRise);
+
     private ShaderMaterial Flames(PropNode tree)
     {
         var ink = new ShaderMaterial { Shader = Blazing, RenderPriority = StandOrder };
-        Pitch(ink, tree, PyreSpan);
+        (Vector2 foot, Vector2 size) = Pyre(tree);
+        float high = tree.Size.Y <= 0.0f ? 1.0f : tree.Size.Y;
+        // The quad in tree heights, and where the foot sits down it. Handed over as
+        // its own measurements rather than derived from a span, because the quad is
+        // no longer the tree's own rectangle: it is sized by the fire, and a shader
+        // that assumed otherwise would put the whole fire a fifth of a tree low.
+        ink.SetShaderParameter("foot_v", size.Y <= 0.0f ? 0.9f : foot.Y / size.Y);
+        ink.SetShaderParameter("tall", size.Y / high);
+        ink.SetShaderParameter("wideq", size.X / high);
+        ink.SetShaderParameter("root", FlameRise * PyreRoot);
+        ink.SetShaderParameter("floor_fade", FlameRise * PyreFade);
+        ink.SetShaderParameter("rise", FlameRise);
+        ink.SetShaderParameter("seed",
+                               (float)Grove.Hash01(tree.Seed, tree.Species, 733_003));
         ink.SetShaderParameter("level", 0.0f);
         ink.SetShaderParameter("time", _fireClock);
         return ink;
