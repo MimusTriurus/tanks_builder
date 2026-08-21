@@ -14,10 +14,6 @@ config/name="Tank Sprite Test"
 run/main_scene="res://Main.tscn"
 config/features=PackedStringArray("4.5", "C#", "GL Compatibility")
 
-[editor_plugins]
-
-enabled=PackedStringArray("res://addons/godot_mcp/plugin.cfg")
-
 [display]
 
 window/size/viewport_width=1600
@@ -27,6 +23,10 @@ window/stretch/mode="canvas_items"
 [dotnet]
 
 project/assembly_name="TankSpriteTest"
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/godot_mcp/plugin.cfg")
 
 [rendering]
 
