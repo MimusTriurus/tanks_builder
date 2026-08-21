@@ -32,6 +32,17 @@ Sounds/
 # alone changes on every window move - and they say nothing about the bench.
 GodotTest/.idea/
 
+# Skill documents for the bench's own MCP tools, written by the addon's
+# godot-skill-generate step from the [AiTool] attributes in the C# beside them.
+# Generated, not authored: the tool declarations are the record, and these fifty
+# files are a rendering of them that regenerates on demand and would otherwise
+# turn up in a diff every time a description is reworded.
+GodotTest/.claude/skills/
+
+# A hand-made backup of the csproj from the day the build was pointed at an
+# installed engine. Git is the backup.
+GodotTest/TankSpriteTest.csproj.old
+
 # Claude Code's per-machine settings. Its sibling .claude/settings.json IS
 # tracked - that one declares the project's MCP server and belongs to the repo,
 # the same way .mcp.json does. This one accumulates whatever a session happened

@@ -121,10 +121,12 @@ public sealed partial class TankSprite : Node2D
     /// See <see cref="PitchTransform"/> for why a shear and not a rotation.</summary>
     public double Pitch;
 
-    /// <summary>Whole pixels of vertical jolt from the ground. Applied to the
-    /// draw rect rather than to Position, which the movement code compares
-    /// against cell anchors and must stay exact.</summary>
-    public int Shake;
+    /// <summary>Pixels of vertical jolt from the ground, unrounded. Applied to
+    /// the draw rect rather than to Position, which the movement code compares
+    /// against cell anchors and must stay exact. What is actually drawn is
+    /// <see cref="Heave"/>, which is this put on the pixel grid of the buffer
+    /// the sprite lands in.</summary>
+    public double Shake;
 
     /// <summary>Roll, as a shear amplitude, positive displacing the top of the
     /// hull to its left: the shear runs along GroundDirection(HullFacing + 90)
@@ -1065,9 +1067,100 @@ public sealed partial class TankSprite : Node2D
         Math.Abs(Climb) > 1e-6 || Math.Abs(Rise - 1.0f) > 1e-6
         || Slope != Vector2.Zero;
 
-    /// <summary>Heave a layer receives. Never depends on the layer - see
-    /// <see cref="TurretStabilised"/>.</summary>
-    public int HeaveFor(bool turret) => Shake;
+    /// <summary>The harness's view scale, pushed in every frame rather than
+    /// read from here, because this node has no business knowing about the
+    /// camera - and pushed every frame rather than once, for the reason the
+    /// tremble level is: a tank built later would sit on the old figure.
+    /// </summary>
+    public float ViewZoom = 1.0f;
+
+    /// <summary>Whether the sprite is rasterised into the stage's paint target
+    /// instead of straight into the screen. It changes which buffer the jolt has
+    /// to land whole in - see <see cref="HeaveScale"/>.</summary>
+    public bool Painted;
+
+    /// <summary>
+    /// Local pixels to pixels of the buffer this sprite is rasterised into: the
+    /// factor the jolt has to be whole against.
+    ///
+    /// <b>Two branches, because there are two buffers.</b> In 2D the sprite is
+    /// drawn straight into the screen, so the factor is the class scale and the
+    /// zoom together. On the 3D stage it is drawn into a 512 target at the class
+    /// scale, and the quad is sampled from there by a camera whose size carries
+    /// the zoom; a fractional zoom resamples the <em>whole</em> tank whatever the
+    /// jolt does, so snapping to screen pixels there buys nothing and the target's
+    /// own texels are what to land on.
+    /// </summary>
+    public float HeaveScale => BodyScale * (Painted ? 1.0f : ViewZoom);
+
+    /// <summary>A jolt put on the pixel grid of what it is drawn into. Static and
+    /// given its factor, so the self-test can ask it without a board - the reason
+    /// <see cref="ClimbLean.Print"/> and its neighbours are shaped this way.
+    /// </summary>
+    public static double SnapHeave(double heave, float scale) =>
+        scale <= 1e-6f ? 0.0 : Math.Round(heave * scale) / scale;
+
+    /// <summary>What the layers are drawn with: <see cref="Shake"/> on the
+    /// grid.</summary>
+    public float Heave => (float)SnapHeave(Shake, HeaveScale);
+
+    /// <summary>
+    /// Heave a layer receives. It does not depend on which part of the tank the
+    /// layer is - see <see cref="TurretStabilised"/> for why the turret shares it
+    /// - but it does depend on whether the layer is part of the tank at all.
+    ///
+    /// <b>A layer printed on the ground gets none of it, and the argument that
+    /// lets the shadow follow the pitch does not reach this far.</b> A pitch turns
+    /// the body about its contact patch and so leaves the patch where it was,
+    /// which is why the shadow is allowed to take it: two pixels of shear reads as
+    /// the tank pressing into the ground. A heave <em>translates</em> the body,
+    /// patch included, and a shadow that goes up with it is a shadow that has left
+    /// the ground - which reads as the camera twitching rather than as the tank
+    /// bouncing.
+    ///
+    /// It also puts the shadow back with the rest of the ground: the selection
+    /// ring, the ruts, the wake and the pond's swell are all keyed on
+    /// <see cref="Vehicle.GroundPoint"/> and stand still through a bump. The
+    /// shadow was the one thing on the ground that jumped.
+    ///
+    /// What it does <em>not</em> do is move the shadow the way a real one moves.
+    /// A body lifted by h throws its shadow 0.70h along the sun's run at 55
+    /// degrees - sideways, not up - and that is a separate claim needing a
+    /// separate measurement. Not moving is the right answer to the wrong one that
+    /// was there; sliding it is the next question.
+    /// </summary>
+    public float HeaveFor(bool turret) => Heave;
+
+    /// <summary>
+    /// Where a bump displaces a layer to: straight up the screen for anything the
+    /// hull carries, along the sun's run for anything printed on the ground.
+    ///
+    /// <b>A directional sun makes this a translation and nothing else.</b> Lifting
+    /// a caster under parallel light slides its shadow along the run and does not
+    /// change its shape, so the baked silhouette stays exactly right - which is
+    /// what makes the answer affordable at all.
+    ///
+    /// The arithmetic is the board's own, in the two steps it already uses
+    /// elsewhere: a screen row of height is <c>1/cos(elevation)</c> world units
+    /// (the same conversion <see cref="Stage3D.SunCast"/>'s note makes when it
+    /// says 100px of tree is 115 units), the run per unit of height is SunCast,
+    /// and a ground offset reaches the screen with its second axis squashed. No
+    /// new constant: the squash comes off the atlas the way
+    /// <see cref="ShearFor"/> takes it, and the cosine follows from it.
+    /// </summary>
+    public Vector2 HeaveShift(bool turret, bool grounded)
+    {
+        float heave = HeaveFor(turret);
+        if (!grounded)
+            return new Vector2(0.0f, heave);
+        if (Atlas is null || Math.Abs(heave) < 1e-6f)
+            return Vector2.Zero;
+        float squash = -Atlas.GroundDirection(90.0).Y;
+        float rise = Mathf.Sqrt(Math.Max(1.0f - squash * squash, 1e-6f));
+        float lifted = -heave / rise;            // screen rows up, as world height
+        return new Vector2(Stage3D.SunCast.X * lifted,
+                           Stage3D.SunCast.Y * lifted * squash);
+    }
 
     /// <summary>
     /// The one shear a layer is drawn through, for both pivots at once.
@@ -1288,7 +1381,7 @@ public sealed partial class TankSprite : Node2D
             return;
         DrawTextureRectRegion(Atlas.Texture(layer),
             new Rect2(-Atlas.Anchor + Atlas.OffsetOf(layer, index)
-                      + new Vector2(0.0f, Shake), size),
+                      + new Vector2(0.0f, Heave), size),
             Atlas.Region(layer, index));
     }
 

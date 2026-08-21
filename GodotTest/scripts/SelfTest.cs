@@ -243,15 +243,38 @@ public static class SelfTest
             $"peak {Math.Abs(minAccel):F4}");
 
         GD.Print("ground rumble");
+        // What a tank drawn at 1:1 shows. The class holds the amplitude now and
+        // the draw does the rounding - see TankSprite.SnapHeave - so every claim
+        // below about pixels has to be made about the drawn figure, not about the
+        // held one.
+        static int Shown(BodyRumble r, float scale = 1.0f) =>
+            (int)Math.Round(TankSprite.SnapHeave(r.Heave, scale) * scale);
+        // The ground is a lattice on the field now, so a test drives a line
+        // across it rather than winding an odometer. Neither axis-aligned nor
+        // diagonal: on a square lattice those two are the extremes of the
+        // crossing rate. The start is off any boundary, so that a coarse step and
+        // a fine one are not being compared across a dead zone.
+        var course = new Vector2(0.6f, 0.8f);
+        var start = new Vector2(7.3f, 11.7f);
+        // One cell for every claim about the lattice: which cell the patch is on
+        // is the other half of it, and holding it still is what leaves these
+        // measuring the square. The claims about the cell are their own, below.
+        var oneCell = new Vector2I(4, 4);
+        void Roll(BodyRumble r, ref Vector2 at, double speed, double step)
+        {
+            at += course * (float)(speed * step);
+            r.Advance(at, oneCell, speed, step);
+        }
         var rumble = new BodyRumble();
+        Vector2 rumbleAt = start;
         var seen = new HashSet<int>();
         int changes = 0, previous = 0;
         for (int i = 0; i < 300; i++)
         {
-            rumble.Advance(240.0 * dt, 240.0);
-            seen.Add(rumble.Offset);
-            if (rumble.Offset != previous) changes++;
-            previous = rumble.Offset;
+            Roll(rumble, ref rumbleAt, 240.0, dt);
+            seen.Add(Shown(rumble));
+            if (Shown(rumble) != previous) changes++;
+            previous = Shown(rumble);
         }
         Check("the jolt is whole pixels and stays small",
             seen.All(v => v is >= -2 and <= 2), $"saw {string.Join(",", seen.OrderBy(v => v))}");
@@ -272,50 +295,239 @@ public static class SelfTest
             300.0 / Math.Max(changes, 1) >= 5.0,
             $"a change every {300.0 / Math.Max(changes, 1):F1} frames");
 
-        // Phase must come from distance. The same ground covered in a seventh
-        // of the steps has to give the same offset, or the rumble is really a
-        // clock and every speed rattles alike.
-        // The distances deliberately avoid whole multiples of BumpSpacing: on a
-        // boundary the two accumulations straddle it by one float ulp and land
-        // on different bumps, which says nothing about whether distance drives
-        // the phase. An earlier version used exactly 240px - eight bumps on the
-        // nose - and passed only while those two bumps happened to agree.
+        // The ground belongs to the place, so how the tank got there cannot
+        // matter: the same line walked in a seventh of the steps has to end on
+        // the same jolt. This is the frame-rate claim the odometer version made,
+        // and the stronger one underneath it - that the bump is a function of
+        // where the tank is and of nothing else.
+        // The end points deliberately avoid the dead zone: within Hysteresis of a
+        // boundary the coarse walk and the fine one legitimately hold different
+        // patches, which says nothing about what the ground is made of.
         var driftOk = true;
         var mismatch = "";
         foreach (double total in new[] { 47.0, 133.0, 237.0, 512.5 })
         {
             var coarse = new BodyRumble();
             var fine = new BodyRumble();
-            for (int i = 0; i < 20; i++) coarse.Advance(total / 20.0, 240.0);
-            for (int i = 0; i < 137; i++) fine.Advance(total / 137.0, 240.0);
-            if (coarse.Offset != fine.Offset)
+            Vector2 coarseAt = start, fineAt = start;
+            // One speed, two step lengths - not one step and two speeds. The
+            // gain is a function of the speed, so walking the same line at two
+            // speeds compares two gains and says nothing about the ground: it is
+            // how this check first failed after the rewrite.
+            for (int i = 0; i < 20; i++)
+                Roll(coarse, ref coarseAt, 240.0, total / 20.0 / 240.0);
+            for (int i = 0; i < 137; i++)
+                Roll(fine, ref fineAt, 240.0, total / 137.0 / 240.0);
+            if (Math.Abs(coarse.Heave - fine.Heave) > 1e-12)
             {
                 driftOk = false;
-                mismatch = $"at {total}px: {coarse.Offset} vs {fine.Offset}";
+                mismatch = $"at {total}px: {coarse.Heave:F6} vs {fine.Heave:F6}";
             }
         }
-        Check("phase follows distance, not the frame clock", driftOk, mismatch);
+        Check("the ground is where the tank is, not how it got there", driftOk,
+            mismatch);
+
+        // One bump is one decision, and the gain is half of that decision: read
+        // live it moves inside the bump, which is what the hold is for. This is
+        // the ramp from rest, where it happened on every class.
+        //
+        // Two things may happen inside one bump and no third: the latched value,
+        // and letting go of it once the body has carried it long enough. So what
+        // is forbidden is a different value, and coming back after coming level -
+        // dropping the offset is not a decision about the ground, and a ramp from
+        // rest crosses a patch in more frames than the hold lasts, so this is the
+        // run where the release happens.
+        var ramp = new BodyRumble { FullSpeed = 155.0 };
+        Vector2 rampAt = start;
+        double climbing = 0.0;
+        long onBump = long.MinValue;
+        double heldAt = 0.0;
+        bool released = false;
+        var slid = "";
+        for (int i = 0; i < 240; i++)
+        {
+            climbing = Math.Min(climbing + 620.0 * dt, 310.0);
+            Roll(ramp, ref rampAt, climbing, dt);
+            if (ramp.Bump != onBump)
+            {
+                onBump = ramp.Bump;
+                heldAt = ramp.Heave;
+                released = false;
+            }
+            else if (Math.Abs(ramp.Heave) < 1e-12)
+                released = true;
+            else if (released)
+                slid = $"bump {onBump} came back to {ramp.Heave:F4} after letting go";
+            else if (Math.Abs(ramp.Heave - heldAt) > 1e-12)
+                slid = $"bump {onBump} slid to {ramp.Heave:F4} from {heldAt:F4}";
+        }
+        Check("one bump is one decision, even while the throttle is opening",
+            slid.Length == 0, slid);
+        // And the latch must not outlive the motion. A tank that brakes to a
+        // halt half way over a bump keeps the latched gain unless something ends
+        // the hold, and would sit there jolted until it drove on.
+        var halted = new BodyRumble();
+        Vector2 haltedAt = start;
+        // Driven until it is on a jolt worth showing, rather than for a fixed
+        // forty frames. Which patch a frame count lands on is the draw's
+        // business, and the pair put two fifths of them level - so the fixed
+        // count picked a bump of -0.068 and the check read as failing when what
+        // it had actually done was stop on flat ground.
+        int haltedFrames = 0;
+        while (Math.Abs(halted.Heave) <= 0.5 && haltedFrames < 600)
+        {
+            Roll(halted, ref haltedAt, 240.0, dt);
+            haltedFrames++;
+        }
+        double rolling = halted.Heave;
+        halted.Advance(haltedAt, oneCell, 0.0, dt);
+        Check("a tank that stops mid-bump comes level",
+            Math.Abs(rolling) > 0.5 && Math.Abs(halted.Heave) < 1e-9,
+            $"was {rolling:F3} after {haltedFrames} frames, left at {halted.Heave:F3}");
+
+        // Three tanks on parallel routes must not be jolted in step, and this is
+        // what the lattice buys instead of a per-tank seed: they are in different
+        // places, so they are on different ground, and nothing has to be told
+        // which tank it is. The seed this replaced answered the odometer's
+        // problem - equal distances, identical bumps - and is gone with it.
+        var groundPer = new List<List<double>>();
+        for (int lane = 0; lane < 3; lane++)
+        {
+            var own = new BodyRumble();
+            Vector2 at = start + new Vector2(0.0f, 137.0f * lane);
+            var track = new List<double>();
+            for (int i = 0; i < 200; i++)
+            {
+                Roll(own, ref at, 240.0, dt);
+                track.Add(own.Heave);
+            }
+            groundPer.Add(track);
+        }
+        Check("three tanks on parallel routes do not meet the same ground",
+            !groundPer[0].SequenceEqual(groundPer[1])
+            && !groundPer[1].SequenceEqual(groundPer[2])
+            && !groundPer[0].SequenceEqual(groundPer[2]),
+            "two of the three were jolted identically");
+        // And the other half, which --capture needs: the same line twice is the
+        // same ground twice. A rumble that differed between runs would be
+        // measuring itself in every A/B taken near a moving tank.
+        var again = new BodyRumble();
+        Vector2 againAt = start + new Vector2(0.0f, 137.0f);
+        var replay = new List<double>();
+        for (int i = 0; i < 200; i++)
+        {
+            Roll(again, ref againAt, 240.0, dt);
+            replay.Add(again.Heave);
+        }
+        Check("and one tank driving the same line meets it again",
+            replay.SequenceEqual(groundPer[1]),
+            "the same line gave a different ride the second time");
+        // The point of a place-indexed lattice, said directly: two tanks standing
+        // on one patch are standing on one patch. Under the odometer they agreed
+        // only if they had driven the same distance, which is a coincidence.
+        var here = new BodyRumble();
+        var there = new BodyRumble();
+        Vector2 spot = new Vector2(413.0f, 271.0f);
+        // One of them has been driving all over the board first, because that is
+        // the half an odometer gets wrong: what the ground gives has to depend on
+        // the square and not on how long the tank has been out.
+        Vector2 wandering = new Vector2(-190.0f, 640.0f);
+        for (int i = 0; i < 300; i++)
+            Roll(there, ref wandering, 240.0, dt);
+        here.Advance(spot, oneCell, 240.0, dt);
+        there.Advance(spot, oneCell, 240.0, dt);
+        Check("two tanks on one patch of ground are jolted alike",
+            Math.Abs(here.Heave - there.Heave) < 1e-12
+            && Math.Abs(here.Roll - there.Roll) < 1e-12
+            && Math.Abs(here.Heave) > 1e-9,
+            $"{here.Heave:F6} against {there.Heave:F6}");
+
+        // What a square lattice costs: a line into its corner crosses more
+        // squares than a line along its side, so the bump rate leans on the
+        // heading. sqrt(2) is the worst a straight line can do; the six the board
+        // can actually drive are what matters, and if they spread wider than half
+        // again the lattice would have to be hexagonal.
+        var perThousand = new List<double>();
+        foreach (int heading in HexField.EdgeHeadings)
+        {
+            Vector2 way = tank.Atlas!.GroundDirection(heading).Normalized();
+            var along = new BodyRumble();
+            Vector2 at = start;
+            long bumps = 0, was = long.MinValue;
+            for (int i = 0; i < 3000; i++)
+            {
+                at += way * (float)(240.0 * dt);
+                along.Advance(at, oneCell, 240.0, dt);
+                if (along.Bump != was) { was = along.Bump; bumps++; }
+            }
+            perThousand.Add(bumps * 1000.0 / (240.0 * 3000.0 * dt));
+        }
+        Check("the bump rate does not lean much on the heading",
+            perThousand.Max() < perThousand.Min() * 1.5,
+            $"{perThousand.Min():F1} to {perThousand.Max():F1} bumps per 1000px "
+            + $"({perThousand.Max() / perThousand.Min():F2}x)");
+
+        // The kind of ground is its own multiplier beside the water's, because
+        // they are two statements about one patch. Identity first: a board with no
+        // art behind a kind rides as it always did.
+        var plainRide = new BodyRumble();
+        var rough = new BodyRumble { Roughness = 1.3 };
+        var soaked = new BodyRumble { Roughness = 1.3, Damping = 0.35 };
+        Vector2 stone = new Vector2(913.0f, 77.0f);
+        plainRide.Advance(stone, oneCell, 240.0, dt);
+        rough.Advance(stone, oneCell, 240.0, dt);
+        soaked.Advance(stone, oneCell, 240.0, dt);
+        Check("rougher ground gives a bigger jolt off the same patch",
+            Math.Abs(rough.Heave - plainRide.Heave * 1.3) < 1e-9
+            && Math.Abs(plainRide.Heave) > 1e-9,
+            $"{plainRide.Heave:F4} against {rough.Heave:F4}");
+        Check("and the ford still damps it on top",
+            Math.Abs(soaked.Heave - rough.Heave * 0.35) < 1e-9,
+            $"{rough.Heave:F4} against {soaked.Heave:F4}");
 
         var stopped = new BodyRumble();
-        stopped.Advance(0.0, 0.0);
+        stopped.Advance(Vector2.Zero, oneCell, 0.0, dt);
         Check("it is still when the tank is",
-            stopped.Offset == 0 && Math.Abs(stopped.Roll) < 1e-9,
-            $"offset {stopped.Offset}, roll {stopped.Roll:F5}");
+            Math.Abs(stopped.Heave) < 1e-9 && Math.Abs(stopped.Roll) < 1e-9,
+            $"heave {stopped.Heave:F5}, roll {stopped.Roll:F5}");
 
         // Roll must not just track the heave, or it adds nothing the heave has
-        // not already said.
+        // not already said. The pair makes this half cheap - the mean and the
+        // half difference of two draws agree in sign exactly half the time by
+        // construction - so it is kept as the floor it now is: a roll copied
+        // off the heave agrees always, a roll negated from it never. What the
+        // pair itself claims is the check under this one.
         var pair = new BodyRumble();
+        Vector2 pairAt = start;
         int agree = 0, samples = 0;
+        double worstJoint = 0.0;
         for (int i = 0; i < 400; i++)
         {
-            pair.Advance(240.0 * dt, 240.0);
-            if (pair.Offset == 0) continue;
+            Roll(pair, ref pairAt, 240.0, dt);
+            if (Math.Abs(pair.Heave) < 1e-9) continue;
             samples++;
-            if (Math.Sign(pair.Roll) == Math.Sign(pair.Offset)) agree++;
+            if (Math.Sign(pair.Roll) == Math.Sign(pair.Heave)) agree++;
+            worstJoint = Math.Max(worstJoint,
+                Math.Abs(pair.Heave) / pair.Amplitude
+                + Math.Abs(pair.Roll) / pair.RollAmplitude);
         }
-        Check("roll is drawn independently of the heave",
+        Check("roll is not derived from the heave",
             samples > 50 && agree > samples * 0.25 && agree < samples * 0.75,
             $"{agree} of {samples} bumps agreed in sign");
+        // And yet both come off one pair of track heights, which shows as a
+        // bound rather than as a correlation. Heave is their mean and roll their
+        // half difference, so the two normalised and added come to the taller of
+        // the two tracks exactly - and a track cannot ride up by more than the
+        // amplitude. Lifting the whole tank takes both tracks agreeing, so one
+        // bump cannot be a full lift and a full tip at once.
+        //
+        // Both halves again. Two independent draws fill the square instead and
+        // put half of every bump outside this diamond, which is what was here
+        // before and what the upper bound catches; the lower one is against a
+        // rumble that has quietly stopped, since nought passes a bound.
+        Check("but both come off one pair of track heights",
+            worstJoint <= 1.0 + 1e-9 && worstJoint > 0.9,
+            $"worst normalised |heave| + |roll| is {worstJoint:F3} over {samples} bumps");
 
         // The point of having roll at all. A bump lifts the tank straight up in
         // world space, which is straight up on screen at every heading, so the
@@ -344,18 +556,184 @@ public static class SelfTest
             worstAxis > 0.5,
             $"worst is {worstHeading} deg at {worstAxis:F2}");
 
+        // Counted per bump rather than per frame, and that is not tidying: a
+        // bump at 20px/s is held for ninety frames and one at cruise for seven,
+        // so a frame count over a fixed number of frames compares thirteen bumps
+        // against a hundred and sixty. It read 360 against 387 - a ratio of noise
+        // over noise, the same shape of mistake the cycle-seam check made when it
+        // divided one median by another.
         var crawl = new BodyRumble();
-        int crawlNonZero = 0, fastNonZero = 0;
         var fast = new BodyRumble();
-        for (int i = 0; i < 600; i++)
+        Vector2 crawlAt = start, fastAt = start;
+        int crawlBumps = 0, crawlShown = 0, fastBumps = 0, fastShown = 0;
+        long onCrawl = long.MinValue, onFast = long.MinValue;
+        for (int i = 0; i < 12000; i++)
         {
-            crawl.Advance(20.0 * dt, 20.0);
-            if (crawl.Offset != 0) crawlNonZero++;
-            fast.Advance(240.0 * dt, 240.0);
-            if (fast.Offset != 0) fastNonZero++;
+            Roll(crawl, ref crawlAt, 20.0, dt);
+            if (crawl.Bump != onCrawl)
+            {
+                onCrawl = crawl.Bump;
+                crawlBumps++;
+                if (Shown(crawl) != 0) crawlShown++;
+            }
+            Roll(fast, ref fastAt, 240.0, dt);
+            if (fast.Bump != onFast)
+            {
+                onFast = fast.Bump;
+                fastBumps++;
+                if (Shown(fast) != 0) fastShown++;
+            }
         }
+        double crawlShare = (double)crawlShown / Math.Max(crawlBumps, 1);
+        double fastShare = (double)fastShown / Math.Max(fastBumps, 1);
+        // Both halves, and the left one is the point: written as "fewer than a
+        // third" alone this passed on nought, which is what a crawl actually got
+        // - the gain could not reach the half pixel a jolt needs. A claim about
+        // thinning out that is satisfied by silence is not a claim.
         Check("it thins out at a crawl instead of switching off",
-            crawlNonZero < fastNonZero / 3, $"{crawlNonZero} vs {fastNonZero} frames jolted");
+            crawlShare > 0.0 && crawlShare < fastShare * 3 / 4,
+            $"{crawlShare:P0} of {crawlBumps} bumps show against {fastShare:P0} of {fastBumps}");
+        // And the harness's own crawl, which is the speed this was measured
+        // failing at: a tank creeping through a bend does 0.12 of cruise against
+        // a FullSpeed of half of it.
+        var bend = new BodyRumble { FullSpeed = 240.0 * 0.5 };
+        Vector2 bendAt = start;
+        int bendJolts = 0;
+        for (int i = 0; i < 1200; i++)
+        {
+            Roll(bend, ref bendAt, 240.0 * 0.12, dt);
+            if (Shown(bend) != 0) bendJolts++;
+        }
+        Check("a tank creeping through a bend still meets the ground",
+            bendJolts > 0, $"{bendJolts} of 1200 frames jolted at the corner speed");
+
+        // And a pond bottom is not a field. Per bump and at one speed, so what is
+        // being compared is the ground rather than the ford's own speed cap.
+        double Showing(double damping, double speed)
+        {
+            var probe = new BodyRumble { FullSpeed = 120.0, Damping = damping };
+            Vector2 at = start;
+            long on = long.MinValue;
+            int bumps = 0, shown = 0;
+            for (int i = 0; i < 12000; i++)
+            {
+                Roll(probe, ref at, speed, 1.0 / 60.0);
+                if (probe.Bump == on) continue;
+                on = probe.Bump;
+                bumps++;
+                if (Math.Abs(TankSprite.SnapHeave(probe.Heave, 1.0f)) > 0.5) shown++;
+            }
+            return (double)shown / Math.Max(bumps, 1);
+        }
+        double dry = Showing(1.0, 108.0);
+        double wet = Showing(BodyRumble.WetDamping, 108.0);
+        Check("the same tank at the same speed rides softer in a ford",
+            wet > 0.0 && wet < dry / 2.0, $"{wet:P0} of bumps show wading, {dry:P0} dry");
+
+        // The hold belongs to the body, not to the ground. Held until the next
+        // patch, a bump at a crawl stood for 83 frames at a stretch and 270 at
+        // the worst - a lean, not a jolt, and the one place the complaint about
+        // this effect is real. Both halves again: nought frames would satisfy a
+        // bound on its own, and nought is a rumble that has stopped.
+        int Longest(double speed, double hold)
+        {
+            var probe = new BodyRumble { FullSpeed = 120.0, HoldSeconds = hold };
+            Vector2 at = start;
+            int worst = 0, run = 0;
+            for (int i = 0; i < 6000; i++)
+            {
+                Roll(probe, ref at, speed, dt);
+                if (Shown(probe) != 0)
+                {
+                    run++;
+                    worst = Math.Max(worst, run);
+                }
+                else run = 0;
+            }
+            return worst;
+        }
+        // The bound is a number of frames rather than the setting read back.
+        // Written as "no longer than HoldSeconds" it is true of any hold at all,
+        // including no hold - which is the very thing it is here to forbid, and
+        // it passed on it. A third of a second is the claim: it was a second and
+        // a half, and the same run uncapped still measures 180 frames.
+        int crawlRun = Longest(20.0, new BodyRumble().HoldSeconds);
+        Check("a bump does not outstay the suspension",
+            crawlRun > 3 && crawlRun < 25,
+            $"longest jolt at a crawl is {crawlRun} frames");
+        // And it costs the road nothing, which is the whole of why the hold is a
+        // time and not a fraction of the patch: at cruise the next bump arrives
+        // before the hold runs out, so the ride is the same frame for frame. It
+        // has to be the same for the worst case rather than for the average one -
+        // the slowest cruise on the heading where a patch takes longest to cross,
+        // which is a heavy along a lattice axis at 30px per bump. Not the shared
+        // course, because that one is deliberately off the axis.
+        var letGo = new BodyRumble { FullSpeed = 175.0 * 0.5 };
+        var holdOn = new BodyRumble { FullSpeed = 175.0 * 0.5, HoldSeconds = 1e9 };
+        Vector2 letGoAt = start, holdOnAt = start;
+        int roadDrift = 0;
+        for (int i = 0; i < 3000; i++)
+        {
+            var axis = new Vector2((float)(175.0 * dt), 0.0f);
+            letGoAt += axis;
+            holdOnAt += axis;
+            letGo.Advance(letGoAt, oneCell, 175.0, dt);
+            holdOn.Advance(holdOnAt, oneCell, 175.0, dt);
+            if (Shown(letGo) != Shown(holdOn)) roadDrift++;
+        }
+        Check("and letting go costs the ride at cruise nothing", roadDrift == 0,
+            $"{roadDrift} of 3000 frames differ, heavy along a lattice axis");
+
+        // A cell edge is a bump, and the reason is the kind rather than the
+        // event. What the ground is made of changes at an edge and the gain is
+        // latched per bump, so with the square alone a tank that has driven onto
+        // stony ground goes on riding the soft kind until the next square - up to
+        // a quarter of a cell late, and the same distance of dry ride past the
+        // edge of a ford. Asserted where it is hardest: the position does not
+        // move at all, so the square cannot be what decides.
+        var acrossEdge = new BodyRumble { FullSpeed = 120.0, Roughness = 0.0 };
+        Vector2 kindAt = start;
+        for (int i = 0; i < 3; i++)
+            Roll(acrossEdge, ref kindAt, 240.0, dt);
+        double onSoft = acrossEdge.Heave;
+        long softBumps = acrossEdge.Bump;
+        acrossEdge.Roughness = 1.0;
+        acrossEdge.Advance(kindAt, new Vector2I(oneCell.X + 1, oneCell.Y), 240.0, dt);
+        Check("a cell edge is a bump, so the kind of ground takes effect there",
+            acrossEdge.Bump == softBumps + 1
+            && Math.Abs(onSoft) < 1e-12 && Math.Abs(acrossEdge.Heave) > 1e-9,
+            $"{softBumps} bumps and {onSoft:F4} on the soft kind, "
+            + $"{acrossEdge.Bump} and {acrossEdge.Heave:F4} across the edge");
+
+        // The whole-pixel claim, made about the buffer the sprite is rasterised
+        // into rather than about the sprite's own space. The node carries the
+        // class scale, so a whole pixel here is 0.85 of one on a light and 1.15
+        // on a heavy - and the zoom multiplies both. Every scale the bench uses
+        // against every zoom it reaches.
+        var heaveOffGrid = "";
+        foreach (float body in new[] { 0.85f, 1.00f, 1.15f })
+            foreach (float zoom in new[] { 0.25f, 1.0f, 2.0f, 3.5f, 8.0f })
+            {
+                float factor = body * zoom;
+                var probe = new BodyRumble();
+                Vector2 probeAt = start;
+                for (int i = 0; i < 200; i++)
+                {
+                    Roll(probe, ref probeAt, 240.0, dt);
+                    double drawn = TankSprite.SnapHeave(probe.Heave, factor) * factor;
+                    if (Math.Abs(drawn - Math.Round(drawn)) > 1e-4)
+                        heaveOffGrid = $"{body:F2}x at zoom {zoom:F2} draws {drawn:F3}px";
+                }
+            }
+        Check("the jolt lands on whole pixels of what it is drawn into",
+            heaveOffGrid.Length == 0, heaveOffGrid);
+        // And the answer it replaced fails that, which is the whole of the fix:
+        // one pixel decided in the sprite's own space, drawn through a light's
+        // scale, is 0.85 of a pixel. Written out rather than described, so the
+        // pair is falsifiable in both directions.
+        double wasDrawn = Math.Round(new BodyRumble().Amplitude * 0.9) * 0.85f;
+        Check("and deciding it before the class scale does not",
+            Math.Abs(wasDrawn - Math.Round(wasDrawn)) > 1e-4, $"drew {wasDrawn:F3}px");
 
         GD.Print("engine tremble");
         var tremble = new EngineTremble();
@@ -1329,7 +1707,7 @@ public static class SelfTest
             string lender = atlases.Keys.First();
             string borrower = atlases.Keys.First(k => k != lender);
             AtlasSet worn = AtlasSet.Load(
-                "D:/Projects/AgentCoding/BlenderMCP/Sprites", borrower, lender);
+                Main.SpritesRoot, borrower, lender);
             Check("a borrowed atlas keeps the tag it was asked for",
                 worn.Error.Length == 0 && worn.Tag == borrower,
                 $"asked for {borrower}, wearing {lender}, tag came back "
@@ -1705,6 +2083,36 @@ public static class SelfTest
                 $"frame {set.Frame.X}x{set.Frame.Y}, kinds "
                 + string.Join(", ", set.Names.Select(
                     n => $"{n} x{set.Detail(n)} {set.Texture(n)!.GetSize()}")));
+
+            // What the ride is taken from, and it is taken from the picture: a
+            // table of names would need editing every time somebody paints a hex,
+            // and a kind missing from it would ride like nothing in particular.
+            // Two halves. The ordering, because that is the whole claim - coarse
+            // ground rides coarse - and a spread, because a set whose kinds all
+            // ride alike is a feature that does nothing while looking present.
+            var byGrain = set.Names.OrderBy(n => set.GrainOf(n)).ToList();
+            var byRide = set.Names.OrderBy(n => set.RideOf(n)).ToList();
+            Check("the ride a kind gives follows the grain of its art",
+                byGrain.SequenceEqual(byRide),
+                string.Join(", ", set.Names.Select(
+                    n => $"{n} grain {set.GrainOf(n):F1} ride {set.RideOf(n):F2}")));
+            Check("and the kinds on this board do not all ride alike",
+                set.Names.Count < 2
+                || set.RideOf(byRide[^1]) - set.RideOf(byRide[0]) > 0.1f,
+                string.Join(", ", set.Names.Select(n => $"{n} {set.RideOf(n):F2}")));
+            // Inside the band by construction, and worth saying because the cap is
+            // a guard rather than the operating point: art nobody has drawn yet
+            // cannot double the ride, and nothing on this board is near it.
+            Check("every kind rides inside the band",
+                set.Names.All(n => set.RideOf(n) >= TerrainSet.SmoothRide
+                                   && set.RideOf(n) <= TerrainSet.RoughRide),
+                string.Join(", ", set.Names.Select(n => $"{n} {set.RideOf(n):F2}")));
+            // A forest cell is soil with trees on it: the kind has no art, so
+            // there is nothing to measure and it rides as normal ground.
+            Check("a kind with no art behind it rides at one",
+                Math.Abs(set.RideOf(TerrainSet.Forest) - 1.0f) < 1e-6
+                && Math.Abs(set.RideOf("no such hex") - 1.0f) < 1e-6,
+                $"forest {set.RideOf(TerrainSet.Forest):F2}");
 
             // Not the silhouette's centre - the template's plate. A kind whose
             // grass grew would otherwise move its whole cell.
@@ -5024,6 +5432,24 @@ public static class SelfTest
             tank.HeaveFor(true) == tank.HeaveFor(false) && tank.HeaveFor(true) == tank.Shake,
             $"{tank.HeaveFor(true)} vs {tank.HeaveFor(false)}");
 
+        // And the one part that is not part of the tank takes the bump the way a
+        // shadow takes it: along the sun rather than up the screen. Both halves,
+        // because either alone passes on a tank that is not being jolted at all -
+        // which is every tank, the rumble being off by default.
+        Vector2 hullBump = tank.HeaveShift(false, grounded: false);
+        Vector2 groundBump = tank.HeaveShift(false, grounded: true);
+        Check("a bump lifts the tank straight up",
+            Math.Abs(hullBump.X) < 1e-9 && Math.Abs(hullBump.Y) > 0.5,
+            $"{hullBump}");
+        // Lifted, so the shadow runs away from the tank along the sun - the same
+        // direction and the same 0.70 per unit of height that every prop on the
+        // board casts by.
+        Check("and slides its shadow along the sun instead of lifting that too",
+            groundBump.X * Stage3D.SunCast.X > 0.0
+            && groundBump.Y * Stage3D.SunCast.Y > 0.0
+            && groundBump.Length() > 0.5f && groundBump.Length() < 2.0f,
+            $"{groundBump} for a {hullBump.Y}px jolt");
+
         // The tremble goes the other way: the turret is exempt from it too, so
         // the aerial stops swinging. Affordable only because the seam cost is
         // sub-pixel at the tremble amplitude - checked below - which is the whole
@@ -7454,7 +7880,7 @@ public static class SelfTest
             foreach (string tag in Main.Tags)
             {
                 AtlasSet set = AtlasSet.Load(
-                    "D:/Projects/AgentCoding/BlenderMCP/Sprites", tag, tag);
+                    Main.SpritesRoot, tag, tag);
                 if (set.Error.Length > 0)
                     continue;
                 if (!set.HasHeights)
@@ -7521,7 +7947,7 @@ public static class SelfTest
                 deepTale.Length == 0, deepTale);
             Check("and a set without one still has a groundline to fall back on",
                 bare.All(t => AtlasSet.Load(
-                    "D:/Projects/AgentCoding/BlenderMCP/Sprites", t, t)
+                    Main.SpritesRoot, t, t)
                     .Groundline is not null),
                 $"{string.Join(", ", bare)} would lose the waterline entirely");
 

@@ -18,27 +18,19 @@ namespace TankSpriteTest;
 /// </summary>
 public sealed partial class Main : Node2D
 {
-	private const string SpritesRoot = "D:/Projects/AgentCoding/BlenderMCP/Sprites";
-
-	/// <summary>Where <c>stage_sounds.sh</c> puts the audio. Off an absolute path
-	/// for the reason the atlases are, and one more besides: the bytes are not in
-	/// this repository - see the script - so this directory is often simply
-	/// absent, and everything downstream of it has to be happy about that.
-	/// </summary>
-	private const string SoundsRoot = "D:/Projects/AgentCoding/BlenderMCP/Sounds";
-
-	/// <summary>The hand-drawn ground. Absolute for the reason the atlases are -
-	/// redraw a hex, restart, see it - and optional for the reason the sounds
-	/// are: without it the field falls back to the rendered tile and everything
-	/// else is unchanged.</summary>
-	private const string TerrainsRoot = "D:/Projects/AgentCoding/BlenderMCP/Images/Terrains";
-	private const string PropsRoot = "D:/Projects/AgentCoding/BlenderMCP/Images/Vegetation";
-
-	/// <summary>The pond's drawn surface. Its own folder rather than a file in
-	/// Terrains, because TerrainSet reads that folder as kinds of ground and a
-	/// kind is picked by hash - which would scatter open water across the
-	/// hilltops. Water is a map, not paint; see <see cref="WaterArt"/>.</summary>
-	internal const string WaterRoot = "D:/Projects/AgentCoding/BlenderMCP/Images/Water";
+	/// <summary>The five folders the bench reads, all off <see cref="AssetRoot"/>
+	/// - which derives them from where this project sits rather than naming a
+	/// machine. They were literals until the repository moved and renamed all
+	/// five at once; see AssetRoot for what that costs and why nothing said so.
+	///
+	/// Internal rather than private because <c>SelfTest</c> loads atlases of its
+	/// own, and it used to carry its own copy of the path: fix one and the other
+	/// stays broken, which is the whole reason there is one name now.</summary>
+	internal static readonly string SpritesRoot = AssetRoot.Sprites;
+	private static readonly string SoundsRoot = AssetRoot.Sounds;
+	private static readonly string TerrainsRoot = AssetRoot.Terrains;
+	private static readonly string PropsRoot = AssetRoot.Props;
+	internal static readonly string WaterRoot = AssetRoot.Water;
 	/// <summary>The tanks to look for on disk, in key order: one per class,
 	/// all three built from separate parts - hull, turret, barrel, engine and
 	/// two belts as their own meshes.
@@ -1167,6 +1159,7 @@ public sealed partial class Main : Node2D
 	private bool _deadAtStart;
 	private double _recoilAtStart = 1.0;
 	private bool _rollOnly;
+	private bool _heaveOnly;
 
 	private bool Moving => _pathStep < _path.Count;
 
@@ -1421,6 +1414,19 @@ public sealed partial class Main : Node2D
 				// per-vehicle flag values above.
 				_rumbleEnabled = true;
 				_rollOnly = true;
+			}
+			else if (userArgs[i] == "--heave-only")
+			{
+				// The other half of the pair above, and it is here because a
+				// half of an A/B that cannot be taken is not an A/B. The roll
+				// had a flag and the heave did not, so every measurement of the
+				// heave so far was taken with the roll resampling the sprite
+				// underneath it.
+				//
+				// Silences the roll rather than the heave: same reason, other
+				// side. The amplitude waits for the tanks to exist.
+				_rumbleEnabled = true;
+				_heaveOnly = true;
 			}
 			else if (userArgs[i] == "--trace" && i + 1 < userArgs.Length
 					 && int.TryParse(userArgs[i + 1], out int frames))
@@ -2012,6 +2018,8 @@ public sealed partial class Main : Node2D
 			vehicle.Recoil.Level = _recoilAtStart;
 			if (_rollOnly)
 				vehicle.Rumble.Amplitude = 0.0;
+			if (_heaveOnly)
+				vehicle.Rumble.RollAmplitude = 0.0;
 		}
 		// Said out loud rather than left to the row claim: --no-3d works because
 		// FlagRows keeps panel.json's default off view.stage, and a table entry is
@@ -2681,7 +2689,15 @@ public sealed partial class Main : Node2D
 	private void RumbleChanged()
 	{
 		foreach (Vehicle v in _vehicles)
+		{
 			UpdateRumble(v, 0.0);
+			// Asked for here, the way ShadowChanged asks. Without it the switch
+			// leans on the tremble redrawing every frame - that is, on a
+			// different effect being on - and with both off the last jolt stays
+			// on screen. Latent rather than live today, which is exactly the
+			// sort of thing that stops being latent later.
+			v.Sprite.QueueRedraw();
+		}
 	}
 
 	private void TrembleChanged()
@@ -3830,15 +3846,43 @@ public sealed partial class Main : Node2D
 
 	private void UpdateRumble(Vehicle v, double delta)
 	{
+		// What the jolt has to be whole against, and it is pushed rather than
+		// pulled because the sprite has no business reading the camera. Every
+		// frame, for the reason the tremble level is: a tank built after a zoom
+		// would otherwise sit on the old factor.
+		v.Sprite.ViewZoom = _camera.Zoom.X;
+		v.Sprite.Painted = Staged;
 		if (!_rumbleEnabled)
 		{
 			v.Rumble.Reset();
-			v.Sprite.Shake = 0;
+			v.Sprite.Shake = 0.0;
 			v.Sprite.Roll = 0.0;
 			return;
 		}
-		v.Rumble.Advance(v.Speed * delta, v.Speed);
-		v.Sprite.Shake = v.Rumble.Offset;
+		// What the ground is doing to the ride. A pond bottom is not a field -
+		// see BodyRumble.WetDamping, which also says what the ford's full ride
+		// was doing to the waterline.
+		v.Rumble.Damping = v.Wading ? BodyRumble.WetDamping : 1.0;
+		// Where it is standing rather than how far it has come, and in flat space
+		// rather than drawn space - the lift goes back on, the way every other
+		// caller that asks the board about a point puts it back. See
+		// BodyRumble.Advance and HexField.Bare.
+		var ground = new Vector2(v.GroundPoint.X - _origin.X,
+								 v.GroundPoint.Y - _origin.Y + _field.Bare(v.Ground));
+		// And what that ground is made of, asked of the field rather than worked
+		// out here: HexField.KindAt is the one answer to which kind a cell is, and
+		// a second one would disagree with the picture on the mixed board. Clamped
+		// (CellUnder, not FlatCellAt) because a tank is always standing somewhere.
+		Vector2I patchCell = _field.CellUnder(ground);
+		v.Rumble.Roughness = _terrain is null ? 1.0
+			: _terrain.RideOf(_field.KindAt(patchCell));
+		// The cell goes in with the point, and it is the same cell the kind was
+		// just read off - the patch is the square and the cell, so the kind takes
+		// effect at the edge where it changes rather than at the next square. The
+		// delta goes in for the hold, not for the bump: which bump is the place,
+		// how long the body carries it is time - see BodyRumble.HoldSeconds.
+		v.Rumble.Advance(ground, patchCell, v.Speed, delta);
+		v.Sprite.Shake = v.Rumble.Heave;
 		v.Sprite.Roll = v.Rumble.Roll;
 	}
 
@@ -4520,6 +4564,7 @@ public sealed partial class Main : Node2D
 		["--pitch"] = new[] { "ride.pitch" },
 		["--rumble"] = new[] { "ride.rumble" },
 		["--roll-only"] = new[] { "ride.rumble" },
+		["--heave-only"] = new[] { "ride.rumble" },
 		["--no-tremble"] = new[] { "ride.tremble" },
 		["--tremble"] = new[] { "ride.tremble_level" },
 		["--no-shadow"] = new[] { "effects.shadow" },
@@ -4728,7 +4773,7 @@ public sealed partial class Main : Node2D
 			+ $"   ramp {_profile.RampTime:F2}s over {_profile.RampDistance:F0}px\n"
 			+ $"turn {_profile.TurnRate:F0} deg/s   corner {_profile.CornerSpeed:F0} px/s\n"
 			+ $"pitch {_tank.Pitch,7:F4}   roll {_tank.Roll,7:F4}"
-			+ $"   heave {_tank.Shake,2}px\n"
+			+ $"   heave {_tank.Heave,4:F1}px of {_tank.Shake,5:F2}\n"
 			+ $"tremble {_tank.TremblePitch,7:F4} / {_tank.TrembleYaw,7:F4}"
 			+ $" at {_tremble.PitchRateAt(_speed),4:F1} Hz\n"
 			// Where it lands, which the two amplitudes above do not say: the
@@ -5751,7 +5796,7 @@ public sealed partial class Main : Node2D
 					 // ramp feels no slope along its heading and is still standing on
 					 // one. See Vehicle.OnSlope.
 					 + (Active.Levelling || Active.OnSlope ? " over" : " depth")
-					 + $"  pitch {_tank.Pitch,8:F5}  shake {_tank.Shake,2}"
+					 + $"  pitch {_tank.Pitch,8:F5}  shake {_tank.Heave,4:F1}"
 					 + $"  roll {_tank.Roll,8:F5}  trem {_tank.TremblePitch,8:F5}"
 					 + $"/{_tank.TrembleYaw,8:F5}"
 					 // The two ends, because the amplitudes beside them cannot say
@@ -5947,7 +5992,7 @@ public sealed partial class Main : Node2D
 		{
 			if (v.Moving)
 				AdvanceOrder(v, delta);
-			else if (v.Pitch.Angle != 0.0 || v.Speed != 0.0 || v.Sprite.Shake != 0)
+			else if (v.Pitch.Angle != 0.0 || v.Speed != 0.0 || v.Sprite.Shake != 0.0)
 			{
 				// let the body settle after the stop instead of snapping level
 				v.Speed = 0.0;
@@ -6401,7 +6446,7 @@ public sealed partial class Main : Node2D
 			v.Pitch.Reset();
 			s.Pitch = 0.0;
 			v.Rumble.Reset();
-			s.Shake = 0;
+			s.Shake = 0.0;
 			s.Roll = 0.0;
 			v.Tremble.Reset();
 			s.TremblePitch = 0.0;
