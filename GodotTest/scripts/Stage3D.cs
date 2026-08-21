@@ -1468,6 +1468,11 @@ void fragment() {{
         for (int r = 0; r < Field.Rows; r++)
         {
             var cell = new Vector2I(q, r);
+            // A hole in the rectangle is not board - see HexField.Plot. Asked
+            // here rather than by walking Ordered(), because every loop over the
+            // board in this file is a raster and the order it runs in is its own.
+            if (!Field.InBounds(cell))
+                continue;
             Vector3 top = CellTop(cell);
             // How far each corner stands off that base, and the middle of the
             // face. A ramp's top is still one plane - the height is linear in
@@ -1692,6 +1697,8 @@ void fragment() {{
         for (int q = 0; q < Field.Columns; q++)
         for (int r = 0; r < Field.Rows; r++)
         {
+            if (!Field.InBounds(new Vector2I(q, r)))
+                continue;
             Vector3 top = CellTop(new Vector2I(q, r));
             Vector3[] up = CornerLift(new Vector2I(q, r));
             for (int i = 0; i < 6; i++)
@@ -1722,6 +1729,8 @@ void fragment() {{
         for (int r = 0; r < Field.Rows; r++)
         {
             var cell = new Vector2I(q, r);
+            if (!Field.InBounds(cell))
+                continue;
             Vector3 top = CellTop(cell);
             Vector3[] up = CornerLift(cell);
             // The same fan the top face is built from, so what is rasterised is
@@ -3993,13 +4002,19 @@ void fragment() {{
     /// <summary>One billboard per planted tree, and the quad shape shared by
     /// every tree of a kind.</summary>
     private readonly Dictionary<PropNode, MeshInstance3D> _standing = new();
-    /// <summary>One quad per kind, per mirror, <b>per state</b>: the burnt art
-    /// has its own size and its own foot, so it is its own mesh. Keyed rather
-    /// than rebuilt at the swap, because a wood burns cell by cell and the
-    /// second tree of a kind to catch wants the mesh the first one made.
+    /// <summary>One quad per kind, per mirror, and <b>that is all</b> - see
+    /// <see cref="Shape"/>. It holds the living picture and the burnt one at
+    /// once, so nothing about it changes when a tree burns: the handover is the
+    /// material's, per fragment.</summary>
+    private readonly Dictionary<(int Species, bool Mirrored), ArrayMesh>
+        _stems = new();
+
+    /// <summary>And one per kind, per mirror, <b>per state</b> for the mark the
+    /// tree leaves on the ground - the shadow it throws and the patch it stands
+    /// on. Its own because it cannot cross-fade; see <see cref="Mark"/>.
     /// </summary>
     private readonly Dictionary<(int Species, bool Mirrored, bool Burnt), ArrayMesh>
-        _stems = new();
+        _marks = new();
 
     /// <summary>The flame and the smoke over one tree, made when it first
     /// catches and kept afterwards. Lazily, because a board of 672 trees would
@@ -4200,13 +4215,18 @@ void fragment() {{
         foreach ((PropNode tree, MeshInstance3D stem) in _standing)
         {
             stem.Transform = Rooted(tree);
-            // The state, if it has changed. Asked by comparing the mesh it wants
-            // with the one it has rather than by watching a flag: the mesh is the
-            // thing that has to change, so a tree whose art was swapped and whose
-            // quad was not cannot get past this.
-            ArrayMesh want = Shape(tree);
-            if (stem.Mesh != want)
-                Reclothe(tree, stem, want);
+            // Which picture is on the ground under it, if that has changed.
+            // Asked by comparing the mesh it wants with the one it has rather
+            // than by watching a flag: the mesh is the thing that has to change,
+            // so a mark whose art was swapped and whose quad was not cannot get
+            // past this. The standing quad is not in it any more - it holds both
+            // pictures and never changes at all, see Shape.
+            if (_shading.TryGetValue(tree, out MeshInstance3D? mark))
+            {
+                ArrayMesh want = Mark(tree);
+                if (mark.Mesh != want)
+                    Restate(tree, mark, want);
+            }
             Kindle(tree);
             // The fade the wood set this frame. Read off the node rather than
             // pushed by whoever set it, for Selected's reason - the reveal, the
@@ -4215,6 +4235,9 @@ void fragment() {{
             {
                 bark.SetShaderParameter("fade", tree.Modulate.A);
                 bark.SetShaderParameter("scorch", tree.Scorch);
+                // How far between its two pictures it is. The one thing about the
+                // pair that moves, which is why the maps beside it are set once.
+                bark.SetShaderParameter("swap", tree.Swap);
             }
         }
         foreach ((PropNode tree, MeshInstance3D seat) in _seating)
@@ -4260,16 +4283,15 @@ void fragment() {{
     {
         foreach (PropNode tree in Wood!.Standing)
         {
-            ArrayMesh shape = Shape(tree);
             var stem = new MeshInstance3D
             {
-                Mesh = shape,
+                Mesh = Shape(tree),
                 // Sorted by where the node is, which is the trunk's foot: the
                 // same rule the tanks are sorted by and the same one the 2D
                 // ZIndex stated. By its box it would be the middle of the crown,
                 // and a crown leans.
                 SortingUseAabbCenter = false,
-                MaterialOverride = Bark(tree.Art,
+                MaterialOverride = Bark(tree,
                     tree.Tier.UnderTanks ? DressOrder : StandOrder),
             };
             AddChild(stem);
@@ -4303,7 +4325,7 @@ void fragment() {{
             // already says so; the order says it again for free.
             var cast = new MeshInstance3D
             {
-                Mesh = shape,
+                Mesh = Mark(tree),
                 SortingUseAabbCenter = false,
                 MaterialOverride = Shadow(tree.Art),
                 Visible = CastShadows,
@@ -4362,6 +4384,8 @@ void fragment() {{
             for (int q = 0; q < Field.Columns; q++)
             for (int r = 0; r < Field.Rows; r++)
             {
+                if (!Field.InBounds(new Vector2I(q, r)))
+                    continue;
                 Vector3 top = CellTop(new Vector2I(q, r));
                 loX = Mathf.Min(loX, top.X - circum); hiX = Mathf.Max(hiX, top.X + circum);
                 loZ = Mathf.Min(loZ, top.Z - circum); hiZ = Mathf.Max(hiZ, top.Z + circum);
@@ -4635,51 +4659,126 @@ void fragment() {
     private static readonly Shader Smoking =
         new() { Code = SmokeShader.Replace("FLAME_NOISE", EmberNoise) };
 
-    /// <summary>The quad for the state a tree is in. See <see cref="_stems"/>.
+    /// <summary>
+    /// The quad a tree of this kind stands on: the union of its living picture
+    /// and its burnt one.
+    ///
+    /// <b>One quad for every state, which is what the crossfade needed and then
+    /// simplified away.</b> The two pictures have their own sizes and their own
+    /// feet - Tree_1 is 947x1011 living against 908x989 burnt, and Tree_2 is
+    /// <i>wider</i> burnt than living - so neither rectangle contains the other,
+    /// and a handover drawn inside the incoming one would cut the outgoing crown
+    /// off square. The union holds both, so the mesh does not change when a tree
+    /// burns at all and the state lives entirely in the material.
+    ///
+    /// The margin it adds costs nothing: it is transparent in both pictures, the
+    /// same reason the rows below a tree's foot cost nothing.
     /// </summary>
     private ArrayMesh Shape(PropNode tree)
     {
-        (int, bool, bool) kind = (tree.Species, tree.Mirrored, tree.Charred);
-        if (!_stems.TryGetValue(kind, out ArrayMesh? shape))
-            _stems[kind] = shape = Stem(tree.ShownFoot * tree.Pixels,
-                                        tree.ShownSize * tree.Pixels, RiseFactor);
+        (int, bool) kind = (tree.Species, tree.Mirrored);
+        if (_stems.TryGetValue(kind, out ArrayMesh? shape))
+            return shape;
+        (Vector2 foot, Vector2 size, _, _) = Union(tree);
+        _stems[kind] = shape = Stem(foot * tree.Pixels, size * tree.Pixels,
+                                    RiseFactor);
         return shape;
     }
 
     /// <summary>
-    /// Put a tree into the art of the state it has reached: the quad, the paint,
-    /// the shadow it throws and the patch it stands on.
+    /// The union quad's foot and size, and the two maps that put each picture
+    /// back where it belongs inside it.
     ///
-    /// <b>All four, and the shadow is the one that would have been forgotten.</b>
-    /// The cast is the same mesh masked by the same art, so a burnt trunk whose
-    /// shadow was left behind would throw the shadow of a crown it no longer has -
-    /// and on Tree_1 that is 33px of canopy lying on the ground beside a bare stem.
+    /// Worked in foot-relative image px with y up from the foot, which is the
+    /// space <see cref="Stem"/> reads: a picture with foot F and size S covers x
+    /// from -F.x to S.x-F.x, and y from F.y-S.y to F.y. A map is an offset and a
+    /// scale onto that picture's own UV, so it carries no pixel scale and is the
+    /// same for every tree of the kind - which is why it is set once and not per
+    /// frame.
+    ///
+    /// A kind with no burnt picture unions its own rectangle with itself, so it
+    /// comes out with exactly the quad and exactly the map it had before any of
+    /// this: the identity, to the bit.
+    /// </summary>
+    public static (Vector2 Foot, Vector2 Size, Godot.Vector4 Live,
+                   Godot.Vector4 Dead) Union(PropNode tree)
+    {
+        Vector2 f = tree.Foot, z = tree.Size;
+        Vector2 b = tree.BurntArt is null ? f : tree.BurntFoot;
+        Vector2 t = tree.BurntArt is null ? z : tree.BurntSize;
+        float left = Mathf.Min(-f.X, -b.X);
+        float right = Mathf.Max(z.X - f.X, t.X - b.X);
+        float top = Mathf.Max(f.Y, b.Y);
+        float low = Mathf.Min(f.Y - z.Y, b.Y - t.Y);
+        var foot = new Vector2(-left, top);
+        var size = new Vector2(right - left, top - low);
+        return (foot, size, Sited(f, z, left, top, size),
+                Sited(b, t, left, top, size));
+    }
+
+    /// <summary>One picture's rectangle as an offset and a scale onto its own
+    /// UV, given where the union starts and how big it is.</summary>
+    private static Godot.Vector4 Sited(Vector2 foot, Vector2 size, float left,
+                                       float top, Vector2 span) =>
+        new((left + foot.X) / size.X, (foot.Y - top) / size.Y,
+            span.X / size.X, span.Y / size.Y);
+
+    /// <summary>
+    /// The quad a tree's mark on the ground is cut from: its own picture's
+    /// rectangle, never the union.
+    ///
+    /// <b>The shadow does not cross-fade, and that is not a saving.</b> It is a
+    /// stencil laid down with ordinary blending, so two of them at complementary
+    /// strength do not average - they compound, the way this stage's own hull and
+    /// turret shadows compound to 0.80 out of two 0.55s. So it shows one picture
+    /// or the other, and the honest moment to change is the middle of the
+    /// handover, where the crown on screen is half of each.
+    ///
+    /// Its own mesh for the same decision: the union's UVs run across the union,
+    /// and both materials down there sample their art from 0 to 1.
+    /// </summary>
+    private ArrayMesh Mark(PropNode tree)
+    {
+        bool burnt = tree.Swap >= 0.5f;
+        (int, bool, bool) kind = (tree.Species, tree.Mirrored, burnt);
+        if (!_marks.TryGetValue(kind, out ArrayMesh? shape))
+            _marks[kind] = shape = Stem(
+                (burnt ? tree.BurntFoot : tree.Foot) * tree.Pixels,
+                (burnt ? tree.BurntSize : tree.Size) * tree.Pixels, RiseFactor);
+        return shape;
+    }
+
+    /// <summary>
+    /// Put a tree's mark on the ground into the picture it is showing now: the
+    /// shadow it throws and the patch it stands on.
+    ///
+    /// <b>The standing quad is not in here any more, and that is the crossfade's
+    /// doing.</b> It carries both pictures and mixes them per fragment, so there
+    /// is nothing about it to swap - see <see cref="Shape"/> and the bark shader.
+    ///
+    /// <b>The shadow is the one that would have been forgotten.</b> The cast is
+    /// a mesh masked by the art, so a burnt trunk whose shadow was left behind
+    /// would throw the shadow of a crown it no longer has - and on Tree_1 that is
+    /// 33px of canopy lying on the ground beside a bare stem.
     ///
     /// <b>What is not touched is the placement.</b> The contact patch keeps its
     /// radius, which came off the living art, because the tree is standing where it
     /// was sown - see <see cref="PropSet"/> on why the state cannot reach those
     /// numbers at all.
     /// </summary>
-    private void Reclothe(PropNode tree, MeshInstance3D stem, ArrayMesh want)
+    private void Restate(PropNode tree, MeshInstance3D cast, ArrayMesh want)
     {
-        stem.Mesh = want;
-        if (stem.MaterialOverride is ShaderMaterial bark)
-        {
-            bark.SetShaderParameter("art", tree.ShownArt);
-            bark.SetShaderParameter("firm", tree.Charred ? Firm : 1.0f);
-        }
-        if (_shading.TryGetValue(tree, out MeshInstance3D? cast))
-        {
-            cast.Mesh = want;
-            if (cast.MaterialOverride is StandardMaterial3D ink)
-                ink.AlbedoTexture = tree.ShownArt;
-        }
+        bool burnt = tree.Swap >= 0.5f;
+        Texture2D art = burnt ? tree.BurntArt! : tree.Art;
+        cast.Mesh = want;
+        if (cast.MaterialOverride is StandardMaterial3D ink)
+            ink.AlbedoTexture = art;
         if (_seating.TryGetValue(tree, out MeshInstance3D? seat)
             && seat.MaterialOverride is ShaderMaterial blot)
         {
-            blot.SetShaderParameter("art", tree.ShownArt);
-            blot.SetShaderParameter("foot", tree.ShownFoot);
-            blot.SetShaderParameter("span", tree.ShownSize);
+            blot.SetShaderParameter("art", art);
+            blot.SetShaderParameter("foot", burnt ? tree.BurntFoot : tree.Foot);
+            blot.SetShaderParameter("span", burnt ? tree.BurntSize : tree.Size);
         }
     }
 
@@ -4836,6 +4935,7 @@ void fragment() {
         _burning.Clear();
         _smoking.Clear();
         _stems.Clear();
+        _marks.Clear();
         _pyres.Clear();
         _plumes.Clear();
     }
@@ -5188,20 +5288,57 @@ shader_type spatial;
 render_mode unshaded, cull_disabled;
 
 uniform sampler2D art : source_color, filter_linear_mipmap, hint_default_white;
-// The wood's own per-tree reveal, and how far this one has charred.
+// The picture it hands over to, and where each of the two sits inside the quad.
+// Both mapped, rather than one of them being the quad, because the quad is the
+// union of the pair - see Shape.
+uniform sampler2D burnt : source_color, filter_linear_mipmap, hint_default_transparent;
+uniform vec4 art_map = vec4(0.0, 0.0, 1.0, 1.0);
+uniform vec4 burnt_map = vec4(0.0, 0.0, 1.0, 1.0);
+// How far the handover has got. Zero is the living picture exactly and one the
+// burnt one exactly, both to the pixel.
+uniform float swap = 0.0;
+// The wood's own per-tree reveal, and how far the living picture has charred.
 uniform float fade = 1.0;
 uniform float scorch = 0.0;
 // What charcoal is worth, as a share of the luminance it replaces.
 uniform float coal = 0.30;
-// A gamma on the alpha, for art whose strokes are thinner than a screen pixel.
-// One leaves it alone exactly - see Firm.
+// A gamma on the burnt picture's alpha, for art whose strokes are thinner than a
+// screen pixel. One leaves it alone exactly - see Firm. Only the burnt one gets
+// it, which is what it was always for: the living crown is a mass.
 uniform float firm = 1.0;
 
+// One of the two pictures off the quad. The quad point comes in as an argument
+// because a built-in is only in scope in the function it belongs to - reading UV
+// in here is a compile error, and the material that fails to compile falls back
+// to an opaque black one, which draws every tree as its own bare rectangle.
+// Outside its own rectangle the picture is not
+// there at all, and that is said rather than left to the sampler's clamp: these
+// arts fill their image to the border, so the edge texel is not transparent and
+// clamping would smear it across the margin the union added.
+vec4 lift(sampler2D tex, vec2 at, vec4 map, float gamma) {
+    vec2 uv = map.xy + at * map.zw;
+    vec4 c = texture(tex, uv);
+    float inside = float(uv.x >= 0.0 && uv.x <= 1.0
+                         && uv.y >= 0.0 && uv.y <= 1.0);
+    c.a = (gamma >= 0.999 ? c.a : pow(c.a, gamma)) * inside;
+    return c;
+}
+
 void fragment() {
-    vec4 paint = texture(art, UV);
-    float lum = dot(paint.rgb, vec3(0.299, 0.587, 0.114));
-    ALBEDO = mix(paint.rgb, vec3(lum * coal), scorch);
-    ALPHA = (firm >= 0.999 ? paint.a : pow(paint.a, firm)) * fade;
+    vec4 live = lift(art, UV, art_map, 1.0);
+    float lum = dot(live.rgb, vec3(0.299, 0.587, 0.114));
+    live.rgb = mix(live.rgb, vec3(lum * coal), scorch);
+    vec4 dead = lift(burnt, UV, burnt_map, firm);
+    // Mixed premultiplied and divided back out, and that is the whole of why a
+    // trunk cannot thin halfway through: the alphas are averaged rather than
+    // composited, so where both pictures are solid the answer is solid. Two
+    // quads at complementary alpha would come out at 0.75 at the midpoint - the
+    // track smear's finding, and the reason it lies over its own layer instead
+    // of cross-fading with it.
+    vec3 pre = mix(live.rgb * live.a, dead.rgb * dead.a, swap);
+    float a = mix(live.a, dead.a, swap);
+    ALBEDO = a > 0.0001 ? pre / a : vec3(0.0);
+    ALPHA = a * fade;
 }
 ";
 
@@ -5235,13 +5372,24 @@ void fragment() {
     /// </summary>
     public const float Firm = 0.60f;
 
-    private static ShaderMaterial Bark(Texture2D art, int order)
+    private static ShaderMaterial Bark(PropNode tree, int order)
     {
         var ink = new ShaderMaterial { Shader = Timber, RenderPriority = order };
-        ink.SetShaderParameter("art", art);
+        (_, _, Godot.Vector4 live, Godot.Vector4 dead) = Union(tree);
+        ink.SetShaderParameter("art", tree.Art);
+        // The pair of rectangles is a fact about the kind, so it is set here and
+        // never again; only how far between them the tree is moves. A kind with
+        // no burnt picture leaves that sampler at its transparent default, which
+        // with swap pinned at zero is never read.
+        if (tree.BurntArt is not null)
+            ink.SetShaderParameter("burnt", tree.BurntArt);
+        ink.SetShaderParameter("art_map", live);
+        ink.SetShaderParameter("burnt_map", dead);
+        ink.SetShaderParameter("swap", 0.0f);
         ink.SetShaderParameter("fade", 1.0f);
         ink.SetShaderParameter("scorch", 0.0f);
         ink.SetShaderParameter("coal", Coal);
+        ink.SetShaderParameter("firm", Firm);
         return ink;
     }
 

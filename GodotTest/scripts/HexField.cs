@@ -932,9 +932,45 @@ public sealed partial class HexField : Node2D
         return y <= 1.0f && 2.0f * x + y <= 2.0f;
     }
 
-    public bool InBounds(Vector2I cell) =>
-        cell.X >= 0 && cell.X < Columns && cell.Y >= 0 && cell.Y < Rows;
+    /// <summary>
+    /// Which cells of the rectangle are actually board, or null for all of them.
+    ///
+    /// A rectangle is what a grid of columns and rows is, and a board that is a
+    /// rosette of seven hexes is not one - see <see cref="WoodBench"/>, where the
+    /// whole subject is one wood and its six neighbours. Written as a hole in
+    /// <see cref="InBounds"/> rather than as a second shape to iterate, because
+    /// that one predicate is already what says where the board stops: the fire
+    /// asks it before it spreads, the wood asks it before it sows and fades, and
+    /// <see cref="Ordered"/> is what paints. A second list of cells would be a
+    /// second answer to "is this cell on the board", and the two would part on
+    /// the one cell nobody checked.
+    ///
+    /// Null on every board drawn so far, so the rectangle is still the default
+    /// and nothing that reads a full board changes.
+    /// </summary>
+    public IReadOnlySet<Vector2I>? Plot
+    {
+        get => _plot;
+        set
+        {
+            _plot = value;
+            // The paint order is cached by the rectangle it was built for, and a
+            // plot is a change to that rectangle without the numbers moving.
+            _orderedFor = new Vector2I(-1, -1);
+        }
+    }
 
+    private IReadOnlySet<Vector2I>? _plot;
+
+    public bool InBounds(Vector2I cell) =>
+        cell.X >= 0 && cell.X < Columns && cell.Y >= 0 && cell.Y < Rows
+        && (_plot is null || _plot.Contains(cell));
+
+    /// <summary>The nearest cell of the <i>rectangle</i>, which on a board with a
+    /// <see cref="Plot"/> may be a cell that is not on it. Clamping into the plot
+    /// would need a nearest-cell search over a shape, and every caller that
+    /// cares already asks <see cref="InBounds"/> - a click off the board is a
+    /// click off the board, not a click on the cell beside it.</summary>
     public Vector2I ClampCell(Vector2I cell) =>
         new(Mathf.Clamp(cell.X, 0, Columns - 1), Mathf.Clamp(cell.Y, 0, Rows - 1));
 
@@ -1181,7 +1217,8 @@ public sealed partial class HexField : Node2D
             var cells = new List<Vector2I>(Columns * Rows);
             for (int q = 0; q < Columns; q++)
             for (int r = 0; r < Rows; r++)
-                cells.Add(new Vector2I(q, r));
+                if (InBounds(new Vector2I(q, r)))
+                    cells.Add(new Vector2I(q, r));
             // By the ground row, and by nothing else. Not by the drawn row -
             // that walks the hill backwards, a raised cell moving up the screen
             // without becoming one step further away - and no longer by

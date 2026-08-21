@@ -7093,9 +7093,10 @@ public static class SelfTest
         Wildfire.Coat done = clock.Of(lit, 0.0);
         Check("when it has finished burning there is no flame on it",
             done.Burnt && done.Flame <= 0.0f, $"flame {done.Flame:F2}");
-        Check("the char comes off at the swap, because the picture is charcoal",
-            done.Char <= 0.0f,
-            "left on, the multiply takes the burnt art to nothing");
+        Check("the char stays on at the swap, because that picture is still up",
+            done.Char >= 1.0f,
+            "it is the outgoing picture the char belongs to, and it fades out "
+            + "over the handover rather than being cut");
         Check("the smoke outlives the flame",
             done.Smoke > 0.0f, "a fire that stops smoking as it dies is a switch");
         Check("the ash does not lift",
@@ -7106,6 +7107,46 @@ public static class SelfTest
             clock.Of(lit, 0.0).Smoke <= 0.0f, "the column would stand for good");
         Check("the ash is still there when it has",
             clock.AshAt(lit) >= 1.0f, "");
+
+        // The swap is a window and not a frame, which is the whole of what the
+        // crossfade is. Its own clock, so the ages are exact.
+        var handing = new Wildfire { Field = field, Wooded = wooded.Contains };
+        handing.Light(lit);
+        handing.Tick(handing.BurnFor);
+        Wildfire.Coat began = handing.Of(lit, 0.0);
+        Check("the picture has not moved on the frame the state arrives",
+            began.Burnt && began.Swap <= 0.02f,
+            $"swap {began.Swap:F2} - a silhouette that changes between two frames "
+            + "reads as a tree replaced rather than one burnt down");
+        handing.Tick(handing.SwapFor * 0.5f);
+        Wildfire.Coat half = handing.Of(lit, 0.0);
+        Check("halfway through the window it is part way between the two",
+            half.Swap > 0.3f && half.Swap < 0.7f, $"swap {half.Swap:F2}");
+        handing.Tick(handing.SwapFor);
+        Check("and it ends on the burnt picture exactly",
+            handing.Of(lit, 0.0).Swap >= 1.0f,
+            "short of one it is a crown that never quite goes");
+
+        // Shutting the window is the swap this replaced, to the frame: the A/B
+        // the crossfade is judged by, and --hard-swap is that switch. Walked at
+        // the fixed step rather than jumped, because what has to be true is that
+        // no frame ever catches it in between.
+        var cut = new Wildfire
+        {
+            Field = field, Wooded = wooded.Contains, SwapFor = 0.0f,
+        };
+        cut.Light(lit);
+        bool between = false;
+        for (int f = 0; f < 900; f++)
+        {
+            cut.Tick(1.0 / 60.0);
+            float sw = cut.Of(lit, 0.0).Swap;
+            between |= sw > 0.0f && sw < 1.0f;
+        }
+        Check("shutting the window is the one-frame swap it replaced",
+            !between,
+            "a hard swap caught halfway is a third picture rather than the one "
+            + "the crossfade is measured against");
 
         clock.Douse();
         Check("dousing puts the wood back green",
@@ -7122,6 +7163,9 @@ public static class SelfTest
         Check("one that has burnt out with no burnt art keeps every bit of its char",
             !stump.Charred && stump.Scorch >= 1.0f,
             "dropping it left bright green scrub standing in a burnt-out cell");
+        Check("and never swaps, because it has nothing to swap to",
+            stump.Swap <= 0.0f,
+            "a fade to nothing is worse than no fade");
 
         if (grove?.Props is not null && grove.Props.Any)
         {
@@ -7158,8 +7202,63 @@ public static class SelfTest
                     && tree.ShownFoot == tree.BurntFoot
                     && tree.ShownSize == tree.BurntSize,
                     "a foot left behind is a tree that steps sideways as it burns");
-                Check("with the char off it, because the picture is already charcoal",
-                    tree.Scorch <= 0.0f, $"scorch {tree.Scorch:F2}");
+                Check("with the char left on, because the picture it belongs to "
+                      + "is still fading out",
+                    tree.Scorch >= 1.0f, $"scorch {tree.Scorch:F2}");
+                tree.Coat = new Wildfire.Coat(1.0f, 0.0f, 0.5f, true, 0.5f);
+                Check("halfway through the handover both pictures are on it",
+                    tree.Swapping && Mathf.Abs(tree.Swap - 0.5f) < 0.0001f,
+                    $"swap {tree.Swap:F2}");
+
+                // The quad both of them are drawn on. Asserted rather than
+                // eyeballed because either failure is a crown cut off square:
+                // too small and the outgoing one is clipped, mismapped and it
+                // is stretched.
+                (Vector2 foot, Vector2 size, Godot.Vector4 live,
+                 Godot.Vector4 dead) = Stage3D.Union(tree);
+                const float slack = 0.001f;
+                bool holds = true;
+                foreach ((Vector2 f, Vector2 z) in new[]
+                         { (tree.Foot, tree.Size), (tree.BurntFoot, tree.BurntSize) })
+                    holds &= foot.X >= f.X - slack
+                             && size.X - foot.X >= z.X - f.X - slack
+                             && foot.Y >= f.Y - slack
+                             && foot.Y - size.Y <= f.Y - z.Y + slack;
+                Check("the quad a burning tree stands on holds both its pictures",
+                    holds,
+                    $"{size.X:F0}x{size.Y:F0} against {tree.Size.X:F0}x"
+                    + $"{tree.Size.Y:F0} and {tree.BurntSize.X:F0}x"
+                    + $"{tree.BurntSize.Y:F0} - neither rectangle contains the "
+                    + "other, so it has to be the union of the pair");
+                bool sited = true;
+                foreach ((Vector2 f, Vector2 z, Godot.Vector4 m) in new[]
+                         { (tree.Foot, tree.Size, live),
+                           (tree.BurntFoot, tree.BurntSize, dead) })
+                {
+                    float u0 = (foot.X - f.X) / size.X, v0 = (foot.Y - f.Y) / size.Y;
+                    float su = z.X / size.X, sv = z.Y / size.Y;
+                    sited &= Mathf.Abs(m.X + u0 * m.Z) < 0.0005f
+                             && Mathf.Abs(m.X + (u0 + su) * m.Z - 1.0f) < 0.0005f
+                             && Mathf.Abs(m.Y + v0 * m.W) < 0.0005f
+                             && Mathf.Abs(m.Y + (v0 + sv) * m.W - 1.0f) < 0.0005f;
+                }
+                Check("and puts each of them back exactly where it belongs in it",
+                    sited,
+                    "a map off by a fraction is a picture stretched across the "
+                    + "margin the union added");
+                var lone = new PropNode
+                {
+                    Art = tree.Art, Foot = tree.Foot, Size = tree.Size,
+                    Pixels = 1.0f,
+                };
+                (Vector2 alone, Vector2 span, Godot.Vector4 only, _) =
+                    Stage3D.Union(lone);
+                Check("a kind with nothing to swap to keeps the quad it always had",
+                    alone == lone.Foot && span == lone.Size
+                    && only == new Godot.Vector4(0.0f, 0.0f, 1.0f, 1.0f),
+                    "the union of one rectangle with itself is the identity, and "
+                    + "every board rendered before any of this depends on it");
+                tree.Coat = new Wildfire.Coat(0.0f, 0.0f, 0.5f, true);
                 // The one thing the pair must not do. Measured against the living
                 // art's own numbers, which is all the placement was decided on.
                 (float rise, float root) = grove.Props.BurntSpanOf(paired);

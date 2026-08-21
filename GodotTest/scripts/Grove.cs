@@ -178,6 +178,31 @@ public sealed partial class Grove : Node2D
     /// 111px tree needs 142px of clearance and a hexagon offers 54.</summary>
     public bool ClearFront;
 
+    /// <summary>
+    /// Plant one of each kind of tree instead of a wood, and nothing else.
+    ///
+    /// A specimen cell rather than a forest cell: what stands on it is exactly
+    /// what the set holds, one apiece, so a look at it is a look at every tree
+    /// there is - which is what <see cref="WoodBench"/> is for and what a wood
+    /// cannot be. In a wood the species come off a hash, so which of the four is
+    /// on any cell is a fact about that cell rather than about the folder, and
+    /// the one that got no roll is the one nobody ever looks at.
+    ///
+    /// <b>The undergrowth goes with the wood, not with the trees.</b> Bushes and
+    /// stones are what a forest floor is made of, and on a cell whose whole
+    /// subject is four trunks they are four trunks harder to see. So this sows
+    /// the tree tier and skips the rest rather than laying out a catalogue of
+    /// everything - that is a different picture, and nothing stops anybody
+    /// asking for it later.
+    ///
+    /// <b>Every rule that cannot bend still holds</b> - the keep-out, the border,
+    /// the room a base needs. What is set aside is the two that are preferences:
+    /// the edge fade, which thins a wood at its rim, and the floor and ceiling,
+    /// which say how much wood a cell carries. Neither means anything when the
+    /// count is one of each.
+    /// </summary>
+    public bool Specimen;
+
     public bool Enabled = true;
 
     public HexField? Field;
@@ -273,8 +298,13 @@ public sealed partial class Grove : Node2D
     /// exactly the way a trunk does, and a bush in the pond is the wood growing
     /// out of the water again at knee height.
     /// </summary>
+    /// <remarks>And never off the board, which on a board with a
+    /// <see cref="HexField.Plot"/> is a hole in the rectangle rather than its
+    /// rim - the sowing walks columns and rows, so without this a wood would
+    /// stand on the two corners a rosette does not have.</remarks>
     public bool Grows(Vector2I cell) =>
-        Enabled && Field is not null && !Field.IsRamp(cell) && !Field.IsWater(cell);
+        Enabled && Field is not null && Field.InBounds(cell)
+        && !Field.IsRamp(cell) && !Field.IsWater(cell);
 
     /// <summary>The key in <see cref="Budget"/> for any drawn ground that is not
     /// named in it. A fallback rather than a wildcard to union in: a kind gets
@@ -468,6 +498,11 @@ public sealed partial class Grove : Node2D
         // can see it, because "later" there means "in another cell".
         foreach (PropTier tier in Props.Tiers)
         {
+            // One of each tree means the trees and nothing under them - see
+            // Specimen. Skipped here rather than inside the sowing, so a tier
+            // nobody plants costs no pass over the board either.
+            if (Specimen && tier.Name != PropTier.Trees)
+                continue;
             float scale = DrawScale(tier);
             int first = _planted.Count;
             for (int q = 0; q < Field.Columns; q++)
@@ -496,9 +531,14 @@ public sealed partial class Grove : Node2D
 
     /// <summary>One candidate that survived every rule that cannot bend, held
     /// with the roll that decides whether it takes.</summary>
+    /// <param name="Room">Ground px of clear border this spot has, or infinity
+    /// where the tier does not mind one. Carried rather than measured again,
+    /// because <see cref="Specimen"/> asks a second question of the same spot -
+    /// whether <i>this</i> species fits it - and a border measured twice is two
+    /// answers to keep in agreement.</param>
     private readonly record struct Seedling(
         Vector2 At, int Species, bool Mirrored, double Roll, double Fade,
-        double Shuffle);
+        double Shuffle, double Room);
 
     private void SowTier(Vector2I cell, PropTier tier, int least, int most,
                          float squash, float scale)
@@ -602,16 +642,39 @@ public sealed partial class Grove : Node2D
                 found.Add(new Seedling(at, chosen, mirrored,
                                        Hash01(i, j, 3037 + salt),
                                        EdgeFade(cell, seed, squash, tier),
-                                       Hash01(i, j, 6091 + salt)));
+                                       Hash01(i, j, 6091 + salt), room));
             }
             return found;
         }
 
         var pool = Gather(step0, 0);
 
-        // The edge fade is a preference, not a rule, and this is where the
-        // difference shows. Everything above rejects outright: a tree inside the
-        // keep-out or across a border is wrong wherever it stands. The fade only
+        // Which of the two the cell gets, and then the planting, which is one
+        // function for both: a spot chosen either way is planted the same way,
+        // and a second copy of that is a second place a tree can be wired up
+        // wrong.
+        PlantAll(cell, tier, scale, Specimen
+            ? OneOfEach(pool, species, scale, step0)
+            : Woodful(pool, least, most, step0, Gather));
+    }
+
+    /// <summary>
+    /// A cell's worth of wood out of its legal spots: the edge fade's
+    /// preference first, then the floor, then the ceiling.
+    ///
+    /// Its own function since <see cref="Specimen"/> arrived, and the split is
+    /// where it is on purpose: everything above it - the keep-out, the border,
+    /// the room a base needs, the crowding - refuses outright and is shared by
+    /// both modes, and that is the half that must not be duplicated. This half
+    /// is preference, which is exactly what one of each does not have.
+    /// </summary>
+    /// <param name="finer">The gatherer, so the floor can go over the cell again
+    /// at half the step. Handed in rather than reached for, because it closes
+    /// over the cell and the tier it was built for.</param>
+    private List<Seedling> Woodful(List<Seedling> pool, int least, int most,
+                                   double step0,
+                                   Func<double, int, List<Seedling>> finer)
+    {
         // says which of the legal spots is the better one - so when it has taken
         // too many, the best of what it refused comes back rather than the cell
         // coming out as a field with four trees short of being woods.
@@ -634,7 +697,7 @@ public sealed partial class Grove : Node2D
         if (taking.Count < least)
         {
             var seen = new HashSet<Vector2>(taking.Select(s => s.At));
-            taking.AddRange(Gather(step0 * 0.5, 617)
+            taking.AddRange(finer(step0 * 0.5, 617)
                             .Where(s => !seen.Contains(s.At)
                                         && taking.All(t => t.At.DistanceTo(s.At)
                                                            > step0 * 0.25))
@@ -646,7 +709,71 @@ public sealed partial class Grove : Node2D
             taking = taking.OrderByDescending(s => s.Fade)
                            .ThenBy(s => s.Shuffle)
                            .Take(most).ToList();
+        return taking;
+    }
 
+    /// <summary>
+    /// One spot per species, spread as far apart as the cell allows.
+    ///
+    /// <b>The fussiest species picks first</b> - widest base before narrowest -
+    /// which is the order the sowing chooses a species in, for the same reason
+    /// restated: taking a spot a big tree needed and standing a small one in it
+    /// loses the big one twice, once by refusing it and once by not having
+    /// planted it anywhere else.
+    ///
+    /// <b>Then farthest-point, and that is what makes the cell readable.</b>
+    /// Ordering by the edge fade would pull every pick to the same part of the
+    /// ring - the fade is a distance from open ground, so it has one maximum -
+    /// and four trunks in a clump is one tree with three behind it. Each pick
+    /// after the first takes the spot whose nearest neighbour is furthest away,
+    /// so the trees come out round the ring rather than in a heap. Never nearer
+    /// than the lattice itself would have allowed, so the spacing statement the
+    /// whole sowing rests on is unchanged.
+    ///
+    /// A species with no spot that fits it is simply absent, and the count says
+    /// so: the border and the keep-out are what make a cell drivable and its
+    /// trees its own, and a mode that showed every species by breaking them
+    /// would be showing something else.
+    /// </summary>
+    private List<Seedling> OneOfEach(List<Seedling> pool, IReadOnlyList<int> species,
+                                     float scale, double step)
+    {
+        var taking = new List<Seedling>();
+        foreach (int k in species.OrderByDescending(k => Props!.RootOf(k)))
+        {
+            double needs = Props!.RootOf(k) * scale + Clearance;
+            Seedling? best = null;
+            double bestGap = double.NegativeInfinity;
+            foreach (Seedling s in pool)
+            {
+                if (needs > s.Room)
+                    continue;
+                // The first pick has no neighbour to be far from, so it takes the
+                // spot furthest inside the cell - which is the fade, read the one
+                // way round it means anything here.
+                double gap = taking.Count == 0
+                    ? s.Fade
+                    : taking.Min(t => (double)t.At.DistanceTo(s.At));
+                if (taking.Count > 0 && gap < step * (1.0 - 2.0 * Jitter))
+                    continue;
+                if (gap > bestGap)
+                {
+                    bestGap = gap;
+                    best = s;
+                }
+            }
+            // Its own species rather than the one the spot's hash chose: a spot
+            // says which props can stand in it, and here the caller says which
+            // one does.
+            if (best is Seedling spot)
+                taking.Add(spot with { Species = k });
+        }
+        return taking;
+    }
+
+    private void PlantAll(Vector2I cell, PropTier tier, float scale,
+                          List<Seedling> taking)
+    {
         // How high this cell stands, in screen px. The foot is already drawn
         // lifted - it came off CellCentre - so this is only ever wanted to take
         // the lift back out for the depth, which is the one place the two terms
@@ -899,8 +1026,11 @@ public sealed partial class Grove : Node2D
             // moved would read as a sprite that had stopped being updated - the
             // rock's flag says "not a thing that sways", and this says "the same
             // thing, with its crown gone".
-            if (tree.Charred)
-                lean *= CharredSway;
+            // Eased across the swap rather than dropped at it, for the
+            // picture's reason: a crown that stops moving on the frame its art
+            // changes announces the change twice. Zero swap is no change at
+            // all, so nothing that is not burning is touched.
+            lean *= Mathf.Lerp(1.0f, CharredSway, tree.Swap);
             // The lean is written every frame and the redraw is not: a tree
             // whose crown has moved a thousandth of a pixel since it was last
             // drawn does not need drawing again. Kept apart rather than folded
@@ -1437,18 +1567,30 @@ public sealed partial class PropNode : Node2D
     public bool Charred => Coat.Burnt && BurntArt is not null;
 
     /// <summary>
-    /// How far this one is charred, as the paint wants it.
+    /// How far the living picture is charred, and it only ever goes up.
     ///
-    /// <b>It does not go back to nothing when the burn ends - it goes to
-    /// everything, unless there is a burnt picture to take over.</b> The char is
-    /// the transition for a kind that has one, so at the swap the art is already
-    /// charcoal and the multiply has to come off or it goes to black. A kind with
-    /// no burnt art has nothing to swap to, so the char is all it will ever have,
-    /// and dropping it left bright green scrub standing in a burnt-out cell - the
-    /// one thing on the board saying the fire had not really been there.
+    /// <b>It used to come back off at the swap, and losing that branch is what
+    /// the crossfade bought.</b> While the swap was one frame the char was the
+    /// whole of the transition, so on that frame the multiply had to be dropped
+    /// or the already-charcoal burnt art went to black. Now the two pictures
+    /// overlap: this is the outgoing one, it is fully charred for the whole of
+    /// the handover, and the incoming one never sees this number at all.
+    ///
+    /// A kind with nothing to swap to keeps it at one for good, and that reason
+    /// is unchanged: dropping it left bright green scrub standing in a burnt-out
+    /// cell - the one thing on the board saying the fire had not really been
+    /// there.
     /// </summary>
-    public float Scorch =>
-        Coat.Burnt ? (BurntArt is null ? 1.0f : 0.0f) : Coat.Char;
+    public float Scorch => Coat.Burnt ? 1.0f : Coat.Char;
+
+    /// <summary>How far the burnt picture has taken over, 0 to 1. Zero for
+    /// anything that has not begun to swap and for every kind nobody drew a
+    /// burnt state for - <see cref="Charred"/>'s rule as a number: there is
+    /// nothing to fade to, so nothing fades.</summary>
+    public float Swap => Charred ? Mathf.Clamp(Coat.Swap, 0.0f, 1.0f) : 0.0f;
+
+    /// <summary>Whether both pictures are on it at once.</summary>
+    public bool Swapping => Swap > 0.0f && Swap < 1.0f;
 
     /// <summary>The picture, the foot and the size as drawn - the state's if it
     /// has one. Three members and not a mutated field, so that no measurement can
