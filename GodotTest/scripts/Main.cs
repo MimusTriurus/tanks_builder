@@ -350,6 +350,27 @@ public sealed partial class Main : Node2D
 
 	private Stage3D? _stage;
 
+	/// <summary>Which cells of the wood are alight. Null until the board is
+	/// built, like the sea.</summary>
+	private Wildfire? _fire;
+
+	/// <summary>Whether the wood can catch at all - <c>--no-tree-fire</c>. Held
+	/// as the bench's own rather than only on the fire, for the reason every
+	/// other flag here is: it is asked before the board exists.</summary>
+	private bool _woodFire = true;
+
+	/// <summary>A cell to set alight once the board is up, from
+	/// <c>--burn-wood q,r</c>. A screenshot of a burning wood otherwise wants a
+	/// hand on the mouse, and --capture exists so it does not.</summary>
+	private Vector2I? _lightAt;
+
+	/// <summary>How many trees are in flame and how many have burnt out. Off the
+	/// grove rather than the fire: the fire knows which cells are alight, and
+	/// which trees that comes to is the wood's own answer - a cell of scrub burns
+	/// without a trunk on it.</summary>
+	private (int Burning, int Burnt) Ablaze() =>
+		_grove?.Ablaze() ?? (0, 0);
+
 	/// <summary>
 	/// Whether each cell of the stage wears an outline at its rim. See
 	/// <see cref="Stage3D.ShowEdges"/> for why it has to be drawn rather than
@@ -446,6 +467,10 @@ public sealed partial class Main : Node2D
 			// depth buffer can judge them. No shift to hand over - a PropNode's
 			// own position already carries Origin.
 			Wood = _grove,
+			// And the ash it leaves, by the same division again: the wood says
+			// which trees are burning, the stage blackens the ground they stood
+			// on, because the ground is the stage's.
+			Blaze = _fire,
 			// The pond's surface, by the same division as the wood: the field goes
 			// on deciding which cells are wet and how deep, the stage draws the
 			// surface over them.
@@ -1545,6 +1570,16 @@ public sealed partial class Main : Node2D
 			// from the command line at all. A flag rather than an edit to the
 			// file, by the rule the whole bench runs on: a capture is evidence,
 			// and taking it twice must not need an edit between the two.
+			else if (userArgs[i] == "--no-tree-fire")
+				_woodFire = false;
+			else if (userArgs[i] == "--burn-wood" && i + 1 < userArgs.Length)
+			{
+				string[] cell = userArgs[++i].Split(',');
+				if (cell.Length == 2
+					&& int.TryParse(cell[0], out int bq)
+					&& int.TryParse(cell[1], out int br))
+					_lightAt = new Vector2I(bq, br);
+			}
 			else if (userArgs[i] == "--no-3d")
 				_noStage = true;
 			// The A/B the outline is judged by, and the reason it is a flag: the
@@ -1742,6 +1777,15 @@ public sealed partial class Main : Node2D
 		if (_brush >= 0.0)
 			_grove.Brushing = _brush;
 		AddChild(_grove);
+		// After the wood, because what can catch is what is standing: the fire
+		// asks the grove and the grove asks its planted list. See
+		// Grove.Carrying - a forest cell whose trees all fell to the budget has
+		// nothing to burn, and a fire on it would blacken a field.
+		_fire = new Wildfire
+		{
+			Field = _field, Enabled = _woodFire, Wooded = _grove.Carrying,
+		};
+		_grove.Fire = _fire;
 
 		// One vehicle per atlas that loaded, parked along HomeCells. Built here
 		// rather than swapped later: each one keeps its own atlas for good, so
@@ -2020,6 +2064,12 @@ public sealed partial class Main : Node2D
 		// turned the stage on before this point.
 		if (_noStage)
 			Staged = false;
+		// The wood, before anything about the tanks: the fire is the board's
+		// state and a screenshot of it wants the front to have had time to walk,
+		// which --capture-at is for. Refused rather than silent if the cell has
+		// nothing on it - a flag naming a field is a flag that did not work.
+		if (_lightAt is Vector2I spark && _fire?.Light(spark) != true)
+			GD.PushWarning($"--burn-wood {spark.X},{spark.Y} has no wood on it");
 		Active.Burning = _burnAtStart;
 		// After the burning flag, because a wreck lights its own fire and would
 		// otherwise be put out by a flag that was not asked for.
@@ -4582,6 +4632,7 @@ public sealed partial class Main : Node2D
 		["--grade"] = new[] { "ground.relief", "ground.grade" },
 		["--terrain"] = new[] { "ground.terrain" },
 		["--no-forest"] = new[] { "ground.forest" },
+		["--no-tree-fire"] = new[] { "ground.wood_fire" },
 		["--no-cast-shadows"] = new[] { "ground.shadows" },
 		["--no-prop-contact"] = new[] { "ground.prop_contact" },
 		["--ghost"] = new[] { "ground.ghost" },
@@ -5363,6 +5414,57 @@ public sealed partial class Main : Node2D
 				SowGrove();
 				_field.QueueRedraw();
 			});
+		// The fire's own three rows: whether the wood can catch, a way to light
+		// it without a hand on the mouse, and what it is doing. The last one is
+		// not decoration - a fire that has stopped spreading and one that was
+		// never lit are the same still picture.
+		ui.Toggle("ground.wood_fire", "the wood can burn  (--no-tree-fire)",
+			() => _fire?.Enabled == true,
+			on =>
+			{
+				_woodFire = on;
+				if (_fire is null) return;
+				_fire.Enabled = on;
+				// Off puts it out rather than freezing it, for the reason the
+				// reset does: a board left half burnt with the fire switched off
+				// is a board nobody can put back.
+				if (!on)
+				{
+					_fire.Douse();
+					_grove?.Smoulder();
+				}
+			});
+		ui.Press("ground.light_wood", "set a wooded cell alight  (middle-click one)",
+			() =>
+			{
+				// The middle of the board, or the nearest cell to it with
+				// anything on it: a button cannot be aimed, and a button that
+				// lights nothing because the centre happens to be a field reads
+				// as a button that does not work.
+				if (_fire is null || _grove is null) return;
+				var mid = new Vector2I(_field.Columns / 2, _field.Rows / 2);
+				Vector2I? best = null;
+				double near = double.MaxValue;
+				for (int q = 0; q < _field.Columns; q++)
+				for (int r = 0; r < _field.Rows; r++)
+				{
+					var cell = new Vector2I(q, r);
+					if (_fire.LitAt(cell) || !_grove.Carrying(cell))
+						continue;
+					double d = (cell - mid).Length();
+					if (d >= near)
+						continue;
+					near = d;
+					best = cell;
+				}
+				if (best is Vector2I spot)
+					_fire.Light(spot);
+			});
+		ui.Readout("ground.fire_state", () =>
+			_fire is null ? "no board"
+			: _fire.Scorched == 0 ? "nothing has burnt"
+			: $"{_fire.Scorched} cells burnt, {_fire.Alight} alight, "
+			  + $"{Ablaze().Burning} trees in flame, {Ablaze().Burnt} burnt out");
 		// Read live rather than at the moment a tank enters, unlike the shell's
 		// calibre: this is not something a round carries, it is how the wood is
 		// being drawn right now, and dragging it while a tank sits in the trees
@@ -5428,8 +5530,8 @@ public sealed partial class Main : Node2D
 				grown[tree.Species]++;
 			return string.Join("\n", Enumerable.Range(0, _props.Count).Select(
 				k => $"{_props.NameOf(k)}  {grown[k]} grown, "
-					 + $"{_props.RiseOf(k) * (_grove?.DrawScale ?? 0.0f):F0}px tall, "
-					 + $"base {_props.RootOf(k) * (_grove?.DrawScale ?? 0.0f):F1}px"));
+					 + $"{_props.RiseOf(k) * (_grove?.ScaleOf(k) ?? 0.0f):F0}px tall, "
+					 + $"base {_props.RootOf(k) * (_grove?.ScaleOf(k) ?? 0.0f):F1}px"));
 		});
 		// The rule that cannot be had, kept as a switch so that is visible
 		// rather than asserted. See Grove.ClearFront: a 111px tree needs 142px
@@ -5913,6 +6015,16 @@ public sealed partial class Main : Node2D
 					 + $"/{_grove?.Standing.Count(t => t.Modulate.A < 0.99f) ?? 0}fade"
 					 + (_grove?.Enabled == true ? "" : "!off")
 					 + (_grove?.ClearFront == true ? "!clear" : "")
+					 // The fire, and it takes four numbers because it fails in
+					 // four ways that look alike in a still frame: a wood nobody
+					 // lit, a fire that lit one cell and stopped, a front that
+					 // walked and left no trees burning, and a burn that never
+					 // finished. Cells lit, cells still alight, trees in flame,
+					 // trees burnt out.
+					 + (_fire is null ? "  fire -"
+						: $"  fire {_fire.Scorched}c/{_fire.Alight}lit"
+						  + $"/{Ablaze().Burning}t/{Ablaze().Burnt}ash"
+						  + (_fire.Enabled ? "" : "!off"))
 					 // The blast: fronts still crossing and the hardest-shoved
 					 // crown - which counts the hulls pushing through as well,
 					 // because both drive the one spring. A wave delivers over a
@@ -6007,6 +6119,11 @@ public sealed partial class Main : Node2D
 				_grove.Brush(now, now - vehicle.LastGroundPoint, delta);
 				vehicle.LastGroundPoint = now;
 			}
+		// Before the wood reads it, and after the tanks have moved: the fire is a
+		// state of the board and the trees are a view of it, which is the order
+		// the sea and its surface run in too.
+		_fire?.Tick(delta);
+		_grove?.Smoulder();
 		_grove?.Blow(delta);
 
 		// The view last of all, after everything that could have fired this
@@ -6164,8 +6281,7 @@ public sealed partial class Main : Node2D
 			}
 			Vector2? from = _middleFrom;
 			_middleFrom = null;
-			if (from is not Vector2 down || !MiddleTap(down, GetGlobalMousePosition())
-				|| _vehicles.Count == 0 || _tank.Atlas is null)
+			if (from is not Vector2 down || !MiddleTap(down, GetGlobalMousePosition()))
 				return;
 			Vector2I at = _field.ClampCell(
 				_field.CellAt(_field.ToLocal(GetGlobalMousePosition())));
@@ -6173,11 +6289,21 @@ public sealed partial class Main : Node2D
 			// game is played in, and a silhouette overhangs its own hex, so
 			// picking by pixels would let a click on the ground beside a tank
 			// destroy it.
-			if (Vehicle.At(_vehicles, at) is Vehicle mark)
+			//
+			// And what is on the cell decides which of the two destructions it is,
+			// the way it decides between selecting and ordering on the left
+			// button: a tank on it is destroyed, and a wood on it is set alight.
+			// The tank wins the tie because a tank parked in a wood is the thing
+			// being aimed at - there is no way to aim at the trees under it, and
+			// the fire spreads onto that cell by itself in a few seconds anyway.
+			if (_vehicles.Count > 0 && _tank.Atlas is not null
+				&& Vehicle.At(_vehicles, at) is Vehicle mark)
 			{
 				Kill(mark);
 				_panel?.Sync();
 			}
+			else if (_fire?.Light(at) == true)
+				_panel?.Sync();
 			return;
 		}
 		if (@event is InputEventMouseButton { Pressed: true } mouse)
@@ -6392,6 +6518,11 @@ public sealed partial class Main : Node2D
 		// driving it. The wind is not reset - it is weather, and it was blowing
 		// before the key was pressed.
 		_grove?.Calm();
+		// And the wood is put back green. With the flinch and for its reason: a
+		// board left burning would come back as one that was alight before
+		// anybody lit it, and the ash on the ground says so for good.
+		_fire?.Douse();
+		_grove?.Smoulder();
 		foreach (Vehicle v in _vehicles)
 		{
 			CancelOrder(v);

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -45,6 +45,25 @@ namespace TankSpriteTest;
 /// <see cref="Stage3D"/> caches one billboard mesh per <c>(species, mirrored)</c> -
 /// and a two-part key is a second thing to hold in agreement for nothing.
 ///
+/// <b>A state is not a species either, and it is a suffix rather than a
+/// folder.</b> <c>Tree_1_burnt.png</c> is what <c>Tree_1.png</c> becomes, not a
+/// sixth kind of tree - loaded as a species it would be sown beside the living
+/// wood instead of replacing it, which is a forest that grows already burnt. The
+/// folder cannot say so because the folder is the tier and a burnt tree plays by
+/// a tree's rules; so it is named in the file, with a word and not a number, the
+/// way <c>L.Caterpillar.Rebuilt</c> and <c>*.Preview</c> name a state in the
+/// pipeline. A suffix with no living twin is refused and said out loud - art that
+/// never appears is indistinguishable from art that failed to load.
+///
+/// <b>And the state cannot reach the placement numbers, by construction.</b>
+/// <see cref="RiseOf"/>, <see cref="RootOf"/> and <see cref="SpreadOf"/> have no
+/// state argument at all: what a tree keeps clear, how far it stands from the
+/// seam and how it sorts is settled by the living art, once, before it ever
+/// catches. The burnt art only draws. That is not tidiness - a burnt trunk with
+/// ash round its feet measures a base twice the wood's (16.7px against 8.3 on
+/// <c>Tree_5</c>), and a prop already standing cannot be given room it was not
+/// sown with.
+///
 /// <b>Tiers are ordered by measurement, not by the order they are declared
 /// in.</b> Tallest first, off the tallest prop each one loaded, because that is
 /// the order they have to be sown in: undergrowth tests against what is already
@@ -54,16 +73,16 @@ namespace TankSpriteTest;
 public sealed class PropSet
 {
     /// <summary>
-    /// How many times the on-screen scale the props are painted at.
+    /// How many times the on-screen scale art is painted at when its tier does
+    /// not say otherwise - see <see cref="PropTier.Detail"/>, which is where the
+    /// number lives now that two folders disagree about it.
     ///
     /// Declared rather than measured, because a prop has no frame to compare
     /// against - it is not painted on the template the way a terrain kind is.
     /// Four, to match the hand-drawn ground: <c>soil.png</c> is a 4x kind, so
-    /// art drawn beside it in the same document is at the same scale. Tree_4 is
-    /// 446px tall, which is 111px on screen - against a 109px hexagon and a
-    /// 131px tank, that is a tree.
+    /// art drawn beside it in the same document is at the same scale.
     /// </summary>
-    public const int Detail = 4;
+    public const double Detail = 4.0;
 
     /// <summary>
     /// How much of the sprite's height counts as touching the ground. Three
@@ -79,6 +98,27 @@ public sealed class PropSet
     /// </summary>
     private const float RootBand = 0.03f;
 
+    /// <summary>What marks a file as a state of another rather than a kind of its
+    /// own. One reserved word, so that a second state is a second word and never
+    /// a number that needs a table to read.</summary>
+    public const string BurntSuffix = "_burnt";
+
+    /// <summary>The half of a prop that is only ever drawn: the picture, its
+    /// mirror and where each of them touches the ground. No rise, no contact, no
+    /// footprint - see the class remarks on why the state cannot reach those.
+    /// The two measured numbers are kept for the note and the checks alone, and
+    /// deliberately not exposed the way the living ones are.</summary>
+    private sealed class Coat
+    {
+        public Texture2D Art = null!;
+        public Texture2D Mirror = null!;
+        public Vector2 Foot;
+        public Vector2 MirrorFoot;
+        public Vector2 Size;
+        public float Rise;      // for the note and the check, never for placement
+        public float Root;
+    }
+
     private sealed class Prop
     {
         public string Name = "";
@@ -91,6 +131,10 @@ public sealed class PropSet
         public float Rise;          // image px above the foot
         public float Root;          // image px, half the ground contact's width
         public float Spread;        // image px, half the footprint's width
+
+        /// <summary>What it looks like once it has finished burning, or nothing.
+        /// </summary>
+        public Coat? Burnt;
     }
 
     private readonly List<Prop> _props = new();
@@ -144,12 +188,17 @@ public sealed class PropSet
 
         set.Note = set._props.Count == 0
             ? $"no props in {root}"
-            : $"{set._props.Count} props at x{Detail} in "
+            : $"{set._props.Count} props in "
               + $"{set._tiers.Count} tier{(set._tiers.Count == 1 ? "" : "s")}: "
               + string.Join("; ", set._tiers.Select(t =>
-                    $"{t.Name}{(t.Declared ? "" : " (undeclared)")} step {t.Step:F0} ["
+                    $"{t.Name}{(t.Declared ? "" : " (undeclared)")} x{t.Detail:F0} "
+                    + $"step {t.Step:F0} ["
                     + string.Join(", ", set._props.Where(p => p.Tier == t).Select(
-                          p => $"{p.Name} {p.Size.X}x{p.Size.Y} rise {p.Rise:F0}"))
+                          p => $"{p.Name} {p.Size.X}x{p.Size.Y} rise {p.Rise:F0}"
+                               + (p.Burnt is null ? ""
+                                  : $" +burnt {p.Burnt.Size.X}x{p.Burnt.Size.Y}"
+                                    + $" rise {p.Burnt.Rise:F0}"
+                                    + $" base {p.Burnt.Root:F0}/{p.Root:F0}")))
                     + "]"))
               + (refused.Count == 0 ? "" : "; refused " + string.Join("; ", refused));
         return set;
@@ -158,13 +207,19 @@ public sealed class PropSet
     /// <summary>Every PNG directly in one folder, as one tier. A folder with no
     /// readable art adds no tier at all - an empty <c>Rock/</c> is not a tier
     /// with nothing in it, it is a tier nobody has drawn yet, and the budget
-    /// table skips what did not load.</summary>
+    /// table skips what did not load.
+    ///
+    /// <b>Two passes, because a state has to find its species and the folder
+    /// hands them over in name order.</b> <c>Tree_1_burnt.png</c> sorts right
+    /// after <c>Tree_1.png</c> here and would not on a folder named differently,
+    /// so the pairing is done by name and not by adjacency.</summary>
     private void Sow(string folder, string tierName, int ordinal, List<string> refused)
     {
         if (!Directory.Exists(folder))
             return;
         PropTier tier = PropTier.For(tierName, ordinal);
-        bool added = false;
+
+        var read = new Dictionary<string, (Image Art, Rect2I Box)>();
         foreach (string path in Directory.GetFiles(folder, "*.png").OrderBy(p => p))
         {
             string name = Path.GetFileNameWithoutExtension(path);
@@ -180,7 +235,26 @@ public sealed class PropSet
                 refused.Add($"{tierName}/{name} is empty");
                 continue;
             }
-            Add(name, tier, art, box);
+            read[name] = (art, box);
+        }
+
+        bool added = false;
+        foreach ((string name, (Image art, Rect2I box)) in read.OrderBy(e => e.Key))
+        {
+            if (name.EndsWith(BurntSuffix, StringComparison.OrdinalIgnoreCase))
+            {
+                // Said out loud rather than skipped: a state whose species is
+                // missing loads, counts for nothing and never appears, which is
+                // the one failure that looks exactly like art that did not load.
+                string live = name[..^BurntSuffix.Length];
+                if (!read.ContainsKey(live))
+                    refused.Add($"{tierName}/{name} has no {live}");
+                continue;
+            }
+            Coat? burnt = null;
+            if (read.TryGetValue(name + BurntSuffix, out (Image Art, Rect2I Box) after))
+                burnt = Dress(after.Art, after.Box, tier);
+            Add(name, tier, art, box, burnt);
             added = true;
         }
         if (added)
@@ -190,11 +264,15 @@ public sealed class PropSet
     private float Tallest(PropTier tier) =>
         _props.Where(p => p.Tier == tier).Select(p => p.Rise).DefaultIfEmpty(0.0f).Max();
 
-    private void Add(string name, PropTier tier, Image art, Rect2I box)
+    private void Add(string name, PropTier tier, Image art, Rect2I box,
+                     Coat? burnt)
     {
         (Vector2 foot, float root) = FootOf(art, box);
         float rise = foot.Y - box.Position.Y + 1;
         float spread = SpreadOf(art, box, rise * (1.0f - (float)tier.Stands));
+        // Before the mirror, so both halves of the pair carry the same margin -
+        // and before the mipmaps, which is the whole point. See Bleed.
+        art = Bleed(art);
         var mirror = (Image)art.Duplicate();
         mirror.FlipX();
 
@@ -216,7 +294,37 @@ public sealed class PropSet
             Rise = rise,
             Root = root,
             Spread = spread,
+            Burnt = burnt,
         });
+    }
+
+    /// <summary>One state's picture, measured by exactly the same code that
+    /// measures the living one - which is the point of it being a function. A
+    /// state whose foot were found some other way would stand somewhere else,
+    /// and a tree that steps sideways when it burns is the one thing this pair
+    /// must not do.</summary>
+    private static Coat Dress(Image art, Rect2I box, PropTier tier)
+    {
+        (Vector2 foot, float root) = FootOf(art, box);
+        // Measured first and bled second: the contact band is read off the alpha,
+        // which Bleed does not touch, and reading it after would be reading it
+        // through the margin.
+        art = Bleed(art);
+        var mirror = (Image)art.Duplicate();
+        mirror.FlipX();
+        var mirrorFoot = new Vector2(art.GetWidth() - 1 - foot.X, foot.Y);
+        art.GenerateMipmaps();
+        mirror.GenerateMipmaps();
+        return new Coat
+        {
+            Art = ImageTexture.CreateFromImage(art),
+            Mirror = ImageTexture.CreateFromImage(mirror),
+            Foot = foot,
+            MirrorFoot = mirrorFoot,
+            Size = new Vector2(art.GetWidth(), art.GetHeight()),
+            Rise = foot.Y - box.Position.Y + 1,
+            Root = root,
+        };
     }
 
     /// <summary>
@@ -290,6 +398,109 @@ public sealed class PropSet
         return least == int.MaxValue ? 0.0f : (most - least) * 0.5f;
     }
 
+
+    /// <summary>
+    /// How far the colour is carried out into the transparent margin before the
+    /// mipmaps are made.
+    ///
+    /// Eight, because that is what the draw scale asks for: art at 8x is drawn
+    /// from about the third mip, where one texel is an 8x8 block of the original,
+    /// so the colour has to be right that far outside the silhouette.
+    /// </summary>
+    private const int BleedFor = 8;
+
+    /// <summary>
+    /// Carry the edge colour out into the fully transparent texels, leaving their
+    /// alpha at zero.
+    ///
+    /// <b>Without it the mipmaps mix the picture with whatever the exporter left
+    /// in the margin, and here that was white.</b> Measured on
+    /// <c>Tree_3_burnt.png</c>: the transparent texels are (255,255,255) and the
+    /// branches are (39,38,37), so at the third mip a bare tree is mostly margin
+    /// by area and comes out silver. On the board it read as a tree drawn in
+    /// chalk, standing brighter than the wood around it - and the art on disk is
+    /// charcoal.
+    ///
+    /// <b>The same fix <c>water_sheet.py</c> uses, in the mirror case.</b> There a
+    /// soft hexagon shrunk on straight alpha picked up the black around it and
+    /// came out with a dark rim; here a dark silhouette picks up the white around
+    /// it. Both are the one rule: alpha-weighted averaging, or fill the margin
+    /// with the colour that belongs there.
+    ///
+    /// Frontier by frontier rather than a pass over the whole image, so the cost
+    /// is the silhouette's perimeter and not eight times its area - nine of these
+    /// at a megapixel each is a load, and this is done at load.
+    /// </summary>
+    private static Image Bleed(Image art)
+    {
+        int wide = art.GetWidth(), tall = art.GetHeight();
+        byte[] px = art.GetData();
+        if (px.Length != wide * tall * 4)
+            return art;                     // not RGBA8; nothing to carry
+        var known = new bool[wide * tall];
+        var edge = new List<int>();
+        for (int i = 0; i < known.Length; i++)
+            if (px[i * 4 + 3] > 0)
+            {
+                known[i] = true;
+                edge.Add(i);
+            }
+        for (int round = 0; round < BleedFor && edge.Count > 0; round++)
+        {
+            var next = new List<int>();
+            var painted = new List<(int At, int R, int G, int B)>();
+            foreach (int at in edge)
+            {
+                int x = at % wide, y = at / wide;
+                for (int dy = -1; dy <= 1; dy++)
+                for (int dx = -1; dx <= 1; dx++)
+                {
+                    int nx = x + dx, ny = y + dy;
+                    if (dx == 0 && dy == 0 || nx < 0 || ny < 0
+                        || nx >= wide || ny >= tall)
+                        continue;
+                    int to = ny * wide + nx;
+                    if (known[to])
+                        continue;
+                    // Averaged over the known neighbours, so a texel between two
+                    // branches takes both rather than whichever was walked first.
+                    int r = 0, g = 0, b = 0, n = 0;
+                    for (int ky = -1; ky <= 1; ky++)
+                    for (int kx = -1; kx <= 1; kx++)
+                    {
+                        int mx = nx + kx, my = ny + ky;
+                        if (mx < 0 || my < 0 || mx >= wide || my >= tall)
+                            continue;
+                        int from = my * wide + mx;
+                        if (!known[from])
+                            continue;
+                        r += px[from * 4]; g += px[from * 4 + 1];
+                        b += px[from * 4 + 2]; n++;
+                    }
+                    if (n == 0)
+                        continue;
+                    painted.Add((to, r / n, g / n, b / n));
+                    next.Add(to);
+                }
+            }
+            // Written after the round rather than inside it, so a texel filled
+            // this round is not a source for its neighbour in the same one -
+            // otherwise the colour smears along the walk order.
+            foreach ((int at, int r, int g, int b) in painted)
+            {
+                if (known[at])
+                    continue;
+                px[at * 4] = (byte)r;
+                px[at * 4 + 1] = (byte)g;
+                px[at * 4 + 2] = (byte)b;
+            }
+            foreach ((int at, int _, int _, int _) in painted)
+                known[at] = true;
+            edge = next;
+        }
+        return Image.CreateFromData(wide, tall, false, Image.Format.Rgba8, px);
+    }
+
     public string NameOf(int i) => _props[Wrap(i)].Name;
 
     /// <summary>Which rules this prop plays by. See <see cref="PropTier"/>.
@@ -315,6 +526,44 @@ public sealed class PropSet
         mirrored ? _props[Wrap(i)].MirrorFoot : _props[Wrap(i)].Foot;
 
     public Vector2 SizeOf(int i) => _props[Wrap(i)].Size;
+
+    /// <summary>Whether this kind has an art for what it looks like burnt out. A
+    /// kind without one does not stop burning - it chars and stays in the shape
+    /// it grew in, which is <c>EffectLayer.StandIn</c>'s rule: a board whose art
+    /// predates the state is a board that loses nothing.</summary>
+    public bool HasBurnt(int i) => _props[Wrap(i)].Burnt is not null;
+
+    /// <summary>The picture for one state of one kind. Falls back to the living
+    /// art, so a caller that asks for a state nobody drew gets a tree rather
+    /// than nothing.</summary>
+    public Texture2D ArtOf(int i, bool mirrored, bool burnt)
+    {
+        Coat? coat = burnt ? _props[Wrap(i)].Burnt : null;
+        return coat is null ? ArtOf(i, mirrored)
+                            : mirrored ? coat.Mirror : coat.Art;
+    }
+
+    public Vector2 FootOf(int i, bool mirrored, bool burnt)
+    {
+        Coat? coat = burnt ? _props[Wrap(i)].Burnt : null;
+        return coat is null ? FootOf(i, mirrored)
+                            : mirrored ? coat.MirrorFoot : coat.Foot;
+    }
+
+    public Vector2 SizeOf(int i, bool burnt)
+    {
+        Coat? coat = burnt ? _props[Wrap(i)].Burnt : null;
+        return coat is null ? SizeOf(i) : coat.Size;
+    }
+
+    /// <summary>The state's own two measurements, for the note and the checks -
+    /// never for placement, which is settled by the living art before anything
+    /// catches. See the class remarks.</summary>
+    public (float Rise, float Root) BurntSpanOf(int i)
+    {
+        Coat? coat = _props[Wrap(i)].Burnt;
+        return coat is null ? (0.0f, 0.0f) : (coat.Rise, coat.Root);
+    }
 
     /// <summary>Height above the foot, in image px. Multiply by the draw scale
     /// to get what the clearance rule is written in.</summary>

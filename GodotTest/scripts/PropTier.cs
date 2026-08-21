@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 
@@ -38,6 +38,24 @@ namespace TankSpriteTest;
 /// </summary>
 /// <param name="Name">The subdirectory, lowercased. What the budget table and
 /// the note call it.</param>
+/// <param name="Detail">How many times the on-screen scale this folder's art is
+/// drawn at. The one number about a prop that cannot be measured - it has no
+/// template frame to compare against, the way a terrain kind does - so it is
+/// declared, and declared per folder because a folder is where the rules of a
+/// tier already live. Per file it would be a table of filenames, which is what
+/// everything else here exists to avoid.
+///
+/// <b>Everything that follows from it is measured, so this is the whole
+/// adjustment a re-export needs.</b> Rise, foot, contact and footprint come off
+/// the pixels; step, clearing and keep-out are in ground px. Aim the drawn
+/// height at 110-140 screen px against a 109px hexagon and a 131px tank, and
+/// keep the widest base under about 18 - the legal ring for a trunk is some 19
+/// deep between the keep-out at 88 and the near edge at 107, and a prop too wide
+/// for every spot on the board goes missing rather than wrong.
+///
+/// Eight for the trees, which are exported at that scale from one document at
+/// 1009-1041px tall: 125-130px on screen, bases 9.2 to 16.8. Four for
+/// everything drawn beside <c>soil.png</c>, which is a 4x kind.</param>
 /// <param name="Step">Ground px between lattice nodes before jitter. Its own,
 /// because a tier is a spacing before it is anything else: 30 for trees is the
 /// measured width of the band a trunk may stand in, and undergrowth that
@@ -106,12 +124,25 @@ namespace TankSpriteTest;
 /// <param name="Sways">Whether the wind, the blast and a passing hull move it.
 /// A rock that leaned in a gust would be the one thing on the board announcing
 /// that all of this is a shear on a sprite.</param>
+/// <param name="Burns">Whether it catches when its cell is alight. False on a
+/// rock, and that is the second thing a board can see about one - it neither
+/// sways nor burns.</param>
+/// <param name="Carries">Whether having one of these on a cell is what makes the
+/// cell able to catch and to pass the fire on.
+///
+/// <b>Two flags and not one, and the pair is the rule rather than caution.</b>
+/// Scrub burns - it is dry brush - but a bush is not a way across a hexagon: made
+/// one, the fire walks the scatter that is on every cell of a mixed board and the
+/// whole map goes up, which is a grass fire wearing a wood's name. So the wood
+/// carries the front and the undergrowth burns where the front already is.
+/// </param>
 /// <param name="Salt">Base for every hash this tier takes, so no two tiers share
 /// a decision. Sharing them puts a bush at the foot of every trunk - the same
 /// failure the per-decision salts inside a tier already avoid, one level up.
 /// Zero for trees, which is what pins the existing boards.</param>
 public sealed record PropTier(
     string Name,
+    double Detail,
     double Step,
     double Clearing,
     bool MindsBorder,
@@ -120,6 +151,8 @@ public sealed record PropTier(
     double Stands,
     bool Fades,
     bool Sways,
+    bool Burns,
+    bool Carries,
     int Salt)
 {
     /// <summary>The tier a PNG in the root of the props folder belongs to. Not a
@@ -151,7 +184,8 @@ public sealed record PropTier(
             // px of depth in 139 of drawn height, so the share a measurement
             // would give is within rounding of the one that leaves every board
             // rendered so far byte for byte where it was.
-            [Trees] = new(Trees, 30.0, 1.0, true, 0.0, false, 1.00, true, true, 0),
+            [Trees] = new(Trees, 8.0, 30.0, 1.0, true, 0.0, false, 1.00, true, true,
+                          true, true, 0),
 
             // Waist-high: it hides a tank's belt and not its turret, so it sorts
             // and it fades. No clearing, because a hull pushes through scrub
@@ -160,7 +194,8 @@ public sealed record PropTier(
             // Eighteen across the whole hexagon rather than round its rim.
             // Two thirds of it stands: a bush is about as deep as it is tall,
             // so H*cos(e) is 0.63 of what is drawn.
-            [Bushes] = new(Bushes, 18.0, 0.0, true, 0.12, true, 0.65, true, true, 100_003),
+            [Bushes] = new(Bushes, PropSet.Detail, 18.0, 0.0, true, 0.12, true,
+                            0.65, true, true, true, false, 100_003),
 
             // Does not sway - the whole difference between a rock and a bush the
             // board can see. No clearing either, and that is a trade rather than
@@ -169,12 +204,14 @@ public sealed record PropTier(
             // on the board standing in a ring. And the least of any tier that
             // stands at all - a stone is roughly twice as wide as it is high,
             // and the far half of it is lying on the same ground as the near.
-            [Rocks] = new(Rocks, 22.0, 0.0, true, 0.12, true, 0.45, false, false, 200_003),
+            [Rocks] = new(Rocks, PropSet.Detail, 22.0, 0.0, true, 0.12, true,
+                           0.45, false, false, false, false, 200_003),
 
             // The one tier that lets itself cross a seam, because that is what a
             // tuft does. See the class remarks for why there is no art here and
             // should not be.
-            [Grass] = new(Grass, 10.0, 0.0, false, 0.0, true, 0.35, false, true, 300_003),
+            [Grass] = new(Grass, PropSet.Detail, 10.0, 0.0, false, 0.0, true,
+                           0.35, false, true, true, false, 300_003),
         };
 
     /// <summary>
@@ -187,7 +224,8 @@ public sealed record PropTier(
     /// which is the visible sign that nobody has written its row yet.
     /// </summary>
     public static PropTier Unknown(string name, int ordinal) =>
-        new(name, 20.0, 1.0, true, 0.10, false, 0.85, true, true, 400_003 + ordinal * 7_919);
+        new(name, PropSet.Detail, 20.0, 1.0, true, 0.10, false, 0.85, true, true,
+            true, false, 400_003 + ordinal * 7_919);
 
     public static PropTier For(string name, int ordinal) =>
         Known.TryGetValue(name, out PropTier? tier) ? tier : Unknown(name, ordinal);

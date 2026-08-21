@@ -162,6 +162,7 @@ public static class SelfTest
         Relief(field, grove, Check);
         Ramps(field, stage, Check);
         Water(field, grove, Check);
+        Burning(field, grove, Check);
         Climbing(field, tank, Check);
 
         GD.Print("turret modes");
@@ -2063,7 +2064,7 @@ public static class SelfTest
                 + $"{grove.Planted} props; missing "
                 + string.Join(", ", wanted.Where(k => !grown.Contains(k))
                     .Select(k => $"{grove.Props.NameOf(k)} "
-                                 + $"(base {grove.Props.RootOf(k) * grove.DrawScale:F1}px)")));
+                                 + $"(base {grove.Props.RootOf(k) * grove.ScaleOf(k):F1}px)")));
 
             // The quiet half: art on disk that no kind of ground carries. It
             // loads, it is counted in the note, and it never appears - which
@@ -6575,6 +6576,206 @@ public static class SelfTest
     /// only because both ask the field. Off the drawn row a wood on a rise sorts
     /// behind the entire plain.
     /// </summary>
+
+    /// <summary>
+    /// The wood on fire: what a cell does when it is lit, what it hands to its
+    /// neighbours, and what one tree standing on it looks like.
+    ///
+    /// <b>Most of it is asked of <see cref="Wildfire"/> with no art on disk and no
+    /// board under it</b>, which is why that class takes a predicate rather than a
+    /// grove - the same shape <see cref="Swell"/> is in, and for the same gain: the
+    /// interesting half is when the front moves, and none of it needs a tree.
+    /// </summary>
+    private static void Burning(HexField field, Grove? grove,
+                                Action<string, bool, string> Check)
+    {
+        GD.Print("the wood on fire");
+
+        // A board where the middle column is wooded and nothing else is, so what
+        // spread does and does not reach is a statement rather than an accident.
+        var wooded = new HashSet<Vector2I>();
+        for (int r = 0; r < field.Rows; r++)
+            wooded.Add(new Vector2I(4, r));
+        var fire = new Wildfire { Field = field, Wooded = wooded.Contains };
+
+        var lit = new Vector2I(4, 3);
+        var bare = new Vector2I(6, 3);
+        Check("a cell with nothing on it cannot be set alight",
+            !fire.Light(bare) && !fire.LitAt(bare),
+            "a bare hex quietly blackening says the fire spread where it did not");
+        Check("a wooded cell can", fire.Light(lit) && fire.LitAt(lit), "");
+        Check("and lighting it twice is not a restart",
+            !fire.Light(lit), "the second click would put its clock back");
+
+        // One long frame, to show the front walks rather than crossing the board.
+        // A frame this long is not a thing the bench runs, which is the point: what
+        // the fire does must not depend on the frame rate.
+        fire.Tick(60.0);
+        int reached = 0;
+        for (int r = 0; r < field.Rows; r++)
+            if (fire.LitAt(new Vector2I(4, r)))
+                reached++;
+        Check("one frame hands the fire on by one cell, however long the frame is",
+            reached == 3, $"{reached} cells of the strip are alight after one tick");
+        Check("and only onto wood",
+            !fire.LitAt(new Vector2I(3, 3)) && !fire.LitAt(new Vector2I(5, 3)),
+            "scrubless ground either side took it");
+
+        // The edge is the pair's, not the source's: a delay hashed off one end
+        // lights all six neighbours of a cell in the same frame.
+        var a = new Vector2I(4, 5);
+        var b = HexField.Step(a, HexField.EdgeHeadings[0]);
+        Check("an edge takes the same time to cross either way",
+            Mathf.Abs(fire.Delay(a, b) - fire.Delay(b, a)) < 0.0001f,
+            $"{fire.Delay(a, b):F2}s against {fire.Delay(b, a):F2}s");
+        var seen = new HashSet<float>();
+        foreach (int heading in HexField.EdgeHeadings)
+            seen.Add(Mathf.Round(fire.Delay(a, HexField.Step(a, heading)) * 100.0f));
+        Check("and its six edges do not all take the same time",
+            seen.Count >= 4,
+            $"{seen.Count} distinct delays of six - a cell that hands the fire to "
+            + "every neighbour at once draws a hexagon on the board");
+
+        // What one tree does, over the whole of a burn. Read off a fresh fire so
+        // the ages are exact.
+        var clock = new Wildfire { Field = field, Wooded = wooded.Contains };
+        clock.Light(lit);
+        Wildfire.Coat green = clock.Of(lit, 0.5);
+        Check("a tree that has not caught yet is untouched",
+            green.Untouched, "the stagger is what keeps a cell from lighting at once");
+        // A fifth of the way in, read off a tree that caught with its cell - the
+        // stagger is asked about separately, two lines down.
+        clock.Tick(clock.BurnFor * 0.2f);
+        Wildfire.Coat young = clock.Of(lit, 0.0);
+        Check("one that has just caught is alight and not yet charred",
+            young.Flame > 0.5f && young.Char < 0.6f && !young.Burnt,
+            $"flame {young.Flame:F2} char {young.Char:F2}");
+        Check("two trees on one cell are not at the same point in it",
+            Mathf.Abs(clock.Of(lit, 0.0).Char - clock.Of(lit, 0.9).Char) > 0.05f,
+            "a cell lighting in step is one animation played eight times");
+
+        clock.Tick(clock.BurnFor * 0.6f);       // four fifths of the way in
+        Wildfire.Coat old = clock.Of(lit, 0.0);
+        Check("the char deepens over the burn",
+            old.Char > young.Char && !old.Burnt,
+            $"{young.Char:F2} to {old.Char:F2}");
+        Check("and the flame is dying down by the end of it",
+            old.Flame < young.Flame && old.Flame > 0.0f,
+            $"flame {young.Flame:F2} to {old.Flame:F2}");
+
+        clock.Tick(clock.BurnFor * 0.4f);
+        Wildfire.Coat done = clock.Of(lit, 0.0);
+        Check("when it has finished burning there is no flame on it",
+            done.Burnt && done.Flame <= 0.0f, $"flame {done.Flame:F2}");
+        Check("the char comes off at the swap, because the picture is charcoal",
+            done.Char <= 0.0f,
+            "left on, the multiply takes the burnt art to nothing");
+        Check("the smoke outlives the flame",
+            done.Smoke > 0.0f, "a fire that stops smoking as it dies is a switch");
+        Check("the ash does not lift",
+            clock.AshAt(lit) >= 1.0f, "a mark that faded is a fire nobody can find");
+
+        clock.Tick(clock.SmokeFor * 1.2f);
+        Check("and the smoke does go, in the end",
+            clock.Of(lit, 0.0).Smoke <= 0.0f, "the column would stand for good");
+        Check("the ash is still there when it has",
+            clock.AshAt(lit) >= 1.0f, "");
+
+        clock.Douse();
+        Check("dousing puts the wood back green",
+            !clock.LitAt(lit) && clock.AshAt(lit) <= 0.0f && clock.Scorched == 0,
+            "a board left burning comes back alight before anybody lit it");
+
+        // The paint, and this is the half that needs the art. A kind with no burnt
+        // picture is the one the char has to stay on: it has nothing to swap to.
+        var stump = new PropNode { Coat = new Wildfire.Coat(0.4f, 1.0f, 1.0f, false) };
+        Check("a tree part way through the burn is charring and still itself",
+            !stump.Charred && Mathf.Abs(stump.Scorch - 0.4f) < 0.0001f,
+            $"scorch {stump.Scorch:F2}");
+        stump.Coat = new Wildfire.Coat(0.0f, 0.0f, 0.5f, true);
+        Check("one that has burnt out with no burnt art keeps every bit of its char",
+            !stump.Charred && stump.Scorch >= 1.0f,
+            "dropping it left bright green scrub standing in a burnt-out cell");
+
+        if (grove?.Props is not null && grove.Props.Any)
+        {
+            int paired = -1;
+            for (int k = 0; k < grove.Props.Count; k++)
+                if (grove.Props.HasBurnt(k))
+                {
+                    paired = k;
+                    break;
+                }
+            if (paired < 0)
+            {
+                GD.Print("        (no burnt art in this run)");
+            }
+            else
+            {
+                var tree = new PropNode
+                {
+                    Art = grove.Props.ArtOf(paired, false),
+                    Foot = grove.Props.FootOf(paired, false),
+                    Size = grove.Props.SizeOf(paired),
+                    RiseImage = grove.Props.RiseOf(paired),
+                    RootImage = grove.Props.RootOf(paired),
+                    BurntArt = grove.Props.ArtOf(paired, false, true),
+                    BurntFoot = grove.Props.FootOf(paired, false, true),
+                    BurntSize = grove.Props.SizeOf(paired, true),
+                    Pixels = 1.0f,
+                };
+                Check("a kind with burnt art is drawn in its living one until it is not",
+                    tree.ShownArt == tree.Art && !tree.Charred, "");
+                tree.Coat = new Wildfire.Coat(0.0f, 0.0f, 0.5f, true);
+                Check("and swaps every part of the picture at once, not just the art",
+                    tree.Charred && tree.ShownArt == tree.BurntArt
+                    && tree.ShownFoot == tree.BurntFoot
+                    && tree.ShownSize == tree.BurntSize,
+                    "a foot left behind is a tree that steps sideways as it burns");
+                Check("with the char off it, because the picture is already charcoal",
+                    tree.Scorch <= 0.0f, $"scorch {tree.Scorch:F2}");
+                // The one thing the pair must not do. Measured against the living
+                // art's own numbers, which is all the placement was decided on.
+                (float rise, float root) = grove.Props.BurntSpanOf(paired);
+                Check("the burnt art is no taller than the tree it replaces",
+                    rise <= grove.Props.RiseOf(paired) + 1.0f,
+                    $"{rise:F0}px against {grove.Props.RiseOf(paired):F0}");
+                Check("what the state cannot touch is what the spot was chosen on",
+                    tree.Rise == grove.Props.RiseOf(paired)
+                    && tree.Root == grove.Props.RootOf(paired),
+                    "a prop already standing cannot be given room it was not sown "
+                    + "with - and a burnt trunk with ash round it measures a base "
+                    + "twice the wood's");
+                // Named rather than asserted: the base is the artist's, and a wide
+                // one is a note about the art and not a fault in the code.
+                if (root > grove.Props.RootOf(paired) * 1.35f)
+                    GD.Print($"        (note: {grove.Props.NameOf(paired)}'s burnt "
+                             + $"base is {root:F0}px against the wood's "
+                             + $"{grove.Props.RootOf(paired):F0} - it is drawn wider "
+                             + "than the tree it replaces)");
+            }
+        }
+
+        // A rock does not burn, and the flag says so rather than the arithmetic.
+        Check("a rock does not burn and a tree carries the fire",
+            PropTier.Known[PropTier.Trees].Burns
+            && PropTier.Known[PropTier.Trees].Carries
+            && !PropTier.Known[PropTier.Rocks].Burns
+            && !PropTier.Known[PropTier.Rocks].Carries,
+            "a boulder charring is the one thing on the board announcing that all "
+            + "of this is a tint on a sprite");
+        Check("scrub burns where the front is and is not a way across a hexagon",
+            PropTier.Known[PropTier.Bushes].Burns
+            && !PropTier.Known[PropTier.Bushes].Carries,
+            "made one, the fire walks the scatter on every cell of a mixed board");
+
+        // And the two quads over a burning tree: the smoke has to be the roomier
+        // of the two, because it stands over the crown the flame licks through.
+        Check("the smoke is given more room than the flame",
+            Stage3D.PlumeReach > Stage3D.PyreReach,
+            $"{Stage3D.PlumeReach:F2} against {Stage3D.PyreReach:F2}");
+    }
+
     private static void Woods(HexField field, Grove? grove, double elevation,
                               Action<string, bool, string> Check)
     {

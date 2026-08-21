@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Godot;
@@ -182,6 +182,13 @@ public sealed partial class Grove : Node2D
 
     public HexField? Field;
     public PropSet? Props;
+
+    /// <summary>Which cells are alight, if anything is. Handed in rather than
+    /// owned, for the reason <see cref="Wildfire"/> is a class of its own: what
+    /// burns is a cell, and the wood's business is which trees are standing on
+    /// it. Null is a board where nothing can catch, which is every board drawn
+    /// before this.</summary>
+    public Wildfire? Fire;
 
     /// <summary>Where the field is, so a tree's node lands in the same space a
     /// tank's does. Its depth is still measured from the field's own origin,
@@ -367,19 +374,38 @@ public sealed partial class Grove : Node2D
         }
     }
 
-    /// <summary>Image px to screen px for a prop.</summary>
-    public float DrawScale
+    /// <summary>How much of the plate's own scale survives to the screen. The
+    /// half of a prop's scale that belongs to the board rather than to the art:
+    /// what the terrain kind is painted at against the tile it is drawn on.
+    /// </summary>
+    private float Plate
     {
         get
         {
             if (Field?.Atlas is null)
-                return 1.0f / PropSet.Detail;
-            float plate = Field.Terrain is { Any: true }
+                return 1.0f;
+            return Field.Terrain is { Any: true }
                 ? Field.Terrain.ScaleTo(Field.Atlas.HexRect)
                 : 1.0f;
-            return plate / PropSet.Detail;
         }
     }
+
+    /// <summary>
+    /// Image px to screen px for one tier's art.
+    ///
+    /// Per tier and not per board, because the scale art is exported at is a
+    /// property of the folder it came from - see <see cref="PropTier.Detail"/>.
+    /// Trees at 8x and undergrowth at 4x is not an inconsistency to be tidied
+    /// away: they are different documents, and the alternative is re-exporting
+    /// art nobody asked to change.
+    /// </summary>
+    public float DrawScale(PropTier tier) => Plate / (float)tier.Detail;
+
+    /// <summary>The same for one kind of prop, which is the form every readout
+    /// and check wants: they hold a species index, and the tier is a lookup they
+    /// would all have to remember to do.</summary>
+    public float ScaleOf(int species) =>
+        Props is null ? 1.0f : DrawScale(Props.TierOf(species));
 
     /// <summary>What grew, for the log. The counts by kind rather than the
     /// total, because the total cannot say that a prop is too wide for every
@@ -398,11 +424,11 @@ public sealed partial class Grove : Node2D
                + $"clearance {Clearance:F0}px: "
                + string.Join("; ", Props.Tiers.Select(t =>
                    $"{t.Name} x{Props.Species(t).Sum(k => grown[k])} "
-                   + $"@{StepOf(t):F0}px ["
+                   + $"@{StepOf(t):F0}px /{t.Detail:F0} ["
                    + string.Join(", ", Props.Species(t).Select(
                        k => $"{Props.NameOf(k)} {grown[k]}"
-                            + $" ({Props.RiseOf(k) * DrawScale:F0}px tall,"
-                            + $" base {Props.RootOf(k) * DrawScale:F1})"))
+                            + $" ({Props.RiseOf(k) * ScaleOf(k):F0}px tall,"
+                            + $" base {Props.RootOf(k) * ScaleOf(k):F1})"))
                    + "]"));
     }
 
@@ -432,7 +458,6 @@ public sealed partial class Grove : Node2D
             return;
 
         float squash = Squash;
-        float scale = DrawScale;
         _taken.Clear();
 
         // Tier by tier over the whole board, tallest first, and the loop nesting
@@ -443,6 +468,7 @@ public sealed partial class Grove : Node2D
         // can see it, because "later" there means "in another cell".
         foreach (PropTier tier in Props.Tiers)
         {
+            float scale = DrawScale(tier);
             int first = _planted.Count;
             for (int q = 0; q < Field.Columns; q++)
             for (int r = 0; r < Field.Rows; r++)
@@ -634,6 +660,10 @@ public sealed partial class Grove : Node2D
                 Art = Props!.ArtOf(s.Species, s.Mirrored),
                 Foot = Props.FootOf(s.Species, s.Mirrored),
                 Size = Props.SizeOf(s.Species),
+                BurntArt = Props.HasBurnt(s.Species)
+                    ? Props.ArtOf(s.Species, s.Mirrored, true) : null,
+                BurntFoot = Props.FootOf(s.Species, s.Mirrored, true),
+                BurntSize = Props.SizeOf(s.Species, true),
                 RiseImage = Props.RiseOf(s.Species),
                 RootImage = Props.RootOf(s.Species),
                 SpreadImage = Props.SpreadOf(s.Species),
@@ -668,6 +698,12 @@ public sealed partial class Grove : Node2D
                                    Mathf.RoundToInt(s.At.Y), 7919) * Math.Tau,
                 SwayRate = 0.8 + 0.5 * Hash01(Mathf.RoundToInt(s.At.X),
                                               Mathf.RoundToInt(s.At.Y), 8837),
+                // Off where it stands, for the sway phase's reason and not the
+                // planting order's: a tree keeps how late it catches when the
+                // sowing around it changes, and two trees on one cell do not
+                // catch together.
+                Seed = Mathf.RoundToInt(s.At.X) * 1_009
+                       + Mathf.RoundToInt(s.At.Y),
             };
             AddChild(node);
             _planted.Add(node);
@@ -858,6 +894,13 @@ public sealed partial class Grove : Node2D
                 }
                 lean += tree.Flinch;
             }
+            // A burnt trunk is stiff. Damped rather than pinned, because a bare
+            // stem in a gust that stood dead still while the wood around it
+            // moved would read as a sprite that had stopped being updated - the
+            // rock's flag says "not a thing that sways", and this says "the same
+            // thing, with its crown gone".
+            if (tree.Charred)
+                lean *= CharredSway;
             // The lean is written every frame and the redraw is not: a tree
             // whose crown has moved a thousandth of a pixel since it was last
             // drawn does not need drawing again. Kept apart rather than folded
@@ -880,6 +923,11 @@ public sealed partial class Grove : Node2D
     /// that has to be true rather than tuned.</summary>
     public double Wind = 2.6;
     public double SwayHeight = 120.0;
+
+    /// <summary>What share of the sway a burnt trunk keeps. A third: what is left
+    /// of a tree after a fire is a stem with no crown on it, so most of the sail
+    /// area the wind was pushing is gone.</summary>
+    public const float CharredSway = 0.33f;
 
     /// <summary>How fast the gust crosses, and how far apart in phase two
     /// points a pixel apart on the board are. 0.55 rad/s is a wave every
@@ -1211,6 +1259,71 @@ public sealed partial class Grove : Node2D
     /// hull's heading, so a per-tree test would have trees blinking as the tank
     /// turned on the spot.
     /// </summary>
+    /// <summary>
+    /// Whether a fire could take hold on this cell, and cross it.
+    ///
+    /// Off what is actually standing there, not off what the ground is called: a
+    /// forest cell whose trees all fell to the budget's ceiling has nothing to
+    /// burn, and a fire that spread onto it would blacken a field. See
+    /// <see cref="PropTier.Carries"/> for why a cell of scrub is not a way
+    /// across.
+    /// </summary>
+    public bool Carrying(Vector2I cell)
+    {
+        foreach (PropNode prop in _planted)
+            if (prop.Cell == cell && prop.Tier.Carries)
+                return true;
+        return false;
+    }
+
+    /// <summary>
+    /// Read the fire onto every tree, once a frame.
+    ///
+    /// <b>The cell holds the clock and the tree reads it late.</b> Every tree on
+    /// one cell lighting in the same frame is one animation played eight times -
+    /// the rule the three tanks' clocks are separate for. The lateness is a hash
+    /// of where the trunk stands, so it is the same tree on two runs and a
+    /// different one from its neighbour.
+    ///
+    /// <b>A rock on a burning cell does not burn</b>, and the flag says so rather
+    /// than the arithmetic: a boulder charring in a fire is the one thing on the
+    /// board announcing that all of this is a tint on a sprite.
+    /// </summary>
+    public void Smoulder()
+    {
+        if (_planted.Count == 0)
+            return;
+        foreach (PropNode prop in _planted)
+        {
+            Wildfire.Coat was = prop.Coat;
+            prop.Coat = Fire is null || !prop.Tier.Burns
+                ? Wildfire.Green
+                : Fire.Of(prop.Cell, Hash01(prop.Seed, prop.Species, 511_003));
+            // The swap changes the picture, and in 2D that is a redraw. The stage
+            // reads the node itself, so it needs nothing from here.
+            if (prop.Coat.Burnt != was.Burnt || prop.Coat.Char != was.Char
+                || prop.Coat.Flame != was.Flame)
+                prop.QueueRedraw();
+        }
+    }
+
+    /// <summary>How many trees are in flame and how many have burnt out.
+    /// Reported because a fire that is spreading and one that has gone out are
+    /// the same still picture - the pond's readouts exist for this reason too.
+    /// </summary>
+    public (int Burning, int Burnt) Ablaze()
+    {
+        int burning = 0, burnt = 0;
+        foreach (PropNode prop in _planted)
+        {
+            if (prop.Coat.Burnt)
+                burnt++;
+            else if (prop.Coat.Flame > 0.0f || prop.Coat.Char > 0.0f)
+                burning++;
+        }
+        return (burning, burnt);
+    }
+
     public void Reveal(IReadOnlySet<Vector2I> occupied, double delta)
     {
         if (_planted.Count == 0)
@@ -1294,6 +1407,55 @@ public sealed partial class PropNode : Node2D
     public Texture2D Art = null!;
     public Vector2 Foot;        // image px
     public Vector2 Size;        // image px
+
+    /// <summary>What this one looks like once it has finished burning, or
+    /// nothing. Held beside the living picture rather than replacing it, which is
+    /// the whole of how the pair stays honest: <see cref="Art"/>,
+    /// <see cref="Foot"/> and <see cref="Size"/> keep meaning the tree that was
+    /// sown, so everything measured off them - the clearance, the seam, the
+    /// contact patch, the checks - is measured off the art the spot was chosen
+    /// for. Only the three <c>Shown</c> members below know about the state.
+    /// </summary>
+    public Texture2D? BurntArt;
+    public Vector2 BurntFoot;
+    public Vector2 BurntSize;
+
+    /// <summary>This tree's own place in every hash about it - how late it
+    /// catches, and nothing else yet. Handed out at planting, so it is the same
+    /// tree on two runs of the same board: <c>--capture</c> fixes the step
+    /// precisely so two runs can be compared.</summary>
+    public int Seed;
+
+    /// <summary>How far through burning it is. Written once a frame by
+    /// <see cref="Grove.Smoulder"/> and read by whoever draws.</summary>
+    public Wildfire.Coat Coat = Wildfire.Green;
+
+    /// <summary>Whether it is standing in its burnt art rather than the one it
+    /// grew in. False for a kind nobody drew a burnt state for, however long it
+    /// burns - <c>EffectLayer.StandIn</c>'s rule: a board whose art predates the
+    /// state loses nothing, it just chars and keeps its shape.</summary>
+    public bool Charred => Coat.Burnt && BurntArt is not null;
+
+    /// <summary>
+    /// How far this one is charred, as the paint wants it.
+    ///
+    /// <b>It does not go back to nothing when the burn ends - it goes to
+    /// everything, unless there is a burnt picture to take over.</b> The char is
+    /// the transition for a kind that has one, so at the swap the art is already
+    /// charcoal and the multiply has to come off or it goes to black. A kind with
+    /// no burnt art has nothing to swap to, so the char is all it will ever have,
+    /// and dropping it left bright green scrub standing in a burnt-out cell - the
+    /// one thing on the board saying the fire had not really been there.
+    /// </summary>
+    public float Scorch =>
+        Coat.Burnt ? (BurntArt is null ? 1.0f : 0.0f) : Coat.Char;
+
+    /// <summary>The picture, the foot and the size as drawn - the state's if it
+    /// has one. Three members and not a mutated field, so that no measurement can
+    /// pick them up by accident.</summary>
+    public Texture2D ShownArt => Charred ? BurntArt! : Art;
+    public Vector2 ShownFoot => Charred ? BurntFoot : Foot;
+    public Vector2 ShownSize => Charred ? BurntSize : Size;
     public float Pixels = 1.0f;   // image px to screen px
     public Vector2 Ground;      // field-local screen px of the foot
     public int Species;
@@ -1414,6 +1576,7 @@ public sealed partial class PropNode : Node2D
     {
         if (Lean != 0.0f)
             DrawSetTransformMatrix(Bend);
-        DrawTextureRect(Art, new Rect2(-Foot * Pixels, Size * Pixels), false);
+        DrawTextureRect(ShownArt,
+                        new Rect2(-ShownFoot * Pixels, ShownSize * Pixels), false);
     }
 }

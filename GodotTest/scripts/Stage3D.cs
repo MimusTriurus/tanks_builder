@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.Globalization;
 using Godot;
 
@@ -134,6 +135,12 @@ public sealed partial class Stage3D : Node3D
     /// leaves the ground bare, which is how the stage behaved while the trees
     /// were still only canvas items - see <see cref="BuildTrees"/>.</summary>
     public Grove? Wood;
+
+    /// <summary>Which cells are burning, for the ash on the ground. The trees'
+    /// own share of the fire is read off the nodes, the way the fade and the lean
+    /// are - this is here because the ground is the stage's and the ash is the
+    /// ground's.</summary>
+    public Wildfire? Blaze;
 
     /// <summary>The drawn water surface. Null leaves the pond the flat colour
     /// it was before the art arrived, which is the A/B the toggle exists for -
@@ -330,6 +337,11 @@ public sealed partial class Stage3D : Node3D
         // hour instead, which is all the precision it needs.
         _deepClock = Mathf.PosMod(_deepClock + (float)delta, 3600.0f);
         _deepInk?.SetShaderParameter("time", _deepClock);
+        // The wood's fire, on the bench's step for the pond's reason: a flame
+        // running on wall-clock time makes every screenshot of a burning wood a
+        // different picture, and every A/B across one measures the difference.
+        _fireClock = Mathf.PosMod(_fireClock + (float)delta, 3600.0f);
+        Soot();
         _deepInk?.SetShaderParameter("foam", Mathf.Max(0.0f, Foam));
         PushSwell();
     }
@@ -1818,6 +1830,12 @@ render_mode unshaded, cull_disabled;
 
 uniform sampler2D art : source_color, filter_linear_mipmap, hint_default_white;
 uniform sampler2D height : filter_linear, hint_default_black;
+// Where the wood has burnt, in the same world XZ the march is walked in, and how
+// black a fully burnt cell goes. Nothing when the board has never been lit, which
+// is what keeps this off every fragment of every board that has not.
+uniform sampler2D ash : filter_linear, hint_default_black;
+uniform vec4 ash_map = vec4(0.0, 0.0, 1.0, 1.0);
+uniform float ash_ink = 0.0;
 // The map's own corner in world XZ, and one over its extent there.
 uniform vec4 map = vec4(0.0, 0.0, 1.0, 1.0);
 // The lowest ground on the board and how far the relief reaches above it.
@@ -1857,7 +1875,25 @@ void fragment() {
                           smoothstep(0.0, soft, over - (ground.y + climb * float(k))));
         }
     }
-    ALBEDO = paint.rgb * (1.0 - shade * blocked);
+    vec3 lit = paint.rgb * (1.0 - shade * blocked);
+    if (ash_ink > 0.0) {
+        vec2 av = (ground.xz - ash_map.xy) * ash_map.zw;
+        if (av.x >= 0.0 && av.x <= 1.0 && av.y >= 0.0 && av.y <= 1.0) {
+            float soot = texture(ash, av).r * ash_ink;
+            // Half the colour out and near half the light: ash is grey, and the
+            // ground under it keeps its own grain, which is what keeps a burnt
+            // cell reading as ground rather than as a hole.
+            //
+            // How far down is set by what stands on it rather than by taste: a
+            // burnt trunk composites to about 86 of 255 over this ground, so at
+            // 0.30 the ash went to 45 and the trees left standing in it read as
+            // silver skeletons on tarmac - brighter than anything near them.
+            // 0.55 puts the ash at 82, which is the charcoal standing in it.
+            float lum = dot(lit, vec3(0.299, 0.587, 0.114));
+            lit = mix(lit, mix(lit, vec3(lum), 0.5) * 0.55, soot);
+        }
+    }
+    ALBEDO = lit;
     // ALPHA is deliberately not written. The ground is opaque and the material
     // this replaced said so by leaving transparency off; a spatial shader that
     // writes ALPHA at all is taken for a transparent surface, drops out of the
@@ -3957,7 +3993,22 @@ void fragment() {{
     /// <summary>One billboard per planted tree, and the quad shape shared by
     /// every tree of a kind.</summary>
     private readonly Dictionary<PropNode, MeshInstance3D> _standing = new();
-    private readonly Dictionary<(int Species, bool Mirrored), ArrayMesh> _stems = new();
+    /// <summary>One quad per kind, per mirror, <b>per state</b>: the burnt art
+    /// has its own size and its own foot, so it is its own mesh. Keyed rather
+    /// than rebuilt at the swap, because a wood burns cell by cell and the
+    /// second tree of a kind to catch wants the mesh the first one made.
+    /// </summary>
+    private readonly Dictionary<(int Species, bool Mirrored, bool Burnt), ArrayMesh>
+        _stems = new();
+
+    /// <summary>The flame and the smoke over one tree, made when it first
+    /// catches and kept afterwards. Lazily, because a board of 672 trees would
+    /// otherwise carry 1344 hidden quads for a fire nobody has lit.</summary>
+    private readonly Dictionary<PropNode, MeshInstance3D> _burning = new();
+    private readonly Dictionary<PropNode, MeshInstance3D> _smoking = new();
+    private readonly Dictionary<(int Species, bool Mirrored), ArrayMesh> _pyres = new();
+    private readonly Dictionary<(int Species, bool Mirrored), ArrayMesh> _plumes = new();
+    private float _fireClock;
     private int _sown = -1;
 
     /// <summary>The same trees again, laid down the sun onto the ground.
@@ -4149,11 +4200,22 @@ void fragment() {{
         foreach ((PropNode tree, MeshInstance3D stem) in _standing)
         {
             stem.Transform = Rooted(tree);
+            // The state, if it has changed. Asked by comparing the mesh it wants
+            // with the one it has rather than by watching a flag: the mesh is the
+            // thing that has to change, so a tree whose art was swapped and whose
+            // quad was not cannot get past this.
+            ArrayMesh want = Shape(tree);
+            if (stem.Mesh != want)
+                Reclothe(tree, stem, want);
+            Kindle(tree);
             // The fade the wood set this frame. Read off the node rather than
             // pushed by whoever set it, for Selected's reason - the reveal, the
             // slider and the reset all write it.
-            if (stem.MaterialOverride is StandardMaterial3D bark)
-                bark.AlbedoColor = new Color(1.0f, 1.0f, 1.0f, tree.Modulate.A);
+            if (stem.MaterialOverride is ShaderMaterial bark)
+            {
+                bark.SetShaderParameter("fade", tree.Modulate.A);
+                bark.SetShaderParameter("scorch", tree.Scorch);
+            }
         }
         foreach ((PropNode tree, MeshInstance3D seat) in _seating)
         {
@@ -4198,10 +4260,7 @@ void fragment() {{
     {
         foreach (PropNode tree in Wood!.Standing)
         {
-            (int, bool) kind = (tree.Species, tree.Mirrored);
-            if (!_stems.TryGetValue(kind, out ArrayMesh? shape))
-                _stems[kind] = shape = Stem(tree.Foot * tree.Pixels,
-                                            tree.Size * tree.Pixels, RiseFactor);
+            ArrayMesh shape = Shape(tree);
             var stem = new MeshInstance3D
             {
                 Mesh = shape,
@@ -4254,6 +4313,491 @@ void fragment() {{
         }
     }
 
+
+    /// <summary>
+    /// How black a fully burnt cell's ground goes, and how coarse the map that
+    /// says where it is.
+    ///
+    /// <b>Coarse on purpose, and it is the hexagon it is blurring away.</b> A mask
+    /// at cell resolution with a soft edge spills over the seams, which is what
+    /// ash does and what a per-cell tint cannot do: the pond's foam had exactly
+    /// this failure, a mask made from a per-cell number, and it drew the grid.
+    /// Eight world units is about three screen px.
+    /// </summary>
+    private const float AshInk = 1.0f;
+    private const float AshGrain = 8.0f;
+
+    private byte[]? _soot;
+    private ImageTexture? _sootMap;
+    private int _sootWide, _sootTall;
+    private Vector4 _sootAt;
+
+    /// <summary>
+    /// Blacken the ground the wood burnt on.
+    ///
+    /// <b>Rasterised into the map the ground shader already reads world XZ in</b>,
+    /// rather than tinting each cell's own face: the face is a prism top built at
+    /// board time, so a tint on it would be a mesh rebuild per frame while the ash
+    /// was still coming down - and it would be exactly hexagon-shaped.
+    ///
+    /// <b>Rebuilt whole each frame while anything has burnt.</b> The board is a
+    /// couple of hundred cells and the map is some 20k texels, so clearing and
+    /// splatting it is cheaper than working out which cell's ash moved - and it
+    /// cannot get out of step with the fire, which the cheaper thing could.
+    /// </summary>
+    private void Soot()
+    {
+        if (_tops?.MaterialOverride is not ShaderMaterial turf)
+            return;
+        if (Blaze is null || Blaze.Scorched == 0 || Field.Atlas is null)
+        {
+            turf.SetShaderParameter("ash_ink", 0.0f);
+            return;
+        }
+        float circum = Field.Atlas.HexRect.Size.X * 0.5f;
+        if (_soot is null)
+        {
+            float loX = float.MaxValue, hiX = float.MinValue;
+            float loZ = float.MaxValue, hiZ = float.MinValue;
+            for (int q = 0; q < Field.Columns; q++)
+            for (int r = 0; r < Field.Rows; r++)
+            {
+                Vector3 top = CellTop(new Vector2I(q, r));
+                loX = Mathf.Min(loX, top.X - circum); hiX = Mathf.Max(hiX, top.X + circum);
+                loZ = Mathf.Min(loZ, top.Z - circum); hiZ = Mathf.Max(hiZ, top.Z + circum);
+            }
+            if (loX > hiX)
+                return;
+            _sootWide = Mathf.Clamp(Mathf.CeilToInt((hiX - loX) / AshGrain), 8, 2048);
+            _sootTall = Mathf.Clamp(Mathf.CeilToInt((hiZ - loZ) / AshGrain), 8, 2048);
+            _soot = new byte[_sootWide * _sootTall];
+            _sootAt = new Vector4(loX, loZ, 1.0f / (hiX - loX), 1.0f / (hiZ - loZ));
+        }
+
+        Array.Clear(_soot);
+        float perX = _sootWide * _sootAt.Z, perZ = _sootTall * _sootAt.W;
+        for (int q = 0; q < Field.Columns; q++)
+        for (int r = 0; r < Field.Rows; r++)
+        {
+            var cell = new Vector2I(q, r);
+            float much = Blaze.AshAt(cell);
+            if (much <= 0.0f)
+                continue;
+            Vector3 top = CellTop(cell);
+            float at = (top.X - _sootAt.X) * perX, down = (top.Z - _sootAt.Y) * perZ;
+            float reachX = circum * perX, reachZ = circum * perZ;
+            int x0 = Mathf.Max(0, Mathf.FloorToInt(at - reachX));
+            int x1 = Mathf.Min(_sootWide - 1, Mathf.CeilToInt(at + reachX));
+            int z0 = Mathf.Max(0, Mathf.FloorToInt(down - reachZ));
+            int z1 = Mathf.Min(_sootTall - 1, Mathf.CeilToInt(down + reachZ));
+            for (int z = z0; z <= z1; z++)
+            for (int x = x0; x <= x1; x++)
+            {
+                // A disc rather than the cell's own hexagon, and it is the same
+                // choice the contact shadow makes: a round mark on the ground is
+                // one that does not announce which cell it belongs to. Two burnt
+                // neighbours overlap and read as one patch, which is what a fire
+                // leaves behind.
+                float dx = (x - at) / Mathf.Max(reachX, 0.0001f);
+                float dz = (z - down) / Mathf.Max(reachZ, 0.0001f);
+                float d = Mathf.Sqrt(dx * dx + dz * dz);
+                if (d >= 1.0f)
+                    continue;
+                float fall = Mathf.Clamp((1.0f - d) / 0.45f, 0.0f, 1.0f);
+                byte want = (byte)Mathf.RoundToInt(255.0f * much * fall);
+                int i = z * _sootWide + x;
+                if (want > _soot[i])
+                    _soot[i] = want;
+            }
+        }
+
+        Image img = Image.CreateFromData(_sootWide, _sootTall, false,
+                                         Image.Format.R8, _soot);
+        if (_sootMap is null)
+            _sootMap = ImageTexture.CreateFromImage(img);
+        else
+            _sootMap.Update(img);
+        turf.SetShaderParameter("ash", _sootMap);
+        turf.SetShaderParameter("ash_map", _sootAt);
+        turf.SetShaderParameter("ash_ink", AshInk);
+    }
+
+    /// <summary>
+    /// The noise the flame and the smoke are both broken up with.
+    ///
+    /// Shared text handed to both shaders rather than copied into each, for
+    /// <c>FoamEdge</c>'s reason: a fire and its own smoke torn by two different
+    /// fields is two effects that happen to be in the same place, and the copy is
+    /// the whole of the failure.
+    /// </summary>
+    private const string EmberNoise = @"
+float ember_hash(vec2 p) {
+    return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5453);
+}
+
+float ember_noise(vec2 p) {
+    vec2 c = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(ember_hash(c), ember_hash(c + vec2(1.0, 0.0)), f.x),
+               mix(ember_hash(c + vec2(0.0, 1.0)), ember_hash(c + vec2(1.0)), f.x),
+               f.y);
+}
+
+float ember_fbm(vec2 p) {
+    float sum = 0.0;
+    float amp = 0.5;
+    for (int i = 0; i < 4; i++) {
+        sum += amp * ember_noise(p);
+        p *= 2.03;
+        amp *= 0.5;
+    }
+    return sum;
+}
+";
+
+    /// <summary>
+    /// The flame on one tree: a tapering body about the trunk, torn into tongues
+    /// by noise scrolling up it.
+    ///
+    /// <b>Additive, and therefore not allowed a white stop anywhere in it.</b> The
+    /// muzzle flash and the tank's engine fire both learnt this the same way: an
+    /// additive pixel of low alpha on pale ground is that ground very slightly
+    /// warmer, so a ramp that saturates comes out as a light bulb and the picture
+    /// is grey. Red saturates and green and blue stay low, and what white there is
+    /// the addition makes for itself where two tongues cross.
+    ///
+    /// <b>The tips taper rather than fade</b>, for the same reason and stated in the
+    /// engine fire's words: a tongue that thins to nothing stays the colour it was,
+    /// and one that dims to nothing turns into steam.
+    ///
+    /// <b>Time is a uniform, not TIME.</b> The bench fixes its step so two runs can
+    /// be compared - a flame on the wall clock makes every screenshot of a burning
+    /// wood a different picture.
+    /// </summary>
+    private const string FlameShader = @"
+shader_type spatial;
+render_mode unshaded, cull_disabled, blend_add, depth_draw_never;
+
+// Where the foot of the tree sits down the quad, and this tree's own place in the
+// flicker - see Pitch. Both per tree, because the mesh is shared per kind.
+uniform float foot_v = 0.9;
+uniform float seed = 0.0;
+uniform float level = 0.0;
+uniform float time = 0.0;
+// How many separate tongues, and how tall the tallest of them stands over the
+// tree's own height. Three, because two read as a pair and four on a 27px trunk
+// merge back into the bar this replaced.
+uniform int licks = 3;
+uniform float reach = 0.62;
+
+FLAME_NOISE
+
+void fragment() {
+    if (level <= 0.0) {
+        ALBEDO = vec3(0.0);
+        ALPHA = 0.0;
+    } else {
+        // Height above the foot, over the quad's own reach. Below the foot there
+        // is nothing to burn - that part of the sprite is the far side of the
+        // ground the tree stands on.
+        float h = (foot_v - UV.y) / max(foot_v, 0.0001);
+        float x = UV.x - 0.5;
+        float t = time + seed * 37.0;
+        float mask = 0.0;
+        float up = 0.0;
+        // A few tongues of different heights rather than one body, and this is
+        // the whole difference between a fire and an orange bar: a single
+        // tapering column with noise cut into it is still a column, because the
+        // noise moves through it while the silhouette stays put. Separate licks
+        // put the variation in the outline, where the eye is reading it.
+        for (int k = 0; k < licks; k++) {
+            float fk = float(k);
+            float side = (ember_hash(vec2(seed * 13.0 + fk, 3.7)) - 0.5) * 0.30;
+            float phase = ember_hash(vec2(seed * 7.0 + fk, 9.1)) * 6.283;
+            // Its own height, and the fire's own strength in it: a tree that has
+            // just caught throws short tongues and one at full burn throws them
+            // through its crown, which is the difference between a fire that is
+            // taking hold and one that is established. Tied to the level rather
+            // than to the age, because the level is what the fade at the end of
+            // the burn is written on - so the tongues drop back as it dies.
+            float tall = reach * (0.45 + 0.55 * ember_hash(vec2(seed * 3.0 + fk, 5.5)))
+                         * (0.55 + 0.45 * level);
+            float own = clamp(h / max(tall, 0.0001), 0.0, 1.0);
+            // Whips harder the higher it goes, and never at the seat: a flame
+            // that waves at its own base has come loose from the fuel.
+            float whip = 0.055 * sin(6.283 * own * 1.1 - t * 2.6 + phase) * own;
+            float wide = mix(0.085, 0.010, pow(own, 0.65));
+            float lick = 1.0 - smoothstep(wide * 0.20, wide, abs(x - side - whip));
+            // Torn along its own length, so the tip breaks into embers instead of
+            // ending on a line.
+            float torn = ember_fbm(vec2(fk * 17.0 + seed * 21.0,
+                                        own * 3.4 - t * 2.2));
+            lick *= smoothstep(0.18, 0.62, torn + 0.45 * (1.0 - own));
+            // And each one breathes on its own clock, which is what keeps three
+            // of them from reading as one shape with three prongs.
+            lick *= 0.55 + 0.45 * ember_noise(vec2(fk * 3.1 + seed * 11.0, t * 1.9));
+            lick *= 1.0 - smoothstep(0.80, 1.0, own);
+            if (lick > mask) {
+                mask = lick;
+                up = own;
+            }
+        }
+        // The seat: a low wide glow where the trunk meets the ground, which is
+        // what stops the tongues looking like they are hovering.
+        float seat = (1.0 - smoothstep(0.06, 0.20, abs(x)))
+                     * (1.0 - smoothstep(0.02, 0.13, h))
+                     * smoothstep(-0.01, 0.02, h);
+        if (seat > mask) {
+            mask = seat;
+            up = 0.0;
+        }
+        mask = clamp(mask * level, 0.0, 1.0);
+        // Deep red at the tips, orange through the middle, hottest at the seat -
+        // and green and blue held down the whole way. No white stop anywhere: an
+        // additive ramp that saturates comes out as a light bulb on pale ground.
+        vec3 hot = vec3(1.00, 0.48, 0.12);
+        vec3 mid = vec3(0.96, 0.22, 0.04);
+        vec3 tip = vec3(0.44, 0.05, 0.02);
+        vec3 fire = up < 0.5 ? mix(hot, mid, up / 0.5)
+                             : mix(mid, tip, (up - 0.5) / 0.5);
+        ALBEDO = fire;
+        ALPHA = mask;
+    }
+}
+";
+
+    /// <summary>
+    /// The smoke over one burning tree: a column standing off the crown, widening
+    /// and thinning as it goes up.
+    ///
+    /// <b>Ordinary alpha and dark, and that is what makes the flame work.</b> The
+    /// fire adds light, so what is behind it decides how much of it arrives; on
+    /// pale ground almost none does. Black smoke under the flame is what the tank's
+    /// burning column is for, in those words, and drawing it the other way round
+    /// would wash out the fire it is supposed to hold up.
+    ///
+    /// <b>It starts above the crown, not at the foot.</b> Smoke pouring out of the
+    /// roots is the one arrangement that reads as a smoke machine rather than a
+    /// tree, and the flame already owns the trunk.
+    /// </summary>
+    private const string SmokeShader = @"
+shader_type spatial;
+render_mode unshaded, cull_disabled, depth_draw_never;
+
+uniform float foot_v = 0.9;
+uniform float seed = 0.0;
+uniform float level = 0.0;
+uniform float time = 0.0;
+// Where the column starts over the tree's own height, and what it is worth at its
+// thickest. It starts low enough to lie behind the flame, because that is what it
+// is for: the fire is additive, so what is behind it decides how much of it
+// arrives, and on pale ground almost none does.
+uniform float onset = 0.10;
+uniform float ink = 0.72;
+
+FLAME_NOISE
+
+void fragment() {
+    if (level <= 0.0) {
+        ALBEDO = vec3(0.0);
+        ALPHA = 0.0;
+    } else {
+        float h = (foot_v - UV.y) / max(foot_v, 0.0001);
+        float x = UV.x - 0.5;
+        float t = time + seed * 53.0;
+        // Rising: the field is dragged down the column as time goes on, so the
+        // puffs travel up it.
+        float climb = h * 2.6 - t * 0.75;
+        float drift = 0.11 * sin(6.283 * (h * 0.6 - t * 0.20) + seed * 6.283)
+                      * max(0.0, h - onset);
+        float half_w = mix(0.05, 0.26,
+                           clamp((h - onset) / max(0.85 - onset, 0.0001), 0.0, 1.0));
+        float body = 1.0 - smoothstep(half_w * 0.20, half_w, abs(x - drift));
+        float puff = ember_fbm(vec2((x - drift) * 4.2 + seed * 31.0, climb));
+        float torn = smoothstep(0.26, 0.66, puff + 0.22);
+        // Nothing under the seat, and thinning out at the top rather than ending:
+        // a column with a hard end is a column somebody cut.
+        float band = smoothstep(onset - 0.04, onset + 0.30, h)
+                     * (1.0 - smoothstep(0.55, 1.0, h));
+        float mask = clamp(body * torn * band * level * ink, 0.0, 1.0);
+        // Soot, not grey: what comes off a burning tree is dark and slightly warm,
+        // and a neutral grey column on this ground reads as fog.
+        ALBEDO = mix(vec3(0.07, 0.06, 0.055), vec3(0.19, 0.16, 0.14), puff);
+        ALPHA = mask;
+    }
+}
+";
+
+    private static readonly Shader Blazing =
+        new() { Code = FlameShader.Replace("FLAME_NOISE", EmberNoise) };
+
+    private static readonly Shader Smoking =
+        new() { Code = SmokeShader.Replace("FLAME_NOISE", EmberNoise) };
+
+    /// <summary>The quad for the state a tree is in. See <see cref="_stems"/>.
+    /// </summary>
+    private ArrayMesh Shape(PropNode tree)
+    {
+        (int, bool, bool) kind = (tree.Species, tree.Mirrored, tree.Charred);
+        if (!_stems.TryGetValue(kind, out ArrayMesh? shape))
+            _stems[kind] = shape = Stem(tree.ShownFoot * tree.Pixels,
+                                        tree.ShownSize * tree.Pixels, RiseFactor);
+        return shape;
+    }
+
+    /// <summary>
+    /// Put a tree into the art of the state it has reached: the quad, the paint,
+    /// the shadow it throws and the patch it stands on.
+    ///
+    /// <b>All four, and the shadow is the one that would have been forgotten.</b>
+    /// The cast is the same mesh masked by the same art, so a burnt trunk whose
+    /// shadow was left behind would throw the shadow of a crown it no longer has -
+    /// and on Tree_1 that is 33px of canopy lying on the ground beside a bare stem.
+    ///
+    /// <b>What is not touched is the placement.</b> The contact patch keeps its
+    /// radius, which came off the living art, because the tree is standing where it
+    /// was sown - see <see cref="PropSet"/> on why the state cannot reach those
+    /// numbers at all.
+    /// </summary>
+    private void Reclothe(PropNode tree, MeshInstance3D stem, ArrayMesh want)
+    {
+        stem.Mesh = want;
+        if (stem.MaterialOverride is ShaderMaterial bark)
+        {
+            bark.SetShaderParameter("art", tree.ShownArt);
+            bark.SetShaderParameter("firm", tree.Charred ? Firm : 1.0f);
+        }
+        if (_shading.TryGetValue(tree, out MeshInstance3D? cast))
+        {
+            cast.Mesh = want;
+            if (cast.MaterialOverride is StandardMaterial3D ink)
+                ink.AlbedoTexture = tree.ShownArt;
+        }
+        if (_seating.TryGetValue(tree, out MeshInstance3D? seat)
+            && seat.MaterialOverride is ShaderMaterial blot)
+        {
+            blot.SetShaderParameter("art", tree.ShownArt);
+            blot.SetShaderParameter("foot", tree.ShownFoot);
+            blot.SetShaderParameter("span", tree.ShownSize);
+        }
+    }
+
+    /// <summary>How much bigger than the tree the flame's quad and the smoke's are,
+    /// about the foot. The flame licks past the crown, the column stands well over
+    /// it; both are shaped inside the quad by the shader, so these only have to be
+    /// roomy enough not to clip - which is the one way they can fail visibly.
+    /// </summary>
+    private const float PyreSpan = 1.20f;
+    private const float PlumeSpan = 1.85f;
+
+    /// <summary>The same two, for the checks: a claim about which of them is the
+    /// roomier is worth asserting, and a private constant cannot be asked.
+    /// </summary>
+    public static float PyreReach => PyreSpan;
+    public static float PlumeReach => PlumeSpan;
+
+    /// <summary>
+    /// The flame and the smoke over one burning tree.
+    ///
+    /// <b>Two quads and not one, for <c>engine_fire</c>'s reason:</b> the fire adds
+    /// light and the smoke takes it away, and one surface cannot do both. The order
+    /// is the effect rather than a preference - the column goes down first so the
+    /// flame has something dark to sit on, which is the whole of why the tank's
+    /// burning plume reads on pale ground.
+    ///
+    /// <b>Made when the tree first catches, not at sowing.</b> Otherwise a board of
+    /// 672 trees carries 1344 hidden quads for a fire nobody has lit. Kept
+    /// afterwards, because a tree burns once.
+    ///
+    /// <b>Sorted by a nudge and not by priority.</b> Both hang on the tree's own
+    /// transform, so they sort at the tree's depth and a trunk in front of this one
+    /// still covers them - which a render priority would break, putting one tree's
+    /// flame over the whole wood. Between themselves the nudge decides, and it is
+    /// the same <see cref="Clear"/> that keeps a quad off the face it stands on.
+    /// </summary>
+    private void Kindle(PropNode tree)
+    {
+        Wildfire.Coat coat = tree.Coat;
+        if (coat.Flame <= 0.0f && coat.Smoke <= 0.0f && !_burning.ContainsKey(tree))
+            return;
+        (int, bool) kind = (tree.Species, tree.Mirrored);
+        if (!_burning.TryGetValue(tree, out MeshInstance3D? fire))
+        {
+            if (!_pyres.TryGetValue(kind, out ArrayMesh? pyre))
+                _pyres[kind] = pyre = Stem(tree.Foot * tree.Pixels * PyreSpan,
+                                           tree.Size * tree.Pixels * PyreSpan,
+                                           RiseFactor);
+            if (!_plumes.TryGetValue(kind, out ArrayMesh? plume))
+                _plumes[kind] = plume = Stem(tree.Foot * tree.Pixels * PlumeSpan,
+                                             tree.Size * tree.Pixels * PlumeSpan,
+                                             RiseFactor);
+            _smoking[tree] = Lick(plume, Fumes(tree));
+            _burning[tree] = fire = Lick(pyre, Flames(tree));
+        }
+        MeshInstance3D smoke = _smoking[tree];
+        Transform3D at = Rooted(tree);
+        Vector3 nudge = Clear(Squash, RiseFactor);
+        smoke.Transform = at with { Origin = at.Origin + nudge };
+        fire.Transform = at with { Origin = at.Origin + nudge * 2.0f };
+        smoke.Visible = coat.Smoke > 0.0f;
+        fire.Visible = coat.Flame > 0.0f;
+        if (smoke.MaterialOverride is ShaderMaterial fumes)
+        {
+            fumes.SetShaderParameter("time", _fireClock);
+            fumes.SetShaderParameter("level", coat.Smoke);
+        }
+        if (fire.MaterialOverride is ShaderMaterial flames)
+        {
+            flames.SetShaderParameter("time", _fireClock);
+            flames.SetShaderParameter("level", coat.Flame);
+        }
+    }
+
+    private MeshInstance3D Lick(ArrayMesh shape, ShaderMaterial ink)
+    {
+        var node = new MeshInstance3D
+        {
+            Mesh = shape,
+            SortingUseAabbCenter = false,
+            MaterialOverride = ink,
+            Visible = false,
+        };
+        AddChild(node);
+        return node;
+    }
+
+    /// <summary>Where the foot sits in the quad's own UV, and this tree's own place
+    /// in the flicker. Both uniforms rather than built into the mesh: the mesh is
+    /// shared by every tree of a kind, and the seed is what keeps two of them from
+    /// burning in step - the rule three tanks' clocks are separate for.</summary>
+    private static void Pitch(ShaderMaterial ink, PropNode tree, float span)
+    {
+        Vector2 size = tree.Size * span;
+        Vector2 foot = tree.Foot * span;
+        ink.SetShaderParameter("foot_v", size.Y <= 0.0f ? 0.9f : foot.Y / size.Y);
+        ink.SetShaderParameter("seed",
+                               (float)Grove.Hash01(tree.Seed, tree.Species, 733_003));
+    }
+
+    private ShaderMaterial Flames(PropNode tree)
+    {
+        var ink = new ShaderMaterial { Shader = Blazing, RenderPriority = StandOrder };
+        Pitch(ink, tree, PyreSpan);
+        ink.SetShaderParameter("level", 0.0f);
+        ink.SetShaderParameter("time", _fireClock);
+        return ink;
+    }
+
+    private ShaderMaterial Fumes(PropNode tree)
+    {
+        var ink = new ShaderMaterial { Shader = Smoking, RenderPriority = StandOrder };
+        Pitch(ink, tree, PlumeSpan);
+        ink.SetShaderParameter("level", 0.0f);
+        ink.SetShaderParameter("time", _fireClock);
+        return ink;
+    }
+
     private void Fell()
     {
         foreach (MeshInstance3D stem in _standing.Values)
@@ -4274,10 +4818,26 @@ void fragment() {{
             seat.MaterialOverride = null;
             seat.QueueFree();
         }
+        foreach (MeshInstance3D fire in _burning.Values)
+        {
+            fire.Mesh = null;
+            fire.MaterialOverride = null;
+            fire.QueueFree();
+        }
+        foreach (MeshInstance3D smoke in _smoking.Values)
+        {
+            smoke.Mesh = null;
+            smoke.MaterialOverride = null;
+            smoke.QueueFree();
+        }
         _standing.Clear();
         _shading.Clear();
         _seating.Clear();
+        _burning.Clear();
+        _smoking.Clear();
         _stems.Clear();
+        _pyres.Clear();
+        _plumes.Clear();
     }
 
     /// <summary>One tree's transform, from where it stands on this board.</summary>
@@ -4603,23 +5163,87 @@ void fragment() {
         return st.Commit();
     }
 
-    /// <summary>What a tree is painted with: the set's own art, unshaded because
-    /// it arrived lit, and mipmapped because it is painted at four times the size
+    /// <summary>
+    /// What a tree is painted with: the set's own art, unshaded because it
+    /// arrived lit, and mipmapped because it is painted at eight times the size
     /// it is drawn at - <see cref="PropNode._Ready"/>'s reason, unchanged. One per
-    /// tree, because the fade is per tree; see <see cref="BuildTrees"/>.</summary>
-    private static StandardMaterial3D Bark(Texture2D art, int order) => new()
+    /// tree, because the fade is per tree; see <see cref="BuildTrees"/>.
+    ///
+    /// <b>A shader rather than the standard material it was, and the reason is the
+    /// wreck's word for word:</b> a multiply cannot take the colour out of
+    /// anything. Charring a green crown by scaling its albedo gives a dark green
+    /// crown, and dark green is a tree in shadow - which is why the tank's char is
+    /// a shader too. So the luminance is taken first and the tint is dropped, and
+    /// then it is darkened.
+    ///
+    /// <b>At <c>scorch = 0</c> it is the material it replaced, and that is
+    /// measured rather than reasoned:</b> the same board rendered before and after
+    /// the swap came out identical to the pixel. The one thing to keep true is the
+    /// pair of defaults - unshaded and writing ALPHA is what a standard material
+    /// with Transparency.Alpha is, and a spatial shader that leaves ALPHA alone
+    /// drops out of the transparent pass and stops sorting against the wood.
+    /// </summary>
+    private const string BarkShader = @"
+shader_type spatial;
+render_mode unshaded, cull_disabled;
+
+uniform sampler2D art : source_color, filter_linear_mipmap, hint_default_white;
+// The wood's own per-tree reveal, and how far this one has charred.
+uniform float fade = 1.0;
+uniform float scorch = 0.0;
+// What charcoal is worth, as a share of the luminance it replaces.
+uniform float coal = 0.30;
+// A gamma on the alpha, for art whose strokes are thinner than a screen pixel.
+// One leaves it alone exactly - see Firm.
+uniform float firm = 1.0;
+
+void fragment() {
+    vec4 paint = texture(art, UV);
+    float lum = dot(paint.rgb, vec3(0.299, 0.587, 0.114));
+    ALBEDO = mix(paint.rgb, vec3(lum * coal), scorch);
+    ALPHA = (firm >= 0.999 ? paint.a : pow(paint.a, firm)) * fade;
+}
+";
+
+    private static readonly Shader Timber = new() { Code = BarkShader };
+
+    /// <summary>How dark charcoal goes, as a share of the luminance under it.
+    /// The tank's number, and for the tank's reason: 0.55 reads as a grey tree
+    /// and 0.22 as a silhouette, so the wreck landed on a third and a burnt
+    /// crown wants the same.</summary>
+    public const float Coal = 0.30f;
+
+    /// <summary>
+    /// The gamma the burnt art's alpha is drawn through.
+    ///
+    /// <b>Because a bare tree is all thin lines, and thin lines do not survive
+    /// minification.</b> The branches are 5-8 art px, which at 8x is well under a
+    /// screen pixel, so the mip that gets drawn has them at half coverage
+    /// everywhere - and half coverage over pale ground is grey. Measured: the art
+    /// on disk is (39,38,37) charcoal and the board drew it at about 95, which
+    /// read as a silver skeleton rather than a burnt tree.
+    ///
+    /// <b>Coverage-correct is not the same as right here.</b> The averaging is
+    /// doing its job - at that distance a real bare tree is a haze - but the art
+    /// was drawn as a black skeleton and is meant to read as one, so the alpha is
+    /// pushed back up. 0.6 puts a half-covered texel at 0.66 rather than 0.5.
+    ///
+    /// <b>The living art is left alone</b>, at one, which the shader takes as
+    /// exactly no change: a canopy is a mass rather than a set of lines, so it
+    /// minifies without going translucent, and thickening its edge would be a
+    /// change to every board rendered so far.
+    /// </summary>
+    public const float Firm = 0.60f;
+
+    private static ShaderMaterial Bark(Texture2D art, int order)
     {
-        ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
-        AlbedoTexture = art,
-        Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
-        TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps,
-        CullMode = BaseMaterial3D.CullModeEnum.Disabled,
-        // The tier's rung. Priority beats depth for transparent surfaces, which
-        // is exactly what is wanted: a bush standing in the cell a tank parks in
-        // has no honest depth answer, so it is taken out of the sort rather than
-        // given a better place in it.
-        RenderPriority = order,
-    };
+        var ink = new ShaderMaterial { Shader = Timber, RenderPriority = order };
+        ink.SetShaderParameter("art", art);
+        ink.SetShaderParameter("fade", 1.0f);
+        ink.SetShaderParameter("scorch", 0.0f);
+        ink.SetShaderParameter("coal", Coal);
+        return ink;
+    }
 
     /// <summary>What a tree's shadow is painted with: the same art used as a
     /// mask and nothing else. <see cref="ShadowInk"/> is an albedo multiply, so
