@@ -6895,6 +6895,204 @@ public static class SelfTest
                 + "--capture, --trace and --selftest refuse the connection at "
                 + "StartMcp whatever the flag said: a run that answered a tool call "
                 + "between frames is not the run the other half of an A/B came from");
+            // The aiming ray - see AimRay. What it draws is a prediction, so
+            // the claims are about agreement rather than about pixels: a ray that
+            // points somewhere plausible on every frame and is wrong about the one
+            // shot being watched is exactly what this is written to prevent.
+            {
+                var trace = new AimRay();
+                Check("the aiming ray stays off unless asked", !AimRay.OnByDefault,
+                    "a named constant precisely so a change to it is a change "
+                    + "somebody made on purpose. On by default would put a debug "
+                    + "line into every pixel diff this bench takes - which is the "
+                    + "argument the tracer itself was off under while it was one "
+                    + "stroke of debug drawing");
+                // It ends ON the target's armour, so it has to be drawn over the
+                // tank it ends on: a ray that stopped at the hull would mark the
+                // air in front of the plate instead of the plate.
+                Check("the ray draws over the tank it lands on",
+                    AimRay.Layer > Shell.Layer
+                    && Shell.Layer > field.Rows * (int)field.CellAnchor(0, 1).Y,
+                    $"{AimRay.Layer} against the tracer's {Shell.Layer}");
+                Check("nothing is laid out until something is aimed",
+                    trace.Count == 0 && !trace.Drawn,
+                    "an overlay that comes up with a ray in it is a ray belonging "
+                    + "to no gun");
+                trace.Aim(new Vector2(10.0f, 10.0f), new Vector2(90.0f, 40.0f),
+                          AimRay.Tip.Hole);
+                trace.Aim(new Vector2(11.0f, 11.0f), new Vector2(91.0f, 41.0f),
+                          AimRay.Tip.Stop);
+                bool one = trace.Count == 2 && trace.Marked == 1
+                           && trace.At(0).From == new Vector2(10.0f, 10.0f)
+                           && trace.At(0).To == new Vector2(90.0f, 40.0f)
+                           && trace.At(0).End == AimRay.Tip.Hole
+                           && trace.At(1).End == AimRay.Tip.Stop;
+                trace.Clear();
+                Check("an aim goes in as given and is dropped every frame",
+                    one && trace.Count == 0,
+                    "the ray is only true for the frame it was solved on - the "
+                    + "turret is still traversing and the target still driving. "
+                    + "Whether it claims a hit travels with it: a line that ran "
+                    + "out and a line that ends in a hole are the two different "
+                    + "things this overlay says");
+                // The dashes are the whole of what makes it read as a measurement
+                // rather than as a second tracer, and the shortest shot on this
+                // board is the case that would quietly turn them into one stroke.
+                // The billboard and its inverse have to be each other's, and this
+                // reads the mesh Stage3D.Body actually built rather than
+                // restating its arithmetic: every vertex's own UV is fed back
+                // through OnBody and the vertex is required back. It is the one
+                // claim the staged ray rests on - staged, the muzzle and the
+                // plate are pixels in a 512px viewport, and this is what turns
+                // them into a point on the screen.
+                {
+                    float squash = 0.5f, rise = 0.866f;
+                    var line = new Vector3(0.6f, 0.8f, 30.0f);
+                    float worst = 0.0f;
+                    int mapped = 0, skipped = 0;
+                    foreach (Vector2 lead in new[] { Vector2.Zero,
+                                                     new Vector2(12.0f, 61.0f),
+                                                     new Vector2(-8.0f, 44.0f) })
+                    {
+                        float seam = (Stage3D.PaintSize * 0.5f + lead.Y)
+                                     / Stage3D.PaintSize;
+                        ArrayMesh mesh = Stage3D.Body(lead, squash, rise, 0.0f,
+                                                      line);
+                        var arrays = mesh.SurfaceGetArrays(0);
+                        Vector3[] verts = arrays[(int)Mesh.ArrayType.Vertex]
+                            .AsVector3Array();
+                        Vector2[] uvs = arrays[(int)Mesh.ArrayType.TexUV]
+                            .AsVector2Array();
+                        for (int i = 0; i < verts.Length; i++)
+                        {
+                            // The hinge row is the one place the surface is
+                            // honestly double-valued - the standing half ends and
+                            // the lying half begins in the same pixel - so a
+                            // vertex sitting exactly on it has two right answers
+                            // and is not evidence either way.
+                            if (Math.Abs(uvs[i].Y - seam) < 1e-4f)
+                            {
+                                skipped++;
+                                continue;
+                            }
+                            Vector3 back = Stage3D.OnBody(
+                                uvs[i] * Stage3D.PaintSize, lead, squash, rise,
+                                0.0f, line);
+                            worst = Math.Max(worst, back.DistanceTo(verts[i]));
+                            mapped++;
+                        }
+                    }
+                    // Twelve is the floor rather than a round number: each cut
+                    // gives twelve vertices and half of them sit on the hinge by
+                    // construction, so six per cut is all there is to check and a
+                    // threshold above that fails on a correct inverse - which is
+                    // what it did.
+                    Check("a pixel of a tank maps back onto the billboard it is "
+                          + "drawn on", mapped >= 12 && worst < 0.01f,
+                        $"{mapped} vertices ({skipped} on the hinge), worst "
+                        + $"{worst:F4} units out - the staged ray is this inverse "
+                        + "and nothing else, so a wrong one puts the mark in the "
+                        + "corner of the window");
+                    // And the climb slide is a branch, so it has to be shown to
+                    // branch: the same pixel with and without a drop differs by
+                    // the slide or by nothing, never by anything else, and some
+                    // pixel has to take it or the tail half is untested.
+                    var slide = new Vector3(0.0f, -18.0f / rise, -18.0f / squash);
+                    int bentOn = 0, stood = 0, odd = 0;
+                    for (int px = 8; px < Stage3D.PaintSize; px += 37)
+                    for (int py = 8; py < Stage3D.PaintSize; py += 37)
+                    {
+                        var at = new Vector2(px, py);
+                        Vector3 flat = Stage3D.OnBody(at, Vector2.Zero, squash,
+                                                      rise, 0.0f, line);
+                        Vector3 bent = Stage3D.OnBody(at, Vector2.Zero, squash,
+                                                      rise, -18.0f, line);
+                        if (bent.DistanceTo(flat) < 1e-3f) stood++;
+                        else if (bent.DistanceTo(flat + slide) < 1e-3f) bentOn++;
+                        else odd++;
+                    }
+                    Check("and a pixel on the trailing side of a climb is slid, "
+                          + "the rest untouched", bentOn > 0 && stood > 0 && odd == 0,
+                        $"{bentOn} slid, {stood} standing, {odd} neither - a third "
+                        + "answer is the seam being read differently from the way "
+                        + "the mesh was split along it");
+                }
+                Check("even the shortest shot gets several dashes",
+                    Shell.PointBlank / AimRay.Dash > 5.0f,
+                    $"{Shell.PointBlank:F0}px point blank over {AimRay.Dash:F0}px"
+                    + " of dash and gap - a solid line out of a muzzle is a tracer");
+                // The line follows the selected tank whatever its turret is
+                // doing, so a line claiming nothing is most of what is ever on
+                // screen, and it may not compete with the one case that claims
+                // something.
+                Check("a ray that claims nothing draws dimmer than one that does",
+                    AimRay.Idle > 0.2f && AimRay.Idle < 1.0f,
+                    $"{AimRay.Idle:F2} of the ink - at full a mark the selected "
+                    + "tank carries permanently competes with a gun actually laid "
+                    + "on somebody, and at nothing the sweep is lost");
+                // The length. It is counted in hexes walked over the ground
+                // rather than in pixels, which is the whole of the fix: a pixel
+                // length is a length on a board that zooms, so the same ray
+                // covered a different number of hexes at every zoom.
+                var vacant = new HashSet<Vector2I>();
+                Vector2 home = field.CellCentre(new Vector2I(2, 2));
+                Vector2 east = new Vector2(1.0f, 0.0f);
+                float roof = field.Lift * (AimRay.Clearance + 2.0f);
+                (float far, Vector2I? edge, bool hit) =
+                    Main.Track(field, home, east, roof, vacant);
+                Check("a ray with nothing in the way runs to the last hex there is",
+                    far > field.Atlas!.HexRect.Size.X * 2.0f && edge is null
+                    && !hit,
+                    $"{far:F0}px to the board's edge over a tile of "
+                    + $"{field.Atlas.HexRect.Size.X:F0}px - and no cap on it, "
+                    + "because a cap in cells would be a made-up number and a "
+                    + "cap in pixels is the thing being removed");
+                // Ground blocks it when it stands higher than the line does, and
+                // a level line has one height everywhere - so the same walk
+                // under a low roof stops short of the same vacant ground.
+                (float under, Vector2I? wall, bool pinned) =
+                    Main.Track(field, home, east, -1.0f, vacant);
+                Check("and ground standing above the line stops it",
+                    pinned && wall is not null && under < far,
+                    $"{under:F0}px to {wall} against {far:F0}px vacant - the test "
+                    + "is one comparison rather than a profile because the line "
+                    + "is level, which is what a tank gun is");
+                // A tank is the other thing that stops a shell, and the walk has
+                // to name the cell it pinned in: that name is what decides
+                // whether the end gets a ring, so a walk that pinned without
+                // saying where cannot be marked.
+                Vector2I holder = field.FlatCellAt(
+                    home + east * field.Atlas.HexRect.Size.X * 1.5f);
+                (float upto, Vector2I? met, bool blocked) = Main.Track(
+                    field, home, east, roof, new HashSet<Vector2I> { holder });
+                Check("and so does a tank, which is named so the ring can be "
+                      + "gated on it", blocked && met == holder && upto < far,
+                    $"halted at {met} after {upto:F0}px, vacant run {far:F0}px - "
+                    + "the hole is drawn only where the line got as far as the "
+                    + "tank it belongs to, so what halted it has to be known");
+                // And the ring is the half that can lie, so where it is allowed
+                // to appear is asserted on every lane rather than on one: the
+                // shell leaves along a flat side of the hex and along nothing in
+                // between.
+                int laidOn = 0, laidOff = 0;
+                foreach (int lane in HexField.EdgeHeadings)
+                {
+                    if (Gunnery.Laid(lane, lane))
+                        laidOn++;
+                    if (!Gunnery.Laid(lane + 15.0, lane)
+                        && !Gunnery.Laid(lane - 15.0, lane))
+                        laidOff++;
+                }
+                Check("and a turret between lanes is laid on none of them",
+                    laidOn == 6 && laidOff == 6,
+                    $"{laidOn} of six laid down their own lane, {laidOff} of six "
+                    + "refusing half an atlas step off it - the atlas steps 15 "
+                    + "degrees and the lanes are 60 apart, so snapping to the "
+                    + "nearest would ring a hole for a shot that needs a "
+                    + "traverse first, with the ring off the end of its own "
+                    + "line");
+                trace.QueueFree();
+            }
             var unseen = new Shell
             {
                 Shooter = shooter, Target = foe, ImpactLocal = aim,

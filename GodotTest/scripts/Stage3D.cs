@@ -865,7 +865,110 @@ void fragment() {{
     /// line is a half-plane in either's frame and the split is two convex
     /// polygons per face.
     /// </summary>
-    private static ArrayMesh Body(Vector2 lead, float squash, float rise,
+    /// <summary>
+    /// Where a pixel of a tank's picture is drawn on screen.
+    ///
+    /// <b>What the stage owes any overlay that wants to point at part of a
+    /// tank.</b> Staged, a sprite is reparented into a SubViewport of its own and
+    /// shown on a quad, so <c>Sprite.ToGlobal</c> - which is what every
+    /// measurement over a tank's pixels comes off, the muzzle and the plate
+    /// included - answers in that viewport's own 512px space. Read as screen space
+    /// those numbers put a mark in the corner of the window: present, confident
+    /// and about nothing.
+    ///
+    /// The answer is not an approximation, because the billboard is not a mystery:
+    /// <see cref="Body"/> builds it out of the picture's own rows, so there is an
+    /// exact point of the mesh under every pixel and <see cref="OnBody"/> is that
+    /// map read backwards. The camera then says where that point lands.
+    ///
+    /// Null when the stage cannot say, which is two cases and one answer. The
+    /// tank may have no stand at all - mid-switch, or before the stage has taken
+    /// it - and a caller that drew anyway would be drawing out of a viewport
+    /// space that is not there yet. Or the stand may exist while the pixel handed
+    /// in still belongs to the harness's canvas: <see cref="Place"/> runs in the
+    /// stage's own _Process, so on the frame a tank is taken the sprite has not
+    /// been moved into its viewport yet and <c>ToGlobal</c> answers a thousand
+    /// pixels off the 512 the billboard covers. <b>That case has to be refused
+    /// here rather than clamped or extrapolated</b>: the camera hands back NaN
+    /// for it, and a NaN travels - it failed every comparison a caller could
+    /// write, reached Godot's own dashed-line drawing as a negative dash count
+    /// and took the process down with an illegal instruction. One frame of no
+    /// answer is the whole cost.
+    ///
+    /// <paramref name="run"/> walks the answer along the ground from that pixel,
+    /// in the harness's own flat px. <b>It has to go through the camera rather
+    /// than be added to the screen point afterwards</b>, and that is the whole
+    /// reason it is a parameter here instead of the caller's business: the
+    /// stage's orthographic size is the viewport height over the zoom (see
+    /// <see cref="Aim"/>), so one world unit is one screen pixel at 1.00x and
+    /// nowhere else. Added on afterwards, a run is a fixed screen length over a
+    /// board that scales - which reads as a line whose length depends on the
+    /// zoom rather than on the ground it covers, and that is exactly what it was
+    /// reported as. No lift on it, because the line it belongs to is level.
+    /// </summary>
+    public Vector2? Screen(Vehicle vehicle, Vector2 paint, Vector2 run = default)
+    {
+        if (!_stands.TryGetValue(vehicle, out Stand? stand))
+            return null;
+        if (paint.X < 0.0f || paint.Y < 0.0f
+            || paint.X > PaintSize || paint.Y > PaintSize)
+            return null;
+        // The cached cut rather than a fresh one, and that is what caching it is
+        // for: the inverse has to invert the mesh that is on screen this frame,
+        // not one recomputed from figures that may since have moved. Lead, Drop
+        // and Line are exactly what Body was last called with.
+        Vector3 local = OnBody(paint, stand.Lead, Squash, RiseFactor,
+                               stand.Drop, stand.Line)
+                        + World(run, 0.0f);
+        Vector2 at = _camera.UnprojectPosition(stand.Quad.Position + local);
+        return float.IsFinite(at.X) && float.IsFinite(at.Y) ? at : null;
+    }
+
+    /// <summary>
+    /// Which point of the billboard a pixel of the picture is drawn at, in the
+    /// quad's own frame - <see cref="Body"/> read backwards.
+    ///
+    /// Every line of it is one of Body's own lines solved the other way, and the
+    /// two sit next to each other for that reason: an inverse kept anywhere else
+    /// is a second description of the same surface, and the day the billboard
+    /// gains a fold the copy goes on answering about the surface before it.
+    /// <b>That is not left to be believed</b> - the check reads the mesh Body
+    /// actually built, feeds each vertex's own UV back through here and requires
+    /// the vertex back.
+    ///
+    /// The climb slide is the one branch: a point is slid only if it fell on the
+    /// trailing side of the seam, and the test for that is the very expression
+    /// Body split the polygon with rather than a restatement of it.
+    /// </summary>
+    internal static Vector3 OnBody(Vector2 paint, Vector2 lead, float squash,
+                                   float rise, float drop, Vector3 line)
+    {
+        float half = PaintSize * 0.5f;
+        float ax = -lead.X, ay = lead.Y / rise;
+        float seam = (half + lead.Y) / PaintSize;
+        float reach = (half - lead.Y) / squash;
+        float top = ay + half / rise;
+
+        float v = paint.Y / PaintSize;
+        bool standing = v <= seam;
+        // u runs across both faces the same way, so x is the same solve on either
+        // side of the seam; only the second coordinate changes meaning - height up
+        // the standing half, ground run out along the lying one.
+        var p = new Vector2(
+            ax - half + paint.X,
+            standing ? top * (1.0f - v / Mathf.Max(seam, 1e-6f))
+                     : reach * (v - seam) / Mathf.Max(1.0f - seam, 1e-6f));
+        float f = standing
+            ? line.X * p.X - line.Y * p.Y * rise - line.Z
+            : line.X * p.X + line.Y * p.Y * squash - line.Z;
+        float d = Mathf.Abs(drop) < 0.25f || f >= 0.0f ? 0.0f : drop;
+        var slide = new Vector3(0.0f, d / rise, d / squash);
+        return standing
+            ? slide + new Vector3(p.X, p.Y, 0.0f)
+            : slide + Clear(squash, rise) + new Vector3(p.X, 0.0f, p.Y);
+    }
+
+    internal static ArrayMesh Body(Vector2 lead, float squash, float rise,
                                   float drop, Vector3 line)
     {
         float half = PaintSize * 0.5f;

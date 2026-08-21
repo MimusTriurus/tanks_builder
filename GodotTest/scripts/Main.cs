@@ -636,6 +636,13 @@ public sealed partial class Main : SceneRoot
 	/// true at once and about different tanks.</summary>
 	private SelectionRing? _targetRing;
 
+	/// <summary>The debug overlay over the shots - see <see cref="AimRay"/>.
+	/// Built on every run, unlike the rings: it draws nothing until it is asked
+	/// to, so it cannot get into a capture by accident, and a node that exists
+	/// only when there is an interface cannot be switched into one that has
+	/// none.</summary>
+	private AimRay? _aimRay;
+
 	/// <summary>What the gunnery marks were last painted for. See the repaint in
 	/// <see cref="_Process"/>.</summary>
 	private (int, Vector2I, Vehicle?, Vector2I?, bool) _painted;
@@ -1070,6 +1077,11 @@ public sealed partial class Main : SceneRoot
 			// --pitch and --rumble, which are also off.
 			else if (userArgs[i] == "--tracer")
 				_tracerVisible = true;
+			// Straight onto the static, which is why it is one: the flags are read
+			// before a node exists, and a flag writing through a node that is not
+			// there yet is the trap that hung the capture instead of failing it.
+			else if (userArgs[i] == "--aim-ray")
+				AimRay.On = true;
 			else if (userArgs[i] == "--no-tracer-smoke")
 				Shell.SmokeOn = false;
 			// Both directions, the shape --water and --no-water already have: the
@@ -1901,6 +1913,18 @@ public sealed partial class Main : SceneRoot
 			AddChild(_targetRing);
 			Suppress2D(Staged);
 		}
+
+		// The debug line over a shot, outside the panel's guard on purpose. The
+		// rings are absent under --capture because a marker nobody asked for must
+		// not turn up in evidence; this one is off by default, so the guard it
+		// needs is the switch it already has - and a flag that could not reach a
+		// capture would be a flag with nowhere to be used.
+		//
+		// Not suppressed on the stage either, for the reason the tracer is not:
+		// it describes the round, so wherever the round is drawn this belongs
+		// over it.
+		_aimRay = new AimRay();
+		AddChild(_aimRay);
 
 		// Before the self-test, which now checks the rows against panel.json,
 		// and before the start-up flags, so the panel's first Sync sees what they
@@ -2883,6 +2907,430 @@ public sealed partial class Main : SceneRoot
 		Tick.TakeHit(victim, fromBearing, Calibre,
 				Gunnery.Penetration(shooter.Profile, victim.Profile), 1);
 
+	/// <summary>Where one gun would hole one tank, and what the round would be
+	/// aimed through to get there. Everything the launch settles at the trigger
+	/// except the calibre and the penetration level, which are dials rather than
+	/// geometry.
+	///
+	/// <paramref name="Muzzle"/> is in board space, not in the shooter's own
+	/// picture: it is what the round is launched from. The ray needs the other
+	/// space and gets it from <see cref="BoreOf"/>.</summary>
+	private readonly record struct Aimed(Vector2 Muzzle, Vector2 Impact,
+										 string Face, float Scatter, float Rise,
+										 float BoreMiss);
+
+	/// <summary>
+	/// The gun's own line: where the muzzle is, and a vector along the bore out
+	/// of it. Both in the shooter's own picture, which is the harness's canvas
+	/// on the flat board and the tank's own 512px viewport on the staged one -
+	/// and that is the space the ray wants, because <see cref="Stage3D.Screen"/>
+	/// takes a pixel of a tank's paint and answers where it went. <b>The round
+	/// wants the other one</b>: two of these cannot be subtracted across tanks
+	/// on the staged board, so <see cref="Aim"/> takes the same measurement
+	/// through <see cref="Vehicle.Spot"/> instead of reusing this.
+	///
+	/// <b>One place, because three different things are drawn along it</b> - the
+	/// hole a round would make in another tank, the sighting line of a gun laid on
+	/// nothing, and the line down a lane the gun is still coming round to. Built
+	/// twice, the tube and the mark would part company for the quietest of reasons
+	/// available: they would agree wherever anybody compared them and differ on
+	/// the one heading nobody did.
+	///
+	/// The direction is the ground direction of a heading, not the muzzle minus
+	/// the anchor: a tank gun is level, and a level line in the world projects to
+	/// exactly the ground direction on screen, while the ring-to-muzzle vector
+	/// also carries however far the trunnions sit above the ring. The same
+	/// measurement the flash points itself by.
+	///
+	/// <paramref name="heading"/> is which heading, and it is asked for rather
+	/// than read off the turret because the two part company for one real case:
+	/// under a standing order the round leaves along the <b>lane</b>, and the gun
+	/// may still be traversing onto it. The hole itself is always solved down the
+	/// turret's own bore - <see cref="Gunnery.ScatterOntoBore"/> puts it on the
+	/// drawn tube - so that caller passes the turret and only the ray passes a
+	/// lane.
+	///
+	/// The muzzle comes off the turret layer for the frame the gun is showing, so
+	/// it foreshortens by itself and comes out of the tube on every heading.
+	/// </summary>
+	private static (Vector2 Muzzle, Vector2 Along) BoreOf(Vehicle shooter,
+														  double heading)
+	{
+		AtlasSet gun = shooter.Atlas;
+		Vector2 muzzle = gun.Muzzle(gun.FrameFor(shooter.Sprite.TurretFacing))
+						 - gun.Anchor;
+		Vector2 launched = shooter.Sprite.ToGlobal(muzzle);
+		Vector2 down = shooter.Sprite.ToGlobal(
+			muzzle + gun.GroundDirection(heading) * 100.0f);
+		return (launched, down - launched);
+	}
+
+	/// <summary>
+	/// Solve one shot without firing it.
+	///
+	/// <b>The one place a shooter, a target and a bearing turn into a hole in the
+	/// armour</b>, and it exists as a method because there are now two callers:
+	/// the launch, and the aiming ray that draws where the launch would put its
+	/// round. A second copy of this arithmetic would be a ray that looks
+	/// plausible on every frame and is wrong about the shot somebody is watching
+	/// - the failure this project keeps naming, one number held in two places.
+	///
+	/// <paramref name="serial"/> is the round's own count against that victim,
+	/// because the scatter is hashed off it: that is what puts consecutive rounds
+	/// beside each other instead of through the same hole, so predicting the next
+	/// one means predicting with the count it will carry rather than the count
+	/// standing now.
+	///
+	/// Null when the target's atlas carries no plate table - nothing can be aimed
+	/// at a tank whose armour was never measured, and the launch already refused
+	/// that case rather than aiming at the anchor.
+	/// </summary>
+	private Aimed? Aim(Vehicle shooter, Vehicle victim, double fromBearing,
+					   int serial)
+	{
+		AtlasSet atlas = victim.Atlas;
+		if (!atlas.HasHit)
+			return null;
+		double from = HexField.EdgeHeadings[Angles.SideFor(fromBearing)];
+		double hull = victim.Sprite.HullFacing;
+		string face = atlas.FaceFor(from, hull);
+		Vector2 centroid = atlas.HitOffset(face, hull);
+		Vector2 tangent = atlas.HitTangent(face, hull);
+		Vector2 slope = atlas.HitSlope(face, hull);
+
+		// Measured here rather than taken from BoreOf, and the two differ by the
+		// space they answer in: this one is the board, because the round is a
+		// thing on the board and the bore below is a difference of two tanks'
+		// points. See Vehicle.Spot - on the staged board a sprite's own
+		// coordinates are its render target's, so two of them cannot be
+		// subtracted.
+		AtlasSet gun = shooter.Atlas;
+		Vector2 tube = gun.Muzzle(gun.FrameFor(shooter.Sprite.TurretFacing))
+					   - gun.Anchor;
+		Vector2 launched = shooter.Spot(tube);
+		// The bore as the target's own layers see it. Carried through both
+		// transforms as a pair of points rather than as an angle, so a scaled
+		// class and a hull leaning on its springs are handled by the transforms
+		// that already express them instead of by arithmetic repeated here.
+		// Unspot and not ToLocal, by the same argument: a point handed from one
+		// sprite to the other through ToGlobal and ToLocal arrives somewhere else
+		// entirely on the staged board, and the bore is the whole of how the
+		// scatter is put onto the gun's axis.
+		Vector2 eye = victim.Unspot(launched);
+		Vector2 down = shooter.Spot(
+			tube + gun.GroundDirection(shooter.Sprite.TurretFacing) * 100.0f);
+		Vector2 bore = victim.Unspot(down) - eye;
+
+		// The vertical fraction stays on its hash and the tangential one follows
+		// it onto the gun's axis - see Gunnery.ScatterOntoBore. Only on this
+		// path: a round asked for by the U key has no shooter and so no bore, and
+		// it keeps both hashes.
+		//
+		// The hash is not gone, it is demoted to what it should always have been:
+		// dispersion about an aim point, a tenth of a plate rather than the whole
+		// of it. Without it the solve is one number per geometry, so a gun
+		// shooting twice from the same place would put its second round exactly
+		// through the first - and where the solve is clamped that is a column of
+		// holes down one edge, which is the row-of-stamps failure again in the
+		// other axis.
+		float rise = TankTick.RiseAt(serial);
+		float scatter = TankTick.AimedScatter(eye, bore, centroid, tangent, slope,
+											  rise, serial);
+		Vector2 impact = centroid + tangent * scatter + slope * rise;
+		return new Aimed(launched, impact, face, scatter, rise,
+						 Gunnery.BoreMiss(eye, bore, impact));
+	}
+
+	/// <summary>
+	/// Hand the overlay every gun's aim for this frame - see
+	/// <see cref="AimRay"/>.
+	///
+	/// <b>Solved every frame rather than when the order is given</b>, because
+	/// every input to it moves: the turret is traversing, the target is driving,
+	/// and the plate the lane arrives on changes as the target's hull turns.
+	///
+	/// <b>Only a gun that could actually fire gets a ray</b>, and the two
+	/// exclusions are different in kind. Off a lane there is no round at all and
+	/// no plate either - the bearing the armour is chosen by *is* the lane turned
+	/// round, so a ray would have to invent one. Blocked, the round exists and
+	/// hits the tank in the way, so a line drawn to the target would be a
+	/// straightforward lie about where it lands. Loading is neither: the shot is
+	/// coming, and the whole point of the ray is to be read before it does.
+	///
+	/// Every tank, not the driven one: a tank left engaging goes on firing after
+	/// you have selected somebody else, which is most of what the attack scene
+	/// is.
+	/// </summary>
+	private void AimRays()
+	{
+		if (_aimRay is null)
+			return;
+		_aimRay.Clear();
+		if (!AimRay.On)
+			return;
+		foreach (Vehicle v in _vehicles)
+		{
+			if (v.Wreck.Dead)
+				continue;
+			bool driving = ReferenceEquals(v, Active);
+			// Who the round is for, if anybody, and which way it leaves. The
+			// standing order first - and down the lane rather than down the tube,
+			// because that is where the round goes and the gun may still be coming
+			// round to it. Then, for the tank being driven, whatever its gun has
+			// been laid on by hand; then nothing, which is still a line.
+			if (v.Target is not null && v.Solution.Clear)
+				Sight(v, v.Target, v.Solution.Heading);
+			else if (driving && LaidOn(v, out int heading) is Vehicle mark)
+				Sight(v, mark, heading);
+			else if (driving)
+				Sight(v, null, v.Sprite.TurretFacing);
+		}
+	}
+
+	/// <summary>
+	/// The tank this gun is laid on, and the lane it is laid down - or null for a
+	/// gun pointing at nothing.
+	///
+	/// <b>Laid rather than nearest, and that is the whole of what keeps the mark
+	/// honest.</b> A shell leaves along a flat side of the hex and along no other
+	/// bearing, so a gun sitting between lanes has no answer at all: snapping to
+	/// the nearest one would claim a hole for a shot the tank cannot fire without
+	/// traversing first, and the ring would sit off the end of its own line. Half
+	/// the drawn courses are lanes and half are not - the atlas steps 15 degrees
+	/// and the lanes are 60 apart - so the ring comes and goes as the turret
+	/// sweeps, which is the rule being shown rather than a flicker.
+	///
+	/// <b>The first tank down the lane, not the one being aimed at</b>, because
+	/// that is the one the round stops in: the same walk
+	/// <see cref="Gunnery.Solve"/> calls blocking, asked from the other end. So a
+	/// gun laid past somebody marks the somebody, which is the answer the blocked
+	/// case could only refuse to give.
+	/// </summary>
+	private Vehicle? LaidOn(Vehicle shooter, out int heading)
+	{
+		heading = -1;
+		foreach (int lane in HexField.EdgeHeadings)
+			if (Gunnery.Laid(shooter.Sprite.TurretFacing, lane))
+			{
+				heading = lane;
+				break;
+			}
+		if (heading < 0)
+			return null;
+		foreach (Vector2I cell in _field.Lane(shooter.Cell, heading))
+			if (Vehicle.At(_vehicles, cell) is Vehicle mark)
+				return mark;
+		return null;
+	}
+
+	/// <summary>
+	/// One gun's ray: how far the line gets, and whether its end is a hole.
+	///
+	/// <b>The line stops at the first thing in the way, and the ring appears only
+	/// if that thing was the tank the round is for.</b> One rule for all three
+	/// cases, which is what stops the picture contradicting itself: a line drawn
+	/// through a hill to a ring beyond it says two things at once, and a line
+	/// stopped at the hill with the ring still out there says them further apart.
+	///
+	/// <b>Which means the ray is stricter than the gun, and that is worth saying
+	/// out loud.</b> <see cref="Gunnery.Solve"/> only knows about tanks in the
+	/// lane - terrain is not in the firing rules at all - so on a board with
+	/// relief an ordered shot across a wall still fires and still hits, while this
+	/// line stops at the wall. The overlay is not guessing there: it is reading
+	/// the board the shot is crossing. Closing the gap means teaching
+	/// <c>Solve</c> about height, which is a change to what the bench does rather
+	/// than to what it draws.
+	/// </summary>
+	private void Sight(Vehicle shooter, Vehicle? victim, double heading)
+	{
+		(Vector2 muzzle, Vector2 along) = BoreOf(shooter, heading);
+		if (along.LengthSquared() < 1e-6f)
+			return;
+		Vector2 dir = along.Normalized();
+		// Asked of the board in flat space, the way every other caller that asks it
+		// about a point does - the lift goes back on. See HexField.Bare and Patch.
+		float top = _field.Bare(shooter.Ground);
+		var ground = new Vector2(shooter.GroundPoint.X - _origin.X,
+								 shooter.GroundPoint.Y - _origin.Y + top);
+		var tanks = new HashSet<Vector2I>();
+		foreach (Vehicle other in _vehicles)
+			if (!ReferenceEquals(other, shooter))
+				tanks.Add(other.Cell);
+		(float run, Vector2I? at, bool blocked) = Track(
+			_field, ground, dir, top + _field.Lift * AimRay.Clearance, tanks);
+		// The hole, but only if the line got as far as the tank it belongs to. The
+		// point itself still comes out of the firing code and is not touched here -
+		// see Aim, and see AimRay for why two copies of it would be the quiet kind
+		// of wrong.
+		//
+		// One past the count standing now, which is the serial the next round will
+		// carry - see Aim. Off by one and the ray marks the hole the *last* round
+		// made, which on a plate that has already been hit is a mark a few pixels
+		// away from a mark: right enough to pass a glance and wrong about the thing
+		// it is for.
+		if (victim is not null && at == victim.Cell
+			&& Aim(shooter, victim, Angles.Mod(heading + 180.0, 360.0),
+				   victim.HitCount + 1) is Aimed shot)
+		{
+			Onto(shooter, victim, muzzle, shot);
+			return;
+		}
+		Lay(shooter, muzzle, dir * run,
+			blocked ? AimRay.Tip.Stop : AimRay.Tip.Open);
+	}
+
+	/// <summary>
+	/// How far a level line out of a tank gets across the board before something
+	/// stops it, which cell stopped it, and whether anything did.
+	///
+	/// <b>Measured in cells walked rather than in pixels run</b>, which is the
+	/// whole of why it exists: a length in pixels is a length on a board that
+	/// zooms, so the same ray covered a different number of hexes at every zoom.
+	/// Walked in flat space and asked of the field, so the answer is a fact about
+	/// the ground rather than about the picture - the rule
+	/// <see cref="Patch"/> is written under, and the fourth place this board has
+	/// charged for the difference.
+	///
+	/// <b>Ground blocks the line when it stands higher than the line does</b>, and
+	/// a level line has one height everywhere - <paramref name="top"/> - so that
+	/// is one comparison rather than a profile. A cell holding a tank blocks it
+	/// too, wreck or not: what stops a shell is a tank being there.
+	///
+	/// No cap on the range, and none is wanted. The line runs as far as there are
+	/// hexes that way, which is what a sighting line does and what was asked for;
+	/// a cap in cells would be a made-up number, and a cap in pixels is the thing
+	/// being removed. <c>limit</c> is only the walk's own guard - a board's worth
+	/// of travel, so a direction that never leaves the grid cannot spin here.
+	///
+	/// Static and given a set of cells rather than the vehicles, so all of it can
+	/// be asserted without a scene: the same reason <see cref="Patch"/> and
+	/// <see cref="Gunnery.Solve"/> are shaped this way.
+	/// </summary>
+	internal static (float Run, Vector2I? At, bool Blocked) Track(
+		HexField field, Vector2 from, Vector2 dir, float top,
+		IReadOnlySet<Vector2I> tanks)
+	{
+		if (field.Atlas is null || dir.LengthSquared() < 1e-9f)
+			return (0.0f, null, false);
+		Vector2 step = dir.Normalized();
+		Vector2 tile = field.Atlas.HexRect.Size;
+		// An eighth of a tile: finer than half the shortest way across a cell, so
+		// nothing standing in the line is stepped over, and coarse enough that a
+		// board's worth of walk is a hundred samples.
+		float grain = Mathf.Max(tile.X * 0.125f, 1.0f);
+		float limit = field.Columns * tile.X + field.Rows * tile.Y;
+		Vector2I here = field.FlatCellAt(from);
+		for (float run = grain; run <= limit; run += grain)
+		{
+			Vector2I cell = field.FlatCellAt(from + step * run);
+			if (cell == here)
+				continue;
+			here = cell;
+			// Stopped at the near side of whatever stopped it - the sample before
+			// the one that found it. The line is drawn from the muzzle, which
+			// already stands a little way along this direction from the cell
+			// centre the walk starts at, so what is drawn reaches a little into the
+			// cell that stopped it rather than halting at its edge. That bias is
+			// forward, bounded by the muzzle's own offset, and it is the readable
+			// direction to be out by: a line that stops short of a hill by a third
+			// of a cell reads as stopping at nothing.
+			if (!field.InBounds(cell))
+				return (run - grain, null, false);
+			if (tanks.Contains(cell) || field.TopAt(cell) > top)
+				return (run - grain, cell, true);
+		}
+		return (limit, null, false);
+	}
+
+	/// <summary>
+	/// Hand over a ray that ends in a hole, with both ends converted for the
+	/// board being drawn.
+	///
+	/// Both ends are pixels of a tank's own picture, and what that means depends
+	/// on who is drawing the board.
+	///
+	/// Flat, the sprite hangs in the harness's canvas and ToGlobal is already a
+	/// canvas point. Staged, the sprite lives in a SubViewport of its own and is
+	/// shown on a quad (<see cref="Stage3D.Take"/>), so the same call answers in
+	/// that viewport's own 512px space - numbers that read as screen space put
+	/// the mark in the corner of the window: present, confident and about
+	/// nothing. So the stage is asked where its own pixel went
+	/// (<see cref="Stage3D.Screen"/>, the billboard read backwards) and the
+	/// answer, which is in screen space, is brought into the canvas the ray is
+	/// drawn in.
+	///
+	/// <b>Undoing the canvas transform is the half that is easy to forget:</b>
+	/// the overlay is a canvas item under a Camera2D, so a screen pixel written
+	/// into it as-is would be out by the zoom and the pan - and centred at 1.00x
+	/// both are near enough to identity to look right.
+	/// </summary>
+	private void Onto(Vehicle shooter, Vehicle victim, Vector2 muzzle,
+					  Aimed shot)
+	{
+		Vector2 hole = victim.Sprite.ToGlobal(shot.Impact);
+		if (!Staged)
+		{
+			_aimRay!.Aim(muzzle, hole, AimRay.Tip.Hole);
+			return;
+		}
+		if (_stage!.Screen(shooter, muzzle) is not Vector2 gun
+			|| _stage.Screen(victim, hole) is not Vector2 mark)
+			return;
+		Transform2D back = GetViewport().CanvasTransform.AffineInverse();
+		_aimRay!.Aim(back * gun, back * mark, AimRay.Tip.Hole);
+	}
+
+	/// <summary>
+	/// Hand over a ray that ends on the ground rather than in a tank: the gun's
+	/// own line, run out as far as the walk got.
+	///
+	/// <b>The run is a ground offset, and on the staged board it goes through the
+	/// camera rather than being added to the screen point.</b> That board's
+	/// orthographic size is the viewport height over the zoom, so one world unit
+	/// is one screen pixel at 1.00x and nowhere else; added on afterwards the ray
+	/// would be a fixed screen length over a board that scales, which is the
+	/// zoom-dependent length this replaced. See <see cref="Stage3D.Screen"/>. On
+	/// the flat board the canvas is the ground, so the offset goes on directly and
+	/// the camera scales it with everything else.
+	/// </summary>
+	private void Lay(Vehicle shooter, Vector2 muzzle, Vector2 run, AimRay.Tip tip)
+	{
+		if (!Staged)
+		{
+			_aimRay!.Aim(muzzle, muzzle + run, tip);
+			return;
+		}
+		if (_stage!.Screen(shooter, muzzle) is not Vector2 gun
+			|| _stage.Screen(shooter, muzzle, run) is not Vector2 far)
+			return;
+		Transform2D back = GetViewport().CanvasTransform.AffineInverse();
+		_aimRay!.Aim(back * gun, back * far, tip);
+	}
+
+	/// <summary>
+	/// The aiming ray's state for <c>--trace</c>.
+	///
+	/// Four answers rather than a count, because they are repaired in four
+	/// different places and every one of them is the same empty picture on
+	/// screen: switched off, no node at all, on with nobody aiming, and on with
+	/// something to aim at that failed to draw. Under --capture there is no panel
+	/// to read any of it off.
+	///
+	/// And how many of the rays are marked, which is not the same question as how
+	/// many there are: a line running out and a line ending in a hole are the two
+	/// things the overlay says, they look nothing alike and the count cannot tell
+	/// them apart.
+	///
+	/// There used to be a fifth - <c>!staged</c> - while the ray refused the 3D
+	/// board. The stage answers now (see <see cref="Stage3D.Screen"/>), so what
+	/// is left is the honest count on either board.
+	/// </summary>
+	private string AimRayLine() =>
+		!AimRay.On ? "!off"
+		: _aimRay is null ? "!gone"
+		: $"{_aimRay.Count} laid/{_aimRay.Marked} marked/{_aimRay.Stopped} stopped"
+		  + (_aimRay.Drawn ? "" : " blank");
+
 	/// <summary>
 	/// Put a round in the air, aimed at the plate the lane arrives on.
 	///
@@ -2900,75 +3348,32 @@ public sealed partial class Main : SceneRoot
 	/// </summary>
 	private void Launch(Vehicle shooter, Vehicle victim, double fromBearing)
 	{
-		AtlasSet atlas = victim.Atlas;
-		if (!atlas.HasHit)
+		if (!victim.Atlas.HasHit)
 			return;
-		double from = HexField.EdgeHeadings[Angles.SideFor(fromBearing)];
+		// Bumped before the aim rather than after it, because the aim depends on
+		// it: the scatter hash is what puts the second round beside the first, so
+		// the serial the round about to leave carries is the count as it is now.
+		// It is also why the aiming ray has to predict with one more than this -
+		// see AimRays.
 		victim.HitCount++;
-		double hull = victim.Sprite.HullFacing;
-		string face = atlas.FaceFor(from, hull);
-		Vector2 centroid = atlas.HitOffset(face, hull);
-		Vector2 tangent = atlas.HitTangent(face, hull);
-		Vector2 slope = atlas.HitSlope(face, hull);
-
-		AtlasSet gun = shooter.Atlas;
-		Vector2 muzzle = gun.Muzzle(gun.FrameFor(shooter.Sprite.TurretFacing))
-						 - gun.Anchor;
-		// Spot rather than ToGlobal, and on the 3D stage that is the difference
-		// between a shell on the board and a shell in a render target - see
-		// Vehicle.Spot. Both ends have to come from the one space, because the
-		// flight is their difference.
-		Vector2 launched = shooter.Spot(muzzle);
-		// The bore as the target's own layers see it. Carried through both
-		// transforms as a pair of points rather than as an angle, so a scaled
-		// class and a hull leaning on its springs are handled by the transforms
-		// that already express them instead of by arithmetic repeated here.
-		//
-		// The direction is the ground direction of the turret's heading, not the
-		// muzzle minus the anchor: a tank gun is level, and a level line in the
-		// world projects to exactly the ground direction on screen, while the
-		// ring-to-muzzle vector also carries however far the trunnions sit above
-		// the ring. The same measurement the flash points itself by.
-		// Spot and Unspot rather than the nodes' own transforms, by Vehicle.Spot's
-		// argument: on the stage the two sprites live in two different render
-		// targets, so a point handed from one to the other through ToGlobal and
-		// ToLocal arrives somewhere else entirely - and the bore is the whole of
-		// how the scatter is put onto the gun's axis.
-		Vector2 eye = victim.Unspot(launched);
-		Vector2 down = shooter.Spot(
-			muzzle + gun.GroundDirection(shooter.Sprite.TurretFacing) * 100.0f);
-		Vector2 bore = victim.Unspot(down) - eye;
-
-		// The vertical fraction stays on its hash and the tangential one follows
-		// it onto the gun's axis - see Gunnery.ScatterOntoBore. Only on this
-		// path: a round asked for by the U key has no shooter and so no bore, and
-		// it keeps both hashes.
-		//
-		// The hash is not gone, it is demoted to what it should always have been:
-		// dispersion about an aim point, a tenth of a plate rather than the whole
-		// of it. Without it the solve is one number per geometry, so a gun
-		// shooting twice from the same place would put its second round exactly
-		// through the first - and where the solve is clamped that is a column of
-		// holes down one edge, which is the row-of-stamps failure again in the
-		// other axis.
-		float rise = TankTick.RiseAt(victim.HitCount);
-		float scatter = TankTick.AimedScatter(eye, bore, centroid, tangent, slope, rise,
-									 victim.HitCount);
-		Vector2 impact = centroid + tangent * scatter + slope * rise;
+		if (Aim(shooter, victim, fromBearing, victim.HitCount) is not Aimed shot)
+			return;
 
 		var shell = new Shell
 		{
 			Shooter = shooter,
 			Target = victim,
-			ImpactLocal = impact,
-			From = launched,
-			FromLift = shooter.LiftOf(launched),
-			BoreMiss = Gunnery.BoreMiss(eye, bore, impact),
+			ImpactLocal = shot.Impact,
+			From = shot.Muzzle,
+			FromLift = shooter.LiftOf(shot.Muzzle),
+			BoreMiss = shot.BoreMiss,
 			Serial = victim.HitCount,
-			// Carried rather than re-read on arrival, for the reason above.
-			Face = face,
-			Scatter = scatter,
-			Rise = rise,
+			// Carried rather than re-read on arrival: what the trigger decided
+			// travels with the shell, because the alternative is a round that
+			// changes calibre in flight because somebody turned a dial.
+			Face = shot.Face,
+			Scatter = shot.Scatter,
+			Rise = shot.Rise,
 			Calibre = Calibre,
 			Level = Gunnery.Penetration(shooter.Profile, victim.Profile),
 		};
@@ -3147,6 +3552,7 @@ public sealed partial class Main : SceneRoot
 		["--no-barrel-recoil"] = new[] { "effects.tube_recoil" },
 		["--shake"] = new[] { "effects.camera_shake", "effects.shake_level" },
 		["--tracer"] = new[] { "gunnery.tracer" },
+		["--aim-ray"] = new[] { "gunnery.aim_ray" },
 		["--no-tracer-smoke"] = new[] { "gunnery.tracer_smoke" },
 		["--tracer-smoke"] = new[] { "gunnery.tracer_smoke", "gunnery.tracer" },
 		["--smoke-life"] = new[] { "gunnery.smoke_life" },
@@ -3670,6 +4076,14 @@ public sealed partial class Main : SceneRoot
 				return $"{born:F1}px wide fresh, {old:F0}px by the end"
 					   + $" on the {Active.Tag}";
 			});
+		// The aiming ray, after the tracer cluster because that is what it is next
+		// to in kind and apart from in purpose: those five tune what a round in
+		// flight looks like, this one draws where a round that has not been fired
+		// yet would land. Off by default - see AimRay.OnByDefault - so it cannot
+		// get into an A/B by accident, which is the argument the tracer itself was
+		// off under while it was one stroke of debug line.
+		ui.Toggle("gunnery.aim_ray", "aiming ray  (--aim-ray)",
+			() => AimRay.On, on => AimRay.On = on);
 		// Frames, not px/s, is what this slider is about: the round exists to put
 		// time between the report and the impact, and the point-blank shot is
 		// where that time runs out first. Four frames is the floor the self-test
@@ -4424,6 +4838,10 @@ public sealed partial class Main : SceneRoot
 					 // reasons a tank is standing there not firing, and from
 					 // outside they look identical.
 					 + $"  aim {AimLine()}"
+					 // The debug overlay, because an overlay switched on with nothing
+					 // to say and one that failed to draw are the same empty picture -
+					 // and under --capture there is no panel to read the switch off.
+					 + $"  aimray {AimRayLine()}"
 					 + $"  cell ({_cell.X},{_cell.Y})"
 					 // Size for the same reason as the zoom: two captures at two
 					 // sizes that came out identical would send you looking at
@@ -4562,6 +4980,10 @@ public sealed partial class Main : SceneRoot
 		// tank got to this frame rather than last frame - the same ordering the
 		// belts and the audio already need, and for the same reason.
 		AdvanceShells(delta);
+		// With them and just after, for the same ordering reason: the ray is solved
+		// from where the turrets ended up this frame, and a ray solved before the
+		// traverse would trail the gun it comes out of by a frame.
+		AimRays();
 
 		// Same ordering argument, one step further out: which cells are occupied
 		// is a fact about where the tanks ended up, so the wood clears for the
