@@ -1,5 +1,6 @@
 using System;
 using System.Globalization;
+using System.IO;
 using Godot;
 
 namespace TankSpriteTest;
@@ -59,15 +60,15 @@ namespace TankSpriteTest;
 /// Run it with the scene as the positional argument, leaving project.godot
 /// alone:
 ///
-///     Godot_v4.5.2-stable_mono_win64.exe --path GodotTest res://Relief3D.tscn
+///     Godot_v4.5.1-stable_mono_win64.exe --path GodotTest res://Relief3D.tscn
 ///
 /// Keys: A/D column, W/S row, Q/E turn, [ / ] grade, T flat board, C the check
 /// overlay, F12 a shot.
 /// </summary>
 public sealed partial class Relief3D : Node3D
 {
-    private const string SpritesRoot = "D:/Projects/AgentCoding/BlenderMCP/Sprites";
-    private const string TerrainsRoot = "D:/Projects/AgentCoding/BlenderMCP/Images/Terrains";
+    private static readonly string SpritesRoot = AssetRoot.Sprites;
+    private static readonly string TerrainsRoot = AssetRoot.Terrains;
 
     /// <summary>The light one, <see cref="ReliefBench"/>'s reason: smallest of
     /// the three, so it is the one a step has the best chance of dwarfing.</summary>
@@ -672,8 +673,12 @@ public sealed partial class Relief3D : Node3D
                 Rebuild();
                 break;
             case Key.F12:
+                // out/ is gitignored scratch and may simply not be there, and
+                // SavePng into a missing directory fails with a line in the log
+                // that reads like a screenshot that did not work.
+                Directory.CreateDirectory(AssetRoot.Out);
                 GetViewport().GetTexture().GetImage()
-                    .SavePng("D:/Projects/AgentCoding/BlenderMCP/out/relief3d.png");
+                    .SavePng(AssetRoot.Out + "/relief3d.png");
                 moved = false;
                 break;
             default: moved = false; break;

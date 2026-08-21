@@ -17,7 +17,7 @@ namespace TankSpriteTest;
 /// Run it with the scene as the positional argument, leaving project.godot
 /// alone:
 ///
-///     Godot_v4.5.2-stable_mono_win64.exe --path GodotTest res://Relief.tscn
+///     Godot_v4.5.1-stable_mono_win64.exe --path GodotTest res://Relief.tscn
 ///
 /// <b>Schematic on purpose.</b> Every face here is a flat polygon, so what is
 /// on screen is the geometry and only the geometry - the moment a hill is
@@ -48,8 +48,8 @@ namespace TankSpriteTest;
 /// </summary>
 public sealed partial class ReliefBench : Node2D
 {
-    private const string TerrainsRoot = "D:/Projects/AgentCoding/BlenderMCP/Images/Terrains";
-    private const string SpritesRoot = "D:/Projects/AgentCoding/BlenderMCP/Sprites";
+    private static readonly string TerrainsRoot = AssetRoot.Terrains;
+    private static readonly string SpritesRoot = AssetRoot.Sprites;
 
     /// <summary>
     /// The tank standing on the relief. The light one, and the class matters
