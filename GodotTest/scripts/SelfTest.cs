@@ -3025,11 +3025,20 @@ public static class SelfTest
             // draw, still be black and still be the right size, and the only
             // thing that changed would be the two lines named here.
             Check("the patch keeps off the ground its own cast already has",
-                Stage3D.SeatShader.Contains("texture(art, uv).a * ink * clip")
+                Stage3D.SeatShader.Contains("cover * ink * clip")
                 && Stage3D.SeatShader.Contains("dz / run.y"),
                 "the inverse of Cast, and one sample of the art the prop is "
                 + "already holding - " + (Stage3D.SeatShader.Contains("dz / run.y")
                     ? "present" : "GONE"));
+
+            // And off what the cast is laying down *this frame*, which during a
+            // handover is a mix of the two pictures. Reading one of them leaves the
+            // patch standing aside from a streak that is half gone - a bite out of
+            // itself taken by a shadow on its way out.
+            Check("and off the mix of the pair, not off one of them",
+                Stage3D.SeatShader.Contains("mix(cover,")
+                && Stage3D.SeatShader.Contains("uniform float swap"),
+                "the same handover the cast and the crown are given");
 
             // The difference and not the maximum, because it is composited over
             // the cast rather than instead of it. Which of the two draws first
@@ -7307,6 +7316,43 @@ public static class SelfTest
             "the shader reads across from the middle of the quad, so a quad built "
             + "around a foot that is not its middle stands the whole flame beside "
             + "its own tree");
+
+        // The shadow hands over along with the crown it is the shadow of, and the
+        // thing that used to stop it was two draws rather than the blending: a
+        // stencil laid down twice at complementary strength compounds instead of
+        // averaging. So the claim is that there is one draw and one alpha.
+        string cast = Stage3D.CastShader;
+        Check("the shadow hands over from one picture to the other, not on a frame",
+            cast.Contains("mix(a, lift(burnt")
+            && cast.Contains("uniform float swap"),
+            "it showed one picture or the other and changed on the middle frame of "
+            + "the handover - which, now that the handover happens under the fire, "
+            + "is the one frame the eye is already watching");
+        Check("and mixes the coverage in one draw, because two would compound",
+            cast.Split("ALPHA").Length == 2
+            && Math.Abs((0.5f + 0.5f - 0.5f * 0.5f) - 0.75f) < 1e-6f
+            && Math.Abs(Mathf.Lerp(0.5f, 0.5f, 0.5f) - 0.5f) < 1e-6f,
+            "two half-covered stencils composite to 0.75 and mix to 0.50 - the "
+            + "first is a shadow that darkens as it changes, which is what "
+            + "ground_shadow refuses to draw a hull and a turret separately for");
+        // One text for the crown and for the mask of the crown. Asserted on both
+        // compiled sources for FoamEdge's reason: a copy that drifted would still
+        // compile, still draw, and read as a burnt trunk throwing a leafy shadow.
+        Check("and lifts its pictures off the quad with the crown's own code",
+            Stage3D.CastShader.Replace("LIFT_FN", Stage3D.PictureLift)
+                  .Contains(Stage3D.PictureLift)
+            && Stage3D.BarkShader.Replace("LIFT_FN", Stage3D.PictureLift)
+                      .Contains(Stage3D.PictureLift)
+            && Stage3D.PictureLift.Contains("vec4 lift("),
+            "a mask that disagrees with the silhouette it is a mask of is two "
+            + "answers to one question");
+        Check("and puts the crown's own gamma on the burnt alpha",
+            cast.Contains("burnt_map, firm")
+            && Stage3D.BarkShader.Contains("burnt_map, firm")
+            && Stage3D.SeatShader.Contains("uniform float firm"),
+            $"Firm is {Stage3D.Firm:F2} on art whose strokes are thinner than a "
+            + "screen pixel, so a shadow without it is thinner than the crown "
+            + "throwing it");
 
         // The section across an element: a shift on the same ramp, and a shoulder
         // that is brighter and not only yellower.

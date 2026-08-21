@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -127,6 +127,17 @@ public sealed partial class WoodBench : Node2D
     /// well.</summary>
     private bool _woodFire = true;
 
+    /// <summary>The two shadows the board throws - <c>--no-cast-shadows</c> and
+    /// <c>--no-prop-contact</c>, the harness's own flags and its own reasons.
+    ///
+    /// Here because the shadow is part of what a burning tree does now: it hands
+    /// over from the living picture to the burnt one along with the crown, so the
+    /// A/B that judges the handover needs the cast on its own. Without them the
+    /// footprint cannot be masked off at all, which is what an empty mask of 0px
+    /// said the first time it was asked for.</summary>
+    private bool _cast = true;
+    private bool _contact = true;
+
     /// <summary>How much fire there is, in tree heights - <c>--flame</c> and
     /// <see cref="Stage3D.FlameRise"/>. Null leaves the tuned value alone.
     ///
@@ -183,6 +194,10 @@ public sealed partial class WoodBench : Node2D
                 _tankFire = true;
             else if (args[i] == "--no-tree-fire")
                 _woodFire = false;
+            else if (args[i] == "--no-cast-shadows")
+                _cast = false;
+            else if (args[i] == "--no-prop-contact")
+                _contact = false;
             else if (args[i] == "--flame" && i + 1 < args.Length
                      && float.TryParse(args[i + 1], NumberStyles.Float,
                                        CultureInfo.InvariantCulture, out float lit))
@@ -296,6 +311,7 @@ public sealed partial class WoodBench : Node2D
         {
             Field = _field, Origin = Vector2.Zero, Eye = _camera,
             Wood = _grove, Blaze = _fire, TankFire = _tankFire,
+            CastShadows = _cast, ContactShadows = _contact,
         };
         if (_flameRise is float high)
             _stage.FlameRise = high;

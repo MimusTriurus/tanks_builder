@@ -4009,13 +4009,6 @@ void fragment() {{
     private readonly Dictionary<(int Species, bool Mirrored), ArrayMesh>
         _stems = new();
 
-    /// <summary>And one per kind, per mirror, <b>per state</b> for the mark the
-    /// tree leaves on the ground - the shadow it throws and the patch it stands
-    /// on. Its own because it cannot cross-fade; see <see cref="Mark"/>.
-    /// </summary>
-    private readonly Dictionary<(int Species, bool Mirrored, bool Burnt), ArrayMesh>
-        _marks = new();
-
     /// <summary>The flame and the smoke over one tree, made when it first
     /// catches and kept afterwards. Lazily, because a board of 672 trees would
     /// otherwise carry 1344 hidden quads for a fire nobody has lit.</summary>
@@ -4217,18 +4210,9 @@ void fragment() {{
         foreach ((PropNode tree, MeshInstance3D stem) in _standing)
         {
             stem.Transform = Rooted(tree);
-            // Which picture is on the ground under it, if that has changed.
-            // Asked by comparing the mesh it wants with the one it has rather
-            // than by watching a flag: the mesh is the thing that has to change,
-            // so a mark whose art was swapped and whose quad was not cannot get
-            // past this. The standing quad is not in it any more - it holds both
-            // pictures and never changes at all, see Shape.
-            if (_shading.TryGetValue(tree, out MeshInstance3D? mark))
-            {
-                ArrayMesh want = Mark(tree);
-                if (mark.Mesh != want)
-                    Restate(tree, mark, want);
-            }
+            // Nothing about the pictures on the ground changes any more either -
+            // the shadow and the patch carry both and mix them per fragment, the
+            // same as the crown. All three are told how far along it is below.
             Kindle(tree);
             // The fade the wood set this frame. Read off the node rather than
             // pushed by whoever set it, for Selected's reason - the reveal, the
@@ -4260,6 +4244,9 @@ void fragment() {{
             {
                 sole.SetShaderParameter("ink", SeatInk.A * tree.Modulate.A);
                 sole.SetShaderParameter("clip", CastShadows ? 1.0f : 0.0f);
+                // The same number the cast and the crown get, and it has to be:
+                // what this keeps off is what the cast is laying down this frame.
+                sole.SetShaderParameter("swap", tree.Swap);
                 sole.SetShaderParameter("run", new Godot.Vector2(
                     tree.Lean * RiseFactor
                         + SunCast.X * (float)tree.Tier.Stands,
@@ -4274,10 +4261,13 @@ void fragment() {{
             cast.Transform = Shaded(tree);
             // The same fade, and it has to be the same one: a tree that has gone
             // half transparent for the tank on its cell keeping a full-strength
-            // shadow reads as the shadow of a tree that is not there.
-            if (cast.MaterialOverride is StandardMaterial3D ink)
-                ink.AlbedoColor = new Color(ShadowInk.R, ShadowInk.G, ShadowInk.B,
-                                            ShadowInk.A * tree.Modulate.A);
+            // shadow reads as the shadow of a tree that is not there. And the same
+            // handover, for the plainer reason: it is the shadow of that crown.
+            if (cast.MaterialOverride is ShaderMaterial ink)
+            {
+                ink.SetShaderParameter("ink", ShadowInk.A * tree.Modulate.A);
+                ink.SetShaderParameter("swap", tree.Swap);
+            }
         }
     }
 
@@ -4307,6 +4297,15 @@ void fragment() {{
             blot.SetShaderParameter("art", tree.Art);
             blot.SetShaderParameter("foot", tree.Foot);
             blot.SetShaderParameter("span", tree.Size);
+            // The pair of rectangles is a fact about the kind, so it goes in once
+            // and only the handover moves - the crown's own arrangement.
+            if (tree.BurntArt is not null)
+                blot.SetShaderParameter("burnt", tree.BurntArt);
+            blot.SetShaderParameter("burnt_foot", tree.BurntFoot);
+            blot.SetShaderParameter("burnt_span",
+                tree.BurntArt is null ? tree.Size : tree.BurntSize);
+            blot.SetShaderParameter("swap", 0.0f);
+            blot.SetShaderParameter("firm", Firm);
             blot.SetShaderParameter("pixels", tree.Pixels);
             blot.SetShaderParameter("rise", RiseFactor);
             blot.SetShaderParameter("radius",
@@ -4325,11 +4324,16 @@ void fragment() {{
             // The shadow goes in first, so that between two trees whose feet
             // sort equal the ground mark is the one underneath. The priority
             // already says so; the order says it again for free.
+            //
+            // On the crown's own quad, and that is what the cross-fade bought: it
+            // held one picture's rectangle while it showed one picture, and now it
+            // shows both. The union is the same mesh the trunk stands on, so a kind
+            // with nothing to swap to gets the quad it always had, to the bit.
             var cast = new MeshInstance3D
             {
-                Mesh = Mark(tree),
+                Mesh = Shape(tree),
                 SortingUseAabbCenter = false,
-                MaterialOverride = Shadow(tree.Art),
+                MaterialOverride = Shade(tree),
                 Visible = CastShadows,
             };
             AddChild(cast);
@@ -5042,65 +5046,6 @@ void fragment() {
         new((left + foot.X) / size.X, (foot.Y - top) / size.Y,
             span.X / size.X, span.Y / size.Y);
 
-    /// <summary>
-    /// The quad a tree's mark on the ground is cut from: its own picture's
-    /// rectangle, never the union.
-    ///
-    /// <b>The shadow does not cross-fade, and that is not a saving.</b> It is a
-    /// stencil laid down with ordinary blending, so two of them at complementary
-    /// strength do not average - they compound, the way this stage's own hull and
-    /// turret shadows compound to 0.80 out of two 0.55s. So it shows one picture
-    /// or the other, and the honest moment to change is the middle of the
-    /// handover, where the crown on screen is half of each.
-    ///
-    /// Its own mesh for the same decision: the union's UVs run across the union,
-    /// and both materials down there sample their art from 0 to 1.
-    /// </summary>
-    private ArrayMesh Mark(PropNode tree)
-    {
-        bool burnt = tree.Swap >= 0.5f;
-        (int, bool, bool) kind = (tree.Species, tree.Mirrored, burnt);
-        if (!_marks.TryGetValue(kind, out ArrayMesh? shape))
-            _marks[kind] = shape = Stem(
-                (burnt ? tree.BurntFoot : tree.Foot) * tree.Pixels,
-                (burnt ? tree.BurntSize : tree.Size) * tree.Pixels, RiseFactor);
-        return shape;
-    }
-
-    /// <summary>
-    /// Put a tree's mark on the ground into the picture it is showing now: the
-    /// shadow it throws and the patch it stands on.
-    ///
-    /// <b>The standing quad is not in here any more, and that is the crossfade's
-    /// doing.</b> It carries both pictures and mixes them per fragment, so there
-    /// is nothing about it to swap - see <see cref="Shape"/> and the bark shader.
-    ///
-    /// <b>The shadow is the one that would have been forgotten.</b> The cast is
-    /// a mesh masked by the art, so a burnt trunk whose shadow was left behind
-    /// would throw the shadow of a crown it no longer has - and on Tree_1 that is
-    /// 33px of canopy lying on the ground beside a bare stem.
-    ///
-    /// <b>What is not touched is the placement.</b> The contact patch keeps its
-    /// radius, which came off the living art, because the tree is standing where it
-    /// was sown - see <see cref="PropSet"/> on why the state cannot reach those
-    /// numbers at all.
-    /// </summary>
-    private void Restate(PropNode tree, MeshInstance3D cast, ArrayMesh want)
-    {
-        bool burnt = tree.Swap >= 0.5f;
-        Texture2D art = burnt ? tree.BurntArt! : tree.Art;
-        cast.Mesh = want;
-        if (cast.MaterialOverride is StandardMaterial3D ink)
-            ink.AlbedoTexture = art;
-        if (_seating.TryGetValue(tree, out MeshInstance3D? seat)
-            && seat.MaterialOverride is ShaderMaterial blot)
-        {
-            blot.SetShaderParameter("art", art);
-            blot.SetShaderParameter("foot", burnt ? tree.BurntFoot : tree.Foot);
-            blot.SetShaderParameter("span", burnt ? tree.BurntSize : tree.Size);
-        }
-    }
-
     /// <summary>How much bigger than the tree the flame's quad and the smoke's are,
     /// about the foot. The flame licks past the crown, the column stands well over
     /// it; both are shaped inside the quad by the shader, so these only have to be
@@ -5680,7 +5625,6 @@ void fragment() {
         _burning.Clear();
         _smoking.Clear();
         _stems.Clear();
-        _marks.Clear();
         _pyres.Clear();
         _plumes.Clear();
     }
@@ -5878,6 +5822,15 @@ render_mode unshaded, cull_disabled, depth_draw_never;
 uniform sampler2D art : filter_linear_mipmap, source_color;
 uniform vec2 foot = vec2(0.0);   // image px of the prop's foot within art
 uniform vec2 span = vec2(1.0);   // image px, the art's size
+// The picture it hands over to, its own foot and size, and how far along that is.
+// Both, because what this has to keep off is what the cast is actually laying
+// down - and the cast is mixing the pair, so a patch reading one of them stands
+// aside from a streak that is half gone.
+uniform sampler2D burnt : filter_linear_mipmap, source_color, hint_default_transparent;
+uniform vec2 burnt_foot = vec2(0.0);
+uniform vec2 burnt_span = vec2(1.0);
+uniform float swap = 0.0;
+uniform float firm = 1.0;       // the same gamma the cast puts on that alpha
 uniform float pixels = 1.0;      // image px to screen px
 uniform float rise = 1.0;        // cos(elevation)
 uniform vec2 run = vec2(0.0);    // Cast's own column: lean*rise + sun*stands
@@ -5888,6 +5841,17 @@ uniform float core = 0.34;       // where the blot stops being flat
 // is switched off, and a patch that went on standing aside would show a bite
 // out of itself taken by a shadow that is not on the board.
 uniform float clip = 1.0;
+
+// One picture's own alpha where the cast would have thrown it here, or nothing at
+// all if that lands outside the picture. The gamma is the cast's, because the two
+// have to agree about what the cast put down.
+float thrown(sampler2D tex, vec2 f, vec2 z, float dx, float t, float gamma) {
+    vec2 uv = (f + vec2(dx - t * run.x, -t * rise) / pixels) / z;
+    if (t <= 0.0 || uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0)
+        return 0.0;
+    float a = texture(tex, uv).a;
+    return gamma >= 0.999 ? a : pow(a, gamma);
+}
 
 void fragment() {
     // The quad is Sole(): local x across, local y up the ground away from the
@@ -5902,10 +5866,11 @@ void fragment() {
     float dx = radius * lx;
     float dz = -radius * ly;
     float t = run.y == 0.0 ? -1.0 : dz / run.y;
-    vec2 uv = (foot + vec2(dx - t * run.x, -t * rise) / pixels) / span;
-    float cast = 0.0;
-    if (t > 0.0 && uv.x >= 0.0 && uv.x <= 1.0 && uv.y >= 0.0 && uv.y <= 1.0)
-        cast = texture(art, uv).a * ink * clip;
+    float cover = thrown(art, foot, span, dx, t, 1.0);
+    if (swap > 0.0)
+        cover = mix(cover, thrown(burnt, burnt_foot, burnt_span, dx, t, firm),
+                    swap);
+    float cast = cover * ink * clip;
 
     ALBEDO = vec3(0.0);
     ALPHA = cast >= 0.9995
@@ -6028,7 +5993,7 @@ void fragment() {
     /// with Transparency.Alpha is, and a spatial shader that leaves ALPHA alone
     /// drops out of the transparent pass and stops sorting against the wood.
     /// </summary>
-    private const string BarkShader = @"
+    internal const string BarkShader = @"
 shader_type spatial;
 render_mode unshaded, cull_disabled;
 
@@ -6052,22 +6017,7 @@ uniform float coal = 0.30;
 // it, which is what it was always for: the living crown is a mass.
 uniform float firm = 1.0;
 
-// One of the two pictures off the quad. The quad point comes in as an argument
-// because a built-in is only in scope in the function it belongs to - reading UV
-// in here is a compile error, and the material that fails to compile falls back
-// to an opaque black one, which draws every tree as its own bare rectangle.
-// Outside its own rectangle the picture is not
-// there at all, and that is said rather than left to the sampler's clamp: these
-// arts fill their image to the border, so the edge texel is not transparent and
-// clamping would smear it across the margin the union added.
-vec4 lift(sampler2D tex, vec2 at, vec4 map, float gamma) {
-    vec2 uv = map.xy + at * map.zw;
-    vec4 c = texture(tex, uv);
-    float inside = float(uv.x >= 0.0 && uv.x <= 1.0
-                         && uv.y >= 0.0 && uv.y <= 1.0);
-    c.a = (gamma >= 0.999 ? c.a : pow(c.a, gamma)) * inside;
-    return c;
-}
+LIFT_FN
 
 void fragment() {
     vec4 live = lift(art, UV, art_map, 1.0);
@@ -6087,7 +6037,116 @@ void fragment() {
 }
 ";
 
-    private static readonly Shader Timber = new() { Code = BarkShader };
+    /// <summary>
+    /// One of the two pictures off the union quad, shared by the crown and by the
+    /// shadow it throws.
+    ///
+    /// <b>One text and not two, for FoamEdge's reason:</b> the mask is a mask
+    /// <i>of</i> the silhouette, so a copy that drifted would be two answers to one
+    /// question - and the way it would read is a burnt trunk throwing a shadow with
+    /// leaves in it. There is a check that both compiled sources contain this.
+    ///
+    /// The quad point comes in as an argument because a built-in is only in scope in
+    /// the function it belongs to - reading UV in here is a compile error, and the
+    /// material that fails to compile falls back to an opaque black one, which draws
+    /// every tree as its own bare rectangle.
+    ///
+    /// Outside its own rectangle the picture is not there at all, and that is said
+    /// rather than left to the sampler's clamp: these arts fill their image to the
+    /// border, so the edge texel is not transparent and clamping would smear it
+    /// across the margin the union added.
+    /// </summary>
+    internal const string PictureLift = @"
+vec4 lift(sampler2D tex, vec2 at, vec4 map, float gamma) {
+    vec2 uv = map.xy + at * map.zw;
+    vec4 c = texture(tex, uv);
+    float inside = float(uv.x >= 0.0 && uv.x <= 1.0
+                         && uv.y >= 0.0 && uv.y <= 1.0);
+    c.a = (gamma >= 0.999 ? c.a : pow(c.a, gamma)) * inside;
+    return c;
+}";
+
+    private static readonly Shader Timber =
+        new() { Code = BarkShader.Replace("LIFT_FN", PictureLift) };
+
+    /// <summary>
+    /// What a tree's shadow is painted with: the same pair of pictures the crown is,
+    /// used as a mask and nothing else. <see cref="ShadowInk"/>'s alpha is the
+    /// strength and its rgb is black, so the leaves' gaps are the shadow's gaps.
+    ///
+    /// <b>It cross-fades now, and the thing that used to stop it was two draws
+    /// rather than the blending.</b> A stencil laid down twice at complementary
+    /// strength compounds instead of averaging - two 0.55s make 0.80, which is why
+    /// <c>ground_shadow</c> will not draw a hull and a turret separately - so the
+    /// shadow showed one picture or the other and changed on the middle frame of the
+    /// handover. Sampling both in <i>one</i> fragment and mixing the coverage is the
+    /// crown's own answer, and it is exactly as legal here: one draw, one alpha,
+    /// nothing to compound with.
+    ///
+    /// <b>And the mid-window switch is worth naming as a bug rather than a
+    /// simplification, now that the handover happens under the fire.</b> The crown
+    /// spends 1.2s dissolving; the shadow snapped in the middle of it, so the one
+    /// frame the eye was already watching was the frame the ground jumped.
+    ///
+    /// <b>The burnt alpha goes through <see cref="Firm"/> here too</b>, because the
+    /// crown's does: a mask thinner than the thing it is a mask of is the same two
+    /// answers again, and on this art it is a whole gamma's worth of twig.
+    ///
+    /// <b>Its own material per prop</b>, because the fade under a tank multiplies
+    /// this alpha and nothing else's, and because how far along the handover is is a
+    /// different number for every tree on the cell.
+    /// </summary>
+    internal const string CastShader = @"
+shader_type spatial;
+render_mode unshaded, cull_disabled, depth_draw_never;
+
+uniform sampler2D art : source_color, filter_linear_mipmap, hint_default_white;
+uniform sampler2D burnt : source_color, filter_linear_mipmap, hint_default_transparent;
+uniform vec4 art_map = vec4(0.0, 0.0, 1.0, 1.0);
+uniform vec4 burnt_map = vec4(0.0, 0.0, 1.0, 1.0);
+// How far the handover has got, the tree's own fade times ShadowInk's strength,
+// the ink itself, and the gamma on the burnt picture's alpha.
+uniform float swap = 0.0;
+uniform float ink = 0.0;
+uniform vec3 tint = vec3(0.0);
+uniform float firm = 1.0;
+LIFT_FN
+
+void fragment() {
+    // Mixed coverage in one fragment, never two draws - see CastShader. Skipped
+    // outright at swap 0 so that a wood nobody has lit is the single sample it
+    // always was, to the bit.
+    float a = lift(art, UV, art_map, 1.0).a;
+    if (swap > 0.0)
+        a = mix(a, lift(burnt, UV, burnt_map, firm).a, swap);
+    ALBEDO = tint;
+    ALPHA = a * ink;
+}
+";
+
+    private static Shader? _castShader;
+
+    private static ShaderMaterial Shade(PropNode tree)
+    {
+        var ink = new ShaderMaterial
+        {
+            Shader = _castShader ??=
+                new Shader { Code = CastShader.Replace("LIFT_FN", PictureLift) },
+            RenderPriority = ShadowOrder,
+        };
+        (_, _, Godot.Vector4 live, Godot.Vector4 dead) = Union(tree);
+        ink.SetShaderParameter("art", tree.Art);
+        if (tree.BurntArt is not null)
+            ink.SetShaderParameter("burnt", tree.BurntArt);
+        ink.SetShaderParameter("art_map", live);
+        ink.SetShaderParameter("burnt_map", dead);
+        ink.SetShaderParameter("swap", 0.0f);
+        ink.SetShaderParameter("ink", 0.0f);
+        ink.SetShaderParameter("tint",
+            new Vector3(ShadowInk.R, ShadowInk.G, ShadowInk.B));
+        ink.SetShaderParameter("firm", Firm);
+        return ink;
+    }
 
     /// <summary>How dark charcoal goes, as a share of the luminance under it.
     /// The tank's number, and for the tank's reason: 0.55 reads as a grey tree
@@ -6137,25 +6196,6 @@ void fragment() {
         ink.SetShaderParameter("firm", Firm);
         return ink;
     }
-
-    /// <summary>What a tree's shadow is painted with: the same art used as a
-    /// mask and nothing else. <see cref="ShadowInk"/> is an albedo multiply, so
-    /// the rgb goes to black and the alpha comes out as the art's own times the
-    /// strength - which is why the leaves' gaps are the shadow's gaps.
-    ///
-    /// <b>Its own material rather than the bark's with a modulate</b>, because
-    /// the two carry different alphas: the fade under a tank multiplies both,
-    /// and the shadow's own strength multiplies only this one.</summary>
-    private static StandardMaterial3D Shadow(Texture2D art) => new()
-    {
-        ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
-        AlbedoTexture = art,
-        AlbedoColor = ShadowInk,
-        Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
-        TextureFilter = BaseMaterial3D.TextureFilterEnum.LinearWithMipmaps,
-        CullMode = BaseMaterial3D.CullModeEnum.Disabled,
-        RenderPriority = ShadowOrder,
-    };
 
     /// <summary>Where the line runs, as a fraction of the cell, and the two
     /// half-widths about it - a 2px line inside a 5px backing, in the cell's own
