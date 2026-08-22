@@ -1845,6 +1845,11 @@ uniform sampler2D height : filter_linear, hint_default_black;
 uniform sampler2D ash : filter_linear, hint_default_black;
 uniform vec4 ash_map = vec4(0.0, 0.0, 1.0, 1.0);
 uniform float ash_ink = 0.0;
+// How much of its own light burnt ground keeps. A uniform rather than a literal
+// in the mix below because it is a bound on other things too - see
+// PropFamily.Soot, which has to come out under it - and a bound copied into the
+// thing it bounds is the one that goes stale.
+uniform float ash_keep = 0.55;
 // The map's own corner in world XZ, and one over its extent there.
 uniform vec4 map = vec4(0.0, 0.0, 1.0, 1.0);
 // The lowest ground on the board and how far the relief reaches above it.
@@ -1899,7 +1904,7 @@ void fragment() {
             // silver skeletons on tarmac - brighter than anything near them.
             // 0.55 puts the ash at 82, which is the charcoal standing in it.
             float lum = dot(lit, vec3(0.299, 0.587, 0.114));
-            lit = mix(lit, mix(lit, vec3(lum), 0.5) * 0.55, soot);
+            lit = mix(lit, mix(lit, vec3(lum), 0.5) * ash_keep, soot);
         }
     }
     ALBEDO = lit;

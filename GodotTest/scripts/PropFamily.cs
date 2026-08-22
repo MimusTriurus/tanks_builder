@@ -55,7 +55,15 @@ namespace TankSpriteTest;
 /// <c>BarkShader</c>'s <c>coal</c> and the colour gone with it. Applied to fuel
 /// and non-fuel alike, so a family at one behaves exactly as it did before this
 /// number existed - which is what keeps every board rendered so far where it
-/// was.</param>
+/// was.
+///
+/// <b>Bounded at both ends by things it will be standing among, not by
+/// taste.</b> A marked surface has to end up darker than the burnt ground under
+/// it - brighter, and the object is the lightest thing in a scorched cell -
+/// and lighter than the charcoal beside it, or the distinction this number
+/// exists to draw has gone. Both bounds are checked, and both are read from
+/// the shaders that own them rather than repeated: <c>coal</c> from
+/// <c>BarkShader</c> and <c>ash_keep</c> from <c>SoilShader</c>.</param>
 public sealed record PropFamily(string Name, bool Sways, bool Burns, float Soot)
 {
     public const string Vegetation = "vegetation";
@@ -77,13 +85,23 @@ public sealed record PropFamily(string Name, bool Sways, bool Burns, float Soot)
             // would re-time every fire ever measured on this bench.
             [Vegetation] = new(Vegetation, Sways: true, Burns: true, Soot: 1.0f),
 
-            // Not fuel, and marked all the same. Judged against the ash it will
-            // be standing in rather than against the charcoal beside it: a mix
-            // of s toward coal leaves a surface at 1 - (1 - coal)*s of its own
-            // luminance, so 0.55 lands stone at 0.615 of itself - about as dark
-            // as the ground the same fire blackens, which is the criterion the
-            // ash's own 0.55 was picked on.
-            [Solid] = new(Solid, Sways: false, Burns: false, Soot: 0.55f),
+            // Not fuel, and marked all the same. Placed between the two things
+            // it will be standing among rather than picked: a mix of s toward
+            // coal leaves a surface at 1 - (1 - coal)*s of its own luminance, so
+            // this lands stone at 0.37 of itself. Measured on the bench at
+            // burnout, in levels of 255: stone 52-59 against burnt ground at 62
+            // and a charred trunk at 43.
+            //
+            // Below the ground it stands on, which is the half that was wrong at
+            // 0.55: that put stone at 80-83 against ground at 62, so a boulder
+            // was the brightest thing in a burnt-out cell - the same complaint
+            // the ash's own level was set to answer, from one object further up.
+            //
+            // And above the charcoal, which is the half that keeps it soot. At
+            // 1.0 the right-hand stone measures 43, exactly the burnt trunk
+            // beside it, and the family has stopped saying anything: marked and
+            // charred are the two answers this number exists to keep apart.
+            [Solid] = new(Solid, Sways: false, Burns: false, Soot: 0.90f),
         };
 
     /// <summary>

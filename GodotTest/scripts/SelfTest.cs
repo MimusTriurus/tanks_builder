@@ -7689,19 +7689,35 @@ public static class SelfTest
             + $"spent {marked.Spent:F2}");
 
         // And the mark on the sprite, which is where the family's number gets
-        // used. Against the shader's own coal rather than a repeat of it here:
-        // the family's row predicts a stone at 1 - (1 - coal) * Soot of its own
-        // luminance, and a mirrored bound is the thing that goes stale.
+        // used. Both bounds come off the shaders that own them rather than being
+        // repeated here, because a mirrored bound is the thing that goes stale:
+        // the mark has to leave a surface darker than the burnt ground it stands
+        // on - brighter, and the object is the lightest thing in a scorched cell,
+        // which is what 0.55 got wrong - and lighter than the charcoal beside it,
+        // or marked and charred have stopped being two answers.
         float coal = Uniform(Stage3D.BarkShader, "coal");
-        var stone = new PropNode { Soot = solid.Soot, Coat = marked };
-        var trunk = new PropNode { Soot = vegetation.Soot, Coat = burning };
+        // And the ground has to be using it, not just declaring it: a literal
+        // put back into the mix leaves this readable and stale, which is the
+        // exact failure reading it was supposed to avoid. Twice - once to
+        // declare and at least once to use.
+        int usesKeep = Stage3D.SoilShader.Split("ash_keep").Length - 1;
+        float ashKeep = Uniform(Stage3D.SoilShader, "ash_keep");
+        // Both at the end of it, because the bound is on how black the thing
+        // ends up: marked above is a coat part way through, and a stone judged
+        // half sooted is a stone judged against a fire that has not finished.
+        var settled = new Wildfire.Coat(1.0f, 0.0f, 0.5f, false, 0.0f, 0.0f);
+        var stone = new PropNode { Soot = solid.Soot, Coat = settled };
+        var trunk = new PropNode { Soot = vegetation.Soot, Coat = settled };
         float left = 1.0f - (1.0f - coal) * stone.Scorch;
-        Check("so a stone comes out of a fire marked, and a trunk comes out charred",
+        Check("so a stone comes out darker than the ash and lighter than charcoal",
             stone.Scorch > 0.0f && stone.Scorch < trunk.Scorch
-            && left > 0.45f && left < 0.80f,
+            && left < ashKeep && left > coal && usesKeep >= 2,
             $"scorch {stone.Scorch:F2} against the wood's {trunk.Scorch:F2}, "
-            + $"which at coal {coal:F2} leaves it at {left:F3} of its own "
-            + "luminance - the ash it will be standing in is 0.55");
+            + $"which leaves it at {left:F3} of its own luminance - the burnt "
+            + $"ground keeps {ashKeep:F2} of its and full char keeps {coal:F2}"
+            + (usesKeep >= 2 ? "" : " - and the soil shader names ash_keep "
+                                    + $"{usesKeep} time(s), so that bound is "
+                                    + "readable and no longer in force"));
 
         // --- and what a fire leaves of the fuel itself ----------------------
         //
