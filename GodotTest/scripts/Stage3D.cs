@@ -1265,6 +1265,39 @@ void fragment() {{
         };
     }
 
+    /// <summary>The board's top faces as triangles, in world units.
+    ///
+    /// <b>For anything that has to stand on the ground rather than draw it</b> -
+    /// today the wall's rigid bodies. Built from the same <see cref="CellTop"/>
+    /// and <see cref="CornerLift"/> the mesh is built from, and fanned the same
+    /// way, for the reason the shadow map is rasterised off them too: a second
+    /// description of the ground disagrees exactly where it is hardest to check,
+    /// and the failure is rubble resting on nothing.
+    ///
+    /// Tops only. A collider for the walls of the prisms would be a second
+    /// question - what happens to a brick that goes over the rim - and this board
+    /// answers it by letting the brick fall to whatever top is under it.</summary>
+    public List<Vector3> GroundTriangles()
+    {
+        var outp = new List<Vector3>();
+        if (Field.Atlas is null)
+            return outp;
+        Vector3[] corner = Corners();
+        for (int q = 0; q < Field.Columns; q++)
+        for (int r = 0; r < Field.Rows; r++)
+        {
+            var cell = new Vector2I(q, r);
+            if (!Field.InBounds(cell))
+                continue;
+            Vector3 top = CellTop(cell);
+            Vector3[] up = CornerLift(cell);
+            for (int i = 1; i + 1 < 6; i++)
+            foreach (int k in new[] { 0, i, i + 1 })
+                outp.Add(top + corner[k] + up[k]);
+        }
+        return outp;
+    }
+
     /// <summary>A cell's centre at its own base level - the lowest its top face
     /// reaches. A flat cell's whole top sits here; a ramp's rises off it, which
     /// <see cref="Field"/>'s <c>TopCorners</c> carries per corner.</summary>

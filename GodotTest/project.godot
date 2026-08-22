@@ -32,6 +32,13 @@ project/assembly_name="TankSpriteTest"
 
 enabled=PackedStringArray("res://addons/godot_mcp/plugin.cfg")
 
+[physics]
+
+3d/physics_engine="Jolt Physics"
+jolt_physics_3d/simulation/velocity_steps=12
+jolt_physics_3d/simulation/position_steps=3
+jolt_physics_3d/simulation/penetration_slop=0.002
+
 [rendering]
 
 textures/canvas_textures/default_texture_filter=0

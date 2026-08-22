@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -107,9 +107,16 @@ public sealed class PanelText
 
     /// <summary>The heading for a group, or the id itself - which is what the
     /// code was passing before there was a file.</summary>
-    public string GroupTitle(string id) =>
+    /// <summary>A group's caption, falling back to the one in the code and then
+    /// to the id itself. The fallback is the same arrangement rows have had all
+    /// along: a panel the file has never heard of - the wall bench builds one -
+    /// should read as English rather than as its own ids, and borrowing another
+    /// panel's group id to get a caption would tie two panels together through
+    /// a file neither of them names.</summary>
+    public string GroupTitle(string id, string fallback = "") =>
         _groups.TryGetValue(id, out GroupEntry? g) && !string.IsNullOrEmpty(g.Title)
-            ? g.Title! : id;
+            ? g.Title!
+            : string.IsNullOrEmpty(fallback) ? id : fallback;
 
     public string GroupNote(string id) =>
         _groups.TryGetValue(id, out GroupEntry? g) ? g.Description ?? "" : "";

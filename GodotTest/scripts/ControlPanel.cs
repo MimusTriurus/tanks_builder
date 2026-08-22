@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Godot;
@@ -94,9 +94,15 @@ public sealed partial class ControlPanel : PanelContainer
             if (had == id)
             {
                 box.Visible = open;
-                head.Text = (open ? "▾  " : "▸  ") + Text.GroupTitle(id).ToUpperInvariant();
+                head.Text = (open ? "▾  " : "▸  ")
+                            + Text.GroupTitle(id, Fallback(id)).ToUpperInvariant();
             }
     }
+
+    private readonly Dictionary<string, string> _headText = new();
+
+    private string Fallback(string id) =>
+        _headText.TryGetValue(id, out string? f) ? f : "";
 
     private string GroupOf(string id) =>
         _group.TryGetValue(id, out string? g) ? g : "";
@@ -253,14 +259,15 @@ public sealed partial class ControlPanel : PanelContainer
     /// worked on is the one open. A Button rather than a Label because that is
     /// what it is - the arrow says so, and the tooltip that was on the label
     /// stays where it was.</summary>
-    public void Heading(string id)
+    public void Heading(string id, string fallback = "")
     {
         _heading = id;
+        _headText[id] = fallback;
         if (_list.GetChildCount() > 0)
             _list.AddChild(new Control { CustomMinimumSize = new Vector2(0, 6) });
         var head = new Button
         {
-            Text = "▸  " + Text.GroupTitle(id).ToUpperInvariant(),
+            Text = "▸  " + Text.GroupTitle(id, fallback).ToUpperInvariant(),
             TooltipText = Text.GroupNote(id),
             FocusMode = FocusModeEnum.None,
             Alignment = HorizontalAlignment.Left,

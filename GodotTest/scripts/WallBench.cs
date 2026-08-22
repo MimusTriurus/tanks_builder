@@ -1,0 +1,917 @@
+﻿using System;
+using System.Globalization;
+using System.Collections.Generic;
+using Godot;
+
+namespace TankSpriteTest;
+
+/// <summary>
+/// One cell with a brick wall generated on it, and a key that knocks it down.
+///
+/// Separate from the harness for <see cref="WoodBench"/>'s reason, which is
+/// <c>flash_bench.sheet()</c>'s: what is judged here is what a wall looks like
+/// and how it falls, and judging that inside <see cref="Main"/> means three
+/// atlases, eighteen layers, sound, a panel and fifty-four cells of board on
+/// which the wall would be one prop. Here the whole subject is one wall.
+///
+///     Godot_v4.7.2-stable_mono_win64.exe --path GodotTest res://Wall.tscn
+///
+/// <b>The ground under it is the harness's own.</b> <see cref="Stage3D"/> builds
+/// the prism, the shader marches the sun over it, the camera is the board's. A
+/// bench that drew its own ground would be judging the wall against a backdrop
+/// nothing else on the board shares - and the first question about this wall is
+/// whether it belongs on that ground. It stands a level up so that prism has
+/// walls to show: see <c>SetRelief</c> in <see cref="_Ready"/>, and
+/// <c>--flat</c> for the plane it used to be.
+///
+/// <b>It is the same wall as the Blender prop, built the other way round.</b>
+/// Over there the ruin is modelled once and rendered to sprites; here it is a
+/// seed. What that buys is on show: a different wall per seed, a wall that stands
+/// on real terrain rather than on a tile baked flat, and no atlas at all. What it
+/// costs is the thing that has to be re-earned rather than ported - the look was
+/// measured against <c>Images/raw/wall.png</c>, and the shading model here is a
+/// different one.
+/// </summary>
+public sealed partial class WallBench : Node2D
+{
+    private static readonly string TerrainsRoot = AssetRoot.Terrains;
+    private static readonly string SpritesRoot = AssetRoot.Sprites;
+
+    /// <summary>The atlas the tile comes off. No tank is drawn - it is loaded for
+    /// <see cref="AtlasSet.HexRect"/>, which every distance on this board is
+    /// measured in, exactly as the wood bench loads it.</summary>
+    private const string TileTag = "MTP";
+
+    /// <summary>The middle of a three by three, because the wall's cell now has
+    /// neighbours to throw rubble onto.</summary>
+    public static readonly Vector2I Middle = new(1, 1);
+
+    /// <summary>The cell and its six neighbours, and nothing else.
+    ///
+    /// <b>One cell was right until the rubble was allowed off it.</b> A brick
+    /// that leaves a lone hexagon falls past the board and disappears, which is
+    /// not "it landed next door" - it is the same picture as a brick that was
+    /// never simulated. The ring is the smallest board on which the thing that
+    /// was asked for can be seen at all.
+    ///
+    /// Named through <c>Step</c> rather than written out as offsets: which cell
+    /// is next to which is the field's answer, and a second one is wrong on the
+    /// odd columns only, which reads as the wall throwing rubble crooked.
+    /// </summary>
+    public static HashSet<Vector2I> Board(Vector2I mid)
+    {
+        var plot = new HashSet<Vector2I> { mid };
+        // EdgeHeadings, never multiples of sixty: on a flat-top hexagon the six
+        // edges face 30, 90, 150 and so on, and Step hands back the cell
+        // unchanged for a heading that points at a corner. Asked with 0, 60, 120
+        // it returns the middle six times and the board is one cell, which looks
+        // exactly like a Plot that was ignored.
+        foreach (int heading in HexField.EdgeHeadings)
+            plot.Add(HexField.Step(mid, heading));
+        return plot;
+    }
+
+    private HexField _field = null!;
+    private Stage3D? _stage;
+    private WallStack? _wall;
+    private Camera2D _camera = null!;
+    private Label? _hud;
+
+    private readonly WallKit.Recipe _recipe = new();
+    private WallKit.Plan? _plan;
+    private float _scale = 1.0f;
+    private float _coverage = 0.94f;
+    private WallFall.Shot _shot = WallFall.Shot.Mine;
+    private WallRig? _rig;
+    private ControlPanel? _panel;
+    private WallRig.Strike _strike = WallRig.Strike.Ram;
+    private float _force = 1.0f;
+
+    /// <summary>The top of the force dial.
+    ///
+    /// <b>A dial has to be able to show too much, and three could not.</b> At
+    /// three the wall comes down whichever shot is chosen and the top half of
+    /// the travel says nothing new - so the number that matters, where a shot
+    /// stops being a breach and starts being a demolition, was off the end of
+    /// the scale rather than on it. Ten puts an AP round through the far side, a
+    /// burst out to 2.6m, and a tank clean across the cell and off the other
+    /// edge, and every one of those is a picture worth being able to reach.
+    ///
+    /// It is a multiplier over the three shots' own numbers and never a force in
+    /// its own right: what one setting buys is written under the slider, in the
+    /// unit the chosen shot is measured in.</summary>
+    public const float MostForce = 10.0f;
+    private bool _solved;
+    /// <summary>Which flat side it comes from, and 270 is broadside.
+    ///
+    /// <b>Two of the six meet the wall's face, and the other four take it end
+    /// on.</b> Not a coincidence and not a choice: the prop is fitted along the
+    /// hexagon's <i>vertex</i> axis, because that is where the room is - a
+    /// flat-top hex is widest corner to corner, and the fit measures against the
+    /// hexagon rather than its incircle for exactly that reason. A wall lying on
+    /// the long diagonal blocks the 90-270 lane and stands beside the other
+    /// four, so those hit it at sixty degrees off its face.
+    ///
+    /// 270 rather than 90 because the shooter is then on the camera's side: the
+    /// tank comes up the near lane and is a see-through box in front of the
+    /// collapse, where from 90 it would be a solid wall's width behind it and
+    /// show nothing at all.</summary>
+    private float _bearing = 270.0f;
+
+    private float _zoomAt = 2.4f;
+    private string? _capturePath;
+    private int _captureAt = 30;
+    private int _frame;
+    private bool _fellAtStart;
+    private int _plinth = 1;
+    private bool _noUi;
+    private bool _showUi;
+    private Vector2? _middleFrom;
+    private Vector2? _leftFrom;
+    private bool _reported;
+    private float _spin;
+    private bool _turning;
+
+    /// <summary>How fast the turntable goes, in degrees a second, and how far a
+    /// key nudges it.
+    ///
+    /// A sixth of a turn a second: nine seconds for the round trip, which is slow
+    /// enough to read a face as it comes past and quick enough that nobody waits
+    /// for the back. The nudge is a twelfth of a turn, so twelve of them come back
+    /// to where they started exactly - a turntable that drifts off its own zero
+    /// cannot be used to compare two sides.</summary>
+    private const float TurnRate = 40.0f;
+    private const float TurnStep = 30.0f;
+
+    /// <summary>Which of the six flat sides the shot comes from.
+    ///
+    /// <b>The sides, never sixths of a circle.</b> A flat-top hexagon's edges
+    /// face 30, 90, 150 and so on - <see cref="HexField.EdgeHeadings"/> - and a
+    /// direction that is not one of those is a shot arriving through a corner,
+    /// which is not a place a tank can stand or a gun can be. The board already
+    /// says this in two other places: the harness gives a hit six bearings, and
+    /// the rosette this bench stands on is built out of the same list.</summary>
+    private int Side
+    {
+        get => SideOf(_bearing);
+        set
+        {
+            _bearing = HexField.EdgeHeadings[
+                Mathf.Clamp(value, 0, HexField.EdgeHeadings.Length - 1)];
+            if (_wall is not null)
+                _wall.TankFacing = HexField.Reverse(Mathf.RoundToInt(_bearing));
+        }
+    }
+
+    /// <summary>Which of the six an arbitrary angle is nearest. Its own method
+    /// because the flag snaps through it as well as the readout: an angle that
+    /// only <i>displays</i> as a side while the shot goes somewhere else is the
+    /// worst of the three possible states.</summary>
+    private static int SideOf(float bearing)
+    {
+        int best = 0;
+        float near = 360.0f;
+        for (int k = 0; k < HexField.EdgeHeadings.Length; k++)
+        {
+            float d = Mathf.Abs(Mathf.AngleDifference(
+                Mathf.DegToRad(bearing),
+                Mathf.DegToRad(HexField.EdgeHeadings[k])));
+            if (d < near)
+            {
+                near = d;
+                best = k;
+            }
+        }
+        return best;
+    }
+
+    /// <summary>Which way the round travels, in the prop's own frame.
+    ///
+    /// <b>Reversed, because the bearing says where it comes from.</b> That is
+    /// what the panel and the readout both say, and what <c>--hit</c> means in
+    /// the harness; the board owns the other end of it too, so the turn is
+    /// <see cref="HexField.Reverse"/> rather than a minus sign. This is
+    /// <c>HexField.Lane</c>'s own sentence read backwards - a shell leaves along
+    /// a flat side and arrives across one, so the shooter's heading and the face
+    /// it strikes are two ends of one number.
+    ///
+    /// <b>Two conversions, and the bench is where both belong.</b> A heading is
+    /// the board's word, so the board answers what it points at -
+    /// <see cref="AtlasSet.GroundDirection"/> squashes the row for the screen
+    /// and <see cref="Stage3D.World"/> divides that squash straight back out, so
+    /// composing them is the world direction with nothing invented in between.
+    /// Then back through the turntable, because the bodies live in the prop's
+    /// frame: the same <c>Basis(Up, -spin)</c> the ground triangles go through
+    /// in <see cref="Rig"/>, and the same one the shadow's sun run goes through
+    /// in <c>WallStack.LocalRun</c>. Written as <c>+spin</c> it is the shot
+    /// arriving from the wrong side once the wall is turned, which nothing on a
+    /// bench that opens at zero would ever have shown.</summary>
+    private Vector3 Into()
+    {
+        if (_stage is null || _field.Atlas is null)
+            return Vector3.Zero;
+        Vector2 flat = _field.Atlas.GroundDirection(
+            HexField.Reverse(Mathf.RoundToInt(_bearing)));
+        return new Basis(Vector3.Up, -_spin) * _stage.World(flat, 0.0f).Normalized();
+    }
+
+
+    private void ReadFlags()
+    {
+        string[] args = OS.GetCmdlineUserArgs();
+        for (int i = 0; i < args.Length; i++)
+        {
+            if (args[i] == "--spin" && i + 1 < args.Length
+                && float.TryParse(args[i + 1], System.Globalization.NumberStyles.Float,
+                                  System.Globalization.CultureInfo.InvariantCulture,
+                                  out float deg))
+            {
+                // Invariant culture, because this machine's is comma-decimal and a
+                // bare TryParse quietly returns false on "22.5" - the flag then
+                // does nothing and two captures come back byte identical, which
+                // reads as an angle that changes nothing rather than as an angle
+                // that never arrived.
+                _spin = Mathf.DegToRad(deg);
+                i++;
+            }
+            else if (args[i] == "--turntable")
+                _turning = true;
+            else if (args[i] == "--capture" && i + 1 < args.Length)
+                _capturePath = args[++i];
+            else if (args[i] == "--capture-at" && i + 1 < args.Length
+                     && int.TryParse(args[i + 1], out int at))
+            {
+                // Never the first frame. The viewport has nothing in it until
+                // something has been drawn into it, so frame 1 comes back one
+                // flat colour - a capture that succeeds, writes a file and shows
+                // nothing, which is the worst way for a proof to fail. Measured:
+                // 1 unique colour at frame 1, 15 126 from frame 2 on.
+                _captureAt = Mathf.Max(2, at);
+                i++;
+            }
+            else if (args[i] == "--seed" && i + 1 < args.Length
+                     && int.TryParse(args[i + 1], out int seed))
+            {
+                _recipe.Seed = seed;
+                i++;
+            }
+            else if (args[i] == "--columns" && i + 1 < args.Length
+                     && int.TryParse(args[i + 1], out int cols))
+            {
+                _recipe.Columns = Mathf.Clamp(cols, 2, 16);
+                i++;
+            }
+            else if (args[i] == "--courses" && i + 1 < args.Length
+                     && int.TryParse(args[i + 1], out int rows))
+            {
+                _recipe.Courses = Mathf.Clamp(rows, 1, 20);
+                i++;
+            }
+            else if (args[i] == "--coverage" && i + 1 < args.Length
+                     && float.TryParse(args[i + 1], NumberStyles.Float,
+                                       CultureInfo.InvariantCulture, out float cov))
+            {
+                // Invariant and never the machine's: on a comma locale the plain
+                // parse fails, the default stands, and two runs at two values come
+                // back byte for byte identical - which reads as a flag that does
+                // nothing rather than one that was not understood.
+                _coverage = Mathf.Clamp(cov, 0.4f, 1.2f);
+                i++;
+            }
+            else if (args[i] == "--zoom" && i + 1 < args.Length
+                     && float.TryParse(args[i + 1], NumberStyles.Float,
+                                       CultureInfo.InvariantCulture, out float zoom))
+            {
+                _zoomAt = Mathf.Clamp(zoom, 0.25f, 8.0f);
+                i++;
+            }
+            else if (args[i] == "--fallen" && i + 1 < args.Length
+                     && int.TryParse(args[i + 1], out int fell))
+            {
+                _recipe.Fallen = Mathf.Max(0, fell);
+                i++;
+            }
+            else if (args[i] == "--chips" && i + 1 < args.Length
+                     && int.TryParse(args[i + 1], out int chips))
+            {
+                // Zero is the useful value: the masonry on its own is the only
+                // way to tell a defect in the courses from one in the apron, and
+                // the two look alike at a distance.
+                _recipe.Chips = Mathf.Max(0, chips);
+                i++;
+            }
+            else if (args[i] == "--shot" && i + 1 < args.Length)
+            {
+                string want = args[++i];
+                _shot = want == "ram" ? WallFall.Shot.Ram : WallFall.Shot.Mine;
+                if (want != "ram" && want != "mine")
+                    GD.PushWarning($"--shot {want} is neither mine nor ram");
+            }
+            else if (args[i] == "--level" && i + 1 < args.Length
+                     && int.TryParse(args[i + 1], out int level))
+            {
+                _plinth = Mathf.Clamp(level, 0, 4);
+                i++;
+            }
+            else if (args[i] == "--flat")
+                _plinth = 0;
+            else if (args[i] == "--strike" && i + 1 < args.Length)
+            {
+                string want = args[++i];
+                _strike = want switch
+                {
+                    "he" => WallRig.Strike.He,
+                    "ap" => WallRig.Strike.Ap,
+                    _ => WallRig.Strike.Ram,
+                };
+                if (want is not ("ram" or "he" or "ap"))
+                    GD.PushWarning($"--strike {want} is none of ram, he, ap");
+            }
+            else if (args[i] == "--bearing" && i + 1 < args.Length
+                     && float.TryParse(args[i + 1], NumberStyles.Float,
+                                       CultureInfo.InvariantCulture, out float from))
+            {
+                // Snapped, so the flag cannot quietly put a round through a
+                // corner: the six are where a tank can stand, and an angle
+                // between two of them is not a weaker version of either.
+                Side = SideOf(from);
+                i++;
+            }
+            else if (args[i] == "--force" && i + 1 < args.Length
+                     && float.TryParse(args[i + 1], NumberStyles.Float,
+                                       CultureInfo.InvariantCulture, out float force))
+            {
+                _force = Mathf.Clamp(force, 0.0f, MostForce);
+                i++;
+            }
+            else if (args[i] == "--solved")
+                _solved = true;
+            else if (args[i] == "--fell")
+                _fellAtStart = true;
+            else if (args[i] == "--no-ui")
+                _noUi = true;
+            else if (args[i] == "--ui")
+                _showUi = true;
+        }
+        if (_capturePath is not null)
+        {
+            // A capture is evidence, so the step is pinned for the reason it is
+            // pinned in the harness: two runs of the same flags have to be
+            // diffable. Stage3D and WallStack both read this field.
+            Main.FixedStep = 1.0 / 60.0;
+            _noUi = !_showUi;
+        }
+    }
+
+    public override void _Ready()
+    {
+        ReadFlags();
+
+        TerrainSet terrain = TerrainSet.Load(TerrainsRoot);
+        GD.Print("wall: terrain " + terrain.Note);
+        // Said out loud every run, because a physics engine that is not the one
+        // the numbers were tuned against is invisible: the collapse still
+        // happens, it is just a different collapse, and every jolt_ setting in
+        // project.godot is quietly doing nothing.
+        GD.Print("wall: physics "
+                 + ProjectSettings.GetSetting("physics/3d/physics_engine",
+                                              "DEFAULT")
+                 + ", slop " + ProjectSettings.GetSetting(
+                     "physics/jolt_physics_3d/simulation/penetration_slop", "?"));
+
+        AtlasSet? tile = null;
+        try
+        {
+            tile = AtlasSet.Load(SpritesRoot, TileTag);
+            GD.Print($"wall: tile off {TileTag}, "
+                     + $"{tile.HexRect.Size.X}x{tile.HexRect.Size.Y}");
+        }
+        catch (Exception e)
+        {
+            // Said out loud rather than left to be a blank window: without a tile
+            // there is no distance on this board at all, so the stage returns
+            // before it builds and the wall has no cell to be a fraction of.
+            GD.PushWarning($"wall: no {TileTag} atlas ({e.Message}) - no board");
+        }
+
+        _field = new HexField
+        {
+            Atlas = tile,
+            Terrain = terrain,
+            Paint = TerrainSet.Plain,
+            Columns = 3,
+            Rows = 3,
+            Plot = Board(Middle),
+        };
+        // Stand the cell on a level, because a level is what gives it sides.
+        //
+        // Stage3D extrudes a prism from a cell's top face down to the board's
+        // floor and skips the walls when the two are the same height - so a lone
+        // cell on the datum is one hexagon of ground and nothing else, which is
+        // the flat sprite this bench used to draw. The board's floor is always
+        // the datum (HexField.LevelRange starts at zero whatever the map says),
+        // so one level up is all it takes and the wall rides with it: the anchor
+        // in Build() already reads LevelAt.
+        //
+        // A level rather than a thickness of my choosing, for the reason nothing
+        // here is in pixels: how tall a hex stands is the board's number, and a
+        // second one measured against the art would be a wall standing on a cell
+        // no tank could ever climb.
+        // The whole rosette, not just the middle: a plateau shows its walls at
+        // the rim and lets the rubble land next door at the height it left,
+        // whereas a single raised cell is a plinth with a drop all round it.
+        int[] levels = new int[9];
+        for (int k = 0; k < 9; k++)
+            levels[k] = _plinth;
+        _field.SetRelief(_plinth > 0 ? levels : null);
+        AddChild(_field);
+
+        _camera = new Camera2D
+        {
+            Zoom = new Vector2(_zoomAt, _zoomAt),
+            Enabled = true,
+            Position = ViewHome,
+        };
+        AddChild(_camera);
+
+        _stage = new Stage3D { Field = _field, Origin = Vector2.Zero, Eye = _camera };
+        AddChild(_stage);
+        _field.ShowField = false;
+
+        if (tile is not null)
+            Build();
+
+        if (!_noUi)
+        {
+            var layer = new CanvasLayer();
+            AddChild(layer);
+            Panel(layer);
+            _hud = new Label { Position = new Vector2(16.0f, 12.0f) };
+            _hud.AddThemeColorOverride("font_color", new Color(0.92f, 0.95f, 1.0f));
+            _hud.AddThemeColorOverride("font_outline_color", new Color(0, 0, 0, 0.85f));
+            _hud.AddThemeConstantOverride("outline_size", 5);
+            layer.AddChild(_hud);
+        }
+
+        if (_fellAtStart)
+            Fell();
+    }
+
+    /// <summary>Lay a wall, fit it to the cell, and stand it up.
+    ///
+    /// The order is the point: fitting is a multiply over the finished layout,
+    /// because nothing in <see cref="WallKit"/> is an absolute length. The Blender
+    /// prop needs two builds for this, and got a different wall out of the second
+    /// one for a year before the last absolute number was found in it.</summary>
+    private void Build()
+    {
+        if (_field.Atlas is null)
+            return;
+        _plan = WallKit.Lay(_recipe);
+        _scale = WallKit.Fit(_plan, _coverage);
+
+        _wall?.QueueFree();
+        float radius = _field.Atlas.HexRect.Size.X * 0.5f;
+        Vector2 flat = _field.FlatAnchor(Middle) + _field.CentreOffset;
+        float lift = _field.LevelAt(Middle) * _field.Lift;
+        _wall = new WallStack
+        {
+            Radius = radius,
+            Squash = _field.Squash,
+            Rise = _field.RiseFactor,
+            Anchor = Stage3D.World(flat, lift, _field.Squash, _field.RiseFactor),
+        };
+        AddChild(_wall);
+        // The board's own tank for the ram to arrive in, and the heading it
+        // drives. Reverse, because the bearing is where the shot comes from -
+        // the same sentence HexField.Lane reads backwards, and the same one
+        // Into() is built out of, so the picture and the impulse cannot point
+        // different ways.
+        _wall.Tank = _field.Atlas;
+        _wall.TankFacing = HexField.Reverse(Mathf.RoundToInt(_bearing));
+        _wall.Raise(_plan);
+        Rig();
+        // After Raise, because the setter needs the multimesh to pose the shadow
+        // into. A new seed keeps the angle: comparing two walls means looking at
+        // them from the same side.
+        _wall.Spin = _spin;
+
+        GD.Print($"wall: seed {_recipe.Seed}, fit {_scale:F4} -> {_plan.Note()}");
+        GD.Print($"wall: plot {_field.Plot?.Count ?? 0} cells, "
+                 + $"tris {(_stage?.GroundTriangles().Count ?? 0) / 3}, "
+                 + $"awake {_rig?.Awake ?? -1}");
+        if (_plan.Overlap * radius > Grit)
+            // Said out loud, because a wall that intersects itself is the one
+            // defect a still picture cannot show - it looks correct and comes
+            // apart the moment anything touches it.
+            GD.PushWarning($"wall: seed {_recipe.Seed} overlaps by "
+                           + $"{_plan.Overlap * radius:F2}px ({_plan.OverlapPair})");
+    }
+
+    /// <summary>The side panel: what hits the wall, how hard, from where, and
+    /// the button that does it.
+    ///
+    /// <b>The harness's own panel, not a second one.</b> <see cref="ControlPanel"/>
+    /// takes a heading and a handful of rows and knows nothing about tanks, so
+    /// there was nothing to port - and the alternative, a panel of this bench's
+    /// own, would be a second answer to how a row is wired, how it stays in step
+    /// and what takes keyboard focus. Every row here is the same pair of
+    /// delegates onto the field a key already writes, so <c>S</c> and the
+    /// dropdown cannot disagree.
+    ///
+    /// <b>Nothing is added to <c>panel.json</c>, and that is deliberate.</b> The
+    /// file is checked against the harness's panel in both directions, so an
+    /// entry for a row only this bench builds would fail that check as a
+    /// description of nothing. These rows carry their own captions and take the
+    /// built-in fallback, which is what <see cref="PanelText.Title"/> is for.
+    ///
+    /// The corner readout stays. In the harness the panel replaced it, because
+    /// it repeated it; here it is the only figure visible while the panel is
+    /// shut, and every number quoted about this wall was read off it.</summary>
+    private void Panel(CanvasLayer layer)
+    {
+        _panel = new ControlPanel();
+        _panel.Prepare();
+
+        // Opened, not collapsed like the harness's. That rule is about fifty
+        // rows in one column; here there are nine in three groups, and the group
+        // the bench exists for should not need a click to be found.
+        _panel.Heading("wall.strike", "strike");
+        _panel.Choice("wall.strike.kind", "what hits it",
+                      new[] { "ram - a tank drives in", "HE - burst on the face",
+                              "AP - a round straight through" },
+                      () => (int)_strike,
+                      i => _strike = (WallRig.Strike)Mathf.Clamp(i, 0, 2));
+        _panel.Slide("wall.strike.force", "force", 0.0, MostForce, 0.05,
+                     () => _force, v => _force = (float)v, "x",
+                     () => WallRig.Costs(_strike, _force));
+        _panel.Radio("wall.strike.side",
+                     () => $"from {_bearing:F0} deg, side {Side + 1} of 6",
+                     System.Array.ConvertAll(HexField.EdgeHeadings, d => $"{d}"),
+                     () => Side, i => Side = i);
+        _panel.Press("wall.strike.go", "Action", Fell);
+        _panel.Readout("wall.strike.state", () =>
+            _rig is null ? "solved flights, no solver"
+            : !_rig.Struck ? "standing, nothing fired"
+            : $"{_rig.Clock:F2}s, {_rig.Awake} moving, {_rig.Loose} let go");
+
+        _panel.Heading("wall.stack", "wall");
+        _panel.Readout("wall.stack.plan", () =>
+            _plan is null ? "no board"
+            : $"seed {_recipe.Seed}: {_plan.Blocks.Count} pieces, "
+              + $"{_plan.Courses} courses");
+        _panel.Readout("wall.stack.pile", () =>
+        {
+            if (_rig is null)
+                return "-";
+            (float reach, float top, int off, _) = _rig.Pile(_spin);
+            return $"reach {reach:F2}, top {top:F2}, {off} off the cell";
+        });
+        _panel.PressPair("wall.stack.seed", "next seed", () =>
+        {
+            _recipe.Seed++;
+            Build();
+            _camera.Position = ViewHome;
+        }, "reset", Reset);
+
+        _panel.Heading("wall.view", "view");
+        _panel.Slide("wall.view.turn", "turntable", 0.0, 330.0, TurnStep,
+                     () => Mathf.RadToDeg(_spin),
+                     v => Turn(Mathf.DegToRad((float)v)), "deg",
+                     () => _rig is { Struck: true }
+                         ? "locked - the bodies are in the prop's frame"
+                         : "turns the prop, never the camera");
+        _panel.Toggle("wall.view.spin", "keep turning", () => _turning,
+                      on => _turning = on);
+
+        _panel.Expand("wall.strike", true);
+        layer.AddChild(_panel);
+        _panel.AddHandle();
+    }
+
+    /// <summary>Hand the laid wall to the solver, standing and asleep.
+    ///
+    /// <b>The ground comes over in the prop's own units, spin and all.</b> The
+    /// bodies live in world space with no parent transform over them - the rule
+    /// the Blender prop states as "Wall.World has to sit at the origin while the
+    /// physics is on", because a simulation writes world transforms and a moving
+    /// parent lays its own matrix over them. Here the prop's frame is what the
+    /// bodies are in, so the board has to be brought into it: turned by the spin,
+    /// shifted to the anchor, divided by the radius.
+    ///
+    /// Which is also why the turntable locks once the wall has been struck. Turn
+    /// it while pieces are in the air and you have turned the world under them.
+    /// </summary>
+    private void Rig()
+    {
+        _rig?.QueueFree();
+        _rig = null;
+        if (_solved || _wall is null || _stage is null || _field.Atlas is null)
+            return;
+        float radius = _field.Atlas.HexRect.Size.X * 0.5f;
+        Vector3 anchor = _wall.Anchor;
+        var back = new Basis(Vector3.Up, -_spin);
+        var tris = new List<Vector3>();
+        foreach (Vector3 v in _stage.GroundTriangles())
+            tris.Add(back * ((v - anchor) / radius));
+        _rig = new WallRig();
+        AddChild(_rig);
+        _rig.Raise(_plan!, tris);
+        _wall.Rig = _rig;
+    }
+
+    /// <summary>A tenth of a pixel, under which two bricks are apart.
+    ///
+    /// <b>The threshold is the point, not the tidiness.</b> The separating-axis
+    /// test works in fractions of a cell over fifteen axes and comes back with
+    /// float noise rather than a clean zero, so a guard written as "&gt; 0" fires
+    /// on a wall that is provably apart and prints "overlaps by 0,00px" - which
+    /// is what it did on every seed. A guard that cries at nothing stops being
+    /// read, and then it is not there for the seed that really does overlap.
+    /// The same argument as the Blender build's worst_overlap, which had to be
+    /// satisfiable before it was worth reporting.</summary>
+    private const float Grit = 0.1f;
+
+    private void Fell()
+    {
+        if (_wall is null || _plan is null)
+            return;
+        if (_rig is not null)
+        {
+            if (_rig.Struck)
+            {
+                // A second shot into rubble is a different experiment, and the
+                // one being run here is what one shot does. Re-lay first.
+                Build();
+                _camera.Position = ViewHome;
+            }
+            _turning = false;
+            _reported = false;
+            _rig!.Fire(_strike, Into(), _force);
+            return;
+        }
+        // The same coverage the wall was fitted to, so the rubble is allowed
+        // exactly the cell the standing prop was allowed and not a hand's width
+        // more. One number, asked twice.
+        _reported = false;
+        _wall.Fell(_recipe.Seed, _shot, _coverage);
+    }
+
+    /// <summary>Put the bench back as it opened. What R does, and what the
+    /// panel's second button does - one method, because two would drift and the
+    /// one that drifted would be the one nobody pressed.
+    ///
+    /// The turntable comes home with everything else: a reset that leaves the
+    /// wall at 200 degrees is not the bench as it opened.</summary>
+    private void Reset()
+    {
+        _turning = false;
+        Turn(0.0f);
+        Build();
+        _camera.Position = ViewHome;
+        _camera.Zoom = new Vector2(_zoomAt, _zoomAt);
+    }
+
+    /// <summary>Put the turntable somewhere, wrapped.
+    ///
+    /// Wrapped rather than left to grow, because the angle is what the readout
+    /// prints and "740 degrees" is not an answer to "which side am I looking at".
+    /// </summary>
+    private void Turn(float radians)
+    {
+        // Locked once something is in the air: the bodies are in the prop's
+        // frame, so turning the prop now is turning the world under them.
+        if (_rig is { Struck: true })
+            return;
+        _spin = Mathf.Wrap(radians, 0.0f, Mathf.Tau);
+        if (_wall is not null)
+            _wall.Spin = _spin;
+    }
+
+    public override void _Process(double delta)
+    {
+        if (_turning)
+            // The bench's fixed step when there is one, so a turntable capture is
+            // the same picture twice - the rule Main.FixedStep exists for.
+            Turn(_spin + Mathf.DegToRad(TurnRate) * (float)(Main.FixedStep ?? delta));
+
+        if (_hud is not null)
+            _hud.Text = Note();
+
+        _frame++;
+        // Said once, when the last piece has stopped: the rubble is judged on
+        // whether it lies down inside the cell, and a heap of sixty bricks on a
+        // cell 109px tall reads as a mass either way.
+        if (_rig is { Struck: true, Ramming: false } && !_reported
+            && _rig.Clock > 0.6f && _rig.Awake == 0)
+        {
+            // Nothing moving is the only end a live collapse has - there is no
+            // baked length to wait for, which is the price of not baking.
+            _reported = true;
+            (float reach, float top, int off, _) = _rig.Pile(_spin);
+            GD.Print($"wall: {_strike} from {_bearing:F0} settled at "
+                     + $"{_rig.Clock:F2}s - reach {reach:F3}, top {top:F3} "
+                     + $"of a cell, {off} of {_rig.Count} off the cell");
+        }
+        if (_wall is { Falling: true } && !_reported && _wall.Clock >= _wall.Length)
+        {
+            _reported = true;
+            (float reach, float top, int aloft, int layers) = _wall.Pile();
+            GD.Print($"wall: settled at {_wall.Length:F2}s - reach {reach:F3}, "
+                     + $"top {top:F3} of a cell, {aloft} aloft, {layers} deep");
+        }
+        if (_rig is not null && _capturePath is not null && _frame == _captureAt)
+        {
+            (float worst, float median, int moved) = _rig.Drift();
+            GD.Print($"wall: drift at frame {_frame} - worst {worst:F3}m, "
+                     + $"median {median:F3}m, {moved} of {_rig.Count} moved, "
+                     + $"{_rig.Awake} awake");
+        }
+        if (_capturePath is not null && _frame >= _captureAt)
+        {
+            Capture(_capturePath);
+            GetTree().Quit();
+        }
+    }
+
+    /// <summary>
+    /// What the wall is, in the numbers that can fail.
+    ///
+    /// The guard first, because a generated wall has one failure a picture cannot
+    /// show: pieces inside each other. Then how much of the cell it takes, which
+    /// is the other thing a seed can get wrong.
+    /// </summary>
+    private string Note()
+    {
+        if (_plan is null)
+            return "no board";
+        float radius = _field.Atlas?.HexRect.Size.X * 0.5f ?? 1.0f;
+        string fall = "standing";
+        if (_rig is not null)
+        {
+            (float reach, float top, int off, int awake) = _rig.Pile(_spin);
+            fall = $"{_strike} x{_force:F2} from {_bearing:F0} deg  "
+                   + (_rig.Struck ? $"{_rig.Clock:F2}s, {awake} moving  " : "ready  ")
+                   + $"reach {reach:F2}, top {top:F2}, {off} off the cell";
+        }
+        else if (_wall is { Falling: true })
+        {
+            (float reach, float top, int aloft, int layers) = _wall.Pile();
+            fall = $"{_shot} {_wall.Clock:F2}/{_wall.Length:F2}s  "
+                   + $"pile reach {reach:F2}, top {top:F2}, "
+                   + $"{aloft} aloft, {layers} deep";
+        }
+        return $"seed {_recipe.Seed}  {_plan.Bricks} bricks, "
+               + $"{_plan.Courses} courses, {_plan.Blocks.Count} pieces\n"
+               + $"fit {_scale:F3}, reach {_plan.Reach:F3} of the cell, "
+               + $"overlap {_plan.Overlap * radius:+0.00;-0.00;0.00}px\n"
+               + $"{fall}\n"
+               + $"on level {_plinth}, turned {Mathf.RadToDeg(_spin):F0} deg"
+               + (_turning ? ", turning" : "") + "\n"
+               + "SPACE fires, S shot, B bearing, N next seed, R resets\n"
+               + "TAB opens the panel, left drag turns it, Q/E step, T turntable\n"
+               + "middle drag pans, wheel zooms, F12 shoots";
+    }
+
+    /// <summary>Where the view sits: the cell, raised by half the wall on it.
+    /// Measured off what got built rather than set to a number, for the wood
+    /// bench's reason - a view centred on the ground puts the cell in the middle
+    /// of the window and the top course off the edge of it.</summary>
+    private Vector2 ViewHome
+    {
+        get
+        {
+            Vector2 flat = _field.CellCentre(Middle);
+            float top = (_plan?.Top ?? 0.0f)
+                        * (_field.Atlas?.HexRect.Size.X * 0.5f ?? 0.0f);
+            return flat - new Vector2(0.0f, top * _field.Squash * 0.5f);
+        }
+    }
+
+    public override void _UnhandledInput(InputEvent @event)
+    {
+        if (@event is InputEventKey { Pressed: true, Echo: false } key)
+        {
+            switch (key.Keycode)
+            {
+                case Key.Space:
+                    Fell();
+                    return;
+                case Key.N:
+                    _recipe.Seed++;
+                    Build();
+                    _camera.Position = ViewHome;
+                    return;
+                case Key.S:
+                    if (_rig is not null)
+                    {
+                        _strike = _strike switch
+                        {
+                            WallRig.Strike.Ram => WallRig.Strike.He,
+                            WallRig.Strike.He => WallRig.Strike.Ap,
+                            _ => WallRig.Strike.Ram,
+                        };
+                        return;
+                    }
+                    _shot = _shot == WallFall.Shot.Mine
+                        ? WallFall.Shot.Ram : WallFall.Shot.Mine;
+                    if (_wall is { Falling: true })
+                        Fell();
+                    return;
+                case Key.B:
+                    // The next flat side, taken off the list rather than by
+                    // adding sixty: adding stays on the six only while the value
+                    // started on them, which is a key that is right because of
+                    // where the field was initialised.
+                    Side = (Side + 1) % HexField.EdgeHeadings.Length;
+                    return;
+                case Key.R:
+                    Reset();
+                    return;
+                case Key.Tab:
+                    _panel?.Flip();
+                    return;
+                case Key.Q:
+                    Turn(_spin - Mathf.DegToRad(TurnStep));
+                    return;
+                case Key.E:
+                    Turn(_spin + Mathf.DegToRad(TurnStep));
+                    return;
+                case Key.T:
+                    _turning = !_turning;
+                    return;
+                case Key.F12:
+                    Capture(AssetRoot.Out + "/wall_" + _recipe.Seed + ".png");
+                    return;
+            }
+        }
+
+        // Left drag turns it. The left button does nothing else on this bench -
+        // there is one prop and it is already selected - and dragging the thing
+        // you are inspecting is how a turntable is expected to work. Horizontal
+        // only: the camera's elevation is the board's and does not move.
+        if (@event is InputEventMouseButton { ButtonIndex: MouseButton.Left } left)
+        {
+            _leftFrom = left.Pressed ? GetGlobalMousePosition() : null;
+            if (left.Pressed)
+                _turning = false;
+            return;
+        }
+        if (@event is InputEventMouseMotion drag
+            && (drag.ButtonMask & MouseButtonMask.Left) != 0)
+        {
+            // A screen width is a turn and a half, which puts a face change inside
+            // a comfortable wrist movement at any zoom - the drag is in screen
+            // pixels on purpose, because the hand is.
+            Turn(_spin + drag.Relative.X * Mathf.Tau * 1.5f
+                         / Mathf.Max(GetViewportRect().Size.X, 1.0f));
+            return;
+        }
+
+        if (@event is InputEventMouseButton { ButtonIndex: MouseButton.Middle } middle)
+        {
+            if (middle.Pressed)
+            {
+                _middleFrom = GetGlobalMousePosition();
+                return;
+            }
+            Vector2? from = _middleFrom;
+            _middleFrom = null;
+            // The same two-gestures-one-button arrangement the harness and the
+            // wood bench use, resolved on release with the same slack, so a pan
+            // across the cell does not fire the charge.
+            if (from is Vector2 down && Main.MiddleTap(down, GetGlobalMousePosition()))
+                Fell();
+            return;
+        }
+        if (@event is InputEventMouseMotion motion
+            && (motion.ButtonMask & MouseButtonMask.Middle) != 0)
+        {
+            _camera.Position -= motion.Relative / _camera.Zoom;
+            return;
+        }
+        if (@event is InputEventMouseButton { Pressed: true } wheel)
+        {
+            float factor = wheel.ButtonIndex switch
+            {
+                MouseButton.WheelUp => 1.1f,
+                MouseButton.WheelDown => 1.0f / 1.1f,
+                _ => 1.0f,
+            };
+            if (factor != 1.0f)
+            {
+                float z = Mathf.Clamp(_camera.Zoom.X * factor, 0.25f, 8.0f);
+                _camera.Zoom = new Vector2(z, z);
+            }
+        }
+    }
+
+    private void Capture(string path)
+    {
+        Image image = GetViewport().GetTexture().GetImage();
+        DirAccess.MakeDirRecursiveAbsolute(path.GetBaseDir());
+        Error err = image.SavePng(path);
+        GD.Print(err == Error.Ok ? $"wall: wrote {path}"
+                                 : $"wall: could not write {path}: {err}");
+    }
+}
