@@ -6574,8 +6574,8 @@ public static class SelfTest
             var round = new Shell
             {
                 Shooter = shooter, Target = foe, ImpactLocal = aim,
-                From = foe.Sprite.ToGlobal(aim)
-                       - new Vector2(Shell.PointBlank, 0.0f),
+                From = foe.Spot(aim) - new Vector2(Shell.PointBlank, 0.0f),
+                FromLift = 0.0f,
                 Serial = 1, Face = "front", Scatter = 0.0f, BoreMiss = 0.0f, Rise = 0.0f, Calibre = 1.0f,
                 Level = 1,
             };
@@ -6611,7 +6611,16 @@ public static class SelfTest
             // effect being switched off. It is also the one most likely to be
             // undone by accident, because freeing the node the moment it lands is
             // the obvious thing to write.
-            Check("the round outlives its own arrival so its smoke can hang",
+            // Both ways round, because the trail is off by default now and the
+            // claim is about the trail: a round laying smoke has to outlive its
+            // own arrival so the line can hang - freeing the node the moment it
+            // lands is the obvious thing to write and reads as the effect being
+            // switched off - while a round laying none has nothing to wait for
+            // and has to go at once, or it lingers drawing nothing and the trace
+            // reports smoke that is not there.
+            bool wasSmoking = Shell.SmokeOn;
+            Shell.SmokeOn = true;
+            Check("a round laying smoke outlives its own arrival so it can hang",
                 round.Arrived && !round.Expired,
                 $"expired {round.Expired} the frame it landed - and note Arrived "
                 + "stays true from here on, which is why the strike has to be "
@@ -6621,6 +6630,11 @@ public static class SelfTest
             Check("and it does go away once the smoke has",
                 round.Expired,
                 $"still drawing after {Shell.SmokeSeconds}s of trail life");
+            Shell.SmokeOn = false;
+            Check("and one laying none goes the frame it lands",
+                round.Expired,
+                "a round with no trail behind it has nothing to wait for");
+            Shell.SmokeOn = wasSmoking;
             // Frozen at impact. While it flies, following the target is the one
             // liberty taken; afterwards the smoke belongs to the air, and a
             // target driving off would swing the whole line round behind it.
@@ -6657,7 +6671,7 @@ public static class SelfTest
                 var trailer = new Shell
                 {
                     Shooter = shooter, Target = foe, ImpactLocal = aim,
-                    From = foe.Sprite.ToGlobal(aim) - new Vector2(400.0f, 0.0f),
+                    From = foe.Spot(aim) - new Vector2(400.0f, 0.0f), FromLift = 0.0f,
                     Serial = 3, Face = "front", Scatter = 0.0f, BoreMiss = 0.0f,
                     Rise = 0.0f, Calibre = 1.0f, Level = 1,
                 };
@@ -6685,13 +6699,119 @@ public static class SelfTest
                     + $" {Shell.SmokeStep:F1}px step - a dotted trail is not a"
                     + " thinner trail, and no calibre can mend the ratio because"
                     + " the calibre multiplies both");
-                Check("and the trail is continuous at the speed it is flown",
-                    Shell.Speed / 60.0f > Shell.Streak
-                    && Shell.Speed / 60.0f < 40.0f,
-                    $"{Shell.Speed / 60.0f:F0}px a frame against a"
-                    + $" {Shell.Streak:F0}px streak - the streak stopped covering"
-                    + " the gap when the round was sped up, and the trail is what"
-                    + " took that job over");
+                // The line has to be continuous at the speed it is flown, and
+                // the streak is what carries that now: it was 14px against a
+                // 25px step and the trail closed the gap, which made the smoke
+                // load-bearing for something the streak should say itself - so
+                // the trail could not be taken off the default without the
+                // round going dotted. Asserted on the streak rather than on the
+                // trail, because that is the claim; a trail is welcome to help
+                // and is no longer needed to.
+                // The level is a multiplier over the tuned length, the rule every
+                // other level here follows, and it has to be able to show both
+                // ends: a streak long enough to hold the line, and one short
+                // enough to go dotted - a slider that cannot show "too little"
+                // is a slider nobody can judge the tuned value against.
+                {
+                    double keep = Shell.StreakLevel;
+                    Shell.StreakLevel = 2.0;
+                    float twice = Shell.StreakSize;
+                    Shell.StreakLevel = 0.3;
+                    float least = Shell.StreakSize;
+                    Shell.StreakLevel = keep;
+                    Check("the streak length level multiplies the tuned length",
+                        Math.Abs(twice - 2.0f * Shell.Streak) < 1e-4f
+                        && Math.Abs(Shell.StreakSize - Shell.Streak) < 1e-4f,
+                        $"{Shell.Streak:F0}px tuned, {twice:F0}px at 2x - a"
+                        + " control setting the length rather than a multiplier"
+                        + " would part company with the reference proportion");
+                    Check("and the bottom of its range can go dotted",
+                        least < Shell.Speed / 60.0f
+                        && Shell.Streak >= Shell.Speed / 60.0f,
+                        $"{least:F0}px at the bottom against"
+                        + $" {Shell.Speed / 60.0f:F0}px of path a frame, tuned"
+                        + $" {Shell.Streak:F0}px - the tuned value has to be"
+                        + " clear of the threshold and the threshold has to be"
+                        + " reachable by dragging");
+                }
+                // Width on its own dial, and the claim is that the two dials
+                // are the proportion: the size level multiplies both at once, so
+                // without this one the tracer could be made bigger and smaller
+                // and never slimmer. Each level has to move its own term and
+                // leave the other alone, or every A/B taken on either measures
+                // both - the objection that keeps the trail's thickness off the
+                // tracer's dial.
+                {
+                    double keepW = Shell.WidthLevel;
+                    double keepL = Shell.StreakLevel;
+                    Shell.WidthLevel = 2.0;
+                    float wideBody = Shell.BodySize, wideLen = Shell.StreakSize;
+                    Shell.WidthLevel = keepW;
+                    Shell.StreakLevel = 2.0;
+                    float longBody = Shell.BodySize, longLen = Shell.StreakSize;
+                    Shell.StreakLevel = keepL;
+                    Check("the width level moves the width and nothing else",
+                        Math.Abs(wideBody - 2.0f * Shell.Body) < 1e-4f
+                        && Math.Abs(wideLen - Shell.Streak) < 1e-4f,
+                        $"body {Shell.Body:F1} -> {wideBody:F1} at 2x while the"
+                        + $" length stayed {wideLen:F0} - one dial over both can"
+                        + " make the round bigger but never slimmer");
+                    Check("and the length level moves the length and nothing else",
+                        Math.Abs(longLen - 2.0f * Shell.Streak) < 1e-4f
+                        && Math.Abs(longBody - Shell.Body) < 1e-4f,
+                        $"length {Shell.Streak:F0} -> {longLen:F0} at 2x while"
+                        + $" the body stayed {longBody:F1}");
+                    // The hem stays a pixel outside whatever the body does,
+                    // which is what stops it reappearing as a spike off the
+                    // tail: written as a share of the body it would grow with it.
+                    Check("and the hem does not grow with the body",
+                        Shell.Edge < 0.5f * Shell.Body,
+                        $"{Shell.Edge:F1}px outside a {Shell.Body:F1}px body,"
+                        + " unscaled by either level");
+                }
+                Check("the streak covers the ground the head crosses in a frame",
+                    Shell.Streak >= Shell.Speed / 60.0f,
+                    $"a {Shell.Streak:F0}px streak against"
+                    + $" {Shell.Speed / 60.0f:F0}px of path a frame - a round"
+                    + " that outruns its own streak draws a dotted line, and no"
+                    + " calibre mends it because the calibre multiplies both");
+                // And it stays a streak rather than becoming a beam: the taper
+                // is only readable while the thing is much longer than it is
+                // wide, which is the proportion the reference is drawn at.
+                Check("and it is drawn long against its own width",
+                    Shell.Streak / (2.0f * Shell.Body) > 6.0f,
+                    $"{Shell.Streak:F0}px long against"
+                    + $" {2.0f * Shell.Body:F1}px of lit body"
+                    + $" = {Shell.Streak / (2.0f * Shell.Body):F1}:1");
+                // Both ends taper to nothing, which is what closes the outline -
+                // a lance whose profile does not reach zero is a bar with mitred
+                // corners, and at these sizes the two look the same in a still.
+                Check("the lance tapers to nothing at both ends",
+                    Shell.Waist(0.0f) < 1e-6f && Shell.Waist(1.0f) < 1e-6f
+                    && Shell.Waist(0.25f) > 0.5f,
+                    $"waist {Shell.Waist(0.0f):F3} at the head,"
+                    + $" {Shell.Waist(0.25f):F3} a quarter back,"
+                    + $" {Shell.Waist(1.0f):F3} at the tail");
+                // Three layers across, hem outermost, and each strictly inside
+                // the one before it. Written as fractions of the hem for the
+                // reason the trail's spacing is: one shape at three widths.
+                // Three layers across, and the middle one is the picture: a
+                // white core inside a warm body inside a hem that is only there
+                // to carry contrast against a pale tile - the selection ring's
+                // answer, and the reason this is not additive.
+                Check("the core sits well inside the lit body",
+                    Shell.CoreOf < 0.7f && Shell.CoreOf > 0.25f,
+                    $"core {Shell.CoreOf:F2} of the body - too wide and the"
+                    + " streak is a white bar, too narrow and it is an amber one");
+                // The hem is an outset, not a wider copy: written as a fraction
+                // it closed later than the body and drew a black spike out of
+                // the tail, which is a defect nothing else in the picture
+                // explains.
+                Check("and the hem is a pixel outside the body, not a share of it",
+                    Shell.Edge > 0.4f && Shell.Edge < 0.5f * Shell.Body,
+                    $"{Shell.Edge:F1}px outside a {Shell.Body:F1}px body - held"
+                    + " outside all the way along, the hem closes where the body"
+                    + " closes and the tail has no dark spike");
             }
             // Sized by the gun, not by the hit dial. One control moving two
             // things makes every A/B taken on it measure both.
@@ -6750,13 +6870,19 @@ public static class SelfTest
                     + " a dial that moved both would make every A/B measure two"
                     + " effects");
             }
-            Check("the tracer and its smoke draw unless asked not to",
-                Main.TracerOnByDefault && Shell.SmokeOnByDefault
+            // The tracer draws and the trail does not, and both halves are named
+            // constants precisely so a change to either is a change somebody made
+            // on purpose. The tracer was off while it was one stroke of debug
+            // line, and is on now that it is a layer with a calibre to be judged;
+            // the trail was on while it carried the line's continuity at speed,
+            // and is off now that the streak is long enough to carry it - see
+            // Shell.Streak. A trail nothing rests on, and absent from the picture
+            // being matched, is decoration.
+            Check("the tracer draws unless asked not to, and the trail does not",
+                Main.TracerOnByDefault && !Shell.SmokeOnByDefault
                 && Main.TurretSoundOnByDefault,
-                "all three are named constants precisely so a change to them is "
-                + "a change somebody made on purpose - the tracer was off while "
-                + "it was one stroke of debug line, and is on now that it is a "
-                + "layer with a calibre and a trail to be judged");
+                $"tracer {Main.TracerOnByDefault}, trail {Shell.SmokeOnByDefault},"
+                + $" turret motor {Main.TurretSoundOnByDefault}");
             // The other half of this one is not a constant and cannot be: that no
             // [mcp] line is printed by the very run this check is inside. If the
             // connection had opened, it would have opened before SelfTest.Run was
@@ -6771,8 +6897,8 @@ public static class SelfTest
             var unseen = new Shell
             {
                 Shooter = shooter, Target = foe, ImpactLocal = aim,
-                From = foe.Sprite.ToGlobal(aim)
-                       - new Vector2(Shell.PointBlank, 0.0f),
+                From = foe.Spot(aim) - new Vector2(Shell.PointBlank, 0.0f),
+                FromLift = 0.0f,
                 Serial = 2, Face = "front", Scatter = 0.0f, BoreMiss = 0.0f, Rise = 0.0f, Calibre = 1.0f,
                 Level = 1,
             };
@@ -6820,7 +6946,8 @@ public static class SelfTest
         var round = new Shell
         {
             Shooter = shooter, Target = foe, ImpactLocal = aim,
-            From = foe.Sprite.ToGlobal(aim) - new Vector2(Shell.PointBlank, 0.0f),
+            From = foe.Spot(aim) - new Vector2(Shell.PointBlank, 0.0f),
+            FromLift = 0.0f,
             Serial = 9, Face = "front", Scatter = 0.0f, BoreMiss = 0.0f,
             Rise = 0.0f, Calibre = 1.0f, Level = 1,
         };

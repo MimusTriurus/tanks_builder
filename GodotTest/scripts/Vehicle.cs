@@ -345,6 +345,46 @@ public sealed class Vehicle
     public Vector2 GroundPoint =>
         Sprite.Position + Atlas.GroundOffset * Sprite.BodyScale;
 
+    /// <summary>
+    /// Where a point of this tank's picture sits on the board, from where it
+    /// sits in the sprite.
+    ///
+    /// <b>Not <c>Sprite.ToGlobal</c>, and that is the whole of why this exists.</b>
+    /// On the 3D stage every tank's sprite is reparented into a render target of
+    /// its own (see <c>Stage3D.Take</c>), so ToGlobal answers in the coordinates
+    /// of that target - a different space per tank. Two such answers cannot be
+    /// subtracted, which is exactly what a shell did with its muzzle and its
+    /// impact: the round flew off the board, drawn in a corner of the world
+    /// nobody was looking at, while every number about it stayed sane.
+    ///
+    /// The sprite's own Position is in board space on both boards - the stage
+    /// leaves it alone and compensates with its holder - so the offset applied
+    /// by hand is the one expression that means the same thing either way. On the
+    /// 2D board it agrees with ToGlobal to the bit, the sprites being direct
+    /// children of the harness.
+    /// </summary>
+    public Vector2 Spot(Vector2 local) =>
+        Sprite.Position + local * Sprite.BodyScale;
+
+    /// <summary>The reverse of <see cref="Spot"/>: a point of the board as this
+    /// tank's sprite sees it.</summary>
+    public Vector2 Unspot(Vector2 spot) =>
+        (spot - Sprite.Position) / Mathf.Max(Sprite.BodyScale, 0.0001f);
+
+    /// <summary>
+    /// How high above its own contact row a point of this tank's picture stands,
+    /// in screen pixels - the lift <c>Stage3D.World</c> asks for separately.
+    ///
+    /// A drawn row mixes height with depth and a flat picture cannot split them,
+    /// which is why props declare a fraction instead. A tank's billboard has no
+    /// such trouble: the standing half of the quad is parameterised over height
+    /// exactly, so a pixel that many rows above the contact is that much height
+    /// and nothing else. Carrying the tank's own <see cref="Standing"/> on top,
+    /// because a lift is measured from the datum rather than from the cell.
+    /// </summary>
+    public float LiftOf(Vector2 spot) =>
+        Standing + (GroundPoint.Y - spot.Y);
+
     /// <summary>Whether it has been killed, and how long ago. Per tank for the
     /// reason the fire is, and more so: a wreck beside an intact tank is the
     /// whole of what this shows.</summary>

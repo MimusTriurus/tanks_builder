@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Godot;
 
 namespace TankSpriteTest;
@@ -81,9 +81,64 @@ public sealed partial class Shell : Node2D
     /// <summary>Screen pixels per second, as flown.</summary>
     public static float Speed => (float)(BaseSpeed * SpeedLevel);
 
-    /// <summary>How long the bright streak behind the head is, per unit of
-    /// calibre.</summary>
-    public const float Streak = 14.0f;
+    /// <summary>
+    /// How long the streak is, per unit of calibre.
+    ///
+    /// <b>Long enough to carry its own continuity, and that is the number's
+    /// whole job.</b> At 1500px/s the head moves 25px a frame; a streak shorter
+    /// than that leaves a gap between consecutive frames, and the round reads as
+    /// a dotted line rather than as one travelling bar of light. It was 14px and
+    /// the trail behind it closed that gap - which worked, and made the smoke
+    /// load-bearing for something the streak should say itself.
+    ///
+    /// So the reference picture and the arithmetic want the same thing: about
+    /// nine long to one wide (see <see cref="Hem"/>), which at this calibre is
+    /// 52px against a 25px step. The one thing to watch when moving it is that
+    /// pairing - a faster round needs a longer streak, and the check says so.
+    ///
+    /// Clipped to the distance actually flown, because a smear cannot be longer
+    /// than the path that made it: at point blank the round crosses about 30px,
+    /// and a full-length streak there would draw a solid bar from muzzle to
+    /// plate - a beam, not a shell.
+    /// </summary>
+    public const float Streak = 52.0f;
+
+    /// <summary>
+    /// How long the streak is drawn, against <see cref="Streak"/>.
+    ///
+    /// A multiplier rather than a length, the rule every other level here
+    /// follows - though the reason is not a class spread this time, there being
+    /// none: it is that the length is paired with the speed. The streak has to
+    /// cover the ground the head crosses in a frame or the line goes dotted, so
+    /// the two numbers are read together, and the caption says which side of
+    /// that the slider is currently on.
+    ///
+    /// Read live rather than settled at the trigger, with the tracer's size and
+    /// for its reason: this decides how the round is drawn, not what it does.
+    /// </summary>
+    public static double StreakLevel { get; set; } = 1.0;
+
+    /// <summary>How long the streak is, per unit of calibre, as drawn.</summary>
+    public static float StreakSize => (float)(Streak * StreakLevel);
+
+    /// <summary>
+    /// How wide the streak is drawn, against <see cref="Body"/>.
+    ///
+    /// <b>Apart from the length, because together they are the proportion.</b>
+    /// The size level multiplies both at once - it is the whole round, scaled -
+    /// so on its own it can make the tracer bigger and smaller and never
+    /// slimmer. What tells a streak from a domino is how long it is against how
+    /// wide, and a proportion needs its two terms on two dials.
+    ///
+    /// The hem is left out of it: it is a pixel outside the body whatever the
+    /// body is doing, which is what keeps it from reappearing as a dark spike
+    /// off the tail - see <see cref="Edge"/>.
+    /// </summary>
+    public static double WidthLevel { get; set; } = 1.0;
+
+    /// <summary>Half the width of the lit body, per unit of calibre, as
+    /// drawn.</summary>
+    public static float BodySize => (float)(Body * WidthLevel);
 
     /// <summary>
     /// How big the tracer is drawn, against the per-class calibre in
@@ -123,11 +178,21 @@ public sealed partial class Shell : Node2D
     public float SmokeSize =>
         (float)(Shooter.Profile.SmokeCalibre * SmokeLevel);
 
-    /// <summary>Whether the round lays smoke behind it. Named rather than left
-    /// in a field initialiser, the rule <see cref="Recoil.ShearOnByDefault"/>
-    /// set: this one carries the tracer's continuity at speed, so turning it off
-    /// is a comparison somebody should have to ask for.</summary>
-    public const bool SmokeOnByDefault = true;
+    /// <summary>
+    /// Whether the round lays smoke behind it.
+    ///
+    /// <b>Off, and it used to be on.</b> The reference picture has no trail at
+    /// all - a bar of light and nothing behind it - and the streak is now long
+    /// enough to hold the line together on its own, which is the job the smoke
+    /// had been doing (see <see cref="Streak"/>). A trail that is no longer
+    /// load-bearing and is not in the picture being matched is decoration.
+    ///
+    /// Kept rather than deleted, and switched by a flag, for the bought muzzle
+    /// sheet's reason: "the streak reads better without it" stays an assertion
+    /// until the two can be put side by side. Named rather than left in a field
+    /// initialiser, the rule <see cref="Recoil.ShearOnByDefault"/> set.
+    /// </summary>
+    public const bool SmokeOnByDefault = false;
 
     public static bool SmokeOn { get; set; } = SmokeOnByDefault;
 
@@ -252,11 +317,24 @@ public sealed partial class Shell : Node2D
     /// </summary>
     public required Vector2 ImpactLocal { get; init; }
 
-    /// <summary>Where it left, in global space, fixed at the shot. The muzzle
+    /// <summary>Where it left, in board space, fixed at the shot. The muzzle
     /// moves with the turret and the turret keeps tracking, so a launch point
     /// read live would drag the whole tracer sideways behind a traversing
     /// gun.</summary>
     public required Vector2 From { get; init; }
+
+    /// <summary>
+    /// How high the muzzle stood above the datum when it fired, in screen
+    /// pixels - see <see cref="Vehicle.LiftOf"/>.
+    ///
+    /// Carried rather than measured on demand for the reason <see cref="From"/>
+    /// is: the shooter may drive off after the shot, and a lift re-read from a
+    /// tank that has since climbed would walk the tail of the tracer up the
+    /// screen. Only the 3D stage reads it - a flat board has no use for a height
+    /// told apart from a row - and it is a plain number rather than a world point
+    /// so the model stays two-dimensional.
+    /// </summary>
+    public required float FromLift { get; init; }
 
     /// <summary>Which round this is, for the spark scatter. Deterministic for
     /// the reason the hit scatter is: --capture and --trace fix the time step so
@@ -338,6 +416,9 @@ public sealed partial class Shell : Node2D
     /// <summary>Where the path ended, frozen at the moment of arrival.</summary>
     private Vector2 _landed;
 
+    /// <summary>And how high, frozen with it and for the same reason.</summary>
+    private float _landedLift;
+
     /// <summary>
     /// Where it is going now, in global space - and where it went, once it has.
     ///
@@ -347,7 +428,12 @@ public sealed partial class Shell : Node2D
     /// target is the deliberate liberty; once it has hit, the smoke belongs to
     /// the air rather than to the tank.
     /// </summary>
-    public Vector2 To => Arrived ? _landed : Target.Sprite.ToGlobal(ImpactLocal);
+    public Vector2 To => Arrived ? _landed : Target.Spot(ImpactLocal);
+
+    /// <summary>How high the armour it is going for stands, in screen pixels.
+    /// Frozen on arrival with <see cref="To"/>, which it is the other half
+    /// of.</summary>
+    public float ToLift => Arrived ? _landedLift : Target.LiftOf(To);
 
     /// <summary>Above every tank. A tracer disappearing behind a hull it is
     /// passing reads as a dropped frame, and it is a few pixels of bright on a
@@ -389,12 +475,16 @@ public sealed partial class Shell : Node2D
             return;
         }
         Vector2 to = To;
+        float lift = ToLift;
         float total = (to - From).Length();
         _flown += (float)(Speed * delta);
         if (total <= 0.001f || _flown >= total)
         {
             Position = to;
             _landed = to;
+            // Read before Arrived is set, because ToLift answers off the frozen
+            // pair the moment it is - which would freeze it to itself.
+            _landedLift = lift;
             Arrived = true;
         }
         else
@@ -478,33 +568,124 @@ public sealed partial class Shell : Node2D
                            new Color(0.40f, 0.38f, 0.36f, SmokeAlpha * fade));
             }
 
-        // Backing first, one line, so the streak reads over the amber route tint
-        // as well as over the pale tile and its own smoke.
         // Nothing bright is drawn once it has landed - what is left is the
         // smoke. The round is still here only because the smoke is.
         if (Arrived)
             return;
 
-        float len = Streak * cal;
-        DrawLine(-along * (len + 1.0f), along * 1.5f,
-                 new Color(0.10f, 0.05f, 0.0f, 0.45f), 2.6f * cal);
-
-        // The streak, brightening into the head. Two segments rather than a
-        // gradient because a gradient needs a polygon and this is two pixels
-        // wide.
+        // **A tapered lance, three shells thick across rather than three
+        // segments long, and both halves of that are what the reference
+        // picture is.** The old streak graded along its length - dim tail into a
+        // bright head - which reads as a stick with a lit tip; a round travelling
+        // fast reads as one even bar of light, hot all the way, and what varies
+        // is across it: a near-white core inside a warm rim inside a dark hem.
         //
-        // **Both segments have to out-cover their own backing.** The dim one ran
-        // at 0.35 over a 0.55 black and composited to dark brown, so the tracer
-        // read as a stick with a lit tip rather than as a streak - the backing is
-        // there to carry contrast against the ground, not to show through.
-        DrawLine(-along * len, -along * (len * 0.4f),
-                 new Color(1.0f, 0.58f, 0.22f, 0.60f), 1.7f * cal);
-        DrawLine(-along * (len * 0.4f), Vector2.Zero,
-                 new Color(1.0f, 0.80f, 0.42f, 0.92f), 2.2f * cal);
-        // **The core is small and near white, and the mass around it is smoke.**
-        // A big amber ball is a fireball travelling sideways; a hot point with a
-        // line of smoke behind it is a round. The bright part is a pixel and a
-        // half on the medium, which is as much of it as there should be.
-        DrawCircle(Vector2.Zero, 1.5f * cal, new Color(1.0f, 0.97f, 0.90f));
+        // The hem is what makes that legal here. The reference is drawn over
+        // near-black cobbles, where a white core additive over the ground is the
+        // whole effect; this board's ground is a pale tile around 0.72, where the
+        // same thing is a slightly warmer tile. So the outermost layer carries
+        // the contrast the ground will not lend - the selection ring's answer,
+        // and the reason this is ordinary alpha rather than additive.
+        //
+        // Both ends taper, which needs a polygon rather than a line. A line's
+        // ends are square, and a square-ended bar of light is a domino: the
+        // tapered head is most of what says which way it is going.
+        float len = Mathf.Min(StreakSize * cal, Flown);
+        Vector2 across = new(-along.Y, along.X);
+        // Three nested lances off one profile, hem outwards. One profile because
+        // the layers are one shape at three widths - written apart, they part
+        // company at the head, where the taper is the whole of the reading.
+        DrawPolygon(Lance(along, across, len, (BodySize + Edge) * cal),
+                    Fill(new Color(0.07f, 0.04f, 0.02f, 0.55f)));
+        DrawPolygon(Lance(along, across, len, BodySize * cal),
+                    Fill(new Color(1.0f, 0.46f, 0.11f, 1.0f)));
+        DrawPolygon(Lance(along, across, len, BodySize * cal * CoreOf),
+                    Fill(new Color(1.0f, 0.95f, 0.87f, 1.0f)));
+    }
+
+    /// <summary>Half the width of the lit body, per unit of calibre. Against
+    /// <see cref="Streak"/> this is the slenderness the reference is drawn at -
+    /// about nine long to one wide - and it is the one number to move if the
+    /// round starts reading as a dash rather than as a tracer.</summary>
+    internal const float Body = 3.0f;
+
+    /// <summary>
+    /// How far the dark hem stands outside the body, per unit of calibre.
+    ///
+    /// <b>An outset rather than a fraction, and the tail is why.</b> Written as
+    /// a wider copy of the same lance, the hem tapers to nothing later than the
+    /// body does - so the last several pixels of the streak were hem and nothing
+    /// else, and the round drew a black spike out of its own tail. Held a pixel
+    /// outside the body all the way along, there is no such stretch: the hem
+    /// closes where the body closes.
+    ///
+    /// It is a pixel because that is all it has to be. Its job is to carry
+    /// contrast against a pale tile - the selection ring's answer - not to be
+    /// seen.
+    /// </summary>
+    internal const float Edge = 0.9f;
+
+    /// <summary>The near-white core, as a fraction of the body. A fraction
+    /// rather than a width of its own, so the streak stays one shape at any
+    /// calibre - the rule the trail's spacing had to learn.</summary>
+    internal const float CoreOf = 0.62f;
+
+    /// <summary>
+    /// How much of each end is taper: a short cone at the nose, a longer one at
+    /// the tail, full width in between.
+    ///
+    /// <b>A trapezium rather than a curve, and that is what makes it read as one
+    /// bar of light.</b> The first shape here closed as a power of the distance
+    /// left, which is the right curve for a smear that thins out - and it meant
+    /// the streak was at full width nowhere and under half width over most of
+    /// its length, so the near-white core measured a single pixel across and the
+    /// whole thing read as an amber needle. The reference is even along its
+    /// middle and pointed only at the ends; a plateau says that directly.
+    /// </summary>
+    private const float Nose = 0.08f;
+
+    private const float Tail = 0.22f;
+
+    /// <summary>How many steps down each side of the lance. Twelve because the
+    /// taper is a curve and the head is a couple of pixels: fewer shows as a
+    /// facet on the one part of the shape anybody reads.</summary>
+    private const int Steps = 12;
+
+    /// <summary>
+    /// The outline of one layer: the head at the origin, the tail
+    /// <paramref name="len"/> back along the path, tapered at both ends.
+    ///
+    /// Public shape, private colour - the profile is asserted rather than
+    /// described, because "it tapers" and "it is a rectangle with mitred
+    /// corners" look the same in a still frame at these sizes.
+    /// </summary>
+    internal static Vector2[] Lance(Vector2 along, Vector2 across, float len,
+                                   float half)
+    {
+        var pts = new Vector2[2 * Steps];
+        for (int i = 0; i < Steps; i++)
+        {
+            float s = i / (float)(Steps - 1);
+            float w = half * Waist(s);
+            Vector2 at = -along * (len * s);
+            pts[i] = at + across * w;
+            pts[2 * Steps - 1 - i] = at - across * w;
+        }
+        return pts;
+    }
+
+    /// <summary>How wide the lance is a fraction <paramref name="s"/> back from
+    /// its head, as a fraction of the widest. Zero at both ends by construction,
+    /// which is what "tapered" has to mean for the outline to close.</summary>
+    internal static float Waist(float s) =>
+        Mathf.Min(Mathf.Min(1.0f, s / Nose),
+                  Mathf.Min(1.0f, Mathf.Max(1.0f - s, 0.0f) / Tail));
+
+    private static Color[] Fill(Color ink)
+    {
+        var flat = new Color[2 * Steps];
+        for (int i = 0; i < flat.Length; i++)
+            flat[i] = ink;
+        return flat;
     }
 }

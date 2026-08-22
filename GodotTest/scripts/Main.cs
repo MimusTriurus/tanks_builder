@@ -1276,6 +1276,16 @@ public sealed partial class Main : Node2D
 				_tracerVisible = true;
 			else if (userArgs[i] == "--no-tracer-smoke")
 				Shell.SmokeOn = false;
+			// Both directions, the shape --water and --no-water already have: the
+			// trail is off now (see Shell.SmokeOnByDefault), so the interesting
+			// half of the A/B is the one that switches it on, and a flag that
+			// only ever agreed with the default would be a flag nobody could
+			// take the other picture with.
+			else if (userArgs[i] == "--tracer-smoke")
+			{
+				Shell.SmokeOn = true;
+				_tracerVisible = true;
+			}
 			else if (userArgs[i] == "--smoke-life" && i + 1 < userArgs.Length
 					 && double.TryParse(userArgs[i + 1], NumberStyles.Float,
 						 CultureInfo.InvariantCulture, out double smokeLife))
@@ -1299,6 +1309,23 @@ public sealed partial class Main : Node2D
 			{
 				Shell.SmokeLevel = smokeLevel;
 				Shell.SmokeOn = true;
+				_tracerVisible = true;
+			}
+			// Asking for the length is asking for the tracer, --tracer-size's
+			// shape: a level over something invisible is a flag that did not
+			// arrive as far as the picture is concerned.
+			else if (userArgs[i] == "--streak" && i + 1 < userArgs.Length
+					 && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+						 CultureInfo.InvariantCulture, out double streakLevel))
+			{
+				Shell.StreakLevel = streakLevel;
+				_tracerVisible = true;
+			}
+			else if (userArgs[i] == "--streak-width" && i + 1 < userArgs.Length
+					 && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+						 CultureInfo.InvariantCulture, out double widthLevel))
+			{
+				Shell.WidthLevel = widthLevel;
 				_tracerVisible = true;
 			}
 			else if (userArgs[i] == "--shell-speed" && i + 1 < userArgs.Length
@@ -4312,7 +4339,11 @@ public sealed partial class Main : Node2D
 		AtlasSet gun = shooter.Atlas;
 		Vector2 muzzle = gun.Muzzle(gun.FrameFor(shooter.Sprite.TurretFacing))
 						 - gun.Anchor;
-		Vector2 launched = shooter.Sprite.ToGlobal(muzzle);
+		// Spot rather than ToGlobal, and on the 3D stage that is the difference
+		// between a shell on the board and a shell in a render target - see
+		// Vehicle.Spot. Both ends have to come from the one space, because the
+		// flight is their difference.
+		Vector2 launched = shooter.Spot(muzzle);
 		// The bore as the target's own layers see it. Carried through both
 		// transforms as a pair of points rather than as an angle, so a scaled
 		// class and a hull leaning on its springs are handled by the transforms
@@ -4323,10 +4354,15 @@ public sealed partial class Main : Node2D
 		// world projects to exactly the ground direction on screen, while the
 		// ring-to-muzzle vector also carries however far the trunnions sit above
 		// the ring. The same measurement the flash points itself by.
-		Vector2 eye = victim.Sprite.ToLocal(launched);
-		Vector2 down = shooter.Sprite.ToGlobal(
+		// Spot and Unspot rather than the nodes' own transforms, by Vehicle.Spot's
+		// argument: on the stage the two sprites live in two different render
+		// targets, so a point handed from one to the other through ToGlobal and
+		// ToLocal arrives somewhere else entirely - and the bore is the whole of
+		// how the scatter is put onto the gun's axis.
+		Vector2 eye = victim.Unspot(launched);
+		Vector2 down = shooter.Spot(
 			muzzle + gun.GroundDirection(shooter.Sprite.TurretFacing) * 100.0f);
-		Vector2 bore = victim.Sprite.ToLocal(down) - eye;
+		Vector2 bore = victim.Unspot(down) - eye;
 
 		// The vertical fraction stays on its hash and the tangential one follows
 		// it onto the gun's axis - see Gunnery.ScatterOntoBore. Only on this
@@ -4351,6 +4387,7 @@ public sealed partial class Main : Node2D
 			Target = victim,
 			ImpactLocal = impact,
 			From = launched,
+			FromLift = shooter.LiftOf(launched),
 			BoreMiss = Gunnery.BoreMiss(eye, bore, impact),
 			Serial = victim.HitCount,
 			// Carried rather than re-read on arrival, for the reason above.
@@ -4632,10 +4669,13 @@ public sealed partial class Main : Node2D
 		["--shake"] = new[] { "effects.camera_shake", "effects.shake_level" },
 		["--tracer"] = new[] { "gunnery.tracer" },
 		["--no-tracer-smoke"] = new[] { "gunnery.tracer_smoke" },
+		["--tracer-smoke"] = new[] { "gunnery.tracer_smoke", "gunnery.tracer" },
 		["--smoke-life"] = new[] { "gunnery.smoke_life" },
 		["--tracer-size"] = new[] { "gunnery.tracer_size", "gunnery.tracer" },
 		["--smoke-size"] = new[]
 			{ "gunnery.smoke_size", "gunnery.tracer_smoke", "gunnery.tracer" },
+		["--streak"] = new[] { "gunnery.streak_length", "gunnery.tracer" },
+		["--streak-width"] = new[] { "gunnery.streak_width", "gunnery.tracer" },
 		["--shell-speed"] = new[] { "gunnery.shell_speed" },
 		["--traverse"] = new[] { "gunnery.traverse_level" },
 		["--hit-scale"] = new[] { "armour.calibre" },
@@ -5095,8 +5135,40 @@ public sealed partial class Main : Node2D
 			() =>
 			{
 				double cal = Active.Profile.TracerCalibre * Shell.TracerLevel;
-				return $"{2.1 * cal:F1}px head, {Shell.Streak * cal:F0}px streak"
+				return $"{2.0 * Shell.BodySize * cal:F1}px across,"
+					   + $" {Shell.StreakSize * cal:F0}px streak"
 					   + $" on the {Active.Tag}";
+			});
+		// Length apart from width, because the two answer to different things: the
+		// width is the reference's proportion, the length is paired with the
+		// speed. So the caption prints the streak against the ground the head
+		// crosses in a frame - which is the whole of whether the line holds
+		// together - rather than printing the multiplier back.
+		ui.Slide("gunnery.streak_length", "tracer streak length level",
+			0.3, 2.0, 0.05,
+			() => Shell.StreakLevel, v => Shell.StreakLevel = v, "x",
+			() =>
+			{
+				double cal = Active.Profile.TracerCalibre * Shell.StreakLevel;
+				double len = Shell.Streak * cal;   // cal already carries the level
+				double step = Shell.Speed / 60.0;
+				return $"{len:F0}px streak against {step:F0}px of path a frame"
+					   + (len < step ? " - dotted" : "");
+			});
+		// Width apart from length, because the pair of them is the proportion -
+		// see Shell.WidthLevel. So the caption prints the proportion rather than
+		// the multiplier: how wide it is says nothing on its own, and how long
+		// against how wide is the whole of whether it reads as a streak.
+		ui.Slide("gunnery.streak_width", "tracer streak width level",
+			0.4, 2.5, 0.05,
+			() => Shell.WidthLevel, v => Shell.WidthLevel = v, "x",
+			() =>
+			{
+				double cal = Active.Profile.TracerCalibre;
+				double wide = 2.0 * Shell.BodySize * cal;
+				double len = Shell.StreakSize * cal;
+				return $"{wide:F1}px across, {len / Math.Max(wide, 0.01):F1}:1"
+					   + (len < 6.0 * wide ? " - a domino" : "");
 			});
 		// A second level rather than the same one, because the streak and the
 		// trail are judged against different things - see Shell.SmokeSize. Its
