@@ -833,6 +833,8 @@ public sealed partial class Grove : Node2D
                 // each prop four times a frame, and a dictionary lookup per
                 // touch buys nothing over two bools.
                 Sways = tier.Family.Sways,
+                Soot = tier.Family.Soot,
+                Consumed = tier.Consumed,
                 Fades = tier.Fades,
                 Position = Origin + s.At,
                 Depth = Field.Depth(s.At.Y + lift, lift),
@@ -1443,9 +1445,17 @@ public sealed partial class Grove : Node2D
     /// of where the trunk stands, so it is the same tree on two runs and a
     /// different one from its neighbour.
     ///
-    /// <b>A rock on a burning cell does not burn</b>, and the flag says so rather
-    /// than the arithmetic: a boulder charring in a fire is the one thing on the
-    /// board announcing that all of this is a tint on a sprite.
+    /// <b>A rock on a burning cell does not burn, and it does not come out of it
+    /// clean either.</b> It takes the mark and nothing else - no flame, no smoke,
+    /// no handover - which is <see cref="Wildfire.Coat.Sooted"/>. A boulder in
+    /// flame would be the one thing on the board announcing that all of this is a
+    /// tint on a sprite; a bright boulder standing in permanently blackened ash is
+    /// the same announcement from the other end.
+    ///
+    /// <b>The coat is read once and then stripped, rather than a second coat
+    /// being computed.</b> Soot arrives on the same schedule the paint beside it
+    /// chars on, so asking the fire twice would be two copies of one curve - see
+    /// <see cref="Wildfire.Coat.Sooted"/>.
     /// </summary>
     public void Smoulder()
     {
@@ -1454,9 +1464,10 @@ public sealed partial class Grove : Node2D
         foreach (PropNode prop in _planted)
         {
             Wildfire.Coat was = prop.Coat;
-            prop.Coat = Fire is null || !prop.Tier.Family.Burns
+            Wildfire.Coat lit = Fire is null
                 ? Wildfire.Green
                 : Fire.Of(prop.Cell, Hash01(prop.Seed, prop.Species, 511_003));
+            prop.Coat = prop.Tier.Family.Burns ? lit : lit.Sooted();
             // The swap changes the picture, and in 2D that is a redraw. The stage
             // reads the node itself, so it needs nothing from here.
             if (prop.Coat.Burnt != was.Burnt || prop.Coat.Char != was.Char
@@ -1465,21 +1476,35 @@ public sealed partial class Grove : Node2D
         }
     }
 
-    /// <summary>How many trees are in flame and how many have burnt out.
+    /// <summary>
+    /// How many props are in flame, how many have burnt out, and how many have
+    /// only been marked by a fire they are not in.
+    ///
     /// Reported because a fire that is spreading and one that has gone out are
     /// the same still picture - the pond's readouts exist for this reason too.
+    /// The third count for the sharper version of that: a stone that has sooted
+    /// and a stone the fire never reached are also the same still picture, and
+    /// nothing else on the board would say which.
+    ///
+    /// <b>Flame alone decides "burning", where it used to be flame or char.</b>
+    /// For fuel the two are the same test - the flame is up within a fifth of the
+    /// burn and only reaches zero as <c>Burnt</c> arrives - so nothing about a
+    /// tree moved. For a sooted stone they are not: char without flame is exactly
+    /// what the mark is, and counting it as burning would report boulders alight.
     /// </summary>
-    public (int Burning, int Burnt) Ablaze()
+    public (int Burning, int Burnt, int Sooted) Ablaze()
     {
-        int burning = 0, burnt = 0;
+        int burning = 0, burnt = 0, sooted = 0;
         foreach (PropNode prop in _planted)
         {
             if (prop.Coat.Burnt)
                 burnt++;
-            else if (prop.Coat.Flame > 0.0f || prop.Coat.Char > 0.0f)
+            else if (prop.Coat.Flame > 0.0f)
                 burning++;
+            else if (prop.Coat.Char > 0.0f)
+                sooted++;
         }
-        return (burning, burnt);
+        return (burning, burnt, sooted);
     }
 
     /// <summary>
@@ -1659,9 +1684,44 @@ public sealed partial class PropNode : Node2D
     /// A kind with nothing to swap to keeps it at one for good, and that reason
     /// is unchanged: dropping it left bright green scrub standing in a burnt-out
     /// cell - the one thing on the board saying the fire had not really been
-    /// there.
+    /// there. The scrub is no longer leaning on it, because the scrub is no
+    /// longer there - see <see cref="Consumed"/> - but a burner nobody has drawn
+    /// a burnt picture for still is.
+    ///
+    /// <b>Scaled by <see cref="Soot"/>, which is how a stone comes out of a fire
+    /// marked rather than charred.</b> At one it is exactly the number it was, so
+    /// nothing wooden moved; below one the mix toward charcoal is partial, and a
+    /// partial mix desaturates partially too - which is what soot on stone is
+    /// and what a multiply could never have given.
     /// </summary>
-    public float Scorch => Coat.Burnt ? 1.0f : Mathf.Clamp(Coat.Char, 0.0f, 1.0f);
+    public float Scorch =>
+        Mathf.Clamp(Soot, 0.0f, 1.0f)
+        * (Coat.Burnt ? 1.0f : Mathf.Clamp(Coat.Char, 0.0f, 1.0f));
+
+    /// <summary>How far through being burnt away this one is, 0 to 1. Zero for
+    /// anything its fire leaves standing - <see cref="Swap"/>'s rule from the
+    /// other side: a tier that hands over to a picture is not being used up, and
+    /// a tier that is being used up has no picture to hand over to.</summary>
+    public float Spent =>
+        Consumed ? Mathf.Clamp(Coat.Spent, 0.0f, 1.0f) : 0.0f;
+
+    /// <summary>
+    /// How much of this prop is on screen at all: the wood's reveal times
+    /// whatever the fire has left of it.
+    ///
+    /// <b>One property and three readers, because a reader that took only one of
+    /// the two factors is a visible failure either way.</b> Taking the reveal
+    /// alone leaves a bush's shadow and the patch under its foot lying on the
+    /// ground after the bush has burnt away - the shadow of a thing that is not
+    /// there, which is the complaint the cast's own fade was written against.
+    /// Taking the burn alone puts a solid bush back under a tank the moment its
+    /// cell catches.
+    ///
+    /// <b>Multiplied and not min'd</b>: they are independent reasons for the same
+    /// prop to be see-through, so a half-burnt bush under a tank is fainter than
+    /// either on its own, which is what two reasons should come to.
+    /// </summary>
+    public float Shown => Modulate.A * (1.0f - Spent);
 
     /// <summary>How far the burnt picture has taken over, 0 to 1. Zero for
     /// anything that has not begun to swap and for every kind nobody drew a
@@ -1695,6 +1755,18 @@ public sealed partial class PropNode : Node2D
     /// gust is the one thing on screen announcing that all of this is a shear on
     /// a sprite.</summary>
     public bool Sways = true;
+
+    /// <summary>How black a fire leaves this one, as a share of the full char -
+    /// its family's <see cref="PropFamily.Soot"/>. One for anything made of
+    /// wood, less for stone, and one by default so a node built by hand behaves
+    /// exactly as every prop did before the number existed.</summary>
+    public float Soot = 1.0f;
+
+    /// <summary>Whether the fire takes it away rather than leaving something
+    /// standing - its tier's <see cref="PropTier.Consumed"/>. False by default,
+    /// which is the answer a trunk gives and the answer every prop on this bench
+    /// gave before the flag.</summary>
+    public bool Consumed;
 
     /// <summary>Whether this prop is in the dressing band right now - under
     /// everything that stands, its feet ignored. A tank on its cell puts it

@@ -179,14 +179,49 @@ public sealed class Wildfire
     /// draws reads Swap. Defaulted to one, so a Coat written out by hand means
     /// the state it names and means it fully.
     /// </summary>
+    /// <param name="Spent">How far through being used up the fuel is - the same
+    /// kind of number as <paramref name="Swap"/> and defaulted the same way for
+    /// the same reason, since <paramref name="Burnt"/> means the handover is
+    /// over whichever of the two a tier does.
+    ///
+    /// <b>Computed for every cell whether anything on it is consumed or
+    /// not</b>, because this class does not know what a tree is - see the class
+    /// remarks. Which tiers use it is <see cref="PropTier.Consumed"/>'s
+    /// business, and a tier that leaves a husk reads
+    /// <paramref name="Swap"/> instead.
+    ///
+    /// <b>It starts where the swap starts and ends where the burn does</b>, so
+    /// it needs no window of its own: fuel running out and a fire going out are
+    /// one event, and the flame is at zero on the same frame this reaches one.
+    /// Roughly five seconds of the nine at the settings above, which is what
+    /// makes it a thing being consumed rather than an object deleted.</param>
     public readonly record struct Coat(float Char, float Flame, float Smoke,
-                                      bool Burnt, float Swap = 1.0f)
+                                      bool Burnt, float Swap = 1.0f,
+                                      float Spent = 1.0f)
     {
         public bool Untouched => Char <= 0.0f && Flame <= 0.0f && Smoke <= 0.0f
                                 && !Burnt;
+
+        /// <summary>
+        /// Only the mark the fire leaves - what something that is not fuel gets.
+        ///
+        /// <b>Here rather than at the caller, so there is one copy of the
+        /// curve.</b> A stone soots on the same schedule the paint beside it
+        /// chars on, so the alternative was a second entry point computing the
+        /// same <see cref="Char"/> again - which is the shape of every number in
+        /// this project that has drifted. The caller says which coat it wants
+        /// and this says what "only the soot of it" means.
+        ///
+        /// <b>The smoke goes with the flame and not with the soot.</b> The dark
+        /// column is what the fire pours out, and a boulder emitting one is a
+        /// boulder on fire - the flag exists to rule out exactly that reading.
+        /// So: the mark, and nothing else on it.
+        /// </summary>
+        public Coat Sooted() => new(Char, 0.0f, 0.0f, false, 0.0f, 0.0f);
     }
 
-    public static readonly Coat Green = new(0.0f, 0.0f, 0.0f, false, 0.0f);
+    public static readonly Coat Green =
+        new(0.0f, 0.0f, 0.0f, false, 0.0f, 0.0f);
 
     /// <summary>Light one cell, if there is anything on it to burn. Refuses
     /// rather than lighting the ground: a cell with no trees has nothing to show
@@ -337,7 +372,15 @@ public sealed class Wildfire
         float swap = t < handing ? 0.0f
                      : SwapFor <= 0.0f ? 1.0f
                      : Mathf.Clamp((t - handing) / SwapFor, 0.0f, 1.0f);
-        return new Coat(charred, flame, smoke, burnt, swap);
+        // And how much of the fuel is left, for whatever the fire takes away
+        // rather than hands over - see Coat.Spent. From the same anchor as the
+        // swap, so the instant a trunk begins to turn to charcoal is the instant
+        // the scrub beside it begins to go; to the end of the burn rather than
+        // over a window, so it reaches nothing on the frame the flame does.
+        float spent = t < handing ? 0.0f
+            : Mathf.Clamp((t - handing) / Mathf.Max(burn - handing, 1e-4f),
+                          0.0f, 1.0f);
+        return new Coat(charred, flame, smoke, burnt, swap, spent);
     }
 
     /// <summary>Put the wood back. Called by the reset and when the fire is

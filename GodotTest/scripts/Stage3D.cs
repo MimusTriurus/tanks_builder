@@ -4227,12 +4227,15 @@ void fragment() {{
             // the shadow and the patch carry both and mix them per fragment, the
             // same as the crown. All three are told how far along it is below.
             Kindle(tree);
-            // The fade the wood set this frame. Read off the node rather than
-            // pushed by whoever set it, for Selected's reason - the reveal, the
-            // slider and the reset all write it.
+            // How much of it is on screen: the fade the wood set this frame
+            // times whatever the fire has left of it. Read off the node rather
+            // than pushed by whoever set it, for Selected's reason - the reveal,
+            // the slider and the reset all write the first, and Smoulder writes
+            // the second. See PropNode.Shown for why all three readers here take
+            // the product and not one of the factors.
             if (stem.MaterialOverride is ShaderMaterial bark)
             {
-                bark.SetShaderParameter("fade", tree.Modulate.A);
+                bark.SetShaderParameter("fade", tree.Shown);
                 bark.SetShaderParameter("scorch", tree.Scorch);
                 // How far between its two pictures it is. The one thing about the
                 // pair that moves, which is why the maps beside it are set once.
@@ -4259,7 +4262,7 @@ void fragment() {{
             // ground the patch is allowed to paint moves with it.
             if (seat.MaterialOverride is ShaderMaterial sole)
             {
-                sole.SetShaderParameter("ink", SeatInk.A * tree.Modulate.A);
+                sole.SetShaderParameter("ink", SeatInk.A * tree.Shown);
                 sole.SetShaderParameter("clip", CastShadows ? 1.0f : 0.0f);
                 // The same number the cast and the crown get, and it has to be:
                 // what this keeps off is what the cast is laying down this frame.
@@ -4278,11 +4281,14 @@ void fragment() {{
             cast.Transform = Shaded(tree);
             // The same fade, and it has to be the same one: a tree that has gone
             // half transparent for the tank on its cell keeping a full-strength
-            // shadow reads as the shadow of a tree that is not there. And the same
-            // handover, for the plainer reason: it is the shadow of that crown.
+            // shadow reads as the shadow of a tree that is not there. Which is
+            // also why it is Shown and not the reveal alone - a bush burnt away
+            // leaving its shadow on the ground is that sentence exactly. And the
+            // same handover, for the plainer reason: it is the shadow of that
+            // crown.
             if (cast.MaterialOverride is ShaderMaterial ink)
             {
-                ink.SetShaderParameter("ink", ShadowInk.A * tree.Modulate.A);
+                ink.SetShaderParameter("ink", ShadowInk.A * tree.Shown);
                 ink.SetShaderParameter("swap", tree.Swap);
             }
         }

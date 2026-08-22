@@ -386,7 +386,7 @@ public sealed partial class WoodBench : Node2D
     {
         if (_fire is null || _grove is null)
             return "no board";
-        (int burning, int burnt) = _grove.Ablaze();
+        (int burning, int burnt, int sooted) = _grove.Ablaze();
         // Which species are standing, and not only how many props: the cell is
         // one of each, so a kind that found no spot it fits is the failure this
         // bench is most likely to have - and a count of four says nothing about
@@ -404,7 +404,7 @@ public sealed partial class WoodBench : Node2D
                     .OrderBy(t => t.Species)
                     .Select(t => _props.NameOf(t.Species)))));
         return $"{kinds}\n"
-               + $"fire {_fire.Scorched}c/{burning}t/{burnt}ash\n"
+               + $"fire {_fire.Scorched}c/{burning}t/{burnt}ash/{sooted}soot\n"
                + "middle click the cell to set it alight\n"
                + "middle drag pans, wheel zooms, R resets, F12 shoots";
     }

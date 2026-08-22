@@ -151,6 +151,34 @@ namespace TankSpriteTest;
 /// whole map goes up, which is a grass fire wearing a wood's name. So the wood
 /// carries the front and the undergrowth burns where the front already is.
 /// </param>
+/// <param name="Consumed">Whether the fire takes it away entirely, rather than
+/// leaving something standing.
+///
+/// <b>A tier and not a family, on <paramref name="Carries"/>'s evidence.</b> A
+/// tree leaves a snag and a bush leaves nothing, and both are vegetation - so
+/// this is the second thing about a bush its material cannot say. Two tiers of
+/// one family disagreeing is the whole argument for there being two levels.
+///
+/// <b>Declared and not read off the art, which is the mistake it would be
+/// easiest to make.</b> Bushes have no burnt picture today, so "has nothing to
+/// hand over to" and "is consumed" happen to name the same three folders - and
+/// they are different statements. A tree nobody has drawn a burnt state for yet
+/// keeps its shape, which is <c>EffectLayer.StandIn</c>'s rule and already
+/// written into <see cref="PropNode.Charred"/>; a bush goes whether or not
+/// somebody draws <c>bush_1_burnt.png</c> next week. Letting the picture answer
+/// it means the day that file lands, every bush on every board stops
+/// disappearing, and nothing says why.
+///
+/// <b>It fades over the rest of its own burn, so it is gone exactly when its
+/// flame is.</b> No window of its own: the fuel running out and the fire going
+/// out are one event, and a prop that vanished early would leave its own flame
+/// burning over bare ground - the flame quad hangs on the prop's transform. See
+/// <see cref="Wildfire.Coat.Spent"/> for the curve, which starts where the
+/// tree's handover starts and ends where the burn does.
+///
+/// <b>Meaningless without <see cref="PropFamily.Burns"/></b>, and false on the
+/// solid rows anyway: a thing that is not fuel is never used up, so there is no
+/// pair of answers here to drift apart.</param>
 /// <param name="Salt">Base for every hash this tier takes, so no two tiers share
 /// a decision. Sharing them puts a bush at the foot of every trunk - the same
 /// failure the per-decision salts inside a tier already avoid, one level up.
@@ -166,6 +194,7 @@ public sealed record PropTier(
     double Stands,
     bool Fades,
     bool Carries,
+    bool Consumed,
     int Salt,
     PropFamily Family)
 {
@@ -212,8 +241,8 @@ public sealed record PropTier(
             // rendered so far byte for byte where it was.
             [Trees] = new(Trees, Detail: 8.0, Step: 30.0, Clearing: 1.0,
                           MindsBorder: true, Inset: 0.0, UnderTanks: false,
-                          Stands: 1.00, Fades: true, Carries: true, Salt: 0,
-                          Family: Vegetation),
+                          Stands: 1.00, Fades: true, Carries: true,
+                          Consumed: false, Salt: 0, Family: Vegetation),
 
             // Waist-high: it hides a tank's belt and not its turret, so it sorts
             // and it fades. No clearing, because a hull pushes through scrub
@@ -224,10 +253,15 @@ public sealed record PropTier(
             // so H*cos(e) is 0.63 of what is drawn.
             // Vegetation, so it sways and it burns - and it still does not
             // carry, which is the one thing about a bush the family cannot say.
+            // Nor is there anything left of it: dry brush in a wood fire is fuel
+            // and goes, where a trunk chars and stands. That is the second thing
+            // about a bush its material cannot say, and the two together are
+            // what a tier is for.
             [Bushes] = new(Bushes, Detail: PropSet.Detail, Step: 18.0,
                            Clearing: 0.0, MindsBorder: true, Inset: 0.12,
                            UnderTanks: true, Stands: 0.65, Fades: true,
-                           Carries: false, Salt: 100_003, Family: Vegetation),
+                           Carries: false, Consumed: true, Salt: 100_003,
+                           Family: Vegetation),
 
             // Neither sways nor burns, and that is now the family saying so
             // rather than this row - the whole difference between a rock and a
@@ -238,10 +272,15 @@ public sealed record PropTier(
             // in a ring. And the least of any tier that stands at all - a stone
             // is roughly twice as wide as it is high, and the far half of it is
             // lying on the same ground as the near.
+            // Not consumed either, and that one is free rather than chosen: it
+            // is not fuel, so there is nothing to use up. Written out because a
+            // row of named arguments with a hole in it is a row somebody has to
+            // go and look up.
             [Rocks] = new(Rocks, Detail: PropSet.Detail, Step: 22.0,
                           Clearing: 0.0, MindsBorder: true, Inset: 0.12,
                           UnderTanks: true, Stands: 0.45, Fades: false,
-                          Carries: false, Salt: 200_003, Family: Solid),
+                          Carries: false, Consumed: false, Salt: 200_003,
+                          Family: Solid),
 
             // The one tier that lets itself cross a seam, because that is what a
             // tuft does. See the class remarks for why there is no art here and
@@ -249,7 +288,8 @@ public sealed record PropTier(
             [Grass] = new(Grass, Detail: PropSet.Detail, Step: 10.0,
                           Clearing: 0.0, MindsBorder: false, Inset: 0.0,
                           UnderTanks: true, Stands: 0.35, Fades: false,
-                          Carries: false, Salt: 300_003, Family: Vegetation),
+                          Carries: false, Consumed: true, Salt: 300_003,
+                          Family: Vegetation),
 
             // And there is no wall row, though Solid/Wall is where wall art
             // goes. Grass has a row without art in order to make an argument
@@ -278,10 +318,16 @@ public sealed record PropTier(
     ///
     /// <b>Carrying stays false, which is the safe direction.</b> A tier nobody
     /// described does not get to spread a fire across the board.
+    ///
+    /// <b>And nor is it consumed, for the plainer version of the same
+    /// reason.</b> Art that appeared without anybody deciding how it behaves
+    /// should turn up on the board, not delete itself the first time something
+    /// near it catches. It chars and keeps its shape, which is the answer every
+    /// prop on this bench had before there was a flag.
     /// </summary>
     public static PropTier Unknown(PropFamily family, string name, int ordinal) =>
         new(name, PropSet.Detail, 20.0, 1.0, true, 0.10, false, 0.85, true,
-            false, 400_003 + ordinal * 7_919, family);
+            false, false, 400_003 + ordinal * 7_919, family);
 
     public static PropTier For(PropFamily family, string name, int ordinal) =>
         Known.TryGetValue(name, out PropTier? tier)

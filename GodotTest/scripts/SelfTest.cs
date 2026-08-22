@@ -7660,6 +7660,145 @@ public static class SelfTest
             "and it does not get to carry a fire either, which is the safe "
             + "direction for a tier nobody has described");
 
+        // --- what a fire leaves on something that is not fuel ---------------
+        //
+        // Both halves, because each on its own is a picture nobody wants. No soot
+        // at all is a bright boulder standing in permanently blackened ash, which
+        // is the same announcement a charring boulder would be from the other
+        // end; as much soot as charcoal is the charring boulder itself.
+        Check("a fire marks what it cannot burn, and marks it less deeply",
+            vegetation.Soot >= 0.999f
+            && solid.Soot > 0.05f && solid.Soot < vegetation.Soot,
+            $"vegetation {vegetation.Soot:F2}, solid {solid.Soot:F2} - at zero a "
+            + "stone comes out of a burnt cell cleaner than the ground it stands "
+            + "on, and at one it comes out charcoal");
+
+        // What "only the soot of it" means, asked of a coat with something in
+        // every field: the mark stays and the rest goes. The smoke is the one to
+        // watch - the dark column is what a fire pours out, and a boulder
+        // emitting one is a boulder alight, which is the reading the whole flag
+        // exists to rule out.
+        var burning = new Wildfire.Coat(0.7f, 0.9f, 0.6f, false, 0.3f, 0.4f);
+        Wildfire.Coat marked = burning.Sooted();
+        Check("a non-fuel coat is the mark and nothing else",
+            Mathf.Abs(marked.Char - burning.Char) < 0.0001f
+            && marked.Flame <= 0.0f && marked.Smoke <= 0.0f
+            && !marked.Burnt && marked.Swap <= 0.0f && marked.Spent <= 0.0f,
+            $"char {marked.Char:F2} flame {marked.Flame:F2} smoke "
+            + $"{marked.Smoke:F2} burnt {marked.Burnt} swap {marked.Swap:F2} "
+            + $"spent {marked.Spent:F2}");
+
+        // And the mark on the sprite, which is where the family's number gets
+        // used. Against the shader's own coal rather than a repeat of it here:
+        // the family's row predicts a stone at 1 - (1 - coal) * Soot of its own
+        // luminance, and a mirrored bound is the thing that goes stale.
+        float coal = Uniform(Stage3D.BarkShader, "coal");
+        var stone = new PropNode { Soot = solid.Soot, Coat = marked };
+        var trunk = new PropNode { Soot = vegetation.Soot, Coat = burning };
+        float left = 1.0f - (1.0f - coal) * stone.Scorch;
+        Check("so a stone comes out of a fire marked, and a trunk comes out charred",
+            stone.Scorch > 0.0f && stone.Scorch < trunk.Scorch
+            && left > 0.45f && left < 0.80f,
+            $"scorch {stone.Scorch:F2} against the wood's {trunk.Scorch:F2}, "
+            + $"which at coal {coal:F2} leaves it at {left:F3} of its own "
+            + "luminance - the ash it will be standing in is 0.55");
+
+        // --- and what a fire leaves of the fuel itself ----------------------
+        //
+        // The sibling of the carrying check above, and the same evidence for the
+        // same conclusion: a trunk leaves a snag and a bush leaves nothing, and
+        // both are vegetation. Two tiers of one family disagreeing is the whole
+        // reason a tier exists.
+        Check("scrub is taken away and a trunk is left standing",
+            PropTier.Known[PropTier.Trees].Family
+                == PropTier.Known[PropTier.Bushes].Family
+            && !PropTier.Known[PropTier.Trees].Consumed
+            && PropTier.Known[PropTier.Bushes].Consumed,
+            "dry brush in a wood fire is fuel and goes; a trunk chars and stands");
+
+        // Declared and not read off the art, which is the mistake it would be
+        // easiest to make: today the bushes have no burnt picture, so "nothing to
+        // hand over to" and "is consumed" name the same folders by accident. Both
+        // directions, because either alone passes on a version that derived it.
+        var drawn = new PropNode
+        {
+            Consumed = true, BurntArt = new PlaceholderTexture2D(),
+            Coat = new Wildfire.Coat(1.0f, 0.5f, 0.5f, false, 0.5f, 0.5f),
+        };
+        var plain = new PropNode
+        {
+            Consumed = false,
+            Coat = new Wildfire.Coat(1.0f, 0.5f, 0.5f, false, 0.5f, 0.5f),
+        };
+        Check("being taken away is declared, not read off whether the art exists",
+            drawn.Spent > 0.0f && plain.Spent <= 0.0f,
+            $"a kind with a burnt picture still goes if its tier says so "
+            + $"({drawn.Spent:F2}), and one without still stands if it does not "
+            + $"({plain.Spent:F2}) - let the picture answer it and the day "
+            + "bush_1_burnt.png lands, every bush on every board stops "
+            + "disappearing and nothing says why");
+
+        // How much of it is on screen: the reveal times the burn. Three readers
+        // take this, and a reader that took one factor fails visibly either way -
+        // the reveal alone leaves a bush's shadow lying on the ground after the
+        // bush has gone, and the burn alone puts a solid bush back under a tank.
+        var ghosted = new PropNode
+        {
+            Consumed = true, Modulate = new Color(1.0f, 1.0f, 1.0f, 0.35f),
+            Coat = new Wildfire.Coat(1.0f, 0.5f, 0.5f, false, 0.5f, 0.5f),
+        };
+        Check("what is on screen is the reveal times what the fire has left",
+            Mathf.Abs(ghosted.Shown - 0.35f * 0.5f) < 0.0001f
+            && ghosted.Shown < ghosted.Modulate.A
+            && ghosted.Shown < 1.0f - ghosted.Spent,
+            $"shown {ghosted.Shown:F3} against a reveal of "
+            + $"{ghosted.Modulate.A:F2} and {1.0f - ghosted.Spent:F2} left of it");
+
+        // The timing, over a real burn, and it is two statements rather than one
+        // window: the fuel running out and the fire going out are one event, so
+        // there must be no frame with a flame on a prop that has gone and none
+        // with the prop still there after its flame has.
+        var clip = new Wildfire { Field = field, Wooded = _ => true };
+        clip.Light(Vector2I.Zero);
+        var scrub = new PropNode { Consumed = true };
+        var snag = new PropNode();
+        bool hovering = false, lingering = false, early = true;
+        bool wentOut = false, scrubGone = false, snagStands = false;
+        for (int f = 0; f < 900; f++)
+        {
+            clip.Tick(1.0 / 60.0);
+            Wildfire.Coat coat = clip.Of(Vector2I.Zero, 0.0);
+            scrub.Coat = coat;
+            snag.Coat = coat;
+            if (scrub.Spent >= 1.0f && coat.Flame > 0.0f)
+                hovering = true;
+            if (coat.Burnt && scrub.Spent < 1.0f)
+                lingering = true;
+            if (coat.Char > 0.0f && coat.Char < 1.0f && scrub.Spent > 0.0f)
+                early = false;
+            if (coat.Burnt)
+            {
+                wentOut = true;
+                scrubGone = scrub.Shown <= 0.0f;
+                snagStands = snag.Shown >= 0.999f;
+            }
+        }
+        Check("scrub is gone exactly when its own flame is, and no sooner",
+            wentOut && !hovering && !lingering && early
+            && scrubGone && snagStands,
+            $"burnt out {wentOut}, flame over nothing {hovering}, left over "
+            + $"after the fire {lingering}, gone before the char finished "
+            + $"{!early}, scrub {scrub.Shown:F2} snag {snag.Shown:F2} - a prop "
+            + "that vanished early leaves its own flame burning over bare "
+            + "ground, because the flame quad hangs on the prop's transform");
+
+        // And all of it end to end on a sown board, which needs a board that has
+        // been sown - so it lives in Charring below, called from the one place in
+        // this file that already owns the planting. Everything above was asked of
+        // a coat held in a hand, and that is why it can be asked here: Burning
+        // runs before the grove's own section, and a re-plant this early turns
+        // three of that section's checks into checks over an empty list.
+
         // And the two quads over a burning tree: the smoke has to be the roomier
         // of the two, because it stands over the crown the flame licks through.
         Check("the smoke is given more room than the flame",
@@ -7683,6 +7822,64 @@ public static class SelfTest
                           System.Globalization.CultureInfo.InvariantCulture);
     }
 
+    /// <summary>
+    /// What a fire leaves of a board that has actually been sown: the fuel gone
+    /// or charred, the stone only marked, and the counts saying so.
+    ///
+    /// <b>Here because everything else about the burn can be asked of a coat held
+    /// in a hand, and this cannot.</b> The tier, the family,
+    /// <see cref="Grove.Smoulder"/> and <see cref="Grove.Ablaze"/> are four
+    /// separate pieces of wiring, and each of them is a place where the right
+    /// answer can be computed and handed to nobody.
+    ///
+    /// <b>Called from <see cref="Woods"/> rather than from <see cref="Burning"/>,
+    /// and the reason is an ordering trap worth knowing.</b> Whoever re-plants the
+    /// shared grove replaces the sowing the startup made, and three checks in the
+    /// grove's own section read that sowing without planting anything themselves.
+    /// Woods runs after them and already re-plants; Burning runs before them, so
+    /// the same code there turned three real failures into checks over an empty
+    /// list - which is the quietest way a suite can go green.
+    /// </summary>
+    private static void Charring(HexField field, Grove grove,
+                                 Action<string, bool, string> Check)
+    {
+        Wildfire? wasFire = grove.Fire;
+        try
+        {
+            var whole = new Wildfire { Field = field, Wooded = _ => true };
+            for (int q = 0; q < field.Columns; q++)
+            for (int r = 0; r < field.Rows; r++)
+                whole.Light(new Vector2I(q, r));
+            grove.Fire = whole;
+            // Long enough that every prop has caught and burnt out, stagger and
+            // all: the mark is finished and so is the fuel.
+            whole.Tick(whole.BurnFor + whole.CatchWithin + 1.0);
+            grove.Smoulder();
+            var fuel = grove.Standing.Where(t => t.Tier.Family.Burns).ToList();
+            var rock = grove.Standing.Where(t => !t.Tier.Family.Burns).ToList();
+            (int _, int ash, int soot) = grove.Ablaze();
+            bool eaten = fuel.Where(t => t.Consumed).All(t => t.Shown <= 0.0f);
+            bool stands = fuel.Where(t => !t.Consumed)
+                              .All(t => t.Shown >= 0.999f && t.Scorch >= 0.999f);
+            bool marks = rock.All(t => t.Shown >= 0.999f && t.Scorch > 0.0f
+                                       && t.Scorch < 0.999f);
+            Check("on a burnt-out board the fuel is gone or charred and the stone "
+                  + "is only marked",
+                fuel.Count > 0 && rock.Count > 0 && eaten && stands && marks
+                && ash == fuel.Count && soot == rock.Count,
+                $"{fuel.Count} fuel, {rock.Count} stone: consumed gone {eaten}, "
+                + $"husks standing {stands}, stone marked {marks}, counted {ash} "
+                + $"burnt and {soot} sooted - a stone counted as burnt is a "
+                + "boulder that went up, and one counted as nothing leaves the "
+                + "readout unable to say the fire was ever here");
+        }
+        finally
+        {
+            grove.Fire = wasFire;
+            grove.Smoulder();
+        }
+    }
+
     private static void Woods(HexField field, Grove? grove, double elevation,
                               Action<string, bool, string> Check)
     {
@@ -7701,6 +7898,12 @@ public static class SelfTest
         {
             field.Paint = TerrainSet.Forest;
             grove.Plant();
+
+            // What a fire leaves of a sown board, here rather than beside the rest
+            // of the fire's checks because it needs a wood on the ground and this
+            // method is the one that already forces one.
+            Charring(field, grove, Check);
+
             // Only what still sorts by its foot. The dressing tiers were taken out
             // of the sort on purpose - see PropTier.UnderTanks - so a projection
             // rule asked of them is a rule asked of the wrong thing.

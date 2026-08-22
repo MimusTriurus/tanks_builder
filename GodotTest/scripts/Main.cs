@@ -360,8 +360,8 @@ public sealed partial class Main : Node2D
 	/// grove rather than the fire: the fire knows which cells are alight, and
 	/// which trees that comes to is the wood's own answer - a cell of scrub burns
 	/// without a trunk on it.</summary>
-	private (int Burning, int Burnt) Ablaze() =>
-		_grove?.Ablaze() ?? (0, 0);
+	private (int Burning, int Burnt, int Sooted) Ablaze() =>
+		_grove?.Ablaze() ?? (0, 0, 0);
 
 	/// <summary>
 	/// Whether each cell of the stage wears an outline at its rim. See
@@ -5509,7 +5509,8 @@ public sealed partial class Main : Node2D
 			_fire is null ? "no board"
 			: _fire.Scorched == 0 ? "nothing has burnt"
 			: $"{_fire.Scorched} cells burnt, {_fire.Alight} alight, "
-			  + $"{Ablaze().Burning} trees in flame, {Ablaze().Burnt} burnt out");
+			  + $"{Ablaze().Burning} in flame, {Ablaze().Burnt} burnt out, "
+			  + $"{Ablaze().Sooted} only sooted");
 		// Read live rather than at the moment a tank enters, unlike the shell's
 		// calibre: this is not something a round carries, it is how the wood is
 		// being drawn right now, and dragging it while a tank sits in the trees
@@ -6069,6 +6070,7 @@ public sealed partial class Main : Node2D
 					 + (_fire is null ? "  fire -"
 						: $"  fire {_fire.Scorched}c/{_fire.Alight}lit"
 						  + $"/{Ablaze().Burning}t/{Ablaze().Burnt}ash"
+						  + $"/{Ablaze().Sooted}soot"
 						  + (_fire.Enabled ? "" : "!off"))
 					 // The blast: fronts still crossing and the hardest-shoved
 					 // crown - which counts the hulls pushing through as well,
