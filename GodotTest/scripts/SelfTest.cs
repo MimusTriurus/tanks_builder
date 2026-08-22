@@ -2569,6 +2569,40 @@ public static class SelfTest
                 grove.Budget[kind] = rows;
             grove.Plant();
 
+            // --- the specimen cell, and which tiers take part in it ----------
+            //
+            // Specimen is the wood bench's picture rather than a board's, so it
+            // is asserted here and looked at there. Both halves, because each is
+            // the other's failure wearing a disguise: a Specimen that quietly
+            // dropped the undergrowth reads exactly like a bench cell whose
+            // bushes found no spot they fit, and a TreesOnly that did nothing
+            // reads exactly like a flag that never arrived.
+            //
+            // Against what the board budgets rather than against every tier that
+            // loaded: a tier no ground carries is a table's decision, and the
+            // sower is not the thing to fail for it.
+            var offered = new HashSet<PropTier>();
+            for (int q = 0; q < field.Columns; q++)
+            for (int r = 0; r < field.Rows; r++)
+                foreach ((PropTier t, int _, int _) in grove.Growth(new Vector2I(q, r)))
+                    offered.Add(t);
+            grove.Specimen = true;
+            grove.Plant();
+            var catalogued = new HashSet<PropTier>(grove.Standing.Select(p => p.Tier));
+            grove.TreesOnly = true;
+            grove.Plant();
+            var wooded2 = new HashSet<PropTier>(grove.Standing.Select(p => p.Tier));
+            grove.Specimen = false;
+            grove.TreesOnly = false;
+            grove.Plant();
+            Check("one of each species means one of each tier, unless asked otherwise",
+                catalogued.SetEquals(offered)
+                && wooded2.Count == 1
+                && wooded2.Single().Name == PropTier.Trees,
+                $"catalogue stood {catalogued.Count} of the {offered.Count} tiers "
+                + $"this board offers, trees-only stood "
+                + string.Join(", ", wooded2.Select(t => t.Name)));
+
             // Same rule as a vehicle's, in the same space - that is what lets a
             // tree and a tank sort against each other at all.
             // Of what still sorts. The dressing gave the sort up rather than got

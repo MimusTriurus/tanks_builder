@@ -47,9 +47,16 @@ namespace TankSpriteTest;
 /// <b>One of each kind, not a wood</b> - see <see cref="Grove.Specimen"/>. In a
 /// wood the species come off a hash, so which of the four is standing anywhere is
 /// a fact about that cell and not about the folder, and the one that got no roll
-/// is the one nobody looks at. Here all four are up at once and the undergrowth
-/// is not, because bushes and stones on a cell about trunks are trunks harder to
-/// see.
+/// is the one nobody looks at. Here every species of every tier is up at once:
+/// four trunks ringing the cell, with the bushes and stones in the middle they
+/// leave, because the wood keeps the whole clearing free and nothing below it
+/// keeps any. <c>--trees-only</c> is the old picture, trunks and nothing under
+/// them.
+///
+/// <b>That is also what makes the family split visible.</b> Set the cell alight
+/// and the bush chars and swaps to its burnt art while the stone does neither -
+/// one frame, one cell, both answers. On the harness the two are a roll apart on
+/// a board of four hundred props.
 ///
 /// <b>No tanks, and that costs one measurement and one effect.</b>
 /// <see cref="Grove.KeepOut"/> is set from the widest hull in the harness and
@@ -112,6 +119,8 @@ public sealed partial class WoodBench : Node2D
     /// than a short window, so the frame the state arrives on is the frame the
     /// picture arrives on and nothing is left to round.</summary>
     private bool _hardSwap;
+
+    private bool _treesOnly;
 
     /// <summary>Wear the tank's own rendered fire instead of the procedural one -
     /// <see cref="Stage3D.TankFire"/>. Off by default because it is the probe and
@@ -188,6 +197,8 @@ public sealed partial class WoodBench : Node2D
                 _zoomAt = Mathf.Clamp(zoom, 0.25f, 8.0f);
                 i++;
             }
+            else if (args[i] == "--trees-only")
+                _treesOnly = true;
             else if (args[i] == "--hard-swap")
                 _hardSwap = true;
             else if (args[i] == "--tank-fire")
@@ -268,8 +279,10 @@ public sealed partial class WoodBench : Node2D
         {
             Field = _field, Props = props, Origin = Vector2.Zero,
             Enabled = props.Any,
-            // One of each tree instead of a wood - the whole point of the cell.
+            // One of each species instead of a wood - the whole point of the
+            // cell. Every tier by default; --trees-only narrows it to the wood.
             Specimen = true,
+            TreesOnly = _treesOnly,
         };
         AddChild(_grove);
         // After the wood, because what can catch is what is standing - see
@@ -378,11 +391,18 @@ public sealed partial class WoodBench : Node2D
         // one of each, so a kind that found no spot it fits is the failure this
         // bench is most likely to have - and a count of four says nothing about
         // which four.
+        // A line per tier rather than one list, and by tier rather than by
+        // species: with every tier up it is ten names, and the question the
+        // bench is asked - did some kind find no spot it fits - is asked of one
+        // tier at a time. A missing tier says so by its line being absent.
         string kinds = _props is null || _grove.Planted == 0
             ? "nothing planted"
-            : string.Join(", ", _grove.Standing
-                .OrderBy(t => t.Species)
-                .Select(t => _props.NameOf(t.Species)));
+            : string.Join("\n", _grove.Standing
+                .GroupBy(t => t.Tier)
+                .OrderByDescending(g => g.Max(t => t.RiseImage))
+                .Select(g => $"{g.Key.Name} " + string.Join(", ", g
+                    .OrderBy(t => t.Species)
+                    .Select(t => _props.NameOf(t.Species)))));
         return $"{kinds}\n"
                + $"fire {_fire.Scorched}c/{burning}t/{burnt}ash\n"
                + "middle click the cell to set it alight\n"

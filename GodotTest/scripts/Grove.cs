@@ -179,7 +179,7 @@ public sealed partial class Grove : Node2D
     public bool ClearFront;
 
     /// <summary>
-    /// Plant one of each kind of tree instead of a wood, and nothing else.
+    /// Plant one of each species instead of a wood - the catalogue, not a cell.
     ///
     /// A specimen cell rather than a forest cell: what stands on it is exactly
     /// what the set holds, one apiece, so a look at it is a look at every tree
@@ -188,12 +188,24 @@ public sealed partial class Grove : Node2D
     /// on any cell is a fact about that cell rather than about the folder, and
     /// the one that got no roll is the one nobody ever looks at.
     ///
-    /// <b>The undergrowth goes with the wood, not with the trees.</b> Bushes and
-    /// stones are what a forest floor is made of, and on a cell whose whole
-    /// subject is four trunks they are four trunks harder to see. So this sows
-    /// the tree tier and skips the rest rather than laying out a catalogue of
-    /// everything - that is a different picture, and nothing stops anybody
-    /// asking for it later.
+    /// <b>Every tier takes part, and it used to be only the wood.</b> The
+    /// argument for skipping the undergrowth was that bushes and stones on a
+    /// cell whose subject is four trunks are four trunks harder to see, and it
+    /// is true as far as it goes - but the same reasoning applies to a bush
+    /// nobody has ever seen at all, and the undergrowth was in exactly the
+    /// position the hashed species were: loaded, sown on the harness by a roll,
+    /// and never looked at on its own. One of each means one of each.
+    ///
+    /// <b>And the two levels turn out to read better together than apart.</b>
+    /// The wood keeps the whole clearing free, so it rings the cell; nothing
+    /// below it keeps any, so the undergrowth fills the middle the trunks leave
+    /// - a forest floor with a ring of trunks round it, on one cell, from the
+    /// rules each tier already had. It also puts a stone and a bush in the same
+    /// fire, which is the one place the family split can be seen doing its work:
+    /// the bush chars and swaps, the stone does neither.
+    ///
+    /// <see cref="TreesOnly"/> is the old picture, kept because it was a real
+    /// argument and because the trunks are still what the bench is named for.
     ///
     /// <b>Every rule that cannot bend still holds</b> - the keep-out, the border,
     /// the room a base needs. What is set aside is the two that are preferences:
@@ -202,6 +214,20 @@ public sealed partial class Grove : Node2D
     /// count is one of each.
     /// </summary>
     public bool Specimen;
+
+    /// <summary>Narrow <see cref="Specimen"/> back to the wood: one of each
+    /// tree and nothing under them.
+    ///
+    /// The picture the specimen cell was originally, and its argument holds -
+    /// undergrowth on a cell about trunks is trunks harder to see. It is a
+    /// switch rather than the default because the catalogue is what somebody
+    /// asked the bench for, and because a picture reachable only by editing a
+    /// file is a picture nobody compares against.
+    ///
+    /// Means nothing unless <see cref="Specimen"/> is set: a wood is sown from
+    /// the budget, and the budget already says which tiers a cell carries.
+    /// </summary>
+    public bool TreesOnly;
 
     public bool Enabled = true;
 
@@ -498,10 +524,11 @@ public sealed partial class Grove : Node2D
         // can see it, because "later" there means "in another cell".
         foreach (PropTier tier in Props.Tiers)
         {
-            // One of each tree means the trees and nothing under them - see
-            // Specimen. Skipped here rather than inside the sowing, so a tier
-            // nobody plants costs no pass over the board either.
-            if (Specimen && tier.Name != PropTier.Trees)
+            // One of each species means every tier, unless the wood is asked
+            // for on its own - see Specimen and TreesOnly. Skipped here rather
+            // than inside the sowing, so a tier nobody plants costs no pass over
+            // the board either.
+            if (Specimen && TreesOnly && tier.Name != PropTier.Trees)
                 continue;
             float scale = DrawScale(tier);
             int first = _planted.Count;
