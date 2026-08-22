@@ -1161,6 +1161,13 @@ public sealed partial class HexField : Node2D
     /// painting meeting soil at a visible seam.
     ///
     /// So it is a kind here, where kinds are chosen, and a plate elsewhere.
+    ///
+    /// <b>An authored board sits under a named plate and over the hash.</b> The
+    /// dropdown is an A/B tool and <c>--terrain plain</c> has to mean one plate
+    /// everywhere, so it wins; the hash is what a board that said nothing gets,
+    /// so it loses. A map that named its woods and got as many again from the
+    /// hash has not named anything - measured on the first render: thirty two
+    /// wooded cells drawn and trees over half the board.
     /// </summary>
     public string KindAt(Vector2I cell)
     {
@@ -1170,11 +1177,53 @@ public sealed partial class HexField : Node2D
             return TerrainSet.Forest;
         if (Terrain.Has(Paint))
             return Paint;
+        if (_kinds is not null && InBounds(cell))
+        {
+            string? want = _kinds[cell.Y * Columns + cell.X];
+            if (want == TerrainSet.Forest && Trees)
+                return TerrainSet.Forest;
+            if (want is not null && want != TerrainSet.Forest
+                && Terrain.Has(want))
+                return want;
+        }
         // In the mix it is one kind among the plates, drawn by the same hash, so
         // "how much forest" is not a second dial arguing with the terrain list.
-        return Trees && Terrain.MixedAt(cell, TerrainSet.Forest) is var mixed
+        // Except on an authored board, where the hash may vary the dirt and may
+        // not add trees: see above.
+        return _kinds is null && Trees
+               && Terrain.MixedAt(cell, TerrainSet.Forest) is var mixed
             ? mixed : Terrain.MixedAt(cell);
     }
+
+    /// <summary>
+    /// What each cell is made of, one entry per cell, null to leave it to the
+    /// mix - or null altogether for a board that authored nothing.
+    ///
+    /// <b>A fourth grid beside the levels, the ramps and the flood, and for
+    /// their reason.</b> <see cref="KindAt"/> hashes, which is the right answer
+    /// for a board that wants variety and the wrong one for a board that wants a
+    /// shape - the same argument by which <see cref="ReliefBench"/> refuses to
+    /// hash its heights.
+    ///
+    /// <b>An array of nothing is not an authored board.</b> The bench hands in
+    /// one entry per cell and every one of them null, and read as authorship
+    /// that is a board declaring it has no woods - which took the trees off the
+    /// bench and turned three known grove failures into seven.
+    /// </summary>
+    public void SetKinds(string?[]? kinds)
+    {
+        _kinds = kinds is not null && kinds.Length == Columns * Rows
+                 && Array.Exists(kinds, k => k is not null)
+            ? kinds : null;
+        QueueRedraw();
+    }
+
+    /// <summary>Whether a board authored its kinds. Read by nothing that draws;
+    /// it is here so the self test can tell a board that said nothing from one
+    /// that said soil everywhere.</summary>
+    public bool HasKinds => _kinds is not null;
+
+    private string?[]? _kinds;
 
     /// <summary>Whether the forest kind is on offer at all. False with no props
     /// loaded and under --no-forest, and then the mix is plates only - a board

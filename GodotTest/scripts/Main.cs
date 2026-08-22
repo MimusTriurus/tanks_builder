@@ -187,6 +187,12 @@ public sealed partial class Main : Node2D
 	/// </summary>
 	private string _paint = TerrainSet.Default;
 
+	/// <summary>Whether --terrain was given. The board carries a paint of its own
+	/// (see <see cref="BoardMap.Paint"/>) and it has to lose to an explicit flag
+	/// while winning over the built-in default - which the value alone cannot tell
+	/// apart from a flag, because that default is a real plate name.</summary>
+	private bool _paintAsked;
+
 	/// <summary>Whether the board has height on it. See --relief.</summary>
 	private bool _relief;
 
@@ -614,7 +620,26 @@ public sealed partial class Main : Node2D
 	/// out to the flat, round, and back in - which is what makes each of the six
 	/// its own test rather than one lap of the hill.
 	/// </summary>
-	private static readonly string[] Relief =
+	/// <summary>
+	/// Which board this session is on. See <see cref="BoardMap"/>.
+	///
+	/// <b>An export rather than only a flag, and that is what makes a scene of
+	/// another map cost four lines.</b> A Godot scene can set an exported
+	/// property, so <c>Abbey.tscn</c> is this same node with this string changed -
+	/// no second script, and every mechanism the harness owns comes with it.
+	/// <c>--map</c> still overrides, because a flag is the more specific
+	/// statement: a screenshot taken with one has to mean what it says whatever
+	/// scene it was taken from.
+	/// </summary>
+	[Export] public string Map = "bench";
+
+	/// <summary>The board itself, resolved once before the field is built. Every
+	/// height, flood, kind and home comes off this - the grids below are the
+	/// bench's own, and they stay where they are because the self test and
+	/// <see cref="Relief3D"/> read them through the three decoders.</summary>
+	private BoardMap _map = BoardMap.Bench;
+
+	public static readonly string[] Relief =
 	{
 		"..............",
 		"..............",
@@ -633,7 +658,7 @@ public sealed partial class Main : Node2D
 	/// they are <c>Step((11,3), h)</c> for each of the six edge headings, and their
 	/// entry cells are one more step of the same heading. Both had to land on the
 	/// board, which is what set the width at fourteen columns.</summary>
-	private static readonly string[] Ramps =
+	public static readonly string[] Ramps =
 	{
 		"..............",
 		"..............",
@@ -694,7 +719,7 @@ public sealed partial class Main : Node2D
 	/// open ground - no ramp under it to refuse and no step between them to be a
 	/// waterfall.
 	/// </summary>
-	private static readonly string[] Water =
+	public static readonly string[] Water =
 	{
 		"..............",
 		"..............",
@@ -785,7 +810,7 @@ public sealed partial class Main : Node2D
 	/// meeting the top are all things a tank on the summit says at a glance and an
 	/// empty summit does not. R puts it back there rather than into the line, which
 	/// is what makes it a home and not a start.</summary>
-	private static readonly Vector2I[] HomeCells =
+	public static readonly Vector2I[] HomeCells =
 		{ new(11, 3), new(4, HomeRow), new(6, HomeRow) };
 
 	private Vector2I _cell
@@ -1124,6 +1149,13 @@ public sealed partial class Main : Node2D
 	private bool _captureAsked;
 	private int _frames;
 	private bool _selfTest;
+
+	/// <summary>Print the board's audit and quit - see
+	/// <see cref="BoardMap.Audit"/>. Answered before anything is built, because
+	/// what it reports is the map and a map that will not load cannot build a
+	/// scene to report from.</summary>
+	private bool _mapReport;
+
 	private Vector2I? _driveTo;
 	// Prints one line of state per frame and quits. Picking a frame to
 	// screenshot by arithmetic does not work - the pivot length depends on
@@ -1489,7 +1521,10 @@ public sealed partial class Main : Node2D
 			// is the whole reason a paint exists, and it must not need a hand on
 			// the mouse - the argument every other A/B flag here makes.
 			else if (userArgs[i] == "--terrain" && i + 1 < userArgs.Length)
+			{
 				_paint = userArgs[++i];
+				_paintAsked = true;
+			}
 			else if (userArgs[i] == "--no-ruts")
 				_rutsEnabled = false;
 			// Height on the board. A flag rather than the default, because
@@ -1499,6 +1534,18 @@ public sealed partial class Main : Node2D
 			// was relief - see HexField.HasRelief.
 			else if (userArgs[i] == "--relief")
 				_relief = true;
+			// Which board. Overrides the scene's export, for the reason every
+			// other flag overrides panel.json: a capture taken with a flag has to
+			// mean what it says whatever it was launched from.
+			else if (userArgs[i] == "--map" && i + 1 < userArgs.Length)
+				Map = userArgs[++i];
+			// The board's own report, printed and gone - the authoring tool for
+			// a hand-drawn map. It is here rather than in the self test because
+			// what it is for is the round trip: it enumerates every cell that
+			// could carry a ramp, and a map is written by picking off that list.
+			// See BoardMap.Audit.
+			else if (userArgs[i] == "--map-report")
+				_mapReport = true;
 			// The A/B the ramps are judged by, and the reason it is a flag rather
 			// than only a panel row: a screenshot is the evidence, and taking it
 			// twice must not need an edit between the two. Off, every level
@@ -1705,6 +1752,52 @@ public sealed partial class Main : Node2D
 			}
 		}
 
+		// The board, before anything that stands on one. A map that will not load
+		// throws here, with the cell it disagrees with itself about - and that is
+		// worth more than a board that comes up plain, which is what a decoder
+		// that clipped would have given.
+		// A map that refuses to load has to be explained rather than thrown,
+		// but only to the tool whose whole job is explaining it: everywhere else
+		// a broken board is a crash, the same as a ragged row. Without this the
+		// authoring report dies before it can say a word, which is the one place
+		// that cannot afford to.
+		try
+		{
+			_map = BoardMap.ByName(Map);
+		}
+		catch (Exception e) when (_mapReport)
+		{
+			GD.Print($"map {Map}: REFUSED {e.Message}");
+			GetTree().Quit();
+			return;
+		}
+		// The board's own paint and its own answer about height, both losing to a
+		// flag and winning over the built-in default. Neither can be inferred from
+		// the value already sitting there: the default paint is a real plate name
+		// and the default height is off, so a map that needs either has to say so.
+		if (!_paintAsked)
+			_paint = _map.Paint;
+		if (_map.Height)
+		{
+			_relief = true;
+			_stage3d = true;
+		}
+		GD.Print($"board {_map.Name}: {_map.Columns} x {_map.Rows}, "
+				 + string.Join(", ", _map.Tally()
+					 .Where(t => t.Count > 0)
+					 .Select(t => $"{t.Count} {t.What}"))
+				 + $", paint {_paint}" + (_map.Height ? ", height" : ""));
+
+		// The authoring report, and nothing else this run: what it is about is
+		// the map, so a scene built around it would only be in the way.
+		if (_mapReport)
+		{
+			foreach (string line in _map.Audit())
+				GD.Print(line);
+			GetTree().Quit();
+			return;
+		}
+
 		// A capture is evidence, so it gets no panel unless one is asked for.
 		if ((_capturePath is not null || _traceFrames > 0) && !_showPanel)
 			_noPanel = true;
@@ -1772,19 +1865,26 @@ public sealed partial class Main : Node2D
 			_paint = TerrainSet.Mixed;
 		}
 
-		_field = new HexField { Terrain = _terrain, Paint = _paint, Trees = _trees };
+		_field = new HexField
+		{
+			Terrain = _terrain, Paint = _paint, Trees = _trees,
+			Columns = _map.Columns, Rows = _map.Rows, Plot = _map.Plot,
+		};
+		// Before the heights and the flood, because those two are the only things
+		// on the board with guards and neither of them asks what a cell is made
+		// of - so a kind that is wrong is wrong on its own and says so on screen.
+		_field.SetKinds(_map.Kinds);
 		if (_grade >= 0.0)
 			_field.StepGrade = _grade;
 		if (_depth >= 0.0)
 			_field.WaterDepth = _depth;
 		if (_relief)
-			_field.SetRelief(ReliefMap(_field.Columns, _field.Rows),
-							 Ramped ? RampMask(_field.Columns, _field.Rows) : null);
+			_field.SetRelief(_map.Levels, Ramped ? _map.Ramps : null);
 		// After the relief and never before it: the water's guards are asked about
 		// levels and ramps, so water laid on a board that has not got its heights
 		// yet is water judged against a board that does not exist.
 		if (Watered)
-			_field.SetWater(WaterMask(_field.Columns, _field.Rows));
+			_field.SetWater(_map.Water);
 		// After the mask, because the cells it keeps a state for are the field's
 		// list and that list is settled by SetWater.
 		_sea = new Swell { Field = _field, Enabled = _seaReacts };
@@ -1841,7 +1941,7 @@ public sealed partial class Main : Node2D
 				Atlas = _atlases[tag],
 				Sprite = sprite,
 				Profile = MovementProfile.For(tag),
-				HomeCell = HomeCells[Math.Min(i, HomeCells.Length - 1)],
+				HomeCell = _map.Homes[Math.Min(i, _map.Homes.Count - 1)],
 			};
 			vehicle.Cell = vehicle.HomeCell;
 			// The ground that gets to stand in front of this one. A child of the
@@ -3639,8 +3739,7 @@ public sealed partial class Main : Node2D
 	{
 		if (_field is null || !_relief || Ramped == _field.HasRamps)
 			return;
-		_field.SetRelief(ReliefMap(_field.Columns, _field.Rows),
-						 Ramped ? RampMask(_field.Columns, _field.Rows) : null);
+		_field.SetRelief(_map.Levels, Ramped ? _map.Ramps : null);
 		Reflood();
 		Settle();
 	}
@@ -3653,7 +3752,7 @@ public sealed partial class Main : Node2D
 	private void Reflood()
 	{
 		if (_field is not null && _field.HasWater)
-			_field.SetWater(WaterMask(_field.Columns, _field.Rows));
+			_field.SetWater(_map.Water);
 	}
 
 	/// <summary>Put the water on the board or take it off. <see cref="Settle"/>
@@ -3675,7 +3774,7 @@ public sealed partial class Main : Node2D
 	{
 		if (_field is null || Watered == _field.HasWater)
 			return;
-		_field.SetWater(Watered ? WaterMask(_field.Columns, _field.Rows) : null);
+		_field.SetWater(Watered ? _map.Water : null);
 		Settle();
 	}
 
@@ -3741,9 +3840,8 @@ public sealed partial class Main : Node2D
 		// capture would show a tank standing where it started.
 		if (on == _field.HasRelief)
 			return;
-		_field.SetRelief(on ? ReliefMap(_field.Columns, _field.Rows) : null,
-						 on && Ramped ? RampMask(_field.Columns, _field.Rows)
-									  : null);
+		_field.SetRelief(on ? _map.Levels : null,
+						 on && Ramped ? _map.Ramps : null);
 		Reflood();
 		Settle();
 	}

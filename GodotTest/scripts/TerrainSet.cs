@@ -69,6 +69,23 @@ public sealed class TerrainSet
     /// </summary>
     public const string Forest = "forest";
 
+    /// <summary>
+    /// What a rise is drawn on, when there is art for it.
+    ///
+    /// <b>Two independent statements make a hill, and this is the second
+    /// one.</b> A cell being a level up is the whole of what a hill does - the
+    /// walls, the ramp, the climb - and it needs no art at all. Rougher ground on
+    /// top is what a hill looks like, and it comes free with the file: the ride
+    /// is measured off the picture's own grain (<see cref="RideOf"/>), so
+    /// exporting this plate makes a rise ride rough without a line of code.
+    ///
+    /// <b>It is not on disk today</b> - only <c>soil_hill.psd</c> is - and that
+    /// is why <see cref="HexField.KindAt"/> falls through when a named kind did
+    /// not load rather than drawing a blank. A map that asked for a plate nobody
+    /// exported has to come up as ground, not as a hole.
+    /// </summary>
+    public const string Rise = "soil_hill";
+
     /// <summary>What a board comes up as. A kind rather than the mix, because
     /// the mix is two kinds until somebody draws a third and it reads as two
     /// biomes rather than as one ground with variety in it. Falls back to the

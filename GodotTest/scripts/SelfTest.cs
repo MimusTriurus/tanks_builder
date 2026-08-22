@@ -10943,5 +10943,242 @@ public static class SelfTest
         Check("and no cell ever changes places with another over it",
             shift < gap, $"height moves a cell {shift:F1}px of depth against "
                          + $"{gap:F1}px between the closest two");
+
+        // --- the authored boards ------------------------------------------
+        //
+        // Run here because a map is data and nothing on the board it describes
+        // has to exist to judge it - levels, ramp headings, the flood guards and
+        // reachability are all grid arithmetic on a probe field. So the map that
+        // no scene in this session opened is still checked, which is the point:
+        // --map-report is the authoring tool and is run by hand, and an edit made
+        // three months from now will be judged by this instead.
+        GD.Print("the authored boards");
+        foreach (string name in BoardMap.Names)
+        {
+            BoardMap map;
+            try
+            {
+                map = BoardMap.ByName(name);
+            }
+            catch (Exception e)
+            {
+                Check($"{name} loads at all", false, e.Message);
+                continue;
+            }
+
+            var probe = new HexField
+            {
+                Columns = map.Columns, Rows = map.Rows, Plot = map.Plot,
+            };
+            try
+            {
+                // The field's own guards, in the order it demands: heights, then
+                // the ramps derived off them, then the flood judged against both.
+                string refused = "";
+                try
+                {
+                    probe.SetRelief(map.Levels, map.Ramps);
+                    if (map.Water.Any(w => w))
+                        probe.SetWater(map.Water);
+                }
+                catch (Exception e)
+                {
+                    refused = e.Message;
+                }
+                Check($"{name}: every level change goes through a legal ramp",
+                    refused.Length == 0, refused);
+                if (refused.Length > 0)
+                    continue;
+
+                // The check the field does not make. A ramp is entered along its
+                // axis only and the level it reaches at the low end is its own,
+                // so a ramp whose low axis neighbour is off the board, on another
+                // level or another ramp can only be entered from the top and left
+                // the same way - a slope on the hillside leading back to it.
+                // Nothing throws and nothing on screen says so.
+                var stumps = new List<string>();
+                var onRock = new List<string>();
+                for (int r = 0; r < map.Rows; r++)
+                for (int q = 0; q < map.Columns; q++)
+                {
+                    var cell = new Vector2I(q, r);
+                    int up = probe.RampHeading(cell);
+                    if (up < 0)
+                        continue;
+                    Vector2I foot = HexField.Step(cell, HexField.Reverse(up));
+                    if (!probe.InBounds(foot) || probe.RampHeading(foot) >= 0
+                        || probe.LevelAt(foot) != probe.LevelAt(cell))
+                        stumps.Add($"({q},{r})");
+                    if (map.IsCliff(HexField.Step(cell, up)))
+                        onRock.Add($"({q},{r})");
+                }
+                Check($"{name}: no ramp is a dead end at its own foot",
+                    stumps.Count == 0, string.Join(" ", stumps));
+                Check($"{name}: no ramp hands away a rock",
+                    onRock.Count == 0, string.Join(" ", onRock));
+
+                // Reachability, and it is only a question because the rock is
+                // declared: a valley cut off by accident and a rise meant to be
+                // unclimbable are the same arithmetic, and the letter is what
+                // tells them apart. Both halves are asserted - a map where
+                // everything is reachable has no rocks in it, and one where the
+                // rocks are climbable has no cliffs.
+                foreach (Vector2I home in map.Homes)
+                {
+                    // Not "on the datum", which was the first draft and was
+                    // wrong about a board it had no business judging: the bench
+                    // parks its light on the rosette's hill on purpose, a level
+                    // up, because a hill with six approaches is worth having a
+                    // tank on. What a home has to be is somewhere with one
+                    // surface height to stand at and a way off it.
+                    Check($"{name}: home ({home.X},{home.Y}) is somewhere a tank "
+                          + "can park",
+                        map.OnBoard(home) && !map.IsCliff(home)
+                        && probe.RampHeading(home) < 0
+                        && !map.Water[map.At(home)],
+                        (map.OnBoard(home) ? "" : "off the board")
+                        + (map.IsCliff(home) ? "on a rock" : "")
+                        + (probe.RampHeading(home) >= 0 ? "on a ramp" : "")
+                        + (map.OnBoard(home) && map.Water[map.At(home)]
+                            ? "in the water" : ""));
+
+                    var seen = new HashSet<Vector2I> { home };
+                    var queue = new Queue<Vector2I>();
+                    queue.Enqueue(home);
+                    while (queue.Count > 0)
+                    {
+                        Vector2I at = queue.Dequeue();
+                        foreach (int h in HexField.EdgeHeadings)
+                            if (probe.Passable(at, h)
+                                && seen.Add(HexField.Step(at, h)))
+                                queue.Enqueue(HexField.Step(at, h));
+                    }
+
+                    var stranded = new List<string>();
+                    var climbed = new List<string>();
+                    for (int r = 0; r < map.Rows; r++)
+                    for (int q = 0; q < map.Columns; q++)
+                    {
+                        var cell = new Vector2I(q, r);
+                        if (!map.OnBoard(cell))
+                            continue;
+                        if (map.IsCliff(cell) && seen.Contains(cell))
+                            climbed.Add($"({q},{r})");
+                        else if (!map.IsCliff(cell) && !seen.Contains(cell))
+                            stranded.Add($"({q},{r})");
+                    }
+                    Check($"{name}: everything but the rocks can be reached from "
+                          + $"({home.X},{home.Y})",
+                        stranded.Count == 0,
+                        $"{stranded.Count} stranded: "
+                        + string.Join(" ", stranded.Take(20)));
+                    Check($"{name}: and no rock can be, from ({home.X},{home.Y})",
+                        climbed.Count == 0,
+                        $"{climbed.Count} climbable: "
+                        + string.Join(" ", climbed.Take(20)));
+                }
+
+                // Water finds its level, so a flat cell at a surface's own
+                // height beside it is under it. SetWater refuses this, which
+                // means the check above already caught it - what this adds is
+                // the closure: how much would be under water, not where it gets
+                // in. A board naming one wrong cell in a wide basin is refused
+                // for one pair and has to be redrawn for twenty.
+                IReadOnlyList<Vector2I> flood = map.Flood();
+                Check($"{name}: nothing dry stands at a water surface's own "
+                      + "height",
+                    flood.Count == 0,
+                    $"{flood.Count} under water: "
+                    + string.Join(" ", flood.Take(20)
+                        .Select(c => $"({c.X},{c.Y})")));
+
+                // And the exemption is load-bearing rather than decorative: a
+                // shore is a ramp that runs into the water, so every board with
+                // water on it has one, and without the exemption every one of
+                // them is refused. Named because it reads as an omission -
+                // "water beside dry land" is exactly what a beach is.
+                var shores = new List<string>();
+                for (int r = 0; r < map.Rows; r++)
+                for (int q = 0; q < map.Columns; q++)
+                {
+                    var cell = new Vector2I(q, r);
+                    if (!map.OnBoard(cell) || probe.RampHeading(cell) < 0)
+                        continue;
+                    foreach (int h in HexField.EdgeHeadings)
+                    {
+                        Vector2I next = HexField.Step(cell, h);
+                        if (probe.InBounds(next) && map.Water[map.At(next)]
+                            && probe.LevelAt(next) == probe.LevelAt(cell))
+                            shores.Add($"({q},{r})");
+                    }
+                }
+                if (map.Water.Any(w => w))
+                    Check($"{name}: its shore is a ramp running into the water",
+                        shores.Count > 0,
+                        "no ramp touches the water at its own level, so the "
+                        + "board has no beach and the exemption is untested");
+
+                // A board that authored its kinds and comes up on a named plate
+                // has its kinds shadowed by it - see BoardMap.Paint, which exists
+                // because that happened and cost every tree on the map. Silent:
+                // the board draws, the plate is a real plate, and the woods are
+                // simply not there.
+                bool authored = map.Kinds.Any(k => k is not null);
+                Check($"{name}: {(authored ? "authored kinds come up on the mix"
+                                           : "a board with no kinds names a plate")}",
+                    authored
+                        ? map.Paint == TerrainSet.Mixed
+                        : map.Paint != TerrainSet.Mixed,
+                    $"paint is {map.Paint}");
+            }
+            finally
+            {
+                probe.Free();
+            }
+        }
+
+        // Sea level, both halves, on a board built for it: a column of three
+        // cells, plain on top and a level below it one water cell and one dry
+        // cell between them. The two runs differ by a single bool, so neither
+        // can pass for the wrong reason - flat, the middle cell is a hole in a
+        // lake and floods; as a ramp it is a beach and dams, and the cell above
+        // it stays dry because it is a level up.
+        //
+        // Built rather than read off the shipped boards, because both of them
+        // obey the rule and a guard nothing ever trips is a guard whose state
+        // nobody knows.
+        for (int pass = 0; pass < 2; pass++)
+        {
+            bool beach = pass == 0;
+            IReadOnlyList<Vector2I> under = BoardMap.Flood(
+                1, 3, new[] { -1, -1, 0 }, new[] { false, beach, false },
+                new[] { true, false, false }, null);
+            Check(beach
+                    ? "a ramp running into the water is a shore, not a hole"
+                    : "and flat, the same cell is a hole in a lake",
+                beach
+                    ? under.Count == 0
+                    : under.Count == 1 && under[0] == new Vector2I(0, 1),
+                beach
+                    ? $"{under.Count} cells flooded through a beach"
+                    : $"{under.Count} flooded, wanted just the dry middle");
+        }
+
+        // The bench board is the one nothing may change, and this is the
+        // assertion rather than the argument: BoardMap decodes the same three
+        // grids that Main's three decoders read, so the two have to agree cell
+        // for cell. They are what the self test and Relief3D still run on.
+        BoardMap bench = BoardMap.Bench;
+        int[] levels = Main.ReliefMap(bench.Columns, bench.Rows);
+        bool[] ramps = Main.RampMask(bench.Columns, bench.Rows);
+        bool[] water = Main.WaterMask(bench.Columns, bench.Rows);
+        Check("the bench board is the board it always was",
+            bench.Levels.SequenceEqual(levels)
+            && bench.Ramps.SequenceEqual(ramps)
+            && bench.Water.SequenceEqual(water)
+            && bench.Plot is null
+            && bench.Kinds.All(k => k is null)
+            && bench.Homes.SequenceEqual(Main.HomeCells),
+            "the map and the decoders disagree");
     }
 }
