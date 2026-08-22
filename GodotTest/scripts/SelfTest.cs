@@ -2642,6 +2642,13 @@ public static class SelfTest
                     .Select(t => t.Name))
                 + " keeps none of the keep-out and still sorts by its foot");
 
+            // Banded first, because the band is a state a tank puts a prop in
+            // rather than a constant it is planted with - see Grove.Reveal. What
+            // is asserted is unchanged: while it is in the band it is under
+            // everything that stands, and the check above is what says which
+            // tiers are entitled to be there at all.
+            var hulls = new HashSet<Vector2I>(grove.Standing.Select(p => p.Cell));
+            grove.Reveal(hulls, 1.0 / 60.0);
             Check("the dressing draws under every tree and every tank",
                 grove.Standing.Where(p => p.Tier.UnderTanks)
                      .All(p => p.ZIndex == Grove.DressZ)
@@ -2650,6 +2657,7 @@ public static class SelfTest
                 && vehicles.All(v => v.Sprite.ZIndex > Grove.DressZ),
                 $"band at {Grove.DressZ}, "
                 + $"{grove.Standing.Count(p => p.Tier.UnderTanks)} props in it");
+            grove.Reveal(new HashSet<Vector2I>(), 10.0);
 
             Check("and over the marks pressed into the ground",
                 Grove.DressZ > TrackMarks.MarksZ
@@ -2726,6 +2734,50 @@ public static class SelfTest
                 $"{grove.Standing.Count(p => !p.Fades && p.Modulate.A < 0.999f)} "
                 + "that could hide nothing went translucent");
             grove.Reveal(new HashSet<Vector2I>(), 10.0);
+
+            // --- and the other half of what a tank on the cell does -------
+            //
+            // The dressing band. It was a tier constant, so a bush was under
+            // every trunk on every board for good - measured on the wood bench,
+            // a bush standing 10.7 ground units nearer the camera than the trunk
+            // beside it and drawn under it. The band gave up sorting against a
+            // hull, so it is off while there is no hull.
+            //
+            // Three parts, and the middle one is the whole point: without it a
+            // Reveal that simply never banded anything would pass both ends.
+            var undergrowth = grove.Standing.Where(p => p.Tier.UnderTanks).ToList();
+            var uprights = grove.Standing.Where(p => !p.Tier.UnderTanks).ToList();
+            grove.Reveal(new HashSet<Vector2I>(), 1.0 / 60.0);
+            bool freeByFeet = undergrowth.All(
+                p => !p.Dressed && p.ZIndex == Mathf.RoundToInt(p.Depth));
+            grove.Reveal(everywhere, 1.0 / 60.0);
+            bool sunkUnderHulls = undergrowth.All(
+                p => p.Dressed && p.ZIndex == Grove.DressZ);
+            bool treesNeverSink = uprights.All(
+                p => !p.Dressed && p.ZIndex == Mathf.RoundToInt(p.Depth));
+            grove.Reveal(new HashSet<Vector2I>(), 10.0);
+            Check("undergrowth sorts by its feet until a tank stands on its cell",
+                undergrowth.Count > 0 && uprights.Count > 0
+                && freeByFeet && sunkUnderHulls && treesNeverSink,
+                $"{undergrowth.Count} dressing props, {uprights.Count} standing: "
+                + $"by feet when clear {freeByFeet}, banded under hulls "
+                + $"{sunkUnderHulls}, and the wood never banded {treesNeverSink}");
+
+            // And the stage reads the same flag rather than the tier, because a
+            // priority beats depth: a second copy of this decision over there is
+            // a board where the two layers disagree about which is in front.
+            PropNode probe = undergrowth[0];
+            probe.Dressed = false;
+            int loose = Stage3D.RungFor(probe);
+            probe.Dressed = true;
+            int banded = Stage3D.RungFor(probe);
+            probe.Dressed = false;
+            Check("and the stage takes its rung from that flag, not from the tier",
+                Stage3D.DressOrder < Stage3D.StandOrder
+                && loose == Stage3D.StandOrder && banded == Stage3D.DressOrder,
+                $"unbanded sits at {loose}, banded at {banded} - a rung that did "
+                + "not move is a board where the two layers disagree on which "
+                + "prop is in front, because a priority beats depth");
 
             // --- and the same wood, drawn by the stage --------------------
             //

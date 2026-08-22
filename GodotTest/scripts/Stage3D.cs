@@ -3807,6 +3807,12 @@ void fragment() {{
     /// tiers that gave up that sort because they stand where a tank parks; see
     /// <see cref="PropTier.UnderTanks"/>.
     ///
+    /// <b>Which rung a prop is on is a state, not a tier constant.</b> It gave up
+    /// the sort against a <i>hull</i>, so it gives it up while a hull is on its
+    /// ground and not otherwise - <see cref="Grove.Reveal"/> carries the whole
+    /// argument and what the change costs. Priority beats depth, so a constant
+    /// here is a bush under every trunk on the board for good.
+    ///
     /// <b>Added above rather than pushing the ground down.</b> Shifting the four
     /// rungs below would restate every one of their arguments in new numbers for
     /// no gain; a tank and a tree were never at a priority anybody chose, they
@@ -3815,6 +3821,13 @@ void fragment() {{
     public const int DressOrder = 0;
 
     public const int StandOrder = 1;
+
+    /// <summary>Which of the two rungs a prop is on this frame. One place,
+    /// because the rung is set twice - once as the billboard is built and again
+    /// every frame as the tanks move - and two copies of it is a board where a
+    /// prop is banded in one of them and not the other.</summary>
+    public static int RungFor(PropNode tree) =>
+        tree.Dressed ? DressOrder : StandOrder;
 
     /// <summary>
     /// The belt marks, as strips lying on the board.
@@ -4224,6 +4237,10 @@ void fragment() {{
                 // How far between its two pictures it is. The one thing about the
                 // pair that moves, which is why the maps beside it are set once.
                 bark.SetShaderParameter("swap", tree.Swap);
+                // Which rung, off the same flag the 2D z-index reads. A prop
+                // only sits in the dressing band while a hull is on its ground -
+                // see Grove.Reveal, and DressOrder for what the band is.
+                bark.RenderPriority = RungFor(tree);
             }
         }
         foreach ((PropNode tree, MeshInstance3D seat) in _seating)
@@ -4283,8 +4300,9 @@ void fragment() {{
                 // ZIndex stated. By its box it would be the middle of the crown,
                 // and a crown leans.
                 SortingUseAabbCenter = false,
-                MaterialOverride = Bark(tree,
-                    tree.Tier.UnderTanks ? DressOrder : StandOrder),
+                // Whichever rung it is on as it is built; the band moves with
+                // the tanks, so the loop above re-states it every frame.
+                MaterialOverride = Bark(tree, RungFor(tree)),
             };
             AddChild(stem);
             _standing[tree] = stem;

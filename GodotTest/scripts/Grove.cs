@@ -840,9 +840,10 @@ public sealed partial class Grove : Node2D
                 // by its foot. Depth above is filled in either way - the checks
                 // read it, the list is sorted by it, and inside the band it is
                 // still what settles two stones against each other.
-                ZIndex = tier.UnderTanks
-                    ? DressZ
-                    : Mathf.RoundToInt(Field.Depth(s.At.Y + lift, lift)),
+                // Off the tier alone at planting, which is where every
+                // board with no tank on it stays: the band is a tank's doing,
+                // and Reveal is what turns it on. See PropTier.UnderTanks.
+                ZIndex = Mathf.RoundToInt(Field.Depth(s.At.Y + lift, lift)),
                 // Hashed off where the tree stands rather than off its place in
                 // any list, so the wood sways the same way twice and a tree
                 // keeps its phase when the sowing around it changes. Its own
@@ -1481,6 +1482,38 @@ public sealed partial class Grove : Node2D
         return (burning, burnt);
     }
 
+    /// <summary>
+    /// What a tank standing on a prop's ground does to it: the prop ghosts, and
+    /// the tiers that gave up sorting sink into the dressing band.
+    ///
+    /// <b>Two consequences of one question, in one loop, on purpose.</b> Both
+    /// ask "is a hull on this prop's ground", and that predicate is not cheap to
+    /// be right about - <see cref="Main.Standing"/> steps a six-probe contact
+    /// patch in <i>flat</i> space and throws in the step the tank is headed for,
+    /// because the picker and the ground stop agreeing the moment a tank is a
+    /// level down. Asked twice it would be answered twice, and the two answers
+    /// would part company on the cell nobody checked.
+    ///
+    /// <b>The band is a tank's doing and nothing else's, which is what
+    /// <see cref="PropTier.UnderTanks"/> is named for and what it did not
+    /// do.</b> It was a constant fixed at planting, so every bush on the board
+    /// was under every trunk for good - and against a trunk the feet have a
+    /// perfectly good answer. Measured on the wood bench: a bush standing 10.7
+    /// ground units nearer the camera than the trunk beside it, drawn under it.
+    /// The coin toss the band exists for is a prop inside a <i>hull's</i>
+    /// footprint, and that only happens while a hull is there.
+    ///
+    /// <b>What it costs is a pop.</b> A bush in front of a trunk drops behind it
+    /// on the frame a tank rolls onto its cell, and comes back when the tank
+    /// leaves. It is paid on the frame where that ground is going under a hull
+    /// anyway, which is the cheapest frame there is to pay it on - and the
+    /// alternative was paying it on every frame of every board.
+    ///
+    /// <b>Not called means not banded, and that is the right default.</b> The
+    /// wood bench never calls this - nothing stands on its cell - so its
+    /// undergrowth sorts by its feet, which is what a cell with no tank on it
+    /// should look like.
+    /// </summary>
     public void Reveal(IReadOnlySet<Vector2I> occupied, double delta)
     {
         if (_planted.Count == 0)
@@ -1491,10 +1524,25 @@ public sealed partial class Grove : Node2D
                  : 1.0 - Math.Exp(-delta / FadeTime);
         foreach (PropNode tree in _planted)
         {
+            bool under = occupied.Contains(tree.Cell);
+
+            // Before the fade's early exit below, which skips a prop whose alpha
+            // has settled - and a settled alpha says nothing about whether a
+            // tank has just arrived.
+            bool dressed = tree.Tier.UnderTanks && under;
+            if (dressed != tree.Dressed)
+            {
+                tree.Dressed = dressed;
+                // The 2D statement of it. The 3D one is the same node's
+                // RenderPriority, set by Stage3D off the same flag - see
+                // Stage3D.DressOrder.
+                tree.ZIndex = dressed ? DressZ : Mathf.RoundToInt(tree.Depth);
+            }
+
             // Only what could have been in the way. A kerbstone going
             // translucent for a tank parked beside it is the ground admitting to
             // being a view of itself for no gain - nothing was hidden.
-            float want = tree.Fades && occupied.Contains(tree.Cell) ? Ghost : 1.0f;
+            float want = tree.Fades && under ? Ghost : 1.0f;
             float now = tree.Modulate.A;
             float next = (float)(now + (want - now) * k);
             if (Math.Abs(next - now) < 0.001f)
@@ -1647,6 +1695,12 @@ public sealed partial class PropNode : Node2D
     /// gust is the one thing on screen announcing that all of this is a shear on
     /// a sprite.</summary>
     public bool Sways = true;
+
+    /// <summary>Whether this prop is in the dressing band right now - under
+    /// everything that stands, its feet ignored. A tank on its cell puts it
+    /// there and nothing else does; see <see cref="Grove.Reveal"/> for why that
+    /// is a state and not the tier constant it used to be.</summary>
+    public bool Dressed;
 
     /// <summary>Whether it ghosts while a tank is on its cell. False on anything
     /// that cannot hide a tank - fading what was never in the way reads as the
