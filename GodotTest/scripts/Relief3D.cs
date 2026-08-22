@@ -60,7 +60,7 @@ namespace TankSpriteTest;
 /// Run it with the scene as the positional argument, leaving project.godot
 /// alone:
 ///
-///     Godot_v4.5.1-stable_mono_win64.exe --path GodotTest res://Relief3D.tscn
+///     Godot_v4.7.2-stable_mono_win64.exe --path GodotTest res://Relief3D.tscn
 ///
 /// Keys: A/D column, W/S row, Q/E turn, [ / ] grade, T flat board, C the check
 /// overlay, F12 a shot.

@@ -17,7 +17,7 @@ namespace TankSpriteTest;
 /// Run it with the scene as the positional argument, leaving project.godot
 /// alone:
 ///
-///     Godot_v4.5.1-stable_mono_win64.exe --path GodotTest res://Relief.tscn
+///     Godot_v4.7.2-stable_mono_win64.exe --path GodotTest res://Relief.tscn
 ///
 /// <b>Schematic on purpose.</b> Every face here is a flat polygon, so what is
 /// on screen is the geometry and only the geometry - the moment a hill is

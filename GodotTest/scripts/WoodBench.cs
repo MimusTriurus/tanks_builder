@@ -19,7 +19,7 @@ namespace TankSpriteTest;
 /// Run it with the scene as the positional argument, leaving project.godot
 /// alone:
 ///
-///     Godot_v4.5.1-stable_mono_win64.exe --path GodotTest res://Wood.tscn
+///     Godot_v4.7.2-stable_mono_win64.exe --path GodotTest res://Wood.tscn
 ///
 /// <b>Every moving part of it is the harness's own.</b> <see cref="Wildfire"/>
 /// holds the clocks, <see cref="Grove"/> reads them onto the trees,
