@@ -14,17 +14,31 @@ namespace TankSpriteTest;
 /// not fade when a tank drives onto its cell, and it wants a lattice a third of
 /// the spacing. None of that is expressible as a fifth tree.
 ///
-/// <b>Read off the subdirectory, not declared in a list.</b>
-/// <c>Images/Vegetation/Rock/*.png</c> is the rock tier; PNGs loose in the root
-/// are trees, which is what they have always been and what keeps every board
-/// rendered before this identical. A tier nobody drew art for costs nothing and
-/// is never mentioned - the counts in <see cref="Grove.Note"/> come off what
-/// loaded.
+/// <b>Read off the path, not declared in a list, and the path is exactly two
+/// deep.</b> <c>Images/Environment/Solid/Rock/*.png</c> is the rock tier of the
+/// solid family; the first element is a <see cref="PropFamily"/> and the second
+/// is the tier, and the pair is the key. A tier nobody drew art for costs
+/// nothing and is never mentioned - the counts in <see cref="Grove.Note"/> come
+/// off what loaded.
+///
+/// <b>Two and no deeper, because there is nothing a third level could be.</b>
+/// Below a tier is either a species, which is a file, or a state, which this
+/// project settled long ago as a word in the filename rather than a folder -
+/// <c>Tree_1_burnt.png</c>. And art loose in a family's root is not a tier at
+/// all and is not scanned: the family root holds folders, so the source
+/// documents can live there without becoming props.
+///
+/// <b>The two levels are siblings in the sowing, not a hierarchy.</b> Sowing
+/// order is measured height across every tier of every family, flat - the
+/// family takes no part in it. That is the sign it is a behaviour table and not
+/// a structure.
 ///
 /// <b>And an unknown subdirectory is named rather than refused or absorbed.</b>
 /// Absorbing it into the trees would put boulders in the canopy; refusing it
 /// silently is a folder of art that does not appear. It gets
-/// <see cref="Unknown"/>'s rules and says so in the note.
+/// <see cref="Unknown"/>'s numbers and says so in the note. An unknown
+/// <i>family</i> is refused instead, and <see cref="PropFamily.For"/> carries
+/// why the two differ.
 ///
 /// <b>Grass is missing from the defaults on purpose.</b> It is paint, not props:
 /// it sits under the tank and never in front of it, so the clearance rule has
@@ -36,8 +50,15 @@ namespace TankSpriteTest;
 /// machinery, and somebody who disagrees should be able to drop a folder in and
 /// look rather than edit this file.
 /// </summary>
-/// <param name="Name">The subdirectory, lowercased. What the budget table and
-/// the note call it.</param>
+/// <param name="Name">The path, lowercased, as <c>family/tier</c>. What the
+/// budget table and the note call it, and a key that cannot collide the way a
+/// bare folder name could: <c>Vegetation/Bush</c> and a future
+/// <c>Solid/Bush</c> are one word apart and would have overwritten each other
+/// in silence.</param>
+/// <param name="Family">What it is made of, and therefore whether it sways and
+/// whether it burns. Those two live there and not here - see
+/// <see cref="PropFamily"/> for why a tier is not allowed to contradict
+/// them.</param>
 /// <param name="Detail">How many times the on-screen scale this folder's art is
 /// drawn at. The one number about a prop that cannot be measured - it has no
 /// template frame to compare against, the way a terrain kind does - so it is
@@ -121,12 +142,6 @@ namespace TankSpriteTest;
 /// <param name="Fades">Whether it ghosts while a tank is on its cell. A tree
 /// hides a tank and a kerbstone does not, and fading what cannot hide anything
 /// reads as the ground going translucent.</param>
-/// <param name="Sways">Whether the wind, the blast and a passing hull move it.
-/// A rock that leaned in a gust would be the one thing on the board announcing
-/// that all of this is a shear on a sprite.</param>
-/// <param name="Burns">Whether it catches when its cell is alight. False on a
-/// rock, and that is the second thing a board can see about one - it neither
-/// sways nor burns.</param>
 /// <param name="Carries">Whether having one of these on a cell is what makes the
 /// cell able to catch and to pass the fire on.
 ///
@@ -150,22 +165,33 @@ public sealed record PropTier(
     bool UnderTanks,
     double Stands,
     bool Fades,
-    bool Sways,
-    bool Burns,
     bool Carries,
-    int Salt)
+    int Salt,
+    PropFamily Family)
 {
     /// <summary>The tier a PNG in the root of the props folder belongs to. Not a
     /// default so much as the arrangement that was there before tiers existed:
     /// every board rendered so far is a board of these.</summary>
-    public const string Trees = "tree";
+    public const string Trees = PropFamily.Vegetation + "/tree";
 
-    public const string Bushes = "bush";
-    public const string Rocks = "rock";
-    public const string Grass = "grass";
+    public const string Bushes = PropFamily.Vegetation + "/bush";
+    public const string Rocks = PropFamily.Solid + "/rock";
+    public const string Grass = PropFamily.Vegetation + "/grass";
+
+    // Resolved once and named here so the rows below read as a table. Declared
+    // above Known on purpose: static initialisers run in textual order, and a
+    // row asking for a family that has not been resolved yet gets null.
+    private static readonly PropFamily Vegetation =
+        PropFamily.Known[PropFamily.Vegetation];
+
+    private static readonly PropFamily Solid = PropFamily.Known[PropFamily.Solid];
 
     /// <summary>
-    /// The tiers whose rules are written down, by folder name.
+    /// The tiers whose rules are written down, by <c>family/tier</c> path.
+    ///
+    /// Written with named arguments rather than a row of bare literals: there
+    /// are eleven of them and four are booleans, so a positional row is a place
+    /// where two flags swap without a compiler ever noticing.
     ///
     /// Steps are the one number here that is a guess rather than a measurement,
     /// and they are guesses in a direction that is safe: a step too coarse comes
@@ -184,8 +210,10 @@ public sealed record PropTier(
             // px of depth in 139 of drawn height, so the share a measurement
             // would give is within rounding of the one that leaves every board
             // rendered so far byte for byte where it was.
-            [Trees] = new(Trees, 8.0, 30.0, 1.0, true, 0.0, false, 1.00, true, true,
-                          true, true, 0),
+            [Trees] = new(Trees, Detail: 8.0, Step: 30.0, Clearing: 1.0,
+                          MindsBorder: true, Inset: 0.0, UnderTanks: false,
+                          Stands: 1.00, Fades: true, Carries: true, Salt: 0,
+                          Family: Vegetation),
 
             // Waist-high: it hides a tank's belt and not its turret, so it sorts
             // and it fades. No clearing, because a hull pushes through scrub
@@ -194,24 +222,43 @@ public sealed record PropTier(
             // Eighteen across the whole hexagon rather than round its rim.
             // Two thirds of it stands: a bush is about as deep as it is tall,
             // so H*cos(e) is 0.63 of what is drawn.
-            [Bushes] = new(Bushes, PropSet.Detail, 18.0, 0.0, true, 0.12, true,
-                            0.65, true, true, true, false, 100_003),
+            // Vegetation, so it sways and it burns - and it still does not
+            // carry, which is the one thing about a bush the family cannot say.
+            [Bushes] = new(Bushes, Detail: PropSet.Detail, Step: 18.0,
+                           Clearing: 0.0, MindsBorder: true, Inset: 0.12,
+                           UnderTanks: true, Stands: 0.65, Fades: true,
+                           Carries: false, Salt: 100_003, Family: Vegetation),
 
-            // Does not sway - the whole difference between a rock and a bush the
-            // board can see. No clearing either, and that is a trade rather than
-            // a free choice: a tank can now park over rubble, which on art this
-            // low reads as rubble at its feet, and the alternative is every rock
-            // on the board standing in a ring. And the least of any tier that
-            // stands at all - a stone is roughly twice as wide as it is high,
-            // and the far half of it is lying on the same ground as the near.
-            [Rocks] = new(Rocks, PropSet.Detail, 22.0, 0.0, true, 0.12, true,
-                           0.45, false, false, false, false, 200_003),
+            // Neither sways nor burns, and that is now the family saying so
+            // rather than this row - the whole difference between a rock and a
+            // bush the board can see, said once for everything solid. No
+            // clearing, and that is a trade rather than a free choice: a tank
+            // can now park over rubble, which on art this low reads as rubble at
+            // its feet, and the alternative is every rock on the board standing
+            // in a ring. And the least of any tier that stands at all - a stone
+            // is roughly twice as wide as it is high, and the far half of it is
+            // lying on the same ground as the near.
+            [Rocks] = new(Rocks, Detail: PropSet.Detail, Step: 22.0,
+                          Clearing: 0.0, MindsBorder: true, Inset: 0.12,
+                          UnderTanks: true, Stands: 0.45, Fades: false,
+                          Carries: false, Salt: 200_003, Family: Solid),
 
             // The one tier that lets itself cross a seam, because that is what a
             // tuft does. See the class remarks for why there is no art here and
             // should not be.
-            [Grass] = new(Grass, PropSet.Detail, 10.0, 0.0, false, 0.0, true,
-                           0.35, false, true, true, false, 300_003),
+            [Grass] = new(Grass, Detail: PropSet.Detail, Step: 10.0,
+                          Clearing: 0.0, MindsBorder: false, Inset: 0.0,
+                          UnderTanks: true, Stands: 0.35, Fades: false,
+                          Carries: false, Salt: 300_003, Family: Vegetation),
+
+            // And there is no wall row, though Solid/Wall is where wall art
+            // goes. Grass has a row without art in order to make an argument
+            // about grass; a wall row would be eleven numbers nobody has seen a
+            // picture for, and Declared would then claim somebody chose them.
+            // Undeclared, it arrives as a ring round each cell and says so in
+            // the note, which is the prompt to write the row - and it arrives
+            // already not swaying and not burning, because of the folder it is
+            // in. That is the second level earning its keep.
         };
 
     /// <summary>
@@ -222,13 +269,24 @@ public sealed record PropTier(
     /// a tier that quietly opted out of them would break the board rather than
     /// look wrong on it. It will therefore come out as a ring round each cell,
     /// which is the visible sign that nobody has written its row yet.
+    ///
+    /// <b>It no longer guesses whether the thing sways or burns, and that is
+    /// what the family bought.</b> Both used to be true here, as the cautious
+    /// middle - and both are exactly wrong for a stone, so the caution was a
+    /// coin toss dressed as prudence. Now the folder it was dropped into
+    /// answers those two and only the numbers are guesses.
+    ///
+    /// <b>Carrying stays false, which is the safe direction.</b> A tier nobody
+    /// described does not get to spread a fire across the board.
     /// </summary>
-    public static PropTier Unknown(string name, int ordinal) =>
-        new(name, PropSet.Detail, 20.0, 1.0, true, 0.10, false, 0.85, true, true,
-            true, false, 400_003 + ordinal * 7_919);
+    public static PropTier Unknown(PropFamily family, string name, int ordinal) =>
+        new(name, PropSet.Detail, 20.0, 1.0, true, 0.10, false, 0.85, true,
+            false, 400_003 + ordinal * 7_919, family);
 
-    public static PropTier For(string name, int ordinal) =>
-        Known.TryGetValue(name, out PropTier? tier) ? tier : Unknown(name, ordinal);
+    public static PropTier For(PropFamily family, string name, int ordinal) =>
+        Known.TryGetValue(name, out PropTier? tier)
+            ? tier
+            : Unknown(family, name, ordinal);
 
     /// <summary>Whether this tier's rules were written down or inferred. The
     /// note says so: a folder running on <see cref="Unknown"/> is art that

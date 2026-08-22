@@ -2656,9 +2656,9 @@ public static class SelfTest
             // that went stale would leave a rock swaying and every check below
             // it agreeing, because they all read the same copy.
             Check("a prop carries its own tier's rules",
-                grove.Standing.All(p => p.Sways == p.Tier.Sways
+                grove.Standing.All(p => p.Sways == p.Tier.Family.Sways
                                         && p.Fades == p.Tier.Fades),
-                $"{grove.Standing.Count(p => p.Sways != p.Tier.Sways || p.Fades != p.Tier.Fades)}"
+                $"{grove.Standing.Count(p => p.Sways != p.Tier.Family.Sways || p.Fades != p.Tier.Fades)}"
                 + " of the planted disagree with the tier they were planted from");
 
             // Both halves, and the second is the one that keeps the first
@@ -2856,7 +2856,7 @@ public static class SelfTest
                 PropTier.Known.Values.All(t => t.Stands > 0.0 && t.Stands <= 1.0),
                 string.Join(", ", PropTier.Known.Values.Select(
                     t => $"{t.Name} {t.Stands:F2}"))
-                + $"; unknown {PropTier.Unknown("x", 0).Stands:F2}");
+                + $"; unknown {PropTier.Unknown(PropFamily.Known[PropFamily.Vegetation], "x", 0).Stands:F2}");
 
             // The whole of it, and it has to be: every board rendered before
             // there was a share was rendered at one, so anything else here is a
@@ -7509,16 +7509,70 @@ public static class SelfTest
 
         // A rock does not burn, and the flag says so rather than the arithmetic.
         Check("a rock does not burn and a tree carries the fire",
-            PropTier.Known[PropTier.Trees].Burns
+            PropTier.Known[PropTier.Trees].Family.Burns
             && PropTier.Known[PropTier.Trees].Carries
-            && !PropTier.Known[PropTier.Rocks].Burns
+            && !PropTier.Known[PropTier.Rocks].Family.Burns
             && !PropTier.Known[PropTier.Rocks].Carries,
             "a boulder charring is the one thing on the board announcing that all "
             + "of this is a tint on a sprite");
         Check("scrub burns where the front is and is not a way across a hexagon",
-            PropTier.Known[PropTier.Bushes].Burns
+            PropTier.Known[PropTier.Bushes].Family.Burns
             && !PropTier.Known[PropTier.Bushes].Carries,
             "made one, the fire walks the scatter on every cell of a mixed board");
+
+        PropFamily vegetation = PropFamily.Known[PropFamily.Vegetation];
+        PropFamily solid = PropFamily.Known[PropFamily.Solid];
+
+        // --- and which of the two levels answers which question -------------
+        //
+        // Swaying and burning are the family's, and the point of asserting it
+        // this way round rather than tier by tier is that it holds for tiers
+        // nobody has written a row for: the two flags no longer have a value of
+        // their own to get wrong. A hand that puts them back on PropTier will
+        // find the rows still say the right thing and this line still failing.
+        Check("what sways and what burns is the family's answer, for every tier",
+            PropTier.Known.Values.All(
+                t => t.Name.StartsWith(t.Family.Name + "/", StringComparison.Ordinal))
+            && vegetation.Sways && vegetation.Burns
+            && !solid.Sways && !solid.Burns,
+            $"vegetation sways {vegetation.Sways} burns {vegetation.Burns}, "
+            + $"solid sways {solid.Sways} burns {solid.Burns}; "
+            + string.Join(", ", PropTier.Known.Values.Select(
+                t => $"{t.Name} under {t.Family.Name}")));
+
+        // And carrying is not, which is the whole evidence there are two levels
+        // rather than one: a tree passes the fire across a hexagon and a bush
+        // does not, and both are vegetation. Were this derivable from the
+        // family, the tier would be a folder and nothing more.
+        Check("and carrying the front is not - two vegetation tiers disagree on it",
+            PropTier.Known[PropTier.Trees].Family == PropTier.Known[PropTier.Bushes].Family
+            && PropTier.Known[PropTier.Trees].Carries
+            && !PropTier.Known[PropTier.Bushes].Carries,
+            "if the family could answer this one too, there would be no reason "
+            + "for a tier to exist");
+
+        // The refusal, and it is the opposite of what an unknown tier gets: a
+        // tier without a row is missing numbers and loads, a family without one
+        // is missing behaviour and there is nothing to guess it from. Written
+        // as both halves, because a For() that returned some cautious default
+        // would pass the first on its own.
+        Check("a folder that is no known family is refused rather than guessed at",
+            PropFamily.For("rubbish") is null
+            && PropFamily.For(PropFamily.Solid) is not null,
+            "two bits are one line to write, which is cheaper than any wrong "
+            + "guess about them");
+
+        // And an undeclared tier under a known family arrives with the right
+        // answer to both for free. This is the failure the restructure was for:
+        // the old Unknown() guessed them, and its cautious middle - both true -
+        // is exactly backwards for anything solid.
+        Check("an undescribed folder under Solid neither sways nor burns",
+            !PropTier.Unknown(solid, PropFamily.Solid + "/debris", 9).Family.Sways
+            && !PropTier.Unknown(solid, PropFamily.Solid + "/debris", 9).Family.Burns
+            && !PropTier.Unknown(solid, PropFamily.Solid + "/debris", 9).Declared
+            && !PropTier.Unknown(solid, PropFamily.Solid + "/debris", 9).Carries,
+            "and it does not get to carry a fire either, which is the safe "
+            + "direction for a tier nobody has described");
 
         // And the two quads over a burning tree: the smoke has to be the roomier
         // of the two, because it stands over the crown the flame licks through.

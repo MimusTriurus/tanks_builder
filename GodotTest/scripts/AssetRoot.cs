@@ -1,4 +1,4 @@
-using System.IO;
+﻿using System.IO;
 using Godot;
 
 namespace TankSpriteTest;
@@ -48,8 +48,11 @@ internal static class AssetRoot
     /// is unchanged.</summary>
     internal static readonly string Terrains = Repo + "/Images/Terrains";
 
-    /// <summary>Trees, bushes and stones.</summary>
-    internal static readonly string Props = Repo + "/Images/Vegetation";
+    /// <summary>Everything that stands on a cell, filed as
+    /// <c>family/tier/*.png</c> - <c>Vegetation/Tree</c>, <c>Solid/Rock</c>. The
+    /// family says whether it sways and burns, the tier says everything else;
+    /// see <see cref="PropFamily"/>.</summary>
+    internal static readonly string Props = Repo + "/Images/Environment";
 
     /// <summary>The pond's drawn surface. Its own folder rather than a file in
     /// Terrains, because TerrainSet reads that folder as kinds of ground and a

@@ -140,6 +140,12 @@ public sealed class PropSet
     private readonly List<Prop> _props = new();
     private readonly List<PropTier> _tiers = new();
 
+    /// <summary>How many tiers have been offered so far, over the whole walk
+    /// rather than per family. It is the undeclared salt's only input, so it has
+    /// to be one running count: per family, the first tier of each would collide
+    /// with the first tier of every other.</summary>
+    private int _ordinal;
+
     public IReadOnlyList<string> Names => _props.Select(p => p.Name).ToList();
     public int Count => _props.Count;
     public bool Any => _props.Count > 0;
@@ -163,19 +169,31 @@ public sealed class PropSet
 
         var refused = new List<string>();
 
-        // The root first and by its own name, so a folder that predates tiers
-        // loads as the trees it has always been. Subdirectories after, in name
-        // order, so which ordinal an undeclared tier gets - and therefore its
-        // salt - does not depend on the filesystem's enumeration order.
-        set.Sow(root, PropTier.Trees, 0, refused);
-        var folders = Directory.GetDirectories(root)
-                               .Select(Path.GetFileName)
-                               .Where(n => !string.IsNullOrEmpty(n))
-                               .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
-                               .ToList();
-        for (int i = 0; i < folders.Count; i++)
-            set.Sow(Path.Combine(root, folders[i]!), folders[i]!.ToLowerInvariant(),
-                    i + 1, refused);
+        // Family then tier, name-ordered at both levels, so which ordinal an
+        // undeclared tier gets - and therefore its salt - does not depend on the
+        // filesystem's enumeration order.
+        //
+        // Nothing loose is scanned, at either level. A family holds folders, so
+        // the source documents can sit beside them without becoming props, and
+        // the root holds families. That is also what retired the old special
+        // case where PNGs in the root were trees: it was there because the trees
+        // predate tiers, and with the art moved into Vegetation/Tree there is
+        // nothing left for it to do.
+        foreach (string folder in Folders(root))
+        {
+            PropFamily? family = PropFamily.For(folder.ToLowerInvariant());
+            if (family is null)
+            {
+                // Refused, not absorbed and not given cautious defaults - see
+                // PropFamily.For. Loudly: every tier under it goes with it.
+                refused.Add($"{folder}/ is no family anyone has written a row for");
+                continue;
+            }
+            string home = Path.Combine(root, folder);
+            foreach (string t in Folders(home))
+                set.Sow(Path.Combine(home, t), family, t.ToLowerInvariant(),
+                        ++set._ordinal, refused);
+        }
 
         // Tallest first, measured. Ties go to the tier that loaded first, which
         // is the root's, so nothing about the existing wood depends on a
@@ -187,7 +205,7 @@ public sealed class PropSet
         });
 
         set.Note = set._props.Count == 0
-            ? $"no props in {root}"
+            ? $"nothing sown from {root}"
             : $"{set._props.Count} props in "
               + $"{set._tiers.Count} tier{(set._tiers.Count == 1 ? "" : "s")}: "
               + string.Join("; ", set._tiers.Select(t =>
@@ -213,11 +231,12 @@ public sealed class PropSet
     /// hands them over in name order.</b> <c>Tree_1_burnt.png</c> sorts right
     /// after <c>Tree_1.png</c> here and would not on a folder named differently,
     /// so the pairing is done by name and not by adjacency.</summary>
-    private void Sow(string folder, string tierName, int ordinal, List<string> refused)
+    private void Sow(string folder, PropFamily family, string tierName,
+                     int ordinal, List<string> refused)
     {
         if (!Directory.Exists(folder))
             return;
-        PropTier tier = PropTier.For(tierName, ordinal);
+        PropTier tier = PropTier.For(family, family.Name + "/" + tierName, ordinal);
 
         var read = new Dictionary<string, (Image Art, Rect2I Box)>();
         foreach (string path in Directory.GetFiles(folder, "*.png").OrderBy(p => p))
@@ -226,13 +245,13 @@ public sealed class PropSet
             Image? art = Image.LoadFromFile(path);
             if (art is null)
             {
-                refused.Add($"{tierName}/{name} unreadable");
+                refused.Add($"{tier.Name}/{name} unreadable");
                 continue;
             }
             Rect2I box = art.GetUsedRect();
             if (box.Size.X <= 0 || box.Size.Y <= 0)
             {
-                refused.Add($"{tierName}/{name} is empty");
+                refused.Add($"{tier.Name}/{name} is empty");
                 continue;
             }
             read[name] = (art, box);
@@ -248,7 +267,7 @@ public sealed class PropSet
                 // the one failure that looks exactly like art that did not load.
                 string live = name[..^BurntSuffix.Length];
                 if (!read.ContainsKey(live))
-                    refused.Add($"{tierName}/{name} has no {live}");
+                    refused.Add($"{tier.Name}/{name} has no {live}");
                 continue;
             }
             Coat? burnt = null;
@@ -260,6 +279,17 @@ public sealed class PropSet
         if (added)
             _tiers.Add(tier);
     }
+
+    /// <summary>One level of subdirectories, in name order. Both levels of the
+    /// walk go through here, so neither can quietly disagree with the other
+    /// about what order the filesystem is read in - which is the thing the
+    /// undeclared salts are pinned to.</summary>
+    private static IEnumerable<string> Folders(string of) =>
+        Directory.GetDirectories(of)
+                 .Select(Path.GetFileName)
+                 .Where(n => !string.IsNullOrEmpty(n))
+                 .Select(n => n!)
+                 .OrderBy(n => n, StringComparer.OrdinalIgnoreCase);
 
     private float Tallest(PropTier tier) =>
         _props.Where(p => p.Tier == tier).Select(p => p.Rise).DefaultIfEmpty(0.0f).Max();

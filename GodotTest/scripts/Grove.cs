@@ -805,7 +805,7 @@ public sealed partial class Grove : Node2D
                 // every frame: Blow, Rush, Brush and Reveal between them touch
                 // each prop four times a frame, and a dictionary lookup per
                 // touch buys nothing over two bools.
-                Sways = tier.Sways,
+                Sways = tier.Family.Sways,
                 Fades = tier.Fades,
                 Position = Origin + s.At,
                 Depth = Field.Depth(s.At.Y + lift, lift),
@@ -1426,7 +1426,7 @@ public sealed partial class Grove : Node2D
         foreach (PropNode prop in _planted)
         {
             Wildfire.Coat was = prop.Coat;
-            prop.Coat = Fire is null || !prop.Tier.Burns
+            prop.Coat = Fire is null || !prop.Tier.Family.Burns
                 ? Wildfire.Green
                 : Fire.Of(prop.Cell, Hash01(prop.Seed, prop.Species, 511_003));
             // The swap changes the picture, and in 2D that is a redraw. The stage

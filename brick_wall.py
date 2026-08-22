@@ -69,7 +69,7 @@ CONFIG = {
     # measures the fraction and sets this; 1.0 is the authored size.
     #
     # The number standing here is the one that fits a cell of R = 1 at 94%
-    # coverage, which is what `Scenes/WALL.blend` holds. It is written down
+    # coverage, which is what `Scenes/WALL_scene.blend` holds. It is written down
     # rather than left at 1.0 so that a plain `build()` reproduces the shipped
     # wall: a default that quietly rebuilds the prop 29% too big for its cell
     # is the kind of knob nobody remembers until a render comes out wrong.
