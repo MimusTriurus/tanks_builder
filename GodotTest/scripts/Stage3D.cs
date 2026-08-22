@@ -4534,10 +4534,43 @@ float ember_fbm(vec2 p) {
     /// overlap brightened and twenty-two elements melted into one bar. Composited in
     /// the shader and handed over premultiplied, the layer still adds exactly once.
     ///
-    /// <b>No stop in the ramp is near white</b>, and green and blue are held low the
-    /// whole way. The ramp is engine_fire's own, stop for stop: red saturating is
-    /// not the failure, green and blue coming up with it is, and a yellow stop
-    /// anywhere near the mass guarantees it.
+    /// <b>No stop in the ramp is near white</b>: red saturating is not the failure,
+    /// green and blue coming up with it is, and a yellow stop anywhere near the mass
+    /// guarantees it.
+    ///
+    /// <b>But the stops are the tank's rendered sprite, not engine_fire's config -
+    /// and copying the config was a whole factor of six wrong.</b> Those numbers are
+    /// linear, because Blender works in linear and the atlas is that ramp after the
+    /// view transform; this shader writes its ALBEDO into an sRGB framebuffer, where
+    /// blending happens in the encoded space. Measured, by grey-probing the flame at
+    /// 0.25 and 0.50: a grey albedo comes back grey to within 0.05%, so the add is in
+    /// the encoded space, and the same numbers read there are far darker in green and
+    /// blue than the sprite the eye is asked to match. Own contribution, integrated
+    /// in sRGB against a black-flame probe of the same frame: <b>(1, 0.061, 0.0002)
+    /// against the sprite's (1, 0.393, 0.110)</b> - a sixth of its green and none of
+    /// its blue, which is why the forest burned blood-red where the tank burns amber.
+    ///
+    /// So the stops carry the sprite's own hue instead, measured off
+    /// <c>fire_atlas.png</c>: the view transform flattens the whole tank ramp into
+    /// very nearly one colour - <b>(179, 69, 15)</b>, its hue moving only 0.373 to
+    /// 0.394 in green across the entire intensity range - so the ramp spans that
+    /// colour's own 2nd-to-98th percentile spread, G/R 0.50 down to 0.31 and B/R 0.25
+    /// down to 0.045, hot end to cool. Red is untouched stop for stop, so this is a
+    /// change of hue and nothing else: A/B over the burning bench moved 135518 px of
+    /// green and 31686 of blue and <b>zero pixels of red</b>. On screen at matched
+    /// red the core went from (148, 68, 52) to (148, 91, 53) against the burning
+    /// tank's own (191, 119, 72) - hue 0.459 to 0.615 against its 0.623.
+    ///
+    /// <b>What it costs is redness against pale ground, and it stays inside the
+    /// tank's own margin.</b> Median redness over the flame body 64.5 to 56.5, where
+    /// engine_fire's check calls 30 the floor and the tank's own atlas reports 60.3;
+    /// near-white pixels stay at zero. The guard turns out to have been cut for this
+    /// all along - it rejects G/R past 0.55 and B/R past 0.30, and the sprite's own
+    /// extremes are 0.506 and 0.247 - it had simply never been walked up to.
+    ///
+    /// <b>engine_fire's config is not the thing to edit here.</b> Its numbers are
+    /// right for Blender and they are what produces the sprite these stops are
+    /// matched to; moving them would move the target.
     ///
     /// <b>Sizes in tree heights, never in pixels</b>, the way engine_fire quotes
     /// everything in hull lengths - so one config fits four kinds of tree and
@@ -4615,9 +4648,12 @@ uniform float born_scatter = 1.05;
 // failure seen here: without it the licks melt into each other instead of keeping
 // a shape. The plume wants the opposite and has its rim nearly the body's colour,
 // because there shapes are the problem.
+//
+// Its hue moved with the ramp's and for the same reason, but less: it stays redder
+// and darker than the body, which is the whole of its job.
 uniform float rim_falloff = 1.15;
 uniform float rim_reach = 0.32;
-uniform vec3 rim_colour = vec3(0.35, 0.03, 0.01);
+uniform vec3 rim_colour = vec3(0.35, 0.088, 0.018);
 uniform float opacity = 0.72;
 // The section across one element, in three bands: a deep core, a bright shoulder,
 // and the dark lip at the very edge.
@@ -4666,25 +4702,27 @@ uniform vec3 ember_colour = vec3(1.00, 0.38, 0.08);
 
 FLAME_NOISE
 
-// engine_fire's ramp, stop for stop, strength in w. Nothing near white anywhere.
+// The tank sprite's own hue, hot end to cool, strength in w. NOT engine_fire's
+// config numbers: those are linear and this lands in an sRGB framebuffer - see the
+// note on FlameShader for the measurement and the factor of six.
 vec4 flame_ramp(float t) {
     vec3 c;
     float s;
     if (t < 0.08) {
         float f = t / 0.08;
-        c = mix(vec3(1.00, 0.50, 0.13), vec3(1.00, 0.26, 0.05), f);
+        c = mix(vec3(1.00, 0.50, 0.25), vec3(1.00, 0.455, 0.19), f);
         s = mix(1.00, 0.95, f);
     } else if (t < 0.22) {
         float f = (t - 0.08) / 0.14;
-        c = mix(vec3(1.00, 0.26, 0.05), vec3(1.00, 0.15, 0.03), f);
+        c = mix(vec3(1.00, 0.455, 0.19), vec3(1.00, 0.40, 0.10), f);
         s = mix(0.95, 0.92, f);
     } else if (t < 0.60) {
         float f = (t - 0.22) / 0.38;
-        c = mix(vec3(1.00, 0.15, 0.03), vec3(0.85, 0.09, 0.02), f);
+        c = mix(vec3(1.00, 0.40, 0.10), vec3(0.85, 0.298, 0.051), f);
         s = mix(0.92, 0.66, f);
     } else {
         float f = (t - 0.60) / 0.40;
-        c = mix(vec3(0.85, 0.09, 0.02), vec3(0.55, 0.04, 0.01), f);
+        c = mix(vec3(0.85, 0.298, 0.051), vec3(0.55, 0.171, 0.025), f);
         s = mix(0.66, 0.26, f);
     }
     return vec4(c, s);

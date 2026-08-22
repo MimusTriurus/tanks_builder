@@ -7232,6 +7232,7 @@ public static class SelfTest
         int after = ramp < 0 ? -1 : flame.IndexOf("\nfloat flame_life", ramp,
                                                  System.StringComparison.Ordinal);
         var pale = new System.Collections.Generic.List<string>();
+        var sooty = new System.Collections.Generic.List<string>();
         int stops = 0;
         for (int at = ramp; ramp >= 0 && after > ramp;)
         {
@@ -7249,6 +7250,14 @@ public static class SelfTest
                                    System.Globalization.CultureInfo.InvariantCulture);
             if (c[1] > 0.55f || c[2] > 0.30f || c[1] >= c[0])
                 pale.Add($"({c[0]:F2},{c[1]:F2},{c[2]:F2})");
+            // And the other way, which is the one a copying hand breaks: these stops
+            // are the tank sprite's rendered hue, not engine_fire's linear config,
+            // and the config read here is a sixth of the sprite's green. The
+            // near-white guard above passes either way - the config is *redder*, not
+            // paler - so nothing else would say a word.
+            if (c[1] / System.Math.Max(c[0], 1e-6f) < 0.28f
+                || c[2] / System.Math.Max(c[0], 1e-6f) < 0.02f)
+                sooty.Add($"({c[0]:F2},{c[1]:F2},{c[2]:F2})");
         }
 
         // The quad has to hold the fire, and the bounds that size it live in C#
@@ -7367,6 +7376,15 @@ public static class SelfTest
             + "middle, so a yellower shoulder still comes out darker and the eye "
             + "sees one dimming body - measured, and the lip has to be pulled in "
             + "close to the rim to leave room for the shoulder");
+
+        Check("and every stop carries the tank sprite's hue, not engine_fire's config",
+            stops >= 4 && sooty.Count == 0,
+            stops < 4 ? $"only {stops} stops found, so this checked nothing"
+                : $"{string.Join(" ", sooty)} - engine_fire's numbers are linear and "
+                  + "this shader's ALBEDO lands in an sRGB framebuffer, where the add "
+                  + "happens; read there they are a sixth of the sprite's green and "
+                  + "none of its blue, and the forest burns blood-red where the tank "
+                  + "burns amber");
 
         Check("and no stop in its ramp is anywhere near white",
             stops >= 4 && pale.Count == 0,
