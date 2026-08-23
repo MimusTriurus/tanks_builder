@@ -22,11 +22,15 @@ namespace TankSpriteTest;
 /// *different* wall: a different vertex count in the cut, a different number of
 /// draws from the generator, and 38 bricks where there had been 37.
 ///
-/// <b>It stands on one side of the cell and is as long as that side.</b> A wall is
+/// <b>It stands on the sides of the cell and is as long as they are.</b> A wall is
 /// a boundary, so the cell decides its length rather than merely bounding it - the
 /// run is the hexagon's side and the outer face is its apothem, both out of the
 /// one <c>coverage</c>, and what the recipe still decides is how many pieces that
-/// length is cut into. Three passes in order, and the order is the point:
+/// length is cut into. <see cref="Recipe.Sides"/> says how many sides it runs
+/// along: the courses are always laid as one straight chain in arc length and
+/// <see cref="Fit"/> folds them onto the boundary, so a three-sided wall is one
+/// wall that turns two corners rather than three walls standing near each other.
+/// Three passes in order, and the order is the point:
 /// <see cref="Lay"/> builds the masonry about the origin, <see cref="Fit"/> cuts
 /// and seats it, <see cref="Scatter"/> drops what fell off into the room that is
 /// left. The apron cannot come first, because until the wall is seated there is no
@@ -120,17 +124,44 @@ public static class WallKit
         public int Columns = 6;
         public int Courses = 8;
 
-        /// <summary>Two leaves. A single-leaf wall reads as a screen, and the
-        /// stretcher bond has nothing to tie into.
+        /// <summary>How many sides of the cell the wall runs along, 1 to 6.
         ///
-        /// <b><see cref="BackKeep"/> is 1, because a gap in the back leaf is a
+        /// <b>One run, folded, and never N walls placed side by side.</b> A
+        /// course is a one-dimensional thing - a row of slots at a pitch - so the
+        /// chain is laid straight, in arc length, and <see cref="Fit"/> bends it
+        /// onto the boundary. Laid as separate walls each side would carry its
+        /// own profile, and a ruin that steps down to one brick six times over
+        /// reads as six ruins rather than as one wall that lost its ends.
+        ///
+        /// <b>The fan is centred on the side the shot comes from</b>, so an odd
+        /// count puts a face square to the shooter and an even one puts a corner
+        /// there. Symmetric on purpose: the turntable then shows the same wall
+        /// from either hand, which a chain growing one way would not.
+        ///
+        /// Six closes the ring, and the two ends of the chain meet behind the
+        /// shooter - so the taper's breach lands at the back, which is the one
+        /// place a closed ring can afford one.</summary>
+        public int Sides = 1;
+
+        /// <summary>How thick, in leaves. <b>Thickness is a count and never a
+        /// length</b>, for the reason nothing here is a length: a leaf is a brick
+        /// on its bed, so a wall is one brick thick or two or three, and a number
+        /// between them is not a wall anybody laid.
+        ///
+        /// One leaf reads as a screen and has nothing for the stretcher bond to
+        /// tie into; two is the default the whole file was measured on. Every
+        /// leaf past the first is offset half a pitch from the one before it, so
+        /// each backs its neighbour's perpends - the bond that stopped this wall
+        /// being see-through when there were only two.
+        ///
+        /// <b><see cref="BackKeep"/> is 1, because a gap in a back leaf is a
         /// hole in the wall and not a weathered one.</b> It was 0.78, on the idea
         /// that a ruin has lost pieces from the inside too - which is true of a
         /// ruin and false of this picture: the camera sees the front, so a missing
         /// back brick is never read as a missing brick, only as light coming
         /// through the front leaf's joints. What a ruin loses where the eye can
         /// tell is on the outside, and that is the profile's job.</summary>
-        public bool BackLeaf = true;
+        public int Leaves = 2;
         public float BackKeep = 1.0f;
 
         /// <summary>How much of a course the profile takes off per step, as a
@@ -206,6 +237,14 @@ public static class WallKit
     {
         public List<Block> Blocks = new();
         public int Courses;
+        public int Sides = 1;
+        public int Leaves = 2;
+        /// <summary>End bricks cut back at a shared corner, and how deep the
+        /// worst cut went. Reported because a mitre is the one place this layout
+        /// removes material the recipe asked for: a corner that eats whole bricks
+        /// is a wall thicker than the cell can turn.</summary>
+        public int Mitred;
+        public float MitreCut;
         public float Overlap;         // worst interpenetration, fractions of R
         public string OverlapPair = "";
         public float Reach;           // worst hex factor; 1.0 is exactly the edge
@@ -231,6 +270,8 @@ public static class WallKit
 
         public string Note() =>
             $"{Blocks.Count} pieces, {Courses} courses, "
+            + $"{Sides} sides, {Leaves} leaves, "
+            + (Mitred > 0 ? $"mitred {Mitred} (worst {MitreCut:F3}), " : "")
             + $"{Size.X:F2}x{Size.Z:F2}x{Size.Y:F2} of a cell, "
             + $"reach {Reach:F3}, crowded {Crowded}, "
             + $"worst overlap {Overlap:+0.0000;-0.0000;0.0000}"
@@ -260,6 +301,17 @@ public static class WallKit
         Recipe r = recipe ?? new Recipe();
         var plan = new Plan();
         int seed = r.Seed;
+        int sides = Mathf.Clamp(r.Sides, 1, 6);
+        int leaves = Mathf.Clamp(r.Leaves, 1, 6);
+        plan.Sides = sides;
+        plan.Leaves = leaves;
+        // The whole chain, in columns. <b>The wall gets longer with the sides it
+        // runs along and the taper does not.</b> `Columns` is what one side is cut
+        // into, so a two-sided wall is twice as many slots - but the profile still
+        // eats `Columns - 1` of them off each end, which is what keeps the middle
+        // of a long wall at full height instead of grinding the whole thing down
+        // to a wedge. At one side this is the arithmetic that was already here.
+        int span = r.Columns * sides;
 
         // --- the profile -------------------------------------------------------
         // A stepped ruin is a run per course, and the run only ever shrinks. This
@@ -276,7 +328,7 @@ public static class WallKit
         int total = Mathf.Max(0, r.Columns - 1);
         int steps = Mathf.Max(1, r.Courses - 1);
         float lean = r.StepRight / Mathf.Max(r.StepLeft + r.StepRight, 1e-4f);
-        int left = 0, right = r.Columns - 1;
+        int left = 0, right = span - 1;
         var runs = new List<(int Left, int Right, int Notch)>();
         for (int c = 0; c < r.Courses && left <= right; c++)
         {
@@ -295,7 +347,7 @@ public static class WallKit
             int cutRight = Mathf.RoundToInt(gone * lean);
             // Monotone, because a course cannot be wider than the one below it.
             left = Mathf.Max(left, gone - cutRight);
-            right = Mathf.Min(right, r.Columns - 1 - cutRight);
+            right = Mathf.Min(right, span - 1 - cutRight);
         }
         plan.Courses = runs.Count;
 
@@ -311,18 +363,25 @@ public static class WallKit
             {
                 if (col == notch)
                     continue;
-                float x = (col - (r.Columns - 1) * 0.5f) * PitchX + shift;
-                plan.Blocks.Add(Course(seed, id++, r, x, c, 0.0f));
+                float x = (col - (span - 1) * 0.5f) * PitchX + shift;
                 // Half a brick across as well as behind, and this is the whole of
-                // why the wall was see-through. Laid at the same x, the two leaves
+                // why the wall was see-through. Laid at the same x, two leaves
                 // put their perpends in the same place, so every joint was a slot
                 // through the full thickness with the cavity between the leaves
                 // behind it - daylight, at every joint, on a wall that is two
-                // bricks thick. Offset, each leaf backs the other's joints, which
-                // is the bond a real two-leaf wall is built to and costs nothing.
-                if (r.BackLeaf && Roll(seed, id, 44) < r.BackKeep)
-                    plan.Blocks.Add(Course(seed, id++, r, x + PitchX * 0.5f, c,
-                                           -LeafGap(r)));
+                // bricks thick. Offset, each leaf backs the one in front of it,
+                // which is the bond a real wall is built to and costs nothing.
+                // Alternating rather than cumulative: three leaves want the
+                // middle one staggered and the back one square behind the front,
+                // which is the bond and not a staircase.
+                for (int k = 0; k < leaves; k++)
+                {
+                    if (k > 0 && Roll(seed, id, 44) >= r.BackKeep)
+                        continue;
+                    float bond = (k % 2 == 1) ? PitchX * 0.5f : 0.0f;
+                    plan.Blocks.Add(Course(seed, id++, r, x + bond, c,
+                                           -LeafGap(r) * k));
+                }
             }
         }
         Measure(plan);
@@ -351,16 +410,37 @@ public static class WallKit
     {
         Recipe r = recipe ?? new Recipe();
         int seed = r.Seed;
-        // The masonry's inner face, which is where the rubble starts.
-        float inner = float.MaxValue;
-        foreach (Block b in plan.Blocks)
+        int sides = Mathf.Clamp(plan.Sides, 1, 6);
+        // One band per side, in that side's own frame, and the pieces are dealt
+        // round the chain. A single band across a folded wall would be a band
+        // across whichever side happened to face +z, which is a heap in front of
+        // one third of a three-sided ruin.
+        var frames = new Basis[sides];
+        var faces = new float[sides];
+        for (int f = 0; f < sides; f++)
         {
-            if (b.Course < 0)
-                continue;
-            foreach (Vector3 c in Corners(b))
-                inner = Mathf.Min(inner, c.Z);
+            frames[f] = new Basis(Vector3.Up, Mathf.DegToRad(Fan(f, sides)));
+            Basis back = frames[f].Inverse();
+            float inner = float.MaxValue;
+            foreach (Block b in plan.Blocks)
+            {
+                if (b.Course < 0)
+                    continue;
+                foreach (Vector3 c in Corners(b))
+                {
+                    Vector3 q = back * c;
+                    // Its own kite only. Without this a side reads its
+                    // neighbours' bricks as its own inner face, which on a chain
+                    // is most of the cell, and the apron is laid in the middle of
+                    // the ring instead of at the foot of the wall.
+                    if (sides > 1 && Mathf.Abs(q.X) > q.Z / Mathf.Sqrt(3.0f))
+                        continue;
+                    inner = Mathf.Min(inner, q.Z);
+                }
+            }
+            faces[f] = inner;
         }
-        if (inner > 1.0f)
+        if (faces[0] > 1.0f)
             return;                       // no masonry, nothing to have fallen off
 
         // Deep enough for a piece that is lying across it: a brick turned
@@ -370,38 +450,47 @@ public static class WallKit
         // eight seeds: 0.75 of a brick left one of five unplaced on four of
         // them, 1.2 on one.
         float deep = BrickLong * 1.2f * scale;
-        float near = inner;
-        float far = inner - deep;
-        // How wide the cell is at the shallow end of the band. The far end is
-        // wider still, so this understates rather than overstates - and every
-        // piece is put to the hexagon itself before it is kept.
-        float reachX = Mathf.Max(0.0f, coverage - Mathf.Abs(near) / Mathf.Sqrt(3.0f));
 
         for (int i = 0; i < r.Fallen; i++)
         {
+            int f = i % sides;
+            float near = faces[f];
+            float far = near - deep;
+            // How wide the cell is at the shallow end of the band. The far end is
+            // wider still, so this understates rather than overstates - and every
+            // piece is put to the hexagon itself before it is kept.
+            float reachX = Mathf.Max(0.0f,
+                                     coverage - Mathf.Abs(near) / Mathf.Sqrt(3.0f));
             var turn = new Basis(Vector3.Up, Mathf.DegToRad(Span(seed, i, 53, -95.0f, 95.0f)))
                        * new Basis(Vector3.Right, Mathf.DegToRad(Span(seed, i, 54, -8.0f, 8.0f)));
             var piece = new Block
             {
                 Half = LooseBrick(seed, i, 55, r) * scale,
-                Turn = turn,
+                Turn = frames[f] * turn,
                 Tone = Roll(seed, i, 56),
                 Moss = Span(seed, i, 57, 0.15f, 0.55f),
                 Course = -1,
             };
             piece.Seat = new Vector3(0.0f, piece.Half.Y, 0.0f);
-            if (Drop(plan, ref piece, seed, i, 50, reachX, near, far, coverage))
+            if (Drop(plan, ref piece, seed, i, 50, frames[f], reachX, near, far,
+                     coverage))
                 plan.Blocks.Add(piece);
         }
 
         for (int i = 0; i < r.Chips; i++)
         {
+            int f = i % sides;
+            float near = faces[f];
+            float far = near - deep;
+            float reachX = Mathf.Max(0.0f,
+                                     coverage - Mathf.Abs(near) / Mathf.Sqrt(3.0f));
             float k = Span(seed, i, 61, 0.20f, 0.38f);
             var piece = new Block
             {
                 Half = new Vector3(BrickLong * k, BrickTall * k, BrickDeep * k)
                        * 0.5f * scale,
-                Turn = new Basis(Vector3.Up, Mathf.DegToRad(Span(seed, i, 64, -180.0f, 180.0f)))
+                Turn = frames[f]
+                       * new Basis(Vector3.Up, Mathf.DegToRad(Span(seed, i, 64, -180.0f, 180.0f)))
                        * new Basis(Vector3.Right, Mathf.DegToRad(Span(seed, i, 65, -25.0f, 25.0f))),
                 Tone = Roll(seed, i, 66),
                 Moss = Span(seed, i, 67, 0.0f, 0.4f),
@@ -409,8 +498,8 @@ public static class WallKit
                 Chip = true,
             };
             piece.Seat = new Vector3(0.0f, piece.Half.Y, 0.0f);
-            if (Drop(plan, ref piece, seed, i, 60, reachX, near + BrickDeep * scale,
-                     far, coverage))
+            if (Drop(plan, ref piece, seed, i, 60, frames[f], reachX,
+                     near + BrickDeep * scale, far, coverage))
                 plan.Blocks.Add(piece);
         }
 
@@ -434,7 +523,8 @@ public static class WallKit
     /// advances a stream.
     /// </summary>
     private static bool Drop(Plan plan, ref Block piece, int seed, int i, int salt,
-                             float reachX, float near, float far, float coverage)
+                             Basis frame, float reachX, float near, float far,
+                             float coverage)
     {
         const int Tries = 24;
         float clear = Perpend * 0.5f;
@@ -451,7 +541,11 @@ public static class WallKit
             float wide = Mathf.Max(0.0f,
                                    reachX - (Mathf.Abs(z) - Mathf.Abs(near))
                                             / Mathf.Sqrt(3.0f));
-            piece.Seat = new Vector3(
+            // Drawn in the side's own frame and then turned into the cell's:
+            // near, far and the wedge are all statements about one side of the
+            // wall. Identity when the wall stands on one side, so a single-sided
+            // seed lands where it always did, to the bit.
+            piece.Seat = frame * new Vector3(
                 Span(seed, i * 31 + t, salt + 1, -wide, wide),
                 piece.Half.Y,
                 z);
@@ -742,10 +836,26 @@ public static class WallKit
     /// than assumed from the column count - the stretcher bond alone puts half a
     /// pitch of the upper courses past the bottom one.
     ///
+    /// <b>And it folds, which is the whole of running along more than one
+    /// side.</b> The chain is laid straight and cut to <c>Sides</c> sides of the
+    /// shrunk cell, then each brick is sent to the side its run coordinate falls
+    /// in and turned by sixty degrees a side. Arc length, so the fold neither
+    /// stretches a course nor gathers it, and the last brick of one side and the
+    /// first of the next meet at the vertex exactly. The fan is centred, so the
+    /// side the shot comes from is either square to it or split by a corner and
+    /// never lopsided.
+    ///
+    /// What that leaves is the corner, and <see cref="Mitre"/> is the answer:
+    /// two slabs meeting at 120 degrees overlap behind their vertex, so an end
+    /// with a neighbour is cut back to the cell's own kite boundary. Nothing is
+    /// cut where there is no neighbour, which is what keeps a one-sided wall the
+    /// wall it has always been.
+    ///
     /// Masonry only. The apron is dropped afterwards by <see cref="Scatter"/>,
     /// against a wall that already knows where it stands.</summary>
     public static float Fit(Plan plan, float coverage = 0.97f)
     {
+        int sides = Mathf.Clamp(plan.Sides, 1, 6);
         float lo = float.MaxValue, hi = float.MinValue, face = float.MinValue;
         foreach (Block b in plan.Blocks)
         {
@@ -762,21 +872,129 @@ public static class WallKit
             return 1.0f;
 
         float run = hi - lo;
-        float scale = run > 1e-4f ? Edge * coverage / run : 1.0f;
+        float side = Edge * coverage;              // one side of the shrunk cell
+        float scale = run > 1e-4f ? side * sides / run : 1.0f;
         float mid = (lo + hi) * 0.5f;
         // Everything moves together: x about the run's middle, y about the ground
         // it is footed in, z so that the outer face lands on the side.
         float seat = Apothem * coverage - face * scale;
-        for (int i = 0; i < plan.Blocks.Count; i++)
+        float half = side * sides * 0.5f;
+        plan.Mitred = 0;
+        plan.MitreCut = 0.0f;
+
+        var kept = new List<Block>(plan.Blocks.Count);
+        foreach (Block src in plan.Blocks)
         {
-            Block b = plan.Blocks[i];
-            b.Seat = new Vector3((b.Seat.X - mid) * scale,
+            Block b = src;
+            float x = (b.Seat.X - mid) * scale;
+            // Which side of the chain this brick belongs to, and where it sits
+            // along that side. Arc length, so the fold neither stretches nor
+            // gathers a course: the end of one side and the start of the next are
+            // the same point on the boundary, and the two runs meet there.
+            int s = Mathf.Clamp(Mathf.FloorToInt((x + half) / side), 0, sides - 1);
+            // Subtract the side's own centre, and never add half a chain and
+            // take it off again. Written that way it is exactly zero on a
+            // one-sided wall in algebra and not in floats: (x + 0.485) - 0.485
+            // drops the low bits of x, which is invisible in the render and not
+            // invisible to the solver. Measured - the standing wall came back
+            // inside its own one-pixel noise while the same HE round settled at
+            // 1.93s instead of 2.28s, which is the whole collapse rearranged by
+            // a rounding error.
+            float axis = (s + 0.5f) * side - half;
+            b.Seat = new Vector3(x - axis,
                                  b.Seat.Y * scale,
                                  b.Seat.Z * scale + seat);
             b.Half *= scale;
-            plan.Blocks[i] = b;
+
+            // The mitre, and it is one rule for every corner, leaf and thickness.
+            //
+            // Two slabs meeting at 120 degrees cross behind their vertex - the
+            // overlap runs back along each of them by the wall's own thickness -
+            // so a chain of full-length sides is a wall inside itself at every
+            // corner, which is the one defect the picture cannot show and the
+            // solver answers with an explosion. The cell already says where the
+            // join belongs: the six kites from the centre to each side tile the
+            // ring with no gap and no overlap, so a brick is simply cut back to
+            // its own kite at an end that has a neighbour.
+            //
+            // <b>Cut out of the brick, never out of the joint</b> - the same rule
+            // that lets the perpend be 10 mm, arriving at a second place. And cut
+            // only where somebody is on the other side: a lone wall pokes out of
+            // its own kite near the ends by design, and clipping it there would
+            // rebuild every seed this file was measured on.
+            // Closed at six, and only then. The chain's two ends are the only
+            // ends without a neighbour - except on a full ring, where they are
+            // each other's. Measured before the wrap: 5.53px of one end inside
+            // the other, at the one vertex behind the shooter.
+            bool ring = sides == 6;
+            bool cut = false;
+            if (s > 0 || ring)
+                cut |= Mitre(ref b, new Vector3(-Mathf.Sqrt(3.0f) * 0.5f, 0.0f, -0.5f),
+                             plan);
+            if (s < sides - 1 || ring)
+                cut |= Mitre(ref b, new Vector3(Mathf.Sqrt(3.0f) * 0.5f, 0.0f, -0.5f),
+                             plan);
+            if (cut)
+            {
+                plan.Mitred++;
+                if (b.Half.X <= 0.0f)
+                    continue;                 // wholly inside the neighbour's kite
+            }
+
+            var turn = new Basis(Vector3.Up, Mathf.DegToRad(Fan(s, sides)));
+            b.Seat = turn * b.Seat;
+            b.Turn = turn * b.Turn;
+            kept.Add(b);
         }
+        plan.Blocks = kept;
         Measure(plan);
         return scale;
+    }
+
+    /// <summary>Which way side <paramref name="s"/> of a chain of
+    /// <paramref name="sides"/> faces, in degrees off the one the shot comes from.
+    ///
+    /// <b>Whole sixties, never a centred fan.</b> The cell has six side normals
+    /// and they are sixty degrees apart, so a chain of an even number of them
+    /// cannot be centred on one of them - it can only be centred on a vertex, and
+    /// a vertex is not somewhere a side can face. Asked for a centred fan the
+    /// first version put every side of a two-sided wall thirty degrees off its
+    /// own boundary, and the wall stood out of the cell: <see cref="Reach"/> 1.120
+    /// against a coverage of 0.97, which is the corner of the prop hanging over
+    /// the next tile.
+    ///
+    /// So an even count is lopsided by one side and says so, and what stays true
+    /// at every count is the thing that has to: side zero faces the shooter.
+    /// </summary>
+    private static float Fan(int s, int sides) => (s - (sides - 1) / 2) * 60.0f;
+
+    /// <summary>Cut a brick back behind a plane through the cell's centre, by
+    /// shortening it along its own length.
+    ///
+    /// Exact in one step rather than iterated, and that is worth the algebra: take
+    /// <c>d</c> off the half length and walk the seat <c>d</c> the same way, and
+    /// both the centre's distance to the plane and the box's reach towards it fall
+    /// by <c>d|Xn|</c> - so the violation goes down by twice that and the step
+    /// that clears it is the violation over twice that. Iterating instead would
+    /// leave a residue that depends on the yaw, which is to say a corner whose
+    /// tightness is a function of the seed.</summary>
+    private static bool Mitre(ref Block b, Vector3 plane, Plan plan)
+    {
+        float over = b.Seat.Dot(plane) + Extent(b, plane);
+        if (over <= 0.0f)
+            return false;
+        float grip = Mathf.Abs(b.Turn.X.Dot(plane));
+        if (grip < 1e-4f)
+            return false;                      // length lies in the plane; nothing to take
+        float d = over / (2.0f * grip);
+        plan.MitreCut = Mathf.Max(plan.MitreCut, d);
+        if (d >= b.Half.X)
+        {
+            b.Half = new Vector3(0.0f, b.Half.Y, b.Half.Z);
+            return true;
+        }
+        b.Seat -= b.Turn.X * (d * Mathf.Sign(b.Turn.X.Dot(plane)));
+        b.Half = new Vector3(b.Half.X - d, b.Half.Y, b.Half.Z);
+        return true;
     }
 }

@@ -105,6 +105,20 @@ public sealed partial class WallBench : Node2D
     /// its own right: what one setting buys is written under the slider, in the
     /// unit the chosen shot is measured in.</summary>
     public const float MostForce = 10.0f;
+
+    /// <summary>The tops of the two size dials.
+    ///
+    /// <b>Both are past what looks right, for the force dial's reason.</b> A dial
+    /// that cannot show too much cannot show that the setting on it is the right
+    /// one - so the height goes up to where a ruin becomes a tower that overruns
+    /// its own cell on screen, and the thickness to where the leaves eat the room
+    /// the mitre needs at a corner and the end bricks start disappearing into it.
+    /// The second is the interesting one, and it is why <c>Mitred</c> is
+    /// reported: thickness is the only setting that can take a wall apart at its
+    /// corners rather than merely make it larger.</summary>
+    public const int MostCourses = 16;
+    public const int MostLeaves = 5;
+
     private bool _solved;
     /// <summary>Which flat side it comes from - and, since the wall stands on a
     /// side, which side that is.
@@ -307,7 +321,19 @@ public sealed partial class WallBench : Node2D
             else if (args[i] == "--courses" && i + 1 < args.Length
                      && int.TryParse(args[i + 1], out int rows))
             {
-                _recipe.Courses = Mathf.Clamp(rows, 1, 20);
+                _recipe.Courses = Mathf.Clamp(rows, 1, MostCourses);
+                i++;
+            }
+            else if (args[i] == "--sides" && i + 1 < args.Length
+                     && int.TryParse(args[i + 1], out int runs))
+            {
+                _recipe.Sides = Mathf.Clamp(runs, 1, 6);
+                i++;
+            }
+            else if (args[i] == "--leaves" && i + 1 < args.Length
+                     && int.TryParse(args[i + 1], out int leaves))
+            {
+                _recipe.Leaves = Mathf.Clamp(leaves, 1, MostLeaves);
                 i++;
             }
             else if (args[i] == "--coverage" && i + 1 < args.Length
@@ -603,10 +629,28 @@ public sealed partial class WallBench : Node2D
             : $"{_rig.Clock:F2}s, {_rig.Awake} moving, {_rig.Loose} let go");
 
         _panel.Heading("wall.stack", "wall");
+        // How much wall there is, in the three numbers that are the wall's own
+        // and not the cell's: how far round it goes, how high, how thick. Each
+        // relays the whole prop, because every one of them changes the layout
+        // rather than the view of it - and each is locked while pieces are in
+        // the air, for the turntable's reason twice over.
+        _panel.Slide("wall.stack.sides", "sides", 1.0, 6.0, 1.0,
+                     () => _recipe.Sides,
+                     v => Relay(() => _recipe.Sides = (int)Mathf.Round(v)), "",
+                     () => SidesNote());
+        _panel.Slide("wall.stack.courses", "height", 1.0, MostCourses, 1.0,
+                     () => _recipe.Courses,
+                     v => Relay(() => _recipe.Courses = (int)Mathf.Round(v)),
+                     " courses", () => CoursesNote());
+        _panel.Slide("wall.stack.leaves", "thickness", 1.0, MostLeaves, 1.0,
+                     () => _recipe.Leaves,
+                     v => Relay(() => _recipe.Leaves = (int)Mathf.Round(v)),
+                     " leaves", () => LeavesNote());
         _panel.Readout("wall.stack.plan", () =>
             _plan is null ? "no board"
             : $"seed {_recipe.Seed}: {_plan.Blocks.Count} pieces, "
-              + $"{_plan.Courses} courses");
+              + $"{_plan.Courses} courses"
+              + (_plan.Mitred > 0 ? $", {_plan.Mitred} mitred" : ""));
         _panel.Readout("wall.stack.pile", () =>
         {
             if (_rig is null)
@@ -631,7 +675,13 @@ public sealed partial class WallBench : Node2D
         _panel.Toggle("wall.view.spin", "keep turning", () => _turning,
                       on => _turning = on);
 
+        // Both subjects open. The harness's rule - everything collapsed - is
+        // about fifty rows in one column; here there are twelve in three groups,
+        // and the bench now has two things it exists for: what the wall is, and
+        // what hits it. A group that has to be found by clicking is a group
+        // nobody compares against.
         _panel.Expand("wall.strike", true);
+        _panel.Expand("wall.stack", true);
         layer.AddChild(_panel);
         _panel.AddHandle();
     }
@@ -702,6 +752,74 @@ public sealed partial class WallBench : Node2D
         // more. One number, asked twice.
         _reported = false;
         _wall.Fell(_recipe.Seed, _shot, _coverage);
+    }
+
+    /// <summary>Change what the wall is, and stand the new one up.
+    ///
+    /// <b>Every size is a relay and never a nudge</b>, because none of them is a
+    /// property of the finished prop: how many sides it runs along, how many
+    /// courses high and how many leaves thick are all read while the courses are
+    /// being laid, so there is nothing to move afterwards. Locked while pieces
+    /// are in the air for the same reason the turntable is, and more so - this
+    /// replaces the bodies rather than turning the world under them.
+    ///
+    /// The view comes home with it: a wall that just grew four courses has its
+    /// crest off the top of the window otherwise, which reads as the setting
+    /// having broken something.</summary>
+    private void Relay(Action change)
+    {
+        if (_rig is { Struck: true })
+            return;
+        change();
+        Build();
+        _camera.Position = ViewHome;
+    }
+
+    /// <summary>How far round the cell the wall goes, in the unit that is not a
+    /// count: a side is one cell radius, so the run is the count times the
+    /// coverage, and six closes the ring.</summary>
+    private string SidesNote()
+    {
+        int n = Mathf.Clamp(_recipe.Sides, 1, 6);
+        float run = n * _coverage;
+        return $"{run:F2}R of run, {run * WallRig.MetresPerCell:F1} m, "
+               + (n == 6 ? "a closed ring" : n == 1 ? "no corner"
+                                                    : $"{n - 1} corners");
+    }
+
+    /// <summary>What the height dial buys, in the units the picture is in.
+    /// Measured off what got built rather than off the count asked for: the
+    /// profile runs out of bricks before it runs out of courses, so the two part
+    /// company at the top of the dial and the built one is the honest number.
+    /// </summary>
+    private string CoursesNote()
+    {
+        if (_plan is null)
+            return "no board";
+        float radius = _field.Atlas?.HexRect.Size.X * 0.5f ?? 1.0f;
+        return $"{_plan.Courses} laid, {_plan.Top * radius:F0}px, "
+               + $"{_plan.Top:F2} of a cell";
+    }
+
+    /// <summary>What the thickness dial buys, and what it costs at a corner.
+    ///
+    /// <b>The second half is the point.</b> Thickness is the one size that a
+    /// corner has to pay for: two slabs meeting at 120 degrees cross behind their
+    /// vertex by the wall's own thickness, so every leaf added is another brick's
+    /// worth cut off both ends of every side that has a neighbour. On one side
+    /// there is no neighbour and it costs nothing, which is why the note says
+    /// which case it is in.</summary>
+    private string LeavesNote()
+    {
+        if (_plan is null)
+            return "no board";
+        float radius = _field.Atlas?.HexRect.Size.X * 0.5f ?? 1.0f;
+        float thick = (WallKit.BrickDeep + (_recipe.Leaves - 1)
+                       * (WallKit.BrickDeep + WallKit.Perpend)) * _scale;
+        return $"{thick * radius:F0}px, {thick * WallRig.MetresPerCell:F2} m"
+               + (_recipe.Sides > 1
+                   ? $" - {_plan.Mitred} mitred, {_plan.MitreCut * radius:F0}px cut"
+                   : " - no corner to pay for");
     }
 
     /// <summary>Put the bench back as it opened. What R does, and what the
@@ -809,7 +927,9 @@ public sealed partial class WallBench : Node2D
                    + $"{aloft} aloft, {layers} deep";
         }
         return $"seed {_recipe.Seed}  {_plan.Bricks} bricks, "
-               + $"{_plan.Courses} courses, {_plan.Blocks.Count} pieces\n"
+               + $"{_plan.Courses} courses, {_plan.Sides} sides, "
+               + $"{_plan.Leaves} leaves, {_plan.Blocks.Count} pieces"
+               + (_plan.Mitred > 0 ? $", {_plan.Mitred} mitred" : "") + "\n"
                + $"fit {_scale:F3}, reach {_plan.Reach:F3} of the cell, "
                + $"overlap {_plan.Overlap * radius:+0.00;-0.00;0.00}px\n"
                + $"{fall}\n"
@@ -817,6 +937,7 @@ public sealed partial class WallBench : Node2D
                + $"turned {Mathf.RadToDeg(_spin):F0} deg"
                + (_turning ? ", turning" : "") + "\n"
                + "SPACE fires, S shot, B bearing, N next seed, R resets\n"
+               + "1/2 sides, 3/4 height, 5/6 thickness\n"
                + "TAB opens the panel, left drag turns it, Q/E step, T turntable\n"
                + "middle drag pans, wheel zooms, F12 shoots";
     }
@@ -872,6 +993,28 @@ public sealed partial class WallBench : Node2D
                     // started on them, which is a key that is right because of
                     // where the field was initialised.
                     Side = (Side + 1) % HexField.EdgeHeadings.Length;
+                    return;
+                case Key.Key1:
+                case Key.Key2:
+                    // The three sizes on pairs of digits, because they are the
+                    // only settings here that count rather than choose - and a
+                    // count wants a step in each direction, not a cycle that has
+                    // to be walked all the way round to come back one.
+                    Relay(() => _recipe.Sides =
+                        Mathf.Clamp(_recipe.Sides + (key.Keycode == Key.Key2 ? 1 : -1),
+                                    1, 6));
+                    return;
+                case Key.Key3:
+                case Key.Key4:
+                    Relay(() => _recipe.Courses =
+                        Mathf.Clamp(_recipe.Courses + (key.Keycode == Key.Key4 ? 1 : -1),
+                                    1, MostCourses));
+                    return;
+                case Key.Key5:
+                case Key.Key6:
+                    Relay(() => _recipe.Leaves =
+                        Mathf.Clamp(_recipe.Leaves + (key.Keycode == Key.Key6 ? 1 : -1),
+                                    1, MostLeaves));
                     return;
                 case Key.R:
                     Reset();
