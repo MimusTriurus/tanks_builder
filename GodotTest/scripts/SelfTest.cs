@@ -10481,6 +10481,10 @@ public static class SelfTest
             // statements about one event at two resolutions, and neither is
             // recoverable from the other.
             var trail = new Wake();
+            // A pond is a level down, so every stamp in this block is laid on
+            // ground below the datum - which is the case the drawn row and the
+            // earth row disagree in, and the only case that shows anything.
+            float pondBed = -field.Lift;
             Check("a fresh wake stamp is wider than the gap to the next one",
                 2.0f * Wake.Seed > Wake.Step,
                 $"a stamp is {Wake.Seed:F0} across and they are {Wake.Step:F0} "
@@ -10490,14 +10494,14 @@ public static class SelfTest
             // behind a crawling tank and dotted behind a fast one - the ruts and
             // the belt phase are laid off distance for the same reason.
             for (int i = 0; i < 30; i++)
-                trail.Note(0, new Vector2(100.0f, 100.0f), true, true);
+                trail.Note(0, new Vector2(100.0f, 100.0f), pondBed, true, true);
             Check("and standing still in the water lays exactly one",
                 trail.Count == 1, $"{trail.Count} stamps without moving an inch");
 
             var was = trail.At[0];
             for (int i = 1; i <= 6; i++)
                 trail.Note(0, new Vector2(100.0f + i * Wake.Step * 1.1f, 100.0f),
-                           true, true);
+                           pondBed, true, true);
             Check("and driving on lays one for every step of ground covered",
                 trail.Count == 7, $"{trail.Count} stamps over six steps");
 
@@ -10517,8 +10521,10 @@ public static class SelfTest
             // at all.
             Vector2 edge = trail.At[trail.Count - 1];
             int ashore = trail.Count;
-            trail.Note(0, edge + new Vector2(Wake.Step * 0.3f, 0.0f), true, false);
-            trail.Note(0, edge + new Vector2(Wake.Step * 0.6f, 0.0f), true, true);
+            trail.Note(0, edge + new Vector2(Wake.Step * 0.3f, 0.0f), pondBed, true,
+                       false);
+            trail.Note(0, edge + new Vector2(Wake.Step * 0.6f, 0.0f), pondBed, true,
+                       true);
             Check("and coming back to the water starts the trail again at once",
                 ashore == 7 && trail.Count == 8,
                 $"{trail.Count} stamps against {ashore} before - the tank was "
@@ -10535,6 +10541,13 @@ public static class SelfTest
             // One threshold for both, because a tank that stirs the water it
             // stands in and leaves no trail through it is two answers to one
             // question.
+            // The blot's own half of the same pairing. Sized and cleared with the
+            // mark, because a lift left standing beside a cleared mark is a blot
+            // at the origin sitting a level off the ground.
+            Check("and the swell keeps a lift beside every mark",
+                sea.Rest.Length == sea.Mark.Length,
+                $"{sea.Rest.Length} lifts against {sea.Mark.Length} marks");
+
             Check("and what counts as driving is the same for the swell and the wake",
                 Mathf.IsEqualApprox(Wake.DriveAbove, Swell.StirAbove),
                 $"wake {Wake.DriveAbove:F2} against swell {Swell.StirAbove:F2}");
@@ -10546,6 +10559,55 @@ public static class SelfTest
             Check("and the surface combines its stamps by max, never by sum",
                 Stage3D.DeepShader.Contains("trail = max(trail,"),
                 "overlapping stamps add up, so the trail beads at its own spacing");
+
+            // A lift beside every stamp, because the point is a drawn row. Two
+            // lists rather than one, so this is the same pairing risk the swell's
+            // mark carries and the same answer: same order, same length, dropped
+            // together.
+            Check("and every wake stamp carries the lift of the ground it was laid on",
+                trail.Lift.Count == trail.At.Count
+                && (trail.Count == 0 || Mathf.IsEqualApprox(trail.Lift[0], pondBed)),
+                $"{trail.Lift.Count} lifts against {trail.At.Count} stamps");
+
+            // <b>And the whole of what that lift buys.</b> A drawn row has the
+            // lift taken out of it already, so handing it to World with a lift of
+            // zero puts the stamp a level too deep. Asserted rather than looked
+            // at, because the screen row of the stamp's own centre comes out the
+            // same either way - World draws a point at flat minus lift, and the
+            // two spellings differ by exactly that lift in both terms. What moves
+            // is <b>where the surface meets it</b>: the pond is a horizontal
+            // plane, so the fragment whose world z matches the stamp is drawn a
+            // level away from the one that should have.
+            //
+            // Which is why nothing said so. The trail was not blank, not clipped
+            // and not the wrong shape; it was one HexField.Lift below the tank
+            // that laid it, and every number about it stayed sane.
+            float mark = 400.0f;
+            float flatten = field.Squash;
+            float lifted = field.RiseFactor;
+            float surface = pondBed + field.WaterRise;
+            // The row the pond fragment that matches a stamp is drawn on: its own
+            // world z through the camera, less the height the surface stands at.
+            //
+            // Through the stage's own Ground for the right spelling and its own
+            // World for the wrong one, rather than either written out here: a
+            // check that spells the conversion itself asserts the arithmetic and
+            // not the wiring, and the wiring is what was wrong.
+            float Row(Vector3 at) => at.Z * flatten - surface;
+            float right = Row(Stage3D.Ground(new Vector2(0.0f, mark), pondBed,
+                                             flatten, lifted));
+            float wrong = Row(Stage3D.World(new Vector2(0.0f, mark), 0.0f,
+                                            flatten, lifted));
+            Check("and a wake laid in a ford is drawn its own depth of water above the tank",
+                Mathf.IsEqualApprox(right, mark - field.WaterRise),
+                $"row {right:F2} against the tank's {mark:F2} less {field.WaterRise:F2} "
+                + "of water");
+            Check("and taking that lift for zero would put it a whole level lower",
+                Mathf.IsEqualApprox(wrong - right, -pondBed)
+                && !Mathf.IsZeroApprox(pondBed),
+                $"{wrong - right:F2} px apart against a lift of {-pondBed:F2} - "
+                + "the two spellings differ by something other than the ground's "
+                + "own height, so this is not the mistake it is named for");
 
             // And it settles. A state that stuck would be a pond that had been
             // driven through once and stayed broken for the rest of the session.

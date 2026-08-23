@@ -1220,12 +1220,47 @@ void fragment() {{
     /// <b>Standing rather than Height</b>, and the two differ only mid-step: the
     /// row drawn is the same for either, so this buys depth and nothing else. See
     /// <see cref="Vehicle.Standing"/> for what it buys it against.</summary>
-    private Vector3 Contact(Vehicle vehicle)
-    {
-        Vector2 ground = vehicle.GroundPoint;
-        return World(new Vector2(ground.X, ground.Y + vehicle.Standing),
-                     vehicle.Standing);
-    }
+    public Vector3 Contact(Vehicle vehicle) =>
+        Ground(vehicle.GroundPoint, vehicle.Standing);
+
+    /// <summary>
+    /// Where a point drawn on the ground stands in the world, given how high off
+    /// the datum the ground under it is.
+    ///
+    /// <b>A drawn row is not an earth row, and the water was the fourth thing on
+    /// this board to pay for it.</b> The ring, the pond and the wood each had to
+    /// put the lift back before they could name a cell (see <c>HexField.Bare</c>);
+    /// the wake, the foam blot and the ripple push each carried a drawn point
+    /// straight into <see cref="World"/> with a lift of zero, which is the same
+    /// mistake read the other way round - a drawn row handed to a mapping that
+    /// wants an earth row and a lift beside it.
+    ///
+    /// <b>And the row on screen comes out right either way, which is why nothing
+    /// said so.</b> <c>World</c> draws a point at <c>flat - lift</c>, and a drawn
+    /// row has the lift taken out of it already, so both spellings land on the
+    /// same screen row. What comes out wrong is the <b>depth</b>, by a whole level
+    /// of it - and the surface the stamp is compared against is a horizontal
+    /// plane, so a level of depth is a level of screen row. Measured on the pond:
+    /// the trail sat one <c>HexField.Lift</c> below the tank that laid it instead
+    /// of the water's own depth above it.
+    ///
+    /// <b>Which is also why it showed on a diagonal and not on a column.</b> The
+    /// error is purely vertical, and four of the six edge headings run
+    /// diagonally: a vertical shift of a diagonal trail reads as the trail having
+    /// moved sideways off the line of cell centres, while on the two vertical
+    /// headings it slides along the trail and is invisible.
+    /// </summary>
+    public Vector3 Ground(Vector2 spot, float lift) =>
+        Ground(spot, lift, Squash, RiseFactor);
+
+    /// <summary>The same conversion given its two camera terms instead of reading
+    /// them off the field, so it can be asserted without a board - the reason
+    /// <see cref="World"/> is shaped this way too, and it earns it here: what a
+    /// check of this has to pin down is the one expression the stage actually
+    /// uses, not a second copy of it written out in the check.</summary>
+    public static Vector3 Ground(Vector2 spot, float lift, float squash,
+                                 float rise) =>
+        World(new Vector2(spot.X, spot.Y + lift), lift, squash, rise);
 
     // --- the board -----------------------------------------------------------
 
@@ -2887,9 +2922,12 @@ void fragment() {
             // Through the same mapping the surface's own vertices went through,
             // because the shader compares it against world.xz. Squashed here
             // rather than in Swell: the swell keeps the tanks' own coordinates,
-            // and which camera is looking at them is not its business.
+            // and which camera is looking at them is not its business - which is
+            // also why it carries the lift beside the point rather than applying
+            // it, see Ground.
             Vector2 at = Sea?.Mark.Length > i ? Sea.Mark[i] : Vector2.Zero;
-            Vector3 w = World(at, 0.0f);
+            float rest = Sea?.Rest.Length > i ? Sea.Rest[i] : 0.0f;
+            Vector3 w = Ground(at, rest);
             mark[i] = new Vector2(w.X, w.Z);
         }
         ink.SetShaderParameter("state", state);
@@ -2912,7 +2950,7 @@ void fragment() {
         int live = Mathf.Min(Trail?.Count ?? 0, Wake.Max);
         for (int i = 0; i < live; i++)
         {
-            Vector3 w = World(Trail!.At[i], 0.0f);
+            Vector3 w = Ground(Trail!.At[i], Trail.Lift[i]);
             spot[i] = new Vector2(w.X, w.Z);
             age[i] = Trail.Age[i];
         }

@@ -5270,12 +5270,16 @@ public sealed partial class Main : Node2D
 					// surface is built in this space too, so the two agree.
 					_sea.Note(i, _field.CellAt(_vehicles[i].GroundPoint - _origin),
 							  _vehicles[i].Speed > Swell.StirAbove,
-							  _vehicles[i].GroundPoint);
+							  _vehicles[i].GroundPoint, _vehicles[i].Standing);
 					// And the trail, off the same point and the same threshold.
 					// In water rather than in a flooded cell: what a wake needs
 					// is a surface to be left on, which is the same question the
 					// waterline already answers.
+					// And the lift beside the point, because the point is a drawn
+					// row: see Stage3D.Ground, which the stage reads it back
+					// through.
 					_wake?.Note(i, _vehicles[i].GroundPoint,
+								_vehicles[i].Standing,
 								_vehicles[i].Speed > Wake.DriveAbove,
 								_field.IsWater(_field.CellAt(
 									_vehicles[i].GroundPoint - _origin)));
@@ -5306,7 +5310,11 @@ public sealed partial class Main : Node2D
 					// already squashed - the mapping the swell's mark and the
 					// wake's stamps go through on their way to the shader, done
 					// here instead because the field is stepped in this space.
-					Vector3 at = _stage.World(vehicle.GroundPoint, 0.0f);
+					// Contact and not World, because GroundPoint is a drawn row: the
+				// stage owns the one expression that puts the lift back, and a
+				// second copy of it here is how the push comes to land a level
+				// away from the tank - see Stage3D.Ground.
+				Vector3 at = _stage.Contact(vehicle);
 					Vector3 way = _stage.World(
 						vehicle.Atlas.GroundDirection(
 							vehicle.Sprite.HullFacing), 0.0f);

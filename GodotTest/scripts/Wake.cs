@@ -83,12 +83,25 @@ public sealed class Wake
     public const float DriveAbove = Swell.StirAbove;
 
     private readonly List<Vector2> _at = new();
+    private readonly List<float> _lift = new();
     private readonly List<float> _age = new();
     private readonly Dictionary<int, Vector2> _last = new();
 
     /// <summary>Where every live stamp is, in the tanks' own space, oldest
     /// first.</summary>
     public IReadOnlyList<Vector2> At => _at;
+
+    /// <summary>How high off the datum the ground each stamp was left on stands,
+    /// in screen px, in the same order.
+    ///
+    /// <b>Carried because the point is a drawn row.</b> A drawn row has the lift
+    /// taken out of it already, so a reader that hands it to
+    /// <c>Stage3D.World</c> with a lift of zero puts the stamp a whole level too
+    /// deep, and the surface it is compared against is horizontal - so the trail
+    /// lands a level below the tank that laid it. Carried rather than applied for
+    /// the reason <see cref="Swell"/> keeps the tanks' own coordinates: which
+    /// camera is looking at them is not this class's business.</summary>
+    public IReadOnlyList<float> Lift => _lift;
 
     /// <summary>How far through its life each stamp is, 0 fresh through 1 gone,
     /// in the same order.</summary>
@@ -108,7 +121,7 @@ public sealed class Wake
     /// it is the same reason: what the ground and the water remember is where
     /// something went, not how long it took.
     /// </summary>
-    public void Note(int who, Vector2 at, bool moving, bool wet)
+    public void Note(int who, Vector2 at, float lift, bool moving, bool wet)
     {
         if (!Enabled || !moving || !wet)
         {
@@ -124,9 +137,11 @@ public sealed class Wake
         if (_at.Count >= Max)
         {
             _at.RemoveAt(0);
+            _lift.RemoveAt(0);
             _age.RemoveAt(0);
         }
         _at.Add(at);
+        _lift.Add(lift);
         _age.Add(0.0f);
     }
 
@@ -142,6 +157,7 @@ public sealed class Wake
             if (_age[i] >= 1.0f)
             {
                 _at.RemoveAt(i);
+                _lift.RemoveAt(i);
                 _age.RemoveAt(i);
             }
         }
@@ -153,6 +169,7 @@ public sealed class Wake
     public void Clear()
     {
         _at.Clear();
+        _lift.Clear();
         _age.Clear();
         _last.Clear();
     }

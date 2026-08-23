@@ -115,6 +115,17 @@ public sealed class Swell
     /// </summary>
     public Vector2[] Mark { get; private set; } = Array.Empty<Vector2>();
 
+    /// <summary>How high off the datum the ground under each mark stands, in
+    /// screen px, indexed as <see cref="Mark"/> is.
+    ///
+    /// <b>Beside the point rather than folded into it, for the reason the mark is
+    /// in the tanks' own space at all.</b> The point is a drawn row, which has the
+    /// lift taken out of it already; a reader that hands it to
+    /// <c>Stage3D.World</c> with a lift of zero puts the blot a whole level too
+    /// deep, and since the surface it lands on is horizontal that is a level of
+    /// screen row - see <c>Stage3D.Ground</c> for what it cost.</summary>
+    public float[] Rest { get; private set; } = Array.Empty<float>();
+
     /// <summary>What a cell is doing, 0 for dry ground as well as for calm water
     /// - a dry cell has no surface to be stirred, so both answers are the same
     /// picture.</summary>
@@ -177,7 +188,8 @@ public sealed class Swell
     /// and a splash happens at every shoreline crossed - including the internal
     /// ones a five-cell pond is made of. The cell changes at each of them.
     /// </summary>
-    public void Note(int who, Vector2I cell, bool moving, Vector2 at = default)
+    public void Note(int who, Vector2I cell, bool moving, Vector2 at = default,
+                     float lift = 0.0f)
     {
         Size();
         bool moved = _was.TryGetValue(who, out Vector2I before) && before != cell;
@@ -190,6 +202,7 @@ public sealed class Swell
         {
             _stirred[here] = true;
             Mark[here] = at;
+            Rest[here] = lift;
         }
         if (!moved)
             return;
@@ -209,6 +222,7 @@ public sealed class Swell
             _splash[into] = 1.0f;
             _leaving[into] = false;
             Mark[into] = at;
+            Rest[into] = lift;
         }
         int outOf = Field.WaterIndex(before);
         if (outOf >= 0 && outOf != into)
@@ -216,6 +230,7 @@ public sealed class Swell
             _splash[outOf] = 1.0f;
             _leaving[outOf] = true;
             Mark[outOf] = at;
+            Rest[outOf] = lift;
         }
     }
 
@@ -265,6 +280,7 @@ public sealed class Swell
         State = new float[n];
         Span = new float[n];
         Mark = new Vector2[n];
+        Rest = new float[n];
         Array.Fill(Span, 1.0f);
         _was.Clear();
     }
@@ -285,6 +301,7 @@ public sealed class Swell
         Array.Clear(_leaving);
         Array.Clear(State);
         Array.Clear(Mark);
+        Array.Clear(Rest);
         Array.Fill(Span, 1.0f);
         _was.Clear();
     }
