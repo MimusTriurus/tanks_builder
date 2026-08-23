@@ -488,26 +488,47 @@ public sealed partial class HexField : Node2D
     /// </summary>
     public float WaterRise => Lift * (float)WaterDepth;
 
-    /// <summary>Where the surface of the water over a cell stands, in screen px
-    /// off the datum - the bottom plus the depth. Meaningless on a dry cell, and
-    /// the callers ask <see cref="IsWater"/> first.</summary>
-    public float WaterTop(Vector2I cell) => TopAt(cell) + WaterRise;
+    /// <summary>
+    /// Where the surface of the water over a cell stands, in screen px off the
+    /// datum - the cell's <i>floor</i> plus the depth. Meaningless on a dry cell,
+    /// and the callers ask <see cref="IsWater"/> first.
+    ///
+    /// <b>The floor and not <see cref="TopAt"/>, and that is the whole of what
+    /// lets a ramp be flooded.</b> On a flat cell the two are the same number, so
+    /// every board drawn before this reads bit for bit as it did. On a ramp TopAt
+    /// is the middle of the slope, half a level up, so measured from it the
+    /// beach's water would stand half a level over the pond it belongs to - a
+    /// waterfall along their shared edge, which is the one thing
+    /// <see cref="SetWater"/> still refuses. A ramp's floor is its own level, the
+    /// same number its flat neighbours carry, so one body of water comes out one
+    /// surface by construction rather than by a check.
+    /// </summary>
+    public float WaterTop(Vector2I cell) => LevelAt(cell) * Lift + WaterRise;
 
     /// <summary>
     /// Put water on the board.
     ///
-    /// <b>Two guards, and both refuse rather than repair</b> - the shape
+    /// <b>One guard, and it refuses rather than repairs</b> - the shape
     /// <see cref="DeriveRamps"/> already has, and for its reason: a map that does
-    /// not decide something cannot be made to decide it by picking.
+    /// not decide something cannot be made to decide it by picking. <b>A body is
+    /// flat.</b> Two water cells side by side at different levels is a waterfall,
+    /// which is a different thing entirely and is not what this draws. Asked of
+    /// neighbours rather than of the whole board, because two unconnected ponds at
+    /// two levels are perfectly reasonable.
     ///
-    /// <list type="bullet">
-    /// <item><b>Not on a ramp.</b> A slope has no single surface height, so water
-    /// on one would either be a wedge or a lie about where its own top is.</item>
-    /// <item><b>A body is flat.</b> Two water cells side by side at different
-    /// levels is a waterfall, which is a different thing entirely and is not what
-    /// this draws. Asked of neighbours rather than of the whole board, because two
-    /// unconnected ponds at two levels are perfectly reasonable.</item>
-    /// </list>
+    /// <b>There were two, and the second was "not on a ramp".</b> Its reason - a
+    /// slope has no single surface height - was true about the slope and false
+    /// about the water: the water is flat, and what a ramp does is cross it. What
+    /// the refusal actually bought was that every reader could take a cell's water
+    /// as covering the whole of it, and what it cost was the one cell that has to
+    /// be half wet: a beach came out as dry sand with a pane of water standing
+    /// beside it, and the ground over the back <see cref="WaterDepth"/> of its run
+    /// lay under the pond's own surface and was drawn dry. So the surface now runs
+    /// onto the ramp at <see cref="WaterTop"/> - the pond's height, because that
+    /// is measured off the floor - and the slope cuts it: the ground is opaque and
+    /// higher ground is nearer the camera, so the depth buffer clips the water at
+    /// exactly the line where the two planes meet, with no shape to author and no
+    /// number to keep in agreement.
     ///
     /// Nothing here touches <see cref="Passable"/>. Water is not a wall - the
     /// whole request was a cell a tank can drive into - so the pathing does not
@@ -517,7 +538,6 @@ public sealed partial class HexField : Node2D
     {
         if (water is not null && water.Length == Columns * Rows)
         {
-            var ramped = new List<Vector2I>();
             var stepped = new List<string>();
             for (int r = 0; r < Rows; r++)
             for (int q = 0; q < Columns; q++)
@@ -525,8 +545,6 @@ public sealed partial class HexField : Node2D
                 var cell = new Vector2I(q, r);
                 if (!water[r * Columns + q])
                     continue;
-                if (IsRamp(cell))
-                    ramped.Add(cell);
                 foreach (int heading in EdgeHeadings)
                 {
                     Vector2I next = Step(cell, heading);
@@ -537,10 +555,6 @@ public sealed partial class HexField : Node2D
                                     + $"({next.X},{next.Y}) on {LevelAt(next)}");
                 }
             }
-            if (ramped.Count > 0)
-                throw new InvalidOperationException(
-                    "water on a ramp has no one surface height to stand at - "
-                    + string.Join(", ", ramped.Select(c => $"({c.X},{c.Y})")));
             if (stepped.Count > 0)
                 throw new InvalidOperationException(
                     "one body of water is one surface, and these neighbours are "

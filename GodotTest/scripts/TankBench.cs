@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -708,6 +708,15 @@ public sealed partial class TankBench : Node2D
         }
     }
 
+    /// <summary>Drive there if the board has such a place, and do nothing if it
+    /// has not. A button that quietly goes somewhere else instead is worse than
+    /// one that does nothing: the first reads as the board being wrong.</summary>
+    private void Go(Vector2I? cell)
+    {
+        if (cell is Vector2I at)
+            OrderTo(at);
+    }
+
     private void OrderTo(Vector2I cell)
     {
         if (!_field.InBounds(cell) || cell == Tank.Cell || Tank.Wreck.Dead)
@@ -797,10 +806,12 @@ public sealed partial class TankBench : Node2D
             $"{Tank.Speed:F0} of {Tick.SpeedCap(Tank):F0} px/s "
             + (Tick.SpeedCapWhy(Tank) is { Length: > 0 } why
                 ? $"- {why}" : "- on the level"));
-        _panel.PressPair("tank.where.go", "to the rise", () => OrderTo(new Vector2I(3, 0)),
-                         "to the water", () => OrderTo(new Vector2I(1, 1)));
-        _panel.Press("tank.where.home", "back to the middle",
-                     () => OrderTo(_map.Homes[0]));
+        _panel.PressPair("tank.where.go",
+                         "to the rise", () => Go(_map.Crown()),
+                         "to the water", () => Go(_map.Ringed(true)));
+        _panel.PressPair("tank.where.far",
+                         "to the island", () => Go(_map.Ringed(false)),
+                         "back to the middle", () => OrderTo(_map.Homes[0]));
 
         _panel.Heading("tank.aim", "heading");
         _panel.Slide("tank.aim.hull", "hull", 0.0, 345.0, 15.0,

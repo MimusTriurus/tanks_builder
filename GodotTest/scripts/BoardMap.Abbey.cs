@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Godot;
@@ -61,12 +61,12 @@ public sealed partial class BoardMap
         "-#1F....#........ww-", // r4
         "-##.........#..11ww-", // r5
         "-###.w........#11ww-", // r6   the lake basin opens
-        "-##wvw.........11ww-", // r7   (4,7) the beach, water on both sides of it
+        "-##www.........11ww-", // r7   (4,7) the beach, and it is under water
         "-###ww.......f.11ww-", // r8
         "-###wwf......f.11ww-", // r9
         "-#11wwf.........www-", // r10  the river, widened to its own level
-        "-#11ww......#..wvww-", // r11  (16,11) the ford, the one dry step across
-        "-#11vw.#..vv...wwww-", // r12  (4,12) the lake mouth, (5,12) now lake
+        "-#11ww......#..wwww-", // r11  (16,11) the ford, and it is a wet step now
+        "-#11ww.#..vv...wwww-", // r12  (4,12) the lake mouth, under water too
         "-#11.fff.vvv.....ww-", // r13  the dry hollow south of the monastery
         "-#...fff..vv..##..w-", // r14
         "--#..fff.#..ff##..w-", // r15
@@ -186,16 +186,23 @@ public sealed partial class BoardMap
             // the river's low bank below it, and every number about it was
             // right.
             //
-            // Water is skipped because a ramp under it is refused downstream by
-            // SetWater - a slope has no one surface height for a pond to stand
-            // at - and listing it as a site is offering something that cannot be
-            // taken.
+            // <b>Water is not skipped, and it used to be.</b> SetWater refused a
+            // ramp under a pond - a slope has no one surface height for water to
+            // stand at - so listing a flooded cell as a site offered something
+            // that could not be taken. That refusal is gone: the pond's plane
+            // crosses the slope instead of needing a height off it, and the
+            // depth buffer cuts the water where the two planes meet. So a
+            // flooded cell is a site like any other, and what taking it makes is
+            // a beach - dry at the head, under water over the back of its run.
+            //
+            // Left in, the skip did not go quiet: it called every beach on every
+            // shipped board BAD, in the words of the guard it outlived.
             var legal = new Dictionary<Vector2I, int>();
             for (int r = 0; r < Rows; r++)
             for (int q = 0; q < Columns; q++)
             {
                 var cell = new Vector2I(q, r);
-                if (!OnBoard(cell) || Cliffs[At(cell)] || Water[At(cell)])
+                if (!OnBoard(cell) || Cliffs[At(cell)])
                     continue;
                 var up = HexField.EdgeHeadings
                     .Where(h => probe.InBounds(HexField.Step(cell, h))
@@ -223,12 +230,6 @@ public sealed partial class BoardMap
             // the others - which is eight round trips on a board this size.
             foreach (Vector2I cell in declared.Where(c => !legal.ContainsKey(c)))
             {
-                if (Water[At(cell)])
-                {
-                    lines.Add($"  BAD ({cell.X},{cell.Y}) is flooded, and a "
-                              + "slope has no one surface for a pond to stand at");
-                    continue;
-                }
                 var up = HexField.EdgeHeadings
                     .Where(h => probe.InBounds(HexField.Step(cell, h))
                                 && probe.LevelAt(HexField.Step(cell, h))

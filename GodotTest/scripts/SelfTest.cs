@@ -8814,22 +8814,34 @@ public static class SelfTest
                 $"{deep:F0}px is {part:P0} of a tank's {tall:F0}px - wanted "
                 + $"{Main.ShallowAt:P0} to {Main.SunkAt:P0}");
 
-            // Water is not a wall, which was the whole request. The pond is
-            // entered from the beach at the pit's mouth, so this is asked of the
-            // board rather than of the rule: a Passable that learned about water
-            // would show up here as a step that used to be legal and is not.
-            int blocked = 0;
+            // Water is not a wall, which was the whole request - and it is asked
+            // as "flooding changes nothing" rather than "every step across the
+            // pond is legal".
+            //
+            // <b>The second form was the old one and it stopped being true the
+            // day a beach could be flooded.</b> A flooded ramp is still a ramp
+            // and is still entered along its own axis, so eight steps sideways
+            // onto the pit's mouth are refused - by the ramp rule, exactly as
+            // they were while the mouth was dry, and the old check simply had no
+            // ramp inside the pond to trip over. What would be a regression is a
+            // Passable that learned about water at all, and that is what this
+            // says: the answer is the same with the pond in and with it out.
+            var steps = new List<(Vector2I Cell, int Heading)>();
             foreach (Vector2I cell in pond)
             foreach (int heading in HexField.EdgeHeadings)
-            {
-                Vector2I next = HexField.Step(cell, heading);
-                if (field.InBounds(next) && field.IsWater(next)
-                    && !field.Passable(cell, heading))
-                    blocked++;
-            }
-            Check("water is not a wall - a pond can be driven across",
-                blocked == 0,
-                $"{blocked} steps between flooded cells are refused");
+                steps.Add((cell, heading));
+            var wetted = steps.Select(s => field.Passable(s.Cell, s.Heading))
+                              .ToArray();
+            bool[] hold = Main.WaterMask(field.Columns, field.Rows);
+            field.SetWater(null);
+            var drained = steps.Select(s => field.Passable(s.Cell, s.Heading))
+                               .ToArray();
+            field.SetWater(hold);
+            int swung = wetted.Where((yes, i) => yes != drained[i]).Count();
+            Check("water is not a wall - flooding a cell changes no step onto it",
+                swung == 0,
+                $"{swung} of {steps.Count} steps round the pond answered "
+                + "differently with the water in");
             Check("and the pond is reachable from the tanks' own end of the board",
                 field.FindPath(new Vector2I(4, 2), pond[0]).Count > 0,
                 $"no route from (4,2) to ({pond[0].X},{pond[0].Y})");
@@ -9028,9 +9040,10 @@ public static class SelfTest
             Check("nothing grows in the water", wooded == 0,
                 $"{wooded} flooded cells are wooded");
 
-            // Both guards, and both have to be shown to bite: a guard that cannot
-            // refuse is a comment.
-            bool onRamp = false, twoLevels = false;
+            // The guard that is left has to be shown to bite, and the one that
+            // went has to be shown to have gone: a refusal quietly still in place
+            // reads exactly like a beach nobody thought to flood.
+            bool twoLevels = false;
             var mask = Main.WaterMask(field.Columns, field.Rows);
             Vector2I ramp = default;
             for (int q = 0; q < field.Columns && ramp == default; q++)
@@ -9042,11 +9055,31 @@ public static class SelfTest
                 }
             var bad = (bool[])mask.Clone();
             bad[ramp.Y * field.Columns + ramp.X] = true;
+            bool tookRamp = true;
             try { field.SetWater(bad); }
-            catch (InvalidOperationException) { onRamp = true; }
-            Check("water on a ramp is refused rather than wedged along it", onRamp,
-                $"a pond was allowed onto the ramp at ({ramp.X},{ramp.Y}), which "
-                + "has no one surface height");
+            catch (InvalidOperationException) { tookRamp = false; }
+            Check("a ramp can be flooded - the water is flat and the slope crosses it",
+                tookRamp,
+                $"the pond was refused the ramp at ({ramp.X},{ramp.Y}), which is "
+                + "the one cell that has to be half wet");
+            // And one body is still one surface across the pair, which is what
+            // measuring the top off the cell's floor buys. The ramp's own foot is
+            // the flat cell to compare against, and it exists for every legal ramp
+            // by the dead-end rule. Off TopAt instead the two come out half a
+            // level apart - a waterfall along the edge a beach shares with its
+            // own pond, which is the failure this replaced a refusal with.
+            Vector2I sole = HexField.Step(ramp,
+                HexField.Reverse(field.RampHeading(ramp)));
+            float wetSlope = field.WaterTop(ramp), wetFoot = field.WaterTop(sole);
+            Check("and its surface is the pond's own, not half a level over it",
+                Mathf.Abs(wetSlope - wetFoot) < 0.01f,
+                $"({ramp.X},{ramp.Y}) stands its water at {wetSlope:F2} and its "
+                + $"foot ({sole.X},{sole.Y}) at {wetFoot:F2}, "
+                + $"{Mathf.Abs(wetSlope - wetFoot):F2}px apart");
+            // Put the board back before the rest of the topic reads it: the
+            // refusal used to leave the field untouched by throwing, and now the
+            // call succeeds.
+            field.SetWater(mask);
 
             // A cell of the pit and the cell above it on the flat: adjacent, two
             // levels, which is a waterfall and not a pond.
@@ -9447,9 +9480,15 @@ public static class SelfTest
             // The board's own pond, and this is the measurement the whole change
             // rests on. Carried on the vertices, a shore had to be marked on the
             // corners so the two triangles sharing one agreed - and a corner
-            // belongs to two edges. Here every cell has two water neighbours at
-            // most, so that spread marks all six corners of all five of them,
-            // which is foam round the whole rim. Said per edge it is not.
+            // belongs to two edges, so one dry edge wet the ends of both its
+            // neighbours. Said per edge it does not.
+            //
+            // <b>Strictly more corners than edges, and it used to be all of
+            // them.</b> That was true of a five-cell pond where no cell had more
+            // than two water neighbours; flooding the mouth put a cell inside the
+            // pond, whose corners the spread does not reach, and the check failed
+            // on a pond that shows the difference perfectly well. The statement
+            // was never "every corner" - it is that the corner rule over-marks.
             int edged = 0, cornered = 0;
             foreach (Vector2I pool in field.WaterCells)
             {
@@ -9469,7 +9508,7 @@ public static class SelfTest
             int all = field.WaterCells.Count * 6;
             Check("and the board's pond is shore at every corner but not at "
                   + "every edge",
-                field.WaterCells.Count > 0 && cornered == all && edged < all,
+                field.WaterCells.Count > 0 && cornered > edged && edged < all,
                 $"{edged} edges and {cornered} corners of {all} - if these agree "
                 + "the pond has stopped being the case that showed the "
                 + "difference, and this check has stopped saying anything");
@@ -9531,7 +9570,7 @@ public static class SelfTest
             // of water drawn in the sand's plane and fighting it for the depth
             // test. Strictly fewer, and the day the two agree the far bank has
             // started being drawn.
-            int shored = 0, freed = 0, level = 0;
+            int shored = 0, freed = 0;
             bool inside = true;
             foreach (Vector2I pool in field.WaterCells)
             {
@@ -9546,9 +9585,6 @@ public static class SelfTest
                         continue;
                     freed++;
                     inside &= shore[k];
-                    if (field.InBounds(beside[k])
-                        && field.LevelAt(beside[k]) == field.LevelAt(pool))
-                        level++;
                 }
             }
             Check("every edge the pond wants a flank on is a shore of it",
@@ -9563,14 +9599,56 @@ public static class SelfTest
                 + "being stood in the far bank's own plane, where it has nothing "
                 + "to be the side of");
             // And the one that decides whether the test is about the surface or
-            // about the cell. The pit's mouth is dry ground on the pond's own
-            // level, so a flank asked for on "the neighbour is lower" would miss
-            // it entirely and the beach would keep its floating sheet.
-            Check("and the pit's mouth earns one at the pond's own level",
-                level > 0,
-                "no free edge has a neighbour on the water's own level, so the "
-                + "test is comparing levels rather than the surface against the "
-                + "ground beside it, and the beach keeps its gap");
+            // about the cell: a dry ramp at the pond's own level. A flank asked
+            // for on "the neighbour is a level down" misses it entirely, and the
+            // beach keeps the floating sheet the flank exists to close.
+            //
+            // <b>Built here rather than read off the board, because the board no
+            // longer has one.</b> The pit's mouth was that cell and it is under
+            // water now - which is the point of letting a ramp be flooded at all
+            // - so the witness has to be a board that cannot be authored away.
+            // The same reason BoardMap.Flood's pair is built rather than found.
+            //
+            // A trench: the floor at -1 with the water on it, a dry ramp beside
+            // it also at -1 rising to the rim at 0, and the ramp's five other
+            // neighbours taken down to -1 as well, because SetRelief wants a ramp
+            // to have exactly one neighbour a level above it.
+            var bed = new int[field.Columns * field.Rows];
+            var tilt = new bool[field.Columns * field.Rows];
+            var trench = new bool[field.Columns * field.Rows];
+            var wetRamp = new Vector2I(5, 3);
+            Vector2I wetFloor = HexField.Step(wetRamp, 270);
+            int Ix(Vector2I c) => c.Y * field.Columns + c.X;
+            bed[Ix(wetRamp)] = -1;
+            tilt[Ix(wetRamp)] = true;
+            foreach (int h in HexField.EdgeHeadings)
+            {
+                Vector2I side = HexField.Step(wetRamp, h);
+                if (h != 90 && field.InBounds(side))
+                    bed[Ix(side)] = -1;
+            }
+            trench[Ix(wetFloor)] = true;
+            field.SetRelief(bed, tilt);
+            field.SetWater(trench);
+            bool[] free = Stage3D.Freeboard(field, wetFloor, hex, 1.0f, 1.0f);
+            Vector2I[] round = Stage3D.Beside(field, wetFloor, hex, 1.0f, 1.0f);
+            bool onLevel = field.IsRamp(wetRamp)
+                           && field.LevelAt(wetRamp) == field.LevelAt(wetFloor);
+            bool lipped = false;
+            for (int k = 0; k < 6; k++)
+                lipped |= free[k] && round[k] == wetRamp;
+            Check("and a dry ramp at the pond's own level earns one too",
+                onLevel && lipped,
+                onLevel
+                    ? "the flank is asked for on \"the neighbour is a level "
+                      + "down\" rather than on \"its ground is under the "
+                      + "surface\", so a beach keeps its floating sheet"
+                    : $"the trench did not build: ({wetRamp.X},{wetRamp.Y}) is "
+                      + $"{(field.IsRamp(wetRamp) ? "level " + field.LevelAt(wetRamp)
+                                                  : "not a ramp")}");
+            field.SetRelief(Main.ReliefMap(field.Columns, field.Rows),
+                            Main.RampMask(field.Columns, field.Rows));
+            field.SetWater(wasWater);
             // Three of six face the eye, which is the ground prisms' arithmetic
             // and the reason theirs need no list. Here the cull is needed rather
             // than saved: a flank on a far edge is behind the surface's own
@@ -10092,10 +10170,15 @@ public static class SelfTest
             // The one number the belts read, and the whole of what stops a rut
             // being laid in a pond. Two halves of one field rather than a flag
             // beside a height, because a pair is a pair that can disagree.
-            Check("a tank is wading exactly when it has a waterline",
-                !Vehicle.WadingAt(float.NegativeInfinity)
-                && Vehicle.WadingAt(field.WaterTop(pond[0]))
-                && Vehicle.WadingAt(0.0f),
+            // And it is asked against the ground rather than against nothing,
+            // which is the half a flooded ramp needed: over the front of a beach
+            // the cell is water and the tank is not in it.
+            float wetTop = field.WaterTop(pond[0]);
+            Check("a tank is wading exactly when the water stands over its own ground",
+                !Vehicle.WadingAt(float.NegativeInfinity, 0.0f)
+                && Vehicle.WadingAt(wetTop, field.TopAt(pond[0]))
+                && Vehicle.WadingAt(wetTop, wetTop - 1.0f)
+                && !Vehicle.WadingAt(wetTop, wetTop + 1.0f),
                 "the belts and the stage read this one field for two questions, "
                 + "and the belts read it to keep a rut out of the water");
         }
@@ -11180,5 +11263,46 @@ public static class SelfTest
             && bench.Kinds.All(k => k is null)
             && bench.Homes.SequenceEqual(Main.HomeCells),
             "the map and the decoders disagree");
+
+        // The island on the test board, and it is the one thing about that board
+        // a single character undoes without a word. Dry one cell of its ring and
+        // it is a peninsula: nothing throws, the flood guard is happy, everything
+        // is still reachable, and the only thing that changed is that the picture
+        // is no longer of an island. TankBench's "to the island" asks the map, so
+        // a ring with a hole in it drives the tank somewhere else instead.
+        //
+        // Both halves, because BoardMap.Ringed is deliberately the weaker
+        // predicate - it says no shore touches the cell, and counts an off-board
+        // neighbour as water so that open water at the board's edge still
+        // answers. Surrounded is the stronger thing, and it is what makes an
+        // island one.
+        BoardMap test = BoardMap.Test;
+        Vector2I? isle = test.Ringed(false);
+        var bare = new List<string>();
+        if (isle is Vector2I stood)
+            foreach (int h in HexField.EdgeHeadings)
+            {
+                Vector2I next = HexField.Step(stood, h);
+                if (!test.OnBoard(next) || !test.Water[test.At(next)])
+                    bare.Add($"({next.X},{next.Y})");
+            }
+        Check("the test board holds an island, with water on all six sides of it",
+            isle is not null && bare.Count == 0,
+            isle is null
+                ? "no dry cell on it has water all round"
+                : $"({isle.Value.X},{isle.Value.Y}) is not surrounded: "
+                  + string.Join(" ", bare));
+
+        // <b>What is deliberately not checked beside it: that the way on to the
+        // island is a flooded beach a level up.</b> It reads like the
+        // load-bearing half, and every part of it is already held elsewhere -
+        // that there is a ramp in the ring at all by the reachability check
+        // above, that the ramp stands under water by the ring being water, and
+        // that the island stands over the pond by Flood, which puts a dry cell
+        // at a surface's own height beneath it. Written out, no mutation makes it
+        // fail alone: dry the landing and the ring check goes first, sink the
+        // island and Flood does, raise it two levels and DeriveRamps finds the
+        // beach nothing to bridge. A check that cannot fail by itself is a second
+        // copy of three answers.
     }
 }

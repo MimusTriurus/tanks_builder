@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Godot;
 
@@ -146,15 +146,25 @@ public sealed class Vehicle
     public float Waterline = float.NegativeInfinity;
 
     /// <summary>Whether this tank is standing in water at all.</summary>
-    public bool Wading => WadingAt(Waterline);
+    public bool Wading => WadingAt(Waterline, Height);
 
-    /// <summary>The same question asked of a bare height, so the check can be
-    /// built on it - a required-member type cannot be conjured in a test, and a
-    /// check that re-wrote the predicate would keep passing after this stopped
-    /// meaning it. The reason <see cref="VehicleAudio.ImpactFor"/> is a named
-    /// static too.</summary>
-    public static bool WadingAt(float waterline) =>
-        !float.IsNegativeInfinity(waterline);
+    /// <summary>
+    /// The same question asked of bare heights, so the check can be built on it -
+    /// a required-member type cannot be conjured in a test, and a check that
+    /// re-wrote the predicate would keep passing after this stopped meaning it.
+    /// The reason <see cref="VehicleAudio.ImpactFor"/> is a named static too.
+    ///
+    /// <b>Against the ground, and it used to be against nothing</b> - a waterline
+    /// at all was enough. That is the same statement on a flat cell, where the
+    /// surface stands over the floor by construction, and it is wrong on the one
+    /// cell that is half wet: a flooded ramp carries water over the back
+    /// <c>WaterDepth</c> of its run and none over the front, so a tank up the
+    /// beach laid no rut and wore a foam collar while standing on dry sand. The
+    /// dry case still falls out without a branch, because negative infinity is
+    /// under every ground there is.
+    /// </summary>
+    public static bool WadingAt(float waterline, float ground) =>
+        waterline > ground;
 
     /// <summary>
     /// How high it counts as standing - equal to <see cref="Height"/> whenever it

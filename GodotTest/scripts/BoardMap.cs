@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Godot;
@@ -191,6 +191,67 @@ public sealed partial class BoardMap
         && (Plot is null || Plot.Contains(cell));
 
     public bool IsCliff(Vector2I cell) => OnBoard(cell) && Cliffs[At(cell)];
+
+    /// <summary>
+    /// The first cell of the asked-for wetness with nothing but water around it
+    /// - open water when asked wet, an island when asked dry - or null if the
+    /// board has no such place.
+    ///
+    /// <b>One predicate serves both because both are defined by what surrounds
+    /// them rather than by where they are:</b> open water is a wet cell no shore
+    /// touches, and an island is a dry one.
+    ///
+    /// <b>An off-board neighbour counts as water, and that is deliberate rather
+    /// than sloppy.</b> Open water at the board's edge is still open water - on
+    /// <see cref="Test"/> every wet cell with no shore on it is at the edge, so
+    /// the strict reading answers nothing at all. Which makes this "no shore
+    /// touches it" and not "surrounded"; an island wants the stronger thing, and
+    /// the check on it asserts that separately.
+    ///
+    /// <b>It lives on the map because the map is what knows the answer.</b>
+    /// <see cref="TankBench"/> drives to both from its panel, and a literal
+    /// there names the island on <see cref="Test"/> and names nothing on
+    /// <c>--map bench</c> - a button that drives to nothing in particular reads
+    /// as the pathing being broken. Here it is also askable of a board no scene
+    /// has opened, which is where the check on it lives.
+    /// </summary>
+    public Vector2I? Ringed(bool wet)
+    {
+        for (int r = 0; r < Rows; r++)
+        for (int q = 0; q < Columns; q++)
+        {
+            var cell = new Vector2I(q, r);
+            if (!OnBoard(cell) || Water[At(cell)] != wet)
+                continue;
+            bool ringed = true;
+            foreach (int heading in HexField.EdgeHeadings)
+            {
+                Vector2I next = HexField.Step(cell, heading);
+                if (OnBoard(next) && !Water[At(next)])
+                    ringed = false;
+            }
+            if (ringed)
+                return cell;
+        }
+        return null;
+    }
+
+    /// <summary>The cell standing at the board's top level, first one found -
+    /// where <see cref="TankBench"/>'s "to the rise" goes. Measured for
+    /// <see cref="Ringed"/>'s reason.</summary>
+    public Vector2I? Crown()
+    {
+        Vector2I? best = null;
+        for (int r = 0; r < Rows; r++)
+        for (int q = 0; q < Columns; q++)
+        {
+            var cell = new Vector2I(q, r);
+            if (OnBoard(cell)
+                && (best is null || Levels[At(cell)] > Levels[At(best.Value)]))
+                best = cell;
+        }
+        return best;
+    }
 
     /// <summary>How many cells of each letter, for the audit and the trace.
     /// </summary>
@@ -480,19 +541,18 @@ public sealed partial class BoardMap
 
     public static BoardMap Abbey => _abbey ??= FromGround(
         "abbey", AbbeyGround, AbbeyRamps, AbbeyHomes, TerrainSet.Mixed, true);
-
     /// <summary>
-    /// The strip <see cref="TankBench"/> stands its tank on: five columns by
-    /// three, with a rise in one corner and a pool in the other.
+    /// The strip <see cref="TankBench"/> stands its tank on: seven columns by
+    /// four, with a rise in one corner and a pool holding an island in the
+    /// other.
     ///
     /// <b>Small because the subject is one tank, and not smaller because a tank
     /// that cannot be driven cannot be judged.</b> Half of what a vehicle does
     /// here is keyed on ground gone past rather than on the clock - the belts,
     /// the ruts, the jolt, the pitch - so a single hex would have shown the
-    /// turret, the gun and the damage and nothing that moves. Five columns is
-    /// the shortest run in which a tank reaches its own cruise: the medium wants
-    /// 69px to get there against 107 to the row, so three cells of straight is
-    /// the least that is not all ramp-up.
+    /// turret, the gun and the damage and nothing that moves. Three cells of
+    /// straight is the least that is not all ramp-up: the medium wants 69px to
+    /// reach its own cruise against 107 to the row.
     ///
     /// <b>The rise and the pool are here because they are the two things the
     /// ground does to a tank that flat soil does not.</b> A grade caps the speed
@@ -500,47 +560,72 @@ public sealed partial class BoardMap
     /// and cuts the sprite at the waterline. Both are one cell's drive from the
     /// middle, so neither needs looking for.
     ///
-    /// <b>The beach sits in the corner because a ramp wants exactly one
-    /// neighbour above it.</b> On a board this small nearly every cell touches
-    /// four or five others at the level above, and a ramp with more than one
-    /// high edge is refused - which edge is its high one is not decided by the
-    /// map. (0,1) has two neighbours off the board and two more in the water, so
-    /// the pool's shore is the one place a beach fits at all.
+    /// <b>The island is why this board is seven by four and not five by three,
+    /// and the size is forced twice over.</b> A cell has all six neighbours on
+    /// the board only inside <c>1..Columns-2</c> by <c>1..Rows-2</c>, so on five
+    /// by three the only candidates were (1,1), (2,1) and (3,1) - and the ring
+    /// around any of them takes two of the three homes and cuts the mainland in
+    /// two. Then the fourth row: a ramp is entered and left along its own axis,
+    /// so <i>both</i> its ends have to be on the board, and on three rows every
+    /// cell of the outer two has half its axes off it. The beaches that would
+    /// still have fitted had their soles two columns away, which drags the pool
+    /// across the strip the board exists for.
+    ///
+    /// <b>The island stands a level above the water because the alternative is
+    /// forbidden, not because it looks better.</b> An island at the pond's own
+    /// level is a dry hole in a lake, and <see cref="Flood"/> puts it under -
+    /// correctly: a flat dry cell at a surface's own height beside it is beneath
+    /// that surface. So the island sits at the datum with the pool a level down,
+    /// and getting on to it costs a ramp.
+    ///
+    /// <b>Reaching it is a lap around it, and that is the axis rule again rather
+    /// than the pathing going the long way.</b> A landing is entered from its
+    /// sole, and the sole is the cell on the far side from the island, so a tank
+    /// always comes at the shore head-on: in at the ford on the north bank, west
+    /// past the island, round its front and up from the east.
     /// </summary>
     private static readonly string[] TestGround =
     {
-        // 01234
-        "ww.11", // r0   the pool top left, the rise top right
-        "vw...", // r1   the beach, and the middle to park on
-        ".....", // r2
+        // 0123456
+        "www..11", // r0   the pool's north bank, the ford, and the rise
+        "wwww...", // r1
+        "w.ww...", // r2   the island at (1,2), water on all six sides of it
+        "wwww...", // r3
     };
 
-    /// <summary>The two ways off the level: up to the rise at (3,1), down to the
-    /// water at (0,1).
+    /// <summary>The three ways off a level: up to the rise at (5,1), out of the
+    /// pool at (2,1), and on to the island at (2,3).
     ///
-    /// The hill's climbs along 90 - up the screen, away from the camera - which
-    /// is the axis a slope reads best on. The beach cannot: its high end has to
-    /// be the end that joins the rest of the board, and at (0,1) that is (0,2)
-    /// rather than the corner (0,0), whose only other neighbour is water. So it
-    /// rises along 270, toward the camera, and the audit names it as compressed.
-    /// The alternative was the ramp and the corner and the pool making an island
-    /// nothing could drive to - which is what the first draft did, and the
-    /// reachability check said so: five cells stranded from every home.</summary>
+    /// <b>All three rise along 30, 90 or 150 - away from the camera - so the
+    /// audit names none of them compressed</b>, unlike the single beach this
+    /// board used to carry. That cost the pool its shape rather than luck: a
+    /// ford wants exactly one neighbour a level above it, so it has to sit where
+    /// the shore turns, and the only turn that leaves its high edge pointing
+    /// away from the camera is the one at (2,1) looking east on to (3,0).
+    ///
+    /// <b>The two in the water are flooded, and that is the point of them.</b> A
+    /// ramp has no single surface height, so the pond's plane crosses it - at
+    /// <see cref="HexField.WaterDepth"/> of its run - and the back of each
+    /// stands under water while its head stands dry. See
+    /// <see cref="HexField.SetWater"/>, whose guard used to refuse exactly
+    /// this.</summary>
     private static readonly string[] TestRamps =
     {
-        // 01234
-        ".....", // r0
-        "r..r.", // r1
-        ".....", // r2
+        // 0123456
+        ".......", // r0
+        "..r..r.", // r1   the ford east on to (3,0), the hill's climb north
+        ".......", // r2
+        "..r....", // r3   the island's landing, north-west on to (1,2)
     };
 
     /// <summary>Where the tank stands. The middle cell first, because the bench
     /// shows one tank and it should open in the middle of its board with the
-    /// rise on one hand and the pool on the other; the other two are there so
-    /// that <c>--map test</c> on the harness, which builds one vehicle per
-    /// atlas, does not park three of them on one hex.</summary>
+    /// rise on one hand and the pool on the other - at (4,2) both are one step
+    /// away; the other two are there so that <c>--map test</c> on the harness,
+    /// which builds one vehicle per atlas, does not park three of them on one
+    /// hex.</summary>
     private static readonly Vector2I[] TestHomes =
-        { new(2, 1), new(2, 2), new(3, 2) };
+        { new(4, 2), new(4, 3), new(5, 3) };
 
     private static BoardMap? _test;
 
