@@ -46,10 +46,21 @@ namespace TankSpriteTest;
 /// left burning is still burning when you come back to it. The one that is not
 /// shown is not ticked and is not drawn.
 ///
+/// <b>Two boards, and the second is the same bench with one string
+/// changed.</b> <c>TankTest.tscn</c> stands the tank on
+/// <see cref="BoardMap.Test"/> - the level, one grade and one ford, which is
+/// where every dial here was tuned. <c>WaterTankTest.tscn</c> stands it on
+/// <see cref="BoardMap.WaterMap"/>, open water with a rosette of land in the
+/// middle: there the water is the board, so every one of the six ways off the
+/// middle is a wade and the descent can be judged on whichever bearing reads
+/// best. Nothing in this file knows which of the two it is on - see
+/// <see cref="Map"/>.
+///
 /// Run it with the scene as the positional argument, leaving project.godot
 /// alone:
 ///
 ///     Godot_v4.7.2-stable_mono_win64.exe --path GodotTest res://TankTest.tscn
+///     Godot_v4.7.2-stable_mono_win64.exe --path GodotTest res://WaterTankTest.tscn
 /// </summary>
 public sealed partial class TankBench : Node2D
 {
@@ -57,8 +68,17 @@ public sealed partial class TankBench : Node2D
     /// <c>Abbey</c> is a map and not a bench: a board is data, and a second
     /// place that authors one is a second place to disagree with the guards
     /// and with the self-test that judges every map whether or not a scene
-    /// opened it.</summary>
-    private const string MapName = "test";
+    /// opened it.
+    ///
+    /// <b>An export rather than a constant, which is what makes a bench on
+    /// another board cost four lines</b> - <see cref="Main.Map"/>'s arrangement
+    /// and its reason: a Godot scene can set an exported property, so
+    /// <c>WaterTankTest.tscn</c> is this same node with this string changed, and
+    /// every dial, clock and readout comes with it. <c>--map</c> still
+    /// overrides, because a flag is the more specific statement - a capture
+    /// taken with one has to mean what it says whichever scene it was launched
+    /// from.</summary>
+    [Export] public string Map = "test";
 
     private BoardMap _map = null!;
     private HexField _field = null!;
@@ -164,6 +184,12 @@ public sealed partial class TankBench : Node2D
                 case "--tank" when i + 1 < args.Length:
                     _startTag = args[++i].ToUpperInvariant();
                     break;
+                // Which board. Overrides the scene's export for the reason every
+                // other flag here overrides a default: a capture taken with a
+                // flag has to mean what it says whatever it was launched from.
+                case "--map" when i + 1 < args.Length:
+                    Map = args[++i];
+                    break;
                 case "--drive" when i + 1 < args.Length:
                     _driveTo = Spot(args[++i]);
                     break;
@@ -263,7 +289,7 @@ public sealed partial class TankBench : Node2D
     {
         ReadFlags();
 
-        _map = BoardMap.ByName(MapName);
+        _map = BoardMap.ByName(Map);
         _terrain = TerrainSet.Load(AssetRoot.Terrains);
         GD.Print("tank bench: terrain " + _terrain.Note);
 

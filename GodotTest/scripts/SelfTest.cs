@@ -8917,6 +8917,7 @@ public static class SelfTest
             var mapped = new List<string>();
             var bare = new List<string>();
             string tallTale = "", underTale = "", deepTale = "";
+            int inked = 0, unanswered = 0;
             foreach (string tag in Main.Tags)
             {
                 AtlasSet set = AtlasSet.Load(
@@ -8975,6 +8976,21 @@ public static class SelfTest
                 if (moved == 0 || fell > 0)
                     deepTale = $"{tag}: deeper water moved {moved} columns, "
                                + $"{rose} up and {fell} down";
+                // And what shallow water does to it, which is the case the flat
+                // fallback was wrong about: a column whose own surface stands
+                // above the plane has no answer, and in an inch of water that is
+                // most of the hull. Counted against the groundline, which is what
+                // says a column has a silhouette at all.
+                set.Waterline(4.0f);
+                for (int f = 0; f < set.Count; f++)
+                for (int x = 0; x < set.Tile.X; x++)
+                {
+                    if (set.GroundlineAt(f, x) < 0)
+                        continue;
+                    inked++;
+                    if (set.WaterlineAt(f, x) < 0)
+                        unanswered++;
+                }
             }
             Check("some tank carries a height map, and some may not",
                 mapped.Count + bare.Count > 0,
@@ -8990,6 +9006,32 @@ public static class SelfTest
                     Main.SpritesRoot, t, t)
                     .Groundline is not null),
                 $"{string.Join(", ", bare)} would lose the waterline entirely");
+
+            // <b>A column the map cannot answer is dry, and it used to be cut
+            // flat.</b> The two tables fail for two reasons - see the shader's own
+            // note on shore_flat - and the flat cut only leaves the groundline's
+            // failure dry by accident of where the gun is drawn. On the height
+            // map it drew a line at the cell centre's row straight across a hull
+            // in an inch of water, which is the one row cut the per-column table
+            // exists to abolish.
+            Check("and a column the height map cannot answer is left dry, not cut flat",
+                Stage3D.PaintShader.Contains("shore_flat < 0.0"),
+                "the sprite falls back to a flat cut for a column the waterline "
+                + "has no answer for, which tints and foams a column with no "
+                + "water in it");
+            // The other half, and it is the half that says the rule matters: the
+            // unanswered column is not a rare one. Asserted as existing rather
+            // than as a fraction, because the fraction is a fact about the art -
+            // but it is printed, because it is the finding.
+            Check("and shallow water leaves such columns, which is why that is not rare",
+                inked == 0 || unanswered > 0,
+                $"in 4px of water every one of {inked} inked columns has an "
+                + "answer, so either the map or the scan has stopped meaning "
+                + "what it says");
+            if (inked > 0)
+                GD.Print($"waterline: 4px of water answers "
+                         + $"{inked - unanswered} of {inked} inked columns "
+                         + $"({100.0 * unanswered / inked:0}% dry)");
 
             // The table the waterline is cut against, and the three things about
             // it that decide whether it can be trusted: that it exists, that it
@@ -9375,6 +9417,45 @@ public static class SelfTest
                 Stage3D.DeepShader.Contains("ALPHA = 1.0;"),
                 "the computed surface is translucent, which is the strip's "
                 + "bargain with more arithmetic on top");
+
+            // Where it stops, and that it stops by hand. The depth test clips this
+            // pass on the intersection of two planes, which is a straight segment -
+            // the shoreline the ramps wore, read as one because it is one - and no
+            // dial can move it. The same comparison made against zbuf gives the
+            // same answer within a pixel of the line (measured: 724 columns
+            // touched, median 2px, longest run 4) and can be offset.
+            Check("and it clips itself against the bottom rather than by the depth test",
+                Stage3D.DeepShader.Contains("depth_test_disabled")
+                && Stage3D.DeepShader.Contains("if (bed + lap <= 0.0)")
+                && Stage3D.DeepShader.Contains("discard;"),
+                "the computed surface is clipped by the hardware, so its shore is "
+                + "the straight segment two planes cross on");
+
+            // And how far it is allowed to move it. Along the shore the bed does
+            // not change; across it it changes at the ramp's own gradient, so a
+            // field steeper than that crosses zero more than once and the water
+            // comes apart into islands standing on dry sand. The crumple's two
+            // octaves put that bound at about 0.05 of the feature size.
+            //
+            // <b>A band and not a ceiling, because both ends were measured.</b>
+            // Held under the bound the line came back as one bow per ramp and, on
+            // the flatter ramps, as the segment it replaced; at twice it drew hard
+            // teeth. The film buys the middle - a fold arrives as a tongue instead
+            // of a tooth - so a number outside this range is one of the two
+            // pictures that were rejected rather than a taste.
+            //
+            // Asked of the board in hand, because the grade is a dial and the
+            // answer is not one number: 1.05 here, 1.48 on the tank bench, which
+            // keeps HexField's own 0.25 and is where the picture was judged.
+            float lapGrade = 2.6f * Stage3D.LapWave.Y * Stage3D.LapWave.X;
+            float bedGrade = (float)field.StepGrade * field.Squash;
+            float lapOver = lapGrade / Mathf.Max(bedGrade, 1e-6f);
+            Check("and the lapping is past the bound of a hard cut, inside the film's",
+                lapOver > 1.0f && lapOver < 2.0f,
+                $"the lap's gradient is {lapOver:0.00} of the ground's - "
+                + (lapOver <= 1.0f
+                    ? "under one it reads as the straight segment again"
+                    : "over two it comes apart into teeth"));
 
             // Its own clock, for the reason the foam has one.
             string deepCode = string.Join('\n',

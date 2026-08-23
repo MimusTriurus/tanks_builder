@@ -581,10 +581,27 @@ uniform vec4 shore_map = vec4(0.0);
 // heading's row of the table, the tile row the ground sits on, and the tile's
 // last row
 uniform vec4 shore_cut = vec4(-1.0);
-// The lift for a column the table has no answer for - the gun swung out past
-// the tracks, or on a height map any column the water never reaches. Always
-// the full depth over the flat ground row, which is far below such a column
-// and therefore leaves it dry.
+// The lift for a column the table has no answer for, or negative where such a
+// column is simply dry.
+//
+// <b>Two tables fail for two reasons, and one fallback served both wrongly.</b>
+// The groundline has no answer where the column has no silhouette bottom - the
+// gun swung out past the tracks - and the flat cut leaves that dry for free,
+// because the gun is drawn far above it. The waterline has no answer where the
+// column's own surface stands above the water plane, which is a hull column
+// like any other: the flat cut runs straight through it and tints and foams a
+// column with no water in it. That is not a rare fallback either - it is nearly
+// every column in shallow water. Measured on MTP's map: of 103 inked columns
+// on the side heading, 0 answer at 2px of water, 16 at 5px, 42 at 10px, 98 at
+// 15px, all at 20px. So a tank putting its nose in read as a dead straight bar
+// across the nose plate at the cell centre's own row, ending hard at the plate's
+// edges - which is what the cut being one row does, said in the one place the
+// per-column table was still allowed to do it.
+//
+// The water's own half already refuses it: shoreline() returns -1 for a column
+// with no entry rather than reaching for a flat line. This is the sprite's half
+// saying the same thing, which is what it means for the two halves not to be two
+// answers.
 uniform float shore_flat = 0.0;
 // The foam lapping at the hull: rgb the water's own foam colour, a its level,
 // so the pond's dial and --no-foam take this with them rather than leaving a
@@ -617,7 +634,10 @@ void fragment() {{
     if (shore_cut.x >= 0.0) {{
         float scale = max(shore_map.z, 0.0001);
         vec2 tile = (UV * shore_map.w - shore_map.w * 0.5) / scale + shore_map.xy;
-        float bottom = shore_cut.z - shore_flat / scale;
+        // Below every row of the tile, so that a column the table cannot
+        // answer is dry: no tint, no foam. Not a flag, because the file's own
+        // convention for an absent number is a negative one - see shore_cut.
+        float bottom = shore_flat < 0.0 ? 1e9 : shore_cut.z - shore_flat / scale;
         if (shore_cut.y >= 0.0) {{
             vec4 s = texture(shore, vec2((tile.x + 0.5)
                                          / float(textureSize(shore, 0).x),
@@ -1060,7 +1080,10 @@ void fragment() {{
                       / Mathf.Max(atlas.Count, 1),
                 atlas.HexRect.Position.Y + atlas.HexRect.Size.Y * 0.5f,
                 Mathf.Max(atlas.Tile.Y - 1, 1)));
-            ink.SetShaderParameter("shore_flat", lift);
+            // The fallback for a column with no answer, or -1 where there is
+            // none to be had: with the height map, no answer means the water
+            // never reaches that column - see the uniform's own note.
+            ink.SetShaderParameter("shore_flat", table is not null ? -1.0f : lift);
             // The water's own foam colour and level, so this line and the pond's
             // are one dial: a tank still wearing a white collar in water that
             // has stopped foaming would be the reading nobody could explain.
@@ -2461,9 +2484,34 @@ void fragment() {
     /// <b>A cap because a shader array has to have one</b>, and named rather than
     /// left at whatever looked big: a pond past it would silently draw calm, which
     /// is the failure this project keeps refusing - so <see cref="BuildWater"/>
-    /// says so instead. The board's pond is five.
+    /// says so instead. The harness's pond is five and the tank bench's is
+    /// fourteen.
+    ///
+    /// <b>A hundred and sixty because a board asked for it, and the warning is
+    /// what asked.</b> <see cref="BoardMap.WaterMap"/> is twelve by twelve with
+    /// seven cells of land in it, so a hundred and forty-three are flooded - and
+    /// under the old sixty-four, seventy-nine of them shared the last slot, which
+    /// on a board whose whole subject is water means the swell answers the wrong
+    /// cell over more than half the pond. Not a silent failure, because the cap
+    /// was named for exactly this; raising it is the answer the name was left
+    /// there to get.
+    ///
+    /// <b>What it costs is a uniform block, and it is measured rather than
+    /// guessed.</b> Four arrays index by this - <c>state</c>, <c>mark</c>,
+    /// <c>hub</c> and <c>rim_mask</c>, with <c>span</c> on the drawn strip in
+    /// place of the last two - and std140 gives every element of an array its own
+    /// sixteen bytes whatever it holds, so a hundred and sixty is ten kilobytes
+    /// against the sixteen a GL ES 3 block is guaranteed. Per frame it is a
+    /// hundred and sixty floats pushed instead of sixty-four.
+    ///
+    /// <b>No board that fitted under the old cap moves</b>, and that is measured
+    /// rather than argued: past the pond's own cell count every slot is dead
+    /// ground the shader never indexes. The tank bench comes back bit for bit
+    /// identical, and the harness by one pixel at one level - against a run to
+    /// run noise floor of zero on this frame, which makes that the rounding this
+    /// project already names and not the cap.
     /// </summary>
-    public const int MaxWaterCells = 64;
+    public const int MaxWaterCells = 160;
 
     /// <summary>Whether the pond is computed or drawn. On by default because it
     /// is what the water is now; the strip stays reachable so the two can be put
@@ -2661,6 +2709,54 @@ void fragment() {
     /// the near banks wore the new line.</summary>
     public const float ShoreDepth = 5.0f;
 
+    /// <summary>How fine the lapping of the shore is in world units, and how far
+    /// it runs the water up a slope and back down, in world units of depth along
+    /// the view ray.
+    ///
+    /// <b>A pair and not a share of the foam band, because it is bounded by
+    /// something else entirely.</b> The band is a width and can be any width; this
+    /// is the displacement of a contour on a slope, and past a point it stops
+    /// moving a line and starts folding one. Along the shore the bed does not
+    /// change and across it it changes at the ramp's own gradient - StepGrade times
+    /// the squash, 0.125 of depth per world unit at grade 0.25 - so a field whose
+    /// own gradient beats that crosses zero more than once, and the water comes
+    /// apart into islands standing on dry sand. The crumple's two octaves put that
+    /// bound at roughly <c>0.05 x</c> the feature size.
+    ///
+    /// <b>And the film is what lets this sit past it.</b> Swept: a fifth under the
+    /// bound (0.032, 1.2) reads as one bow per ramp and, on the flatter ramps, as
+    /// the straight segment it replaced; the foam's own scale at a beach amplitude
+    /// (0.05, 2.25) is twice over and drew a row of hard teeth. This pair is over
+    /// it, and with <see cref="LapEdge"/> feathering the tip the fold arrives as a
+    /// tongue of water on wet sand instead. So the bound is the bound of a
+    /// <i>cut</i>, and what bought the scallops was the softness and not the size.
+    ///
+    /// <b>The bound is the board's, not this file's, and by more than a little.</b>
+    /// The grade is a dial, so how far over this sits depends on which board is
+    /// asking: 1.48 on the tank bench, which keeps HexField's own 0.25 and is where
+    /// the picture was judged, and 1.05 on the harness, whose panel opens at 0.35.
+    /// That is why it is written down as a ratio to the ground's gradient and
+    /// asserted as a band rather than set as a distance in pixels - a flatter board
+    /// tightens the bound, and it is the one way this pair can go wrong later.</summary>
+    public static readonly Vector2 LapWave = new(0.04f, 1.8f);
+
+    /// <summary>How soft the tip of that run is, in the same units.
+    ///
+    /// <b>A film, not a cut.</b> The last inch of a wave up a beach is a sheet a
+    /// few millimetres deep over wet sand, so the edge wants a ramp rather than a
+    /// boundary - and the same ramp is what keeps a fold from reading as a tooth
+    /// where the field's gradient does clip the bound. Half a unit of depth is
+    /// about four world units of beach, the narrowest strip that is more than one
+    /// pixel of itself at play zoom.
+    ///
+    /// <b>Spent on what the water adds, never on its alpha.</b> Feathering ALPHA
+    /// is the obvious build and the self test refuses it by name: owning every
+    /// pixel it covers is the whole difference in kind between this surface and the
+    /// strip. It is not needed anyway - the colour converges on the ground by
+    /// itself as the thickness goes to nothing. What stops dead at a cut is what
+    /// gets added regardless of depth: the foam and the two highlights.</summary>
+    public const float LapEdge = 0.5f;
+
     /// <summary>The colour of foam, wherever it is drawn. One constant because
     /// the line at the hull and the line at the bank are the same water, and two
     /// would be two things to keep in agreement.</summary>
@@ -2694,6 +2790,8 @@ void fragment() {
         _deepInk.SetShaderParameter("edge_crumple", EdgeCrumple);
         _deepInk.SetShaderParameter("beach", Beach);
         _deepInk.SetShaderParameter("shore", ShoreDepth);
+        _deepInk.SetShaderParameter("lap_wave", LapWave);
+        _deepInk.SetShaderParameter("lap_edge", LapEdge);
         _deepInk.SetShaderParameter("wave_scale", Swell2D.X);
         _deepInk.SetShaderParameter("wave_speed", Swell2D.Y);
         return _deepInk;
@@ -3021,7 +3119,14 @@ void fragment() {{
     /// </summary>
     internal const string DeepShader = @"
 shader_type spatial;
-render_mode unshaded, cull_disabled, depth_draw_never;
+// <b>The depth test is off and the clip is done here instead</b> - see the lap
+// in fragment(). Off costs nothing and gives up nothing: what clips this pass is
+// the opaque ground, which is exactly what zbuf holds, so the same comparison
+// made by hand is the same answer - and the props and the tanks were never
+// clipped by depth anyway, they are drawn after it (WaterOrder is below both).
+// What it buys is the freedom to reach *past* the geometric line, which the
+// hardware test cannot give at any setting.
+render_mode unshaded, cull_disabled, depth_draw_never, depth_test_disabled;
 
 uniform sampler2D screen : hint_screen_texture, filter_linear_mipmap;
 uniform sampler2D zbuf : hint_depth_texture, filter_linear;
@@ -3126,6 +3231,13 @@ uniform float beach = 0.05;
 // as a fraction of that edge's own band. Shared verbatim with the sprite, which
 // draws the half of the waterline that lies on the armour.
 uniform vec2 edge_crumple = vec2(0.08, 0.6);
+// How fine the lapping of the shore is in world units, and how far it runs the
+// water up a slope and back down, in depth along the ray. A pair on the shape of
+// edge_crumple above and for the same reason: a scale means nothing without the
+// amplitude read at it. See Stage3D.LapWave.
+uniform vec2 lap_wave = vec2(0.04, 1.8);
+// And how soft the tip of that run is, in the same units. See Stage3D.LapEdge.
+uniform float lap_edge = 0.5;
 
 varying vec3 world;
 
@@ -3213,7 +3325,50 @@ void fragment() {{
     float floor_z = -(view.z / view.w);
     float here_z = -(INV_PROJECTION_MATRIX * vec4(vec3(SCREEN_UV * 2.0 - 1.0,
                      own * 2.0 - 1.0), 1.0)).z;
-    float thick = max(0.0, floor_z - here_z);
+
+    // <b>And the swell runs the edge up the beach and back down.</b> Where the
+    // pond meets a slope the water ends on the intersection of two planes, which
+    // is a straight segment - dead straight along the whole of a ramp, and read
+    // as one because it is one.
+    //
+    // Pushed by the <b>same</b> crumple that pushes the foam, in the same coin,
+    // and that is the point rather than a saving. The band was already displaced
+    // by this field while the cut it faded into was not, so the foam wandered
+    // *inside* a straight edge - the two halves of one line parting exactly as
+    // the hull's collar and the shore are written not to. One push, read once,
+    // and the band rides on the edge by construction.
+    //
+    // In depth along the ray, because that is the space the comparison is in: a
+    // world height of w moves this fragment w * squash nearer, so a threshold
+    // said in thickness is a wave height said in the only units the depth buffer
+    // can be asked about. Signed, so the water reaches past the geometric line
+    // as often as it falls short of it - the crest running up dry sand is the
+    // half the hardware test could never draw.
+    // <b>Its own scale, and the bound on it belongs to the ground.</b> This edge
+    // is a contour on a slope: along it the bed does not change, and across it it
+    // changes at the ramp's own gradient - StepGrade times the squash, 0.125 of
+    // depth per world unit on this board. A field whose own gradient beats that
+    // crosses zero more than once, and where it does the water comes apart into
+    // islands sitting on dry sand. Measured: the foam's own crumple, at the
+    // amplitude a beach needs, is a gradient of 0.29 - twice over - and it drew
+    // exactly that, a row of hard teeth.
+    //
+    // <b>What buys the rest is the film, not a bigger number.</b> Held under the
+    // bound the line comes back nearly straight - swept it, and a fifth under read
+    // as one bow per ramp and nothing else. Past it, with the tip feathered, the
+    // same fold arrives as a tongue of water on wet sand, which is what a wave up
+    // a beach is. So the bound is the bound of a <i>cut</i>; a soft edge is
+    // allowed past it, and that is the whole of why this pair sits where it does.
+    float lap = crumple(world.xz * lap_wave.x, time * wave_speed) * lap_wave.y;
+    float bed = floor_z - here_z;
+    if (bed + lap <= 0.0)
+        discard;
+    float thick = max(0.0, bed + lap);
+    // How much of the last inch of the run is water at all - a film over wet sand
+    // rather than a cut. It is also what keeps the fold from reading as a tooth
+    // where this field's gradient beats the ground's: a hard edge shows a fold, a
+    // soft one shows a tongue.
+    float film = smoothstep(0.0, lap_edge, thick);
 
     // Bent by the surface, and the amount falls off in the shallows so the
     // shoreline does not tear. The tanks are drawn after this pass, so what is
@@ -3268,9 +3423,10 @@ void fragment() {{
     // cell, which puts the gradient at 0.9 and the fold one step away. Taken at
     // the point on the edge itself the displacement is constant across the band
     // by construction, so no setting of the two dials can fold it.
-    float lip = 1.0 - smoothstep(0.0, shore, thick
-                 + crumple(world.xz * edge_crumple.x, time) * edge_crumple.y
-                   * shore);
+    // Off the thickness the lap already moved, so the band starts at the water's
+    // own edge. It carried this push itself while the edge stood still; both at
+    // once would push it twice.
+    float lip = 1.0 - smoothstep(0.0, shore, thick);
     // And in the plane of the water: how far this fragment is from an edge the
     // pond actually ends at. Independent of where the camera is by construction,
     // which is the whole point - a shore is where the water stops, not where the
@@ -3427,6 +3583,17 @@ void fragment() {{
     // than as a bow.
     float lane = max(trail, prow) * mix(broken, 1.0, 0.55);
     col = mix(col, foam_ink, clamp(max(edge, lane), 0.0, 1.0) * foam);
+
+    // And the film, spent on what the water <b>adds</b> rather than on ALPHA.
+    // Translucency was the obvious way to feather a tip and it is the one thing
+    // this surface must not do: owning every pixel it covers is the whole
+    // difference in kind from the strip, and an alpha ramp hands the last of them
+    // back to the blender. It is not needed either - the colour already arrives
+    // at the ground on its own, because t goes to nothing with the thickness and
+    // mix(through, body, 0) is the bottom exactly. What ends abruptly at a cut is
+    // the foam and the two highlights, which are added whatever the depth: so it
+    // is those that fade, and `bottom` is where they fade to.
+    col = mix(bottom, col, film);
 
     ALBEDO = col;
     ALPHA = 1.0;

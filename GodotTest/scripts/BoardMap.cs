@@ -632,14 +632,142 @@ public sealed partial class BoardMap
     public static BoardMap Test => _test ??= FromGround(
         "test", TestGround, TestRamps, TestHomes, TerrainSet.Mixed, true);
 
+    /// <summary>
+    /// Open water twelve by twelve, with one rosette of land in the middle of
+    /// it: a flat centre and six ramps running off it down into the pond.
+    ///
+    /// <b>Seven land cells and six of them are the shore, which is what makes
+    /// this board a different question from <see cref="Test"/>.</b> There the
+    /// pool is a feature one cell's drive from a strip of dry ground, and a
+    /// tank meets the water on the one beach that fits; here the water is the
+    /// board and the land is the feature, so <i>every</i> way off the middle is
+    /// a wade. Six of them, one per flat side, so a run into the water can be
+    /// taken on any bearing without redrawing anything - and the descent, the
+    /// waterline creeping up the hull, the speed ceiling and the wake are all
+    /// measured on whichever face the camera reads best rather than on the only
+    /// one there is.
+    ///
+    /// <b>The ring is flooded ramps rather than dry ones, and that is what the
+    /// ask means by a descent.</b> A ramp's floor is its own level, so the
+    /// pond's surface runs onto it at <see cref="HexField.WaterTop"/> and the
+    /// slope cuts that plane: the back <see cref="HexField.WaterDepth"/> of
+    /// every one of the six stands under water and the head of it stands dry.
+    /// See <see cref="HexField.SetWater"/>, whose second guard used to refuse
+    /// exactly this.
+    ///
+    /// <b>The centre stands a level above the pond because the alternative is
+    /// forbidden</b> - <see cref="Flood"/>'s rule, the same one that puts
+    /// <see cref="Test"/>'s island on the datum: a flat dry cell at a surface's
+    /// own height beside it is beneath that surface. So the pond is a level
+    /// down, the centre is at the datum, and each ring cell is a ramp bridging
+    /// the one step between them. Each has exactly one neighbour a level above
+    /// it - the centre - so the ramp headings are settled off the levels with
+    /// nothing left for the map to declare.
+    ///
+    /// <b>The ring cells cannot be driven to one another, and that is the axis
+    /// rule rather than an oversight.</b> Two adjacent ramps are refused by
+    /// <see cref="HexField.Passable"/>, and all six of these are adjacent; a
+    /// ramp is entered from its sole and left to its head, so getting from one
+    /// face to the next is out into the water, round, and back in - or across
+    /// the centre. Which makes each of the six its own run rather than one lap
+    /// of a hill.
+    ///
+    /// <b>Three of the six point their high edge at the camera and the audit
+    /// says so, and here that cannot be fixed.</b> A high edge along 30, 90 or
+    /// 150 is drawn at full height and one along 210, 270 or 330 at about half
+    /// - see <see cref="Abbey"/>, where every ramp that had a choice took the
+    /// far-facing one. A rosette has no choice: it is all six headings by
+    /// definition, so half of it is compressed by construction. That is the
+    /// board rather than a defect in it, and the compressed three are worth
+    /// having for the same reason the far three are - a wade seen foreshortened
+    /// is a wade the game will draw.
+    ///
+    /// <b>One home, because one cell on this board is a place a tank may
+    /// park.</b> The self test wants a home that is dry, flat and not a rock,
+    /// and only the centre is all three - the ring is ramp and the rest is
+    /// water. So <c>--map water</c> on the harness, which builds one vehicle per
+    /// atlas, stands all three of them on that cell: this board belongs to the
+    /// one-tank bench, and says so here rather than by looking wrong there.
+    ///
+    /// Which also collapses three of the bench's four "go" buttons onto one
+    /// destination - the rise, the island and the middle are the same hex,
+    /// because the only high ground here is an island. True of the board rather
+    /// than worth special-casing the panel for.
+    /// </summary>
+    private static readonly string[] WaterGround =
+    {
+        // 012345678901
+        "wwwwwwwwwwww", // r0
+        "wwwwwwwwwwww", // r1
+        "wwwwwwwwwwww", // r2
+        "wwwwwwwwwwww", // r3
+        "wwwwwwwwwwww", // r4
+        "wwwwwwwwwwww", // r5   the ring: (5,5) (6,5) (7,5)
+        "wwwwww.wwwww", // r6   the centre at (6,6), flanked by (5,6) and (7,6)
+        "wwwwwwwwwwww", // r7   and (6,7)
+        "wwwwwwwwwwww", // r8
+        "wwwwwwwwwwww", // r9
+        "wwwwwwwwwwww", // r10
+        "wwwwwwwwwwww", // r11
+    };
+
+    /// <summary>The six ways off the centre - all of them, which is the board.
+    ///
+    /// The ring is the six neighbours of (6,6) on a flat-top grid with an even
+    /// column, so it is not the square block around it: 90 and 270 stay in
+    /// column 6, and the four diagonals land a row <i>up</i> from (6,6) on the
+    /// even column and level with it on the odd ones. Hence three marks on r5,
+    /// two on r6 and one on r7 - see <see cref="HexField.Step"/>, which is the
+    /// only definition of what is next to what.</summary>
+    private static readonly string[] WaterRamps =
+    {
+        // 012345678901
+        "............", // r0
+        "............", // r1
+        "............", // r2
+        "............", // r3
+        "............", // r4
+        ".....rrr....", // r5
+        ".....r.r....", // r6
+        "......r.....", // r7
+        "............", // r8
+        "............", // r9
+        "............", // r10
+        "............", // r11
+    };
+
+    /// <summary>The centre, and nothing else can be one - see the ground's
+    /// note.</summary>
+    private static readonly Vector2I[] WaterHomes = { new(6, 6) };
+
+    private static BoardMap? _water;
+
+    /// <summary>
+    /// The rosette-in-a-pond board, named <c>water</c>.
+    ///
+    /// <b><c>WaterMap</c> rather than <c>Water</c> because the instance array
+    /// already owns that name</b> - <see cref="Water"/> is which cells of a
+    /// board are flooded, and this is a whole board. The name a scene and a
+    /// flag ask for is still <c>"water"</c>.
+    ///
+    /// <see cref="TerrainSet.Default"/> and not the mix: this board authors no
+    /// kinds, and the self test asserts that pairing in both directions. A
+    /// board with kinds has to come up on the mix or a named plate hides them;
+    /// a board without them names its plate, so that what is drawn is a
+    /// decision rather than a hash.
+    /// </summary>
+    public static BoardMap WaterMap => _water ??= FromGround(
+        "water", WaterGround, WaterRamps, WaterHomes, TerrainSet.Default, true);
+
     public static BoardMap ByName(string name) =>
         name.Trim().ToLowerInvariant() switch
         {
             "abbey" => Abbey,
             "test" => Test,
+            "water" => WaterMap,
             _ => Bench,
         };
 
     public static IReadOnlyList<string> Names { get; } =
-        new[] { "bench", "abbey", "test" };
+        new[] { "bench", "abbey", "test", "water" };
 }
