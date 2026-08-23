@@ -162,6 +162,7 @@ public static class SelfTest
         Relief(field, grove, Check);
         Ramps(field, stage, Check);
         Water(field, grove, Check);
+        Ripple(Check);
         Burning(field, grove, Check);
         Climbing(field, tank, Check);
 
@@ -8754,6 +8755,323 @@ public static class SelfTest
     /// one height per cell looks identical to a pond drawn at one height, until
     /// somebody puts two levels next to each other.
     /// </summary>
+    /// <summary>
+    /// The pond's own surface, and every word of it asserted with no board, no art
+    /// and no frame drawn - which is the whole reason the field is stepped on the
+    /// CPU rather than in a ping-pong of viewports. See Ripples.
+    /// </summary>
+    private static void Ripple(Action<string, bool, string> Check)
+    {
+        GD.Print("ripples: water that carries on after the tank has gone");
+        // A tidy squash, so the two grains come out 7 and 14 and a probe can be
+        // put where the arithmetic says rather than near it. The board's own is
+        // 0.5075 and nothing below depends on which it is.
+        const float squash = 0.5f;
+        float dx = Ripples.Grain;
+        float dz = Ripples.Grain / squash;
+        Rect2 Span(int w, int d) =>
+            new Rect2(Vector2.Zero, new Vector2(w * dx, d * dz));
+        Ripples Pond(int w, int d, Func<Vector2, bool>? wet = null)
+        {
+            var pond = new Ripples();
+            pond.Fit(Span(w, d), squash, 1L, wet ?? (_ => true));
+            return pond;
+        }
+        void Steps(Ripples pond, int frames)
+        {
+            for (int i = 0; i < frames; i++)
+                pond.Tick(Ripples.Step);
+        }
+
+        Ripples calm = Pond(24, 12);
+        Steps(calm, 120);
+        Check("a pond nobody has touched stays flat",
+              calm.Peak == 0.0f,
+              $"two seconds of stepping raised {calm.Peak:F4} units out of "
+              + "nothing, so the step is making water rather than moving it");
+
+        // How the whole field is laid: square on screen, not on the water. The one
+        // number here that is about the camera, and it is worth an assertion
+        // because getting it the other way up costs twice the texels for nothing
+        // the eye can resolve.
+        Check("its grid is square on screen rather than on the water",
+              Mathf.Abs(calm.Cell.Y * squash - calm.Cell.X) < 1e-3f,
+              $"a texel is {calm.Cell.X:F2} by {calm.Cell.Y:F2} world units, which "
+              + $"at a squash of {squash} is {calm.Cell.X:F2} by "
+              + $"{calm.Cell.Y * squash:F2} on screen");
+
+        Ripples still = Pond(24, 12);
+        still.Note(still.Middle(12, 6), Vector2.Right, 0.0f);
+        Steps(still, 30);
+        Check("and a hull that is parked does not push it",
+              still.Peak == 0.0f,
+              $"a tank standing still put {still.Peak:F4} units of wave in the "
+              + "water, so the share of the ford's ceiling is not being read");
+
+        // Everything below shares one board big enough that a probe past the wave
+        // front is still inside the field - otherwise "nothing has got there yet"
+        // and "there is no field there" are the same answer, and the check that
+        // the front is bounded passes on a box too small to hold it.
+        Ripples ring = Pond(200, 100);
+        Vector2 hub = ring.Middle(100, 50);
+        ring.Note(hub, Vector2.Right, 1.0f);
+        ring.Tick(Ripples.Step);
+        float bow = ring.Height(hub + new Vector2(Ripples.Reach, 0.0f));
+        float stern = ring.Height(hub - new Vector2(Ripples.Reach, 0.0f));
+        Check("a hull under way piles water ahead of itself and hollows it behind",
+              bow > 0.0f && stern < 0.0f,
+              $"the water stands {bow:F4} at the bow and {stern:F4} at the stern, "
+              + "so what is being put in is not a dipole - and a bow wave is a "
+              + "dipole from a moving source or it is a ring");
+
+        Steps(ring, 59);
+        float lobe = Ripples.Reach + Ripples.Spread;
+        float near = ring.Height(hub + new Vector2(lobe + 90.0f, 0.0f));
+        Check("and the answer travels outward from it",
+              Mathf.Abs(near) > 1e-5f,
+              "a second on and the water 90 units past the far edge of the push "
+              + $"has moved by {near:F6}, so nothing is propagating - which is the "
+              + "one thing a field is for");
+
+        float front = Ripples.Speed * 1.0f + lobe + 4.0f * ring.Cell.X;
+        float ahead = ring.Height(hub + new Vector2(front, 0.0f));
+        Check("and no faster than the speed it was given",
+              Mathf.Abs(ahead) < 1e-6f,
+              $"{front:F0} units out - past a second of travel at "
+              + $"{Ripples.Speed:F0} plus the push's own reach - the water has "
+              + $"already moved {ahead:F6}");
+
+        // Judged on the height and not on the total, and that is a measurement
+        // rather than a preference: the total is a sum over the field, and a ring
+        // spreading over more of it holds a larger sum at a smaller height.
+        //
+        // <b>And judged over five half-lives rather than three, because a small
+        // pond concentrates what it reflects.</b> Damping alone puts three at an
+        // eighth and five at a thirtieth; measured on this one they came out at
+        // 30% and 6%, and the difference is the walls - a ring that has come back
+        // off four of them is standing on itself. So the threshold is set where
+        // the reflections are paid for, and it still asserts the thing that
+        // matters, which is that the water is not a memory that keeps.
+        Ripples dies = Pond(60, 30);
+        dies.Note(dies.Middle(30, 15), Vector2.Right, 1.0f);
+        Steps(dies, 30);
+        float loud = dies.Peak;
+        float total = dies.Energy;
+        Steps(dies, Mathf.RoundToInt(Ripples.Fade * 5.0f / Ripples.Step));
+        Check("and dies away when nothing is pushing it",
+              loud > 0.0f && dies.Peak < loud * 0.1f && dies.Energy < total,
+              $"five half-lives on it stands {dies.Peak:F4} of {loud:F4}, so a "
+              + "pond somebody crossed a minute ago is still moving");
+
+        // Land is a wall, which is the whole of the boundary: a dry texel is left
+        // out of the neighbour sum, so there is no slope across the bank and the
+        // wave turns round instead of draining into it.
+        Ripples bank = Pond(120, 60, p => p.X < 60.0f * dx);
+        bank.Note(new Vector2(55.0f * dx, bank.Middle(0, 30).Y), Vector2.Right,
+                  1.0f);
+        Steps(bank, 90);
+        int leaked = 0;
+        float wetPeak = 0.0f;
+        for (int j = 0; j < bank.Tall; j++)
+        for (int i = 0; i < bank.Wide; i++)
+        {
+            float h = bank.Height(bank.Middle(i, j));
+            if (bank.Wet(i, j))
+                wetPeak = Mathf.Max(wetPeak, Mathf.Abs(h));
+            else if (h != 0.0f)
+                leaked++;
+        }
+        Check("land is a wall the water does not cross",
+              leaked == 0 && wetPeak > 0.0f,
+              $"{leaked} dry texels are carrying water, so the bank is a hole "
+              + "rather than a boundary");
+
+        // And it comes back off it. Asserted against the same push in open water,
+        // because a bounded pond holds what an open one lets past - which is what
+        // reflection is, said as a number.
+        Ripples open = Pond(120, 60);
+        open.Note(new Vector2(55.0f * dx, open.Middle(0, 30).Y), Vector2.Right,
+                  1.0f);
+        Steps(open, 90);
+        float held = 0.0f;
+        for (int j = 0; j < bank.Tall; j++)
+        for (int i = 0; i < bank.Wide; i++)
+            if (bank.Wet(i, j))
+                held += Mathf.Abs(bank.Height(bank.Middle(i, j)));
+        float loose = 0.0f;
+        for (int j = 0; j < open.Tall; j++)
+        for (int i = 0; i < 60; i++)
+            loose += Mathf.Abs(open.Height(open.Middle(i, j)));
+        Check("and it comes back off that wall rather than through it",
+              held > loose * 1.05f,
+              $"the walled half holds {held:F2} against {loose:F2} loose in the "
+              + "same half of an open pond, so nothing is being turned back");
+
+        // A rate and not an impulse, which is the same statement as being
+        // independent of the frame rate: what a hull does to water in a second is
+        // the same whether the second came in one frame or in sixty.
+        Ripples lump = Pond(60, 30);
+        Ripples split = Pond(60, 30);
+        Vector2 spot = lump.Middle(30, 15);
+        lump.Note(spot, Vector2.Right, 1.0f);
+        lump.Tick(Ripples.Step * 3.0);
+        for (int i = 0; i < 3; i++)
+        {
+            split.Note(spot, Vector2.Right, 1.0f);
+            split.Tick(Ripples.Step);
+        }
+        Check("one long frame is the frames it is made of",
+              lump.Steps == 3 && Mathf.Abs(lump.Peak - split.Peak) < 1e-6f,
+              $"three steps in one frame gave {lump.Peak:F6} and three frames of "
+              + $"one gave {split.Peak:F6}, so the push is an impulse per frame "
+              + "and the water depends on the frame rate");
+
+        Ripples late = Pond(20, 10);
+        late.Note(late.Middle(10, 5), Vector2.Right, 1.0f);
+        late.Tick(60.0);
+        Check("and a frame a minute long does not advance it by a minute",
+              late.Steps == Ripples.MaxSteps,
+              $"{late.Steps} steps for one frame of sixty seconds, so a hitch "
+              + "hands the pond an hour of weather");
+
+        // Bitwise, because a simulation two captures of cannot be compared is a
+        // simulation this bench cannot judge - the reason --capture pins the step
+        // in the first place.
+        Ripples twinA = Pond(40, 20);
+        Ripples twinB = Pond(40, 20);
+        for (int i = 0; i < 45; i++)
+        {
+            twinA.Note(twinA.Middle(10 + i / 4, 10), Vector2.Right, 1.0f);
+            twinB.Note(twinB.Middle(10 + i / 4, 10), Vector2.Right, 1.0f);
+            twinA.Tick(Ripples.Step);
+            twinB.Tick(Ripples.Step);
+        }
+        Check("two runs of it agree to the bit",
+              twinA.Peak == twinB.Peak && twinA.Energy == twinB.Energy,
+              $"peaks {twinA.Peak:F9} and {twinB.Peak:F9}, energies "
+              + $"{twinA.Energy:F6} and {twinB.Energy:F6}");
+
+        // Two tanks add up, which is interference and is half of what a field is
+        // for - and it is a property of the step rather than of the wiring, so it
+        // is asserted on the step.
+        Ripples solo1 = Pond(120, 60);
+        Ripples solo2 = Pond(120, 60);
+        Ripples both = Pond(120, 60);
+        Vector2 one = both.Middle(40, 30);
+        Vector2 two = both.Middle(80, 30);
+        for (int i = 0; i < 40; i++)
+        {
+            solo1.Note(one, Vector2.Right, 1.0f);
+            solo2.Note(two, Vector2.Left, 1.0f);
+            both.Note(one, Vector2.Right, 1.0f);
+            both.Note(two, Vector2.Left, 1.0f);
+            solo1.Tick(Ripples.Step);
+            solo2.Tick(Ripples.Step);
+            both.Tick(Ripples.Step);
+        }
+        Vector2 mid = both.Middle(60, 30);
+        float sum = solo1.Height(mid) + solo2.Height(mid);
+        float mix = both.Height(mid);
+        Check("two tanks pushing one pond add up where they meet",
+              Mathf.Abs(mix - sum) < 1e-4f * Mathf.Max(1.0f, Mathf.Abs(sum)),
+              $"between them the water stands {mix:F5} against {sum:F5} for the "
+              + "two pushes taken apart, so they are not sharing one surface");
+
+        // The dial moves the forcing and only the forcing: the field is linear, so
+        // twice the shove is exactly twice the wave and not a differently shaped
+        // one. That is the whole argument for it being the only dial there is.
+        Ripples soft = Pond(120, 60);
+        Ripples hard = Pond(120, 60);
+        hard.Level = 2.0f;
+        for (int i = 0; i < 40; i++)
+        {
+            soft.Note(one, Vector2.Right, 1.0f);
+            hard.Note(one, Vector2.Right, 1.0f);
+            soft.Tick(Ripples.Step);
+            hard.Tick(Ripples.Step);
+        }
+        float soloH = soft.Height(mid);
+        float hardH = hard.Height(mid);
+        Check("the dial scales the wave and does not reshape it",
+              Mathf.Abs(soloH) > 1e-6f
+              && Mathf.Abs(hardH - 2.0f * soloH) < 1e-3f * Mathf.Abs(soloH),
+              $"at twice the shove the same point stands {hardH:F6} against "
+              + $"{soloH:F6}, which is not twice - so the level is doing something "
+              + "besides scaling the push");
+
+        // The same pond keeps its field when the board is rebuilt, and a different
+        // one does not. Both halves, because this is the failure it was written
+        // for: the ripples a crossing had made vanished on a frame near the end of
+        // the order and stayed gone, which reads as a field that forgets.
+        Ripples kept = Pond(60, 30);
+        kept.Note(kept.Middle(30, 15), Vector2.Right, 1.0f);
+        Steps(kept, 20);
+        float before = kept.Peak;
+        kept.Fit(Span(60, 30), squash, 1L, _ => true);
+        Check("the same pond keeps its ripples when the board is rebuilt",
+              before > 0.0f && kept.Peak == before,
+              $"a rebuild took the field from {before:F4} to {kept.Peak:F4}, so "
+              + "anything that rebuilds a mesh empties the pond");
+        kept.Fit(Span(60, 30), squash, 2L, _ => true);
+        Check("and a pond that is not the same one does not",
+              kept.Peak == 0.0f,
+              $"a different set of flooded cells kept {kept.Peak:F4} units of the "
+              + "old field, so the wet mask under it may be stale");
+
+        Ripples huge = new Ripples();
+        huge.Fit(new Rect2(Vector2.Zero, new Vector2(20000.0f, 40000.0f)), squash,
+                 1L, _ => true);
+        Check("a pond too big for the field coarsens rather than being cropped",
+              huge.Wide * huge.Tall <= Ripples.MaxTexels
+              && huge.Box.Size.X >= 20000.0f && huge.Box.Size.Y >= 40000.0f,
+              $"{huge.Wide}x{huge.Tall} texels over {huge.Box.Size} - either past "
+              + $"the {Ripples.MaxTexels} cap or short of the water it was asked "
+              + "to cover");
+
+        Check("and the step stays inside its own stability bound",
+              huge.Coupling <= Ripples.Bound + 1e-6f
+              && calm.Coupling <= Ripples.Bound + 1e-6f,
+              $"a coupling of {huge.Coupling:F3} against a bound of "
+              + $"{Ripples.Bound:F3}: past a half the field does not wobble, it "
+              + "doubles every step");
+
+        Ripples dry = new Ripples();
+        dry.Drain();
+        Check("a board with no water has no field at all",
+              dry.Wide == 0 && dry.Height(Vector2.Zero) == 0.0f
+              && dry.Sheet is null,
+              "a drained field still answers, so a board without a pond is paying "
+              + "for one");
+
+        // And what reads it. Three ways of drawing and nothing that decides, which
+        // is the whole of how a displacement about the datum is allowed to exist:
+        // the sprite's own cut, the pond's wall, the ring and the wading flag all
+        // go on reading WaterTop.
+        Check("the surface bends its normals by the field",
+              Stage3D.DeepShader.Contains("wslope"),
+              "nothing in the deep shader differences the field, so a ripple has "
+              + "no slope and the one thing the eye reads off water is missing");
+        Check("and runs it up the beach on the projection's own term",
+              Stage3D.DeepShader.Contains("+ wsh * squash"),
+              "the lap does not carry the field, or carries it through a gain - "
+              + "and a gain there is a second opinion about the camera");
+        Check("and whitens only the crests that stand over the cut",
+              Stage3D.DeepShader.Contains("wash_crest")
+              && Stage3D.DeepShader.Contains("float crest ="),
+              "the foam does not read the field, so the bow wave is whatever the "
+              + "band was painting");
+        Check("but the sprite's own waterline does not read it at all",
+              !Stage3D.PaintShader.Contains("wash"),
+              "the half of the line that lies on the armour is being cut by the "
+              + "simulation, which puts a displacement in front of every reader "
+              + "that decides something");
+        Check("and a board without a field costs nothing",
+              Stage3D.DeepShader.Contains("hint_default_black")
+              && Stage3D.DeepShader.Contains("* wash_on"),
+              "an unset sampler has to read zero and the whole thing has to be "
+              + "gated, or --no-ripples is not the picture as it was");
+    }
+
     private static void Water(HexField field, Grove? grove,
                               Action<string, bool, string> Check)
     {

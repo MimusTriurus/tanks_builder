@@ -2024,6 +2024,7 @@ void fragment() {
         {
             _pond.Mesh = null;
             _flank.Mesh = null;
+            Wash?.Drain();
             return;
         }
         // Half the hexagon, so a corner maps to a corner of the frame. Not the
@@ -2062,6 +2063,17 @@ void fragment() {
         int over = 0;
         var hub = new Vector2[MaxWaterCells];
         var mask = new float[MaxWaterCells];
+        // The pond's own bounding box in world XZ, which is what the ripple field
+        // is laid over - see Ripples.Fit. Taken in this loop because it is the one
+        // that already knows which cells are wet and how far a hexagon reaches,
+        // and a second pass over them would be a second answer to where the water
+        // is.
+        var low = new Vector2(float.MaxValue, float.MaxValue);
+        var high = new Vector2(float.MinValue, float.MinValue);
+        // And a signature of which cells came out wet, so the field can tell this
+        // pond from another one that happens to have the same bounding box - see
+        // Ripples.Fit, which keeps its state when both agree.
+        long wetStamp = 1469598103934665603L;
         for (int q = 0; q < Field.Columns; q++)
         for (int r = 0; r < Field.Rows; r++)
         {
@@ -2089,6 +2101,11 @@ void fragment() {
             // answer on the corners is what put foam round the whole rim.
             hub[ord] = new Vector2(top.X, top.Z);
             mask[ord] = Edges(cell, corner);
+            wetStamp = (wetStamp ^ (q * 1013 + r)) * 1099511628211L;
+            low = new Vector2(Mathf.Min(low.X, top.X - halfX),
+                              Mathf.Min(low.Y, top.Z - halfZ));
+            high = new Vector2(Mathf.Max(high.X, top.X + halfX),
+                               Mathf.Max(high.Y, top.Z + halfZ));
             // A fan from the middle rather than from a corner. Nothing in the
             // shading needs it any more, but it is the shape that keeps a
             // triangle inside one edge's business, and rebuilding it the other
@@ -2136,6 +2153,7 @@ void fragment() {
         {
             _pond.Mesh = null;
             _flank.Mesh = null;
+            Wash?.Drain();
             return;
         }
         if (walled)
@@ -2163,6 +2181,15 @@ void fragment() {
                            + "slot, so they will churn when it does");
         st.GenerateNormals();
         _pond.Mesh = st.Commit();
+        // And the field the tanks push about, over the box those cells came to.
+        // Here rather than per frame because it is state: re-laying it empties the
+        // pond, so it is laid exactly when the pond's shape is - which is what
+        // Build is gated on. The wet test is asked in world XZ and answered by the
+        // field, through the same mapping the vertices went through, so the two
+        // cannot disagree about which texel is water.
+        Wash?.Fit(new Rect2(low, high - low), Squash, wetStamp,
+                  p => Field.IsWater(Field.FlatCellAt(
+                           new Vector2(p.X, p.Y * Squash) - Origin)));
         // Where each cell is and which of its edges are shore. With the board,
         // not with the frame: this is the pond's shape, and the shape is exactly
         // what Build is gated on changing.
@@ -2593,13 +2620,29 @@ void fragment() {
     public const float HullBand = 6.0f;
 
     /// <summary>
-    /// Whether the water piles up ahead of a hull that is driving through it.
-    /// Off leaves the pond as it was before this - see --no-bow, which is the
-    /// A/B it is judged by. Separate from the wake's own switch because they are
-    /// two statements: one is what the water does behind a tank and one is what
-    /// it does in front, and an A/B of either wants the other to hold still.
+    /// Whether the crest ahead of a wading hull is painted as a band of foam
+    /// dilated off its own waterline.
+    ///
+    /// <b>Off, because the field pushes the water instead now.</b> A hull under
+    /// way puts a dipole into <see cref="Ripples"/> and the crest is what the
+    /// surface does about it: a real ridge with a real slope, shedding real arms,
+    /// which is a different thing from a band of white paint held at a fixed
+    /// stand-off. The band read as a thick collar in front of the tracks, and that
+    /// is what it was.
+    ///
+    /// <b>Kept rather than deleted, on the bought flash sheet's precedent:</b> "the
+    /// pushed one is better" stays an assertion until the two can be put side by
+    /// side. See --bow, and note that the two are not exclusive - the band is
+    /// drawn over the field, so asking for both is a fair way to see how much of
+    /// the old one was the field's job all along.
     /// </summary>
-    public bool Bows = true;
+    public bool Bows = BowBandOnByDefault;
+
+    /// <summary>Whether the painted bow band starts on. Named rather than left in
+    /// the field's initialiser, for <see cref="Recoil.ShearOnByDefault"/>'s reason:
+    /// a default nobody can point at is a default nobody notices being flipped.
+    /// </summary>
+    public const bool BowBandOnByDefault = false;
 
     /// <summary>
     /// How far ahead of its own waterline the bow crest stands, in the sprite's
@@ -2875,7 +2918,61 @@ void fragment() {
         }
         _deepInk.SetShaderParameter("wake_at", spot);
         _deepInk.SetShaderParameter("wake_age", age);
+        // And the ripple field, which is one texture and its box rather than an
+        // array of anything: what it holds is a surface, so the shader looks it up
+        // where the fragment is instead of being told about every source that made
+        // it. Left unset while there is no field, and that is the whole of how a
+        // board without one costs nothing - an unset sampler reads zero, so all
+        // three readers of it are no-ops.
+        if (Wash is { Wide: > 0, Sheet: not null })
+        {
+            _deepInk.SetShaderParameter("wash", Wash.Sheet);
+            _deepInk.SetShaderParameter(
+                "wash_box", new Vector4(Wash.Box.Position.X, Wash.Box.Position.Y,
+                                        Wash.Box.Size.X, Wash.Box.Size.Y));
+            _deepInk.SetShaderParameter("wash_step", Wash.Cell);
+            _deepInk.SetShaderParameter("wash_relief", WashRelief);
+            _deepInk.SetShaderParameter("wash_crest", WashCrest);
+            _deepInk.SetShaderParameter("wash_band", WashBand);
+            _deepInk.SetShaderParameter("wash_on", Wash.Enabled ? 1.0f : 0.0f);
+        }
+        else
+        {
+            _deepInk.SetShaderParameter("wash_on", 0.0f);
+        }
     }
+
+    /// <summary>The field of ripples on the pond, or null to leave it flat. What
+    /// the surface reads it for is its normals, its foam and how far the water runs
+    /// up a beach - never anything that decides. See Ripples.</summary>
+    public Ripples? Wash;
+
+    /// <summary>How much of the ripple field's own slope goes into the surface
+    /// normal.
+    ///
+    /// <b>One, and that is a statement rather than a default.</b> The field is a
+    /// height in world units and the normal is built in world units, so the honest
+    /// gain is unity and there is nothing to fit: a ring is as steep as the water
+    /// it is made of. What it costs is that the amplitude dial is
+    /// <see cref="Ripples.Push"/> and only that, which is where a dial about how
+    /// hard a hull shoves water belongs.</summary>
+    public const float WashRelief = 1.0f;
+
+    /// <summary>How tall a ripple has to be before it goes white, in world units,
+    /// and over how much more of it the foam comes fully in.
+    ///
+    /// <b>This is the bow wave, and the number is what makes it one.</b> Foam on
+    /// every crest is what the first cut of the surface's own swell did and it read
+    /// as scratches; foam only on the tall crests picks out the one thing on this
+    /// pond that is genuinely taller than the chop, which is the water a hull is
+    /// pushing. Measured against <see cref="Ripples.Push"/>: a hull at full shove
+    /// stands about four units of water in front of itself, so a cut at two fifths
+    /// of that whitens the crest and leaves the rings it sheds grey.</summary>
+    public const float WashCrest = 3.5f;
+
+    /// <summary>How much taller than <see cref="WashCrest"/> a crest is when its
+    /// foam is fully in - see there.</summary>
+    public const float WashBand = 2.5f;
 
     /// <summary>What each flooded cell is doing. Null leaves the pond calm, which
     /// is how it behaved before the water answered anybody - see --still-water.
@@ -3238,6 +3335,19 @@ uniform vec2 edge_crumple = vec2(0.08, 0.6);
 uniform vec2 lap_wave = vec2(0.04, 1.8);
 // And how soft the tip of that run is, in the same units. See Stage3D.LapEdge.
 uniform float lap_edge = 0.5;
+// The pond's own displacement, a float of world height per texel, over the box in
+// world XZ it is laid on and at the grain it is laid at - see Ripples. A texture
+// and not an array of sources, because what is being handed over is the *surface*:
+// the sum of everything that ever pushed it, which is the whole of what a field
+// buys over a stamp. hint_default_black is how a board without one costs nothing -
+// an unset sampler reads zero, so all three readers below are no-ops.
+uniform sampler2D wash : filter_linear, repeat_disable, hint_default_black;
+uniform vec4 wash_box = vec4(0.0, 0.0, 1.0, 1.0);
+uniform vec2 wash_step = vec2(1.0);
+uniform float wash_relief = 1.0;
+uniform float wash_crest = 3.5;
+uniform float wash_band = 2.5;
+uniform float wash_on = 0.0;
 
 varying vec3 world;
 
@@ -3272,6 +3382,17 @@ float chop(vec2 p) {{
 // the bow crest at the fragment stepped back along the way the tank is going -
 // and a second copy of this lookup would be a second answer to where the
 // waterline is, which is the one thing the whole arrangement exists to prevent.
+// The pond's displacement at a point on it, in world units. Zero off the field's
+// own box rather than clamped to its rim: a pond reaching past the field fades out
+// of the simulation there, where clamping would smear the edge texel across the
+// rest of it.
+float washed(vec2 p) {{
+    vec2 uv = (p - wash_box.xy) / max(wash_box.zw, vec2(1e-4));
+    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0)
+        return 0.0;
+    return texture(wash, uv).x * wash_on;
+}}
+
 float shoreline(int who, vec2 px, bool hem) {{
     float u = px.x / max(hull_size[who].y, 1.0);
     if (u < 0.0 || u > 1.0)
@@ -3312,9 +3433,20 @@ void fragment() {{
     float c = chop(cp);
     float cx = chop(cp + ce) - c;
     float cz = chop(cp + ce.yx) - c;
-    vec3 n = normalize(vec3(-hx * relief - cx * sparkle,
+    // And the sheet the tanks are actually pushing about, differenced at its own
+    // grain. <b>A real slope, so it is the one term here with a unit</b>: the
+    // swell's two are height differences taken over the e-step, which is the
+    // convention this normal is built in - (-slope*e, e, -slope*e) - so a slope in
+    // world units has to be multiplied by e to join them. Sampled at the grain and
+    // not at e, because differencing a linearly filtered texture over less than a
+    // texel returns the filter's own ramp rather than the field's.
+    float wsh = washed(world.xz);
+    vec2 wslope = (vec2(washed(world.xz + vec2(wash_step.x, 0.0)),
+                        washed(world.xz + vec2(0.0, wash_step.y))) - wsh)
+                  / max(wash_step, vec2(1e-4)) * wash_relief * e;
+    vec3 n = normalize(vec3(-hx * relief - cx * sparkle - wslope.x,
                             e,
-                            -hz * relief - cz * sparkle));
+                            -hz * relief - cz * sparkle - wslope.y));
 
     // How much water is in front of the bottom. The prisms are opaque, so this
     // is the floor of the pit and the wall it climbs at the shore.
@@ -3359,7 +3491,15 @@ void fragment() {{
     // same fold arrives as a tongue of water on wet sand, which is what a wave up
     // a beach is. So the bound is the bound of a <i>cut</i>; a soft edge is
     // allowed past it, and that is the whole of why this pair sits where it does.
-    float lap = crumple(world.xz * lap_wave.x, time * wave_speed) * lap_wave.y;
+    // <b>And the ripples run up the beach on the same term, with no dial at all.</b>
+    // A crest of h world units stands the surface h higher, which moves this
+    // fragment h*squash nearer - the conversion this comment already states two
+    // paragraphs up - so the honest amount is exactly that and a gain here would be
+    // a second opinion about the projection. It is also what makes the shore the
+    // one place the simulation is unmistakable: a ring arriving does not brighten
+    // the bank, it moves it.
+    float lap = crumple(world.xz * lap_wave.x, time * wave_speed) * lap_wave.y
+                + wsh * squash;
     float bed = floor_z - here_z;
     if (bed + lap <= 0.0)
         discard;
@@ -3397,7 +3537,14 @@ void fragment() {{
     // gets a flattened normal that the creases barely reach, and stays what it
     // is for: the surface saying it is wet. The spark keeps the whole normal,
     // chop and all, because being small and moving is the whole of its job.
-    vec3 soft = normalize(vec3(-hx * relief * 0.25, e, -hz * relief * 0.25));
+    // The ripples go into this one at full weight, where the swell is flattened to
+    // a quarter. Not an oversight: what the sheen is for is the surface saying it
+    // is wet, and it was flattened because the swell's creases are what made it
+    // read as brush strokes. A ring is not a crease - it is the largest feature on
+    // the water and the one the eye is following - so a sheen that ignored it would
+    // be a wet surface with a dry ring in it.
+    vec3 soft = normalize(vec3(-hx * relief * 0.25 - wslope.x, e,
+                               -hz * relief * 0.25 - wslope.y));
     col += vec3(pow(max(dot(n, half_v), 0.0), gloss)) * glint
          + vec3(pow(max(dot(soft, half_v), 0.0), sheen_gloss)) * sheen;
 
@@ -3581,7 +3728,14 @@ void fragment() {{
     // they hold together as a body. Broken as hard as the shore is, a crest that
     // is a few pixels wide comes apart into speckle and reads as noise rather
     // than as a bow.
-    float lane = max(trail, prow) * mix(broken, 1.0, 0.55);
+    // And the crest of the ripple field itself, which is where the bow wave comes
+    // from now. It goes in the lane rather than the edge for the lane's own reason:
+    // this is water being churned through right now, so it holds together as a body
+    // and only takes the surface's texture on top. Thresholded high, because foam on
+    // every crest is the scratches this shader already refused once - what is over
+    // the cut is the water a hull is standing in front of itself.
+    float crest = smoothstep(wash_crest, wash_crest + wash_band, wsh);
+    float lane = max(max(trail, prow), crest) * mix(broken, 1.0, 0.55);
     col = mix(col, foam_ink, clamp(max(edge, lane), 0.0, 1.0) * foam);
 
     // And the film, spent on what the water <b>adds</b> rather than on ALPHA.

@@ -86,6 +86,20 @@ public sealed partial class TankBench : Node2D
     private TrackMarks? _marks;
     private Swell? _sea;
     private Wake? _wake;
+    private Ripples? _wash;
+
+    /// <summary>Whether the pond is simulated at all, and how hard a hull shoves
+    /// it. See --no-ripples and --ripple.
+    ///
+    /// <b>The first water flags this bench parses, and they are here because it is
+    /// the board the field is looked at on.</b> Every other water switch belongs to
+    /// the harness and is silently ignored here - which the docs name as a defect
+    /// in waiting, because a measurement set against such a flag comes back at zero
+    /// difference and reads as a layer that does nothing. Two of them earn their
+    /// way now: the water board is twelve by twelve of pond, so it is where an A/B
+    /// of the surface is actually worth taking.</summary>
+    private bool _ripples = true;
+    private float _rippleLevel = 1.0f;
     private WaterArt? _surf;
     private Stage3D? _stage;
     private Camera2D _camera = null!;
@@ -239,6 +253,24 @@ public sealed partial class TankBench : Node2D
                 case "--no-shadow":
                     _shadow = false;
                     break;
+                case "--no-ripples":
+                    _ripples = false;
+                    break;
+                case "--ripple":
+                    // Asking for an amount is asking for the thing - the argument
+                    // --recoil <x> already makes - and parsed with the invariant
+                    // culture, because this locale writes a comma for the point and
+                    // a bare TryParse leaves the default standing.
+                    if (i + 1 < args.Length
+                        && float.TryParse(args[i + 1], NumberStyles.Float,
+                                          CultureInfo.InvariantCulture,
+                                          out float shove))
+                    {
+                        _rippleLevel = Mathf.Max(0.0f, shove);
+                        _ripples = true;
+                        i++;
+                    }
+                    break;
                 case "--rumble":
                     _rumble = true;
                     break;
@@ -315,6 +347,7 @@ public sealed partial class TankBench : Node2D
 
         _sea = new Swell { Field = _field };
         _wake = new Wake();
+        _wash = new Ripples();
         _marks = new TrackMarks();
         AddChild(_marks);
 
@@ -452,7 +485,7 @@ public sealed partial class TankBench : Node2D
         {
             Field = _field, Origin = _origin, Eye = _camera,
             Marks = _marks, MarksAt = _marks?.Position ?? Vector2.Zero,
-            Surf = _surf, Sea = _sea,
+            Surf = _surf, Sea = _sea, Wash = _wash,
         };
         AddChild(_stage);
         foreach (Vehicle vehicle in _garage)
@@ -620,6 +653,27 @@ public sealed partial class TankBench : Node2D
                             _field.IsWater(_field.CellAt(Tank.GroundPoint - _origin)));
                 _sea.Tick(delta);
                 _wake?.Tick(delta);
+                // And the ripple field, off the same point and the same share of
+                // the ford's ceiling the harness reads - see Main, which does this
+                // for three tanks and for the same reason.
+                if (_wash is not null)
+                {
+                    _wash.Enabled = _ripples;
+                    _wash.Level = _rippleLevel;
+                }
+                if (_wash is not null && Tank.Wading)
+                {
+                    float shove = Mathf.Clamp(
+                        (float)(Tank.Speed
+                                / Mathf.Max(Tank.Profile.WaterSpeed, 1e-4)),
+                        0.0f, 1.0f);
+                    Vector3 at = _stage.World(Tank.GroundPoint, 0.0f);
+                    Vector3 way = _stage.World(
+                        Tank.Atlas.GroundDirection(Tank.Sprite.HullFacing), 0.0f);
+                    _wash.Note(new Vector2(at.X, at.Z),
+                               new Vector2(way.X, way.Z), shove);
+                }
+                _wash?.Tick(delta);
             }
             _stage.Trail = _wake;
             // Every frame and with the whole garage, because Place is also where
@@ -777,6 +831,7 @@ public sealed partial class TankBench : Node2D
         }
         _shake.Reset();
         _sea?.Settle();
+        _wash?.Settle();
         _field.Highlight = Array.Empty<Vector2I>();
         _field.QueueRedraw();
         Home();
@@ -959,6 +1014,20 @@ public sealed partial class TankBench : Node2D
                       on => _board = on);
         _panel.Toggle("tank.view.edges", "cell outlines", () => _edges,
                       on => _edges = on);
+        _panel.Toggle("tank.view.ripples", "the water is simulated  (--no-ripples)",
+                      () => _ripples, on => _ripples = on);
+        _panel.Slide("tank.view.shove", "how hard a hull shoves  (--ripple)",
+                     0.0, 6.0, 0.25,
+                     () => _rippleLevel, v => _rippleLevel = (float)v,
+                     "x", () =>
+                     {
+                         if (_wash is not { Wide: > 0 })
+                             return "no field on the board";
+                         if (!_ripples)
+                             return "off - flat water, as it was before this";
+                         return $"{_wash.Peak:F2} units standing, "
+                                + $"{_wash.Wide}x{_wash.Tall} texels";
+                     });
         _panel.Press("tank.view.reset", "reset  (R)", Reset);
 
         // Opened on the tank, closed elsewhere. The harness opens every group

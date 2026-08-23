@@ -370,9 +370,23 @@ public sealed partial class Main : Node2D
 	/// <summary>Whether a trail is laid at all. See --no-wake.</summary>
 	private bool _wakes = true;
 
-	/// <summary>Whether the water piles up ahead of a wading hull. See --no-bow.
-	/// </summary>
-	private bool _bows = true;
+	/// <summary>The pond's own surface, advanced every frame and pushed by whatever
+	/// drives through it. Built beside the swell and the wake, by the same division
+	/// of labour: what the tanks did to the water is neither the water's business
+	/// nor the renderer's.</summary>
+	private Ripples? _wash;
+
+	/// <summary>Whether that field is stepped at all. See --no-ripples, which is
+	/// the pond as it was before it and the A/B it is judged by.</summary>
+	private bool _ripples = true;
+
+	/// <summary>How hard a hull shoves the water, over the field's own figure. See
+	/// --ripple, and Ripples.Level for why this is the only dial it has.</summary>
+	private float _rippleLevel = 1.0f;
+
+	/// <summary>Whether the painted crest ahead of a wading hull is drawn - the old
+	/// answer, kept for the comparison. See --bow.</summary>
+	private bool _bows = Stage3D.BowBandOnByDefault;
 
 	/// <summary>Whether the water answers the tanks. See --still-water: the pond
 	/// as it was, which is the A/B this is judged by.</summary>
@@ -540,6 +554,12 @@ public sealed partial class Main : Node2D
 			Surf = Surf,
 			// And what each of its cells is doing, by the same division again.
 			Sea = _sea,
+			// And the ripples on it. In the initialiser rather than pushed per
+			// frame like the wake, because the stage lays the field out when it
+			// builds the pond - which happens inside this constructor, so a field
+			// arriving a frame later would arrive to a board that had already
+			// decided it had none.
+			Wash = _wash,
 		};
 		AddChild(_stage);
 		foreach (Vehicle vehicle in _vehicles)
@@ -1682,8 +1702,32 @@ public sealed partial class Main : Node2D
 			// of it: what the water does in front of a tank and what it does
 			// behind are two statements, and an A/B of either wants the other to
 			// hold still.
+			// And the painted crest, which is off now that the field pushes the
+			// water - so the flag turns it *on*, and it is the A/B the pushed one
+			// is judged by rather than a way of removing it.
+			else if (userArgs[i] == "--bow")
+				_bows = true;
 			else if (userArgs[i] == "--no-bow")
 				_bows = false;
+			// The pond without a simulation on it, which is the A/B the field is
+			// judged by. Its own flag beside --still-water and --no-wake for the
+			// reason those two are apart: a hexagon's state, a line of stamps and a
+			// surface that propagates are three statements, and one switch for any
+			// pair of them would measure two things.
+			else if (userArgs[i] == "--no-ripples")
+				_ripples = false;
+			// How hard, over the row above rather than instead of it: asking for
+			// an amount is asking for the thing, the argument --recoil <x> already
+			// makes.
+			else if (userArgs[i] == "--ripple" && i + 1 < userArgs.Length
+					 && float.TryParse(userArgs[i + 1], NumberStyles.Float,
+									   CultureInfo.InvariantCulture,
+									   out float shove))
+			{
+				_rippleLevel = Mathf.Max(0.0f, shove);
+				_ripples = true;
+				i++;
+			}
 			else if (userArgs[i] == "--drawn-water")
 				_deepWater = false;
 			else if (userArgs[i] == "--no-foam")
@@ -1962,6 +2006,10 @@ public sealed partial class Main : Node2D
 		// list and that list is settled by SetWater.
 		_sea = new Swell { Field = _field, Enabled = _seaReacts };
 		_wake = new Wake { Enabled = _wakes };
+		// Empty of a field until the stage lays one over the pond it builds: what
+		// the box is depends on which cells came out wet, and that is settled by
+		// the mesh rather than by the mask.
+		_wash = new Ripples { Enabled = _ripples };
 		AddChild(_field);
 		_marks = new TrackMarks { Enabled = _rutsEnabled };
 		AddChild(_marks);
@@ -3364,6 +3412,9 @@ public sealed partial class Main : Node2D
 		// runs when the water itself is taken off the board, where a state held
 		// against cells that no longer exist is worse than wrong.
 		_sea?.Settle();
+		// And the ripples, for the swell's reason exactly: a field left standing
+		// comes back as a pond somebody had driven through.
+		_wash?.Settle();
 		SowGrove();
 		_field.QueueRedraw();
 	}
@@ -3746,6 +3797,9 @@ public sealed partial class Main : Node2D
 		["--drawn-water"] = new[] { "ground.deep" },
 		["--no-wake"] = new[] { "ground.wake" },
 	["--no-bow"] = new[] { "ground.bow" },
+		["--bow"] = new[] { "ground.bow" },
+		["--no-ripples"] = new[] { "ground.ripples" },
+		["--ripple"] = new[] { "ground.ripples", "ground.ripple_level" },
 		["--no-foam"] = new[] { "ground.foam" },
 		["--foam"] = new[] { "ground.foam" },
 		// The stage asks for height as well as for itself, so it declares both -
@@ -4465,7 +4519,35 @@ public sealed partial class Main : Node2D
 			() => _deepWater, v => _deepWater = v);
 		ui.Toggle("ground.wake", "tanks leave a wake  (--no-wake)",
 			() => _wakes, v => _wakes = v);
-		ui.Toggle("ground.bow", "water piles up at the bow  (--no-bow)",
+		ui.Toggle("ground.ripples", "the water is simulated  (--no-ripples)",
+			() => _ripples, v => _ripples = v);
+		ui.Readout("ground.ripple_state", () =>
+		{
+			if (_wash is not { Wide: > 0 })
+				return "no field on the board";
+			if (!_ripples)
+				return "off - flat water, as it was before this";
+			return $"{_wash.Peak:F2} units at its tallest"
+				   + $"   ({_wash.Wide}x{_wash.Tall} texels, "
+				   + $"{_wash.Cell.X:F0} world units across)";
+		});
+		ui.Slide("ground.ripple_level", "how hard a hull shoves  (--ripple)",
+			0.0, 6.0, 0.25,
+			() => _rippleLevel, v => _rippleLevel = (float)v,
+			"x", () =>
+			{
+				if (_wash is not { Wide: > 0 })
+					return "no field on the board";
+				if (!_ripples)
+					return "off - flat water, as it was before this";
+				if (_rippleLevel <= 0.0f)
+					return "nothing pushes - the pond only ever settles";
+				return $"{Ripples.Push * _rippleLevel:F1} units of height a second "
+					   + $"at full shove, {_wash.Peak:F2} standing now"
+					   + (_wash.Peak >= Stage3D.WashCrest
+							  ? "   (over the foam's cut)" : "");
+			});
+		ui.Toggle("ground.bow", "paint the bow crest as well  (--bow)",
 			() => _bows, v => _bows = v);
 		ui.Toggle("ground.water_react", "water answers the tanks  (--still-water)",
 			() => _seaReacts, v => _seaReacts = v);
@@ -5027,7 +5109,17 @@ public sealed partial class Main : Node2D
 						  // How hard the driven tank is shouldering the water,
 						  // because a crest that is not there and a crest whose
 						  // push came out nought are the same still water.
-						  + (_bows ? $"/{BowPush():F2}bow" : "/!nobow")
+						  + (_bows ? $"/{BowPush():F2}bow" : "/!noband")
+						  // What the simulation is holding: how tall the tallest
+						  // ripple is and how many steps the last frame ran. Two
+						  // numbers because they fail apart - a field nobody pushed
+						  // and a field that is not being stepped at all are the
+						  // same flat water, and a frame that ran into the step cap
+						  // is a third thing again.
+						  + (_wash is not { Wide: > 0 } ? "/!nofield"
+							 : !_ripples ? "/!noripple"
+							 : $"/{_wash.Peak:F2}x{_wash.Steps}"
+							   + $"@{_rippleLevel:F2}wash")
 						  + (_seaReacts ? "" : "!still"))
 					 // Trees, wooded cells, and how many of those no tank may
 					 // enter. Three numbers because a board with no props, a
@@ -5190,6 +5282,38 @@ public sealed partial class Main : Node2D
 				}
 				_sea.Tick(delta);
 				_wake?.Tick(delta);
+			}
+			// And the field, after them and on the same rule: every tank noted
+			// before anything is stepped, because two tanks pushing one patch of
+			// water add up and that is not known until both have spoken.
+			if (_wash is not null)
+			{
+				_wash.Enabled = _ripples;
+				_wash.Level = _rippleLevel;
+				foreach (Vehicle vehicle in _vehicles)
+				{
+					if (!vehicle.Wading)
+						continue;
+					// The same share of the ford's own ceiling the painted crest
+					// is scaled by, and read the same way: what a tank can do in
+					// water is what full push through water means.
+					float shove = Mathf.Clamp(
+						(float)(vehicle.Speed
+								/ Mathf.Max(vehicle.Profile.WaterSpeed, 1e-4)),
+						0.0f, 1.0f);
+					// In world XZ, both of them, because a ring is round on the
+					// water and the tanks' own space is the one the camera has
+					// already squashed - the mapping the swell's mark and the
+					// wake's stamps go through on their way to the shader, done
+					// here instead because the field is stepped in this space.
+					Vector3 at = _stage.World(vehicle.GroundPoint, 0.0f);
+					Vector3 way = _stage.World(
+						vehicle.Atlas.GroundDirection(
+							vehicle.Sprite.HullFacing), 0.0f);
+					_wash.Note(new Vector2(at.X, at.Z),
+							   new Vector2(way.X, way.Z), shove);
+				}
+				_wash.Tick(delta);
 			}
 			_stage.Place(_vehicles);
 		}
