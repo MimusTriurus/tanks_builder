@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Godot;
 
@@ -16,11 +16,21 @@ namespace TankSpriteTest;
 /// <b>Nothing here is a length in world units.</b> Every number is a fraction of
 /// the cell's circumradius, which is what <c>HEX_TILES.md</c> asks of anything
 /// that stands on a cell, and what makes <see cref="Fit"/> exact: the layout does
-/// not change with scale, so shrinking the wall to its cell is one multiply and
-/// not a rebuild. The Blender version could not say that - one absolute length
+/// not change with scale, so cutting the wall to its cell is one multiply and not
+/// a rebuild. The Blender version could not say that - one absolute length
 /// survived in it, the depth of a corner chip, and it made a smaller wall a
 /// *different* wall: a different vertex count in the cut, a different number of
 /// draws from the generator, and 38 bricks where there had been 37.
+///
+/// <b>It stands on one side of the cell and is as long as that side.</b> A wall is
+/// a boundary, so the cell decides its length rather than merely bounding it - the
+/// run is the hexagon's side and the outer face is its apothem, both out of the
+/// one <c>coverage</c>, and what the recipe still decides is how many pieces that
+/// length is cut into. Three passes in order, and the order is the point:
+/// <see cref="Lay"/> builds the masonry about the origin, <see cref="Fit"/> cuts
+/// and seats it, <see cref="Scatter"/> drops what fell off into the room that is
+/// left. The apron cannot come first, because until the wall is seated there is no
+/// answer to which side of it is still on the board.
 ///
 /// <b>Y is up and the space is the board's flat plane, not the world.</b>
 /// <see cref="Stage3D.World"/> maps a flat board point and a lift into the
@@ -49,14 +59,38 @@ public static class WallKit
     public const float BrickDeep = 0.107f;
     public const float BrickTall = 0.099f;
 
+    /// <summary>The cell's two lengths, and they are the wall's brief.
+    ///
+    /// A hexagon's side equals its circumradius, so <see cref="Edge"/> is 1 -
+    /// the same number the whole file is quoted in - and <see cref="Apothem"/>
+    /// is how far out that side sits. A wall standing on a boundary is
+    /// therefore not fitted to the cell, it is <i>cut</i> to it: the run is the
+    /// side, the seat is the apothem, and <see cref="Recipe.Columns"/> stops
+    /// deciding how long a wall is and only says how many pieces that length is
+    /// cut into.</summary>
+    public const float Edge = 1.0f;
+    public static readonly float Apothem = Mathf.Sqrt(3.0f) * 0.5f;
+
     /// <summary>The joint across a course, and the one up it.
     ///
     /// <b>They are different, and the second is zero.</b> A gap on all three axes
     /// was the Blender version's worst bug: every brick hung a few millimetres in
     /// the air, and forty-one of those released at once is a heap rather than a
-    /// wall. Nothing bears on the perpend, so a gap there is free and draws the
-    /// dark line the reference draws; everything bears on the bed.</summary>
-    public const float Perpend = 0.0148f;
+    /// wall. Nothing bears on the perpend, so a gap there is free; everything
+    /// bears on the bed.
+    ///
+    /// <b>And free is not the same as wanted: this is 10 mm, where it was 60.</b>
+    /// It was a budget the jitter spent - the joint had to be wide enough that
+    /// two bricks wandering and yawing at each other still came apart - so the
+    /// number quoted here was never the joint you saw, it was the worst case
+    /// plus the wobble. Now every irregularity is taken out of the brick instead
+    /// (see <see cref="HalfBrick"/>), the joint is the joint, and it can be the
+    /// real one: 0.0025 of a cell is 10 mm at <c>WallRig.MetresPerCell</c>, which
+    /// is what a bricklayer leaves. <b>The dark line is not this.</b> The seam is
+    /// painted round every face by the shader, in cell units, so it survives a
+    /// joint too thin to see - which is the whole reason this could shrink at
+    /// all.</summary>
+    public const float Perpend = 0.0025f;
     public const float Bed = 0.0f;
 
     public const float PitchX = BrickLong + Perpend;
@@ -116,9 +150,10 @@ public static class WallKit
         /// </summary>
         public float NotchChance = 0.0f;
 
-        /// <summary>Bricks that never made it into a course, lying in front, and
-        /// chips of them in the apron. Counts, not positions: where they go is
-        /// worked out against the wall that got built.
+        /// <summary>Bricks that never made it into a course, lying against it on
+        /// the cell's side, and chips of them in the apron. Counts, not positions:
+        /// where they go is worked out against the wall that got built, and
+        /// against the cell it has to stay inside - see <see cref="Scatter"/>.
         ///
         /// <b>That is the fix for the one bug the Blender layout kept.</b> Its
         /// four fallen bricks were hand-placed against a single-leaf wall and
@@ -137,10 +172,17 @@ public static class WallKit
         /// <summary>Jitter, as fractions of a brick. Position and yaw only: a
         /// leaning brick in a course lifts its own far corner into the course
         /// above, which is 9.3 mm of interpenetration in the Blender build and
-        /// the reason only its crest brick leans.</summary>
+        /// the reason only its crest brick leans.
+        ///
+        /// <b>The size jitter is what pays for the other two now, so it is the
+        /// one that grew.</b> A brick is only ever cut short, never long, and
+        /// what it gives up is the room it is then allowed to wander and turn in
+        /// - so the wobble is bounded by the brick and not by the joint. Ask for
+        /// none of it and you get a wall of identical bricks in dead straight
+        /// courses, which is the honest price of a 10 mm perpend.</summary>
         public float Jitter = 0.035f;
         public float Yaw = 3.0f;
-        public float SizeJitter = 0.022f;
+        public float SizeJitter = 0.060f;
     }
 
     /// <summary>One piece. An oriented box with a shade, in the flat plane's
@@ -283,38 +325,72 @@ public static class WallKit
                                            -LeafGap(r)));
             }
         }
+        Measure(plan);
+        return plan;
+    }
 
-        // --- what fell off it --------------------------------------------------
-        // Placed against the wall that got built, never against a table.
-        //
-        // **+z is towards the camera, and this is the one place it matters.**
-        // Stage3D maps a flat row to world z and the camera looks down -z, so the
-        // near side of the board is +z - which means the back leaf goes to -z and
-        // the rubble to +z. The first pass had both negative and put the whole
-        // apron behind the wall, where it read as debris floating above it.
-        float front = BrickDeep * 0.5f;
-        float reachX = (r.Columns * 0.5f + 0.6f) * PitchX;
-        // The apron sits against the wall. Spread over the whole cell it reads as
-        // litter someone dropped rather than as a wall that lost pieces, and the
-        // Blender prop's own numbers say the same - its rubble is banded along the
-        // face, not scattered.
-        reachX *= 0.82f;
-        int laid = plan.Blocks.Count;
+    /// <summary>Drop what fell off the wall, into the cell the wall stands on.
+    ///
+    /// <b>After the seat, never before it, and that is the whole reason this is
+    /// its own pass.</b> While the wall was fitted to the middle of the cell the
+    /// apron could be laid in the wall's own coordinates and scaled with it; a
+    /// wall standing on a boundary has a side that is off the board, so where the
+    /// rubble may lie is a question about the hexagon and cannot be answered
+    /// before the wall knows where it sits.
+    ///
+    /// <b>Inward, because the other side of this wall is the next cell.</b> The
+    /// prop belongs to one cell - a brick that rolled to a neighbour is a brick
+    /// in somebody else's sprite - and the wall's outer face is the boundary
+    /// itself, so there is no outward side left to fall on. What that costs is
+    /// named: at the near face the apron is behind the wall from the camera, and
+    /// what reads is the part of it that spreads past the wall's ends. It does
+    /// spread past them, and by construction: the band lies inward of the wall,
+    /// the hexagon widens as it goes in, and the pieces are sampled across the
+    /// width that is actually there rather than across the wall's own.</summary>
+    public static void Scatter(Plan plan, Recipe? recipe, float scale, float coverage)
+    {
+        Recipe r = recipe ?? new Recipe();
+        int seed = r.Seed;
+        // The masonry's inner face, which is where the rubble starts.
+        float inner = float.MaxValue;
+        foreach (Block b in plan.Blocks)
+        {
+            if (b.Course < 0)
+                continue;
+            foreach (Vector3 c in Corners(b))
+                inner = Mathf.Min(inner, c.Z);
+        }
+        if (inner > 1.0f)
+            return;                       // no masonry, nothing to have fallen off
+
+        // Deep enough for a piece that is lying across it: a brick turned
+        // ninety degrees spans its own length along z, so a band 0.75 of a brick
+        // deep is thinner than the thing it is meant to hold and the rejection
+        // has to throw pieces away for want of anywhere legal. Measured over
+        // eight seeds: 0.75 of a brick left one of five unplaced on four of
+        // them, 1.2 on one.
+        float deep = BrickLong * 1.2f * scale;
+        float near = inner;
+        float far = inner - deep;
+        // How wide the cell is at the shallow end of the band. The far end is
+        // wider still, so this understates rather than overstates - and every
+        // piece is put to the hexagon itself before it is kept.
+        float reachX = Mathf.Max(0.0f, coverage - Mathf.Abs(near) / Mathf.Sqrt(3.0f));
+
         for (int i = 0; i < r.Fallen; i++)
         {
             var turn = new Basis(Vector3.Up, Mathf.DegToRad(Span(seed, i, 53, -95.0f, 95.0f)))
                        * new Basis(Vector3.Right, Mathf.DegToRad(Span(seed, i, 54, -8.0f, 8.0f)));
             var piece = new Block
             {
-                Half = HalfBrick(seed, i, 55, r),
+                Half = LooseBrick(seed, i, 55, r) * scale,
                 Turn = turn,
                 Tone = Roll(seed, i, 56),
                 Moss = Span(seed, i, 57, 0.15f, 0.55f),
                 Course = -1,
             };
             piece.Seat = new Vector3(0.0f, piece.Half.Y, 0.0f);
-            if (Drop(plan, ref piece, seed, i, 50, reachX, front,
-                     front + BrickLong * 0.75f, laid))
+            if (Drop(plan, ref piece, seed, i, 50, reachX, near, far, coverage))
                 plan.Blocks.Add(piece);
         }
 
@@ -323,7 +399,8 @@ public static class WallKit
             float k = Span(seed, i, 61, 0.20f, 0.38f);
             var piece = new Block
             {
-                Half = new Vector3(BrickLong * k, BrickTall * k, BrickDeep * k) * 0.5f,
+                Half = new Vector3(BrickLong * k, BrickTall * k, BrickDeep * k)
+                       * 0.5f * scale,
                 Turn = new Basis(Vector3.Up, Mathf.DegToRad(Span(seed, i, 64, -180.0f, 180.0f)))
                        * new Basis(Vector3.Right, Mathf.DegToRad(Span(seed, i, 65, -25.0f, 25.0f))),
                 Tone = Roll(seed, i, 66),
@@ -332,13 +409,12 @@ public static class WallKit
                 Chip = true,
             };
             piece.Seat = new Vector3(0.0f, piece.Half.Y, 0.0f);
-            if (Drop(plan, ref piece, seed, i, 60, reachX * 1.1f, front - BrickDeep,
-                     front + BrickLong * 1.15f, laid))
+            if (Drop(plan, ref piece, seed, i, 60, reachX, near + BrickDeep * scale,
+                     far, coverage))
                 plan.Blocks.Add(piece);
         }
 
         Measure(plan);
-        return plan;
     }
 
     /// <summary>
@@ -358,17 +434,32 @@ public static class WallKit
     /// advances a stream.
     /// </summary>
     private static bool Drop(Plan plan, ref Block piece, int seed, int i, int salt,
-                             float reachX, float near, float far, int against)
+                             float reachX, float near, float far, float coverage)
     {
         const int Tries = 24;
         float clear = Perpend * 0.5f;
         for (int t = 0; t < Tries; t++)
         {
+            // The depth first, then the width the cell has at that depth. The
+            // band is a wedge and not a rectangle - the hexagon opens out as it
+            // goes in from the side the wall stands on - so a piece sampled across
+            // the wall's own width would never reach past the wall's ends, which
+            // is the only part of the apron the camera gets to see from the near
+            // face. Measured off the drawn cell: the wall's half-run is 0.485 and
+            // the wedge is 0.57 wide at the back of the masonry.
+            float z = Span(seed, i * 31 + t, salt + 2, near, far);
+            float wide = Mathf.Max(0.0f,
+                                   reachX - (Mathf.Abs(z) - Mathf.Abs(near))
+                                            / Mathf.Sqrt(3.0f));
             piece.Seat = new Vector3(
-                Span(seed, i * 31 + t, salt + 1, -reachX, reachX),
+                Span(seed, i * 31 + t, salt + 1, -wide, wide),
                 piece.Half.Y,
-                Span(seed, i * 31 + t, salt + 2, near, far));
-            bool clean = true;
+                z);
+            // Two tests, and the second is the cell. The wall is on the boundary
+            // now, so a piece that clears every brick can still be over the edge
+            // - and it is asked with the very test the fit is stated in, so the
+            // two cannot disagree about where the cell ends.
+            bool clean = Reach(piece) <= coverage;
             for (int k = 0; k < plan.Blocks.Count && clean; k++)
                 if (Penetration(piece, plan.Blocks[k]) > -clear)
                     clean = false;
@@ -389,54 +480,88 @@ public static class WallKit
 
     /// <summary>How far apart the two leaves sit, centre to centre.
     ///
-    /// <b>Derived from the jitter rather than set beside it, because the jitter is
-    /// what closes it.</b> A perpend of 0.0148 looks like plenty until two bricks
-    /// three degrees apart swing their corners at each other: 0.107 of half-length
-    /// times sin(3) is 0.0056 each, and the depth jitter adds 0.0037 each on top.
-    /// The first version used the bare perpend and the guard caught it on the
-    /// first seed ever generated - 4.95px, front leaf against back.</summary>
-    private static float LeafGap(Recipe r) =>
-        BrickDeep + Perpend
-        + 2.0f * (r.Jitter * BrickDeep
-                  + BrickLong * 0.5f * Mathf.Sin(Mathf.DegToRad(r.Yaw)));
+    /// <b>The bare joint, and it is exact.</b> It used to be the joint plus twice
+    /// the jitter and twice the yaw's corner swing, because those were what closed
+    /// it - the first version used the bare perpend and the guard caught it on the
+    /// first seed ever generated, 4.95px of front leaf inside back. That allowance
+    /// is gone because the thing it allowed for is gone: a course brick's
+    /// footprint is now the nominal brick whatever it does inside it, so two
+    /// leaves a perpend apart are a perpend apart. Measured, it took 135 mm of
+    /// daylight out of the cavity.</summary>
+    private static float LeafGap(Recipe r) => BrickDeep + Perpend;
 
-    /// <summary>A brick, near enough its nominal size to be one.
+    /// <summary>A brick that fits its slot however it is turned.
+    ///
+    /// <b>Every irregularity comes out of the brick and never out of the
+    /// joint.</b> That is the whole of what lets the perpend be 10 mm. A box
+    /// yawed by t has an x extent of <c>a*cos + c*sin</c> and a z extent of
+    /// <c>c*cos + a*sin</c>, so asking both of those to come out at the nominal
+    /// half-brick is a 2x2 solve, and the answer is a brick a little shorter and
+    /// a little thinner than nominal - 2% and 10% at three degrees. Turn it, and
+    /// it still occupies exactly one brick of the course.
+    ///
+    /// The size jitter is then one-sided: a brick is cut short, never long. Long
+    /// is the same failure under another name - it has to come out of the joint,
+    /// because there is nowhere else - and short leaves room the position jitter
+    /// is allowed to spend, which is where the wobble comes from now.
     ///
     /// <b>Length and depth only: the height is never jittered.</b> The bed joint
     /// is zero, so a brick 2.2% taller than nominal is 2.2% of interpenetration
-    /// with the course above it and nothing absorbs it. Measured before this: a
-    /// steady +0.0016 of a cell on every seed, always between two bricks in the
-    /// same column - which is small enough to look like noise in the guard and is
-    /// not noise, it is the jitter.</summary>
-    private static Vector3 HalfBrick(int seed, int id, int salt, Recipe r)
+    /// with the course above it and nothing absorbs it. Measured before that was
+    /// found: a steady +0.0016 of a cell on every seed, always between two bricks
+    /// in the same column - small enough to look like noise in the guard and not
+    /// noise at all.</summary>
+    private static Vector3 HalfBrick(int seed, int id, int salt, Recipe r, float yaw)
     {
-        float gx = 1.0f + (Roll(seed, id, salt) - 0.5f) * 2.0f * r.SizeJitter;
-        float gz = 1.0f + (Roll(seed, id, salt + 7) - 0.5f) * 2.0f * r.SizeJitter;
+        float cs = Mathf.Cos(yaw), sn = Mathf.Abs(Mathf.Sin(yaw));
+        // cos(2t), and it only vanishes at 45 degrees - a course brick never gets
+        // near that, and the apron's loose bricks do not come through here.
+        float det = Mathf.Max(cs * cs - sn * sn, 1e-3f);
+        float ax = (BrickLong * cs - BrickDeep * sn) / (2.0f * det);
+        float az = (BrickDeep * cs - BrickLong * sn) / (2.0f * det);
+        float gx = 1.0f - Roll(seed, id, salt) * r.SizeJitter;
+        float gz = 1.0f - Roll(seed, id, salt + 7) * r.SizeJitter;
+        return new Vector3(ax * gx, BrickTall * 0.5f, az * gz);
+    }
+
+    /// <summary>A brick that fell off. No slot to keep to, so no solve: cut short
+    /// like the others and then placed by rejection, which is a stronger test
+    /// than any size rule.</summary>
+    private static Vector3 LooseBrick(int seed, int id, int salt, Recipe r)
+    {
+        float gx = 1.0f - Roll(seed, id, salt) * r.SizeJitter;
+        float gz = 1.0f - Roll(seed, id, salt + 7) * r.SizeJitter;
         return new Vector3(BrickLong * gx, BrickTall, BrickDeep * gz) * 0.5f;
     }
 
     private static Block Course(int seed, int id, Recipe r, float x, int c, float depth)
     {
-        float yawRad = Mathf.DegToRad(r.Yaw);
-        // **The perpend is a budget and the jitter spends it.** Two neighbours in
-        // a course close on twice their own wander plus twice the swing their yaw
-        // gives the near corner, so a jitter quoted as a fraction of a brick can
-        // spend more than the joint has: 0.035 of a 0.214 brick is 0.0075 each
-        // against a 0.0148 joint, and the guard reported exactly that - a steady
-        // 0.0016 between two bricks in the same course, on the seeds where both
-        // wandered the same way. Capped against the slack that is actually there.
-        float swing = BrickDeep * 0.5f * Mathf.Sin(yawRad);
-        float slack = Mathf.Max(0.0f, Perpend * 0.5f - swing);
-        float jx = (Roll(seed, id, 11) - 0.5f) * 2.0f
-                   * Mathf.Min(r.Jitter * BrickLong, slack);
-        float jz = (Roll(seed, id, 12) - 0.5f) * 2.0f * r.Jitter * BrickDeep;
         // No lift jitter and no lean: both raise a brick into the course above,
         // and the bed joint is zero so there is nowhere for it to go.
-        float yaw = (Roll(seed, id, 13) - 0.5f) * 2.0f * yawRad;
+        float yaw = (Roll(seed, id, 13) - 0.5f) * 2.0f * Mathf.DegToRad(r.Yaw);
+        Vector3 half = HalfBrick(seed, id, 14, r, yaw);
+        // **Every brick owns one slot of the course and never leaves it.** The
+        // perpend used to be a budget the jitter spent, and it overspent: 0.035
+        // of a 0.214 brick is 0.0075 of wander each against a 0.0148 joint, plus
+        // the swing the yaw gives the near corner, and the guard reported exactly
+        // that - a steady 0.0016 of a cell between two bricks in the same course
+        // on the seeds where both wandered the same way. The slot inverts it. A
+        // brick's yawed footprint is already the nominal brick, so what it may
+        // wander is what it gave up by being cut short, and two neighbours are a
+        // full perpend apart in the worst case rather than in the average one.
+        // Same-course overlap is zero by construction now, and the guard has
+        // nothing left to catch there.
+        float cs = Mathf.Cos(yaw), sn = Mathf.Abs(Mathf.Sin(yaw));
+        float roomX = Mathf.Max(0.0f, BrickLong * 0.5f - (half.X * cs + half.Z * sn));
+        float roomZ = Mathf.Max(0.0f, BrickDeep * 0.5f - (half.Z * cs + half.X * sn));
+        float jx = (Roll(seed, id, 11) - 0.5f) * 2.0f
+                   * Mathf.Min(r.Jitter * BrickLong, roomX);
+        float jz = (Roll(seed, id, 12) - 0.5f) * 2.0f
+                   * Mathf.Min(r.Jitter * BrickDeep, roomZ);
         return new Block
         {
             Seat = new Vector3(x + jx, (c + 0.5f) * PitchY - Footing, depth + jz),
-            Half = HalfBrick(seed, id, 14, r),
+            Half = half,
             Turn = new Basis(Vector3.Up, yaw),
             Tone = Roll(seed, id, 15),
             // Moss climbs out of the ground, so it is a function of the course
@@ -477,6 +602,18 @@ public static class WallKit
     /// The hexagon's own two constraints, never a circle: a bounding circle is
     /// the inradius and throws away the 15% of extra room along the vertex axis,
     /// which is the axis a wall runs along.</summary>
+    public static float Reach(in Block b)
+    {
+        float worst = 0.0f;
+        foreach (Vector3 c in Corners(b))
+        {
+            float x = Mathf.Abs(c.X), z = Mathf.Abs(c.Z);
+            worst = Mathf.Max(worst, Mathf.Max(z / (Mathf.Sqrt(3.0f) * 0.5f),
+                                               x + z / Mathf.Sqrt(3.0f)));
+        }
+        return worst;
+    }
+
     public static float Reach(IReadOnlyList<Block> blocks)
     {
         float worst = 0.0f;
@@ -577,54 +714,68 @@ public static class WallKit
         + Mathf.Abs(Col(b.Turn, 1).Dot(axis)) * b.Half.Y
         + Mathf.Abs(Col(b.Turn, 2).Dot(axis)) * b.Half.Z;
 
-    // --- fitting the cell ------------------------------------------------------
+    // --- standing it on a side of the cell -------------------------------------
 
-    /// <summary>Scale the wall so it sits inside its cell, and centre it first.
+    /// <summary>Cut the wall to the side it stands on, and seat it there.
     ///
-    /// One pass, where the Blender version needed two. Over there the footprint
-    /// was not a closed form - the apron was scattered by rejection and the
-    /// boulders were hulls of random points - so what the prop spanned had to be
-    /// measured by building it. Here nothing about the layout depends on the
-    /// scale, so the fit is exactly <c>coverage / reach</c>.
+    /// <b>The cell sets the length; the recipe only says how many pieces that
+    /// length is cut into.</b> A wall on a boundary is not a prop that happens to
+    /// fit a cell - it is a piece of that boundary, so its run is the hexagon's
+    /// side and its face is the hexagon's apothem, and both come out of the same
+    /// <paramref name="coverage"/>. That one number is what keeps it off the tile
+    /// edge, and it is exact rather than approximate: a run of
+    /// <c>Edge * coverage</c> seated at <c>Apothem * coverage</c> puts the wall's
+    /// two outer top corners on the two vertices of the cell shrunk by coverage,
+    /// because <c>0.5c + (sqrt(3)/2)c/sqrt(3)</c> is <c>c</c>. The wall stands on
+    /// the side of a slightly smaller hexagon, and <see cref="Reach"/> comes back
+    /// reading coverage to the last digit.
     ///
-    /// Centred before fitting, and that is not cosmetic: the layout is
-    /// deliberately lopsided, so an off-centre prop touches one edge and wastes
-    /// the clearance at the other. On the Blender build that was 0.778 against
-    /// 0.819 of the cell.</summary>
-    public static float Fit(Plan plan, float coverage = 0.94f)
+    /// <b>Where it used to be a ceiling it is now a cut, and that is the change.</b>
+    /// The old fit scaled the prop down if it stuck out and left it alone if it
+    /// did not, on the argument that a layout stated in cell fractions is already
+    /// the size that was asked for. True while the wall stood in the middle of the
+    /// cell with nothing to line up with; a wall standing on a side has something
+    /// to line up with, and being a little short of it is a wall that missed.
+    ///
+    /// Centred before it is seated, and that is not cosmetic: the profile is
+    /// deliberately lopsided, so the run has to be measured and centred rather
+    /// than assumed from the column count - the stretcher bond alone puts half a
+    /// pitch of the upper courses past the bottom one.
+    ///
+    /// Masonry only. The apron is dropped afterwards by <see cref="Scatter"/>,
+    /// against a wall that already knows where it stands.</summary>
+    public static float Fit(Plan plan, float coverage = 0.97f)
     {
-        var lo = new Vector3(float.MaxValue, 0.0f, float.MaxValue);
-        var hi = new Vector3(float.MinValue, 0.0f, float.MinValue);
+        float lo = float.MaxValue, hi = float.MinValue, face = float.MinValue;
         foreach (Block b in plan.Blocks)
-        foreach (Vector3 c in Corners(b))
         {
-            lo.X = Mathf.Min(lo.X, c.X); lo.Z = Mathf.Min(lo.Z, c.Z);
-            hi.X = Mathf.Max(hi.X, c.X); hi.Z = Mathf.Max(hi.Z, c.Z);
+            if (b.Course < 0)
+                continue;
+            foreach (Vector3 c in Corners(b))
+            {
+                lo = Mathf.Min(lo, c.X);
+                hi = Mathf.Max(hi, c.X);
+                face = Mathf.Max(face, c.Z);
+            }
         }
-        var mid = new Vector3((lo.X + hi.X) * 0.5f, 0.0f, (lo.Z + hi.Z) * 0.5f);
+        if (lo > hi)
+            return 1.0f;
+
+        float run = hi - lo;
+        float scale = run > 1e-4f ? Edge * coverage / run : 1.0f;
+        float mid = (lo + hi) * 0.5f;
+        // Everything moves together: x about the run's middle, y about the ground
+        // it is footed in, z so that the outer face lands on the side.
+        float seat = Apothem * coverage - face * scale;
         for (int i = 0; i < plan.Blocks.Count; i++)
         {
             Block b = plan.Blocks[i];
-            b.Seat -= mid;
+            b.Seat = new Vector3((b.Seat.X - mid) * scale,
+                                 b.Seat.Y * scale,
+                                 b.Seat.Z * scale + seat);
+            b.Half *= scale;
             plan.Blocks[i] = b;
         }
-
-        // **A ceiling, never a target.** The layout is already stated in cell
-        // fractions, so its natural size is the size that was asked for; scaling
-        // it *up* to fill the coverage means the cell decides how big a wall is,
-        // and a narrower apron then makes a taller wall. Measured: trimming the
-        // rubble band moved the fit from 0.87 to 1.11 and pushed the crest out of
-        // frame, which is a wall that grew because its debris shrank.
-        float reach = Reach(plan.Blocks);
-        float scale = Mathf.Min(1.0f, reach > 1e-4f ? coverage / reach : 1.0f);
-        if (Mathf.Abs(scale - 1.0f) > 1e-6f)
-            for (int i = 0; i < plan.Blocks.Count; i++)
-            {
-                Block b = plan.Blocks[i];
-                b.Seat *= scale;
-                b.Half *= scale;
-                plan.Blocks[i] = b;
-            }
         Measure(plan);
         return scale;
     }

@@ -98,19 +98,55 @@ public sealed partial class WallRig : Node3D
     /// is allowed to go.</summary>
     public static readonly float Apothem = MetresPerCell * Mathf.Sqrt(3.0f) * 0.5f;
 
-    /// <summary>HE: how hard, and how far it reaches, in metres. The reach is
-    /// what makes it a breach instead of a demolition - past it the wall is only
-    /// losing its support.</summary>
-    public const float HeImpulse = 2200.0f;
-    public const float HeReach = 1.2f;
+    /// <summary>How fast each shot throws a piece it catches, in metres a
+    /// second, and how far the burst reaches, in metres. The reach is what makes
+    /// HE a breach instead of a demolition - past it the wall is only losing its
+    /// support.
+    ///
+    /// <b>Speeds, and they were newton-seconds - 2200 and 2000.</b> Impulse is
+    /// the more physical of the two: a blast delivers momentum to the face it can
+    /// see and a shell delivers its own, so neither cares what the piece weighs.
+    /// It is also the one that breaks the moment the wall changes size. Cutting
+    /// the wall to the cell's side took every piece to 0.69 of its length, which
+    /// is 0.33 of its mass, so the same newton-seconds became three times the
+    /// speed: measured on one seed and one shot, the HE heap went from reach 1.10
+    /// with a single piece off the cell to reach 5.93 with thirty-six, and AP from
+    /// 1.72 and three to 8.22 and twelve. Quoted as a speed the shot is scale-free
+    /// by construction - the cell it has to stay on did not shrink, only the
+    /// bricks did, and how far a piece thrown at v goes in cells is v squared over
+    /// g times the cell, which has no brick in it. The two numbers are the old
+    /// ones divided by the mass they were tuned against, so the shot they describe
+    /// is the shot that was tuned.</summary>
+    public const float HeSpeed = 7.6f;
+    public const float ApSpeed = 6.9f;
 
-    /// <summary>AP: one line, and only what stands on it. Large, because a piece
-    /// that is merely nudged reads as the wall settling rather than as a round
-    /// going through it.</summary>
-    public const float ApImpulse = 2000.0f;
+    /// <summary>How wide a hole each shot makes, <b>in course bricks</b> - the
+    /// burst's radius and the round's bore.
+    ///
+    /// <b>Bricks, because a hole is read against the wall it is in.</b> These
+    /// were 1.2 m and 0.55 m, and the second was already argued from the piece it
+    /// knocks out - half a metre being one block up and one down against a block
+    /// 0.87 m long. Cutting the wall to the cell's side took the block to 0.60 m
+    /// and left both numbers where they were, so the same two shots became
+    /// different shots: measured, HE moved 57 of 59 pieces where it had moved 38
+    /// of 58, and AP 16 where it had moved 9 - a demolition and a gap instead of a
+    /// breach and a hole. Quoted in bricks they say what they are for, and the
+    /// bench keeps three shots that answer differently.
+    ///
+    /// The brick they are measured against is <b>measured off the wall</b> rather
+    /// than read from <see cref="WallKit"/>: the plan has been cut to the cell by
+    /// the time it gets here, so the nominal is not the built size and reading it
+    /// would be reading the very number the fit exists to replace.</summary>
+    public const float HeReach = 1.38f;
+    public const float ApBore = 0.63f;
 
-    /// <summary>How wide the hole is, in metres, measured from the line the
-    /// round travels down.
+    /// <summary>The course brick as it was actually built, in metres - its length
+    /// and its height. Largest rather than mean, because the size jitter only ever
+    /// cuts a brick short, so the largest is the nominal.</summary>
+    private float _brick = WallKit.BrickLong * MetresPerCell;
+    private float _course = WallKit.BrickTall * MetresPerCell;
+
+    /// <summary>Why the bore is not a ray.
     ///
     /// <b>The hole an AP round leaves is wider than the round, and that is the
     /// whole of why this is not a ray.</b> Two rays hit two pieces - one leaf
@@ -121,13 +157,12 @@ public sealed partial class WallRig : Node3D
     /// across it, so the middle of the patch is thrown and its rim is only
     /// dropped.
     ///
-    /// <b>It is a calibre, not a dial.</b> The force multiplier moves the
-    /// impulse and never this: a heavier round goes through harder, and the
-    /// reason only the burst has a radius is written where that radius is.
-    /// Measured against the piece it is knocking out - 0.87 x 0.44 x 0.40m - so
-    /// half a metre is one block up and one down, and the courses either side
-    /// stay where they are.</summary>
-    public const float ApBore = 0.55f;
+    /// <b>It is a calibre, not a dial.</b> The force multiplier moves the speed
+    /// and never the bore: a heavier round goes through harder, and the reason
+    /// only the burst has a radius is written where that radius is. Measured
+    /// against the piece it knocks out, which is why it is quoted in bricks - one
+    /// block up and one down, and the courses either side stay where they
+    /// are.</summary>
     public const float ApBite = 0.5f;
     public const float ApSpall = 0.2f;
 
@@ -194,9 +229,10 @@ public sealed partial class WallRig : Node3D
         // The reach is quoted because it moves: a heavier charge reaches
         // further by the cube root of itself, and the panel's job is to say what
         // the number costs rather than what it is called.
-        Strike.He => $"{HeImpulse * force:F0} Ns at the burst over "
-                     + $"{HeReach * Mathf.Pow(Mathf.Max(force, 0.0f), 1.0f / 3.0f):F1} m",
-        _ => $"{ApImpulse * force:F0} Ns down the line",
+        Strike.He => $"{HeSpeed * force:F1} m/s at the burst over "
+                     + $"{HeReach * Mathf.Pow(Mathf.Max(force, 0.0f), 1.0f / 3.0f):F1}"
+                     + " bricks",
+        _ => $"{ApSpeed * force:F1} m/s down a {ApBore * 2.0f:F1} brick bore",
     };
     public int Count => _bodies.Count;
 
@@ -313,6 +349,16 @@ public sealed partial class WallRig : Node3D
     {
         Clear();
         _plan = plan;
+        // The brick the shots are measured against, off the wall that got built.
+        float nose = 0.0f, tall = 0.0f;
+        foreach (WallKit.Block b in plan.Blocks)
+            if (b.Course >= 0)
+            {
+                nose = Mathf.Max(nose, b.Half.X * 2.0f);
+                tall = Mathf.Max(tall, b.Half.Y * 2.0f);
+            }
+        _brick = (nose > 0.0f ? nose : WallKit.BrickLong) * MetresPerCell;
+        _course = (tall > 0.0f ? tall : WallKit.BrickTall) * MetresPerCell;
 
         var floor = new StaticBody3D { Name = "Ground" };
         var tris = new Vector3[groundTris.Count];
@@ -516,7 +562,7 @@ public sealed partial class WallRig : Node3D
         // picture is a wall collapsing at a tank that is still driving. So the
         // thaw follows the tank - <see cref="Reached"/> - which is the same rule
         // stated properly: a brick is let go when the tank gets to it.
-        _tankLane = wide * 0.5f + WallKit.BrickLong * MetresPerCell;
+        _tankLane = wide * 0.5f + _brick;
         _tankTip = nose + into * (deep * 0.5f);
         _tankInto = into;
         _tankGone = 0.0f;
@@ -591,7 +637,8 @@ public sealed partial class WallRig : Node3D
         float front = float.MaxValue;
         foreach (RigidBody3D b in _bodies)
             front = Mathf.Min(front, b.Transform.Origin.Dot(into));
-        Vector3 at = into * (front - HeReach * HeStandoff) + Vector3.Up * mid;
+        Vector3 at = into * (front - HeReach * _brick * HeStandoff)
+                     + Vector3.Up * mid;
         _beam = (-into * reach + Vector3.Up * mid, at);
         // A bigger charge reaches further, by the cube root of itself.
         //
@@ -609,7 +656,7 @@ public sealed partial class WallRig : Node3D
         // thrown away from the wall touch nothing on the way out, so the cascade
         // had nothing to spread through either.
         float grow = Mathf.Pow(Mathf.Max(_force, 0.0f), 1.0f / 3.0f);
-        float blast = Mathf.Max(HeReach * grow, 0.0001f);
+        float blast = Mathf.Max(HeReach * _brick * grow, 0.0001f);
         for (int i = 0; i < _bodies.Count; i++)
         {
             Vector3 arm = _bodies[i].Transform.Origin - at;
@@ -625,7 +672,8 @@ public sealed partial class WallRig : Node3D
                 continue;
             Vector3 dir = (arm.Normalized() * 0.55f + into * 0.45f).Normalized();
             float fall = 1.0f / (1.0f + (d / blast) * (d / blast));
-            _bodies[i].ApplyImpulse(dir * HeImpulse * _force * fall);
+            _bodies[i].ApplyImpulse(
+                dir * (HeSpeed * _force * fall * _bodies[i].Mass));
         }
     }
 
@@ -656,7 +704,7 @@ public sealed partial class WallRig : Node3D
         // Gun height - see ApAim - and dropped far enough under that crest to
         // leave a course over the hole, so a wall too low for a gun is hit near
         // its top rather than over it.
-        float lintel = ApBore + WallKit.BrickTall * MetresPerCell;
+        float lintel = ApBore * _brick + _course;
         mid = crest > lintel ? Mathf.Min(ApAim, crest - lintel) : ApAim;
         Vector3 from = -into * reach + side * lane + Vector3.Up * mid;
         _beam = (from, into * reach + Vector3.Up * mid);
@@ -684,7 +732,8 @@ public sealed partial class WallRig : Node3D
             // the tunnel had a brick in it and the wall read solid. The box's own
             // reach along the offset is the honest test, and it is exact for a
             // box: the sum of its half extents projected on that direction.
-            if (off > ApBore + span * ApBite)
+            float bore = ApBore * _brick;
+            if (off > bore + span * ApBite)
                 continue;
             // Only what the round takes, and nothing that touches it - see
             // Thaw: the frozen ring round the gap is what keeps it a hole.
@@ -693,14 +742,15 @@ public sealed partial class WallRig : Node3D
             // square, the burst's falloff over its own width, for the burst's
             // reason: an edge that is a step is a patch of pieces all leaving at
             // once, which reads as a small charge rather than as a hole.
-            float t = off / Mathf.Max(ApBore + span * ApBite, 1e-4f);
+            float t = off / Mathf.Max(bore + span * ApBite, 1e-4f);
             float fall = 1.0f - ApSpall * t * t;
             // <b>Straight down the shot, and the cone was built and measured
             // worse.</b> Real spall goes out in a cone, and leaning the push away
             // from the axis drives every piece into the frozen side of its own
             // hole: measured, the furthest went 1.35m against 4.88m straight. A
             // hole is only as wide as the pieces that left it.
-            _bodies[i].ApplyImpulse(into * ApImpulse * _force * fall);
+            _bodies[i].ApplyImpulse(
+                into * (ApSpeed * _force * fall * _bodies[i].Mass));
         }
     }
 

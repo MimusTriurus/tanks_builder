@@ -80,7 +80,11 @@ public sealed partial class WallBench : Node2D
     private readonly WallKit.Recipe _recipe = new();
     private WallKit.Plan? _plan;
     private float _scale = 1.0f;
-    private float _coverage = 0.94f;
+    /// <summary>How much of the side the wall takes, and how far out it stands
+    /// - one number for both, see <see cref="WallKit.Fit"/>. 0.97 leaves about
+    /// two pixels of tile between each end of the wall and the cell's vertex,
+    /// which is the whole of what keeps it off the edge.</summary>
+    private float _coverage = 0.97f;
     private WallFall.Shot _shot = WallFall.Shot.Mine;
     private WallRig? _rig;
     private ControlPanel? _panel;
@@ -102,20 +106,33 @@ public sealed partial class WallBench : Node2D
     /// unit the chosen shot is measured in.</summary>
     public const float MostForce = 10.0f;
     private bool _solved;
-    /// <summary>Which flat side it comes from, and 270 is broadside.
+    /// <summary>Which flat side it comes from - and, since the wall stands on a
+    /// side, which side that is.
     ///
-    /// <b>Two of the six meet the wall's face, and the other four take it end
-    /// on.</b> Not a coincidence and not a choice: the prop is fitted along the
-    /// hexagon's <i>vertex</i> axis, because that is where the room is - a
-    /// flat-top hex is widest corner to corner, and the fit measures against the
-    /// hexagon rather than its incircle for exactly that reason. A wall lying on
-    /// the long diagonal blocks the 90-270 lane and stands beside the other
-    /// four, so those hit it at sixty degrees off its face.
+    /// <b>One dial, because a wall on a boundary is the boundary being
+    /// crossed.</b> The two used to be independent, and could be: the prop was
+    /// fitted along the hexagon's vertex axis in the middle of the cell, so two
+    /// of the six bearings met its face and the other four took it end on -
+    /// measured, 45-49 of 58 pieces broadside against 17-24 along. Standing it on
+    /// a side ends that arrangement, and not by preference: the ram's travel is
+    /// clamped at the cell's middle so that the tank is guaranteed to take the
+    /// cell and guaranteed not to take the next one, and a wall on the far
+    /// boundary is a metre past the end of that. Measured before the two were
+    /// tied together: at force 1 the nose stops 2 m short of it, and only past
+    /// force 3 does it arrive at all. Tying them keeps every side meaning the
+    /// same thing, so the dial changes where the heap lands rather than whether
+    /// anything happens - which is what it already changed for the ram.
     ///
-    /// 270 rather than 90 because the shooter is then on the camera's side: the
-    /// tank comes up the near lane and is a see-through box in front of the
-    /// collapse, where from 90 it would be a solid wall's width behind it and
-    /// show nothing at all.</summary>
+    /// The turntable is the free one, and it stays free: it turns the prop under
+    /// a fixed sun and a fixed camera, which is how the other five sides are
+    /// looked at.
+    ///
+    /// 270 rather than 90 because the shooter is then on the camera's side, and
+    /// because the wall then presents its outer face: from 90 the camera would be
+    /// looking at the back leaf and the tank would break through towards it.
+    /// What that costs is the apron, which has to fall into the cell and is
+    /// therefore behind the wall from here - see <see cref="WallKit.Scatter"/>.
+    /// </summary>
     private float _bearing = 270.0f;
 
     private float _zoomAt = 2.4f;
@@ -143,6 +160,22 @@ public sealed partial class WallBench : Node2D
     private const float TurnRate = 40.0f;
     private const float TurnStep = 30.0f;
 
+    /// <summary>Which way the prop is turned, all in: the side it stands on plus
+    /// the turntable on top of that.
+    ///
+    /// <b>Everything that crosses between the board and the prop goes through
+    /// this and never through the turntable alone.</b> The layout is built
+    /// standing on its own +z side, so putting it on the board's side <i>b</i> is
+    /// a turn of <c>b + 90</c> - the angle that carries <c>d(270)</c>, which is
+    /// what local +z is, onto <c>d(b)</c>. Four places need it and they are all
+    /// the same sentence: the shot's direction coming into the prop's frame, the
+    /// ground triangles going the same way, the sun's run inside
+    /// <c>WallStack</c>, and the heap measured against the cell. Give any one of
+    /// them the bare turntable and it is right only while the bench sits on its
+    /// opening side, which is the one state a bench is never looked at in.
+    /// </summary>
+    private float Lay => _spin + Mathf.DegToRad(_bearing + 90.0f);
+
     /// <summary>Which of the six flat sides the shot comes from.
     ///
     /// <b>The sides, never sixths of a circle.</b> A flat-top hexagon's edges
@@ -156,10 +189,20 @@ public sealed partial class WallBench : Node2D
         get => SideOf(_bearing);
         set
         {
+            // Locked once something is in the air, for the turntable's reason and
+            // more so: this one moves the wall itself, not just the view of it.
+            if (_rig is { Struck: true })
+                return;
             _bearing = HexField.EdgeHeadings[
                 Mathf.Clamp(value, 0, HexField.EdgeHeadings.Length - 1)];
-            if (_wall is not null)
-                _wall.TankFacing = HexField.Reverse(Mathf.RoundToInt(_bearing));
+            if (_wall is null)
+                return;
+            _wall.TankFacing = HexField.Reverse(Mathf.RoundToInt(_bearing));
+            // The wall stands on this side, so changing it turns the prop - and
+            // the solver has to be handed the ground again, because the triangles
+            // it was given came through the old turn.
+            _wall.Spin = Lay;
+            Rig();
         }
     }
 
@@ -212,7 +255,7 @@ public sealed partial class WallBench : Node2D
             return Vector3.Zero;
         Vector2 flat = _field.Atlas.GroundDirection(
             HexField.Reverse(Mathf.RoundToInt(_bearing)));
-        return new Basis(Vector3.Up, -_spin) * _stage.World(flat, 0.0f).Normalized();
+        return new Basis(Vector3.Up, -Lay) * _stage.World(flat, 0.0f).Normalized();
     }
 
 
@@ -469,6 +512,9 @@ public sealed partial class WallBench : Node2D
             return;
         _plan = WallKit.Lay(_recipe);
         _scale = WallKit.Fit(_plan, _coverage);
+        // Third, and it has to be third: the rubble is allowed the cell that is
+        // left over once the wall has taken its side of it.
+        WallKit.Scatter(_plan, _recipe, _scale, _coverage);
 
         _wall?.QueueFree();
         float radius = _field.Atlas.HexRect.Size.X * 0.5f;
@@ -494,7 +540,7 @@ public sealed partial class WallBench : Node2D
         // After Raise, because the setter needs the multimesh to pose the shadow
         // into. A new seed keeps the angle: comparing two walls means looking at
         // them from the same side.
-        _wall.Spin = _spin;
+        _wall.Spin = Lay;
 
         GD.Print($"wall: seed {_recipe.Seed}, fit {_scale:F4} -> {_plan.Note()}");
         GD.Print($"wall: plot {_field.Plot?.Count ?? 0} cells, "
@@ -546,7 +592,8 @@ public sealed partial class WallBench : Node2D
                      () => _force, v => _force = (float)v, "x",
                      () => WallRig.Costs(_strike, _force));
         _panel.Radio("wall.strike.side",
-                     () => $"from {_bearing:F0} deg, side {Side + 1} of 6",
+                     () => $"from {_bearing:F0} deg - the wall stands on "
+                           + $"side {Side + 1} of 6",
                      System.Array.ConvertAll(HexField.EdgeHeadings, d => $"{d}"),
                      () => Side, i => Side = i);
         _panel.Press("wall.strike.go", "Action", Fell);
@@ -564,7 +611,7 @@ public sealed partial class WallBench : Node2D
         {
             if (_rig is null)
                 return "-";
-            (float reach, float top, int off, _) = _rig.Pile(_spin);
+            (float reach, float top, int off, _) = _rig.Pile(Lay);
             return $"reach {reach:F2}, top {top:F2}, {off} off the cell";
         });
         _panel.PressPair("wall.stack.seed", "next seed", () =>
@@ -610,7 +657,7 @@ public sealed partial class WallBench : Node2D
             return;
         float radius = _field.Atlas.HexRect.Size.X * 0.5f;
         Vector3 anchor = _wall.Anchor;
-        var back = new Basis(Vector3.Up, -_spin);
+        var back = new Basis(Vector3.Up, -Lay);
         var tris = new List<Vector3>();
         foreach (Vector3 v in _stage.GroundTriangles())
             tris.Add(back * ((v - anchor) / radius));
@@ -685,7 +732,7 @@ public sealed partial class WallBench : Node2D
             return;
         _spin = Mathf.Wrap(radians, 0.0f, Mathf.Tau);
         if (_wall is not null)
-            _wall.Spin = _spin;
+            _wall.Spin = Lay;
     }
 
     public override void _Process(double delta)
@@ -708,7 +755,7 @@ public sealed partial class WallBench : Node2D
             // Nothing moving is the only end a live collapse has - there is no
             // baked length to wait for, which is the price of not baking.
             _reported = true;
-            (float reach, float top, int off, _) = _rig.Pile(_spin);
+            (float reach, float top, int off, _) = _rig.Pile(Lay);
             GD.Print($"wall: {_strike} from {_bearing:F0} settled at "
                      + $"{_rig.Clock:F2}s - reach {reach:F3}, top {top:F3} "
                      + $"of a cell, {off} of {_rig.Count} off the cell");
@@ -749,7 +796,7 @@ public sealed partial class WallBench : Node2D
         string fall = "standing";
         if (_rig is not null)
         {
-            (float reach, float top, int off, int awake) = _rig.Pile(_spin);
+            (float reach, float top, int off, int awake) = _rig.Pile(Lay);
             fall = $"{_strike} x{_force:F2} from {_bearing:F0} deg  "
                    + (_rig.Struck ? $"{_rig.Clock:F2}s, {awake} moving  " : "ready  ")
                    + $"reach {reach:F2}, top {top:F2}, {off} off the cell";
@@ -766,7 +813,8 @@ public sealed partial class WallBench : Node2D
                + $"fit {_scale:F3}, reach {_plan.Reach:F3} of the cell, "
                + $"overlap {_plan.Overlap * radius:+0.00;-0.00;0.00}px\n"
                + $"{fall}\n"
-               + $"on level {_plinth}, turned {Mathf.RadToDeg(_spin):F0} deg"
+               + $"on side {_bearing:F0}, level {_plinth}, "
+               + $"turned {Mathf.RadToDeg(_spin):F0} deg"
                + (_turning ? ", turning" : "") + "\n"
                + "SPACE fires, S shot, B bearing, N next seed, R resets\n"
                + "TAB opens the panel, left drag turns it, Q/E step, T turntable\n"
