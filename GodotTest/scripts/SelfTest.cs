@@ -5153,12 +5153,12 @@ public static class SelfTest
             var heights = new HashSet<float>();
             for (int n = 1; n <= 100; n++)
             {
-                pairs.Add((Main.ScatterAt(n), Main.RiseAt(n)));
-                heights.Add(Main.RiseAt(n));
+                pairs.Add((TankTick.ScatterAt(n), TankTick.RiseAt(n)));
+                heights.Add(TankTick.RiseAt(n));
             }
             Check("consecutive rounds differ in height as well as in offset",
                 heights.Count > 90 && pairs.Count == 100
-                && Math.Abs(Main.RiseAt(1)) > 0.0f,
+                && Math.Abs(TankTick.RiseAt(1)) > 0.0f,
                 $"{heights.Count} distinct heights and {pairs.Count} distinct"
                 + " pairs in 100 rounds - a shared modulus gives fewer of both");
 
@@ -6185,13 +6185,13 @@ public static class SelfTest
                     Vector2 slope = gun.HitSlope(face, hull);
                     for (int n = 1; n <= 5; n++)
                     {
-                        float rise = Main.RiseAt(n);
+                        float rise = TankTick.RiseAt(n);
                         float bare = Gunnery.ScatterOntoBore(
                             eye, aim, centroid, tangent, slope, rise,
-                            Main.ScatterLimit, Main.ScatterAt(n));
+                            TankTick.ScatterLimit, TankTick.ScatterAt(n));
                         // What the trigger actually places, dispersion and all,
                         // rather than the three steps reassembled here.
-                        float aimedAt = Main.AimedScatter(
+                        float aimedAt = TankTick.AimedScatter(
                             eye, aim, centroid, tangent, slope, rise, n);
                         float off = Gunnery.BoreMiss(
                             eye, aim, centroid + tangent * aimedAt + slope * rise);
@@ -6202,13 +6202,13 @@ public static class SelfTest
                         // claim; a solve that is merely different is not a fix.
                         float hashed = Gunnery.BoreMiss(
                             eye, aim,
-                            centroid + tangent * Main.ScatterAt(n) + slope * rise);
+                            centroid + tangent * TankTick.ScatterAt(n) + slope * rise);
                         tried++;
                         solvedTotal += off;
                         hashedTotal += hashed;
                         if (aimOff > hashed + 0.01f)
                             worse++;
-                        if (Math.Abs(bare) >= Main.ScatterLimit - 1e-4f)
+                        if (Math.Abs(bare) >= TankTick.ScatterLimit - 1e-4f)
                             clamped++;
                         else if (aimOff > worst)
                         {

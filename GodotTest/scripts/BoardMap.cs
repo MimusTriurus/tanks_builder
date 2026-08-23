@@ -481,13 +481,80 @@ public sealed partial class BoardMap
     public static BoardMap Abbey => _abbey ??= FromGround(
         "abbey", AbbeyGround, AbbeyRamps, AbbeyHomes, TerrainSet.Mixed, true);
 
+    /// <summary>
+    /// The strip <see cref="TankBench"/> stands its tank on: five columns by
+    /// three, with a rise in one corner and a pool in the other.
+    ///
+    /// <b>Small because the subject is one tank, and not smaller because a tank
+    /// that cannot be driven cannot be judged.</b> Half of what a vehicle does
+    /// here is keyed on ground gone past rather than on the clock - the belts,
+    /// the ruts, the jolt, the pitch - so a single hex would have shown the
+    /// turret, the gun and the damage and nothing that moves. Five columns is
+    /// the shortest run in which a tank reaches its own cruise: the medium wants
+    /// 69px to get there against 107 to the row, so three cells of straight is
+    /// the least that is not all ramp-up.
+    ///
+    /// <b>The rise and the pool are here because they are the two things the
+    /// ground does to a tank that flat soil does not.</b> A grade caps the speed
+    /// at two thirds and tilts the hull; water caps it at 45%, damps the ride
+    /// and cuts the sprite at the waterline. Both are one cell's drive from the
+    /// middle, so neither needs looking for.
+    ///
+    /// <b>The beach sits in the corner because a ramp wants exactly one
+    /// neighbour above it.</b> On a board this small nearly every cell touches
+    /// four or five others at the level above, and a ramp with more than one
+    /// high edge is refused - which edge is its high one is not decided by the
+    /// map. (0,1) has two neighbours off the board and two more in the water, so
+    /// the pool's shore is the one place a beach fits at all.
+    /// </summary>
+    private static readonly string[] TestGround =
+    {
+        // 01234
+        "ww.11", // r0   the pool top left, the rise top right
+        "vw...", // r1   the beach, and the middle to park on
+        ".....", // r2
+    };
+
+    /// <summary>The two ways off the level: up to the rise at (3,1), down to the
+    /// water at (0,1).
+    ///
+    /// The hill's climbs along 90 - up the screen, away from the camera - which
+    /// is the axis a slope reads best on. The beach cannot: its high end has to
+    /// be the end that joins the rest of the board, and at (0,1) that is (0,2)
+    /// rather than the corner (0,0), whose only other neighbour is water. So it
+    /// rises along 270, toward the camera, and the audit names it as compressed.
+    /// The alternative was the ramp and the corner and the pool making an island
+    /// nothing could drive to - which is what the first draft did, and the
+    /// reachability check said so: five cells stranded from every home.</summary>
+    private static readonly string[] TestRamps =
+    {
+        // 01234
+        ".....", // r0
+        "r..r.", // r1
+        ".....", // r2
+    };
+
+    /// <summary>Where the tank stands. The middle cell first, because the bench
+    /// shows one tank and it should open in the middle of its board with the
+    /// rise on one hand and the pool on the other; the other two are there so
+    /// that <c>--map test</c> on the harness, which builds one vehicle per
+    /// atlas, does not park three of them on one hex.</summary>
+    private static readonly Vector2I[] TestHomes =
+        { new(2, 1), new(2, 2), new(3, 2) };
+
+    private static BoardMap? _test;
+
+    public static BoardMap Test => _test ??= FromGround(
+        "test", TestGround, TestRamps, TestHomes, TerrainSet.Mixed, true);
+
     public static BoardMap ByName(string name) =>
         name.Trim().ToLowerInvariant() switch
         {
             "abbey" => Abbey,
+            "test" => Test,
             _ => Bench,
         };
 
     public static IReadOnlyList<string> Names { get; } =
-        new[] { "bench", "abbey" };
+        new[] { "bench", "abbey", "test" };
 }

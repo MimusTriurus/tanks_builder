@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Globalization;
 using System.Linq;
 using System.Threading;
@@ -243,7 +243,7 @@ public sealed partial class Main
 	{
 		if (index < 0 || index >= _vehicles.Count)
 			return $"no tank {index}; there are {_vehicles.Count}";
-		Kill(_vehicles[index]);
+		Tick.Kill(_vehicles[index]);
 		return $"{_vehicles[index].Tag} destroyed";
 	}
 
