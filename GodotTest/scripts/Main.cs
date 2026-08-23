@@ -5268,21 +5268,23 @@ public sealed partial class Main : Node2D
 					// tanks' own space: the cell is what the water reacts to, the
 					// point is where the foam sits. Not the origin-less one - the
 					// surface is built in this space too, so the two agree.
-					_sea.Note(i, _field.CellAt(_vehicles[i].GroundPoint - _origin),
-							  _vehicles[i].Speed > Swell.StirAbove,
-							  _vehicles[i].GroundPoint, _vehicles[i].Standing);
+					//
+					// And the lift of the water beside the point, because the
+					// point is a drawn row and the mark is painted on the pond
+					// rather than on the bed - see Stage3D.Ground, which the stage
+					// reads the pair back through. The cell resolved once for all
+					// three answers, so none of them can be about another one.
+					Vector2I wet = _field.CellAt(_vehicles[i].GroundPoint - _origin);
+					float sea = _field.WaterTop(wet);
+					_sea.Note(i, wet, _vehicles[i].Speed > Swell.StirAbove,
+							  _vehicles[i].GroundPoint, sea);
 					// And the trail, off the same point and the same threshold.
 					// In water rather than in a flooded cell: what a wake needs
 					// is a surface to be left on, which is the same question the
 					// waterline already answers.
-					// And the lift beside the point, because the point is a drawn
-					// row: see Stage3D.Ground, which the stage reads it back
-					// through.
-					_wake?.Note(i, _vehicles[i].GroundPoint,
-								_vehicles[i].Standing,
+					_wake?.Note(i, _vehicles[i].GroundPoint, sea,
 								_vehicles[i].Speed > Wake.DriveAbove,
-								_field.IsWater(_field.CellAt(
-									_vehicles[i].GroundPoint - _origin)));
+								_field.IsWater(wet));
 				}
 				_sea.Tick(delta);
 				_wake?.Tick(delta);
@@ -5310,11 +5312,16 @@ public sealed partial class Main : Node2D
 					// already squashed - the mapping the swell's mark and the
 					// wake's stamps go through on their way to the shader, done
 					// here instead because the field is stepped in this space.
-					// Contact and not World, because GroundPoint is a drawn row: the
+					// Ground and not World, because GroundPoint is a drawn row: the
 				// stage owns the one expression that puts the lift back, and a
 				// second copy of it here is how the push comes to land a level
-				// away from the tank - see Stage3D.Ground.
-				Vector3 at = _stage.Contact(vehicle);
+				// away from the tank. The water's lift rather than Contact's
+				// ground, so the crest comes up on the tank's own row along with
+				// the trail and the blot - all three are marks on the pond, and
+				// two of them agreeing is not enough. See Stage3D.Ground.
+				Vector3 at = _stage.Ground(
+					vehicle.GroundPoint,
+					_field.WaterTop(_field.CellAt(vehicle.GroundPoint - _origin)));
 					Vector3 way = _stage.World(
 						vehicle.Atlas.GroundDirection(
 							vehicle.Sprite.HullFacing), 0.0f);

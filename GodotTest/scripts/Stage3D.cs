@@ -1249,6 +1249,19 @@ void fragment() {{
     /// diagonally: a vertical shift of a diagonal trail reads as the trail having
     /// moved sideways off the line of cell centres, while on the two vertical
     /// headings it slides along the trail and is invisible.
+    ///
+    /// <b>And the lift to hand it is the plane's, not the ground's.</b> A mark on
+    /// the water is drawn on a plane the water's own depth above the ground, so
+    /// carrying the ground's lift puts it that depth up the screen - which is not
+    /// a rounding: on the water board the depth is 14.7px and half the track
+    /// gauge projects to 17.1px, so the blot lands on the <b>far</b> track's own
+    /// ground line and reads as clinging to it. Handing it the surface's lift
+    /// brings it back onto the tank's own row, where the board draws every other
+    /// ground mark - the rut, the ring in a ford, the pond's splash - so a trail
+    /// crossing a beach joins its ruts with no step. What is given up is the plan
+    /// position: the mark sits one water depth further from the camera than the
+    /// tank does. <see cref="Contact"/> is the other case and keeps the ground's
+    /// lift, because a tank stands on the ground rather than on the water.
     /// </summary>
     public Vector3 Ground(Vector2 spot, float lift) =>
         Ground(spot, lift, Squash, RiseFactor);
@@ -4287,8 +4300,10 @@ void fragment() {{
     private static Vector3 Sit(Vector2 at, float lift, Vector2 shift,
                                float squash, float rise)
     {
-        Vector2 flat = at + shift + new Vector2(0.0f, lift);
-        return World(flat, lift, squash, rise) + Clear(squash, rise);
+        // Ground and not a fourth spelling of it: a rut is a mark on the ground
+        // drawn on the tank's own row, which is the same sentence the water marks
+        // and the tank's own quad are, and the arithmetic is bit for bit the same.
+        return Ground(at + shift, lift, squash, rise) + Clear(squash, rise);
     }
 
     /// <summary>Horizontal and across a step of the path, in the ground plane. The

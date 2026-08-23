@@ -647,14 +647,16 @@ public sealed partial class TankBench : Node2D
             _stage.ShowBoard = _board;
             if (_sea is not null)
             {
-                _sea.Note(0, _field.CellAt(Tank.GroundPoint - _origin),
-                          Tank.Speed > Swell.StirAbove, Tank.GroundPoint,
-                          Tank.Standing);
-                // The lift beside the point in both, because the point is a drawn
-                // row - see Stage3D.Ground, which reads it back through.
-                _wake?.Note(0, Tank.GroundPoint, Tank.Standing,
-                            Tank.Speed > Wake.DriveAbove,
-                            _field.IsWater(_field.CellAt(Tank.GroundPoint - _origin)));
+                // The lift of the water beside the point in all three, because
+                // the point is a drawn row and these are marks on the pond rather
+                // than on its bed - see Stage3D.Ground, which reads the pair back
+                // through.
+                Vector2I wet = _field.CellAt(Tank.GroundPoint - _origin);
+                float sea = _field.WaterTop(wet);
+                _sea.Note(0, wet, Tank.Speed > Swell.StirAbove, Tank.GroundPoint,
+                          sea);
+                _wake?.Note(0, Tank.GroundPoint, sea,
+                            Tank.Speed > Wake.DriveAbove, _field.IsWater(wet));
                 _sea.Tick(delta);
                 _wake?.Tick(delta);
                 // And the ripple field, off the same point and the same share of
@@ -671,7 +673,7 @@ public sealed partial class TankBench : Node2D
                         (float)(Tank.Speed
                                 / Mathf.Max(Tank.Profile.WaterSpeed, 1e-4)),
                         0.0f, 1.0f);
-                    Vector3 at = _stage.Contact(Tank);
+                    Vector3 at = _stage.Ground(Tank.GroundPoint, sea);
                     Vector3 way = _stage.World(
                         Tank.Atlas.GroundDirection(Tank.Sprite.HullFacing), 0.0f);
                     _wash.Note(new Vector2(at.X, at.Z),

@@ -91,16 +91,21 @@ public sealed class Wake
     /// first.</summary>
     public IReadOnlyList<Vector2> At => _at;
 
-    /// <summary>How high off the datum the ground each stamp was left on stands,
+    /// <summary>How high off the datum the water each stamp was left on stands,
     /// in screen px, in the same order.
     ///
     /// <b>Carried because the point is a drawn row.</b> A drawn row has the lift
     /// taken out of it already, so a reader that hands it to
     /// <c>Stage3D.World</c> with a lift of zero puts the stamp a whole level too
-    /// deep, and the surface it is compared against is horizontal - so the trail
-    /// lands a level below the tank that laid it. Carried rather than applied for
-    /// the reason <see cref="Swell"/> keeps the tanks' own coordinates: which
-    /// camera is looking at them is not this class's business.</summary>
+    /// deep, and the plane it is compared against is horizontal - so the trail
+    /// lands a level below the tank that laid it.
+    ///
+    /// <b>The water's own height and not the ground's</b>, which is a second
+    /// thing the same number could have been and is off by the depth of the ford:
+    /// see <c>Stage3D.Ground</c>, where that reads as the trail clinging to the
+    /// far track. Carried rather than applied for the reason <see cref="Swell"/>
+    /// keeps the tanks' own coordinates: which camera is looking at them is not
+    /// this class's business.</summary>
     public IReadOnlyList<float> Lift => _lift;
 
     /// <summary>How far through its life each stamp is, 0 fresh through 1 gone,

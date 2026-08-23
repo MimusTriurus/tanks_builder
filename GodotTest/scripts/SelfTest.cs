@@ -10569,19 +10569,19 @@ public static class SelfTest
                 && (trail.Count == 0 || Mathf.IsEqualApprox(trail.Lift[0], pondBed)),
                 $"{trail.Lift.Count} lifts against {trail.At.Count} stamps");
 
-            // <b>And the whole of what that lift buys.</b> A drawn row has the
-            // lift taken out of it already, so handing it to World with a lift of
-            // zero puts the stamp a level too deep. Asserted rather than looked
-            // at, because the screen row of the stamp's own centre comes out the
-            // same either way - World draws a point at flat minus lift, and the
-            // two spellings differ by exactly that lift in both terms. What moves
-            // is <b>where the surface meets it</b>: the pond is a horizontal
-            // plane, so the fragment whose world z matches the stamp is drawn a
-            // level away from the one that should have.
+            // <b>And the whole of what that lift buys.</b> Three spellings, three
+            // rows, and only one of them is the tank's own. Asserted rather than
+            // looked at, because the screen row of the stamp's own centre comes
+            // out the same however it is spelled - World draws a point at flat
+            // minus lift, and every spelling differs by exactly its lift in both
+            // terms. What moves is <b>where the surface meets it</b>: the pond is
+            // a horizontal plane, so the fragment whose world z matches the stamp
+            // is drawn a lift away from the one that should have.
             //
-            // Which is why nothing said so. The trail was not blank, not clipped
-            // and not the wrong shape; it was one HexField.Lift below the tank
-            // that laid it, and every number about it stayed sane.
+            // Which is why nothing said so, twice over. The trail was not blank,
+            // not clipped and not the wrong shape - it was a level below the tank
+            // that laid it, then a ford's depth above it, and every number about
+            // it stayed sane both times.
             float mark = 400.0f;
             float flatten = field.Squash;
             float lifted = field.RiseFactor;
@@ -10589,24 +10589,31 @@ public static class SelfTest
             // The row the pond fragment that matches a stamp is drawn on: its own
             // world z through the camera, less the height the surface stands at.
             //
-            // Through the stage's own Ground for the right spelling and its own
-            // World for the wrong one, rather than either written out here: a
-            // check that spells the conversion itself asserts the arithmetic and
-            // not the wiring, and the wiring is what was wrong.
+            // Through the stage's own Ground and its own World rather than either
+            // written out here: a check that spells the conversion itself asserts
+            // the arithmetic and not the wiring, and the wiring is what was wrong.
             float Row(Vector3 at) => at.Z * flatten - surface;
-            float right = Row(Stage3D.Ground(new Vector2(0.0f, mark), pondBed,
-                                             flatten, lifted));
-            float wrong = Row(Stage3D.World(new Vector2(0.0f, mark), 0.0f,
-                                            flatten, lifted));
-            Check("and a wake laid in a ford is drawn its own depth of water above the tank",
-                Mathf.IsEqualApprox(right, mark - field.WaterRise),
-                $"row {right:F2} against the tank's {mark:F2} less {field.WaterRise:F2} "
-                + "of water");
-            Check("and taking that lift for zero would put it a whole level lower",
-                Mathf.IsEqualApprox(wrong - right, -pondBed)
+            var spot = new Vector2(0.0f, mark);
+            float onWater = Row(Stage3D.Ground(spot, surface, flatten, lifted));
+            float onBed = Row(Stage3D.Ground(spot, pondBed, flatten, lifted));
+            float onNothing = Row(Stage3D.World(spot, 0.0f, flatten, lifted));
+            Check("and a wake laid in a ford is drawn on the tank's own row",
+                Mathf.IsEqualApprox(onWater, mark),
+                $"row {onWater:F2} against the tank's {mark:F2}");
+            // The second mistake, and the reason it is not a rounding: the depth
+            // of a ford and half a track gauge project to about the same number of
+            // rows, so a blot that misses by the one lands on the far track's own
+            // ground line and reads as clinging to it.
+            Check("and carrying the bed's lift instead would raise it by the water's depth",
+                Mathf.IsEqualApprox(onWater - onBed, field.WaterRise)
+                && field.WaterRise > 0.0f,
+                $"{onWater - onBed:F2} px apart against {field.WaterRise:F2} of "
+                + "water, so this is not the mistake it is named for");
+            Check("and taking a lift of zero would drop it a whole level below that",
+                Mathf.IsEqualApprox(onNothing - onBed, -pondBed)
                 && !Mathf.IsZeroApprox(pondBed),
-                $"{wrong - right:F2} px apart against a lift of {-pondBed:F2} - "
-                + "the two spellings differ by something other than the ground's "
+                $"{onNothing - onBed:F2} px apart against a lift of {-pondBed:F2} "
+                + "- the two spellings differ by something other than the ground's "
                 + "own height, so this is not the mistake it is named for");
 
             // And it settles. A state that stuck would be a pond that had been
