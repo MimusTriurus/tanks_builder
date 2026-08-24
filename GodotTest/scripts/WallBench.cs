@@ -771,7 +771,15 @@ public sealed partial class WallBench : SceneRoot
     private void Reset()
     {
         _turning = false;
-        Turn(0.0f);
+        // Written straight rather than through Turn, which is locked once
+        // anything is in the air: that lock is there so the world cannot be
+        // turned under moving bodies, and after a strike it left R with a wall
+        // still on its old angle - the one state a reset must not keep. Build
+        // stands a new prop at this spin, so there is nothing to turn.
+        _spin = 0.0f;
+        // A new wall gets a new settle line: left set, the collapse after a
+        // reset prints nothing and reads as a wall that never came apart.
+        _reported = false;
         Build();
         _camera.Position = ViewHome;
         _camera.Zoom = new Vector2(HomeZoom, HomeZoom);

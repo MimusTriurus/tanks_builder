@@ -148,6 +148,10 @@ public sealed partial class TankBench : SceneRoot
 
     private WallProp? Wall => _walls.Count > 0 ? _walls[0] : null;
 
+    /// <summary>The class the bench opened on, so R can go back to it. See
+    /// <see cref="Reset"/>.</summary>
+    private int _opened;
+
     /// <summary>Which flat side the wall stands on, as an index into
     /// <see cref="HexField.EdgeHeadings"/>. One dial for both halves of it -
     /// <see cref="WallBench"/>'s argument, and here it decides the run-up too.
@@ -611,6 +615,11 @@ public sealed partial class TankBench : SceneRoot
                 GD.PushWarning($"--tank {_startTag} is not one of "
                                + string.Join(", ", _garage.Select(v => v.Tag)));
         }
+        // Held, because R means "the bench as it opened" and the class is part
+        // of that. Read back rather than worked out a second time: the medium
+        // fallback and the flag are one decision, and a second copy of it would
+        // send a reset to a tank the flags never named.
+        _opened = _pick;
     }
 
     /// <summary>Hand the board to the stage.
@@ -687,6 +696,15 @@ public sealed partial class TankBench : SceneRoot
         if (Wall?.Rig is { Struck: true })
             return;
         change();
+        Relaid();
+    }
+
+    /// <summary>Stand every wall up again, whatever state the last one was left
+    /// in. The half of <see cref="Relay"/> that has no guard on it, because
+    /// <see cref="Reset"/> is the one caller that must work on rubble - a struck
+    /// wall has no undo, so putting it back is building another one.</summary>
+    private void Relaid()
+    {
         _ramSpeed = -1.0;
         _wallSaid = false;
         foreach (WallProp prop in _walls)
@@ -1225,22 +1243,120 @@ public sealed partial class TankBench : SceneRoot
                      Ordnance.BiteFor(_tick.Calibre));
     }
 
+    /// <summary>
+    /// The bench as it opened, which is more than putting the tanks back.
+    ///
+    /// <b>Everything that holds a pose with nothing driving it has to be named
+    /// here</b> - <see cref="Main.ResetAll"/>'s list, arriving at the other end
+    /// of the board, and this is that list rather than a shorter one on purpose:
+    /// a spring left leaning, a clock left mid-cycle, a rut left in the mud or a
+    /// wall left in rubble is state the next measurement is taken against, and
+    /// R's whole job is being the one key that makes two measurements
+    /// comparable. A reset that leaves any of it behind is lying about what it
+    /// did, and every one of them is invisible in the same way: the picture looks
+    /// like a bench that opened, and the numbers come out of the one before.
+    ///
+    /// <b>The wall is re-laid rather than tidied</b>, because a struck wall has
+    /// no undo - the pieces are bodies the solver has moved. <see cref="WallProp.Build"/>
+    /// frees the old stack and rig and stands a new one, which is exactly what
+    /// <c>WallBench.Fire</c> does before a second shot and for the same reason:
+    /// a shot into rubble is a different experiment.
+    ///
+    /// <b>The dials that are levels go back to their tuned values, and the dials
+    /// that are choices do not.</b> The harness's split: a level of one is the
+    /// value worth being able to get back to in one key, whereas which calibre is
+    /// loaded, which side a hit comes from and which side the wall stands on are
+    /// what to do next, and a reset that answered those would be undoing the
+    /// setup rather than the run.
+    /// </summary>
     private void Reset()
     {
+        _spinning = false;
+        _lineUp = false;
+        // Before the tanks are repaired, not after: a round still in the air
+        // would land on armour that had just been made good, which is the one way
+        // this reset could leave a mark behind it.
+        Tick.ClearRounds();
+        // The ruts, which are the longest-lived thing on the board: they outlast
+        // the drive that made them by design, so a board that was not swept reads
+        // as one that had been driven on before anybody touched it.
+        _marks?.Clear();
         foreach (Vehicle vehicle in _garage)
         {
             Tick.CancelOrder(vehicle);
-            vehicle.Sprite.Repair();
+            TankSprite s = vehicle.Sprite;
+            s.HullFacing = 270.0;
+            s.TurretFacing = 270.0;
+            vehicle.Pitch.Reset();
+            s.Pitch = 0.0;
+            vehicle.Rumble.Reset();
+            s.Shake = 0.0;
+            s.Roll = 0.0;
+            vehicle.Tremble.Reset();
+            s.TremblePitch = 0.0;
+            s.TrembleYaw = 0.0;
+            vehicle.Exhaust.Reset();
+            s.ExhaustPhase = -1;
+            vehicle.TrackLeft.Reset();
+            vehicle.TrackRight.Reset();
+            s.TrackPhaseLeft = -1;
+            s.TrackPhaseRight = -1;
+            s.TrackBlurLeft = 0.0;
+            s.TrackBlurRight = 0.0;
+            // Before the fire is put out, because a wreck is what keeps
+            // relighting it - see TankTick.UpdateWreck.
             vehicle.Wreck.Reset();
+            s.Wrecked = false;
+            s.Char = 0.0;
+            s.FireDensity = 1.0f;
+            s.SmokeDensity = 1.0f;
             vehicle.Burning = false;
+            vehicle.Burn.Reset();
+            s.Burning = false;
+            s.FirePhase = -1;
+            s.BurnPhase = -1;
+            // A ceasefire is part of it for the repair's reason: a tank left
+            // engaging would start putting holes back into armour just fixed.
+            vehicle.Target = null;
+            vehicle.Solution = Gunnery.None;
+            vehicle.ReloadLeft = 0.0;
             vehicle.Hit.Reset();
+            vehicle.HitCount = 0;
+            s.HitPhase = -1;
+            s.Repair();
+            vehicle.Scan.Reset();
+            vehicle.Recoil.Reset();
+            vehicle.Barrel.Reset();
+            s.RecoilPhase = 0;
+            vehicle.Tremble.Level = 1.0;
+            vehicle.Recoil.Level = 1.0;
+            vehicle.ShotFrame = -1;
+            s.FlashFrame = -1;
+            s.ShotPhase = -1;
+            s.RecoilPitch = 0.0;
+            s.RecoilRoll = 0.0;
             vehicle.Cell = vehicle.HomeCell;
-            vehicle.Sprite.HullFacing = 270.0;
-            vehicle.Sprite.TurretFacing = 270.0;
             Tick.Park(vehicle);
         }
+        // The class the bench opened on, which is a choice the command line
+        // already made - so unlike the other choices this one has a stated
+        // answer to go back to. Pick() moves the incoming tank onto the outgoing
+        // one's cell, so leaving it alone would also leave every tank in the
+        // garage parked somewhere the flags never asked for.
+        _pick = _opened;
+        OnlyOne();
+        _recoilLevel = 1.0;
+        _sizeLevel = 1.0;
+        _traverse = 1.0;
+        // One line rather than one per tank, because the traverse knob is not
+        // held on a machine - see Gunnery.TraverseLevel.
+        Gunnery.TraverseLevel = 1.0;
+        ApplySize();
+        Relaid();
         _shake.Reset();
+        _camera.Offset = Vector2.Zero;
         _sea?.Settle();
+        _wake?.Clear();
         _wash?.Settle();
         _field.Highlight = Array.Empty<Vector2I>();
         _field.QueueRedraw();
