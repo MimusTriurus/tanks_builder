@@ -35,9 +35,11 @@ public static class SelfTest
                           IReadOnlyDictionary<string, SoundSet>? sounds = null,
                           ControlPanel? livePanel = null,
                           Grove? grove = null,
-                          Stage3D? stage = null)
+                          Stage3D? stage = null,
+                          string? only = null)
     {
         int failed = 0;
+        Filter(only);
 
         // Every check below either wants a flat board or lays its own relief on
         // one, so the run starts from the flat state whatever the session was
@@ -52,6 +54,15 @@ public static class SelfTest
 
         void Check(string name, bool ok, string detail = "")
         {
+            // A check outside the asked-for themes is not run silently and not
+            // reported: it is counted, so the tally at the end can say how much
+            // of the run this was. See Filter.
+            if (!_on)
+            {
+                _skipped++;
+                return;
+            }
+            _reported++;
             if (ok)
                 GD.Print($"  ok    {name}");
             else
@@ -61,7 +72,7 @@ public static class SelfTest
             }
         }
 
-        GD.Print("grid: click lands on the cell that was drawn");
+        Theme("grid: click lands on the cell that was drawn");
         int misses = 0;
         var firstMiss = "";
         for (int q = 0; q < field.Columns; q++)
@@ -103,7 +114,7 @@ public static class SelfTest
         Check("clicks off-centre stay in the same cell", misses == 0,
             $"{misses} wrong, first {firstMiss}");
 
-        GD.Print("grid: steps and headings agree");
+        Theme("grid: steps and headings agree");
         misses = 0;
         for (int q = 0; q < field.Columns; q++)
         for (int r = 0; r < field.Rows; r++)
@@ -115,7 +126,7 @@ public static class SelfTest
         }
         Check("HeadingTo inverts Step everywhere", misses == 0, $"{misses} wrong");
 
-        GD.Print("paths");
+        Theme("paths");
         int bad = 0;
         var badDetail = "";
         for (int q = 0; q < field.Columns; q++)
@@ -167,7 +178,7 @@ public static class SelfTest
         Burning(field, grove, Check);
         Climbing(field, tank, Check);
 
-        GD.Print("turret modes");
+        Theme("turret modes");
         // Which one a tank comes up in, off the named constant rather than off
         // whatever the field happens to be initialised to. It decides what every
         // screenshot of a turning tank shows, and the two modes look nothing
@@ -203,7 +214,7 @@ public static class SelfTest
             Math.Abs(WrapAngle(tank.TurretFacing - 0.0)) > 1.0,
             $"turret ended at {tank.TurretFacing:F3}");
 
-        GD.Print("body pitch");
+        Theme("body pitch");
         var pitch = new BodyPitch();
         const double dt = 1.0 / 60.0;
         double minAccel = 0.0, maxBrake = 0.0;
@@ -245,7 +256,7 @@ public static class SelfTest
         Check("amplitude stays under the jelly threshold", Math.Abs(minAccel) < 0.045,
             $"peak {Math.Abs(minAccel):F4}");
 
-        GD.Print("ground rumble");
+        Theme("ground rumble");
         // What a tank drawn at 1:1 shows. The class holds the amplitude now and
         // the draw does the rounding - see TankSprite.SnapHeave - so every claim
         // below about pixels has to be made about the drawn figure, not about the
@@ -738,7 +749,7 @@ public static class SelfTest
         Check("and deciding it before the class scale does not",
             Math.Abs(wasDrawn - Math.Round(wasDrawn)) > 1e-4, $"drew {wasDrawn:F3}px");
 
-        GD.Print("engine tremble");
+        Theme("engine tremble");
         var tremble = new EngineTremble();
         // What one unit of amplitude is worth at the stern - the figure the
         // amplitude checks are calibrated against, and the one the panel quotes
@@ -1000,7 +1011,7 @@ public static class SelfTest
             loud.PitchRateAt(240.0) == tremble.PitchRateAt(240.0),
             $"{loud.PitchRateAt(240.0):F2} Hz against {tremble.PitchRateAt(240.0):F2} Hz");
 
-        GD.Print("turret scan");
+        Theme("turret scan");
         var scan = new TurretScan();
         scan.Rest(0.0);
         double scanStep = 360.0 / tank.Atlas!.Count;
@@ -1134,7 +1145,7 @@ public static class SelfTest
             scan.Base == 60.0 && lanePeak <= scan.MaxSteps * scanStep + 1e-6,
             $"base {scan.Base:F1} deg, reached {lanePeak:F1} deg from it");
 
-        GD.Print("the shot");
+        Theme("the shot");
         int shotFrames = FlashSheet.Duration;
         Check("the flash lasts about half a second",
             shotFrames * dt is > 0.3 and < 0.8, $"{shotFrames * dt:F2}s over {shotFrames} frames");
@@ -1240,7 +1251,7 @@ public static class SelfTest
             && Math.Abs(flashAway - Math.Sin(Mathf.DegToRad(atlas.Elevation))) < 1e-6,
             $"x{flashAcross:F2} across, x{flashAway:F2} away");
 
-        GD.Print("the rendered flash");
+        Theme("the rendered flash");
         // The rendered flash exists to be compared against the painted sheet,
         // so the first thing to hold is that the comparison is fair: two
         // sources on the same tank at the same moment differing only in
@@ -1335,7 +1346,7 @@ public static class SelfTest
                 + $" {atlas.EffectPhases * atlas.Count}, highest {tiles.Max()}");
         }
 
-        GD.Print("trimmed frames");
+        Theme("trimmed frames");
         {
             AtlasSet packedSet = tank.Atlas!;
             // The fallback first, because it is what keeps every set that was
@@ -1396,7 +1407,7 @@ public static class SelfTest
 
         const double tick = 1.0 / 60.0;
 
-        GD.Print("the track belts");
+        Theme("the track belts");
         // A loop like the exhaust's, driven by the one thing none of the others
         // are: the ground. Everything here is about that difference.
         var belt = new TrackLoop { Phases = 8, Pitch = 7.0 };
@@ -1596,7 +1607,7 @@ public static class SelfTest
             + "keep its tree slot or an older atlas would reshuffle");
 
         // --- the view jolting when a gun goes off -------------------------
-        GD.Print("camera shake");
+        Theme("camera shake");
         Check("the shake is off by default, and that is a named fact",
             !CameraShake.OnByDefault,
             "it moves the whole frame, and nearly every measurement in this "
@@ -1763,7 +1774,7 @@ public static class SelfTest
         // The layer exists for the case a per-cell mark cannot express, so that
         // is what most of this is about: a tank turning on the spot never leaves
         // its cell, and the marks it makes are the whole point.
-        GD.Print("track marks: the ruts the belts leave");
+        Theme("track marks: the ruts the belts leave");
         {
             // The arithmetic first, with no tank in it at all. A belt one arm
             // from the centre covers the drive plus what the turn sweeps it
@@ -1801,7 +1812,7 @@ public static class SelfTest
                 + "is terrain, and a shadow falls across one");
 
             if (vehicles is null || vehicles.Count == 0)
-                GD.Print("  ..    no vehicles to lay any");
+                Note("  ..    no vehicles to lay any");
             else
             {
                 Vehicle car = vehicles[Math.Clamp(active, 0, vehicles.Count - 1)];
@@ -2085,10 +2096,10 @@ public static class SelfTest
         // files live outside the repository, and a bench without them is a bench
         // running on the rendered tile, not a broken one.
         if (field.Terrain is null || !field.Terrain.Any)
-            GD.Print("terrain: no art loaded, running on the rendered tile");
+            Theme("terrain: no art loaded, running on the rendered tile");
         else
         {
-            GD.Print("terrain: the kinds of ground on the board");
+            Theme("terrain: the kinds of ground on the board");
             TerrainSet set = field.Terrain;
             Rect2I hex = field.Atlas!.HexRect;
             string wasPaint = field.Paint;
@@ -2257,10 +2268,10 @@ public static class SelfTest
         // tree art lives outside the repository, and a bench without it is a
         // bench on open ground.
         if (grove is null || grove.Planted == 0)
-            GD.Print("the grove: nothing sown, running on open ground");
+            Theme("the grove: nothing sown, running on open ground");
         else
         {
-            GD.Print("the grove: what stands on the cells");
+            Theme("the grove: what stands on the cells");
 
             // First, and before anything here re-sows: the board as it stands
             // has to agree with the ground it says it is painted with. Trees
@@ -3740,7 +3751,7 @@ public static class SelfTest
         //
         // The one layer that is neither the tank nor an effect on it, and every
         // check here is about that difference.
-        GD.Print("the contact shadow");
+        Theme("the contact shadow");
         var shade = EffectLayer.Shadow(AtlasSet.ShadowName);
         Check("the shadow is ordered under every tank, not with its own",
             shade.ZIndex == TankSprite.ShadowZ && !shade.ZAsRelative
@@ -3950,7 +3961,7 @@ public static class SelfTest
             }
         }
 
-        GD.Print("the gun tube's recoil");
+        Theme("the gun tube's recoil");
         // What separates this clock from every other event is that it does not
         // end - it comes back to rest. The tube is part of the tank, so there is
         // no frame without a gun on it, and most of what follows is that one
@@ -4118,7 +4129,7 @@ public static class SelfTest
                 $"{atAnchor} of {gunned.Count} headings found no solid tube");
         }
 
-        GD.Print("the engine exhaust");
+        Theme("the engine exhaust");
         // What separates this from every other effect clock is that it has no
         // end, so the assertions are about it going round rather than about it
         // running out.
@@ -4335,7 +4346,7 @@ public static class SelfTest
                 + $" {atlas.ExhaustPhases * atlas.Count}, highest {plumeTiles.Max()}");
         }
 
-        GD.Print("the wreck");
+        Theme("the wreck");
         {
             // Death is an event and a wreck is a state, and the whole of this
             // prototype is that everything is a function of one age. So what is
@@ -4518,7 +4529,7 @@ public static class SelfTest
                     ? "it samples TEXTURE" : "it does not touch COLOR.rgb");
         }
 
-        GD.Print("the burning wreck");
+        Theme("the burning wreck");
         var fire = new BurnLoop { Phases = 12 };
         var fireSeen = new HashSet<int>();
         var smokeSeen = new HashSet<int>();
@@ -4657,7 +4668,7 @@ public static class SelfTest
                 + $" {atlas.BurnPhases * atlas.Count}, highest {burnTiles.Max()}");
         }
 
-        GD.Print("a shell arriving");
+        Theme("a shell arriving");
         // An event, like the shot, and unlike everything else that came after
         // it: the phases run out into -1 rather than wrapping.
         var hitSeen = new HashSet<int>();
@@ -4915,7 +4926,7 @@ public static class SelfTest
                 reach > 20.0, $"furthest {reach:F1}px");
         }
 
-        GD.Print("the mark it leaves");
+        Theme("the mark it leaves");
         // A state, not an event, and every check here is that distinction.
         Check("a scar layer knows its plate from its name",
             EffectLayer.FaceOf("scar_front") == "front"
@@ -5267,7 +5278,7 @@ public static class SelfTest
                 $"{atlas.ScarLevels} levels x {atlas.Count} headings");
         }
 
-        GD.Print("the settings file");
+        Theme("the settings file");
         {
             // The file decorates rows; it does not declare them. So both
             // directions have to hold, and neither failure says a word on
@@ -5382,7 +5393,7 @@ public static class SelfTest
                 + " a difference the triple no longer has");
         }
 
-        GD.Print("the side panel");
+        Theme("the side panel");
         // The panel is a view of the harness's state and never a second copy of
         // it, which is one claim with two halves - and the second half is a
         // feedback loop unless something stops it, because writing a widget's
@@ -5457,7 +5468,7 @@ public static class SelfTest
             + $" of {widgets.Count} would steal a key");
         stub.QueueFree();
 
-        GD.Print("recoil");
+        Theme("recoil");
         // Off by default, and this is the assertion that keeps it that way. The
         // spring below still has to be right - it is kept for the A/B - but a
         // bench that shears the hull *and* recoils the tube shows one true
@@ -5541,7 +5552,7 @@ public static class SelfTest
             Math.Abs(new Recoil().PeakFor(1.0) - Math.Abs(liftPeak)) < 1e-9,
             $"predicted {new Recoil().PeakFor(1.0):F5}, measured {Math.Abs(liftPeak):F5}");
 
-        GD.Print("turret stabiliser");
+        Theme("turret stabiliser");
         tank.HullFacing = 270.0;
         tank.Pitch = 0.03;
         tank.Roll = 0.02;
@@ -5708,7 +5719,7 @@ public static class SelfTest
 
         if (vehicles is { Count: > 0 })
         {
-            GD.Print("three tanks on one field");
+            Theme("three tanks on one field");
 
             // One per class, which is the whole reason there are three: the size
             // difference is a comparison, and two mediums parked side by side
@@ -5885,7 +5896,7 @@ public static class SelfTest
 
             if (ring is not null)
             {
-                GD.Print("the ring on the selected tank");
+                Theme("the ring on the selected tank");
                 ring.Target = vehicles[active];
                 ring._Process(0.0);
                 Check("the ring marks the tank being driven",
@@ -5937,7 +5948,7 @@ public static class SelfTest
             }
         }
 
-        GD.Print("movement profiles");
+        Theme("movement profiles");
         MovementProfile light = MovementProfile.Light;
         MovementProfile medium = MovementProfile.Medium;
         MovementProfile heavy = MovementProfile.Heavy;
@@ -6086,7 +6097,7 @@ public static class SelfTest
                     : read);
         }
 
-        GD.Print("gunnery: the gun fires down a flat side and nowhere else");
+        Theme("gunnery: the gun fires down a flat side and nowhere else");
 
         // A lane is a ray of Steps, so the two have to agree by construction -
         // and this is where that gets asserted rather than assumed, because a
@@ -7295,9 +7306,103 @@ public static class SelfTest
             field.SetRelief(BoardMap.Bench.LevelsFor(field.Columns, field.Rows),
                             BoardMap.Bench.RampsFor(field.Columns, field.Rows));
 
-        GD.Print(failed == 0 ? "SELFTEST OK" : $"SELFTEST FAILED: {failed}");
+        // The themes, whenever the filter asked for something no theme is called -
+        // including the literal "list", which is a filter that matches nothing on
+        // purpose. A filter that matches nothing otherwise reports "OK, 0 checks",
+        // which is the one result that must never read as a pass.
+        if (_only.Length > 0 && _reported == 0)
+        {
+            GD.Print("themes:");
+            foreach (string name in _themes)
+                GD.Print("  " + name);
+            if (_listing)
+            {
+                GD.Print($"SELFTEST LISTED {_themes.Count} themes, "
+                         + $"{_skipped} checks");
+                return 0;
+            }
+            GD.Print($"SELFTEST FILTER \"{string.Join(",", _only)}\" matched no "
+                     + "theme");
+            return 1;
+        }
+        // Never a bare "OK" on a filtered run: a green line that says nothing
+        // about how much of the run it covers is exactly how a filter turns into
+        // a false pass. Hence the rule that the whole run goes before a commit.
+        string scope = _only.Length == 0
+            ? $"{_reported} checks"
+            : $"\"{string.Join(",", _only)}\" only - {_reported} of "
+              + $"{_reported + _skipped} checks, {_skipped} skipped by the filter";
+        GD.Print(failed == 0 ? $"SELFTEST OK: {scope}"
+                             : $"SELFTEST FAILED: {failed} of {scope}");
         return failed;
     }
+
+    /// <summary>
+    /// Which themes get reported.
+    ///
+    /// <b>It filters the report and not the work, and that is the whole of what
+    /// it promises.</b> The run is one linear pass with variables shared across
+    /// its themes, so skipping a theme's work means either restructuring it or
+    /// scoping those variables out from under the rest - and the clock does not
+    /// ask for it: the whole run is about twelve seconds, most of which is the
+    /// engine starting. What a filter buys is the answer to "I changed the wall,
+    /// show me the wall", which is a question about reading output.
+    ///
+    /// <b>Matched as a case-insensitive substring of the theme's own heading</b>,
+    /// so the words already printed are the words to filter by and there is no
+    /// second list of keys to keep in step: <c>wall</c> finds "the wall a tank
+    /// drives into", <c>relief</c> finds all seven of its parts. Commas separate
+    /// several.
+    ///
+    /// <b>A filter that matches nothing fails and prints the themes.</b> Reporting
+    /// zero checks and calling it OK is the one outcome that could send somebody
+    /// to a commit on the strength of a typo.
+    /// </summary>
+    private static void Filter(string? only)
+    {
+        _themes.Clear();
+        _reported = 0;
+        _skipped = 0;
+        _listing = only is "list" or "?";
+        _only = _listing || string.IsNullOrWhiteSpace(only)
+            ? Array.Empty<string>()
+            : only!.Split(',', StringSplitOptions.RemoveEmptyEntries
+                               | StringSplitOptions.TrimEntries);
+        // The listing wants every theme named and no check reported, which is a
+        // filter nothing matches - written as one rather than as a second mode.
+        if (_listing)
+            _only = new[] { " " };
+        _on = _only.Length == 0;
+    }
+
+    /// <summary>Start a theme: print its heading and decide whether its checks are
+    /// reported. Every heading in the run goes through here, which is what makes
+    /// the printed list the list a filter can name.</summary>
+    private static void Theme(string name)
+    {
+        _themes.Add(name);
+        _on = _only.Length == 0
+              || _only.Any(key => name.Contains(key,
+                                                StringComparison.OrdinalIgnoreCase));
+        if (_on)
+            GD.Print(name);
+    }
+
+    /// <summary>An aside inside a theme - "no art loaded", "skipped". Silent when
+    /// the theme is not being reported, or a filtered run prints the notes of
+    /// every theme it is not showing.</summary>
+    private static void Note(string line)
+    {
+        if (_on)
+            GD.Print(line);
+    }
+
+    private static string[] _only = Array.Empty<string>();
+    private static bool _on = true;
+    private static bool _listing;
+    private static int _reported;
+    private static int _skipped;
+    private static readonly List<string> _themes = new();
 
     /// <summary>Frames a point-blank round takes at a given speed level. The
     /// level is restored, because a check that leaves a global moved is a check
@@ -7341,7 +7446,7 @@ public static class SelfTest
     private static void Climbing(HexField field, TankSprite tank,
                                  Action<string, bool, string> Check)
     {
-        GD.Print("climb: the body is turned by the slope and its shadow is "
+        Theme("climb: the body is turned by the slope and its shadow is "
                  + "flattened by it");
 
         float rise = field.RiseFactor;
@@ -7601,7 +7706,7 @@ public static class SelfTest
     private static void Burning(HexField field, Grove? grove,
                                 Action<string, bool, string> Check)
     {
-        GD.Print("the wood on fire");
+        Theme("the wood on fire");
 
         // A board where the middle column is wooded and nothing else is, so what
         // spread does and does not reach is a statement rather than an accident.
@@ -7981,7 +8086,7 @@ public static class SelfTest
                 }
             if (paired < 0)
             {
-                GD.Print("        (no burnt art in this run)");
+                Note("        (no burnt art in this run)");
             }
             else
             {
@@ -8077,7 +8182,7 @@ public static class SelfTest
                 // Named rather than asserted: the base is the artist's, and a wide
                 // one is a note about the art and not a fault in the code.
                 if (root > grove.Props.RootOf(paired) * 1.35f)
-                    GD.Print($"        (note: {grove.Props.NameOf(paired)}'s burnt "
+                    Note($"        (note: {grove.Props.NameOf(paired)}'s burnt "
                              + $"base is {root:F0}px against the wood's "
                              + $"{grove.Props.RootOf(paired):F0} - it is drawn wider "
                              + "than the tree it replaces)");
@@ -8394,7 +8499,7 @@ public static class SelfTest
         {
             Check("trees sort by where they stand, not by where they are drawn",
                 true, "");
-            GD.Print("        (no grove in this run)");
+            Note("        (no grove in this run)");
             return;
         }
 
@@ -8423,7 +8528,7 @@ public static class SelfTest
             {
                 Check("trees sort by where they stand, not by where they are drawn",
                     true, "");
-                GD.Print("        (no tree art on disk, so nothing was sown)");
+                Note("        (no tree art on disk, so nothing was sown)");
                 return;
             }
             Check("the wood reaches ground at more than one level", levels > 0,
@@ -8488,7 +8593,7 @@ public static class SelfTest
     private static void Ramps(HexField field, Stage3D? stage,
                               Action<string, bool, string> Check)
     {
-        GD.Print("ramps: the level changes where the map says it may");
+        Theme("ramps: the level changes where the map says it may");
         try
         {
             field.SetRelief(BoardMap.Bench.LevelsFor(field.Columns, field.Rows),
@@ -9140,7 +9245,7 @@ public static class SelfTest
     private static void Walls(HexField field, IReadOnlyList<Vehicle>? vehicles,
                               Action<string, bool, string> Check)
     {
-        GD.Print("the wall a tank drives into");
+        Theme("the wall a tank drives into");
 
         BoardMap map = BoardMap.WallMap;
         IReadOnlyList<Vector2I> walled = map.Walled();
@@ -9221,7 +9326,7 @@ public static class SelfTest
         // what that looks like.
         if (field.Atlas is null)
         {
-            GD.Print("  skip  no atlas loaded, so the board has no distance");
+            Note("  skip  no atlas loaded, so the board has no distance");
         }
         else if (laneHeading >= 0)
         {
@@ -9431,7 +9536,7 @@ public static class SelfTest
 
     private static void Ripple(Action<string, bool, string> Check)
     {
-        GD.Print("ripples: water that carries on after the tank has gone");
+        Theme("ripples: water that carries on after the tank has gone");
         // A tidy squash, so the two grains come out 7 and 14 and a probe can be
         // put where the arithmetic says rather than near it. The board's own is
         // 0.5075 and nothing below depends on which it is.
@@ -9744,7 +9849,7 @@ public static class SelfTest
     private static void Water(HexField field, Grove? grove,
                               Action<string, bool, string> Check)
     {
-        GD.Print("water: a cell to drive into, not round");
+        Theme("water: a cell to drive into, not round");
         // What the session came up with, because the grove was sown against it and
         // the topic that judges the wood asks the board as it stands. Run() clears
         // the relief for the same reason and puts it back at the end; this is that
@@ -10016,7 +10121,7 @@ public static class SelfTest
                 + "answer, so either the map or the scan has stopped meaning "
                 + "what it says");
             if (inked > 0)
-                GD.Print($"waterline: 4px of water answers "
+                Note($"waterline: 4px of water answers "
                          + $"{inked - unanswered} of {inked} inked columns "
                          + $"({100.0 * unanswered / inked:0}% dry)");
 
@@ -10136,7 +10241,7 @@ public static class SelfTest
                 : WaterArt.Load(AssetRoot.Water, art.HexRect);
             if (!surf.Any)
             {
-                GD.Print("  skip  water art: " + surf.Note);
+                Note("  skip  water art: " + surf.Note);
             }
             else
             {
@@ -11331,7 +11436,7 @@ public static class SelfTest
     private static void Relief(HexField field, Grove? grove,
                                Action<string, bool, string> Check)
     {
-        GD.Print("relief: a flat board is the board it was");
+        Theme("relief: a flat board is the board it was");
 
         // The claim the whole slice rests on. Depth is only ever compared, so it
         // could be scaled by anything - but the trees sort at round(footY) and
@@ -11362,7 +11467,7 @@ public static class SelfTest
         field.SetRelief(BoardMap.Bench.LevelsFor(field.Columns, field.Rows));
         try
         {
-            GD.Print("relief: a click lands on the face that was drawn");
+            Theme("relief: a click lands on the face that was drawn");
 
             float lift = field.Lift;
             Check("one level is a visible number of pixels", lift > 4.0f,
@@ -11456,7 +11561,7 @@ public static class SelfTest
                 wrong > 0 ? $"{wrong} wrong, first {firstWrong}"
                           : $"only {probes} probes, {retired} retired");
 
-            GD.Print("relief: the depth key is the camera it claims to be");
+            Theme("relief: the depth key is the camera it claims to be");
 
             // Against the projection written out from the angle, rather than
             // against itself. Depth is compared and never read, so what has to
@@ -11484,7 +11589,7 @@ public static class SelfTest
             Check("it orders every pair the way the projection does", disagree == 0,
                 $"{disagree} pairs out of order - raising a thing must bring it nearer");
 
-            GD.Print("relief: ground hides what stands below it and nothing else");
+            Theme("relief: ground hides what stands below it and nothing else");
 
             // The two reported pictures, asked as themselves rather than by
             // repeating the rule. Both are needed: a test that only says no
@@ -11882,7 +11987,7 @@ public static class SelfTest
                            : $"{behind} did, first {firstBehind} - this paints a wall "
                              + "across the turret");
 
-            GD.Print("relief: every hex is a column standing on one floor");
+            Theme("relief: every hex is a column standing on one floor");
 
             // Two claims, and between them they are the whole of what a column
             // has to satisfy - which is the point of columns: the rule per pair
@@ -12083,10 +12188,10 @@ public static class SelfTest
                 missed > 0 ? $"{missed} faces do not hold their own middle"
                            : $"{spilled} reach past their own corner");
 
-            GD.Print("relief: a wood on a rise sorts where it stands");
+            Theme("relief: a wood on a rise sorts where it stands");
             Woods(field, grove, elevation, Check);
 
-            GD.Print("relief: a route walks the board it is on");
+            Theme("relief: a route walks the board it is on");
             int steep = 0;
             var firstSteep = "";
             for (int q = 0; q < field.Columns; q++)
@@ -12121,7 +12226,7 @@ public static class SelfTest
 
         // Taking it off again has to leave the board where it was: the panel row
         // turns it off as readily as on.
-        GD.Print("relief: and taking it off puts the board back");
+        Theme("relief: and taking it off puts the board back");
         int moved = 0;
         for (int q = 0; q < field.Columns; q++)
         for (int r = 0; r < field.Rows; r++)
@@ -12172,7 +12277,7 @@ public static class SelfTest
         // no scene in this session opened is still checked, which is the point:
         // --map-report is the authoring tool and is run by hand, and an edit made
         // three months from now will be judged by this instead.
-        GD.Print("the authored boards");
+        Theme("the authored boards");
         foreach (string name in BoardMap.Names)
         {
             BoardMap map;

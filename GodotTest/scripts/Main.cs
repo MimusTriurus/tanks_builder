@@ -969,6 +969,12 @@ public sealed partial class Main : SceneRoot
 	private int _frames;
 	private bool _selfTest;
 
+	/// <summary>Which themes of the self-test to report, or null for all of them.
+	/// See <see cref="SelfTest.Run"/>: a filtered run does every check and reports
+	/// the ones asked for, which is what makes "the whole run before a commit" a
+	/// rule rather than a suggestion.</summary>
+	private string? _selfTestOnly;
+
 	/// <summary>Print the board's audit and quit - see
 	/// <see cref="BoardMap.Audit"/>. Answered before anything is built, because
 	/// what it reports is the map and a map that will not load cannot build a
@@ -1066,8 +1072,20 @@ public sealed partial class Main : SceneRoot
 			// chain was one of four.
 			if (ReadCommonFlag(userArgs, ref i))
 				continue;
-			if (userArgs[i] == "--selftest")
+			// A theme filter may follow it, either as --selftest wall or as
+			// --selftest=wall. Taken as a value only when it is not another flag,
+			// so a bare --selftest followed by --no-ui still means all of them.
+			if (userArgs[i] == "--selftest"
+			    || userArgs[i].StartsWith("--selftest=", StringComparison.Ordinal))
+			{
 				_selfTest = true;
+				int eq = userArgs[i].IndexOf('=');
+				if (eq > 0)
+					_selfTestOnly = userArgs[i][(eq + 1)..];
+				else if (i + 1 < userArgs.Length
+				         && !userArgs[i + 1].StartsWith("--", StringComparison.Ordinal))
+					_selfTestOnly = userArgs[++i];
+			}
 			else if (userArgs[i] == "--pitch")
 				_tick.PitchEnabled = true;
 			else if (userArgs[i] == "--rumble")
@@ -2002,7 +2020,7 @@ public sealed partial class Main : SceneRoot
 		{
 			int failed = SelfTest.Run(_field, _tank, _atlases, _vehicles, _active,
 									  _ring, _commonSounds, _sounds, _panel, _grove,
-									  _stage);
+									  _stage, _selfTestOnly);
 			GetTree().Quit(failed == 0 ? 0 : 1);
 			return;
 		}
