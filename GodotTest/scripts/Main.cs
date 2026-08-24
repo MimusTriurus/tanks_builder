@@ -2484,6 +2484,41 @@ public sealed partial class Main : SceneRoot
 	}
 
 	/// <summary>
+	/// Rounds in the air, and how far the nearest one has got. A shot that seems
+	/// to do nothing is either a shell still flying or a shell that was never
+	/// launched, and from outside those are the same picture.
+	///
+	/// <b>Beside the aim rather than inside it</b>, because a round in the air is
+	/// a fact about the board and not about having a target: a shot fired by hand
+	/// has no target at all, and reported only through the engagement it would be
+	/// the one shot nothing could be read about. See <see cref="Shoot"/>.
+	///
+	/// Rounds still in the air, not rounds still on screen: the smoke hangs for a
+	/// second after the last of them has landed, and a count of those would report
+	/// a shot that is over as a shot in progress.
+	/// </summary>
+	private string Flying()
+	{
+		List<Shell> up = _shells.FindAll(s => !s.Arrived);
+		return up.Count == 0
+			? (_shells.Count == 0 ? "" : $" [{_shells.Count} smoking]")
+			: $" [{up.Count} up, {up[0].Fraction:F2}"
+			  // How far off its own barrel this one is going to land. Normally
+			  // zero by construction; anything else is the clamp that keeps the
+			  // mark on the armour, and that is not visible in the picture.
+			  + $", bore {up[0].BoreMiss:F1}px"
+			  // How fast and how big, because both are levels now and a level
+			  // that did not arrive looks exactly like one that did.
+			  // Two calibres, because they are two settings now: a trail tuned
+			  // against a streak that turned out to be the same number would be
+			  // two dials that agree by accident.
+			  + $", {Shell.Speed:F0}px/s cal {up[0].TracerSize:F2}"
+			  + $"/{up[0].SmokeSize:F2}"
+			  + $"{(Shell.SmokeOn ? "" : " nosmoke")}"
+			  + $"{(_tracerVisible ? "" : " unseen")}]";
+	}
+
+	/// <summary>
 	/// The gunnery field for <c>--trace</c> and for the panel.
 	///
 	/// It reports the reason rather than a yes or no, because from outside a
@@ -2496,7 +2531,7 @@ public sealed partial class Main : SceneRoot
 	{
 		Vehicle v = Active;
 		if (v.Target is null)
-			return "-";
+			return "-" + Flying();
 		if (!v.Solution.OnLane)
 			return $"{v.Target.Tag} no lane";
 		string state = v.Solution.BlockedAt is Vector2I b ? $"blocked ({b.X},{b.Y})"
@@ -2513,29 +2548,7 @@ public sealed partial class Main : SceneRoot
 		string face = v.Target.Atlas.FaceFor(
 			Angles.Mod(v.Solution.Heading + 180.0, 360.0), v.Target.Sprite.HullFacing);
 		int cap = Gunnery.Penetration(v.Profile, v.Target.Profile);
-		// Rounds in the air, and how far the nearest one has got. A shot that
-		// seems to do nothing is either a shell still flying or a shell that was
-		// never launched, and from outside those are the same picture.
-		// Rounds still in the air, not rounds still on screen: the smoke hangs
-		// for a second after the last of them has landed, and a trace that
-		// counted those would report a shot that is over as a shot in progress.
-		List<Shell> up = _shells.FindAll(s => !s.Arrived);
-		string flying = up.Count == 0
-			? (_shells.Count == 0 ? "" : $" [{_shells.Count} smoking]")
-			: $" [{up.Count} up, {up[0].Fraction:F2}"
-			  // How far off its own barrel this one is going to land. Normally
-			  // zero by construction; anything else is the clamp that keeps the
-			  // mark on the armour, and that is not visible in the picture.
-			  + $", bore {up[0].BoreMiss:F1}px"
-			  // How fast and how big, because both are levels now and a level
-			  // that did not arrive looks exactly like one that did.
-			  // Two calibres, because they are two settings now: a trail tuned
-			  // against a streak that turned out to be the same number would be
-			  // two dials that agree by accident.
-			  + $", {Shell.Speed:F0}px/s cal {up[0].TracerSize:F2}"
-			  + $"/{up[0].SmokeSize:F2}"
-			  + $"{(Shell.SmokeOn ? "" : " nosmoke")}"
-			  + $"{(_tracerVisible ? "" : " unseen")}]";
+		string flying = Flying();
 		// And how near the end the target is, which the plate cannot say: three
 		// rounds finish it wherever they landed, so a tank whose front plate reads
 		// 1/1 may be one round from dead or three, depending on what its flanks
@@ -2867,7 +2880,103 @@ public sealed partial class Main : SceneRoot
 	/// <summary>Fire. Restarts the flash from frame zero rather than being
 	/// ignored while one is running, so holding the key reads as a rate of fire
 	/// instead of doing nothing.</summary>
-	private void Fire() => Tick.Fire(Active);
+	private void Fire()
+	{
+		Tick.Fire(Active);
+		Shoot(Active);
+	}
+
+	/// <summary>
+	/// The round a hand-fired shot puts in the air.
+	///
+	/// <b>A shot by hand is a whole shot</b>, and it was not: the key set off the
+	/// flash, the recoil, the shake and the report, and nothing left the tube. The
+	/// muzzle event and the round were only ever joined on the ordered path, so
+	/// the one shot a person fires themselves was the one with no shell in it.
+	///
+	/// <b>It goes where the aiming ray says it goes</b>, and that is the whole of
+	/// the design rather than a convenience. Both read the gun through
+	/// <see cref="BoreOf"/> and walk the board through <see cref="Reach"/>, so the
+	/// line drawn out of the tube and the thing that flies down it cannot part
+	/// company - which is the failure a second copy of this would produce, quietly
+	/// and only on the shot being watched.
+	///
+	/// Two endings, and they are the ray's own two:
+	///
+	/// - <b>Laid on a tank</b> - the same <see cref="Launch"/> the standing order
+	///   uses, so one round is one set of rules. The lane turned round is the
+	///   bearing the armour model wants, exactly, and <see cref="LaidOn"/> already
+	///   answers with the <em>first</em> tank down it, so a third tank in the way
+	///   stops the shell here for the same reason it does there.
+	/// - <b>Laid on nothing</b> - the round still goes, down the tube, and lands
+	///   on the field where the walk stopped. No armour, no burst, no damage: see
+	///   <see cref="Shell.Target"/> for why null is a shot rather than the absence
+	///   of one. That case is not an edge - the three tanks start off each other's
+	///   lanes, so it is what the key does on the opening frame.
+	///
+	/// Off the tube rather than off a lane when there is nobody to hit, and that
+	/// is allowed exactly because there is nobody: the six lanes are a rule about
+	/// <em>armour</em> - the arrival bearing has to be a flat side of the hex or
+	/// <see cref="AtlasSet.FaceFor"/> is being handed a number it cannot use - and
+	/// a round going at the ground never asks for a plate.
+	///
+	/// No reload gate, and none was here before: the key restarts the flash on
+	/// every press by design, and a bench control that answered a third of the
+	/// time would read as a bench control that half works.
+	/// </summary>
+	private void Shoot(Vehicle shooter)
+	{
+		int lane = -1;
+		if (LaidOn(shooter, out lane) is Vehicle mark && mark.Atlas.HasHit)
+		{
+			Launch(shooter, mark, Angles.Mod(lane + 180.0, 360.0));
+			return;
+		}
+		// Down the lane when there is one and down the tube otherwise. The two
+		// differ by up to half a frame of traverse, and it is the lane that is
+		// right: it is where the round would arrive if a tank drove onto it.
+		double heading = lane >= 0 ? lane : shooter.Sprite.TurretFacing;
+		AtlasSet gun = shooter.Atlas;
+		Vector2 tube = gun.Muzzle(gun.FrameFor(shooter.Sprite.TurretFacing))
+					   - gun.Anchor;
+		Vector2 dir = gun.GroundDirection(heading);
+		if (dir.LengthSquared() < 1e-6f)
+			return;
+		dir = dir.Normalized();
+		// Board space, by Vehicle.Spot's argument - the round is a thing on the
+		// board, and on the staged board a sprite's own coordinates are its render
+		// target's. The run comes back in flat pixels, which the board is measured
+		// in too, so the direction carries it across unchanged.
+		Vector2 from = shooter.Spot(tube);
+		(float run, _, _) = Reach(shooter, dir);
+		float lift = shooter.LiftOf(from);
+		var shell = new Shell
+		{
+			Shooter = shooter,
+			Target = null,
+			Ground = from + dir * run,
+			// The same height at both ends, because a tank gun is level and that
+			// is the one assumption the walk itself is written under - see Track,
+			// which blocks the line with a single comparison for exactly this
+			// reason.
+			GroundLift = lift,
+			From = from,
+			FromLift = lift,
+			// The armour half, written blank rather than left to default: there is
+			// no plate in this shot at all. See Shell.Target.
+			ImpactLocal = Vector2.Zero,
+			Serial = 0,
+			Face = "",
+			Scatter = 0.0f,
+			Rise = 0.0f,
+			BoreMiss = 0.0f,
+			Calibre = Calibre,
+			Level = 0,
+		};
+		shell.Visible = _tracerVisible;
+		_shells.Add(shell);
+		AddChild(shell);
+	}
 
 
 	/// <summary>
@@ -3088,6 +3197,33 @@ public sealed partial class Main : SceneRoot
 	}
 
 	/// <summary>
+	/// How far this tank's level line gets across the board, which cell stopped
+	/// it, and whether anything did.
+	///
+	/// <b>One walk for the ray and for the round</b>, and that is the argument the
+	/// aim point is already under: the line drawn out of a gun and the flight of
+	/// what leaves it answer one question, so two copies of it would agree
+	/// wherever anybody put them side by side and differ on the shot being
+	/// watched.
+	///
+	/// Asked of the board in flat space, the way every other caller that asks it
+	/// about a point does - the lift goes back on. See HexField.Bare and Patch.
+	/// </summary>
+	private (float Run, Vector2I? At, bool Blocked) Reach(Vehicle shooter,
+														  Vector2 dir)
+	{
+		float top = _field.Bare(shooter.Ground);
+		var ground = new Vector2(shooter.GroundPoint.X - _origin.X,
+								 shooter.GroundPoint.Y - _origin.Y + top);
+		var tanks = new HashSet<Vector2I>();
+		foreach (Vehicle other in _vehicles)
+			if (!ReferenceEquals(other, shooter))
+				tanks.Add(other.Cell);
+		return Track(_field, ground, dir,
+					 top + _field.Lift * AimRay.Clearance, tanks);
+	}
+
+	/// <summary>
 	/// The tank this gun is laid on, and the lane it is laid down - or null for a
 	/// gun pointing at nothing.
 	///
@@ -3147,17 +3283,7 @@ public sealed partial class Main : SceneRoot
 		if (along.LengthSquared() < 1e-6f)
 			return;
 		Vector2 dir = along.Normalized();
-		// Asked of the board in flat space, the way every other caller that asks it
-		// about a point does - the lift goes back on. See HexField.Bare and Patch.
-		float top = _field.Bare(shooter.Ground);
-		var ground = new Vector2(shooter.GroundPoint.X - _origin.X,
-								 shooter.GroundPoint.Y - _origin.Y + top);
-		var tanks = new HashSet<Vector2I>();
-		foreach (Vehicle other in _vehicles)
-			if (!ReferenceEquals(other, shooter))
-				tanks.Add(other.Cell);
-		(float run, Vector2I? at, bool blocked) = Track(
-			_field, ground, dir, top + _field.Lift * AimRay.Clearance, tanks);
+		(float run, Vector2I? at, bool blocked) = Reach(shooter, dir);
 		// The hole, but only if the line got as far as the tank it belongs to. The
 		// point itself still comes out of the firing code and is not touched here -
 		// see Aim, and see AimRay for why two copies of it would be the quiet kind
@@ -3427,11 +3553,22 @@ public sealed partial class Main : SceneRoot
 	}
 
 
-	/// <summary>A round that has flown its path. Nothing is decided here - see
-	/// <see cref="Launch"/>.</summary>
-	private void Strike(Shell shell) =>
-		Tick.Land(shell.Target, shell.Face, shell.Scatter, shell.Rise, shell.Calibre,
-			 shell.Level, 1);
+	/// <summary>
+	/// A round that has flown its path. Nothing is decided here - see
+	/// <see cref="Launch"/>.
+	///
+	/// A round with no target lands and that is all of it: no plate, no burst, no
+	/// sound. It is not a hit that failed to register - it is a shell going into
+	/// the field, which is what the board has to say back when the gun was laid
+	/// on nobody. See <see cref="Shell.Target"/> and <see cref="Shoot"/>.
+	/// </summary>
+	private void Strike(Shell shell)
+	{
+		if (shell.Target is null)
+			return;
+		Tick.Land(shell.Target, shell.Face, shell.Scatter, shell.Rise,
+				  shell.Calibre, shell.Level, 1);
+	}
 
 	/// <summary>
 	/// One tank engaging another: lay the gun, and fire when it is laid, loaded

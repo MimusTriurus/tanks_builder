@@ -6654,6 +6654,58 @@ public static class SelfTest
                 round.Face == "front" && round.Level == 1
                 && Math.Abs(round.Calibre - 1.0f) < 1e-6,
                 "a shell that re-read the dials would change calibre in flight");
+            // A round with nobody to hit. The gun fires down a flat side of the
+            // hex and hits what it is laid on; laid on nobody it still goes off,
+            // and what leaves the tube has to leave, cross and land the same way
+            // - see Main.Shoot. Before this the hand-fired shot was the one shot
+            // on the bench with no shell in it, which is what a key that flashes
+            // and does nothing else looks like from outside.
+            {
+                Vector2 out0 = shooter.Spot(Vector2.Zero);
+                var loose = new Shell
+                {
+                    Shooter = shooter, Target = null,
+                    From = out0, FromLift = 3.0f,
+                    Ground = out0 + new Vector2(600.0f, 0.0f), GroundLift = 3.0f,
+                    ImpactLocal = Vector2.Zero, Serial = 0, Face = "",
+                    Scatter = 0.0f, BoreMiss = 0.0f, Rise = 0.0f, Calibre = 1.0f,
+                    Level = 0,
+                };
+                loose.Position = loose.From;
+                Check("a round with nobody to hit is aimed at the ground it was given",
+                    loose.To.DistanceTo(out0 + new Vector2(600.0f, 0.0f)) < 0.01f
+                    && Math.Abs(loose.ToLift - 3.0f) < 1e-6,
+                    $"headed for {loose.To} rather than the point it was handed - "
+                    + "a target-less round reading the anchor would fly at its own "
+                    + "shooter");
+                int loft = 0;
+                float climbedTo = -1.0f;
+                bool rose = true;
+                while (!loose.Arrived && loft < 600)
+                {
+                    loose.Advance(1.0 / 60.0);
+                    loft++;
+                    if (loose.Fraction < climbedTo)
+                        rose = false;
+                    climbedTo = loose.Fraction;
+                }
+                Check("and it crosses and lands like any other",
+                    loose.Arrived && loft >= 4 && rose,
+                    $"{loft} frames over 600px, rising {rose} - a shot that only "
+                    + "flashes is what this replaced");
+                // The difference in kind between the two ends. The liberty a
+                // round takes with a target exists because a tank drives away;
+                // the ground does not, so there is nothing here to follow and
+                // nothing to freeze.
+                Vector2 landedAt = loose.To;
+                Vector2 stood = shooter.Sprite.Position;
+                shooter.Sprite.Position = stood + new Vector2(150.0f, 60.0f);
+                Check("and the ground it went into does not walk off with a tank",
+                    loose.To.DistanceTo(landedAt) < 0.01f,
+                    $"the landing moved {loose.To.DistanceTo(landedAt):F0}px when "
+                    + "the shooter drove - the board is not a target");
+                shooter.Sprite.Position = stood;
+            }
             // Above every tank: depth is taken from the contact patch, so the
             // deepest a tank can sit is the height of the board.
             Check("the tracer draws over any tank on the board",

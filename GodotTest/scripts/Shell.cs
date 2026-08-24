@@ -320,7 +320,38 @@ public sealed partial class Shell : Node2D
     /// because a tracer with no origin cannot be checked against one.</summary>
     public required Vehicle Shooter { get; init; }
 
-    public required Vehicle Target { get; init; }
+    /// <summary>
+    /// The tank it is going to hit, or null for a round going at the ground.
+    ///
+    /// <b>Null is a shot, not an absent one.</b> A gun fires down a flat side of
+    /// the hex and hits what it is laid on; laid on nobody it still goes off, and
+    /// the round still leaves, flies and lands - it just lands on the field. That
+    /// case has no armour in it at all, so the whole armour half below
+    /// (<see cref="ImpactLocal"/>, <see cref="Face"/>, <see cref="Scatter"/>,
+    /// <see cref="Rise"/>, <see cref="Level"/>, <see cref="BoreMiss"/>,
+    /// <see cref="Serial"/>) means nothing and is written blank by the caller
+    /// rather than quietly defaulted - see <see cref="Ground"/>.
+    /// </summary>
+    public required Vehicle? Target { get; init; }
+
+    /// <summary>
+    /// Where a round with no target is going, in board space, and how high that
+    /// point stands.
+    ///
+    /// A board point rather than something read off a tank each frame, and that
+    /// is the difference in kind between the two ends: the liberty
+    /// <see cref="ImpactLocal"/> takes exists because a tank drives away, and the
+    /// ground does not. So this is fixed at the shot and nothing has to be frozen
+    /// on arrival.
+    ///
+    /// Ignored while <see cref="Target"/> is set. Left at the origin by the
+    /// armour path on purpose: a field that means nothing should read as nothing
+    /// rather than as a plausible point.
+    /// </summary>
+    public Vector2 Ground { get; init; }
+
+    /// <inheritdoc cref="Ground"/>
+    public float GroundLift { get; init; }
 
     /// <summary>
     /// Where on the target it is going, in the target sprite's own space.
@@ -446,12 +477,15 @@ public sealed partial class Shell : Node2D
     /// target is the deliberate liberty; once it has hit, the smoke belongs to
     /// the air rather than to the tank.
     /// </summary>
-    public Vector2 To => Arrived ? _landed : Target.Spot(ImpactLocal);
+    public Vector2 To =>
+        Arrived ? _landed : Target is null ? Ground : Target.Spot(ImpactLocal);
 
     /// <summary>How high the armour it is going for stands, in screen pixels.
     /// Frozen on arrival with <see cref="To"/>, which it is the other half
     /// of.</summary>
-    public float ToLift => Arrived ? _landedLift : Target.LiftOf(To);
+    public float ToLift =>
+        Arrived ? _landedLift
+        : Target is null ? GroundLift : Target.LiftOf(To);
 
     /// <summary>Above every tank. A tracer disappearing behind a hull it is
     /// passing reads as a dropped frame, and it is a few pixels of bright on a
