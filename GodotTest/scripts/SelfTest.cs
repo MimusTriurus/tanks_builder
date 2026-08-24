@@ -6706,6 +6706,87 @@ public static class SelfTest
                     + "the shooter drove - the board is not a target");
                 shooter.Sprite.Position = stood;
             }
+            // Whose round it is. The list was the harness's, so a bench with a
+            // tank on it had a gun that only flashed - the whole flight lived in
+            // the scene root, and the one-tank bench could not have it without a
+            // second copy of it. Now the tank carries what it fired and the tick
+            // flies it, which is the same argument TankTick itself is under.
+            {
+                var gun = new TankTick
+                {
+                    Field = field,
+                    Origin = new Vector2(220, 200),
+                    Vehicles = vehicles!,
+                };
+                foreach (Vehicle v in vehicles!)
+                    v.Rounds.Clear();
+                int wasShot = shooter.ShotFrame;
+                double wasLoad = shooter.ReloadLeft;
+
+                gun.Fire(shooter);
+                Check("firing puts the round on the tank that fired it",
+                    shooter.Rounds.Count == 1 && foe.Rounds.Count == 0,
+                    $"{shooter.Rounds.Count} on the shooter and"
+                    + $" {foe.Rounds.Count} on the other tank - a round belongs to"
+                    + " the gun, not to the board it crosses");
+                Check("and it is aimed at the ground when nobody answers for it",
+                    shooter.Rounds.Count == 1 && shooter.Rounds[0].Target is null,
+                    "a tick with no Launch hook is a bench: nobody to hit, so the"
+                    + " shot goes into the field");
+
+                // The seam. Who a round is for is about two tanks and stays with
+                // the caller; that the round exists at all is about one and is
+                // here. A hook that says "I have launched it" must not then get a
+                // second round loosed underneath it.
+                gun.ClearRounds();
+                Vehicle? told = null;
+                gun.Launch = v => { told = v; return true; };
+                gun.Fire(shooter);
+                Check("and a caller that launches its own is not given a second",
+                    ReferenceEquals(told, shooter)
+                    && shooter.Rounds.Count == 0,
+                    $"asked about {(told is null ? "nobody" : told.Tag)} and"
+                    + $" left {shooter.Rounds.Count} rounds up - answering the hook"
+                    + " is what suppresses the ground shot");
+                gun.Launch = null;
+
+                // Flown by the tick rather than by the root, and swept when they
+                // are done with. Both halves: a round that is never advanced is a
+                // shot that hangs at the muzzle, and one that is never dropped is
+                // a leak the trace reports as a shot in progress for ever.
+                gun.ClearRounds();
+                gun.Fire(shooter);
+                float wasAt = shooter.Rounds.Count == 1
+                    ? shooter.Rounds[0].Fraction : -1.0f;
+                for (int i = 0; i < 600 && shooter.Rounds.Count > 0; i++)
+                    gun.Fly(1.0 / 60.0);
+                Check("the tick flies what the tank is carrying, and sweeps it up",
+                    wasAt >= 0.0f && shooter.Rounds.Count == 0,
+                    $"started at {wasAt:F2} and left {shooter.Rounds.Count} up");
+
+                // The switch reaching what is already drawn, which is the whole
+                // of why it is not just a flag read at launch.
+                gun.ClearRounds();
+                gun.TracerVisible = true;
+                gun.Fire(shooter);
+                bool lit = shooter.Rounds.Count == 1 && shooter.Rounds[0].Visible;
+                gun.TracerVisible = false;
+                gun.ShowRounds();
+                Check("the tracer switch reaches the rounds already up",
+                    lit && shooter.Rounds.Count == 1
+                    && !shooter.Rounds[0].Visible,
+                    "a round that kept its tracer because it was launched a"
+                    + " moment ago reads as the switch not working");
+                gun.TracerVisible = Shell.TracerOnByDefault;
+
+                gun.ClearRounds();
+                Check("and clearing takes every tank's rounds off the board",
+                    shooter.Rounds.Count == 0 && foe.Rounds.Count == 0,
+                    "the reset runs before the repair, so a shell left in the air"
+                    + " would land on armour that has just been mended");
+                shooter.ShotFrame = wasShot;
+                shooter.ReloadLeft = wasLoad;
+            }
             // Above every tank: depth is taken from the contact patch, so the
             // deepest a tank can sit is the height of the board.
             Check("the tracer draws over any tank on the board",
@@ -7089,9 +7170,9 @@ public static class SelfTest
                 var vacant = new HashSet<Vector2I>();
                 Vector2 home = field.CellCentre(new Vector2I(2, 2));
                 Vector2 east = new Vector2(1.0f, 0.0f);
-                float roof = field.Lift * (AimRay.Clearance + 2.0f);
+                float roof = field.Lift * (TankTick.Clearance + 2.0f);
                 (float far, Vector2I? edge, bool hit) =
-                    Main.Track(field, home, east, roof, vacant);
+                    TankTick.Track(field, home, east, roof, vacant);
                 Check("a ray with nothing in the way runs to the last hex there is",
                     far > field.Atlas!.HexRect.Size.X * 2.0f && edge is null
                     && !hit,
@@ -7103,7 +7184,7 @@ public static class SelfTest
                 // a level line has one height everywhere - so the same walk
                 // under a low roof stops short of the same vacant ground.
                 (float under, Vector2I? wall, bool pinned) =
-                    Main.Track(field, home, east, -1.0f, vacant);
+                    TankTick.Track(field, home, east, -1.0f, vacant);
                 Check("and ground standing above the line stops it",
                     pinned && wall is not null && under < far,
                     $"{under:F0}px to {wall} against {far:F0}px vacant - the test "
@@ -7115,7 +7196,7 @@ public static class SelfTest
                 // saying where cannot be marked.
                 Vector2I holder = field.FlatCellAt(
                     home + east * field.Atlas.HexRect.Size.X * 1.5f);
-                (float upto, Vector2I? met, bool blocked) = Main.Track(
+                (float upto, Vector2I? met, bool blocked) = TankTick.Track(
                     field, home, east, roof, new HashSet<Vector2I> { holder });
                 Check("and so does a tank, which is named so the ring can be "
                       + "gated on it", blocked && met == holder && upto < far,

@@ -89,6 +89,33 @@ public sealed class TankTick
     /// </summary>
     public bool Staged;
 
+    /// <summary>
+    /// Where a round's node is hung, or null on a board that does not want the
+    /// tracer drawn.
+    ///
+    /// <b>The board and never the tank.</b> A shell must not ride the hull that
+    /// fired it, and on the staged board the sprite is reparented into a render
+    /// target of its own - a tracer parented there is drawn inside the tank's
+    /// picture instead of on the field, which is a bug this project has already
+    /// paid for once. See <see cref="Vehicle.Rounds"/>.
+    /// </summary>
+    public Node2D? Deck;
+
+    /// <summary>
+    /// Who the round leaving this gun is for, when the caller knows - true if it
+    /// launched one, false to let the shot go at the ground.
+    ///
+    /// <b>A hook for the same reason <see cref="Aim"/> is one.</b> Which tank a
+    /// round is for is about two tanks: whose lane, whose armour, whether
+    /// somebody is in the way. That is the harness's and stays there. What the
+    /// round then does - leave, cross, land - is about one tank and is here, so a
+    /// bench with a single tank gets a whole shot out of <see cref="Fire"/>
+    /// rather than a flash.
+    ///
+    /// Null is the bench: nobody to hit, so every shot goes into the field.
+    /// </summary>
+    public Func<Vehicle, bool>? Launch;
+
     // --- the switches ------------------------------------------------------
 
     /// <summary>
@@ -113,6 +140,20 @@ public sealed class TankTick
     /// look at rather than the subject.
     /// </summary>
     public bool PitchEnabled = true;
+
+    /// <summary>Which calibre is loaded, as an index into
+    /// <see cref="Ordnance"/>.
+    ///
+    /// A dial like the twelve above it, and here rather than on a root because
+    /// both roots had one: it is what the gun is loaded with, and the shot is
+    /// what this object now owns end to end.</summary>
+    public int Calibre = 1;
+
+    /// <summary>Whether a round in the air is drawn. The flight is not on a
+    /// switch - it is what puts time between the report and the impact - so this
+    /// is the drawing alone, and it reaches the rounds already up: see
+    /// <see cref="ShowRounds"/>.</summary>
+    public bool TracerVisible = Shell.TracerOnByDefault;
 
     public bool RumbleEnabled;
     public bool TracksEnabled = true;
@@ -1108,13 +1149,280 @@ public sealed class TankTick
         v.Sprite.BurnPhase = v.Burn.SmokeFrame;
     }
 
+
+    // --- the round -----------------------------------------------------------
+
+    /// <summary>
+    /// How far above its own ground the gun's line runs, in levels.
+    ///
+    /// What it is for is the one test a level line needs: ground blocks the line
+    /// when it stands higher than the line does. Half a level is about where a
+    /// gun sits over its own deck, and the figure hardly matters because the
+    /// board's tops are whole levels apart - anything strictly between 0 and 1
+    /// gives the same answer for every flat cell. It decides exactly one case,
+    /// the ramp, whose top is half a level up: at 0.5 a ramp on your own level
+    /// does not block and one a level up does, which is what the picture shows.
+    /// </summary>
+    public const float Clearance = 0.5f;
+
+    /// <summary>
+    /// How far this tank's level line gets across the board, which cell stopped
+    /// it, and whether anything did.
+    ///
+    /// <b>One walk for the ray and for the round</b>, which is the argument the
+    /// aim point is already under: the line drawn out of a gun and the flight of
+    /// what leaves it answer one question, so two copies of it would agree
+    /// wherever anybody put them side by side and differ on the shot being
+    /// watched.
+    ///
+    /// Asked of the board in flat space, the way every other caller that asks it
+    /// about a point does - the lift goes back on. See <see cref="HexField.Bare"/>
+    /// and <c>Main.Patch</c>.
+    /// </summary>
+    public (float Run, Vector2I? At, bool Blocked) Reach(Vehicle shooter,
+                                                         Vector2 dir)
+    {
+        float top = Field.Bare(shooter.Ground);
+        var ground = new Vector2(shooter.GroundPoint.X - Origin.X,
+                                 shooter.GroundPoint.Y - Origin.Y + top);
+        var tanks = new HashSet<Vector2I>();
+        foreach (Vehicle other in Vehicles)
+            if (!ReferenceEquals(other, shooter))
+                tanks.Add(other.Cell);
+        return Track(Field, ground, dir, top + Field.Lift * Clearance, tanks);
+    }
+
+    /// <summary>
+    /// How far a level line out of a tank gets across the board before something
+    /// stops it, which cell stopped it, and whether anything did.
+    ///
+    /// <b>Measured in cells walked rather than in pixels run</b>, which is the
+    /// whole of why it exists: a length in pixels is a length on a board that
+    /// zooms, so the same ray covered a different number of hexes at every zoom.
+    /// Walked in flat space and asked of the field, so the answer is a fact about
+    /// the ground rather than about the picture - the rule <c>Main.Patch</c> is
+    /// written under, and the fourth place this board has charged for the
+    /// difference.
+    ///
+    /// <b>Ground blocks the line when it stands higher than the line does</b>, and
+    /// a level line has one height everywhere - <paramref name="top"/> - so that
+    /// is one comparison rather than a profile. A cell holding a tank blocks it
+    /// too, wreck or not: what stops a shell is a tank being there.
+    ///
+    /// No cap on the range, and none is wanted. The line runs as far as there are
+    /// hexes that way, which is what a sighting line does and what was asked for;
+    /// a cap in cells would be a made-up number, and a cap in pixels is the thing
+    /// being removed. <c>limit</c> is only the walk's own guard - a board's worth
+    /// of travel, so a direction that never leaves the grid cannot spin here.
+    ///
+    /// Static and given a set of cells rather than the vehicles, so all of it can
+    /// be asserted without a scene: the same reason <c>Main.Patch</c> and
+    /// <see cref="Gunnery.Solve"/> are shaped this way.
+    /// </summary>
+    internal static (float Run, Vector2I? At, bool Blocked) Track(
+        HexField field, Vector2 from, Vector2 dir, float top,
+        IReadOnlySet<Vector2I> tanks)
+    {
+        if (field.Atlas is null || dir.LengthSquared() < 1e-9f)
+            return (0.0f, null, false);
+        Vector2 step = dir.Normalized();
+        Vector2 tile = field.Atlas.HexRect.Size;
+        // An eighth of a tile: finer than half the shortest way across a cell, so
+        // nothing standing in the line is stepped over, and coarse enough that a
+        // board's worth of walk is a hundred samples.
+        float grain = Mathf.Max(tile.X * 0.125f, 1.0f);
+        float limit = field.Columns * tile.X + field.Rows * tile.Y;
+        Vector2I here = field.FlatCellAt(from);
+        for (float run = grain; run <= limit; run += grain)
+        {
+            Vector2I cell = field.FlatCellAt(from + step * run);
+            if (cell == here)
+                continue;
+            here = cell;
+            // Stopped at the near side of whatever stopped it - the sample before
+            // the one that found it. The line is drawn from the muzzle, which
+            // already stands a little way along this direction from the cell
+            // centre the walk starts at, so what is drawn reaches a little into the
+            // cell that stopped it rather than halting at its edge. That bias is
+            // forward, bounded by the muzzle's own offset, and it is the readable
+            // direction to be out by: a line that stops short of a hill by a third
+            // of a cell reads as stopping at nothing.
+            if (!field.InBounds(cell))
+                return (run - grain, null, false);
+            if (tanks.Contains(cell) || field.TopAt(cell) > top)
+                return (run - grain, cell, true);
+        }
+        return (limit, null, false);
+    }
+
+    /// <summary>
+    /// Put a finished round in the air on the tank that fired it.
+    ///
+    /// The one door into <see cref="Vehicle.Rounds"/>, so the two things a round
+    /// needs before anybody sees it - a list to be advanced from and a parent to
+    /// be drawn under - happen together. The harness's aimed round comes through
+    /// here as well, which is what keeps the ground shot and the armour shot one
+    /// kind of object.
+    /// </summary>
+    public void Send(Vehicle shooter, Shell round)
+    {
+        // Invisible is still in the air: the flight is what separates the report
+        // from the impact, and only the drawing is on a switch.
+        round.Visible = TracerVisible;
+        shooter.Rounds.Add(round);
+        Deck?.AddChild(round);
+    }
+
+    /// <summary>
+    /// A round with nobody to hit: down the tube, onto the field where the walk
+    /// stopped.
+    ///
+    /// <b>Not a lesser shot.</b> A gun fires down a flat side of the hex and hits
+    /// what it is laid on; laid on nobody it still goes off, and what leaves has
+    /// to leave, cross and land. Before this the hand-fired shot was the one shot
+    /// on the board with no round in it, which reads as a key that half works.
+    ///
+    /// Down the tube rather than down a lane, and that is allowed exactly because
+    /// there is nobody: the six lanes are a rule about <em>armour</em> - the
+    /// arrival bearing has to be a flat side of the hex or
+    /// <c>AtlasSet.FaceFor</c> is handed a number it cannot use - and a round
+    /// going at the ground never asks for a plate.
+    /// </summary>
+    private void Loose(Vehicle shooter)
+    {
+        if (Field?.Atlas is null)
+            return;
+        AtlasSet gun = shooter.Atlas;
+        Vector2 tube = gun.Muzzle(gun.FrameFor(shooter.Sprite.TurretFacing))
+                       - gun.Anchor;
+        Vector2 dir = gun.GroundDirection(shooter.Sprite.TurretFacing);
+        if (dir.LengthSquared() < 1e-6f)
+            return;
+        dir = dir.Normalized();
+        // Board space, by Vehicle.Spot's argument - the round is a thing on the
+        // board, and on the staged board a sprite's own coordinates are its render
+        // target's. The run comes back in flat pixels, which the board is measured
+        // in too, so the direction carries it across unchanged.
+        Vector2 from = shooter.Spot(tube);
+        (float run, _, _) = Reach(shooter, dir);
+        float lift = shooter.LiftOf(from);
+        Send(shooter, new Shell
+        {
+            Shooter = shooter,
+            Target = null,
+            Ground = from + dir * run,
+            // The same height at both ends, because a tank gun is level and that
+            // is the one assumption the walk itself is written under - see Track,
+            // which blocks the line with a single comparison for exactly this
+            // reason.
+            GroundLift = lift,
+            From = from,
+            FromLift = lift,
+            // The armour half, written blank rather than left to default: there is
+            // no plate in this shot at all. See Shell.Target.
+            ImpactLocal = Vector2.Zero,
+            Serial = 0,
+            Face = "",
+            Scatter = 0.0f,
+            Rise = 0.0f,
+            BoreMiss = 0.0f,
+            Calibre = Ordnance.At(Calibre),
+            Level = 0,
+        });
+    }
+
+    /// <summary>
+    /// Every round in the air, one frame on.
+    ///
+    /// <b>A pass of its own after every tank has moved</b>, not a step inside
+    /// <see cref="Run"/>: a round aimed at a tank has to see where that tank got
+    /// to this frame rather than last, and folded into the per-tank sequence the
+    /// first gun's shell would fly against the second gun's stale position. Same
+    /// ordering argument the belts and the audio already need.
+    ///
+    /// Landing and being finished with stopped being the same frame when the smoke
+    /// was allowed to outlive the round, so the strike is guarded and the node
+    /// goes on the trail rather than on the hit.
+    /// </summary>
+    public void Fly(double delta)
+    {
+        foreach (Vehicle v in Vehicles)
+            for (int i = v.Rounds.Count - 1; i >= 0; i--)
+            {
+                Shell round = v.Rounds[i];
+                round.Advance(delta);
+                if (round.Arrived && !round.Struck)
+                {
+                    round.Struck = true;
+                    Strike(round);
+                }
+                if (!round.Expired)
+                    continue;
+                v.Rounds.RemoveAt(i);
+                round.QueueFree();
+            }
+    }
+
+    /// <summary>
+    /// A round that has flown its path.
+    ///
+    /// Nothing is decided here: what the trigger settled travels with the shell,
+    /// because the alternative is a round that changes calibre in flight because
+    /// somebody turned a dial.
+    ///
+    /// A round with no target lands and that is all of it - no plate, no burst,
+    /// no sound. It is not a hit that failed to register; it is a shell going
+    /// into the field, which is what the board has to say back when the gun was
+    /// laid on nobody. See <see cref="Shell.Target"/>.
+    /// </summary>
+    private void Strike(Shell round)
+    {
+        if (round.Target is null)
+            return;
+        Land(round.Target, round.Face, round.Scatter, round.Rise, round.Calibre,
+             round.Level, 1);
+    }
+
+    /// <summary>Take every round off the board - the reset, and it runs before
+    /// the repair: a shell left in the air would land on armour that has just
+    /// been mended.</summary>
+    public void ClearRounds()
+    {
+        foreach (Vehicle v in Vehicles)
+        {
+            foreach (Shell round in v.Rounds)
+                round.QueueFree();
+            v.Rounds.Clear();
+        }
+    }
+
+    /// <summary>
+    /// The tracer switch reaching the rounds already up.
+    ///
+    /// Reaching into what is flying is the point rather than an extra: switching
+    /// a drawing off has to take effect on what is being drawn, and a round that
+    /// kept its tracer because it was launched a moment ago would read as the
+    /// switch not working.
+    /// </summary>
+    public void ShowRounds()
+    {
+        foreach (Vehicle v in Vehicles)
+            foreach (Shell round in v.Rounds)
+                round.Visible = TracerVisible;
+    }
+
     /// <summary>
     /// One round out of one tank's gun.
     ///
     /// Takes the vehicle rather than working on the driven one, because a tank
     /// left engaging a target goes on firing after you have selected somebody
-    /// else - which is the whole of the attack scene. Key Z is the same thing
-    /// aimed at nothing in particular.
+    /// else - which is the whole of the attack scene.
+    ///
+    /// <b>Five things off one trigger now, and the fifth is the shell.</b> It was
+    /// four, and the round was wired to the standing order alone - so the one
+    /// shot a person fires by hand was the one with nothing in it. Who the round
+    /// is for is asked of <see cref="Launch"/>, which is the harness's answer;
+    /// unanswered, the shot goes at the ground.
     /// </summary>
     public void Fire(Vehicle v)
     {
@@ -1151,6 +1459,10 @@ public sealed class TankTick
         // the gun's report is 1.2s on the light and 3.4s on the heavy, and neither
         // is the 34 frames the flash runs or the 28 the tube takes to come home.
         v.Audio?.Fire();
+        // And the round, last because it is the only one of the five that leaves
+        // the tank. Who it is for is the caller's to know - see Launch.
+        if (Launch is null || !Launch(v))
+            Loose(v);
     }
 
     /// <summary>The shot runs on screen frames, not seconds. The sheet is a

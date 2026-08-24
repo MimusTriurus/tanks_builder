@@ -139,7 +139,6 @@ public sealed partial class TankBench : SceneRoot
     private double _sizeLevel = 1.0;
     private double _traverse = 1.0;
     private int _hitSide = HexField.EdgeHeadings.Length - 1;
-    private int _calibre = 1;
     private bool _edges = true;
     private bool _board = true;
 
@@ -483,11 +482,19 @@ public sealed partial class TankBench : SceneRoot
             _tick.ViewZoom = _camera?.Zoom.X ?? 1.0f;
             _tick.Staged = true;
 
+            // Where a round's node hangs. Not the tank: a shell must not ride
+            // the hull that fired it, and this bench is staged, where the sprite
+            // lives in a render target of its own. See TankTick.Deck.
+            _tick.Deck = this;
+
             _tick.TurretHeld = _ => _spinning;
             // No gunnery: one tank has nobody to shoot at, and the lane, the
-            // armour and the shell in the air are all statements about two.
-            // See TankTick.Aim.
+            // armour and *whose* shell is in the air are all statements about
+            // two. See TankTick.Aim. The shell itself is about one tank and the
+            // tick has it, so Z fires a whole round here - it just never has
+            // anybody to hit, and goes at the ground. See TankTick.Launch.
             _tick.Aim = null;
+            _tick.Launch = null;
             return _tick;
         }
     }
@@ -587,6 +594,8 @@ public sealed partial class TankBench : SceneRoot
         delta = FrameClock.FixedStep ?? delta;
 
         Tick.Run(Tank, delta);
+        // After the tank has moved, for TankTick.Fly's reason.
+        Tick.Fly(delta);
 
         if (_tick.ShakeOn)
             _shake.Update(delta);
@@ -773,8 +782,8 @@ public sealed partial class TankBench : SceneRoot
     private void Hit(double bearing)
     {
         _hitSide = Angles.SideFor(bearing);
-        Tick.TakeHit(Tank, HitFrom, Ordnance.At(_calibre), null,
-                     Ordnance.BiteFor(_calibre));
+        Tick.TakeHit(Tank, HitFrom, Ordnance.At(_tick.Calibre), null,
+                     Ordnance.BiteFor(_tick.Calibre));
     }
 
     private void Reset()
@@ -952,8 +961,8 @@ public sealed partial class TankBench : SceneRoot
                      () => _hitSide, i => _hitSide = i);
         _panel.Choice("tank.armour.calibre", "calibre",
                       new[] { "light", "medium", "heavy" },
-                      () => _calibre,
-                      i => _calibre = Math.Clamp(i, 0, Ordnance.Count - 1));
+                      () => _tick.Calibre,
+                      i => _tick.Calibre = Math.Clamp(i, 0, Ordnance.Count - 1));
         _panel.PressPair("tank.armour.hit", "take a hit  (U)", () => Hit(HitFrom),
                          "repair", () =>
                          {

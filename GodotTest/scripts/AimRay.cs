@@ -222,18 +222,6 @@ public sealed partial class AimRay : Node2D
     /// pixels - still gets several of them.</summary>
     public const float Dash = 9.0f;
 
-    /// <summary>
-    /// How far above its own ground the gun's line runs, in levels.
-    ///
-    /// What it is for is the one test a level line needs: ground blocks the line
-    /// when it stands higher than the line does. Half a level is about where a
-    /// gun sits over its own deck, and the figure hardly matters because the
-    /// board's tops are whole levels apart - anything strictly between 0 and 1
-    /// gives the same answer for every flat cell. It decides exactly one case,
-    /// the ramp, whose top is half a level up: at 0.5 a ramp on your own level
-    /// does not block and one a level up does, which is what the picture shows.
-    /// </summary>
-    public const float Clearance = 0.5f;
 
     /// <summary>
     /// How much of the ink a ray that claims nothing gets.

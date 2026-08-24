@@ -439,6 +439,29 @@ public sealed class Vehicle
     public int ShotFrame = -1;
 
     /// <summary>
+    /// The rounds this gun has in the air, and the smoke they are still laying.
+    ///
+    /// <b>On the tank because a round belongs to the gun that fired it</b>, not
+    /// to the board it crosses. It carries its shooter already - the class
+    /// decides how deep it gets - and everything that happens to it afterwards is
+    /// one tank's business: it leaves, it crosses, it lands. Which tank it lands
+    /// on, when it lands on one, is the harness's business and stays there; see
+    /// <see cref="TankTick.Launch"/> for the seam.
+    ///
+    /// <b>Which is also why it is not a list on the scene root.</b> It was, and a
+    /// bench with a tank on it therefore had a gun that only flashed - the whole
+    /// flight lived in the harness, so the one-tank bench could not have it
+    /// without a second copy. Same argument as <see cref="TankTick"/> itself.
+    ///
+    /// The nodes are not children of this tank. A shell must not ride the hull
+    /// that fired it, and on the staged board the sprite is reparented into a
+    /// render target of its own - parenting a tracer there draws it inside the
+    /// picture rather than on the board. <see cref="TankTick.Deck"/> is where
+    /// they go.
+    /// </summary>
+    public readonly List<Shell> Rounds = new();
+
+    /// <summary>
     /// Which tank is standing on a cell, or null for an empty one.
     ///
     /// Static and over the list rather than a lookup kept beside it: three
