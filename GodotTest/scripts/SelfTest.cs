@@ -1709,7 +1709,7 @@ public static class SelfTest
             string lender = atlases.Keys.First();
             string borrower = atlases.Keys.First(k => k != lender);
             AtlasSet worn = AtlasSet.Load(
-                Main.SpritesRoot, borrower, lender);
+                AssetRoot.Sprites, borrower, lender);
             Check("a borrowed atlas keeps the tag it was asked for",
                 worn.Error.Length == 0 && worn.Tag == borrower,
                 $"asked for {borrower}, wearing {lender}, tag came back "
@@ -3286,11 +3286,11 @@ public static class SelfTest
             {
                 var pit = new Vector2I(6, 5);
                 var bank = new Vector2I(5, 5);
-                field.SetRelief(Main.ReliefMap(field.Columns, field.Rows),
-                                Main.RampMask(field.Columns, field.Rows));
+                field.SetRelief(BoardMap.Bench.LevelsFor(field.Columns, field.Rows),
+                                BoardMap.Bench.RampsFor(field.Columns, field.Rows));
                 Vector2 stand = field.CellCentre(pit);
                 float drop = field.TopAt(pit);
-                var ground = Main.Patch(field, stand, drop,
+                var ground = Footing.Patch(field, stand, drop,
                                         grove.KeepOut, grove.Squash).ToHashSet();
                 var screen = new HashSet<Vector2I>();
                 for (int k = 0; k < 6; k++)
@@ -4467,10 +4467,10 @@ public static class SelfTest
             // would be the worst kind of overload: it fires while the hand is
             // busy doing something else.
             Check("a middle tap destroys and a middle drag does not",
-                Main.MiddleTap(new Vector2(400, 300), new Vector2(400, 300))
-                && Main.MiddleTap(new Vector2(400, 300), new Vector2(402, 301))
-                && !Main.MiddleTap(new Vector2(400, 300), new Vector2(420, 300))
-                && !Main.MiddleTap(new Vector2(400, 300), new Vector2(400, 340)),
+                SceneRoot.MiddleTap(new Vector2(400, 300), new Vector2(400, 300))
+                && SceneRoot.MiddleTap(new Vector2(400, 300), new Vector2(402, 301))
+                && !SceneRoot.MiddleTap(new Vector2(400, 300), new Vector2(420, 300))
+                && !SceneRoot.MiddleTap(new Vector2(400, 300), new Vector2(400, 340)),
                 "a drag reads as a tap or the other way round");
             // The one that let every tank on the board open already darkened.
             // COLOR arrives holding the texel, so sampling TEXTURE and
@@ -4683,10 +4683,10 @@ public static class SelfTest
         // took any number, and a 1.4 round was loaded under a control reading
         // 1.0x.
         Check("any calibre asked for resolves to one the gun has",
-            Main.CalibreFor(0.4f) == 0 && Main.CalibreFor(0.95f) == 1
-            && Main.CalibreFor(1.4f) == 2 && Main.CalibreFor(9.0f) == 2,
-            $"0.4 -> {Main.CalibreFor(0.4f)}, 0.95 -> {Main.CalibreFor(0.95f)},"
-            + $" 1.4 -> {Main.CalibreFor(1.4f)}, 9.0 -> {Main.CalibreFor(9.0f)}");
+            Ordnance.For(0.4f) == 0 && Ordnance.For(0.95f) == 1
+            && Ordnance.For(1.4f) == 2 && Ordnance.For(9.0f) == 2,
+            $"0.4 -> {Ordnance.For(0.4f)}, 0.95 -> {Ordnance.For(0.95f)},"
+            + $" 1.4 -> {Ordnance.For(1.4f)}, 9.0 -> {Ordnance.For(9.0f)}");
 
         Check("the hit pair follows the hull, like the plume",
             EffectLayer.HitBurst(AtlasSet.BurstName).FollowsHull
@@ -4791,7 +4791,7 @@ public static class SelfTest
             bool snapped = true;
             for (int deg = 0; deg < 360; deg += 7)
             {
-                int side = Main.SideFor(deg);
+                int side = Angles.SideFor(deg);
                 int edge = HexField.EdgeHeadings[side];
                 double gap = Math.Abs(Mathf.PosMod(edge - deg + 180.0, 360.0) - 180.0);
                 if (side < 0 || side >= HexField.EdgeHeadings.Length || gap > 30.0)
@@ -4979,11 +4979,11 @@ public static class SelfTest
             // picks the hole" a rule rather than a coincidence of two lists
             // happening to be three long today.
             Check("the calibres span exactly the levels of damage there are",
-                Main.CalibreCount == atlas.ScarLevels
-                && Main.BiteFor(0) == 1
-                && Main.BiteFor(Main.CalibreCount - 1) == atlas.ScarLevels,
-                $"{Main.CalibreCount} calibres against {atlas.ScarLevels} levels,"
-                + $" biting {Main.BiteFor(0)}..{Main.BiteFor(Main.CalibreCount - 1)}");
+                Ordnance.Count == atlas.ScarLevels
+                && Ordnance.BiteFor(0) == 1
+                && Ordnance.BiteFor(Ordnance.Count - 1) == atlas.ScarLevels,
+                $"{Ordnance.Count} calibres against {atlas.ScarLevels} levels,"
+                + $" biting {Ordnance.BiteFor(0)}..{Ordnance.BiteFor(Ordnance.Count - 1)}");
             tank.Repair();
 
             // The other kind of shell: one fired by a tank, whose class sets a
@@ -5702,13 +5702,13 @@ public static class SelfTest
             // Same row, so the same screen height: what the eye compares has to be
             // size, and two tanks at different heights differ by perspective too.
             //
-            // The line is the tanks whose home is on Main.HomeRow rather than all of
+            // The line is the tanks whose home is on BoardMap.BenchHomeRow rather than all of
             // them, because one of them is parked on the rosette's hill on purpose -
-            // see Main.HomeCells. A pair is enough to compare sizes against; asking
+            // see BoardMap.BenchHomes. A pair is enough to compare sizes against; asking
             // all three would fail on a map that says so out loud. Where the third
             // went is asserted below, because "somebody moved a tank" and "the map
             // changed" look identical from here.
-            var line = vehicles.Where(v => v.HomeCell.Y == Main.HomeRow).ToList();
+            var line = vehicles.Where(v => v.HomeCell.Y == BoardMap.BenchHomeRow).ToList();
             Check("the ones on the home row stand in one row, so only the size "
                 + "differs",
                 line.Count >= 2
@@ -5717,10 +5717,10 @@ public static class SelfTest
                 $"{line.Count} on the row: " + string.Join(", ", vehicles.Select(
                     v => $"{v.Tag} y={field.CellAnchor(v.HomeCell).Y:F0}")));
             Check("and the one that is not is parked on the rosette",
-                vehicles.Count(v => v.HomeCell.Y != Main.HomeRow) == 0
-                || vehicles.Where(v => v.HomeCell.Y != Main.HomeRow)
+                vehicles.Count(v => v.HomeCell.Y != BoardMap.BenchHomeRow) == 0
+                || vehicles.Where(v => v.HomeCell.Y != BoardMap.BenchHomeRow)
                            .All(v => v.HomeCell == new Vector2I(11, 3)),
-                string.Join(", ", vehicles.Where(v => v.HomeCell.Y != Main.HomeRow)
+                string.Join(", ", vehicles.Where(v => v.HomeCell.Y != BoardMap.BenchHomeRow)
                     .Select(v => $"{v.Tag} at ({v.HomeCell.X},{v.HomeCell.Y})")));
             // Far enough apart that the silhouettes cannot touch. A heavy is about
             // 212px of hull broadside; anything closer than that would have the
@@ -5739,18 +5739,18 @@ public static class SelfTest
             // on the cell, so this is the routing the feature is made of.
             int other = active == 0 ? vehicles.Count - 1 : 0;
             Check("clicking a tank takes control of it",
-                Main.SelectionFor(vehicles, active, vehicles[other].Cell) == other,
+                Vehicle.SelectionFor(vehicles, active, vehicles[other].Cell) == other,
                 $"click on {vehicles[other].Tag}'s cell picked "
-                + $"{Main.SelectionFor(vehicles, active, vehicles[other].Cell)}");
+                + $"{Vehicle.SelectionFor(vehicles, active, vehicles[other].Cell)}");
             // Otherwise the tank you are driving could not be told to stay where it
             // is, and clicking it would be a selection that does nothing.
             Check("clicking the one you are driving is not a selection",
-                Main.SelectionFor(vehicles, active, vehicles[active].Cell) < 0,
+                Vehicle.SelectionFor(vehicles, active, vehicles[active].Cell) < 0,
                 "it has to fall through to a move order");
             Vector2I empty = new(field.Columns - 1, field.Rows - 1);
             Check("clicking empty ground is a move order",
                 Vehicle.At(vehicles, empty) is null
-                && Main.SelectionFor(vehicles, active, empty) < 0,
+                && Vehicle.SelectionFor(vehicles, active, empty) < 0,
                 $"({empty.X},{empty.Y}) is not empty");
 
             // Paths go round the others. Straight through would be the one thing a
@@ -6125,7 +6125,7 @@ public static class SelfTest
 
         Check("the reverse of a lane is one of the six the armour knows",
             HexField.EdgeHeadings.All(h =>
-                HexField.EdgeHeadings[Main.SideFor((h + 180) % 360)] == (h + 180) % 360),
+                HexField.EdgeHeadings[Angles.SideFor((h + 180) % 360)] == (h + 180) % 360),
             "the firing heading turned round has to be a hex side exactly, "
             + "or the snap in TakeHit moves the shell to another plate");
 
@@ -6880,10 +6880,10 @@ public static class SelfTest
             // Shell.Streak. A trail nothing rests on, and absent from the picture
             // being matched, is decoration.
             Check("the tracer draws unless asked not to, and the trail does not",
-                Main.TracerOnByDefault && !Shell.SmokeOnByDefault
-                && Main.TurretSoundOnByDefault,
-                $"tracer {Main.TracerOnByDefault}, trail {Shell.SmokeOnByDefault},"
-                + $" turret motor {Main.TurretSoundOnByDefault}");
+                Shell.TracerOnByDefault && !Shell.SmokeOnByDefault
+                && VehicleAudio.TurretSoundOnByDefault,
+                $"tracer {Shell.TracerOnByDefault}, trail {Shell.SmokeOnByDefault},"
+                + $" turret motor {VehicleAudio.TurretSoundOnByDefault}");
             // The other half of this one is not a constant and cannot be: that no
             // [mcp] line is printed by the very run this check is inside. If the
             // connection had opened, it would have opened before SelfTest.Run was
@@ -6929,8 +6929,8 @@ public static class SelfTest
             "fallback or case-insensitive lookup is broken");
 
         if (hadRelief)
-            field.SetRelief(Main.ReliefMap(field.Columns, field.Rows),
-                            Main.RampMask(field.Columns, field.Rows));
+            field.SetRelief(BoardMap.Bench.LevelsFor(field.Columns, field.Rows),
+                            BoardMap.Bench.RampsFor(field.Columns, field.Rows));
 
         GD.Print(failed == 0 ? "SELFTEST OK" : $"SELFTEST FAILED: {failed}");
         return failed;
@@ -8128,8 +8128,8 @@ public static class SelfTest
         GD.Print("ramps: the level changes where the map says it may");
         try
         {
-            field.SetRelief(Main.ReliefMap(field.Columns, field.Rows),
-                            Main.RampMask(field.Columns, field.Rows));
+            field.SetRelief(BoardMap.Bench.LevelsFor(field.Columns, field.Rows),
+                            BoardMap.Bench.RampsFor(field.Columns, field.Rows));
             Check("the board carries ramps at all", field.HasRamps,
                 "no ramp survived the derivation, so nothing below is being tested");
 
@@ -8305,7 +8305,7 @@ public static class SelfTest
                         // Where the drive puts the contact point, and the flat point
                         // it is over - the horizontal part carries no lift at all,
                         // so it is the same both ways.
-                        Vector2 at = Main.GroundBetween(field, cell, next, f);
+                        Vector2 at = Footing.GroundBetween(field, cell, next, f);
                         Vector2 flat = field.FlatAnchor(cell.X, cell.Y).Lerp(
                                            field.FlatAnchor(next.X, next.Y), f)
                                        + field.CentreOffset;
@@ -8715,7 +8715,7 @@ public static class SelfTest
 
             // The fallback, which is what keeps every relief assertion written
             // before ramps existed describing the board it was written for.
-            field.SetRelief(Main.ReliefMap(field.Columns, field.Rows));
+            field.SetRelief(BoardMap.Bench.LevelsFor(field.Columns, field.Rows));
             Check("without ramps a board paths by MaxClimb, as it always did",
                 !field.HasRamps && field.Passable(new Vector2I(4, 3), 150),
                 "a ramp-free board stopped letting a tank climb one level");
@@ -8729,7 +8729,7 @@ public static class SelfTest
             bool refused = false;
             try
             {
-                field.SetRelief(Main.ReliefMap(field.Columns, field.Rows), bad);
+                field.SetRelief(BoardMap.Bench.LevelsFor(field.Columns, field.Rows), bad);
             }
             catch (InvalidOperationException)
             {
@@ -9085,9 +9085,9 @@ public static class SelfTest
         bool hadWater = field.HasWater;
         try
         {
-            field.SetRelief(Main.ReliefMap(field.Columns, field.Rows),
-                            Main.RampMask(field.Columns, field.Rows));
-            field.SetWater(Main.WaterMask(field.Columns, field.Rows));
+            field.SetRelief(BoardMap.Bench.LevelsFor(field.Columns, field.Rows),
+                            BoardMap.Bench.RampsFor(field.Columns, field.Rows));
+            field.SetWater(BoardMap.Bench.WaterFor(field.Columns, field.Rows));
             Check("the board carries water at all", field.HasWater,
                 "no cell flooded, so nothing below is being tested");
 
@@ -9150,7 +9150,7 @@ public static class SelfTest
                 steps.Add((cell, heading));
             var wetted = steps.Select(s => field.Passable(s.Cell, s.Heading))
                               .ToArray();
-            bool[] hold = Main.WaterMask(field.Columns, field.Rows);
+            bool[] hold = BoardMap.Bench.WaterFor(field.Columns, field.Rows);
             field.SetWater(null);
             var drained = steps.Select(s => field.Passable(s.Cell, s.Heading))
                                .ToArray();
@@ -9236,10 +9236,10 @@ public static class SelfTest
             var bare = new List<string>();
             string tallTale = "", underTale = "", deepTale = "";
             int inked = 0, unanswered = 0;
-            foreach (string tag in Main.Tags)
+            foreach (string tag in MovementProfile.Tags)
             {
                 AtlasSet set = AtlasSet.Load(
-                    Main.SpritesRoot, tag, tag);
+                    AssetRoot.Sprites, tag, tag);
                 if (set.Error.Length > 0)
                     continue;
                 if (!set.HasHeights)
@@ -9321,7 +9321,7 @@ public static class SelfTest
                 deepTale.Length == 0, deepTale);
             Check("and a set without one still has a groundline to fall back on",
                 bare.All(t => AtlasSet.Load(
-                    Main.SpritesRoot, t, t)
+                    AssetRoot.Sprites, t, t)
                     .Groundline is not null),
                 $"{string.Join(", ", bare)} would lose the waterline entirely");
 
@@ -9404,7 +9404,7 @@ public static class SelfTest
             // went has to be shown to have gone: a refusal quietly still in place
             // reads exactly like a beach nobody thought to flood.
             bool twoLevels = false;
-            var mask = Main.WaterMask(field.Columns, field.Rows);
+            var mask = BoardMap.Bench.WaterFor(field.Columns, field.Rows);
             Vector2I ramp = default;
             for (int q = 0; q < field.Columns && ramp == default; q++)
             for (int r = 0; r < field.Rows; r++)
@@ -9463,8 +9463,8 @@ public static class SelfTest
             // sounds get, and for the same reason: a bench with no art still shows
             // everything it claims to.
             WaterArt surf = art is null
-                ? WaterArt.Load(Main.WaterRoot, default)
-                : WaterArt.Load(Main.WaterRoot, art.HexRect);
+                ? WaterArt.Load(AssetRoot.Water, default)
+                : WaterArt.Load(AssetRoot.Water, art.HexRect);
             if (!surf.Any)
             {
                 GD.Print("  skip  water art: " + surf.Note);
@@ -9917,7 +9917,7 @@ public static class SelfTest
             // six headings match one edge and the answer is one. The relief
             // comes off first so the guards will take a made-up mask; both go
             // back below.
-            var wasWater = Main.WaterMask(field.Columns, field.Rows);
+            var wasWater = BoardMap.Bench.WaterFor(field.Columns, field.Rows);
             field.SetWater(null);
             field.SetRelief(null, null);
             var middle = new Vector2I(2, 2);
@@ -9957,8 +9957,8 @@ public static class SelfTest
             Check("and a single dry neighbour lights exactly one edge",
                 lit == 1, $"{lit} edges for one dry neighbour");
 
-            field.SetRelief(Main.ReliefMap(field.Columns, field.Rows),
-                            Main.RampMask(field.Columns, field.Rows));
+            field.SetRelief(BoardMap.Bench.LevelsFor(field.Columns, field.Rows),
+                            BoardMap.Bench.RampsFor(field.Columns, field.Rows));
             field.SetWater(wasWater);
 
             // The flank under the free edges, and the two things it has to be
@@ -10045,8 +10045,8 @@ public static class SelfTest
                     : $"the trench did not build: ({wetRamp.X},{wetRamp.Y}) is "
                       + $"{(field.IsRamp(wetRamp) ? "level " + field.LevelAt(wetRamp)
                                                   : "not a ramp")}");
-            field.SetRelief(Main.ReliefMap(field.Columns, field.Rows),
-                            Main.RampMask(field.Columns, field.Rows));
+            field.SetRelief(BoardMap.Bench.LevelsFor(field.Columns, field.Rows),
+                            BoardMap.Bench.RampsFor(field.Columns, field.Rows));
             field.SetWater(wasWater);
             // Three of six face the eye, which is the ground prisms' arithmetic
             // and the reason theirs need no list. Here the cull is needed rather
@@ -10655,7 +10655,7 @@ public static class SelfTest
             field.SetWater(null);
             field.SetRelief(null);
             if (hadWater)
-                field.SetWater(Main.WaterMask(field.Columns, field.Rows));
+                field.SetWater(BoardMap.Bench.WaterFor(field.Columns, field.Rows));
         }
     }
 
@@ -10690,7 +10690,7 @@ public static class SelfTest
         // occlusion rule, which is written in whole levels and cannot answer for a
         // surface half a level up - see Main.Ramped. The ramps have their own
         // topic and their own board.
-        field.SetRelief(Main.ReliefMap(field.Columns, field.Rows));
+        field.SetRelief(BoardMap.Bench.LevelsFor(field.Columns, field.Rows));
         try
         {
             GD.Print("relief: a click lands on the face that was drawn");
@@ -11032,9 +11032,9 @@ public static class SelfTest
                         continue;
                     stepPairs++;
                     (float nose, float tail) =
-                        Main.StepHeights(field, from, onto, 0.5f, 0.4f, 20.0f);
+                        Footing.StepHeights(field, from, onto, 0.5f, 0.4f, 20.0f);
                     (float noseEnd, float tailEnd) =
-                        Main.StepHeights(field, from, onto, 1.0f, 0.4f, 20.0f);
+                        Footing.StepHeights(field, from, onto, 1.0f, 0.4f, 20.0f);
                     // Surface heights rather than levels, for StepHeights'
                     // reason: a leg onto a ramp climbs half a lift, and asked in
                     // levels it is a flat leg that had better not split.
@@ -11137,11 +11137,11 @@ public static class SelfTest
                     if (!field.InBounds(onto)
                         || field.LevelAt(onto) <= field.LevelAt(from))
                         continue;
-                    if (Main.SeamFlank(field, from, onto) is not Vector2I flank
+                    if (Footing.SeamFlank(field, from, onto) is not Vector2I flank
                         || field.LevelAt(flank) != field.LevelAt(onto))
                         continue;
                     seams++;
-                    Vector3 line = Main.SeamLine(field, Vector2.Zero, from, onto);
+                    Vector3 line = Footing.SeamLine(field, Vector2.Zero, from, onto);
                     foreach (Vector2 c in rim)
                     {
                         Vector2 pOn = field.CellAnchor(onto) + field.CentreOffset + c;
@@ -11183,7 +11183,7 @@ public static class SelfTest
                         || field.GroundRow(onto) >= field.GroundRow(from))
                         continue;
                     legsDown++;
-                    Vector3 line = Main.SeamEdge(field, Vector2.Zero, from, onto);
+                    Vector3 line = Footing.SeamEdge(field, Vector2.Zero, from, onto);
                     foreach (Vector2 c in rim)
                     {
                         Vector2 pFrom = field.FlatAnchor(from)
@@ -11486,7 +11486,7 @@ public static class SelfTest
         // occlusion rule, which is written in whole levels and cannot answer for a
         // surface half a level up - see Main.Ramped. The ramps have their own
         // topic and their own board.
-        field.SetRelief(Main.ReliefMap(field.Columns, field.Rows));
+        field.SetRelief(BoardMap.Bench.LevelsFor(field.Columns, field.Rows));
         (int low, int high) = field.LevelRange;
         float tan = field.Squash / Math.Max(field.RiseFactor, 0.01f);
         float shift = (high - low) * field.Lift * tan * tan;
@@ -11715,22 +11715,68 @@ public static class SelfTest
                     : $"{under.Count} flooded, wanted just the dry middle");
         }
 
-        // The bench board is the one nothing may change, and this is the
-        // assertion rather than the argument: BoardMap decodes the same three
-        // grids that Main's three decoders read, so the two have to agree cell
-        // for cell. They are what the self test and Relief3D still run on.
+        // The bench board is the one nothing may change, and this is a golden:
+        // the three grids written out a second time, here, and decoded here.
+        //
+        // A second copy on purpose, which is the opposite of what this file does
+        // everywhere else, and the reason is that the old form could not fail.
+        // It compared BoardMap.Bench against Main's three decoders - and those
+        // decoders read the very grids BoardMap.Bench was built from, so editing
+        // a character moved both sides together and the check passed. What it
+        // actually asserted was that two decoders of one grid agree; the decoder
+        // is now one, and that assertion has nothing left to make. Held against
+        // a copy, a stray character in either grid names the cell it moved.
         BoardMap bench = BoardMap.Bench;
-        int[] levels = Main.ReliefMap(bench.Columns, bench.Rows);
-        bool[] ramps = Main.RampMask(bench.Columns, bench.Rows);
-        bool[] water = Main.WaterMask(bench.Columns, bench.Rows);
+        string[] wasRelief =
+        {
+            "..............",
+            "..............",
+            "...1.1........",
+            "...1.1.....1..",
+            "......vvv.....",
+            "......vvv.....",
+        };
+        string[] wasRamps =
+        {
+            "..............",
+            "..............",
+            "...........r..",
+            "..........r.r.",
+            "...r.r.r..rrr.",
+            "..............",
+        };
+        string[] wasWater =
+        {
+            "..............",
+            "..............",
+            "..............",
+            "..............",
+            "......www.....",
+            "......www.....",
+        };
+        Vector2I[] wasHomes = { new(11, 3), new(4, 2), new(6, 2) };
+        string wrongCell = "";
+        for (int r = 0; r < bench.Rows && wrongCell.Length == 0; r++)
+        for (int q = 0; q < bench.Columns && wrongCell.Length == 0; q++)
+        {
+            int at = r * bench.Columns + q;
+            int level = wasRelief[r][q] switch { '1' => 1, '2' => 2, 'v' => -1, _ => 0 };
+            if (bench.Levels[at] != level)
+                wrongCell = $"({q},{r}) stands at {bench.Levels[at]}, was {level}";
+            else if (bench.Ramps[at] != (wasRamps[r][q] == 'r'))
+                wrongCell = $"({q},{r}) is {(bench.Ramps[at] ? "" : "not ")}a ramp now";
+            else if (bench.Water[at] != (wasWater[r][q] == 'w'))
+                wrongCell = $"({q},{r}) is {(bench.Water[at] ? "" : "not ")}wet now";
+        }
         Check("the bench board is the board it always was",
-            bench.Levels.SequenceEqual(levels)
-            && bench.Ramps.SequenceEqual(ramps)
-            && bench.Water.SequenceEqual(water)
+            wrongCell.Length == 0
+            && bench.Columns == 14 && bench.Rows == 6
             && bench.Plot is null
             && bench.Kinds.All(k => k is null)
-            && bench.Homes.SequenceEqual(Main.HomeCells),
-            "the map and the decoders disagree");
+            && bench.Homes.SequenceEqual(wasHomes),
+            wrongCell.Length > 0 ? wrongCell
+                : $"{bench.Columns}x{bench.Rows}, homes "
+                  + string.Join(" ", bench.Homes));
 
         // The island on the test board, and it is the one thing about that board
         // a single character undoes without a word. Dry one cell of its ring and

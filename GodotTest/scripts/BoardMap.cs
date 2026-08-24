@@ -186,6 +186,45 @@ public sealed partial class BoardMap
 
     public int At(Vector2I cell) => cell.Y * Columns + cell.X;
 
+    /// <summary>
+    /// This map's heights laid onto a field of another size: every cell the map
+    /// has, and the datum everywhere it does not reach.
+    ///
+    /// <b>Three of these rather than one map handed over whole, because the two
+    /// readers ask about a field rather than about the map.</b> The self test
+    /// builds fields of whatever size the assertion needs and
+    /// <see cref="Relief3D"/> has its own columns and rows, so what they want is
+    /// the bench's hill projected onto that - which is what the three decoders
+    /// that used to sit on <see cref="Main"/> did, character by character, off
+    /// the grids. Off the decoded map instead: one decode, so a cell cannot mean
+    /// one thing to the board and another to the check reading the same grid.
+    ///
+    /// Clipped rather than refused when the sizes disagree - <see cref="Read"/>
+    /// throws for a map, because a ragged map is an authoring mistake, but a
+    /// field wider than the board it borrows a hill from is the ordinary case
+    /// here.
+    /// </summary>
+    public int[] LevelsFor(int columns, int rows) => Onto(Levels, columns, rows);
+
+    /// <summary>Which cells carry a ramp, on a field of another size. Separate
+    /// from <see cref="LevelsFor"/> so a board can be given height without them -
+    /// which is what every relief assertion written before ramps existed runs on,
+    /// and what <see cref="HexField.Passable"/> falls back to.</summary>
+    public bool[] RampsFor(int columns, int rows) => Onto(Ramps, columns, rows);
+
+    /// <summary>Which cells are flooded, on a field of another size.</summary>
+    public bool[] WaterFor(int columns, int rows) => Onto(Water, columns, rows);
+
+    private T[] Onto<T>(T[] cells, int columns, int rows)
+    {
+        var into = new T[columns * rows];
+        for (int r = 0; r < rows && r < Rows; r++)
+        for (int q = 0; q < columns && q < Columns; q++)
+            into[r * columns + q] = cells[r * Columns + q];
+        return into;
+    }
+
+
     public bool OnBoard(Vector2I cell) =>
         cell.X >= 0 && cell.X < Columns && cell.Y >= 0 && cell.Y < Rows
         && (Plot is null || Plot.Contains(cell));
@@ -382,7 +421,7 @@ public sealed partial class BoardMap
     // --- authoring -----------------------------------------------------------
 
     /// <summary>Reads a char grid, refusing a ragged one. See the type's note on
-    /// why this throws where <see cref="Main.ReliefMap"/> clips.</summary>
+    /// why this throws where <see cref="LevelsFor"/> clips.</summary>
     private static char[,] Read(string what, string[] grid, int columns, int rows)
     {
         if (grid.Length != rows)
@@ -532,11 +571,180 @@ public sealed partial class BoardMap
     private static BoardMap? _bench;
     private static BoardMap? _abbey;
 
-    /// <summary>The harness board. Its grids live in <see cref="Main"/>, where
-    /// every line of them is explained and where three static decoders read them
-    /// for the self test and <see cref="Relief3D"/>.</summary>
+    /// <summary>
+    /// The one board with height on it, until a map format exists.
+    ///
+    /// Written as rows of characters for the reason the relief bench's is: the
+    /// shape of the hill has to be legible in the source, and an int array of
+    /// fifty-four entries is not.
+    ///
+    /// <b>The hill is in front of the tanks, not behind them, and that is the
+    /// whole of why it is where it is.</b> Ground only hides what is behind it,
+    /// so a hill up at the top of the board is a hill nothing is ever occluded
+    /// by - it would show the lift and the walls and say nothing at all about the
+    /// one rule this slice is for. It sits one row in front of the home line,
+    /// where standing still is already the test.
+    ///
+    /// The three home cells stay level - all on row 2 - so the bench still opens
+    /// with the tanks in a line at one height, which is the comparison every
+    /// other thing here is judged by. The ditch is off to one side for the other
+    /// direction: a cell below the datum is drawn <i>down</i>, and its far
+    /// neighbours own the walls.
+    ///
+    /// Clipped to the board rather than refused when the two disagree: this is a
+    /// stand-in, and a board that came up empty because somebody widened the
+    /// field would read as the flag not working.
+    /// </summary>
+    /// <summary>
+    /// The board's height, one character per cell.
+    ///
+    /// <b>A ramp is a cell of the lower of the two levels it joins</b>, marked
+    /// '/' - its own level is read off the neighbours exactly as any other cell's
+    /// is, and which way it tilts is derived from them by
+    /// <see cref="HexField.SetRelief"/>. So a ramp up onto a plateau is a '/' on
+    /// the flat beside it, and a ramp down into a pit is a '/' in the pit at its
+    /// mouth.
+    ///
+    /// <b>Every level change on this board goes through exactly one ramp, and
+    /// that is the map being a map.</b> The plateaus are reached up column 3 and
+    /// column 5; the pit is entered at (7,4) and opens out inside. Drive at a
+    /// cliff anywhere else and the route refuses, which is what
+    /// <see cref="HexField.Passable"/> is for.
+    ///
+    /// <b>The pit had to be widened to six cells to hold its ramp.</b> A ramp
+    /// wants exactly one neighbour a level above it, and at the old four-cell
+    /// pit's mouth (8,4) there were three - so the map did not decide which edge
+    /// was the high one and the derivation refused it, correctly. Surrounding
+    /// (7,4) with pit on its other five edges is what leaves one.
+    ///
+    /// <b>Every ramp rises away from the camera, and that is measured rather than
+    /// tidy.</b> A slope's face projects by <c>sin(e) -/+ grade*cos(e)</c> of its
+    /// own footprint, so one rising toward the camera is <i>compressed</i> - the
+    /// first draft put the plateau ramps on row 2, where a 100px cell came out
+    /// 57px tall, read as the plateau simply being one cell bigger, and pushed the
+    /// ground art far enough down its mipmaps to come back as a smooth pale band.
+    /// Rising away it is stretched instead, which is what a slope looks like.
+    ///
+    /// <b>Both of a ramp's axis neighbours have to be on the board.</b> The
+    /// obvious fix - ramps on row 5, the near edge of the plateau - makes them
+    /// unreachable: the low edge points off the board, and a ramp is entered
+    /// along its axis only, so the only way in was from the plateau it exists to
+    /// reach. The plateaus moved up a row instead.
+    ///
+    /// <b>The right-hand five columns are the rosette: one hill cell with a ramp
+    /// on every one of its six flat faces.</b> The rest of this board exercises
+    /// one ramp heading - 90, away from the camera - because that is the one that
+    /// looks right, and a slope is drawn from a corner pattern rotated to its high
+    /// edge, so five of the six rotations were never rendered at all. Here they
+    /// all are, and the hill is reachable six ways.
+    ///
+    /// <b>Two of them rise toward the camera and read badly, and that is the
+    /// point rather than an oversight.</b> A face rising at the viewer projects to
+    /// <c>sin(e) - grade*cos(e)</c> of its footprint against <c>sin(e) +
+    /// grade*cos(e)</c> going away, so the near pair is compressed to about half
+    /// the far pair's height. The lesson is written on the plateau ramps above,
+    /// which is where the map obeys it; this patch is where it can be seen.
+    ///
+    /// <b>The ring cells are all adjacent to each other and none of them may be
+    /// driven to another.</b> Two adjacent ramps are refused by
+    /// <see cref="HexField.Passable"/>, so the way from one face to the next is
+    /// out to the flat, round, and back in - which is what makes each of the six
+    /// its own test rather than one lap of the hill.
+    /// </summary>
+    private static readonly string[] BenchRelief =
+    {
+        "..............",
+        "..............",
+        "...1.1........",
+        "...1.1.....1..",
+        "......vvv.....",
+        "......vvv.....",
+    };
+
+    /// <summary>Where the ramps are. Kept beside <see cref="BenchRelief"/> rather than
+    /// mixed into it because the two answer different questions about a cell -
+    /// how high it stands, and whether its top is flat - and a ramp reads its own
+    /// level out of the same grid every other cell does.
+    ///
+    /// The six around column 11 are the rosette's, and they are not placed by eye:
+    /// they are <c>Step((11,3), h)</c> for each of the six edge headings, and their
+    /// entry cells are one more step of the same heading. Both had to land on the
+    /// board, which is what set the width at fourteen columns.</summary>
+    private static readonly string[] BenchRamps =
+    {
+        "..............",
+        "..............",
+        "...........r..",
+        "..........r.r.",
+        "...r.r.r..rrr.",
+        "..............",
+    };
+
+    /// <summary>
+    /// Which cells are flooded. A third grid beside the levels and the ramps,
+    /// because water is a third statement about a cell and not a shade of either
+    /// of the other two - see <see cref="HexField.SetWater"/>.
+    ///
+    /// <b>It is the pit, and putting it there is most of the point.</b> The pit
+    /// already exists, it is already a level down, and it already has exactly one
+    /// way in - so the pond is somewhere a tank has to drive down to rather than a
+    /// puddle standing on the plain, and the first order that reaches it walks a
+    /// ramp and a ford back to back, which is both speed ceilings in one leg.
+    ///
+    /// <b>The mouth cell (7,4) is dry, and it has to be.</b> It is the pit's ramp,
+    /// and a slope has no one surface height for water to stand at - the guard
+    /// refuses it rather than wedging the pond, which is the same refusal the ramp
+    /// derivation makes about an undecided high edge. What that leaves is a beach:
+    /// the tank comes down the slope on dry ground and enters the water at (7,5),
+    /// which is where a ford is entered from.
+    ///
+    /// <b>Painted onto a flat board it is still legal, and that is the A/B.</b>
+    /// With no relief every level is nought, so the five cells are one flat pond on
+    /// open ground - no ramp under it to refuse and no step between them to be a
+    /// waterfall.
+    /// </summary>
+    private static readonly string[] BenchWater =
+    {
+        "..............",
+        "..............",
+        "..............",
+        "..............",
+        "......www.....",
+        "......www.....",
+    };
+
+
+
+    /// <summary>The row the comparison line stands on. Named because the self-test
+    /// asks which tanks are on it, and a literal there would be a second copy of
+    /// this one.</summary>
+    public const int BenchHomeRow = 2;
+
+    /// <summary>Where the three are parked: one row, every other column. The same
+    /// row means the same screen height, and two columns apart - 372px against a
+    /// heavy's 212px of hull - means the silhouettes never touch, so what the eye
+    /// compares is size rather than spacing.
+    ///
+    /// <b>The light stands on the rosette's hill instead, and it costs the thing
+    /// the line is for.</b> Three abreast at one height is how the class sizes are
+    /// judged - see MovementProfile.Size - and with the light on (11,3) that
+    /// comparison is down to a pair. It is there because a hill with six approaches
+    /// is worth having a tank on: the lean, the standing height and the six ramps
+    /// meeting the top are all things a tank on the summit says at a glance and an
+    /// empty summit does not. R puts it back there rather than into the line, which
+    /// is what makes it a home and not a start.</summary>
+    public static readonly Vector2I[] BenchHomes =
+        { new(11, 3), new(4, BenchHomeRow), new(6, BenchHomeRow) };
+
+    /// <summary>The harness board, off the three grids above.
+    ///
+    /// <b>They used to live on <see cref="Main"/>, and this read them from
+    /// there.</b> That put the one thing a map is - its data - inside the scene
+    /// that draws it, and left the other three boards here; the self test and
+    /// <see cref="Relief3D"/> then reached into the harness for a level array.
+    /// They ask this map for one now - see <see cref="LevelsFor"/>.</summary>
     public static BoardMap Bench => _bench ??= FromLayers(
-        "bench", 14, 6, Main.Relief, Main.Ramps, Main.Water, Main.HomeCells,
+        "bench", 14, 6, BenchRelief, BenchRamps, BenchWater, BenchHomes,
         TerrainSet.Default, false);
 
     public static BoardMap Abbey => _abbey ??= FromGround(

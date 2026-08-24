@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Globalization;
 using System.IO;
 using Godot;
@@ -181,7 +181,7 @@ public sealed partial class Relief3D : Node3D
     public override void _Ready()
     {
         ReadFlags();
-        _levels = Main.ReliefMap(Columns, Rows);
+        _levels = BoardMap.Bench.LevelsFor(Columns, Rows);
         _terrain = TerrainSet.Load(TerrainsRoot);
         GD.Print($"relief3d: {_terrain.Note}");
 

@@ -245,7 +245,7 @@ public sealed partial class WallStack : Node3D
         }
         if (_fall is null)
             return;
-        _clock += (float)(Main.FixedStep ?? delta);
+        _clock += (float)(FrameClock.FixedStep ?? delta);
         Pose();
     }
 

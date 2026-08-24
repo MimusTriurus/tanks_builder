@@ -65,8 +65,12 @@ namespace TankSpriteTest;
 /// same clearing. What is genuinely absent is the fade,
 /// <see cref="Grove.Reveal"/>: nothing stands on the cell, so nothing ghosts.
 /// </summary>
-public sealed partial class WoodBench : Node2D
+public sealed partial class WoodBench : SceneRoot
 {
+	/// <summary>Thirty frames: a tree that has just caught is still a green
+	/// tree, so a shot of one burning has to wait for the flame.</summary>
+	public WoodBench() : base(30) { }
+
     private static readonly string TerrainsRoot = AssetRoot.Terrains;
     private static readonly string PropsRoot = AssetRoot.Props;
     private static readonly string SpritesRoot = AssetRoot.Sprites;
@@ -106,9 +110,10 @@ public sealed partial class WoodBench : Node2D
     /// one that wants looking at closely. The atlas is still sampled 1:1 - the
     /// zoom moves the view and never the sprites - and the wheel and --zoom reach
     /// the rest.</summary>
-    private float _zoomAt = 3.0f;
-    private string? _capturePath;
-    private int _captureAt = 30;
+    /// <summary>What the wheel and R come back to. Three, because the subject
+    /// is four trunks on one cell. <c>--zoom</c> overrides it - see
+    /// <see cref="SceneRoot.ZoomAt"/>.</summary>
+    private float HomeZoom => ZoomAt ?? 3.0f;
     private int _frame;
     private Vector2I? _lightAt;
 
@@ -157,23 +162,16 @@ public sealed partial class WoodBench : Node2D
     /// this is a sweep of the whole effect rather than of one of its parts.</summary>
     private float? _flameRise;
 
-    private bool _noUi;
-    private bool _showUi;
 
     private void ReadFlags()
     {
         string[] args = OS.GetCmdlineUserArgs();
         for (int i = 0; i < args.Length; i++)
         {
-            if (args[i] == "--capture" && i + 1 < args.Length)
-                _capturePath = args[++i];
-            else if (args[i] == "--capture-at" && i + 1 < args.Length
-                     && int.TryParse(args[i + 1], out int at))
-            {
-                _captureAt = at;
-                i++;
-            }
-            else if (args[i] == "--burn-wood" && i + 1 < args.Length)
+            // The five every root here takes - see SceneRoot.
+            if (ReadCommonFlag(args, ref i))
+                continue;
+            if (args[i] == "--burn-wood" && i + 1 < args.Length)
             {
                 // q,r, spelled the way the harness spells it: a screenshot of a
                 // burning wood must not need a hand on the mouse.
@@ -185,17 +183,6 @@ public sealed partial class WoodBench : Node2D
                     _lightAt = new Vector2I(q, r);
                 else
                     GD.PushWarning($"--burn-wood {spot} is not q,r");
-            }
-            else if (args[i] == "--zoom" && i + 1 < args.Length
-                     && float.TryParse(args[i + 1], NumberStyles.Float,
-                                       CultureInfo.InvariantCulture, out float zoom))
-            {
-                // Invariant and never the machine's: on a comma locale the plain
-                // parse fails, the default stands, and two runs at two zooms come
-                // back byte for byte identical - which reads as a flag that does
-                // nothing rather than one that was not understood.
-                _zoomAt = Mathf.Clamp(zoom, 0.25f, 8.0f);
-                i++;
             }
             else if (args[i] == "--trees-only")
                 _treesOnly = true;
@@ -216,23 +203,12 @@ public sealed partial class WoodBench : Node2D
                 _flameRise = Mathf.Clamp(lit, 0.05f, 2.0f);
                 i++;
             }
-            else if (args[i] == "--no-ui")
-                _noUi = true;
-            else if (args[i] == "--ui")
-                _showUi = true;
         }
         // A capture is evidence, so the step is pinned for the reason it is
         // pinned over there: two runs of the same flags have to be diffable, and
         // the pond taught this file's neighbour that a step kept local is a step
         // the siblings never see. Stage3D reads this very field.
-        if (_capturePath is not null)
-        {
-            Main.FixedStep = 1.0 / 60.0;
-            // A capture is evidence, and an A/B of two renders must not differ by
-            // a readout that happened to be up - the harness's rule for its panel.
-            // --ui brings it back, for the shot of the bench itself.
-            _noUi = !_showUi;
-        }
+        SettleForProof(CapturePath is not null);
     }
 
     public override void _Ready()
@@ -296,7 +272,7 @@ public sealed partial class WoodBench : Node2D
 
         _camera = new Camera2D
         {
-            Zoom = new Vector2(_zoomAt, _zoomAt),
+            Zoom = new Vector2(HomeZoom, HomeZoom),
             Enabled = true,
             // The cell's own hexagon, not its anchor: the anchor is the turret
             // axis floating some sixty pixels above the ground plane, and a view
@@ -332,7 +308,7 @@ public sealed partial class WoodBench : Node2D
         _field.ShowField = false;
         _grove.Visible = false;
 
-        if (!_noUi)
+        if (!NoUi)
         {
             var layer = new CanvasLayer();
             AddChild(layer);
@@ -351,7 +327,7 @@ public sealed partial class WoodBench : Node2D
 
     public override void _Process(double delta)
     {
-        delta = Main.FixedStep ?? delta;
+        delta = FrameClock.FixedStep ?? delta;
         // The board's state first and the trees' reading of it second, which is
         // the order the harness runs these three in: the fire is a state of the
         // board, and the coat on a trunk is a view of that state.
@@ -367,9 +343,9 @@ public sealed partial class WoodBench : Node2D
             _hud.Text = Note();
 
         _frame++;
-        if (_capturePath is not null && _frame >= _captureAt)
+        if (CapturePath is not null && _frame >= CaptureAt)
         {
-            Capture(_capturePath);
+            Capture(CapturePath);
             GetTree().Quit();
         }
     }
@@ -443,7 +419,7 @@ public sealed partial class WoodBench : Node2D
     {
         // One button doing two things with the gesture deciding which, resolved
         // on release because that is the earliest moment the two are
-        // distinguishable - Main.MiddleTap's arrangement, and its own slack, so
+        // distinguishable - MiddleTap's arrangement, and its own slack, so
         // that a pan across the wood does not leave a line of fires behind it.
         if (@event is InputEventMouseButton { ButtonIndex: MouseButton.Middle } middle)
         {
@@ -455,7 +431,7 @@ public sealed partial class WoodBench : Node2D
             Vector2? from = _middleFrom;
             _middleFrom = null;
             if (from is not Vector2 down
-                || !Main.MiddleTap(down, GetGlobalMousePosition()))
+                || !MiddleTap(down, GetGlobalMousePosition()))
                 return;
             // By cell, like every button on the harness's board: a crown
             // overhangs its own hexagon, so picking by pixels would light a cell
@@ -503,7 +479,7 @@ public sealed partial class WoodBench : Node2D
                 // trees drop their coats on this frame rather than on the next.
                 _fire?.Douse();
                 _grove?.Smoulder();
-                _camera.Zoom = new Vector2(_zoomAt, _zoomAt);
+                _camera.Zoom = new Vector2(HomeZoom, HomeZoom);
                 _camera.Position = ViewHome;
                 break;
             case Key.F12:
@@ -512,12 +488,4 @@ public sealed partial class WoodBench : Node2D
         }
     }
 
-    private void Capture(string path)
-    {
-        Image image = GetViewport().GetTexture().GetImage();
-        DirAccess.MakeDirRecursiveAbsolute(path.GetBaseDir());
-        Error err = image.SavePng(path);
-        GD.Print(err == Error.Ok ? $"wood: wrote {path}"
-                                 : $"wood: could not write {path}: {err}");
-    }
 }

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Godot;
 
@@ -23,14 +23,15 @@ namespace TankSpriteTest;
 /// <see cref="Stage3D"/> already use: the caller says what the world is, and
 /// this says what a frame does to a tank standing in it.
 ///
-/// <b>The switches are pushed every frame, never pulled.</b> They live where
-/// they are declared - a flag, a key and a panel row apiece in the harness, a
-/// smaller set in the bench - and <see cref="Bind"/> copies them across before
-/// the loop. Pulling them through an interface would have made every one of
-/// them a member of a contract, and the contract would then be the place a new
-/// switch has to be remembered in as well as the two it already does. Pushing
-/// costs the risk that one is forgotten; that risk is one method long and the
-/// caller can read it.
+/// <b>The world is pushed every frame; the switches live here.</b> Which board,
+/// which tanks and which of them is driven are the caller's and change under it,
+/// so a root reaching for this and saying what the world is are one act. The
+/// switches are not that: each is set once by a key, a flag or a panel row and
+/// read until the hand moves again, so they are declared here and written in
+/// place. They were mirrored on every root and copied across in <see cref="Run"/>'s caller
+/// before, which cost twenty-four declarations for twelve facts and carried the
+/// one risk that arrangement has - that a new switch is added to the mirror and
+/// not to the push.
 ///
 /// <b>Gunnery is the harness's and is not here.</b> It is about two tanks -
 /// which lane, whose armour, whose shell in the air - and this is about one,
@@ -88,20 +89,42 @@ public sealed class TankTick
     /// </summary>
     public bool Staged;
 
-    // --- the switches, pushed by Bind ---------------------------------------
+    // --- the switches ------------------------------------------------------
 
+    /// <summary>
+    /// Which of a tank's effects are running. One copy, here, and the key, the
+    /// flag and the panel row of whichever root is up write straight onto it.
+    ///
+    /// <b>Each root used to keep a private mirror of all twelve and copy them
+    /// across in Bind.</b> Twenty-four declarations and twenty-four assignments
+    /// for twelve facts, and the arrangement's own docstring named what it cost:
+    /// "pushing costs the risk that one is forgotten". There is nothing left to
+    /// forget - a switch nobody pushes is a switch that was never anywhere else.
+    ///
+    /// <b>Bind still pushes the world</b>, because the world is genuinely the
+    /// caller's: which board, which tanks, which of them is driven. That is the
+    /// half where reaching for the tick and saying what the world is have to be
+    /// one act. A dial is not that - it is set once by a hand and read until the
+    /// hand moves again.
+    ///
+    /// The defaults are the effects' own, named where the effect names them.
+    /// Where a root disagrees it says so at its own <c>TankTick</c> - the harness
+    /// opens with the pitch off, because there it is a thing to switch on and
+    /// look at rather than the subject.
+    /// </summary>
     public bool PitchEnabled = true;
+
     public bool RumbleEnabled;
     public bool TracksEnabled = true;
     public bool TrembleEnabled = true;
     public double TrembleLevel = 1.0;
     public bool ExhaustEnabled = true;
     public double ExhaustLevel = 1.0;
-    public bool ExhaustRamp;
+    public bool ExhaustRamp = !ExhaustLoop.BinaryByDefault;
     public bool ScanEnabled;
     public bool RecoilTube = true;
-    public bool RecoilShear;
-    public bool ShakeOn;
+    public bool RecoilShear = Recoil.ShearOnByDefault;
+    public bool ShakeOn = CameraShake.OnByDefault;
 
     // --- what it cannot answer for itself -----------------------------------
 
@@ -227,7 +250,7 @@ public sealed class TankTick
     /// </summary>
     public Vector2 StandBetween(Vehicle vehicle, Vector2I from, Vector2I onto,
                                  float done) =>
-        Origin + Main.GroundBetween(Field, from, onto, done)
+        Origin + Footing.GroundBetween(Field, from, onto, done)
         - vehicle.Atlas.GroundOffset * vehicle.Sprite.BodyScale;
 
     /// <param name="placed">Whether the tank is being <i>put</i> here rather than
@@ -311,7 +334,7 @@ public sealed class TankTick
         // off the angle, so a reset that moved the turret and left this stale
         // would report the whole move as one frame's traverse and blip the motor.
         vehicle.LastTurretOffset =
-            Main.WrapAngle(vehicle.Sprite.TurretFacing - vehicle.Sprite.HullFacing);
+            Angles.WrapAngle(vehicle.Sprite.TurretFacing - vehicle.Sprite.HullFacing);
         // And the third baseline, for the third thing read back rather than
         // announced. Left stale, a tank put back on its home cell would count
         // the whole jump as one frame's travel and shoulder the wood aside on
@@ -409,7 +432,7 @@ public sealed class TankTick
     /// </summary>
     private (double Left, double Right) BeltTravel(Vehicle v, double delta)
     {
-        double swing = Main.WrapAngle(v.Sprite.HullFacing - v.LastHullFacing);
+        double swing = Angles.WrapAngle(v.Sprite.HullFacing - v.LastHullFacing);
         v.LastHullFacing = v.Sprite.HullFacing;
         double radius = PivotArm(v);
         return TrackLoop.Split(v.Speed * delta, swing, radius);
@@ -513,7 +536,7 @@ public sealed class TankTick
             return;
         }
 
-        double diff = Main.WrapAngle(heading - v.Sprite.HullFacing);
+        double diff = Angles.WrapAngle(heading - v.Sprite.HullFacing);
         double accelRatio;
 
         if (Math.Abs(diff) > 0.5)
@@ -682,8 +705,8 @@ public sealed class TankTick
         // fraction of this leg: half a hull, in the leg's own units.
         float gait = span <= 0.001f ? 0.0f
             : v.Atlas.HullSpan * v.Sprite.BodyScale * 0.5f / span;
-        (v.Standing, v.Trailing) = Main.StepHeights(Field, v.Cell, next, done, gait,
-            Main.GearCover * v.Sprite.BodyScale);
+        (v.Standing, v.Trailing) = Footing.StepHeights(Field, v.Cell, next, done, gait,
+            Footing.GearCover * v.Sprite.BodyScale);
         v.Travel = span <= 0.001f ? Vector2.Zero : (goal - from) / span;
         // How much of the hull has crossed onto the far cell's face - see
         // Vehicle.LegBlend. Nought until the nose reaches the seam at 0.5 - gait,
@@ -707,7 +730,7 @@ public sealed class TankTick
         {
             v.Trailing = v.Standing
                 + (v.Trailing - v.Standing) * Mathf.Abs(v.Travel.X);
-            v.SeamLine = Main.SeamLine(Field, Origin, v.Cell, next);
+            v.SeamLine = Footing.SeamLine(Field, Origin, v.Cell, next);
             return;
         }
         // A descent's seam is not pinned to the board at all - it is a wipe.
@@ -731,7 +754,7 @@ public sealed class TankTick
         // below it - a tank torn in two, measured and seen. Swept over the
         // whole leg, because the drawn ramp sinks the sprite from the first
         // pixel and half a leg at cruise is a handful of frames.
-        Vector3 axis = Main.SeamEdge(Field, Origin, v.Cell, next);
+        Vector3 axis = Footing.SeamEdge(Field, Origin, v.Cell, next);
         float reach = v.Atlas.HullSpan * v.Sprite.BodyScale;
         // The range is the rows where the two depths actually differ - from
         // just under the shadow's far edge to the top of the parked cut.
@@ -1101,7 +1124,7 @@ public sealed class TankTick
         // real article now, and the two together show one true movement and one
         // invented one.
         if (RecoilShear)
-            v.Recoil.Fire(Main.WrapAngle(v.Sprite.TurretFacing - v.Sprite.HullFacing));
+            v.Recoil.Fire(Angles.WrapAngle(v.Sprite.TurretFacing - v.Sprite.HullFacing));
         // The tube goes back on the same trigger and on its own clock: the two
         // events last different lengths of time, so one counter would give one of
         // them the wrong tempo. See RecoilLoop.
@@ -1217,7 +1240,7 @@ public sealed class TankTick
         // Snapped, not taken as given: a shell arrives from a neighbouring
         // cell, so every angle anything hands in resolves to one of the six
         // sides rather than to itself.
-        double from = HexField.EdgeHeadings[Main.SideFor(fromBearing)];
+        double from = HexField.EdgeHeadings[Angles.SideFor(fromBearing)];
         // Deterministic under --capture and --trace, which fix the time step so
         // two runs can be diffed; a random scatter would put the two hits in
         // different places and the diff would measure that instead.
@@ -1419,7 +1442,7 @@ public sealed class TankTick
             // Snapped to a rendered bearing, which costs nothing on screen: the
             // sprite is drawn at the nearest rendered heading regardless, so this
             // moves the number and not the picture.
-            double onto = Main.Mod(Math.Round(v.Sprite.TurretFacing / step) * step, 360.0);
+            double onto = Angles.Mod(Math.Round(v.Sprite.TurretFacing / step) * step, 360.0);
             v.Scan.Rest(onto);
             if (onto != v.Sprite.TurretFacing)
             {
@@ -1430,7 +1453,7 @@ public sealed class TankTick
         double move = v.Scan.Advance(step, delta);
         if (move == 0.0)
             return;
-        v.Sprite.TurretFacing = Main.Mod(v.Sprite.TurretFacing + move, 360.0);
+        v.Sprite.TurretFacing = Angles.Mod(v.Sprite.TurretFacing + move, 360.0);
         v.Sprite.QueueRedraw();
     }
 }

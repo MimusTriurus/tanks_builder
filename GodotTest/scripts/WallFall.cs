@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Godot;
 
@@ -17,7 +17,7 @@ namespace TankSpriteTest;
 ///
 /// <b>And it buys the two things the bench actually needs.</b> A capture is
 /// evidence and two runs of the same flags have to be diffable - the rule
-/// <see cref="Main.FixedStep"/> exists for - and a live solver would be the first
+/// <see cref="FrameClock.FixedStep"/> exists for - and a live solver would be the first
 /// thing on this board that is not reproducible. It also costs nothing: forty
 /// parabolas against a physics tick the project does not otherwise have.
 ///

@@ -291,8 +291,8 @@ public sealed partial class Stage3D : Node3D
         // The bench's step when it has pinned one. This node is a sibling of
         // Main, not a child of its process, so a pin kept local over there left
         // the pond running on the wall clock through every capture ever taken -
-        // see Main.FixedStep for what that cost.
-        delta = Main.FixedStep ?? delta;
+        // see FrameClock.FixedStep for what that cost.
+        delta = FrameClock.FixedStep ?? delta;
         if (Field.Atlas is null)
             return;
         Aim();
@@ -840,7 +840,7 @@ void fragment() {{
     /// promoted whole to the crown, the tank spent all of (3,2)->(4,3) drawn
     /// over (3,3), a hex it had not come up to. <paramref name="drop"/> is how
     /// much lower the trailing side stands and <paramref name="line"/> is
-    /// <c>Main.SeamLine</c> in the quad's own screen frame, and the trailing
+    /// <c>Footing.SeamLine</c> in the quad's own screen frame, and the trailing
     /// side slides along the view ray by the whole of the drop: up by
     /// <c>d/cos(e)</c> and toward the camera by <c>d/sin(e)</c>, the family
     /// <c>World(row + L, L)</c> in the quad's own space, so not one pixel moves
@@ -3280,7 +3280,7 @@ uniform sampler2D screen : hint_screen_texture, filter_linear_mipmap;
 uniform sampler2D zbuf : hint_depth_texture, filter_linear;
 
 // Our own clock, wrapped, for --capture's reason: TIME is the wall clock and
-// two runs have to land on the same picture. See Main.FixedStep.
+// two runs have to land on the same picture. See FrameClock.FixedStep.
 uniform float time = 0.0;
 uniform vec3 sun = vec3(0.0, 1.0, 0.0);
 uniform float wave_scale = 0.02;

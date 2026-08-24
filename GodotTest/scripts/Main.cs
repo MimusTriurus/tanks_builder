@@ -16,31 +16,25 @@ namespace TankSpriteTest;
 ///   3. does the tank sit centred in its cell at all twelve headings
 ///   4. does the field tessellate without gaps or overlap
 /// </summary>
-public sealed partial class Main : Node2D
+public sealed partial class Main : SceneRoot
 {
+	/// <summary>Four frames is enough for the harness: nothing has to have
+	/// moved for a shot of the board to be worth looking at.</summary>
+	public Main() : base(4) { }
+
 	/// <summary>The five folders the bench reads, all off <see cref="AssetRoot"/>
 	/// - which derives them from where this project sits rather than naming a
 	/// machine. They were literals until the repository moved and renamed all
 	/// five at once; see AssetRoot for what that costs and why nothing said so.
 	///
-	/// Internal rather than private because <c>SelfTest</c> loads atlases of its
-	/// own, and it used to carry its own copy of the path: fix one and the other
-	/// stays broken, which is the whole reason there is one name now.</summary>
-	internal static readonly string SpritesRoot = AssetRoot.Sprites;
+	/// Private, and the test reads <see cref="AssetRoot"/> for itself: it used to
+	/// carry its own copy of the path, which is the whole reason there is one name
+	/// now - but the one name is AssetRoot's, not this node's.</summary>
+	private static readonly string SpritesRoot = AssetRoot.Sprites;
 	private static readonly string SoundsRoot = AssetRoot.Sounds;
 	private static readonly string TerrainsRoot = AssetRoot.Terrains;
 	private static readonly string PropsRoot = AssetRoot.Props;
-	internal static readonly string WaterRoot = AssetRoot.Water;
-	/// <summary>The tanks to look for on disk, in key order: one per class,
-	/// all three built from separate parts - hull, turret, barrel, engine and
-	/// two belts as their own meshes.
-	///
-	/// The single-mesh HT/MT/LT used to sit alongside them so a winding belt
-	/// could be judged against a still one. They are gone: their belts are not
-	/// separate meshes, so they cannot wind at all, and a tank that slides on
-	/// dead tracks is not a comparison, it is the old bug still on screen.
-	/// The atlases stay on disk under Sprites/; nothing here loads them.</summary>
-	internal static readonly string[] Tags = { "LTP", "MTP", "HTP" };
+	private static readonly string WaterRoot = AssetRoot.Water;
 
 	/// <summary>
 	/// One directory every class reads its pixels from, or null for one per tag.
@@ -111,27 +105,15 @@ public sealed partial class Main : Node2D
 	/// switch on to see is a feature nobody looks at. The comparison is still one
 	/// click away, which is all it ever needed to be.
 	///
-	/// Default named here rather than left in the initialiser for the reason
-	/// <see cref="Recoil.ShearOnByDefault"/> is: a default nobody can point at is
-	/// a default that quietly changes.
+	/// The default itself belongs to the round rather than to this board -
+	/// see <see cref="Shell.TracerOnByDefault"/>, which is where it is named.
 	/// </summary>
-	public const bool TracerOnByDefault = true;
+	private bool _tracerVisible = Shell.TracerOnByDefault;
 
-	private bool _tracerVisible = TracerOnByDefault;
-
-	/// <summary>
-	/// The turret's traverse motor - --no-turret-sound, or the panel. On.
-	/// 
-	/// It came up off while it was the newest and least settled voice on the
-	/// tank: synthesised rather than recorded, its level chosen by argument
-	/// rather than by ear, and the question about a background hum - is it
-	/// missed when it stops - can only be asked by stopping it. That has been
-	/// asked and answered, so the default is now the tank as it sounds, and the
-	/// flag turns it off for the A/B rather than on.
-	/// </summary>
-	public const bool TurretSoundOnByDefault = true;
-
-	private bool _turretSound = TurretSoundOnByDefault;
+	/// <summary>The turret's traverse motor - --no-turret-sound, or the panel.
+	/// On; the default is the voice's own, at
+	/// <see cref="VehicleAudio.TurretSoundOnByDefault"/>.</summary>
+	private bool _turretSound = VehicleAudio.TurretSoundOnByDefault;
 
 	/// <summary>
 	/// All three tanks, in the order they loaded, which is also key order and the
@@ -167,7 +149,11 @@ public sealed partial class Main : Node2D
 	/// <summary>What a frame does to a tank: the drive, the placement and every
 	/// clock, in one object shared with <see cref="TankBench"/>. See
 	/// <see cref="TankTick"/> for why it is not written twice.</summary>
-	private readonly TankTick _tick = new();
+	/// <summary>This board's tick, and the twelve switches with it - see
+	/// <see cref="TankTick.PitchEnabled"/>. The pitch opens off here and on at
+	/// the tank bench, and that is the one they disagree about: there the ride is
+	/// the subject, here it is a thing to switch on with P and look at.</summary>
+	private readonly TankTick _tick = new() { PitchEnabled = false };
 
 	/// <summary>The tick with this frame's world already on it.
 	///
@@ -208,19 +194,6 @@ public sealed partial class Main : Node2D
 		_tick.Driven = _vehicles.Count > 0 ? Active : null;
 		_tick.ViewZoom = _camera?.Zoom.X ?? 1.0f;
 		_tick.Staged = Staged;
-
-		_tick.PitchEnabled = _pitchEnabled;
-		_tick.RumbleEnabled = _rumbleEnabled;
-		_tick.TracksEnabled = _tracksEnabled;
-		_tick.TrembleEnabled = _trembleEnabled;
-		_tick.TrembleLevel = _trembleLevel;
-		_tick.ExhaustEnabled = _exhaustEnabled;
-		_tick.ExhaustLevel = _exhaustLevel;
-		_tick.ExhaustRamp = _exhaustRamp;
-		_tick.ScanEnabled = _scanEnabled;
-		_tick.RecoilTube = _recoilTube;
-		_tick.RecoilShear = _recoilShear;
-		_tick.ShakeOn = _shakeOn;
 
 		// The two the tick cannot answer for itself. Both are the harness's own
 		// controls: the spin key and mouse aim suspend the scan, and gunnery is
@@ -626,86 +599,6 @@ public sealed partial class Main : Node2D
 	private double _grade = -1.0;
 
 	/// <summary>
-	/// The one board with height on it, until a map format exists.
-	///
-	/// Written as rows of characters for the reason the relief bench's is: the
-	/// shape of the hill has to be legible in the source, and an int array of
-	/// fifty-four entries is not.
-	///
-	/// <b>The hill is in front of the tanks, not behind them, and that is the
-	/// whole of why it is where it is.</b> Ground only hides what is behind it,
-	/// so a hill up at the top of the board is a hill nothing is ever occluded
-	/// by - it would show the lift and the walls and say nothing at all about the
-	/// one rule this slice is for. It sits one row in front of the home line,
-	/// where standing still is already the test.
-	///
-	/// The three home cells stay level - all on row 2 - so the bench still opens
-	/// with the tanks in a line at one height, which is the comparison every
-	/// other thing here is judged by. The ditch is off to one side for the other
-	/// direction: a cell below the datum is drawn <i>down</i>, and its far
-	/// neighbours own the walls.
-	///
-	/// Clipped to the board rather than refused when the two disagree: this is a
-	/// stand-in, and a board that came up empty because somebody widened the
-	/// field would read as the flag not working.
-	/// </summary>
-	/// <summary>
-	/// The board's height, one character per cell.
-	///
-	/// <b>A ramp is a cell of the lower of the two levels it joins</b>, marked
-	/// '/' - its own level is read off the neighbours exactly as any other cell's
-	/// is, and which way it tilts is derived from them by
-	/// <see cref="HexField.SetRelief"/>. So a ramp up onto a plateau is a '/' on
-	/// the flat beside it, and a ramp down into a pit is a '/' in the pit at its
-	/// mouth.
-	///
-	/// <b>Every level change on this board goes through exactly one ramp, and
-	/// that is the map being a map.</b> The plateaus are reached up column 3 and
-	/// column 5; the pit is entered at (7,4) and opens out inside. Drive at a
-	/// cliff anywhere else and the route refuses, which is what
-	/// <see cref="HexField.Passable"/> is for.
-	///
-	/// <b>The pit had to be widened to six cells to hold its ramp.</b> A ramp
-	/// wants exactly one neighbour a level above it, and at the old four-cell
-	/// pit's mouth (8,4) there were three - so the map did not decide which edge
-	/// was the high one and the derivation refused it, correctly. Surrounding
-	/// (7,4) with pit on its other five edges is what leaves one.
-	///
-	/// <b>Every ramp rises away from the camera, and that is measured rather than
-	/// tidy.</b> A slope's face projects by <c>sin(e) -/+ grade*cos(e)</c> of its
-	/// own footprint, so one rising toward the camera is <i>compressed</i> - the
-	/// first draft put the plateau ramps on row 2, where a 100px cell came out
-	/// 57px tall, read as the plateau simply being one cell bigger, and pushed the
-	/// ground art far enough down its mipmaps to come back as a smooth pale band.
-	/// Rising away it is stretched instead, which is what a slope looks like.
-	///
-	/// <b>Both of a ramp's axis neighbours have to be on the board.</b> The
-	/// obvious fix - ramps on row 5, the near edge of the plateau - makes them
-	/// unreachable: the low edge points off the board, and a ramp is entered
-	/// along its axis only, so the only way in was from the plateau it exists to
-	/// reach. The plateaus moved up a row instead.
-	///
-	/// <b>The right-hand five columns are the rosette: one hill cell with a ramp
-	/// on every one of its six flat faces.</b> The rest of this board exercises
-	/// one ramp heading - 90, away from the camera - because that is the one that
-	/// looks right, and a slope is drawn from a corner pattern rotated to its high
-	/// edge, so five of the six rotations were never rendered at all. Here they
-	/// all are, and the hill is reachable six ways.
-	///
-	/// <b>Two of them rise toward the camera and read badly, and that is the
-	/// point rather than an oversight.</b> A face rising at the viewer projects to
-	/// <c>sin(e) - grade*cos(e)</c> of its footprint against <c>sin(e) +
-	/// grade*cos(e)</c> going away, so the near pair is compressed to about half
-	/// the far pair's height. The lesson is written on the plateau ramps above,
-	/// which is where the map obeys it; this patch is where it can be seen.
-	///
-	/// <b>The ring cells are all adjacent to each other and none of them may be
-	/// driven to another.</b> Two adjacent ramps are refused by
-	/// <see cref="HexField.Passable"/>, so the way from one face to the next is
-	/// out to the flat, round, and back in - which is what makes each of the six
-	/// its own test rather than one lap of the hill.
-	/// </summary>
-	/// <summary>
 	/// Which board this session is on. See <see cref="BoardMap"/>.
 	///
 	/// <b>An export rather than only a flag, and that is what makes a scene of
@@ -719,109 +612,9 @@ public sealed partial class Main : Node2D
 	[Export] public string Map = "bench";
 
 	/// <summary>The board itself, resolved once before the field is built. Every
-	/// height, flood, kind and home comes off this - the grids below are the
-	/// bench's own, and they stay where they are because the self test and
-	/// <see cref="Relief3D"/> read them through the three decoders.</summary>
+	/// height, flood, kind and home comes off this. Its grids are <see cref="BoardMap"/>'s,
+	/// beside the other three boards' - see <see cref="BoardMap.Bench"/>.</summary>
 	private BoardMap _map = BoardMap.Bench;
-
-	public static readonly string[] Relief =
-	{
-		"..............",
-		"..............",
-		"...1.1........",
-		"...1.1.....1..",
-		"......vvv.....",
-		"......vvv.....",
-	};
-
-	/// <summary>Where the ramps are. Kept beside <see cref="Relief"/> rather than
-	/// mixed into it because the two answer different questions about a cell -
-	/// how high it stands, and whether its top is flat - and a ramp reads its own
-	/// level out of the same grid every other cell does.
-	///
-	/// The six around column 11 are the rosette's, and they are not placed by eye:
-	/// they are <c>Step((11,3), h)</c> for each of the six edge headings, and their
-	/// entry cells are one more step of the same heading. Both had to land on the
-	/// board, which is what set the width at fourteen columns.</summary>
-	public static readonly string[] Ramps =
-	{
-		"..............",
-		"..............",
-		"...........r..",
-		"..........r.r.",
-		"...r.r.r..rrr.",
-		"..............",
-	};
-
-	public static int[] ReliefMap(int columns, int rows)
-	{
-		var levels = new int[columns * rows];
-		for (int r = 0; r < rows && r < Relief.Length; r++)
-		for (int q = 0; q < columns && q < Relief[r].Length; q++)
-			levels[r * columns + q] = Relief[r][q] switch
-			{
-				'1' => 1,
-				'2' => 2,
-				'v' => -1,
-				_ => 0,
-			};
-		return levels;
-	}
-
-	/// <summary>Which cells carry a ramp. Separate from <see cref="ReliefMap"/>
-	/// so a board can be given height without them - which is what every relief
-	/// assertion written before ramps existed runs on, and what
-	/// <see cref="HexField.Passable"/> falls back to.</summary>
-	public static bool[] RampMask(int columns, int rows)
-	{
-		var ramps = new bool[columns * rows];
-		for (int r = 0; r < rows && r < Ramps.Length; r++)
-		for (int q = 0; q < columns && q < Ramps[r].Length; q++)
-			ramps[r * columns + q] = Ramps[r][q] == 'r';
-		return ramps;
-	}
-
-	/// <summary>
-	/// Which cells are flooded. A third grid beside the levels and the ramps,
-	/// because water is a third statement about a cell and not a shade of either
-	/// of the other two - see <see cref="HexField.SetWater"/>.
-	///
-	/// <b>It is the pit, and putting it there is most of the point.</b> The pit
-	/// already exists, it is already a level down, and it already has exactly one
-	/// way in - so the pond is somewhere a tank has to drive down to rather than a
-	/// puddle standing on the plain, and the first order that reaches it walks a
-	/// ramp and a ford back to back, which is both speed ceilings in one leg.
-	///
-	/// <b>The mouth cell (7,4) is dry, and it has to be.</b> It is the pit's ramp,
-	/// and a slope has no one surface height for water to stand at - the guard
-	/// refuses it rather than wedging the pond, which is the same refusal the ramp
-	/// derivation makes about an undecided high edge. What that leaves is a beach:
-	/// the tank comes down the slope on dry ground and enters the water at (7,5),
-	/// which is where a ford is entered from.
-	///
-	/// <b>Painted onto a flat board it is still legal, and that is the A/B.</b>
-	/// With no relief every level is nought, so the five cells are one flat pond on
-	/// open ground - no ramp under it to refuse and no step between them to be a
-	/// waterfall.
-	/// </summary>
-	public static readonly string[] Water =
-	{
-		"..............",
-		"..............",
-		"..............",
-		"..............",
-		"......www.....",
-		"......www.....",
-	};
-
-	public static bool[] WaterMask(int columns, int rows)
-	{
-		var water = new bool[columns * rows];
-		for (int r = 0; r < rows && r < Water.Length; r++)
-		for (int q = 0; q < columns && q < Water[r].Length; q++)
-			water[r * columns + q] = Water[r][q] == 'w';
-		return water;
-	}
 
 	/// <summary>What the terrain dropdown offers: mixed, then whatever loaded.
 	/// Built from the set rather than listed here, so drawing a new hex is a
@@ -852,7 +645,6 @@ public sealed partial class Main : Node2D
 
 	/// <summary>What the view opens at. See --zoom, and the panel's missing zoom
 	/// row for why this is a flag and not a slider.</summary>
-	private float _zoomAt = 1.0f;
 
 	/// <summary>Where the view is parked, and where R puts it back.
 	///
@@ -873,30 +665,9 @@ public sealed partial class Main : Node2D
 	/// vehicle could not express.</summary>
 	private readonly CameraShake _shake = new();
 
-	private bool _shakeOn = CameraShake.OnByDefault;
 
 	private readonly Vector2 _origin = new(220, 200);
 
-	/// <summary>The row the comparison line stands on. Named because the self-test
-	/// asks which tanks are on it, and a literal there would be a second copy of
-	/// this one.</summary>
-	public const int HomeRow = 2;
-
-	/// <summary>Where the three are parked: one row, every other column. The same
-	/// row means the same screen height, and two columns apart - 372px against a
-	/// heavy's 212px of hull - means the silhouettes never touch, so what the eye
-	/// compares is size rather than spacing.
-	///
-	/// <b>The light stands on the rosette's hill instead, and it costs the thing
-	/// the line is for.</b> Three abreast at one height is how the class sizes are
-	/// judged - see MovementProfile.Size - and with the light on (11,3) that
-	/// comparison is down to a pair. It is there because a hill with six approaches
-	/// is worth having a tank on: the lean, the standing height and the six ramps
-	/// meeting the top are all things a tank on the summit says at a glance and an
-	/// empty summit does not. R puts it back there rather than into the line, which
-	/// is what makes it a home and not a start.</summary>
-	public static readonly Vector2I[] HomeCells =
-		{ new(11, 3), new(4, HomeRow), new(6, HomeRow) };
 
 	private Vector2I _cell
 	{
@@ -950,20 +721,17 @@ public sealed partial class Main : Node2D
 	/// something the atlases contain, so the plain rendered motion stays the
 	/// default and the effect is something you switch on to compare against
 	/// it.</summary>
-	private bool _pitchEnabled;
 
 	private BodyRumble _rumble => Active.Rumble;
 	/// <summary>Ground rumble - key B, or --rumble. Off again: the whole-pixel
 	/// jolt turned out to be a stronger reading of the ground than wanted, and
 	/// the engine tremble now covers moving as well as standing, so the two
 	/// stack rather than divide the work.</summary>
-	private bool _rumbleEnabled;
 
 	private EngineTremble _tremble => Active.Tremble;
 	/// <summary>Engine tremble, standing or moving. The one vibration that is on
 	/// by default: a tank that slides over the ground with nothing moving on it
 	/// is wrong in a way the plain render is not. Key I, or --no-tremble.</summary>
-	private bool _trembleEnabled = true;
 
 	/// <summary>
 	/// How hard the engines shake, over the tuned pair - the panel's slider and
@@ -980,17 +748,14 @@ public sealed partial class Main : Node2D
 	/// Pushed in <see cref="UpdateTremble"/> rather than on the drag, so a tank
 	/// built later cannot miss it.
 	/// </summary>
-	private double _trembleLevel = 1.0;
 
 	private TurretScan _scan => Active.Scan;
 	/// <summary>Idle turret traverse - key N, or --scan.</summary>
-	private bool _scanEnabled;
 
 	private TrackLoop _track => Active.Track;
 	/// <summary>The belts winding - key C, or --no-tracks. On by default, and
 	/// not really an option: a tank has tracks and they move. The switch is so
 	/// the hull layer can be looked at without them.</summary>
-	private bool _tracksEnabled = true;
 
 	/// <summary>Whether the tanks are drawn standing on their shadows.
 	///
@@ -1015,7 +780,6 @@ public sealed partial class Main : Node2D
 	/// exactly how every tank looked before it had one, so the comparison is
 	/// against the old picture rather than against a tank with no gun.
 	/// </summary>
-	private bool _recoilTube = true;
 
 	/// <summary>
 	/// The hull rocking back on the shot - key ']', or --recoil-shear.
@@ -1040,7 +804,6 @@ public sealed partial class Main : Node2D
 	/// --recoil-turret, switches it back on - asking for the setting is asking
 	/// for the effect.
 	/// </summary>
-	private bool _recoilShear = Recoil.ShearOnByDefault;
 
 	private ExhaustLoop _exhaust => Active.Exhaust;
 	/// <summary>Engine exhaust - key O, or --no-exhaust. On by default, and for
@@ -1048,7 +811,6 @@ public sealed partial class Main : Node2D
 	/// a tank showing no sign of it reads as switched off. Unlike the tremble it
 	/// costs nothing to be sure of - the plume is a layer that was rendered, not
 	/// an interpretation laid over one.</summary>
-	private bool _exhaustEnabled = true;
 
 	/// <summary>
 	/// How fast the plume walks its loop, as a multiplier over the pair of rates
@@ -1063,7 +825,6 @@ public sealed partial class Main : Node2D
 	/// Pushed in <see cref="UpdateExhaust"/> rather than on the drag, so a tank
 	/// built later cannot miss it.
 	/// </summary>
-	private double _exhaustLevel = 1.0;
 
 	/// <summary>
 	/// The analogue load ramp instead of the two states - the panel's "load
@@ -1077,7 +838,6 @@ public sealed partial class Main : Node2D
 	/// Kept rather than deleted for the reason the flash sheet is kept: "the step
 	/// reads better" stays a claim until both are on screen.
 	/// </summary>
-	private bool _exhaustRamp = !ExhaustLoop.BinaryByDefault;
 
 	private BurnLoop _burn => Active.Burn;
 	/// <summary>The tank on fire - key J, or --burning. Off by default, and
@@ -1101,10 +861,8 @@ public sealed partial class Main : Node2D
 	/// Which side of the hex the shooter is standing on, as an index into
 	/// <see cref="HexField.EdgeHeadings"/>.
 	///
-	/// Six bearings, not any bearing: a tank is hit from a neighbouring cell,
-	/// and a neighbour is across a flat side. So the six directions a tank can
-	/// drive in are exactly the six it can be shot from, and there is one list
-	/// of them rather than a movement list and a gunnery list.
+	/// Six bearings, not any bearing - see <see cref="Angles.SideFor"/>, which
+	/// is where any angle is answered with one of them.
 	///
 	/// It walked a free bearing in steps of 90 before this, seeded off the
 	/// plate normals so the choice between two neighbouring plates got
@@ -1121,40 +879,11 @@ public sealed partial class Main : Node2D
 
 	private double HitFrom => HexField.EdgeHeadings[_hitSide];
 
-	/// <summary>The hex side a bearing arrives on. Any angle from anywhere -
-	/// the command line, a future game - is answered with one of the six.</summary>
-	public static int SideFor(double bearing)
-	{
-		int best = 0;
-		double bestGap = double.MaxValue;
-		for (int i = 0; i < HexField.EdgeHeadings.Length; i++)
-		{
-			double gap = Math.Abs(Mod(HexField.EdgeHeadings[i] - bearing + 180.0, 360.0)
-								  - 180.0);
-			if (gap < bestGap)
-			{
-				bestGap = gap;
-				best = i;
-			}
-		}
-		return best;
-	}
-
 	private int _hitCount
 	{
 		get => Active.HitCount;
 		set => Active.HitCount = value;
 	}
-
-	/// <summary>Calibres, as a multiplier on the rendered hit - key Y.
-	///
-	/// The layer is a sprite, so this is a scale on the drawn rect and costs
-	/// nothing; what it cannot do is change the shape of the burst, only its
-	/// size. Kept modest for that reason - past about half again the rendered
-	/// size the dust starts to read as soft rather than as bigger, and the
-	/// answer there is another render, not a bigger number.
-	/// </summary>
-	private static readonly float[] Calibres = { 0.7f, 1.0f, 1.4f };
 
 	private int _calibre = 1;
 
@@ -1166,7 +895,7 @@ public sealed partial class Main : Node2D
 	/// than of the round: turning it while the dust was settling resized a shell
 	/// that had already landed. Same argument as the scatter, and the same
 	/// answer.</summary>
-	private float Calibre => Calibres[_calibre];
+	private float Calibre => Ordnance.At(_calibre);
 
 	/// <summary>How many levels of armour the loaded round goes through in one
 	/// hit.
@@ -1176,40 +905,7 @@ public sealed partial class Main : Node2D
 	/// damage, and "the smallest round does one level" is the whole rule. A
 	/// second list would be a second thing to keep in step with the first.
 	/// </summary>
-	private int Bite => BiteFor(_calibre);
-
-	/// <summary>How deep the nth calibre goes. Static so the self-test can
-	/// assert the list of calibres and the levels of damage still line up -
-	/// adding a fourth round or a fourth decal without the other is the way this
-	/// stops meaning anything.</summary>
-	public static int BiteFor(int calibre) => calibre + 1;
-
-	public static int CalibreCount => Calibres.Length;
-
-	/// <summary>The nth calibre itself. Beside <see cref="CalibreCount"/> and
-	/// <see cref="BiteFor"/> rather than a second list in
-	/// <see cref="TankBench"/>: how big a shell is drawn is one list, and a bench
-	/// that wrote its own would be a bench whose "heavy" was a different round
-	/// from the harness's.</summary>
-	internal static float CalibreAt(int n) =>
-		Calibres[Math.Clamp(n, 0, Calibres.Length - 1)];
-
-	/// <summary>Which of the three a scale asked for on the command line means.
-	///
-	/// Snapped rather than taken as given, for the reason a bearing is snapped
-	/// to a side of the hex: a gun has the calibres it has, and there is one
-	/// list of them rather than a keyboard list and a flag list. An arbitrary
-	/// number was accepted here before, and the cost was a dropdown reading
-	/// 1.0x with a 1.4 round loaded - the control lying about what it would
-	/// fire, which is the whole failure this pass is about.</summary>
-	public static int CalibreFor(float scale)
-	{
-		int best = 0;
-		for (int i = 1; i < Calibres.Length; i++)
-			if (Math.Abs(Calibres[i] - scale) < Math.Abs(Calibres[best] - scale))
-				best = i;
-		return best;
-	}
+	private int Bite => Ordnance.BiteFor(_calibre);
 
 	private FlashSheet _flash = null!;
 	private Recoil _recoil => Active.Recoil;
@@ -1226,8 +922,6 @@ public sealed partial class Main : Node2D
 	// `godot --path <dir> -- --capture <file>` renders a few frames, saves a
 	// screenshot and quits, so the harness can be checked without a human at
 	// the keyboard. F12 does the same thing interactively.
-	private string? _capturePath;
-	private int _captureAfter = 4;
 
 	/// <summary>Whether <c>--capture-at</c> was on the line.
 	///
@@ -1239,7 +933,6 @@ public sealed partial class Main : Node2D
 	/// taken, of the right board, at the wrong moment. Two frames of a pond that
 	/// nobody had driven into yet compared identical, and the conclusion drawn
 	/// from them was that the water did not answer the tanks.</summary>
-	private bool _captureAsked;
 	private int _frames;
 	private bool _selfTest;
 
@@ -1273,8 +966,6 @@ public sealed partial class Main : Node2D
 	/// panel that happened to be open. --ui forces it back on for a screenshot
 	/// of the harness itself.</summary>
 	private ControlPanel? _panel;
-	private bool _noPanel;
-	private bool _showPanel;
 	private double? _startTurret;
 	/// <summary>Which flash to start with - key V, or --flash sheet|rendered.
 	/// Rendered by default: it is the one the pipeline exists to produce, and
@@ -1313,27 +1004,12 @@ public sealed partial class Main : Node2D
 
 	private bool Moving => _pathStep < _path.Count;
 
-	/// <summary>
-	/// The step every animated thing on the bench takes, or null to run on the
-	/// real one. Set once a capture or a trace is asked for.
-	///
-	/// <b>Static because the pin has to reach past this node, and once did not.</b>
-	/// It used to be a local in <see cref="_Process"/>, which pinned the tanks and
-	/// left <see cref="Stage3D"/> - a sibling with a _Process of its own - turning
-	/// the pond on the wall clock. So the water was never the same twice under
-	/// --capture, and every A/B taken over it carried that as noise: measured at
-	/// <b>58 446 px, peak 10</b>, in a box that is exactly the pond. Anything the
-	/// bench animates from here on reads this, or it is outside the guarantee
-	/// --capture exists to give.
-	/// </summary>
-	public static double? FixedStep;
-
 	public override void _Ready()
 	{
 		string[] userArgs = OS.GetCmdlineUserArgs();
 		if (Array.IndexOf(userArgs, "--capture") >= 0
 			|| Array.IndexOf(userArgs, "--trace") >= 0)
-			FixedStep = 1.0 / 60.0;
+			FrameClock.FixedStep = 1.0 / 60.0;
 		// Which panel rows the command line has spoken for, so panel.json does
 		// not then overrule it. The order is compiled-in default, then the file,
 		// then the flag: a flag is the more specific statement, and a capture
@@ -1352,30 +1028,25 @@ public sealed partial class Main : Node2D
 		}
 		for (int i = 0; i < userArgs.Length; i++)
 		{
-			if (userArgs[i] == "--capture" && i + 1 < userArgs.Length)
-				_capturePath = userArgs[i + 1];
-			else if (userArgs[i].StartsWith("--capture="))
-				_capturePath = userArgs[i]["--capture=".Length..];
-			else if (userArgs[i] == "--selftest")
+			// The five that are about the run rather than about the board - see
+			// SceneRoot. The copy of them that used to stand at the head of this
+			// chain was one of four.
+			if (ReadCommonFlag(userArgs, ref i))
+				continue;
+			if (userArgs[i] == "--selftest")
 				_selfTest = true;
-			else if (userArgs[i] == "--capture-at" && i + 1 < userArgs.Length
-					 && int.TryParse(userArgs[i + 1], out int at))
-			{
-				_captureAfter = at;
-				_captureAsked = true;
-			}
 			else if (userArgs[i] == "--pitch")
-				_pitchEnabled = true;
+				_tick.PitchEnabled = true;
 			else if (userArgs[i] == "--rumble")
-				_rumbleEnabled = true;
+				_tick.RumbleEnabled = true;
 			else if (userArgs[i] == "--no-tremble")
-				_trembleEnabled = false;
+				_tick.TrembleEnabled = false;
 			else if (userArgs[i] == "--scan")
-				_scanEnabled = true;
+				_tick.ScanEnabled = true;
 			else if (userArgs[i] == "--no-exhaust")
-				_exhaustEnabled = false;
+				_tick.ExhaustEnabled = false;
 			else if (userArgs[i] == "--no-tracks")
-				_tracksEnabled = false;
+				_tick.TracksEnabled = false;
 			else if (userArgs[i] == "--no-shadow")
 				_shadowEnabled = false;
 			else if (userArgs[i] == "--no-cast-shadows")
@@ -1460,7 +1131,7 @@ public sealed partial class Main : Node2D
 			else if (userArgs[i] == "--no-turret-sound")
 				_turretSound = false;
 			else if (userArgs[i] == "--no-barrel-recoil")
-				_recoilTube = false;
+				_tick.RecoilTube = false;
 			else if (userArgs[i] == "--burning")
 				_burnAtStart = true;
 			else if (userArgs[i] == "--destroy")
@@ -1484,17 +1155,13 @@ public sealed partial class Main : Node2D
 			else if (userArgs[i] == "--damage" && i + 1 < userArgs.Length
 					 && int.TryParse(userArgs[i + 1], out int deep))
 				_damageAtStart = deep;
-			else if (userArgs[i] == "--no-ui")
-				_noPanel = true;
-			else if (userArgs[i] == "--ui")
-				_showPanel = true;
 			// Snapped to one of the three, like --hit is snapped to a side of
 			// the hex: the gun has the calibres it has, and the flag picks from
 			// the same list the key and the dropdown do.
 			else if (userArgs[i] == "--hit-scale" && i + 1 < userArgs.Length
 					 && float.TryParse(userArgs[i + 1], NumberStyles.Float,
 						 CultureInfo.InvariantCulture, out float calibre))
-				_calibre = CalibreFor(calibre);
+				_calibre = Ordnance.For(calibre);
 			// The panel sliders, on the command line for the same reason the
 			// calibre is: a slider is judged by a picture, and taking that
 			// picture twice at two settings cannot need a hand on the mouse.
@@ -1507,22 +1174,22 @@ public sealed partial class Main : Node2D
 						 CultureInfo.InvariantCulture, out double trembleLevel))
 				// Straight onto the board's level, not onto a start-up copy of it:
 				// the vehicles read it every frame, so there is nothing to wait
-				// for - see _trembleLevel. The copy was needed while the slider
+				// for - see _tick.TrembleLevel. The copy was needed while the slider
 				// wrote one tank's own amplitude and the flag had to write three.
-				_trembleLevel = trembleLevel;
+				_tick.TrembleLevel = trembleLevel;
 			// Asking for a rate is not asking for the effect, unlike the recoil
 			// level: the exhaust is on by default, so --no-exhaust and this one
 			// are about different things and neither implies the other.
 			else if (userArgs[i] == "--exhaust" && i + 1 < userArgs.Length
 					 && double.TryParse(userArgs[i + 1], NumberStyles.Float,
 						 CultureInfo.InvariantCulture, out double exhaustLevel))
-				_exhaustLevel = exhaustLevel;
+				_tick.ExhaustLevel = exhaustLevel;
 			// A mode and not a level, so it gets a bare flag - the same shape as
 			// --recoil-turret. It does not imply --exhaust: the level means the
 			// same thing to both models, because it multiplies the pair either
 			// way.
 			else if (userArgs[i] == "--exhaust-ramp")
-				_exhaustRamp = true;
+				_tick.ExhaustRamp = true;
 			// Straight onto the static rather than waiting for the vehicles like
 			// the tremble does: this one is not held on a machine, because the
 			// rate has two readers that share no object. See Gunnery.TraverseRate.
@@ -1541,7 +1208,7 @@ public sealed partial class Main : Node2D
 			// shake off, so asking for a level is asking for the shake.
 			else if (userArgs[i] == "--shake")
 			{
-				_shakeOn = true;
+				_tick.ShakeOn = true;
 				if (i + 1 < userArgs.Length
 					&& double.TryParse(userArgs[i + 1], NumberStyles.Float,
 						CultureInfo.InvariantCulture, out double shakeLevel))
@@ -1555,7 +1222,7 @@ public sealed partial class Main : Node2D
 						 CultureInfo.InvariantCulture, out double recoilLevel))
 			{
 				_recoilAtStart = recoilLevel;
-				_recoilShear = true;
+				_tick.RecoilShear = true;
 			}
 			// A mode rather than a level, and it needs a flag for the reason the
 			// two slider levels do: the pair is judged by a screenshot, and
@@ -1563,12 +1230,12 @@ public sealed partial class Main : Node2D
 			else if (userArgs[i] == "--recoil-turret")
 			{
 				_recoilTurretOnly = true;
-				_recoilShear = true;
+				_tick.RecoilShear = true;
 			}
 			// The plain switch, for looking at the shear against the tube that
 			// replaced it without also changing its level or its pivot.
 			else if (userArgs[i] == "--recoil-shear")
-				_recoilShear = true;
+				_tick.RecoilShear = true;
 			else if (userArgs[i] == "--flash" && i + 1 < userArgs.Length)
 				_flashSource = userArgs[i + 1].Equals("sheet",
 					StringComparison.OrdinalIgnoreCase)
@@ -1589,7 +1256,7 @@ public sealed partial class Main : Node2D
 				//
 				// The amplitude waits for the tanks to exist, like the other
 				// per-vehicle flag values above.
-				_rumbleEnabled = true;
+				_tick.RumbleEnabled = true;
 				_rollOnly = true;
 			}
 			else if (userArgs[i] == "--heave-only")
@@ -1602,7 +1269,7 @@ public sealed partial class Main : Node2D
 				//
 				// Silences the roll rather than the heave: same reason, other
 				// side. The amplitude waits for the tanks to exist.
-				_rumbleEnabled = true;
+				_tick.RumbleEnabled = true;
 				_heaveOnly = true;
 			}
 			else if (userArgs[i] == "--trace" && i + 1 < userArgs.Length
@@ -1801,13 +1468,6 @@ public sealed partial class Main : Node2D
 			// of that - it is fixed for the run and printed by --trace - and the
 			// board is now wider than the window, so a capture of all of it needs
 			// this. Around the view's own centre, which is where the wheel zooms.
-			else if (userArgs[i] == "--zoom" && i + 1 < userArgs.Length
-					 && float.TryParse(userArgs[i + 1], NumberStyles.Float,
-									   CultureInfo.InvariantCulture, out float zoomAt))
-			{
-				i++;
-				_zoomAt = Mathf.Clamp(zoomAt, 0.25f, 8.0f);
-			}
 			// No number: how much forest there is comes from --terrain, because
 			// forest is one of the kinds of ground. This is the A/B - the same
 			// board with the tree layer off.
@@ -1860,11 +1520,11 @@ public sealed partial class Main : Node2D
 				{
 					_driveTo = new Vector2I(col, row);
 					// Long enough to be mid-path, and only when nobody said
-					// when - see _captureAsked. Written unconditionally, this
+					// when - see CaptureAtAsked. Written unconditionally, this
 					// line made --capture-at work or not by which side of
 					// --drive it was written on.
-					if (!_captureAsked)
-						_captureAfter = 90;
+					if (!CaptureAtAsked)
+						CaptureAt = 90;
 				}
 			}
 		}
@@ -1915,12 +1575,13 @@ public sealed partial class Main : Node2D
 			return;
 		}
 
-		// A capture is evidence, so it gets no panel unless one is asked for.
-		if ((_capturePath is not null || _traceFrames > 0) && !_showPanel)
-			_noPanel = true;
+		// A capture is evidence, so it gets no panel unless one is asked for. A
+		// trace counts as evidence too, which is why the base is told rather than
+		// left to read CapturePath for itself.
+		SettleForProof(CapturePath is not null || _traceFrames > 0);
 
 		var failures = new List<string>();
-		foreach (string tag in Tags)
+		foreach (string tag in MovementProfile.Tags)
 		{
 			AtlasSet atlas = AtlasSet.Load(SpritesRoot, tag, _spriteDir ?? tag);
 			if (atlas.Error.Length > 0)
@@ -2041,7 +1702,7 @@ public sealed partial class Main : Node2D
 		};
 		_grove.Fire = _fire;
 
-		// One vehicle per atlas that loaded, parked along HomeCells. Built here
+		// One vehicle per atlas that loaded, parked along BoardMap.BenchHomes. Built here
 		// rather than swapped later: each one keeps its own atlas for good, so
 		// nothing has to be reconfigured when the selection changes - which is
 		// most of what switching class used to be, and every line of it was a
@@ -2136,7 +1797,7 @@ public sealed partial class Main : Node2D
 		// and HexField.FlatAnchor answers Vector2.Zero until there is one, so asked
 		// here it would quietly hand back the origin - which is a corner of the
 		// board and looks like a view that simply was not moved.
-		_camera = new Camera2D { Zoom = new Vector2(_zoomAt, _zoomAt), Enabled = true };
+		_camera = new Camera2D { Zoom = new Vector2(ZoomAt ?? 1.0f, ZoomAt ?? 1.0f), Enabled = true };
 		AddChild(_camera);
 
 		var layer = new CanvasLayer();
@@ -2224,7 +1885,7 @@ public sealed partial class Main : Node2D
 		// whatever mode the bench opens in and merely hidden while the stage
 		// owns the ground - the switch is live now, and a node that exists only
 		// in one mode cannot be switched into the other.
-		if (!_noPanel)
+		if (!NoUi)
 		{
 			_ring = new SelectionRing { Field = _field, Target = Active };
 			AddChild(_ring);
@@ -2271,14 +1932,14 @@ public sealed partial class Main : Node2D
 					 + " - falling back to the built-in labels and defaults");
 		_panel = new ControlPanel { Text = _panelText };
 		_panel.Prepare();
-		if (!_noPanel)
+		if (!NoUi)
 		{
 			layer.AddChild(_panel);
 			_panel.AddHandle();
 		}
 		BuildPanel();
 		_panel.OpenDefaults(_flagged);
-		if (_noPanel)
+		if (NoUi)
 		{
 			// Nothing will ever draw or sync it, and a detached branch of
 			// Controls left lying about is a wall of leak warnings at exit that
@@ -2332,7 +1993,7 @@ public sealed partial class Main : Node2D
 		if (_deadAtStart)
 			Tick.Kill(Active);
 		if (_startTurret is not null)
-			_tank.TurretFacing = Mod(_startTurret.Value, 360.0);
+			_tank.TurretFacing = Angles.Mod(_startTurret.Value, 360.0);
 		for (int i = 0; i < _damageAtStart; i++)
 			foreach (string face in _tank.Atlas?.HitFaces
 									?? (IReadOnlyList<string>)Array.Empty<string>())
@@ -2482,29 +2143,6 @@ public sealed partial class Main : Node2D
 	}
 
 	/// <summary>
-	/// Which tank a click on a cell means, or -1 for "no tank - this is a move
-	/// order".
-	///
-	/// A cell rather than the sprite's pixels: a tank occupies a cell, that is the
-	/// unit the game is played in, and the two readings differ only where a
-	/// silhouette overhangs its own hex - where a pixel test would let you select
-	/// a tank by clicking the ground beside it.
-	///
-	/// The tank already being driven does not count, so clicking the one you are
-	/// driving is an order to stay put rather than a selection that does nothing.
-	/// Static and pure so the routing can be asserted: "a click on an occupied
-	/// cell selects instead of ordering" is the whole feature.
-	/// </summary>
-	public static int SelectionFor(IReadOnlyList<Vehicle> vehicles, int active,
-								  Vector2I cell)
-	{
-		for (int i = 0; i < vehicles.Count; i++)
-			if (i != active && vehicles[i].Cell == cell)
-				return i;
-		return -1;
-	}
-
-	/// <summary>
 	/// The class's size onto the tank, and onto the one thing outside it that
 	/// has to follow.
 	///
@@ -2540,21 +2178,6 @@ public sealed partial class Main : Node2D
 	}
 
 
-	/// <summary>The contact point itself, in the field's own space and with no tank
-	/// in it: the flat line between the two centres, dropped by the ground's height
-	/// along it.
-	///
-	/// A static of the field for <see cref="StepHeights"/>'s reason - the check has
-	/// to be able to ask the same question. It asks it of the board's own faces
-	/// (<see cref="HexField.TopAtPoint"/> reads the corner planes, not the edge
-	/// means), so that "the tank is driven on the ground" is two descriptions
-	/// agreeing rather than one restating itself.</summary>
-	public static Vector2 GroundBetween(HexField field, Vector2I from,
-										Vector2I onto, float done) =>
-		field.FlatAnchor(from.X, from.Y).Lerp(field.FlatAnchor(onto.X, onto.Y),
-											  Mathf.Clamp(done, 0.0f, 1.0f))
-		+ field.CentreOffset
-		- new Vector2(0.0f, field.SurfaceBetween(from, onto, done));
 
 
 	/// <summary>
@@ -2640,7 +2263,7 @@ public sealed partial class Main : Node2D
 		double squash = _grove?.Squash ?? 0.5;
 		foreach (Vehicle vehicle in _vehicles)
 		{
-			foreach (Vector2I cell in Patch(_field, vehicle.GroundPoint - _origin,
+			foreach (Vector2I cell in Footing.Patch(_field, vehicle.GroundPoint - _origin,
 											_field.Bare(vehicle.Ground),
 											reach, squash))
 				cells.Add(cell);
@@ -2650,38 +2273,6 @@ public sealed partial class Main : Node2D
 		return cells;
 	}
 
-	/// <summary>
-	/// The cells one contact patch covers: the point it stands on and six probes
-	/// a keep-out radius around it, all in flat space.
-	///
-	/// Named and static so the flat-space rule above can be checked rather than
-	/// looked at - the same reason <see cref="Stage3D.Covers"/> and
-	/// <see cref="Stage3D.Overlook"/> are. It is the whole of the failure: a
-	/// picker answering a screen point is right about the picture and wrong about
-	/// the ground, and both answers are cells on the board, so nothing downstream
-	/// can tell them apart.
-	///
-	/// The centre is clamped and the rim is not, and that is
-	/// <see cref="HexField.CellUnder"/> against
-	/// <see cref="HexField.FlatCellAt"/>: a tank is always somewhere, a probe
-	/// stepping off the board is nowhere.
-	/// </summary>
-	internal static IEnumerable<Vector2I> Patch(HexField field, Vector2 at,
-											   float lift, double reach,
-											   double squash)
-	{
-		yield return field.CellUnder(new Vector2(at.X, at.Y + lift));
-		for (int k = 0; k < 6; k++)
-		{
-			double a = Math.PI * k / 3.0;
-			var rim = new Vector2(
-				at.X + (float)(Math.Cos(a) * reach),
-				at.Y + (float)(Math.Sin(a) * reach * squash) + lift);
-			Vector2I cell = field.FlatCellAt(rim);
-			if (field.InBounds(cell))
-				yield return cell;
-		}
-	}
 
 	/// <summary>Cells carrying trees.</summary>
 	/// <summary>How hard the driven tank is shouldering the water, 0 parked
@@ -2835,7 +2426,7 @@ public sealed partial class Main : Node2D
 
 	private void ScanChanged()
 	{
-		if (_scanEnabled)
+		if (_tick.ScanEnabled)
 			return;
 		foreach (Vehicle v in _vehicles)
 			v.Scan.Reset();
@@ -2896,7 +2487,7 @@ public sealed partial class Main : Node2D
 		// and how deep it has got - so a light tank stuck at 0/0 on a heavy is
 		// the matchup working rather than the shells missing.
 		string face = v.Target.Atlas.FaceFor(
-			Mod(v.Solution.Heading + 180.0, 360.0), v.Target.Sprite.HullFacing);
+			Angles.Mod(v.Solution.Heading + 180.0, 360.0), v.Target.Sprite.HullFacing);
 		int cap = Gunnery.Penetration(v.Profile, v.Target.Profile);
 		// Rounds in the air, and how far the nearest one has got. A shot that
 		// seems to do nothing is either a shell still flying or a shell that was
@@ -3002,223 +2593,7 @@ public sealed partial class Main : Node2D
 
 
 
-	/// <summary>
-	/// The screen-space line along which the stage splits a climbing tank's
-	/// depth, as <c>(a, b, c)</c> with <c>a*x + b*y &gt;= c</c> the mounted
-	/// cell's side: the shared edge between the cell being mounted and the
-	/// raised flanking neighbour nearest the camera, extended.
-	///
-	/// The edge and nothing simpler, because the simpler lines were tried and
-	/// each left a bite. A vertical through the leg's midpoint cannot separate
-	/// two neighbouring hexes at all - they overlap by half a width in x - so
-	/// the mounted hex's own corner reached across it and sat on the tank
-	/// riding up. The shared edge is the one line with the mounted cell wholly
-	/// on one side and the covering neighbour wholly on the other, a convex
-	/// hex lying entirely on its own side of each of its edges: the mounted
-	/// hex never covers the tank mounting it, and the neighbour's cover runs
-	/// exactly to the rim it draws.
-	///
-	/// Two hex centres are equidistant from their shared edge, so the line is
-	/// the perpendicular bisector of the two anchors, dropped by the
-	/// neighbour's lift to where that neighbour's rim is drawn.
-	/// <b>Perpendicular in the flat world, not on the screen:</b> the camera
-	/// squashes the ground and does not preserve right angles, and the
-	/// bisector taken in screen coordinates missed the edge by enough to spill
-	/// hex corners across it - the self-test caught it on its first run. The
-	/// screen normal of a flat-perpendicular line is <c>(dx*s, dy/s)</c> for a
-	/// screen centre difference <c>(dx, dy)</c> and squash <c>s</c>. A leg
-	/// with no flanker to read - the board's edge - falls back to the
-	/// perpendicular through the leg's own midpoint, where there is nothing to
-	/// cover either way.
-	/// </summary>
-	/// <summary>The raised ground a climbing tank passes beside: of the two
-	/// cells adjacent to both ends of the leg, the one nearer the camera - the
-	/// only one whose rim can cover the tank. Null on a board edge. Found by
-	/// adjacency rather than heading arithmetic, because the heading numbers do
-	/// not go round the ring in steps of sixty - 330 is down-right and 90 is
-	/// straight down - and a +-60 guess picked the cell straight behind the
-	/// leg, which laid the seam across the hull instead of along the boundary.
-	/// The self-test only half-caught that one: it made the same guess, and
-	/// the two wrongs agreed - which is why it now asks this method rather
-	/// than its own copy.</summary>
-	public static Vector2I? SeamFlank(HexField field, Vector2I cell,
-		Vector2I next)
-	{
-		Vector2I? best = null;
-		foreach (int h in HexField.EdgeHeadings)
-		{
-			Vector2I cand = HexField.Step(cell, h);
-			if (cand == next || !field.InBounds(cand)
-				|| HexField.HeadingTo(cand, next) < 0)
-				continue;
-			if (best is null
-				|| field.GroundRow(cand) > field.GroundRow(best.Value))
-				best = cand;
-		}
-		return best;
-	}
 
-	public static Vector3 SeamLine(HexField field, Vector2 origin,
-		Vector2I cell, Vector2I next)
-	{
-		if (SeamFlank(field, cell, next) is Vector2I flank)
-			return Bisector(field,
-				origin + field.FlatAnchor(next) + field.CentreOffset,
-				origin + field.FlatAnchor(flank) + field.CentreOffset,
-				field.LevelAt(flank) * field.Lift);
-		return SeamEdge(field, origin, cell, next);
-	}
-
-	/// <summary>The leg's own shared edge, in the flat world. A descent's
-	/// wipe (see <see cref="Climb"/>) runs parallel to it - only the normal
-	/// is read, the offset is swept - and a climb on a board edge falls back
-	/// to it, where there is no flanker and nothing to cover either way.
-	/// Flat rather than dropped to a drawn rim, because two lifts could
-	/// claim the drop and neither owns this line.</summary>
-	public static Vector3 SeamEdge(HexField field, Vector2 origin,
-		Vector2I cell, Vector2I next) =>
-		Bisector(field,
-			origin + field.FlatAnchor(next) + field.CentreOffset,
-			origin + field.FlatAnchor(cell) + field.CentreOffset,
-			0.0f);
-
-	/// <summary>The shared hex edge as a screen half-plane, with the side of
-	/// <paramref name="cn"/> - the cell being driven onto, whose fragments
-	/// carry <c>Vehicle.Standing</c> - positive. Perpendicular in the flat
-	/// world, not on the screen (the camera does not preserve right angles),
-	/// and dropped by <paramref name="lift"/> to where the covering rim is
-	/// drawn.</summary>
-	private static Vector3 Bisector(HexField field, Vector2 cn, Vector2 other,
-		float lift)
-	{
-		Vector2 d = cn - other;
-		float s = Mathf.Max(field.Squash, 0.0001f);
-		Vector2 n = new Vector2(d.X * s, d.Y / s).Normalized();
-		Vector2 mid = (cn + other) * 0.5f - new Vector2(0.0f, lift);
-		return new Vector3(n.X, n.Y, n.Dot(mid));
-	}
-
-	/// <summary>
-	/// How high the two ends of the hull count as standing, <paramref name="done"/>
-	/// of the way from one cell to the next, with the contact point leading the
-	/// trailing end by <paramref name="gait"/> of the leg.
-	///
-	/// A named static rather than four lines in <see cref="Climb"/> for
-	/// <c>ImpactFor</c>'s reason: the self-test walks every climb on the board
-	/// through it, and a copy of the arithmetic in the test would be a second
-	/// truth to keep in agreement.
-	///
-	/// <b>The nose is the crown of the step while the tank is on the wall</b>,
-	/// then down onto what it is arriving at. A staircase has no ramp on it, so
-	/// a tank drawn halfway up one at its honest height is a tank halfway inside
-	/// the block - and the stage, unlike a z index, says so, cutting the sprite
-	/// along that block's top plane. The wall belongs to the higher cell, and a
-	/// tank on it is not inside it, so for as long as it is on the wall it
-	/// counts as up on the crown. Climbing, the higher cell is the one being
-	/// driven onto and the tank is never off it, so the crown holds for the
-	/// whole leg. Descending toward the viewer the tank is on the near face, in
-	/// plain sight the whole way, so the crown holds there too - a single pixel
-	/// of early descent puts it under the level of the shoulder it is passing,
-	/// measured on (5,3)->(6,4), where the corner of (5,4)'s top face took a
-	/// wedge out of the hull. Whether a wall faces the camera is which of the
-	/// two cells is nearer, not which is higher.
-	///
-	/// <b>Descending behind the rim the split reappears, the other way up.</b>
-	/// The single number tried both answers here and each was a visible jolt:
-	/// the drawn ramp bites the foot out of the plateau it is still standing
-	/// on, and the crown squeezed the whole descent into the second half of
-	/// the leg at double rate - measured on (4,3)->(4,2), the rim swallowed
-	/// thirty percent of the silhouette in four frames and handed part of it
-	/// back by arrival. So the nose rides the ramp the sprite is drawn on and
-	/// sinks behind the rim exactly as fast as it is drawn sinking, while the
-	/// tail holds the crown for as long as it is over the top - the same two
-	/// statements the climb makes, read in the other order. The seam is the
-	/// leg's own shared edge (<see cref="SeamEdge"/>): the climb cuts along
-	/// the flanker's rim because that is the rim doing the covering, and here
-	/// the covering rim is the one being driven over.
-	///
-	/// <b>The tail is still down where the hull came from.</b> One depth for the
-	/// whole sprite could not say so: a drawn row fixes the family
-	/// <c>(row + L, L)</c>, so the promotion that stands the nose out of the
-	/// block it is entering also stood the tail level with ground it had not
-	/// come up to - promoted at the first pixel of (3,2)->(4,3), the tank spent
-	/// the whole leg drawn over (3,3), a lateral hex it was not level with until
-	/// the end, and the hex stopped covering it the moment the leg began.
-	/// Climbing, the trailing end therefore reads its height off the leg half a
-	/// hull behind the contact point, so the low end of the sprite stays below
-	/// the level it has not reached and the ground at that level goes back over
-	/// it - the same statement the 2D board's climb rule makes, asked of the end
-	/// of the tank it is true of. The 2D board bought both answers with a
-	/// per-cell sort key taken at the far edge; the stage buys them with a
-	/// height per end, laid along the travel axis by <c>Stage3D.Body</c>.
-	/// Parked, level and descending in plain sight the tail is the nose: the
-	/// two ends have nothing to disagree about, and a split of zero is the old
-	/// single number.
-	///
-	/// <b>But the ground ahead may take the running gear and no more</b> -
-	/// <paramref name="cover"/> floors the tail that far under the nose. The
-	/// fully honest tail was built and looked wrong for a reason no geometry
-	/// fixes: on (3,2)->(4,3) the step ahead honestly hid half the tank, but the
-	/// wall doing the hiding faces away from the camera and its top wears the
-	/// same dirt as the flat ground, so the picture read as level ground painted
-	/// over a tank rather than a tank behind a rise. Capped at the gear, the
-	/// tracks and the shadow tuck behind the rim while the hull and turret stay
-	/// whole - a tank cresting an edge, which is the reading a climb wants.
-	/// </summary>
-	public static (float Nose, float Tail) StepHeights(HexField field,
-		Vector2I cell, Vector2I next, float done, float gait, float cover)
-	{
-		// Surface heights, not levels: a ramp's ends are half a level up, so the
-		// crown of a leg onto one is half a lift and the level test would call
-		// that leg flat. Every cell of a board with no ramps on it reports the
-		// same number either way, which is why this reads as a rename.
-		float onto = field.TopAt(next);
-		float crown = Mathf.Max(field.TopAt(cell), onto);
-		bool behind = field.GroundRow(next) < field.GroundRow(cell);
-		// Descending behind the rim, the split works the other way up: the
-		// nose rides the ramp the sprite is drawn on, and the tail holds the
-		// crown - not until some moment, but for the whole leg. There is no
-		// moment to pick: a fragment drawn over the plateau's top face is
-		// visible at exactly the crown and swallowed whole a hair under it,
-		// so any tail that descends by number - the old half-leg lerp, a
-		// climbing-style catch-up, anything - dumps everything still drawn
-		// over the top in a single frame. Measured on (4,3)->(4,2) twice:
-		// the lerp cost thirty percent of the silhouette in four frames, the
-		// catch-up six hundred pixels in one. What drains the crown side
-		// instead is the seam, swept down the sprite by Climb - fragment by
-		// fragment, a few rows a frame - which is why this split needs no
-		// closing: by the time the leg parks, the sweep has left nothing on
-		// the crown side to pop.
-		// No cover cap here either: the parked tank behind this rim wears
-		// the full cut already, and a floor would pop off at parking.
-		if (behind && onto < field.TopAt(cell))
-			return (field.HeightBetween(cell, next, done), crown);
-		// Everything else stands on the crown: climbing it is the cell being
-		// entered, level it is both, and descending toward the camera it is
-		// the near face the tank is in plain sight on - a pixel of early
-		// descent there put it under the shoulder it was passing, measured on
-		// (5,3)->(6,4). The park at the far anchor snaps that crown to the
-		// floor, and it is allowed to: measured on the two worst legs, not
-		// one pixel of the tank changes - by the time it parks it is a full
-		// half-cell clear of anything the crown was holding it out of.
-		float nose = crown;
-		// From a gait behind the contact at the near anchor to level with the
-		// nose at the far one, so the split closes exactly where the leg parks:
-		// held at a plain lag it would still be half a lift down on arrival,
-		// and parking would pop the tail's depth.
-		float tail = onto > field.TopAt(cell)
-			? Mathf.Max(
-				field.HeightBetween(cell, next, done * (1.0f + gait) - gait),
-				nose - cover)
-			: nose;
-		return (nose, tail);
-	}
-
-	/// <summary>How much of a climbing tank the ground ahead may hide, in
-	/// atlas px of depth under the crown - about the height of the running
-	/// gear, scaled by the class before use. See <see cref="StepHeights"/> for
-	/// why the honest number was retired.</summary>
-	public const float GearCover = 24.0f;
 
 	/// <summary>
 	/// What the slope is doing to the drawn body, this frame.
@@ -3485,7 +2860,7 @@ public sealed partial class Main : Node2D
 		// shell arriving from another tank must not: the dial says which side
 		// the *next* manual hit comes from, and a firefight rewriting it would
 		// make the panel a report of what happened rather than a control.
-		_hitSide = SideFor(fromBearing);
+		_hitSide = Angles.SideFor(fromBearing);
 		Tick.TakeHit(Active, HitFrom, Calibre, null, Bite);
 	}
 
@@ -3528,7 +2903,7 @@ public sealed partial class Main : Node2D
 		AtlasSet atlas = victim.Atlas;
 		if (!atlas.HasHit)
 			return;
-		double from = HexField.EdgeHeadings[SideFor(fromBearing)];
+		double from = HexField.EdgeHeadings[Angles.SideFor(fromBearing)];
 		victim.HitCount++;
 		double hull = victim.Sprite.HullFacing;
 		string face = atlas.FaceFor(from, hull);
@@ -3700,7 +3075,7 @@ public sealed partial class Main : Node2D
 		// the situation.
 		int onto = v.Solution.OnLane
 			? v.Solution.Heading
-			: HexField.EdgeHeadings[SideFor(Gunnery.HeadingOf(
+			: HexField.EdgeHeadings[Angles.SideFor(Gunnery.HeadingOf(
 				  v.Target.GroundPoint - v.GroundPoint))];
 		double was = v.Sprite.TurretFacing;
 		v.Sprite.TurretFacing = Gunnery.Traverse(
@@ -3717,7 +3092,7 @@ public sealed partial class Main : Node2D
 		// restricted to the six: the bearing the armour model wants is the firing
 		// heading turned round, exactly, with nothing snapped and nothing
 		// approximated. See AtlasSet.FaceFor.
-		Launch(v, v.Target, Mod(v.Solution.Heading + 180.0, 360.0));
+		Launch(v, v.Target, Angles.Mod(v.Solution.Heading + 180.0, 360.0));
 	}
 
 	/// <summary>The hit runs on screen frames for the shot's reason: it is a
@@ -3898,10 +3273,10 @@ public sealed partial class Main : Node2D
 		// the sprite turns more finely than it does.
 		ui.Slide("heading.hull", "hull  (A/D)", 0.0, 330.0, 30.0,
 			() => Math.Round(_tank.HullFacing / 30.0) * 30.0,
-			v => { CancelOrder(); _tank.HullFacing = Mod(v, 360.0); }, " deg");
+			v => { CancelOrder(); _tank.HullFacing = Angles.Mod(v, 360.0); }, " deg");
 		ui.Slide("heading.turret", "turret  (Q/E)", 0.0, 330.0, 30.0,
 			() => Math.Round(_tank.TurretFacing / 30.0) * 30.0,
-			v => { _aimWithMouse = false; _tank.TurretFacing = Mod(v, 360.0); }, " deg");
+			v => { _aimWithMouse = false; _tank.TurretFacing = Angles.Mod(v, 360.0); }, " deg");
 		// Two named states rather than a checkbox, and the reason is the reading
 		// that went wrong: it used to say "turret locked", and a traverse lock
 		// locks the turret *to the hull*, so the label promised the opposite of
@@ -3914,9 +3289,9 @@ public sealed partial class Main : Node2D
 		ui.Toggle("heading.mouse", "aim with mouse  (M)",
 			() => _aimWithMouse, on => _aimWithMouse = on);
 		ui.Toggle("heading.spin", "spin turret  (SPACE)", () => _spinning, on => _spinning = on);
-		ui.Toggle("heading.scan", "scan on the spot  (N)", () => _scanEnabled, on =>
+		ui.Toggle("heading.scan", "scan on the spot  (N)", () => _tick.ScanEnabled, on =>
 		{
-			_scanEnabled = on;
+			_tick.ScanEnabled = on;
 			ScanChanged();
 		});
 		// Which frame each heading resolves to. The pair is the thing worth
@@ -3935,19 +3310,19 @@ public sealed partial class Main : Node2D
 		});
 
 		ui.Heading("ride");
-		ui.Toggle("ride.pitch", "body pitch  (P)", () => _pitchEnabled, on =>
+		ui.Toggle("ride.pitch", "body pitch  (P)", () => _tick.PitchEnabled, on =>
 		{
-			_pitchEnabled = on;
+			_tick.PitchEnabled = on;
 			PitchChanged();
 		});
-		ui.Toggle("ride.rumble", "ground rumble  (B)", () => _rumbleEnabled, on =>
+		ui.Toggle("ride.rumble", "ground rumble  (B)", () => _tick.RumbleEnabled, on =>
 		{
-			_rumbleEnabled = on;
+			_tick.RumbleEnabled = on;
 			RumbleChanged();
 		});
-		ui.Toggle("ride.tremble", "engine tremble  (I)", () => _trembleEnabled, on =>
+		ui.Toggle("ride.tremble", "engine tremble  (I)", () => _tick.TrembleEnabled, on =>
 		{
-			_trembleEnabled = on;
+			_tick.TrembleEnabled = on;
 			TrembleChanged();
 		});
 		// A multiplier over the tuned pair rather than a raw amplitude - see
@@ -3957,10 +3332,10 @@ public sealed partial class Main : Node2D
 		// figure is the whole argument the value was chosen on.
 		//
 		// Reads and writes the board's level, not the driven tank's - see
-		// _trembleLevel.
+		// _tick.TrembleLevel.
 		ui.Slide("ride.tremble_level", "engine tremble level", 0.0, 2.5, 0.05,
-			() => _trembleLevel, v => _trembleLevel = v, "x",
-			() => $"{_tremble.TravelAt(_speed, _trembleLevel):F2}px"
+			() => _tick.TrembleLevel, v => _tick.TrembleLevel = v, "x",
+			() => $"{_tremble.TravelAt(_speed, _tick.TrembleLevel):F2}px"
 				  + " of stern travel at this speed");
 		ui.Toggle("ride.stabiliser", "turret stabiliser  (K)",
 			() => _tank.TurretStabilised, on => _tank.TurretStabilised = on);
@@ -4000,9 +3375,9 @@ public sealed partial class Main : Node2D
 				? $"shadow  rendered, {a.Count} headings{where}"
 				: $"shadow  [none - {a?.Count ?? 0} headings{where}, re-render]";
 		});
-		ui.Toggle("effects.tracks", "tracks wind  (C)", () => _tracksEnabled, on =>
+		ui.Toggle("effects.tracks", "tracks wind  (C)", () => _tick.TracksEnabled, on =>
 		{
-			_tracksEnabled = on;
+			_tick.TracksEnabled = on;
 			TracksChanged();
 		});
 		// No key: the alphabet is gone, and so are [ ] and \. The panel is
@@ -4053,15 +3428,15 @@ public sealed partial class Main : Node2D
 				   + $"\nsmears from {_track.BlurSpeed,3:F0} px/s"
 				   + $"   blur {_track.Blur * 100.0,3:F0}%";
 		});
-		ui.Toggle("effects.exhaust", "engine exhaust  (O)", () => _exhaustEnabled, on =>
+		ui.Toggle("effects.exhaust", "engine exhaust  (O)", () => _tick.ExhaustEnabled, on =>
 		{
-			_exhaustEnabled = on;
+			_tick.ExhaustEnabled = on;
 			ExhaustChanged();
 		});
 		// Above the level rather than below it, because it decides what the
 		// level's caption is describing.
 		ui.Toggle("effects.exhaust_ramp", "load ramp instead of two states",
-			() => _exhaustRamp, on => _exhaustRamp = on);
+			() => _tick.ExhaustRamp, on => _tick.ExhaustRamp = on);
 		// Frames per phase and not just the rate, because that is the question
 		// the drag runs into: the plume is twelve rendered poses stepped a few
 		// times a second, and the ceiling is how briefly a pose can be held
@@ -4070,18 +3445,18 @@ public sealed partial class Main : Node2D
 		// less than that.
 		//
 		// Reads the board's level rather than the driven tank's - see
-		// _exhaustLevel and ExhaustLoop.RateAt(speed, level).
+		// _tick.ExhaustLevel and ExhaustLoop.RateAt(speed, level).
 		ui.Slide("effects.exhaust_level", "exhaust rate", 0.0, 3.0, 0.05,
-			() => _exhaustLevel, v => _exhaustLevel = v, "x",
+			() => _tick.ExhaustLevel, v => _tick.ExhaustLevel = v, "x",
 			() =>
 			{
-				double rate = _exhaust.RateAt(_speed, _exhaustLevel);
+				double rate = _exhaust.RateAt(_speed, _tick.ExhaustLevel);
 				double held = ExhaustLoop.FramesPerPhase(rate);
 				// Which state, and not only the rate it works out to: the two
 				// models can agree on a number and mean different things by it,
 				// and "resting" on a tank that is plainly rolling is the one
 				// failure this row could show and otherwise would not.
-				return (_exhaustRamp
+				return (_tick.ExhaustRamp
 						   ? $"ramp {_exhaust.Response(_speed) * 100.0,3:F0}%"
 						   : _exhaust.Response(_speed) > 0.0 ? "working" : "resting")
 					   + $",  {rate,4:F1} phases/s at this speed"
@@ -4107,12 +3482,12 @@ public sealed partial class Main : Node2D
 		// Above its own level and pivot, because it gates both: a slider on a
 		// switched-off effect is a slider that looks broken.
 		ui.Toggle("effects.hull_shear", "hull shear on the shot  (])",
-			() => _recoilShear, on => _recoilShear = on);
+			() => _tick.RecoilShear, on => _tick.RecoilShear = on);
 		// Read when the trigger goes, not while the hull is rocking, so this
 		// sets the next shot rather than the one in the air.
 		ui.Slide("effects.recoil_level", "recoil level", 0.0, 2.5, 0.05,
 			() => _recoil.Level, v => _recoil.Level = v, "x",
-			() => _recoilShear
+			() => _tick.RecoilShear
 				? $"kick peaks at {_recoil.PeakFor(_recoil.Level):F3}"
 				  + $", rigid body ends at {Recoil.RigidBodyPeak:F3}"
 				: "the shear is off - the tube recoils for real instead");
@@ -4120,9 +3495,9 @@ public sealed partial class Main : Node2D
 		// outside the tank: those two say what the vehicle does, this says what
 		// the view does.
 		ui.Toggle("effects.camera_shake", "camera shake on the shot",
-			() => _shakeOn, on =>
+			() => _tick.ShakeOn, on =>
 			{
-				_shakeOn = on;
+				_tick.ShakeOn = on;
 				if (!on)
 				{
 					_shake.Reset();
@@ -4131,7 +3506,7 @@ public sealed partial class Main : Node2D
 			});
 		ui.Slide("effects.shake_level", "shake level", 0.0, 2.5, 0.05,
 			() => _shake.Level, v => _shake.Level = v, "x",
-			() => _shakeOn
+			() => _tick.ShakeOn
 				// The class amplitude is what the level multiplies, so quoting
 				// the level alone would answer nothing: the same 1.00x is three
 				// pixels on the light and seven on the heavy. Across the screen,
@@ -4144,7 +3519,7 @@ public sealed partial class Main : Node2D
 		ui.Toggle("effects.recoil_turret", "recoil on turret only  (L)",
 			() => _tank.RecoilTurretOnly, on => _tank.RecoilTurretOnly = on);
 		ui.Toggle("effects.tube_recoil", "gun tube recoils  ([)",
-			() => _recoilTube, on => _recoilTube = on);
+			() => _tick.RecoilTube, on => _tick.RecoilTube = on);
 		// What the tube is doing and what it cost. The stroke in pixels is the
 		// number the whole layer is judged on - four is what it was authored to,
 		// and it is a fraction of that on the headings where the bore points at
@@ -4906,9 +4281,9 @@ public sealed partial class Main : Node2D
 	public override void _Process(double delta)
 	{
 		// give the panel and both layers a couple of frames to settle first
-		if (_capturePath is not null && ++_frames > _captureAfter)
+		if (CapturePath is not null && ++_frames > CaptureAt)
 		{
-			Capture(_capturePath);
+			Capture(CapturePath);
 			GetTree().Quit();
 			return;
 		}
@@ -4922,8 +4297,8 @@ public sealed partial class Main : Node2D
 		// then measures the drift instead: caught once when the two runs were
 		// mid-pivot on either side of a 30 deg sprite boundary and "differed"
 		// by 91k pixels.
-		if (_capturePath is not null || _traceFrames > 0)
-			delta = FixedStep ?? 1.0 / 60.0;
+		if (CapturePath is not null || _traceFrames > 0)
+			delta = FrameClock.FixedStep ?? 1.0 / 60.0;
 
 		if (_traceFrames > 0)
 		{
@@ -4991,16 +4366,16 @@ public sealed partial class Main : Node2D
 					 // trace of zeroes is the normal case rather than a spring
 					 // that failed to fire - which is exactly the confusion the
 					 // '@turret'/'@body' marker was added to prevent.
-					 + $"{(_recoilShear ? "" : "!off")}"
+					 + $"{(_tick.RecoilShear ? "" : "!off")}"
 					 // The level beside the phase, for the reason the traverse
 				 // prints its own: "the tuned figure is in" and "the flag
 				 // arrived" are the same picture.
 				 + $"  exh {_tank.ExhaustPhase,2}@{_exhaust.Phase,5:F2}"
-				 + $" x{_exhaustLevel,4:F2}"
+				 + $" x{_tick.ExhaustLevel,4:F2}"
 				 // Which model, because the two agree at both ends: a trace taken
 				 // standing still, or at cruise, cannot tell them apart, and those
 				 // are the two frames most likely to be traced.
-				 + (_exhaustRamp
+				 + (_tick.ExhaustRamp
 					 ? $"ramp{_exhaust.Response(_speed),4:F2}"
 					 : _exhaust.Response(_speed) > 0.0 ? "work" : "rest")
 					 // slip as well as phase: the cap is a real limit, and a
@@ -5017,7 +4392,7 @@ public sealed partial class Main : Node2D
 					 // the switch beside it: 'rest' with the flag off and 'rest'
 					 // between shots are the same number and not the same thing.
 					 + $"  tube {_tank.RecoilPhase,2}"
-					 + $"{(_recoilTube ? "" : "!off")}"
+					 + $"{(_tick.RecoilTube ? "" : "!off")}"
 					 + $"  burn {_tank.FirePhase,2}/{_tank.BurnPhase,2}"
 					 // The wreck, and the char beside it: a tank that is dead
 					 // and a tank that is dead and has finished blackening are
@@ -5163,7 +4538,7 @@ public sealed partial class Main : Node2D
 					 + $"  ruts {_marks?.Count ?? 0}@{_marks?.WidthOf(Active) ?? 0.0:F1}px"
 					 + (_marks?.Enabled == true ? "" : "!off")
 					 + $"  shake {_shake.ScreenOffset(_camera.Zoom.X)}"
-					 + (_shakeOn ? "" : "!off"));
+					 + (_tick.ShakeOn ? "" : "!off"));
 			if (++_frames >= _traceFrames)
 			{
 				GetTree().Quit();
@@ -5220,11 +4595,11 @@ public sealed partial class Main : Node2D
 		// that switching the shake off mid-ring-down puts the view back rather
 		// than leaving it parked a few pixels out - the trap the recoil spring
 		// already documents.
-		if (_shakeOn)
+		if (_tick.ShakeOn)
 			_shake.Update(delta);
 		else if (_shake.Moving)
 			_shake.Reset();
-		Vector2 want = _shakeOn ? _shake.ScreenOffset(_camera.Zoom.X)
+		Vector2 want = _tick.ShakeOn ? _shake.ScreenOffset(_camera.Zoom.X)
 								: Vector2.Zero;
 		if (_camera.Offset != want)
 			_camera.Offset = want;
@@ -5235,7 +4610,7 @@ public sealed partial class Main : Node2D
 		// under them.
 		if (_stage is not null)
 		{
-			_stage.Selected = _noPanel ? null : Active;
+			_stage.Selected = NoUi ? null : Active;
 			// Every frame rather than on the drag, for the tremble level's reason:
 			// a stage handed the board later would otherwise sit on the built-in
 			// while the row it is a view of says something else.
@@ -5356,7 +4731,7 @@ public sealed partial class Main : Node2D
 		}
 		else if (!Moving && _spinning)
 		{
-			_tank.TurretFacing = Mod(_tank.TurretFacing + SpinSpeed * delta, 360.0);
+			_tank.TurretFacing = Angles.Mod(_tank.TurretFacing + SpinSpeed * delta, 360.0);
 			_tank.QueueRedraw();
 		}
 		else if (!Moving && _aimWithMouse)
@@ -5373,22 +4748,6 @@ public sealed partial class Main : Node2D
 			}
 		}
 	}
-
-	/// <summary>
-	/// How far the pointer may travel between pressing the middle button and
-	/// letting it go and still count as a click rather than a pan.
-	///
-	/// In screen pixels, not world ones: the same hand movement is eight times
-	/// the world distance at zoom 8, and whether somebody tapped or dragged is
-	/// about the hand.
-	/// </summary>
-	private const float MiddleTapSlack = 4.0f;
-
-	/// <summary>Whether a middle press that ended at <paramref name="to"/> was a
-	/// tap. Split out so the one thing overloading this button risks - a pan that
-	/// destroys a tank on the way past - is asserted rather than assumed.</summary>
-	internal static bool MiddleTap(Vector2 from, Vector2 to) =>
-		from.DistanceTo(to) <= MiddleTapSlack;
 
 	/// <summary>Where the middle button went down, or null if it is up.</summary>
 	private Vector2? _middleFrom;
@@ -5449,7 +4808,7 @@ public sealed partial class Main : Node2D
 				// A tank there means "drive that one from now on"; empty ground
 				// means "go there". One click, and which of the two it is decided
 				// by what is standing on the cell rather than by a modifier.
-				int pick = SelectionFor(_vehicles, _active, cell);
+				int pick = Vehicle.SelectionFor(_vehicles, _active, cell);
 				if (pick >= 0)
 					Select(pick);
 				else
@@ -5501,41 +4860,41 @@ public sealed partial class Main : Node2D
 			case Key.D: _tank.TurnHull(-step); break;
 			case Key.Q:
 				_aimWithMouse = false;
-				_tank.TurretFacing = Mod(_tank.TurretFacing + step, 360.0);
+				_tank.TurretFacing = Angles.Mod(_tank.TurretFacing + step, 360.0);
 				break;
 			case Key.E:
 				_aimWithMouse = false;
-				_tank.TurretFacing = Mod(_tank.TurretFacing - step, 360.0);
+				_tank.TurretFacing = Angles.Mod(_tank.TurretFacing - step, 360.0);
 				break;
 			case Key.W:
 				OrderMoveTo(_field.Neighbour(_cell, _tank.HullFacing));
 				break;
 			case Key.S:
-				OrderMoveTo(_field.Neighbour(_cell, Mod(_tank.HullFacing + 180.0, 360.0)));
+				OrderMoveTo(_field.Neighbour(_cell, Angles.Mod(_tank.HullFacing + 180.0, 360.0)));
 				break;
 			case Key.F: _tank.TurretHoldsHeading = !_tank.TurretHoldsHeading; break;
 			case Key.P:
-				_pitchEnabled = !_pitchEnabled;
+				_tick.PitchEnabled = !_tick.PitchEnabled;
 				PitchChanged();
 				break;
 			case Key.B:
-				_rumbleEnabled = !_rumbleEnabled;
+				_tick.RumbleEnabled = !_tick.RumbleEnabled;
 				RumbleChanged();
 				break;
 			case Key.I:
-				_trembleEnabled = !_trembleEnabled;
+				_tick.TrembleEnabled = !_tick.TrembleEnabled;
 				TrembleChanged();
 				break;
 			case Key.N:
-				_scanEnabled = !_scanEnabled;
+				_tick.ScanEnabled = !_tick.ScanEnabled;
 				ScanChanged();
 				break;
 			case Key.O:
-				_exhaustEnabled = !_exhaustEnabled;
+				_tick.ExhaustEnabled = !_tick.ExhaustEnabled;
 				ExhaustChanged();
 				break;
 			case Key.C:
-				_tracksEnabled = !_tracksEnabled;
+				_tick.TracksEnabled = !_tick.TracksEnabled;
 				TracksChanged();
 				break;
 			// Beside the belts, because it is the same kind of switch: both are
@@ -5547,7 +4906,7 @@ public sealed partial class Main : Node2D
 			// free key outside an existing range. The bracket at least points the
 			// way the tube goes.
 			case Key.Bracketleft:
-				_recoilTube = !_recoilTube;
+				_tick.RecoilTube = !_tick.RecoilTube;
 				break;
 			// '\' because the note on '[' has now come true twice over: A-Z are
 			// all bound, '[' went to the tube and ']' to the shear, so this is
@@ -5566,7 +4925,7 @@ public sealed partial class Main : Node2D
 			// key exists for. ']' for the same reason '[' is '[': the letters are
 			// gone.
 			case Key.Bracketright:
-				_recoilShear = !_recoilShear;
+				_tick.RecoilShear = !_tick.RecoilShear;
 				break;
 			case Key.J:
 				_burning = !_burning;
@@ -5582,7 +4941,7 @@ public sealed partial class Main : Node2D
 					(_hitSide + 1) % HexField.EdgeHeadings.Length]);
 				break;
 			case Key.Y:
-				_calibre = (_calibre + 1) % Calibres.Length;
+				_calibre = (_calibre + 1) % Ordnance.Count;
 				break;
 			case Key.V:
 				_tank.Source = _tank.Source == FlashSource.Rendered
@@ -5735,7 +5094,7 @@ public sealed partial class Main : Node2D
 		Shell.SmokeSeconds = Shell.TunedSmokeSeconds;
 		ApplySize();
 		PaintGunnery();
-		_camera.Zoom = new Vector2(_zoomAt, _zoomAt);
+		_camera.Zoom = new Vector2(ZoomAt ?? 1.0f, ZoomAt ?? 1.0f);
 		_camera.Position = ViewHome;
 		// and the shake, which holds a displacement with nothing driving it -
 		// the same reason the recoil spring is reset rather than left leaning
@@ -5743,17 +5102,4 @@ public sealed partial class Main : Node2D
 		_camera.Offset = Vector2.Zero;
 	}
 
-	private void Capture(string path)
-	{
-		Image image = GetViewport().GetTexture().GetImage();
-		Error err = image.SavePng(path);
-		if (err != Error.Ok)
-			GD.PushError($"screenshot to {path} failed: {err}");
-		else
-			GD.Print($"screenshot: {path}");
-	}
-
-	internal static double Mod(double a, double n) => (a % n + n) % n;
-
-	internal static double WrapAngle(double degrees) => Mod(degrees + 180.0, 360.0) - 180.0;
 }

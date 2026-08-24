@@ -32,8 +32,12 @@ namespace TankSpriteTest;
 /// measured against <c>Images/raw/wall.png</c>, and the shading model here is a
 /// different one.
 /// </summary>
-public sealed partial class WallBench : Node2D
+public sealed partial class WallBench : SceneRoot
 {
+	/// <summary>Thirty frames, and never fewer than two - see the clamp in
+	/// <see cref="ReadFlags"/> for why one is not a picture.</summary>
+	public WallBench() : base(30) { }
+
     private static readonly string TerrainsRoot = AssetRoot.Terrains;
     private static readonly string SpritesRoot = AssetRoot.Sprites;
 
@@ -149,14 +153,12 @@ public sealed partial class WallBench : Node2D
     /// </summary>
     private float _bearing = 270.0f;
 
-    private float _zoomAt = 2.4f;
-    private string? _capturePath;
-    private int _captureAt = 30;
+    /// <summary>What the view opens on and what R comes back to.
+    /// <c>--zoom</c> overrides it - see <see cref="SceneRoot.ZoomAt"/>.</summary>
+    private float HomeZoom => ZoomAt ?? 2.4f;
     private int _frame;
     private bool _fellAtStart;
     private int _plinth = 1;
-    private bool _noUi;
-    private bool _showUi;
     private Vector2? _middleFrom;
     private Vector2? _leftFrom;
     private bool _reported;
@@ -278,6 +280,9 @@ public sealed partial class WallBench : Node2D
         string[] args = OS.GetCmdlineUserArgs();
         for (int i = 0; i < args.Length; i++)
         {
+            // The five every root here takes - see SceneRoot.
+            if (ReadCommonFlag(args, ref i))
+                continue;
             if (args[i] == "--spin" && i + 1 < args.Length
                 && float.TryParse(args[i + 1], System.Globalization.NumberStyles.Float,
                                   System.Globalization.CultureInfo.InvariantCulture,
@@ -293,19 +298,6 @@ public sealed partial class WallBench : Node2D
             }
             else if (args[i] == "--turntable")
                 _turning = true;
-            else if (args[i] == "--capture" && i + 1 < args.Length)
-                _capturePath = args[++i];
-            else if (args[i] == "--capture-at" && i + 1 < args.Length
-                     && int.TryParse(args[i + 1], out int at))
-            {
-                // Never the first frame. The viewport has nothing in it until
-                // something has been drawn into it, so frame 1 comes back one
-                // flat colour - a capture that succeeds, writes a file and shows
-                // nothing, which is the worst way for a proof to fail. Measured:
-                // 1 unique colour at frame 1, 15 126 from frame 2 on.
-                _captureAt = Mathf.Max(2, at);
-                i++;
-            }
             else if (args[i] == "--seed" && i + 1 < args.Length
                      && int.TryParse(args[i + 1], out int seed))
             {
@@ -345,13 +337,6 @@ public sealed partial class WallBench : Node2D
                 // back byte for byte identical - which reads as a flag that does
                 // nothing rather than one that was not understood.
                 _coverage = Mathf.Clamp(cov, 0.4f, 1.2f);
-                i++;
-            }
-            else if (args[i] == "--zoom" && i + 1 < args.Length
-                     && float.TryParse(args[i + 1], NumberStyles.Float,
-                                       CultureInfo.InvariantCulture, out float zoom))
-            {
-                _zoomAt = Mathf.Clamp(zoom, 0.25f, 8.0f);
                 i++;
             }
             else if (args[i] == "--fallen" && i + 1 < args.Length
@@ -417,19 +402,15 @@ public sealed partial class WallBench : Node2D
                 _solved = true;
             else if (args[i] == "--fell")
                 _fellAtStart = true;
-            else if (args[i] == "--no-ui")
-                _noUi = true;
-            else if (args[i] == "--ui")
-                _showUi = true;
         }
-        if (_capturePath is not null)
-        {
-            // A capture is evidence, so the step is pinned for the reason it is
-            // pinned in the harness: two runs of the same flags have to be
-            // diffable. Stage3D and WallStack both read this field.
-            Main.FixedStep = 1.0 / 60.0;
-            _noUi = !_showUi;
-        }
+        SettleForProof(CapturePath is not null);
+        // Never the first frame. The viewport has nothing in it until something
+        // has been drawn into it, so frame 1 comes back one flat colour - a
+        // capture that succeeds, writes a file and shows nothing, which is the
+        // worst way for a proof to fail. Measured: 1 unique colour at frame 1,
+        // 15 126 from frame 2 on. Clamped here rather than in the base, because
+        // it is this bench that starts empty.
+        CaptureAt = Mathf.Max(2, CaptureAt);
     }
 
     public override void _Ready()
@@ -497,7 +478,7 @@ public sealed partial class WallBench : Node2D
 
         _camera = new Camera2D
         {
-            Zoom = new Vector2(_zoomAt, _zoomAt),
+            Zoom = new Vector2(HomeZoom, HomeZoom),
             Enabled = true,
             Position = ViewHome,
         };
@@ -510,7 +491,7 @@ public sealed partial class WallBench : Node2D
         if (tile is not null)
             Build();
 
-        if (!_noUi)
+        if (!NoUi)
         {
             var layer = new CanvasLayer();
             AddChild(layer);
@@ -834,7 +815,7 @@ public sealed partial class WallBench : Node2D
         Turn(0.0f);
         Build();
         _camera.Position = ViewHome;
-        _camera.Zoom = new Vector2(_zoomAt, _zoomAt);
+        _camera.Zoom = new Vector2(HomeZoom, HomeZoom);
     }
 
     /// <summary>Put the turntable somewhere, wrapped.
@@ -857,8 +838,8 @@ public sealed partial class WallBench : Node2D
     {
         if (_turning)
             // The bench's fixed step when there is one, so a turntable capture is
-            // the same picture twice - the rule Main.FixedStep exists for.
-            Turn(_spin + Mathf.DegToRad(TurnRate) * (float)(Main.FixedStep ?? delta));
+            // the same picture twice - the rule FrameClock.FixedStep exists for.
+            Turn(_spin + Mathf.DegToRad(TurnRate) * (float)(FrameClock.FixedStep ?? delta));
 
         if (_hud is not null)
             _hud.Text = Note();
@@ -885,16 +866,16 @@ public sealed partial class WallBench : Node2D
             GD.Print($"wall: settled at {_wall.Length:F2}s - reach {reach:F3}, "
                      + $"top {top:F3} of a cell, {aloft} aloft, {layers} deep");
         }
-        if (_rig is not null && _capturePath is not null && _frame == _captureAt)
+        if (_rig is not null && CapturePath is not null && _frame == CaptureAt)
         {
             (float worst, float median, int moved) = _rig.Drift();
             GD.Print($"wall: drift at frame {_frame} - worst {worst:F3}m, "
                      + $"median {median:F3}m, {moved} of {_rig.Count} moved, "
                      + $"{_rig.Awake} awake");
         }
-        if (_capturePath is not null && _frame >= _captureAt)
+        if (CapturePath is not null && _frame >= CaptureAt)
         {
-            Capture(_capturePath);
+            Capture(CapturePath);
             GetTree().Quit();
         }
     }
@@ -1071,7 +1052,7 @@ public sealed partial class WallBench : Node2D
             // The same two-gestures-one-button arrangement the harness and the
             // wood bench use, resolved on release with the same slack, so a pan
             // across the cell does not fire the charge.
-            if (from is Vector2 down && Main.MiddleTap(down, GetGlobalMousePosition()))
+            if (from is Vector2 down && MiddleTap(down, GetGlobalMousePosition()))
                 Fell();
             return;
         }
@@ -1097,12 +1078,4 @@ public sealed partial class WallBench : Node2D
         }
     }
 
-    private void Capture(string path)
-    {
-        Image image = GetViewport().GetTexture().GetImage();
-        DirAccess.MakeDirRecursiveAbsolute(path.GetBaseDir());
-        Error err = image.SavePng(path);
-        GD.Print(err == Error.Ok ? $"wall: wrote {path}"
-                                 : $"wall: could not write {path}: {err}");
-    }
 }

@@ -179,6 +179,24 @@ public sealed partial class Shell : Node2D
         (float)(Shooter.Profile.SmokeCalibre * SmokeLevel);
 
     /// <summary>
+    /// Whether the streak is drawn at all - --tracer, or the panel. On.
+    ///
+    /// <b>It was off, and the reason it was has expired.</b> A debug line that
+    /// crept into an A/B would be measuring itself, so while the tracer was one
+    /// stroke of plain code that was the right default. It is now a drawn layer
+    /// with a calibre, a trail and two levels of its own - something to be judged
+    /// rather than something to keep out of the way - and a feature you have to
+    /// switch on to see is a feature nobody looks at. The comparison is still one
+    /// click away, which is all it ever needed to be.
+    ///
+    /// Named here rather than left in an initialiser, for the reason
+    /// <see cref="Recoil.ShearOnByDefault"/> is: a default nobody can point at is
+    /// a default that quietly changes. Beside <see cref="SmokeOnByDefault"/>
+    /// rather than on the harness, because what a round looks like is the round's.
+    /// </summary>
+    public const bool TracerOnByDefault = true;
+
+    /// <summary>
     /// Whether the round lays smoke behind it.
     ///
     /// <b>Off, and it used to be on.</b> The reference picture has no trail at

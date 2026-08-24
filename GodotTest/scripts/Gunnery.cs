@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Godot;
 
@@ -39,7 +39,7 @@ public readonly struct Shot
 /// <summary>
 /// The firing rules, in one place and with no scene in them.
 ///
-/// Static and pure for the reason <see cref="Main.SelectionFor"/> is: the whole
+/// Static and pure for the reason <see cref="Vehicle.SelectionFor"/> is: the whole
 /// of this feature is a handful of decisions - whether there is a line, whether
 /// something is in it, whether the gun is laid, whether the round is loaded -
 /// and every one of them is invisible in a screenshot. Asserted instead.

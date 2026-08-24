@@ -62,8 +62,12 @@ namespace TankSpriteTest;
 ///     Godot_v4.7.2-stable_mono_win64.exe --path GodotTest res://TankTest.tscn
 ///     Godot_v4.7.2-stable_mono_win64.exe --path GodotTest res://WaterTankTest.tscn
 /// </summary>
-public sealed partial class TankBench : Node2D
+public sealed partial class TankBench : SceneRoot
 {
+	/// <summary>Forty frames, because half of what this bench shows is a tank
+	/// that has been driving for a while.</summary>
+	public TankBench() : base(40) { }
+
     /// <summary>The board. Named rather than built here, for the reason
     /// <c>Abbey</c> is a map and not a bench: a board is data, and a second
     /// place that authors one is a second place to disagree with the guards
@@ -128,19 +132,7 @@ public sealed partial class TankBench : Node2D
 
     // --- the dials -----------------------------------------------------------
 
-    private bool _pitch = true;
-    private bool _rumble;
-    private bool _tremble = true;
-    private double _trembleLevel = 1.0;
-    private bool _tracks = true;
-    private bool _exhaust = true;
-    private double _exhaustLevel = 1.0;
-    private bool _exhaustRamp;
-    private bool _scan;
-    private bool _tube = true;
-    private bool _shear = Recoil.ShearOnByDefault;
     private double _recoilLevel = 1.0;
-    private bool _shakeOn = CameraShake.OnByDefault;
     private bool _shadow = true;
     private bool _ruts = true;
     private bool _spinning;
@@ -160,8 +152,6 @@ public sealed partial class TankBench : Node2D
 
     // --- flags ---------------------------------------------------------------
 
-    private string? _capturePath;
-    private int _captureAt = 40;
     private int _frame;
 
     /// <summary>What the view opens at, or null for "measure it" - see
@@ -169,7 +159,6 @@ public sealed partial class TankBench : Node2D
     /// fifteen cells and the panel eats three hundred pixels of the window: a
     /// tuned figure would be right for this board at this window size and wrong
     /// for the next cell added to either.</summary>
-    private float? _zoomAt;
     private string? _startTag;
     private Vector2I? _driveTo;
     private bool _fireAtStart;
@@ -177,24 +166,17 @@ public sealed partial class TankBench : Node2D
     private int _damageAtStart;
     private bool _destroyAtStart;
     private bool _burnAtStart;
-    private bool _noUi;
-    private bool _showUi;
 
     private void ReadFlags()
     {
         string[] args = OS.GetCmdlineUserArgs();
         for (int i = 0; i < args.Length; i++)
         {
+            // The five every root here takes - see SceneRoot.
+            if (ReadCommonFlag(args, ref i))
+                continue;
             switch (args[i])
             {
-                case "--capture" when i + 1 < args.Length:
-                    _capturePath = args[++i];
-                    break;
-                case "--capture-at" when i + 1 < args.Length
-                                         && int.TryParse(args[i + 1], out int at):
-                    _captureAt = at;
-                    i++;
-                    break;
                 case "--tank" when i + 1 < args.Length:
                     _startTag = args[++i].ToUpperInvariant();
                     break;
@@ -225,30 +207,26 @@ public sealed partial class TankBench : Node2D
                 case "--burning":
                     _burnAtStart = true;
                     break;
-                case "--zoom" when i + 1 < args.Length && Number(args[i + 1]) is double z:
-                    _zoomAt = Mathf.Clamp((float)z, 0.25f, 8.0f);
-                    i++;
-                    break;
                 case "--size" when i + 1 < args.Length && Number(args[i + 1]) is double s:
                     _sizeLevel = Mathf.Clamp(s, 0.5, 2.0);
                     i++;
                     break;
                 case "--tremble" when i + 1 < args.Length && Number(args[i + 1]) is double t:
-                    _trembleLevel = Mathf.Clamp(t, 0.0, 2.5);
+                    _tick.TrembleLevel = Mathf.Clamp(t, 0.0, 2.5);
                     i++;
                     break;
                 case "--exhaust" when i + 1 < args.Length && Number(args[i + 1]) is double e:
-                    _exhaustLevel = Mathf.Clamp(e, 0.0, 3.0);
+                    _tick.ExhaustLevel = Mathf.Clamp(e, 0.0, 3.0);
                     i++;
                     break;
                 case "--no-tremble":
-                    _tremble = false;
+                    _tick.TrembleEnabled = false;
                     break;
                 case "--no-tracks":
-                    _tracks = false;
+                    _tick.TracksEnabled = false;
                     break;
                 case "--no-exhaust":
-                    _exhaust = false;
+                    _tick.ExhaustEnabled = false;
                     break;
                 case "--no-shadow":
                     _shadow = false;
@@ -272,28 +250,18 @@ public sealed partial class TankBench : Node2D
                     }
                     break;
                 case "--rumble":
-                    _rumble = true;
+                    _tick.RumbleEnabled = true;
                     break;
                 case "--scan":
-                    _scan = true;
-                    break;
-                case "--no-ui":
-                    _noUi = true;
-                    break;
-                case "--ui":
-                    _showUi = true;
+                    _tick.ScanEnabled = true;
                     break;
             }
         }
         // A capture is evidence, so the step is pinned for the harness's reason:
         // two runs of the same flags have to be diffable. Stage3D reads this very
         // field, which is why it is Main's and not a local one - see
-        // Main.FixedStep.
-        if (_capturePath is not null)
-        {
-            Main.FixedStep = 1.0 / 60.0;
-            _noUi = !_showUi;
-        }
+        // FrameClock.FixedStep.
+        SettleForProof(CapturePath is not null);
     }
 
     /// <summary>Invariant, never the machine's - the trap named beside
@@ -408,7 +376,7 @@ public sealed partial class TankBench : Node2D
     private void Garage()
     {
         var missing = new List<string>();
-        foreach (string tag in Main.Tags)
+        foreach (string tag in MovementProfile.Tags)
         {
             AtlasSet atlas;
             try
@@ -515,18 +483,6 @@ public sealed partial class TankBench : Node2D
             _tick.ViewZoom = _camera?.Zoom.X ?? 1.0f;
             _tick.Staged = true;
 
-            _tick.PitchEnabled = _pitch;
-            _tick.RumbleEnabled = _rumble;
-            _tick.TracksEnabled = _tracks;
-            _tick.TrembleEnabled = _tremble;
-            _tick.TrembleLevel = _trembleLevel;
-            _tick.ExhaustEnabled = _exhaust;
-            _tick.ExhaustLevel = _exhaustLevel;
-            _tick.ExhaustRamp = _exhaustRamp;
-            _tick.ScanEnabled = _scan;
-            _tick.RecoilTube = _tube;
-            _tick.RecoilShear = _shear;
-            _tick.ShakeOn = _shakeOn;
             _tick.TurretHeld = _ => _spinning;
             // No gunnery: one tank has nobody to shoot at, and the lane, the
             // armour and the shell in the air are all statements about two.
@@ -551,9 +507,9 @@ public sealed partial class TankBench : Node2D
     private void Home()
     {
         Rect2 board = Spread();
-        float zoom = _zoomAt ?? Fit(board);
+        float zoom = ZoomAt ?? Fit(board);
         _camera.Zoom = new Vector2(zoom, zoom);
-        float hidden = _noUi ? 0.0f : ControlPanel.Width;
+        float hidden = NoUi ? 0.0f : ControlPanel.Width;
         _camera.Position = board.GetCenter() + new Vector2(hidden * 0.5f / zoom, 0.0f);
     }
 
@@ -590,7 +546,7 @@ public sealed partial class TankBench : Node2D
     private float Fit(Rect2 board)
     {
         Vector2 window = GetViewportRect().Size;
-        float free = Mathf.Max(window.X - (_noUi ? 0.0f : ControlPanel.Width),
+        float free = Mathf.Max(window.X - (NoUi ? 0.0f : ControlPanel.Width),
                                200.0f);
         return Mathf.Clamp(Mathf.Min(free * 0.9f / Mathf.Max(board.Size.X, 1.0f),
                                      window.Y * 0.9f / Mathf.Max(board.Size.Y, 1.0f)),
@@ -628,21 +584,21 @@ public sealed partial class TankBench : Node2D
     {
         if (_garage.Count == 0)
             return;
-        delta = Main.FixedStep ?? delta;
+        delta = FrameClock.FixedStep ?? delta;
 
         Tick.Run(Tank, delta);
 
-        if (_shakeOn)
+        if (_tick.ShakeOn)
             _shake.Update(delta);
         else if (_shake.Moving)
             _shake.Reset();
-        Vector2 want = _shakeOn ? _shake.ScreenOffset(_camera.Zoom.X) : Vector2.Zero;
+        Vector2 want = _tick.ShakeOn ? _shake.ScreenOffset(_camera.Zoom.X) : Vector2.Zero;
         if (_camera.Offset != want)
             _camera.Offset = want;
 
         if (_stage is not null)
         {
-            _stage.Selected = _noUi ? null : Tank;
+            _stage.Selected = NoUi ? null : Tank;
             _stage.ShowEdges = _edges;
             _stage.ShowBoard = _board;
             if (_sea is not null)
@@ -696,13 +652,13 @@ public sealed partial class TankBench : Node2D
             Sprite.QueueRedraw();
         }
 
-        if (_hud is not null && !_noUi)
+        if (_hud is not null && !NoUi)
             _hud.Text = Note();
 
         _frame++;
-        if (_capturePath is not null && _frame >= _captureAt)
+        if (CapturePath is not null && _frame >= CaptureAt)
         {
-            Capture(_capturePath);
+            Capture(CapturePath);
             GetTree().Quit();
         }
     }
@@ -816,9 +772,9 @@ public sealed partial class TankBench : Node2D
 
     private void Hit(double bearing)
     {
-        _hitSide = Main.SideFor(bearing);
-        Tick.TakeHit(Tank, HitFrom, Main.CalibreAt(_calibre), null,
-                     Main.BiteFor(_calibre));
+        _hitSide = Angles.SideFor(bearing);
+        Tick.TakeHit(Tank, HitFrom, Ordnance.At(_calibre), null,
+                     Ordnance.BiteFor(_calibre));
     }
 
     private void Reset()
@@ -920,21 +876,21 @@ public sealed partial class TankBench : Node2D
         _panel.Toggle("tank.aim.spin", "spin the turret  (SPACE)",
                       () => _spinning, on => _spinning = on);
         _panel.Toggle("tank.aim.scan", "look around on the halt  (N)",
-                      () => _scan, on => _scan = on);
+                      () => _tick.ScanEnabled, on => _tick.ScanEnabled = on);
 
         _panel.Heading("tank.ride", "ride");
-        _panel.Toggle("tank.ride.pitch", "body pitch  (P)", () => _pitch,
-                      on => { _pitch = on; Tick.UpdatePitch(Tank, 0.0, 0.0); });
-        _panel.Toggle("tank.ride.rumble", "ground rumble  (B)", () => _rumble,
-                      on => { _rumble = on; Tick.UpdateRumble(Tank, 0.0); });
-        _panel.Toggle("tank.ride.tremble", "engine tremble  (I)", () => _tremble,
-                      on => { _tremble = on; Tick.UpdateTremble(Tank, 0.0); });
+        _panel.Toggle("tank.ride.pitch", "body pitch  (P)", () => _tick.PitchEnabled,
+                      on => { _tick.PitchEnabled = on; Tick.UpdatePitch(Tank, 0.0, 0.0); });
+        _panel.Toggle("tank.ride.rumble", "ground rumble  (B)", () => _tick.RumbleEnabled,
+                      on => { _tick.RumbleEnabled = on; Tick.UpdateRumble(Tank, 0.0); });
+        _panel.Toggle("tank.ride.tremble", "engine tremble  (I)", () => _tick.TrembleEnabled,
+                      on => { _tick.TrembleEnabled = on; Tick.UpdateTremble(Tank, 0.0); });
         _panel.Slide("tank.ride.tremble_level", "tremble level", 0.0, 2.5, 0.05,
-                     () => _trembleLevel, v => _trembleLevel = v, "x",
-                     () => $"{Tank.Tremble.TravelAt(Tank.Speed, _trembleLevel):F2}px "
+                     () => _tick.TrembleLevel, v => _tick.TrembleLevel = v, "x",
+                     () => $"{Tank.Tremble.TravelAt(Tank.Speed, _tick.TrembleLevel):F2}px "
                            + "of stern travel at this speed");
-        _panel.Toggle("tank.ride.tracks", "belts wind  (C)", () => _tracks,
-                      on => { _tracks = on; Tick.UpdateTracks(Tank, (0.0, 0.0), 0.0); });
+        _panel.Toggle("tank.ride.tracks", "belts wind  (C)", () => _tick.TracksEnabled,
+                      on => { _tick.TracksEnabled = on; Tick.UpdateTracks(Tank, (0.0, 0.0), 0.0); });
         _panel.Toggle("tank.ride.ruts", "leave ruts", () => _ruts,
                       on => _ruts = on);
         _panel.Readout("tank.ride.belt", () =>
@@ -942,27 +898,27 @@ public sealed partial class TankBench : Node2D
             + $"blur {Tank.Track.Blur:F2}");
 
         _panel.Heading("tank.smoke", "exhaust and fire");
-        _panel.Toggle("tank.smoke.on", "exhaust plume  (O)", () => _exhaust,
-                      on => { _exhaust = on; Tick.UpdateExhaust(Tank, 0.0); });
+        _panel.Toggle("tank.smoke.on", "exhaust plume  (O)", () => _tick.ExhaustEnabled,
+                      on => { _tick.ExhaustEnabled = on; Tick.UpdateExhaust(Tank, 0.0); });
         _panel.Slide("tank.smoke.level", "plume rate", 0.0, 3.0, 0.05,
-                     () => _exhaustLevel, v => _exhaustLevel = v, "x",
+                     () => _tick.ExhaustLevel, v => _tick.ExhaustLevel = v, "x",
                      () =>
                      {
-                         double rate = Tank.Exhaust.RateAt(Tank.Speed, _exhaustLevel);
+                         double rate = Tank.Exhaust.RateAt(Tank.Speed, _tick.ExhaustLevel);
                          return $"{rate:F1} phases/s, "
                                 + $"{60.0 / Math.Max(rate, 0.01):F1} frames a phase";
                      });
-        _panel.Toggle("tank.smoke.ramp", "analogue load ramp", () => _exhaustRamp,
-                      on => _exhaustRamp = on);
+        _panel.Toggle("tank.smoke.ramp", "analogue load ramp", () => _tick.ExhaustRamp,
+                      on => _tick.ExhaustRamp = on);
         _panel.Toggle("tank.smoke.burn", "set it alight  (J)",
                       () => Tank.Burning, on => Tank.Burning = on);
 
         _panel.Heading("tank.gun", "the gun");
         _panel.Press("tank.gun.fire", "fire  (Z)", () => Tick.Fire(Tank));
-        _panel.Toggle("tank.gun.tube", "barrel recoil  ([)", () => _tube,
-                      on => _tube = on);
+        _panel.Toggle("tank.gun.tube", "barrel recoil  ([)", () => _tick.RecoilTube,
+                      on => _tick.RecoilTube = on);
         _panel.Toggle("tank.gun.shear", "body shear on the shot  (])",
-                      () => _shear, on => _shear = on);
+                      () => _tick.RecoilShear, on => _tick.RecoilShear = on);
         _panel.Slide("tank.gun.recoil", "shear level", 0.0, 2.5, 0.05,
                      () => _recoilLevel,
                      v =>
@@ -973,10 +929,10 @@ public sealed partial class TankBench : Node2D
                      }, "x",
                      () => $"peak {Tank.Recoil.PeakFor(_recoilLevel):F3} against "
                            + $"{Recoil.RigidBodyPeak:F3} for a rigid body");
-        _panel.Toggle("tank.gun.shake", "camera shake", () => _shakeOn,
+        _panel.Toggle("tank.gun.shake", "camera shake", () => _tick.ShakeOn,
                       on =>
                       {
-                          _shakeOn = on;
+                          _tick.ShakeOn = on;
                           if (!on)
                               _shake.Reset();
                       });
@@ -997,7 +953,7 @@ public sealed partial class TankBench : Node2D
         _panel.Choice("tank.armour.calibre", "calibre",
                       new[] { "light", "medium", "heavy" },
                       () => _calibre,
-                      i => _calibre = Math.Clamp(i, 0, Main.CalibreCount - 1));
+                      i => _calibre = Math.Clamp(i, 0, Ordnance.Count - 1));
         _panel.PressPair("tank.armour.hit", "take a hit  (U)", () => Hit(HitFrom),
                          "repair", () =>
                          {
@@ -1041,7 +997,7 @@ public sealed partial class TankBench : Node2D
         // groups, and the one the bench exists for should not need a click to
         // be found.
         _panel.Expand("tank.pick", true);
-        if (!_noUi)
+        if (!NoUi)
         {
             layer.AddChild(_panel);
             _panel.AddHandle();
@@ -1074,7 +1030,7 @@ public sealed partial class TankBench : Node2D
             }
             Vector2? from = _middleFrom;
             _middleFrom = null;
-            if (from is Vector2 down && Main.MiddleTap(down, GetGlobalMousePosition()))
+            if (from is Vector2 down && MiddleTap(down, GetGlobalMousePosition()))
                 Tick.Kill(Tank);
             return;
         }
@@ -1145,33 +1101,33 @@ public sealed partial class TankBench : Node2D
                 Tank.Burning = !Tank.Burning;
                 break;
             case Key.P:
-                _pitch = !_pitch;
+                _tick.PitchEnabled = !_tick.PitchEnabled;
                 Tick.UpdatePitch(Tank, 0.0, 0.0);
                 break;
             case Key.B:
-                _rumble = !_rumble;
+                _tick.RumbleEnabled = !_tick.RumbleEnabled;
                 Tick.UpdateRumble(Tank, 0.0);
                 break;
             case Key.I:
-                _tremble = !_tremble;
+                _tick.TrembleEnabled = !_tick.TrembleEnabled;
                 Tick.UpdateTremble(Tank, 0.0);
                 break;
             case Key.C:
-                _tracks = !_tracks;
+                _tick.TracksEnabled = !_tick.TracksEnabled;
                 Tick.UpdateTracks(Tank, (0.0, 0.0), 0.0);
                 break;
             case Key.O:
-                _exhaust = !_exhaust;
+                _tick.ExhaustEnabled = !_tick.ExhaustEnabled;
                 Tick.UpdateExhaust(Tank, 0.0);
                 break;
             case Key.N:
-                _scan = !_scan;
+                _tick.ScanEnabled = !_tick.ScanEnabled;
                 break;
             case Key.Bracketleft:
-                _tube = !_tube;
+                _tick.RecoilTube = !_tick.RecoilTube;
                 break;
             case Key.Bracketright:
-                _shear = !_shear;
+                _tick.RecoilShear = !_tick.RecoilShear;
                 break;
             case Key.G:
                 _board = !_board;
@@ -1201,12 +1157,4 @@ public sealed partial class TankBench : Node2D
         GD.PushWarning("tank bench: " + what);
     }
 
-    private void Capture(string path)
-    {
-        Image image = GetViewport().GetTexture().GetImage();
-        DirAccess.MakeDirRecursiveAbsolute(path.GetBaseDir());
-        Error err = image.SavePng(path);
-        GD.Print(err == Error.Ok ? $"tank bench: wrote {path}"
-                                 : $"tank bench: could not write {path}: {err}");
-    }
 }

@@ -101,7 +101,7 @@ public sealed partial class Main
 	/// </summary>
 	private void StartMcp()
 	{
-		if (_capturePath is not null || _traceFrames > 0 || _selfTest)
+		if (CapturePath is not null || _traceFrames > 0 || _selfTest)
 			return;
 		if (!_mcpEnabled)
 			return;

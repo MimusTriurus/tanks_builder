@@ -190,7 +190,7 @@ public sealed class Vehicle
     /// <see cref="Standing"/> whenever the two ends have nothing to disagree
     /// about, the height read off the leg behind the contact point while the
     /// tank climbs, and the crown it is leaving while it descends behind a
-    /// rim. See Main.StepHeights for the numbers, Stage3D.Body for what is
+    /// rim. See Footing.StepHeights for the numbers, Stage3D.Body for what is
     /// done with them.
     ///
     /// <b>It exists because one depth per tank cannot answer a climb.</b>
@@ -282,7 +282,7 @@ public sealed class Vehicle
 
     /// <summary>The screen-space line the stage splits the sprite's depth
     /// along, as <c>(a, b, c)</c> with <c>a*x + b*y &gt;= c</c> the side that
-    /// carries <see cref="Standing"/>. Climbing it is <c>Main.SeamLine</c>,
+    /// carries <see cref="Standing"/>. Climbing it is <c>Footing.SeamLine</c>,
     /// the shared edge of the hex being mounted and the raised neighbour
     /// nearest the camera; descending behind a rim it is the wipe
     /// <c>Main.Climb</c> sweeps down the sprite. Meaningless while parked,
@@ -452,6 +452,32 @@ public sealed class Vehicle
             if (vehicle.Cell == cell)
                 return vehicle;
         return null;
+    }
+
+    /// <summary>
+    /// Which tank a click on a cell means, or -1 for "no tank - this is a move
+    /// order".
+    ///
+    /// A cell rather than the sprite's pixels: a tank occupies a cell, that is the
+    /// unit the game is played in, and the two readings differ only where a
+    /// silhouette overhangs its own hex - where a pixel test would let you select
+    /// a tank by clicking the ground beside it.
+    ///
+    /// The tank already being driven does not count, so clicking the one you are
+    /// driving is an order to stay put rather than a selection that does nothing.
+    /// Here rather than on the harness: it is a question about a list of tanks
+    /// and a cell, and says nothing about the board they stand on.
+    ///
+    /// Static and pure so the routing can be asserted: "a click on an occupied
+    /// cell selects instead of ordering" is the whole feature.
+    /// </summary>
+    public static int SelectionFor(IReadOnlyList<Vehicle> vehicles, int active,
+                                  Vector2I cell)
+    {
+        for (int i = 0; i < vehicles.Count; i++)
+            if (i != active && vehicles[i].Cell == cell)
+                return i;
+        return -1;
     }
 
     /// <summary>Cells taken by everyone except <paramref name="mover"/> - what a

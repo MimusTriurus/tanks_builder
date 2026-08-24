@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 
 namespace TankSpriteTest;
 
@@ -289,6 +289,24 @@ public sealed class MovementProfile
     /// about the class rather than about how the scene was cut, so retagging them
     /// is the whole of that change here.</summary>
     public static readonly MovementProfile[] All = { Light, Medium, Heavy };
+
+    /// <summary>The tanks to look for on disk, in key order.
+    ///
+    /// <b>Derived from the profiles rather than written beside them, and it used
+    /// to be written on <see cref="Main"/>.</b> Two lists of the same three
+    /// strings is two places a fourth class has to be remembered in, and the
+    /// bench that shows one tank at a time was reaching into the harness for the
+    /// list of which tanks there are - which is a question about the classes, not
+    /// about the board they stand on.
+    ///
+    /// One per class, all three built from separate parts - hull, turret, barrel,
+    /// engine and two belts as their own meshes. The single-mesh HT/MT/LT used to
+    /// sit alongside them so a winding belt could be judged against a still one.
+    /// They are gone: their belts are not separate meshes, so they cannot wind at
+    /// all, and a tank that slides on dead tracks is not a comparison, it is the
+    /// old bug still on screen. The atlases stay on disk under Sprites/; nothing
+    /// loads them.</summary>
+    public static readonly string[] Tags = Array.ConvertAll(All, p => p.Tag);
 
     /// <summary>Profile for an atlas tag, medium for anything unrecognised.</summary>
     public static MovementProfile For(string tag)

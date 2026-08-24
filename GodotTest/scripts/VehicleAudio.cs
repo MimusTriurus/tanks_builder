@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using Godot;
 
@@ -44,8 +44,23 @@ public sealed partial class VehicleAudio : Node2D
     public bool Enabled = true;
 
     /// <summary>
-    /// The traverse motor, separately from <see cref="Enabled"/> and off by
-    /// default - see <see cref="Main.TurretSoundOnByDefault"/>.
+    /// The turret's traverse motor - --no-turret-sound, or the panel. On.
+    ///
+    /// It came up off while it was the newest and least settled voice on the
+    /// tank: synthesised rather than recorded, its level chosen by argument
+    /// rather than by ear, and the question about a background hum - is it missed
+    /// when it stops - can only be asked by stopping it. That has been asked and
+    /// answered, so the default is now the tank as it sounds, and the flag turns
+    /// it off for the A/B rather than on.
+    ///
+    /// Here rather than on the harness, because it is this voice's own default
+    /// and the bench that plays it should not have to load a board to read it.
+    /// </summary>
+    public const bool TurretSoundOnByDefault = true;
+
+    /// <summary>
+    /// The traverse motor, separately from <see cref="Enabled"/> and on by
+    /// default - see <see cref="TurretSoundOnByDefault"/>.
     ///
     /// Its own switch rather than a share of the master one because it is the
     /// only voice here that was built rather than recorded, and the only one
