@@ -412,31 +412,20 @@ public sealed partial class WoodBench : SceneRoot
         }
     }
 
-    /// <summary>Where the middle button went down, or null if it is up.</summary>
-    private Vector2? _middleFrom;
-
     public override void _UnhandledInput(InputEvent @event)
     {
         // One button doing two things with the gesture deciding which, resolved
         // on release because that is the earliest moment the two are
-        // distinguishable - MiddleTap's arrangement, and its own slack, so
-        // that a pan across the wood does not leave a line of fires behind it.
+        // distinguishable - SceneRoot.MiddleTapped, and its own slack, so that a
+        // pan across the wood does not leave a line of fires behind it.
         if (@event is InputEventMouseButton { ButtonIndex: MouseButton.Middle } middle)
         {
-            if (middle.Pressed)
-            {
-                _middleFrom = GetGlobalMousePosition();
-                return;
-            }
-            Vector2? from = _middleFrom;
-            _middleFrom = null;
-            if (from is not Vector2 down
-                || !MiddleTap(down, GetGlobalMousePosition()))
+            if (!MiddleTapped(middle, out Vector2 tapped))
                 return;
             // By cell, like every button on the harness's board: a crown
             // overhangs its own hexagon, so picking by pixels would light a cell
             // by clicking a tree standing on the one behind it.
-            Vector2I at = _field.CellAt(_field.ToLocal(GetGlobalMousePosition()));
+            Vector2I at = _field.CellAt(_field.ToLocal(tapped));
             // Not clamped: on a board that is a hole in a rectangle a click off
             // the plot is a click off the board, and clamping it would light the
             // cell beside the one that was aimed at.

@@ -158,6 +158,39 @@ public abstract partial class SceneRoot : Node2D
 	internal static bool MiddleTap(Vector2 from, Vector2 to)
 		=> from.DistanceTo(to) <= MiddleSlack;
 
+	/// <summary>Where the middle button went down, or null if it is up.</summary>
+	private Vector2? _middleFrom;
+
+	/// <summary>
+	/// The middle button's gesture, resolved: true on the release that was a tap,
+	/// with <paramref name="at"/> where it happened.
+	///
+	/// <b>One button doing two things, and the gesture deciding which</b> - a drag
+	/// pans and a tap does the root's own thing to whatever is under it. Every
+	/// root that offers the second one wants the same four lines to get there:
+	/// remember the press, take it back on release, and ask
+	/// <see cref="MiddleTap"/>. Four copies is four chances for one of them to
+	/// resolve on press, where the two gestures are not yet distinguishable.
+	///
+	/// The pan is untouched and still runs on motion, so a drag pans all the way
+	/// and then declines to do anything else.
+	///
+	/// False on the press too, which is what the caller wants: there is nothing to
+	/// do yet, and returning early is the whole of the press's business.
+	/// </summary>
+	protected bool MiddleTapped(InputEventMouseButton middle, out Vector2 at)
+	{
+		at = GetGlobalMousePosition();
+		if (middle.Pressed)
+		{
+			_middleFrom = at;
+			return false;
+		}
+		Vector2? from = _middleFrom;
+		_middleFrom = null;
+		return from is Vector2 down && MiddleTap(down, at);
+	}
+
 	/// <summary>How far the middle button may travel and still be a tap.</summary>
 	internal const float MiddleSlack = 4.0f;
 }

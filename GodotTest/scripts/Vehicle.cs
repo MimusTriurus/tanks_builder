@@ -439,6 +439,34 @@ public sealed class Vehicle
     public int ShotFrame = -1;
 
     /// <summary>
+    /// Where this tank's muzzle sits and which way its bore runs, in the
+    /// sprite's own frame.
+    ///
+    /// <b>One measurement with three projections, and it was written out three
+    /// times.</b> The round wants it in board space (<see cref="Spot"/>), the
+    /// aiming ray wants it in the tank's own picture, and the ground shot wants
+    /// only the direction - so each of them had the same two lines at the top and
+    /// its own transform underneath. The transform is genuinely the caller's; the
+    /// measurement is not, and three copies of it agree until somebody changes
+    /// how a gun is measured.
+    ///
+    /// <paramref name="heading"/> is which way, and it is asked for rather than
+    /// read off the turret because the two part company for one real case: under
+    /// a standing order the round leaves along the <b>lane</b>, and the gun may
+    /// still be traversing onto it. The tube is always the frame the gun is
+    /// actually showing, which is what makes it foreshorten by itself and come
+    /// out of the barrel on every heading.
+    ///
+    /// <c>Along</c> is unnormalised on purpose - it is
+    /// <see cref="AtlasSet.GroundDirection"/>, whose length is the share of a
+    /// ground length that survived the projection. A caller wanting a far point
+    /// scales it; a caller wanting only a direction normalises it.
+    /// </summary>
+    public (Vector2 Tube, Vector2 Along) Bore(double heading) =>
+        (Atlas.Muzzle(Atlas.FrameFor(Sprite.TurretFacing)) - Atlas.Anchor,
+         Atlas.GroundDirection(heading));
+
+    /// <summary>
     /// The rounds this gun has in the air, and the smoke they are still laying.
     ///
     /// <b>On the tank because a round belongs to the gun that fired it</b>, not

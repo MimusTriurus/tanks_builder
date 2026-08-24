@@ -1196,6 +1196,37 @@ public static class SelfTest
             across > away && away > toward && across is > 55 and < 120,
             $"across {across:F0}px, away {away:F0}px, at the camera {toward:F0}px");
 
+        // One measurement of where a gun points, three projections of it. The
+        // round wants it on the board, the ray wants it in the tank's own
+        // picture and the ground shot wants only the direction, and each of them
+        // had these two lines written out again above its own transform. The
+        // transform is the caller's; this is not.
+        if (vehicles is { Count: > 0 })
+        {
+            Vehicle gunner = vehicles[0];
+            AtlasSet own = gunner.Atlas;
+            double laid = gunner.Sprite.TurretFacing;
+            (Vector2 barrel, Vector2 along) = gunner.Bore(laid);
+            Check("a tank measures its own bore the way the flash is placed",
+                barrel.DistanceTo(own.Muzzle(own.FrameFor(laid)) - own.Anchor) < 1e-4
+                && along == own.GroundDirection(laid),
+                "Vehicle.Bore is the one measurement the round, the ray and the "
+                + "ground shot share - a second copy of it agrees until somebody "
+                + "changes how a gun is measured");
+            // The asymmetry, and it is deliberate: under a standing order the
+            // round leaves along the lane while the gun may still be traversing
+            // onto it, so the barrel is the frame actually being drawn and only the
+            // direction follows the bearing it was asked for.
+            double lane = Angles.Mod(laid + 60.0, 360.0);
+            (Vector2 sameTube, Vector2 other) = gunner.Bore(lane);
+            Check("and its barrel is the frame it is drawing while its line is the "
+                  + "heading it was asked for",
+                sameTube == barrel && other == own.GroundDirection(lane)
+                && other != along,
+                "a bore that read the heading for both would put the muzzle where "
+                + "the gun is not yet pointing");
+        }
+
         // Why GroundDirection is handed to the flash unnormalised. Its length is
         // how much of a horizontal thing survives the projection: all of it
         // across the screen, half of it into the screen. Normalise it and a gun

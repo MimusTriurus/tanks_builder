@@ -149,6 +149,20 @@ public sealed class TankTick
     /// what this object now owns end to end.</summary>
     public int Calibre = 1;
 
+    /// <summary>Which side of the hex the next hand-dealt hit comes from, as an
+    /// index into <see cref="HexField.EdgeHeadings"/>.
+    ///
+    /// A dial of the shot like the calibre beside it, and here for the same
+    /// reason: both roots kept one. It says which side the <em>next</em> manual
+    /// hit arrives on - a shell from another tank must not write it, or the
+    /// control becomes a report of what happened instead of a control.
+    ///
+    /// Opens on the last side so the U key steps to the first.</summary>
+    public int HitSide = HexField.EdgeHeadings.Length - 1;
+
+    /// <summary>The heading <see cref="HitSide"/> names.</summary>
+    public double HitFrom => HexField.EdgeHeadings[HitSide];
+
     /// <summary>Whether a round in the air is drawn. The flight is not on a
     /// switch - it is what puts time between the report and the impact - so this
     /// is the drawing alone, and it reaches the rounds already up: see
@@ -1255,6 +1269,137 @@ public sealed class TankTick
         return (limit, null, false);
     }
 
+
+    /// <summary>Where one gun would hole one tank, and what the round would be
+    /// aimed through to get there. Everything the shot settles at the trigger
+    /// except the calibre and the penetration level, which are dials rather than
+    /// geometry.
+    ///
+    /// <c>Muzzle</c> is in board space, not in the shooter's own picture: it is
+    /// what the round is launched from. The ray needs the other space and takes
+    /// its own projection of <see cref="Vehicle.Bore"/>.</summary>
+    public readonly record struct Aimed(Vector2 Muzzle, Vector2 Impact,
+                                        string Face, float Scatter, float Rise,
+                                        float BoreMiss);
+
+    /// <summary>
+    /// Solve one shot without firing it.
+    ///
+    /// <b>The one place a shooter, a target and a bearing turn into a hole in the
+    /// armour</b>, and it is a method because there are two callers: the shot,
+    /// and the aiming ray that draws where the shot would put its round. A second
+    /// copy of this arithmetic would be a ray that looks plausible on every frame
+    /// and is wrong about the one shot somebody is watching - the failure this
+    /// project keeps naming, one number held in two places.
+    ///
+    /// <b>Here rather than on the harness because it decides nothing.</b> Who is
+    /// engaging whom, whose lane it is and whether it is clear are statements
+    /// about two tanks on a board and stay with the root that owns the board.
+    /// Given a shooter, a victim and a bearing, where the hole goes is geometry -
+    /// the same kind of thing as <see cref="TakeHit"/> and <see cref="Land"/>,
+    /// which have always been here.
+    ///
+    /// <paramref name="serial"/> is the round's own count against that victim,
+    /// because the scatter is hashed off it: that is what puts consecutive rounds
+    /// beside each other instead of through the same hole, so predicting the next
+    /// one means predicting with the count it will carry rather than the count
+    /// standing now.
+    ///
+    /// Null when the target's atlas carries no plate table - nothing can be aimed
+    /// at a tank whose armour was never measured, and <see cref="Shoot"/> refuses
+    /// that case rather than aiming at the anchor.
+    /// </summary>
+    public static Aimed? AimAt(Vehicle shooter, Vehicle victim,
+                               double fromBearing, int serial)
+    {
+        AtlasSet atlas = victim.Atlas;
+        if (!atlas.HasHit)
+            return null;
+        double from = HexField.EdgeHeadings[Angles.SideFor(fromBearing)];
+        double hull = victim.Sprite.HullFacing;
+        string face = atlas.FaceFor(from, hull);
+        Vector2 centroid = atlas.HitOffset(face, hull);
+        Vector2 tangent = atlas.HitTangent(face, hull);
+        Vector2 slope = atlas.HitSlope(face, hull);
+
+        // Board space and not the shooter's own picture, because the round is a
+        // thing on the board and the bore below is a difference of two tanks'
+        // points. See Vehicle.Spot - on the staged board a sprite's own
+        // coordinates are its render target's, so two of them cannot be
+        // subtracted.
+        (Vector2 tube, Vector2 along) = shooter.Bore(shooter.Sprite.TurretFacing);
+        Vector2 launched = shooter.Spot(tube);
+        // The bore as the target's own layers see it. Carried through both
+        // transforms as a pair of points rather than as an angle, so a scaled
+        // class and a hull leaning on its springs are handled by the transforms
+        // that already express them instead of by arithmetic repeated here.
+        // Unspot and not ToLocal, by the same argument: a point handed from one
+        // sprite to the other through ToGlobal and ToLocal arrives somewhere else
+        // entirely on the staged board, and the bore is the whole of how the
+        // scatter is put onto the gun's axis.
+        Vector2 eye = victim.Unspot(launched);
+        Vector2 bore = victim.Unspot(shooter.Spot(tube + along * 100.0f)) - eye;
+
+        // The vertical fraction stays on its hash and the tangential one follows
+        // it onto the gun's axis - see Gunnery.ScatterOntoBore. Only on this
+        // path: a round asked for by the U key has no shooter and so no bore, and
+        // it keeps both hashes.
+        //
+        // The hash is not gone, it is demoted to what it should always have been:
+        // dispersion about an aim point, a tenth of a plate rather than the whole
+        // of it. Without it the solve is one number per geometry, so a gun
+        // shooting twice from the same place would put its second round exactly
+        // through the first - and where the solve is clamped that is a column of
+        // holes down one edge, which is the row-of-stamps failure again in the
+        // other axis.
+        float rise = RiseAt(serial);
+        float scatter = AimedScatter(eye, bore, centroid, tangent, slope,
+                                     rise, serial);
+        Vector2 impact = centroid + tangent * scatter + slope * rise;
+        return new Aimed(launched, impact, face, scatter, rise,
+                         Gunnery.BoreMiss(eye, bore, impact));
+    }
+
+    /// <summary>
+    /// One tank's round at another: solve it, and put it in the air.
+    ///
+    /// False when there is nothing to aim at - a target whose armour was never
+    /// measured - so the caller can let the shot go at the ground instead. That
+    /// is <see cref="Launch"/>'s contract read from the other end.
+    /// </summary>
+    public bool Shoot(Vehicle shooter, Vehicle victim, double fromBearing)
+    {
+        // Bumped before the aim rather than after it, because the aim depends on
+        // it: the scatter hash is what puts the second round beside the first, so
+        // the serial the round about to leave carries is the count as it is now.
+        // It is also why the aiming ray has to predict with one more than this.
+        victim.HitCount++;
+        if (AimAt(shooter, victim, fromBearing, victim.HitCount) is not Aimed shot)
+        {
+            victim.HitCount--;
+            return false;
+        }
+        Send(shooter, new Shell
+        {
+            Shooter = shooter,
+            Target = victim,
+            ImpactLocal = shot.Impact,
+            From = shot.Muzzle,
+            FromLift = shooter.LiftOf(shot.Muzzle),
+            BoreMiss = shot.BoreMiss,
+            Serial = victim.HitCount,
+            // Carried rather than re-read on arrival: what the trigger decided
+            // travels with the shell, because the alternative is a round that
+            // changes calibre in flight because somebody turned a dial.
+            Face = shot.Face,
+            Scatter = shot.Scatter,
+            Rise = shot.Rise,
+            Calibre = Ordnance.At(Calibre),
+            Level = Gunnery.Penetration(shooter.Profile, victim.Profile),
+        });
+        return true;
+    }
+
     /// <summary>
     /// Put a finished round in the air on the tank that fired it.
     ///
@@ -1292,13 +1437,10 @@ public sealed class TankTick
     {
         if (Field?.Atlas is null)
             return;
-        AtlasSet gun = shooter.Atlas;
-        Vector2 tube = gun.Muzzle(gun.FrameFor(shooter.Sprite.TurretFacing))
-                       - gun.Anchor;
-        Vector2 dir = gun.GroundDirection(shooter.Sprite.TurretFacing);
-        if (dir.LengthSquared() < 1e-6f)
+        (Vector2 tube, Vector2 along) = shooter.Bore(shooter.Sprite.TurretFacing);
+        if (along.LengthSquared() < 1e-6f)
             return;
-        dir = dir.Normalized();
+        Vector2 dir = along.Normalized();
         // Board space, by Vehicle.Spot's argument - the round is a thing on the
         // board, and on the staged board a sprite's own coordinates are its render
         // target's. The run comes back in flat pixels, which the board is measured

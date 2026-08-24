@@ -138,11 +138,19 @@ public sealed partial class TankBench : SceneRoot
     private bool _spinning;
     private double _sizeLevel = 1.0;
     private double _traverse = 1.0;
-    private int _hitSide = HexField.EdgeHeadings.Length - 1;
     private bool _edges = true;
     private bool _board = true;
 
-    private double HitFrom => HexField.EdgeHeadings[_hitSide];
+    /// <summary>Which side the next hand-dealt hit comes from, and the heading it
+    /// names. On the tick, with the calibre - see
+    /// <see cref="TankTick.HitSide"/>.</summary>
+    private int _hitSide
+    {
+        get => _tick.HitSide;
+        set => _tick.HitSide = value;
+    }
+
+    private double HitFrom => _tick.HitFrom;
 
     /// <summary>The board's own corner, the same one the harness parks its grid
     /// at. Any value would do on a bench of fifteen cells; this one keeps the
@@ -1023,8 +1031,6 @@ public sealed partial class TankBench : SceneRoot
 
     // --- input ---------------------------------------------------------------
 
-    private Vector2? _middleFrom;
-
     public override void _UnhandledInput(InputEvent @event)
     {
         if (_garage.Count == 0)
@@ -1032,14 +1038,8 @@ public sealed partial class TankBench : SceneRoot
 
         if (@event is InputEventMouseButton { ButtonIndex: MouseButton.Middle } middle)
         {
-            if (middle.Pressed)
-            {
-                _middleFrom = GetGlobalMousePosition();
-                return;
-            }
-            Vector2? from = _middleFrom;
-            _middleFrom = null;
-            if (from is Vector2 down && MiddleTap(down, GetGlobalMousePosition()))
+            // Drag pans, tap destroys - SceneRoot.MiddleTapped.
+            if (MiddleTapped(middle, out Vector2 _))
                 Tick.Kill(Tank);
             return;
         }

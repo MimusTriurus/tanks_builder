@@ -159,7 +159,6 @@ public sealed partial class WallBench : SceneRoot
     private int _frame;
     private bool _fellAtStart;
     private int _plinth = 1;
-    private Vector2? _middleFrom;
     private Vector2? _leftFrom;
     private bool _reported;
     private float _spin;
@@ -1042,17 +1041,10 @@ public sealed partial class WallBench : SceneRoot
 
         if (@event is InputEventMouseButton { ButtonIndex: MouseButton.Middle } middle)
         {
-            if (middle.Pressed)
-            {
-                _middleFrom = GetGlobalMousePosition();
-                return;
-            }
-            Vector2? from = _middleFrom;
-            _middleFrom = null;
             // The same two-gestures-one-button arrangement the harness and the
             // wood bench use, resolved on release with the same slack, so a pan
-            // across the cell does not fire the charge.
-            if (from is Vector2 down && MiddleTap(down, GetGlobalMousePosition()))
+            // across the cell does not fire the charge - SceneRoot.MiddleTapped.
+            if (MiddleTapped(middle, out Vector2 _))
                 Fell();
             return;
         }
