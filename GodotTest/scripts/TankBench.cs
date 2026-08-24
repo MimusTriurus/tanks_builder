@@ -429,6 +429,12 @@ public sealed partial class TankBench : SceneRoot
                 case "--wall-beam":
                     _wallBeam = true;
                     break;
+                // The rubble stays where it landed - the A/B the clearing is
+                // judged by, and the flag the wall bench carries under the same
+                // name.
+                case "--no-crumble":
+                    WallRig.Crumbles = false;
+                    break;
             }
         }
         // A capture is evidence, so the step is pinned for the harness's reason:
@@ -1140,6 +1146,10 @@ public sealed partial class TankBench : SceneRoot
                // rubble in the void is the board being too small for the shot.
                // WallRig.Fell's own words.
                + (rig.Fell > 0 ? $", {rig.Fell} off the board" : "")
+               // And how many have cleared themselves, which is a third fact
+               // again: a swept cell and a shot that moved nothing are the same
+               // empty picture. WallRig.Crumbled.
+               + (rig.Crumbled > 0 ? $", {rig.Crumbled} gone" : "")
                // The one figure the picture cannot give and nobody can guess -
                // see _ramSpeed.
                + (_ramSpeed >= 0.0
@@ -1584,6 +1594,8 @@ public sealed partial class TankBench : SceneRoot
                          " leaves");
             _panel.Toggle("wall.beam", "the rig draws its own line too",
                           () => _wallBeam, on => _wallBeam = on);
+            _panel.Toggle("wall.crumble", "fallen pieces clear  (--no-crumble)",
+                          () => WallRig.Crumbles, on => WallRig.Crumbles = on);
             _panel.Readout("wall.state", () => WallNote());
         }
 

@@ -85,6 +85,8 @@ public sealed partial class WallStack : Node3D
     private List<WallFall.Flight>? _fall;
     private MultiMeshInstance3D _bricks = null!;
     private MultiMesh _mesh = null!;
+    private MultiMeshInstance3D _ghosts = null!;
+    private MultiMesh _ghostMesh = null!;
     private MeshInstance3D? _ram;
     private SubViewport? _paint;
     private Node2D? _holder;
@@ -207,9 +209,35 @@ public sealed partial class WallStack : Node3D
         };
         AddChild(_bricks);
 
+        // What is leaving. Its own mesh rather than its own alpha on the one
+        // above, because a material that blends is a material in the transparent
+        // pass, and putting the whole wall there costs a thousand pixels along
+        // its own foot for nothing - measured. See Pose: a piece moves from one
+        // mesh to the other on the frame it starts to go.
+        _ghostMesh = new MultiMesh
+        {
+            TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
+            UseColors = true,
+            UseCustomData = true,
+            Mesh = Brick(),
+        };
+        _ghosts = new MultiMeshInstance3D
+        {
+            Multimesh = _ghostMesh,
+            MaterialOverride = Mortar(going: true),
+            SortingUseAabbCenter = true,
+        };
+        AddChild(_ghosts);
+
         _shadeMesh = new MultiMesh
         {
             TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
+            // Both, and only so the shadow can be eaten away in the same places
+            // as the piece throwing it: the colour carries how much is left and
+            // the custom data the half extents the crumbs are measured in. See
+            // Erosion.
+            UseColors = true,
+            UseCustomData = true,
             Mesh = Brick(),
         };
         _shade = new MultiMeshInstance3D
@@ -254,18 +282,12 @@ public sealed partial class WallStack : Node3D
         if (_mesh is null)
             return;
         _mesh.InstanceCount = _plan.Blocks.Count;
+        _ghostMesh!.InstanceCount = _plan.Blocks.Count;
         _shadeMesh!.InstanceCount = _plan.Blocks.Count;
-        for (int i = 0; i < _plan.Blocks.Count; i++)
-        {
-            WallKit.Block b = _plan.Blocks[i];
-            _mesh.SetInstanceColor(i, Paint(b));
-            // The half extents travel with the instance because the joint band
-            // has to be a width in board units and not in UV: a brick is twice as
-            // long as it is deep, so a band measured in its own texture space
-            // would be twice as wide down its side as across its end.
-            _mesh.SetInstanceCustomData(i, new Color(b.Half.X, b.Half.Y, b.Half.Z,
-                                                     b.Chip ? 1.0f : 0.0f));
-        }
+        // Colour and custom data are Pose's, every slot of them: which slot a
+        // piece sits in is decided by the draw order, so writing them by plan
+        // index here would put a brick's tone and size on whichever piece later
+        // took its place.
         Pose();
     }
 
@@ -518,12 +540,44 @@ public sealed partial class WallStack : Node3D
             new Color(tint.R, tint.G, tint.B, Mathf.Clamp(fade, 0.0f, 1.0f));
     }
 
+    /// <summary>
+    /// Where each piece is, what colour it is and how much of it is left, written
+    /// every frame.
+    ///
+    /// <b>Whole pieces go in the opaque mesh in plan order, and that is what
+    /// keeps a standing wall the picture it was.</b> Measured: moving the whole
+    /// wall into the transparent pass shifts 1 151 pixels along its own foot -
+    /// the ground shadow's depth test against it changes the moment it leaves the
+    /// opaque pass - so nothing that is not going pays for the going.
+    ///
+    /// <b>What is leaving goes in the blended mesh, farthest first.</b> Multimesh
+    /// instances are drawn in index order and nothing sorts them, so an
+    /// alpha-blended heap handed over in plan order blends its boxes in whatever
+    /// order they were built: the failure the shadow's stencil exists to avoid,
+    /// one buffer over. Sorted back to front the blend is right by construction,
+    /// and it costs a sort of however many pieces are actually going.
+    ///
+    /// <b>The shadow stays in plan order and carries every piece</b>, whole, going
+    /// or gone. It is a union under a stencil, so its order changes nothing, and a
+    /// gone piece discards itself - keeping the order is what makes a standing
+    /// wall's shadow the same pixels it always was.
+    /// </summary>
     private void Pose()
     {
         PoseRam();
         PoseShot();
         Vector2 run = LocalRun();
-        for (int i = 0; i < _plan.Blocks.Count; i++)
+        int n = _plan.Blocks.Count;
+        if (_order.Length != n)
+        {
+            _order = new int[n];
+            _depth = new float[n];
+            _ghost = new Transform3D[n];
+            _tone = new Color[n];
+            _size = new Color[n];
+        }
+        int solid = 0, going = 0;
+        for (int i = 0; i < n; i++)
         {
             WallKit.Block b = _plan.Blocks[i];
             Transform3D frame = Rig is not null ? Rig.At(i)
@@ -533,11 +587,92 @@ public sealed partial class WallStack : Node3D
             // so one mesh serves every piece. Scaling along a box's own axes
             // leaves its face normals pointing the same way, which is what lets
             // the shader normalise its way back to an honest normal.
-            Basis solid = frame.Basis * Basis.FromScale(b.Half * 2.0f);
-            _mesh.SetInstanceTransform(i, new Transform3D(solid, frame.Origin));
-            _shadeMesh!.SetInstanceTransform(i, Flatten(solid, frame.Origin, run));
+            Basis box = frame.Basis * Basis.FromScale(b.Half * 2.0f);
+            var pose = new Transform3D(box, frame.Origin);
+            // The half extents travel with the instance because the joint band
+            // has to be a width in board units and not in UV: a brick is twice as
+            // long as it is deep, so a band measured in its own texture space
+            // would be twice as wide down its side as across its end.
+            var size = new Color(b.Half.X, b.Half.Y, b.Half.Z,
+                                 b.Chip ? 1.0f : 0.0f);
+            // How much of it is left, read every frame because it is the only
+            // thing here that changes while nothing moves - see WallRig.Left. The
+            // brick spends it as opacity and its shadow as coverage; a solved
+            // flight has no rig and never goes.
+            float left = Rig?.Left(i) ?? 1.0f;
+            Color tone = Paint(b);
+
+            _shadeMesh!.SetInstanceTransform(i, Flatten(box, frame.Origin, run));
+            _shadeMesh.SetInstanceColor(i, new Color(1.0f, 1.0f, 1.0f, left));
+            _shadeMesh.SetInstanceCustomData(i, size);
+
+            if (left >= 1.0f)
+            {
+                _mesh.SetInstanceTransform(solid, pose);
+                _mesh.SetInstanceColor(solid, tone);
+                _mesh.SetInstanceCustomData(solid, size);
+                solid++;
+                continue;
+            }
+            if (left <= 0.0f)
+                continue;
+            // Held rather than written straight through, because which slot it
+            // ends up in is the depth order and that is not known until every
+            // piece has been looked at.
+            _order[going] = going;
+            _ghost[going] = pose;
+            _tone[going] = new Color(tone.R, tone.G, tone.B, left);
+            _size[going] = size;
+            going++;
         }
+        Backwards(going);
+        for (int k = 0; k < going; k++)
+        {
+            int was = _order[k];
+            _ghostMesh!.SetInstanceTransform(k, _ghost[was]);
+            _ghostMesh.SetInstanceColor(k, _tone[was]);
+            _ghostMesh.SetInstanceCustomData(k, _size[was]);
+        }
+        // Only the slots written this frame are drawn, so a piece that has gone
+        // leaves no stale pose behind it in either mesh.
+        _mesh.VisibleInstanceCount = solid;
+        _ghostMesh!.VisibleInstanceCount = going;
     }
+
+    /// <summary>Order the blended pieces back to front.
+    ///
+    /// <b>Which way is back comes from the camera and never from the board.</b>
+    /// The prop turns on a turntable and the board's camera is tilted, so a
+    /// direction worked out from the squash would be a second opinion about where
+    /// the viewer is. No camera - the first frame of a scene - is not a reason to
+    /// guess: nothing is going on that frame.</summary>
+    private void Backwards(int going)
+    {
+        Camera3D? eye = going > 1 && IsInsideTree()
+            ? GetViewport()?.GetCamera3D() : null;
+        if (eye is null)
+            return;
+        Transform3D lens = eye.GlobalTransform;
+        // Along the way the camera looks, so a bigger number is farther off. A
+        // dot product rather than a distance because this board's camera is
+        // orthographic: every fragment shares one view direction, and how far a
+        // piece sits to the side of the lens is not how far away it is.
+        Vector3 into = -lens.Basis.Z;
+        Transform3D mine = GlobalTransform;
+        for (int k = 0; k < going; k++)
+            _depth[k] = (mine * _ghost[k].Origin - lens.Origin).Dot(into);
+        Array.Sort(_depth, _order, 0, going);
+        Array.Reverse(_order, 0, going);
+    }
+
+    /// <summary>Scratch for <see cref="Pose"/>: the blended pieces held aside
+    /// until their order is known. Fields rather than locals because this runs
+    /// every frame while a heap settles.</summary>
+    private int[] _order = Array.Empty<int>();
+    private float[] _depth = Array.Empty<float>();
+    private Transform3D[] _ghost = Array.Empty<Transform3D>();
+    private Color[] _tone = Array.Empty<Color>();
+    private Color[] _size = Array.Empty<Color>();
 
     /// <summary>The same box, run down the sun onto the ground.
     ///
@@ -669,9 +804,12 @@ public sealed partial class WallStack : Node3D
     /// of the face rather than an edge on it.</summary>
     private const float Joint = 0.0125f;
 
-    private ShaderMaterial Mortar()
+    private ShaderMaterial Mortar(bool going = false)
     {
-        var ink = new ShaderMaterial { Shader = new Shader { Code = MortarShader } };
+        var ink = new ShaderMaterial
+        {
+            Shader = new Shader { Code = going ? GhostCode : MortarCode },
+        };
         ink.SetShaderParameter("sun", Key);
         ink.SetShaderParameter("joint", Joint);
         ink.SetShaderParameter("radius", Radius);
@@ -717,12 +855,40 @@ public sealed partial class WallStack : Node3D
     /// <b>Culling off, because a flattened box has no inside.</b> Its faces are
     /// degenerate and half of them wind backwards; the union of all six is the
     /// silhouette, so all six have to be drawn.</summary>
-    private static ShaderMaterial Shade()
+    private ShaderMaterial Shade()
     {
-        var ink = new ShaderMaterial { Shader = new Shader { Code = ShadeShader } };
+        var ink = new ShaderMaterial
+        {
+            Shader = new Shader { Code = ShadeCode },
+        };
         ink.SetShaderParameter("ink", Stage3D.ShadowInk.A);
         return ink;
     }
+
+    /// <summary>The brick as it is actually compiled while it is whole: opaque,
+    /// writing depth, exactly the wall this board has always drawn.</summary>
+    internal static string MortarCode => string.Format(MortarShader, "", "");
+
+    /// <summary>
+    /// The same text, blended.
+    ///
+    /// <b>A second material and never a second shader.</b> What is whole has to
+    /// go on being opaque - see <see cref="Pose"/> - and what is leaving has to
+    /// blend; every other line of the brick, the seam, the grain and the chip is
+    /// the same statement, and two copies of it would drift exactly where nobody
+    /// compares them: the tone of a fading brick against the one beside it.
+    ///
+    /// <b>It still writes depth.</b> Blending without it would hand back the one
+    /// thing the opaque wall bought - a tank behind it is occluded by it - the
+    /// moment a piece began to go, and a tank showing through a nearly whole
+    /// brick reads as a hole in the wall.
+    /// </summary>
+    internal static string GhostCode =>
+        string.Format(MortarShader, ", depth_draw_always", "ALPHA = left;");
+
+    /// <summary>The shadow, which takes no parameter: it was always blended.
+    /// </summary>
+    internal static string ShadeCode => ShadeShader;
 
     internal const string ShadeShader = @"
 shader_type spatial;
@@ -731,9 +897,29 @@ stencil_mode read, write, compare_not_equal, 1;
 
 uniform float ink = 0.45;
 
+varying float left;
+
+void vertex() {
+    left = COLOR.a;
+}
+
 void fragment() {
+    // Gone at nothing, so the ground under it is the ground.
+    if (left <= 0.0)
+        discard;
     ALBEDO = vec3(0.0);
-    ALPHA = ink;
+    // <b>Thinner with its brick, not smaller.</b> The piece spends its going as
+    // opacity, so a shadow that spent it as coverage stayed full black in patches
+    // under a brick that had almost gone - measured, and it read as the rubble
+    // being a wireframe over its own shadow.
+    //
+    // <b>The stencil is what this leans on and what it costs.</b> The union takes
+    // the first fragment at a pixel, so where two pieces overlap the ink is
+    // whichever of them was laid first - exact while a heap goes together, which
+    // is what a heap does, and a lighter patch inside a solid shadow when one
+    // piece goes alone. Blending them instead compounds: two at 0.45 make 0.70,
+    // which is the whole reason this pass is a stencil.
+    ALPHA = ink * left;
 }
 ";
 
@@ -742,7 +928,11 @@ shader_type spatial;
 // Unshaded like everything else on this board, and opaque: it writes depth, so a
 // tank behind it is occluded by it. That is the one thing a billboard prop on
 // this board cannot do.
-render_mode unshaded, cull_back;
+// Unshaded like everything else on this board. Opaque or alpha-blended by the
+// same text - see WallStack.Mortar: what is whole writes depth and nothing else,
+// which is what lets a tank behind it be occluded by it, and what is leaving
+// blends and writes depth as well, so it keeps occluding while it goes.
+render_mode unshaded, cull_back{0};
 
 uniform vec3 sun = vec3(-0.33, 0.82, 0.47);
 uniform float joint = 0.0125;
@@ -758,31 +948,32 @@ varying vec3 axis;
 varying vec3 local;
 varying vec3 halfsz;
 varying float chip;
+varying float left;
 
-float hash13(vec3 p) {
+float hash13(vec3 p) {{
     p = fract(p * 0.1031);
     p += dot(p, p.yzx + 33.33);
     return fract((p.x + p.y) * p.z);
-}
+}}
 
 // Value noise in the brick's own space. Object space and never world: the
 // pattern has to travel with the brick, or every piece re-textures itself on the
 // way down - the Blender material's argument, and here it is the difference
 // between rubble and a swarm.
-float vnoise(vec3 p) {
+float vnoise(vec3 p) {{
     vec3 i = floor(p), f = fract(p);
     f = f * f * (3.0 - 2.0 * f);
     float n = 0.0;
-    for (int k = 0; k < 8; k++) {
+    for (int k = 0; k < 8; k++) {{
         vec3 o = vec3(float(k & 1), float((k >> 1) & 1), float((k >> 2) & 1));
         float w = mix(1.0 - f.x, f.x, o.x) * mix(1.0 - f.y, f.y, o.y)
                 * mix(1.0 - f.z, f.z, o.z);
         n += w * hash13(i + o);
-    }
+    }}
     return n;
-}
+}}
 
-void vertex() {
+void vertex() {{
     tint = COLOR.rgb;
     local = VERTEX;                       // the unit box, -0.5 .. 0.5
     halfsz = INSTANCE_CUSTOM.xyz;
@@ -801,9 +992,18 @@ void vertex() {
     // black. The comment below already names that failure; it just had the
     // second way of reaching it.
     axis = NORMAL;
-}
+    // How much of this piece is left - see Erosion. Carried in the colour''s
+    // alpha because nothing else on this instance wanted it: the tone is picked
+    // once on the CPU and the three half extents fill the custom data.
+    left = COLOR.a;
+}}
 
-void fragment() {
+void fragment() {{
+    // Gone at nothing, rather than eaten away in patches: the piece thins out.
+    // Costs the depth pre-pass nothing here because the material writes depth
+    // anyway, and costs the ordering nothing because the instances arrive sorted.
+    if (left <= 0.0)
+        discard;
     // One Lambert term, written rather than lit.
     float lam = max(dot(normalize(face), normalize(sun)), 0.0);
     float lit = ambient + (1.0 - ambient) * lam;
@@ -826,12 +1026,21 @@ void fragment() {
     // change size when the wall is fitted to a different tile.
     float g = vnoise(local * halfsz * radius * 0.55) - 0.5;
 
+    // <b>The dark line goes with the piece.</b> Alpha thins the body and the seam
+    // alike, but a near-black line at a fifth of its opacity is still a line on
+    // pale ground while the brick beside it has washed out - measured, and it read
+    // as the heap turning into a wireframe of itself. Lifted by however much of
+    // the piece has gone, the outline leaves before the mass does, which is the
+    // way round that reads as masonry going rather than as a drawing of it.
+    float show = max(seam, 1.0 - left);
+
     vec3 body = tint * lit * (1.0 + g * grain);
     // A chip is a broken piece: the inside of a brick is paler and rawer than
     // its weathered face, which is the one thing the procedural material in
     // Blender had to define rather than paint.
     body = mix(body, body * vec3(1.14, 1.10, 1.05), chip * 0.6);
-    ALBEDO = mix(body * 0.13, body, seam);
-}
+    ALBEDO = mix(body * 0.13, body, show);
+    {1}
+}}
 ";
 }

@@ -193,6 +193,7 @@ public sealed partial class WallRig : Node3D
     private readonly List<RigidBody3D> _bodies = new();
     private readonly HashSet<int> _live = new();
     private readonly HashSet<int> _gone = new();
+    private readonly List<float> _lain = new();
     private AnimatableBody3D? _tank;
     private Vector3 _tankSize;
     private Vector3 _tankRun;
@@ -329,6 +330,74 @@ public sealed partial class WallRig : Node3D
     /// void is the board being too small for the shot.</summary>
     public int Fell => _gone.Count;
 
+    /// <summary>How long a piece that has been let go lies still before it starts
+    /// to go, and how long it takes to go, in seconds.
+    ///
+    /// <b>Two numbers rather than one, because the rubble has to be looked at
+    /// before it leaves.</b> The whole point of the three shots is what the heap
+    /// ends up like - <c>reach</c>, <c>top</c>, how much of the cell it covers -
+    /// and a piece that starts vanishing on the frame it lands is a heap nobody
+    /// ever sees. The lie-still comes first and the going is slower than it, so
+    /// what reads on screen is masonry being cleared and not masonry being
+    /// deleted.</summary>
+    public const float Linger = 2.0f;
+
+    /// <summary>How long the going takes. See <see cref="Linger"/>.</summary>
+    public const float Crumble = 4.0f;
+
+    /// <summary>Whether fallen pieces go at all. On, and named here rather than
+    /// left in the field's initialiser for <c>Recoil.ShearOnByDefault</c>'s
+    /// reason: a default nobody can point at is a default nobody notices being
+    /// changed.</summary>
+    public const bool CrumblesByDefault = true;
+
+    /// <summary>Whether fallen pieces go at all - <c>--no-crumble</c> on either
+    /// bench. Static because it is a question about the effect and not about one
+    /// wall, the same way <see cref="Gunnery.TraverseLevel"/> is not held on a
+    /// machine.</summary>
+    public static bool Crumbles = CrumblesByDefault;
+
+    /// <summary>
+    /// How much of piece <paramref name="i"/> is still there: one whole, zero
+    /// gone.
+    ///
+    /// <b>A standing piece is always whole, and that is the whole of which pieces
+    /// go.</b> What has not been let go of is masonry, and masonry does not clear
+    /// itself; the shot decides what falls and this only decides what happens to
+    /// it afterwards. So a wall left standing round an AP hole stays exactly as it
+    /// was drawn, however long anybody looks at it.
+    ///
+    /// <b>Measured off time spent lying still, which is what makes it
+    /// monotone.</b> A piece nudged again by the one landing on it has been lying
+    /// still for however long it had - a brick cannot un-crumble - so the clock
+    /// only ever adds. Written as "reset it when it moves" instead, a heap still
+    /// shuffling into place keeps putting its pieces back together.
+    /// </summary>
+    public float Left(int i)
+    {
+        if (!Crumbles || i < 0 || i >= _lain.Count || !_live.Contains(i))
+            return 1.0f;
+        float going = _lain[i] - Linger;
+        return going <= 0.0f
+            ? 1.0f : Mathf.Clamp(1.0f - going / Crumble, 0.0f, 1.0f);
+    }
+
+    /// <summary>How many pieces have gone completely. Reported because it is the
+    /// one thing about this that a still picture cannot tell from a shot that
+    /// never moved them: an empty cell is either cleared rubble or a wall that
+    /// was never hit.</summary>
+    public int Crumbled
+    {
+        get
+        {
+            int n = 0;
+            for (int i = 0; i < _bodies.Count; i++)
+                if (Left(i) <= 0.0f)
+                    n++;
+            return n;
+        }
+    }
+
     /// <summary>Still driving. The settle report has to wait for it: a wall that
     /// has not been hit yet is quiet, and quiet is what that report is watching
     /// for - measured, it fired at 0.60s while the tank was still on its way.
@@ -403,6 +472,7 @@ public sealed partial class WallRig : Node3D
             });
             AddChild(body);
             _bodies.Add(body);
+            _lain.Add(0.0f);
         }
     }
 
@@ -416,6 +486,7 @@ public sealed partial class WallRig : Node3D
         _bodies.Clear();
         _live.Clear();
         _gone.Clear();
+        _lain.Clear();
         _tank = null;
         _driven = false;
         _nosePlaced = false;
@@ -1003,6 +1074,18 @@ public sealed partial class WallRig : Node3D
                 _bodies[i].Freeze = true;
                 _gone.Add(i);
             }
+        // How long each fallen piece has been lying still, which is what decides
+        // when it starts to go - see Left. Only ever added to, and asked of the
+        // velocity rather than of the sleep flag for Still's reason: a piece
+        // resting against the tank never sleeps.
+        foreach (int i in _live)
+        {
+            RigidBody3D b = _bodies[i];
+            if (b.Freeze
+                || (b.LinearVelocity.LengthSquared() <= Still * Still
+                    && b.AngularVelocity.LengthSquared() <= Still * Still))
+                _lain[i] += step;
+        }
         if (_tank is null || _driven)
             return;
         if (_tankLeft <= 0.0f)

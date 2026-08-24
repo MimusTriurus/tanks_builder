@@ -7430,6 +7430,21 @@ public static class SelfTest
         return n;
     }
 
+    /// <summary>How much of two shader sources is the same line. Lines rather
+    /// than a substring, because the two brick variants differ by a render mode
+    /// and one statement: asking whether either contains the other would be false
+    /// for both while they are still one text.</summary>
+    private static double Same(string a, string b)
+    {
+        var one = new HashSet<string>(a.Split('\n'));
+        string[] two = b.Split('\n');
+        int shared = 0;
+        foreach (string line in two)
+            if (one.Contains(line))
+                shared++;
+        return two.Length == 0 ? 0.0 : (double)shared / two.Length;
+    }
+
     private static double WrapAngle(double degrees) =>
         (degrees % 360.0 + 360.0 + 180.0) % 360.0 - 180.0;
 
@@ -9470,6 +9485,17 @@ public static class SelfTest
         try
         {
             rig.Raise(plan, Array.Empty<Vector3>());
+            // Standing masonry does not clear itself, which is the whole of which
+            // pieces go: what the shot let go of. A wall left standing round an AP
+            // hole has to be there however long anybody looks at it, and the
+            // failure is silent in the worst direction - a wall that quietly
+            // sweeps itself away with nothing having hit it.
+            bool whole = rig.Crumbled == 0;
+            for (int i = 0; i < rig.Count; i++)
+                whole &= rig.Left(i) >= 1.0f;
+            Check("a wall nothing has hit is whole, and stays whole: only what a "
+                  + "shot let go of clears itself",
+                whole, $"{rig.Crumbled} of {rig.Count} pieces gone unhit");
             var box = new Vector3(2.5f, WallRig.TankTall, 6.0f);
             rig.Nose(Vector3.Zero, Vector3.Forward, box);
             bool droveFirst = rig.Driven && rig.Ram() is null;
@@ -9494,6 +9520,50 @@ public static class SelfTest
         {
             rig.Free();
         }
+
+        // --- the rubble clears itself ----------------------------------------
+        //
+        // The schedule rather than the picture, because the picture is what this
+        // cannot have: the solver steps physics and --selftest exits before the
+        // first frame of a scene, so how a heap goes is measured by running one.
+        // What is assertable is the order of the two numbers and the text both
+        // shaders are written in.
+        Check("the rubble is looked at before it leaves: it lies still first, and "
+              + "the going is the longer half",
+            WallRig.Linger > 0.0f && WallRig.Crumble > WallRig.Linger,
+            $"lies {WallRig.Linger:F1}s, goes over {WallRig.Crumble:F1}s");
+        Check("and it clears by default, which is the one state the effect is "
+              + "looked at in",
+            WallRig.CrumblesByDefault, "off by default");
+        // Asserted on the compiled sources for FoamEdge's reason: a copy that
+        // drifted would still compile and still draw, and it would read as a
+        // fading brick being a slightly different brick from the one beside it.
+        string intact = WallStack.MortarCode;
+        string going = WallStack.GhostCode;
+        Check("a intact brick and a going one are one text with two settings, "
+              + "never two shaders",
+            intact.Contains("void fragment") && going.Contains("void fragment")
+            && Same(intact, going) >= 0.9,
+            $"they share {Same(intact, going) * 100.0:F0}% of their lines");
+        // The pair the fade rests on. A material that writes ALPHA is a material
+        // in the transparent pass, where multimesh instances are not sorted - so
+        // only what is leaving goes there, and it keeps writing depth while it
+        // does, or a tank behind a nearly intact brick shows through it.
+        Check("what is intact stays opaque and what is leaving blends and still "
+              + "writes depth",
+            !intact.Contains("ALPHA") && !intact.Contains("depth_draw")
+            && going.Contains("ALPHA = left") && going.Contains("depth_draw_always"),
+            $"intact: alpha {intact.Contains("ALPHA")}, depth "
+            + $"{intact.Contains("depth_draw")}; going: alpha "
+            + $"{going.Contains("ALPHA = left")}, depth "
+            + $"{going.Contains("depth_draw_always")}");
+        // And the shadow spends the same figure as ink rather than as coverage,
+        // because a stencil union cannot composite alpha: the first fragment at a
+        // pixel wins, so an eaten shadow stays full black in patches under a brick
+        // that has almost gone.
+        Check("and its shadow thins with it rather than being eaten away",
+            WallStack.ShadeCode.Contains("ALPHA = ink * left"),
+            "the shadow does not read how much is left");
 
         // --- what the tank pushes with ---------------------------------------
         if (vehicles is { Count: > 0 } garage && field.Atlas is not null)

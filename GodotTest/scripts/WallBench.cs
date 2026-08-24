@@ -383,6 +383,11 @@ public sealed partial class WallBench : SceneRoot
             }
             else if (args[i] == "--solved")
                 _solved = true;
+            // The rubble stays where it landed. A capture of the heap is what
+            // every one of this bench's numbers is read off, so being able to
+            // stop it clearing itself is the A/B the effect is judged by.
+            else if (args[i] == "--no-crumble")
+                WallRig.Crumbles = false;
             else if (args[i] == "--fell")
                 _fellAtStart = true;
         }
@@ -583,6 +588,11 @@ public sealed partial class WallBench : SceneRoot
             _rig is null ? "solved flights, no solver"
             : !_rig.Struck ? "standing, nothing fired"
             : $"{_rig.Clock:F2}s, {_rig.Awake} moving, {_rig.Loose} let go");
+        _panel.Toggle("wall.strike.crumble", "fallen pieces clear",
+                      () => WallRig.Crumbles, on => WallRig.Crumbles = on);
+        _panel.Readout("wall.strike.clear", () =>
+            $"lies {WallRig.Linger:F1}s, goes over {WallRig.Crumble:F1}s"
+            + (_rig is null ? "" : $" - {_rig.Crumbled} gone"));
 
         _panel.Heading("wall.stack", "wall");
         // How much wall there is, in the three numbers that are the wall's own
@@ -864,7 +874,13 @@ public sealed partial class WallBench : SceneRoot
             (float reach, float top, int off, int awake) = _rig.Pile(Lay);
             fall = $"{_strike} x{_force:F2} from {_bearing:F0} deg  "
                    + (_rig.Struck ? $"{_rig.Clock:F2}s, {awake} moving  " : "ready  ")
-                   + $"reach {reach:F2}, top {top:F2}, {off} off the cell";
+                   + $"reach {reach:F2}, top {top:F2}, {off} off the cell"
+                   // How much of the heap has cleared itself. Printed because a
+                   // cleared cell and a shot that never moved anything are the
+                   // same empty picture - and because reach and top go on
+                   // describing bodies nobody can see any more, which is worth
+                   // being able to see said.
+                   + (_rig.Crumbled > 0 ? $", {_rig.Crumbled} gone" : "");
         }
         else if (_wall is { Falling: true })
         {
