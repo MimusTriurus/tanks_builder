@@ -1065,17 +1065,29 @@ public sealed partial class BoardMap
     /// <c>--map wall</c> on it is this hexagon with nothing standing in the
     /// middle. Three homes all the same, because the harness stands one vehicle
     /// per atlas and would otherwise put all three on one hex.
+    ///
+    /// <b>Five walls: a ring on the middle cell and four samples, one on the end
+    /// of each of four lanes out of it.</b> The map says which cells carry one
+    /// and nothing else about them - what each is made of is the bench's, the
+    /// same split the letter <c>f</c> already has: the map says a wood grows
+    /// here and <see cref="Grove"/> decides which trees. See
+    /// <c>TankBench.Walls</c>.
+    ///
+    /// The samples stand at the far end of a lane on purpose. Each is three cells
+    /// from the middle, so the drive out of the ring to any of them shows the
+    /// whole braking curve, and each faces the ring, so a tank coming out of it
+    /// arrives square on the masonry rather than at its end.
     /// </summary>
     private static readonly string[] WallGround =
     {
         // 0123456
-        "---.---", // r0
+        "---W---", // r0   taller
         "-.....-", // r1
-        ".......", // r2
-        "...W...", // r3   the wall at (3,3), the middle of the hexagon
+        "W.....W", // r2   thicker (0,2), another seed (6,2)
+        "...W...", // r3   the ring at (3,3), with the tank inside it
         ".......", // r4
         ".......", // r5
-        "--...--", // r6
+        "--.W.--", // r6   a longer run
     };
 
     /// <summary>None. Every cell is the same level, so there is no step for a
@@ -1092,17 +1104,21 @@ public sealed partial class BoardMap
         ".......", // r6
     };
 
-    /// <summary>Three cells down the 270 lane from the wall, and two off to the
-    /// sides.
+    /// <summary>The middle of the hexagon, and two off to the sides.
     ///
-    /// The first is the one a single-tank run gets, and it stands on a lane of
-    /// the wall on purpose: the bench opens with the wall's face towards the
-    /// camera and the tank behind it, so the run-up is a straight drive and the
-    /// gun is already laid. The other two are only there so that <c>--map
-    /// wall</c> on the harness, which builds one vehicle per atlas, does not
-    /// stand three of them on one hex.</summary>
+    /// <b>The first is the ring's own cell, so a single-tank run opens with the
+    /// tank inside the walls.</b> That is the board's subject: a machine in a
+    /// walled yard with a face on every side of it, so the ram has six answers
+    /// and none of them needs a run-up first. It used to stand three cells down
+    /// the 270 lane, which is the same drive the <c>M</c> key still makes towards
+    /// any of the samples.
+    ///
+    /// The other two are only there so that <c>--map wall</c> on the harness,
+    /// which builds one vehicle per atlas, does not stand three of them on one
+    /// hex - and they sit two cells out on the 210 and 330 lanes, which carry no
+    /// wall.</summary>
     private static readonly Vector2I[] WallHomes =
-        { new(3, 6), new(1, 4), new(5, 4) };
+        { new(3, 3), new(1, 4), new(5, 4) };
 
     private static BoardMap? _wall;
 

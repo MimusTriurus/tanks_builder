@@ -9264,11 +9264,24 @@ public static class SelfTest
 
         BoardMap map = BoardMap.WallMap;
         IReadOnlyList<Vector2I> walled = map.Walled();
-        Check("the wall board declares exactly one wall",
-            walled.Count == 1, $"{walled.Count} cells carry one");
+        // The ring is the first home's own cell: the board opens with the tank
+        // inside the walls, which is what makes the ram six answers rather than a
+        // run-up. Both halves, because each is a different board: a home that is
+        // not walled is a tank standing in the open, and a walled cell that is not
+        // a home is a yard with nothing in it.
+        Vector2I home = map.Homes[0];
+        Check("the tank starts inside a wall, and the samples stand elsewhere",
+            walled.Count > 1 && walled.Contains(home),
+            $"{walled.Count} walls, home ({home.X},{home.Y}) "
+            + (walled.Contains(home) ? "is walled" : "is not"));
         if (walled.Count == 0)
             return;
-        Vector2I wall = walled[0];
+        // And that ring runs every side of it. A ring with a gap leaves the
+        // machine standing in an opening nobody chose, and no readout names which
+        // side it was - see TankBench.RingSides.
+        Check("and the wall it starts in runs all six sides of the cell",
+            TankBench.RingSides == 6, $"{TankBench.RingSides} sides");
+        Vector2I wall = home;
 
         // --- the board -------------------------------------------------------
         //
@@ -9278,15 +9291,27 @@ public static class SelfTest
         // screen says so: the tank simply refuses the order and the picture is a
         // tank parked beside a wall.
         var steps = new List<string>();
+        foreach (Vector2I at in walled)
         foreach (int heading in HexField.EdgeHeadings)
         {
-            Vector2I next = HexField.Step(wall, heading);
+            Vector2I next = HexField.Step(at, heading);
+            // Off the board is a failure for the ring and not for a sample: the
+            // ring is rammed out of on any of the six, so every one of them has to
+            // be somewhere a tank can be, whereas a sample is only ever met down
+            // the one lane that leads to it - and each of them stands on the rim
+            // of the hexagon, where three of the six are off it by construction.
             if (!map.OnBoard(next))
-                steps.Add($"{heading} is off the board");
-            else if (map.Levels[map.At(next)] != map.Levels[map.At(wall)])
-                steps.Add($"{heading} stands at {map.Levels[map.At(next)]}");
+            {
+                if (at == wall)
+                    steps.Add($"the ring's {heading} is off the board");
+                continue;
+            }
+            if (map.Levels[map.At(next)] != map.Levels[map.At(at)])
+                steps.Add($"({at.X},{at.Y}) {heading} stands at "
+                          + $"{map.Levels[map.At(next)]}");
         }
-        Check("the wall's cell is level with all six of its neighbours",
+        Check("every walled cell is level with the neighbours it has, and the "
+              + "ring has all six",
             steps.Count == 0, string.Join(", ", steps));
 
         // Which side the wall stands on is a dial, so each of the six has to
@@ -9313,26 +9338,45 @@ public static class SelfTest
         Check("and every one of its six lanes is three cells long",
             lanes.Count == 0, string.Join(", ", lanes));
 
-        // A home the tank cannot fire from is a board where the shot has to be
-        // set up before it can be taken. The first is the one a single-tank run
-        // gets, so it is the one that has to be on a lane.
-        Vector2I home = map.Homes[0];
+        // A sample the tank cannot fire at is a board where the shot has to be
+        // set up before it can be taken. Every sample stands at the end of a lane
+        // out of the ring on purpose - so driving out of it and turning is not
+        // part of taking the shot - and the one found here is what the rest of
+        // this topic fires at.
+        Vector2I mark = home;
         int laneHeading = -1;
-        foreach (int heading in HexField.EdgeHeadings)
+        var offLane = new List<string>();
+        foreach (Vector2I sample in walled)
         {
-            Vector2I at = wall;
-            for (int k = 0; k < map.Columns + map.Rows; k++)
+            if (sample == home)
+                continue;
+            int found = -1;
+            foreach (int heading in HexField.EdgeHeadings)
             {
-                Vector2I next = HexField.Step(at, heading);
-                if (next == at || !map.OnBoard(next))
-                    break;
-                at = next;
-                if (at == home)
-                    laneHeading = heading;
+                Vector2I at = home;
+                for (int k = 0; k < map.Columns + map.Rows; k++)
+                {
+                    Vector2I next = HexField.Step(at, heading);
+                    if (next == at || !map.OnBoard(next))
+                        break;
+                    at = next;
+                    if (at == sample)
+                        found = heading;
+                }
+            }
+            if (found < 0)
+                offLane.Add($"({sample.X},{sample.Y})");
+            else if (laneHeading < 0)
+            {
+                laneHeading = found;
+                mark = sample;
             }
         }
-        Check("the first home stands on a lane of the wall",
-            laneHeading >= 0, $"({home.X},{home.Y}) is on none of the six");
+        Check("every sample stands down a lane out of the ring",
+            laneHeading >= 0 && offLane.Count == 0,
+            offLane.Count > 0 ? string.Join(" ", offLane) + " are on no lane"
+                              : "no sample is on one");
+        wall = mark;
 
         // --- the lane a round takes ------------------------------------------
         //
@@ -9354,9 +9398,13 @@ public static class SelfTest
             {
                 probe.SetRelief(map.Levels, map.Ramps);
                 Vector2 from = probe.FlatAnchor(home) + probe.CentreOffset;
-                // Towards the wall, which is the lane read the other way.
-                Vector2 dir = field.Atlas.GroundDirection(
-                    HexField.Reverse(laneHeading));
+                // Towards the sample, and not reversed: laneHeading is the way out
+                // of the ring, which is the way the round goes. It used to be the
+                // heading from the wall back to the home, which is the same lane
+                // read the other way - and reading it the old way now walks the
+                // round off the far edge of the board, where it stops at nothing
+                // and the check passes for the wrong reason.
+                Vector2 dir = field.Atlas.GroundDirection(laneHeading);
                 float top = probe.LevelAt(home) * probe.Lift;
                 var none = new HashSet<Vector2I>();
                 var solid = new HashSet<Vector2I> { wall };
@@ -9540,7 +9588,7 @@ public static class SelfTest
         // fading brick being a slightly different brick from the one beside it.
         string intact = WallStack.MortarCode;
         string going = WallStack.GhostCode;
-        Check("a intact brick and a going one are one text with two settings, "
+        Check("a whole brick and a going one are one text with two settings, "
               + "never two shaders",
             intact.Contains("void fragment") && going.Contains("void fragment")
             && Same(intact, going) >= 0.9,
@@ -9549,11 +9597,11 @@ public static class SelfTest
         // in the transparent pass, where multimesh instances are not sorted - so
         // only what is leaving goes there, and it keeps writing depth while it
         // does, or a tank behind a nearly intact brick shows through it.
-        Check("what is intact stays opaque and what is leaving blends and still "
+        Check("what is whole stays opaque and what is leaving blends and still "
               + "writes depth",
             !intact.Contains("ALPHA") && !intact.Contains("depth_draw")
             && going.Contains("ALPHA = left") && going.Contains("depth_draw_always"),
-            $"intact: alpha {intact.Contains("ALPHA")}, depth "
+            $"whole: alpha {intact.Contains("ALPHA")}, depth "
             + $"{intact.Contains("depth_draw")}; going: alpha "
             + $"{going.Contains("ALPHA = left")}, depth "
             + $"{going.Contains("depth_draw_always")}");

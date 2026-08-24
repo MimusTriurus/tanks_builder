@@ -138,13 +138,63 @@ public sealed partial class TankBench : SceneRoot
     /// carries the reason. What is here is the wiring: which cells stop a shell,
     /// which prop a landed round belongs to, and the box the tank pushes with.
     ///
-    /// <b>The recipe is shared, and on a board with one wall that is exact.</b>
-    /// Two props off one recipe are two identical walls, because the seed is in
-    /// it; if a board ever carries several, that is the line to look at.
+    /// <b>A recipe apiece, because the board carries several.</b> Two props off
+    /// one recipe are two identical walls - the seed is in it - so the ring gets
+    /// <see cref="_brick"/>, which is what the panel's dials write into, and every
+    /// sample gets its own out of <see cref="Samples"/>. That is also why
+    /// <see cref="Relaid"/> stands each prop up on its own bearing and coverage
+    /// instead of pushing the dials' pair into all of them.
     /// </summary>
     private readonly List<WallProp> _walls = new();
     private readonly HashSet<Vector2I> _walled = new();
-    private readonly WallKit.Recipe _brick = new();
+
+    /// <summary>The ring's own recipe: the one the dials drive. Six sides,
+    /// because the board's subject is a tank inside a walled yard - see
+    /// <see cref="BoardMap.WallMap"/> - and a yard with one face is a fence.
+    /// </summary>
+    private readonly WallKit.Recipe _brick = new() { Sides = RingSides };
+
+    /// <summary>How far round its cell the ring goes. Named because the board is
+    /// authored around it: the tank's home is the ring's cell, so a ring that
+    /// stopped covering every side would leave the machine standing in a gap
+    /// nobody chose - and no number in any readout would say which side it was.
+    /// </summary>
+    public const int RingSides = 6;
+
+    /// <summary>
+    /// The walls that are not the ring: where each stands, which way it faces and
+    /// what it is made of.
+    ///
+    /// <b>Here rather than in <see cref="BoardMap"/>, for the same reason a wood
+    /// is.</b> The map says which cells carry a wall; what a wall <i>is</i> - how
+    /// high, how thick, which seed - is the bench's, exactly as the map says a
+    /// wood grows on a cell and <see cref="Grove"/> decides which trees stand on
+    /// it. A recipe in the map would also be a recipe no dial can reach.
+    ///
+    /// <b>One thing at a time, and that is the whole point of four of them.</b>
+    /// Height, thickness, seed and run are four dials whose effect is hard to
+    /// judge one wall at a time - a taller wall looks like a nearer wall, a
+    /// thicker one like a longer one - so each sample moves one of them off the
+    /// ring's own numbers and the rest stay put.
+    ///
+    /// <b>Each faces the ring.</b> The bearing is the side the wall stands on and
+    /// the side a shot arrives from, one dial for both, so a tank driving out of
+    /// the ring along that lane meets the masonry square on rather than at its
+    /// end - which is the difference between a ram and a graze, and it is
+    /// measured: a shot off the axis moves a tenth of the pieces.
+    /// </summary>
+    private static readonly (Vector2I Cell, float Bearing, string What,
+                             WallKit.Recipe Recipe)[] Samples =
+    {
+        (new Vector2I(3, 0), 270.0f, "taller",
+         new WallKit.Recipe { Courses = 14 }),
+        (new Vector2I(0, 2), 330.0f, "thicker",
+         new WallKit.Recipe { Leaves = 4 }),
+        (new Vector2I(6, 2), 210.0f, "another seed",
+         new WallKit.Recipe { Seed = 47 }),
+        (new Vector2I(3, 6), 90.0f, "a longer run",
+         new WallKit.Recipe { Sides = 3, Seed = 23 }),
+    };
 
     private WallProp? Wall => _walls.Count > 0 ? _walls[0] : null;
 
@@ -670,27 +720,57 @@ public sealed partial class TankBench : SceneRoot
     {
         if (_stage is null || _field.Atlas is null)
             return;
+        // The ring first, so it is _walls[0] - the one the dials drive, the one
+        // the readout prints and the one the tank stands in. Everything that says
+        // "the wall" on this bench means that one.
+        Vector2I ring = _map.Homes.Count > 0 ? _map.Homes[0] : new Vector2I(-1, -1);
         foreach (Vector2I cell in _map.Walled())
         {
-            var prop = new WallProp
-            {
-                Field = _field,
-                Stage = _stage,
-                Cell = cell,
-                Recipe = _brick,
-                Borrow = null,
-            };
-            AddChild(prop);
-            prop.Bearing = HexField.EdgeHeadings[_wallSide];
-            prop.Coverage = _wallCoverage;
-            prop.Build();
-            _walls.Add(prop);
-            _walled.Add(cell);
+            if (cell != ring)
+                continue;
+            Stand(cell, HexField.EdgeHeadings[_wallSide], _wallCoverage, _brick);
+            break;
         }
+        foreach ((Vector2I cell, float bearing, string _, WallKit.Recipe recipe)
+                 in Samples)
+        {
+            if (!_walled.Contains(cell) && _map.Walled().Contains(cell))
+                Stand(cell, bearing, _wallCoverage, recipe);
+        }
+        // Any cell the map marked that no sample named. Stood rather than skipped:
+        // a letter on the board with nothing on it is the one failure this whole
+        // arrangement can have, and it looks exactly like open ground.
+        foreach (Vector2I cell in _map.Walled())
+            if (!_walled.Contains(cell))
+                Stand(cell, HexField.EdgeHeadings[_wallSide], _wallCoverage,
+                      new WallKit.Recipe());
         if (_walls.Count > 0)
-            GD.Print($"tank bench: {_walls.Count} wall(s) on "
-                     + string.Join(" ", _map.Walled().Select(c => $"({c.X},{c.Y})"))
-                     + $", side {HexField.EdgeHeadings[_wallSide]} deg");
+            GD.Print($"tank bench: {_walls.Count} wall(s), ring on "
+                     + $"({ring.X},{ring.Y}) over {_brick.Sides} sides, samples "
+                     + string.Join(" ", Samples.Select(
+                         x => $"({x.Cell.X},{x.Cell.Y}) {x.What}")));
+    }
+
+    /// <summary>One wall on one cell. Every field a prop needs is handed in, so
+    /// which walls a board has is a list rather than a special case per
+    /// wall.</summary>
+    private void Stand(Vector2I cell, float bearing, float coverage,
+                       WallKit.Recipe recipe)
+    {
+        var prop = new WallProp
+        {
+            Field = _field,
+            Stage = _stage!,
+            Cell = cell,
+            Recipe = recipe,
+            Borrow = null,
+        };
+        AddChild(prop);
+        prop.Bearing = bearing;
+        prop.Coverage = coverage;
+        prop.Build();
+        _walls.Add(prop);
+        _walled.Add(cell);
     }
 
     /// <summary>Lay them all again - what a size dial, a seed or a side does.
@@ -713,12 +793,16 @@ public sealed partial class TankBench : SceneRoot
     {
         _ramSpeed = -1.0;
         _wallSaid = false;
-        foreach (WallProp prop in _walls)
+        // The dials are the ring's: which side it stands on and how much of the
+        // cell it takes. A sample keeps the bearing it was stood on, because that
+        // bearing is what makes it face the ring - see Samples.
+        if (Wall is WallProp ring)
         {
-            prop.Bearing = HexField.EdgeHeadings[_wallSide];
-            prop.Coverage = _wallCoverage;
-            prop.Build();
+            ring.Bearing = HexField.EdgeHeadings[_wallSide];
+            ring.Coverage = _wallCoverage;
         }
+        foreach (WallProp prop in _walls)
+            prop.Build();
     }
 
     /// <summary>
@@ -786,7 +870,21 @@ public sealed partial class TankBench : SceneRoot
         Vector2 way = tank.Atlas.GroundDirection(tank.Sprite.HullFacing);
         foreach (WallProp prop in _walls)
         {
-            if (Beside(here, prop.Cell))
+            // <b>Moving, or already struck.</b> A parked tank is not ramming
+            // anything - WallRig.Nose's own sentence - and it matters here in a
+            // way it did not when the tank stood a cell away: the board opens with
+            // the machine inside the ring, and a six-sided ring's inner leaf
+            // stands 2.96m off the middle against a hull 6.0m long. It does not
+            // fit, so a box pushed in while parked lets go of fourteen bricks on
+            // the first frame and the wall reads as struck before anything
+            // happened.
+            //
+            // Struck keeps the box in, and that is the half that must not be
+            // dropped: after a ram the tank is parked in the rubble it made, and
+            // the rubble is resting on it. Take the box away then and the heap
+            // sinks through the machine.
+            if (Beside(here, prop.Cell)
+                && (tank.Moving || prop.Rig is { Struck: true }))
                 prop.Nose(foot, way, box);
             else
                 prop.Halt();
@@ -814,6 +912,17 @@ public sealed partial class TankBench : SceneRoot
     {
         if (Wall is null || !order)
             return;
+        // Out through the named side when the tank is already in the ring, which
+        // is where the board opens. One leg, not two: the run-up exists because
+        // the pathing cannot say "and arrive along this heading", and from inside
+        // the cell the first step is the heading. What it rams is its own wall,
+        // which is what a machine in a walled yard does to get out.
+        if (Tank.Cell == Wall.Cell)
+        {
+            OrderTo(HexField.Step(Wall.Cell, HexField.EdgeHeadings[_wallSide]));
+            _lineUp = false;
+            return;
+        }
         Vector2I from = HexField.Step(Wall.Cell,
                                       HexField.EdgeHeadings[_wallSide]);
         // Line up first when it is not already on the lane: a path that comes at
@@ -1133,7 +1242,7 @@ public sealed partial class TankBench : SceneRoot
         // What actually struck it, off the rig, and never the ammunition dial:
         // a ram is not a round, so the loaded shell says nothing about a wall a
         // tank drove into - which is what the first version of this line did.
-        return "wall "
+        return $"wall (the ring, {_walls.Count - 1} samples off it) "
                + (rig.Struck ? $"{rig.Shot} " : $"{_tick.Ammo} x{_wallForce:F2} ")
                + $"on side {HexField.EdgeHeadings[_wallSide]}  "
                + (rig.Struck
@@ -1155,7 +1264,13 @@ public sealed partial class TankBench : SceneRoot
                + (_ramSpeed >= 0.0
                    ? $"\nram at {_ramSpeed:F1} m/s against RamSpeed "
                      + $"{WallRig.RamSpeed:F1}"
-                   : "");
+                   : "")
+               // And what else stands on the board, because the dials do not
+               // reach it: every sample carries its own recipe, so a wall that
+               // ignores the sliders is this working rather than failing. See
+               // Samples.
+               + "\n" + string.Join("  ", Samples.Select(
+                   x => $"({x.Cell.X},{x.Cell.Y}) {x.What}"));
     }
 
     // --- what the dials do ---------------------------------------------------
