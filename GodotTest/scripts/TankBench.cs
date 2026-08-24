@@ -46,21 +46,35 @@ namespace TankSpriteTest;
 /// left burning is still burning when you come back to it. The one that is not
 /// shown is not ticked and is not drawn.
 ///
-/// <b>Two boards, and the second is the same bench with one string
+/// <b>And the third thing on the board is a wall, on the board that carries
+/// one.</b> The subject of this bench is no longer quite "one tank": it is one
+/// tank and the thing it can drive into. What that costs is the two hundred odd
+/// lines below that know a prop exists - which cells stop a shell, which prop a
+/// landed round belongs to, and the box the hull pushes with. What it does not
+/// cost is a second wall: the plan, the fit, the rubble, the drawing and the
+/// solver are <see cref="WallBench"/>'s, taken whole through
+/// <see cref="WallProp"/>. A bench that laid its own masonry would be a bench
+/// measuring itself, which is the rule this file is written under twice already.
+///
+/// <b>Three boards now, and the third is the same bench with one string
 /// changed.</b> <c>TankTest.tscn</c> stands the tank on
 /// <see cref="BoardMap.Test"/> - the level, one grade and one ford, which is
 /// where every dial here was tuned. <c>WaterTankTest.tscn</c> stands it on
 /// <see cref="BoardMap.WaterMap"/>, open water with a rosette of land in the
 /// middle: there the water is the board, so every one of the six ways off the
 /// middle is a wade and the descent can be judged on whichever bearing reads
-/// best. Nothing in this file knows which of the two it is on - see
-/// <see cref="Map"/>.
+/// best. <c>WallTankTest.tscn</c> stands it on <see cref="BoardMap.WallMap"/>,
+/// a hexagon of level ground three cells across with one brick wall in the
+/// middle of it: a ram, an HE round and an AP round, which are the three things
+/// that break masonry and none of which a tank could do before. Nothing in this
+/// file knows which of the three it is on - see <see cref="Map"/>.
 ///
 /// Run it with the scene as the positional argument, leaving project.godot
 /// alone:
 ///
 ///     Godot_v4.7.2-stable_mono_win64.exe --path GodotTest res://TankTest.tscn
 ///     Godot_v4.7.2-stable_mono_win64.exe --path GodotTest res://WaterTankTest.tscn
+///     Godot_v4.7.2-stable_mono_win64.exe --path GodotTest res://WallTankTest.tscn
 /// </summary>
 public sealed partial class TankBench : SceneRoot
 {
@@ -113,6 +127,44 @@ public sealed partial class TankBench : SceneRoot
     /// <summary>What a frame does to the tank. One object, shared with the
     /// harness - see <see cref="TankTick"/>.</summary>
     private readonly TankTick _tick = new();
+
+    // --- the wall ------------------------------------------------------------
+
+    /// <summary>
+    /// One prop per cell the map marks with <see cref="BoardMap.Wall"/>, and
+    /// nothing at all on a board that marks none.
+    ///
+    /// <b>Off the map rather than out of the scene</b> - <see cref="BoardMap.Wall"/>
+    /// carries the reason. What is here is the wiring: which cells stop a shell,
+    /// which prop a landed round belongs to, and the box the tank pushes with.
+    ///
+    /// <b>The recipe is shared, and on a board with one wall that is exact.</b>
+    /// Two props off one recipe are two identical walls, because the seed is in
+    /// it; if a board ever carries several, that is the line to look at.
+    /// </summary>
+    private readonly List<WallProp> _walls = new();
+    private readonly HashSet<Vector2I> _walled = new();
+    private readonly WallKit.Recipe _brick = new();
+
+    private WallProp? Wall => _walls.Count > 0 ? _walls[0] : null;
+
+    /// <summary>Which flat side the wall stands on, as an index into
+    /// <see cref="HexField.EdgeHeadings"/>. One dial for both halves of it -
+    /// <see cref="WallBench"/>'s argument, and here it decides the run-up too.
+    /// Opens on 270, so the wall faces the camera and the tank comes at it from
+    /// the near side.</summary>
+    private int _wallSide = Array.IndexOf(HexField.EdgeHeadings, 270);
+
+    /// <summary>A multiplier over what the round already carries. The calibre is
+    /// the shot's own size - an ordered three - and a second table beside it
+    /// would be a second thing to keep in step, so this only scales it.</summary>
+    private double _wallForce = 1.0;
+
+    /// <summary>Whether the rig draws its own line into the wall on top of the
+    /// shell's tracer. Off: the round has been drawn all the way in already, and
+    /// a second line over it is a second answer to where it came from. Kept as a
+    /// switch because that claim is worth being able to look at.</summary>
+    private bool _wallBeam;
 
     /// <summary>The view's spring, for the gun. One for the board rather than
     /// one per tank, which on a bench with one tank is the same thing said
@@ -173,6 +225,25 @@ public sealed partial class TankBench : SceneRoot
     private int _damageAtStart;
     private bool _destroyAtStart;
     private bool _burnAtStart;
+    private bool _ramAtStart;
+    private double? _turretAtStart;
+
+    /// <summary>How much of the cell the wall takes. The wall bench's dial, and
+    /// its number: 0.97 leaves about two pixels of tile between each end of the
+    /// wall and the cell's vertex.</summary>
+    private float _wallCoverage = 0.97f;
+
+    /// <summary>How fast the tank was going, in metres a second, when the wall
+    /// first let go of a piece - negative until it has.
+    ///
+    /// <b>Reported, because it is neither of the two numbers anybody would
+    /// guess.</b> The medium's cruise is 240px/s, which at 30.5px to the metre is
+    /// 7.9 m/s against the <see cref="WallRig.RamSpeed"/> of 3.9 the shot was
+    /// tuned at - but a tank braking to stop on the wall's cell meets the masonry
+    /// an apothem short of where it is aiming to stand, so what it actually
+    /// arrives at is neither. Without this figure "the wall went off like a break
+    /// shot" cannot be told from "the wall is tuned wrong".</summary>
+    private double _ramSpeed = -1.0;
 
     private void ReadFlags()
     {
@@ -199,6 +270,16 @@ public sealed partial class TankBench : SceneRoot
                 case "--fire":
                     _fireAtStart = true;
                     break;
+                // Where the gun points to begin with. The harness has had this
+                // for as long as it has had a turret; the bench needed it the
+                // moment there was something on the board worth laying on,
+                // because a shot at a wall cannot be captured with the gun
+                // pointing the way the tank parked.
+                case "--turret" when i + 1 < args.Length
+                                     && Number(args[i + 1]) is double lay:
+                    _turretAtStart = lay;
+                    i++;
+                    break;
                 case "--hit" when i + 1 < args.Length && Number(args[i + 1]) is double deg:
                     _hitAtStart = deg;
                     i++;
@@ -210,6 +291,17 @@ public sealed partial class TankBench : SceneRoot
                     break;
                 case "--destroy":
                     _destroyAtStart = true;
+                    break;
+                // Which of the three the gun is loaded with, by the harness's
+                // name for it and snapped through the harness's list: a gun has
+                // the calibres it has, and a control that reads 1.0x with a 1.4
+                // round loaded is a control lying about what it will fire. It
+                // reaches the wall too - the round's calibre is what the burst
+                // is scaled by - so this is how the shot's own size is swept.
+                case "--hit-scale" when i + 1 < args.Length
+                                        && Number(args[i + 1]) is double bore:
+                    _tick.Calibre = Ordnance.For((float)bore);
+                    i++;
                     break;
                 case "--burning":
                     _burnAtStart = true;
@@ -261,6 +353,77 @@ public sealed partial class TankBench : SceneRoot
                     break;
                 case "--scan":
                     _tick.ScanEnabled = true;
+                    break;
+
+                // --- the wall ---------------------------------------------
+                //
+                // What hits it at the start. A convenience over the two below:
+                // a ram is an order and the other two are a round, so the flag
+                // sets the ammunition and pulls the trigger.
+                case "--strike" when i + 1 < args.Length:
+                    switch (args[++i])
+                    {
+                        case "ram": _ramAtStart = true; break;
+                        case "he": _tick.Ammo = Shell.Kind.He; _fireAtStart = true; break;
+                        case "ap": _tick.Ammo = Shell.Kind.Ap; _fireAtStart = true; break;
+                        default:
+                            GD.PushWarning($"--strike {args[i]} is none of ram, "
+                                           + "he, ap");
+                            break;
+                    }
+                    break;
+                case "--ram":
+                    _ramAtStart = true;
+                    break;
+                case "--ammo" when i + 1 < args.Length:
+                    _tick.Ammo = args[++i] == "ap" ? Shell.Kind.Ap : Shell.Kind.He;
+                    if (args[i] is not ("he" or "ap"))
+                        GD.PushWarning($"--ammo {args[i]} is neither he nor ap");
+                    break;
+                case "--force" when i + 1 < args.Length
+                                    && Number(args[i + 1]) is double f:
+                    _wallForce = Mathf.Clamp(f, 0.0, WallBench.MostForce);
+                    i++;
+                    break;
+                // Snapped, so the flag cannot quietly stand the wall through a
+                // corner: the six are where a tank can be, and an angle between
+                // two of them is not a weaker version of either.
+                case "--bearing" when i + 1 < args.Length
+                                      && Number(args[i + 1]) is double b:
+                    _wallSide = Angles.SideFor(b);
+                    i++;
+                    break;
+                case "--seed" when i + 1 < args.Length
+                                   && int.TryParse(args[i + 1], out int seed):
+                    _brick.Seed = seed;
+                    i++;
+                    break;
+                case "--sides" when i + 1 < args.Length
+                                    && int.TryParse(args[i + 1], out int runs):
+                    _brick.Sides = Math.Clamp(runs, 1, 6);
+                    i++;
+                    break;
+                case "--courses" when i + 1 < args.Length
+                                      && int.TryParse(args[i + 1], out int high):
+                    _brick.Courses = Math.Clamp(high, 1, WallBench.MostCourses);
+                    i++;
+                    break;
+                case "--leaves" when i + 1 < args.Length
+                                     && int.TryParse(args[i + 1], out int thick):
+                    _brick.Leaves = Math.Clamp(thick, 1, WallBench.MostLeaves);
+                    i++;
+                    break;
+                case "--coverage" when i + 1 < args.Length
+                                       && Number(args[i + 1]) is double cov:
+                    _wallCoverage = Mathf.Clamp((float)cov, 0.4f, 1.2f);
+                    i++;
+                    break;
+                // The rig's own line over the shell's tracer. Off by default -
+                // the round has been drawn all the way in already - and kept as a
+                // flag because "the tracer is enough" is a claim until the two
+                // can be put side by side.
+                case "--wall-beam":
+                    _wallBeam = true;
                     break;
             }
         }
@@ -350,6 +513,10 @@ public sealed partial class TankBench : SceneRoot
 
         Stage();
         ApplySize();
+        // After the stage, because a prop wants the ground it stands on and the
+        // triangles come off the stage - and after ApplySize, because the ram's
+        // box is measured through the class scale.
+        Walls();
         foreach (Vehicle vehicle in _garage)
             Tick.Park(vehicle);
         OnlyOne();
@@ -470,6 +637,192 @@ public sealed partial class TankBench : SceneRoot
         _stage.ShowBoard = _board;
     }
 
+    /// <summary>
+    /// Stand a wall on every cell the map marks with one.
+    ///
+    /// <b>All of it is <see cref="WallProp"/>'s</b>, which is the point of that
+    /// type existing: the plan, the fit, the rubble, the drawing and the solver
+    /// are the wall bench's, dead literally, and what a second bench adds is a
+    /// board to stand them on. What is written here is which cells, which side
+    /// and which recipe.
+    ///
+    /// <b>Nothing is borrowed for the ram.</b> <see cref="WallStack.Tank"/> draws
+    /// a tank out of an atlas because the wall bench has no
+    /// <see cref="Vehicle"/>; this board has three, and a borrowed sprite would
+    /// be a second tank standing where the real one is.
+    /// </summary>
+    private void Walls()
+    {
+        if (_stage is null || _field.Atlas is null)
+            return;
+        foreach (Vector2I cell in _map.Walled())
+        {
+            var prop = new WallProp
+            {
+                Field = _field,
+                Stage = _stage,
+                Cell = cell,
+                Recipe = _brick,
+                Borrow = null,
+            };
+            AddChild(prop);
+            prop.Bearing = HexField.EdgeHeadings[_wallSide];
+            prop.Coverage = _wallCoverage;
+            prop.Build();
+            _walls.Add(prop);
+            _walled.Add(cell);
+        }
+        if (_walls.Count > 0)
+            GD.Print($"tank bench: {_walls.Count} wall(s) on "
+                     + string.Join(" ", _map.Walled().Select(c => $"({c.X},{c.Y})"))
+                     + $", side {HexField.EdgeHeadings[_wallSide]} deg");
+    }
+
+    /// <summary>Lay them all again - what a size dial, a seed or a side does.
+    /// Locked while anything is in the air, for the wall bench's reason twice
+    /// over: this replaces the bodies rather than turning the world under
+    /// them.</summary>
+    private void Relay(Action change)
+    {
+        if (Wall?.Rig is { Struck: true })
+            return;
+        change();
+        _ramSpeed = -1.0;
+        _wallSaid = false;
+        foreach (WallProp prop in _walls)
+        {
+            prop.Bearing = HexField.EdgeHeadings[_wallSide];
+            prop.Coverage = _wallCoverage;
+            prop.Build();
+        }
+    }
+
+    /// <summary>
+    /// A round that went into the board rather than into a tank, offered to the
+    /// wall it stopped at.
+    ///
+    /// <b>The direction is the round's own flight, not the bearing</b>, so the
+    /// line that was drawn and the line the damage landed on cannot point
+    /// different ways - which is the whole claim <see cref="WallRig.Beam"/> is
+    /// written under. A level gun has the same lift at both ends, so the
+    /// difference of the two drawn rows is the ground direction with nothing
+    /// mixed in.
+    ///
+    /// <b>The force is what the round already carries.</b>
+    /// <see cref="Ordnance"/> is an ordered three and the bench's dial is a
+    /// multiplier over it; a second table of wall forces beside the calibres
+    /// would be a second thing to hold in step.
+    ///
+    /// <b>And the rig draws no line of its own</b> - see <c>_wallBeam</c>.
+    /// </summary>
+    private void Struck(Shell round)
+    {
+        if (round.Blocked is not Vector2I cell)
+            return;
+        foreach (WallProp prop in _walls)
+        {
+            if (prop.Cell != cell)
+                continue;
+            Vector2 flight = round.To - round.From;
+            if (flight.LengthSquared() < 1.0f)
+                return;
+            prop.Fire(round.Ammo == Shell.Kind.Ap
+                          ? WallRig.Strike.Ap : WallRig.Strike.He,
+                      prop.Into(flight.Normalized()),
+                      (float)(round.Calibre * _wallForce), _wallBeam);
+            return;
+        }
+    }
+
+    /// <summary>
+    /// Push the tank at every wall it is close enough to touch, and take the box
+    /// away from the rest.
+    ///
+    /// <b>Pushed every frame rather than fired once</b>, because a tank is not a
+    /// shot: how fast it arrives, where it stops and how far it turns on the way
+    /// are decided by an order, a speed ceiling and the ground, none of which the
+    /// solver knows about. What is left for the rig is to feel it - see
+    /// <see cref="WallRig.Nose"/>.
+    ///
+    /// <b>Close enough is the cell or one of its six</b>, and the box is why: it
+    /// is a cell and a half long, so a tank on the next hex already has its nose
+    /// over this one. Further off there is nothing to feel and the body is taken
+    /// down, which is what keeps a wall on the far side of the board from
+    /// carrying a kinematic tank around after it.
+    /// </summary>
+    private void Ram()
+    {
+        if (_stage is null || _walls.Count == 0 || _garage.Count == 0)
+            return;
+        Vehicle tank = Tank;
+        Vector2I here = _field.CellAt(tank.GroundPoint - _origin);
+        Vector3 box = WallProp.Box(tank,
+                                   _field.Atlas!.HexRect.Size.X * 0.5f);
+        Vector3 foot = _stage.Contact(tank);
+        Vector2 way = tank.Atlas.GroundDirection(tank.Sprite.HullFacing);
+        foreach (WallProp prop in _walls)
+        {
+            if (Beside(here, prop.Cell))
+                prop.Nose(foot, way, box);
+            else
+                prop.Halt();
+            // How fast it was going the moment the masonry first gave, and only
+            // that moment: a speed read afterwards is the speed of a tank that
+            // has already stopped in the rubble.
+            if (_ramSpeed < 0.0 && prop.Rig is { Loose: > 0, Driven: true })
+                _ramSpeed = tank.Speed * WallRig.MetresPerCell
+                            / (_field.Atlas.HexRect.Size.X * 0.5);
+        }
+    }
+
+    /// <summary>Drive at the wall from the side it stands on.
+    ///
+    /// <b>An order to its cell, and nothing stops the tank there.</b> The
+    /// geometry lines up with the rig by itself: a neighbour's centre is two
+    /// apothems from the wall's, and the rig clamps its own ram at exactly that -
+    /// so where a tank ends up is the same number either way, and none of the
+    /// travel had to be rewritten. What is given up is named in the plan: the
+    /// wall does not stop it, so it parks in the rubble it made.
+    ///
+    /// From the wall's own side, because that is what the side dial means: the
+    /// run-up is the lane the wall faces, and the pathing walks it.</summary>
+    private void Ram(bool order)
+    {
+        if (Wall is null || !order)
+            return;
+        Vector2I from = HexField.Step(Wall.Cell,
+                                      HexField.EdgeHeadings[_wallSide]);
+        // Line up first when it is not already on the lane: a path that comes at
+        // the wall round a corner is a ram along whatever heading the search
+        // happened to leave on, which is not the side the dial names.
+        OrderTo(Tank.Cell == from ? Wall.Cell : from);
+        _lineUp = Tank.Cell != from;
+    }
+
+    /// <summary>Whether the drive under way is only the run-up, so that reaching
+    /// its end orders the ram itself. Two legs rather than one, for the reason
+    /// above; held rather than pathed in one go because the board's pathing has
+    /// no way to say "and arrive along this heading".</summary>
+    private bool _lineUp;
+
+    /// <summary>Whether the settle report has been printed for this wall. One
+    /// line per collapse, and a new wall gets a new line.</summary>
+    private bool _wallSaid;
+
+    /// <summary>Whether two cells are the same one or neighbours. Through
+    /// <see cref="HexField.Step"/>, which is the only definition of what is next
+    /// to what - a second one written in axial arithmetic is wrong on the odd
+    /// columns only.</summary>
+    private static bool Beside(Vector2I a, Vector2I b)
+    {
+        if (a == b)
+            return true;
+        foreach (int heading in HexField.EdgeHeadings)
+            if (HexField.Step(a, heading) == b)
+                return true;
+        return false;
+    }
+
     /// <summary>The tick with this frame's world on it - <see cref="Main.Tick"/>'s
     /// arrangement and its reason: reaching for it and telling it what the world
     /// is are one act, so a dial cannot be applied through a stale binding and a
@@ -503,6 +856,13 @@ public sealed partial class TankBench : SceneRoot
             // anybody to hit, and goes at the ground. See TankTick.Launch.
             _tick.Aim = null;
             _tick.Launch = null;
+            // What else on the board stops a shell, and what to do about it when
+            // one is stopped. Both pushed with the world rather than held,
+            // because both are facts about the board this frame - the third hook
+            // beside Aim and Launch, and null on a board with no walls so the
+            // shot goes into the field exactly as it did.
+            _tick.Obstacles = _walled;
+            _tick.Landed = _walls.Count > 0 ? Struck : null;
             return _tick;
         }
     }
@@ -581,6 +941,11 @@ public sealed partial class TankBench : SceneRoot
             foreach (string face in Tank.Atlas.HitFaces)
                 for (int n = 0; n < _damageAtStart; n++)
                     Sprite.Damage(face, TankTick.ScatterAt(n), TankTick.RiseAt(n));
+        if (_turretAtStart is double lay)
+        {
+            Sprite.TurretFacing = Mathf.PosMod(lay, 360.0);
+            Sprite.QueueRedraw();
+        }
         if (_burnAtStart)
             Tank.Burning = true;
         if (_hitAtStart is double bearing)
@@ -591,6 +956,7 @@ public sealed partial class TankBench : SceneRoot
             Tick.Kill(Tank);
         if (_driveTo is Vector2I cell)
             OrderTo(cell);
+        Ram(_ramAtStart);
     }
 
     // --- the frame -----------------------------------------------------------
@@ -604,6 +970,20 @@ public sealed partial class TankBench : SceneRoot
         Tick.Run(Tank, delta);
         // After the tank has moved, for TankTick.Fly's reason.
         Tick.Fly(delta);
+        // And after both, for the same reason: the box the wall feels is where
+        // the tank got to this frame, and a round that landed this frame has
+        // already been offered to the wall by Fly.
+        Ram();
+        // The second leg of a ram, once the run-up has arrived. Here rather than
+        // in the order itself because the board's pathing has no way to say
+        // "and come in along this heading" - see Ram(bool).
+        if (_lineUp && Wall is not null && !Tank.Moving
+            && Tank.Cell == HexField.Step(Wall.Cell,
+                                          HexField.EdgeHeadings[_wallSide]))
+        {
+            _lineUp = false;
+            OrderTo(Wall.Cell);
+        }
 
         if (_tick.ShakeOn)
             _shake.Update(delta);
@@ -672,6 +1052,19 @@ public sealed partial class TankBench : SceneRoot
         if (_hud is not null && !NoUi)
             _hud.Text = Note();
 
+        // Said out loud once the last piece has stopped, and printed rather than
+        // left to the panel: the collapse is judged on numbers - WallBench's
+        // reason, and here it is load-bearing twice over, because a live solver
+        // is the one thing on this board that does not repeat, so a capture
+        // cannot be diffed and the figures are the whole of the evidence.
+        // Nothing moving is the only end a live collapse has.
+        if (Wall?.Rig is { Struck: true } settling && !_wallSaid
+            && settling.Clock > 0.6f && settling.Awake == 0)
+        {
+            _wallSaid = true;
+            GD.Print("tank bench: " + WallNote().Replace("\n", " - "));
+        }
+
         _frame++;
         if (CapturePath is not null && _frame >= CaptureAt)
         {
@@ -695,8 +1088,46 @@ public sealed partial class TankBench : SceneRoot
                + $"\nlean {Sprite.Climb:F3}  pen {Sprite.Penetrations}"
                + $"/{Gunnery.PenetrationsToKill}"
                + (Tank.Wreck.Dead ? "  wrecked" : "")
+               + (_walls.Count > 0 ? "\n" + WallNote() : "")
                + "\nleft click drives, right click stops, middle drag pans"
                + "\nTAB the panel, R resets, F12 shoots";
+    }
+
+    /// <summary>
+    /// What the wall is doing, in the numbers a picture cannot answer.
+    ///
+    /// The same figures the wall bench prints, for its reason: a heap of sixty
+    /// pieces on a cell 109px tall reads as a mass whichever way it went, so
+    /// whether it is lying down is a number rather than a look. Printed here as
+    /// well as on the panel because under <c>--capture</c> there is no panel.
+    /// </summary>
+    private string WallNote()
+    {
+        if (Wall is not { Rig: { } rig } prop)
+            return "no wall";
+        (float reach, float top, int off, int awake) = prop.Pile();
+        // What actually struck it, off the rig, and never the ammunition dial:
+        // a ram is not a round, so the loaded shell says nothing about a wall a
+        // tank drove into - which is what the first version of this line did.
+        return "wall "
+               + (rig.Struck ? $"{rig.Shot} " : $"{_tick.Ammo} x{_wallForce:F2} ")
+               + $"on side {HexField.EdgeHeadings[_wallSide]}  "
+               + (rig.Struck
+                   ? $"{rig.Clock:F2}s, {awake} moving, {rig.Loose} let go  "
+                   : "standing, nothing has reached it  ")
+               + $"reach {reach:F2}, top {top:F2}, {off} of {rig.Count} "
+               + "off the cell"
+               // And how many went over the edge of the board, which is a
+               // different fact: rubble on a neighbour is what was asked for,
+               // rubble in the void is the board being too small for the shot.
+               // WallRig.Fell's own words.
+               + (rig.Fell > 0 ? $", {rig.Fell} off the board" : "")
+               // The one figure the picture cannot give and nobody can guess -
+               // see _ramSpeed.
+               + (_ramSpeed >= 0.0
+                   ? $"\nram at {_ramSpeed:F1} m/s against RamSpeed "
+                     + $"{WallRig.RamSpeed:F1}"
+                   : "");
     }
 
     // --- what the dials do ---------------------------------------------------
@@ -988,6 +1419,58 @@ public sealed partial class TankBench : SceneRoot
         _panel.Toggle("tank.armour.shadow", "contact shadow", () => _shadow,
                       on => { _shadow = on; Shadow(); });
 
+        // Only on a board that has one. A group of rows that move nothing is
+        // worse than no group: it reads as the wall being broken rather than as
+        // there being no wall.
+        if (_walls.Count > 0)
+        {
+            _panel.Heading("wall", "the wall");
+            _panel.Choice("wall.ammo", "loaded",
+                          new[] { "HE - bursts on the face",
+                                  "AP - straight through" },
+                          () => (int)_tick.Ammo,
+                          i => _tick.Ammo = (Shell.Kind)Math.Clamp(i, 0, 1));
+            _panel.Slide("wall.force", "force", 0.0, WallBench.MostForce, 0.05,
+                         () => _wallForce, v => _wallForce = v, "x",
+                         // What one setting buys, in the unit the chosen shot is
+                         // measured in - the wall bench's own line, so the two
+                         // benches cannot describe one force differently.
+                         () => WallRig.Costs(
+                             _tick.Ammo == Shell.Kind.Ap
+                                 ? WallRig.Strike.Ap : WallRig.Strike.He,
+                             (float)(_wallForce * Ordnance.At(_tick.Calibre))));
+            _panel.Radio("wall.side",
+                         () => $"it stands on side {_wallSide + 1} of 6, "
+                               + $"{HexField.EdgeHeadings[_wallSide]} deg",
+                         Array.ConvertAll(HexField.EdgeHeadings, d => $"{d}"),
+                         () => _wallSide,
+                         i => Relay(() => _wallSide = Math.Clamp(
+                             i, 0, HexField.EdgeHeadings.Length - 1)));
+            _panel.PressPair("wall.ram", "drive into it  (M)", () => Ram(true),
+                             "next seed",
+                             () => Relay(() => _brick.Seed++));
+            _panel.Readout("wall.ram_note", () =>
+                _ramSpeed < 0.0
+                    ? $"nothing rammed yet - it is {WallRig.RamSpeed:F1} m/s the "
+                      + "shot was tuned at"
+                    : $"arrived at {_ramSpeed:F1} m/s against "
+                      + $"{WallRig.RamSpeed:F1} tuned");
+            _panel.Slide("wall.sides", "sides", 1.0, 6.0, 1.0,
+                         () => _brick.Sides,
+                         v => Relay(() => _brick.Sides = (int)Mathf.Round(v)), "");
+            _panel.Slide("wall.courses", "height", 1.0, WallBench.MostCourses, 1.0,
+                         () => _brick.Courses,
+                         v => Relay(() => _brick.Courses = (int)Mathf.Round(v)),
+                         " courses");
+            _panel.Slide("wall.leaves", "thickness", 1.0, WallBench.MostLeaves, 1.0,
+                         () => _brick.Leaves,
+                         v => Relay(() => _brick.Leaves = (int)Mathf.Round(v)),
+                         " leaves");
+            _panel.Toggle("wall.beam", "the rig draws its own line too",
+                          () => _wallBeam, on => _wallBeam = on);
+            _panel.Readout("wall.state", () => WallNote());
+        }
+
         _panel.Heading("tank.view", "board");
         _panel.Toggle("tank.view.board", "draw the ground", () => _board,
                       on => _board = on);
@@ -1131,6 +1614,12 @@ public sealed partial class TankBench : SceneRoot
                 break;
             case Key.N:
                 _tick.ScanEnabled = !_tick.ScanEnabled;
+                break;
+            // The ram. M rather than a letter that says so, because A-Z is full
+            // on this bench and M is what is left free on both roots; the panel
+            // is where it is found by name.
+            case Key.M:
+                Ram(true);
                 break;
             case Key.Bracketleft:
                 _tick.RecoilTube = !_tick.RecoilTube;

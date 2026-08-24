@@ -430,6 +430,37 @@ public sealed partial class Shell : Node2D
     /// </summary>
     public required int Level { get; init; }
 
+    /// <summary>
+    /// What the round is: a shell that bursts on the face, or one that goes
+    /// through.
+    ///
+    /// <b>Two, because that is how many ways masonry can be broken by something
+    /// arriving down a line</b> - see <see cref="WallRig.Strike"/>, whose third
+    /// is a tank and is therefore not a round at all. Against armour it means
+    /// nothing yet, which <see cref="TankTick.Ammo"/> says out loud.
+    /// </summary>
+    public enum Kind { He, Ap }
+
+    /// <summary>Which of the two this one is. Settled at the trigger and carried,
+    /// like the calibre beside it: a dial turned while the round is in the air
+    /// must not change what arrives.</summary>
+    public Kind Ammo { get; init; } = Kind.He;
+
+    /// <summary>
+    /// Which cell stopped it, or null for a round that ran out of board.
+    ///
+    /// <b>Carried rather than worked out from where it landed, and that is not
+    /// tidiness.</b> <see cref="TankTick.Track"/> stops the walk at the near side
+    /// of whatever blocked it - one sample short, up to an eighth of a tile - on
+    /// purpose, so the landing point is deliberately not inside the cell that
+    /// stopped it. Asking the point which cell it is in therefore answers the
+    /// cell before, every time.
+    ///
+    /// Meaningless while <see cref="Target"/> is set: a round going at armour was
+    /// stopped by a tank, and which tank is <see cref="Target"/> itself.
+    /// </summary>
+    public Vector2I? Blocked { get; init; }
+
     /// <summary>True once it has reached the armour. The owner reads this and
     /// applies the hit - the shell does not reach into the harness to do damage,
     /// because then the order of two things that both have to happen exactly

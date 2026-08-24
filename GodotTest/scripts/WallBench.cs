@@ -77,20 +77,30 @@ public sealed partial class WallBench : SceneRoot
 
     private HexField _field = null!;
     private Stage3D? _stage;
-    private WallStack? _wall;
     private Camera2D _camera = null!;
     private Label? _hud;
 
+    /// <summary>The wall on its cell, and everything about standing one there.
+    ///
+    /// <b>Lifted out rather than kept here, and the bench is the poorer half of
+    /// the split on purpose</b> - see <see cref="WallProp"/>. What is left in
+    /// this file is what a bench is: the dials, the keys, the panel and the
+    /// readout. Which recipe, which side and how hard are the caller's; what a
+    /// wall on a cell <i>is</i> is the prop's.</summary>
+    private WallProp? _prop;
+
+    private WallStack? _wall => _prop?.Stack;
+    private WallKit.Plan? _plan => _prop?.Plan;
+    private float _scale => _prop?.Scale ?? 1.0f;
+
     private readonly WallKit.Recipe _recipe = new();
-    private WallKit.Plan? _plan;
-    private float _scale = 1.0f;
     /// <summary>How much of the side the wall takes, and how far out it stands
     /// - one number for both, see <see cref="WallKit.Fit"/>. 0.97 leaves about
     /// two pixels of tile between each end of the wall and the cell's vertex,
     /// which is the whole of what keeps it off the edge.</summary>
     private float _coverage = 0.97f;
     private WallFall.Shot _shot = WallFall.Shot.Mine;
-    private WallRig? _rig;
+    private WallRig? _rig => _prop?.Rig;
     private ControlPanel? _panel;
     private WallRig.Strike _strike = WallRig.Strike.Ram;
     private float _force = 1.0f;
@@ -189,7 +199,7 @@ public sealed partial class WallBench : SceneRoot
     /// them the bare turntable and it is right only while the bench sits on its
     /// opening side, which is the one state a bench is never looked at in.
     /// </summary>
-    private float Lay => _spin + Mathf.DegToRad(_bearing + 90.0f);
+    private float Lay => _prop?.Lay ?? 0.0f;
 
     /// <summary>Which of the six flat sides the shot comes from.
     ///
@@ -210,14 +220,10 @@ public sealed partial class WallBench : SceneRoot
                 return;
             _bearing = HexField.EdgeHeadings[
                 Mathf.Clamp(value, 0, HexField.EdgeHeadings.Length - 1)];
-            if (_wall is null)
-                return;
-            _wall.TankFacing = HexField.Reverse(Mathf.RoundToInt(_bearing));
             // The wall stands on this side, so changing it turns the prop - and
             // the solver has to be handed the ground again, because the triangles
-            // it was given came through the old turn.
-            _wall.Spin = Lay;
-            Rig();
+            // it was given came through the old turn. Both in WallProp.Stand.
+            _prop?.Stand(_bearing);
         }
     }
 
@@ -245,33 +251,11 @@ public sealed partial class WallBench : SceneRoot
 
     /// <summary>Which way the round travels, in the prop's own frame.
     ///
-    /// <b>Reversed, because the bearing says where it comes from.</b> That is
-    /// what the panel and the readout both say, and what <c>--hit</c> means in
-    /// the harness; the board owns the other end of it too, so the turn is
-    /// <see cref="HexField.Reverse"/> rather than a minus sign. This is
-    /// <c>HexField.Lane</c>'s own sentence read backwards - a shell leaves along
-    /// a flat side and arrives across one, so the shooter's heading and the face
-    /// it strikes are two ends of one number.
-    ///
-    /// <b>Two conversions, and the bench is where both belong.</b> A heading is
-    /// the board's word, so the board answers what it points at -
-    /// <see cref="AtlasSet.GroundDirection"/> squashes the row for the screen
-    /// and <see cref="Stage3D.World"/> divides that squash straight back out, so
-    /// composing them is the world direction with nothing invented in between.
-    /// Then back through the turntable, because the bodies live in the prop's
-    /// frame: the same <c>Basis(Up, -spin)</c> the ground triangles go through
-    /// in <see cref="Rig"/>, and the same one the shadow's sun run goes through
-    /// in <c>WallStack.LocalRun</c>. Written as <c>+spin</c> it is the shot
-    /// arriving from the wrong side once the wall is turned, which nothing on a
-    /// bench that opens at zero would ever have shown.</summary>
-    private Vector3 Into()
-    {
-        if (_stage is null || _field.Atlas is null)
-            return Vector3.Zero;
-        Vector2 flat = _field.Atlas.GroundDirection(
-            HexField.Reverse(Mathf.RoundToInt(_bearing)));
-        return new Basis(Vector3.Up, -Lay) * _stage.World(flat, 0.0f).Normalized();
-    }
+    /// <b>Reversed, because the bearing says where it comes from</b> - and both
+    /// halves of that turn live in <see cref="WallProp.Arriving"/> now, because
+    /// the tank bench needs the same one and two copies of it are two chances to
+    /// be a quarter turn out.</summary>
+    private Vector3 Into() => _prop?.Arriving(_bearing) ?? Vector3.Zero;
 
 
     private void ReadFlags()
@@ -514,39 +498,31 @@ public sealed partial class WallBench : SceneRoot
     /// one for a year before the last absolute number was found in it.</summary>
     private void Build()
     {
-        if (_field.Atlas is null)
+        if (_field.Atlas is null || _stage is null)
             return;
-        _plan = WallKit.Lay(_recipe);
-        _scale = WallKit.Fit(_plan, _coverage);
-        // Third, and it has to be third: the rubble is allowed the cell that is
-        // left over once the wall has taken its side of it.
-        WallKit.Scatter(_plan, _recipe, _scale, _coverage);
-
-        _wall?.QueueFree();
-        float radius = _field.Atlas.HexRect.Size.X * 0.5f;
-        Vector2 flat = _field.FlatAnchor(Middle) + _field.CentreOffset;
-        float lift = _field.LevelAt(Middle) * _field.Lift;
-        _wall = new WallStack
+        if (_prop is null)
         {
-            Radius = radius,
-            Squash = _field.Squash,
-            Rise = _field.RiseFactor,
-            Anchor = Stage3D.World(flat, lift, _field.Squash, _field.RiseFactor),
-        };
-        AddChild(_wall);
-        // The board's own tank for the ram to arrive in, and the heading it
-        // drives. Reverse, because the bearing is where the shot comes from -
-        // the same sentence HexField.Lane reads backwards, and the same one
-        // Into() is built out of, so the picture and the impulse cannot point
-        // different ways.
-        _wall.Tank = _field.Atlas;
-        _wall.TankFacing = HexField.Reverse(Mathf.RoundToInt(_bearing));
-        _wall.Raise(_plan);
-        Rig();
-        // After Raise, because the setter needs the multimesh to pose the shadow
-        // into. A new seed keeps the angle: comparing two walls means looking at
-        // them from the same side.
-        _wall.Spin = Lay;
+            _prop = new WallProp
+            {
+                Field = _field,
+                Stage = _stage,
+                Cell = Middle,
+                Recipe = _recipe,
+                // The board's own tank for the ram to arrive in. This bench has
+                // no Vehicle at all, which is the whole reason the sprite is
+                // borrowed - see WallStack.Tank.
+                Borrow = _field.Atlas,
+            };
+            AddChild(_prop);
+        }
+        _prop.Coverage = _coverage;
+        _prop.Solved = _solved;
+        _prop.Bearing = _bearing;
+        _prop.Spin = _spin;
+        _prop.Build();
+        if (_plan is null)
+            return;
+        float radius = _field.Atlas.HexRect.Size.X * 0.5f;
 
         GD.Print($"wall: seed {_recipe.Seed}, fit {_scale:F4} -> {_plan.Note()}");
         GD.Print($"wall: plot {_field.Plot?.Count ?? 0} cells, "
@@ -679,23 +655,7 @@ public sealed partial class WallBench : SceneRoot
     /// Which is also why the turntable locks once the wall has been struck. Turn
     /// it while pieces are in the air and you have turned the world under them.
     /// </summary>
-    private void Rig()
-    {
-        _rig?.QueueFree();
-        _rig = null;
-        if (_solved || _wall is null || _stage is null || _field.Atlas is null)
-            return;
-        float radius = _field.Atlas.HexRect.Size.X * 0.5f;
-        Vector3 anchor = _wall.Anchor;
-        var back = new Basis(Vector3.Up, -Lay);
-        var tris = new List<Vector3>();
-        foreach (Vector3 v in _stage.GroundTriangles())
-            tris.Add(back * ((v - anchor) / radius));
-        _rig = new WallRig();
-        AddChild(_rig);
-        _rig.Raise(_plan!, tris);
-        _wall.Rig = _rig;
-    }
+    private void Rig() => _prop?.Raise();
 
     /// <summary>A tenth of a pixel, under which two bricks are apart.
     ///
@@ -724,14 +684,14 @@ public sealed partial class WallBench : SceneRoot
             }
             _turning = false;
             _reported = false;
-            _rig!.Fire(_strike, Into(), _force);
+            _prop!.Fire(_strike, Into(), _force);
             return;
         }
         // The same coverage the wall was fitted to, so the rubble is allowed
         // exactly the cell the standing prop was allowed and not a hand's width
         // more. One number, asked twice.
         _reported = false;
-        _wall.Fell(_recipe.Seed, _shot, _coverage);
+        _prop!.Fell(_shot);
     }
 
     /// <summary>Change what the wall is, and stand the new one up.
@@ -829,8 +789,7 @@ public sealed partial class WallBench : SceneRoot
         if (_rig is { Struck: true })
             return;
         _spin = Mathf.Wrap(radians, 0.0f, Mathf.Tau);
-        if (_wall is not null)
-            _wall.Spin = Lay;
+        _prop?.Turn(_spin);
     }
 
     public override void _Process(double delta)

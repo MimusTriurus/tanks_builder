@@ -163,6 +163,7 @@ public static class SelfTest
         Ramps(field, stage, Check);
         Water(field, grove, Check);
         Ripple(Check);
+        Walls(field, vehicles, Check);
         Burning(field, grove, Check);
         Climbing(field, tank, Check);
 
@@ -9122,6 +9123,312 @@ public static class SelfTest
     /// and no frame drawn - which is the whole reason the field is stepped on the
     /// CPU rather than in a ping-pong of viewports. See Ripples.
     /// </summary>
+    /// <summary>
+    /// A tank meeting a wall: the board it happens on, the lane the round takes
+    /// to get there, and the one turn that carries a direction from the board
+    /// into the prop's own frame.
+    ///
+    /// <b>Every word of it without a frame drawn</b>, which is what decides what
+    /// is here and what is not. Grid arithmetic, the walk a shell takes and the
+    /// board-to-prop turn are all answerable on a probe field; how a wall
+    /// actually comes apart is a live solver stepping physics, and
+    /// <c>--selftest</c> quits before the first frame of a scene. So the three
+    /// strikes answering differently is measured by running the bench and reading
+    /// the numbers it prints - named here rather than half-asserted, because a
+    /// check that cannot run is worse than one that is missing.
+    /// </summary>
+    private static void Walls(HexField field, IReadOnlyList<Vehicle>? vehicles,
+                              Action<string, bool, string> Check)
+    {
+        GD.Print("the wall a tank drives into");
+
+        BoardMap map = BoardMap.WallMap;
+        IReadOnlyList<Vector2I> walled = map.Walled();
+        Check("the wall board declares exactly one wall",
+            walled.Count == 1, $"{walled.Count} cells carry one");
+        if (walled.Count == 0)
+            return;
+        Vector2I wall = walled[0];
+
+        // --- the board -------------------------------------------------------
+        //
+        // With ramps on the board Passable reduces to "the two cells stand at the
+        // same level", so a wall's cell standing above its neighbours cannot be
+        // driven on to at all - and the ram is the whole subject. Nothing on
+        // screen says so: the tank simply refuses the order and the picture is a
+        // tank parked beside a wall.
+        var steps = new List<string>();
+        foreach (int heading in HexField.EdgeHeadings)
+        {
+            Vector2I next = HexField.Step(wall, heading);
+            if (!map.OnBoard(next))
+                steps.Add($"{heading} is off the board");
+            else if (map.Levels[map.At(next)] != map.Levels[map.At(wall)])
+                steps.Add($"{heading} stands at {map.Levels[map.At(next)]}");
+        }
+        Check("the wall's cell is level with all six of its neighbours",
+            steps.Count == 0, string.Join(", ", steps));
+
+        // Which side the wall stands on is a dial, so each of the six has to
+        // carry a run-up and a lane to shoot down. Three cells because the third
+        // is where the braking curve becomes visible - two is the minimum that
+        // works at all.
+        int LaneRun(int heading)
+        {
+            int run = 0;
+            Vector2I at = wall;
+            while (true)
+            {
+                Vector2I next = HexField.Step(at, heading);
+                if (next == at || !map.OnBoard(next))
+                    return run;
+                at = next;
+                run++;
+            }
+        }
+        var lanes = new List<string>();
+        foreach (int heading in HexField.EdgeHeadings)
+            if (LaneRun(heading) < 3)
+                lanes.Add($"{heading} runs {LaneRun(heading)}");
+        Check("and every one of its six lanes is three cells long",
+            lanes.Count == 0, string.Join(", ", lanes));
+
+        // A home the tank cannot fire from is a board where the shot has to be
+        // set up before it can be taken. The first is the one a single-tank run
+        // gets, so it is the one that has to be on a lane.
+        Vector2I home = map.Homes[0];
+        int laneHeading = -1;
+        foreach (int heading in HexField.EdgeHeadings)
+        {
+            Vector2I at = wall;
+            for (int k = 0; k < map.Columns + map.Rows; k++)
+            {
+                Vector2I next = HexField.Step(at, heading);
+                if (next == at || !map.OnBoard(next))
+                    break;
+                at = next;
+                if (at == home)
+                    laneHeading = heading;
+            }
+        }
+        Check("the first home stands on a lane of the wall",
+            laneHeading >= 0, $"({home.X},{home.Y}) is on none of the six");
+
+        // --- the lane a round takes ------------------------------------------
+        //
+        // Both halves, and the second is the point: a set nothing reads passes
+        // the first on its own, and a shell that goes through a wall is exactly
+        // what that looks like.
+        if (field.Atlas is null)
+        {
+            GD.Print("  skip  no atlas loaded, so the board has no distance");
+        }
+        else if (laneHeading >= 0)
+        {
+            var probe = new HexField
+            {
+                Atlas = field.Atlas,
+                Columns = map.Columns, Rows = map.Rows, Plot = map.Plot,
+            };
+            try
+            {
+                probe.SetRelief(map.Levels, map.Ramps);
+                Vector2 from = probe.FlatAnchor(home) + probe.CentreOffset;
+                // Towards the wall, which is the lane read the other way.
+                Vector2 dir = field.Atlas.GroundDirection(
+                    HexField.Reverse(laneHeading));
+                float top = probe.LevelAt(home) * probe.Lift;
+                var none = new HashSet<Vector2I>();
+                var solid = new HashSet<Vector2I> { wall };
+                (float openRun, Vector2I? openAt, bool openStop) =
+                    TankTick.Track(probe, from, dir, top, none);
+                (float shutRun, Vector2I? shutAt, bool shutStop) =
+                    TankTick.Track(probe, from, dir, top, solid);
+                Check("a line down the lane runs past the wall's cell when "
+                      + "nothing stands there",
+                    !openStop && openAt is null,
+                    $"stopped at {openAt} after {openRun:F0}px");
+                Check("and stops at it when the wall does",
+                    shutStop && shutAt == wall,
+                    $"stopped at {shutAt} after {shutRun:F0}px");
+                Check("and stops short of the cell that stopped it, which is why "
+                      + "a round carries what blocked it",
+                    shutStop
+                    && probe.FlatCellAt(from + dir.Normalized() * shutRun) != wall,
+                    "the landing point is inside the blocking cell, so asking it "
+                    + "which cell it is in would have answered");
+
+                // The wiring, which is the half that rots: Track is handed a set
+                // and Reach is what builds one. A tank is wanted for that, and a
+                // run may have none.
+                if (vehicles is { Count: > 0 })
+                {
+                    Vehicle shooter = vehicles[0];
+                    Vector2 was = shooter.Sprite.Position;
+                    float stood = shooter.Standing, ground = shooter.Ground;
+                    var tick = new TankTick
+                    {
+                        Field = probe,
+                        Origin = Vector2.Zero,
+                        Vehicles = new[] { shooter },
+                        Obstacles = solid,
+                    };
+                    shooter.Sprite.Position =
+                        from - shooter.Atlas.GroundOffset * shooter.Sprite.BodyScale;
+                    shooter.Standing = top;
+                    shooter.Ground = top;
+                    (_, Vector2I? at, bool blocked) = tick.Reach(shooter, dir);
+                    tick.Obstacles = none;
+                    (_, Vector2I? bare, bool _) = tick.Reach(shooter, dir);
+                    shooter.Sprite.Position = was;
+                    shooter.Standing = stood;
+                    shooter.Ground = ground;
+                    Check("and Reach hands that set to the walk, so the aiming "
+                          + "ray and the round stop at the same wall",
+                        blocked && at == wall && bare is null,
+                        $"with the wall {at}, without it {bare}");
+                }
+            }
+            finally
+            {
+                probe.Free();
+            }
+        }
+
+        // --- the one turn between the board and the prop ---------------------
+        //
+        // The layout is built standing on its own +z side, so however the wall is
+        // stood on the board, a shot from the side it stands on has to arrive
+        // straight down the prop's own axis. Written as +Lay it is a shot from
+        // the wrong side the moment the wall leaves its opening bearing - the
+        // failure WallBench carries the history of, and the one a second copy of
+        // that turn would bring back.
+        if (field.Atlas is not null)
+        {
+            var stage = new Stage3D { Field = field, Origin = Vector2.Zero };
+            var prop = new WallProp
+            {
+                Field = field, Stage = stage, Cell = Vector2I.Zero,
+            };
+            try
+            {
+                var axis = new Vector3(0.0f, 0.0f, -1.0f);
+                // <b>Not to the bit, and the slack is named.</b> The two
+                // conversions the turn is composed of read the camera off two
+                // different places - AtlasSet.GroundDirection squashes by
+                // sin(the atlas Elevation) and Stage3D.World divides by the
+                // field own squash - so a round arrives about a third of a
+                // degree off the axis. That is the board as it stands rather
+                // than anything this turn does, and a quarter turn is 1.41.
+                const float slack = 0.02f;
+                float spin = Mathf.DegToRad(37.0f);
+                var turned = new Basis(Vector3.Up, -spin) * axis;
+                float worstSide = 0.0f, worstSpin = 0.0f;
+                foreach (int bearing in HexField.EdgeHeadings)
+                {
+                    prop.Spin = 0.0f;
+                    prop.Bearing = bearing;
+                    worstSide = Mathf.Max(worstSide,
+                                          prop.Arriving(bearing).DistanceTo(axis));
+                    // And the turntable moves the arrival by exactly the
+                    // turntable: it turns the prop under a fixed board, so the
+                    // face the round meets turns with it and by nothing else. A
+                    // sign wrong here is a shot from the far side once the wall
+                    // is turned, which a bench opening at zero never shows.
+                    prop.Spin = spin;
+                    worstSpin = Mathf.Max(
+                        worstSpin, prop.Arriving(bearing).DistanceTo(turned));
+                }
+                Check("a shot from the side the wall stands on arrives down the "
+                      + "prop's own axis, from all six",
+                    worstSide < slack, $"worst {worstSide:F4} off");
+                Check("and the turntable moves that arrival by exactly the "
+                      + "turntable",
+                    worstSpin < slack, $"worst {worstSpin:F4} off");
+            }
+            finally
+            {
+                prop.Free();
+                stage.Free();
+            }
+        }
+
+        // --- one tank, one box -----------------------------------------------
+        //
+        // The rig's own box is a stand-in for a tank on a board that has none. A
+        // board with one that also let the rig make its own would draw two tanks
+        // in one place, both solid - and the ram would be felt twice.
+        var recipe = new WallKit.Recipe();
+        WallKit.Plan plan = WallKit.Lay(recipe);
+        WallKit.Fit(plan, 0.97f);
+        var rig = new WallRig();
+        try
+        {
+            rig.Raise(plan, Array.Empty<Vector3>());
+            var box = new Vector3(2.5f, WallRig.TankTall, 6.0f);
+            rig.Nose(Vector3.Zero, Vector3.Forward, box);
+            bool droveFirst = rig.Driven && rig.Ram() is null;
+            rig.Fire(WallRig.Strike.Ram, Vector3.Forward);
+            Check("a ram fired while a tank is driving the nose is refused, and "
+                  + "leaves the wall standing rather than struck",
+                droveFirst && rig.Driven && rig.Ram() is null && !rig.Struck,
+                $"driven {rig.Driven}, own box {rig.Ram() is not null}, "
+                + $"struck {rig.Struck}");
+            rig.Halt();
+            Check("and taking the tank away takes its box with it",
+                !rig.Driven && rig.Ram() is null, "the box is still there");
+
+            rig.Fire(WallRig.Strike.Ram, Vector3.Forward);
+            bool ownBox = rig.Ram() is not null;
+            rig.Nose(Vector3.Zero, Vector3.Forward, box);
+            Check("and the other way round: a tank cannot drive a rig that has a "
+                  + "ram of its own",
+                ownBox && !rig.Driven, $"own box {ownBox}, driven {rig.Driven}");
+        }
+        finally
+        {
+            rig.Free();
+        }
+
+        // --- what the tank pushes with ---------------------------------------
+        if (vehicles is { Count: > 0 } garage && field.Atlas is not null)
+        {
+            float radius = field.Atlas.HexRect.Size.X * 0.5f;
+            Vector3 box = WallProp.Box(garage[0], radius);
+            Check("the ram's box is measured off the atlas: longer than it is "
+                  + "wide, and a sane number of metres",
+                box.Z > box.X && box.Z > 2.0f && box.Z < 15.0f
+                && box.X > 0.5f && box.Y == WallRig.TankTall,
+                $"{box.X:F2} x {box.Y:F2} x {box.Z:F2} m");
+            // The class scale comes in with it, which is the whole reason the
+            // bench has three: a heavy rams with a bigger box than a light.
+            float was = garage[0].Sprite.BodyScale;
+            garage[0].Sprite.BodyScale = was * 2.0f;
+            Vector3 twice = WallProp.Box(garage[0], radius);
+            garage[0].Sprite.BodyScale = was;
+            Check("and the class scale comes in with it, so a heavy rams with a "
+                  + "bigger box than a light",
+                Mathf.Abs(twice.Z - box.Z * 2.0f) < 0.01f
+                && Mathf.Abs(twice.X - box.X * 2.0f) < 0.01f,
+                $"{box.Z:F2}m doubled is {twice.Z:F2}m");
+        }
+
+        // --- the engine the numbers were tuned against -----------------------
+        //
+        // A physics engine that is not the one they were tuned against is
+        // invisible: the collapse still happens, it is just a different collapse,
+        // and every jolt_ setting in project.godot is quietly doing nothing.
+        string engine = ProjectSettings.GetSetting(
+            "physics/3d/physics_engine", "DEFAULT").AsString();
+        double slop = ProjectSettings.GetSetting(
+            "physics/jolt_physics_3d/simulation/penetration_slop", 0.02).AsDouble();
+        Check("the physics engine is the one the collapse was tuned against",
+            engine.Contains("Jolt"), $"it is {engine}");
+        Check("and its penetration slop is the tuned one, which decides how much "
+              + "of the wall comes down",
+            slop <= 0.005, $"slop {slop:F4}, tuned at 0.002");
+    }
+
     private static void Ripple(Action<string, bool, string> Check)
     {
         GD.Print("ripples: water that carries on after the tank has gone");

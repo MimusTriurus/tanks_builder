@@ -247,7 +247,11 @@ public sealed partial class WallRig : Node3D
     /// put that on screen.</summary>
     public (Transform3D At, Vector3 Size)? Ram()
     {
-        if (_tank is null)
+        // Nothing when the board is driving it: the stand-in exists because that
+        // bench has no tank, and a board that has one draws its own. Two would be
+        // two tanks in one place, which is the guard in <see cref="Nose"/> said
+        // again in the picture.
+        if (_tank is null || _driven)
             return null;
         Transform3D t = _tank.Transform;
         return (new Transform3D(t.Basis, t.Origin / MetresPerCell),
@@ -413,6 +417,8 @@ public sealed partial class WallRig : Node3D
         _live.Clear();
         _gone.Clear();
         _tank = null;
+        _driven = false;
+        _nosePlaced = false;
         _clock = -1.0f;
         _beam = null;
     }
@@ -449,7 +455,13 @@ public sealed partial class WallRig : Node3D
     /// Read here rather than held, so a shot carries the force it was fired
     /// with: turning the dial while the rubble is still moving must not reach
     /// back into the round already in the air.</summary>
-    public void Fire(Strike shot, Vector3 into, float force = 1.0f)
+    /// <param name="beam">Whether the rig draws its own tracer for this shot.
+    /// False for a round that was already drawn on its way in - a gun's shell has
+    /// a tracer of its own, and a second line over it is a second answer to which
+    /// way the round came. See <see cref="Beam"/>, whose whole claim is that the
+    /// line drawn is the line fired.</param>
+    public void Fire(Strike shot, Vector3 into, float force = 1.0f,
+                     bool beam = true)
     {
         // Flattened and normalised here rather than trusted: the shot runs along
         // the ground whatever the caller handed over, and a degenerate direction
@@ -457,6 +469,14 @@ public sealed partial class WallRig : Node3D
         into = new Vector3(into.X, 0.0f, into.Z);
         if (_bodies.Count == 0 || into.LengthSquared() < 1e-6f)
             return;
+        // Before the clock, so a refused ram leaves the wall standing rather than
+        // struck-but-untouched - see Ram, which is where the reason is written.
+        if (shot == Strike.Ram && _driven)
+        {
+            GD.PushWarning("wall: a ram was fired while a tank is driving the "
+                           + "nose - one box at a time");
+            return;
+        }
         into = into.Normalized();
         _shot = shot;
         _force = Mathf.Max(0.0f, force);
@@ -471,6 +491,8 @@ public sealed partial class WallRig : Node3D
             case Strike.He: Burst(into, mid, reach); break;
             case Strike.Ap: Pierce(into, mid, reach); break;
         }
+        if (!beam)
+            _beam = null;
     }
 
     /// <summary>A tank drives into it.
@@ -486,6 +508,14 @@ public sealed partial class WallRig : Node3D
     /// it is a bench whose main picture cannot be judged.</summary>
     private void Ram(Vector3 into)
     {
+        // One tank at a time, and the guard is not tidiness: the box below is a
+        // stand-in for a tank on a board that has none, so a rig already being
+        // driven by a real one would be shown two - the rig's own driving through
+        // the wall while the board's drives beside it, both solid. Refused rather
+        // than replaced, because which of the two the caller meant is not
+        // recoverable here. Turned away in Fire, before the clock is started.
+        if (_driven)
+            return;
         const float wide = 3.0f, deep = 6.0f;
         float tall = TankTall;
         // <b>It starts on the neighbouring cell and ends standing on this one,
@@ -569,32 +599,157 @@ public sealed partial class WallRig : Node3D
         // Nothing at all when the tank never sets off: force nought is no ram,
         // and a wall let go of falls down by itself.
         if (speed > 0.0f)
-            Reached(0.0f);
+            Reached(_tankTip, _tankInto, _tankLane, 0.0f, 0.0f);
     }
 
-    /// <summary>Let go of everything the tank has driven into by now.
+    /// <summary>
+    /// Let go of every piece the box has swept, in a band along
+    /// <paramref name="into"/> reaching from <paramref name="back"/> behind
+    /// <paramref name="tip"/> to <paramref name="front"/> ahead of it.
     ///
-    /// <paramref name="lead"/> is how far ahead of the nose to look, and it has
-    /// to be at least a step's worth of travel: a frozen piece is a static body,
-    /// which a kinematic one drives straight through, so a brick still frozen
-    /// when the nose arrives is a brick the tank passes through rather than
-    /// hits. At the top of the dial a step is 0.65m, which is most of a piece.
+    /// <b>The nose and its direction are arguments rather than fields, because a
+    /// real tank turns on the way in.</b> The rig's own box is fired down one
+    /// heading and never leaves it, so it could be asked about the tip it started
+    /// from; a tank driving an order steers, and a band measured off where it set
+    /// out is a band that stops covering the tank about a third of the way
+    /// through a corner.
+    ///
+    /// <paramref name="front"/> has to be at least a step's worth of travel: a
+    /// frozen piece is a static body, which a kinematic one drives straight
+    /// through, so a brick still frozen when the nose arrives is a brick the tank
+    /// passes through rather than hits. At the top of the dial a step is 0.65m,
+    /// which is most of a piece.
+    ///
+    /// Going back over ground already swept costs nothing - a piece is only ever
+    /// let go once (<see cref="Thaw"/> is idempotent through
+    /// <see cref="_live"/>), which is what lets the driven nose ask about the
+    /// band it is standing in rather than about everywhere it has been.
     /// </summary>
-    private void Reached(float lead)
+    private void Reached(Vector3 tip, Vector3 into, float lane, float back,
+                         float front)
     {
-        float front = _tankGone + lead;
         for (int i = 0; i < _bodies.Count; i++)
         {
             if (_live.Contains(i))
                 continue;
-            Vector3 arm = _bodies[i].Transform.Origin - _tankTip;
-            float along = arm.Dot(_tankInto);
+            Vector3 arm = _bodies[i].Transform.Origin - tip;
+            float along = arm.Dot(into);
             // Up to where the tank has actually got, and not a brick further.
-            if (along < 0.0f || along > front)
+            if (along < -back || along > front)
                 continue;
-            if ((arm - _tankInto * along).Length() > _tankLane)
+            if ((arm - into * along).Length() > lane)
                 continue;
             Thaw(i);
+        }
+    }
+
+    // --- a tank somebody else drives ----------------------------------------
+
+    /// <summary>Whether a box is being driven from outside. The other half of
+    /// <see cref="Ramming"/>: that one is the rig's own box on its way in, this
+    /// one is a board's tank that the rig only feels.</summary>
+    public bool Driven => _driven;
+
+    private bool _driven;
+    private Vector3 _noseAt;
+    private Vector3 _noseInto;
+    private Vector3 _noseSize;
+    private bool _nosePlaced;
+
+    /// <summary>
+    /// Where the tank is and how big, in metres, in the prop's own frame -
+    /// pushed every frame by whoever is driving it.
+    ///
+    /// <b>The rig feels it and does not move it.</b> <see cref="Ram"/> owns its
+    /// box because there is no tank on that board; here there is one, and how
+    /// fast it goes, when it stops and where it turns are the tank's own
+    /// business - decided by an order, a speed ceiling and a ground slope that
+    /// this class knows nothing about. What is left for the rig is the two things
+    /// only it can do: put a kinematic body where the tank is, and let go of what
+    /// that body has reached.
+    ///
+    /// <b>It does not start the clock.</b> A tank parked a cell away is not a
+    /// strike, and a wall reported as struck from the first frame would have its
+    /// settle report fire before anything had been touched. The clock starts on
+    /// the first piece actually let go - see <see cref="Drive"/> - which is the
+    /// honest moment: the wall is struck when the tank reaches it.
+    /// </summary>
+    public void Nose(Vector3 at, Vector3 into, Vector3 size)
+    {
+        if (_tank is not null && !_driven)
+        {
+            // The mirror of Ram's guard, and the same reason.
+            GD.PushWarning("wall: a tank tried to drive the nose while the rig "
+                           + "has a ram of its own - one box at a time");
+            return;
+        }
+        into = new Vector3(into.X, 0.0f, into.Z);
+        if (_bodies.Count == 0 || into.LengthSquared() < 1e-6f)
+            return;
+        _driven = true;
+        _noseAt = at;
+        _noseInto = into.Normalized();
+        if (_tank is null || _noseSize != size)
+        {
+            _noseSize = size;
+            _tank?.QueueFree();
+            _tank = new AnimatableBody3D
+            {
+                SyncToPhysics = true,
+                Transform = new Transform3D(
+                    Basis.LookingAt(_noseInto, Vector3.Up), at),
+            };
+            _tank.AddChild(new CollisionShape3D
+            {
+                Shape = new BoxShape3D { Size = size },
+            });
+            AddChild(_tank);
+            _tankSize = size;
+            _nosePlaced = false;
+        }
+    }
+
+    /// <summary>Take the driven box away again - the tank has gone somewhere
+    /// else. What it has already let go of stays let go: a brick knocked out by a
+    /// tank that then drove off is still a brick that was knocked out.</summary>
+    public void Halt()
+    {
+        if (!_driven)
+            return;
+        _driven = false;
+        _nosePlaced = false;
+        _tank?.QueueFree();
+        _tank = null;
+    }
+
+    /// <summary>One physics step of a box the board is driving: put it where it
+    /// has got to, and let go of what it now covers.
+    ///
+    /// The band is the box itself plus this step's travel behind and a step and a
+    /// half ahead, for <see cref="Reached"/>'s reason. Behind as well as ahead
+    /// because the box has length: a piece level with the tank's flank has been
+    /// driven into just as surely as one at its nose.</summary>
+    private void Drive(float step)
+    {
+        if (_tank is null)
+            return;
+        Vector3 was = _nosePlaced ? _tank.GlobalPosition : _noseAt;
+        _tank.GlobalTransform = new Transform3D(
+            Basis.LookingAt(_noseInto, Vector3.Up), _noseAt);
+        _nosePlaced = true;
+        float gone = (_noseAt - was).Length();
+        Vector3 tip = _noseAt + _noseInto * (_noseSize.Z * 0.5f);
+        int had = _live.Count;
+        Reached(tip, _noseInto, _noseSize.X * 0.5f + _brick,
+                _noseSize.Z + gone, gone * 1.5f);
+        // Struck when the tank first reaches a brick, and never before: see
+        // Nose. The shot is named here rather than at the trigger because with a
+        // driven nose there is no trigger - the tank arriving is the whole event.
+        if (_live.Count > had && _clock < 0.0f)
+        {
+            _shot = Strike.Ram;
+            _force = 1.0f;
+            _clock = 0.0f;
         }
     }
 
@@ -830,9 +985,14 @@ public sealed partial class WallRig : Node3D
 
     public override void _PhysicsProcess(double delta)
     {
+        float step = (float)delta;
+        // Before the clock gate, because a driven nose is what starts the clock:
+        // a tank standing off is not a strike, and the wall it has not reached
+        // yet is a wall that has not been hit. See Nose.
+        if (_driven)
+            Drive(step);
         if (_clock < 0.0f)
             return;
-        float step = (float)delta;
         _clock += step;
         // Stop what has left the board. Frozen where it fell rather than deleted,
         // so the number of pieces never changes under a caller that indexes them
@@ -843,7 +1003,7 @@ public sealed partial class WallRig : Node3D
                 _bodies[i].Freeze = true;
                 _gone.Add(i);
             }
-        if (_tank is null)
+        if (_tank is null || _driven)
             return;
         if (_tankLeft <= 0.0f)
             // Stops where it stopped. A tank that rammed a wall is parked in the
@@ -854,8 +1014,11 @@ public sealed partial class WallRig : Node3D
         _tank.GlobalPosition += _tankRun * step;
         _tankGone += _tankRun.Length() * step;
         // A step and a half of lead, so the piece is a dynamic body before the
-        // box reaches it however fast the box is going.
-        Reached(_tankRun.Length() * step * 1.5f);
+        // box reaches it however fast the box is going. Measured off the tip it
+        // set out from, which for a box driven down one heading is the same band
+        // as one measured off where it has got to.
+        Reached(_tankTip, _tankInto, _tankLane, 0.0f,
+                _tankGone + _tankRun.Length() * step * 1.5f);
     }
 
     /// <summary>How far the pieces have moved from where they were laid, in

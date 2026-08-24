@@ -89,6 +89,22 @@ public sealed partial class BoardMap
     /// </summary>
     public const char Rock = '#';
 
+    /// <summary>
+    /// Open ground with a brick wall standing on it.
+    ///
+    /// <b>Data rather than a literal in a scene, and the slot for it already
+    /// existed.</b> The precedent is <see cref="Wood"/>: the map says trees grow
+    /// here and <see cref="Grove"/> is what sows them, so the letter describes
+    /// the cell and a mechanism reads it. The same split here - the cell is level
+    /// ground, and <see cref="WallProp"/> is what stands a wall on it.
+    ///
+    /// An exported string on the scene was the alternative and is worse in the
+    /// way this file keeps naming: it drifts away from the map without a word,
+    /// and the self test that judges every board whether or not a scene opened it
+    /// can say nothing at all about it.
+    /// </summary>
+    public const char Wall = 'W';
+
     /// <summary>Not on the board at all - see <see cref="HexField.Plot"/>. The
     /// hatched border of a World of Tanks minimap, and drawn as nothing rather
     /// than as a wall: it is the edge of the world, not a feature of it.
@@ -115,6 +131,12 @@ public sealed partial class BoardMap
     /// <summary>Which cells are flooded, for <see cref="HexField.SetWater"/>.
     /// </summary>
     public bool[] Water { get; }
+
+    /// <summary>Which cells carry a wall. Not handed to the field - nothing
+    /// there needs it, because a wall is a prop standing on the ground rather
+    /// than a property of it - and read by whoever builds the props, the way
+    /// <see cref="Kinds"/> is read by the grove.</summary>
+    public bool[] Walls { get; }
 
     /// <summary>What each cell is made of, or null to leave it to the mix. See
     /// <see cref="HexField.SetKinds"/>.</summary>
@@ -166,7 +188,7 @@ public sealed partial class BoardMap
     private BoardMap(string name, int columns, int rows,
                      IReadOnlyList<Vector2I> homes,
                      int[] levels, bool[] ramps, bool[] water,
-                     string?[] kinds, bool[] cliffs,
+                     string?[] kinds, bool[] cliffs, bool[] walls,
                      IReadOnlySet<Vector2I>? plot,
                      string paint, bool height)
     {
@@ -179,9 +201,23 @@ public sealed partial class BoardMap
         Water = water;
         Kinds = kinds;
         Cliffs = cliffs;
+        Walls = walls;
         Plot = plot;
         Paint = paint;
         Height = height;
+    }
+
+    /// <summary>Every cell carrying a wall, in reading order. A list rather than
+    /// the array, because what a caller wants is to build one prop per wall and
+    /// not to walk the board asking.</summary>
+    public IReadOnlyList<Vector2I> Walled()
+    {
+        var found = new List<Vector2I>();
+        for (int r = 0; r < Rows; r++)
+        for (int q = 0; q < Columns; q++)
+            if (OnBoard(new Vector2I(q, r)) && Walls[At(new Vector2I(q, r))])
+                found.Add(new Vector2I(q, r));
+        return found;
     }
 
     public int At(Vector2I cell) => cell.Y * Columns + cell.X;
@@ -230,6 +266,8 @@ public sealed partial class BoardMap
         && (Plot is null || Plot.Contains(cell));
 
     public bool IsCliff(Vector2I cell) => OnBoard(cell) && Cliffs[At(cell)];
+
+    public bool IsWall(Vector2I cell) => OnBoard(cell) && Walls[At(cell)];
 
     /// <summary>
     /// The first cell of the asked-for wetness with nothing but water around it
@@ -314,10 +352,15 @@ public sealed partial class BoardMap
             else plain++;
             if (Kinds[at] == TerrainSet.Forest) wood++;
         }
+        int walled = 0;
+        foreach (bool w in Walls)
+            if (w)
+                walled++;
         return new[]
         {
             ("plain", plain), ("hill", hill), ("low", low), ("water", wet),
-            ("rock", rock), ("wooded", wood), ("off board", off),
+            ("rock", rock), ("wooded", wood), ("walled", walled),
+            ("off board", off),
         };
     }
 
@@ -441,10 +484,20 @@ public sealed partial class BoardMap
     }
 
     /// <summary>A map written as one letter per cell plus a ramp grid.</summary>
+    /// <param name="plinth">How many levels the whole board stands above the
+    /// datum. <b>Not a per-cell height and never a thickness of somebody's
+    /// choosing:</b> <see cref="Stage3D"/> extrudes a prism from a cell's top
+    /// face down to the board's floor and skips the walls when the two are the
+    /// same height, so a board flat on the datum is hexagons of ground and
+    /// nothing else. The floor is always the datum whatever the map says
+    /// (<c>HexField.LevelRange</c> starts at zero), so one level up is all it
+    /// takes - which is exactly what <see cref="WallBench"/> does to its rosette,
+    /// and for the same reason. Uniform, so every relative height in the grid is
+    /// untouched and <see cref="Passable"/> reads the same board.</param>
     private static BoardMap FromGround(string name, string[] ground,
                                        string[] ramps,
                                        IReadOnlyList<Vector2I> homes,
-                                       string paint, bool height)
+                                       string paint, bool height, int plinth = 0)
     {
         int rows = ground.Length;
         int columns = rows == 0 ? 0 : ground[0].Length;
@@ -455,6 +508,7 @@ public sealed partial class BoardMap
         var water = new bool[columns * rows];
         var kinds = new string?[columns * rows];
         var cliffs = new bool[columns * rows];
+        var walls = new bool[columns * rows];
         var ramped = new bool[columns * rows];
         var plot = new HashSet<Vector2I>();
         var wrong = new List<string>();
@@ -475,6 +529,15 @@ public sealed partial class BoardMap
                     break;
                 case Wood:
                     kinds[at] = TerrainSet.Forest;
+                    break;
+                case Wall:
+                    // Level ground under it, and that is not a simplification:
+                    // with ramps on the board Passable reduces to "the same
+                    // level", so a wall's cell raised above its neighbours could
+                    // not be driven on to at all and the ram would be
+                    // impossible. What gives the prisms their sides is the
+                    // plinth, which lifts the whole board at once.
+                    walls[at] = true;
                     break;
                 case Hill:
                     levels[at] = 1;
@@ -531,8 +594,13 @@ public sealed partial class BoardMap
             throw new InvalidOperationException(
                 name + ": " + string.Join("; ", wrong));
 
+        if (plinth != 0)
+            for (int at = 0; at < levels.Length; at++)
+                levels[at] += plinth;
+
         return Sealed(new BoardMap(name, columns, rows, homes, levels, ramped,
-                                   water, kinds, cliffs, plot, paint, height));
+                                   water, kinds, cliffs, walls, plot, paint,
+                                   height));
     }
 
     /// <summary>A map written as separate relief, ramp and water grids - the
@@ -562,6 +630,7 @@ public sealed partial class BoardMap
         }
         return Sealed(new BoardMap(name, columns, rows, homes, levels, ramped,
                                    wet, new string?[columns * rows],
+                                   new bool[columns * rows],
                                    new bool[columns * rows], null, paint,
                                    height));
     }
@@ -967,15 +1036,94 @@ public sealed partial class BoardMap
     public static BoardMap WaterMap => _water ??= FromGround(
         "water", WaterGround, WaterRamps, WaterHomes, TerrainSet.Default, true);
 
+    /// <summary>
+    /// One brick wall in the middle of a hexagon of level ground three cells
+    /// across, and nothing else on it.
+    ///
+    /// <b>Level throughout, and that is forced rather than chosen.</b> With
+    /// ramps on the board <see cref="HexField.Passable"/> reduces to "the two
+    /// cells stand at the same level", so a wall's cell raised above its
+    /// neighbours cannot be driven on to at all - and the whole subject of this
+    /// board is a tank driving into a wall. What gives the prisms their sides is
+    /// the plinth: the <i>whole</i> board a level up, exactly as
+    /// <see cref="WallBench"/> lifts its rosette, so nothing is relatively higher
+    /// than anything else and the rim still reads as ground.
+    ///
+    /// <b>Three cells of approach on every side, not two.</b> Which side the wall
+    /// stands on is a dial, so each of the six has to carry both a run-up and a
+    /// lane to shoot down. Two cells is the minimum that works at all; the third
+    /// is where the tank's braking curve becomes visible, and on a board about a
+    /// tank arriving at a wall that is half the subject.
+    ///
+    /// <b>No kinds, so it names a plate</b> - the pairing the self test asserts
+    /// in both directions. The subject is masonry, and hashed ground kinds pull
+    /// the eye and bring a wood with them.
+    ///
+    /// <b>It belongs to the one-tank bench, and says so here rather than by
+    /// looking wrong there</b> - <see cref="WaterMap"/>'s note, for a different
+    /// reason. The harness builds no props from <see cref="Walls"/>, so
+    /// <c>--map wall</c> on it is this hexagon with nothing standing in the
+    /// middle. Three homes all the same, because the harness stands one vehicle
+    /// per atlas and would otherwise put all three on one hex.
+    /// </summary>
+    private static readonly string[] WallGround =
+    {
+        // 0123456
+        "---.---", // r0
+        "-.....-", // r1
+        ".......", // r2
+        "...W...", // r3   the wall at (3,3), the middle of the hexagon
+        ".......", // r4
+        ".......", // r5
+        "--...--", // r6
+    };
+
+    /// <summary>None. Every cell is the same level, so there is no step for a
+    /// ramp to bridge - which is the board.</summary>
+    private static readonly string[] WallRamps =
+    {
+        // 0123456
+        ".......", // r0
+        ".......", // r1
+        ".......", // r2
+        ".......", // r3
+        ".......", // r4
+        ".......", // r5
+        ".......", // r6
+    };
+
+    /// <summary>Three cells down the 270 lane from the wall, and two off to the
+    /// sides.
+    ///
+    /// The first is the one a single-tank run gets, and it stands on a lane of
+    /// the wall on purpose: the bench opens with the wall's face towards the
+    /// camera and the tank behind it, so the run-up is a straight drive and the
+    /// gun is already laid. The other two are only there so that <c>--map
+    /// wall</c> on the harness, which builds one vehicle per atlas, does not
+    /// stand three of them on one hex.</summary>
+    private static readonly Vector2I[] WallHomes =
+        { new(3, 6), new(1, 4), new(5, 4) };
+
+    private static BoardMap? _wall;
+
+    /// <summary>The one-wall board, named <c>wall</c>. <c>WallMap</c> rather than
+    /// <c>Wall</c> because the letter already owns that name - see
+    /// <see cref="WaterMap"/>, which is named the same way for the same
+    /// reason.</summary>
+    public static BoardMap WallMap => _wall ??= FromGround(
+        "wall", WallGround, WallRamps, WallHomes, TerrainSet.Default, true,
+        plinth: 1);
+
     public static BoardMap ByName(string name) =>
         name.Trim().ToLowerInvariant() switch
         {
             "abbey" => Abbey,
             "test" => Test,
             "water" => WaterMap,
+            "wall" => WallMap,
             _ => Bench,
         };
 
     public static IReadOnlyList<string> Names { get; } =
-        new[] { "bench", "abbey", "test", "water" };
+        new[] { "bench", "abbey", "test", "water", "wall" };
 }

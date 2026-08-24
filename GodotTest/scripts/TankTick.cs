@@ -64,6 +64,23 @@ public sealed class TankTick
     /// a board with no props.</summary>
     public Grove? Wood;
 
+    /// <summary>
+    /// Cells that stop a line across the board besides the tanks - today the
+    /// props that are solid, which is the walls.
+    ///
+    /// <b>The world's, so it is pushed with the rest of it</b>, and a set rather
+    /// than a list of props because that is the only thing <see cref="Track"/>
+    /// asks: which cells are not to be crossed. Which keeps the walk static and
+    /// assertable without a scene - the reason it was shaped that way in the
+    /// first place.
+    ///
+    /// <b>The aiming ray gets it for nothing</b>, because the ray walks the same
+    /// <see cref="Reach"/>: a sighting line that runs through a wall the round
+    /// stops at would be the one number this project keeps refusing to hold in
+    /// two places.
+    /// </summary>
+    public IReadOnlySet<Vector2I> Obstacles = new HashSet<Vector2I>();
+
     /// <summary>The view's spring. A gun going off shoves it - see
     /// <see cref="Fire"/> - and a bench without one simply does not shake.
     /// </summary>
@@ -149,6 +166,23 @@ public sealed class TankTick
     /// what this object now owns end to end.</summary>
     public int Calibre = 1;
 
+    /// <summary>
+    /// What the gun is loaded with: a shell that bursts, or one that goes
+    /// through.
+    ///
+    /// A dial like the calibre beside it, and here for the same reason - it is
+    /// what the gun holds, and the shot is what this object owns end to end. It
+    /// travels with the round at the trigger (<see cref="Shell.Ammo"/>): turning
+    /// the dial while a round is in the air must not change what arrives.
+    ///
+    /// <b>Against armour it means nothing yet, and that is named rather than
+    /// done.</b> <see cref="Gunnery.Penetration"/> is a class of gun against a
+    /// class of armour; writing HE and AP into it is a change to what the bench
+    /// <i>does</i> rather than to what it draws, and it is a separate piece of
+    /// work. What it means today is what a wall makes of it.
+    /// </summary>
+    public Shell.Kind Ammo = Shell.Kind.He;
+
     /// <summary>Which side of the hex the next hand-dealt hit comes from, as an
     /// index into <see cref="HexField.EdgeHeadings"/>.
     ///
@@ -193,6 +227,21 @@ public sealed class TankTick
     /// where it ran. See the class summary: it belongs to a board with two
     /// tanks on it, and a bench with one leaves it null.</summary>
     public Action<Vehicle, double>? Aim;
+
+    /// <summary>
+    /// What a round with no tank in front of it hit, once it gets there.
+    ///
+    /// The third hook, on <see cref="Aim"/>'s and <see cref="Launch"/>'s model
+    /// and for their reason: what a shell does to a prop is a statement about the
+    /// board, and what a shell <i>is</i> is a statement about one tank. Null
+    /// leaves the shot going into the field exactly as it did - see
+    /// <see cref="Strike"/>.
+    ///
+    /// The round carries what it hit (<see cref="Shell.Blocked"/>) rather than
+    /// being asked where it landed, because the landing point is deliberately
+    /// short of the cell's edge - see <see cref="Track"/>.
+    /// </summary>
+    public Action<Shell>? Landed;
 
     // --- the frame -----------------------------------------------------------
 
@@ -1203,6 +1252,11 @@ public sealed class TankTick
         foreach (Vehicle other in Vehicles)
             if (!ReferenceEquals(other, shooter))
                 tanks.Add(other.Cell);
+        // And whatever else on the board is solid. Unioned rather than asked
+        // separately, because Track's whole question is "which cells are not to
+        // be crossed" and a shell does not care which kind of thing is in one.
+        foreach (Vector2I cell in Obstacles)
+            tanks.Add(cell);
         return Track(Field, ground, dir, top + Field.Lift * Clearance, tanks);
     }
 
@@ -1395,6 +1449,7 @@ public sealed class TankTick
             Scatter = shot.Scatter,
             Rise = shot.Rise,
             Calibre = Ordnance.At(Calibre),
+            Ammo = Ammo,
             Level = Gunnery.Penetration(shooter.Profile, victim.Profile),
         });
         return true;
@@ -1446,12 +1501,16 @@ public sealed class TankTick
         // target's. The run comes back in flat pixels, which the board is measured
         // in too, so the direction carries it across unchanged.
         Vector2 from = shooter.Spot(tube);
-        (float run, _, _) = Reach(shooter, dir);
+        (float run, Vector2I? at, bool blocked) = Reach(shooter, dir);
         float lift = shooter.LiftOf(from);
         Send(shooter, new Shell
         {
             Shooter = shooter,
             Target = null,
+            // What stopped it, taken from the walk rather than from where it
+            // landed - see Shell.Blocked.
+            Blocked = blocked ? at : null,
+            Ammo = Ammo,
             Ground = from + dir * run,
             // The same height at both ends, because a tank gun is level and that
             // is the one assumption the walk itself is written under - see Track,
@@ -1520,7 +1579,12 @@ public sealed class TankTick
     private void Strike(Shell round)
     {
         if (round.Target is null)
+        {
+            // Whatever the board makes of a round that went into it. Unanswered,
+            // the shot goes into the field exactly as it did - see Landed.
+            Landed?.Invoke(round);
             return;
+        }
         Land(round.Target, round.Face, round.Scatter, round.Rise, round.Calibre,
              round.Level, 1);
     }
