@@ -254,6 +254,12 @@ public sealed class TankTick
     /// for. Off by default, and named there rather than here: the rendered
     /// column is what every shipped set draws, and the A/B is what makes
     /// "built reads better" an assertion instead of a memory.</summary>
+    /// <summary>Whether the engine's plume is built rather than read - see
+    /// <see cref="ProcSmoke.Plume"/>. Its own switch beside the column's and the
+    /// flame's, because the three are separate effects and the whole use of the
+    /// switches is putting one built half beside two read ones.</summary>
+    public bool ProceduralExhaust = ProcSmoke.OnByDefault;
+
     public bool ProceduralSmoke = ProcSmoke.OnByDefault;
 
     /// <summary>The flame built rather than read - see <see cref="ProcFire"/>.
@@ -1177,12 +1183,19 @@ public sealed class TankTick
                 return;
             v.Exhaust.Reset();
             v.Sprite.ExhaustPhase = -1;
+            v.Sprite.ProceduralExhaust = ProceduralExhaust;
             v.Sprite.QueueRedraw();
             return;
         }
         v.Exhaust.Advance(v.Speed, delta);
         v.Sprite.ExhaustPhase = v.Exhaust.Frame;
         v.Sprite.ExhaustDensity = (float)v.Exhaust.Density;
+        v.Sprite.ProceduralExhaust = ProceduralExhaust;
+        // The continuous lap beside the frame it rounds to, for the built plume -
+        // see TankSprite.ExhaustCycle. Set here rather than worked out there so
+        // the loop stays the one thing that knows how long a lap is.
+        v.Sprite.ExhaustCycle =
+            (float)(v.Exhaust.Phase / Math.Max(v.Exhaust.Phases, 1));
     }
 
     /// <summary>

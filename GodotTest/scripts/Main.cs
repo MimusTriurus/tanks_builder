@@ -1107,6 +1107,10 @@ public sealed partial class Main : SceneRoot
 				_tick.ProceduralFire = true;
 			else if (userArgs[i] == "--no-proc-fire")
 				_tick.ProceduralFire = false;
+			else if (userArgs[i] == "--proc-exhaust")
+				_tick.ProceduralExhaust = true;
+			else if (userArgs[i] == "--no-proc-exhaust")
+				_tick.ProceduralExhaust = false;
 			else if (userArgs[i] == "--no-tracks")
 				_tick.TracksEnabled = false;
 			else if (userArgs[i] == "--no-shadow")
@@ -3398,6 +3402,8 @@ public sealed partial class Main : SceneRoot
 		["--no-proc-smoke"] = new[] { "effects.proc_smoke" },
 		["--proc-fire"] = new[] { "effects.proc_fire" },
 		["--no-proc-fire"] = new[] { "effects.proc_fire" },
+		["--proc-exhaust"] = new[] { "effects.proc_exhaust" },
+		["--no-proc-exhaust"] = new[] { "effects.proc_exhaust" },
 		["--burning"] = new[] { "effects.fire" },
 		["--flash"] = new[] { "effects.flash_source" },
 		["--recoil-shear"] = new[] { "effects.hull_shear" },
@@ -3701,6 +3707,9 @@ public sealed partial class Main : SceneRoot
 		// the model, not an optional effect. Reads and writes the board's flag,
 		// so all three tanks change together - a comparison with one tank on
 		// each side of it is no comparison.
+		ui.Toggle("effects.proc_exhaust", "build the plume, do not read it",
+			() => _tick.ProceduralExhaust,
+			on => _tick.ProceduralExhaust = on);
 		ui.Toggle("effects.proc_smoke", "build the smoke column, do not read it",
 			() => _tick.ProceduralSmoke, on => _tick.ProceduralSmoke = on);
 		ui.Toggle("effects.proc_fire", "build the flame, do not read it",

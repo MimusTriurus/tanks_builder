@@ -431,15 +431,20 @@ void fragment() {
             ? flame_spark(at, p.xy, p.z, p.w, f.xy, float(i) + 60.0,
                           ember_colour, gain)
             : flame_blob(at, p.xy, p.z, p.w, f.xy, float(i) + 20.0, f.z, gain);
-        // A sphere has two surfaces and the ray crosses both: the material
-        // has backface culling off and its transparent back shown, so what
-        // reaches the render is one element composited over itself. Written
-        // with the operator that already means that.
+        // One surface, the same correction the two smoke layers took: the
+        // material asks for its transparent back only where that property
+        // still exists, and on EEVEE Next it does not - see ProcSmoke's note
+        // and the numbers under it.
         //
-        // The forest's fire does not do this and does not need to - it is not
-        // matching a rendered tree. Here the rendered layer is the target, and
-        // without it the flame comes out a third of the fire at the same size.
-        fire = flame_over(fire, flame_over(e, e));
+        // <b>This one is measured worse for the change, and it is taken
+        // anyway.</b> Departure from the rendered flame, three tanks, median
+        // levels: single 33.0 / 21.5 / 32.5 against doubled 30.0 / 15.0 / 26.0.
+        // The doubling was narrowing a gap it had nothing to do with - the
+        // built flame carries less mass than the rendered one, which is written
+        // down above with its own lever - and a wrong term kept because it
+        // partly cancels another wrong term is two faults holding each other
+        // up. The honest number is the larger one.
+        fire = flame_over(fire, e);
     }
     // Already premultiplied by the compositing above, so the alpha is spent and a
     // nought is handed over: an emitting layer says what it is - light to add, and

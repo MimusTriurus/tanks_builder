@@ -587,7 +587,12 @@ void fragment() {
                 return -1;
             return Clock switch
             {
-                Clocks.Exhaust => Tank.ShowExhaust ? Tank.ExhaustPhase : -1,
+                // Stands down for the built plume the same way the column does
+                // below, and the ordering matters: ExhaustPhase already carries
+                // every reason there is no plume at all, so asking it first
+                // leaves this saying only "and something else is drawing it".
+                Clocks.Exhaust => Tank.ShowExhaust && !Tank.ExhaustIsProcedural
+                    ? Tank.ExhaustPhase : -1,
                 // Stands down when the column is being built rather than
                 // read - exactly one of the pair draws, or the tank smokes
                 // twice. See TankSprite.SmokeIsProcedural, which is false on a

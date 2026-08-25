@@ -422,6 +422,12 @@ public sealed partial class TankBench : SceneRoot
                 case "--no-proc-fire":
                     _tick.ProceduralFire = false;
                     break;
+                case "--proc-exhaust":
+                    _tick.ProceduralExhaust = true;
+                    break;
+                case "--no-proc-exhaust":
+                    _tick.ProceduralExhaust = false;
+                    break;
                 case "--no-shadow":
                     _shadow = false;
                     break;
@@ -1790,6 +1796,9 @@ public sealed partial class TankBench : SceneRoot
                       on => _tick.ExhaustRamp = on);
         _panel.Toggle("tank.smoke.burn", "set it alight  (J)",
                       () => Tank.Burning, on => Tank.Burning = on);
+        _panel.Toggle("tank.smoke.plume", "build the plume, do not read it",
+                      () => _tick.ProceduralExhaust,
+                      on => _tick.ProceduralExhaust = on);
         _panel.Toggle("tank.smoke.column", "build the smoke column, do not read it",
                       () => _tick.ProceduralSmoke, on => _tick.ProceduralSmoke = on);
         _panel.Toggle("tank.smoke.flame", "build the flame, do not read it",

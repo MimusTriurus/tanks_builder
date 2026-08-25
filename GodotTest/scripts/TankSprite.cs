@@ -188,6 +188,24 @@ public sealed partial class TankSprite : Node2D
     /// breathes a haze and a working one smokes.</summary>
     public float ExhaustDensity = 1.0f;
 
+    /// <summary>The same loop as a position round the lap in [0, 1) rather than
+    /// as the frame it rounds to - <see cref="SmokeCycle"/>'s counterpart, and
+    /// read off the figure <see cref="ExhaustLoop"/> was already integrating and
+    /// only rounding at the door.</summary>
+    public float ExhaustCycle;
+
+    /// <summary>Whether the plume is built here instead of read off the atlas -
+    /// see <see cref="ProcSmoke"/>. Its own switch rather than the column's,
+    /// because the two are separate effects that happen to share a model: a tank
+    /// idles far more often than it burns, so this is the one of the pair that is
+    /// on screen all game.</summary>
+    public bool ProceduralExhaust;
+
+    /// <summary>Whether the rendered plume should stand down - see
+    /// <see cref="SmokeIsProcedural"/> for why the atlas has a say.</summary>
+    public bool ExhaustIsProcedural => ProceduralExhaust
+                                       && Atlas is { HasPorts: true };
+
     public bool ShowExhaust = true;
 
     /// <summary>Whether this tank is on fire.</summary>
@@ -1313,8 +1331,18 @@ public sealed partial class TankSprite : Node2D
             // composite in the same place and the A/B is a swap and not a
             // reorder. Exactly one of the pair draws - see
             // ProcSmoke.Wanted and EffectLayer.Wanted.
+            if (name == AtlasSet.ExhaustName)
+            {
+                Plume = ProcSmoke.Plume();
+                Plume.Tank = this;
+                AddChild(Plume);
+            }
             if (name == AtlasSet.BurnName)
-                AddChild(Column = new ProcSmoke { Tank = this });
+            {
+                Column = ProcSmoke.Column();
+                Column.Tank = this;
+                AddChild(Column);
+            }
             if (name == AtlasSet.FireName)
                 AddChild(Blaze = new ProcFire { Tank = this });
         }
@@ -1326,6 +1354,11 @@ public sealed partial class TankSprite : Node2D
 
     /// <summary>The built flame, in <see cref="LayerOrder"/>'s fire slot.</summary>
     public ProcFire? Blaze { get; private set; }
+
+    /// <summary>The built engine plume, in <see cref="LayerOrder"/>'s exhaust
+    /// slot. The same class as <see cref="Column"/> wearing the other
+    /// configuration - see <see cref="ProcSmoke.Plume"/>.</summary>
+    public ProcSmoke? Plume { get; private set; }
 
     public override void _Draw()
     {

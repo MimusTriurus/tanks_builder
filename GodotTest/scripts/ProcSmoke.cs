@@ -4,7 +4,17 @@ using Godot;
 namespace TankSpriteTest;
 
 /// <summary>
-/// The burning tank's smoke column, built here rather than read off the atlas.
+/// A column of smoke off a vent, built here rather than read off the atlas -
+/// the burning tank's and the running engine's both.
+///
+/// <b>One class for the two because in Blender they are one file.</b>
+/// <c>engine_fire.SMOKE</c> <em>is</em> <c>exhaust_plume</c> with different
+/// numbers: the fire imports the plume's path outright and drives its material
+/// builder. Two transcriptions here would be the thing <see cref="Plumes"/>
+/// exists to prevent, and they would part at whichever number nobody put side by
+/// side. So the geometry is written once and the two arrive as
+/// <see cref="Column"/> and <see cref="Plume"/>, which differ in seventeen
+/// numbers, an ink and which layer's slot they draw in - and in nothing else.
 ///
 /// <b>It is the same model, not a new one.</b> Every number below is
 /// <c>engine_fire.SMOKE</c> standing on <c>exhaust_plume</c>'s geometry: puffs
@@ -74,7 +84,21 @@ public sealed partial class ProcSmoke : Node2D
     /// </summary>
     public const bool OnByDefault = false;
 
+    /// <summary>
+    /// Which layer's slot this draws in, and thereby which of the tank's two
+    /// columns it is: <see cref="AtlasSet.BurnName"/> or
+    /// <see cref="AtlasSet.ExhaustName"/>.
+    ///
+    /// The one field the rest of the class branches on, and it branches in three
+    /// places only - is the effect running, where its lap position comes from,
+    /// and how much of its alpha survives. Everything else is a number.
+    /// </summary>
+    public string Layer = AtlasSet.BurnName;
+
     // --- engine_fire.SMOKE, transcribed --------------------------------------
+    // The default is the burning tank's column, so `new ProcSmoke()` is what it
+    // always was; Plume() below overwrites them with exhaust_plume.CONFIG.
+    //
     // Quoted against the hull's length exactly as that file quotes them, so one
     // set of numbers fits three tanks and whatever a slider does to their size.
     // Reading them as fractions of anything else is the mistake the forest's
@@ -115,9 +139,80 @@ public sealed partial class ProcSmoke : Node2D
     /// The per-puff tone jitter is kept because the model has one, at the size
     /// the render can be shown to carry: a couple of levels either way.
     /// </summary>
-    public static readonly Color Ink = new(0.282f, 0.259f, 0.243f);
+    public Color Ink = ColumnInk;
+
+    /// <summary>The burning tank's column: (72, 66, 62) on the shipped
+    /// <c>burn_atlas</c>.</summary>
+    public static readonly Color ColumnInk = new(0.282f, 0.259f, 0.243f);
+
+    /// <summary>
+    /// The idling engine's plume, measured the same way and startlingly lighter:
+    /// (132, 129, 127) over <c>exhaust_atlas</c>, flat to within a level from
+    /// alpha 16 to alpha 255 and identical on all three tanks.
+    ///
+    /// <b>Light, and still occlusive.</b> The board's ground is a pale hex field
+    /// around 0.72 and this is 0.52, so it darkens - but barely, which is exactly
+    /// what <c>tank_pipeline</c>'s <c>exhaust_contrast</c> has been reporting at
+    /// 28 against a threshold of 28 on three tanks running. The plume is the
+    /// quietest thing the pipeline ships and this ink is why.
+    ///
+    /// It checks out against the config rather than being taken on trust: the
+    /// linear (0.28, 0.26, 0.25) there encodes to about (143, 138, 135), and the
+    /// render's tonemap brings that to what is measured. The burn column's much
+    /// darker config measures much darker in the same way.
+    /// </summary>
+    public static readonly Color PlumeInk = new(0.518f, 0.506f, 0.498f);
 
     public float ToneVary = 0.08f;
+
+    /// <summary>The burning tank's column - the numbers already standing above,
+    /// named so the pair reads as a pair at the call site.</summary>
+    public static ProcSmoke Column() => new();
+
+    /// <summary>
+    /// The running engine's plume: <c>exhaust_plume.CONFIG</c>, transcribed.
+    ///
+    /// <b>Read the two side by side and the differences are the effect.</b> Rise
+    /// 0.24 of a hull against the column's 0.45 - haze over the deck, not a
+    /// smokestack. <c>Slowing</c> 0.45 against 1.10, because a jet gives its
+    /// momentum up at once where a fire draws all the way: that is the number
+    /// which crowds the plume's puffs at the tip and spaces the column's evenly.
+    /// <c>TurnPower</c> 1.0 against 0.45 - exhaust really does leave along the
+    /// pipe and bend up afterwards, where a fire that flies half a hull on the
+    /// vent's aim reads as a jet. And <see cref="Wobble"/> 0.16 against 0.22,
+    /// because this one lies over the armour for the whole game and lumps at that
+    /// size stop reading as a volume in front of it and start reading as dirt on
+    /// it.
+    ///
+    /// <b><see cref="RimFalloff"/> is the density lever, not <see cref="Alpha"/>,
+    /// and that is not visible from the number.</b> Alpha goes as
+    /// <c>facing**RimFalloff</c> and most of a sphere faces obliquely, so the
+    /// config's own note records raising it from 1.1 to 1.6 for softness quietly
+    /// taking a third of the plume with it.
+    /// </summary>
+    public static ProcSmoke Plume() => new()
+    {
+        Layer = AtlasSet.ExhaustName,
+        Ink = PlumeInk,
+        Rise = 0.24f,
+        Spread = 0.055f,
+        Buoyancy = 0.80f,
+        TurnPower = 1.00f,
+        Slowing = 0.45f,
+        PuffStart = 0.45f,
+        PuffGrow = 0.048f,
+        PuffPower = 0.70f,
+        Puffs = 20,
+        Stagger = 0.35f,
+        PuffVary = 0.45f,
+        Wobble = 0.16f,
+        Alpha = 0.60f,
+        Onset = 0.14f,
+        Fade = 1.60f,
+        RimFalloff = 1.25f,
+        Opacity = 0.70f,
+        Seed = 33,
+    };
 
     public TankSprite? Tank;
 
@@ -146,7 +241,7 @@ public sealed partial class ProcSmoke : Node2D
     public override void _Ready()
     {
         TextureFilter = TextureFilterEnum.Linear;
-        _shader = new ShaderMaterial { Shader = Column };
+        _shader = new ShaderMaterial { Shader = Section };
         Material = _shader;
         _white ??= MakeWhite();
     }
@@ -167,9 +262,32 @@ public sealed partial class ProcSmoke : Node2D
             QueueRedraw();
     }
 
-    private bool Wanted => Tank is { Burning: true, ProceduralSmoke: true }
-                           && Tank.Atlas is { HasPorts: true }
-                           && Tank.SmokeDensity > 0.002f;
+    private bool Plumed => Layer == AtlasSet.ExhaustName;
+
+    /// <summary>Whether the effect this stands in for is running at all - the
+    /// burning tank's column while it burns, the engine's plume while the loop
+    /// that drives the rendered layer is armed.</summary>
+    /// <remarks>Keyed on <c>ExhaustPhase >= 0</c> rather than on the enable flag
+    /// because that is the one place already holding every reason a plume is not
+    /// showing: the effect switched off, a wreck's dead engine, an atlas with no
+    /// exhaust layer. Asking those again here would be a second copy of a list
+    /// that grows.</remarks>
+    private bool Running => Tank is not null
+        && (Plumed ? Tank.ExhaustPhase >= 0 && Tank.ProceduralExhaust
+                   : Tank.Burning && Tank.ProceduralSmoke);
+
+    /// <summary>Where round the lap this is, in [0, 1). Continuous - the whole
+    /// point - where the rendered layer only has the frame it rounds to.</summary>
+    private float Cycle => Tank is null ? 0.0f
+        : Plumed ? Tank.ExhaustCycle : Tank.SmokeCycle;
+
+    /// <summary>How much of the alpha survives: the engine's load for the plume,
+    /// the wreck's fading for the column.</summary>
+    private float Density => Tank is null ? 0.0f
+        : Plumed ? Tank.ExhaustDensity : Tank.SmokeDensity;
+
+    private bool Wanted => Running && Tank!.Atlas is { HasPorts: true }
+                           && Density > 0.002f;
 
     // --- the model -----------------------------------------------------------
 
@@ -239,8 +357,8 @@ public sealed partial class ProcSmoke : Node2D
         // Asked every draw and not only when it moves: z-index sorts siblings
         // ahead of tree order, so one layer using it and the rest sitting at zero
         // puts that one over everything.
-        ZIndex = TankSprite.ZFor(AtlasSet.BurnName,
-                                 atlas.OverTurretAt(AtlasSet.BurnName, Tank.HullFacing));
+        ZIndex = TankSprite.ZFor(Layer,
+                                 atlas.OverTurretAt(Layer, Tank.HullFacing));
 
         var puffs = new Godot.Collections.Array();
         // Each puff's own height on the map's scale, so the shader can ask which
@@ -248,10 +366,10 @@ public sealed partial class ProcSmoke : Node2D
         // than packed into them because a vec4 is full.
         var lifts = new Godot.Collections.Array();
         Rect2? box = null;
-        float density = Tank.SmokeDensity;
+        float density = Density;
         foreach (AtlasSet.Port port in atlas.Ports)
         {
-            foreach (Puff puff in Build(port, atlas.HullLength, Tank.SmokeCycle))
+            foreach (Puff puff in Build(port, atlas.HullLength, Cycle))
             {
                 if (puff.Alpha <= 0.002f || puffs.Count >= MaxPuffs)
                     continue;
@@ -285,7 +403,7 @@ public sealed partial class ProcSmoke : Node2D
             foreach (Variant one in puffs)
                 peak = Math.Max(peak, one.AsVector4().W);
             Note = string.Format(
-                "proc smoke: {0} puffs, {1:0}x{2:0}px at ({3:0},{4:0})..({5:0},{6:0}) "
+                "proc " + Layer + ": {0} puffs, {1:0}x{2:0}px at ({3:0},{4:0})..({5:0},{6:0}) "
                 + "off the anchor, peak puff alpha {7:0.00}, hull {8:0.000}, "
                 + "port r {9:0.000}",
                 puffs.Count, quad.Size.X, quad.Size.Y, quad.Position.X,
@@ -335,7 +453,11 @@ public sealed partial class ProcSmoke : Node2D
     internal static readonly string ColumnShaderCode =
         ColumnCode.Replace("DEPTH_CODE", Plumes.DepthCode);
 
-    private static readonly Shader Column = new() { Code = ColumnShaderCode };
+    /// <summary>One shader for both configurations - it is the section across a
+    /// puff and the stacking of them, and neither depends on which vent the puffs
+    /// came out of. Named for what it draws rather than for either column, which
+    /// the text around it still is.</summary>
+    private static readonly Shader Section = new() { Code = ColumnShaderCode };
 
     /// <summary>The shader's text, so the three claims that fail into a
     /// deliberate-looking picture can be asserted rather than remembered -
@@ -374,14 +496,27 @@ void fragment() {
         if (r < 1.0) {
             float facing = sqrt(max(1.0 - r * r, 0.0));
             float one = pow(facing, rim_falloff) * puff.w * opacity;
-            // A puff is a sphere, and a ray through a sphere crosses it twice:
-            // the material has backface culling off and its transparent back
-            // shown, so both surfaces blend. Facing is the same on the two -
-            // it goes by |N.V| - so the pair comes to 1-(1-p)^2, and leaving it
-            // out is what made the first pass a thin wisp beside the rendered
-            // column at the same size. Measured: peak puff alpha 0.35 either
-            // way, and the stack under it 0.48 rather than 0.28.
-            float a = 1.0 - (1.0 - one) * (1.0 - one);
+            // <b>One surface per element, and the first pass had two.</b> The
+            // material does ask for backfaces - build_material sets
+            // use_backface_culling False - but it asks for the second surface
+            // behind a hasattr guard on show_transparent_back, and on the
+            // Blender these atlases came off that attribute is gone: EEVEE Next
+            // dropped Show Backface, and a blended surface composites its front
+            // only. So what the render actually put down is one surface, and
+            // doubling it here was the model being corrected toward a material
+            // setting the renderer ignored.
+            //
+            // Measured against the shipped layers, three tanks, driving, median
+            // levels the layer moves the picture by against no plume at all:
+            //
+            //   render 16.0 / 22.0 / 20.0
+            //   single 14.0 / 22.0 / 19.0     doubled 24.0 / 37.0 / 33.0
+            //
+            // and the column the same way, as departure from its own render:
+            // single 7 / 6 / 6 against doubled 8 / 8 / 7. The earlier thin-wisp
+            // reading compared two built columns to each other, not either of
+            // them to the render.
+            float a = one;
             a *= depth_keep(tank, lift[i].x + lift[i].y * facing);
             // Seat first, tip last - the list arrives sorted, so this is the
             // depth buffer's answer without a depth buffer.

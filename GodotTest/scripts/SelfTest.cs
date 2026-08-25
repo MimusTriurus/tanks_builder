@@ -4671,9 +4671,9 @@ public static class SelfTest
         Theme("the column built rather than read");
         // Every one of these is about something that fails without a mark on the
         // screen: a quarter turn of error in the projection still draws a column,
-        // a loop that does not close still draws smoke, and a model that has lost
-        // the sphere's second surface draws a thinner one that looks like a
-        // choice. See ProcSmoke.
+        // a loop that does not close still draws smoke, and an ink read out of
+        // the config rather than off the pixels draws a column of the wrong
+        // grey that looks like a choice. See ProcSmoke.
         var built = new ProcSmoke();
         Check($"{atlas.Tag} carries a stamped port",
             atlas.HasPorts,
@@ -4864,11 +4864,13 @@ public static class SelfTest
             column.Contains("blend_mix") && !column.Contains("blend_add"),
             "a column that adds light is the one arrangement that washes out the "
             + "flame it exists to hold up");
-        Check("a puff is a sphere, so its two surfaces both count",
-            column.Contains("(1.0 - one) * (1.0 - one)"),
-            "one surface per puff is a thin wisp beside the rendered column at "
-            + "the same size - measured, the stack under a peak puff drops from "
-            + "0.48 to 0.28");
+        Check("a puff is one surface, because that is what the render put down",
+            !column.Contains("(1.0 - one) * (1.0 - one)"),
+            "the material asks for its transparent back only where that property "
+            + "still exists and EEVEE Next dropped it, so doubling here corrects "
+            + "the model toward a setting the renderer ignored. Measured on the "
+            + "plume, three tanks driving, median levels off the render: single "
+            + "14/22/19 against the render's 16/22/20, doubled 24/37/33");
         // Read off what the shaders were compiled with, not off the template,
         // because the block came from Plumes and a marker left unreplaced is
         // exactly the failure this would otherwise miss.
@@ -4908,11 +4910,14 @@ public static class SelfTest
             && ProcSmoke.ColumnCode.Contains("blend_mix"),
             "the pair is one effect and the order is the effect: dark under, light "
             + "over. Either half in the other's mode washes out the one it holds up");
-        Check("an element is a sphere here too, so its two surfaces both count",
-            ProcFire.BlazeShaderCode.Contains("flame_over(e, e)"),
-            "one surface per element is a third of the fire at the same size - the "
-            + "column's measurement, and the one thing the tank's flame adds to the "
-            + "forest's text, because here the rendered layer is the target");
+        Check("an element is one surface here too, and this one measured worse"
+              + " for it",
+            !ProcFire.BlazeShaderCode.Contains("flame_over(e, e)"),
+            "departure from the rendered flame goes 30/15/26 to 33/21.5/32.5 "
+            + "median levels without the doubling, and it is still the right "
+            + "answer: the doubling was narrowing the mass gap written down "
+            + "beside it, and two wrong terms holding each other up read as one "
+            + "correct one");
         Check("and it hands its light over premultiplied, hiding nothing",
             ProcFire.BlazeShaderCode.Contains("fire.rgb * level, 0.0"),
             "the stage shows its target premultiplied, so a straight-alpha emitter "
@@ -5023,6 +5028,133 @@ public static class SelfTest
             !new TankSprite { Atlas = atlas, ProceduralFire = true }.SmokeIsProcedural
             && !new TankSprite { Atlas = atlas, ProceduralSmoke = true }.FireIsProcedural,
             "one flag drives both, so neither half can be judged on its own");
+
+        Theme("the engine plume built rather than read");
+        // The plume is ProcSmoke's second configuration, so almost everything
+        // about the model is already asserted above and what is left is the pair:
+        // that the two really are two, that each reaches the right state, and
+        // that neither can quietly become the other.
+        ProcSmoke stack = ProcSmoke.Column();
+        ProcSmoke plume = ProcSmoke.Plume();
+        Check("the plume and the column are one class in two configurations",
+            plume.Layer == AtlasSet.ExhaustName
+            && stack.Layer == AtlasSet.BurnName
+            && plume.GetType() == stack.GetType(),
+            "in Blender engine_fire.SMOKE is exhaust_plume with other numbers - "
+            + "it imports that file's path outright - and two transcriptions here "
+            + "would part at whichever number nobody put side by side");
+        Check("and they differ in the numbers that make one a plume and the other"
+              + " a column",
+            Math.Abs(plume.Rise - stack.Rise) > 0.1f
+            && Math.Abs(plume.Slowing - stack.Slowing) > 0.3f
+            && Math.Abs(plume.TurnPower - stack.TurnPower) > 0.3f
+            && plume.Ink != stack.Ink,
+            $"rise {plume.Rise:F2}/{stack.Rise:F2}, slowing "
+            + $"{plume.Slowing:F2}/{stack.Slowing:F2}, turn "
+            + $"{plume.TurnPower:F2}/{stack.TurnPower:F2}");
+        // Both are smoke, so both slow down; the plume slows harder, which is a
+        // jet giving its momentum up at once against a fire drawing all the way.
+        // Read at half a life it is the plume that is already nearly there.
+        Vector3[] hazePath = Plumes.Path(Plumes.Up, 1.0f, plume.Buoyancy,
+                                         plume.TurnPower, -1.0f / plume.Slowing);
+        Vector3[] stackPath = Plumes.Path(Plumes.Up, 1.0f, stack.Buoyancy,
+                                          stack.TurnPower, -1.0f / stack.Slowing);
+        Check("the plume is most of the way up by half a life and the column is"
+              + " not",
+            Plumes.Along(hazePath, 0.5f).Length()
+            > Plumes.Along(stackPath, 0.5f).Length() + 0.05f,
+            $"plume {Plumes.Along(hazePath, 0.5f).Length():F3}, column "
+            + $"{Plumes.Along(stackPath, 0.5f).Length():F3} of the way at half a"
+            + " life");
+        Check("the plume's ink is the lighter of the two and still darkens the"
+              + " board",
+            plume.Ink.R > stack.Ink.R + 0.15f && plume.Ink.R < 0.72f,
+            $"plume ink {plume.Ink.R:F3}, stack {stack.Ink.R:F3}, pale ground "
+            + "0.72 - a haze the same value as what is behind it is not haze");
+
+        if (atlas.HasPorts && atlas.HasExhaust)
+        {
+            AtlasSet.Port port = atlas.Ports[0];
+
+            // Quoted against the hull and against the port, each where the config
+            // quotes it: how far the plume gets is a fact about the tank, how
+            // wide it leaves is a fact about the grille. Reading either as a
+            // fraction of the other is the mistake the forest's port paid for.
+            ProcSmoke.Puff[] near = plume.Build(port, atlas.HullLength, 0.0f);
+            ProcSmoke.Puff[] far = plume.Build(port, atlas.HullLength * 2.0, 0.0f);
+            float nearTip = 0.0f, farTip = 0.0f;
+            foreach (ProcSmoke.Puff q in near)
+                nearTip = Math.Max(nearTip, (q.Centre - port.Point).Length());
+            foreach (ProcSmoke.Puff q in far)
+                farTip = Math.Max(farTip, (q.Centre - port.Point).Length());
+            Check("how far the plume reaches is quoted against the hull",
+                farTip > nearTip * 1.6f,
+                $"doubling the hull took the tip from {nearTip:F3} to {farTip:F3}");
+
+            var wide = new AtlasSet.Port(port.Point, port.Dir, port.Radius * 2.0f);
+            ProcSmoke.Puff[] fat = plume.Build(wide, atlas.HullLength, 0.0f);
+            float shifted = 0.0f, widened = 0.0f;
+            for (int i = 0; i < fat.Length; i++)
+            {
+                Vector3 nudged = fat[i].Centre - near[i].Centre;
+                shifted = Math.Max(shifted, Math.Abs(nudged.Dot(port.Dir)));
+                widened = Math.Max(widened, fat[i].Radius - near[i].Radius);
+            }
+            Check("and how wide it leaves is quoted against the port, which moves"
+                  + " puffs across the vent and never along it",
+                shifted < 1e-5f && widened > 0.0f,
+                $"doubling the port radius moved a puff {shifted:E2} along the "
+                + $"vent and grew one by {widened:F4}");
+
+            ProcSmoke.Puff[] lapStart = plume.Build(port, atlas.HullLength, 0.0f);
+            ProcSmoke.Puff[] lapEnd = plume.Build(port, atlas.HullLength, 1.0f);
+            double worst = 0.0;
+            for (int i = 0; i < lapStart.Length; i++)
+                worst = Math.Max(worst,
+                    (lapStart[i].Centre - lapEnd[i].Centre).Length()
+                    + Math.Abs(lapStart[i].Alpha - lapEnd[i].Alpha));
+            Check("a whole lap of the plume is the same picture",
+                worst < 1e-4, $"worst puff moved {worst:E2}");
+
+            // Solidity has to reach zero at both ends of a life or a puff appears
+            // and vanishes with a step, which on a loop is a seam once a lap.
+            ProcSmoke.Puff youngest = lapStart.OrderBy(q => q.Age).First();
+            ProcSmoke.Puff eldest = lapStart.OrderBy(q => q.Age).Last();
+            Check("and its puffs fade up out of nothing and back into it",
+                youngest.Alpha < plume.Alpha * 0.6f
+                && eldest.Alpha < plume.Alpha * 0.6f,
+                $"youngest {youngest.Alpha:F3} at age {youngest.Age:F3}, eldest "
+                + $"{eldest.Alpha:F3} at {eldest.Age:F3}, peak {plume.Alpha:F2}");
+        }
+
+        var plumePair = new TankSprite { Atlas = atlas, ExhaustPhase = 0 };
+        var readPlume = TankSprite.MakeLayer(AtlasSet.ExhaustName);
+        readPlume.Tank = plumePair;
+        plumePair.ProceduralExhaust = false;
+        bool plumeWhenOff = readPlume.Showing >= 0;
+        plumePair.ProceduralExhaust = true;
+        bool plumeWhenOn = readPlume.Showing >= 0;
+        Check("exactly one of the built plume and the read one draws",
+            plumeWhenOff && (!plumeWhenOn || !atlas.HasPorts),
+            $"rendered layer shows {(plumeWhenOff ? "yes" : "no")} with the flag "
+            + $"off, {(plumeWhenOn ? "yes" : "no")} with it on");
+        // Three effects, three switches. A tank idles all game and burns once, so
+        // this is the one of the three that is on screen almost always - and the
+        // whole use of the switches is standing one built half beside read ones.
+        Check("and the three switch apart",
+            !new TankSprite { Atlas = atlas, ProceduralExhaust = true }
+                .SmokeIsProcedural
+            && !new TankSprite { Atlas = atlas, ProceduralExhaust = true }
+                .FireIsProcedural
+            && !new TankSprite { Atlas = atlas, ProceduralSmoke = true }
+                .ExhaustIsProcedural,
+            "one flag drives more than its own effect, so no half can be judged "
+            + "on its own");
+        Check("the plume is framed by the hull's heading, not the turret's",
+            ProcSmoke.ColumnCode.Contains("origin") // the shader is heading-free
+            && !ProcSmoke.ColumnCode.Contains("TurretFacing"),
+            "the vent is welded to the engine deck, so a plume indexed by the gun "
+            + "drags its smoke wherever the gun is pointing");
 
         Theme("a shell arriving");
         // An event, like the shot, and unlike everything else that came after
