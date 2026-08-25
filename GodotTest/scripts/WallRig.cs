@@ -492,6 +492,7 @@ public sealed partial class WallRig : Node3D
         _nosePlaced = false;
         _noseGone = 0.0f;
         _noseAim = Vector3.Zero;
+        Shoving = 0;
         _clock = -1.0f;
         _beam = null;
     }
@@ -746,6 +747,36 @@ public sealed partial class WallRig : Node3D
         }
     }
 
+    /// <summary>How many pieces of the wall proper stand in the band from
+    /// <paramref name="back"/> behind <paramref name="tip"/> to
+    /// <paramref name="front"/> ahead of it - the mirror of
+    /// <see cref="Reached"/>, counting instead of letting go.
+    ///
+    /// Standing pieces of the wall proper: what has been let go of does not
+    /// count and neither does the apron - see <see cref="Shoving"/>.
+    /// </summary>
+    private int Pressing(Vector3 tip, Vector3 into, float lane, float back,
+                         float front)
+    {
+        int on = 0;
+        for (int i = 0; i < _bodies.Count; i++)
+        {
+            if (_live.Contains(i))
+                continue;
+            if (_plan is { } plan && i < plan.Blocks.Count
+                && (plan.Blocks[i].Chip || plan.Blocks[i].Course < 0))
+                continue;
+            Vector3 arm = _bodies[i].Transform.Origin - tip;
+            float along = arm.Dot(into);
+            if (along < -back || along > front)
+                continue;
+            if ((arm - into * along).Length() > lane)
+                continue;
+            on++;
+        }
+        return on;
+    }
+
     // --- a tank somebody else drives ----------------------------------------
 
     /// <summary>Whether a box is being driven from outside. The other half of
@@ -770,6 +801,41 @@ public sealed partial class WallRig : Node3D
     /// frame of a scene.</summary>
     public static float Swept(float travel, float length) =>
         Mathf.Clamp(travel, 0.0f, Mathf.Max(length, 0.0f));
+
+    /// <summary>How far behind the tip the band actually reaches, in metres:
+    /// everything the front face has crossed, plus the nose's own half-length
+    /// earned at the same rate.
+    ///
+    /// <b>The second term is there because the board stands the tank inside the
+    /// masonry it is about to drive through.</b> A band measured back from the
+    /// tip by <see cref="Swept"/> alone says "ground the front face has
+    /// crossed", which is exactly right for a tank arriving from outside and
+    /// says nothing at all for one that opens inside a ring it does not fit in:
+    /// the leaf is already behind the tip when the lane begins, and it recedes
+    /// from the tip exactly as fast as the band grows. Written out, a piece at
+    /// radius r from the middle of the cell is reached only if r is past the
+    /// box's own half-length - so what decides is the hull rather than the wall,
+    /// and it is a slide rather than a cliff. Measured on this ring, whose
+    /// masonry stands 2.76m out against half-hulls of 2.62 / 3.00 / 3.43m: the
+    /// three classes let go of 76 / 77 / <b>0</b> pieces driving out of it. The
+    /// heavy tank did not fail to break the wall, it was never asked to.
+    ///
+    /// <b>Half a hull rather than a whole one, and that is the nose against the
+    /// tail.</b> What the box started standing in ahead of its own centre is
+    /// embedded in the nose and gets ploughed; what it started standing in
+    /// behind its centre is embedded in the tail and is being left behind - a
+    /// tank does not bring the far side of a ring down by driving away from it.
+    /// Measured on the same ring: the far leaf sits 6.43m behind the tip, which
+    /// a whole footprint reaches and half of one cannot.
+    ///
+    /// <b>Earned at the same rate, because that is the gate.</b> Granted
+    /// outright it is <see cref="Advance"/>'s own bug again - a hull swinging on
+    /// the spot inside a ring would let go of its whole nose - so it arrives
+    /// through <see cref="Swept"/>, which is nought at a standstill and
+    /// continuous in what the box has advanced.</summary>
+    public static float Ploughed(float gone, float length) =>
+        Mathf.Max(gone, 0.0f)
+        + Swept(gone, Mathf.Max(length, 0.0f) * 0.5f);
 
     /// <summary>How far the nose has advanced along the heading it is pointing
     /// now: what it had, plus this step's <paramref name="ahead"/> - and nothing
@@ -832,6 +898,63 @@ public sealed partial class WallRig : Node3D
     /// <see cref="Advance"/>: the sign is the whole of the rule, and a live
     /// solver is the one thing <c>--selftest</c> cannot run.</summary>
     public static float Through(float brick) => -brick * NoseThrough;
+
+    /// <summary>How far ahead of the nose masonry counts as being shoved, as a
+    /// fraction of a brick's length.
+    ///
+    /// <b>Two bricks rather than nothing, and it is the leaf's own thickness
+    /// that is too short.</b> A leaf is under a metre through, which a hull at
+    /// cruise crosses in a sixth of a second - at 420px/s/s that is a tenth off
+    /// the speed, a dip nobody sees. The window has to open before the tip
+    /// touches the masonry so the ceiling has somewhere to bite, and two bricks
+    /// ahead with half a one behind is 1.5m of it. Because the tank slows inside
+    /// the band it also stays in it longer than the arithmetic on its entry
+    /// speed suggests.
+    ///
+    /// Two rather than more, because further ahead is braking rather than
+    /// shoving: a tank that starts crawling a couple of metres short of a wall
+    /// reads as having seen it coming.</summary>
+    public const float NoseShove = 2.0f;
+
+    /// <summary>The far end of the window <see cref="Shoving"/> is counted over,
+    /// in metres, with <see cref="Through"/> as its near end.
+    ///
+    /// <b>The two windows meet and never overlap</b>, and that is the whole of
+    /// why both are named: a piece is either driven through or being pressed
+    /// against, and one that was both would be resisting a tank that has already
+    /// let go of it.</summary>
+    public static float Shove(float brick) => brick * NoseShove;
+
+    /// <summary>How many pieces of the wall the driven nose is pressing against
+    /// right now - the standing leaf in front of it, plus whatever of it has come
+    /// loose and is being bulldozed along.
+    ///
+    /// <b>The feedback the solver never gave back, and it is one number because
+    /// one is all a speed ceiling wants.</b> The board decides how fast a tank
+    /// goes; all this says is that some of the going is masonry - see
+    /// <c>TankTick.Shoving</c> and <see cref="MovementProfile.WallFraction"/>.
+    /// A count rather than a rate, so it does not depend on the step; a fact
+    /// from the solver rather than a timer, so it ends when the shoving ends.
+    ///
+    /// <b>Standing masonry only, and counting what has come loose is the version
+    /// this replaces.</b> Bulldozing the heap is the more physical answer and it
+    /// does not end: the pieces the nose knocks out are pushed along in front of
+    /// the nose, so they stay in the band that counts them and the drag sustains
+    /// itself. Measured - a tank that drove out of the ring was still reporting
+    /// 22 pieces and still pinned at 53px/s two and a quarter seconds and four
+    /// metres later, on open ground with the wall behind it. What is left is the
+    /// sentence that ends by itself: <b>a wall resists until it is broken</b>,
+    /// and <see cref="Reached"/> is what breaks it, so the count drains as the
+    /// nose advances and reaches nought as the last course goes.
+    ///
+    /// <b>Rubble is not masonry</b> either, word for word <see cref="Clearance"/>
+    /// and <c>WallProp.Bars</c>: the apron lies on the ground inside the cell and
+    /// was never a wall.
+    ///
+    /// What is given up is named: a tank shoving a heap of loose brick along
+    /// feels nothing for it. That is the lighter half of the two, and the heavier
+    /// half is the half that stops.</summary>
+    public int Shoving { get; private set; }
 
     /// <summary>How far the driven box has advanced along its current heading, in
     /// metres. The reach behind the nose in <see cref="Drive"/>, reset with the
@@ -898,6 +1021,7 @@ public sealed partial class WallRig : Node3D
             _nosePlaced = false;
             _noseGone = 0.0f;
             _noseAim = Vector3.Zero;
+            Shoving = 0;
         }
     }
 
@@ -912,6 +1036,7 @@ public sealed partial class WallRig : Node3D
         _nosePlaced = false;
         _noseGone = 0.0f;
         _noseAim = Vector3.Zero;
+        Shoving = 0;
         _tank?.QueueFree();
         _tank = null;
     }
@@ -931,13 +1056,19 @@ public sealed partial class WallRig : Node3D
     /// moment the masonry first gave was <b>0.0 m/s</b>: the wall was not rammed,
     /// it was swept.
     ///
-    /// So the reach behind the nose is <see cref="Advance"/>, capped by
-    /// <see cref="Swept"/> at the box's own length - which is exactly the ground
-    /// the front face has crossed along the heading it faces now. Nothing at a
-    /// standstill, the full footprint once the tank has driven its own length
-    /// down one lane, and continuous in between, so no brick the nose has passed
-    /// is left frozen for the hull to slide through: <see cref="Thaw"/> is
-    /// idempotent and the band grows as fast as the tip does.
+    /// So the reach behind the nose is <see cref="Ploughed"/>, built on
+    /// <see cref="Advance"/>: the ground the front face has crossed along the
+    /// heading it faces now, plus the half-hull the box was standing in when the
+    /// lane began. Nothing at a standstill and continuous in between, so no
+    /// brick the nose has passed is left frozen for the hull to slide through:
+    /// <see cref="Thaw"/> is idempotent and the band grows as fast as the tip
+    /// does.
+    ///
+    /// <b>The second term is what makes the opening a ram at all, and without it
+    /// the heaviest hull let go of nothing.</b> A band measured off the tip and
+    /// no further reaches only masonry outside the box's own half-length, and a
+    /// leaf the tank is already standing in recedes from the tip as fast as the
+    /// band grows - see <see cref="Ploughed"/> for the three numbers.
     ///
     /// <b>Travel alone was not enough, and the second report is why.</b> A plain
     /// odometer is only ever zero once - on the frame the board is built - so it
@@ -986,7 +1117,12 @@ public sealed partial class WallRig : Node3D
         // same step the tip takes, so a piece skipped by one long frame is caught
         // by the next rather than missed.
         Reached(tip, _noseInto, _noseSize.X * 0.5f + _brick,
-                Swept(_noseGone, _noseSize.Z), Through(_brick));
+                Ploughed(_noseGone, _noseSize.Z), Through(_brick));
+        // And what is left standing against the nose, over the band that begins
+        // where that one ends. Counted after the sweep rather than before it, so
+        // a piece let go of this frame is not also reported as resisting.
+        Shoving = Pressing(tip, _noseInto, _noseSize.X * 0.5f + _brick,
+                           -Through(_brick), Shove(_brick));
         // Struck when the tank first reaches a brick, and never before: see
         // Nose. The shot is named here rather than at the trigger because with a
         // driven nose there is no trigger - the tank arriving is the whole event.

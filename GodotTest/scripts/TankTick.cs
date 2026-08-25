@@ -97,6 +97,23 @@ public sealed class TankTick
     /// driven through bars five.</summary>
     public Func<Vector2I, Vector2, bool>? Barred;
 
+    /// <summary>Whether this tank is pressing against masonry right now, and so
+    /// may only go at <see cref="MovementProfile.WallFraction"/> of its cruise -
+    /// see <see cref="SpeedCap"/>.
+    ///
+    /// <b>A hook because a wall is a prop and the other two caps are terrain.</b>
+    /// Grade and water are asked of <see cref="Field"/>, which knows every cell of
+    /// itself; what stands on a cell it does not know at all, and a board with no
+    /// walls answers null and gets exactly the cap it had.
+    ///
+    /// <b>A predicate rather than a number, exactly as <c>HexField.IsGrade</c> and
+    /// <c>IsWet</c> are.</b> How heavy the going is belongs beside the other two
+    /// fractions, where it can be read against them; all that is asked here is
+    /// whether it is in force. What answers it is a count of pieces the solver has
+    /// the nose against - <c>WallRig.Shoving</c> - so the drag ends when the
+    /// shoving does rather than when a timer says so.</summary>
+    public Func<Vehicle, bool>? Shoving;
+
     /// <summary>The view's spring. A gun going off shoves it - see
     /// <see cref="Fire"/> - and a bench without one simply does not shake.
     /// </summary>
@@ -614,7 +631,17 @@ public sealed class TankTick
     /// leg is a slope or it is not and it is wet or it is not; multiplying would
     /// invent a third terrain nothing on the board is made of, and the one place
     /// the two meet on this map - the beach at the mouth of the pit - is exactly
-    /// where that invention would show.</summary>
+    /// where that invention would show.
+    ///
+    /// <b>And a third that is not terrain: masonry the tank is shoving</b>, at
+    /// <see cref="MovementProfile.WallFraction"/> - see <see cref="Shoving"/>.
+    /// It arrives through a hook because a wall stands on a cell rather than being
+    /// one, and it takes the same lower-of-them treatment for the same reason.
+    /// The ramp in <see cref="AdvanceOrder"/> is what turns it into an effect: a
+    /// ceiling that drops when the nose meets the leaf and comes back up when the
+    /// leaf is behind is a tank slowing into the wall at its own retardation and
+    /// pulling away again at its own acceleration, which is what pushing through
+    /// something looks like.</summary>
     public double SpeedCap(Vehicle v)
     {
         double cap = v.Profile.TopSpeed;
@@ -625,6 +652,12 @@ public sealed class TankTick
             cap = Math.Min(cap, v.Profile.GradeSpeed);
         if (Field.IsWet(v.Cell, next))
             cap = Math.Min(cap, v.Profile.WaterSpeed);
+        // And masonry, which is neither of those and is not the board's at all -
+        // see Shoving. Lowest of the three by construction, so a tank in a wall on
+        // a wet bank goes at the wall's figure; the same "the lower of them, never
+        // their product" that already holds for the other two.
+        if (Shoving is not null && Shoving(v))
+            cap = Math.Min(cap, v.Profile.WallSpeed);
         return cap;
     }
 
@@ -640,6 +673,12 @@ public sealed class TankTick
     {
         if (!v.Moving)
             return "";
+        // Masonry first, because the word names the cap actually in force and
+        // the wall's is the lowest of the three by construction - see
+        // MovementProfile.WallFraction. A tank shoving a leaf on a wet bank is
+        // going at the wall's figure whatever else is true of the leg.
+        if (Shoving is not null && Shoving(v))
+            return "shoving";
         Vector2I next = v.Path[v.PathStep];
         bool grade = Field.IsGrade(v.Cell, next), wet = Field.IsWet(v.Cell, next);
         return grade && wet ? "wading a grade" : wet ? "wading"
@@ -700,6 +739,13 @@ public sealed class TankTick
             // SpeedCap.
             double allowed = Math.Min(SpeedCap(v), ceiling);
             double before = v.Speed;
+            // How fast that ceiling may be closed on. The engine's own
+            // retardation for everything the board is made of - see below - and
+            // harder for the one thing it is not: masonry does not slow a tank
+            // down, it is hit. See MovementProfile.WallBrake.
+            double down = v.Profile.Accel
+                          * (Shoving is not null && Shoving(v)
+                              ? MovementProfile.WallBrake : 1.0);
             // Slowed into rather than snapped to, and the two are told apart here
             // because only one of them can be. The braking ceiling descends at the
             // tank's own retardation by construction, so clamping to it was already
@@ -709,7 +755,7 @@ public sealed class TankTick
             // to the pitch as a single frame of full brake where the tank has a
             // smooth dip.
             v.Speed = v.Speed > allowed
-                ? Math.Max(allowed, v.Speed - v.Profile.Accel * delta)
+                ? Math.Max(allowed, v.Speed - down * delta)
                 : Math.Min(v.Speed + v.Profile.Accel * delta, allowed);
             // What the body actually felt, rather than a flag saying which branch
             // was taken. The pitch is driven by acceleration, and under the

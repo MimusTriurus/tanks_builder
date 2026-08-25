@@ -220,6 +220,17 @@ public sealed partial class TankBench : SceneRoot
     /// switch because that claim is worth being able to look at.</summary>
     private bool _wallBeam;
 
+    /// <summary>Whether masonry slows the tank down - see
+    /// <see cref="TankTick.Shoving"/>.
+    ///
+    /// On, because a tank that goes through a wall at cruise is the picture this
+    /// replaces. A switch all the same, and for the reason every effect on this
+    /// board has one: a shot is proof, and taking the pair of it must not need a
+    /// hand on the keyboard. What it turns off is only the ceiling - the box, the
+    /// sweep and the collapse are untouched, so the A/B is the going and nothing
+    /// else.</summary>
+    private bool _shove = true;
+
     /// <summary>The view's spring, for the gun. One for the board rather than
     /// one per tank, which on a bench with one tank is the same thing said
     /// twice - but it is the harness's arrangement and there is no reason to
@@ -488,6 +499,11 @@ public sealed partial class TankBench : SceneRoot
                 // can be put side by side.
                 case "--wall-beam":
                     _wallBeam = true;
+                    break;
+                // Masonry costs nothing to drive through - the A/B the going is
+                // judged by. Only the ceiling goes; the wall still comes down.
+                case "--no-shove":
+                    _shove = false;
                     break;
                 // The rubble stays where it landed - the A/B the clearing is
                 // judged by, and the flag the wall bench carries under the same
@@ -864,6 +880,23 @@ public sealed partial class TankBench : SceneRoot
         return false;
     }
 
+    /// <summary>Whether the tank has its nose in masonry - the answer to
+    /// <see cref="TankTick.Shoving"/>, taken straight off the solver.
+    ///
+    /// Asked of every wall because the box is pushed at every wall the tank is
+    /// beside (see <see cref="Ram"/>), and of the driven tank only: the other two
+    /// in the garage are parked somewhere else and do not have a box at all.
+    /// </summary>
+    private bool Pressing(Vehicle v)
+    {
+        if (v != Tank)
+            return false;
+        foreach (WallProp prop in _walls)
+            if (prop.Rig is { Shoving: > 0 })
+                return true;
+        return false;
+    }
+
     private void Struck(Shell round)
     {
         if (round.Blocked is not Vector2I cell)
@@ -1058,6 +1091,7 @@ public sealed partial class TankBench : SceneRoot
             _tick.Obstacles = _walled;
             _tick.Landed = _walls.Count > 0 ? Struck : null;
             _tick.Barred = _walls.Count > 0 ? Barring : null;
+            _tick.Shoving = _walls.Count > 0 && _shove ? Pressing : null;
             return _tick;
         }
     }
@@ -1325,6 +1359,12 @@ public sealed partial class TankBench : SceneRoot
                // again: a swept cell and a shot that moved nothing are the same
                // empty picture. WallRig.Crumbled.
                + (rig.Crumbled > 0 ? $", {rig.Crumbled} gone" : "")
+               // And what the nose is pressing against this instant, which is the
+               // cause of the speed the line above reports: a tank crawling at a
+               // fifth of its cruise and a tank whose order has gone stale are the
+               // same picture, and the cap is the only thing that tells them
+               // apart. See WallRig.Shoving.
+               + (rig.Shoving > 0 ? $", shoving {rig.Shoving}" : "")
                // The one figure the picture cannot give and nobody can guess -
                // see _ramSpeed.
                + (_ramSpeed >= 0.0
@@ -1786,6 +1826,8 @@ public sealed partial class TankBench : SceneRoot
                          " leaves");
             _panel.Toggle("wall.beam", "the rig draws its own line too",
                           () => _wallBeam, on => _wallBeam = on);
+            _panel.Toggle("wall.shove", "masonry is heavy going  (--no-shove)",
+                          () => _shove, on => _shove = on);
             _panel.Toggle("wall.crumble", "fallen pieces clear  (--no-crumble)",
                           () => WallRig.Crumbles, on => WallRig.Crumbles = on);
             _panel.Readout("wall.state", () => WallNote());

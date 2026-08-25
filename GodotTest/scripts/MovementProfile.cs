@@ -125,6 +125,72 @@ public sealed class MovementProfile
     public double WaterSpeed => TopSpeed * WaterFraction;
 
     /// <summary>
+    /// Speed allowed while shoving masonry, as a fraction of TopSpeed.
+    ///
+    /// <b>One number for all three classes, by <see cref="GradeFraction"/>'s
+    /// argument word for word</b>: the wall under all three is one wall. The
+    /// spread is already there in what 22% of three different cruises comes to -
+    /// 68 / 53 / 39 px/s.
+    ///
+    /// <b>The slowest going on the board, and it has to be.</b> A bank is over in
+    /// a cell and water is pushed aside; a wall is broken, and until it is broken
+    /// it does not move at all. Equal to the ford and masonry would be water that
+    /// happens to be brown, which is <see cref="WaterFraction"/>'s own objection
+    /// arriving a third time.
+    ///
+    /// <b>Still above <see cref="CornerFraction"/>, and the margin is what keeps
+    /// the two from fighting.</b> A tank swinging round inside a ring is not
+    /// ramming it - that is the whole of <c>WallRig.Advance</c> - so the crawl has
+    /// to stay a floor to slow down to rather than a speed the wall lifts it up
+    /// to.
+    ///
+    /// <b>What it does not do is stop the tank.</b> The wall gives no other
+    /// feedback than this: how far the machine gets and where it parks are still
+    /// decided by the order, and driving through masonry is a ceiling on the way
+    /// rather than a wall to bounce off. That debt is named in the bench's notes
+    /// and this is not it - this is the going, and the going is heavy.
+    /// </summary>
+    public const double WallFraction = 0.22;
+
+    public double WallSpeed => TopSpeed * WallFraction;
+
+    /// <summary>
+    /// How much harder masonry takes speed off than the engine's own brakes,
+    /// as a multiple of <see cref="Accel"/> - and it applies to the slowing
+    /// only, never to getting the speed back.
+    ///
+    /// <b>The one exception to "no faster than the engine can", and a collision
+    /// is what earns it.</b> Every other ceiling on this board is terrain, and
+    /// terrain is arrived at rather than hit: a bank appears under the tracks and
+    /// the tank eases onto it, so closing on the cap at anything but its own
+    /// retardation would be a stop dead in one frame - eleven times what the
+    /// engine can do, and it is that objection that put the ramp in
+    /// <see cref="TankTick.AdvanceOrder"/> in the first place. A wall is the
+    /// thing that <i>can</i> take speed off faster than brakes, because it is not
+    /// slowing the tank down, it is being hit.
+    ///
+    /// <b>Without it the cap is nearly ornamental at speed, and that is measured
+    /// rather than argued.</b> The band a nose presses through is 1.5m, which a
+    /// hull at cruise crosses in a sixth of a second; at 420px/s/s that is 56px/s
+    /// off 240 and the wall is already behind. Three times that reaches
+    /// <see cref="WallSpeed"/> inside the same sixth of a second, so the tank
+    /// arrives at the far side of a leaf doing a fifth of its cruise instead of
+    /// three quarters.
+    ///
+    /// <b>One-sided on purpose.</b> Coming out the other side is the engine's
+    /// work and goes at the engine's rate, which is what makes the shape read as
+    /// pushing through something rather than as a dip in the road: a hard edge
+    /// going in, half a second of pulling away coming out.
+    ///
+    /// Still not a stop in one frame: three times 420px/s/s is 21px per frame at
+    /// 60Hz, so the whole of a cruise takes nine frames to go. What the pitch
+    /// sees is a full nose-down, which is what ramming a wall should look like -
+    /// the ratio is clamped, so this cannot drive the body harder than a full
+    /// brake already does.
+    /// </summary>
+    public const double WallBrake = 3.0;
+
+    /// <summary>
     /// Where this class sits between the others - 0 light, 1 medium, 2 heavy.
     ///
     /// The only thing in this table that is not a quantity, and it is here rather

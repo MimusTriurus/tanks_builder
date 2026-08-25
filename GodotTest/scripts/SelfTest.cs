@@ -9687,6 +9687,112 @@ public static class SelfTest
             && Mathf.IsEqualApprox(WallRig.Through(0.6f), -0.3f),
             $"the near end at {WallRig.Through(0.6f):F2}m on a 0.60m brick");
 
+        // --- and the half-hull the box began the lane standing in -------------
+        //
+        // The board puts the tank inside the ring, so the leaf it is about to
+        // drive through is already behind the tip when the lane begins - and a
+        // band measured off the tip and no further can never catch it, because it
+        // recedes exactly as fast as the band grows. Measured: the heaviest hull
+        // let go of nought pieces of 536 driving out of the yard, while the two
+        // lighter ones let go of a leaf. So the reach is Ploughed, and these
+        // three say what it may and may not add.
+        Check("the band reaches back further than the nose has advanced, so a "
+              + "leaf the box was already standing in when the lane began is "
+              + "reached at all",
+            WallRig.Ploughed(0.5f, 6.0f) > 0.5f,
+            $"{WallRig.Ploughed(0.5f, 6.0f):F2}m of reach after 0.50m driven");
+        Check("and never further back than its own nose, so the leaf behind a "
+              + "tank driving away from it is left standing",
+            WallRig.Ploughed(60.0f, 6.0f) - 60.0f <= 3.0f + 0.001f
+            && WallRig.Ploughed(6.0f, 6.0f) - 6.0f <= 3.0f + 0.001f,
+            $"{WallRig.Ploughed(60.0f, 6.0f) - 60.0f:F2}m over the sweep on a "
+            + "6.00m box");
+        Check("and it is still nothing at a standstill and next to nothing a "
+              + "centimetre in, because granted outright it is the pivot again",
+            WallRig.Ploughed(0.0f, 6.0f) == 0.0f
+            && WallRig.Ploughed(0.01f, 6.0f) < 0.05f,
+            $"{WallRig.Ploughed(0.0f, 6.0f):F2}m parked, "
+            + $"{WallRig.Ploughed(0.01f, 6.0f):F3}m a centimetre in");
+
+        // --- and what it is pushing against while it does ---------------------
+        //
+        // The going, not the sweep: how heavy masonry is to drive through. The
+        // two windows are the whole of it that can be asserted here - the count
+        // itself is a live solver, and a picture of a tank slowing down is a
+        // picture, which --selftest does not have.
+        Check("the band a nose presses against begins where the band it has "
+              + "driven through ends, so no piece is both let go of and resisting",
+            WallRig.Through(0.6f) < 0.0f && WallRig.Shove(0.6f) > 0.0f,
+            $"driven through up to {WallRig.Through(0.6f):F2}m, pressing to "
+            + $"{WallRig.Shove(0.6f):F2}m");
+        Check("and it reaches a good way in front of the tip, because what a tank "
+              + "shoves once the leaf gives is the leaf in bits, moving ahead of "
+              + "it",
+            WallRig.Shove(0.6f) >= 0.6f,
+            $"{WallRig.Shove(0.6f):F2}m ahead on a 0.60m brick");
+        // Where it sits among the other two caps. Below the ford because a wall
+        // does not move until it is broken, above the crawl because a hull
+        // swinging round inside a ring is not ramming it and the crawl has to
+        // stay a floor rather than a speed the wall lifts it to.
+        MovementProfile mid = MovementProfile.Medium;
+        Check("masonry is the heaviest going on the board, and still lighter than "
+              + "the crawl at a bend is slow",
+            MovementProfile.WallFraction < MovementProfile.WaterFraction
+            && MovementProfile.WallFraction > mid.CornerFraction,
+            $"wall {MovementProfile.WallFraction:F2}, water "
+            + $"{MovementProfile.WaterFraction:F2}, crawl "
+            + $"{mid.CornerFraction:F2}");
+        // The cap itself, through the tick that applies it. A board with no walls
+        // answers null and gets the cap it had - that half matters as much as the
+        // other, because a hook that fires on every board is a tank that crawls
+        // everywhere.
+        if (vehicles is { Count: > 0 } drivers && field.InBounds(new Vector2I(1, 1)))
+        {
+            Vehicle one = drivers[0];
+            List<Vector2I> was = one.Path;
+            int step = one.PathStep;
+            Vector2I stood = one.Cell;
+            one.Cell = new Vector2I(1, 1);
+            one.Path = new List<Vector2I> { new Vector2I(1, 1) };
+            one.PathStep = 0;
+            var walk = new TankTick { Field = field };
+            double open = walk.SpeedCap(one);
+            string openWhy = walk.SpeedCapWhy(one);
+            walk.Shoving = _ => true;
+            double dug = walk.SpeedCap(one);
+            string dugWhy = walk.SpeedCapWhy(one);
+            walk.Shoving = _ => false;
+            double clear = walk.SpeedCap(one);
+            one.Path = was;
+            one.PathStep = step;
+            one.Cell = stood;
+            Check("a tank with its nose in masonry may only go at the wall's "
+                  + "figure, and gets its cruise back the moment it is through",
+                Math.Abs(dug - one.Profile.WallSpeed) < 0.01
+                && Math.Abs(clear - open) < 0.01 && dug < open - 1.0,
+                $"{open:F0} px/s open, {dug:F0} shoving, {clear:F0} out the far "
+                + "side");
+            Check("and the readout names the cap in force, so a tank in a wall is "
+                  + "not read as an order gone stale",
+                dugWhy == "shoving" && openWhy != "shoving",
+                $"shoving reads \"{dugWhy}\", open ground reads \"{openWhy}\"");
+            // And how fast the ceiling may be closed on. Harder than the brakes,
+            // because a wall is hit rather than eased onto - the one exception to
+            // the rule the ramp exists for - and still not a stop in one frame,
+            // which is the objection that put the ramp there.
+            double bite = one.Profile.Accel * MovementProfile.WallBrake / 60.0;
+            Check("masonry takes speed off harder than the engine's own brakes, "
+                  + "because it is hit rather than eased onto",
+                MovementProfile.WallBrake > 1.0,
+                $"x{MovementProfile.WallBrake:F1} of a {one.Profile.Accel:F0} "
+                + "px/s/s brake");
+            Check("and still not a dead stop in one frame, which is what the ramp "
+                  + "it goes through is there to stop",
+                bite < one.Profile.TopSpeed * 0.25,
+                $"{bite:F0} px/s a frame off a {one.Profile.TopSpeed:F0} px/s "
+                + "cruise");
+        }
+
         // --- what the tank pushes with ---------------------------------------
         if (vehicles is { Count: > 0 } garage && field.Atlas is not null)
         {
