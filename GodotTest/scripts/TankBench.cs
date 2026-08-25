@@ -1790,6 +1790,10 @@ public sealed partial class TankBench : SceneRoot
                       on => _tick.ExhaustRamp = on);
         _panel.Toggle("tank.smoke.burn", "set it alight  (J)",
                       () => Tank.Burning, on => Tank.Burning = on);
+        _panel.Toggle("tank.smoke.column", "build the smoke column, do not read it",
+                      () => _tick.ProceduralSmoke, on => _tick.ProceduralSmoke = on);
+        _panel.Toggle("tank.smoke.flame", "build the flame, do not read it",
+                      () => _tick.ProceduralFire, on => _tick.ProceduralFire = on);
 
         _panel.Heading("tank.gun", "the gun");
         _panel.Press("tank.gun.fire", "fire  (Z)", () => Tick.Fire(Tank));
