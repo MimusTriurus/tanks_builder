@@ -392,6 +392,10 @@ public sealed partial class WallBench : SceneRoot
             // to - the A/B a breach is judged by.
             else if (args[i] == "--no-breach")
                 WallRig.Breaches = false;
+            // The blast crosses sections again, the way it used to - the A/B a
+            // segment is judged by.
+            else if (args[i] == "--wide-blast")
+                WallRig.Segmented = false;
             // Every piece takes the depth buffer, the way it used to - the A/B
             // rubble giving that up is judged by.
             else if (args[i] == "--solid-rubble")

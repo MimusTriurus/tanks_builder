@@ -9902,6 +9902,38 @@ public static class SelfTest
             $"struck leaf at a quarter charge {WallRig.Breached(27, 96)}, "
             + $"neighbour at ten {WallRig.Breached(78, 96)}");
 
+        // So the field is confined, not just the verdict - see WallRig.Reaches.
+        //
+        // Naming the section a burst brings down stopped the neighbours coming
+        // down whole and left the blast still reaching them: at force 10 it
+        // thaws and throws 78 of each neighbour's 96 pieces, which is a leaf
+        // destroyed by any reading but the rule's.
+        Check("a burst acts on the section it went off against, on the rubble "
+              + "at its feet, and on no other section",
+            WallRig.Reaches(2, 2) && WallRig.Reaches(2, -1)
+            && !WallRig.Reaches(2, 1) && !WallRig.Reaches(2, 3),
+            $"own {WallRig.Reaches(2, 2)}, rubble {WallRig.Reaches(2, -1)}, "
+            + $"next door {WallRig.Reaches(2, 3)}");
+        // And its own docstring's claim, which the line that distributes the
+        // blast did not keep: a round put through a gap in the masonry went off
+        // at the muzzle and threw whatever stood within a radius of the gun.
+        // Worse than untidy - the burst centre came out at an infinity with a
+        // zero in it, so every distance was NaN, every test against it false,
+        // and the whole prop was thawed and pushed to nowhere. Measured on the
+        // wall bench turned 60 degrees: "reach NaN, top NaN", and a wall that
+        // vanishes.
+        Check("and a burst that meets no face touches nothing at all",
+            !WallRig.Reaches(-1, 0) && !WallRig.Reaches(-1, -1),
+            $"no face still reaches masonry {WallRig.Reaches(-1, 0)}, "
+            + $"rubble {WallRig.Reaches(-1, -1)}");
+        WallRig.Segmented = false;
+        bool wide = WallRig.Reaches(2, 3) && WallRig.Reaches(-1, 0);
+        WallRig.Segmented = WallRig.SegmentedByDefault;
+        Check("and --wide-blast puts back the field that crossed sections, "
+              + "which is the A/B a segment is judged by",
+            wide && WallRig.SegmentedByDefault && WallRig.Segmented,
+            $"wide blast still confined: {!wide}");
+
         // --- and every piece knows which section it is in ----------------------
         //
         // Written where the fold is decided and nowhere else - see Block.Side.

@@ -527,6 +527,11 @@ public sealed partial class TankBench : SceneRoot
                 case "--no-breach":
                     WallRig.Breaches = false;
                     break;
+                // The blast crosses sections again, as it used to - the A/B a
+                // segment is judged by. See WallRig.Segmented.
+                case "--wide-blast":
+                    WallRig.Segmented = false;
+                    break;
                 // Every piece takes the depth buffer, as it used to - the A/B
                 // rubble giving that up is judged by. See WallStack.Dressed.
                 case "--solid-rubble":

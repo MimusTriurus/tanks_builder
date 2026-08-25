@@ -424,6 +424,52 @@ public sealed partial class WallRig : Node3D
     /// itself reached. Static for <see cref="Crumbles"/>'s reason.</summary>
     public static bool Breaches = BreachesByDefault;
 
+    /// <summary>Whether a burst is confined to the section it went off against.
+    /// On, and named here rather than left in the field's initialiser for
+    /// <c>Recoil.ShearOnByDefault</c>'s reason.</summary>
+    public const bool SegmentedByDefault = true;
+
+    /// <summary>Whether a strike acts on one section and no other -
+    /// <c>--wide-blast</c> on either bench puts back the field that crossed them.
+    ///
+    /// <b>The section is the unit the board already counts in.</b> A wall stands
+    /// on a cell edge, <c>Recipe.Sides</c> counts edges, <c>WallProp.Bars</c>
+    /// asks per edge and <see cref="Breach"/> brings one down; a blast that
+    /// reaches into the two edges either side leaves "which section did that
+    /// shell take" with no answer, and on a ring one round flattens half the
+    /// cell.
+    ///
+    /// <b>Confining the collapse was not enough, and the reason is worth
+    /// keeping.</b> Naming the section a burst <i>breaches</i> stopped the
+    /// neighbours coming down whole, and left the blast itself still reaching
+    /// them: measured on the ring, force 10 thaws and throws <b>78 of each
+    /// neighbour's 96 pieces</b>, which is a leaf destroyed by any reading but
+    /// the rule's. The field has to be confined, not just the verdict.
+    ///
+    /// Costs nothing on a wall that is one section: every piece is the face's,
+    /// so <c>Wall.tscn</c> answers to the digit either way - which is the
+    /// regression this is checked by.</summary>
+    public static bool Segmented = SegmentedByDefault;
+
+    /// <summary>Whether a burst that went off against section
+    /// <paramref name="face"/> acts on a piece standing in section
+    /// <paramref name="side"/>.
+    ///
+    /// <b>Rubble is reached whatever the face</b> (<paramref name="side"/> below
+    /// zero): the apron lies on the ground inside this cell and has been down
+    /// since it was laid, so a shell kicking it about cannot read as a
+    /// neighbouring wall breaking - which is the whole of what is confined here.
+    ///
+    /// <b>A burst with no face reaches nothing, which is <see cref="Burst"/>
+    /// saying out loud what it already claimed.</b> "It goes off where it was
+    /// fired, which touches nothing - the honest answer" is written above the
+    /// line that places it, and was not true of the line that distributes it: a
+    /// round put through a gap in the masonry went off at the muzzle and threw
+    /// whatever stood within a radius of the gun, which on a ring is the masonry
+    /// at the shooter's back.</summary>
+    public static bool Reaches(int face, int side) =>
+        !Segmented || (face >= 0 && (side < 0 || side == face));
+
     /// <summary>
     /// How much of piece <paramref name="i"/> is still there: one whole, zero
     /// gone.
@@ -1369,6 +1415,9 @@ public sealed partial class WallRig : Node3D
         float blast = Mathf.Max(HeReach * _brick * grow, 0.0001f);
         for (int i = 0; i < _bodies.Count; i++)
         {
+            // One section, and no other - see Reaches.
+            if (!Reaches(face, SideOf(i)))
+                continue;
             Vector3 arm = _bodies[i].Transform.Origin - at;
             float d = arm.Length();
             // Thawed wider than it is pushed, and that gap is the shot. Given an
