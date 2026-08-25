@@ -9793,6 +9793,36 @@ public static class SelfTest
                 + "cruise");
         }
 
+        // --- and when it is in the masonry at all -----------------------------
+        //
+        // The box is a ram, not a hull: it knocks nothing down (Reached does,
+        // geometrically) and cannot touch standing masonry at all, a frozen piece
+        // being a static body. What it does is push loose brick about and stop it
+        // falling through the machine - both things a tank does while driving.
+        // Kept for good by a struck wall, it is an invisible two-metre slab that
+        // catches rubble: measured, the heavy tank's three-leg run then never
+        // settled at all in fifty seconds, because a piece resting on a kinematic
+        // body never sleeps, against 14.68s once the box goes with the order.
+        Check("a parked tank has no ram box, even standing in the rubble it just "
+              + "made, so the heap lands on the ground rather than on the machine",
+            !TankBench.Boxed(false, true, false)
+            && !TankBench.Boxed(false, false, false),
+            "parked over a struck wall: "
+            + $"{TankBench.Boxed(false, true, false)}");
+        Check("and a tank under orders has one either way, because that is the "
+              + "whole of what a ram is",
+            TankBench.Boxed(true, false, false)
+            && TankBench.Boxed(true, true, false)
+            && TankBench.Boxed(true, false, true),
+            "moving at an untouched wall: "
+            + $"{TankBench.Boxed(true, false, false)}");
+        Check("and --parked-box puts the old answer back, and only for a wall "
+              + "that has actually been struck",
+            TankBench.Boxed(false, true, true)
+            && !TankBench.Boxed(false, false, true),
+            $"parked over a struck wall {TankBench.Boxed(false, true, true)}, "
+            + $"over an untouched one {TankBench.Boxed(false, false, true)}");
+
         // --- what the tank pushes with ---------------------------------------
         if (vehicles is { Count: > 0 } garage && field.Atlas is not null)
         {

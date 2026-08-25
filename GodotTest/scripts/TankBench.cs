@@ -231,6 +231,12 @@ public sealed partial class TankBench : SceneRoot
     /// else.</summary>
     private bool _shove = true;
 
+    /// <summary>Whether a wall that has been struck keeps the ram box even after
+    /// the tank has parked - the way it used to work. Off, so the box goes with
+    /// the order and the rubble lands on the ground; see <see cref="Boxed"/> for
+    /// what that costs and what it buys.</summary>
+    private bool _parkedBox;
+
     /// <summary>The view's spring, for the gun. One for the board rather than
     /// one per tank, which on a bench with one tank is the same thing said
     /// twice - but it is the harness's arrangement and there is no reason to
@@ -504,6 +510,11 @@ public sealed partial class TankBench : SceneRoot
                 // judged by. Only the ceiling goes; the wall still comes down.
                 case "--no-shove":
                     _shove = false;
+                    break;
+                // A struck wall keeps the box for good, as it used to - the A/B
+                // the rubble is judged by. See Boxed.
+                case "--parked-box":
+                    _parkedBox = true;
                     break;
                 // The rubble stays where it landed - the A/B the clearing is
                 // judged by, and the flag the wall bench carries under the same
@@ -947,6 +958,31 @@ public sealed partial class TankBench : SceneRoot
     /// down, which is what keeps a wall on the far side of the board from
     /// carrying a kinematic tank around after it.
     /// </summary>
+    /// <summary>Whether the ram box belongs in the masonry this frame.
+    ///
+    /// <b>The box is a ram, not a hull, and that is the whole of it.</b> It does
+    /// not knock anything down - <c>WallRig.Reached</c> does, geometrically - and
+    /// it cannot touch standing masonry at all, because a frozen piece is a
+    /// static body and a kinematic box passes through one. What it does is push
+    /// the loose brick about and stop it falling through the machine, and both of
+    /// those are things a tank does while it is <i>driving</i>.
+    ///
+    /// <b>So it goes when the order does.</b> Parked, the tank is not ramming
+    /// anything - <c>WallRig.Nose</c>'s own sentence - and the board opens with
+    /// the machine inside a ring it does not fit in, so a box pushed in while
+    /// parked lets go of bricks on the first frame and the wall reads as struck
+    /// before anything happened.
+    ///
+    /// <b>What is given up is that the heap the ram made is resting on the box,
+    /// and drops when it goes.</b> That was the reason the struck wall used to
+    /// keep its box for good, and it is the wrong half to keep: an invisible slab
+    /// two metres tall catching brick reads as rubble hanging in the air, which
+    /// is worse than a heap that settles a little late. <paramref name="parked"/>
+    /// - <c>--parked-box</c> - puts the old answer back so the two can be looked
+    /// at side by side.</summary>
+    public static bool Boxed(bool moving, bool struck, bool parked) =>
+        moving || (parked && struck);
+
     private void Ram()
     {
         if (_stage is null || _walls.Count == 0 || _garage.Count == 0)
@@ -959,21 +995,9 @@ public sealed partial class TankBench : SceneRoot
         Vector2 way = tank.Atlas.GroundDirection(tank.Sprite.HullFacing);
         foreach (WallProp prop in _walls)
         {
-            // <b>Moving, or already struck.</b> A parked tank is not ramming
-            // anything - WallRig.Nose's own sentence - and it matters here in a
-            // way it did not when the tank stood a cell away: the board opens with
-            // the machine inside the ring, and a six-sided ring's inner leaf
-            // stands 2.96m off the middle against a hull 6.0m long. It does not
-            // fit, so a box pushed in while parked lets go of fourteen bricks on
-            // the first frame and the wall reads as struck before anything
-            // happened.
-            //
-            // Struck keeps the box in, and that is the half that must not be
-            // dropped: after a ram the tank is parked in the rubble it made, and
-            // the rubble is resting on it. Take the box away then and the heap
-            // sinks through the machine.
+            // In while the order is - see Boxed.
             if (Beside(here, prop.Cell)
-                && (tank.Moving || prop.Rig is { Struck: true }))
+                && Boxed(tank.Moving, prop.Rig is { Struck: true }, _parkedBox))
                 prop.Nose(foot, way, box);
             else
                 prop.Halt();
@@ -1828,6 +1852,9 @@ public sealed partial class TankBench : SceneRoot
                           () => _wallBeam, on => _wallBeam = on);
             _panel.Toggle("wall.shove", "masonry is heavy going  (--no-shove)",
                           () => _shove, on => _shove = on);
+            _panel.Toggle("wall.box", "a struck wall keeps the ram box  "
+                                      + "(--parked-box)",
+                          () => _parkedBox, on => _parkedBox = on);
             _panel.Toggle("wall.crumble", "fallen pieces clear  (--no-crumble)",
                           () => WallRig.Crumbles, on => WallRig.Crumbles = on);
             _panel.Readout("wall.state", () => WallNote());
