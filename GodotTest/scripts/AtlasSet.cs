@@ -324,6 +324,35 @@ public sealed class AtlasSet
                             && UnitsPerPixel > 0.0;
 
     /// <summary>
+    /// The gun's bore, in world units - where a shot leaves, which way, and how
+    /// wide the tube is there. Stamped onto the two shot layers by
+    /// <c>stamp_bore.py</c>.
+    ///
+    /// <b>The radius is the point of it.</b> Every number the flash and its
+    /// smoke are made of is quoted in bore radii - which is what lets one
+    /// <c>muzzle_flash.CONFIG</c> fit three tanks - and the bore is nowhere in
+    /// the frames, which carry pixels and the view and nothing about the gun the
+    /// pixels are of. Same argument as <see cref="Ports"/>, other end of the
+    /// tank.
+    ///
+    /// <b>The point is here for its height and not for its place.</b> Where the
+    /// muzzle is drawn comes from <see cref="Muzzle"/>, which is measured off
+    /// the barrel layer per heading and is therefore exact; projecting this
+    /// point instead would carry <see cref="Project"/>'s rotation about the
+    /// origin, where the render spins about the stamped ring axis - up to 3.3px
+    /// on <c>LTP</c>. What the projection cannot give and this can is <c>z</c>,
+    /// which is what the height map is compared against.
+    ///
+    /// A set without the block reports none, which leaves the rendered flash the
+    /// fallback rather than an error.
+    /// </summary>
+    public Port Bore { get; private set; }
+
+    /// <summary>Whether this set can build its shot itself.</summary>
+    public bool HasBore => Bore.Radius > 0.0f && Bore.Dir.LengthSquared() > 0.0f
+                           && UnitsPerPixel > 0.0;
+
+    /// <summary>
     /// A point or a vector of the model's own frame, in pixels off the shared
     /// anchor, as the hull would be drawn at <paramref name="headingDegrees"/>.
     ///
@@ -997,6 +1026,28 @@ public sealed class AtlasSet
         }
     }
 
+    /// <summary>Take the stamped bore block. Both shot layers carry the same
+    /// one, for <c>stamp_bore.py</c>'s reason, so the second call is a no-op
+    /// rather than a conflict.</summary>
+    private void TakeBore(BoreMeta bore)
+    {
+        if (bore.Point.Length < 3 || bore.Dir.Length < 3 || bore.Radius <= 0.0)
+            return;
+        var dir = new Vector3((float)bore.Dir[0], (float)bore.Dir[1],
+                              (float)bore.Dir[2]);
+        if (dir.LengthSquared() <= 0.0f)
+            return;
+        Bore = new Port(new Vector3((float)bore.Point[0], (float)bore.Point[1],
+                                    (float)bore.Point[2]),
+                        dir.Normalized(), (float)bore.Radius);
+        // The shot layers carry the hull's length too, so a set that ships a
+        // bore and no ports can still place what it builds. Never overwritten:
+        // the ports block is the one stamp_ports fitted, and two fits of one
+        // number are two numbers.
+        if (HullLength <= 0.0 && bore.HullLength > 0.0)
+            HullLength = bore.HullLength;
+    }
+
     private void TakePlates(Dictionary<string, PlateMeta> plates)
     {
         foreach ((string face, PlateMeta plate) in plates)
@@ -1123,6 +1174,8 @@ public sealed class AtlasSet
                 atlas.TakePlates(meta.Hits.Faces);
             if (meta.Ports is not null)
                 atlas.TakePorts(meta.Ports);
+            if (meta.Bore is not null)
+                atlas.TakeBore(meta.Bore);
             if (layer == TrackNames[0] && meta.Track is { Length: > 0 }
                 && meta.UnitsPerPixel > 0.0)
                 atlas.TrackPitch = meta.Track[0].Pitch / meta.UnitsPerPixel;
@@ -1699,6 +1752,12 @@ public sealed class AtlasSet
         /// the fallback rather than a failure.</summary>
         [JsonPropertyName("ports")] public PortsMeta? Ports { get; set; }
 
+        /// <summary>The gun's bore, in world units, on the two shot layers.
+        /// Absent everywhere else and on any set stamped before
+        /// <c>stamp_bore.py</c> - which is what leaves the rendered flash the
+        /// fallback rather than a failure.</summary>
+        [JsonPropertyName("bore")] public BoreMeta? Bore { get; set; }
+
         /// <summary>Per hull heading: is this layer in front of the turret.
         /// Absent on a set rendered before the turret came out of these layers'
         /// holdouts, and absent is the right default - such a set has the turret
@@ -1758,6 +1817,14 @@ public sealed class AtlasSet
         [JsonPropertyName("hull_length")] public double HullLength { get; set; }
         [JsonPropertyName("list")]
         public PortMeta[] List { get; set; } = Array.Empty<PortMeta>();
+    }
+
+    private sealed class BoreMeta
+    {
+        [JsonPropertyName("point")] public double[] Point { get; set; } = { 0, 0, 0 };
+        [JsonPropertyName("dir")] public double[] Dir { get; set; } = { 0, -1, 0 };
+        [JsonPropertyName("radius")] public double Radius { get; set; }
+        [JsonPropertyName("hull_length")] public double HullLength { get; set; }
     }
 
     private sealed class PortMeta

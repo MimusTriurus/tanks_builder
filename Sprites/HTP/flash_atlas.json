@@ -3492,5 +3492,27 @@
   ],
   "packed": true,
   "layer": "flash",
-  "static": false
+  "static": false,
+  "bore": {
+    "point": [
+      0.000962,
+      -0.501325,
+      0.101948
+    ],
+    "dir": [
+      0.001989,
+      -0.999998,
+      0.0
+    ],
+    "dir_from": "muzzle against the ring axis, level",
+    "bearing": 270.114,
+    "bearing_disagreement": 0.785,
+    "shape": "rod",
+    "radius": 0.086791,
+    "radius_px": 14.142,
+    "radius_from": "barrel atlas width across the bore",
+    "radius_spread_px": 0.208,
+    "hull_length": 0.935789,
+    "hull_length_from": "hull atlas broadside fit"
+  }
 }

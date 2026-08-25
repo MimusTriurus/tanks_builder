@@ -18,6 +18,19 @@ public enum FlashSource
     /// <summary>Layers rendered in Blender with the tank, on the shared
     /// anchor.</summary>
     Rendered,
+
+    /// <summary>Built here from <c>muzzle_flash.CONFIG</c> and its
+    /// <c>SMOKE</c> - see <see cref="ProcFlash"/> and <see cref="ProcFume"/>.
+    ///
+    /// A third track rather than a flag beside the other two, because that is
+    /// what it is: the same shot drawn three ways, and the whole use of the
+    /// choice is standing one of them beside another. The pair before it exists
+    /// for the same sentence - "the rendered one looks better" is not a claim to
+    /// make from memory.
+    ///
+    /// Falls back to <see cref="Sheet"/> on a set with no stamped bore, which is
+    /// every set shipped before <c>stamp_bore.py</c> existed.</summary>
+    Built,
 }
 
 /// <summary>
@@ -821,12 +834,27 @@ public sealed partial class TankSprite : Node2D
     /// <summary>Whether this tank can show the rendered flash at all.</summary>
     public bool CanRender => Atlas?.HasEffects == true;
 
-    /// <summary>The source actually in use - Rendered falls back to Sheet on a
-    /// tank whose scene has no separated barrel.</summary>
+    /// <summary>Whether this tank can build its shot at all - a stamped bore is
+    /// what every length in the flash and its smoke is quoted against.</summary>
+    public bool CanBuild => Atlas?.HasBore == true;
+
+    /// <summary>The source actually in use. Rendered falls back to Sheet on a
+    /// tank whose scene has no separated barrel; Built falls back on one whose
+    /// atlas carries no bore. Both fall back rather than failing, which is what
+    /// keeps a set stamped before either tool existed drawing what it shipped
+    /// with.</summary>
     public FlashSource ActiveSource =>
-        Source == FlashSource.Rendered && CanRender
-            ? FlashSource.Rendered
-            : FlashSource.Sheet;
+        Source switch
+        {
+            FlashSource.Built when CanBuild => FlashSource.Built,
+            FlashSource.Rendered when CanRender => FlashSource.Rendered,
+            _ => FlashSource.Sheet,
+        };
+
+    /// <summary>Whether the shot on screen is built here rather than read off the
+    /// atlas. The pair to <see cref="ExhaustIsProcedural"/> and its siblings, and
+    /// asserted the same way: exactly one of the sources draws.</summary>
+    public bool ShotIsProcedural => ActiveSource == FlashSource.Built;
 
     /// <summary>
     /// Pitch, applied as a shear rather than a rotation.
@@ -1345,8 +1373,26 @@ public sealed partial class TankSprite : Node2D
             }
             if (name == AtlasSet.FireName)
                 AddChild(Blaze = new ProcFire { Tank = this });
+            // The shot's pair, in the slots the rendered ones would have taken.
+            // Their z-index is worked out per draw against the turret rather
+            // than read off a stamp - see ProcFume.OverTurret - so tree order
+            // only decides which of the two lands on top of the other, and the
+            // fire goes over its own smoke for the reason the burning tank's
+            // does.
+            if (name == "smoke")
+                AddChild(Fume = new ProcFume { Tank = this });
+            if (name == "flash")
+                AddChild(Flare = new ProcFlash { Tank = this });
         }
     }
+
+    /// <summary>The built muzzle smoke, in <see cref="LayerOrder"/>'s smoke
+    /// slot.</summary>
+    public ProcFume? Fume { get; private set; }
+
+    /// <summary>The built muzzle flash, in <see cref="LayerOrder"/>'s flash
+    /// slot.</summary>
+    public ProcFlash? Flare { get; private set; }
 
     /// <summary>The procedural column, built in <see cref="LayerOrder"/>'s burn
     /// slot. Kept so the checks and the readout can ask what it put up.</summary>

@@ -1311,7 +1311,10 @@ public sealed partial class Main : SceneRoot
 				_flashSource = userArgs[i + 1].Equals("sheet",
 					StringComparison.OrdinalIgnoreCase)
 					? FlashSource.Sheet
-					: FlashSource.Rendered;
+					: userArgs[i + 1].Equals("built",
+						StringComparison.OrdinalIgnoreCase)
+						? FlashSource.Built
+						: FlashSource.Rendered;
 			else if (userArgs[i] == "--turret" && i + 1 < userArgs.Length
 					 && double.TryParse(userArgs[i + 1], out double bearing))
 				_startTurret = bearing;
@@ -3749,11 +3752,21 @@ public sealed partial class Main : SceneRoot
 			_burning = on;
 			Tick.UpdateBurn(Active, 0.0);
 		});
-		ui.Choice("effects.flash_source", "flash source  (V)", new[] { "rendered", "sheet" },
-			() => _tank.Source == FlashSource.Rendered ? 0 : 1,
+		// One list for the labels and the values, because panel.json picks a row's
+		// opening value by *label* ("default": "rendered") and the enum's own
+		// order is Sheet, Rendered, Built. Written as two orderings once and the
+		// harness opened on the sheet: the getter handed back (int)Rendered = 1,
+		// which is "sheet" in a list that starts at "rendered", and the file's
+		// default resolved to index 0 and set Sheet through the setter. Nothing
+		// said so - the flash still drew, from the other track.
+		FlashSource[] sources =
+			{ FlashSource.Rendered, FlashSource.Sheet, FlashSource.Built };
+		ui.Choice("effects.flash_source", "flash source  (V)",
+			new[] { "rendered", "sheet", "built" },
+			() => Math.Max(Array.IndexOf(sources, _tank.Source), 0),
 			i =>
 			{
-				_tank.Source = i == 0 ? FlashSource.Rendered : FlashSource.Sheet;
+				_tank.Source = sources[Math.Clamp(i, 0, sources.Length - 1)];
 				_tank.QueueRedraw();
 			});
 		// Above its own level and pivot, because it gates both: a slider on a
@@ -5224,9 +5237,9 @@ public sealed partial class Main : SceneRoot
 				_calibre = (_calibre + 1) % Ordnance.Count;
 				break;
 			case Key.V:
-				_tank.Source = _tank.Source == FlashSource.Rendered
-					? FlashSource.Sheet
-					: FlashSource.Rendered;
+				// Three now, so it cycles rather than toggling. Same key: which
+				// track is drawing is one question however many answers it has.
+				_tank.Source = (FlashSource)(((int)_tank.Source + 1) % 3);
 				_tank.QueueRedraw();
 				break;
 			case Key.Escape: CancelOrder(); break;

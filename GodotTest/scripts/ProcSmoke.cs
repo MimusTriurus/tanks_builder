@@ -457,7 +457,7 @@ public sealed partial class ProcSmoke : Node2D
     /// puff and the stacking of them, and neither depends on which vent the puffs
     /// came out of. Named for what it draws rather than for either column, which
     /// the text around it still is.</summary>
-    private static readonly Shader Section = new() { Code = ColumnShaderCode };
+    internal static readonly Shader Section = new() { Code = ColumnShaderCode };
 
     /// <summary>The shader's text, so the three claims that fail into a
     /// deliberate-looking picture can be asserted rather than remembered -
