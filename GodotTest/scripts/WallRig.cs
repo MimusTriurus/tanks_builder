@@ -490,9 +490,19 @@ public sealed partial class WallRig : Node3D
         _tank = null;
         _driven = false;
         _nosePlaced = false;
+        _noseGone = 0.0f;
+        _noseAim = Vector3.Zero;
         _clock = -1.0f;
         _beam = null;
     }
+
+    /// <summary>Whether piece <paramref name="i"/> is still where it was laid -
+    /// frozen, and never let go by a shot or a ram.
+    ///
+    /// Asked rather than worked out from <see cref="At"/>: a piece knocked out of
+    /// a wall may come to rest a hand's width from its seat, so "has it moved" is
+    /// a threshold, while "was it let go" is a fact the rig already holds.</summary>
+    public bool Held(int i) => i >= 0 && i < _bodies.Count && !_live.Contains(i);
 
     /// <summary>Where piece <paramref name="i"/> is, back in the cell's own
     /// units. The basis comes straight over: the bodies carry no scale, so
@@ -531,8 +541,24 @@ public sealed partial class WallRig : Node3D
     /// a tracer of its own, and a second line over it is a second answer to which
     /// way the round came. See <see cref="Beam"/>, whose whole claim is that the
     /// line drawn is the line fired.</param>
+    /// <param name="from">Where the round started, as a coordinate along
+    /// <paramref name="into"/> in the prop's own metres, or negative infinity for
+    /// "from outside" - which is what every shot at a wall was until a tank stood
+    /// inside one.
+    ///
+    /// <b>One coordinate rather than a point, because one is all that is
+    /// answerable.</b> <see cref="Burst"/> takes the face as the nearest piece
+    /// along the shot and <see cref="Pierce"/> runs its channel from behind the
+    /// masonry; both read "the round comes from far away up this line", which is
+    /// true of every shot fired at a wall from another cell and false of one fired
+    /// from the middle of a ring. Measured on that ring: a round aimed at one leaf
+    /// blew the leaf <i>behind</i> the tank, because the piece with the smallest
+    /// projection is the one at the shooter's back. Across and up are left where
+    /// they were - the same restraint <c>Burst</c> already states about its own
+    /// face - so this says where the round began and not where on the plate it
+    /// struck, which is still the debt named in the bench's notes.</param>
     public void Fire(Strike shot, Vector3 into, float force = 1.0f,
-                     bool beam = true)
+                     bool beam = true, float from = float.NegativeInfinity)
     {
         // Flattened and normalised here rather than trusted: the shot runs along
         // the ground whatever the caller handed over, and a degenerate direction
@@ -550,6 +576,7 @@ public sealed partial class WallRig : Node3D
         }
         into = into.Normalized();
         _shot = shot;
+        _from = from;
         _force = Mathf.Max(0.0f, force);
         _clock = 0.0f;
         _beam = null;
@@ -565,6 +592,11 @@ public sealed partial class WallRig : Node3D
         if (!beam)
             _beam = null;
     }
+
+    /// <summary>Where the round in flight started, along its own direction, in the
+    /// prop's metres - see the <c>from</c> parameter of <see cref="Fire"/>.
+    /// Negative infinity means "outside", which is every shot but one.</summary>
+    private float _from = float.NegativeInfinity;
 
     /// <summary>A tank drives into it.
     ///
@@ -727,6 +759,93 @@ public sealed partial class WallRig : Node3D
     private Vector3 _noseSize;
     private bool _nosePlaced;
 
+    /// <summary>How far behind its nose a driven box has swept, in metres: how
+    /// far it has advanced, capped at its own length.
+    ///
+    /// The cap, and <see cref="Advance"/> is what it caps. Both are named
+    /// functions rather than expressions inside <see cref="Drive"/>, because
+    /// together they are the whole of the rule that a tank knocks a brick out by
+    /// driving into it - and the only part of a ram that can be asserted at all:
+    /// the rest is a live solver, and <c>--selftest</c> quits before the first
+    /// frame of a scene.</summary>
+    public static float Swept(float travel, float length) =>
+        Mathf.Clamp(travel, 0.0f, Mathf.Max(length, 0.0f));
+
+    /// <summary>How far the nose has advanced along the heading it is pointing
+    /// now: what it had, plus this step's <paramref name="ahead"/> - and nothing
+    /// at all of what it had if the heading has turned, <paramref name="held"/>
+    /// being the cosine between the old heading and the new.
+    ///
+    /// <b>Advance, not travel, and that is the whole of it.</b> A band behind the
+    /// nose stands for ground the front face has already crossed, and it says
+    /// that about <i>one</i> heading: turn, and the volume behind the new nose
+    /// was never crossed by the new nose, so what was banked belongs to a
+    /// direction the box no longer faces. Kept across the turn it means a hull
+    /// pivoting in a yard it does not fit in lets go of everything it overlaps -
+    /// which is the bug this replaces, arriving a second time by a longer road: a
+    /// trip out and back banks the full length, and from then on every frame,
+    /// parked or pivoting, sweeps the whole footprint.
+    ///
+    /// <b>Backwards sweeps nothing</b>, by the same sentence. The box is aimed by
+    /// the hull's facing, so in reverse the leading face is the tail and the band
+    /// is behind the wrong end; the safe way to be wrong is frozen, because a
+    /// brick left frozen is a brick the hull clips and a brick let go is a wall
+    /// that fell for free.</summary>
+    public static float Advance(float had, float ahead, float held) =>
+        (held < NoseHeld ? 0.0f : Mathf.Max(had, 0.0f))
+        + Mathf.Max(ahead, 0.0f);
+
+    /// <summary>How straight a heading has to stay, as a cosine, for the band
+    /// behind the nose to carry over from one step to the next.
+    ///
+    /// Measured off the board rather than picked: the slowest hull turns at
+    /// 140 deg/s, which is 2.3 deg in a 60Hz step and a cosine of 0.9992 - well
+    /// under this - while a leg driven straight holds its facing to the float,
+    /// cosine 1.0. So a turn always resets and a straight run never does, with
+    /// three decimal places of room on either side.</summary>
+    public const float NoseHeld = 0.9999f;
+
+    /// <summary>How far past a brick the nose has to be before that brick counts
+    /// as driven through, as a fraction of a brick's own length.
+    ///
+    /// <b>Through it, not up to it, and this is the half the band could not say.</b>
+    /// The window used to run from the band's far end up to the tip, so a brick
+    /// the nose had merely poked into came out - and a tank driving back into the
+    /// ring parks with its nose 3.0m out against 2.76m of clear yard, poking a
+    /// quarter of a metre into the leaf it stopped at. That is the innermost
+    /// course of that leaf, the course everything above it stands on, so the leaf
+    /// in front of a tank that had come to rest fell down: measured, an out-and-
+    /// back trip let go of 161 pieces where the one leaf it drove through is 89.
+    ///
+    /// Half a brick rather than a brick, because it is the tip's clearance past
+    /// the piece's <i>centre</i>, and half the long side is the worst a piece can
+    /// present to a nose whatever way it was laid. It errs frozen, which is the
+    /// side to err on: a brick left frozen is one the hull clips, a brick let go
+    /// is a wall that fell for free.</summary>
+    public const float NoseThrough = 0.5f;
+
+    /// <summary>The near end of the window <see cref="Reached"/> is given,
+    /// in metres: <see cref="NoseThrough"/> of a brick <i>behind</i> the tip,
+    /// so the number is negative and a piece level with the tip is outside it.
+    ///
+    /// Named for the same reason as <see cref="Swept"/> and
+    /// <see cref="Advance"/>: the sign is the whole of the rule, and a live
+    /// solver is the one thing <c>--selftest</c> cannot run.</summary>
+    public static float Through(float brick) => -brick * NoseThrough;
+
+    /// <summary>How far the driven box has advanced along its current heading, in
+    /// metres. The reach behind the nose in <see cref="Drive"/>, reset with the
+    /// box and reset by a turn: a tank that drove off, came back and swung round
+    /// sweeps from where it is pointing now, not from everywhere it has ever
+    /// been.</summary>
+    private float _noseGone;
+
+    /// <summary>The heading <see cref="_noseGone"/> was banked along, so that
+    /// <see cref="Advance"/> can be told whether the box still faces it. Read
+    /// only while <see cref="_nosePlaced"/>, which is why nothing has to seed
+    /// it.</summary>
+    private Vector3 _noseAim;
+
     /// <summary>
     /// Where the tank is and how big, in metres, in the prop's own frame -
     /// pushed every frame by whoever is driving it.
@@ -777,6 +896,8 @@ public sealed partial class WallRig : Node3D
             AddChild(_tank);
             _tankSize = size;
             _nosePlaced = false;
+            _noseGone = 0.0f;
+            _noseAim = Vector3.Zero;
         }
     }
 
@@ -789,30 +910,83 @@ public sealed partial class WallRig : Node3D
             return;
         _driven = false;
         _nosePlaced = false;
+        _noseGone = 0.0f;
+        _noseAim = Vector3.Zero;
         _tank?.QueueFree();
         _tank = null;
     }
 
     /// <summary>One physics step of a box the board is driving: put it where it
-    /// has got to, and let go of what it now covers.
+    /// has got to, and let go of what it has <b>driven into</b> since it arrived.
     ///
-    /// The band is the box itself plus this step's travel behind and a step and a
-    /// half ahead, for <see cref="Reached"/>'s reason. Behind as well as ahead
-    /// because the box has length: a piece level with the tank's flank has been
-    /// driven into just as surely as one at its nose.</summary>
+    /// <b>The band is anchored to advance, not to the box and not to travel.</b>
+    /// A tank knocks a brick out by driving into it; standing in one, turning in
+    /// one and coming to rest with the nose over one are not the same act, and a
+    /// board can put a tank somewhere it does not fit. This one does: the ring
+    /// stands on the tank's own cell, its nearest standing brick 2.76m off the
+    /// middle against hull corners of 2.88 to 3.67m, so the box overlaps masonry
+    /// at every heading and sweeps all six leaves as the hull turns on the spot.
+    /// Written as the whole footprint, that turn let go of 452 to 468 pieces out
+    /// of 536 - and the bench's own readout named it, because the speed at the
+    /// moment the masonry first gave was <b>0.0 m/s</b>: the wall was not rammed,
+    /// it was swept.
+    ///
+    /// So the reach behind the nose is <see cref="Advance"/>, capped by
+    /// <see cref="Swept"/> at the box's own length - which is exactly the ground
+    /// the front face has crossed along the heading it faces now. Nothing at a
+    /// standstill, the full footprint once the tank has driven its own length
+    /// down one lane, and continuous in between, so no brick the nose has passed
+    /// is left frozen for the hull to slide through: <see cref="Thaw"/> is
+    /// idempotent and the band grows as fast as the tip does.
+    ///
+    /// <b>Travel alone was not enough, and the second report is why.</b> A plain
+    /// odometer is only ever zero once - on the frame the board is built - so it
+    /// fixed the opening and nothing after it. Two apothems is 7.05m against a
+    /// 6.0m box, so <i>every</i> approach from outside banks the full length
+    /// before the tank parks; and the box is not taken down in between, because
+    /// <c>Beside</c> is the cell and its six, and a struck wall keeps the box in
+    /// whether the tank moves or not. A trip out and back therefore left the band
+    /// saturated, and every frame after it - parked, pivoting, or merely aimed at
+    /// a leaf from the next hex - swept the whole footprint again. Resetting on a
+    /// turn is what makes the band a statement about one lane.
+    ///
+    /// The flank term this replaces read "a piece level with the tank's flank has
+    /// been driven into just as surely as one at its nose", and that is true of a
+    /// tank arriving from outside - whose flank only ever passes bricks its nose
+    /// went through first, which are let go already. What it was really covering
+    /// was the sideways cases: a hull spawned inside masonry, and one turning in
+    /// place. Neither is a ram.
+    ///
+    /// <b>What is left over is named rather than fixed:</b> parked in the middle
+    /// the hull's nose stands 3.0m out against 2.76m of clear yard, so the last
+    /// quarter-metre of an approach really does push the tip into the far leaf's
+    /// inner face. That is a brick or two, not a leaf, and the lever for it is
+    /// the one already named - the tank does not fit in the ring.</summary>
     private void Drive(float step)
     {
         if (_tank is null)
             return;
         Vector3 was = _nosePlaced ? _tank.GlobalPosition : _noseAt;
+        Vector3 aim = _nosePlaced ? _noseAim : _noseInto;
         _tank.GlobalTransform = new Transform3D(
             Basis.LookingAt(_noseInto, Vector3.Up), _noseAt);
         _nosePlaced = true;
-        float gone = (_noseAt - was).Length();
+        // Along the heading, never the plain length of the step: a hull pivoting
+        // about its contact point covers ground without advancing a metre, and
+        // the band is a statement about ground the front face has crossed.
+        float ahead = (_noseAt - was).Dot(_noseInto);
+        _noseGone = Advance(_noseGone, ahead, aim.Dot(_noseInto));
+        _noseAim = _noseInto;
         Vector3 tip = _noseAt + _noseInto * (_noseSize.Z * 0.5f);
         int had = _live.Count;
+        // Nothing forward of the nose at all, and less than nothing: a piece has
+        // to be NoseThrough of a brick behind the tip before the tank counts as
+        // having driven through it. The forward term this replaces was there
+        // against tunnelling, and the band makes it unnecessary - it grows by the
+        // same step the tip takes, so a piece skipped by one long frame is caught
+        // by the next rather than missed.
         Reached(tip, _noseInto, _noseSize.X * 0.5f + _brick,
-                _noseSize.Z + gone, gone * 1.5f);
+                Swept(_noseGone, _noseSize.Z), Through(_brick));
         // Struck when the tank first reaches a brick, and never before: see
         // Nose. The shot is named here rather than at the trigger because with a
         // driven nose there is no trigger - the tank arriving is the whole event.
@@ -860,9 +1034,41 @@ public sealed partial class WallRig : Node3D
         // then a standoff back towards the shooter. Only the along-shot
         // coordinate is measured - across and up stay where they were, so this
         // is still the middle of the plate and not a corner of it.
+        // Nearest along the shot, and never nearer than the round started: a
+        // ring is masonry on both sides of the gun, so the smallest projection of
+        // all is the leaf at the shooter's back. Measured on it - a round aimed at
+        // one leaf took the opposite one out, which reads as the wall answering
+        // the wrong side rather than as the burst being placed from infinity.
         float front = float.MaxValue;
-        foreach (RigidBody3D b in _bodies)
-            front = Mathf.Min(front, b.Transform.Origin.Dot(into));
+        for (int i = 0; i < _bodies.Count; i++)
+        {
+            // Rubble is not masonry, Clearance's own sentence arriving where it
+            // decides something: the apron lies on the ground inside the cell, so
+            // a round fired from the middle of a ring has a fallen brick at its
+            // feet - measured, the nearest piece ahead was 0.13m away and the
+            // charge went off beside the tank.
+            if (_plan is { } plan && i < plan.Blocks.Count
+                && (plan.Blocks[i].Chip || plan.Blocks[i].Course < 0))
+                continue;
+            Vector3 arm = _bodies[i].Transform.Origin;
+            float d = arm.Dot(into);
+            if (d < _from)
+                continue;
+            // And within a brick of the line, because the face is what the round
+            // would actually meet. Measured on the ring: a leaf running alongside
+            // the shot has pieces at every projection, so the smallest of them was
+            // a brick 0.13m along - beside the tank rather than in front of it -
+            // and the charge went off there. A plate met head on is unmoved by
+            // this: its near face spans the line, so the nearest piece on the line
+            // is the nearest piece.
+            if ((arm - into * d).Length() > _brick)
+                continue;
+            front = Mathf.Min(front, d);
+        }
+        // Nothing ahead of it: a round fired out of a gap in the masonry. It goes
+        // off where it was fired, which touches nothing - the honest answer.
+        if (front == float.MaxValue)
+            front = _from;
         Vector3 at = into * (front - HeReach * _brick * HeStandoff)
                      + Vector3.Up * mid;
         _beam = (-into * reach + Vector3.Up * mid, at);
@@ -922,7 +1128,11 @@ public sealed partial class WallRig : Node3D
         Vector3 side = into.Cross(Vector3.Up).Normalized();
         float lane = 0.0f, crest = 0.0f;
         foreach (RigidBody3D b in _bodies)
-            if (b.Transform.Origin.Y > crest)
+            // Ahead of where the round started, for Burst's reason: masonry at
+            // the shooter's back is not what the round is aimed at, and a ring is
+            // masonry on both sides of the gun.
+            if (b.Transform.Origin.Dot(into) >= _from
+                && b.Transform.Origin.Y > crest)
             {
                 crest = b.Transform.Origin.Y;
                 lane = b.Transform.Origin.Dot(side);
@@ -933,6 +1143,12 @@ public sealed partial class WallRig : Node3D
         float lintel = ApBore * _brick + _course;
         mid = crest > lintel ? Mathf.Min(ApAim, crest - lintel) : ApAim;
         Vector3 from = -into * reach + side * lane + Vector3.Up * mid;
+        // Brought forward to where the round started, when that is known: the
+        // channel is everything ahead of its own beginning, and begun from
+        // infinity it drills the masonry behind the gun as well as the masonry in
+        // front of it. Burst's lesson in the other half of the same shot.
+        if (!float.IsNegativeInfinity(_from))
+            from += into * (_from - from.Dot(into));
         _beam = (from, into * reach + Vector3.Up * mid);
         // Everything standing in the bore, both leaves, and nothing behind the
         // wall - which is nothing, because the line runs out of masonry and the

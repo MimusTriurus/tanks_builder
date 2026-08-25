@@ -9425,6 +9425,23 @@ public static class SelfTest
                     && probe.FlatCellAt(from + dir.Normalized() * shutRun) != wall,
                     "the landing point is inside the blocking cell, so asking it "
                     + "which cell it is in would have answered");
+                // And the cell it fires from, which is the one cell a set of
+                // cells cannot speak for: a wall stands on the rim of its own
+                // hex, so a tank inside a ring of it was firing straight through
+                // its own masonry. Both halves, because the default is what every
+                // other board on this project answers and the other is the whole
+                // feature.
+                (float rimRun, Vector2I? rimAt, bool rimStop) =
+                    TankTick.Track(probe, from, dir, top, none, rim: true);
+                Check("a line crosses the cell it fires from when nothing on it "
+                      + "bars the way out",
+                    !openStop && openAt is null,
+                    $"stopped at {openAt} after {openRun:F0}px with no rim");
+                Check("and stops on that cell when something does - the one hex a "
+                      + "set of cells cannot answer for, because a wall stands on "
+                      + "its rim rather than in it",
+                    rimStop && rimAt == home && rimRun > 0.0f,
+                    $"stopped at {rimAt} after {rimRun:F0}px");
 
                 // The wiring, which is the half that rots: Track is handed a set
                 // and Reach is what builds one. A tank is wanted for that, and a
@@ -9612,6 +9629,63 @@ public static class SelfTest
         Check("and its shadow thins with it rather than being eaten away",
             WallStack.ShadeCode.Contains("ALPHA = ink * left"),
             "the shadow does not read how much is left");
+
+        // --- what a ram lets go of -------------------------------------------
+        //
+        // A tank knocks a brick out by driving into it. Standing in one and
+        // turning in one are not the same act, and this board makes the
+        // difference load-bearing: the ring stands on the tank's own cell and
+        // leaves 2.76m clear against a medium hull that turns through 3.18m, so
+        // the box overlaps masonry at every heading. Written as the whole
+        // footprint, an ordinary order out of the yard let go of 452 to 468
+        // pieces of 536 before the tank had moved at all - and the bench's own
+        // readout said so, because the speed at the moment the masonry first
+        // gave was 0.0 m/s.
+        //
+        // This is the one part of a ram that can be asserted without a frame:
+        // everything else is a live solver, and --selftest quits first.
+        Check("a driven box that has not moved has swept nothing behind its "
+              + "nose, so turning on the spot is not a ram",
+            WallRig.Swept(0.0f, 6.0f) == 0.0f,
+            $"{WallRig.Swept(0.0f, 6.0f):F2}m of reach at a standstill");
+        Check("and once it has driven its own length it has swept all of it, and "
+              + "never more",
+            Mathf.IsEqualApprox(WallRig.Swept(6.0f, 6.0f), 6.0f)
+            && Mathf.IsEqualApprox(WallRig.Swept(60.0f, 6.0f), 6.0f),
+            $"{WallRig.Swept(6.0f, 6.0f):F2}m at its length, "
+            + $"{WallRig.Swept(60.0f, 6.0f):F2}m ten lengths on");
+        Check("and in between it is exactly how far it has come, so no brick the "
+              + "nose has passed is left frozen for the hull to slide through",
+            Mathf.IsEqualApprox(WallRig.Swept(2.5f, 6.0f), 2.5f),
+            $"{WallRig.Swept(2.5f, 6.0f):F2}m after 2.50m");
+        Check("a nose that holds its heading banks what it drove, so a straight "
+              + "leg adds up",
+            Mathf.IsEqualApprox(WallRig.Advance(2.0f, 1.0f, 1.0f), 3.0f),
+            $"{WallRig.Advance(2.0f, 1.0f, 1.0f):F2}m after 2.00m and 1.00m more");
+        Check("and a nose that turns starts over, because the ground behind a new "
+              + "heading was never crossed by the new nose - which is what stops a "
+              + "hull pivoting in a yard it does not fit in from letting go of "
+              + "everything it overlaps",
+            WallRig.Advance(6.0f, 0.0f, WallRig.NoseHeld - 0.0005f) == 0.0f
+            && Mathf.IsEqualApprox(WallRig.Advance(6.0f, 0.0f, 1.0f), 6.0f),
+            $"{WallRig.Advance(6.0f, 0.0f, WallRig.NoseHeld - 0.0005f):F2}m "
+            + "across a turn, "
+            + $"{WallRig.Advance(6.0f, 0.0f, 1.0f):F2}m across none");
+        Check("and the slowest hull's own turn is enough of one, while a leg "
+              + "driven straight is not",
+            Mathf.Cos(Mathf.DegToRad(140.0f / 60.0f)) < WallRig.NoseHeld
+            && WallRig.NoseHeld < 1.0f,
+            $"cos {Mathf.Cos(Mathf.DegToRad(140.0f / 60.0f)):F5} in a 60Hz step "
+            + $"against {WallRig.NoseHeld:F5}");
+        Check("backing up sweeps nothing, the band being behind the wrong end of "
+              + "a box aimed by the hull's facing",
+            Mathf.IsEqualApprox(WallRig.Advance(2.0f, -1.0f, 1.0f), 2.0f),
+            $"{WallRig.Advance(2.0f, -1.0f, 1.0f):F2}m after 1.00m in reverse");
+        Check("and the window stops short of the tip by half a brick, so masonry "
+              + "the nose has only come to rest against is not driven through",
+            WallRig.Through(0.6f) < 0.0f
+            && Mathf.IsEqualApprox(WallRig.Through(0.6f), -0.3f),
+            $"the near end at {WallRig.Through(0.6f):F2}m on a 0.60m brick");
 
         // --- what the tank pushes with ---------------------------------------
         if (vehicles is { Count: > 0 } garage && field.Atlas is not null)

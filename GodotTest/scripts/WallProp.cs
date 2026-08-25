@@ -219,8 +219,8 @@ public sealed partial class WallProp : Node
     /// <summary>Fire at it. <paramref name="into"/> is in the prop's frame -
     /// <see cref="Into"/> or <see cref="Arriving"/>.</summary>
     public void Fire(WallRig.Strike shot, Vector3 into, float force,
-                     bool beam = true) =>
-        _rig?.Fire(shot, into, force, beam);
+                     bool beam = true, float from = float.NegativeInfinity) =>
+        _rig?.Fire(shot, into, force, beam, from);
 
     /// <summary>The solved-flights path, for <c>--solved</c>.</summary>
     public void Fell(WallFall.Shot shot) =>
@@ -291,6 +291,100 @@ public sealed partial class WallProp : Node
         float gauge = (float)(tank.Atlas.TrackArm * 2.0) * scale * metres;
         return new Vector3(
             gauge > 0.01f ? gauge : length * 0.5f, WallRig.TankTall, length);
+    }
+
+    /// <summary>How close the standing masonry comes to the middle of its own
+    /// cell, in metres.
+    ///
+    /// What a ring leaves for whatever parks inside it, and so the number that
+    /// says whether the machine fits the yard it opens in - against the half
+    /// diagonal of <see cref="Box"/>, because a hull turns. Printed rather than
+    /// left to a comment: it decides whether a tank on this cell spends its life
+    /// clipping through brick, and nothing on screen distinguishes that from a
+    /// wall drawn a little too close.
+    ///
+    /// Rubble is not masonry here. The apron lies on the ground inside the cell
+    /// and would answer every time; what is being asked is what is standing up.
+    /// </summary>
+    public float Clearance()
+    {
+        if (_plan is null)
+            return float.PositiveInfinity;
+        float near = float.PositiveInfinity;
+        foreach (WallKit.Block block in _plan.Blocks)
+        {
+            if (block.Chip || block.Course < 0)
+                continue;
+            var to = new Vector3(block.Seat.X, 0.0f, block.Seat.Z);
+            float far = to.Length();
+            if (far < 1e-4f)
+                return 0.0f;
+            Vector3 way = to / far;
+            // The block's own reach along that ray - exact for a box, which is
+            // what these are.
+            float over = Mathf.Abs(block.Turn.X.Dot(way)) * block.Half.X
+                         + Mathf.Abs(block.Turn.Y.Dot(way)) * block.Half.Y
+                         + Mathf.Abs(block.Turn.Z.Dot(way)) * block.Half.Z;
+            near = Mathf.Min(near, far - over);
+        }
+        return near * WallRig.MetresPerCell;
+    }
+
+    /// <summary>Whether standing masonry lies across a shot leaving the middle of
+    /// this cell along <paramref name="flat"/>.
+    ///
+    /// <b>The question a cell-sized obstacle cannot answer.</b> What stops a round
+    /// is a set of cells - <c>TankTick.Obstacles</c> - and the walk skips the cell
+    /// it fires from, which is right for everything else on the board and wrong
+    /// for exactly one thing: a wall stands on the <i>rim</i> of its cell, so a
+    /// tank inside a ring of it was firing through its own masonry. This is the
+    /// finer resolution, and it is one predicate rather than a finer grid.
+    ///
+    /// <b>Measured off the pieces, never off <see cref="Bearing"/> and
+    /// <c>Sides</c>.</b> Those two do say which edges a wall was laid on, but
+    /// reading them here means writing the fan's sign convention down a second
+    /// time, and a wall with one leaf would then bar shots through the five edges
+    /// it does not cover - masonry invented by arithmetic. Walking the blocks
+    /// answers the same question with nothing assumed, the way
+    /// <see cref="Clearance"/> already does.
+    ///
+    /// <b>And it asks the rig, so a leaf that has fallen stops barring.</b> A ring
+    /// with one side driven through is a ring a tank can shoot out of, which is
+    /// the whole of what makes this a rule rather than a wall of glass.
+    ///
+    /// Rubble is not masonry here, for <see cref="Clearance"/>'s reason: the apron
+    /// lies on the ground inside the cell and would answer every heading.</summary>
+    public bool Bars(Vector2 flat)
+    {
+        if (_plan is null || flat.LengthSquared() < 1e-12f)
+            return false;
+        Vector3 into = Into(flat.Normalized());
+        into.Y = 0.0f;
+        if (into.LengthSquared() < 1e-12f)
+            return false;
+        into = into.Normalized();
+        // Half a brick across. The pieces of a leaf sit about a brick apart along
+        // their edge, so a ray leaving the middle passes within half of one of
+        // some piece's centre - and a corridor wider than that starts answering
+        // for the leaf on the next edge round.
+        float lane = WallKit.BrickLong * 0.5f;
+        for (int i = 0; i < _plan.Blocks.Count; i++)
+        {
+            WallKit.Block block = _plan.Blocks[i];
+            if (block.Chip || block.Course < 0)
+                continue;
+            if (_rig is { } rig && !rig.Held(i))
+                continue;
+            var to = new Vector3(block.Seat.X, 0.0f, block.Seat.Z);
+            float along = to.Dot(into);
+            // Behind the shot: the far leaf of a ring is not in the way of a round
+            // going the other direction.
+            if (along <= 0.0f)
+                continue;
+            if ((to - into * along).Length() <= lane)
+                return true;
+        }
+        return false;
     }
 
     /// <summary>Where the pieces have got to, in the cell's own units - through

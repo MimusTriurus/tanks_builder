@@ -81,6 +81,22 @@ public sealed class TankTick
     /// </summary>
     public IReadOnlySet<Vector2I> Obstacles = new HashSet<Vector2I>();
 
+    /// <summary>Whether what stands on a cell stops a round <b>leaving</b> it in a
+    /// given direction - the one question <see cref="Obstacles"/> cannot be asked,
+    /// because it is a set of cells and this is about the rim of one.
+    ///
+    /// <b>A hook rather than a second set, and unanswered by default.</b> Every
+    /// other solid thing on this board occupies a cell, so the walk skipping the
+    /// cell it fires from is right: a tank does not shoot itself and the ground
+    /// under a gun does not block it. A wall is the exception - it stands on the
+    /// <i>edges</i> of its cell - and a board that has none answers null and gets
+    /// exactly the walk it had.
+    ///
+    /// The direction is passed because the answer depends on it: a wall covering
+    /// one edge bars one way out and no other, and a ring that has had a side
+    /// driven through bars five.</summary>
+    public Func<Vector2I, Vector2, bool>? Barred;
+
     /// <summary>The view's spring. A gun going off shoves it - see
     /// <see cref="Fire"/> - and a bench without one simply does not shake.
     /// </summary>
@@ -1257,7 +1273,14 @@ public sealed class TankTick
         // be crossed" and a shell does not care which kind of thing is in one.
         foreach (Vector2I cell in Obstacles)
             tanks.Add(cell);
-        return Track(Field, ground, dir, top + Field.Lift * Clearance, tanks);
+        // And whether the cell it fires from stops it on the way out - see Barred.
+        // Asked of the walk's own starting cell rather than of Vehicle.Cell: those
+        // are the same hex whenever the tank is parked, and the walk is what the
+        // answer is for.
+        bool rim = Barred is not null
+                   && Barred(Field.FlatCellAt(ground), dir);
+        return Track(Field, ground, dir, top + Field.Lift * Clearance, tanks,
+                     rim);
     }
 
     /// <summary>
@@ -1271,6 +1294,12 @@ public sealed class TankTick
     /// the ground rather than about the picture - the rule <c>Main.Patch</c> is
     /// written under, and the fourth place this board has charged for the
     /// difference.
+    ///
+    /// <b>What stands on the cell it fires from is asked separately</b>, through
+    /// <paramref name="rim"/>, and defaults to no. Everything solid on this board
+    /// fills a cell, so skipping the one under the gun is the rule rather than the
+    /// exception; a wall stands on that cell's edges instead, and is the only
+    /// thing that has ever needed the other answer. See <see cref="Barred"/>.
     ///
     /// <b>Ground blocks the line when it stands higher than the line does</b>, and
     /// a level line has one height everywhere - <paramref name="top"/> - so that
@@ -1289,7 +1318,7 @@ public sealed class TankTick
     /// </summary>
     internal static (float Run, Vector2I? At, bool Blocked) Track(
         HexField field, Vector2 from, Vector2 dir, float top,
-        IReadOnlySet<Vector2I> tanks)
+        IReadOnlySet<Vector2I> tanks, bool rim = false)
     {
         if (field.Atlas is null || dir.LengthSquared() < 1e-9f)
             return (0.0f, null, false);
@@ -1301,11 +1330,19 @@ public sealed class TankTick
         float grain = Mathf.Max(tile.X * 0.125f, 1.0f);
         float limit = field.Columns * tile.X + field.Rows * tile.Y;
         Vector2I here = field.FlatCellAt(from);
+        Vector2I start = here;
         for (float run = grain; run <= limit; run += grain)
         {
             Vector2I cell = field.FlatCellAt(from + step * run);
             if (cell == here)
                 continue;
+            // The rim of the cell it fired from, if something stands on it - the
+            // sample before the walk left, by the same reading as every other stop
+            // below. Tested here rather than before the loop so the run is the
+            // distance to the edge rather than zero: a wall on this cell is met
+            // where the cell ends, not at the muzzle.
+            if (rim && here == start)
+                return (run - grain, start, true);
             here = cell;
             // Stopped at the near side of whatever stopped it - the sample before
             // the one that found it. The line is drawn from the muzzle, which

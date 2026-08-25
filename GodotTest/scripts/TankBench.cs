@@ -273,7 +273,16 @@ public sealed partial class TankBench : SceneRoot
     /// tuned figure would be right for this board at this window size and wrong
     /// for the next cell added to either.</summary>
     private string? _startTag;
-    private Vector2I? _driveTo;
+    /// <summary>The legs of a queued <c>--drive</c>, in order, and how many of
+    /// them have been ordered. A list rather than one cell because the flag is
+    /// how a run is made to repeat: out of the ring, back into it and away again
+    /// is three orders, and until there were three the only thing measurable from
+    /// the command line was a board nobody had driven on yet - which is exactly
+    /// the state the wall's opening frame is already in. One leg per occurrence
+    /// of the flag, and the next is ordered when the one before it arrives.
+    /// </summary>
+    private readonly List<Vector2I> _driveTo = new();
+    private int _driveLeg;
     private bool _fireAtStart;
     private double? _hitAtStart;
     private int _damageAtStart;
@@ -319,7 +328,8 @@ public sealed partial class TankBench : SceneRoot
                     Map = args[++i];
                     break;
                 case "--drive" when i + 1 < args.Length:
-                    _driveTo = Spot(args[++i]);
+                    if (Spot(args[++i]) is Vector2I leg)
+                        _driveTo.Add(leg);
                     break;
                 case "--fire":
                     _fireAtStart = true;
@@ -745,10 +755,27 @@ public sealed partial class TankBench : SceneRoot
                 Stand(cell, HexField.EdgeHeadings[_wallSide], _wallCoverage,
                       new WallKit.Recipe());
         if (_walls.Count > 0)
+        {
+            // What the yard leaves against what stands in it. Both numbers,
+            // because either alone says nothing: a six-sided ring on the tank's
+            // own cell is 2.96m clear and a medium hull turns through 3.26m, so
+            // the machine does not fit and clips brick at every heading. That is
+            // the board as asked for, and it is only harmless because the ram
+            // lets go of what it has driven into rather than what it stands in -
+            // see WallRig.Drive. Named here so that a wall that starts eating
+            // tanks again is one printed line away from being explained.
+            float clear = Wall?.Clearance() ?? 0.0f;
+            Vector3 box = _garage.Count > 0
+                ? WallProp.Box(Tank, _field.Atlas.HexRect.Size.X * 0.5f)
+                : Vector3.Zero;
+            float corner = 0.5f * new Vector2(box.X, box.Z).Length();
             GD.Print($"tank bench: {_walls.Count} wall(s), ring on "
-                     + $"({ring.X},{ring.Y}) over {_brick.Sides} sides, samples "
+                     + $"({ring.X},{ring.Y}) over {_brick.Sides} sides, "
+                     + $"{clear:F2}m clear against a {corner:F2}m hull corner, "
+                     + "samples "
                      + string.Join(" ", Samples.Select(
                          x => $"({x.Cell.X},{x.Cell.Y}) {x.What}")));
+        }
     }
 
     /// <summary>One wall on one cell. Every field a prop needs is handed in, so
@@ -823,6 +850,20 @@ public sealed partial class TankBench : SceneRoot
     ///
     /// <b>And the rig draws no line of its own</b> - see <c>_wallBeam</c>.
     /// </summary>
+    /// <summary>Whether the wall on a cell stands across a round leaving it -
+    /// <see cref="TankTick.Barred"/> answered by whichever prop is on that cell.
+    ///
+    /// This is what lets a tank in the ring shoot its way out: the walk skips the
+    /// cell it fires from, so without it the one wall on this board a tank is
+    /// actually inside was the one wall it could not hit.</summary>
+    private bool Barring(Vector2I cell, Vector2 dir)
+    {
+        foreach (WallProp prop in _walls)
+            if (prop.Cell == cell)
+                return prop.Bars(dir);
+        return false;
+    }
+
     private void Struck(Shell round)
     {
         if (round.Blocked is not Vector2I cell)
@@ -834,10 +875,25 @@ public sealed partial class TankBench : SceneRoot
             Vector2 flight = round.To - round.From;
             if (flight.LengthSquared() < 1.0f)
                 return;
+            // Where the round began, when it began on this wall's own cell: a
+            // tank in a ring fires from the middle of it, which in the prop's
+            // frame is nought along any heading. Left at "outside" otherwise, and
+            // that is exact rather than approximate - a round from another cell
+            // starts further back than any piece of this wall, which is what
+            // negative infinity says. See WallRig.Fire's own from.
+            // Asked of the tank, not of Shell.From and not of CellAt: the muzzle
+            // is a drawn point some forty pixels above the ground, and a drawn
+            // row is not a ground row on a board that stands on a plinth - the
+            // fourth place this board has charged for that difference, and
+            // measured here as the shot going on answering the wrong leaf. The
+            // bench has the one tank that fired, and the cell it is on is a fact
+            // it already holds.
+            bool inside = Tank.Cell == prop.Cell;
             prop.Fire(round.Ammo == Shell.Kind.Ap
                           ? WallRig.Strike.Ap : WallRig.Strike.He,
                       prop.Into(flight.Normalized()),
-                      (float)(round.Calibre * _wallForce), _wallBeam);
+                      (float)(round.Calibre * _wallForce), _wallBeam,
+                      inside ? 0.0f : float.NegativeInfinity);
             return;
         }
     }
@@ -890,8 +946,13 @@ public sealed partial class TankBench : SceneRoot
                 prop.Halt();
             // How fast it was going the moment the masonry first gave, and only
             // that moment: a speed read afterwards is the speed of a tank that
-            // has already stopped in the rubble.
-            if (_ramSpeed < 0.0 && prop.Rig is { Loose: > 0, Driven: true })
+            // has already stopped in the rubble. And only when a ram is what gave
+            // way: since a round can now reach the wall on the tank's own cell,
+            // a shot fired while the box is in the masonry would otherwise print
+            // "ram at 0.0 m/s" - the one reading this line exists to make mean
+            // something else.
+            if (_ramSpeed < 0.0 && prop.Rig is
+                    { Loose: > 0, Driven: true, Shot: WallRig.Strike.Ram })
                 _ramSpeed = tank.Speed * WallRig.MetresPerCell
                             / (_field.Atlas.HexRect.Size.X * 0.5);
         }
@@ -996,6 +1057,7 @@ public sealed partial class TankBench : SceneRoot
             // shot goes into the field exactly as it did.
             _tick.Obstacles = _walled;
             _tick.Landed = _walls.Count > 0 ? Struck : null;
+            _tick.Barred = _walls.Count > 0 ? Barring : null;
             return _tick;
         }
     }
@@ -1087,8 +1149,7 @@ public sealed partial class TankBench : SceneRoot
             Tick.Fire(Tank);
         if (_destroyAtStart)
             Tick.Kill(Tank);
-        if (_driveTo is Vector2I cell)
-            OrderTo(cell);
+        NextLeg();
         Ram(_ramAtStart);
     }
 
@@ -1117,6 +1178,11 @@ public sealed partial class TankBench : SceneRoot
             _lineUp = false;
             OrderTo(Wall.Cell);
         }
+        // And the next leg of a queued --drive, once the one before it has
+        // arrived. After the ram's own second leg and behind its flag, so the two
+        // do not both claim the same standstill.
+        if (!_lineUp)
+            NextLeg();
 
         if (_tick.ShakeOn)
             _shake.Update(delta);
@@ -1348,6 +1414,17 @@ public sealed partial class TankBench : SceneRoot
     {
         if (cell is Vector2I at)
             OrderTo(at);
+    }
+
+    /// <summary>Order the next queued <c>--drive</c> leg, if the tank is not
+    /// already on one. Ordering is what advances the index, so a leg that goes
+    /// nowhere - the cell the tank is already on - is spent rather than retried
+    /// every frame.</summary>
+    private void NextLeg()
+    {
+        if (_driveLeg >= _driveTo.Count || Tank.Moving)
+            return;
+        OrderTo(_driveTo[_driveLeg++]);
     }
 
     private void OrderTo(Vector2I cell)
