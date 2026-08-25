@@ -416,6 +416,12 @@ public sealed partial class TankBench : SceneRoot
                 case "--no-proc-smoke":
                     _tick.ProceduralSmoke = false;
                     break;
+                case "--proc-fire":
+                    _tick.ProceduralFire = true;
+                    break;
+                case "--no-proc-fire":
+                    _tick.ProceduralFire = false;
+                    break;
                 case "--no-shadow":
                     _shadow = false;
                     break;

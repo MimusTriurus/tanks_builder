@@ -596,7 +596,8 @@ void fragment() {
                 // a broken switch.
                 Clocks.BurningSmoke => Tank.Burning && !Tank.SmokeIsProcedural
                     ? Tank.BurnPhase : -1,
-                Clocks.BurningFire => Tank.Burning ? Tank.FirePhase : -1,
+                Clocks.BurningFire => Tank.Burning && !Tank.FireIsProcedural
+                    ? Tank.FirePhase : -1,
                 Clocks.HitBurst or Clocks.HitDust => Tank.HitPhase,
                 Clocks.Track => Tank.ShowTracks ? Tank.TrackPhaseOf(Layer) : -1,
                 // No phase axis, so frame 0 of one, like the turret: what it

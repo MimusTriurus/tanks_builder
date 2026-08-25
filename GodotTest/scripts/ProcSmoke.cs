@@ -173,93 +173,6 @@ public sealed partial class ProcSmoke : Node2D
 
     // --- the model -----------------------------------------------------------
 
-    /// <summary>
-    /// Deterministic values in [0, 1) from two integers - <c>muzzle_flash._hash01</c>
-    /// with its two keys, so the arrangement is stable between runs and between a
-    /// run and the screenshot it is compared against.
-    /// </summary>
-    /// <remarks>The arrangement it produces is <em>a</em> draw of the same dice
-    /// rather than the render's own, because the two hashes differ in how they
-    /// fold the second key. Worth saying out loud: the A/B against the rendered
-    /// layer is a comparison of two arrangements of one model, not of one
-    /// arrangement drawn two ways.</remarks>
-    public static float Hash01(int index, int seed)
-    {
-        unchecked
-        {
-            ulong x = (ulong)(long)index * 0x9E3779B97F4A7C15UL;
-            x ^= (ulong)(long)seed * (0x9E3779B97F4A7C15UL + 0x632BE59BD9B4E019UL);
-            x ^= x >> 29;
-            x *= 0xBF58476D1CE4E5B9UL;
-            x ^= x >> 32;
-            return (x & 0xFFFFFF) / (float)0x1000000;
-        }
-    }
-
-    /// <summary>
-    /// Where a puff is at each age, in world units off the port.
-    ///
-    /// The direction turns from the vent's axis toward world up as the puff ages
-    /// and the speed decays, so the result is a curve that leaves the port the
-    /// way the port points and ends up climbing. Swinging a straight line instead
-    /// would move the <em>whole</em> plume, the part still in the pipe included.
-    ///
-    /// Normalised on the end <em>point</em>, so <see cref="Rise"/> is how far the
-    /// tip gets from the port rather than how far it travelled getting there.
-    /// </summary>
-    /// <remarks>Integrated and then sampled, exactly as
-    /// <c>exhaust_plume._path</c> does. The closed form the forest's flame uses
-    /// is not available here: that axis is vertical, and this one points back and
-    /// up at anywhere from 49 to 72 degrees depending on the tank.</remarks>
-    public static Vector3[] Path(Vector3 axis, float reach, float buoyancy,
-                                 float turnPower, float slowing, int samples = 96)
-    {
-        var pos = new Vector3[samples];
-        var run = Vector3.Zero;
-        for (int i = 0; i < samples; i++)
-        {
-            float t = samples <= 1 ? 0.0f : i / (float)(samples - 1);
-            float turn = Math.Clamp(buoyancy * MathF.Pow(t, turnPower), 0.0f, 1.0f);
-            Vector3 dir = axis * (1.0f - turn) + Up * turn;
-            float len = dir.Length();
-            if (len > 1e-9f)
-                dir /= len;
-            run += dir * MathF.Exp(-t / Math.Max(slowing, 1e-4f));
-            pos[i] = run;
-        }
-        Vector3 zero = pos[0];
-        for (int i = 0; i < samples; i++)
-            pos[i] -= zero;
-        float span = pos[samples - 1].Length();
-        if (span > 1e-9f)
-            for (int i = 0; i < samples; i++)
-                pos[i] *= reach / span;
-        return pos;
-    }
-
-    /// <summary>World up in the model's own frame. Not Godot's up: these are
-    /// Blender coordinates, the ones the port is stamped in, where z is
-    /// height.</summary>
-    public static readonly Vector3 Up = new(0.0f, 0.0f, 1.0f);
-
-    private static Vector3 Along(Vector3[] path, float age)
-    {
-        float at = Math.Clamp(age, 0.0f, 1.0f) * (path.Length - 1);
-        int lo = Math.Clamp((int)at, 0, path.Length - 2);
-        return path[lo].Lerp(path[lo + 1], at - lo);
-    }
-
-    /// <summary>Two unit vectors across <paramref name="axis"/> - the pair
-    /// <c>muzzle_flash._perpendicular</c> builds, by the same rule: the seed
-    /// swaps away from up when the axis is nearly up, or the cross product
-    /// vanishes.</summary>
-    public static (Vector3 U, Vector3 V) Across(Vector3 axis)
-    {
-        Vector3 seed = MathF.Abs(axis.Z) > 0.9f ? new Vector3(1.0f, 0.0f, 0.0f) : Up;
-        Vector3 u = seed.Cross(axis).Normalized();
-        return (u, axis.Cross(u));
-    }
-
     /// <summary>One puff: where it is in the model's world, how big, how solid,
     /// and how far through its life.</summary>
     public readonly record struct Puff(Vector3 Centre, float Radius, float Alpha,
@@ -277,30 +190,33 @@ public sealed partial class ProcSmoke : Node2D
     public Puff[] Build(AtlasSet.Port port, double hullLength, float cycle)
     {
         int count = Math.Clamp(Puffs, 1, MaxPuffs);
-        var (u, v) = Across(port.Dir);
+        var (u, v) = Plumes.Across(port.Dir);
         float hull = (float)hullLength;
-        Vector3[] path = Path(port.Dir, hull * Rise, Buoyancy, TurnPower, Slowing);
+        // Negative rate: the plume's `slowing` is exp(-t/slowing), and it is the
+        // one number that tells this from a flame - see Plumes.Path.
+        Vector3[] path = Plumes.Path(port.Dir, hull * Rise, Buoyancy,
+                                     TurnPower, -1.0f / Math.Max(Slowing, 1e-4f));
         var made = new Puff[count];
         for (int k = 0; k < count; k++)
         {
             float slot = (k + 0.5f) / count;
-            float nudge = Stagger * (2.0f * Hash01(k, Seed + 1) - 1.0f) / count;
+            float nudge = Stagger * (2.0f * Plumes.Hash01(k, Seed + 1) - 1.0f) / count;
             float age = Mod1(slot + nudge + cycle);
-            float turn = MathF.Tau * Hash01(k, Seed + 2);
-            float wander = hull * Spread * MathF.Pow(age, 0.7f) * Hash01(k, Seed + 3);
-            float born = port.Radius * 0.7f * (2.0f * Hash01(k, Seed + 4) - 1.0f);
+            float turn = MathF.Tau * Plumes.Hash01(k, Seed + 2);
+            float wander = hull * Spread * MathF.Pow(age, 0.7f) * Plumes.Hash01(k, Seed + 3);
+            float born = port.Radius * 0.7f * (2.0f * Plumes.Hash01(k, Seed + 4) - 1.0f);
             float size = (port.Radius * PuffStart
                           + hull * PuffGrow * MathF.Pow(age, PuffPower))
-                         * (1.0f - PuffVary + 2.0f * PuffVary * Hash01(k, Seed + 5));
+                         * (1.0f - PuffVary + 2.0f * PuffVary * Plumes.Hash01(k, Seed + 5));
             // Solidity is a function of age alone, and it has to reach zero at
             // both ends of a life, or a puff appears and vanishes with a step.
             float life = (1.0f - MathF.Exp(-age / Math.Max(Onset, 1e-4f)))
                          * MathF.Pow(Math.Max(1.0f - age, 0.0f), Fade);
-            Vector3 centre = port.Point + Along(path, age)
+            Vector3 centre = port.Point + Plumes.Along(path, age)
                              + u * (wander * MathF.Cos(turn) + born)
                              + v * (wander * MathF.Sin(turn) + born);
             made[k] = new Puff(centre, size, Math.Clamp(Alpha * life, 0.0f, 1.0f),
-                               1.0f + ToneVary * (2.0f * Hash01(k, Seed + 7) - 1.0f),
+                               1.0f + ToneVary * (2.0f * Plumes.Hash01(k, Seed + 7) - 1.0f),
                                age);
         }
         // Seat first, tip last: higher is nearer under this camera, so the tip is
@@ -351,7 +267,8 @@ public sealed partial class ProcSmoke : Node2D
                 box = box is null ? one : box.Value.Merge(one);
                 puffs.Add(new Vector4(at.X, at.Y, radius,
                                       puff.Alpha * puff.Tone * density));
-                lifts.Add(LiftOf(atlas, puff.Centre.Z));
+                lifts.Add(new Vector2(Plumes.LiftOf(atlas, puff.Centre.Z),
+                                      Plumes.BulgeOf(atlas, puff.Radius)));
             }
         }
         if (box is null || puffs.Count == 0)
@@ -385,77 +302,12 @@ public sealed partial class ProcSmoke : Node2D
         _shader.SetShaderParameter("ink", new Vector3(Ink.R, Ink.G, Ink.B));
         _shader.SetShaderParameter("rim_falloff", RimFalloff);
         _shader.SetShaderParameter("opacity", Opacity);
-        SetDepthMask(atlas);
+        Plumes.SetDepth(_shader, atlas, Tank.HullFacing);
 
         DrawSetTransformMatrix(Tank.ShearFor(false));
         Vector2 bump = Tank.HeaveShift(false, false);
         DrawTextureRect(_white!, new Rect2(quad.Position + bump, quad.Size), false);
         DrawSetTransformMatrix(Transform2D.Identity);
-    }
-
-    /// <summary>Where a world height sits on the height map's own byte scale, in
-    /// [0, 1]. Clamped rather than allowed to go negative, which is what a puff
-    /// under the belts would be.</summary>
-    public static float LiftOf(AtlasSet atlas, float z)
-    {
-        double span = atlas.HeightHigh - atlas.HeightLow;
-        return span <= 0.0 ? 0.0f
-            : (float)Math.Clamp((z - atlas.HeightLow) / span, 0.0, 1.0);
-    }
-
-    /// <summary>
-    /// Hand the shader the tank's height map at this heading, so the column can
-    /// be cut where the tank is in front of it.
-    ///
-    /// <b>This is the holdout, and it is exact rather than a stand-in.</b> The
-    /// rendered layer has the hull punched out of its alpha - <c>hull_only</c> in
-    /// <c>tank_pipeline</c> - which is a depth test done at render time. The first
-    /// pass here did it against the hull's <em>alpha</em> instead, and that is a
-    /// different question: it cuts the column wherever the hull's silhouette is,
-    /// in front or behind. Measured on four headings, it took the haze off the
-    /// deck that the rendered column legitimately puts there.
-    ///
-    /// Height answers it exactly. At a fixed screen row this camera has
-    /// <c>screen_y = -(Y*sin(e) + Z*cos(e))</c> and depth <c>Y*cos(e) - Z*sin(e)</c>;
-    /// eliminating Y between them leaves <c>depth = const - Z/sin(e)</c>. So at
-    /// one pixel higher is nearer, full stop - and comparing the map's height
-    /// against the puff's own <em>is</em> comparing depth. Which is also why the
-    /// puffs composite seat first: the same fact, used once per layer instead of
-    /// once per fragment.
-    ///
-    /// The map covers the hull and the belts rather than the hull alone, so this
-    /// holds out marginally more than the render does. That is the better answer
-    /// and not a discrepancy: a belt in front of the column hides it too.
-    /// </summary>
-    private void SetDepthMask(AtlasSet atlas)
-    {
-        if (_shader is null || Tank is null || !atlas.HasHeights
-            || !atlas.Has(AtlasSet.HeightName))
-        {
-            _shader?.SetShaderParameter("depth_on", false);
-            return;
-        }
-        int frame = atlas.EffectFrame(AtlasSet.HeightName, 0, Tank.HullFacing);
-        Rect2 region = atlas.Region(AtlasSet.HeightName, frame);
-        Vector2 size = atlas.SizeOf(AtlasSet.HeightName, frame);
-        if (size.X <= 0.0f || size.Y <= 0.0f)
-        {
-            _shader.SetShaderParameter("depth_on", false);
-            return;
-        }
-        Texture2D texture = atlas.Texture(AtlasSet.HeightName);
-        _shader.SetShaderParameter("depth_on", true);
-        _shader.SetShaderParameter("depth_tex", texture);
-        _shader.SetShaderParameter("depth_size",
-            new Vector2(texture.GetWidth(), texture.GetHeight()));
-        _shader.SetShaderParameter("depth_rect",
-            new Vector4(region.Position.X, region.Position.Y, size.X, size.Y));
-        // Its own anchor, not the hull's: the height layer is rendered in a tile
-        // of its own size and the anchor scales with the tile - the trap the
-        // effect layers already pay attention to.
-        _shader.SetShaderParameter("depth_shift",
-            atlas.AnchorOf(AtlasSet.HeightName)
-            - atlas.OffsetOf(AtlasSet.HeightName, frame));
     }
 
     /// <summary>
@@ -478,7 +330,12 @@ public sealed partial class ProcSmoke : Node2D
     /// colour toward nothing; Godot's blend_mix expects straight, so the divide
     /// puts it back.
     /// </summary>
-    private static readonly Shader Column = new() { Code = ColumnCode };
+    /// <summary>This column as it is compiled, so the checks can read what the
+    /// shader actually got rather than what the template says.</summary>
+    internal static readonly string ColumnShaderCode =
+        ColumnCode.Replace("DEPTH_CODE", Plumes.DepthCode);
+
+    private static readonly Shader Column = new() { Code = ColumnShaderCode };
 
     /// <summary>The shader's text, so the three claims that fail into a
     /// deliberate-looking picture can be asserted rather than remembered -
@@ -488,9 +345,10 @@ shader_type canvas_item;
 render_mode blend_mix, unshaded;
 
 uniform vec4 puffs[40];
-// Each puff's height on the map's byte scale, so a pixel can be told which of
-// the two surfaces over it is nearer.
-uniform float lift[40];
+// Each puff's height on the map's byte scale, as (centre, bulge): how high its
+// middle is and how much higher its near surface gets at the fragment facing the
+// eye most. See Plumes.depth_keep.
+uniform vec2 lift[40];
 uniform int count = 0;
 uniform vec2 origin = vec2(0.0);
 uniform vec2 span = vec2(1.0);
@@ -498,36 +356,14 @@ uniform vec3 ink = vec3(0.28, 0.26, 0.24);
 uniform float rim_falloff = 1.15;
 uniform float opacity = 0.80;
 
-// The tank's height map, so the column can be cut where the tank is in front of
-// it. Nearest rather than linear: the byte is a height, and blending two of them
-// across a silhouette edge invents a surface halfway between the tank and
-// nothing.
-uniform bool depth_on = false;
-uniform sampler2D depth_tex : filter_nearest;
-uniform vec2 depth_size = vec2(1.0);
-uniform vec4 depth_rect = vec4(0.0);
-uniform vec2 depth_shift = vec2(0.0);
-// How softly the cut is made, on the map's own scale. Small: it is there to stop
-// the silhouette's edge stepping, not to blur the tank.
-uniform float depth_band = 0.02;
-
+DEPTH_CODE
 void fragment() {
     // Back out of the quad into the tile's own pixels, which is the space every
     // puff arrived in and the space the hull's frame is addressed in.
     vec2 at = origin + UV * span;
 
-    // What the tank's own surface is doing over this pixel, once for every puff
-    // that will ask: -1 where the tank is not drawn at all.
-    float tank = -1.0;
-    if (depth_on) {
-        vec2 dp = at + depth_shift;
-        if (dp.x >= 0.0 && dp.x <= depth_rect.z
-            && dp.y >= 0.0 && dp.y <= depth_rect.w) {
-            float code = texture(depth_tex, (depth_rect.xy + dp) / depth_size).r;
-            // 0 is no tank; the rest is the range mapped onto 1..255.
-            tank = code > 0.002 ? (code * 255.0 - 1.0) / 254.0 : -1.0;
-        }
-    }
+    // Once for every element that will ask.
+    float tank = depth_at(at);
 
     float cover = 0.0;
     vec3 body = vec3(0.0);
@@ -546,10 +382,7 @@ void fragment() {
             // column at the same size. Measured: peak puff alpha 0.35 either
             // way, and the stack under it 0.48 rather than 0.28.
             float a = 1.0 - (1.0 - one) * (1.0 - one);
-            if (tank >= 0.0) {
-                a *= 1.0 - smoothstep(lift[i] - depth_band,
-                                      lift[i] + depth_band, tank);
-            }
+            a *= depth_keep(tank, lift[i].x + lift[i].y * facing);
             // Seat first, tip last - the list arrives sorted, so this is the
             // depth buffer's answer without a depth buffer.
             body = body * (1.0 - a) + ink * a;

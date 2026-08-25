@@ -1103,6 +1103,10 @@ public sealed partial class Main : SceneRoot
 				_tick.ProceduralSmoke = true;
 			else if (userArgs[i] == "--no-proc-smoke")
 				_tick.ProceduralSmoke = false;
+			else if (userArgs[i] == "--proc-fire")
+				_tick.ProceduralFire = true;
+			else if (userArgs[i] == "--no-proc-fire")
+				_tick.ProceduralFire = false;
 			else if (userArgs[i] == "--no-tracks")
 				_tick.TracksEnabled = false;
 			else if (userArgs[i] == "--no-shadow")
@@ -3392,6 +3396,8 @@ public sealed partial class Main : SceneRoot
 		["--exhaust-ramp"] = new[] { "effects.exhaust_ramp" },
 		["--proc-smoke"] = new[] { "effects.proc_smoke" },
 		["--no-proc-smoke"] = new[] { "effects.proc_smoke" },
+		["--proc-fire"] = new[] { "effects.proc_fire" },
+		["--no-proc-fire"] = new[] { "effects.proc_fire" },
 		["--burning"] = new[] { "effects.fire" },
 		["--flash"] = new[] { "effects.flash_source" },
 		["--recoil-shear"] = new[] { "effects.hull_shear" },
@@ -3697,6 +3703,8 @@ public sealed partial class Main : SceneRoot
 		// each side of it is no comparison.
 		ui.Toggle("effects.proc_smoke", "build the smoke column, do not read it",
 			() => _tick.ProceduralSmoke, on => _tick.ProceduralSmoke = on);
+		ui.Toggle("effects.proc_fire", "build the flame, do not read it",
+			() => _tick.ProceduralFire, on => _tick.ProceduralFire = on);
 		// Frames per phase and not just the rate, because that is the question
 		// the drag runs into: the plume is twelve rendered poses stepped a few
 		// times a second, and the ceiling is how briefly a pose can be held

@@ -233,6 +233,17 @@ public sealed partial class TankSprite : Node2D
     /// </summary>
     public bool ProceduralSmoke;
 
+    /// <summary>Whether the flame is built here instead of read off the atlas -
+    /// see <see cref="ProcFire"/>. Its own switch beside the column's rather than
+    /// one for the pair, because the two are meant to be judged apart: the column
+    /// is what the flame is composited against, so a built flame over a read column
+    /// is the picture that says which half moved.</summary>
+    public bool ProceduralFire;
+
+    /// <summary>Whether the rendered flame should stand down - see
+    /// <see cref="SmokeIsProcedural"/> for why the atlas has a say.</summary>
+    public bool FireIsProcedural => ProceduralFire && Atlas is { HasPorts: true };
+
     /// <summary>Whether the rendered burn layer should stand down. True only
     /// when something else is actually going to draw a column: a flag flipped on
     /// a set that cannot honour it would take the smoke away rather than change
@@ -1304,12 +1315,17 @@ public sealed partial class TankSprite : Node2D
             // ProcSmoke.Wanted and EffectLayer.Wanted.
             if (name == AtlasSet.BurnName)
                 AddChild(Column = new ProcSmoke { Tank = this });
+            if (name == AtlasSet.FireName)
+                AddChild(Blaze = new ProcFire { Tank = this });
         }
     }
 
     /// <summary>The procedural column, built in <see cref="LayerOrder"/>'s burn
     /// slot. Kept so the checks and the readout can ask what it put up.</summary>
     public ProcSmoke? Column { get; private set; }
+
+    /// <summary>The built flame, in <see cref="LayerOrder"/>'s fire slot.</summary>
+    public ProcFire? Blaze { get; private set; }
 
     public override void _Draw()
     {

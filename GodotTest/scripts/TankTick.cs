@@ -255,6 +255,11 @@ public sealed class TankTick
     /// column is what every shipped set draws, and the A/B is what makes
     /// "built reads better" an assertion instead of a memory.</summary>
     public bool ProceduralSmoke = ProcSmoke.OnByDefault;
+
+    /// <summary>The flame built rather than read - see <see cref="ProcFire"/>.
+    /// Its own switch for the column's reason: the two halves are judged
+    /// apart.</summary>
+    public bool ProceduralFire = ProcFire.OnByDefault;
     public bool ShakeOn = CameraShake.OnByDefault;
 
     // --- what it cannot answer for itself -----------------------------------
@@ -1277,12 +1282,14 @@ public sealed class TankTick
             v.Sprite.FireCycle = 0.0f;
             v.Sprite.SmokeCycle = 0.0f;
             v.Sprite.ProceduralSmoke = ProceduralSmoke;
+            v.Sprite.ProceduralFire = ProceduralFire;
             v.Sprite.QueueRedraw();
             return;
         }
         v.Burn.Advance(delta);
         v.Sprite.Burning = true;
         v.Sprite.ProceduralSmoke = ProceduralSmoke;
+        v.Sprite.ProceduralFire = ProceduralFire;
         v.Sprite.FirePhase = v.Burn.FireFrame;
         v.Sprite.BurnPhase = v.Burn.SmokeFrame;
         // The same two positions unrounded, for whatever draws itself rather

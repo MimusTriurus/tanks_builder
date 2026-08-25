@@ -4725,7 +4725,7 @@ public static class SelfTest
                               / atlas.UnitsPerPixel;
             foreach (int facing in atlas.RenderedFacings())
             {
-                Vector2 up = atlas.Project(ProcSmoke.Up, facing);
+                Vector2 up = atlas.Project(Plumes.Up, facing);
                 worstLean = Math.Max(worstLean, Math.Abs(up.X));
                 worstRise = Math.Max(worstRise, Math.Abs(-up.Y - wantRise));
             }
@@ -4738,17 +4738,17 @@ public static class SelfTest
             // its length is the distance to the tip rather than the distance
             // travelled. Writing the second one instead is a column of the right
             // shape and the wrong height, which nothing else here would notice.
-            Vector3[] path = ProcSmoke.Path(port.Dir, 1.0f, built.Buoyancy,
-                                            built.TurnPower, built.Slowing);
+            Vector3[] path = Plumes.Path(port.Dir, 1.0f, built.Buoyancy, built.TurnPower,
+                                         -1.0f / built.Slowing);
             Vector3 first = (path[1] - path[0]).Normalized();
             Vector3 last = (path[^1] - path[^2]).Normalized();
             double columnWalked = 0.0;
             for (int i = 1; i < path.Length; i++)
                 columnWalked += (path[i] - path[i - 1]).Length();
             Check("the column leaves along the vent and ends up going up",
-                first.Dot(port.Dir) > 0.99f && last.Dot(ProcSmoke.Up) > 0.97f,
+                first.Dot(port.Dir) > 0.99f && last.Dot(Plumes.Up) > 0.97f,
                 $"leaves at {Mathf.RadToDeg(Math.Acos(first.Dot(port.Dir))):F1} deg"
-                + $" off the vent, ends {Mathf.RadToDeg(Math.Acos(last.Dot(ProcSmoke.Up))):F1}"
+                + $" off the vent, ends {Mathf.RadToDeg(Math.Acos(last.Dot(Plumes.Up))):F1}"
                 + " deg off vertical");
             // Two halves: the tip lands exactly on the reach it was given, and
             // the way there is longer than that. Normalised on the arc instead -
@@ -4869,15 +4869,160 @@ public static class SelfTest
             "one surface per puff is a thin wisp beside the rendered column at "
             + "the same size - measured, the stack under a peak puff drops from "
             + "0.48 to 0.28");
+        // Read off what the shaders were compiled with, not off the template,
+        // because the block came from Plumes and a marker left unreplaced is
+        // exactly the failure this would otherwise miss.
         Check("the height map is sampled without blending",
-            column.Contains("depth_tex : filter_nearest"),
+            ProcSmoke.ColumnShaderCode.Contains("depth_tex : filter_nearest"),
             "blending two heights across a silhouette edge invents a surface "
             + "halfway between the tank and nothing");
+        Check("and both built layers cut themselves against the same map",
+            ProcSmoke.ColumnShaderCode.Contains(Plumes.DepthCode)
+            && ProcFire.BlazeShaderCode.Contains(Plumes.DepthCode),
+            "one of the pair is holding itself out by something else, so the "
+            + "flame and the column disagree about where the tank is");
         Check("and a puff at the map's own floor and ceiling reads 0 and 1",
             atlas.HeightHigh > atlas.HeightLow
-            && Math.Abs(ProcSmoke.LiftOf(atlas, (float)atlas.HeightLow)) < 1e-4
-            && Math.Abs(ProcSmoke.LiftOf(atlas, (float)atlas.HeightHigh) - 1.0f) < 1e-4,
+            && Math.Abs(Plumes.LiftOf(atlas, (float)atlas.HeightLow)) < 1e-4
+            && Math.Abs(Plumes.LiftOf(atlas, (float)atlas.HeightHigh) - 1.0f) < 1e-4,
             $"map runs {atlas.HeightLow:F3}..{atlas.HeightHigh:F3}");
+
+        Theme("the flame built rather than read");
+        // The one that matters most is the first: the forest and the tank now burn
+        // by one text. Everything else here is about a term that fails into a
+        // picture somebody would take for a choice.
+        var blaze = new ProcFire();
+        Check("the tree and the tank burn by the same statement of what a lick is",
+            Stage3D.BlazingCode.Contains(Stage3D.FlameInk)
+            && ProcFire.BlazeShaderCode.Contains(Stage3D.FlameInk),
+            "one of the two is carrying its own copy of the ramp, and a copy "
+            + "still names every function it defines - so it compiles, draws, and "
+            + "parts from the other where nobody puts them side by side");
+        Check("and the ramp is in that shared text rather than in either shader",
+            Stage3D.FlameInk.Contains("vec4 flame_ramp(")
+            && !ProcFire.BlazeShaderCode.Replace(Stage3D.FlameInk, "")
+                        .Contains("flame_ramp("),
+            "the tank's shader defines a ramp of its own");
+        Check("the flame adds light where the column takes it away",
+            ProcFire.BlazeShaderCode.Contains("blend_premul_alpha")
+            && ProcSmoke.ColumnCode.Contains("blend_mix"),
+            "the pair is one effect and the order is the effect: dark under, light "
+            + "over. Either half in the other's mode washes out the one it holds up");
+        Check("an element is a sphere here too, so its two surfaces both count",
+            ProcFire.BlazeShaderCode.Contains("flame_over(e, e)"),
+            "one surface per element is a third of the fire at the same size - the "
+            + "column's measurement, and the one thing the tank's flame adds to the "
+            + "forest's text, because here the rendered layer is the target");
+        Check("and it hands its light over premultiplied, hiding nothing",
+            ProcFire.BlazeShaderCode.Contains("fire.rgb * level, 0.0"),
+            "the stage shows its target premultiplied, so a straight-alpha emitter "
+            + "is scaled by an alpha it never asked to have - EffectLayer.Glow's "
+            + "measurement, nine levels of red");
+
+        if (atlas.HasPorts && atlas.HasBurning)
+        {
+            AtlasSet.Port port = atlas.Ports[0];
+
+            // Positive against the column's negative, and it is the one number that
+            // tells a flame from smoke: it crowds the elements at the seat and pulls
+            // them apart toward the tips. Zero is an evenly spaced ladder.
+            Vector3[] hot = Plumes.Path(port.Dir, 1.0f, blaze.Buoyancy, blaze.TurnPower,
+                                        blaze.Gather);
+            Vector3[] cool = Plumes.Path(port.Dir, 1.0f, built.Buoyancy,
+                                         built.TurnPower, -1.0f / built.Slowing);
+            Check("the flame crowds its elements at the seat and the column spreads"
+                  + " them",
+                Plumes.Along(hot, 0.5f).Length() < 0.5f
+                && Plumes.Along(cool, 0.5f).Length() > 0.5f,
+                $"at half a life the flame is {Plumes.Along(hot, 0.5f).Length():F3}"
+                + $" of the way up and the column {Plumes.Along(cool, 0.5f).Length():F3}");
+
+            // An element is long, so which way it lies is not decoration: got wrong
+            // it is a lick lying across its own column. The path's tangent is what
+            // it lies along, and at the seat that is the vent.
+            Vector3 first = Plumes.Going(hot, 0.0f);
+            Vector3 last = Plumes.Going(hot, 1.0f);
+            Check("a lick lies along the flow, which leaves down the vent and ends"
+                  + " up climbing",
+                Math.Abs(first.Length() - 1.0f) < 1e-4f
+                && first.Dot(port.Dir) > 0.99f && last.Dot(Plumes.Up) > 0.97f,
+                $"leaves {Mathf.RadToDeg(Math.Acos(first.Dot(port.Dir))):F1} deg off"
+                + $" the vent, ends {Mathf.RadToDeg(Math.Acos(last.Dot(Plumes.Up))):F1}"
+                + " deg off vertical");
+
+            ProcFire.Part[] lapZero = blaze.Build(port, atlas.HullLength, 0.0f);
+            // And that the queue is actually laid along it. The claim above is
+            // about the path; this one is about what Build did with it, and
+            // without it a lick lying across its own column passes.
+            double worstLie = 0.0;
+            foreach (ProcFire.Part q in lapZero.Skip(blaze.SeatBlobs)
+                                               .Take(blaze.Tongues))
+                worstLie = Math.Max(worstLie,
+                    1.0 - q.Flow.Dot(Plumes.Going(hot, q.Age)));
+            Check("and every lick in the queue is laid along it",
+                worstLie < 1e-4,
+                $"worst lick is {Mathf.RadToDeg(Math.Acos(1.0 - worstLie)):F1} deg"
+                + " off the flow at its own age");
+            ProcFire.Part[] lapOne = blaze.Build(port, atlas.HullLength, 1.0f);
+            double worstLap = 0.0;
+            for (int i = 0; i < lapZero.Length; i++)
+                worstLap = Math.Max(worstLap,
+                    (lapZero[i].Centre - lapOne[i].Centre).Length()
+                    + Math.Abs(lapZero[i].Gain - lapOne[i].Gain));
+            // The seat is the one part of the effect that never moves, so it is the
+            // one part where a jump at the wrap is obvious - which is why its
+            // flicker runs a whole number of cycles a lap rather than any wave that
+            // happened to look right.
+            Check("a whole lap of the flame is the same picture, seat included",
+                worstLap < 1e-4, $"worst element moved {worstLap:E2}");
+
+            Check("the seat sits proud of the grille rather than half inside the"
+                  + " deck",
+                lapZero.Take(blaze.SeatBlobs).All(
+                    q => (q.Centre - port.Point).Dot(port.Dir) > 0.0f),
+                "half of every seat blob is inside the deck and only shows on the "
+                + "headings where the holdout happens not to cut it");
+
+            // The column is the effect that buys height; this one sits on the deck
+            // and must not quietly acquire any. Asserted against the rendered
+            // flame's own frame, which is the thing that would have to grow.
+            int zeroFrame = atlas.EffectFrame(AtlasSet.FireName, 0, 270.0);
+            Vector2 drawn = atlas.SizeOf(AtlasSet.FireName, zeroFrame);
+            float top = 0.0f, wide = 0.0f;
+            foreach (ProcFire.Part q in lapZero)
+            {
+                if (q.Gain <= 0.002f)
+                    continue;
+                Vector2 at = atlas.Project(q.Centre, 270.0);
+                float r = (float)(q.Radius * q.Stretch / atlas.UnitsPerPixel);
+                top = Math.Min(top, at.Y - r);
+                wide = Math.Max(wide, Math.Abs(at.X) + r);
+            }
+            Check("and the built flame stays inside the rendered one's own frame",
+                drawn.Y > 0.0f && -top < drawn.Y * 1.25f && wide * 2.0f < drawn.X * 2.2f,
+                $"built reaches {-top:F0}px up and {wide:F0}px out, rendered frame"
+                + $" {drawn.X:F0}x{drawn.Y:F0}px");
+        }
+
+        var firePair = new TankSprite { Atlas = atlas, Burning = true };
+        var readFire = TankSprite.MakeLayer(AtlasSet.FireName);
+        readFire.Tank = firePair;
+        firePair.FirePhase = 0;
+        firePair.ProceduralFire = false;
+        bool fireWhenOff = readFire.Showing >= 0;
+        firePair.ProceduralFire = true;
+        bool fireWhenOn = readFire.Showing >= 0;
+        Check("exactly one of the built flame and the read one draws",
+            fireWhenOff && (!fireWhenOn || !atlas.HasPorts),
+            $"rendered layer shows {(fireWhenOff ? "yes" : "no")} with the flag off,"
+            + $" {(fireWhenOn ? "yes" : "no")} with it on");
+        // Two switches on one effect, and they are meant to be pulled apart: the
+        // column is what the flame is composited against, so a built flame over a
+        // read column is the picture that says which half moved.
+        Check("and the two halves switch apart",
+            !new TankSprite { Atlas = atlas, ProceduralFire = true }.SmokeIsProcedural
+            && !new TankSprite { Atlas = atlas, ProceduralSmoke = true }.FireIsProcedural,
+            "one flag drives both, so neither half can be judged on its own");
 
         Theme("a shell arriving");
         // An event, like the shot, and unlike everything else that came after
@@ -8113,7 +8258,12 @@ public static class SelfTest
         // The flame's own shape, asked of the shader's text for FoamEdge's reason:
         // this is what the driver compiles, and all three of these are mistakes that
         // were made once and cost a render each to find.
-        string flame = Stage3D.FlameShader;
+        //
+        // The *compiled* text, not the template. Since the element moved into
+        // Stage3D.FlameInk - shared with the tank's own flame - the template holds
+        // a marker where the ramp used to be, and every one of these read nothing
+        // and said so.
+        string flame = Stage3D.BlazingCode;
         Check("the flame's elements composite over each other, they do not sum",
             flame.Contains("flame_over(") && !flame.Contains("fire +="),
             "added instead, the dark lip that keeps the licks apart brightens what "
