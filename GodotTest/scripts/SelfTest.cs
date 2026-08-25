@@ -9884,6 +9884,24 @@ public static class SelfTest
             + $"none of 89 {WallRig.Breached(0, 89)}, "
             + $"one of none {WallRig.Breached(1, 0)}");
 
+        // And the reason a burst has to name the section it brings down rather
+        // than let the share decide it - see WallRig.Breach.
+        //
+        // A burst has a radius and the radius grows with the dial, so a heavy
+        // shell reaches into the leaves either side of the one it went off
+        // against. Measured on the ring, as a fraction of each leaf's 96 pieces:
+        // the struck leaf takes 0.28 at force 0.25 and 0.82 at force 1, while a
+        // neighbour takes 0.08 at 1.5, 0.36 at 3 and 0.81 at 10. Both ends below
+        // are true of the same threshold, so no threshold orders them - which is
+        // the whole argument, and it fails the moment someone tries to fix a
+        // spreading breach by raising the share instead.
+        Check("and the share cannot tell the leaf that was hit from the "
+              + "neighbour the blast reached, which is why the section is named",
+            WallRig.Breached(27, 96) && WallRig.Breached(78, 96)
+            && 27.0f / 96.0f < 78.0f / 96.0f,
+            $"struck leaf at a quarter charge {WallRig.Breached(27, 96)}, "
+            + $"neighbour at ten {WallRig.Breached(78, 96)}");
+
         // --- and every piece knows which section it is in ----------------------
         //
         // Written where the fold is decided and nowhere else - see Block.Side.

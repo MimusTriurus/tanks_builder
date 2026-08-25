@@ -340,6 +340,15 @@ public sealed partial class WallRig : Node3D
     /// void is the board being too small for the shot.</summary>
     public int Fell => _gone.Count;
 
+    /// <summary>How many sections have come down whole - see <see cref="Breach"/>.
+    ///
+    /// <b>Printed because the piece count cannot say it.</b> A round that levels
+    /// the leaf it was aimed at and one that levels that leaf and both its
+    /// neighbours are 99 pieces against 296, and the difference between those two
+    /// numbers reads as a bigger charge rather than as a rule reaching where it
+    /// was not meant to. Sections is the unit the ask was made in.</summary>
+    public int Broken => _breached.Count;
+
     /// <summary>How long a piece that has been let go lies still before it starts
     /// to go, and how long it takes to go, in seconds.
     ///
@@ -560,16 +569,33 @@ public sealed partial class WallRig : Node3D
                 Thaw(i);
     }
 
-    /// <summary>Bring down the section piece <paramref name="i"/> stands in, if a
-    /// strike has now taken enough of it. Asked where a strike lands and never in
-    /// <see cref="Thaw"/>: see <see cref="_stood"/>.</summary>
-    private void Breach(int i, Strike shot)
+    /// <summary>Bring down section <paramref name="side"/>, if a strike has now
+    /// taken enough of it. Asked where a strike lands and never in
+    /// <see cref="Thaw"/>: see <see cref="_stood"/>.
+    ///
+    /// <b>Named, never inferred from what fell, and the ring is why.</b> A burst
+    /// has a radius and the radius grows with the dial - the one thing about the
+    /// three strikes that <see cref="Burst"/>'s own docstring already says - so a
+    /// heavy shell honestly reaches into the leaves either side of the one it
+    /// went off against. Asked per piece, that made every leaf the blast touched
+    /// bring itself down: measured on the ring, one round took <b>three sections
+    /// of six</b> from force 1.5 up.
+    ///
+    /// <b>The share cannot be what spares them, and this was measured before it
+    /// was designed around.</b> Reach of the burst into each leaf, as a fraction
+    /// of its 96 pieces: the struck leaf takes 0.28 at force 0.25 and 0.82 at
+    /// force 1, while a neighbour takes 0.08 at 1.5, 0.36 at 3 and <b>0.81</b> at
+    /// 10. The two ranges overlap end to end, so no threshold orders them - one
+    /// that lets a lightly hit leaf fall lets a neighbour fall too, and one high
+    /// enough to spare a neighbour at full charge stops the struck leaf falling
+    /// at the half force the whole rule exists for.</summary>
+    private void Breach(int side, Strike shot)
     {
         if (!Breaches || !Breaching(shot))
             return;
-        int s = SideOf(i);
-        if (s >= 0 && Breached(_taken[s], _stood[s]))
-            Collapse(s);
+        if (side >= 0 && side < _stood.Length
+            && Breached(_taken[side], _stood[side]))
+            Collapse(side);
     }
 
     public void Clear()
@@ -846,7 +872,12 @@ public sealed partial class WallRig : Node3D
             // A tank driving through masonry is a breach, and a breach takes the
             // section - see Breaching. The tally it reads counts the cascade too,
             // but the question is only ever asked here.
-            Breach(i, Strike.Ram);
+            // Per piece, and the asymmetry with the burst is the whole of it:
+            // a hull's lane is the hull's own width and cannot widen with the
+            // dial, so a brick it reached is a brick it drove through. Driving
+            // across a mitred corner touches two leaves because it went through
+            // two leaves.
+            Breach(SideOf(i), Strike.Ram);
         }
     }
 
@@ -1278,7 +1309,12 @@ public sealed partial class WallRig : Node3D
         // all is the leaf at the shooter's back. Measured on it - a round aimed at
         // one leaf took the opposite one out, which reads as the wall answering
         // the wrong side rather than as the burst being placed from infinity.
+        // And which section that frontmost piece belongs to, taken here rather
+        // than looked up afterwards: the face the round meets is the section it
+        // brings down, and two measurements of the same face are two answers to
+        // one question. See Breach.
         float front = float.MaxValue;
+        int face = -1;
         for (int i = 0; i < _bodies.Count; i++)
         {
             // Rubble is not masonry, Clearance's own sentence arriving where it
@@ -1302,7 +1338,10 @@ public sealed partial class WallRig : Node3D
             // is the nearest piece.
             if ((arm - into * d).Length() > _brick)
                 continue;
-            front = Mathf.Min(front, d);
+            if (d >= front)
+                continue;
+            front = d;
+            face = SideOf(i);
         }
         // Nothing ahead of it: a round fired out of a gap in the masonry. It goes
         // off where it was fired, which touches nothing - the honest answer.
@@ -1339,7 +1378,6 @@ public sealed partial class WallRig : Node3D
             if (d > blast * 2.0f)
                 continue;
             Thaw(i);
-            Breach(i, Strike.He);
             if (d > blast * 1.5f)
                 continue;
             Vector3 dir = (arm.Normalized() * 0.55f + into * 0.45f).Normalized();
@@ -1347,6 +1385,10 @@ public sealed partial class WallRig : Node3D
             _bodies[i].ApplyImpulse(
                 dir * (HeSpeed * _force * fall * _bodies[i].Mass));
         }
+        // The face, and only the face. Asked after the loop rather than inside
+        // it so the tally is complete: a section is breached on what the whole
+        // burst took from it, not on what the first piece of it took.
+        Breach(face, Strike.He);
     }
 
     /// <summary>AP straight through: a line, and only what is standing on it.
@@ -1443,6 +1485,7 @@ public sealed partial class WallRig : Node3D
     /// the drift report that is about the void rather than about the wall.
     /// </summary>
     public const float Lost = -MetresPerCell;
+
 
     /// <summary>Let a piece go.
     ///

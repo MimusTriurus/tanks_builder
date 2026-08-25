@@ -1335,6 +1335,21 @@ public sealed partial class TankBench : SceneRoot
         _frame++;
         if (CapturePath is not null && _frame >= CaptureAt)
         {
+            // And said at the shutter too, if settling never said it.
+            //
+            // <b>A collapse that never ends and a shot that moved nothing are
+            // the same silence.</b> Measured on the ring at HE force 3: the
+            // solver frees a jammed pile with an enormous impulse, a block
+            // leaves at 324 m/s, and nothing is ever all at rest again - so the
+            // one force the picture was being judged at printed no numbers at
+            // all. A named frame is a defined measurement whether or not the
+            // heap has stopped, and saying which of the two it is costs a word.
+            if (!_wallSaid && Wall?.Rig is { Struck: true })
+            {
+                _wallSaid = true;
+                GD.Print($"tank bench: at frame {_frame}, still settling - "
+                         + WallNote().Replace("\n", " - "));
+            }
             Capture(CapturePath);
             GetTree().Quit();
         }
@@ -1384,6 +1399,10 @@ public sealed partial class TankBench : SceneRoot
                    : "standing, nothing has reached it  ")
                + $"reach {reach:F2}, top {top:F2}, {off} of {rig.Count} "
                + "off the cell"
+               // And how many whole sections went, which the piece count cannot
+               // say: one leaf levelled and three levelled differ by a number
+               // that reads as a heavier charge. WallRig.Broken.
+               + (rig.Broken > 0 ? $", {rig.Broken} section(s) breached" : "")
                // And how many went over the edge of the board, which is a
                // different fact: rubble on a neighbour is what was asked for,
                // rubble in the void is the board being too small for the shot.

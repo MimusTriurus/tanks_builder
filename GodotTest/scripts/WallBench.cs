@@ -595,7 +595,8 @@ public sealed partial class WallBench : SceneRoot
         _panel.Readout("wall.strike.state", () =>
             _rig is null ? "solved flights, no solver"
             : !_rig.Struck ? "standing, nothing fired"
-            : $"{_rig.Clock:F2}s, {_rig.Awake} moving, {_rig.Loose} let go");
+            : $"{_rig.Clock:F2}s, {_rig.Awake} moving, {_rig.Loose} let go"
+              + (_rig.Broken > 0 ? $", {_rig.Broken} breached" : ""));
         _panel.Toggle("wall.strike.breach", "a breach takes the whole side",
                       () => WallRig.Breaches, on => WallRig.Breaches = on);
         _panel.Toggle("wall.strike.crumble", "fallen pieces clear",
