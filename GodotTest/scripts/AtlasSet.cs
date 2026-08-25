@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -288,6 +288,64 @@ public sealed class AtlasSet
         double rad = Mathf.DegToRad(headingDegrees);
         double squash = Math.Sin(Mathf.DegToRad(Elevation));
         return new Vector2((float)Math.Cos(rad), (float)(-Math.Sin(rad) * squash));
+    }
+
+    /// <summary>
+    /// Where the engine breathes, in the model's own world units: the point on
+    /// the deck, the direction the vent faces, and how wide it is.
+    ///
+    /// World rather than pixels, which is the opposite of the plate table beside
+    /// it and for the other half of the same reason. A plate's screen offset is
+    /// a *result* of fitting the camera, so working it out anywhere but between
+    /// the render and the check would be a second guess at it. A port is a fact
+    /// about the tank and does not move when the camera does, and this end
+    /// already holds the two numbers that turn world into pixels - see
+    /// <see cref="Project"/>. Stamped in pixels it would freeze a projection
+    /// that can be done exactly, and freeze it per heading.
+    ///
+    /// Read by the procedural column and by nothing else. A set without the
+    /// block reports none, which is what makes the rendered layer the fallback
+    /// rather than an error: every atlas shipped before <c>stamp_ports.py</c>
+    /// existed is such a set.
+    /// </summary>
+    public readonly record struct Port(Vector3 Point, Vector3 Dir, float Radius);
+
+    private readonly List<Port> _ports = new();
+
+    public IReadOnlyList<Port> Ports => _ports;
+
+    /// <summary>The hull's longest world axis - what every length in the smoke
+    /// and the flame is quoted against, the way <c>engine_fire</c> quotes them.
+    /// Zero where no port block arrived.</summary>
+    public double HullLength { get; private set; }
+
+    /// <summary>Whether this set can build its burning pair itself.</summary>
+    public bool HasPorts => _ports.Count > 0 && HullLength > 0.0
+                            && UnitsPerPixel > 0.0;
+
+    /// <summary>
+    /// A point or a vector of the model's own frame, in pixels off the shared
+    /// anchor, as the hull would be drawn at <paramref name="headingDegrees"/>.
+    ///
+    /// <b>Said through <see cref="GroundDirection"/> rather than as a formula of
+    /// its own</b>, because the squash is already stated there and a second
+    /// statement of it is the way two layers come apart. The ground half is that
+    /// call verbatim; the height half is one cosine, the same one
+    /// <see cref="HeightSpanPx"/> uses to turn a world height into screen rows.
+    ///
+    /// <b>The ninety degrees is the front being -Y</b>, which is the import
+    /// convention and not a measurement - so it is asserted rather than trusted:
+    /// the self-test projects the stamped port and requires it to land inside
+    /// the rendered column's own silhouette at every heading, which is what a
+    /// quarter turn of error looks like from the outside.
+    /// </summary>
+    public Vector2 Project(Vector3 world, double headingDegrees)
+    {
+        double bearing = Mathf.RadToDeg(Math.Atan2(world.Y, world.X));
+        float reach = MathF.Sqrt(world.X * world.X + world.Y * world.Y);
+        Vector2 flat = GroundDirection(bearing + headingDegrees + 90.0) * reach;
+        float up = world.Z * (float)Math.Cos(Mathf.DegToRad(Elevation));
+        return new Vector2(flat.X, flat.Y - up) / (float)UnitsPerPixel;
     }
 
     private readonly Dictionary<string, ImageTexture> _textures = new();
@@ -914,6 +972,31 @@ public sealed class AtlasSet
     /// it. Ordered front, rear, left, right when they are all present, so the
     /// harness cycles them in a way that makes sense rather than in whatever
     /// order the JSON happened to come in.</summary>
+    /// <summary>Take the stamped port block. Called off whichever burning layer
+    /// carries it; both do, and they carry the same one, so the second call is a
+    /// no-op rather than a conflict - see <c>stamp_ports.py</c> on why the block
+    /// goes into both.</summary>
+    private void TakePorts(PortsMeta ports)
+    {
+        if (ports.List.Length == 0 || ports.HullLength <= 0.0)
+            return;
+        HullLength = ports.HullLength;
+        _ports.Clear();
+        foreach (PortMeta port in ports.List)
+        {
+            if (port.Point.Length < 3 || port.Dir.Length < 3)
+                continue;
+            var dir = new Vector3((float)port.Dir[0], (float)port.Dir[1],
+                                  (float)port.Dir[2]);
+            if (dir.LengthSquared() <= 0.0f)
+                continue;
+            _ports.Add(new Port(
+                new Vector3((float)port.Point[0], (float)port.Point[1],
+                            (float)port.Point[2]),
+                dir.Normalized(), (float)port.Radius));
+        }
+    }
+
     private void TakePlates(Dictionary<string, PlateMeta> plates)
     {
         foreach ((string face, PlateMeta plate) in plates)
@@ -1038,6 +1121,8 @@ public sealed class AtlasSet
             }
             if (layer == BurstName && meta.Hits is not null)
                 atlas.TakePlates(meta.Hits.Faces);
+            if (meta.Ports is not null)
+                atlas.TakePorts(meta.Ports);
             if (layer == TrackNames[0] && meta.Track is { Length: > 0 }
                 && meta.UnitsPerPixel > 0.0)
                 atlas.TrackPitch = meta.Track[0].Pitch / meta.UnitsPerPixel;
@@ -1182,6 +1267,13 @@ public sealed class AtlasSet
     /// standing so many pixels above the tank's feet.</summary>
     public double HeightSpanPx { get; private set; }
 
+    /// <summary>The world z the height map's floor and ceiling stand for.
+    /// Needed by anything that wants to put its own world z on the map's scale -
+    /// see <see cref="ProcSmoke"/>, which compares a puff's height against the
+    /// tank's at the same pixel to decide which is in front.</summary>
+    public double HeightLow { get; private set; }
+    public double HeightHigh { get; private set; }
+
     /// <summary>Whether this set carries a height map at all. A set rendered
     /// before sprite_height.py existed does not, and falls back to the
     /// groundline lifted by the depth - which is how every set behaved until
@@ -1193,6 +1285,8 @@ public sealed class AtlasSet
         if (meta.HeightRange is not { Length: 2 } || meta.UnitsPerPixel <= 0.0
             || Tile.X <= 0 || Tile.Y <= 0)
             return;
+        HeightLow = meta.HeightRange[0];
+        HeightHigh = meta.HeightRange[1];
         HeightSpanPx = (meta.HeightRange[1] - meta.HeightRange[0])
                        * Math.Cos(Mathf.DegToRad(meta.View.Elevation))
                        / meta.UnitsPerPixel;
@@ -1599,6 +1693,12 @@ public sealed class AtlasSet
         [JsonPropertyName("view")] public ViewMeta View { get; set; } = new();
         [JsonPropertyName("hits")] public HitsMeta? Hits { get; set; }
 
+        /// <summary>The engine port, in world units, on the two burning layers.
+        /// Absent everywhere else and on any set stamped before
+        /// <c>stamp_ports.py</c> - which is what leaves the rendered column as
+        /// the fallback rather than a failure.</summary>
+        [JsonPropertyName("ports")] public PortsMeta? Ports { get; set; }
+
         /// <summary>Per hull heading: is this layer in front of the turret.
         /// Absent on a set rendered before the turret came out of these layers'
         /// holdouts, and absent is the right default - such a set has the turret
@@ -1651,6 +1751,20 @@ public sealed class AtlasSet
         [JsonPropertyName("slope")] public double[] Slope { get; set; } = { 0, 0 };
         [JsonPropertyName("normal")] public double[] Normal { get; set; } = { 0, 0 };
         [JsonPropertyName("facing")] public double Facing { get; set; } = 1.0;
+    }
+
+    private sealed class PortsMeta
+    {
+        [JsonPropertyName("hull_length")] public double HullLength { get; set; }
+        [JsonPropertyName("list")]
+        public PortMeta[] List { get; set; } = Array.Empty<PortMeta>();
+    }
+
+    private sealed class PortMeta
+    {
+        [JsonPropertyName("point")] public double[] Point { get; set; } = { 0, 0, 0 };
+        [JsonPropertyName("dir")] public double[] Dir { get; set; } = { 0, 0, 1 };
+        [JsonPropertyName("radius")] public double Radius { get; set; } = 0.1;
     }
 
     private sealed class ViewMeta

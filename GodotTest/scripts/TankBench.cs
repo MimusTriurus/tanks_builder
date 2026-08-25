@@ -408,6 +408,14 @@ public sealed partial class TankBench : SceneRoot
                 case "--no-exhaust":
                     _tick.ExhaustEnabled = false;
                     break;
+                // See ProcSmoke: the column built rather than read off the
+                // atlas, and its A/B.
+                case "--proc-smoke":
+                    _tick.ProceduralSmoke = true;
+                    break;
+                case "--no-proc-smoke":
+                    _tick.ProceduralSmoke = false;
+                    break;
                 case "--no-shadow":
                     _shadow = false;
                     break;

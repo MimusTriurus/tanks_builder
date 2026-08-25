@@ -1096,6 +1096,13 @@ public sealed partial class Main : SceneRoot
 				_tick.ScanEnabled = true;
 			else if (userArgs[i] == "--no-exhaust")
 				_tick.ExhaustEnabled = false;
+			// The smoke column built rather than read - see ProcSmoke. A plain
+			// flag and not a level: which of two ways an effect is drawn is not
+			// a quantity, and the two are meant to be put side by side.
+			else if (userArgs[i] == "--proc-smoke")
+				_tick.ProceduralSmoke = true;
+			else if (userArgs[i] == "--no-proc-smoke")
+				_tick.ProceduralSmoke = false;
 			else if (userArgs[i] == "--no-tracks")
 				_tick.TracksEnabled = false;
 			else if (userArgs[i] == "--no-shadow")
@@ -3383,6 +3390,8 @@ public sealed partial class Main : SceneRoot
 		["--no-exhaust"] = new[] { "effects.exhaust" },
 		["--exhaust"] = new[] { "effects.exhaust_level" },
 		["--exhaust-ramp"] = new[] { "effects.exhaust_ramp" },
+		["--proc-smoke"] = new[] { "effects.proc_smoke" },
+		["--no-proc-smoke"] = new[] { "effects.proc_smoke" },
 		["--burning"] = new[] { "effects.fire" },
 		["--flash"] = new[] { "effects.flash_source" },
 		["--recoil-shear"] = new[] { "effects.hull_shear" },
@@ -3682,6 +3691,12 @@ public sealed partial class Main : SceneRoot
 		// level's caption is describing.
 		ui.Toggle("effects.exhaust_ramp", "load ramp instead of two states",
 			() => _tick.ExhaustRamp, on => _tick.ExhaustRamp = on);
+		// Beside the exhaust because it is the same shape of switch: it names
+		// the model, not an optional effect. Reads and writes the board's flag,
+		// so all three tanks change together - a comparison with one tank on
+		// each side of it is no comparison.
+		ui.Toggle("effects.proc_smoke", "build the smoke column, do not read it",
+			() => _tick.ProceduralSmoke, on => _tick.ProceduralSmoke = on);
 		// Frames per phase and not just the rate, because that is the question
 		// the drag runs into: the plume is twelve rendered poses stepped a few
 		// times a second, and the ceiling is how briefly a pose can be held

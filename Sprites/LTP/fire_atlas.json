@@ -5272,5 +5272,26 @@
     1.0
   ],
   "layer": "fire",
-  "static": false
+  "static": false,
+  "ports": {
+    "hull_length": 0.924791,
+    "hull_length_from": "hull atlas broadside fit",
+    "hull_width": 0.779251,
+    "hull_fit_residual": 0.083803,
+    "list": [
+      {
+        "point": [
+          2e-05,
+          0.4277,
+          -0.00728
+        ],
+        "dir": [
+          -0.00014,
+          0.18194,
+          0.98331
+        ],
+        "radius": 0.20921
+      }
+    ]
+  }
 }

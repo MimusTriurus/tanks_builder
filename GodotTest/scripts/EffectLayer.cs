@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Godot;
 
 namespace TankSpriteTest;
@@ -588,7 +588,14 @@ void fragment() {
             return Clock switch
             {
                 Clocks.Exhaust => Tank.ShowExhaust ? Tank.ExhaustPhase : -1,
-                Clocks.BurningSmoke => Tank.Burning ? Tank.BurnPhase : -1,
+                // Stands down when the column is being built rather than
+                // read - exactly one of the pair draws, or the tank smokes
+                // twice. See TankSprite.SmokeIsProcedural, which is false on a
+                // set with no stamped port however the flag is set: a switch
+                // that took the smoke away rather than remade it would read as
+                // a broken switch.
+                Clocks.BurningSmoke => Tank.Burning && !Tank.SmokeIsProcedural
+                    ? Tank.BurnPhase : -1,
                 Clocks.BurningFire => Tank.Burning ? Tank.FirePhase : -1,
                 Clocks.HitBurst or Clocks.HitDust => Tank.HitPhase,
                 Clocks.Track => Tank.ShowTracks ? Tank.TrackPhaseOf(Layer) : -1,

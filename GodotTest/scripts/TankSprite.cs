@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.Linq;
 using Godot;
@@ -206,6 +206,38 @@ public sealed partial class TankSprite : Node2D
     /// <see cref="BurnLoop"/>.</summary>
     public int FirePhase = -1;
     public int BurnPhase = -1;
+
+    /// <summary>
+    /// The same two loops as a position round the lap in [0, 1), rather than as
+    /// the frame that position lands on.
+    ///
+    /// <b>The quantisation is the difference, and it is the whole reason the
+    /// procedural column exists.</b> A rendered layer can only be at one of
+    /// twelve phases; the model it was rendered from is continuous, and so is the
+    /// forest's fire drawn from that same model. Read straight off
+    /// <see cref="BurnLoop"/>, which was already keeping the continuous figure
+    /// and only rounding it at the door.
+    /// </summary>
+    public float FireCycle;
+    public float SmokeCycle;
+
+    /// <summary>
+    /// Whether the smoke column is built here instead of read off the atlas -
+    /// see <see cref="ProcSmoke"/>.
+    ///
+    /// One flag rather than a per-tank setting: which of two ways an effect is
+    /// drawn is a question about the effect, and answering it on one tank while
+    /// two others burn the other way destroys the comparison it is asked for.
+    /// The rendered layer stays loaded and stays the fallback, because a set with
+    /// no stamped port cannot draw the procedural one at all.
+    /// </summary>
+    public bool ProceduralSmoke;
+
+    /// <summary>Whether the rendered burn layer should stand down. True only
+    /// when something else is actually going to draw a column: a flag flipped on
+    /// a set that cannot honour it would take the smoke away rather than change
+    /// how it is made.</summary>
+    public bool SmokeIsProcedural => ProceduralSmoke && Atlas is { HasPorts: true };
 
     /// <summary>Phase of a shell arriving, or -1 between hits. An event like the
     /// shot, so it runs out rather than wrapping - see <see cref="HitLoop"/>.</summary>
@@ -1266,8 +1298,18 @@ public sealed partial class TankSprite : Node2D
             // it was when the turret was a parent draw. See SheetFlash.
             if (name == "turret")
                 AddChild(new SheetFlash { Tank = this });
+            // In the slot the rendered column would have taken, so the two
+            // composite in the same place and the A/B is a swap and not a
+            // reorder. Exactly one of the pair draws - see
+            // ProcSmoke.Wanted and EffectLayer.Wanted.
+            if (name == AtlasSet.BurnName)
+                AddChild(Column = new ProcSmoke { Tank = this });
         }
     }
+
+    /// <summary>The procedural column, built in <see cref="LayerOrder"/>'s burn
+    /// slot. Kept so the checks and the readout can ask what it put up.</summary>
+    public ProcSmoke? Column { get; private set; }
 
     public override void _Draw()
     {

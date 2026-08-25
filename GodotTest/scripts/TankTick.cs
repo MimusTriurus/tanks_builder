@@ -246,6 +246,15 @@ public sealed class TankTick
     public bool ScanEnabled;
     public bool RecoilTube = true;
     public bool RecoilShear = Recoil.ShearOnByDefault;
+
+    /// <summary>Whether the smoke column is built rather than read off the
+    /// atlas - see <see cref="ProcSmoke"/>. On the tick and not on a tank
+    /// because it is a question about the effect, and answered on one tank
+    /// while two others burn the other way it destroys the comparison it exists
+    /// for. Off by default, and named there rather than here: the rendered
+    /// column is what every shipped set draws, and the A/B is what makes
+    /// "built reads better" an assertion instead of a memory.</summary>
+    public bool ProceduralSmoke = ProcSmoke.OnByDefault;
     public bool ShakeOn = CameraShake.OnByDefault;
 
     // --- what it cannot answer for itself -----------------------------------
@@ -1265,13 +1274,23 @@ public sealed class TankTick
             v.Sprite.Burning = false;
             v.Sprite.FirePhase = -1;
             v.Sprite.BurnPhase = -1;
+            v.Sprite.FireCycle = 0.0f;
+            v.Sprite.SmokeCycle = 0.0f;
+            v.Sprite.ProceduralSmoke = ProceduralSmoke;
             v.Sprite.QueueRedraw();
             return;
         }
         v.Burn.Advance(delta);
         v.Sprite.Burning = true;
+        v.Sprite.ProceduralSmoke = ProceduralSmoke;
         v.Sprite.FirePhase = v.Burn.FireFrame;
         v.Sprite.BurnPhase = v.Burn.SmokeFrame;
+        // The same two positions unrounded, for whatever draws itself rather
+        // than picking a rendered frame - see TankSprite.SmokeCycle. Set beside
+        // the frames rather than derived at the reader, so the two can never be
+        // a frame apart.
+        v.Sprite.FireCycle = (float)(v.Burn.FirePhase / Math.Max(v.Burn.Phases, 1));
+        v.Sprite.SmokeCycle = (float)(v.Burn.SmokePhase / Math.Max(v.Burn.Phases, 1));
     }
 
 

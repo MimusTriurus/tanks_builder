@@ -4668,6 +4668,217 @@ public static class SelfTest
                 + $" {atlas.BurnPhases * atlas.Count}, highest {burnTiles.Max()}");
         }
 
+        Theme("the column built rather than read");
+        // Every one of these is about something that fails without a mark on the
+        // screen: a quarter turn of error in the projection still draws a column,
+        // a loop that does not close still draws smoke, and a model that has lost
+        // the sphere's second surface draws a thinner one that looks like a
+        // choice. See ProcSmoke.
+        var built = new ProcSmoke();
+        Check($"{atlas.Tag} carries a stamped port",
+            atlas.HasPorts,
+            atlas.Ports.Count == 0
+                ? "no ports block - run stamp_ports.py over Sprites/"
+                : $"hull length {atlas.HullLength:F3}, units per pixel"
+                  + $" {atlas.UnitsPerPixel:F6}");
+
+        if (atlas.HasPorts && atlas.HasBurning)
+        {
+            // The quarter turn. The projection carries a +90 for the front being
+            // -Y, which is an import convention and not a measurement, so it is
+            // put against the one thing that already knows where the column goes:
+            // the rendered layer's own trimmed frame. A sign or an axis swapped
+            // still produces a tidy column, ninety degrees from the vent.
+            AtlasSet.Port port = atlas.Ports[0];
+            double worstSeat = 0.0;
+            int seatHeading = 0;
+            foreach (int facing in atlas.RenderedFacings())
+            {
+                int frame = atlas.EffectFrame(AtlasSet.BurnName, 0, facing);
+                Vector2 size = atlas.SizeOf(AtlasSet.BurnName, frame);
+                if (size.X <= 0.0f || size.Y <= 0.0f)
+                    continue;
+                Vector2 lo = atlas.OffsetOf(AtlasSet.BurnName, frame)
+                             - atlas.AnchorOf(AtlasSet.BurnName);
+                var box = new Rect2(lo, size);
+                Vector2 seat = atlas.Project(port.Point, facing);
+                double out_ = Math.Max(
+                    Math.Max(box.Position.X - seat.X, seat.X - box.End.X),
+                    Math.Max(box.Position.Y - seat.Y, seat.Y - box.End.Y));
+                if (out_ > worstSeat)
+                {
+                    worstSeat = out_;
+                    seatHeading = facing;
+                }
+            }
+            Check("the stamped port projects inside the rendered column at every"
+                  + " heading",
+                worstSeat <= 12.0,
+                $"worst {worstSeat:F1}px outside its own frame at {seatHeading} deg");
+
+            // World up has to come out straight up on the screen whatever the hull
+            // is doing - it is the one direction the carousel cannot turn - and it
+            // has to be exactly as long as the height map says a unit of height is.
+            // Two statements of one number is how a map and a column come apart.
+            double worstLean = 0.0, worstRise = 0.0;
+            double wantRise = Math.Cos(Mathf.DegToRad(atlas.Elevation))
+                              / atlas.UnitsPerPixel;
+            foreach (int facing in atlas.RenderedFacings())
+            {
+                Vector2 up = atlas.Project(ProcSmoke.Up, facing);
+                worstLean = Math.Max(worstLean, Math.Abs(up.X));
+                worstRise = Math.Max(worstRise, Math.Abs(-up.Y - wantRise));
+            }
+            Check("world up projects straight up, at the height map's own scale",
+                worstLean < 0.01 && worstRise < 0.01,
+                $"leans {worstLean:F3}px, off the map's rise by {worstRise:F3}px"
+                + $" of {wantRise:F1}");
+
+            // The path leaves the way the vent points and ends up climbing, and
+            // its length is the distance to the tip rather than the distance
+            // travelled. Writing the second one instead is a column of the right
+            // shape and the wrong height, which nothing else here would notice.
+            Vector3[] path = ProcSmoke.Path(port.Dir, 1.0f, built.Buoyancy,
+                                            built.TurnPower, built.Slowing);
+            Vector3 first = (path[1] - path[0]).Normalized();
+            Vector3 last = (path[^1] - path[^2]).Normalized();
+            double columnWalked = 0.0;
+            for (int i = 1; i < path.Length; i++)
+                columnWalked += (path[i] - path[i - 1]).Length();
+            Check("the column leaves along the vent and ends up going up",
+                first.Dot(port.Dir) > 0.99f && last.Dot(ProcSmoke.Up) > 0.97f,
+                $"leaves at {Mathf.RadToDeg(Math.Acos(first.Dot(port.Dir))):F1} deg"
+                + $" off the vent, ends {Mathf.RadToDeg(Math.Acos(last.Dot(ProcSmoke.Up))):F1}"
+                + " deg off vertical");
+            // Two halves: the tip lands exactly on the reach it was given, and
+            // the way there is longer than that. Normalised on the arc instead -
+            // the obvious other reading - the tip would fall short by the
+            // difference, which on this vent is only a percent and a half.
+            Check("and its reach is to the tip, not the distance travelled",
+                Math.Abs(path[^1].Length() - 1.0) < 1e-3 && columnWalked > 1.002,
+                $"tip at {path[^1].Length():F4}, travelled {columnWalked:F4}");
+
+            // The loop closes by construction: age advances by 1/n a lap for every
+            // puff at once, so a whole lap is the same picture and one step of the
+            // lap columnSlides puff k onto where k+1 was. Neither is a tolerance - both
+            // are exact, which is the whole reason there is no phase table.
+            ProcSmoke.Puff[] atZero = built.Build(port, atlas.HullLength, 0.0f);
+            ProcSmoke.Puff[] atOne = built.Build(port, atlas.HullLength, 1.0f);
+            double worstLap = 0.0;
+            for (int i = 0; i < atZero.Length; i++)
+                worstLap = Math.Max(worstLap,
+                    (atZero[i].Centre - atOne[i].Centre).Length());
+            Check("a whole lap of the column is the same picture",
+                worstLap < 1e-5, $"worst puff moved {worstLap:E2} world units");
+
+            ProcSmoke.Puff[] atStep = built.Build(port, atlas.HullLength,
+                                                  1.0f / built.Puffs);
+            var wasAges = atZero.Select(q => (double)q.Age).OrderBy(a => a).ToArray();
+            var nowAges = atStep.Select(q => (double)q.Age).OrderBy(a => a).ToArray();
+            double columnSlid = 0.0;
+            for (int i = 0; i + 1 < wasAges.Length; i++)
+                columnSlid = Math.Max(columnSlid, Math.Abs(nowAges[i + 1] - wasAges[i]
+                                               - 1.0 / built.Puffs));
+            Check("and one step of it slides each puff onto the next one's place",
+                columnSlid < 1e-5, $"worst {columnSlid:E2} of a life out");
+
+            // Hashed on the puff and never on the phase. Mix the phase in and
+            // every puff becomes a different puff every frame - the column boils
+            // rather than drifting, and no amount of tuning the shape fixes it.
+            // Tone is the one per-puff draw that does not move with age, so it is
+            // what says whether the dice were rolled again.
+            var wasTone = atZero.Select(q => Math.Round(q.Tone, 6))
+                                .OrderBy(t => t).ToArray();
+            var nowTone = atStep.Select(q => Math.Round(q.Tone, 6))
+                                .OrderBy(t => t).ToArray();
+            Check("a puff keeps its own dice as the lap turns",
+                wasTone.SequenceEqual(nowTone),
+                "the stagger is hashed on the phase as well as the puff, so the "
+                + "column boils instead of drifting");
+
+            // Solidity has to reach nothing at both ends of a life, or a puff
+            // arrives and leaves with a step. The ends are what onset and fade are
+            // for and they are easy to lose to a tidier expression.
+            ProcSmoke.Puff youngest = atZero.OrderBy(q => q.Age).First();
+            ProcSmoke.Puff oldest = atZero.OrderBy(q => q.Age).Last();
+            Check("a puff comes up from nothing and goes back to it",
+                youngest.Alpha < built.Alpha * 0.55f
+                && oldest.Alpha < built.Alpha * 0.35f,
+                $"youngest {youngest.Alpha:F3} at age {youngest.Age:F3},"
+                + $" oldest {oldest.Alpha:F3} at age {oldest.Age:F3},"
+                + $" against a ceiling of {built.Alpha:F2}");
+
+            // The built column has to come out the size the rendered one is: same
+            // model, same numbers, so a difference here is a number read against
+            // the wrong thing - which is the mistake the forest's port made with
+            // three of them at once.
+            Rect2? span = null;
+            foreach (ProcSmoke.Puff q in atZero)
+            {
+                if (q.Alpha <= 0.002f)
+                    continue;
+                Vector2 at = atlas.Project(q.Centre, 270.0);
+                float r = (float)(q.Radius * (1.0 + built.Wobble * 0.5)
+                                  / atlas.UnitsPerPixel);
+                var one = new Rect2(at - Vector2.One * r, Vector2.One * r * 2.0f);
+                span = span is null ? one : span.Value.Merge(one);
+            }
+            int zero = atlas.EffectFrame(AtlasSet.BurnName, 0, 270.0);
+            Vector2 drawn = atlas.SizeOf(AtlasSet.BurnName, zero);
+            Check("and it comes out the size the rendered one is",
+                span is not null && drawn.X > 0.0f
+                && Math.Abs(span.Value.Size.X - drawn.X) < drawn.X * 0.30f
+                && Math.Abs(span.Value.Size.Y - drawn.Y) < drawn.Y * 0.35f,
+                span is null ? "nothing built"
+                    : $"built {span.Value.Size.X:F0}x{span.Value.Size.Y:F0}px,"
+                      + $" rendered {drawn.X:F0}x{drawn.Y:F0}px");
+        }
+
+        // Exactly one of the pair draws. Both is a tank smoking twice; neither is
+        // a switch that took the smoke away rather than remaking it, and that is
+        // the half a flag on a set with no port would hit.
+        var pairTank = new TankSprite { Atlas = atlas, Burning = true };
+        var rendered = TankSprite.MakeLayer(AtlasSet.BurnName);
+        rendered.Tank = pairTank;
+        pairTank.BurnPhase = 0;
+        pairTank.ProceduralSmoke = false;
+        bool readWhenOff = rendered.Showing >= 0;
+        pairTank.ProceduralSmoke = true;
+        bool readWhenOn = rendered.Showing >= 0;
+        Check("exactly one of the built column and the read one draws",
+            readWhenOff && (!readWhenOn || !atlas.HasPorts),
+            $"rendered layer shows {(readWhenOff ? "yes" : "no")} with the flag off,"
+            + $" {(readWhenOn ? "yes" : "no")} with it on");
+        Check("and a set with no stamped port keeps the rendered one whatever the"
+              + " flag says",
+            !new TankSprite { ProceduralSmoke = true }.SmokeIsProcedural,
+            "a flag honoured on a set that cannot build the column takes the "
+            + "smoke away instead of remaking it");
+
+        // Three claims about the shader, each of which fails into a picture that
+        // looks deliberate. Read off the code for EffectLayer.Glow's reason: what
+        // goes wrong is a render mode or a single term, and nothing else about the
+        // pass changes with it.
+        string column = ProcSmoke.ColumnCode;
+        Check("the column takes light away rather than adding it",
+            column.Contains("blend_mix") && !column.Contains("blend_add"),
+            "a column that adds light is the one arrangement that washes out the "
+            + "flame it exists to hold up");
+        Check("a puff is a sphere, so its two surfaces both count",
+            column.Contains("(1.0 - one) * (1.0 - one)"),
+            "one surface per puff is a thin wisp beside the rendered column at "
+            + "the same size - measured, the stack under a peak puff drops from "
+            + "0.48 to 0.28");
+        Check("the height map is sampled without blending",
+            column.Contains("depth_tex : filter_nearest"),
+            "blending two heights across a silhouette edge invents a surface "
+            + "halfway between the tank and nothing");
+        Check("and a puff at the map's own floor and ceiling reads 0 and 1",
+            atlas.HeightHigh > atlas.HeightLow
+            && Math.Abs(ProcSmoke.LiftOf(atlas, (float)atlas.HeightLow)) < 1e-4
+            && Math.Abs(ProcSmoke.LiftOf(atlas, (float)atlas.HeightHigh) - 1.0f) < 1e-4,
+            $"map runs {atlas.HeightLow:F3}..{atlas.HeightHigh:F3}");
+
         Theme("a shell arriving");
         // An event, like the shot, and unlike everything else that came after
         // it: the phases run out into -1 rather than wrapping.
