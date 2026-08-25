@@ -388,6 +388,14 @@ public sealed partial class WallBench : SceneRoot
             // stop it clearing itself is the A/B the effect is judged by.
             else if (args[i] == "--no-crumble")
                 WallRig.Crumbles = false;
+            // The wall only loses what the strike itself reached, the way it used
+            // to - the A/B a breach is judged by.
+            else if (args[i] == "--no-breach")
+                WallRig.Breaches = false;
+            // Every piece takes the depth buffer, the way it used to - the A/B
+            // rubble giving that up is judged by.
+            else if (args[i] == "--solid-rubble")
+                WallStack.Dressed = false;
             else if (args[i] == "--fell")
                 _fellAtStart = true;
         }
@@ -588,6 +596,8 @@ public sealed partial class WallBench : SceneRoot
             _rig is null ? "solved flights, no solver"
             : !_rig.Struck ? "standing, nothing fired"
             : $"{_rig.Clock:F2}s, {_rig.Awake} moving, {_rig.Loose} let go");
+        _panel.Toggle("wall.strike.breach", "a breach takes the whole side",
+                      () => WallRig.Breaches, on => WallRig.Breaches = on);
         _panel.Toggle("wall.strike.crumble", "fallen pieces clear",
                       () => WallRig.Crumbles, on => WallRig.Crumbles = on);
         _panel.Readout("wall.strike.clear", () =>

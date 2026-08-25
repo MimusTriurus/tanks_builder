@@ -228,6 +228,23 @@ public static class WallKit
         public int Course;        // -1 for a fallen brick or a chip
         public bool Chip;
 
+        /// <summary>Which side of the cell this piece stands on, 0 to
+        /// <c>Sides - 1</c>, counted the way <see cref="Fit"/> folds the chain.
+        ///
+        /// <b>Written where the fold is decided and nowhere else.</b> A side is
+        /// recoverable from a seat afterwards - it is the kite the centre falls
+        /// in, which is the test <see cref="Mitre"/> already makes - and a second
+        /// answer to it would be a second opinion about which section a shot broke
+        /// into, drifting exactly at the corner where nobody compares them.
+        ///
+        /// <b>Masonry only.</b> The apron is dropped after the fold by
+        /// <see cref="Scatter"/> and is rubble on the ground rather than a piece
+        /// of a section, so what this says about a piece with
+        /// <see cref="Course"/> below zero means nothing - the same sentence
+        /// <c>WallRig.Clearance</c> and <c>Bars</c> already make about it.
+        /// </summary>
+        public int Side;
+
         public readonly Transform3D Frame => new(Turn, Seat);
     }
 
@@ -892,6 +909,7 @@ public static class WallKit
             // gathers a course: the end of one side and the start of the next are
             // the same point on the boundary, and the two runs meet there.
             int s = Mathf.Clamp(Mathf.FloorToInt((x + half) / side), 0, sides - 1);
+            b.Side = s;
             // Subtract the side's own centre, and never add half a chain and
             // take it off again. Written that way it is exactly zero on a
             // one-sided wall in algebra and not in floats: (x + 0.485) - 0.485

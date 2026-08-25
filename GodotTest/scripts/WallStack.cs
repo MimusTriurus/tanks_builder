@@ -462,6 +462,12 @@ public sealed partial class WallStack : Node3D
                 ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
                 CullMode = BaseMaterial3D.CullModeEnum.Disabled,
                 TextureFilter = BaseMaterial3D.TextureFilterEnum.Nearest,
+                // A tank stands on the board, so it goes on the board's own rung
+                // for that - above the rubble it is standing in, which gave that
+                // sort up. Said rather than left at the default, which is the
+                // rung the rubble is on: a tie is settled by distance, and the
+                // pile in front of a tank is nearer than the tank.
+                RenderPriority = Stage3D.StandOrder,
             },
         };
         AddChild(_ram);
@@ -606,7 +612,7 @@ public sealed partial class WallStack : Node3D
             _shadeMesh.SetInstanceColor(i, new Color(1.0f, 1.0f, 1.0f, left));
             _shadeMesh.SetInstanceCustomData(i, size);
 
-            if (left >= 1.0f)
+            if (left >= 1.0f && !Rubble(b.Course, Rig?.Held(i) ?? true))
             {
                 _mesh.SetInstanceTransform(solid, pose);
                 _mesh.SetInstanceColor(solid, tone);
@@ -638,6 +644,46 @@ public sealed partial class WallStack : Node3D
         _mesh.VisibleInstanceCount = solid;
         _ghostMesh!.VisibleInstanceCount = going;
     }
+
+    /// <summary>Whether a piece is rubble rather than masonry: the apron
+    /// (<paramref name="course"/> below zero), or anything the wall has let go of
+    /// (<paramref name="held"/> false).
+    ///
+    /// <b>Rubble is not masonry</b> - <c>WallRig.Clearance</c>'s sentence
+    /// arriving in a fifth place, and here it decides what occludes a tank.
+    /// Standing masonry is a solid on the board and takes the depth buffer, which
+    /// is what lets it hide a hull behind it. What is lying on the ground is
+    /// dressing on the board instead, and it gives up that fight for
+    /// <see cref="Stage3D.DressOrder"/>'s reason, stated there about undergrowth:
+    /// a tank parks where it lies, and a billboard has one depth while the hull it
+    /// draws is six metres long, so honest depth against a pile at its feet is a
+    /// coin toss reshuffled at every heading. Measured before this: a heap the
+    /// tank had just made was painted across its hull up to the turret ring.
+    ///
+    /// <b>What it costs is a brick genuinely between the camera and the tank</b>,
+    /// which now goes behind it. That brick lies on the ground, so it draws below
+    /// the tank's own groundline where the sprite is transparent anyway; the cost
+    /// is bounded to the pile the tank is standing in, which is the pile that was
+    /// wrong before.
+    ///
+    /// A solved flight has no rig and nothing has been let go of, so there the
+    /// apron is the whole of it.</summary>
+    public static bool Rubble(int course, bool held) =>
+        Dressed && (course < 0 || !held);
+
+    /// <summary>Whether rubble is dressing on the board rather than a solid on
+    /// it. On, and named here rather than left in the field's initialiser for
+    /// <c>Recoil.ShearOnByDefault</c>'s reason.</summary>
+    public const bool DressedByDefault = true;
+
+    /// <summary>Whether rubble is dressing - <c>--solid-rubble</c> on either
+    /// bench puts back the wall whose every piece took the depth buffer, which is
+    /// the A/B <see cref="Rubble"/> is judged by. Static for
+    /// <see cref="WallRig.Crumbles"/>'s reason, and read while the materials are
+    /// built rather than every frame: whether a shader writes depth is a render
+    /// mode, compiled in and not set, which is <c>Stage3D.Tested</c>'s reason for
+    /// keeping two of them.</summary>
+    public static bool Dressed = DressedByDefault;
 
     /// <summary>Order the blended pieces back to front.
     ///
@@ -808,7 +854,11 @@ public sealed partial class WallStack : Node3D
     {
         var ink = new ShaderMaterial
         {
-            Shader = new Shader { Code = going ? GhostCode : MortarCode },
+            Shader = new Shader
+            {
+                Code = !going ? MortarCode
+                     : Dressed ? GhostCode : SolidCode,
+            },
         };
         ink.SetShaderParameter("sun", Key);
         ink.SetShaderParameter("joint", Joint);
@@ -861,6 +911,12 @@ public sealed partial class WallStack : Node3D
         {
             Shader = new Shader { Code = ShadeCode },
         };
+        // On the board's own rung for a cast shadow, which is under everything
+        // that lies on the ground. Said rather than left at the default, for the
+        // ram quad's reason: the rubble is on that default now, and a shadow that
+        // settles against it by distance is a shadow that flickers as a piece
+        // rolls past its own.
+        ink.RenderPriority = Stage3D.ShadowOrder;
         ink.SetShaderParameter("ink", Stage3D.ShadowInk.A);
         return ink;
     }
@@ -878,12 +934,23 @@ public sealed partial class WallStack : Node3D
     /// the same statement, and two copies of it would drift exactly where nobody
     /// compares them: the tone of a fading brick against the one beside it.
     ///
-    /// <b>It still writes depth.</b> Blending without it would hand back the one
-    /// thing the opaque wall bought - a tank behind it is occluded by it - the
-    /// moment a piece began to go, and a tank showing through a nearly whole
-    /// brick reads as a hole in the wall.
+    /// <b>And it writes no depth, which is what this mesh is now for.</b> It
+    /// used to, on the argument that a fading brick still had to hide a tank
+    /// behind it; that was written when the only thing in here was a piece part
+    /// way through clearing itself, still standing in the wall. What is in here
+    /// now is <see cref="Rubble"/> - the apron and everything let go - and rubble
+    /// occluding a hull is the defect rather than the feature. It still <i>tests</i>
+    /// depth, so masonry standing in front of a brick still hides it, and the
+    /// pieces sort against each other by <see cref="Backwards"/> rather than by
+    /// the buffer.
     /// </summary>
     internal static string GhostCode =>
+        string.Format(MortarShader, ", depth_draw_never", "ALPHA = left;");
+
+    /// <summary>The same again, taking the depth buffer - the wall as it was
+    /// before rubble gave that up. <c>--solid-rubble</c>; see
+    /// <see cref="Dressed"/>.</summary>
+    internal static string SolidCode =>
         string.Format(MortarShader, ", depth_draw_always", "ALPHA = left;");
 
     /// <summary>The shadow, which takes no parameter: it was always blended.

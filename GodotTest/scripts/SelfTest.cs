@@ -9612,16 +9612,15 @@ public static class SelfTest
             $"they share {Same(intact, going) * 100.0:F0}% of their lines");
         // The pair the fade rests on. A material that writes ALPHA is a material
         // in the transparent pass, where multimesh instances are not sorted - so
-        // only what is leaving goes there, and it keeps writing depth while it
-        // does, or a tank behind a nearly intact brick shows through it.
-        Check("what is whole stays opaque and what is leaving blends and still "
-              + "writes depth",
+        // only rubble goes there, and Backwards is what orders it instead of the
+        // buffer. What depth each of them takes is asserted further down, where
+        // the reason for it is.
+        Check("what is standing stays opaque and what is rubble blends",
             !intact.Contains("ALPHA") && !intact.Contains("depth_draw")
-            && going.Contains("ALPHA = left") && going.Contains("depth_draw_always"),
+            && going.Contains("ALPHA = left"),
             $"whole: alpha {intact.Contains("ALPHA")}, depth "
             + $"{intact.Contains("depth_draw")}; going: alpha "
-            + $"{going.Contains("ALPHA = left")}, depth "
-            + $"{going.Contains("depth_draw_always")}");
+            + $"{going.Contains("ALPHA = left")}");
         // And the shadow spends the same figure as ink rather than as coverage,
         // because a stencil union cannot composite alpha: the first fragment at a
         // pixel wins, so an eaten shadow stays full black in patches under a brick
@@ -9845,6 +9844,128 @@ public static class SelfTest
                 && Mathf.Abs(twice.X - box.X * 2.0f) < 0.01f,
                 $"{box.Z:F2}m doubled is {twice.Z:F2}m");
         }
+
+        // --- a breach takes the section --------------------------------------
+        //
+        // Which shots do, and it is the one exception AP already carries against
+        // the cascade: a round through the middle takes what stands on its line
+        // and leaves the rest standing round the gap.
+        Check("a ram and a burst break into masonry, so each brings the section "
+              + "it broke into down whole; a round through it does not",
+            WallRig.Breaching(WallRig.Strike.Ram)
+            && WallRig.Breaching(WallRig.Strike.He)
+            && !WallRig.Breaching(WallRig.Strike.Ap),
+            $"ram {WallRig.Breaching(WallRig.Strike.Ram)}, "
+            + $"he {WallRig.Breaching(WallRig.Strike.He)}, "
+            + $"ap {WallRig.Breaching(WallRig.Strike.Ap)}");
+        // A share of the section and never a count, because a section is however
+        // long the side it stands on is cut into. Both walls this bench actually
+        // builds, at their own sizes.
+        Check("and how much of a section has to go is a share of it, so the same "
+              + "rule fits a ring's leaf and a single-sided wall",
+            WallRig.Breached(12, 89) && !WallRig.Breached(10, 89)
+            && WallRig.Breached(8, 59) && !WallRig.Breached(6, 59),
+            $"of 89: 10 {WallRig.Breached(10, 89)}, 12 "
+            + $"{WallRig.Breached(12, 89)}; of 59: 6 {WallRig.Breached(6, 59)}, "
+            + $"8 {WallRig.Breached(8, 59)}");
+        // The one that pays for itself: a hull leaving the ring clips a brick or
+        // two off the mitred corner of the leaf next to the one it drives
+        // through, and a rule that levelled a section on first contact would
+        // bring that one down as well.
+        Check("so a graze is not a breach: two bricks off the corner of a leaf "
+              + "leave it standing",
+            !WallRig.Breached(1, 89) && !WallRig.Breached(2, 89),
+            $"two of 89 breaches: {WallRig.Breached(2, 89)}");
+        Check("and a section the profile has cut down to a few blocks still "
+              + "answers, while one that has lost nothing never does",
+            WallRig.Breached(1, 4) && !WallRig.Breached(0, 89)
+            && !WallRig.Breached(1, 0),
+            $"one of four {WallRig.Breached(1, 4)}, "
+            + $"none of 89 {WallRig.Breached(0, 89)}, "
+            + $"one of none {WallRig.Breached(1, 0)}");
+
+        // --- and every piece knows which section it is in ----------------------
+        //
+        // Written where the fold is decided and nowhere else - see Block.Side.
+        // The failure this catches is silent and total: with the side left
+        // unwritten every piece reads as section nought, so the first brick a
+        // shot reaches brings down a leaf on the far side of the cell.
+        WallKit.Plan fan = WallKit.Lay(new WallKit.Recipe { Sides = 6 });
+        WallKit.Fit(fan, 0.97f);
+        WallKit.Scatter(fan, new WallKit.Recipe { Sides = 6 }, 1.0f, 0.97f);
+        var carried = new HashSet<int>();
+        bool sane = true, apron = false;
+        foreach (WallKit.Block b in fan.Blocks)
+        {
+            if (b.Course < 0)
+            {
+                apron = true;
+                continue;
+            }
+            sane &= b.Side >= 0 && b.Side < 6;
+            carried.Add(b.Side);
+        }
+        Check("every piece of masonry stands on a side of the cell, and a chain "
+              + "folded round all six carries pieces on every one of them",
+            sane && carried.Count == 6,
+            $"{carried.Count} of 6 sides carry masonry, all in range {sane}");
+        Check("and the wall that runs along one side puts all of it there",
+            plan.Blocks.TrueForAll(b => b.Course < 0 || b.Side == 0),
+            "a single-sided wall has masonry off side nought");
+        // Rubble is not masonry, for the fourth time: the apron is dropped after
+        // the fold, lies on the ground inside the cell and is no part of a
+        // section - so it cannot be brought down with one, and it is what
+        // WallStack draws under a hull rather than over it.
+        Check("the apron is dropped after the fold, so it is rubble on the "
+              + "ground rather than a piece of any section",
+            apron, "the fan has no apron at all, so nothing was asserted");
+
+        // --- what rubble does about a hull -------------------------------------
+        //
+        // Standing masonry is a solid on the board and takes the depth buffer,
+        // which is what lets it hide a tank behind it. Rubble gives that up: a
+        // billboard has one depth and the hull it draws is six metres long, so
+        // honest depth against a pile at its feet is a coin toss reshuffled at
+        // every heading - measured, a heap the tank had just made was painted
+        // across its hull up to the turret ring.
+        Check("the apron is rubble the moment it is laid, a standing course is "
+              + "not, and one the wall has let go of is",
+            WallStack.Rubble(-1, true) && !WallStack.Rubble(3, true)
+            && WallStack.Rubble(3, false),
+            $"apron {WallStack.Rubble(-1, true)}, standing "
+            + $"{WallStack.Rubble(3, true)}, let go {WallStack.Rubble(3, false)}");
+        WallStack.Dressed = false;
+        bool asSolid = !WallStack.Rubble(-1, true) && !WallStack.Rubble(3, false);
+        WallStack.Dressed = WallStack.DressedByDefault;
+        Check("and --solid-rubble puts back the wall whose every piece was a "
+              + "solid, which is the A/B the change is judged by",
+            asSolid && WallStack.DressedByDefault && WallStack.Dressed,
+            $"solid-rubble leaves the apron rubble: {!asSolid}");
+        Check("standing masonry writes depth and rubble does not, which is how "
+              + "a wall hides a tank behind it while a heap at its feet does not",
+            !WallStack.MortarCode.Contains("depth_draw")
+            && WallStack.GhostCode.Contains("depth_draw_never")
+            && WallStack.SolidCode.Contains("depth_draw_always"),
+            "the two bricks disagree about depth the wrong way round");
+        // Both are the same text with one render mode changed, for FoamEdge's
+        // reason: the seam, the grain, the chip and the tone are one statement,
+        // and a second copy of them drifts exactly where nobody compares it - the
+        // colour of a fading brick against the one beside it.
+        Check("and the two are the same brick with one render mode between them, "
+              + "never two copies of it",
+            WallStack.GhostCode.Replace("depth_draw_never", "depth_draw_always")
+            == WallStack.SolidCode,
+            "the rubble brick and the solid one have drifted apart");
+        // Rubble is on the board's dressing rung and a tank on the standing one,
+        // which is what settles the pair when neither writes depth. A tie is
+        // settled by distance, and the pile in front of a tank is nearer than the
+        // tank.
+        Check("rubble sorts under what stands on the board, and a cast shadow "
+              + "under both",
+            Stage3D.ShadowOrder < Stage3D.DressOrder
+            && Stage3D.DressOrder < Stage3D.StandOrder,
+            $"shadow {Stage3D.ShadowOrder}, dressing {Stage3D.DressOrder}, "
+            + $"standing {Stage3D.StandOrder}");
 
         // --- the engine the numbers were tuned against -----------------------
         //

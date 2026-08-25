@@ -522,6 +522,16 @@ public sealed partial class TankBench : SceneRoot
                 case "--no-crumble":
                     WallRig.Crumbles = false;
                     break;
+                // The wall only loses what the strike itself reached, as it used
+                // to - the A/B a breach is judged by. See WallRig.Breaches.
+                case "--no-breach":
+                    WallRig.Breaches = false;
+                    break;
+                // Every piece takes the depth buffer, as it used to - the A/B
+                // rubble giving that up is judged by. See WallStack.Dressed.
+                case "--solid-rubble":
+                    WallStack.Dressed = false;
+                    break;
             }
         }
         // A capture is evidence, so the step is pinned for the harness's reason:
@@ -1855,6 +1865,9 @@ public sealed partial class TankBench : SceneRoot
             _panel.Toggle("wall.box", "a struck wall keeps the ram box  "
                                       + "(--parked-box)",
                           () => _parkedBox, on => _parkedBox = on);
+            _panel.Toggle("wall.breach", "a breach takes the whole side  "
+                                         + "(--no-breach)",
+                          () => WallRig.Breaches, on => WallRig.Breaches = on);
             _panel.Toggle("wall.crumble", "fallen pieces clear  (--no-crumble)",
                           () => WallRig.Crumbles, on => WallRig.Crumbles = on);
             _panel.Readout("wall.state", () => WallNote());

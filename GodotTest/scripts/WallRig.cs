@@ -194,6 +194,16 @@ public sealed partial class WallRig : Node3D
     private readonly HashSet<int> _live = new();
     private readonly HashSet<int> _gone = new();
     private readonly List<float> _lain = new();
+    /// <summary>Masonry per side as it was laid, and how much of each has been
+    /// let go by anything at all. The count is kept in <see cref="Thaw"/> so that
+    /// a piece knocked out by a falling neighbour counts against its section the
+    /// same as one the shot reached - a leaf does not care what took its bricks.
+    /// What the cascade does <i>not</i> do is set the collapse off: that is asked
+    /// only where a strike lands, so a leaf coming down cannot walk round the
+    /// ring bringing its neighbours with it.</summary>
+    private readonly int[] _stood = new int[6];
+    private readonly int[] _taken = new int[6];
+    private readonly HashSet<int> _breached = new();
     private AnimatableBody3D? _tank;
     private Vector3 _tankSize;
     private Vector3 _tankRun;
@@ -357,6 +367,54 @@ public sealed partial class WallRig : Node3D
     /// machine.</summary>
     public static bool Crumbles = CrumblesByDefault;
 
+    /// <summary>How much of one section a strike has to take before the rest of
+    /// it comes down with it: an eighth.
+    ///
+    /// <b>A share of the section and never a count, because a section is however
+    /// long the cell's side is cut into.</b> The same eighth is 11 pieces of a
+    /// ring's leaf and 8 of a single-sided wall, and both are the same statement
+    /// about masonry that has lost its footing.
+    ///
+    /// <b>And it is what keeps a graze from being a breach.</b> A hull leaving
+    /// the ring clips one or two bricks off the mitred corner of the leaf next to
+    /// the one it drives through - measured, two of 89 - and a rule that levelled
+    /// a section on first contact would bring that one down too. Two per cent is
+    /// a long way under an eighth; the leaf actually driven through loses most of
+    /// itself in the same second.</summary>
+    public const float BreachShare = 0.125f;
+
+    /// <summary>Whether a section that has lost <paramref name="gone"/> of its
+    /// <paramref name="pieces"/> is breached - see <see cref="BreachShare"/>.
+    ///
+    /// Rounded up, which is what makes a section too small to have an eighth
+    /// still answer: the ceiling of any share of one piece or more is one, so a
+    /// stub the profile has cut down to three blocks comes down when it loses
+    /// one. Written with a floor under it as well at first, and that floor was
+    /// dead the moment it was typed.</summary>
+    public static bool Breached(int gone, int pieces) =>
+        pieces > 0 && gone >= Mathf.CeilToInt(pieces * BreachShare);
+
+    /// <summary>Which shots bring a whole section down, and it is every one but
+    /// AP.
+    ///
+    /// <b>The same exception, said a second time.</b> AP already opts out of the
+    /// cascade (<see cref="Thaw"/>'s <c>spreads</c>), and for the same reason: a
+    /// round through the middle takes what stands on its line and leaves the rest
+    /// standing round the gap, so "the wall did not notice" is the whole shot. A
+    /// ram and a burst are the opposite claim - they break <i>into</i> masonry,
+    /// and what a breach does is bring the section down.</summary>
+    public static bool Breaching(Strike shot) => shot != Strike.Ap;
+
+    /// <summary>Whether a section comes down whole at all. On, and named here
+    /// rather than left in the field's initialiser for
+    /// <c>Recoil.ShearOnByDefault</c>'s reason.</summary>
+    public const bool BreachesByDefault = true;
+
+    /// <summary>Whether a breach takes the whole section - <c>--no-breach</c> on
+    /// either bench, which puts back the wall that only ever lost what the strike
+    /// itself reached. Static for <see cref="Crumbles"/>'s reason.</summary>
+    public static bool Breaches = BreachesByDefault;
+
     /// <summary>
     /// How much of piece <paramref name="i"/> is still there: one whole, zero
     /// gone.
@@ -473,7 +531,45 @@ public sealed partial class WallRig : Node3D
             AddChild(body);
             _bodies.Add(body);
             _lain.Add(0.0f);
+            int s = b.Course >= 0 ? b.Side : -1;
+            if (s >= 0 && s < _stood.Length)
+                _stood[s]++;
         }
+    }
+
+    /// <summary>Which section piece <paramref name="i"/> belongs to, or -1 for
+    /// the apron. <b>Rubble is not masonry</b> - <c>Clearance</c>'s sentence
+    /// arriving in a fourth place: what is already lying on the ground is not
+    /// part of a section and cannot be brought down with one.</summary>
+    private int SideOf(int i) =>
+        _plan is { } plan && i >= 0 && i < plan.Blocks.Count
+        && plan.Blocks[i].Course >= 0
+            ? plan.Blocks[i].Side : -1;
+
+    /// <summary>Bring the whole of one section down.
+    ///
+    /// Once only, and the guard is taken before anything is let go: every piece
+    /// this releases counts against its own section in <see cref="Thaw"/>, which
+    /// would ask to breach the section again on the first one.</summary>
+    private void Collapse(int side)
+    {
+        if (side < 0 || side >= _stood.Length || !_breached.Add(side))
+            return;
+        for (int i = 0; i < _bodies.Count; i++)
+            if (SideOf(i) == side)
+                Thaw(i);
+    }
+
+    /// <summary>Bring down the section piece <paramref name="i"/> stands in, if a
+    /// strike has now taken enough of it. Asked where a strike lands and never in
+    /// <see cref="Thaw"/>: see <see cref="_stood"/>.</summary>
+    private void Breach(int i, Strike shot)
+    {
+        if (!Breaches || !Breaching(shot))
+            return;
+        int s = SideOf(i);
+        if (s >= 0 && Breached(_taken[s], _stood[s]))
+            Collapse(s);
     }
 
     public void Clear()
@@ -487,6 +583,9 @@ public sealed partial class WallRig : Node3D
         _live.Clear();
         _gone.Clear();
         _lain.Clear();
+        _breached.Clear();
+        System.Array.Clear(_stood);
+        System.Array.Clear(_taken);
         _tank = null;
         _driven = false;
         _nosePlaced = false;
@@ -744,6 +843,10 @@ public sealed partial class WallRig : Node3D
             if ((arm - into * along).Length() > lane)
                 continue;
             Thaw(i);
+            // A tank driving through masonry is a breach, and a breach takes the
+            // section - see Breaching. The tally it reads counts the cascade too,
+            // but the question is only ever asked here.
+            Breach(i, Strike.Ram);
         }
     }
 
@@ -1236,6 +1339,7 @@ public sealed partial class WallRig : Node3D
             if (d > blast * 2.0f)
                 continue;
             Thaw(i);
+            Breach(i, Strike.He);
             if (d > blast * 1.5f)
                 continue;
             Vector3 dir = (arm.Normalized() * 0.55f + into * 0.45f).Normalized();
@@ -1379,6 +1483,9 @@ public sealed partial class WallRig : Node3D
     {
         if (!_live.Add(i))
             return;
+        int side = SideOf(i);
+        if (side >= 0 && side < _taken.Length)
+            _taken[side]++;
         RigidBody3D b = _bodies[i];
         b.Freeze = false;
         b.Sleeping = false;
