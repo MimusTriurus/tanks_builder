@@ -9822,6 +9822,37 @@ public static class SelfTest
             $"parked over a struck wall {TankBench.Boxed(false, true, true)}, "
             + $"over an untouched one {TankBench.Boxed(false, false, true)}");
 
+        // --- and whether the box in it is a ram -------------------------------
+        //
+        // The box goes in whenever the tank drives, because the rubble it made
+        // has to rest on something; what it breaks is a separate question, and
+        // the answer is the order. The board stands the tank inside a ring it
+        // does not fit in, so the masonry is within the hull before anything
+        // happens and a quarter-metre of ordinary driving took a whole leaf:
+        // measured, the wall gave at frame 62 of an ordinary order with the tank
+        // 7px off its parking spot. Both halves are asserted, because either
+        // alone passes on the failure the other one is: a gate that never sweeps
+        // is a wall no tank can break, and one that always sweeps is what this
+        // replaces.
+        Check("an ordinary order does not break masonry - a ram is an intent, "
+              + "and driving past a wall is not one",
+            !TankBench.Sweeps(true, false, false),
+            $"moving under an ordinary order: {TankBench.Sweeps(true, false, false)}");
+        Check("and one that asked to ram does, which is the half that makes the "
+              + "gate a gate rather than a wall nothing can break",
+            TankBench.Sweeps(true, true, false),
+            $"moving under a ram: {TankBench.Sweeps(true, true, false)}");
+        Check("and a standstill breaks nothing whatever was asked for, because a "
+              + "hull turning on the spot inside a ring is not a ram either",
+            !TankBench.Sweeps(false, true, false)
+            && !TankBench.Sweeps(false, false, true),
+            $"parked under a ram: {TankBench.Sweeps(false, true, false)}, "
+            + $"parked with --drive-rams: {TankBench.Sweeps(false, false, true)}");
+        Check("and --drive-rams puts the old answer back, where any order took "
+              + "the leaf it drove through",
+            TankBench.Sweeps(true, false, true),
+            $"moving under an ordinary order: {TankBench.Sweeps(true, false, true)}");
+
         // --- what the tank pushes with ---------------------------------------
         if (vehicles is { Count: > 0 } garage && field.Atlas is not null)
         {

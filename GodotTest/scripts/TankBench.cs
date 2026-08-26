@@ -237,6 +237,25 @@ public sealed partial class TankBench : SceneRoot
     /// what that costs and what it buys.</summary>
     private bool _parkedBox;
 
+    /// <summary>Whether the order under way is a ram - see
+    /// <see cref="Sweeps"/>.
+    ///
+    /// <b>Held on the bench rather than read off the tank, because it is a fact
+    /// about the order and the tank has no field for one.</b> A path is a path;
+    /// what makes this one a ram is that <c>M</c> asked for it, and the only
+    /// place that knows is where the key is handled. Cleared inside
+    /// <see cref="OrderTo"/> and raised only by the two calls <see cref="Ram"/>
+    /// makes, so the ordinary way to order is also the way to clear it: a flag
+    /// whose clearing has to be remembered at every call site is a flag that
+    /// eventually is not.</summary>
+    private bool _ramming;
+
+    /// <summary>Whether ordinary driving breaks masonry, the way it used to.
+    /// Off - <c>--drive-rams</c>, the A/B the gate is judged by, and the only
+    /// honest base picture: it puts back the wall that fell to any order, so
+    /// what the pair measures is the gate and nothing else.</summary>
+    private bool _driveRams;
+
     /// <summary>The view's spring, for the gun. One for the board rather than
     /// one per tank, which on a bench with one tank is the same thing said
     /// twice - but it is the harness's arrangement and there is no reason to
@@ -297,8 +316,12 @@ public sealed partial class TankBench : SceneRoot
     /// the command line was a board nobody had driven on yet - which is exactly
     /// the state the wall's opening frame is already in. One leg per occurrence
     /// of the flag, and the next is ordered when the one before it arrives.
-    /// </summary>
-    private readonly List<Vector2I> _driveTo = new();
+    ///
+    /// Each leg carries whether it is a ram, because <c>--charge</c> shares the
+    /// queue: what a double click on the board says is "this same drive, as a
+    /// ram", so the two flags have to be able to say it in one run and in
+    /// order.</summary>
+    private readonly List<(Vector2I Cell, bool Ram)> _driveTo = new();
     private int _driveLeg;
     private bool _fireAtStart;
     private double? _hitAtStart;
@@ -346,7 +369,16 @@ public sealed partial class TankBench : SceneRoot
                     break;
                 case "--drive" when i + 1 < args.Length:
                     if (Spot(args[++i]) is Vector2I leg)
-                        _driveTo.Add(leg);
+                        _driveTo.Add((leg, false));
+                    break;
+                // The same leg, driven as a ram - what a double click on the
+                // target hex does. A flag of its own rather than a modifier on
+                // --drive, so that a run can be half ordinary driving and half
+                // ram: a snapshot is proof, and taking one must not need a hand
+                // on the mouse.
+                case "--charge" when i + 1 < args.Length:
+                    if (Spot(args[++i]) is Vector2I rush)
+                        _driveTo.Add((rush, true));
                     break;
                 case "--fire":
                     _fireAtStart = true;
@@ -515,6 +547,11 @@ public sealed partial class TankBench : SceneRoot
                 // the rubble is judged by. See Boxed.
                 case "--parked-box":
                     _parkedBox = true;
+                    break;
+                // Any order breaks masonry, as it used to - the A/B the ram gate
+                // is judged by. See Sweeps.
+                case "--drive-rams":
+                    _driveRams = true;
                     break;
                 // The rubble stays where it landed - the A/B the clearing is
                 // judged by, and the flag the wall bench carries under the same
@@ -998,6 +1035,36 @@ public sealed partial class TankBench : SceneRoot
     public static bool Boxed(bool moving, bool struck, bool parked) =>
         moving || (parked && struck);
 
+    /// <summary>Whether the box breaks masonry this frame: only a tank that is
+    /// driving, and only under an order that asked to ram.
+    ///
+    /// <b>A ram is an intent, and driving past a wall is not one.</b> The board
+    /// stands the tank inside a ring it does not fit in - 2.76m of clear yard
+    /// against half-hulls of 2.62 / 3.00 / 3.43m - so the masonry is already
+    /// within the hull before anything happens, and <c>WallRig.Ploughed</c>
+    /// hands the nose that half-hull the moment it advances at all. Measured on
+    /// an ordinary order out of the ring: the wall gave at frame 62, with the
+    /// tank 7px off its parking spot and a whole leaf gone by frame 65. Read as
+    /// a picture, that is a hull demolishing a yard by turning round in it -
+    /// which is exactly the complaint, and the turn itself was innocent: the
+    /// band is nought through every frame of it, because <c>WallRig.Advance</c>
+    /// resets on a turn.
+    ///
+    /// <b>Not the box, only the sweep, and the two are told apart in the
+    /// rig.</b> The kinematic body still goes in whenever the tank is driving,
+    /// because the rubble a ram made has to rest on something and the tank parks
+    /// in it. What the gate takes away is <c>WallRig.Reached</c>.
+    ///
+    /// <b>What is given up is the sentence this was refused with once:</b> a
+    /// frozen piece is a static body, so a tank driving at standing masonry it
+    /// did not ask to ram passes through it. A hull clipping a wall is visible;
+    /// a wall falling down for free was visible and also wrong.
+    ///
+    /// <paramref name="always"/> - <c>--drive-rams</c> - puts the old answer
+    /// back, so the two can be looked at side by side.</summary>
+    public static bool Sweeps(bool moving, bool ramming, bool always) =>
+        moving && (ramming || always);
+
     private void Ram()
     {
         if (_stage is null || _walls.Count == 0 || _garage.Count == 0)
@@ -1011,8 +1078,14 @@ public sealed partial class TankBench : SceneRoot
         foreach (WallProp prop in _walls)
         {
             // In while the order is - see Boxed.
+            // Under a ram and never under an ordinary order - see Sweeps. The
+            // gate goes here rather than inside the rig, because the box is the
+            // ram: what it lets go of is one half of it, and what it shoves the
+            // loose brick about with is the other, and a tank driving past a
+            // wall is doing neither.
             if (Beside(here, prop.Cell)
-                && Boxed(tank.Moving, prop.Rig is { Struck: true }, _parkedBox))
+                && Boxed(Sweeps(tank.Moving, _ramming, _driveRams),
+                         prop.Rig is { Struck: true }, _parkedBox))
                 prop.Nose(foot, way, box);
             else
                 prop.Halt();
@@ -1053,6 +1126,7 @@ public sealed partial class TankBench : SceneRoot
         if (Tank.Cell == Wall.Cell)
         {
             OrderTo(HexField.Step(Wall.Cell, HexField.EdgeHeadings[_wallSide]));
+            _ramming = true;
             _lineUp = false;
             return;
         }
@@ -1062,6 +1136,11 @@ public sealed partial class TankBench : SceneRoot
         // the wall round a corner is a ram along whatever heading the search
         // happened to leave on, which is not the side the dial names.
         OrderTo(Tank.Cell == from ? Wall.Cell : from);
+        // Both legs, because both are this order: the run-up is only there
+        // because the pathing cannot say "and arrive along this heading", and a
+        // tank that lined up and then stopped ramming would drive through the
+        // leaf it came for.
+        _ramming = true;
         _lineUp = Tank.Cell != from;
     }
 
@@ -1250,6 +1329,7 @@ public sealed partial class TankBench : SceneRoot
         {
             _lineUp = false;
             OrderTo(Wall.Cell);
+            _ramming = true;
         }
         // And the next leg of a queued --drive, once the one before it has
         // arrived. After the ram's own second leg and behind its flag, so the two
@@ -1423,6 +1503,12 @@ public sealed partial class TankBench : SceneRoot
                // same picture, and the cap is the only thing that tells them
                // apart. See WallRig.Shoving.
                + (rig.Shoving > 0 ? $", shoving {rig.Shoving}" : "")
+               // And whether the box under way is a ram at all, because a tank
+               // driving past a standing wall and a tank whose ram did nothing
+               // are the same picture. See Sweeps.
+               + (Tank.Moving
+                   ? rig.Driven ? ", ramming" : ", driving past"
+                   : "")
                // The one figure the picture cannot give and nobody can guess -
                // see _ramSpeed.
                + (_ramSpeed >= 0.0
@@ -1522,18 +1608,68 @@ public sealed partial class TankBench : SceneRoot
     {
         if (_driveLeg >= _driveTo.Count || Tank.Moving)
             return;
-        OrderTo(_driveTo[_driveLeg++]);
+        (Vector2I cell, bool ram) = _driveTo[_driveLeg++];
+        if (ram)
+            Charge(cell);
+        else
+            OrderTo(cell);
     }
 
-    private void OrderTo(Vector2I cell)
+    /// <summary>Drive to <paramref name="cell"/>, and say whether an order was
+    /// actually given: a click on a cell the board does not have, on the one the
+    /// tank is already standing on, or on nothing at all with a wreck is not an
+    /// order, and <see cref="Charge"/> must not call one a ram.</summary>
+    private bool OrderTo(Vector2I cell)
     {
-        if (!_field.InBounds(cell) || cell == Tank.Cell || Tank.Wreck.Dead)
-            return;
+        if (!_field.InBounds(cell) || Tank.Wreck.Dead)
+            return false;
+        // Already on the way there: the path is left alone rather than reissued.
+        // A second click on the same hex is how a ram is asked for, and a reissue
+        // would restart the leg from the cell behind the tank - a visible jerk
+        // for nothing.
+        if (Tank.Moving && Tank.Path.Count > 0 && Tank.Path[^1] == cell)
+        {
+            _ramming = false;
+            return true;
+        }
+        if (cell == Tank.Cell)
+            return false;
+        // Every order is an ordinary one until the ram says otherwise - see
+        // _ramming. Cleared here rather than at each call site, because the one
+        // place every order goes through is the one place that cannot forget.
+        _ramming = false;
         Tank.Path = _field.FindPath(Tank.Cell, cell, new HashSet<Vector2I>());
         Tank.PathStep = 0;
         _spinning = false;
         _field.Highlight = Tank.Path;
         _field.QueueRedraw();
+        return true;
+    }
+
+    /// <summary>The same order, driven as a ram - <b>a double click on the hex
+    /// being driven to.</b>
+    ///
+    /// <b>The same gesture as an ordinary order, said twice</b>, because that is
+    /// what the two are to each other: one drive, and whether the hull is meant
+    /// to go through what is standing there. A key would have to name a target
+    /// the mouse has already named, and <c>M</c> is the version that does - it
+    /// rams the ring by the side dial, which is the wall the bench is about and
+    /// not the one under the cursor.
+    ///
+    /// <b>By cell, like every other button on this board</b>, and through
+    /// <see cref="OrderTo"/> so that a double click on a hex nobody can drive to
+    /// is not an order at all, let alone a ram. That includes the cell the tank
+    /// is standing on: a machine already inside the ring rams its way out with
+    /// <c>M</c>, which names a side, and a click on its own hex names none.
+    ///
+    /// The first of the two clicks has already gone through as an ordinary
+    /// order, which is why <see cref="OrderTo"/> leaves a path alone when it is
+    /// asked for the one already under way: what the second click adds is the
+    /// flag and nothing else.</summary>
+    private void Charge(Vector2I cell)
+    {
+        if (OrderTo(cell))
+            _ramming = true;
     }
 
     private void Hit(double bearing)
@@ -1573,6 +1709,7 @@ public sealed partial class TankBench : SceneRoot
     {
         _spinning = false;
         _lineUp = false;
+        _ramming = false;
         // Before the tanks are repaired, not after: a round still in the air
         // would land on armour that had just been made good, which is the one way
         // this reset could leave a mark behind it.
@@ -1889,6 +2026,8 @@ public sealed partial class TankBench : SceneRoot
             _panel.Toggle("wall.box", "a struck wall keeps the ram box  "
                                       + "(--parked-box)",
                           () => _parkedBox, on => _parkedBox = on);
+            _panel.Toggle("wall.gate", "any order rams  (--drive-rams)",
+                          () => _driveRams, on => _driveRams = on);
             _panel.Toggle("wall.breach", "a breach takes the whole side  "
                                          + "(--no-breach)",
                           () => WallRig.Breaches, on => WallRig.Breaches = on);
@@ -1966,8 +2105,13 @@ public sealed partial class TankBench : SceneRoot
                     // By cell, like every button on the harness's board: the
                     // silhouette overhangs its own hexagon, so picking by pixels
                     // would order a drive by clicking the ground beside it.
-                    OrderTo(_field.ClampCell(
-                        _field.CellAt(_field.ToLocal(GetGlobalMousePosition()))));
+                    Vector2I at = _field.ClampCell(
+                        _field.CellAt(_field.ToLocal(GetGlobalMousePosition())));
+                    // Twice on the target hex is a ram - see Charge.
+                    if (mouse.DoubleClick)
+                        Charge(at);
+                    else
+                        OrderTo(at);
                     return;
                 case MouseButton.Right:
                     Tick.CancelOrder(Tank);
