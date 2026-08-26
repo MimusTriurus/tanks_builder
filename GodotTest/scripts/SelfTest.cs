@@ -9378,6 +9378,79 @@ public static class SelfTest
                               : "no sample is on one");
         wall = mark;
 
+        // --- the ram tour ----------------------------------------------------
+        //
+        // How the masonry answers a ram is measured by driving and printing
+        // numbers - a live solver steps the physics and this leaves before the
+        // first frame of a scene. What is assertable here is the plan: which
+        // walls, in which order, along which heading. Every one of those fails
+        // silently - a leg the tank refuses is a tank parked in a yard, and a
+        // wall left off the list is a wall nobody drove at.
+        List<TankBench.Leg> tour = TankBench.TourLegs(home, TankBench.RingSides);
+        List<TankBench.Leg> ringLegs =
+            tour.Where(l => l.Wall == home).ToList();
+        Check("the ram tour drives out of the ring along every one of its "
+              + "sides, each of them once",
+            ringLegs.Count == TankBench.RingSides
+            && ringLegs.Select(l => l.Side).Distinct().Count()
+               == TankBench.RingSides,
+            $"{ringLegs.Count} legs on the ring, "
+            + $"{ringLegs.Select(l => l.Side).Distinct().Count()} distinct");
+
+        // Every sample too, and exactly once. A walled cell no leg names is a
+        // wall that stands through the whole tour and is never reported on,
+        // which is the one failure a per-leaf report can have: it looks like a
+        // wall the ram did not reach. And a sample whose bearing is not a flat
+        // side of the hex is dropped by TourLegs rather than rounded to the
+        // nearest - so this is the check that says the dropping never happens.
+        List<Vector2I> samples = walled.Where(c => c != home).ToList();
+        var missed = samples.Where(c => tour.Count(l => l.Wall == c) != 1)
+                            .Select(c => $"({c.X},{c.Y})").ToList();
+        Check("and every other wall on the board is on it exactly once",
+            missed.Count == 0 && tour.Count == TankBench.RingSides
+                                              + samples.Count,
+            missed.Count > 0 ? string.Join(" ", missed) + " named "
+                               + $"{missed.Count} times"
+                             : $"{tour.Count} legs for {samples.Count} samples");
+
+        // The ring before any sample, and not because it reads better: a run-up
+        // to a sample is a ram the whole way - see TankBench.RamAt - so it
+        // sweeps whatever it drives past, and what it drives past on the way out
+        // of the yard is the ring. Taken the other way round, every sample leg
+        // would be measuring two collapses at once.
+        Check("and it takes the ring before any sample, because a run-up sweeps "
+              + "what it drives past",
+            samples.Count == 0
+            || tour.FindLastIndex(l => l.Wall == home)
+               < tour.FindIndex(l => l.Wall != home),
+            $"ring last at {tour.FindLastIndex(l => l.Wall == home)}, "
+            + $"first sample at {tour.FindIndex(l => l.Wall != home)}");
+
+        // And each leg has a cell to come at its wall from. A run-up cell off
+        // the board is an order the tank simply refuses, and nothing on screen
+        // says so - the leg reports "no wall" or nothing at all, and the tour
+        // walks on.
+        var noRun = tour.Where(
+            l => !map.OnBoard(HexField.Step(l.Wall,
+                                            HexField.EdgeHeadings[l.Side])))
+            .Select(l => $"({l.Wall.X},{l.Wall.Y})@"
+                         + HexField.EdgeHeadings[l.Side]).ToList();
+        Check("and every leg has a cell to come at its wall from",
+            noRun.Count == 0, string.Join(" ", noRun));
+
+        // What the tour cannot promise, said as arithmetic rather than left to
+        // the run: driving out of a yard the hull does not fit in clips the
+        // mitred corner of the leaf next door, and on the three-sided sample
+        // that graze runs to 11 pieces of 78 - past the share. Asked per piece,
+        // that is a leaf coming down that the tank never entered; the ram names
+        // its section instead, which is why the measured tour reports no
+        // unnamed section at all.
+        Check("and a corner graze can cross the share, which is why the ram "
+              + "names its section rather than counting pieces",
+            WallRig.Breached(11, 78) && !WallRig.Breached(11, 96),
+            $"11 of 78 {WallRig.Breached(11, 78)}, "
+            + $"11 of 96 {WallRig.Breached(11, 96)}");
+
         // --- the lane a round takes ------------------------------------------
         //
         // Both halves, and the second is the point: a set nothing reads passes
@@ -9686,6 +9759,24 @@ public static class SelfTest
             && Mathf.IsEqualApprox(WallRig.Through(0.6f), -0.3f),
             $"the near end at {WallRig.Through(0.6f):F2}m on a 0.60m brick");
 
+        // --- and the body goes in on the same figure as the band -------------
+        //
+        // The box is a ram: what it lets go of is one half of it and what it
+        // shoves the loose brick about with is the other, and a hull turning on
+        // the spot is doing neither. Asserted off the one number the band is
+        // already built on rather than a second reading of the same thing, so
+        // "the box sweeps" and "the box is felt" cannot come apart.
+        Check("the driven box is out of the simulation until it has advanced, so "
+              + "a hull swinging on the spot shoves nothing about",
+            !WallRig.Feels(0.0f) && WallRig.Feels(0.01f)
+            && !WallRig.Feels(
+                   WallRig.Advance(6.0f, 0.0f, WallRig.NoseHeld - 0.0005f))
+            && WallRig.Feels(WallRig.Advance(6.0f, 0.0f, 1.0f)),
+            $"felt at nought: {WallRig.Feels(0.0f)}, after a turn: "
+            + $"{WallRig.Feels(WallRig.Advance(6.0f, 0.0f, WallRig.NoseHeld - 0.0005f))}"
+            + $", driving straight on: "
+            + $"{WallRig.Feels(WallRig.Advance(6.0f, 0.0f, 1.0f))}");
+
         // --- and the half-hull the box began the lane standing in -------------
         //
         // The board puts the tank inside the ring, so the leaf it is about to
@@ -9903,6 +9994,12 @@ public static class SelfTest
         // two off the mitred corner of the leaf next to the one it drives
         // through, and a rule that levelled a section on first contact would
         // bring that one down as well.
+        //
+        // It only covers the smallest graze, and that is worth saying. Measured
+        // on the ring, a corner clip runs to 54 pieces of 96 - four times the
+        // share - so what keeps a grazed leaf standing is the ram naming its
+        // section, below. This protects the first brick or two and nothing past
+        // them.
         Check("so a graze is not a breach: two bricks off the corner of a leaf "
               + "leave it standing",
             !WallRig.Breached(1, 89) && !WallRig.Breached(2, 89),
@@ -9932,6 +10029,31 @@ public static class SelfTest
             && 27.0f / 96.0f < 78.0f / 96.0f,
             $"struck leaf at a quarter charge {WallRig.Breached(27, 96)}, "
             + $"neighbour at ten {WallRig.Breached(78, 96)}");
+
+        // And the same argument for the ram, which used to ask per piece.
+        //
+        // A hull's lane cannot widen with the dial, so "a brick it reached is a
+        // brick it drove through" is true - but a brick off a mitred corner is a
+        // brick it drove through belonging to a leaf it did not. Measured on the
+        // ring with the breach off, so that the hull and the cascade are all
+        // that is acting: a leaf driven through came down 70-72 of 72 and 74-75
+        // of 75, while a leaf merely grazed lost 8 to 54 of 96. Both ends are
+        // over the share, so no threshold orders them either - and the low end
+        // is not free to raise, because the wall bench's own ram at half force
+        // needs the share to fire at all (measured: the wall lies down at top
+        // 0.173 with the breach and stands at 0.526 without).
+        //
+        // So the ram names its section too - see WallRig.Reached, which asks
+        // Breach once about the leaf the lane is going into rather than once per
+        // piece. Measured on three legs of one command: two breaches on one run
+        // and three on another before, one on every run after.
+        Check("and the share cannot tell the leaf a hull drove through from the "
+              + "one it grazed on the way out, which is why the ram names its "
+              + "section as well",
+            WallRig.Breached(70, 72) && WallRig.Breached(12, 96)
+            && 12.0f / 96.0f < 70.0f / 72.0f,
+            $"driven through {WallRig.Breached(70, 72)}, "
+            + $"grazed {WallRig.Breached(12, 96)}");
 
         // So the field is confined, not just the verdict - see WallRig.Reaches.
         //

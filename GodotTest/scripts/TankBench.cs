@@ -488,6 +488,12 @@ public sealed partial class TankBench : SceneRoot
                 case "--ram":
                     _ramAtStart = true;
                     break;
+                // Ram every wall on the board in turn and print what each ram
+                // did to the masonry it was not aimed at - see TankBench.Tour.
+                // It ends the run itself, because the run is the measurement.
+                case "--ram-tour":
+                    _tour = true;
+                    break;
                 case "--ammo" when i + 1 < args.Length:
                     _tick.Ammo = args[++i] == "ap" ? Shell.Kind.Ap : Shell.Kind.He;
                     if (args[i] is not ("he" or "ap"))
@@ -580,7 +586,11 @@ public sealed partial class TankBench : SceneRoot
         // two runs of the same flags have to be diffable. Stage3D reads this very
         // field, which is why it is Main's and not a local one - see
         // FrameClock.FixedStep.
-        SettleForProof(CapturePath is not null);
+        //
+        // A tour is evidence of the same kind and pins it for the same reason:
+        // it is a measurement whose whole output is printed numbers, and one
+        // taken on wall-clock frames is a measurement of the machine it ran on.
+        SettleForProof(CapturePath is not null || _tour);
     }
 
     /// <summary>Invariant, never the machine's - the trap named beside
@@ -1116,39 +1126,56 @@ public sealed partial class TankBench : SceneRoot
     /// run-up is the lane the wall faces, and the pathing walks it.</summary>
     private void Ram(bool order)
     {
-        if (Wall is null || !order)
-            return;
+        if (Wall is not null && order)
+            RamAt(Wall, _wallSide);
+    }
+
+    /// <summary>The same drive, at a named wall on a named side - what
+    /// <see cref="Ram(bool)"/> does to the ring, and what a tour does to each
+    /// wall on the board in turn.
+    ///
+    /// <b>One copy, because the two legs are the awkward part.</b> A caller that
+    /// wrote its own run-up would be a second answer to "and arrive along this
+    /// heading", and the two agree until the day one of them is edited.</summary>
+    private void RamAt(WallProp wall, int side)
+    {
+        side = Mathf.PosMod(side, HexField.EdgeHeadings.Length);
         // Out through the named side when the tank is already in the ring, which
         // is where the board opens. One leg, not two: the run-up exists because
         // the pathing cannot say "and arrive along this heading", and from inside
         // the cell the first step is the heading. What it rams is its own wall,
         // which is what a machine in a walled yard does to get out.
-        if (Tank.Cell == Wall.Cell)
+        if (Tank.Cell == wall.Cell)
         {
-            OrderTo(HexField.Step(Wall.Cell, HexField.EdgeHeadings[_wallSide]));
+            OrderTo(HexField.Step(wall.Cell, HexField.EdgeHeadings[side]));
             _ramming = true;
-            _lineUp = false;
+            _lineUp = null;
             return;
         }
-        Vector2I from = HexField.Step(Wall.Cell,
-                                      HexField.EdgeHeadings[_wallSide]);
+        Vector2I from = HexField.Step(wall.Cell, HexField.EdgeHeadings[side]);
         // Line up first when it is not already on the lane: a path that comes at
         // the wall round a corner is a ram along whatever heading the search
         // happened to leave on, which is not the side the dial names.
-        OrderTo(Tank.Cell == from ? Wall.Cell : from);
+        OrderTo(Tank.Cell == from ? wall.Cell : from);
         // Both legs, because both are this order: the run-up is only there
         // because the pathing cannot say "and arrive along this heading", and a
         // tank that lined up and then stopped ramming would drive through the
         // leaf it came for.
         _ramming = true;
-        _lineUp = Tank.Cell != from;
+        _lineUp = Tank.Cell != from ? (wall, side) : null;
     }
 
-    /// <summary>Whether the drive under way is only the run-up, so that reaching
-    /// its end orders the ram itself. Two legs rather than one, for the reason
+    /// <summary>Which wall and which side the drive under way is only the
+    /// run-up for, so that reaching its end orders the ram itself, or null when
+    /// the drive is not a run-up. Two legs rather than one, for the reason
     /// above; held rather than pathed in one go because the board's pathing has
-    /// no way to say "and arrive along this heading".</summary>
-    private bool _lineUp;
+    /// no way to say "and arrive along this heading".
+    ///
+    /// <b>The wall is carried rather than assumed to be the ring</b>: a tour
+    /// rams every wall on the board in turn, and a second leg that always came
+    /// in at the ring would walk the tank home in the middle of ramming a
+    /// sample.</summary>
+    private (WallProp Wall, int Side)? _lineUp;
 
     /// <summary>Whether the settle report has been printed for this wall. One
     /// line per collapse, and a new wall gets a new line.</summary>
@@ -1322,20 +1349,26 @@ public sealed partial class TankBench : SceneRoot
         Ram();
         // The second leg of a ram, once the run-up has arrived. Here rather than
         // in the order itself because the board's pathing has no way to say
-        // "and come in along this heading" - see Ram(bool).
-        if (_lineUp && Wall is not null && !Tank.Moving
-            && Tank.Cell == HexField.Step(Wall.Cell,
-                                          HexField.EdgeHeadings[_wallSide]))
+        // "and come in along this heading" - see RamAt.
+        if (!Tank.Moving && _lineUp is (WallProp lineWall, int lineSide)
+            && Tank.Cell == HexField.Step(lineWall.Cell,
+                                          HexField.EdgeHeadings[lineSide]))
         {
-            _lineUp = false;
-            OrderTo(Wall.Cell);
+            _lineUp = null;
+            OrderTo(lineWall.Cell);
             _ramming = true;
         }
         // And the next leg of a queued --drive, once the one before it has
         // arrived. After the ram's own second leg and behind its flag, so the two
         // do not both claim the same standstill.
-        if (!_lineUp)
+        if (_lineUp is null)
             NextLeg();
+
+        // And the tour, last of the three, for the same reason the queue is
+        // behind the run-up: three things that all wake on a standstill have to
+        // be given one order, and the tour is the one that only exists when it
+        // was asked for.
+        Tour(delta);
 
         if (_tick.ShakeOn)
             _shake.Update(delta);
@@ -1410,7 +1443,11 @@ public sealed partial class TankBench : SceneRoot
         // is the one thing on this board that does not repeat, so a capture
         // cannot be diffed and the figures are the whole of the evidence.
         // Nothing moving is the only end a live collapse has.
-        if (Wall?.Rig is { Struck: true } settling && !_wallSaid
+        //
+        // Not under a tour: that prints a line of its own per ram, out of the
+        // same tallies, and a one-shot line about the first of ten collapses
+        // sitting among them reads as a figure for the lot.
+        if (!_tour && Wall?.Rig is { Struck: true } settling && !_wallSaid
             && settling.Clock > 0.6f && settling.Awake == 0)
         {
             _wallSaid = true;
@@ -1503,6 +1540,10 @@ public sealed partial class TankBench : SceneRoot
                // same picture, and the cap is the only thing that tells them
                // apart. See WallRig.Shoving.
                + (rig.Shoving > 0 ? $", shoving {rig.Shoving}" : "")
+               // And which leaves that came out of, which the total cannot say:
+               // a leaf driven through and a leaf caught by the corner of the
+               // band are the same count and different pictures. WallRig.Leaves.
+               + (rig.Struck ? $"\nleaves {rig.Leaves()}" : "")
                // And whether the box under way is a ram at all, because a tank
                // driving past a standing wall and a tank whose ram did nothing
                // are the same picture. See Sweeps.
@@ -1515,12 +1556,16 @@ public sealed partial class TankBench : SceneRoot
                    ? $"\nram at {_ramSpeed:F1} m/s against RamSpeed "
                      + $"{WallRig.RamSpeed:F1}"
                    : "")
-               // And what else stands on the board, because the dials do not
-               // reach it: every sample carries its own recipe, so a wall that
-               // ignores the sliders is this working rather than failing. See
-               // Samples.
-               + "\n" + string.Join("  ", Samples.Select(
-                   x => $"({x.Cell.X},{x.Cell.Y}) {x.What}"));
+               // And what else stands on the board, and whether it still
+               // stands. Every sample carries its own recipe, so a wall that
+               // ignores the sliders is this working rather than failing - and a
+               // sample the tank has driven through reads exactly like one it has
+               // not until this line says so, which is the whole of "the ram is
+               // taking walls it was never aimed at". See Samples.
+               + "\n" + string.Join("  ", _walls.Skip(1).Select(
+                   w => $"({w.Cell.X},{w.Cell.Y}) "
+                        + (w.Rig is { Struck: true } r2
+                            ? $"{r2.Loose} let go" : "standing")));
     }
 
     // --- what the dials do ---------------------------------------------------
@@ -1708,7 +1753,7 @@ public sealed partial class TankBench : SceneRoot
     private void Reset()
     {
         _spinning = false;
-        _lineUp = false;
+        _lineUp = null;
         _ramming = false;
         // Before the tanks are repaired, not after: a round still in the air
         // would land on armour that had just been made good, which is the one way
