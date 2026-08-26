@@ -470,13 +470,16 @@ public sealed partial class WallRig : Node3D
     /// itself reached. Static for <see cref="Crumbles"/>'s reason.</summary>
     public static bool Breaches = BreachesByDefault;
 
-    /// <summary>Whether a burst is confined to the section it went off against.
-    /// On, and named here rather than left in the field's initialiser for
+    /// <summary>Whether a strike is confined to the section it struck. On, and
+    /// named here rather than left in the field's initialiser for
     /// <c>Recoil.ShearOnByDefault</c>'s reason.</summary>
     public const bool SegmentedByDefault = true;
 
     /// <summary>Whether a strike acts on one section and no other -
-    /// <c>--wide-blast</c> on either bench puts back the field that crossed them.
+    /// <c>--wide-blast</c> on either bench puts back the fields that crossed
+    /// them. Named for the blast because that was the only one of them it cut
+    /// when it was written, and kept rather than renamed so every command
+    /// written down with it still works - the name is the narrower of the two.
     ///
     /// <b>The section is the unit the board already counts in.</b> A wall stands
     /// on a cell edge, <c>Recipe.Sides</c> counts edges, <c>WallProp.Bars</c>
@@ -492,9 +495,27 @@ public sealed partial class WallRig : Node3D
     /// neighbour's 96 pieces</b>, which is a leaf destroyed by any reading but
     /// the rule's. The field has to be confined, not just the verdict.
     ///
+    /// <b>Three fields, and the blast was only the first of them.</b> A strike
+    /// reaches masonry three ways - the blast field in <see cref="Burst"/>, the
+    /// hull's band in <see cref="Reached"/>, and the cascade in
+    /// <see cref="Thaw"/> - and confining one leaves the other two crossing.
+    /// Measured by the ram tour, which drives every leaf of a ring in turn: with
+    /// only the blast cut, a leg spilled up to <b>10 pieces of a neighbour's
+    /// 96</b> off the mitred corner; cutting the band took the worst to 6 and
+    /// left seven legs of ten clean; cutting the cascade as well took every leg
+    /// to <b>none</b>. The three are one rule and go together.
+    ///
+    /// A falling piece of the apron waking masonry falls out of this too, and
+    /// that is the right way round: the apron is rubble that has lain on the
+    /// ground since it was laid, so a hull ploughing it into a standing leaf is
+    /// not that leaf being struck - the same sentence <see cref="Reaches"/>,
+    /// <c>WallProp.Bars</c> and <see cref="Shoving"/> each say about their own
+    /// question.
+    ///
     /// Costs nothing on a wall that is one section: every piece is the face's,
     /// so <c>Wall.tscn</c> answers to the digit either way - which is the
-    /// regression this is checked by.</summary>
+    /// regression this is checked by, and it does, on all five of its shots.
+    /// </summary>
     public static bool Segmented = SegmentedByDefault;
 
     /// <summary>Whether a burst that went off against section
@@ -962,6 +983,14 @@ public sealed partial class WallRig : Node3D
         for (int i = 0; i < _bodies.Count; i++)
         {
             if (_live.Contains(i))
+                continue;
+            // One section, and no other - see Reaches. The same confinement the
+            // blast already has, arriving at the ram: the hull's lane is its own
+            // width and cannot widen with a dial, so every piece standing in the
+            // band is a piece it drove through - but driving across the mitred
+            // corner of the leaf next door is going through a corner and not
+            // through the leaf, and a corner let go of is a corner that falls.
+            if (!Reaches(face, SideOf(i)))
                 continue;
             Vector3 arm = _bodies[i].Transform.Origin - tip;
             float along = arm.Dot(into);
@@ -1794,7 +1823,16 @@ public sealed partial class WallRig : Node3D
             for (int k = 0; k < _bodies.Count; k++)
                 if (ReferenceEquals(_bodies[k], hit))
                 {
-                    Thaw(k);
+                    // Its own section, and no other - see Reaches, which is the
+                    // same predicate the band and the blast field are cut by.
+                    // The cascade is how a breach widens: the courses either
+                    // side of the hole lose what they leaned on, and that is an
+                    // argument about one leaf. Two leaves meet at a mitre and
+                    // nowhere else, so a brick falling out of one knocking the
+                    // corner off the next is the breach crossing a boundary the
+                    // wall does not have.
+                    if (Reaches(side, SideOf(k)))
+                        Thaw(k);
                     return;
                 }
         };

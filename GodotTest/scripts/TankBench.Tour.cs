@@ -33,12 +33,16 @@ namespace TankSpriteTest;
 /// it sweeps whatever it passes; passing a ring with nothing left standing
 /// costs nothing.
 ///
-/// <b>What it cannot promise is that nothing else moves at all.</b> The hull
+/// <b>The spill it reports is the number that changed the rule.</b> The hull
 /// does not fit in the yard - 2.76m clear against a 3.18m hull corner - so
-/// driving out clips a brick or two off the mitred corner of the leaf next
-/// door, and that is measured rather than hidden: the verdict names the worst
-/// spill onto a leaf nobody rammed. What it does promise is the thing the rule
-/// is about - that no leaf but the one named comes down.</summary>
+/// driving out passes through the mitred corner of the leaf next door, and the
+/// band used to let those bricks go: 3 to 10 pieces of a neighbour's 96 every
+/// leg, and 11 of 78 on the three-sided sample, which is past BreachShare. The
+/// blast field was already cut by section and the band and the cascade were
+/// not - see <c>WallRig.Segmented</c> - and nothing could see it until there
+/// was a figure for what a leaf nobody rammed had lost. Cut as well, every leg
+/// spills none. The verdict still names the worst spill, because that is the
+/// number this exists to watch.</summary>
 public sealed partial class TankBench
 {
     /// <summary>One ram: which wall, and the flat side of its cell the hull

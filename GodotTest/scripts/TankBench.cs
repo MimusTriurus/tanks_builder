@@ -570,8 +570,13 @@ public sealed partial class TankBench : SceneRoot
                 case "--no-breach":
                     WallRig.Breaches = false;
                     break;
-                // The blast crosses sections again, as it used to - the A/B a
-                // segment is judged by. See WallRig.Segmented.
+                // Every strike crosses sections again, as it used to - the A/B
+                // a segment is judged by. Named for the blast because that was
+                // the only field it cut when it was written; it cuts the band
+                // and the cascade too now, and the name is the narrower of the
+                // two. Kept rather than renamed: it is one switch on both
+                // benches, and every command written down with it still has to
+                // work. See WallRig.Segmented.
                 case "--wide-blast":
                     WallRig.Segmented = false;
                     break;

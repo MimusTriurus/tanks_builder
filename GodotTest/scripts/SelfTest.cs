@@ -10061,8 +10061,9 @@ public static class SelfTest
         // down whole and left the blast still reaching them: at force 10 it
         // thaws and throws 78 of each neighbour's 96 pieces, which is a leaf
         // destroyed by any reading but the rule's.
-        Check("a burst acts on the section it went off against, on the rubble "
-              + "at its feet, and on no other section",
+        Check("a strike acts on the section it struck, on the rubble at its "
+              + "feet, and on no other section - blast field, hull band and "
+              + "cascade cut by the one predicate",
             WallRig.Reaches(2, 2) && WallRig.Reaches(2, -1)
             && !WallRig.Reaches(2, 1) && !WallRig.Reaches(2, 3),
             $"own {WallRig.Reaches(2, 2)}, rubble {WallRig.Reaches(2, -1)}, "
@@ -10082,8 +10083,8 @@ public static class SelfTest
         WallRig.Segmented = false;
         bool wide = WallRig.Reaches(2, 3) && WallRig.Reaches(-1, 0);
         WallRig.Segmented = WallRig.SegmentedByDefault;
-        Check("and --wide-blast puts back the field that crossed sections, "
-              + "which is the A/B a segment is judged by",
+        Check("and --wide-blast puts back all three fields that crossed "
+              + "sections, which is the A/B a segment is judged by",
             wide && WallRig.SegmentedByDefault && WallRig.Segmented,
             $"wide blast still confined: {!wide}");
 
