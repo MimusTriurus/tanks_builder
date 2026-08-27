@@ -318,7 +318,7 @@ public sealed partial class TankBench : SceneRoot
     /// of the flag, and the next is ordered when the one before it arrives.
     ///
     /// Each leg carries whether it is a ram, because <c>--charge</c> shares the
-    /// queue: what a double click on the board says is "this same drive, as a
+    /// queue: what a right click on the board says is "this same drive, as a
     /// ram", so the two flags have to be able to say it in one run and in
     /// order.</summary>
     private readonly List<(Vector2I Cell, bool Ram)> _driveTo = new();
@@ -371,7 +371,7 @@ public sealed partial class TankBench : SceneRoot
                     if (Spot(args[++i]) is Vector2I leg)
                         _driveTo.Add((leg, false));
                     break;
-                // The same leg, driven as a ram - what a double click on the
+                // The same leg, driven as a ram - what a right click on the
                 // target hex does. A flag of its own rather than a modifier on
                 // --drive, so that a run can be half ordinary driving and half
                 // ram: a snapshot is proof, and taking one must not need a hand
@@ -1674,9 +1674,9 @@ public sealed partial class TankBench : SceneRoot
         if (!_field.InBounds(cell) || Tank.Wreck.Dead)
             return false;
         // Already on the way there: the path is left alone rather than reissued.
-        // A second click on the same hex is how a ram is asked for, and a reissue
-        // would restart the leg from the cell behind the tank - a visible jerk
-        // for nothing.
+        // A right click on the hex already being driven to is how a ram is
+        // asked for, and a reissue would restart the leg from the cell behind
+        // the tank - a visible jerk for nothing.
         if (Tank.Moving && Tank.Path.Count > 0 && Tank.Path[^1] == cell)
         {
             _ramming = false;
@@ -1696,26 +1696,32 @@ public sealed partial class TankBench : SceneRoot
         return true;
     }
 
-    /// <summary>The same order, driven as a ram - <b>a double click on the hex
+    /// <summary>The same order, driven as a ram - <b>a right click on the hex
     /// being driven to.</b>
     ///
-    /// <b>The same gesture as an ordinary order, said twice</b>, because that is
-    /// what the two are to each other: one drive, and whether the hull is meant
-    /// to go through what is standing there. A key would have to name a target
-    /// the mouse has already named, and <c>M</c> is the version that does - it
-    /// rams the ring by the side dial, which is the wall the bench is about and
-    /// not the one under the cursor.
+    /// <b>The other button on the same gesture</b>, because that is what the two
+    /// are to each other: one drive, and whether the hull is meant to go through
+    /// what is standing there. Left says where, right says where and through. A
+    /// key would have to name a target the mouse has already named, and <c>M</c>
+    /// is the version that does - it rams the ring by the side dial, which is
+    /// the wall the bench is about and not the one under the cursor.
+    ///
+    /// <b>Standing still is ESC alone now, which is where it already was.</b>
+    /// The bench has one tank, so the right button had nothing to aim at and was
+    /// a second way to cancel an order; a ram has a target, and a target is what
+    /// the mouse can say and the keyboard cannot.
     ///
     /// <b>By cell, like every other button on this board</b>, and through
-    /// <see cref="OrderTo"/> so that a double click on a hex nobody can drive to
+    /// <see cref="OrderTo"/> so that a right click on a hex nobody can drive to
     /// is not an order at all, let alone a ram. That includes the cell the tank
     /// is standing on: a machine already inside the ring rams its way out with
     /// <c>M</c>, which names a side, and a click on its own hex names none.
     ///
-    /// The first of the two clicks has already gone through as an ordinary
-    /// order, which is why <see cref="OrderTo"/> leaves a path alone when it is
-    /// asked for the one already under way: what the second click adds is the
-    /// flag and nothing else.</summary>
+    /// A right click on the hex already being driven to adds the flag and
+    /// nothing else, so an ordinary drive turns into a ram mid-leg: it is why
+    /// <see cref="OrderTo"/> leaves a path alone when it is asked for the one
+    /// already under way, rather than restarting it from the cell behind the
+    /// tank.</summary>
     private void Charge(Vector2I cell)
     {
         if (OrderTo(cell))
@@ -2129,6 +2135,12 @@ public sealed partial class TankBench : SceneRoot
 
     // --- input ---------------------------------------------------------------
 
+    /// <summary>The cell under the cursor. By cell, like every button on the
+    /// harness's board: the silhouette overhangs its own hexagon, so picking
+    /// by pixels would order a drive by clicking the ground beside it.</summary>
+    private Vector2I Pointed() =>
+        _field.ClampCell(_field.CellAt(_field.ToLocal(GetGlobalMousePosition())));
+
     public override void _UnhandledInput(InputEvent @event)
     {
         if (_garage.Count == 0)
@@ -2152,19 +2164,12 @@ public sealed partial class TankBench : SceneRoot
             switch (mouse.ButtonIndex)
             {
                 case MouseButton.Left:
-                    // By cell, like every button on the harness's board: the
-                    // silhouette overhangs its own hexagon, so picking by pixels
-                    // would order a drive by clicking the ground beside it.
-                    Vector2I at = _field.ClampCell(
-                        _field.CellAt(_field.ToLocal(GetGlobalMousePosition())));
-                    // Twice on the target hex is a ram - see Charge.
-                    if (mouse.DoubleClick)
-                        Charge(at);
-                    else
-                        OrderTo(at);
+                    OrderTo(Pointed());
                     return;
                 case MouseButton.Right:
-                    Tick.CancelOrder(Tank);
+                    // The other button on the same hex is a ram - see Charge.
+                    // Standing still is ESC, which is where it already was.
+                    Charge(Pointed());
                     return;
                 case MouseButton.WheelUp:
                 case MouseButton.WheelDown:
