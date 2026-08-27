@@ -9759,6 +9759,74 @@ public static class SelfTest
             && Mathf.IsEqualApprox(WallRig.Through(0.6f), -0.3f),
             $"the near end at {WallRig.Through(0.6f):F2}m on a 0.60m brick");
 
+        // --- and it ends on the piece rather than on the worst piece ---------
+        //
+        // The window is tested on a centre, so it only means "let go when the
+        // nose gets to it" if it reaches forward by the piece's own half-extent.
+        // NoseThrough is the worst any piece can present whatever way it was
+        // laid, which makes it right as a bound and wrong as a distance.
+        Check("a box's reach along its own axes is its half extents, which is "
+              + "what turns a window tested on a centre into one on a face",
+            Mathf.IsEqualApprox(
+                WallRig.Face(Basis.Identity, new Vector3(0.30f, 0.05f, 0.15f),
+                             Vector3.Right), 0.30f)
+            && Mathf.IsEqualApprox(
+                WallRig.Face(Basis.Identity, new Vector3(0.30f, 0.05f, 0.15f),
+                             Vector3.Back), 0.15f),
+            $"{WallRig.Face(Basis.Identity, new Vector3(0.30f, 0.05f, 0.15f), Vector3.Right):F2}m "
+            + $"along and {WallRig.Face(Basis.Identity, new Vector3(0.30f, 0.05f, 0.15f), Vector3.Back):F2}m across");
+        Check("and it turns with the piece, so a header presents its length "
+              + "where a stretcher presents its depth",
+            Mathf.IsEqualApprox(
+                WallRig.Face(new Basis(Vector3.Up, Mathf.Pi * 0.5f),
+                             new Vector3(0.30f, 0.05f, 0.15f), Vector3.Right),
+                0.15f),
+            $"{WallRig.Face(new Basis(Vector3.Up, Mathf.Pi * 0.5f), new Vector3(0.30f, 0.05f, 0.15f), Vector3.Right):F2}m "
+            + "turned a quarter about Y");
+        Check("a stretcher is let go of nearer the tip than the bound, and a "
+              + "header exactly at it - the bound being the worst of the two",
+            WallRig.Face(Basis.Identity, new Vector3(0.30f, 0.05f, 0.15f),
+                         Vector3.Back) < -WallRig.Through(0.6f)
+            && Mathf.IsEqualApprox(
+                WallRig.Face(Basis.Identity, new Vector3(0.30f, 0.05f, 0.15f),
+                             Vector3.Right), -WallRig.Through(0.6f)),
+            $"0.15m and 0.30m against a bound of {-WallRig.Through(0.6f):F2}m");
+
+        // --- and the box hands a piece back only once it is out of it --------
+        //
+        // The scatter is the box throwing what it was standing in: measured on
+        // the ring, the same leaf and the same count of pieces, a shell puts the
+        // pile 1.52 cells out and the ram put it 9.3 to 9.8 with 45 pieces off
+        // the cell. So a piece does not collide with the box until it is clear -
+        // and the test for clear is box against box, because a cylinder round
+        // the heading is a different question that looks like the same one.
+        Check("a piece at the box's middle is inside it, and one a box-length "
+              + "ahead is not",
+            WallRig.Inside(Vector3.Zero, Vector3.Back, Vector3.Right,
+                           new Vector3(2.6f, 2.0f, 6.9f), Basis.Identity,
+                           Vector3.Zero)
+            && !WallRig.Inside(Vector3.Back * 7.0f, Vector3.Back, Vector3.Right,
+                               new Vector3(2.6f, 2.0f, 6.9f), Basis.Identity,
+                               Vector3.Zero),
+            "at the middle and a box-length out");
+        Check("a piece in the box's corner is inside it, where a cylinder of the "
+              + "box's half-width would call it out and hand back the exception",
+            WallRig.Inside(new Vector3(1.2f, 0.9f, 3.2f), Vector3.Back,
+                           Vector3.Right, new Vector3(2.6f, 2.0f, 6.9f),
+                           Basis.Identity, Vector3.Zero)
+            && new Vector3(1.2f, 0.9f, 0.0f).Length() > 2.6f * 0.5f,
+            $"a corner {new Vector3(1.2f, 0.9f, 0.0f).Length():F2}m off the axis "
+            + $"against a half-width of {2.6f * 0.5f:F2}m");
+        Check("and a piece adds its own reach, so clear means clear rather than "
+              + "centred outside",
+            WallRig.Inside(Vector3.Back * 3.6f, Vector3.Back, Vector3.Right,
+                           new Vector3(2.6f, 2.0f, 6.9f), Basis.Identity,
+                           new Vector3(0.30f, 0.05f, 0.15f))
+            && !WallRig.Inside(Vector3.Back * 3.6f, Vector3.Back, Vector3.Right,
+                               new Vector3(2.6f, 2.0f, 6.9f), Basis.Identity,
+                               Vector3.Zero),
+            "0.15m of reach over a half-length of 3.45m");
+
         // --- and the body goes in on the same figure as the band -------------
         //
         // The box is a ram: what it lets go of is one half of it and what it

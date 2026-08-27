@@ -204,6 +204,37 @@ public sealed partial class WallRig : Node3D
     private readonly int[] _stood = new int[6];
     private readonly int[] _taken = new int[6];
     private readonly HashSet<int> _breached = new();
+
+    /// <summary>Pieces that do not collide with the driven box until they are
+    /// out of it again, and the scratch list for handing them back.
+    ///
+    /// <b>The box throws what it was standing in, and that is the whole of the
+    /// scatter.</b> Measured on the ring, the same leaf and the same 97 or 98
+    /// pieces let go: a shell puts the pile 1.52 cells out, the ram put it 9.3
+    /// to 9.8 with 45 pieces off the cell. It is not the masonry resolving
+    /// itself, and it is not the impulse of the drive - it is one kinematic box
+    /// that spent the approach overlapping bodies it could not touch, because a
+    /// frozen piece is a static one. On the frame a piece turns dynamic the only
+    /// thing the solver has to say about that pair is how deep they are into
+    /// each other, and it says it as a separating impulse worth about twenty
+    /// metres a second.
+    ///
+    /// <b>Every piece and not only the band's</b>, which is the half that made
+    /// the first attempt measure nothing: the nose lets go of what it drove
+    /// through, and the cascade - <see cref="Thaw"/>'s own - lets go of most of
+    /// the leaf. Excepting the band alone left the ring at 11.31 cells, which is
+    /// to say unchanged; excepting every thaw took it to 1.50, which is the
+    /// shell's number to two places.
+    ///
+    /// <b>The exception is temporary, and that is what keeps the shove.</b> Once
+    /// a piece is out of the box the box hits it again, so the heap at the
+    /// tracks is pushed along rather than driven through - see
+    /// <see cref="Passed"/>. Only the driven box: the rig's own ram leads its
+    /// band by a step and a half (<see cref="Drive"/>), so its pieces are
+    /// dynamic before it reaches them and there is no overlap to resolve.
+    /// </summary>
+    private readonly HashSet<int> _passing = new();
+    private readonly List<int> _spent = new();
     private AnimatableBody3D? _tank;
     private Vector3 _tankSize;
     private Vector3 _tankRun;
@@ -723,6 +754,8 @@ public sealed partial class WallRig : Node3D
         _gone.Clear();
         _lain.Clear();
         _breached.Clear();
+        _passing.Clear();
+        _spent.Clear();
         System.Array.Clear(_stood);
         System.Array.Clear(_taken);
         _tank = null;
@@ -994,8 +1027,16 @@ public sealed partial class WallRig : Node3D
                 continue;
             Vector3 arm = _bodies[i].Transform.Origin - tip;
             float along = arm.Dot(into);
-            // Up to where the tank has actually got, and not a brick further.
-            if (along < -back || along > front)
+            // Up to where the tank has actually got, and not a brick further -
+            // measured on the piece rather than bounded by the worst one, see
+            // Face. Taken as a maximum, so a caller that hands in a lead of its
+            // own - the rig's own box does - keeps it.
+            float edge = front;
+            if (_plan is { } near && i < near.Blocks.Count)
+                edge = Mathf.Max(front, -Face(_bodies[i].Transform.Basis,
+                                              near.Blocks[i].Half * MetresPerCell,
+                                              into));
+            if (along < -back || along > edge)
                 continue;
             if ((arm - into * along).Length() > lane)
                 continue;
@@ -1020,6 +1061,70 @@ public sealed partial class WallRig : Node3D
         // did. The tally it reads counts the cascade too, but the question is
         // only ever asked here.
         Breach(face, Strike.Ram);
+    }
+
+    /// <summary>Give the box back the pieces that have got out of it.
+    ///
+    /// <b>An exception nobody takes away is a tank that drives through rubble
+    /// for the rest of the run</b> - the opposite failure and just as visible,
+    /// because the heap at the tracks has to be shoved along and shoving is a
+    /// contact. So the pair is put back together the frame the piece is clear,
+    /// tested against the box where it is now rather than where it was when the
+    /// piece was let go.
+    ///
+    /// Clear of the whole box, not of the band: the band is a statement about
+    /// ground the nose has crossed and it reaches behind the tail, whereas this
+    /// asks the plainer thing - are these two solids apart.</summary>
+    /// <summary>Whether a piece is still inside the driven box, given the arm
+    /// from the box's centre to the piece's, the box's forward and side axes,
+    /// its size, and the piece's own basis and half extents.
+    ///
+    /// <b>Box against box on the box's three axes, never a cylinder round the
+    /// heading.</b> The two look like the same question and are not: a piece in
+    /// a corner of the box is outside a cylinder of the box's half-width, so the
+    /// cylinder hands the exception back while the piece is still inside and the
+    /// throw happens anyway. Measured - with the cylinder the ring came back at
+    /// 11.31 cells, which is the number with no exception at all.
+    ///
+    /// <b>The piece's own reach is added on every axis</b>, so clear means clear
+    /// rather than merely centred outside. That is the safe side: an exception
+    /// held a frame too long costs a frame of shoving, one dropped a frame too
+    /// early costs the throw the whole thing is written against.
+    ///
+    /// Named and static because the live solver is the one thing
+    /// <c>--selftest</c> cannot run, and this is the half that is
+    /// arithmetic.</summary>
+    public static bool Inside(Vector3 arm, Vector3 into, Vector3 side,
+                              Vector3 size, in Basis turn, Vector3 half) =>
+        Mathf.Abs(arm.Dot(into)) <= size.Z * 0.5f + Face(turn, half, into)
+        && Mathf.Abs(arm.Dot(side)) <= size.X * 0.5f + Face(turn, half, side)
+        && Mathf.Abs(arm.Y) <= size.Y * 0.5f + Face(turn, half, Vector3.Up);
+
+    private void Passed()
+    {
+        if (_passing.Count == 0 || _tank is null)
+            return;
+        // The box's own three axes, and the test is the plain box-against-box
+        // one on them: a cylinder round the heading looks like the same question
+        // and is not, because a piece in a corner of the box is outside a
+        // cylinder of its half-width. Measured: with the cylinder the ring came
+        // back at 11.31 cells, which is to say the exception was handed back
+        // while the piece was still inside and the throw happened anyway.
+        Vector3 side = _noseInto.Cross(Vector3.Up).Normalized();
+        _spent.Clear();
+        foreach (int i in _passing)
+        {
+            Vector3 arm = _bodies[i].Transform.Origin - _noseAt;
+            Vector3 half = _plan is { } near && i < near.Blocks.Count
+                ? near.Blocks[i].Half * MetresPerCell : Vector3.Zero;
+            if (Inside(arm, _noseInto, side, _noseSize,
+                       _bodies[i].Transform.Basis, half))
+                continue;
+            _bodies[i].RemoveCollisionExceptionWith(_tank);
+            _spent.Add(i);
+        }
+        foreach (int i in _spent)
+            _passing.Remove(i);
     }
 
     /// <summary>How many pieces of the wall proper stand in the band from
@@ -1192,6 +1297,35 @@ public sealed partial class WallRig : Node3D
     /// <see cref="Advance"/>: the sign is the whole of the rule, and a live
     /// solver is the one thing <c>--selftest</c> cannot run.</summary>
     public static float Through(float brick) => -brick * NoseThrough;
+
+    /// <summary>How far an oriented box reaches along <paramref name="axis"/>
+    /// from its own centre, in whatever units its <paramref name="half"/>
+    /// extents are given in - the support function of a box, and the same three
+    /// lines <c>WallKit</c> uses to keep the courses apart.
+    ///
+    /// <b>The window is tested on a centre, and this is what turns it into a
+    /// face.</b> <see cref="NoseThrough"/> is the worst any piece can present
+    /// whatever way it was laid, which is what makes it right as a bound and
+    /// wrong as a distance: a stretcher lying along the wall presents its depth,
+    /// about a third of that, so the nose had swallowed it whole before letting
+    /// go. Measured head on, the pieces come out at the tip instead of a brick
+    /// behind it.
+    ///
+    /// <b>It cannot let go of more than the bound did</b>, which is why it is
+    /// safe on every board already measured: a piece's own extent is never more
+    /// than half the longest brick, so the window only ever ends nearer the tip
+    /// than it used to, never further back. The out-and-back case
+    /// <see cref="NoseThrough"/> is written against keeps its margin - the far
+    /// leaf's innermost course sits 0.09m behind a parked MTP tip against an
+    /// extent of about 0.15m.
+    ///
+    /// Named and static because a live solver is the one thing
+    /// <c>--selftest</c> cannot run, and this half of the rule is
+    /// arithmetic.</summary>
+    public static float Face(in Basis turn, Vector3 half, Vector3 axis) =>
+        Mathf.Abs(turn.X.Dot(axis)) * half.X
+        + Mathf.Abs(turn.Y.Dot(axis)) * half.Y
+        + Mathf.Abs(turn.Z.Dot(axis)) * half.Z;
 
     /// <summary>How far ahead of the nose masonry counts as being shoved, as a
     /// fraction of a brick's length.
@@ -1405,6 +1539,9 @@ public sealed partial class WallRig : Node3D
         _noseFace = -1;
         _noseAim = Vector3.Zero;
         Shoving = 0;
+        foreach (int i in _passing)
+            _bodies[i].RemoveCollisionExceptionWith(_tank);
+        _passing.Clear();
         _tank?.QueueFree();
         _tank = null;
         _noseHull = null;
@@ -1504,6 +1641,7 @@ public sealed partial class WallRig : Node3D
         // by the next rather than missed.
         Reached(tip, _noseInto, _noseSize.X * 0.5f + _brick,
                 Ploughed(_noseGone, _noseSize.Z), Through(_brick), _noseFace);
+        Passed();
         // And what is left standing against the nose, over the band that begins
         // where that one ends. Counted after the sweep rather than before it, so
         // a piece let go of this frame is not also reported as resisting.
@@ -1814,6 +1952,13 @@ public sealed partial class WallRig : Node3D
         b.ContinuousCd = true;
         b.ContactMonitor = true;
         b.MaxContactsReported = 6;
+        // And the box does not resolve an overlap it made while the piece
+        // was static - see _passing.
+        if (_driven && _tank is not null)
+        {
+            b.AddCollisionExceptionWith(_tank);
+            _passing.Add(i);
+        }
         if (!spreads)
             return;
         b.BodyEntered += hit =>
