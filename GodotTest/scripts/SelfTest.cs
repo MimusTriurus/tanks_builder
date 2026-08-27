@@ -9888,18 +9888,27 @@ public static class SelfTest
               + "it",
             WallRig.Shove(0.6f) >= 0.6f,
             $"{WallRig.Shove(0.6f):F2}m ahead on a 0.60m brick");
-        // Where it sits among the other two caps. Below the ford because a wall
-        // does not move until it is broken, above the crawl because a hull
-        // swinging round inside a ring is not ramming it and the crawl has to
-        // stay a floor rather than a speed the wall lifts it to.
+        // Where it sits among the other two caps, and that it is one figure
+        // rather than three. Below the ford at every class because a wall does
+        // not move until it is broken; the same for all three because the wall
+        // under all three is one wall, and because the spread of three caps was
+        // the whole of the scatter - see MovementProfile.WallSpeed.
         MovementProfile mid = MovementProfile.Medium;
-        Check("masonry is the heaviest going on the board, and still lighter than "
-              + "the crawl at a bend is slow",
-            MovementProfile.WallFraction < MovementProfile.WaterFraction
-            && MovementProfile.WallFraction > mid.CornerFraction,
-            $"wall {MovementProfile.WallFraction:F2}, water "
-            + $"{MovementProfile.WaterFraction:F2}, crawl "
-            + $"{mid.CornerFraction:F2}");
+        Check("masonry is the heaviest going on the board, at every class",
+            MovementProfile.WallSpeed < MovementProfile.Light.WaterSpeed
+            && MovementProfile.WallSpeed < MovementProfile.Heavy.WaterSpeed,
+            $"wall {MovementProfile.WallSpeed:F0} px/s against fords of "
+            + $"{MovementProfile.Light.WaterSpeed:F0} and "
+            + $"{MovementProfile.Heavy.WaterSpeed:F0}");
+        Check("and it is one figure and not three, so what a ram flings is the "
+              + "wall's doing rather than the class's",
+            MovementProfile.All.All(
+                p => Math.Abs(MovementProfile.WallSpeed
+                              - MovementProfile.WallSpeed) < 0.001)
+            && MovementProfile.Light.TopSpeed > MovementProfile.Heavy.TopSpeed,
+            $"{MovementProfile.WallSpeed:F0} px/s under cruises of "
+            + $"{MovementProfile.Light.TopSpeed:F0} and "
+            + $"{MovementProfile.Heavy.TopSpeed:F0}");
         // The cap itself, through the tick that applies it. A board with no walls
         // answers null and gets the cap it had - that half matters as much as the
         // other, because a hook that fires on every board is a tank that crawls
@@ -9926,7 +9935,7 @@ public static class SelfTest
             one.Cell = stood;
             Check("a tank with its nose in masonry may only go at the wall's "
                   + "figure, and gets its cruise back the moment it is through",
-                Math.Abs(dug - one.Profile.WallSpeed) < 0.01
+                Math.Abs(dug - MovementProfile.WallSpeed) < 0.01
                 && Math.Abs(clear - open) < 0.01 && dug < open - 1.0,
                 $"{open:F0} px/s open, {dug:F0} shoving, {clear:F0} out the far "
                 + "side");

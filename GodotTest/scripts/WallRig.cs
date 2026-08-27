@@ -1402,7 +1402,7 @@ public sealed partial class WallRig : Node3D
     /// <b>The feedback the solver never gave back, and it is one number because
     /// one is all a speed ceiling wants.</b> The board decides how fast a tank
     /// goes; all this says is that some of the going is masonry - see
-    /// <c>TankTick.Shoving</c> and <see cref="MovementProfile.WallFraction"/>.
+    /// <c>TankTick.Shoving</c> and <see cref="MovementProfile.WallSpeed"/>.
     /// A count rather than a rate, so it does not depend on the step; a fact
     /// from the solver rather than a timer, so it ends when the shoving ends.
     ///

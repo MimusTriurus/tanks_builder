@@ -98,7 +98,7 @@ public sealed class TankTick
     public Func<Vector2I, Vector2, bool>? Barred;
 
     /// <summary>Whether this tank is pressing against masonry right now, and so
-    /// may only go at <see cref="MovementProfile.WallFraction"/> of its cruise -
+    /// may only go at <see cref="MovementProfile.WallSpeed"/> -
     /// see <see cref="SpeedCap"/>.
     ///
     /// <b>A hook because a wall is a prop and the other two caps are terrain.</b>
@@ -634,7 +634,7 @@ public sealed class TankTick
     /// where that invention would show.
     ///
     /// <b>And a third that is not terrain: masonry the tank is shoving</b>, at
-    /// <see cref="MovementProfile.WallFraction"/> - see <see cref="Shoving"/>.
+    /// <see cref="MovementProfile.WallSpeed"/> - see <see cref="Shoving"/>.
     /// It arrives through a hook because a wall stands on a cell rather than being
     /// one, and it takes the same lower-of-them treatment for the same reason.
     /// The ramp in <see cref="AdvanceOrder"/> is what turns it into an effect: a
@@ -657,7 +657,7 @@ public sealed class TankTick
         // a wet bank goes at the wall's figure; the same "the lower of them, never
         // their product" that already holds for the other two.
         if (Shoving is not null && Shoving(v))
-            cap = Math.Min(cap, v.Profile.WallSpeed);
+            cap = Math.Min(cap, MovementProfile.WallSpeed);
         return cap;
     }
 
@@ -675,7 +675,7 @@ public sealed class TankTick
             return "";
         // Masonry first, because the word names the cap actually in force and
         // the wall's is the lowest of the three by construction - see
-        // MovementProfile.WallFraction. A tank shoving a leaf on a wet bank is
+        // MovementProfile.WallSpeed. A tank shoving a leaf on a wet bank is
         // going at the wall's figure whatever else is true of the leg.
         if (Shoving is not null && Shoving(v))
             return "shoving";

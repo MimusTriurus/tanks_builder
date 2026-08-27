@@ -125,12 +125,22 @@ public sealed class MovementProfile
     public double WaterSpeed => TopSpeed * WaterFraction;
 
     /// <summary>
-    /// Speed allowed while shoving masonry, as a fraction of TopSpeed.
+    /// Speed allowed while shoving masonry, in px/s and the same figure for
+    /// every class.
     ///
-    /// <b>One number for all three classes, by <see cref="GradeFraction"/>'s
-    /// argument word for word</b>: the wall under all three is one wall. The
-    /// spread is already there in what 22% of three different cruises comes to -
-    /// 68 / 53 / 39 px/s.
+    /// <b>A speed and not a fraction, which is where this parts company with the
+    /// grade and the ford.</b> Those two are fractions because what they cost is
+    /// power against weight, so a stronger machine really does carry more of its
+    /// cruise through them. Masonry is not going anywhere until it is broken, so
+    /// what limits the tank is the wall giving way, and that is one figure
+    /// whoever is leaning on it. As a fraction it came to 68 / 53 / 39 px/s, and
+    /// that spread was the ram's rather than the wall's.
+    ///
+    /// <b>And it was the whole of the scatter.</b> Measured on the ring, same
+    /// leaf and same count let go: the light tank arrived fastest and put the
+    /// pile 12.74 cells out against the heavy's 2.67 - in that order, which is
+    /// the order of the three caps. What the spread showed was not the classes
+    /// but how fast each of them happened to hit.
     ///
     /// <b>The slowest going on the board, and it has to be.</b> A bank is over in
     /// a cell and water is pushed aside; a wall is broken, and until it is broken
@@ -138,11 +148,14 @@ public sealed class MovementProfile
     /// happens to be brown, which is <see cref="WaterFraction"/>'s own objection
     /// arriving a third time.
     ///
-    /// <b>Still above <see cref="CornerFraction"/>, and the margin is what keeps
-    /// the two from fighting.</b> A tank swinging round inside a ring is not
-    /// ramming it - that is the whole of <c>WallRig.Advance</c> - so the crawl has
-    /// to stay a floor to slow down to rather than a speed the wall lifts it up
-    /// to.
+    /// <b>Below <see cref="CornerFraction"/> at two classes of three, and the
+    /// two still cannot fight.</b> The crawl is a floor in the branch that turns
+    /// and nowhere else - <c>TankTick.AdvanceOrder</c> - and a hull swinging on
+    /// the spot is not ramming, which is the whole of <c>WallRig.Advance</c>. On
+    /// the straight the cap is honoured on its own, so a tank that comes out of a
+    /// bend at the crawl slows into the wall's figure at <see cref="WallBrake"/>
+    /// instead of being lifted to the crawl by it. What the fraction had to
+    /// promise, the branch gives for nothing.
     ///
     /// <b>What it does not do is stop the tank.</b> The wall gives no other
     /// feedback than this: how far the machine gets and where it parks are still
@@ -150,9 +163,7 @@ public sealed class MovementProfile
     /// rather than a wall to bounce off. That debt is named in the bench's notes
     /// and this is not it - this is the going, and the going is heavy.
     /// </summary>
-    public const double WallFraction = 0.22;
-
-    public double WallSpeed => TopSpeed * WallFraction;
+    public const double WallSpeed = 48.0;
 
     /// <summary>
     /// How much harder masonry takes speed off than the engine's own brakes,
