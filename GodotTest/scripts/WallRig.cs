@@ -175,9 +175,29 @@ public sealed partial class WallRig : Node3D
     /// piece is down among the bottom courses, behind the rubble already lying
     /// against the foot - measured, both of those put the hole somewhere it
     /// could not be seen. What decides how high a hole in a wall is is what shot
-    /// at it.</summary>
+    /// at it.
+    ///
+    /// <b>And it stands on the ground rather than being buried to the waist,
+    /// which it was.</b> The driven box is placed at the contact point the board
+    /// hands over, so a shape centred on the body's own origin runs from a metre
+    /// underground to a metre up - half of it below the floor, against a wall
+    /// that stands 2.20m. The rig's own ram lifts its box by half its height and
+    /// always did; the driven one did not, and nothing said so, because a ram
+    /// that reaches half a wall still brings a wall down - it only leaves more
+    /// of it lying where it was laid. Measured on the ring: the heap went from
+    /// <c>reach 5.08</c> to <c>1.58</c> for the same count let go.</summary>
     public const float TankTall = 2.0f;
     public const float ApAim = TankTall * 0.75f;
+
+    /// <summary>Where the ram box's shape sits relative to the body that carries
+    /// it, given the box's height: on the ground, so half a box up.
+    ///
+    /// Named rather than written twice, because it is read from both ends - the
+    /// shape is placed by it and every question about what the box contains is
+    /// asked against it - and two spellings of the same offset would part at
+    /// exactly the height nobody compares. See <see cref="TankTall"/> for what
+    /// the buried version cost.</summary>
+    public static Vector3 Seat(float tall) => Vector3.Up * (tall * 0.5f);
 
     /// <summary>How fast a piece has to be going before it takes its neighbour
     /// with it, in metres a second.
@@ -376,6 +396,73 @@ public sealed partial class WallRig : Node3D
     /// than hidden: rubble on a neighbour is what was asked for, rubble in the
     /// void is the board being too small for the shot.</summary>
     public int Fell => _gone.Count;
+
+    /// <summary>How near its own seat a piece has to be to count as still
+    /// standing, in bricks - see <see cref="Stuck"/>.</summary>
+    public const float Seated = 0.25f;
+
+    /// <summary>How upright it has to have stayed, as the cosine between
+    /// the block's own up axis then and now - see <see cref="Stuck"/>. A
+    /// brick that dropped straight down onto the rubble under it kept its
+    /// seat to within a brick and is not a course; one still laid is.</summary>
+    public const float Upright = 0.985f;
+
+    /// <summary>How many of the pieces let go of are still laid where they
+    /// were put - within a quarter of a brick of their seat and still upright.
+    ///
+    /// <b>Let go of and fallen down are two different facts with one count, and
+    /// this is the second one.</b> <see cref="Loose"/> says the rig released a
+    /// piece; whether anything then moved it is the solver's business, and dry
+    /// masonry with no bed joint is a stack of boxes that stands perfectly well
+    /// once it has been unfrozen. So a leaf can report <c>96/96</c> in
+    /// <see cref="Leaves"/> and still be standing in the picture, which is
+    /// exactly the shape of "the ram only took the outer part of the wall".
+    ///
+    /// <b>Measured, and the two cases are far apart.</b> A four-leaf sample met
+    /// from outside keeps <b>19 of the 111</b> it let go of, and the picture is a
+    /// tumbled heap; the leaf of the ring the tank drives out of keeps <b>36 of
+    /// 98</b>, at the wall's own full height, because the hull's front face
+    /// begins level with that masonry and can never cross it. That is the ring's
+    /// standing debt - the tank does not fit in it - arriving where it can be
+    /// seen.
+    ///
+    /// <b>Seated and upright, not seated alone.</b> A brick that dropped
+    /// straight down onto the rubble under it keeps its seat to within a brick
+    /// and is not a course; asked by distance alone the four-leaf sample - a
+    /// visible tumble with nothing laid left in it - came back with 38 of its
+    /// 111 standing. Turned by more than <see cref="Upright"/> it is rubble
+    /// whatever it is sitting on: 38 becomes 19.
+    ///
+    /// <b>And masonry only</b> - <c>Clearance</c>'s sentence in a sixth place.
+    /// The apron was laid on the ground and was never standing, so a shot that
+    /// let go of it without moving it has not left a wall behind.
+    ///
+    /// It still counts a little high, because a bottom course that settled in
+    /// place is honestly still a course - so it is a floor under what is
+    /// standing rather than a measure of it.</summary>
+    public int Stuck
+    {
+        get
+        {
+            if (_plan is not { } plan)
+                return 0;
+            float near = _brick * Seated;
+            int held = 0;
+            foreach (int k in _live)
+            {
+                if (k >= plan.Blocks.Count || plan.Blocks[k].Course < 0)
+                    continue;
+                Transform3D laid = plan.Blocks[k].Frame;
+                Transform3D now = _bodies[k].Transform;
+                if ((now.Origin - laid.Origin * MetresPerCell).Length() >= near)
+                    continue;
+                if (now.Basis.Y.Dot(laid.Basis.Y) < Upright)
+                    continue;
+                held++;
+            }
+            return held;
+        }
+    }
 
     /// <summary>How many sections have come down whole - see <see cref="Breach"/>.
     ///
@@ -1112,9 +1199,13 @@ public sealed partial class WallRig : Node3D
         // while the piece was still inside and the throw happened anyway.
         Vector3 side = _noseInto.Cross(Vector3.Up).Normalized();
         _spent.Clear();
+        // From the middle of the box and not from the contact point: the shape
+        // stands on the ground - see TankTall - so the two are half a box apart
+        // in y, and the height term below is written against the middle.
+        Vector3 mid = _noseAt + Seat(_noseSize.Y);
         foreach (int i in _passing)
         {
-            Vector3 arm = _bodies[i].Transform.Origin - _noseAt;
+            Vector3 arm = _bodies[i].Transform.Origin - mid;
             Vector3 half = _plan is { } near && i < near.Blocks.Count
                 ? near.Blocks[i].Half * MetresPerCell : Vector3.Zero;
             if (Inside(arm, _noseInto, side, _noseSize,
@@ -1510,6 +1601,11 @@ public sealed partial class WallRig : Node3D
             _noseHull = new CollisionShape3D
             {
                 Shape = new BoxShape3D { Size = size },
+                // Standing on the ground rather than buried to the waist - see
+                // TankTall. The body's own origin stays at the contact point,
+                // because that is what the board hands over and what the band is
+                // measured from; the shape is what has to sit on top of it.
+                Position = Seat(size.Y),
                 // Out of the simulation until the box has advanced - see Feels.
                 // Stated at birth rather than left to the first Drive, because a
                 // physics step can fall between the two.

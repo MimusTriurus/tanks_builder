@@ -9826,6 +9826,20 @@ public static class SelfTest
                                new Vector3(2.6f, 2.0f, 6.9f), Basis.Identity,
                                Vector3.Zero),
             "0.15m of reach over a half-length of 3.45m");
+        Check("the ram box stands on the ground rather than being buried to the "
+              + "waist, so it reaches the top course of a wall",
+            WallRig.Seat(WallRig.TankTall).IsEqualApprox(
+                Vector3.Up * (WallRig.TankTall * 0.5f))
+            && WallRig.Inside(new Vector3(0.0f, 1.8f, 1.0f)
+                              - WallRig.Seat(WallRig.TankTall),
+                              Vector3.Back, Vector3.Right,
+                              new Vector3(2.6f, WallRig.TankTall, 6.9f),
+                              Basis.Identity, new Vector3(0.30f, 0.14f, 0.15f))
+            && !WallRig.Inside(new Vector3(0.0f, 1.8f, 1.0f),
+                               Vector3.Back, Vector3.Right,
+                               new Vector3(2.6f, WallRig.TankTall, 6.9f),
+                               Basis.Identity, new Vector3(0.30f, 0.14f, 0.15f)),
+            $"a course at 1.80m against a {WallRig.TankTall:F1}m box");
 
         // --- and the body goes in on the same figure as the band -------------
         //

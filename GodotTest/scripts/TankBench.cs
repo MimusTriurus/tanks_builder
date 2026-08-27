@@ -1535,6 +1535,12 @@ public sealed partial class TankBench : SceneRoot
                // rubble in the void is the board being too small for the shot.
                // WallRig.Fell's own words.
                + (rig.Fell > 0 ? $", {rig.Fell} off the board" : "")
+               // And how many of those it let go of never moved, which is the
+               // one fact the leaf tally cannot carry: unfrozen dry masonry with
+               // no bed joint is a stack of boxes that stands, so a leaf can
+               // report all of itself gone and still be standing in the picture.
+               // WallRig.Stuck.
+               + (rig.Stuck > 0 ? $", {rig.Stuck} let go but standing" : "")
                // And how many have cleared themselves, which is a third fact
                // again: a swept cell and a shot that moved nothing are the same
                // empty picture. WallRig.Crumbled.
@@ -1570,7 +1576,8 @@ public sealed partial class TankBench : SceneRoot
                + "\n" + string.Join("  ", _walls.Skip(1).Select(
                    w => $"({w.Cell.X},{w.Cell.Y}) "
                         + (w.Rig is { Struck: true } r2
-                            ? $"{r2.Loose} let go" : "standing")));
+                            ? $"{r2.Loose} let go, {r2.Stuck} standing"
+                            : "standing")));
     }
 
     // --- what the dials do ---------------------------------------------------
