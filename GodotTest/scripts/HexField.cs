@@ -1022,6 +1022,33 @@ public sealed partial class HexField : Node2D
         return -1;
     }
 
+    /// <summary>The cells on the straight line from <paramref name="from"/> to
+    /// <paramref name="to"/>, both ends included, each adjacent to the next.
+    ///
+    /// <b>For a crossing nobody watched frame by frame.</b> A diff of "which
+    /// cell now" against "which cell last time" normally moves one step at a
+    /// time, but held through a pivot or a long frame the pair can come apart
+    /// by more than one cell - and every rim between the two was still
+    /// crossed. The standard hex line: lerped in cube coordinates and rounded;
+    /// the nudge keeps a sample that lands exactly on an edge from flipping
+    /// sides mid-line, which is what makes consecutive cells neighbours.
+    /// </summary>
+    public static List<Vector2I> Chain(Vector2I from, Vector2I to)
+    {
+        Vector2I a = OffsetToAxial(from), b = OffsetToAxial(to);
+        int n = (Mathf.Abs(a.X - b.X) + Mathf.Abs(a.Y - b.Y)
+                 + Mathf.Abs(a.X + a.Y - b.X - b.Y)) / 2;
+        var line = new List<Vector2I>(n + 1);
+        for (int i = 0; i <= n; i++)
+        {
+            float t = n == 0 ? 0.0f : (float)i / n;
+            line.Add(AxialToOffset(CubeRound(
+                Mathf.Lerp(a.X + 1e-4f, b.X + 1e-4f, t),
+                Mathf.Lerp(a.Y - 2e-4f, b.Y - 2e-4f, t))));
+        }
+        return line;
+    }
+
     /// <summary>
     /// The cells outward from one along a flat-side heading, nearest first,
     /// stopping at the edge of the board.
@@ -1144,6 +1171,9 @@ public sealed partial class HexField : Node2D
 
     private static Vector2I AxialToOffset(Vector2I axial) =>
         new(axial.X, axial.Y + (axial.X - (axial.X & 1)) / 2);
+
+    private static Vector2I OffsetToAxial(Vector2I cell) =>
+        new(cell.X, cell.Y - (cell.X - (cell.X & 1)) / 2);
 
     private static Vector2I CubeRound(float q, float r)
     {

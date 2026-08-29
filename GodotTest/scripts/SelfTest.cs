@@ -126,6 +126,45 @@ public static class SelfTest
         }
         Check("HeadingTo inverts Step everywhere", misses == 0, $"{misses} wrong");
 
+        // The chain is what the ram event walks when a diff of nose cells
+        // spans more than one rim - see TankBench.Ram - so the claim it
+        // stands on is asserted here: both ends are the ends asked for, and
+        // every consecutive pair is a Step apart, which is what lets the walk
+        // name a flat-side heading for each rim it crossed.
+        misses = 0;
+        firstMiss = "";
+        for (int q = 0; q < field.Columns; q++)
+        for (int r = 0; r < field.Rows; r++)
+        for (int q2 = 0; q2 < field.Columns; q2++)
+        for (int r2 = 0; r2 < field.Rows; r2++)
+        {
+            var from = new Vector2I(q, r);
+            var to = new Vector2I(q2, r2);
+            List<Vector2I> chain = HexField.Chain(from, to);
+            string why = "";
+            if (chain.Count == 0 || chain[0] != from)
+                why = "does not start at the start";
+            else if (chain[^1] != to)
+                why = "does not end at the end";
+            else
+                for (int i = 1; i < chain.Count; i++)
+                    if (HexField.HeadingTo(chain[i - 1], chain[i]) < 0)
+                    {
+                        why = $"({chain[i - 1].X},{chain[i - 1].Y}) and "
+                              + $"({chain[i].X},{chain[i].Y}) are not "
+                              + "neighbours";
+                        break;
+                    }
+            if (why.Length > 0)
+            {
+                misses++;
+                if (firstMiss.Length == 0)
+                    firstMiss = $"({q},{r})->({q2},{r2}): {why}";
+            }
+        }
+        Check("a chain runs end to end in single steps, between every pair "
+              + "on the board", misses == 0, $"{misses} wrong, first {firstMiss}");
+
         Theme("paths");
         int bad = 0;
         var badDetail = "";
@@ -5391,6 +5430,50 @@ public static class SelfTest
                 $"tracer {tracers[0]:F2}/{tracers[2]:F2},"
                 + $" trail {trails[0]:F2}/{trails[2]:F2} - a level cannot put back"
                 + " a difference the triple no longer has");
+
+            // The third file, and the same division of authority a third time:
+            // walls.json fills in the shape of every wall the benches lay - seed,
+            // columns, courses, sides, leaves - and does not say which walls
+            // exist. The two silent failures are the same pair: a record with no
+            // wall behind it is a recipe for a wall that does not exist, and a
+            // wall with no record quietly kept the compiled figure.
+            var walls = WallConfig.Load(null);
+            string[] laid = TankBench.WallNames
+                .Concat(new[] { WallBench.WallName }).ToArray();
+            Check("walls.json loads", walls.Loaded, walls.Error);
+            Check("every wall the benches lay is named in the file",
+                laid.All(n => walls.Names.Contains(n, StringComparer.OrdinalIgnoreCase)),
+                string.Join(", ", laid.Where(
+                    n => !walls.Names.Contains(n, StringComparer.OrdinalIgnoreCase)))
+                + " run on the compiled recipes, which nothing on screen says");
+            Check("and every id in the file is a wall a bench lays",
+                !walls.Strays(laid).Any(),
+                string.Join(", ", walls.Strays(laid).Take(4))
+                + " - a typo here is a recipe for a wall that does not exist");
+            Check("no wall id is used twice in the file",
+                walls.Duplicates.Count == 0,
+                string.Join(", ", walls.Duplicates)
+                + " - the second entry wins silently and the first reads as a "
+                + "recipe that did nothing");
+            // What the file is allowed to do and nothing can stop, so it is said
+            // out loud instead. The four samples exist to move one dial each off
+            // the ring's numbers - height, thickness, seed, run - so a sample the
+            // file has given the ring's own record is a second ring, and the
+            // whole arrangement of four of them has quietly become one wall drawn
+            // five times. Compared as written rather than as laid: two records
+            // that spell the same five fields are the same wall whatever base
+            // they would otherwise have started from.
+            var ringRow = walls.Read(TankBench.RingName);
+            string[] flat = TankBench.WallNames
+                .Where(n => n != TankBench.RingName
+                            && walls.Read(n) is { } row && ringRow is { } r
+                            && row == r)
+                .ToArray();
+            Check("the file did not flatten a sample onto the ring",
+                flat.Length == 0,
+                string.Join(", ", flat)
+                + " spell the ring's own record - a sample that differs from the "
+                + "ring in nothing is the ring again");
         }
 
         Theme("the side panel");
@@ -9623,6 +9706,11 @@ public static class SelfTest
         try
         {
             rig.Raise(plan, Array.Empty<Vector3>());
+            // A wall nobody is driving at has no ram box, and the overlay is
+            // told so rather than left to draw one at the origin - which is
+            // where a six-metre box would sit on a board measured in pixels.
+            Check("a rig with no tank has no box to draw",
+                rig.Hull() is null, "a frame came back for a box that is not there");
             // Standing masonry does not clear itself, which is the whole of which
             // pieces go: what the shot let go of. A wall left standing round an AP
             // hole has to be there however long anybody looks at it, and the
@@ -9634,30 +9722,141 @@ public static class SelfTest
             Check("a wall nothing has hit is whole, and stays whole: only what a "
                   + "shot let go of clears itself",
                 whole, $"{rig.Crumbled} of {rig.Count} pieces gone unhit");
-            var box = new Vector3(2.5f, WallRig.TankTall, 6.0f);
-            rig.Nose(Vector3.Zero, Vector3.Forward, box);
-            bool droveFirst = rig.Driven && rig.Ram() is null;
+            // --- the driven ram, arrived as an event --------------------------
+            //
+            // See WallRig.Rammed: the board says a hull's front face crossed a
+            // wall-bearing rim, and the rig answers once. What is assertable
+            // without a frame is the naming: a crossing with standing masonry
+            // in front enters a section and strikes the wall, one anywhere
+            // else enters nothing - and a single-sided wall has exactly one
+            // rim that answers.
+            var hull = new Vector3(2.5f, WallRig.TankTall, 6.0f);
+            int met = 0, face = -1;
+            for (int d = 0; d < 12; d++)
+            {
+                float a = Mathf.DegToRad(d * 30.0f);
+                int hit = rig.Rammed(
+                    new Vector3(0.0f, WallRig.TankTall * 0.5f, 0.0f),
+                    new Vector3(Mathf.Cos(a), 0.0f, Mathf.Sin(a)), 0.0f, hull);
+                if (hit < 0)
+                    continue;
+                met++;
+                face = hit;
+            }
+            Check("a hull crossing the wall's plane enters the one section a "
+                  + "single-sided wall has, from the one direction that meets "
+                  + "masonry",
+                met == 1 && face == 0 && rig.Struck && rig.Loose > 0,
+                $"{met} of 12 directions entered, face {face}, "
+                + $"struck {rig.Struck}, {rig.Loose} let go");
+            // A crossing over a rim the last ram emptied is a drive, not a
+            // strike: the section is asked of standing bricks, and none stand.
+            int loose = rig.Loose;
+            bool again = false;
+            for (int d = 0; d < 12; d++)
+            {
+                float a = Mathf.DegToRad(d * 30.0f);
+                again |= rig.Rammed(
+                    new Vector3(0.0f, WallRig.TankTall * 0.5f, 0.0f),
+                    new Vector3(Mathf.Cos(a), 0.0f, Mathf.Sin(a)), 0.0f,
+                    hull) >= 0;
+            }
+            Check("and a second crossing over the emptied rim enters nothing "
+                  + "and lets nothing more go",
+                !again && rig.Loose == loose,
+                $"entered {again}, {rig.Loose} let go against {loose}");
+            // The bench's own ram is still a body, and it is live from the
+            // start: that one is a shot rather than a tank, so there is no
+            // nose to advance.
             rig.Fire(WallRig.Strike.Ram, Vector3.Forward);
-            Check("a ram fired while a tank is driving the nose is refused, and "
-                  + "leaves the wall standing rather than struck",
-                droveFirst && rig.Driven && rig.Ram() is null && !rig.Struck,
-                $"driven {rig.Driven}, own box {rig.Ram() is not null}, "
-                + $"struck {rig.Struck}");
-            rig.Halt();
-            Check("and taking the tank away takes its box with it",
-                !rig.Driven && rig.Ram() is null, "the box is still there");
-
-            rig.Fire(WallRig.Strike.Ram, Vector3.Forward);
-            bool ownBox = rig.Ram() is not null;
-            rig.Nose(Vector3.Zero, Vector3.Forward, box);
-            Check("and the other way round: a tank cannot drive a rig that has a "
-                  + "ram of its own",
-                ownBox && !rig.Driven, $"own box {ownBox}, driven {rig.Driven}");
+            Check("the bench's own ram box has a frame, and its shape is on "
+                  + "the moment it is made",
+                rig.Ram() is not null && rig.Hull() is { Live: true },
+                $"{(rig.Hull() is null ? "no frame" : "not live")}");
         }
         finally
         {
             rig.Free();
         }
+
+        // --- driving back in over an emptied rim -----------------------------
+        //
+        // The single-sided wall above cannot ask this: once its one leaf is
+        // down there is no masonry left to misname. On a ring there is - the
+        // opposite leaf, two apothems out - and Meets scans as far as it can
+        // see, so a hull re-entering over the rim its own ram had emptied was
+        // answered with that leaf and Rammed felled it from across the cell.
+        // The strike belongs to the plane that was crossed: an emptied plane
+        // is a drive, and the far leaf answers at its own rim when the hull
+        // actually gets there.
+        var yard = new WallRig();
+        try
+        {
+            WallKit.Plan walls = WallKit.Lay(new WallKit.Recipe { Sides = 6 });
+            WallKit.Fit(walls, 0.97f);
+            yard.Raise(walls, Array.Empty<Vector3>());
+            var hull = new Vector3(2.5f, WallRig.TankTall, 6.0f);
+            var outward = new Vector3(0.0f, 0.0f, 1.0f);
+            int left = yard.Rammed(
+                new Vector3(0.0f, WallRig.TankTall * 0.5f, 0.0f),
+                outward, 0.0f, hull);
+            int loose = yard.Loose;
+            Check("a hull ramming out of a ring enters the leaf it crossed",
+                left >= 0 && loose > 0,
+                $"face {left}, {loose} let go");
+            // Back in over the same rim: the nose just inside the plane it
+            // emptied, the rest of the cell - and the far leaf - ahead of it.
+            int back = yard.Rammed(
+                new Vector3(0.0f, WallRig.TankTall * 0.5f,
+                            WallRig.Apothem - 0.1f + hull.Z * 0.5f),
+                -outward, 0.0f, hull);
+            Check("and driving back in over the rim it emptied is a drive, "
+                  + "not a strike on the leaf across the cell",
+                back < 0 && yard.Loose == loose,
+                $"face {back}, {yard.Loose} let go against {loose}");
+            // The far leaf still answers, at its own rim: the crossing where
+            // the hull actually reaches it.
+            int far = yard.Rammed(
+                new Vector3(0.0f, WallRig.TankTall * 0.5f,
+                            -WallRig.Apothem - 0.1f + hull.Z * 0.5f),
+                -outward, 0.0f, hull);
+            Check("while the leaf across the cell still falls to the crossing "
+                  + "at its own rim",
+                far >= 0 && far != left && yard.Loose > loose,
+                $"face {far} against {left}, {yard.Loose} let go against {loose}");
+        }
+        finally
+        {
+            yard.Free();
+        }
+
+        // --- the collider overlay --------------------------------------------
+        //
+        // Two claims, and both of them are about the picture being readable
+        // rather than about the picture itself.
+        Check("the colliders are off by default: nearly every number on these "
+              + "benches is a pixel difference between two captures, and a frame "
+              + "drawn over one would be measuring itself",
+            !WallHulls.ShownByDefault, "on by default");
+        // Four states, one overlay. Two of them painted alike is an overlay that
+        // draws the shapes and answers none of the questions they were drawn for
+        // - which side of the wall has been let go of, and whether the box the
+        // tank drives is in the simulation yet.
+        Color[] inks =
+        {
+            WallHulls.Standing, WallHulls.Loose, WallHulls.Ram, WallHulls.Idle,
+        };
+        float nearest = 9.0f;
+        for (int i = 0; i < inks.Length; i++)
+            for (int k = i + 1; k < inks.Length; k++)
+                nearest = Mathf.Min(nearest,
+                    new Vector3(inks[i].R - inks[k].R,
+                                inks[i].G - inks[k].G,
+                                inks[i].B - inks[k].B).Length());
+        Check("and its four states are four colours: standing masonry, masonry "
+              + "let go of, the ram box, and the ram box the solver cannot see "
+              + "yet",
+            nearest > 0.3f, $"the closest pair is {nearest:F2} apart");
 
         // --- the rubble clears itself ----------------------------------------
         //
@@ -9704,56 +9903,11 @@ public static class SelfTest
 
         // --- what a ram lets go of -------------------------------------------
         //
-        // A tank knocks a brick out by driving into it. Standing in one and
-        // turning in one are not the same act, and this board makes the
-        // difference load-bearing: the ring stands on the tank's own cell and
-        // leaves 2.76m clear against a medium hull that turns through 3.18m, so
-        // the box overlaps masonry at every heading. Written as the whole
-        // footprint, an ordinary order out of the yard let go of 452 to 468
-        // pieces of 536 before the tank had moved at all - and the bench's own
-        // readout said so, because the speed at the moment the masonry first
-        // gave was 0.0 m/s.
-        //
-        // This is the one part of a ram that can be asserted without a frame:
-        // everything else is a live solver, and --selftest quits first.
-        Check("a driven box that has not moved has swept nothing behind its "
-              + "nose, so turning on the spot is not a ram",
-            WallRig.Swept(0.0f, 6.0f) == 0.0f,
-            $"{WallRig.Swept(0.0f, 6.0f):F2}m of reach at a standstill");
-        Check("and once it has driven its own length it has swept all of it, and "
-              + "never more",
-            Mathf.IsEqualApprox(WallRig.Swept(6.0f, 6.0f), 6.0f)
-            && Mathf.IsEqualApprox(WallRig.Swept(60.0f, 6.0f), 6.0f),
-            $"{WallRig.Swept(6.0f, 6.0f):F2}m at its length, "
-            + $"{WallRig.Swept(60.0f, 6.0f):F2}m ten lengths on");
-        Check("and in between it is exactly how far it has come, so no brick the "
-              + "nose has passed is left frozen for the hull to slide through",
-            Mathf.IsEqualApprox(WallRig.Swept(2.5f, 6.0f), 2.5f),
-            $"{WallRig.Swept(2.5f, 6.0f):F2}m after 2.50m");
-        Check("a nose that holds its heading banks what it drove, so a straight "
-              + "leg adds up",
-            Mathf.IsEqualApprox(WallRig.Advance(2.0f, 1.0f, 1.0f), 3.0f),
-            $"{WallRig.Advance(2.0f, 1.0f, 1.0f):F2}m after 2.00m and 1.00m more");
-        Check("and a nose that turns starts over, because the ground behind a new "
-              + "heading was never crossed by the new nose - which is what stops a "
-              + "hull pivoting in a yard it does not fit in from letting go of "
-              + "everything it overlaps",
-            WallRig.Advance(6.0f, 0.0f, WallRig.NoseHeld - 0.0005f) == 0.0f
-            && Mathf.IsEqualApprox(WallRig.Advance(6.0f, 0.0f, 1.0f), 6.0f),
-            $"{WallRig.Advance(6.0f, 0.0f, WallRig.NoseHeld - 0.0005f):F2}m "
-            + "across a turn, "
-            + $"{WallRig.Advance(6.0f, 0.0f, 1.0f):F2}m across none");
-        Check("and the slowest hull's own turn is enough of one, while a leg "
-              + "driven straight is not",
-            Mathf.Cos(Mathf.DegToRad(140.0f / 60.0f)) < WallRig.NoseHeld
-            && WallRig.NoseHeld < 1.0f,
-            $"cos {Mathf.Cos(Mathf.DegToRad(140.0f / 60.0f)):F5} in a 60Hz step "
-            + $"against {WallRig.NoseHeld:F5}");
-        Check("backing up sweeps nothing, the band being behind the wrong end of "
-              + "a box aimed by the hull's facing",
-            Mathf.IsEqualApprox(WallRig.Advance(2.0f, -1.0f, 1.0f), 2.0f),
-            $"{WallRig.Advance(2.0f, -1.0f, 1.0f):F2}m after 1.00m in reverse");
-        Check("and the window stops short of the tip by half a brick, so masonry "
+        // A tank knocks a brick out by driving into it, and the driven ram is
+        // an event now - see WallRig.Rammed, asserted above on a raised wall.
+        // What is still arithmetic here is the pair of windows the event and
+        // the shove count share.
+        Check("the window stops short of the tip by half a brick, so masonry "
               + "the nose has only come to rest against is not driven through",
             WallRig.Through(0.6f) < 0.0f
             && Mathf.IsEqualApprox(WallRig.Through(0.6f), -0.3f),
@@ -9792,99 +9946,55 @@ public static class SelfTest
                              Vector3.Right), -WallRig.Through(0.6f)),
             $"0.15m and 0.30m against a bound of {-WallRig.Through(0.6f):F2}m");
 
-        // --- and the box hands a piece back only once it is out of it --------
+        // --- and the momentum it hands over instead of touching --------------
         //
-        // The scatter is the box throwing what it was standing in: measured on
-        // the ring, the same leaf and the same count of pieces, a shell puts the
-        // pile 1.52 cells out and the ram put it 9.3 to 9.8 with 45 pieces off
-        // the cell. So a piece does not collide with the box until it is clear -
-        // and the test for clear is box against box, because a cylinder round
-        // the heading is a different question that looks like the same one.
-        Check("a piece at the box's middle is inside it, and one a box-length "
-              + "ahead is not",
-            WallRig.Inside(Vector3.Zero, Vector3.Back, Vector3.Right,
-                           new Vector3(2.6f, 2.0f, 6.9f), Basis.Identity,
-                           Vector3.Zero)
-            && !WallRig.Inside(Vector3.Back * 7.0f, Vector3.Back, Vector3.Right,
-                               new Vector3(2.6f, 2.0f, 6.9f), Basis.Identity,
-                               Vector3.Zero),
-            "at the middle and a box-length out");
-        Check("a piece in the box's corner is inside it, where a cylinder of the "
-              + "box's half-width would call it out and hand back the exception",
-            WallRig.Inside(new Vector3(1.2f, 0.9f, 3.2f), Vector3.Back,
-                           Vector3.Right, new Vector3(2.6f, 2.0f, 6.9f),
-                           Basis.Identity, Vector3.Zero)
-            && new Vector3(1.2f, 0.9f, 0.0f).Length() > 2.6f * 0.5f,
-            $"a corner {new Vector3(1.2f, 0.9f, 0.0f).Length():F2}m off the axis "
-            + $"against a half-width of {2.6f * 0.5f:F2}m");
-        Check("and a piece adds its own reach, so clear means clear rather than "
-              + "centred outside",
-            WallRig.Inside(Vector3.Back * 3.6f, Vector3.Back, Vector3.Right,
-                           new Vector3(2.6f, 2.0f, 6.9f), Basis.Identity,
-                           new Vector3(0.30f, 0.05f, 0.15f))
-            && !WallRig.Inside(Vector3.Back * 3.6f, Vector3.Back, Vector3.Right,
-                               new Vector3(2.6f, 2.0f, 6.9f), Basis.Identity,
-                               Vector3.Zero),
-            "0.15m of reach over a half-length of 3.45m");
-        Check("the ram box stands on the ground rather than being buried to the "
-              + "waist, so it reaches the top course of a wall",
-            WallRig.Seat(WallRig.TankTall).IsEqualApprox(
-                Vector3.Up * (WallRig.TankTall * 0.5f))
-            && WallRig.Inside(new Vector3(0.0f, 1.8f, 1.0f)
-                              - WallRig.Seat(WallRig.TankTall),
-                              Vector3.Back, Vector3.Right,
-                              new Vector3(2.6f, WallRig.TankTall, 6.9f),
-                              Basis.Identity, new Vector3(0.30f, 0.14f, 0.15f))
-            && !WallRig.Inside(new Vector3(0.0f, 1.8f, 1.0f),
-                               Vector3.Back, Vector3.Right,
-                               new Vector3(2.6f, WallRig.TankTall, 6.9f),
-                               Basis.Identity, new Vector3(0.30f, 0.14f, 0.15f)),
-            $"a course at 1.80m against a {WallRig.TankTall:F1}m box");
+        // The ram was the only one of the three strikes handing the masonry
+        // nothing at all: a standing brick is a static body, and the driven
+        // hull is not in the solver at all. These are what the shove that
+        // replaces the touch may and may not be.
+        Check("a reversing hull rams nothing and a parked one nothing at all, "
+              + "because the band is measured along the heading it faces now",
+            WallRig.Shunted(0.0f) == 0.0f && WallRig.Shunted(-2.0f) == 0.0f
+            && WallRig.Shunted(1.6f) > 0.0f,
+            $"{WallRig.Shunted(-2.0f):F2} m/s backing off, "
+            + $"{WallRig.Shunted(1.6f):F2} driving at 1.60");
+        Check("and a piece never leaves faster than the box that let go of it, "
+              + "which is what makes it a ram and not a break shot",
+            WallRig.Shunted(1.6f) <= 1.6f + 0.001f
+            && WallRig.Shunted(3.2f) > WallRig.Shunted(1.6f),
+            $"{WallRig.Shunted(1.6f):F2} m/s off a 1.60 m/s box, "
+            + $"{WallRig.Shunted(3.2f):F2} off a 3.20");
 
-        // --- and the body goes in on the same figure as the band -------------
+        // --- and which way, which is what breaks a stack rather than moving it
         //
-        // The box is a ram: what it lets go of is one half of it and what it
-        // shoves the loose brick about with is the other, and a hull turning on
-        // the spot is doing neither. Asserted off the one number the band is
-        // already built on rather than a second reading of the same thing, so
-        // "the box sweeps" and "the box is felt" cannot come apart.
-        Check("the driven box is out of the simulation until it has advanced, so "
-              + "a hull swinging on the spot shoves nothing about",
-            !WallRig.Feels(0.0f) && WallRig.Feels(0.01f)
-            && !WallRig.Feels(
-                   WallRig.Advance(6.0f, 0.0f, WallRig.NoseHeld - 0.0005f))
-            && WallRig.Feels(WallRig.Advance(6.0f, 0.0f, 1.0f)),
-            $"felt at nought: {WallRig.Feels(0.0f)}, after a turn: "
-            + $"{WallRig.Feels(WallRig.Advance(6.0f, 0.0f, WallRig.NoseHeld - 0.0005f))}"
-            + $", driving straight on: "
-            + $"{WallRig.Feels(WallRig.Advance(6.0f, 0.0f, 1.0f))}");
-
-        // --- and the half-hull the box began the lane standing in -------------
-        //
-        // The board puts the tank inside the ring, so the leaf it is about to
-        // drive through is already behind the tip when the lane begins - and a
-        // band measured off the tip and no further can never catch it, because it
-        // recedes exactly as fast as the band grows. Measured: the heaviest hull
-        // let go of nought pieces of 536 driving out of the yard, while the two
-        // lighter ones let go of a leaf. So the reach is Ploughed, and these
-        // three say what it may and may not add.
-        Check("the band reaches back further than the nose has advanced, so a "
-              + "leaf the box was already standing in when the lane began is "
-              + "reached at all",
-            WallRig.Ploughed(0.5f, 6.0f) > 0.5f,
-            $"{WallRig.Ploughed(0.5f, 6.0f):F2}m of reach after 0.50m driven");
-        Check("and never further back than its own nose, so the leaf behind a "
-              + "tank driving away from it is left standing",
-            WallRig.Ploughed(60.0f, 6.0f) - 60.0f <= 3.0f + 0.001f
-            && WallRig.Ploughed(6.0f, 6.0f) - 6.0f <= 3.0f + 0.001f,
-            $"{WallRig.Ploughed(60.0f, 6.0f) - 60.0f:F2}m over the sweep on a "
-            + "6.00m box");
-        Check("and it is still nothing at a standstill and next to nothing a "
-              + "centimetre in, because granted outright it is the pivot again",
-            WallRig.Ploughed(0.0f, 6.0f) == 0.0f
-            && WallRig.Ploughed(0.01f, 6.0f) < 0.05f,
-            $"{WallRig.Ploughed(0.0f, 6.0f):F2}m parked, "
-            + $"{WallRig.Ploughed(0.01f, 6.0f):F3}m a centimetre in");
+        // Handed the same speed every piece keeps its neighbours' velocity, so
+        // nothing shears and the leaf travels as a block: measured on the ring,
+        // two leaves came back with more seated masonry at a uniform shove than
+        // with no shove at all. The hull drives through what it can and parts
+        // the rest, so a piece at the flank leaves across the lane.
+        Check("a piece on the drive axis is pushed straight down it, there "
+              + "being no side for a wedge to part it towards",
+            WallRig.Wedge(Vector3.Back, Vector3.Zero, 1.94f)
+                   .IsEqualApprox(Vector3.Back),
+            $"{WallRig.Wedge(Vector3.Back, Vector3.Zero, 1.94f)}");
+        Check("one out at the flank is thrown across the lane as well, and "
+              + "keeps its forward push rather than paying for the other with it",
+            Mathf.IsEqualApprox(
+                WallRig.Wedge(Vector3.Back, Vector3.Right * 1.94f, 1.94f)
+                       .Dot(Vector3.Back), 1.0f)
+            && Mathf.IsEqualApprox(
+                   WallRig.Wedge(Vector3.Back, Vector3.Right * 1.94f, 1.94f)
+                          .Dot(Vector3.Right), WallRig.RamSplay)
+            && WallRig.Wedge(Vector3.Back, Vector3.Right * 1.94f, 1.94f)
+                      .Length() <= 2.0f,
+            $"{WallRig.Wedge(Vector3.Back, Vector3.Right * 1.94f, 1.94f)}");
+        Check("and a course standing high over the axis is not thrown by its "
+              + "own height, because what the hull parts it parts sideways",
+            WallRig.Wedge(Vector3.Back, Vector3.Up * 2.0f, 1.94f)
+                   .IsEqualApprox(Vector3.Back),
+            $"{WallRig.Wedge(Vector3.Back, Vector3.Up * 2.0f, 1.94f)}");
+        Check("the ram hands its momentum over by default",
+            WallRig.ShuntsByDefault, $"{WallRig.ShuntsByDefault}");
 
         // --- and what it is pushing against while it does ---------------------
         //
@@ -9974,48 +10084,14 @@ public static class SelfTest
                 + "cruise");
         }
 
-        // --- and when it is in the masonry at all -----------------------------
+        // --- and whether a crossing is a ram at all ---------------------------
         //
-        // The box is a ram, not a hull: it knocks nothing down (Reached does,
-        // geometrically) and cannot touch standing masonry at all, a frozen piece
-        // being a static body. What it does is push loose brick about and stop it
-        // falling through the machine - both things a tank does while driving.
-        // Kept for good by a struck wall, it is an invisible two-metre slab that
-        // catches rubble: measured, the heavy tank's three-leg run then never
-        // settled at all in fifty seconds, because a piece resting on a kinematic
-        // body never sleeps, against 14.68s once the box goes with the order.
-        Check("a parked tank has no ram box, even standing in the rubble it just "
-              + "made, so the heap lands on the ground rather than on the machine",
-            !TankBench.Boxed(false, true, false)
-            && !TankBench.Boxed(false, false, false),
-            "parked over a struck wall: "
-            + $"{TankBench.Boxed(false, true, false)}");
-        Check("and a tank under orders has one either way, because that is the "
-              + "whole of what a ram is",
-            TankBench.Boxed(true, false, false)
-            && TankBench.Boxed(true, true, false)
-            && TankBench.Boxed(true, false, true),
-            "moving at an untouched wall: "
-            + $"{TankBench.Boxed(true, false, false)}");
-        Check("and --parked-box puts the old answer back, and only for a wall "
-              + "that has actually been struck",
-            TankBench.Boxed(false, true, true)
-            && !TankBench.Boxed(false, false, true),
-            $"parked over a struck wall {TankBench.Boxed(false, true, true)}, "
-            + $"over an untouched one {TankBench.Boxed(false, false, true)}");
-
-        // --- and whether the box in it is a ram -------------------------------
-        //
-        // The box goes in whenever the tank drives, because the rubble it made
-        // has to rest on something; what it breaks is a separate question, and
-        // the answer is the order. The board stands the tank inside a ring it
-        // does not fit in, so the masonry is within the hull before anything
-        // happens and a quarter-metre of ordinary driving took a whole leaf:
-        // measured, the wall gave at frame 62 of an ordinary order with the tank
-        // 7px off its parking spot. Both halves are asserted, because either
-        // alone passes on the failure the other one is: a gate that never sweeps
-        // is a wall no tank can break, and one that always sweeps is what this
-        // replaces.
+        // What breaks masonry is the order. The board stands the tank inside a
+        // ring it does not fit in, so a rule that broke masonry on any contact
+        // read as a hull demolishing a yard by driving out of it. Both halves
+        // are asserted, because either alone passes on the failure the other
+        // one is: a gate that never fires is a wall no tank can break, and one
+        // that always fires is what this replaces.
         Check("an ordinary order does not break masonry - a ram is an intent, "
               + "and driving past a wall is not one",
             !TankBench.Sweeps(true, false, false),

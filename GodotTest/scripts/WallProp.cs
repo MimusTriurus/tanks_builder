@@ -68,6 +68,14 @@ public sealed partial class WallProp : Node
     /// <summary>Where it sorts. <see cref="WallStack.Order"/>.</summary>
     public int Order { get; init; }
 
+    /// <summary>Which collision bit this prop's solver lives on - see
+    /// <see cref="WallRig.Channel"/>. Every rig is centred on the world origin
+    /// in its own units, so two props sharing a bit are two walls overlapping
+    /// in phantom space, and one wall's collapse scatters the other's rubble.
+    /// The caller that stands several walls hands each its own number; a bench
+    /// with one wall leaves the default.</summary>
+    public int Channel { get; init; }
+
     private WallStack? _wall;
     private WallRig? _rig;
     private WallKit.Plan? _plan;
@@ -160,7 +168,7 @@ public sealed partial class WallProp : Node
         var tris = new List<Vector3>();
         foreach (Vector3 v in Stage.GroundTriangles())
             tris.Add(back * ((v - anchor) / radius));
-        _rig = new WallRig();
+        _rig = new WallRig { Channel = Channel };
         AddChild(_rig);
         _rig.Raise(_plan, tris);
         _wall.Rig = _rig;
@@ -227,7 +235,8 @@ public sealed partial class WallProp : Node
         _wall?.Fell(Recipe.Seed, shot, Coverage);
 
     /// <summary>
-    /// A box somebody else drives, handed over in the board's own terms.
+    /// A hull crossed this wall's plane - the driven ram, handed over in the
+    /// board's own terms. See <see cref="WallRig.Rammed"/> for what one is.
     ///
     /// <b>The board-to-prop conversion lives here and not in the caller</b>,
     /// which is the whole reason this class was pulled out: a tank's contact
@@ -236,30 +245,48 @@ public sealed partial class WallProp : Node
     /// quarter turn out, and a wall struck through a corner of its own hex is a
     /// picture that looks entirely reasonable.
     /// </summary>
-    /// <param name="foot">Where the box touches the ground, in world units -
+    /// <param name="foot">Where the hull touches the ground, in world units -
     /// <see cref="Stage3D.Contact"/>, which is the board's one answer to that and
     /// so cannot disagree with where the tank is drawn.</param>
-    /// <param name="flatDir">Which way it is driving, as a board direction.</param>
-    /// <param name="size">How big the box is, in metres.</param>
-    public void Nose(Vector3 foot, Vector2 flatDir, Vector3 size)
+    /// <param name="flatDir">Which way it crossed, as a board direction.</param>
+    /// <param name="speedPx">How fast it was going, in board pixels a
+    /// second.</param>
+    /// <param name="size">How big the hull's box is, in metres.</param>
+    /// <returns>The section the hull entered, or -1 when it met no standing
+    /// masonry.</returns>
+    public int Rammed(Vector3 foot, Vector2 flatDir, float speedPx, Vector3 size)
     {
         if (_rig is null || _wall is null || Field.Atlas is null)
-            return;
+            return -1;
         Vector3 into = Into(flatDir);
         if (into.LengthSquared() < 1e-6f)
-            return;
+            return -1;
         Vector3 local = new Basis(Vector3.Up, -Lay)
                         * ((foot - _wall.Anchor) / RadiusPx)
                         * WallRig.MetresPerCell;
         // The box's middle, off the contact point: a tank stands on the ground,
         // and everything on this board that is put somewhere is put by where it
         // touches it.
-        _rig.Nose(local + Vector3.Up * (size.Y * 0.5f), into, size);
+        return _rig.Rammed(local + Vector3.Up * (size.Y * 0.5f), into,
+                           speedPx * WallRig.MetresPerCell / RadiusPx, size);
     }
 
-    /// <summary>Stop driving the box and take it off the picture. What the
-    /// caller says when the tank has gone somewhere else.</summary>
-    public void Halt() => _rig?.Halt();
+    /// <summary>How many standing pieces a hull at <paramref name="foot"/> is
+    /// pressing against - <see cref="WallRig.Against"/>, in the board's own
+    /// terms, with the same conversion <see cref="Rammed"/> makes and for the
+    /// same reason.</summary>
+    public int Against(Vector3 foot, Vector2 flatDir, Vector3 size)
+    {
+        if (_rig is null || _wall is null || Field.Atlas is null)
+            return 0;
+        Vector3 into = Into(flatDir);
+        if (into.LengthSquared() < 1e-6f)
+            return 0;
+        Vector3 local = new Basis(Vector3.Up, -Lay)
+                        * ((foot - _wall.Anchor) / RadiusPx)
+                        * WallRig.MetresPerCell;
+        return _rig.Against(local + Vector3.Up * (size.Y * 0.5f), into, size);
+    }
 
     /// <summary>
     /// How big a tank is, in metres, for the solver to feel.

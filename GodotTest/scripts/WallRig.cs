@@ -74,6 +74,55 @@ public sealed partial class WallRig : Node3D
     /// on out the far side it takes the wall with it.</summary>
     public const float RamSpeed = 3.9f;
 
+    /// <summary>How much of the box's own speed a piece carries away when the
+    /// box lets go of it, as a fraction.
+    ///
+    /// <b>The ram is the only one of the three strikes that handed the masonry
+    /// no momentum at all, and this is it.</b> A shell says what it does with an
+    /// impulse - see <see cref="HeSpeed"/> and <see cref="ApSpeed"/> - and the
+    /// ram said it with contact, which is exactly the thing it does not have: a
+    /// standing brick is a static body and a hull is not in the solver at all,
+    /// so nothing pushed it.
+    ///
+    /// <b>One, because that is the plain inelastic answer</b>: a forty-tonne
+    /// hull against a ninety-kilo brick loses nothing worth counting, so the
+    /// brick leaves at the speed of the thing that hit it. Above one it would be
+    /// leaving faster than the tank, which is a break shot and not a ram; the
+    /// levers below it are this and <see cref="ThawSpeed"/> together, since a
+    /// piece shoved slower than the cascade threshold does not take its
+    /// neighbours with it.</summary>
+    public const float RamCarry = 1.0f;
+
+    /// <summary>How far to the side of the heading a piece is thrown as well as
+    /// forward, as a fraction of the shove, out at the edge of the band.
+    ///
+    /// <b>A uniform shove does not break a stack, it moves one.</b> Measured on
+    /// the ring: handed the same speed every piece keeps its neighbours'
+    /// velocity, so nothing shears, the leaf travels as a block and lands as
+    /// one - two leaves came back with more seated masonry at 0.5 and 1.0 than
+    /// with no shove at all (20 and 22 of 72 against 15), and only a shove half
+    /// again the tank's own speed was violent enough to break it. That is a
+    /// break shot bought with energy, and the wedge buys it with direction
+    /// instead: the hull drives through what it can and pushes the rest aside,
+    /// so a piece out at the flank leaves across the lane while one on the axis
+    /// leaves along it, and the two come apart.
+    ///
+    /// Taken from the piece's own offset across the lane, which is what makes it
+    /// a wedge rather than a scatter: deterministic, nothing hashed, and nought
+    /// on the axis where a hull really does push straight.</summary>
+    public const float RamSplay = 1.0f;
+
+    /// <summary>Whether the ram hands its momentum over at all. On, and named
+    /// here rather than left in the field's initialiser for
+    /// <c>Recoil.ShearOnByDefault</c>'s reason.</summary>
+    public const bool ShuntsByDefault = true;
+
+    /// <summary>Whether a piece the box has been excepted from is given the
+    /// speed of the box instead - <c>--no-shunt</c> on either bench, which puts
+    /// back the ram that let masonry go and never pushed it. Static for
+    /// <see cref="Breaches"/>'s reason.</summary>
+    public static bool Shunts = ShuntsByDefault;
+
     /// <summary>How far past the cell's near edge the tank carries on, per
     /// unit of force, in metres.
     ///
@@ -178,26 +227,17 @@ public sealed partial class WallRig : Node3D
     /// at it.
     ///
     /// <b>And it stands on the ground rather than being buried to the waist,
-    /// which it was.</b> The driven box is placed at the contact point the board
-    /// hands over, so a shape centred on the body's own origin runs from a metre
-    /// underground to a metre up - half of it below the floor, against a wall
-    /// that stands 2.20m. The rig's own ram lifts its box by half its height and
-    /// always did; the driven one did not, and nothing said so, because a ram
-    /// that reaches half a wall still brings a wall down - it only leaves more
-    /// of it lying where it was laid. Measured on the ring: the heap went from
-    /// <c>reach 5.08</c> to <c>1.58</c> for the same count let go.</summary>
+    /// which it was.</b> A box placed at the contact point the board hands over
+    /// and centred on its own origin runs from a metre underground to a metre
+    /// up - half of it below the floor, against a wall that stands 2.20m - and
+    /// nothing said so, because a ram that reaches half a wall still brings a
+    /// wall down; it only leaves more of it lying where it was laid. Measured
+    /// on the ring: the heap went from <c>reach 5.08</c> to <c>1.58</c> for the
+    /// same count let go. The rig's own ram lifts its box by half its height,
+    /// and the driven ram's window is centred on the courses the same
+    /// way.</summary>
     public const float TankTall = 2.0f;
     public const float ApAim = TankTall * 0.75f;
-
-    /// <summary>Where the ram box's shape sits relative to the body that carries
-    /// it, given the box's height: on the ground, so half a box up.
-    ///
-    /// Named rather than written twice, because it is read from both ends - the
-    /// shape is placed by it and every question about what the box contains is
-    /// asked against it - and two spellings of the same offset would part at
-    /// exactly the height nobody compares. See <see cref="TankTall"/> for what
-    /// the buried version cost.</summary>
-    public static Vector3 Seat(float tall) => Vector3.Up * (tall * 0.5f);
 
     /// <summary>How fast a piece has to be going before it takes its neighbour
     /// with it, in metres a second.
@@ -225,38 +265,25 @@ public sealed partial class WallRig : Node3D
     private readonly int[] _taken = new int[6];
     private readonly HashSet<int> _breached = new();
 
-    /// <summary>Pieces that do not collide with the driven box until they are
-    /// out of it again, and the scratch list for handing them back.
-    ///
-    /// <b>The box throws what it was standing in, and that is the whole of the
-    /// scatter.</b> Measured on the ring, the same leaf and the same 97 or 98
-    /// pieces let go: a shell puts the pile 1.52 cells out, the ram put it 9.3
-    /// to 9.8 with 45 pieces off the cell. It is not the masonry resolving
-    /// itself, and it is not the impulse of the drive - it is one kinematic box
-    /// that spent the approach overlapping bodies it could not touch, because a
-    /// frozen piece is a static one. On the frame a piece turns dynamic the only
-    /// thing the solver has to say about that pair is how deep they are into
-    /// each other, and it says it as a separating impulse worth about twenty
-    /// metres a second.
-    ///
-    /// <b>Every piece and not only the band's</b>, which is the half that made
-    /// the first attempt measure nothing: the nose lets go of what it drove
-    /// through, and the cascade - <see cref="Thaw"/>'s own - lets go of most of
-    /// the leaf. Excepting the band alone left the ring at 11.31 cells, which is
-    /// to say unchanged; excepting every thaw took it to 1.50, which is the
-    /// shell's number to two places.
-    ///
-    /// <b>The exception is temporary, and that is what keeps the shove.</b> Once
-    /// a piece is out of the box the box hits it again, so the heap at the
-    /// tracks is pushed along rather than driven through - see
-    /// <see cref="Passed"/>. Only the driven box: the rig's own ram leads its
-    /// band by a step and a half (<see cref="Drive"/>), so its pieces are
-    /// dynamic before it reaches them and there is no overlap to resolve.
-    /// </summary>
-    private readonly HashSet<int> _passing = new();
-    private readonly List<int> _spent = new();
+    /// <summary>Frozen masonry whose footing may just have gone - queued by
+    /// <see cref="Thaw"/>, judged by <see cref="Undermined"/>. A standing piece
+    /// is held by the freeze flag and not by anything under it, so what a
+    /// collapse leaves overhanging the mitre hangs on air for ever unless
+    /// somebody asks the question; this is where the question waits to be
+    /// asked.</summary>
+    private readonly HashSet<int> _perch = new();
+
+    /// <summary>Pieces that have crumbled away and been taken out of the
+    /// solver. Kept so the clearing is done once: the body stays in
+    /// <see cref="_bodies"/> for every caller that indexes against the plan,
+    /// it just no longer collides with anything.</summary>
+    private readonly HashSet<int> _cleared = new();
+
     private AnimatableBody3D? _tank;
     private Vector3 _tankSize;
+
+    /// <summary>The ram box's shape - see <see cref="Hull"/>.</summary>
+    private CollisionShape3D? _tankHull;
     private Vector3 _tankRun;
     private float _tankLeft;
     private Vector3 _tankTip;
@@ -315,15 +342,29 @@ public sealed partial class WallRig : Node3D
     /// put that on screen.</summary>
     public (Transform3D At, Vector3 Size)? Ram()
     {
-        // Nothing when the board is driving it: the stand-in exists because that
-        // bench has no tank, and a board that has one draws its own. Two would be
-        // two tanks in one place, which is the guard in <see cref="Nose"/> said
-        // again in the picture.
-        if (_tank is null || _driven)
+        if (_tank is null)
             return null;
         Transform3D t = _tank.Transform;
         return (new Transform3D(t.Basis, t.Origin / MetresPerCell),
                 _tankSize / MetresPerCell);
+    }
+
+    /// <summary>The ram box as the solver holds it: where it is in the cell's
+    /// own units, how big it is, and whether its shape is switched on. Null
+    /// when there is no box - which on a board that drives its own tank is
+    /// always, because a driven ram is an event and not a body (see
+    /// <see cref="Rammed"/>).
+    ///
+    /// <b>The shape's own offset comes with it</b>, so a frame drawn off the
+    /// body alone cannot drift from where the solver puts the shape.</summary>
+    public (Transform3D At, Vector3 Size, bool Live)? Hull()
+    {
+        if (_tank is null || _tankHull is null)
+            return null;
+        Transform3D t = _tank.Transform * _tankHull.Transform;
+        return (new Transform3D(t.Basis, t.Origin / MetresPerCell),
+                _tankSize / MetresPerCell,
+                !_tankHull.Disabled);
     }
 
     /// <summary>How long the tracer hangs about, and how much of that it spends
@@ -627,7 +668,7 @@ public sealed partial class WallRig : Node3D
     /// that is the right way round: the apron is rubble that has lain on the
     /// ground since it was laid, so a hull ploughing it into a standing leaf is
     /// not that leaf being struck - the same sentence <see cref="Reaches"/>,
-    /// <c>WallProp.Bars</c> and <see cref="Shoving"/> each say about their own
+    /// <c>WallProp.Bars</c> and <see cref="Against"/> each say about their own
     /// question.
     ///
     /// Costs nothing on a wall that is one section: every piece is the face's,
@@ -702,6 +743,32 @@ public sealed partial class WallRig : Node3D
     /// </summary>
     public bool Ramming => _tank is not null && _tankLeft > 0.0f;
 
+    /// <summary>Which collision bit everything this rig raises lives on - the
+    /// floor, the masonry and the bench's own ram box alike.
+    ///
+    /// <b>Every rig is centred on the world origin, and that is why this
+    /// exists.</b> The bodies live in prop-local units with no parent transform
+    /// over them (see <c>WallProp.Raise</c>), so every wall on a board stands
+    /// in the same place in the one shared <c>World3D</c> - five rigs, one
+    /// origin, all overlapping. Frozen masonry hid it (static against static
+    /// never collides), but rubble is live: ramming one wall threw its pieces
+    /// through another wall's heap in phantom space, and on screen the other
+    /// wall's rubble scattered by itself - measured, a charge into the far
+    /// sample smeared the ring's settled heap across its whole cell. The same
+    /// overlap is what blew the solver up on late tour legs (reach 409-434
+    /// with no kinematic body left in the world): by the eighth ram, pieces
+    /// were being released straight into seven other walls' rubble.
+    ///
+    /// Nothing real is given up: in origin-centred frames the geometry between
+    /// two walls was never on the board, so cross-rig contact was always
+    /// phantom, never physics. Masked with the same bit it carries as layer,
+    /// so a rig collides with itself and nobody else; past 32 walls the bits
+    /// wrap, which is a board nobody has drawn.</summary>
+    public int Channel { get; set; }
+
+    /// <summary>The layer-and-mask bit <see cref="Channel"/> names.</summary>
+    private uint Bit => 1u << (Channel & 31);
+
     /// <summary>Stand the wall up as bodies, on ground handed in as triangles in
     /// cell units.
     ///
@@ -731,7 +798,12 @@ public sealed partial class WallRig : Node3D
         _brick = (nose > 0.0f ? nose : WallKit.BrickLong) * MetresPerCell;
         _course = (tall > 0.0f ? tall : WallKit.BrickTall) * MetresPerCell;
 
-        var floor = new StaticBody3D { Name = "Ground" };
+        var floor = new StaticBody3D
+        {
+            Name = "Ground",
+            CollisionLayer = Bit,
+            CollisionMask = Bit,
+        };
         var tris = new Vector3[groundTris.Count];
         for (int i = 0; i < groundTris.Count; i++)
             tris[i] = groundTris[i] * MetresPerCell;
@@ -760,6 +832,8 @@ public sealed partial class WallRig : Node3D
                 Freeze = true,
                 FreezeMode = RigidBody3D.FreezeModeEnum.Static,
                 CanSleep = true,
+                CollisionLayer = Bit,
+                CollisionMask = Bit,
                 Transform = new Transform3D(b.Turn, b.Seat * MetresPerCell),
                 PhysicsMaterialOverride =
                     new PhysicsMaterial { Friction = 0.8f, Bounce = 0.0f },
@@ -841,18 +915,13 @@ public sealed partial class WallRig : Node3D
         _gone.Clear();
         _lain.Clear();
         _breached.Clear();
-        _passing.Clear();
-        _spent.Clear();
+        _perch.Clear();
+        _cleared.Clear();
         System.Array.Clear(_stood);
         System.Array.Clear(_taken);
         _tank = null;
-        _driven = false;
-        _nosePlaced = false;
-        _noseGone = 0.0f;
-        _noseFace = -1;
+        _tankHull = null;
         _tankFace = -1;
-        _noseAim = Vector3.Zero;
-        Shoving = 0;
         _clock = -1.0f;
         _beam = null;
     }
@@ -927,14 +996,6 @@ public sealed partial class WallRig : Node3D
         into = new Vector3(into.X, 0.0f, into.Z);
         if (_bodies.Count == 0 || into.LengthSquared() < 1e-6f)
             return;
-        // Before the clock, so a refused ram leaves the wall standing rather than
-        // struck-but-untouched - see Ram, which is where the reason is written.
-        if (shot == Strike.Ram && _driven)
-        {
-            GD.PushWarning("wall: a ram was fired while a tank is driving the "
-                           + "nose - one box at a time");
-            return;
-        }
         into = into.Normalized();
         _shot = shot;
         _from = from;
@@ -972,14 +1033,6 @@ public sealed partial class WallRig : Node3D
     /// it is a bench whose main picture cannot be judged.</summary>
     private void Ram(Vector3 into)
     {
-        // One tank at a time, and the guard is not tidiness: the box below is a
-        // stand-in for a tank on a board that has none, so a rig already being
-        // driven by a real one would be shown two - the rig's own driving through
-        // the wall while the board's drives beside it, both solid. Refused rather
-        // than replaced, because which of the two the caller meant is not
-        // recoverable here. Turned away in Fire, before the clock is started.
-        if (_driven)
-            return;
         const float wide = 3.0f, deep = 6.0f;
         float tall = TankTall;
         // <b>It starts on the neighbouring cell and ends standing on this one,
@@ -1009,13 +1062,16 @@ public sealed partial class WallRig : Node3D
         _tank = new AnimatableBody3D
         {
             SyncToPhysics = true,
+            CollisionLayer = Bit,
+            CollisionMask = Bit,
             Transform = new Transform3D(
                 Basis.LookingAt(into, Vector3.Up), nose),
         };
-        _tank.AddChild(new CollisionShape3D
+        _tankHull = new CollisionShape3D
         {
             Shape = new BoxShape3D { Size = new Vector3(wide, tall, deep) },
-        });
+        };
+        _tank.AddChild(_tankHull);
         AddChild(_tank);
         _tankSize = new Vector3(wide, tall, deep);
 
@@ -1065,14 +1121,48 @@ public sealed partial class WallRig : Node3D
         if (speed > 0.0f)
         {
             // Which section the charge is going into, named on the way in -
-            // see Meets. From the box middle rather than its tip, because on
-            // a ring the leaf the tank opens inside is already behind the tip
-            // when the lane begins - Ploughed's own finding, arriving where it
-            // decides which leaf comes down.
+            // see Meets. From the box middle rather than its tip, because a
+            // leaf a hull opens inside is already behind the tip when the run
+            // begins - named where it decides which leaf comes down.
             _tankFace = Meets(nose, into, 0.0f).Face;
             Reached(_tankTip, _tankInto, _tankLane, 0.0f, 0.0f, _tankFace);
         }
     }
+
+    /// <summary>How fast a piece leaves when a box going
+    /// <paramref name="speed"/> metres a second lets go of it, in metres a
+    /// second - <see cref="RamCarry"/> of the box.
+    ///
+    /// <b>Never backwards.</b> The band is measured along the heading the box
+    /// faces now, and a tank in reverse crosses that ground with a negative
+    /// advance; handed on unclamped it would fling the masonry towards the
+    /// tank. A reversing hull rams nothing, and nought is what says so.
+    ///
+    /// Named and static because the live solver is the one thing
+    /// <c>--selftest</c> cannot run, and this is the half that is
+    /// arithmetic.</summary>
+    public static float Shunted(float speed) =>
+        Mathf.Max(0.0f, speed) * RamCarry;
+
+    /// <summary>Which way a piece leaves when the box lets go of it: down the
+    /// heading, splayed across the lane by how far off the axis it stood - see
+    /// <see cref="RamSplay"/>. <paramref name="off"/> is its offset from the
+    /// axis, <paramref name="lane"/> the half-width of the band.
+    ///
+    /// <b>The offset is flattened first.</b> The band is a cylinder about the
+    /// drive line, so a piece's offset from it carries the height it stands at,
+    /// and a top course thrown by its own height is a wall lifted rather than
+    /// pushed. What the hull wedges aside, it wedges sideways.
+    ///
+    /// Not normalised: length is the shove, and a piece at the flank is given
+    /// the forward push it would have had plus the sideways one, rather than
+    /// having the forward push taken off it to pay for the other.
+    ///
+    /// Named and static for <see cref="Shunted"/>'s reason.</summary>
+    public static Vector3 Wedge(Vector3 into, Vector3 off, float lane) =>
+        lane > 0.0f
+            ? into + new Vector3(off.X, 0.0f, off.Z) * (RamSplay / lane)
+            : into;
 
     /// <summary>
     /// Let go of every piece the box has swept, in a band along
@@ -1140,7 +1230,7 @@ public sealed partial class WallRig : Node3D
         // But going through a corner of a leaf is not going through the leaf, and
         // asking per piece could not tell the two apart - measured on the ring,
         // a graze took 8 to 54 pieces of 96 where BreachShare is 12, so a leaf
-        // the tank never entered came down on one pass in three. See _noseFace,
+        // the tank never entered came down on one pass in three. See Rammed,
         // which also has the numbers for why a share cannot separate them.
         //
         // Asked every frame rather than once at the end, so the section still
@@ -1150,81 +1240,13 @@ public sealed partial class WallRig : Node3D
         Breach(face, Strike.Ram);
     }
 
-    /// <summary>Give the box back the pieces that have got out of it.
-    ///
-    /// <b>An exception nobody takes away is a tank that drives through rubble
-    /// for the rest of the run</b> - the opposite failure and just as visible,
-    /// because the heap at the tracks has to be shoved along and shoving is a
-    /// contact. So the pair is put back together the frame the piece is clear,
-    /// tested against the box where it is now rather than where it was when the
-    /// piece was let go.
-    ///
-    /// Clear of the whole box, not of the band: the band is a statement about
-    /// ground the nose has crossed and it reaches behind the tail, whereas this
-    /// asks the plainer thing - are these two solids apart.</summary>
-    /// <summary>Whether a piece is still inside the driven box, given the arm
-    /// from the box's centre to the piece's, the box's forward and side axes,
-    /// its size, and the piece's own basis and half extents.
-    ///
-    /// <b>Box against box on the box's three axes, never a cylinder round the
-    /// heading.</b> The two look like the same question and are not: a piece in
-    /// a corner of the box is outside a cylinder of the box's half-width, so the
-    /// cylinder hands the exception back while the piece is still inside and the
-    /// throw happens anyway. Measured - with the cylinder the ring came back at
-    /// 11.31 cells, which is the number with no exception at all.
-    ///
-    /// <b>The piece's own reach is added on every axis</b>, so clear means clear
-    /// rather than merely centred outside. That is the safe side: an exception
-    /// held a frame too long costs a frame of shoving, one dropped a frame too
-    /// early costs the throw the whole thing is written against.
-    ///
-    /// Named and static because the live solver is the one thing
-    /// <c>--selftest</c> cannot run, and this is the half that is
-    /// arithmetic.</summary>
-    public static bool Inside(Vector3 arm, Vector3 into, Vector3 side,
-                              Vector3 size, in Basis turn, Vector3 half) =>
-        Mathf.Abs(arm.Dot(into)) <= size.Z * 0.5f + Face(turn, half, into)
-        && Mathf.Abs(arm.Dot(side)) <= size.X * 0.5f + Face(turn, half, side)
-        && Mathf.Abs(arm.Y) <= size.Y * 0.5f + Face(turn, half, Vector3.Up);
-
-    private void Passed()
-    {
-        if (_passing.Count == 0 || _tank is null)
-            return;
-        // The box's own three axes, and the test is the plain box-against-box
-        // one on them: a cylinder round the heading looks like the same question
-        // and is not, because a piece in a corner of the box is outside a
-        // cylinder of its half-width. Measured: with the cylinder the ring came
-        // back at 11.31 cells, which is to say the exception was handed back
-        // while the piece was still inside and the throw happened anyway.
-        Vector3 side = _noseInto.Cross(Vector3.Up).Normalized();
-        _spent.Clear();
-        // From the middle of the box and not from the contact point: the shape
-        // stands on the ground - see TankTall - so the two are half a box apart
-        // in y, and the height term below is written against the middle.
-        Vector3 mid = _noseAt + Seat(_noseSize.Y);
-        foreach (int i in _passing)
-        {
-            Vector3 arm = _bodies[i].Transform.Origin - mid;
-            Vector3 half = _plan is { } near && i < near.Blocks.Count
-                ? near.Blocks[i].Half * MetresPerCell : Vector3.Zero;
-            if (Inside(arm, _noseInto, side, _noseSize,
-                       _bodies[i].Transform.Basis, half))
-                continue;
-            _bodies[i].RemoveCollisionExceptionWith(_tank);
-            _spent.Add(i);
-        }
-        foreach (int i in _spent)
-            _passing.Remove(i);
-    }
-
     /// <summary>How many pieces of the wall proper stand in the band from
     /// <paramref name="back"/> behind <paramref name="tip"/> to
     /// <paramref name="front"/> ahead of it - the mirror of
     /// <see cref="Reached"/>, counting instead of letting go.
     ///
     /// Standing pieces of the wall proper: what has been let go of does not
-    /// count and neither does the apron - see <see cref="Shoving"/>.
+    /// count and neither does the apron - see <see cref="Against"/>.
     /// </summary>
     private int Pressing(Vector3 tip, Vector3 into, float lane, float back,
                          float front)
@@ -1247,119 +1269,6 @@ public sealed partial class WallRig : Node3D
         }
         return on;
     }
-
-    // --- a tank somebody else drives ----------------------------------------
-
-    /// <summary>Whether a box is being driven from outside. The other half of
-    /// <see cref="Ramming"/>: that one is the rig's own box on its way in, this
-    /// one is a board's tank that the rig only feels.</summary>
-    public bool Driven => _driven;
-
-    /// <summary>Which section the hull now in the masonry named on its way in,
-    /// or <c>-1</c> when no hull is in it - see <see cref="_noseFace"/>.
-    ///
-    /// <b>It has to be read while the ram is happening.</b> The bench calls
-    /// <see cref="Halt"/> on every frame the tank is not sweeping this prop, so
-    /// the answer is gone by the time the pile has settled and the numbers are
-    /// being read - a caller that wants it has to latch it, and one that reads it
-    /// afterwards gets <c>-1</c> and no complaint. That is the honest shape:
-    /// this says what is being driven through now, not what was driven through
-    /// last.</summary>
-    public int Entered => _noseFace;
-
-    private bool _driven;
-    private Vector3 _noseAt;
-    private Vector3 _noseInto;
-    private Vector3 _noseSize;
-    private bool _nosePlaced;
-
-    /// <summary>The driven box's own shape, held so <see cref="Drive"/> can take
-    /// it out of the simulation on the frames the hull is only turning - see
-    /// <see cref="Feels"/>. Held rather than reached for through the body each
-    /// frame, because that body is shared with the rig's own ram, which carries a
-    /// shape of its own and must not be switched off by this gate.</summary>
-    private CollisionShape3D? _noseHull;
-
-    /// <summary>How far behind its nose a driven box has swept, in metres: how
-    /// far it has advanced, capped at its own length.
-    ///
-    /// The cap, and <see cref="Advance"/> is what it caps. Both are named
-    /// functions rather than expressions inside <see cref="Drive"/>, because
-    /// together they are the whole of the rule that a tank knocks a brick out by
-    /// driving into it - and the only part of a ram that can be asserted at all:
-    /// the rest is a live solver, and <c>--selftest</c> quits before the first
-    /// frame of a scene.</summary>
-    public static float Swept(float travel, float length) =>
-        Mathf.Clamp(travel, 0.0f, Mathf.Max(length, 0.0f));
-
-    /// <summary>How far behind the tip the band actually reaches, in metres:
-    /// everything the front face has crossed, plus the nose's own half-length
-    /// earned at the same rate.
-    ///
-    /// <b>The second term is there because the board stands the tank inside the
-    /// masonry it is about to drive through.</b> A band measured back from the
-    /// tip by <see cref="Swept"/> alone says "ground the front face has
-    /// crossed", which is exactly right for a tank arriving from outside and
-    /// says nothing at all for one that opens inside a ring it does not fit in:
-    /// the leaf is already behind the tip when the lane begins, and it recedes
-    /// from the tip exactly as fast as the band grows. Written out, a piece at
-    /// radius r from the middle of the cell is reached only if r is past the
-    /// box's own half-length - so what decides is the hull rather than the wall,
-    /// and it is a slide rather than a cliff. Measured on this ring, whose
-    /// masonry stands 2.76m out against half-hulls of 2.62 / 3.00 / 3.43m: the
-    /// three classes let go of 76 / 77 / <b>0</b> pieces driving out of it. The
-    /// heavy tank did not fail to break the wall, it was never asked to.
-    ///
-    /// <b>Half a hull rather than a whole one, and that is the nose against the
-    /// tail.</b> What the box started standing in ahead of its own centre is
-    /// embedded in the nose and gets ploughed; what it started standing in
-    /// behind its centre is embedded in the tail and is being left behind - a
-    /// tank does not bring the far side of a ring down by driving away from it.
-    /// Measured on the same ring: the far leaf sits 6.43m behind the tip, which
-    /// a whole footprint reaches and half of one cannot.
-    ///
-    /// <b>Earned at the same rate, because that is the gate.</b> Granted
-    /// outright it is <see cref="Advance"/>'s own bug again - a hull swinging on
-    /// the spot inside a ring would let go of its whole nose - so it arrives
-    /// through <see cref="Swept"/>, which is nought at a standstill and
-    /// continuous in what the box has advanced.</summary>
-    public static float Ploughed(float gone, float length) =>
-        Mathf.Max(gone, 0.0f)
-        + Swept(gone, Mathf.Max(length, 0.0f) * 0.5f);
-
-    /// <summary>How far the nose has advanced along the heading it is pointing
-    /// now: what it had, plus this step's <paramref name="ahead"/> - and nothing
-    /// at all of what it had if the heading has turned, <paramref name="held"/>
-    /// being the cosine between the old heading and the new.
-    ///
-    /// <b>Advance, not travel, and that is the whole of it.</b> A band behind the
-    /// nose stands for ground the front face has already crossed, and it says
-    /// that about <i>one</i> heading: turn, and the volume behind the new nose
-    /// was never crossed by the new nose, so what was banked belongs to a
-    /// direction the box no longer faces. Kept across the turn it means a hull
-    /// pivoting in a yard it does not fit in lets go of everything it overlaps -
-    /// which is the bug this replaces, arriving a second time by a longer road: a
-    /// trip out and back banks the full length, and from then on every frame,
-    /// parked or pivoting, sweeps the whole footprint.
-    ///
-    /// <b>Backwards sweeps nothing</b>, by the same sentence. The box is aimed by
-    /// the hull's facing, so in reverse the leading face is the tail and the band
-    /// is behind the wrong end; the safe way to be wrong is frozen, because a
-    /// brick left frozen is a brick the hull clips and a brick let go is a wall
-    /// that fell for free.</summary>
-    public static float Advance(float had, float ahead, float held) =>
-        (held < NoseHeld ? 0.0f : Mathf.Max(had, 0.0f))
-        + Mathf.Max(ahead, 0.0f);
-
-    /// <summary>How straight a heading has to stay, as a cosine, for the band
-    /// behind the nose to carry over from one step to the next.
-    ///
-    /// Measured off the board rather than picked: the slowest hull turns at
-    /// 140 deg/s, which is 2.3 deg in a 60Hz step and a cosine of 0.9992 - well
-    /// under this - while a leg driven straight holds its facing to the float,
-    /// cosine 1.0. So a turn always resets and a straight run never does, with
-    /// three decimal places of room on either side.</summary>
-    public const float NoseHeld = 0.9999f;
 
     /// <summary>How far past a brick the nose has to be before that brick counts
     /// as driven through, as a fraction of a brick's own length.
@@ -1384,9 +1293,8 @@ public sealed partial class WallRig : Node3D
     /// in metres: <see cref="NoseThrough"/> of a brick <i>behind</i> the tip,
     /// so the number is negative and a piece level with the tip is outside it.
     ///
-    /// Named for the same reason as <see cref="Swept"/> and
-    /// <see cref="Advance"/>: the sign is the whole of the rule, and a live
-    /// solver is the one thing <c>--selftest</c> cannot run.</summary>
+    /// Named because the sign is the whole of the rule, and a live solver is
+    /// the one thing <c>--selftest</c> cannot run.</summary>
     public static float Through(float brick) => -brick * NoseThrough;
 
     /// <summary>How far an oriented box reaches along <paramref name="axis"/>
@@ -1435,7 +1343,7 @@ public sealed partial class WallRig : Node3D
     /// reads as having seen it coming.</summary>
     public const float NoseShove = 2.0f;
 
-    /// <summary>The far end of the window <see cref="Shoving"/> is counted over,
+    /// <summary>The far end of the window <see cref="Against"/> is counted over,
     /// in metres, with <see cref="Through"/> as its near end.
     ///
     /// <b>The two windows meet and never overlap</b>, and that is the whole of
@@ -1444,314 +1352,144 @@ public sealed partial class WallRig : Node3D
     /// let go of it.</summary>
     public static float Shove(float brick) => brick * NoseShove;
 
-    /// <summary>Whether the driven box is in the simulation at all this frame:
-    /// only once it has advanced along the heading it faces now.
-    ///
-    /// <b>The box is a ram, and a hull turning on the spot is not ramming.</b>
-    /// It cannot touch standing masonry either way - a frozen piece is a static
-    /// body and a kinematic box passes through one - so the two things it does
-    /// are shove the loose brick about and stop it falling through the machine,
-    /// and both of those are a tank going forward. Swung on the spot it does
-    /// neither.
-    ///
-    /// <b>It buys no number, and that is said here rather than left to be
-    /// rediscovered.</b> The suspicion it was built on - that a box 6.9m by 2.6m
-    /// pivoting about its contact point carries its far corner at some ten metres
-    /// a second, well over <see cref="ThawSpeed"/>, and flings the last ram's
-    /// rubble into standing masonry - is not what this board measures. Three rams
-    /// in a row let go of 199, 226 and 286 of 536 pieces over three runs of the
-    /// same flags, breaching two sections twice and three once, and the ungated
-    /// build sat inside that spread. What actually takes a leaf it was never
-    /// driven through is the return leg parking its nose inside the far one -
-    /// see <see cref="NoseThrough"/>. The gate is kept for what it says rather
-    /// than for what it fixes: the band and the body now agree on what a ram is,
-    /// and a pivot is outside both.
-    ///
-    /// <b>The second job cannot be seen at all, which is why it is not weighed
-    /// against the first.</b> Rubble is drawn <c>depth_draw_never</c> and the
-    /// tank's sprite goes over it, so a brick sunk into the hull's volume and a
-    /// brick resting on top of it are the same pixel.
-    ///
-    /// <b><see cref="_noseGone"/> and not a second reading of the same thing.</b>
-    /// That is the number <see cref="Ploughed"/> already builds the band on,
-    /// nought at a standstill and reset by a turn through <see cref="Advance"/>,
-    /// so "the box feels" and "the box sweeps" cannot come apart. A tank that
-    /// stops mid-leg keeps it - <see cref="Advance"/> banks what it had - so the
-    /// gate is the turn at the head of a leg and nothing else.
-    ///
-    /// <b>What is given up is the first centimetre of a leg.</b> The heap the
-    /// last ram made is on the ground for the length of the pivot, which is a
-    /// heap settling a little early against a heap flung across the cell.
-    /// </summary>
-    public static bool Feels(float gone) => gone > 0.0f;
+    // --- a tank somebody else drives ----------------------------------------
 
-
-    /// <summary>How many pieces of the wall the driven nose is pressing against
-    /// right now - the standing leaf in front of it, plus whatever of it has come
-    /// loose and is being bulldozed along.
+    /// <summary>A hull crossed the wall's plane: the driven ram, arrived as an
+    /// event.
     ///
-    /// <b>The feedback the solver never gave back, and it is one number because
-    /// one is all a speed ceiling wants.</b> The board decides how fast a tank
-    /// goes; all this says is that some of the going is masonry - see
-    /// <c>TankTick.Shoving</c> and <see cref="MovementProfile.WallSpeed"/>.
-    /// A count rather than a rate, so it does not depend on the step; a fact
-    /// from the solver rather than a timer, so it ends when the shoving ends.
+    /// <b>An event and not a body, and that is the whole revision.</b> The
+    /// driven ram used to be a kinematic box swept continuously along the
+    /// tank's path, and nearly everything about it existed to tame the sweep's
+    /// degenerate cases - a pivot is not a ram, a hull spawned inside masonry,
+    /// a poke against a leaf against a drive through it, a box reborn inside
+    /// the last ram's heap. A shot already arrives as one call
+    /// (<c>TankTick.Landed</c> into <see cref="Fire"/>) and that path has never
+    /// needed taming, so the ram arrives the same way: the board says a hull's
+    /// front face crossed a wall-bearing rim, and the rig answers once.
     ///
-    /// <b>Standing masonry only, and counting what has come loose is the version
-    /// this replaces.</b> Bulldozing the heap is the more physical answer and it
-    /// does not end: the pieces the nose knocks out are pushed along in front of
-    /// the nose, so they stay in the band that counts them and the drag sustains
-    /// itself. Measured - a tank that drove out of the ring was still reporting
-    /// 22 pieces and still pinned at 53px/s two and a quarter seconds and four
-    /// metres later, on open ground with the wall behind it. What is left is the
-    /// sentence that ends by itself: <b>a wall resists until it is broken</b>,
-    /// and <see cref="Reached"/> is what breaks it, so the count drains as the
-    /// nose advances and reaches nought as the last course goes.
+    /// <b>What it does is what the band did, said once:</b> every standing
+    /// piece of the section the nose met, within the hull's own lane, is let
+    /// go and handed the hull's momentum - <see cref="Shunted"/> of the speed
+    /// it crossed at, parted by <see cref="Wedge"/> - and <see cref="Breach"/>
+    /// takes the section. The quantum of a driven ram is the section, which it
+    /// already was through <see cref="BreachShare"/>; what is gone is the
+    /// per-frame release, and with it the pivot, the spawn and the rebirth
+    /// cases whole.
     ///
-    /// <b>Rubble is not masonry</b> either, word for word <see cref="Clearance"/>
-    /// and <c>WallProp.Bars</c>: the apron lies on the ground inside the cell and
-    /// was never a wall.
+    /// <b>The section is asked of the bricks, never mapped from the
+    /// heading:</b> <c>WallKit.Fan</c> decides which leaf a side is, and
+    /// putting Fan and the bricks against each other is the tour's whole
+    /// subject. See <see cref="Meets"/>.
     ///
-    /// What is given up is named: a tank shoving a heap of loose brick along
-    /// feels nothing for it. That is the lighter half of the two, and the heavier
-    /// half is the half that stops.</summary>
-    public int Shoving { get; private set; }
-
-    /// <summary>How far the driven box has advanced along its current heading, in
-    /// metres. The reach behind the nose in <see cref="Drive"/>, reset with the
-    /// box and reset by a turn: a tank that drove off, came back and swung round
-    /// sweeps from where it is pointing now, not from everywhere it has ever
-    /// been.</summary>
-    private float _noseGone;
-
-    /// <summary>The heading <see cref="_noseGone"/> was banked along, so that
-    /// <see cref="Advance"/> can be told whether the box still faces it. Read
-    /// only while <see cref="_nosePlaced"/>, which is why nothing has to seed
-    /// it.</summary>
-    private Vector3 _noseAim;
-
-    /// <summary>Which section the driven nose is going through on this lane -
-    /// see <see cref="Meets"/>.
-    ///
-    /// <b>Named when the lane begins, and not once per piece.</b> A hull is
-    /// wider than a leaf is thick, so a leaf it drives through loses all of
-    /// itself: measured on the ring with the breach off, the two leaves driven
-    /// through came down 70-72 of 72 and 74-75 of 75 by hull and cascade alone.
-    /// A leaf it merely clips at a mitred corner loses 8 to 54 of 96 - and
-    /// <see cref="BreachShare"/> is 12 of 96, so asking per piece hands a corner
-    /// graze the same verdict as a drive-through. Measured on the same three
-    /// legs: leaf 1 lost 12, 14 and 96 pieces over three runs of one command,
-    /// the 96 being the run where the graze crossed the share and took the
-    /// section with it - two breaches on one pass and three on another, from a
-    /// tank that drove through two.
-    ///
-    /// <b>A share cannot separate them either, and that is why this is a name.</b>
-    /// The wall bench's own ram at half force needs a low share - measured, the
-    /// wall lies down at top 0.173 with the breach and stands at 0.526 without -
-    /// while the ring's corner graze needs a high one. The two ranges overlap end
-    /// to end, which is <see cref="Breach"/>'s own finding about the blast
-    /// arriving a second time.
-    ///
-    /// -1 while nothing is named, which <see cref="Breach"/> refuses.</summary>
-    private int _noseFace = -1;
-
-    /// <summary>
-    /// Where the tank is and how big, in metres, in the prop's own frame -
-    /// pushed every frame by whoever is driving it.
-    ///
-    /// <b>The rig feels it and does not move it.</b> <see cref="Ram"/> owns its
-    /// box because there is no tank on that board; here there is one, and how
-    /// fast it goes, when it stops and where it turns are the tank's own
-    /// business - decided by an order, a speed ceiling and a ground slope that
-    /// this class knows nothing about. What is left for the rig is the two things
-    /// only it can do: put a kinematic body where the tank is, and let go of what
-    /// that body has reached.
-    ///
-    /// <b>It does not start the clock.</b> A tank parked a cell away is not a
-    /// strike, and a wall reported as struck from the first frame would have its
-    /// settle report fire before anything had been touched. The clock starts on
-    /// the first piece actually let go - see <see cref="Drive"/> - which is the
-    /// honest moment: the wall is struck when the tank reaches it.
-    /// </summary>
-    public void Nose(Vector3 at, Vector3 into, Vector3 size)
+    /// <b>No body, so nothing to pinch.</b> A kinematic box overlapping a
+    /// dynamic brick is a pair the solver can only answer with a separating
+    /// impulse - measured at <c>reach 696</c> cells when a box reborn for a
+    /// second leg stood in the first leg's heap - and a box that does not
+    /// exist overlaps nothing. What is given up is named: the hull does not
+    /// shove old rubble along (under <see cref="Shunts"/> it already did not),
+    /// and nothing holds a heap off the machine (once the order ended, nothing
+    /// did).</summary>
+    /// <param name="at">The hull's centre at the crossing, in the prop's own
+    /// metres - the contact point lifted by half the box, so the lane is
+    /// centred on the courses.</param>
+    /// <param name="into">Which way it crossed, in the prop's frame.</param>
+    /// <param name="speed">How fast it was going, metres a second - what the
+    /// pieces leave at. See <see cref="RamCarry"/>.</param>
+    /// <param name="size">The hull's box, in metres - <c>WallProp.Box</c>, so
+    /// a heavy rams a wider lane than a light.</param>
+    /// <returns>The section the nose met, or -1 for a crossing with no
+    /// standing masonry at the plane it crossed - which is not a strike and
+    /// starts no clock. At the plane, not merely ahead: masonry counts within
+    /// two bricks of the nose and no further.</returns>
+    public int Rammed(Vector3 at, Vector3 into, float speed, Vector3 size)
     {
-        if (_tank is not null && !_driven)
-        {
-            // The mirror of Ram's guard, and the same reason.
-            GD.PushWarning("wall: a tank tried to drive the nose while the rig "
-                           + "has a ram of its own - one box at a time");
-            return;
-        }
         into = new Vector3(into.X, 0.0f, into.Z);
         if (_bodies.Count == 0 || into.LengthSquared() < 1e-6f)
-            return;
-        _driven = true;
-        _noseAt = at;
-        _noseInto = into.Normalized();
-        if (_tank is null || _noseSize != size)
-        {
-            _noseSize = size;
-            _tank?.QueueFree();
-            _tank = new AnimatableBody3D
-            {
-                SyncToPhysics = true,
-                Transform = new Transform3D(
-                    Basis.LookingAt(_noseInto, Vector3.Up), at),
-            };
-            _noseHull = new CollisionShape3D
-            {
-                Shape = new BoxShape3D { Size = size },
-                // Standing on the ground rather than buried to the waist - see
-                // TankTall. The body's own origin stays at the contact point,
-                // because that is what the board hands over and what the band is
-                // measured from; the shape is what has to sit on top of it.
-                Position = Seat(size.Y),
-                // Out of the simulation until the box has advanced - see Feels.
-                // Stated at birth rather than left to the first Drive, because a
-                // physics step can fall between the two.
-                Disabled = true,
-            };
-            _tank.AddChild(_noseHull);
-            AddChild(_tank);
-            _tankSize = size;
-            _nosePlaced = false;
-            _noseGone = 0.0f;
-            _noseFace = -1;
-            _noseAim = Vector3.Zero;
-            Shoving = 0;
-        }
-    }
-
-    /// <summary>Take the driven box away again - the tank has gone somewhere
-    /// else. What it has already let go of stays let go: a brick knocked out by a
-    /// tank that then drove off is still a brick that was knocked out.</summary>
-    public void Halt()
-    {
-        if (!_driven)
-            return;
-        _driven = false;
-        _nosePlaced = false;
-        _noseGone = 0.0f;
-        _noseFace = -1;
-        _noseAim = Vector3.Zero;
-        Shoving = 0;
-        foreach (int i in _passing)
-            _bodies[i].RemoveCollisionExceptionWith(_tank);
-        _passing.Clear();
-        _tank?.QueueFree();
-        _tank = null;
-        _noseHull = null;
-    }
-
-    /// <summary>One physics step of a box the board is driving: put it where it
-    /// has got to, and let go of what it has <b>driven into</b> since it arrived.
-    ///
-    /// <b>The band is anchored to advance, not to the box and not to travel.</b>
-    /// A tank knocks a brick out by driving into it; standing in one, turning in
-    /// one and coming to rest with the nose over one are not the same act, and a
-    /// board can put a tank somewhere it does not fit. This one does: the ring
-    /// stands on the tank's own cell, its nearest standing brick 2.76m off the
-    /// middle against hull corners of 2.88 to 3.67m, so the box overlaps masonry
-    /// at every heading and sweeps all six leaves as the hull turns on the spot.
-    /// Written as the whole footprint, that turn let go of 452 to 468 pieces out
-    /// of 536 - and the bench's own readout named it, because the speed at the
-    /// moment the masonry first gave was <b>0.0 m/s</b>: the wall was not rammed,
-    /// it was swept.
-    ///
-    /// So the reach behind the nose is <see cref="Ploughed"/>, built on
-    /// <see cref="Advance"/>: the ground the front face has crossed along the
-    /// heading it faces now, plus the half-hull the box was standing in when the
-    /// lane began. Nothing at a standstill and continuous in between, so no
-    /// brick the nose has passed is left frozen for the hull to slide through:
-    /// <see cref="Thaw"/> is idempotent and the band grows as fast as the tip
-    /// does.
-    ///
-    /// <b>The second term is what makes the opening a ram at all, and without it
-    /// the heaviest hull let go of nothing.</b> A band measured off the tip and
-    /// no further reaches only masonry outside the box's own half-length, and a
-    /// leaf the tank is already standing in recedes from the tip as fast as the
-    /// band grows - see <see cref="Ploughed"/> for the three numbers.
-    ///
-    /// <b>Travel alone was not enough, and the second report is why.</b> A plain
-    /// odometer is only ever zero once - on the frame the board is built - so it
-    /// fixed the opening and nothing after it. Two apothems is 7.05m against a
-    /// 6.0m box, so <i>every</i> approach from outside banks the full length
-    /// before the tank parks; and the box is not taken down in between, because
-    /// <c>Beside</c> is the cell and its six, and a struck wall keeps the box in
-    /// whether the tank moves or not. A trip out and back therefore left the band
-    /// saturated, and every frame after it - parked, pivoting, or merely aimed at
-    /// a leaf from the next hex - swept the whole footprint again. Resetting on a
-    /// turn is what makes the band a statement about one lane.
-    ///
-    /// The flank term this replaces read "a piece level with the tank's flank has
-    /// been driven into just as surely as one at its nose", and that is true of a
-    /// tank arriving from outside - whose flank only ever passes bricks its nose
-    /// went through first, which are let go already. What it was really covering
-    /// was the sideways cases: a hull spawned inside masonry, and one turning in
-    /// place. Neither is a ram.
-    ///
-    /// <b>What is left over is named rather than fixed:</b> parked in the middle
-    /// the hull's nose stands 3.0m out against 2.76m of clear yard, so the last
-    /// quarter-metre of an approach really does push the tip into the far leaf's
-    /// inner face. That is a brick or two, not a leaf, and the lever for it is
-    /// the one already named - the tank does not fit in the ring.</summary>
-    private void Drive(float step)
-    {
-        if (_tank is null)
-            return;
-        Vector3 was = _nosePlaced ? _tank.GlobalPosition : _noseAt;
-        Vector3 aim = _nosePlaced ? _noseAim : _noseInto;
-        _tank.GlobalTransform = new Transform3D(
-            Basis.LookingAt(_noseInto, Vector3.Up), _noseAt);
-        _nosePlaced = true;
-        // Along the heading, never the plain length of the step: a hull pivoting
-        // about its contact point covers ground without advancing a metre, and
-        // the band is a statement about ground the front face has crossed.
-        float ahead = (_noseAt - was).Dot(_noseInto);
-        _noseGone = Advance(_noseGone, ahead, aim.Dot(_noseInto));
-        _noseAim = _noseInto;
-        // And which section this lane is going through - see _noseFace.
+            return -1;
+        into = into.Normalized();
+        // The nose, because the event is the front face crossing the plane.
+        Vector3 nose = at + into * (size.Z * 0.5f);
+        // Named from two bricks behind the nose: a hull leaving its own ring
+        // crosses the plane with the leaf's thickness already behind the tip,
+        // while one arriving from outside has it all ahead.
         //
-        // Named while the band is still empty, which is what "when the lane
-        // begins" means here: Advance holds _noseGone at nought through a turn
-        // and through a standstill, so the last naming before the box moves is
-        // the one that sticks and a turn names again. No second latch for that -
-        // the band already carries where the lane starts.
-        //
-        // From the box middle rather than its tip, for Charge's reason: the leaf
-        // a tank opens inside is already behind the tip when the lane begins.
-        if (_noseGone <= 0.0f)
-            _noseFace = Meets(_noseAt, _noseInto, 0.0f).Face;
-        // And in or out of the simulation by the same number - see Feels. The
-        // band and the body are the one statement about whether this is a ram,
-        // so they are read off the one figure rather than gated apart.
-        if (_noseHull is not null)
-            _noseHull.Disabled = !Feels(_noseGone);
-        Vector3 tip = _noseAt + _noseInto * (_noseSize.Z * 0.5f);
+        // And no further than two bricks ahead of it, because the event is
+        // the nose crossing THIS plane. Meets scans as far as it can see, and
+        // rubble is not masonry to it - so a hull driving back in over the
+        // rim its own ram had emptied was answered with the opposite leaf,
+        // two apothems out (7.0m against the half-brick a leaf stands from
+        // the rim it is laid on), and Rammed felled it from across the cell.
+        // Masonry the hull has not reached is a later crossing's business, at
+        // that leaf's own rim - and a hull that parks short of it never rams
+        // it at all, which is the promise in the line above. Two bricks
+        // mirrors the reach behind, and NoseShove's reason fits it unchanged:
+        // further ahead is driving towards, not driving through.
+        (float front, int face) = Meets(nose - into * (2.0f * _brick), into, 0.0f);
+        if (face < 0 || front > 4.0f * _brick)
+            return -1;
+        float lane = size.X * 0.5f + _brick;
         int had = _live.Count;
-        // Nothing forward of the nose at all, and less than nothing: a piece has
-        // to be NoseThrough of a brick behind the tip before the tank counts as
-        // having driven through it. The forward term this replaces was there
-        // against tunnelling, and the band makes it unnecessary - it grows by the
-        // same step the tip takes, so a piece skipped by one long frame is caught
-        // by the next rather than missed.
-        Reached(tip, _noseInto, _noseSize.X * 0.5f + _brick,
-                Ploughed(_noseGone, _noseSize.Z), Through(_brick), _noseFace);
-        Passed();
-        // And what is left standing against the nose, over the band that begins
-        // where that one ends. Counted after the sweep rather than before it, so
-        // a piece let go of this frame is not also reported as resisting.
-        Shoving = Pressing(tip, _noseInto, _noseSize.X * 0.5f + _brick,
-                           -Through(_brick), Shove(_brick));
-        // Struck when the tank first reaches a brick, and never before: see
-        // Nose. The shot is named here rather than at the trigger because with a
-        // driven nose there is no trigger - the tank arriving is the whole event.
+        for (int i = 0; i < _bodies.Count; i++)
+        {
+            if (_live.Contains(i))
+                continue;
+            // One section, and no other - see Reaches: the same confinement
+            // the band had, and the rubble at the hull's feet comes with it.
+            if (!Reaches(face, SideOf(i)))
+                continue;
+            Vector3 arm = _bodies[i].Transform.Origin - nose;
+            float along = arm.Dot(into);
+            // The leaf's own thickness behind the nose and the drive ahead of
+            // it: a hull parks no further than the far rim, and the section's
+            // masonry all stands within a leaf of its plane.
+            if (along < -2.0f * _brick || along > Apothem * 2.0f)
+                continue;
+            if ((arm - into * along).Length() > lane)
+                continue;
+            Thaw(i);
+            // Straight down the heading and at the centre of mass - the AP
+            // round's answer for the AP round's reason: a cone was built for
+            // that one and measured worse. --no-shunt keeps the ram that let
+            // go and pushed nothing, which is what the driven ram was before
+            // it handed its momentum over.
+            if (Shunts)
+                _bodies[i].ApplyImpulse(
+                    Wedge(into, arm - into * along, lane)
+                    * (Shunted(speed) * _bodies[i].Mass));
+        }
+        // A hull through masonry is a breach, and a breach takes the section.
+        Breach(face, Strike.Ram);
+        // Struck when a brick was actually let go, and never before: a
+        // crossing over a rim the last ram already emptied is a drive, not a
+        // strike.
         if (_live.Count > had && _clock < 0.0f)
         {
             _shot = Strike.Ram;
             _force = 1.0f;
             _clock = 0.0f;
+            _beam = null;
         }
+        return face;
+    }
+
+    /// <summary>How many standing pieces a hull at <paramref name="at"/> is
+    /// pressing against - the count under <c>TankTick.Shoving</c>'s speed cap,
+    /// asked of the bricks.
+    ///
+    /// The same window the driven band used - <see cref="Through"/> of a brick
+    /// behind the nose to <see cref="Shove"/> ahead of it, the hull's own lane
+    /// wide - so the going costs what it cost. And it ends by itself: a wall
+    /// resists until it is broken, <see cref="Rammed"/> breaks it, and the
+    /// count drains as the section goes.</summary>
+    public int Against(Vector3 at, Vector3 into, Vector3 size)
+    {
+        into = new Vector3(into.X, 0.0f, into.Z);
+        if (_bodies.Count == 0 || into.LengthSquared() < 1e-6f)
+            return 0;
+        into = into.Normalized();
+        Vector3 tip = at + into * (size.Z * 0.5f);
+        return Pressing(tip, into, size.X * 0.5f + _brick,
+                        -Through(_brick), Shove(_brick));
     }
 
     /// <summary>How far off the plate a shell goes off, as a fraction of
@@ -1960,7 +1698,7 @@ public sealed partial class WallRig : Node3D
                 continue;
             Vector3 across = arm - into * along;
             float off = across.Length();
-            float span = Reach(_bodies[i], across / Mathf.Max(off, 1e-4f));
+            float span = Reach(i, across / Mathf.Max(off, 1e-4f));
             // <b>What the channel clips, not what it contains.</b> Asking whether
             // a piece's *centre* is in the bore leaves standing every piece the
             // round went through the edge of - and one of those is the header,
@@ -2016,10 +1754,10 @@ public sealed partial class WallRig : Node3D
     /// <paramref name="n"/> - the support radius of its box, which is the sum of
     /// its half extents projected onto that direction. Exact for a box, and the
     /// only thing needed to ask whether the round's channel clips it.</summary>
-    private float Reach(RigidBody3D b, Vector3 n)
+    private float Reach(int i, Vector3 n)
     {
-        Vector3 half = _plan.Blocks[_bodies.IndexOf(b)].Half * MetresPerCell;
-        Basis m = b.Transform.Basis;
+        Vector3 half = _plan.Blocks[i].Half * MetresPerCell;
+        Basis m = _bodies[i].Transform.Basis;
         return Mathf.Abs(m.Column0.Dot(n)) * half.X
                + Mathf.Abs(m.Column1.Dot(n)) * half.Y
                + Mathf.Abs(m.Column2.Dot(n)) * half.Z;
@@ -2048,15 +1786,14 @@ public sealed partial class WallRig : Node3D
         b.ContinuousCd = true;
         b.ContactMonitor = true;
         b.MaxContactsReported = 6;
-        // And the box does not resolve an overlap it made while the piece
-        // was static - see _passing.
-        if (_driven && _tank is not null)
-        {
-            b.AddCollisionExceptionWith(_tank);
-            _passing.Add(i);
-        }
         if (!spreads)
             return;
+        // What stood on this piece now stands on one support fewer, and the
+        // question of whether it stands on any at all waits for Undermined.
+        // Behind the spreads gate with the cascade, and for the cascade's
+        // reason read backwards: an AP hole is a hole because the wall does
+        // not notice, so what spans it keeps spanning it.
+        Perch(i);
         b.BodyEntered += hit =>
         {
             if (b.LinearVelocity.LengthSquared() < ThawSpeed * ThawSpeed)
@@ -2085,14 +1822,110 @@ public sealed partial class WallRig : Node3D
             Thaw(i);
     }
 
+    /// <summary>Whether piece <paramref name="i"/> bears piece
+    /// <paramref name="k"/>: stands under it within a bed joint of height and
+    /// overlaps it in plan by more than a corner kiss. Asked of frozen pieces,
+    /// which are exactly where the plan laid them, so the tolerances are the
+    /// layout's own - a third of a course of slack for the size jitter, and
+    /// two centimetres of required overlap so that neighbours in one course,
+    /// which touch end to end, never read as each other's footing.</summary>
+    private bool Bears(int i, int k)
+    {
+        Vector3 under = _bodies[i].Transform.Origin;
+        Vector3 over = _bodies[k].Transform.Origin;
+        float bed = over.Y - Reach(k, Vector3.Up)
+                    - (under.Y + Reach(i, Vector3.Up));
+        if (Mathf.Abs(bed) > _course * 0.35f)
+            return false;
+        var flat = new Vector3(over.X - under.X, 0.0f, over.Z - under.Z);
+        float gap = flat.Length();
+        if (gap < 1e-4f)
+            return true;
+        Vector3 n = flat / gap;
+        return gap < Reach(i, n) + Reach(k, n) - 0.02f;
+    }
+
+    /// <summary>Whether frozen piece <paramref name="j"/> still has anything
+    /// under it: the floor, or another frozen piece bearing it. Rubble and
+    /// chips can bear - the test is geometry, not rank - but in practice the
+    /// apron lies a course below any masonry bed and never answers.</summary>
+    private bool Footed(int j)
+    {
+        if (_plan.Blocks[j].Course <= 0)
+            return true;
+        // Near the floor is footed however the courses were counted: a ruin's
+        // column can start above course nought.
+        if (_bodies[j].Transform.Origin.Y - Reach(j, Vector3.Up)
+            < _course * 0.5f)
+            return true;
+        for (int i = 0; i < _bodies.Count; i++)
+            if (i != j && !_live.Contains(i) && Bears(i, j))
+                return true;
+        return false;
+    }
+
+    /// <summary>Queue for <see cref="Undermined"/> every frozen piece of
+    /// masonry that was standing on piece <paramref name="i"/>.</summary>
+    private void Perch(int i)
+    {
+        if (_plan is not { } plan)
+            return;
+        for (int k = 0; k < _bodies.Count; k++)
+            if (k != i && SideOf(k) >= 0 && !plan.Blocks[k].Chip
+                && !_live.Contains(k) && !_perch.Contains(k) && Bears(i, k))
+                _perch.Add(k);
+    }
+
+    /// <summary>Let go what has been left standing on air.
+    ///
+    /// <b>A frozen piece is held by the flag, not by anything under it</b>, and
+    /// every field that could knock it down is confined to its own section by
+    /// <see cref="Reaches"/> - so nothing anywhere could release a frozen brick
+    /// whose whole footing fell with somebody else's section. This is the rule
+    /// that says masonry stands on masonry, said where it can act.
+    ///
+    /// <b>Measured, it almost never fires, and that is the bond doing its
+    /// work</b>: rammed on every bearing and burst at force 3, every frozen
+    /// piece the collapses queued here (84-130 a strike) still overlapped a
+    /// standing piece of its own leaf, mitre included, and not one was let go.
+    /// So this is insurance against the seed and the strike nobody ran yet,
+    /// bought cheap - the queue only fills when something thaws - rather than
+    /// the repair of a failure the bench shows daily.
+    ///
+    /// <b>It crosses the section boundary on purpose, and that is not the
+    /// strike escaping its confinement.</b> Reaches cuts what the strike does;
+    /// a piece with nothing under it falls by gravity, whoever took its
+    /// footing - the same distinction the cascade's docstring already draws
+    /// between what a shot reaches and what the solver does about it.
+    ///
+    /// Judged when the support went rather than swept every frame: each thaw
+    /// queues what stood on the thawed piece (<see cref="Perch"/>), and this
+    /// drains the queue, thawing whatever no longer answers
+    /// <see cref="Footed"/> - which queues what stood on <i>that</i>, so an
+    /// undermined stack peels from the bottom up in one drain.</summary>
+    private void Undermined()
+    {
+        while (_perch.Count > 0)
+        {
+            int j = -1;
+            foreach (int k in _perch)
+            {
+                j = k;
+                break;
+            }
+            _perch.Remove(j);
+            if (!_live.Contains(j) && !Footed(j))
+                Thaw(j);
+        }
+    }
+
     public override void _PhysicsProcess(double delta)
     {
         float step = (float)delta;
-        // Before the clock gate, because a driven nose is what starts the clock:
-        // a tank standing off is not a strike, and the wall it has not reached
-        // yet is a wall that has not been hit. See Nose.
-        if (_driven)
-            Drive(step);
+        // Before the clock guard, not after: the queue can only fill when
+        // something thawed, but whether that also started the clock is the
+        // strike's business and no concern of gravity's.
+        Undermined();
         if (_clock < 0.0f)
             return;
         _clock += step;
@@ -2117,7 +1950,27 @@ public sealed partial class WallRig : Node3D
                     && b.AngularVelocity.LengthSquared() <= Still * Still))
                 _lain[i] += step;
         }
-        if (_tank is null || _driven)
+        // A piece that has crumbled away leaves the solver, not just the
+        // picture. The renderer stops drawing at Left <= 0 and nothing used to
+        // stop colliding, so a brick whose bed faded first hovered on an
+        // invisible body until its own clock caught up. What lay on it is
+        // woken by hand: a body sleeping on a collider that vanishes is not
+        // guaranteed a contact event to wake to.
+        foreach (int i in _live)
+        {
+            if (Left(i) > 0.0f || !_cleared.Add(i))
+                continue;
+            RigidBody3D b = _bodies[i];
+            foreach (int k in _live)
+                if (k != i && !_bodies[k].Freeze
+                    && (_bodies[k].Transform.Origin - b.Transform.Origin)
+                       .LengthSquared() < _brick * _brick * 4.0f)
+                    _bodies[k].Sleeping = false;
+            b.Freeze = true;
+            b.CollisionLayer = 0;
+            b.CollisionMask = 0;
+        }
+        if (_tank is null)
             return;
         if (_tankLeft <= 0.0f)
             // Stops where it stopped. A tank that rammed a wall is parked in the

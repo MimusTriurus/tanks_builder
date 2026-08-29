@@ -161,6 +161,26 @@ public sealed partial class TankBench : SceneRoot
     /// </summary>
     public const int RingSides = 6;
 
+    /// <summary>What <c>walls.json</c> calls the ring. A constant rather than a
+    /// literal at the one call site, because the self-test holds the file against
+    /// this list and a name spelt twice is a name that can be spelt two ways.
+    /// </summary>
+    public const string RingName = "ring";
+
+    /// <summary>Every wall this bench lays, by name: the table
+    /// <see cref="WallConfig"/> fills in. Declared here rather than in the file
+    /// for that class's reason - which walls exist is a cell, a bearing and a row
+    /// of dials, none of which a file can supply.</summary>
+    public static IEnumerable<string> WallNames
+    {
+        get
+        {
+            yield return RingName;
+            foreach ((Vector2I _, float _, string name, WallKit.Recipe _) in Samples)
+                yield return name;
+        }
+    }
+
     /// <summary>
     /// The walls that are not the ring: where each stands, which way it faces and
     /// what it is made of.
@@ -182,17 +202,21 @@ public sealed partial class TankBench : SceneRoot
     /// the ring along that lane meets the masonry square on rather than at its
     /// end - which is the difference between a ram and a graze, and it is
     /// measured: a shot off the axis moves a tenth of the pieces.
+    ///
+    /// <b>The name is the id <c>walls.json</c> speaks to and the word the readout
+    /// prints, and it is one name on purpose.</b> A label beside an id is two
+    /// names for one wall, and they part company on the line nobody re-reads.
     /// </summary>
-    private static readonly (Vector2I Cell, float Bearing, string What,
+    private static readonly (Vector2I Cell, float Bearing, string Name,
                              WallKit.Recipe Recipe)[] Samples =
     {
         (new Vector2I(3, 0), 270.0f, "taller",
          new WallKit.Recipe { Courses = 14 }),
         (new Vector2I(0, 2), 330.0f, "thicker",
          new WallKit.Recipe { Leaves = 4 }),
-        (new Vector2I(6, 2), 210.0f, "another seed",
+        (new Vector2I(6, 2), 210.0f, "reseeded",
          new WallKit.Recipe { Seed = 47 }),
-        (new Vector2I(3, 6), 90.0f, "a longer run",
+        (new Vector2I(3, 6), 90.0f, "longer",
          new WallKit.Recipe { Sides = 3, Seed = 23 }),
     };
 
@@ -230,12 +254,6 @@ public sealed partial class TankBench : SceneRoot
     /// sweep and the collapse are untouched, so the A/B is the going and nothing
     /// else.</summary>
     private bool _shove = true;
-
-    /// <summary>Whether a wall that has been struck keeps the ram box even after
-    /// the tank has parked - the way it used to work. Off, so the box goes with
-    /// the order and the rubble lands on the ground; see <see cref="Boxed"/> for
-    /// what that costs and what it buys.</summary>
-    private bool _parkedBox;
 
     /// <summary>Whether the order under way is a ram - see
     /// <see cref="Sweeps"/>.
@@ -350,6 +368,25 @@ public sealed partial class TankBench : SceneRoot
 
     private void ReadFlags()
     {
+        // Before the switch, never after it: --seed and its four neighbours write
+        // the same fields, and a flag is the more specific statement - see
+        // WallConfig. Said out loud rather than left to load order, because a
+        // flag the file quietly overrules reads exactly like a flag that did not
+        // arrive.
+        var walls = WallConfig.Load();
+        if (walls.Loaded)
+        {
+            int spoke = walls.Apply(RingName, _brick) ? 1 : 0;
+            foreach ((Vector2I _, float _, string name, WallKit.Recipe recipe)
+                     in Samples)
+                if (walls.Apply(name, recipe))
+                    spoke++;
+            GD.Print($"tank bench: walls json, {spoke} wall(s) named");
+        }
+        else
+        {
+            GD.Print($"tank bench: walls built-in ({walls.Error})");
+        }
         string[] args = OS.GetCmdlineUserArgs();
         for (int i = 0; i < args.Length; i++)
         {
@@ -549,11 +586,6 @@ public sealed partial class TankBench : SceneRoot
                 case "--no-shove":
                     _shove = false;
                     break;
-                // A struck wall keeps the box for good, as it used to - the A/B
-                // the rubble is judged by. See Boxed.
-                case "--parked-box":
-                    _parkedBox = true;
-                    break;
                 // Any order breaks masonry, as it used to - the A/B the ram gate
                 // is judged by. See Sweeps.
                 case "--drive-rams":
@@ -564,6 +596,19 @@ public sealed partial class TankBench : SceneRoot
                 // name.
                 case "--no-crumble":
                     WallRig.Crumbles = false;
+                    break;
+                // The solver's own boxes, drawn over the picture. Off by
+                // default and a flag rather than a key for WallHulls' reason:
+                // a debug frame that wandered into an A/B would be measuring
+                // itself, and a capture is the proof, so putting one in must
+                // not need a hand on the mouse.
+                case "--hulls":
+                    WallHulls.Shown = true;
+                    break;
+                // The ram lets masonry go and never pushes it, as it used to -
+                // the A/B the shunt is judged by. See WallRig.RamCarry.
+                case "--no-shunt":
+                    WallRig.Shunts = false;
                     break;
                 // The wall only loses what the strike itself reached, as it used
                 // to - the A/B a breach is judged by. See WallRig.Breaches.
@@ -868,7 +913,7 @@ public sealed partial class TankBench : SceneRoot
                      + $"{clear:F2}m clear against a {corner:F2}m hull corner, "
                      + "samples "
                      + string.Join(" ", Samples.Select(
-                         x => $"({x.Cell.X},{x.Cell.Y}) {x.What}")));
+                         x => $"({x.Cell.X},{x.Cell.Y}) {x.Name}")));
         }
     }
 
@@ -885,6 +930,11 @@ public sealed partial class TankBench : SceneRoot
             Cell = cell,
             Recipe = recipe,
             Borrow = null,
+            // Its own collision bit, because every rig is centred on the world
+            // origin: on one bit the ring's rubble and a sample's lie in the
+            // same phantom space, and ramming the sample scatters the ring's
+            // heap - see WallRig.Channel.
+            Channel = _walls.Count,
         };
         AddChild(prop);
         prop.Bearing = bearing;
@@ -901,10 +951,25 @@ public sealed partial class TankBench : SceneRoot
     private void Relay(Action change)
     {
         if (Wall?.Rig is { Struck: true })
+        {
+            // Refused out loud, once per wall: a dial that is silently held
+            // reads as a dial that does nothing - measured as "the wall
+            // changes with the direction I ram", because the turns of this
+            // dial after the first strike were going nowhere.
+            if (!_lockSaid)
+                GD.Print("wall dials are locked while the wall lies - "
+                         + "R lays a new one");
+            _lockSaid = true;
             return;
+        }
         change();
         Relaid();
     }
+
+    /// <summary>Whether the locked-dials line has been printed for this wall.
+    /// Once per wall, not per turn of the dial: a slider dragged against the
+    /// lock is one refusal, not forty.</summary>
+    private bool _lockSaid;
 
     /// <summary>Stand every wall up again, whatever state the last one was left
     /// in. The half of <see cref="Relay"/> that has no guard on it, because
@@ -914,6 +979,7 @@ public sealed partial class TankBench : SceneRoot
     {
         _ramSpeed = -1.0;
         _wallSaid = false;
+        _lockSaid = false;
         // The dials are the ring's: which side it stands on and how much of the
         // cell it takes. A sample keeps the bearing it was stood on, because that
         // bearing is what makes it face the ring - see Samples.
@@ -959,18 +1025,27 @@ public sealed partial class TankBench : SceneRoot
     }
 
     /// <summary>Whether the tank has its nose in masonry - the answer to
-    /// <see cref="TankTick.Shoving"/>, taken straight off the solver.
+    /// <see cref="TankTick.Shoving"/>, asked of the bricks
+    /// (<see cref="WallProp.Against"/>).
     ///
-    /// Asked of every wall because the box is pushed at every wall the tank is
-    /// beside (see <see cref="Ram"/>), and of the driven tank only: the other two
-    /// in the garage are parked somewhere else and do not have a box at all.
-    /// </summary>
+    /// <b>Under a ram and never under an ordinary order</b> - the same gate the
+    /// event has (<see cref="Sweeps"/>): a wall an order did not ask to break
+    /// does not slow the hull that clips through it, which is what the old
+    /// driven box also answered by only being pushed in under a ram.
+    ///
+    /// Asked of every wall the tank is beside, and of the driven tank only: the
+    /// other two in the garage are parked somewhere else.</summary>
     private bool Pressing(Vehicle v)
     {
-        if (v != Tank)
+        if (v != Tank || _stage is null || _field.Atlas is null
+            || !Sweeps(v.Moving, _ramming, _driveRams))
             return false;
+        Vector2I here = _field.CellAt(v.GroundPoint - _origin);
+        Vector3 box = WallProp.Box(v, _field.Atlas.HexRect.Size.X * 0.5f);
+        Vector3 foot = _stage.Contact(v);
+        Vector2 way = v.Atlas.GroundDirection(v.Sprite.HullFacing);
         foreach (WallProp prop in _walls)
-            if (prop.Rig is { Shoving: > 0 })
+            if (Beside(here, prop.Cell) && prop.Against(foot, way, box) > 0)
                 return true;
         return false;
     }
@@ -1009,112 +1084,133 @@ public sealed partial class TankBench : SceneRoot
         }
     }
 
-    /// <summary>
-    /// Push the tank at every wall it is close enough to touch, and take the box
-    /// away from the rest.
-    ///
-    /// <b>Pushed every frame rather than fired once</b>, because a tank is not a
-    /// shot: how fast it arrives, where it stops and how far it turns on the way
-    /// are decided by an order, a speed ceiling and the ground, none of which the
-    /// solver knows about. What is left for the rig is to feel it - see
-    /// <see cref="WallRig.Nose"/>.
-    ///
-    /// <b>Close enough is the cell or one of its six</b>, and the box is why: it
-    /// is a cell and a half long, so a tank on the next hex already has its nose
-    /// over this one. Further off there is nothing to feel and the body is taken
-    /// down, which is what keeps a wall on the far side of the board from
-    /// carrying a kinematic tank around after it.
-    /// </summary>
-    /// <summary>Whether the ram box belongs in the masonry this frame.
-    ///
-    /// <b>The box is a ram, not a hull, and that is the whole of it.</b> It does
-    /// not knock anything down - <c>WallRig.Reached</c> does, geometrically - and
-    /// it cannot touch standing masonry at all, because a frozen piece is a
-    /// static body and a kinematic box passes through one. What it does is push
-    /// the loose brick about and stop it falling through the machine, and both of
-    /// those are things a tank does while it is <i>driving</i>.
-    ///
-    /// <b>So it goes when the order does.</b> Parked, the tank is not ramming
-    /// anything - <c>WallRig.Nose</c>'s own sentence - and the board opens with
-    /// the machine inside a ring it does not fit in, so a box pushed in while
-    /// parked lets go of bricks on the first frame and the wall reads as struck
-    /// before anything happened.
-    ///
-    /// <b>What is given up is that the heap the ram made is resting on the box,
-    /// and drops when it goes.</b> That was the reason the struck wall used to
-    /// keep its box for good, and it is the wrong half to keep: an invisible slab
-    /// two metres tall catching brick reads as rubble hanging in the air, which
-    /// is worse than a heap that settles a little late. <paramref name="parked"/>
-    /// - <c>--parked-box</c> - puts the old answer back so the two can be looked
-    /// at side by side.</summary>
-    public static bool Boxed(bool moving, bool struck, bool parked) =>
-        moving || (parked && struck);
-
-    /// <summary>Whether the box breaks masonry this frame: only a tank that is
-    /// driving, and only under an order that asked to ram.
+    /// <summary>Whether a crossing breaks masonry: only under an order that
+    /// asked to ram.
     ///
     /// <b>A ram is an intent, and driving past a wall is not one.</b> The board
     /// stands the tank inside a ring it does not fit in - 2.76m of clear yard
-    /// against half-hulls of 2.62 / 3.00 / 3.43m - so the masonry is already
-    /// within the hull before anything happens, and <c>WallRig.Ploughed</c>
-    /// hands the nose that half-hull the moment it advances at all. Measured on
-    /// an ordinary order out of the ring: the wall gave at frame 62, with the
-    /// tank 7px off its parking spot and a whole leaf gone by frame 65. Read as
-    /// a picture, that is a hull demolishing a yard by turning round in it -
-    /// which is exactly the complaint, and the turn itself was innocent: the
-    /// band is nought through every frame of it, because <c>WallRig.Advance</c>
-    /// resets on a turn.
-    ///
-    /// <b>Not the box, only the sweep, and the two are told apart in the
-    /// rig.</b> The kinematic body still goes in whenever the tank is driving,
-    /// because the rubble a ram made has to rest on something and the tank parks
-    /// in it. What the gate takes away is <c>WallRig.Reached</c>.
+    /// against half-hulls of 2.62 / 3.00 / 3.43m - so a rule that broke
+    /// masonry on any contact read as a hull demolishing a yard by driving out
+    /// of it, which was exactly the complaint.
     ///
     /// <b>What is given up is the sentence this was refused with once:</b> a
     /// frozen piece is a static body, so a tank driving at standing masonry it
     /// did not ask to ram passes through it. A hull clipping a wall is visible;
     /// a wall falling down for free was visible and also wrong.
     ///
+    /// <paramref name="moving"/> is kept in the gate even though a crossing
+    /// implies movement, because the gate is also what cuts the shove count
+    /// (<see cref="Pressing"/>) and a parked hull presses on nothing.
+    ///
     /// <paramref name="always"/> - <c>--drive-rams</c> - puts the old answer
     /// back, so the two can be looked at side by side.</summary>
     public static bool Sweeps(bool moving, bool ramming, bool always) =>
         moving && (ramming || always);
 
+    /// <summary>The driven tank's nose cell as of the last look, so a crossing
+    /// is a difference rather than a state - null before the first frame.
+    ///
+    /// <b>Frozen through a pivot, and that is the pivot rule's whole
+    /// residence.</b> The nose sweeps an arc a half-hull wide while the contact
+    /// point stands still, so tracked raw it would bank rim crossings that no
+    /// ram made; frozen, the first driven frame diffs against where the nose
+    /// stood before the pivot and a swept rim still fires once, as a
+    /// crossing. The debt this runs up is that the diff is not always one
+    /// step, which is what <see cref="HexField.Chain"/> pays out.</summary>
+    private Vector2I? _noseCell;
+
+    /// <summary>The last ram event: which wall's cell, and the section the rig
+    /// said the hull entered. What the tour latches - see
+    /// <c>TankBench.Tour</c>.</summary>
+    private (Vector2I Cell, int Face)? _ramNamed;
+
+    /// <summary>
+    /// The driven ram: fire an event at the wall whose plane the hull's nose
+    /// has crossed this frame, if an order asked to ram.
+    ///
+    /// <b>An event, mirroring the shot, and that is the whole revision.</b> The
+    /// shot's path - <see cref="TankTick.Landed"/> into
+    /// <see cref="WallProp.Fire"/> - has never needed a degenerate case tamed;
+    /// the swept kinematic box needed five (see <see cref="WallRig.Rammed"/>).
+    /// A ram is now the same shape: the nose crosses a wall-bearing rim, the
+    /// rig answers once, and how fast the tank arrives, where it stops and how
+    /// far it turns stay the board's business.
+    ///
+    /// <b>The nose, not the contact point.</b> A wall's outer plane stands on
+    /// the rim, so the front face reaching the rim is the front face reaching
+    /// the masonry; measured from the contact point instead, the hull would
+    /// clip through half its length of standing wall before anything gave.
+    ///
+    /// <b>A pivot fires nothing while it turns</b>: <see cref="_noseCell"/>
+    /// freezes below walking pace, and the first driven frame diffs against
+    /// where the nose stood before the turn. That diff can span more than one
+    /// rim - a pivot wider than a step parks the nose two cells from where it
+    /// was - so it is walked as a chain of adjacent cells and every rim in it
+    /// is answered once. It used to be dropped instead, whenever
+    /// <c>HeadingTo</c> said the pair were not neighbours, with the latch
+    /// already moved: the wall never heard about the crossing and the tank
+    /// drove on through standing masonry.
+    /// </summary>
     private void Ram()
     {
-        if (_stage is null || _walls.Count == 0 || _garage.Count == 0)
+        if (_stage is null || _walls.Count == 0 || _garage.Count == 0
+            || _field.Atlas is null)
             return;
         Vehicle tank = Tank;
-        Vector2I here = _field.CellAt(tank.GroundPoint - _origin);
-        Vector3 box = WallProp.Box(tank,
-                                   _field.Atlas!.HexRect.Size.X * 0.5f);
-        Vector3 foot = _stage.Contact(tank);
         Vector2 way = tank.Atlas.GroundDirection(tank.Sprite.HullFacing);
-        foreach (WallProp prop in _walls)
+        float half = (float)(tank.Atlas.HullSpan * 0.5 * tank.Sprite.BodyScale);
+        Vector2I nose = _field.CellAt(tank.GroundPoint + way * half - _origin);
+        // No intent - follow silently, so a later ram diffs against the
+        // present rather than against wherever the last one ended.
+        if (!Sweeps(tank.Moving, _ramming, _driveRams))
         {
-            // In while the order is - see Boxed.
-            // Under a ram and never under an ordinary order - see Sweeps. The
-            // gate goes here rather than inside the rig, because the box is the
-            // ram: what it lets go of is one half of it, and what it shoves the
-            // loose brick about with is the other, and a tank driving past a
-            // wall is doing neither.
-            if (Beside(here, prop.Cell)
-                && Boxed(Sweeps(tank.Moving, _ramming, _driveRams),
-                         prop.Rig is { Struck: true }, _parkedBox))
-                prop.Nose(foot, way, box);
-            else
-                prop.Halt();
-            // How fast it was going the moment the masonry first gave, and only
-            // that moment: a speed read afterwards is the speed of a tank that
-            // has already stopped in the rubble. And only when a ram is what gave
-            // way: since a round can now reach the wall on the tank's own cell,
-            // a shot fired while the box is in the masonry would otherwise print
-            // "ram at 0.0 m/s" - the one reading this line exists to make mean
-            // something else.
-            if (_ramSpeed < 0.0 && prop.Rig is
-                    { Loose: > 0, Driven: true, Shot: WallRig.Strike.Ram })
-                _ramSpeed = tank.Speed * WallRig.MetresPerCell
-                            / (_field.Atlas.HexRect.Size.X * 0.5);
+            _noseCell = nose;
+            return;
+        }
+        // A pivot is not a ram - see _noseCell.
+        if (tank.Speed < 1.0)
+        {
+            _noseCell ??= nose;
+            return;
+        }
+        Vector2I was = _noseCell ?? nose;
+        _noseCell = nose;
+        if (was == nose)
+            return;
+        Vector3 box = WallProp.Box(tank, _field.Atlas.HexRect.Size.X * 0.5f);
+        Vector3 foot = _stage.Contact(tank);
+        // Every rim between where the nose stood and where it is, each
+        // answered once. One pair at driving speed - but held through a pivot
+        // wider than a step the diff spans two rims, and the first version
+        // returned on HeadingTo's -1 with _noseCell already moved: the
+        // crossing was consumed unanswered and the tank drove on through
+        // standing masonry. A chain owes an answer for every rim it names,
+        // and each heading is a flat side by construction.
+        List<Vector2I> chain = HexField.Chain(was, nose);
+        for (int leg = 1; leg < chain.Count; leg++)
+        {
+            int heading = HexField.HeadingTo(chain[leg - 1], chain[leg]);
+            if (heading < 0)
+                continue;
+            Vector2 dir = tank.Atlas.GroundDirection(heading);
+            foreach (WallProp prop in _walls)
+            {
+                // A wall stands on the rim of its own cell, so the crossed rim
+                // belongs to one of the two cells it parts. Which section - if
+                // any - is the rig's answer, off the bricks.
+                if (prop.Cell != chain[leg - 1] && prop.Cell != chain[leg])
+                    continue;
+                int face = prop.Rammed(foot, dir, (float)tank.Speed, box);
+                if (face < 0)
+                    continue;
+                _ramNamed = (prop.Cell, face);
+                // How fast it was going the moment the masonry gave, and only
+                // the first such moment: a speed read afterwards is the speed
+                // of a tank already slowed by what it broke.
+                if (_ramSpeed < 0.0)
+                    _ramSpeed = tank.Speed * WallRig.MetresPerCell
+                                / (_field.Atlas.HexRect.Size.X * 0.5);
+            }
         }
     }
 
@@ -1515,6 +1611,14 @@ public sealed partial class TankBench : SceneRoot
         if (Wall is not { Rig: { } rig } prop)
             return "no wall";
         (float reach, float top, int off, int awake) = prop.Pile();
+        // What the nose is pressing against, asked the way the speed cap asks
+        // it - see Pressing.
+        int shoving = _stage is not null && _field.Atlas is not null
+                      && _garage.Count > 0
+            ? prop.Against(_stage.Contact(Tank),
+                           Tank.Atlas.GroundDirection(Tank.Sprite.HullFacing),
+                           WallProp.Box(Tank, _field.Atlas.HexRect.Size.X * 0.5f))
+            : 0;
         // What actually struck it, off the rig, and never the ammunition dial:
         // a ram is not a round, so the loaded shell says nothing about a wall a
         // tank drove into - which is what the first version of this line did.
@@ -1541,6 +1645,10 @@ public sealed partial class TankBench : SceneRoot
                // report all of itself gone and still be standing in the picture.
                // WallRig.Stuck.
                + (rig.Stuck > 0 ? $", {rig.Stuck} let go but standing" : "")
+               // And that the size and side dials are refused while it lies,
+               // in the line that is always on screen: a held dial with no
+               // notice reads as a dial that does nothing. See Relay.
+               + (rig.Struck ? ", dials locked (R lays a new wall)" : "")
                // And how many have cleared themselves, which is a third fact
                // again: a swept cell and a shot that moved nothing are the same
                // empty picture. WallRig.Crumbled.
@@ -1549,17 +1657,17 @@ public sealed partial class TankBench : SceneRoot
                // cause of the speed the line above reports: a tank crawling at a
                // fifth of its cruise and a tank whose order has gone stale are the
                // same picture, and the cap is the only thing that tells them
-               // apart. See WallRig.Shoving.
-               + (rig.Shoving > 0 ? $", shoving {rig.Shoving}" : "")
+               // apart. See WallRig.Against.
+               + (shoving > 0 ? $", shoving {shoving}" : "")
                // And which leaves that came out of, which the total cannot say:
                // a leaf driven through and a leaf caught by the corner of the
                // band are the same count and different pictures. WallRig.Leaves.
                + (rig.Struck ? $"\nleaves {rig.Leaves()}" : "")
-               // And whether the box under way is a ram at all, because a tank
+               // And whether the drive under way is a ram at all, because a tank
                // driving past a standing wall and a tank whose ram did nothing
                // are the same picture. See Sweeps.
                + (Tank.Moving
-                   ? rig.Driven ? ", ramming" : ", driving past"
+                   ? _ramming || _driveRams ? ", ramming" : ", driving past"
                    : "")
                // The one figure the picture cannot give and nobody can guess -
                // see _ramSpeed.
@@ -2086,16 +2194,18 @@ public sealed partial class TankBench : SceneRoot
                           () => _wallBeam, on => _wallBeam = on);
             _panel.Toggle("wall.shove", "masonry is heavy going  (--no-shove)",
                           () => _shove, on => _shove = on);
-            _panel.Toggle("wall.box", "a struck wall keeps the ram box  "
-                                      + "(--parked-box)",
-                          () => _parkedBox, on => _parkedBox = on);
             _panel.Toggle("wall.gate", "any order rams  (--drive-rams)",
                           () => _driveRams, on => _driveRams = on);
+            _panel.Toggle("wall.shunt", "the ram shoves what it frees  "
+                                        + "(--no-shunt)",
+                          () => WallRig.Shunts, on => WallRig.Shunts = on);
             _panel.Toggle("wall.breach", "a breach takes the whole side  "
                                          + "(--no-breach)",
                           () => WallRig.Breaches, on => WallRig.Breaches = on);
             _panel.Toggle("wall.crumble", "fallen pieces clear  (--no-crumble)",
                           () => WallRig.Crumbles, on => WallRig.Crumbles = on);
+            _panel.Toggle("wall.hulls", "draw the colliders  (--hulls)",
+                          () => WallHulls.Shown, on => WallHulls.Shown = on);
             _panel.Readout("wall.state", () => WallNote());
         }
 

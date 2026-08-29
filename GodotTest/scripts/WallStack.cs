@@ -247,6 +247,11 @@ public sealed partial class WallStack : Node3D
         };
         AddChild(_shade);
 
+        // Last, so its lines are laid over the solids rather than under them.
+        // It draws nothing at all while it is switched off - see WallHulls.
+        _hulls = new WallHulls();
+        AddChild(_hulls);
+
         if (_plan is not null)
             Rebuild();
     }
@@ -262,6 +267,11 @@ public sealed partial class WallStack : Node3D
     {
         if (_bricks is null)
             return;
+        // Every frame and outside the gates below, because the ram box moves
+        // while the wall is still untouched: Pose only runs once something has
+        // been let go of, and an overlay that froze until the first brick fell
+        // would draw the box where the tank used to be.
+        _hulls?.Draw(Rig, _plan);
         if (Rig is not null)
         {
             // Every frame while anything is still moving, and one more after it
@@ -714,6 +724,7 @@ public sealed partial class WallStack : Node3D
     /// <summary>Scratch for <see cref="Pose"/>: the blended pieces held aside
     /// until their order is known. Fields rather than locals because this runs
     /// every frame while a heap settles.</summary>
+    private WallHulls? _hulls;
     private int[] _order = Array.Empty<int>();
     private float[] _depth = Array.Empty<float>();
     private Transform3D[] _ghost = Array.Empty<Transform3D>();

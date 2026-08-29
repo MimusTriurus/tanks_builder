@@ -119,10 +119,10 @@ public sealed partial class TankBench
     private const double TourGiveUp = 8.0;
 
     /// <summary>Which section the hull named on its way into the wall this leg,
-    /// latched. <c>WallRig.Entered</c> is cleared the moment the tank stops
-    /// sweeping that prop, so by the time the pile has settled and the numbers
-    /// are worth reading the answer is gone - it has to be caught while the ram
-    /// is happening.</summary>
+    /// latched off <c>_ramNamed</c> - the event's own answer, left where the
+    /// tour can read it after the pile has settled. Cleared per leg in
+    /// <see cref="TourGo"/>, so a leg that entered nothing says so instead of
+    /// inheriting the last leg's answer.</summary>
     private int _tourFace = -1;
 
     /// <summary>What every section of every wall had lost when this leg began,
@@ -170,10 +170,12 @@ public sealed partial class TankBench
                          l => $"({l.Wall.X},{l.Wall.Y})@"
                               + HexField.EdgeHeadings[l.Side])));
         }
-        // Caught while the ram is happening - see _tourFace.
+        // Latched off the event: the ram arrives as one call now, and
+        // _ramNamed is what it left behind - see TankBench.Ram.
         if (_tourAt >= 0 && _tourAt < _tourLegs.Count
-            && Prop(_tourLegs[_tourAt].Wall)?.Rig is { Entered: >= 0 } rig)
-            _tourFace = rig.Entered;
+            && _ramNamed is (Vector2I hit, int entered)
+            && hit == _tourLegs[_tourAt].Wall)
+            _tourFace = entered;
 
         // Still under way. The run-up counts as moving too: a two-leg ram stands
         // still for a frame between its legs, and a standstill read there is the
@@ -230,6 +232,7 @@ public sealed partial class TankBench
             _tourBroke.Add(prop.Rig?.Broken ?? 0);
         }
         _tourFace = -1;
+        _ramNamed = null;
         _tourRest = 0.0;
         if (wall is null)
         {
