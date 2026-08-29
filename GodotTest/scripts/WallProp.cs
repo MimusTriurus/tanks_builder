@@ -282,14 +282,15 @@ public sealed partial class WallProp : Node
     /// <summary>Stand the driven box on this prop's rig - see
     /// <see cref="WallRig.Mount"/>. In the board's own terms, with the same
     /// conversion <see cref="Rammed"/> makes and for the same reason.</summary>
-    public void Mount(Vector3 foot, Vector2 flatDir, Vector3 size, float bow)
+    public void Mount(Vector3 foot, Vector2 flatDir, Vector3 size, float bow,
+                      float crown = 0.0f)
     {
         if (_rig is null || _wall is null || Field.Atlas is null)
             return;
         Vector3 into = Into(flatDir);
         if (into.LengthSquared() < 1e-6f)
             return;
-        _rig.Mount(Local(foot), into, size, bow);
+        _rig.Mount(Local(foot), into, size, bow, crown);
     }
 
     /// <summary>Put the driven box where the tank has got to - see
@@ -382,6 +383,19 @@ public sealed partial class WallProp : Node
     {
         float metres = WallRig.MetresPerCell / Mathf.Max(radiusPx, 1e-4f);
         return (float)tank.Atlas.HullBowPx * tank.Sprite.BodyScale * metres;
+    }
+
+    /// <summary>How high this tank's turret roof stands above the ground, in
+    /// metres - <see cref="AtlasSet.TurretTallPx"/> through the same conversion
+    /// <see cref="Box"/> makes, class scale and all. What lifts the driven
+    /// box's crown over the hull so bricks riding the deck meet armour instead
+    /// of crossing the turret sprite. Nought on a set without a turret layer,
+    /// and the rig keeps the hull-high box - see
+    /// <see cref="WallRig.Mount"/>.</summary>
+    public static float Crown(Vehicle tank, float radiusPx)
+    {
+        float metres = WallRig.MetresPerCell / Mathf.Max(radiusPx, 1e-4f);
+        return (float)tank.Atlas.TurretTallPx * tank.Sprite.BodyScale * metres;
     }
 
     /// <summary>How close the standing masonry comes to the middle of its own

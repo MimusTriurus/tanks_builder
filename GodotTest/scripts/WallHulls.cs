@@ -119,22 +119,27 @@ public sealed partial class WallHulls : MeshInstance3D
         _mesh.SurfaceEnd();
     }
 
-    /// <summary>The twelve edges of the driven prow - the same eight corners
-    /// the solver's convex hull is built from, handed over in the rig's own
-    /// metres and drawn in the cell's units like everything else here.</summary>
+    /// <summary>The edges of the driven prow - the same corners the solver's
+    /// convex hull is built from, handed over in the rig's own metres and
+    /// drawn in the cell's units like everything else here.</summary>
     private void Wedge(in Transform3D at, Vector3[] prow, Color ink)
     {
         // Corner order is Mount's: rear face 0-3, front bottom edge 4-5,
-        // front top edge 6-7.
+        // front top edge 6-7, and - when the box carries a crown - the turret
+        // roof 8-11, strutted to the deck corners it shoulders up from.
         ReadOnlySpan<(int A, int B)> edge = stackalloc (int, int)[]
         {
             (0, 1), (1, 3), (3, 2), (2, 0),
             (0, 4), (1, 5), (4, 5),
             (2, 6), (3, 7), (6, 7),
             (4, 6), (5, 7),
+            (8, 9), (9, 11), (11, 10), (10, 8),
+            (2, 8), (3, 9), (6, 10), (7, 11),
         };
         foreach ((int a, int b) in edge)
         {
+            if (b >= prow.Length)
+                continue;
             _mesh!.SurfaceSetColor(ink);
             _mesh.SurfaceAddVertex(at * (prow[a] / WallRig.MetresPerCell));
             _mesh.SurfaceSetColor(ink);

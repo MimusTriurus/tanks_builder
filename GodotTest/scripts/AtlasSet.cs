@@ -1089,6 +1089,11 @@ public sealed class AtlasSet
         atlas.TakeGroundline();
         if (heightImage is not null && heightMeta is not null)
             atlas.TakeHeights(heightImage, heightMeta);
+        // After TakeHeights: the crown is the hull's measured height plus the
+        // drawn gap between the two silhouettes' tops, so it needs both images
+        // and the map's number to stand on.
+        if (turretImage is not null && hullImage is not null)
+            atlas.MeasureTurret(turretImage, hullImage);
         return atlas;
     }
 
@@ -1230,6 +1235,36 @@ public sealed class AtlasSet
     /// </summary>
     public double HullBowPx { get; private set; }
 
+    /// <summary>
+    /// How high the turret's roof stands above the ground, in ground pixels -
+    /// the same scale <see cref="HullTallPx"/> is in, for the one reader the
+    /// hull height deliberately leaves short: the ram's box stops at the deck,
+    /// and bricks riding over it cross the turret sprite as though it were not
+    /// there.
+    ///
+    /// <b>Read off the sprites, because the height map cannot say it</b> - the
+    /// map is indexed by hull heading and the turret turns against it, which is
+    /// why sprite_height.py excludes the turret by design. What the sprites do
+    /// know is how far the turret's topmost drawn pixel stands above the
+    /// hull's own in the same broadside frame: that gap is world rise shortened
+    /// by cos(elevation), and the hull's top is <see cref="HullTallPx"/> - a
+    /// number the map already vouches for - so the roof is the sum. Measured as
+    /// a difference within one frame rather than against the anchor, because
+    /// the anchor is not on the ground (it stands a third of a tile above the
+    /// groundline, caught by printing both); and taken as the mean of the two
+    /// broadsides, so the ground-depth term of the two top points - the part of
+    /// drawn height that is nearness to the camera rather than tallness -
+    /// enters once from each side and mostly cancels.
+    ///
+    /// <b>Solid pixels, not opaque ones</b> - the same word doing the same work
+    /// as in <see cref="FindMuzzles"/>: the topmost <i>opaque</i> pixel of a
+    /// turret is its aerial, and a box grown to the aerial's tip would press on
+    /// courses no armour reaches. Nought when there is no turret layer, no
+    /// height map to stand the difference on, or no gap survived the erosion -
+    /// and the reader keeps the hull-high box it always had.
+    /// </summary>
+    public double TurretTallPx { get; private set; }
+
     /// <summary>Whether this set carries a height map at all. A set rendered
     /// before sprite_height.py existed does not, and falls back to the
     /// groundline lifted by the depth - which is how every set behaved until
@@ -1305,6 +1340,52 @@ public sealed class AtlasSet
         if (bow < (nose - rear) * 0.05 || bow > (nose - rear) * 0.7)
             return;
         HullBowPx = bow;
+    }
+
+    /// <summary>Measure <see cref="TurretTallPx"/> off the two broadside
+    /// frames - see that property for what is read and why a within-frame
+    /// difference, averaged over the two sides, is the honest height.</summary>
+    private void MeasureTurret(Image turretImage, Image hullImage)
+    {
+        if (HullTallPx <= 0.0)
+            return;
+        double gap = 0.0;
+        int seen = 0;
+        foreach (double facing in new[] { 0.0, 180.0 })
+        {
+            int index = FrameFor(facing);
+            if (index < 0 || index >= Count)
+                continue;
+            int roof = TopRow(turretImage, "turret", index);
+            int deck = TopRow(hullImage, "hull", index);
+            if (roof < 0 || deck < 0)
+                continue;
+            gap += deck - roof;
+            seen++;
+        }
+        if (seen == 0 || gap <= 0.0)
+            return;
+        TurretTallPx = HullTallPx
+                       + gap / seen / Math.Cos(Mathf.DegToRad(Elevation));
+    }
+
+    /// <summary>The topmost solid row of one frame of one layer, or -1 when
+    /// nothing survives the erosion. Solid with the aerial-rejecting margin,
+    /// for <see cref="TurretTallPx"/>'s reason.</summary>
+    private int TopRow(Image image, string layer, int index)
+    {
+        Image rgba = image;
+        if (rgba.GetFormat() != Image.Format.Rgba8)
+        {
+            rgba = (Image)image.Duplicate();
+            rgba.Convert(Image.Format.Rgba8);
+        }
+        byte[] data = TileFrom(rgba, layer, index).GetData();
+        for (int y = 0; y < Tile.Y; y++)
+        for (int x = 0; x < Tile.X; x++)
+            if (Solid(data, Tile.X, 0, 0, x, y, 2))
+                return y;
+        return -1;
     }
 
     /// <summary>

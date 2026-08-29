@@ -1442,7 +1442,12 @@ public sealed partial class WallRig : Node3D
     /// <c>WallProp.Bow</c>, measured off the tank's own height map. Nought or
     /// absent keeps the declared slope of a third of the hull, which is what
     /// every box was before the map could be asked.</param>
-    public void Mount(Vector3 at, Vector3 into, Vector3 size, float bow = 0.0f)
+    /// <param name="crown">How high the turret roof stands above the ground,
+    /// in metres - <c>WallProp.Crown</c>, measured off the turret sprite's own
+    /// broadsides. Nought, or no higher than the hull, keeps the deck-high
+    /// wedge every box was before the turret could be asked.</param>
+    public void Mount(Vector3 at, Vector3 into, Vector3 size, float bow = 0.0f,
+                      float crown = 0.0f)
     {
         Dismount();
         into = new Vector3(into.X, 0.0f, into.Z);
@@ -1475,15 +1480,38 @@ public sealed partial class WallRig : Node3D
         float hx = size.X * 0.5f, hy = size.Y * 0.5f, hz = size.Z * 0.5f;
         bow = bow > 0.01f ? Mathf.Min(bow, size.Z * 0.7f) : size.Z * 0.35f;
         _tankBow = bow;
-        _tankProw = new[]
-        {
-            new Vector3(-hx, -hy, hz), new Vector3(hx, -hy, hz),
-            new Vector3(-hx, hy, hz), new Vector3(hx, hy, hz),
-            new Vector3(-hx * 0.5f, -hy, -hz),
-            new Vector3(hx * 0.5f, -hy, -hz),
-            new Vector3(-hx, hy, -hz + bow),
-            new Vector3(hx, hy, -hz + bow),
-        };
+        // The crown: four more corners over the ring, and the hull's convexity
+        // fills in the shoulders - sloped faces from the deck's edges up to the
+        // turret roof, so a brick riding the deck is shed sideways instead of
+        // crossing the turret sprite. The footprint is declared, not measured -
+        // the turret sprite's width is mostly gun barrel at every heading worth
+        // reading - and declared narrow: shoulders too steep throw bricks at
+        // the camera, too wide are a taller slab. Capped at twice the hull for
+        // the bow's reason: a misread sprite must not build a tower.
+        bool crowned = crown > size.Y + 0.05f;
+        float cy = Mathf.Min(crown, size.Y * 2.0f) - hy;
+        float cx = hx * 0.6f, cf = hz * 0.35f;
+        _tankProw = crowned
+            ? new[]
+            {
+                new Vector3(-hx, -hy, hz), new Vector3(hx, -hy, hz),
+                new Vector3(-hx, hy, hz), new Vector3(hx, hy, hz),
+                new Vector3(-hx * 0.5f, -hy, -hz),
+                new Vector3(hx * 0.5f, -hy, -hz),
+                new Vector3(-hx, hy, -hz + bow),
+                new Vector3(hx, hy, -hz + bow),
+                new Vector3(-cx, cy, cf), new Vector3(cx, cy, cf),
+                new Vector3(-cx, cy, -cf), new Vector3(cx, cy, -cf),
+            }
+            : new[]
+            {
+                new Vector3(-hx, -hy, hz), new Vector3(hx, -hy, hz),
+                new Vector3(-hx, hy, hz), new Vector3(hx, hy, hz),
+                new Vector3(-hx * 0.5f, -hy, -hz),
+                new Vector3(hx * 0.5f, -hy, -hz),
+                new Vector3(-hx, hy, -hz + bow),
+                new Vector3(hx, hy, -hz + bow),
+            };
         _tankHull = new CollisionShape3D
         {
             Shape = new ConvexPolygonShape3D { Points = _tankProw },

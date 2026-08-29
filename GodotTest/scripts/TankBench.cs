@@ -1431,7 +1431,8 @@ public sealed partial class TankBench : SceneRoot
         float radius = _field.Atlas.HexRect.Size.X * 0.5f;
         prop.Mount(_stage.Contact(tank),
                    tank.Atlas.GroundDirection(tank.Sprite.HullFacing),
-                   WallProp.Box(tank, radius), WallProp.Bow(tank, radius));
+                   WallProp.Box(tank, radius), WallProp.Bow(tank, radius),
+                   WallProp.Crown(tank, radius));
     }
 
     /// <summary>Drive at the wall from the side it stands on.

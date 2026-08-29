@@ -10290,6 +10290,15 @@ public static class SelfTest
                   + "believable fraction of the hull or nothing at all",
                 bow == 0.0f || (bow > box.Z * 0.05f && bow < box.Z * 0.7f),
                 $"{bow:F2}m of bow on a {box.Z:F2}m hull");
+            // The crown is measured off the turret sprite's broadsides, so it
+            // exists with or without a height map - but it only means anything
+            // against a hull height, so it is judged as the rig judges it:
+            // above the deck, and not a tower.
+            float crown = WallProp.Crown(garage[0], radius);
+            Check("and the turret's crown stands above the deck and below a "
+                  + "tower, so the box grows a roof and not a mast",
+                crown > box.Y && crown < box.Y * 2.5f,
+                $"{crown:F2}m of crown over {box.Y:F2}m of hull");
             // The class scale comes in with all four numbers, which is both
             // why the bench has three classes and the guarantee that resizing
             // a tank never reshapes it: one multiplier, measured proportions.
@@ -11027,7 +11036,8 @@ public static class SelfTest
             // back to the groundline instead of losing its waterline.
             var mapped = new List<string>();
             var bare = new List<string>();
-            string tallTale = "", underTale = "", deepTale = "", prowTale = "";
+            string tallTale = "", underTale = "", deepTale = "", prowTale = "",
+                   crownTale = "";
             int inked = 0, unanswered = 0;
             foreach (string tag in MovementProfile.Tags)
             {
@@ -11067,6 +11077,18 @@ public static class SelfTest
                 else
                     Note($"prow: {tag} stands {set.HullTallPx:0.0}px, glacis "
                          + $"runs {set.HullBowPx:0}px of {set.HullSpan}px");
+                // The crown the box grows over the wedge: a turret roof is
+                // above the deck and not a tower - a reading outside that is a
+                // misread sprite, and the box must keep its deck height. Atlas
+                // pixels against atlas pixels, so no dial can move the band.
+                if (set.TurretTallPx <= set.HullTallPx
+                    || set.TurretTallPx > set.HullTallPx * 2.5)
+                    crownTale = $"{tag} puts the turret roof at "
+                                + $"{set.TurretTallPx:0.0}px over a "
+                                + $"{set.HullTallPx:0.0}px hull";
+                else
+                    Note($"crown: {tag} turret roof at {set.TurretTallPx:0.0}px "
+                         + $"over a {set.HullTallPx:0.0}px hull");
                 set.Waterline(20.0f);
                 int above = 0, moved = 0, rose = 0, fell = 0;
                 var shallow = new int[set.Count * set.Tile.X];
@@ -11129,6 +11151,9 @@ public static class SelfTest
                   + "height above the drawn rise, the glacis a fraction of the "
                   + "hull or honestly nought",
                 prowTale.Length == 0, prowTale);
+            Check("and the crown's measure too: the turret roof above the deck "
+                  + "and no tower",
+                crownTale.Length == 0, crownTale);
             Check("and the water it puts on a tank never stands below its feet",
                 underTale.Length == 0, underTale);
             Check("and deeper water climbs the tank, in every column that moves",
