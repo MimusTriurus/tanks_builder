@@ -622,7 +622,7 @@ public sealed partial class WallStack : Node3D
             _shadeMesh.SetInstanceColor(i, new Color(1.0f, 1.0f, 1.0f, left));
             _shadeMesh.SetInstanceCustomData(i, size);
 
-            if (left >= 1.0f && !Rubble(b.Course, Rig?.Held(i) ?? true))
+            if (left >= 1.0f && !Rubble(b.Course))
             {
                 _mesh.SetInstanceTransform(solid, pose);
                 _mesh.SetInstanceColor(solid, tone);
@@ -656,30 +656,26 @@ public sealed partial class WallStack : Node3D
     }
 
     /// <summary>Whether a piece is rubble rather than masonry: the apron
-    /// (<paramref name="course"/> below zero), or anything the wall has let go of
-    /// (<paramref name="held"/> false).
+    /// (<paramref name="course"/> below zero), and nothing else.
     ///
-    /// <b>Rubble is not masonry</b> - <c>WallRig.Clearance</c>'s sentence
-    /// arriving in a fifth place, and here it decides what occludes a tank.
-    /// Standing masonry is a solid on the board and takes the depth buffer, which
-    /// is what lets it hide a hull behind it. What is lying on the ground is
-    /// dressing on the board instead, and it gives up that fight for
-    /// <see cref="Stage3D.DressOrder"/>'s reason, stated there about undergrowth:
-    /// a tank parks where it lies, and a billboard has one depth while the hull it
-    /// draws is six metres long, so honest depth against a pile at its feet is a
-    /// coin toss reshuffled at every heading. Measured before this: a heap the
-    /// tank had just made was painted across its hull up to the turret ring.
+    /// <b>A piece let go of used to be rubble too, and that clause died with
+    /// the burial it excused.</b> When the ram's box still swallowed what it
+    /// overran, the heap lived inside the hull's own footprint, and honest
+    /// depth against it was a coin toss reshuffled at every heading -
+    /// measured, a heap the tank had just made was painted across its hull up
+    /// to the turret ring. So everything loose was demoted to dressing and
+    /// drawn under the tank wholesale. The shepherd ended the burial: the
+    /// heap now stands before and beside the prow, which is exactly where a
+    /// brick must occlude the hull that pushes it - and drawn as dressing it
+    /// visibly sank behind the sprite instead, "the tank drives over the wall
+    /// it is ploughing". A whole piece is masonry now, standing or shoved,
+    /// and takes the depth buffer; what fades has to blend and stays in the
+    /// dressing pass, which by then is a heap lying still on the ground.
     ///
-    /// <b>What it costs is a brick genuinely between the camera and the tank</b>,
-    /// which now goes behind it. That brick lies on the ground, so it draws below
-    /// the tank's own groundline where the sprite is transparent anyway; the cost
-    /// is bounded to the pile the tank is standing in, which is the pile that was
-    /// wrong before.
-    ///
-    /// A solved flight has no rig and nothing has been let go of, so there the
-    /// apron is the whole of it.</summary>
-    public static bool Rubble(int course, bool held) =>
-        Dressed && (course < 0 || !held);
+    /// The apron keeps the old sentence: it lies inside the cell a tank
+    /// parks on from the moment it is laid, which is the one place the
+    /// billboard's single depth genuinely loses.</summary>
+    public static bool Rubble(int course) => Dressed && course < 0;
 
     /// <summary>Whether rubble is dressing on the board rather than a solid on
     /// it. On, and named here rather than left in the field's initialiser for

@@ -9898,6 +9898,23 @@ public static class SelfTest
                         spared = box.GetCollisionExceptions().Count;
             Check("a box born in rubble excepts what it stood in",
                 spared > 0, $"{spared} exceptions on a box in a fallen wall");
+            // And the ghosts heal. An exception is overlap insurance, and
+            // overlap ends: once the hull has driven clear of a spared
+            // piece, the shepherd removes the pair and the body owns the
+            // brick again - which is what lets a returning hull push the
+            // heap its own ram once ghosted through.
+            for (int s = 1; s <= 30; s++)
+                driven.Drive(
+                    way * (WallRig.Apothem * (1.0f + 1.5f * s / 30.0f)),
+                    way, 0.0f);
+            int healed = 0;
+            foreach (Node child in driven.GetChildren())
+                if (child is AnimatableBody3D box)
+                    healed = box.GetCollisionExceptions().Count;
+            Check("and the ghosts heal behind the hull: what the box was "
+                  + "born inside collides again once it has driven clear",
+                healed < spared,
+                $"{spared} exceptions at birth, {healed} after driving clear");
             // The naming grant: without one (and without a crossing) the box
             // is a pose however far it drives; granted the crossing, it names
             // the leaf for itself at the face - which is what lets the prow
@@ -10475,19 +10492,20 @@ public static class SelfTest
         // --- what rubble does about a hull -------------------------------------
         //
         // Standing masonry is a solid on the board and takes the depth buffer,
-        // which is what lets it hide a tank behind it. Rubble gives that up: a
-        // billboard has one depth and the hull it draws is six metres long, so
-        // honest depth against a pile at its feet is a coin toss reshuffled at
-        // every heading - measured, a heap the tank had just made was painted
-        // across its hull up to the turret ring.
-        Check("the apron is rubble the moment it is laid, a standing course is "
-              + "not, and one the wall has let go of is",
-            WallStack.Rubble(-1, true) && !WallStack.Rubble(3, true)
-            && WallStack.Rubble(3, false),
-            $"apron {WallStack.Rubble(-1, true)}, standing "
-            + $"{WallStack.Rubble(3, true)}, let go {WallStack.Rubble(3, false)}");
+        // which is what lets it hide a tank behind it. Only the apron gives
+        // that up now. A let-go piece used to give it up too, back when the
+        // box swallowed what it overran and the heap lived inside the hull -
+        // drawn honestly it painted across the hull up to the turret ring.
+        // The shepherd ended the burial, and the trade flipped with it: the
+        // heap stands before the prow, and dressing it down made the tank
+        // visibly drive over the wall it was ploughing.
+        Check("the apron is rubble the moment it is laid; a whole piece is "
+              + "masonry, standing or shoved - the heap before the prow hides "
+              + "the hull that pushes it",
+            WallStack.Rubble(-1) && !WallStack.Rubble(3),
+            $"apron {WallStack.Rubble(-1)}, course {WallStack.Rubble(3)}");
         WallStack.Dressed = false;
-        bool asSolid = !WallStack.Rubble(-1, true) && !WallStack.Rubble(3, false);
+        bool asSolid = !WallStack.Rubble(-1);
         WallStack.Dressed = WallStack.DressedByDefault;
         Check("and --solid-rubble puts back the wall whose every piece was a "
               + "solid, which is the A/B the change is judged by",

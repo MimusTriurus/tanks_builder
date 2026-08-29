@@ -310,16 +310,19 @@ public sealed partial class WallRig : Node3D
 
     /// <summary>Pieces the driven box holds a collision exception with - what
     /// it was born inside, and what was released already inside it. Kept so
-    /// each pair is excepted once; cleared with the box.</summary>
+    /// each pair is excepted once - and no longer for the box's whole life:
+    /// the shepherd removes a pair the moment its piece stands clear of the
+    /// wedge while the hull drives, because a ghost that has left the hull
+    /// is just a brick the body should be pushing.</summary>
     private readonly HashSet<int> _sparedByBox = new();
 
-    /// <summary>How many pieces the safety sweep swallowed mid-push - pushed
-    /// hard enough to bury their centre inside the box, then excepted. The
+    /// <summary>How many buried pieces the shepherd carried all the way out
+    /// of the wedge - the count that used to be pieces swallowed and ghosted,
+    /// before burial was answered by eviction instead of by exception. The
     /// wedge exists to make this rare, and the count is what says whether it
-    /// is: a ram that swallows dozens is a prow shaped wrong, and that is a
-    /// number rather than an impression. Reported at <see cref="Dismount"/>,
-    /// reset at <see cref="Mount"/>. Birth exceptions do not count - what the
-    /// box started inside was never pushed at all.</summary>
+    /// is: a ram that has to carry dozens out is a prow shaped wrong, and
+    /// that is a number rather than an impression. Reported at
+    /// <see cref="Dismount"/>, reset at <see cref="Mount"/>.</summary>
     private int _swallowed;
 
     /// <summary>How far back the wedge's slope runs from the leading edge, in
@@ -1586,7 +1589,7 @@ public sealed partial class WallRig : Node3D
         _tankAt = at;
         _tankInto = into;
         _tankTip = centre + into * (_tankSize.Z * 0.5f);
-        Shepherd(centre, speed);
+        Shepherd(centre, speed, ahead);
         if (ahead <= 0.0f)
             return;
         // Released just in time, not two bricks early. NoseShove's lead was
@@ -1653,14 +1656,28 @@ public sealed partial class WallRig : Node3D
     /// in a pile (measured unshepherded: reach 18, 7 off the board, on a
     /// return over the rim its own ram had emptied).
     ///
-    /// <b>The belt over the braces</b>: a piece buried inside the wedge would
-    /// be the solver-overlap pair again, so it is excepted the moment that
-    /// happens. Inside the WEDGE, not the bounding box - the air over the
-    /// slope is exactly where a ploughed brick is supposed to be, and a
-    /// bounds test swallowed 58 pieces of one exit ram, most of them
-    /// section-collapse masonry standing beside the hull. A quarter brick of
-    /// burial past the slope, so a piece being honestly ridden up the prow
-    /// keeps being pushed.
+    /// <b>A buried piece is carried out, not ghosted.</b> It used to be
+    /// excepted on the spot - the solver-overlap pair answered by absence -
+    /// and that was the complaint made flesh: bricks sinking into the hull
+    /// instead of standing before it, 36-85 of them a leg. Now a piece
+    /// buried past a quarter brick of the wedge's own surface (the WEDGE,
+    /// not the bounding box - the air over the slope is exactly where a
+    /// ploughed brick belongs) is moved toward its nearest way out - either
+    /// flank, or forward past the prow, never up and never rearward through
+    /// the hull - by at most the hull's own advance each frame. Carried,
+    /// not thrown: a teleport to the surface would snap a leaf's worth of
+    /// masonry sideways in one frame, and a step bounded by the frame's
+    /// advance reads as the hull squeezing it out. It leaves with outward
+    /// speed matching the hull's, so the face does not immediately
+    /// re-swallow it.
+    ///
+    /// <b>And the ghosts heal.</b> A piece the release excepted (named too
+    /// late, born inside) is carried out the same way while the hull drives,
+    /// and the moment it stands clear of the wedge its exception is removed:
+    /// the body owns it again, which is the whole point. Gated on forward
+    /// progress - a parked hull moves nothing, because nothing honest is
+    /// moving it - so a box born standing in a heap keeps its birth
+    /// exceptions until it actually drives.
     ///
     /// <b>And a muzzle brake on the solver's answer</b>: a piece pinched
     /// between the advancing wedge and something that will not move is
@@ -1668,8 +1685,10 @@ public sealed partial class WallRig : Node3D
     /// teleporting. Anything near the box is capped at twice the hull's
     /// speed (floored at 8 m/s so a crawling hull still lets bricks tumble):
     /// the honest push is at most the hull's speed and is untouched, only
-    /// the shout is muted.</summary>
-    private void Shepherd(Vector3 centre, float speed)
+    /// the shout is muted. The cap is also what lets a buried piece keep
+    /// colliding while it is carried out - the pinch it used to be excepted
+    /// for can no longer shout.</summary>
+    private void Shepherd(Vector3 centre, float speed, float ahead)
     {
         if (_tank is null)
             return;
@@ -1677,30 +1696,73 @@ public sealed partial class WallRig : Node3D
         float bx = _tankSize.X * 0.5f, by = _tankSize.Y * 0.5f,
               bz = _tankSize.Z * 0.5f;
         float cap = Mathf.Max(speed * 2.0f, 8.0f);
+        // How far a buried piece may be carried this frame: the hull's own
+        // advance and a little, so the squeeze converges while never reading
+        // as a jump. Nought when the hull is not driving forward.
+        float creep = ahead > 0.0f ? ahead * 1.5f + _brick * 0.1f : 0.0f;
+        float margin = _brick * 0.5f;
         foreach (int i in _live)
         {
             if (_bodies[i].Freeze)
                 continue;
             Vector3 arm = hold * (_bodies[i].Transform.Origin - centre);
-            if (Mathf.Abs(arm.X) >= bx + _brick
-                || Mathf.Abs(arm.Y) >= by + _brick
-                || Mathf.Abs(arm.Z) >= bz + _brick)
-                continue;
-            Vector3 rush = _bodies[i].LinearVelocity;
-            float pace = rush.Length();
-            if (pace > cap)
-                _bodies[i].LinearVelocity = rush * (cap / pace);
-            if (_sparedByBox.Contains(i))
-                continue;
+            bool near = Mathf.Abs(arm.X) < bx + _brick
+                        && Mathf.Abs(arm.Y) < by + _brick
+                        && Mathf.Abs(arm.Z) < bz + _brick;
+            if (near)
+            {
+                Vector3 rush = _bodies[i].LinearVelocity;
+                float pace = rush.Length();
+                if (pace > cap)
+                    _bodies[i].LinearVelocity = rush * (cap / pace);
+            }
             float prow = -bz + Mathf.Clamp(
                 (arm.Y + by) * (_tankBow / _tankSize.Y), 0.0f, _tankBow);
-            if (Mathf.Abs(arm.X) < bx && Mathf.Abs(arm.Y) < by && arm.Z < bz
-                && arm.Z - prow > _brick * 0.25f)
+            bool buried = Mathf.Abs(arm.X) < bx && Mathf.Abs(arm.Y) < by
+                          && arm.Z < bz && arm.Z - prow > _brick * 0.25f;
+            if (!buried)
             {
-                _tank.AddCollisionExceptionWith(_bodies[i]);
-                _sparedByBox.Add(i);
-                _swallowed++;
+                // Standing clear, the ghost heals - only while the hull
+                // drives, so a parked box keeps what its birth excepted.
+                if (creep > 0.0f && _sparedByBox.Remove(i))
+                    _tank.RemoveCollisionExceptionWith(_bodies[i]);
+                continue;
             }
+            if (creep <= 0.0f)
+                continue;
+            // The nearest way out that can be WON: a flank, whose cost stands
+            // still while the hull advances - never up (a brick surfacing
+            // through the deck is the sunken brick again, one metre higher),
+            // never rearward (the length of the hull), and forward only when
+            // one step finishes it. The forward exit races the hull and
+            // loses: carried past the prow by less than the frame's advance,
+            // the piece is back inside next frame and the box herds it -
+            // measured, a brick surfed half a metre inside the nose for
+            // twenty frames and six metres of drive, which is the sunk-brick
+            // complaint wearing a new coat. One step and clear is the nose
+            // punching a piece out, and that it may do.
+            float starboard = bx + margin - arm.X;
+            float port = arm.X + bx + margin;
+            (Vector3 exit, float cost) = starboard <= port
+                ? (new Vector3(1.0f, 0.0f, 0.0f), starboard)
+                : (new Vector3(-1.0f, 0.0f, 0.0f), port);
+            float fore = arm.Z - prow + margin;
+            if (fore < cost && fore <= creep)
+                (exit, cost) = (new Vector3(0.0f, 0.0f, -1.0f), fore);
+            float step = Mathf.Min(cost, creep);
+            Vector3 way = _tank.Transform.Basis * exit;
+            Transform3D stood = _bodies[i].Transform;
+            _bodies[i].Transform = new Transform3D(
+                stood.Basis, stood.Origin + way * step);
+            // With the hull's own pace outward, so the face is not straight
+            // back on top of it next frame.
+            Vector3 going = _bodies[i].LinearVelocity;
+            float outward = going.Dot(way);
+            float want = Mathf.Max(speed, 1.0f);
+            if (outward < want)
+                _bodies[i].LinearVelocity = going + way * (want - outward);
+            if (step >= cost)
+                _swallowed++;
         }
     }
 
@@ -1726,8 +1788,8 @@ public sealed partial class WallRig : Node3D
         if (!_tankDriven)
             return;
         if (_swallowed > 0)
-            GD.Print($"wall rig: the ram box swallowed {_swallowed} piece(s) "
-                     + "mid-push - see WallRig._swallowed");
+            GD.Print($"wall rig: the ram box carried {_swallowed} buried "
+                     + "piece(s) out of the wedge - see WallRig._swallowed");
         _tankDriven = false;
         _tankFace = -1;
         _sparedByBox.Clear();
