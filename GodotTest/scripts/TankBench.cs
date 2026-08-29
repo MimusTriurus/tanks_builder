@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using Godot;
 
@@ -301,6 +302,75 @@ public sealed partial class TankBench : SceneRoot
     private bool _edges = true;
     private bool _board = true;
 
+    /// <summary>The bench panel's own settings file, beside the project - the
+    /// harness's <c>panel.json</c> arrangement on this panel's rows. One file
+    /// for all three bench scenes, because they share one panel: what differs
+    /// between the boards is the ground, not the dials, and a file per scene
+    /// would be three copies of one row list disagreeing after the first edit
+    /// in any of them.</summary>
+    public const string PanelFile = "bench.json";
+
+    /// <summary>Captions, tooltips, ranges and opening values off
+    /// <see cref="PanelFile"/>. Held on the bench rather than only on the
+    /// panel because --no-ui frees the panel, and the defaults still have to
+    /// be applied and the trace still has to say whether the file was read -
+    /// a settings file that quietly did not load looks exactly like one whose
+    /// settings did nothing.</summary>
+    private PanelText _benchText = new();
+
+    /// <summary>
+    /// Which panel row each start-up flag speaks for - the harness's
+    /// <c>Main.FlagRows</c> on this bench's flags, and for its reason: the
+    /// list is only correct when it can be read at once. A flag missing from
+    /// it still works and is then quietly overruled by <see cref="PanelFile"/>,
+    /// which from outside looks exactly like the flag not arriving.
+    ///
+    /// The wall-shape trio (--sides, --courses, --leaves) is here even though
+    /// the shipped file carries no default for those rows - walls.json owns
+    /// that opening shape, and two files answering one default is what the
+    /// ui doc forbids twice. The claim protects the flag from a default a
+    /// user adds anyway, which nothing can stop and the row's description
+    /// says so.
+    /// </summary>
+    private static readonly Dictionary<string, string[]> FlagRows = new()
+    {
+        ["--tank"] = new[] { "tank.pick.class" },
+        ["--size"] = new[] { "tank.pick.size" },
+        ["--turret"] = new[] { "tank.aim.turret" },
+        ["--scan"] = new[] { "tank.aim.scan" },
+        ["--no-tremble"] = new[] { "tank.ride.tremble" },
+        ["--tremble"] = new[] { "tank.ride.tremble_level" },
+        ["--rumble"] = new[] { "tank.ride.rumble" },
+        ["--no-tracks"] = new[] { "tank.ride.tracks" },
+        ["--no-exhaust"] = new[] { "tank.smoke.on" },
+        ["--exhaust"] = new[] { "tank.smoke.level" },
+        ["--burning"] = new[] { "tank.smoke.burn" },
+        ["--hit"] = new[] { "tank.armour.side" },
+        ["--hit-scale"] = new[] { "tank.armour.calibre" },
+        ["--no-shadow"] = new[] { "tank.armour.shadow" },
+        ["--strike"] = new[] { "wall.ammo" },
+        ["--ammo"] = new[] { "wall.ammo" },
+        ["--force"] = new[] { "wall.force" },
+        ["--bearing"] = new[] { "wall.side" },
+        ["--sides"] = new[] { "wall.sides" },
+        ["--courses"] = new[] { "wall.courses" },
+        ["--leaves"] = new[] { "wall.leaves" },
+        ["--wall-beam"] = new[] { "wall.beam" },
+        ["--no-shove"] = new[] { "wall.shove" },
+        ["--drive-rams"] = new[] { "wall.gate" },
+        ["--no-shunt"] = new[] { "wall.shunt" },
+        ["--no-breach"] = new[] { "wall.breach" },
+        ["--no-crumble"] = new[] { "wall.crumble" },
+        ["--hulls"] = new[] { "wall.hulls" },
+        ["--no-ripples"] = new[] { "tank.view.ripples" },
+        ["--ripple"] = new[] { "tank.view.ripples", "tank.view.shove" },
+    };
+
+    /// <summary>Rows a flag on this run's command line has claimed, so the
+    /// file's opening values keep off them - the conventional order: built-in
+    /// default, then file, then flag.</summary>
+    private readonly HashSet<string> _flagged = new();
+
     /// <summary>Which side the next hand-dealt hit comes from, and the heading it
     /// names. On the tick, with the calibre - see
     /// <see cref="TankTick.HitSide"/>.</summary>
@@ -393,6 +463,11 @@ public sealed partial class TankBench : SceneRoot
             // The five every root here takes - see SceneRoot.
             if (ReadCommonFlag(args, ref i))
                 continue;
+            // Claimed before parsed, so a branch that rejects its argument
+            // still shields its row: a flag that was said and did not parse
+            // should read as a flag that failed, never as the file winning.
+            if (FlagRows.TryGetValue(args[i], out string[]? spoken))
+                _flagged.UnionWith(spoken);
             switch (args[i])
             {
                 case "--tank" when i + 1 < args.Length:
@@ -1164,25 +1239,31 @@ public sealed partial class TankBench : SceneRoot
         Vector2 way = tank.Atlas.GroundDirection(tank.Sprite.HullFacing);
         float half = (float)(tank.Atlas.HullSpan * 0.5 * tank.Sprite.BodyScale);
         Vector2I nose = _field.CellAt(tank.GroundPoint + way * half - _origin);
+        // The box rides always, order or none: mounted on the nearest wall
+        // the hull stands on, beside, or will drive through, posed to the
+        // hull every frame. It used to live only while a ram order did, and
+        // the seam showed: the moment the order ended, the hull went back to
+        // ghosting through the heap its own ram had made. The body is not
+        // what breaks masonry - standing pieces are static and the kinematic
+        // box passes through them - so a permanent box shoves what is already
+        // loose and touches nothing that stands.
+        Rebox(Boxable());
+        bool ramming = Sweeps(tank.Moving, _ramming, _driveRams);
+        // What the intent still bounds is the naming: the gate exists only
+        // under a ram order, and a face named by the last ram is forgotten
+        // with it - an armed box on a plain drive would keep releasing and
+        // breaching, finishing a wall the ram only entered.
+        if (!ramming)
+            _boxed?.Disarm();
+        _boxed?.Drive(_stage.Contact(tank), way, (float)tank.Speed,
+                      ramming ? Gate(tank, way, half) : null);
         // No intent - follow silently, so a later ram diffs against the
-        // present rather than against wherever the last one ended. And no
-        // intent is no box: the order ended or was never a ram, and the heap
-        // the box was holding lies down at once.
-        if (!Sweeps(tank.Moving, _ramming, _driveRams))
+        // present rather than against wherever the last one ended.
+        if (!ramming)
         {
-            Rebox(null);
             _noseCell = nose;
             return;
         }
-        // The box rides the whole order - mounted on the nearest wall still
-        // ahead, retargeted as walls are passed, posed to the hull every
-        // frame. Before the speed guard on purpose: a hull pivoting in rubble
-        // shoves that rubble with its body, which is a turning tank doing what
-        // turning tanks do - the release, gated by forward progress and a
-        // named section, stays silent through the whole turn.
-        Rebox(Boxable());
-        _boxed?.Drive(_stage.Contact(tank), way, (float)tank.Speed,
-                      Gate(tank, way, half));
         // A pivot is not a ram - see _noseCell.
         if (tank.Speed < 1.0)
         {
@@ -1230,17 +1311,25 @@ public sealed partial class TankBench : SceneRoot
         }
     }
 
-    /// <summary>The prop whose rig carries the driven ram box, or null when no
-    /// ram order is under way. One box, one wall: the box lives on the target
-    /// rig's collision bit, so every other wall is invisible to it - the
-    /// intent names what is being rammed, and nothing else is.</summary>
+    /// <summary>The prop whose rig carries the driven box, or null when no
+    /// wall is anywhere near the hull. One box, one wall: the box lives on
+    /// the target rig's collision bit, so every other wall is invisible to
+    /// it. The box itself is permanent company now - what a ram order still
+    /// owns is the naming, not the body (see <see cref="Ram"/>).</summary>
     private WallProp? _boxed;
 
-    /// <summary>The wall the current order is about: the first prop whose cell
-    /// the tank stands on or will drive through. Asked every frame rather than
-    /// latched at the order, so a charge past two walls hands the box from one
-    /// to the next as the first is passed - and a wall behind the tank drops
-    /// out by itself, because a driven path only shortens.</summary>
+    /// <summary>The wall the hull is about: the first prop whose cell the
+    /// tank stands on, will drive through, or stands beside. Asked every
+    /// frame rather than latched, so a charge past two walls hands the box
+    /// from one to the next as the first is passed - and a wall behind the
+    /// tank drops out by itself, because a driven path only shortens.
+    ///
+    /// <b>The neighbours are in the walk because heaps spill.</b> A felled
+    /// section throws its pieces a cell out, so a hull parked beside the
+    /// wall's own cell is parked in that wall's rubble - and a box mounted
+    /// only on the cell itself left exactly that hull ghosting through the
+    /// heap. Own cell first, then the path: during a charge the wall being
+    /// driven at must win over one merely stood beside.</summary>
     private WallProp? Boxable()
     {
         foreach (WallProp prop in _walls)
@@ -1249,6 +1338,10 @@ public sealed partial class TankBench : SceneRoot
         for (int i = Tank.PathStep; i < Tank.Path.Count; i++)
             foreach (WallProp prop in _walls)
                 if (prop.Cell == Tank.Path[i])
+                    return prop;
+        foreach (WallProp prop in _walls)
+            foreach (int heading in HexField.EdgeHeadings)
+                if (_field.Neighbour(Tank.Cell, heading) == prop.Cell)
                     return prop;
         return null;
     }
@@ -2113,11 +2206,22 @@ public sealed partial class TankBench : SceneRoot
     /// <b>Nothing is added to <c>panel.json</c>, and that is deliberate</b> -
     /// <see cref="WallBench.Panel"/>'s reason: the file is checked against the
     /// harness's panel in both directions, so an entry for a row only this bench
-    /// builds would fail that check as a description of nothing. These rows carry
-    /// their own captions and take the built-in fallback.</summary>
+    /// builds would fail that check as a description of nothing. These rows have
+    /// a file of their own instead - <see cref="PanelFile"/>, read through the
+    /// same <see cref="PanelText"/>, checked against these rows in both
+    /// directions at start-up (see <see cref="Vet"/>), its opening values
+    /// applied through the same setters a click uses and kept off any row a
+    /// flag has claimed.</summary>
     private void Panel(CanvasLayer layer)
     {
-        _panel = new ControlPanel();
+        _benchText = PanelText.Load(Path.Combine(
+            ProjectSettings.GlobalizePath("res://"), PanelFile));
+        if (!_benchText.Loaded)
+            GD.Print($"tank bench: panel built-in ({PanelFile}: "
+                     + $"{_benchText.Error})");
+        else
+            GD.Print("tank bench: panel json");
+        _panel = new ControlPanel { Text = _benchText };
         _panel.Prepare();
 
         _panel.Heading("tank.pick", "tank");
@@ -2357,6 +2461,13 @@ public sealed partial class TankBench : SceneRoot
                      });
         _panel.Press("tank.view.reset", "reset  (R)", Reset);
 
+        // The file's opening values, before the NoUi branch can free the
+        // panel: the setters write into the bench, not into widgets, so a
+        // capture reads the same file a session does - the harness's "the
+        // panel is always built" argument, arrived at from the other side.
+        _panel.OpenDefaults(_flagged);
+        Vet();
+
         // Opened on the tank, closed elsewhere. The harness opens every group
         // shut because it has fifty rows in ten of them; here there are eight
         // groups, and the one the bench exists for should not need a click to
@@ -2375,6 +2486,49 @@ public sealed partial class TankBench : SceneRoot
             _panel.QueueFree();
             _panel = null;
         }
+    }
+
+    /// <summary>Check <see cref="PanelFile"/> against the rows this panel just
+    /// built, in both directions - the harness's panel.json check, moved to
+    /// where the bench's row list actually lives. It cannot run in the
+    /// self-test: these rows are delegates onto a live bench, and a second
+    /// declaration of the list just for checking would be the two-statements
+    /// failure the check exists to catch.
+    ///
+    /// <b>The wall group is excused only on a board with no wall</b>: the file
+    /// is one for all three bench scenes, and the group it describes is built
+    /// exactly when there is masonry to point it at - an entry for a row a
+    /// walled board does build is a description, not a leftover.</summary>
+    private void Vet()
+    {
+        if (!_benchText.Loaded || _panel is null)
+            return;
+        var built = _panel.Ids;
+        var haveRows = built.Select(pair => pair.Id).ToHashSet();
+        var fileRows = _benchText.RowIds.ToHashSet();
+        foreach ((string id, string group) in built)
+        {
+            if (!fileRows.Contains(id))
+                GD.PushWarning($"tank bench: {PanelFile} has no entry for "
+                               + $"row {id}");
+            else if (_benchText.GroupOf(id) != group)
+                GD.PushWarning($"tank bench: {PanelFile} puts {id} in group "
+                               + $"'{_benchText.GroupOf(id)}', the panel in "
+                               + $"'{group}'");
+        }
+        foreach (string id in fileRows)
+            if (!haveRows.Contains(id)
+                && !(_walls.Count == 0 && _benchText.GroupOf(id) == "wall"))
+                GD.PushWarning($"tank bench: {PanelFile} names a row this "
+                               + $"panel does not build: {id}");
+        // And the flag table, for the harness's reason: a flag claiming a row
+        // that does not exist protects nothing, so the file overrules it and
+        // the flag reads as one that never arrived.
+        foreach (string id in FlagRows.Values.SelectMany(v => v).Distinct())
+            if (!haveRows.Contains(id)
+                && !(_walls.Count == 0 && id.StartsWith("wall.")))
+                GD.PushWarning($"tank bench: a flag claims row {id}, which "
+                               + "this panel does not build");
     }
 
     // --- input ---------------------------------------------------------------

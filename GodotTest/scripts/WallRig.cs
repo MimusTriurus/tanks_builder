@@ -1405,13 +1405,17 @@ public sealed partial class WallRig : Node3D
     /// bench's own ram (<see cref="Ram"/>) read as a ram was never the release,
     /// it was the box shoving what the release let go.
     ///
-    /// <b>The box exists only while a ram order does, and only on one rig.</b>
-    /// The old swept box died of living always and everywhere - a pivot swept
-    /// six leaves, a box reborn in the last leg's heap measured <c>reach
-    /// 696</c>. Intent bounds its life (the caller mounts on the order and
-    /// dismounts with it), and <see cref="Channel"/> bounds its world: the box
-    /// carries this rig's bit, so every other wall's masonry and rubble are
-    /// not merely ignored but invisible to it.
+    /// <b>The box lives whenever a wall is near, and only on one rig - what
+    /// intent bounds is the naming, not the body.</b> It used to live only
+    /// while a ram order did, and the seam showed: the order over, the hull
+    /// went back to ghosting through its own ram's heap. The old swept box
+    /// died not of living always but of living always <i>armed</i> and being
+    /// reborn in heaps unexcepted - a pivot swept six leaves, a box reborn in
+    /// the last leg's heap measured <c>reach 696</c>; this one is disarmed by
+    /// default (<see cref="Disarm"/> - the caller calls it when the ram order
+    /// ends) and excepts what it is born inside. <see cref="Channel"/> bounds
+    /// its world: the box carries this rig's bit, so every other wall's
+    /// masonry and rubble are not merely ignored but invisible to it.
     ///
     /// <b>What it was born inside, it must not throw.</b> A tank standing in
     /// its own rubble and ordered on is exactly the reborn-box case, and the
@@ -1699,6 +1703,18 @@ public sealed partial class WallRig : Node3D
             }
         }
     }
+
+    /// <summary>Forget the section the box was ploughing, keeping the box.
+    ///
+    /// The box outliving the order is what made this necessary: while it was
+    /// mounted per-ram, <see cref="Dismount"/> cleared the face with the body,
+    /// but a box that stays with the hull carries the last ram's naming into
+    /// the next plain drive - and <see cref="Drive"/> releases and breaches
+    /// for as long as a face is named, so an armed box on an ordinary order
+    /// would finish the wall the ram only entered. The caller says the intent
+    /// ended; the body stays and keeps shoving what is already loose, which
+    /// is the whole point of it staying.</summary>
+    public void Disarm() => _tankFace = -1;
 
     /// <summary>Take the driven box out of the world - the order ended, was
     /// cancelled, or moved on to another wall. The heap it was holding lies

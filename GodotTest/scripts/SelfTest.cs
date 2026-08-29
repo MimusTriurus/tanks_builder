@@ -9926,6 +9926,21 @@ public static class SelfTest
                       + "and ploughs it for itself",
                     granted.Loose > 0 && granted.Struck,
                     $"{granted.Loose} let go, struck {granted.Struck}");
+                // The box outlives the order now, so the order's end has to
+                // take the naming with it: an armed box on a plain drive
+                // would keep releasing and finish a wall the ram only
+                // entered.
+                int ploughed = granted.Loose;
+                granted.Disarm();
+                for (int s = 1; s <= 20; s++)
+                    granted.Drive(
+                        way * (WallRig.Apothem * (1.2f + 0.6f * s / 20.0f)),
+                        way, 0.0f);
+                Check("and disarmed, the box keeps its body but forgets its "
+                      + "section: further advance releases nothing more",
+                    granted.Loose == ploughed && granted.Mounted,
+                    $"{granted.Loose} let go against {ploughed}, "
+                    + $"mounted {granted.Mounted}");
             }
             finally
             {
@@ -10223,11 +10238,20 @@ public static class SelfTest
         {
             float radius = field.Atlas.HexRect.Size.X * 0.5f;
             Vector3 box = WallProp.Box(garage[0], radius);
+            // Judged at unit scale, not as the dial left it: the box rightly
+            // follows the size level, so a panel.json that opens the bench
+            // small halves every side - a legitimate setting that must not
+            // read as a mismeasured tank. Caught live: a 0.5 opening level
+            // put LTP at 0.90m of box and failed an absolute band.
+            float unit = Mathf.Max(garage[0].Sprite.BodyScale, 1e-4f);
             Check("the ram's box is measured off the atlas: longer than it is "
-                  + "wide, and a sane number of metres",
-                box.Z > box.X && box.Z > 2.0f && box.Z < 15.0f
-                && box.X > 0.5f && box.Y > 1.0f && box.Y < 4.5f,
-                $"{box.X:F2} x {box.Y:F2} x {box.Z:F2} m");
+                  + "wide, and a sane number of metres at unit scale",
+                box.Z > box.X && box.Z / unit > 2.0f && box.Z / unit < 15.0f
+                && box.X / unit > 0.5f
+                && box.Y / unit > 1.0f && box.Y / unit < 4.5f,
+                $"{box.X:F2} x {box.Y:F2} x {box.Z:F2} m at {unit:F3}x "
+                + $"({garage[0].Tag}, radius {radius:F1}px, "
+                + $"span {garage[0].Atlas.HullSpan}px)");
             // The height too, where the set carries a height map: the map's
             // range is the hull's own world span, so the box stops being
             // TankTall metres of declaration the moment there is something to
@@ -10271,6 +10295,25 @@ public static class SelfTest
                 $"{box.X:F2} x {box.Y:F2} x {box.Z:F2} + {bow:F2} doubled is "
                 + $"{twice.X:F2} x {twice.Y:F2} x {twice.Z:F2} + {twiceBow:F2}");
         }
+
+        // --- the bench panel's file -------------------------------------------
+        //
+        // What is assertable from the harness: the file loads, and it does not
+        // quietly become a second owner of the wall's opening shape. The
+        // two-way row check cannot run here - the bench's rows are delegates
+        // onto a live bench, and a second declaration of the list just for
+        // checking would be the failure the check catches - so it runs in
+        // TankBench.Vet at every bench start-up, loudly.
+        PanelText benchText = PanelText.Load(System.IO.Path.Combine(
+            ProjectSettings.GlobalizePath("res://"), TankBench.PanelFile));
+        Check("the bench panel has a file of its own, so what it opens on is "
+              + "edited rather than recompiled",
+            benchText.Loaded, benchText.Error);
+        Check("and the wall's opening shape stays walls.json's alone: the "
+              + "panel file carries no default for sides, courses or leaves",
+            new[] { "wall.sides", "wall.courses", "wall.leaves" }
+                .All(id => benchText.Default(id) is null),
+            "a second owner of the wall's shape, quietly outranking walls.json");
 
         // --- a breach takes the section --------------------------------------
         //

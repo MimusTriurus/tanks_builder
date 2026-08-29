@@ -314,6 +314,11 @@ public sealed partial class WallProp : Node
     /// answers with a no-op.</summary>
     public void Dismount() => _rig?.Dismount();
 
+    /// <summary>Forget the section the box was ploughing, keeping the box -
+    /// see <see cref="WallRig.Disarm"/>. What the end of a ram order does now
+    /// that the box outlives it.</summary>
+    public void Disarm() => _rig?.Disarm();
+
     /// <summary>How many standing pieces a hull at <paramref name="foot"/> is
     /// pressing against - <see cref="WallRig.Against"/>, in the board's own
     /// terms, with the same conversion <see cref="Rammed"/> makes and for the

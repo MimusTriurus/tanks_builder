@@ -398,13 +398,28 @@ public sealed partial class ControlPanel : PanelContainer
             Refresh = () => drop.Selected = Math.Clamp(get(), 0, options.Count - 1),
             // Named, not numbered: an index into a list whose length is whatever
             // loaded picks a different tank the day a fourth one appears.
+            //
+            // A unique prefix names too. Option labels carry live figures
+            // ("MTP  183 px/s"), so a file that had to quote one exactly would
+            // be a setting that quietly dies on the next re-render - the tag
+            // is the name, the figure is decoration. Exact match still wins,
+            // and a prefix two options share sets nothing.
             Open = t =>
             {
                 if (t.Choice(id) is not string want)
                     return;
+                int at = -1;
                 for (int i = 0; i < options.Count; i++)
-                    if (string.Equals(options[i], want, StringComparison.OrdinalIgnoreCase))
-                        set(i);
+                    if (string.Equals(options[i], want,
+                                      StringComparison.OrdinalIgnoreCase))
+                        at = i;
+                if (at < 0)
+                    for (int i = 0; i < options.Count; i++)
+                        if (options[i].StartsWith(want,
+                                StringComparison.OrdinalIgnoreCase))
+                            at = at < 0 ? i : -2;
+                if (at >= 0)
+                    set(at);
             },
         });
     }
