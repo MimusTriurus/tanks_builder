@@ -293,14 +293,20 @@ public sealed partial class WallProp : Node
     }
 
     /// <summary>Put the driven box where the tank has got to - see
-    /// <see cref="WallRig.Drive"/>. Speed in board pixels a second, converted
-    /// the way <see cref="Rammed"/> converts it.</summary>
-    public void Drive(Vector3 foot, Vector2 flatDir, float speedPx)
+    /// <see cref="WallRig.Drive"/>. Speed in board pixels a second and the
+    /// naming gate as a world point, both converted the way
+    /// <see cref="Rammed"/> converts its arguments - the gate crosses the seam
+    /// as a point precisely so the isometric squash cannot halve a vertical
+    /// ram's grant; a null gate passes through as the prohibition it
+    /// is.</summary>
+    public void Drive(Vector3 foot, Vector2 flatDir, float speedPx,
+                      Vector3? gateWorld)
     {
         if (_rig is null || _wall is null || Field.Atlas is null)
             return;
         _rig.Drive(Local(foot), Into(flatDir),
-                   speedPx * WallRig.MetresPerCell / RadiusPx);
+                   speedPx * WallRig.MetresPerCell / RadiusPx,
+                   gateWorld is { } gate ? Local(gate) : null);
     }
 
     /// <summary>Take the driven box off this prop's rig, if it carries one.

@@ -9898,6 +9898,39 @@ public static class SelfTest
                         spared = box.GetCollisionExceptions().Count;
             Check("a box born in rubble excepts what it stood in",
                 spared > 0, $"{spared} exceptions on a box in a fallen wall");
+            // The naming grant: without one (and without a crossing) the box
+            // is a pose however far it drives; granted the crossing, it names
+            // the leaf for itself at the face - which is what lets the prow
+            // meet a leaf standing 0.4m before the rim the cell-flip naming
+            // arrived too late for.
+            var granted = new WallRig();
+            try
+            {
+                WallKit.Plan second = WallKit.Lay(new WallKit.Recipe());
+                WallKit.Fit(second, 0.97f);
+                granted.Raise(second, Array.Empty<Vector3>());
+                granted.Mount(Vector3.Zero, way, hull);
+                for (int s = 1; s <= 40; s++)
+                    granted.Drive(way * (WallRig.Apothem * 1.2f * s / 40.0f),
+                                  way, 0.0f);
+                Check("without a grant or a crossing, the box names nothing "
+                      + "however far it drives",
+                    granted.Loose == 0 && !granted.Struck,
+                    $"{granted.Loose} let go, struck {granted.Struck}");
+                granted.Dismount();
+                granted.Mount(Vector3.Zero, way, hull);
+                for (int s = 1; s <= 40; s++)
+                    granted.Drive(way * (WallRig.Apothem * 1.2f * s / 40.0f),
+                                  way, 0.0f, way * 100.0f);
+                Check("granted the crossing, it names the leaf at its face "
+                      + "and ploughs it for itself",
+                    granted.Loose > 0 && granted.Struck,
+                    $"{granted.Loose} let go, struck {granted.Struck}");
+            }
+            finally
+            {
+                granted.Free();
+            }
         }
         finally
         {

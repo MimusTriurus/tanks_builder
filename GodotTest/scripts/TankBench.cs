@@ -1181,7 +1181,8 @@ public sealed partial class TankBench : SceneRoot
         // turning tanks do - the release, gated by forward progress and a
         // named section, stays silent through the whole turn.
         Rebox(Boxable());
-        _boxed?.Drive(_stage.Contact(tank), way, (float)tank.Speed);
+        _boxed?.Drive(_stage.Contact(tank), way, (float)tank.Speed,
+                      Gate(tank, way, half));
         // A pivot is not a ram - see _noseCell.
         if (tank.Speed < 1.0)
         {
@@ -1250,6 +1251,75 @@ public sealed partial class TankBench : SceneRoot
                 if (prop.Cell == Tank.Path[i])
                     return prop;
         return null;
+    }
+
+    /// <summary>The point on the rim the current order still has to cross with
+    /// the boxed wall's masonry on it - the naming gate of
+    /// <see cref="WallRig.Drive"/>, null when there is no such rim. Walked off
+    /// the remaining path: every consecutive pair touching the wall's cell is
+    /// a rim the order crosses, and the farthest one still ahead of the nose
+    /// is how far the hull is entitled to name masonry for itself. A world
+    /// point rather than a distance, because the distance was first measured
+    /// in flat screen coordinates where the isometric squash halves vertical
+    /// lengths: a vertical ram's grant came out half its true size, the
+    /// naming arrived late, and the leaf fell flat off the swallowed branch
+    /// while diagonal rams ploughed correctly. A wall the order parks short
+    /// of never enters this walk, which is what keeps a hull braking to a
+    /// stop in its own ring from naming the leaf its nose merely clears by
+    /// less than a corner.</summary>
+    private Vector3? Gate(Vehicle tank, Vector2 way, float half)
+    {
+        if (_boxed is null || _stage is null || _field.Atlas is null)
+            return null;
+        Vector2 nose = tank.GroundPoint + way * half - _origin;
+        Vector3? gate = null;
+        float best = float.NegativeInfinity;
+        Vector2I prev = tank.Cell;
+        for (int i = tank.PathStep; i < tank.Path.Count; i++)
+        {
+            Vector2I next = tank.Path[i];
+            if (prev != _boxed.Cell && next != _boxed.Cell)
+            {
+                prev = next;
+                continue;
+            }
+            // Only while the hull actually faces this crossing: measured off
+            // the pose alone, a hull swinging through its turn at the start
+            // of a return leg pointed its nose into the mitre of the leaf
+            // NEXT to the breach for a few frames, named it, and BreachShare
+            // took the whole neighbour - a section felled by a pivot, the
+            // exact sentence the nose-cell freeze exists to forbid. Thirty
+            // degrees of the crossing's own direction is a hull that is
+            // driving at the rim, not past it; both vectors carry the same
+            // squash, so the angle test is consistent with itself - and both
+            // are normalized, because GroundDirection is not: a vertical
+            // heading comes back squash long (0.5), so an unnormalized dot
+            // could never reach 0.87 and the gate stayed shut on every
+            // vertical ram - the leaf fell flat off the late-named branch
+            // while diagonals ploughed.
+            Vector2 dir = _field.FlatAnchor(next) - _field.FlatAnchor(prev);
+            if (dir.LengthSquared() >= 1e-6f && way.LengthSquared() >= 1e-6f
+                && dir.Normalized().Dot(way.Normalized()) >= 0.87f)
+            {
+                Vector2 mid = (_field.FlatAnchor(prev)
+                               + _field.FlatAnchor(next)) * 0.5f
+                              + _field.CentreOffset;
+                float d = (mid - nose).Dot(way);
+                if (d > best)
+                {
+                    best = d;
+                    // The same expression WallProp.Build stands its wall
+                    // with, so the gate cannot disagree with where the rim
+                    // is drawn.
+                    gate = Stage3D.World(
+                        _stage.Origin + mid,
+                        _field.LevelAt(_boxed.Cell) * _field.Lift,
+                        _field.Squash, _field.RiseFactor);
+                }
+            }
+            prev = next;
+        }
+        return gate;
     }
 
     /// <summary>Move the driven box to <paramref name="prop"/>'s rig - a
