@@ -1335,9 +1335,10 @@ public sealed partial class TankBench : SceneRoot
         if (prop is null || _stage is null || _field.Atlas is null)
             return;
         Vehicle tank = Tank;
+        float radius = _field.Atlas.HexRect.Size.X * 0.5f;
         prop.Mount(_stage.Contact(tank),
                    tank.Atlas.GroundDirection(tank.Sprite.HullFacing),
-                   WallProp.Box(tank, _field.Atlas.HexRect.Size.X * 0.5f));
+                   WallProp.Box(tank, radius), WallProp.Bow(tank, radius));
     }
 
     /// <summary>Drive at the wall from the side it stands on.

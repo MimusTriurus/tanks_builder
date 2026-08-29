@@ -10226,19 +10226,50 @@ public static class SelfTest
             Check("the ram's box is measured off the atlas: longer than it is "
                   + "wide, and a sane number of metres",
                 box.Z > box.X && box.Z > 2.0f && box.Z < 15.0f
-                && box.X > 0.5f && box.Y == WallRig.TankTall,
+                && box.X > 0.5f && box.Y > 1.0f && box.Y < 4.5f,
                 $"{box.X:F2} x {box.Y:F2} x {box.Z:F2} m");
-            // The class scale comes in with it, which is the whole reason the
-            // bench has three: a heavy rams with a bigger box than a light.
+            // The height too, where the set carries a height map: the map's
+            // range is the hull's own world span, so the box stops being
+            // TankTall metres of declaration the moment there is something to
+            // measure - and stays exactly that on a set with nothing to ask.
+            Check("and its height is the height map's answer where there is "
+                  + "one, not the declared constant",
+                garage[0].Atlas.HullTallPx > 0.0
+                    ? Mathf.Abs(box.Y - (float)garage[0].Atlas.HullTallPx
+                                * garage[0].Sprite.BodyScale
+                                * WallRig.MetresPerCell / radius) < 0.01f
+                    : box.Y == WallRig.TankTall,
+                $"{box.Y:F2}m of box against {garage[0].Atlas.HullTallPx:F1}px "
+                + "of map");
+            // The prow's slope is the sprite's own where it could be read:
+            // a run of nought builds the declared third-of-the-hull wedge,
+            // anything measured has to be a fraction a glacis could be.
+            float bow = WallProp.Bow(garage[0], radius);
+            Check("and the glacis run is measured off the same map, a "
+                  + "believable fraction of the hull or nothing at all",
+                bow == 0.0f || (bow > box.Z * 0.05f && bow < box.Z * 0.7f),
+                $"{bow:F2}m of bow on a {box.Z:F2}m hull");
+            // The class scale comes in with all four numbers, which is both
+            // why the bench has three classes and the guarantee that resizing
+            // a tank never reshapes it: one multiplier, measured proportions.
             float was = garage[0].Sprite.BodyScale;
             garage[0].Sprite.BodyScale = was * 2.0f;
             Vector3 twice = WallProp.Box(garage[0], radius);
+            float twiceBow = WallProp.Bow(garage[0], radius);
             garage[0].Sprite.BodyScale = was;
-            Check("and the class scale comes in with it, so a heavy rams with a "
-                  + "bigger box than a light",
+            Check("and the class scale comes in with it - every side and the "
+                  + "bow together - so a resized tank is the same shape pushed "
+                  + "larger, never a different one",
                 Mathf.Abs(twice.Z - box.Z * 2.0f) < 0.01f
-                && Mathf.Abs(twice.X - box.X * 2.0f) < 0.01f,
-                $"{box.Z:F2}m doubled is {twice.Z:F2}m");
+                && Mathf.Abs(twice.X - box.X * 2.0f) < 0.01f
+                // A declared height is a constant, and a constant does not
+                // scale - only what was measured has proportions to keep.
+                && (garage[0].Atlas.HullTallPx > 0.0
+                    ? Mathf.Abs(twice.Y - box.Y * 2.0f) < 0.01f
+                    : twice.Y == box.Y)
+                && Mathf.Abs(twiceBow - bow * 2.0f) < 0.01f,
+                $"{box.X:F2} x {box.Y:F2} x {box.Z:F2} + {bow:F2} doubled is "
+                + $"{twice.X:F2} x {twice.Y:F2} x {twice.Z:F2} + {twiceBow:F2}");
         }
 
         // --- a breach takes the section --------------------------------------
@@ -10935,7 +10966,7 @@ public static class SelfTest
             // back to the groundline instead of losing its waterline.
             var mapped = new List<string>();
             var bare = new List<string>();
-            string tallTale = "", underTale = "", deepTale = "";
+            string tallTale = "", underTale = "", deepTale = "", prowTale = "";
             int inked = 0, unanswered = 0;
             foreach (string tag in MovementProfile.Tags)
             {
@@ -10958,6 +10989,23 @@ public static class SelfTest
                 if (set.HeightSpanPx <= 0.0 || set.HeightSpanPx >= set.Tile.Y)
                     tallTale = $"{tag} says one tank is {set.HeightSpanPx:0.0}px "
                                + $"of rise in a {set.Tile.Y}px tile";
+                // The two numbers the ram's wedge is built from. The true
+                // height has to stand above the drawn rise - the rise is that
+                // height shortened by cos(elevation) - and a bow is either
+                // unmeasurable (nought, the wedge keeps its declared slope) or
+                // a fraction of the hull a glacis could actually be.
+                if (set.HullTallPx <= set.HeightSpanPx
+                    || set.HullTallPx >= set.Tile.Y)
+                    prowTale = $"{tag} stands {set.HullTallPx:0.0}px tall "
+                               + $"against {set.HeightSpanPx:0.0}px of rise";
+                else if (set.HullBowPx > 0.0
+                         && (set.HullBowPx < set.HullSpan * 0.05
+                             || set.HullBowPx > set.HullSpan * 0.7))
+                    prowTale = $"{tag} runs a {set.HullBowPx:0}px glacis on a "
+                               + $"{set.HullSpan}px hull";
+                else
+                    Note($"prow: {tag} stands {set.HullTallPx:0.0}px, glacis "
+                         + $"runs {set.HullBowPx:0}px of {set.HullSpan}px");
                 set.Waterline(20.0f);
                 int above = 0, moved = 0, rose = 0, fell = 0;
                 var shallow = new int[set.Count * set.Tile.X];
@@ -11016,6 +11064,10 @@ public static class SelfTest
                 "no set loaded at all, so neither path was exercised");
             Check("and where there is one it is a tank's height, not a tile's",
                 tallTale.Length == 0, tallTale);
+            Check("and the wedge's two measures come out believable: the true "
+                  + "height above the drawn rise, the glacis a fraction of the "
+                  + "hull or honestly nought",
+                prowTale.Length == 0, prowTale);
             Check("and the water it puts on a tank never stands below its feet",
                 underTale.Length == 0, underTale);
             Check("and deeper water climbs the tank, in every column that moves",

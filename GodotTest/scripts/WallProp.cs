@@ -282,14 +282,14 @@ public sealed partial class WallProp : Node
     /// <summary>Stand the driven box on this prop's rig - see
     /// <see cref="WallRig.Mount"/>. In the board's own terms, with the same
     /// conversion <see cref="Rammed"/> makes and for the same reason.</summary>
-    public void Mount(Vector3 foot, Vector2 flatDir, Vector3 size)
+    public void Mount(Vector3 foot, Vector2 flatDir, Vector3 size, float bow)
     {
         if (_rig is null || _wall is null || Field.Atlas is null)
             return;
         Vector3 into = Into(flatDir);
         if (into.LengthSquared() < 1e-6f)
             return;
-        _rig.Mount(Local(foot), into, size);
+        _rig.Mount(Local(foot), into, size, bow);
     }
 
     /// <summary>Put the driven box where the tank has got to - see
@@ -344,12 +344,16 @@ public sealed partial class WallProp : Node
     /// bench has three: a heavy rams with a bigger box than a light, and the
     /// difference is the same 0.85/1.00/1.15 the picture shows.
     ///
-    /// <b>The height is <see cref="WallRig.TankTall"/> and is a named hole.</b> A
-    /// sprite has no height in metres - the height map
-    /// (<c>sprite_height.py</c>) carries screen rise, which mixes height with
-    /// depth - so this is the one figure here that is declared rather than
-    /// measured. It decides how many courses a ram reaches, and nothing on
-    /// screen would say if it were wrong.
+    /// <b>The height is measured too, off the height map's own range</b> -
+    /// <see cref="AtlasSet.HullTallPx"/>, which closes what used to be a named
+    /// hole here. The map's range is a true world span, invariant under the
+    /// turntable, so it converts by the same chain the length does; what it
+    /// deliberately leaves out is the turret, and for this reader that is the
+    /// right height: masonry is pushed by the hull and its running gear, not
+    /// by what turns on top of them. A set rendered before sprite_height.py
+    /// existed carries no map, and falls back to the declared
+    /// <see cref="WallRig.TankTall"/> - which is every height this box ever
+    /// had before the map arrived.
     /// </summary>
     public static Vector3 Box(Vehicle tank, float radiusPx)
     {
@@ -357,8 +361,22 @@ public sealed partial class WallProp : Node
         float scale = tank.Sprite.BodyScale;
         float length = tank.Atlas.HullSpan * scale * metres;
         float gauge = (float)(tank.Atlas.TrackArm * 2.0) * scale * metres;
+        float tall = (float)tank.Atlas.HullTallPx * scale * metres;
         return new Vector3(
-            gauge > 0.01f ? gauge : length * 0.5f, WallRig.TankTall, length);
+            gauge > 0.01f ? gauge : length * 0.5f,
+            tall > 0.1f ? tall : WallRig.TankTall, length);
+    }
+
+    /// <summary>How long this tank's glacis runs, nose to deck, in metres -
+    /// <see cref="AtlasSet.HullBowPx"/> through the same conversion
+    /// <see cref="Box"/> makes, class scale and all, so the wedge the rig
+    /// builds from the two keeps the sprite's own proportions at any size.
+    /// Nought on a set without a height map, and the rig keeps its declared
+    /// slope - see <see cref="WallRig.Mount"/>.</summary>
+    public static float Bow(Vehicle tank, float radiusPx)
+    {
+        float metres = WallRig.MetresPerCell / Mathf.Max(radiusPx, 1e-4f);
+        return (float)tank.Atlas.HullBowPx * tank.Sprite.BodyScale * metres;
     }
 
     /// <summary>How close the standing masonry comes to the middle of its own

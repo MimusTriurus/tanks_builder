@@ -1182,6 +1182,54 @@ public sealed class AtlasSet
     /// standing so many pixels above the tank's feet.</summary>
     public double HeightSpanPx { get; private set; }
 
+    /// <summary>
+    /// How tall the hull and its tracks are, in ground pixels - the same scale
+    /// <see cref="HullSpan"/> is in, so the two convert to metres by the one
+    /// chain.
+    ///
+    /// <b>Not <see cref="HeightSpanPx"/>, and the difference is the camera.</b>
+    /// The span is the rise as drawn, which is the true height shortened by
+    /// cos(elevation); this is the map's own range divided by the render's
+    /// units-per-pixel, which is the height a tape measure would find. It can
+    /// be trusted for exactly the reason the map stores height rather than
+    /// depth: height is invariant under the turntable, so this is one number
+    /// and not one per heading.
+    ///
+    /// <b>The turret is not in it, by the map's own design</b> - it turns
+    /// against the hull the map is indexed by. For the one reader this serves,
+    /// the ram's box, that is the right height anyway: what pushes masonry is
+    /// the hull and its running gear, and a box the turret's height would press
+    /// on courses the glacis never reaches. Nought on a set rendered before
+    /// sprite_height.py existed, and the reader falls back to the declared
+    /// <c>WallRig.TankTall</c> - which is how every set behaved until this
+    /// arrived.
+    /// </summary>
+    public double HullTallPx { get; private set; }
+
+    /// <summary>
+    /// How long the glacis runs, nose tip to deck, in ground pixels - the
+    /// measured slope of the frontal armour, for the wedge the ram drives.
+    ///
+    /// <b>Read off the broadside frame of the height map</b>, the one heading
+    /// where along-the-hull is along-the-screen: <see cref="FrameFor"/>(0)
+    /// faces screen-right (<see cref="GroundDirection"/>(0) is +X), so the
+    /// nose is the rightmost inked column and needs no guessing at. Each
+    /// column's crest is the tallest surface in it - the near track and the
+    /// hull compete, and the winner is whichever actually meets a brick first,
+    /// which is the shape a plough wants. The bow is then the distance from
+    /// the nose back to where the crest reaches nine tenths of its climb to
+    /// the deck.
+    ///
+    /// <b>Nought when it cannot be trusted</b>: no map at all, or a measured
+    /// run outside a twentieth-to-seven-tenths of the silhouette - a profile
+    /// that flat or that steep is a misread frame, not a tank - and the reader
+    /// keeps its declared slope instead of building a plate or a ramp the
+    /// length of the hull. Ground pixels, like <see cref="HullTallPx"/>:
+    /// screen columns are unforeshortened along the ground, so the count is
+    /// the world length.
+    /// </summary>
+    public double HullBowPx { get; private set; }
+
     /// <summary>Whether this set carries a height map at all. A set rendered
     /// before sprite_height.py existed does not, and falls back to the
     /// groundline lifted by the depth - which is how every set behaved until
@@ -1215,6 +1263,48 @@ public sealed class AtlasSet
             }
         }
         _heights = map;
+        HullTallPx = (meta.HeightRange[1] - meta.HeightRange[0])
+                     / meta.UnitsPerPixel;
+        MeasureProw();
+    }
+
+    /// <summary>Measure <see cref="HullBowPx"/> off the height map's broadside
+    /// frame - see that property for what is read and why it can be.</summary>
+    private void MeasureProw()
+    {
+        if (_heights is null || Tile.X <= 0 || Count <= 0)
+            return;
+        int frame = FrameFor(0.0);
+        if (frame < 0 || frame >= Count)
+            return;
+        var crest = new byte[Tile.X];
+        for (int x = 0; x < Tile.X; x++)
+        for (int y = 0; y < Tile.Y; y++)
+        {
+            byte code = _heights[(frame * Tile.Y + y) * Tile.X + x];
+            if (code > crest[x])
+                crest[x] = code;
+        }
+        int nose = -1, rear = -1, deck = 0;
+        for (int x = 0; x < Tile.X; x++)
+        {
+            if (crest[x] == 0)
+                continue;
+            if (rear < 0)
+                rear = x;
+            nose = x;
+            deck = Math.Max(deck, crest[x]);
+        }
+        if (nose <= rear)
+            return;
+        double brow = crest[nose] + 0.9 * (deck - crest[nose]);
+        int at = nose;
+        while (at > rear && crest[at] < brow)
+            at--;
+        int bow = nose - at;
+        if (bow < (nose - rear) * 0.05 || bow > (nose - rear) * 0.7)
+            return;
+        HullBowPx = bow;
     }
 
     /// <summary>

@@ -1431,7 +1431,11 @@ public sealed partial class WallRig : Node3D
     /// the box centre is lifted by half its own height here.</param>
     /// <param name="into">Which way the hull faces, in the prop's frame.</param>
     /// <param name="size">The hull's box, in metres - <c>WallProp.Box</c>.</param>
-    public void Mount(Vector3 at, Vector3 into, Vector3 size)
+    /// <param name="bow">How long the glacis runs, nose to deck, in metres -
+    /// <c>WallProp.Bow</c>, measured off the tank's own height map. Nought or
+    /// absent keeps the declared slope of a third of the hull, which is what
+    /// every box was before the map could be asked.</param>
+    public void Mount(Vector3 at, Vector3 into, Vector3 size, float bow = 0.0f)
     {
         Dismount();
         into = new Vector3(into.X, 0.0f, into.Z);
@@ -1447,18 +1451,22 @@ public sealed partial class WallRig : Node3D
             Transform = new Transform3D(
                 Basis.LookingAt(into, Vector3.Up), centre),
         };
-        // A prow, not a wall: the front third is a wedge - the bottom edge
-        // leads at half width, the top is set back at full - so a brick met
-        // by the advancing face is pushed up-forward and aside along the
-        // slope instead of being pinched between a vertical plate and the
-        // ground. Measured flat-faced, the hull toppled the wall onto itself
-        // and swallowed what fell in; the wedge is what turns "run down" into
-        // "ploughed through". One convex hull, because two shapes on one body
-        // are two chances to pinch in the seam. Forward is -Z under
-        // LookingAt; Ram()/Hull() keep reporting the bounding box, so the
-        // overlay draws the frame the wedge lives in.
+        // A prow, not a wall: the front is a wedge - the bottom edge leads at
+        // half width, the top is set back by the bow - so a brick met by the
+        // advancing face is pushed up-forward and aside along the slope
+        // instead of being pinched between a vertical plate and the ground.
+        // Measured flat-faced, the hull toppled the wall onto itself and
+        // swallowed what fell in; the wedge is what turns "run down" into
+        // "ploughed through". The bow is the tank's own where the atlas
+        // could measure one, and a declared third of the hull where it could
+        // not - capped short of the box's own length either way, because a
+        // ramp the length of the hull is not a prow, it is a different shape
+        // with no measurement behind it. One convex hull, because two shapes
+        // on one body are two chances to pinch in the seam. Forward is -Z
+        // under LookingAt; Ram()/Hull() keep reporting the bounding box, so
+        // the overlay draws the frame the wedge lives in.
         float hx = size.X * 0.5f, hy = size.Y * 0.5f, hz = size.Z * 0.5f;
-        float bow = size.Z * 0.35f;
+        bow = bow > 0.01f ? Mathf.Min(bow, size.Z * 0.7f) : size.Z * 0.35f;
         _tankBow = bow;
         _tankProw = new[]
         {
