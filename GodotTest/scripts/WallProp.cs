@@ -261,15 +261,52 @@ public sealed partial class WallProp : Node
         Vector3 into = Into(flatDir);
         if (into.LengthSquared() < 1e-6f)
             return -1;
-        Vector3 local = new Basis(Vector3.Up, -Lay)
-                        * ((foot - _wall.Anchor) / RadiusPx)
-                        * WallRig.MetresPerCell;
         // The box's middle, off the contact point: a tank stands on the ground,
         // and everything on this board that is put somewhere is put by where it
         // touches it.
-        return _rig.Rammed(local + Vector3.Up * (size.Y * 0.5f), into,
+        return _rig.Rammed(Local(foot) + Vector3.Up * (size.Y * 0.5f), into,
                            speedPx * WallRig.MetresPerCell / RadiusPx, size);
     }
+
+    /// <summary>A board point in the prop's own metres - the one turn every
+    /// call that crosses the seam makes, written once. Callers guard
+    /// <c>_wall</c> themselves, the way they already guard the rig.</summary>
+    private Vector3 Local(Vector3 foot) =>
+        new Basis(Vector3.Up, -Lay)
+        * ((foot - _wall!.Anchor) / RadiusPx)
+        * WallRig.MetresPerCell;
+
+    /// <summary>Whether this prop's rig carries the driven box.</summary>
+    public bool Mounted => _rig?.Mounted ?? false;
+
+    /// <summary>Stand the driven box on this prop's rig - see
+    /// <see cref="WallRig.Mount"/>. In the board's own terms, with the same
+    /// conversion <see cref="Rammed"/> makes and for the same reason.</summary>
+    public void Mount(Vector3 foot, Vector2 flatDir, Vector3 size)
+    {
+        if (_rig is null || _wall is null || Field.Atlas is null)
+            return;
+        Vector3 into = Into(flatDir);
+        if (into.LengthSquared() < 1e-6f)
+            return;
+        _rig.Mount(Local(foot), into, size);
+    }
+
+    /// <summary>Put the driven box where the tank has got to - see
+    /// <see cref="WallRig.Drive"/>. Speed in board pixels a second, converted
+    /// the way <see cref="Rammed"/> converts it.</summary>
+    public void Drive(Vector3 foot, Vector2 flatDir, float speedPx)
+    {
+        if (_rig is null || _wall is null || Field.Atlas is null)
+            return;
+        _rig.Drive(Local(foot), Into(flatDir),
+                   speedPx * WallRig.MetresPerCell / RadiusPx);
+    }
+
+    /// <summary>Take the driven box off this prop's rig, if it carries one.
+    /// Safe on a prop whose wall was re-laid: the new rig carries no box and
+    /// answers with a no-op.</summary>
+    public void Dismount() => _rig?.Dismount();
 
     /// <summary>How many standing pieces a hull at <paramref name="foot"/> is
     /// pressing against - <see cref="WallRig.Against"/>, in the board's own
@@ -282,10 +319,8 @@ public sealed partial class WallProp : Node
         Vector3 into = Into(flatDir);
         if (into.LengthSquared() < 1e-6f)
             return 0;
-        Vector3 local = new Basis(Vector3.Up, -Lay)
-                        * ((foot - _wall.Anchor) / RadiusPx)
-                        * WallRig.MetresPerCell;
-        return _rig.Against(local + Vector3.Up * (size.Y * 0.5f), into, size);
+        return _rig.Against(Local(foot) + Vector3.Up * (size.Y * 0.5f), into,
+                            size);
     }
 
     /// <summary>

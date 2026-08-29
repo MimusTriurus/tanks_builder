@@ -9830,6 +9830,80 @@ public static class SelfTest
             yard.Free();
         }
 
+        // --- the driven box ---------------------------------------------------
+        //
+        // The ram as a body again, bounded by intent: mounted, a crossing only
+        // names the section and the release follows the box's own forward
+        // progress - a pivot and a stand-still release nothing. What is
+        // assertable without stepping the solver is exactly that split, plus
+        // the birth rule: a box born in rubble excepts what it stood in.
+        var driven = new WallRig();
+        try
+        {
+            WallKit.Plan lone = WallKit.Lay(new WallKit.Recipe());
+            WallKit.Fit(lone, 0.97f);
+            driven.Raise(lone, Array.Empty<Vector3>());
+            var hull = new Vector3(2.5f, WallRig.TankTall, 6.0f);
+            int named = -1;
+            var way = Vector3.Zero;
+            for (int d = 0; d < 12 && named < 0; d++)
+            {
+                float a = Mathf.DegToRad(d * 30.0f);
+                var dir = new Vector3(Mathf.Cos(a), 0.0f, Mathf.Sin(a));
+                driven.Mount(Vector3.Zero, dir, hull);
+                if (driven.Rammed(new Vector3(0.0f, WallRig.TankTall * 0.5f,
+                                              0.0f), dir, 0.0f, hull) >= 0)
+                {
+                    named = 1;
+                    way = dir;
+                }
+            }
+            Check("with the box mounted, a crossing names the section and "
+                  + "releases nothing",
+                named >= 0 && driven.Mounted && driven.Loose == 0
+                && !driven.Struck,
+                $"named {named}, mounted {driven.Mounted}, "
+                + $"{driven.Loose} let go, struck {driven.Struck}");
+            // A pivot is a pose with no forward progress, and it releases
+            // nothing however far the nose swings.
+            driven.Drive(Vector3.Zero,
+                         new Basis(Vector3.Up, Mathf.DegToRad(90.0f)) * way,
+                         0.0f);
+            driven.Drive(Vector3.Zero, way, 0.0f);
+            Check("a pivot in place swings the box and releases nothing",
+                driven.Loose == 0 && !driven.Struck,
+                $"{driven.Loose} let go, struck {driven.Struck}");
+            for (int s = 1; s <= 40; s++)
+                driven.Drive(way * (WallRig.Apothem * 1.2f * s / 40.0f), way,
+                             0.0f);
+            Check("and the box's own advance releases the named section, "
+                  + "starting the clock on the first piece",
+                driven.Loose > 0 && driven.Struck,
+                $"{driven.Loose} let go, struck {driven.Struck}");
+            int loose = driven.Loose;
+            driven.Dismount();
+            Check("dismounted, the rig carries no box and keeps what fell",
+                !driven.Mounted && driven.Hull() is null
+                && driven.Loose == loose,
+                $"mounted {driven.Mounted}, "
+                + $"{driven.Loose} let go against {loose}");
+            // Born again in the rubble it just made: everything the box
+            // overlaps at birth is excepted, so the solver is never asked to
+            // separate a hull from the heap it starts in.
+            driven.Mount(way * WallRig.Apothem, way, hull);
+            int spared = 0;
+            if (driven.Hull() is not null)
+                foreach (Node child in driven.GetChildren())
+                    if (child is AnimatableBody3D box)
+                        spared = box.GetCollisionExceptions().Count;
+            Check("a box born in rubble excepts what it stood in",
+                spared > 0, $"{spared} exceptions on a box in a fallen wall");
+        }
+        finally
+        {
+            driven.Free();
+        }
+
         // --- the collider overlay --------------------------------------------
         //
         // Two claims, and both of them are about the picture being readable

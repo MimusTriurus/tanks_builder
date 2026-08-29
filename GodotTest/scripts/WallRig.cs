@@ -296,6 +296,22 @@ public sealed partial class WallRig : Node3D
     /// down the section it went into, and a tally is not a name.</summary>
     private int _tankFace = -1;
     private float _tankGone;
+
+    /// <summary>Whether the box is synced from a live tank rather than run by
+    /// the rig - see <see cref="Mount"/>. The two never coexist: the rig's own
+    /// ram is a shot on a board with no tank, the driven box is a tank on a
+    /// board with no shot.</summary>
+    private bool _tankDriven;
+
+    /// <summary>Where the driven box's contact point was last frame, so a
+    /// frame's forward progress is a difference rather than a speed handed in -
+    /// a reversing hull rams nothing, and a pivot advances nothing.</summary>
+    private Vector3 _tankAt;
+
+    /// <summary>Pieces the driven box holds a collision exception with - what
+    /// it was born inside, and what was released already inside it. Kept so
+    /// each pair is excepted once; cleared with the box.</summary>
+    private readonly HashSet<int> _sparedByBox = new();
     private WallKit.Plan _plan = null!;
     private float _clock = -1.0f;
     private (Vector3 From, Vector3 To)? _beam;
@@ -921,6 +937,8 @@ public sealed partial class WallRig : Node3D
         System.Array.Clear(_taken);
         _tank = null;
         _tankHull = null;
+        _tankDriven = false;
+        _sparedByBox.Clear();
         _tankFace = -1;
         _clock = -1.0f;
         _beam = null;
@@ -1354,6 +1372,205 @@ public sealed partial class WallRig : Node3D
 
     // --- a tank somebody else drives ----------------------------------------
 
+    /// <summary>Whether a driven box is standing in this rig's world.</summary>
+    public bool Mounted => _tankDriven && _tank is not null;
+
+    /// <summary>Stand a kinematic box in this rig's world for a tank somebody
+    /// else drives - the ram brought back as a body, for the reason the event
+    /// alone could not answer: one impulse at the crossing is a wall that
+    /// crumbles while the hull ghosts through the fall, and what made the
+    /// bench's own ram (<see cref="Ram"/>) read as a ram was never the release,
+    /// it was the box shoving what the release let go.
+    ///
+    /// <b>The box exists only while a ram order does, and only on one rig.</b>
+    /// The old swept box died of living always and everywhere - a pivot swept
+    /// six leaves, a box reborn in the last leg's heap measured <c>reach
+    /// 696</c>. Intent bounds its life (the caller mounts on the order and
+    /// dismounts with it), and <see cref="Channel"/> bounds its world: the box
+    /// carries this rig's bit, so every other wall's masonry and rubble are
+    /// not merely ignored but invisible to it.
+    ///
+    /// <b>What it was born inside, it must not throw.</b> A tank standing in
+    /// its own rubble and ordered on is exactly the reborn-box case, and the
+    /// solver answers overlap only with a separating impulse. Every live piece
+    /// overlapping the box at birth - found by arithmetic over the bodies, a
+    /// brick's own margin wide, no space query - becomes a collision exception
+    /// for the box's whole life. The price is named: the hull does not shove
+    /// the rubble it started in, which is the price the rig's own ram already
+    /// paid for the same reason.
+    ///
+    /// <b>Frozen masonry needs no guard at all</b>: the box is kinematic and
+    /// standing pieces are static, and the two pass through each other - a
+    /// brick is only ever pushed after <see cref="Drive"/> has let it go, two
+    /// bricks ahead of the nose, so it is dynamic before the box arrives.
+    /// </summary>
+    /// <param name="at">The hull's contact point, in the prop's own metres -
+    /// the box centre is lifted by half its own height here.</param>
+    /// <param name="into">Which way the hull faces, in the prop's frame.</param>
+    /// <param name="size">The hull's box, in metres - <c>WallProp.Box</c>.</param>
+    public void Mount(Vector3 at, Vector3 into, Vector3 size)
+    {
+        Dismount();
+        into = new Vector3(into.X, 0.0f, into.Z);
+        if (_bodies.Count == 0 || into.LengthSquared() < 1e-6f)
+            return;
+        into = into.Normalized();
+        Vector3 centre = at + Vector3.Up * (size.Y * 0.5f);
+        _tank = new AnimatableBody3D
+        {
+            SyncToPhysics = true,
+            CollisionLayer = Bit,
+            CollisionMask = Bit,
+            Transform = new Transform3D(
+                Basis.LookingAt(into, Vector3.Up), centre),
+        };
+        _tankHull = new CollisionShape3D
+        {
+            Shape = new BoxShape3D { Size = size },
+        };
+        _tank.AddChild(_tankHull);
+        _sparedByBox.Clear();
+        Basis frame = _tank.Transform.Basis.Inverse();
+        foreach (int i in _live)
+        {
+            if (_bodies[i].Freeze)
+                continue;
+            Vector3 arm = frame * (_bodies[i].Transform.Origin - centre);
+            if (Mathf.Abs(arm.X) < size.X * 0.5f + _brick
+                && Mathf.Abs(arm.Y) < size.Y * 0.5f + _brick
+                && Mathf.Abs(arm.Z) < size.Z * 0.5f + _brick)
+            {
+                _tank.AddCollisionExceptionWith(_bodies[i]);
+                _sparedByBox.Add(i);
+            }
+        }
+        AddChild(_tank);
+        _tankSize = size;
+        _tankDriven = true;
+        _tankRun = Vector3.Zero;
+        _tankLeft = 0.0f;
+        _tankGone = 0.0f;
+        _tankInto = into;
+        _tankLane = size.X * 0.5f + _brick;
+        _tankTip = centre + into * (size.Z * 0.5f);
+        _tankAt = at;
+        _tankFace = -1;
+    }
+
+    /// <summary>Put the driven box where the tank has got to this frame, and
+    /// let go of what its nose has earned.
+    ///
+    /// <b>The release follows forward progress, never the pose.</b> The frame's
+    /// advance is the contact point's displacement along the heading, taken as
+    /// a difference rather than a speed handed in - so a pivot (displacement
+    /// nought) and a reversing hull (displacement negative) release nothing,
+    /// which is the old sweep's first death answered by arithmetic.
+    ///
+    /// <b>What stands ahead of the tip is bulldozed; what the naming arrived
+    /// too late for is shoved the event's own way.</b> The section is named
+    /// when the sprite's nose crosses the rim, and a hull leaving its own ring
+    /// crosses that plane with the leaf's thickness already behind the box tip
+    /// - measured, the naming arrived with the tip 0.11m past the rim and the
+    /// nearest centres 0.33m behind it. A piece released inside the box is a
+    /// pair the solver can only answer with a separating impulse (measured:
+    /// reach 16.4, 30 pieces off the board - the reborn-box explosion in
+    /// miniature), and a piece released inside and excepted just stands there
+    /// (measured: 66 of 72 stood, a wall driven through and still up). So the
+    /// split is by where the piece stands when it is let go: at or behind the
+    /// tip - excepted from the box and handed <see cref="Wedge"/> of
+    /// <see cref="Shunted"/>, exactly what the event gave every piece; ahead
+    /// of the tip - let go clean and left to the advancing body, which is the
+    /// whole reason the box exists.
+    ///
+    /// <b>Nothing is released before a crossing has named the section</b> -
+    /// <see cref="Rammed"/> latches the face while the box is mounted and
+    /// releases nothing itself; until then this call is only a pose. The clock
+    /// starts on the first piece actually let go, the event's own rule.</summary>
+    /// <param name="speed">How fast the hull is going, metres a second - what
+    /// the swallowed pieces leave at, the event's own parameter.</param>
+    public void Drive(Vector3 at, Vector3 into, float speed)
+    {
+        if (!_tankDriven || _tank is null)
+            return;
+        into = new Vector3(into.X, 0.0f, into.Z);
+        into = into.LengthSquared() < 1e-6f ? _tankInto : into.Normalized();
+        Vector3 centre = at + Vector3.Up * (_tankSize.Y * 0.5f);
+        _tank.Transform = new Transform3D(
+            Basis.LookingAt(into, Vector3.Up), centre);
+        float ahead = (at - _tankAt).Dot(into);
+        _tankAt = at;
+        _tankInto = into;
+        _tankTip = centre + into * (_tankSize.Z * 0.5f);
+        if (_tankFace < 0 || ahead <= 0.0f)
+            return;
+        int had = _live.Count;
+        float front = Shove(_brick) + ahead * 1.5f;
+        for (int i = 0; i < _bodies.Count; i++)
+        {
+            if (_live.Contains(i) || !Reaches(_tankFace, SideOf(i)))
+                continue;
+            Vector3 arm = _bodies[i].Transform.Origin - _tankTip;
+            float along = arm.Dot(into);
+            if (along < -2.0f * _brick || along > front)
+                continue;
+            Vector3 off = arm - into * along;
+            if (off.Length() > _tankLane)
+                continue;
+            Thaw(i);
+            if (along > 0.0f)
+                continue;
+            _tank.AddCollisionExceptionWith(_bodies[i]);
+            _sparedByBox.Add(i);
+            if (Shunts && speed > 0.0f)
+                _bodies[i].ApplyImpulse(
+                    Wedge(into, off, _tankLane)
+                    * (Shunted(speed) * _bodies[i].Mass));
+        }
+        Breach(_tankFace, Strike.Ram);
+        if (_live.Count > had && _clock < 0.0f)
+        {
+            _shot = Strike.Ram;
+            _force = 1.0f;
+            _clock = 0.0f;
+            _beam = null;
+        }
+        // And the belt over the braces: a piece pushed hard enough to bury its
+        // centre inside the box would be the same solver pair again, so it is
+        // excepted the moment that happens. Bounds without margin, so a piece
+        // being honestly pushed at the face - its centre half a piece outside -
+        // keeps being pushed.
+        Basis hold = _tank.Transform.Basis.Inverse();
+        foreach (int i in _live)
+        {
+            if (_bodies[i].Freeze || !_sparedByBox.Add(i))
+                continue;
+            Vector3 arm = hold * (_bodies[i].Transform.Origin - centre);
+            if (Mathf.Abs(arm.X) < _tankSize.X * 0.5f
+                && Mathf.Abs(arm.Y) < _tankSize.Y * 0.5f
+                && Mathf.Abs(arm.Z) < _tankSize.Z * 0.5f)
+                _tank.AddCollisionExceptionWith(_bodies[i]);
+            else
+                _sparedByBox.Remove(i);
+        }
+    }
+
+    /// <summary>Take the driven box out of the world - the order ended, was
+    /// cancelled, or moved on to another wall. The heap it was holding lies
+    /// down at once, which is the parked-box failure answered by absence.
+    /// Leaves the rig's own scripted ram alone: that box is not driven and not
+    /// this method's to free.</summary>
+    public void Dismount()
+    {
+        if (!_tankDriven)
+            return;
+        _tankDriven = false;
+        _tankFace = -1;
+        _sparedByBox.Clear();
+        _tank?.QueueFree();
+        _tank = null;
+        _tankHull = null;
+    }
+
     /// <summary>A hull crossed the wall's plane: the driven ram, arrived as an
     /// event.
     ///
@@ -1427,6 +1644,19 @@ public sealed partial class WallRig : Node3D
         (float front, int face) = Meets(nose - into * (2.0f * _brick), into, 0.0f);
         if (face < 0 || front > 4.0f * _brick)
             return -1;
+        // With a driven box mounted, the crossing only names: the release is
+        // the box's, piece by piece as the nose earns them (see Drive), and
+        // the shove is the body's own push rather than an impulse - which is
+        // the whole difference between a wall that crumbles at a tank and a
+        // wall that is bulldozed by one. Breach still asks, so a section the
+        // cascade already bled past its share falls on the crossing, the
+        // event's own rule.
+        if (_tankDriven && _tank is not null)
+        {
+            _tankFace = face;
+            Breach(face, Strike.Ram);
+            return face;
+        }
         float lane = size.X * 0.5f + _brick;
         int had = _live.Count;
         for (int i = 0; i < _bodies.Count; i++)

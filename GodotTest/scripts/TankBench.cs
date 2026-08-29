@@ -980,6 +980,10 @@ public sealed partial class TankBench : SceneRoot
         _ramSpeed = -1.0;
         _wallSaid = false;
         _lockSaid = false;
+        // The box is the old rig's body, and the old rigs are about to be
+        // freed with their walls; forgetting the prop here is what keeps
+        // Rebox from dismounting a rig that no longer exists.
+        _boxed = null;
         // The dials are the ring's: which side it stands on and how much of the
         // cell it takes. A sample keeps the bearing it was stood on, because that
         // bearing is what makes it face the ring - see Samples.
@@ -1161,12 +1165,23 @@ public sealed partial class TankBench : SceneRoot
         float half = (float)(tank.Atlas.HullSpan * 0.5 * tank.Sprite.BodyScale);
         Vector2I nose = _field.CellAt(tank.GroundPoint + way * half - _origin);
         // No intent - follow silently, so a later ram diffs against the
-        // present rather than against wherever the last one ended.
+        // present rather than against wherever the last one ended. And no
+        // intent is no box: the order ended or was never a ram, and the heap
+        // the box was holding lies down at once.
         if (!Sweeps(tank.Moving, _ramming, _driveRams))
         {
+            Rebox(null);
             _noseCell = nose;
             return;
         }
+        // The box rides the whole order - mounted on the nearest wall still
+        // ahead, retargeted as walls are passed, posed to the hull every
+        // frame. Before the speed guard on purpose: a hull pivoting in rubble
+        // shoves that rubble with its body, which is a turning tank doing what
+        // turning tanks do - the release, gated by forward progress and a
+        // named section, stays silent through the whole turn.
+        Rebox(Boxable());
+        _boxed?.Drive(_stage.Contact(tank), way, (float)tank.Speed);
         // A pivot is not a ram - see _noseCell.
         if (tank.Speed < 1.0)
         {
@@ -1212,6 +1227,47 @@ public sealed partial class TankBench : SceneRoot
                                 / (_field.Atlas.HexRect.Size.X * 0.5);
             }
         }
+    }
+
+    /// <summary>The prop whose rig carries the driven ram box, or null when no
+    /// ram order is under way. One box, one wall: the box lives on the target
+    /// rig's collision bit, so every other wall is invisible to it - the
+    /// intent names what is being rammed, and nothing else is.</summary>
+    private WallProp? _boxed;
+
+    /// <summary>The wall the current order is about: the first prop whose cell
+    /// the tank stands on or will drive through. Asked every frame rather than
+    /// latched at the order, so a charge past two walls hands the box from one
+    /// to the next as the first is passed - and a wall behind the tank drops
+    /// out by itself, because a driven path only shortens.</summary>
+    private WallProp? Boxable()
+    {
+        foreach (WallProp prop in _walls)
+            if (prop.Cell == Tank.Cell)
+                return prop;
+        for (int i = Tank.PathStep; i < Tank.Path.Count; i++)
+            foreach (WallProp prop in _walls)
+                if (prop.Cell == Tank.Path[i])
+                    return prop;
+        return null;
+    }
+
+    /// <summary>Move the driven box to <paramref name="prop"/>'s rig - a
+    /// no-op when it is already there. Mounting takes the tank's pose as it
+    /// stands, so the birth exceptions (see <see cref="WallRig.Mount"/>) cover
+    /// exactly what the hull is standing in at this moment.</summary>
+    private void Rebox(WallProp? prop)
+    {
+        if (_boxed == prop)
+            return;
+        _boxed?.Dismount();
+        _boxed = prop;
+        if (prop is null || _stage is null || _field.Atlas is null)
+            return;
+        Vehicle tank = Tank;
+        prop.Mount(_stage.Contact(tank),
+                   tank.Atlas.GroundDirection(tank.Sprite.HullFacing),
+                   WallProp.Box(tank, _field.Atlas.HexRect.Size.X * 0.5f));
     }
 
     /// <summary>Drive at the wall from the side it stands on.
