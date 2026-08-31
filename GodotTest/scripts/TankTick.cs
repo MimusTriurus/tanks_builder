@@ -672,6 +672,14 @@ public sealed class TankTick
             cap = Math.Min(cap, v.Profile.GradeSpeed);
         if (Field.IsWet(v.Cell, next))
             cap = Math.Min(cap, v.Profile.WaterSpeed);
+        // And what the cell itself is worth - the floor and what stands on it,
+        // out of terrain.json. A fraction of the class's own top speed rather
+        // than a figure, because the terrain is the same terrain for every
+        // class and only the tank differs. One everywhere on today's boards, so
+        // this line changes no measurement that was taken before it.
+        float ground = TerrainRules.Speed(Field.FaceAt(next));
+        if (ground < 1.0f)
+            cap = Math.Min(cap, v.Profile.TopSpeed * ground);
         // And masonry, which is neither of those and is not the board's at all -
         // see Shoving. Lowest of the three by construction, so a tank in a wall on
         // a wet bank goes at the wall's figure; the same "the lower of them, never
@@ -701,8 +709,12 @@ public sealed class TankTick
             return "shoving";
         Vector2I next = v.Path[v.PathStep];
         bool grade = Field.IsGrade(v.Cell, next), wet = Field.IsWet(v.Cell, next);
-        return grade && wet ? "wading a grade" : wet ? "wading"
-            : grade ? "grade" : "";
+        if (grade || wet)
+            return grade && wet ? "wading a grade" : wet ? "wading" : "grade";
+        // Last, because it is the loosest ceiling of the four and the word has
+        // to name the cap actually in force - the same ordering the masonry has
+        // at the top of this method.
+        return TerrainRules.Why(Field.FaceAt(next));
     }
 
     private void AdvanceOrder(Vehicle v, double delta)

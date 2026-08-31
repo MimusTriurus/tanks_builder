@@ -394,6 +394,15 @@ public sealed partial class HexField : Node2D
         Vector2I next = Step(cell, heading);
         if (!InBounds(cell) || !InBounds(next))
             return false;
+        // The floor, before any of the height arithmetic. Rock and open water
+        // are refusals of the same kind as the board's edge - nothing about the
+        // step across it makes them drivable - and off-board cells come through
+        // here too, which is where Plot finally reaches the pathing. Rock was
+        // already unreachable by standing two levels up; saying it here as well
+        // costs nothing and means a board that flattens its relief does not
+        // quietly open its cliffs.
+        if (!TerrainRules.Drivable(FoundationAt(next)))
+            return false;
         if (_levels is null)
             return true;
         if (_ramps is null)
@@ -462,11 +471,28 @@ public sealed partial class HexField : Node2D
     private bool[]? _water;
 
     /// <summary>Whether this board carries water at all.</summary>
-    public bool HasWater => _water is not null;
+    public bool HasWater => _wet.Count > 0;
 
-    public bool IsWater(Vector2I cell) =>
-        _water is not null && InBounds(cell)
-        && _water[cell.Y * Columns + cell.X];
+    /// <summary>
+    /// Whether a cell is under water.
+    ///
+    /// <b>Two authors, one answer.</b> The flood grid is how every board here
+    /// has said it - it has a guard, a panel switch and an ordering that the
+    /// mesh and the swell index by - and a map may also name the floor as
+    /// shallow or deep outright, which is what the floor being one slot means.
+    /// A reader that had to ask both would eventually ask one, so this is the
+    /// only place the two meet.
+    /// </summary>
+    public bool IsWater(Vector2I cell)
+    {
+        if (!InBounds(cell))
+            return false;
+        int at = cell.Y * Columns + cell.X;
+        return (_water is not null && _water[at])
+               || (_ground is not null
+                   && (_ground[at] == Foundation.Shallow
+                       || _ground[at] == Foundation.Deep));
+    }
 
     /// <summary>
     /// How deep the water stands, as a fraction of one level.
@@ -536,44 +562,72 @@ public sealed partial class HexField : Node2D
     /// </summary>
     public void SetWater(bool[]? water)
     {
-        if (water is not null && water.Length == Columns * Rows)
-        {
-            var stepped = new List<string>();
-            for (int r = 0; r < Rows; r++)
-            for (int q = 0; q < Columns; q++)
-            {
-                var cell = new Vector2I(q, r);
-                if (!water[r * Columns + q])
-                    continue;
-                foreach (int heading in EdgeHeadings)
-                {
-                    Vector2I next = Step(cell, heading);
-                    if (!InBounds(next) || !water[next.Y * Columns + next.X])
-                        continue;
-                    if (LevelAt(next) != LevelAt(cell))
-                        stepped.Add($"({q},{r}) on {LevelAt(cell)} beside "
-                                    + $"({next.X},{next.Y}) on {LevelAt(next)}");
-                }
-            }
-            if (stepped.Count > 0)
-                throw new InvalidOperationException(
-                    "one body of water is one surface, and these neighbours are "
-                    + "on two levels, which is a waterfall: "
-                    + string.Join("; ", stepped.Distinct()));
-        }
+        bool[]? held = _water;
         _water = water is not null && water.Length == Columns * Rows
                  && Array.Exists(water, on => on)
             ? water : null;
-        // The flooded cells in one fixed order, settled here and nowhere else.
-        // Two things index by it - the surface mesh writes an ordinal into each
-        // vertex, and the swell keeps a state per cell - and a second ordering
-        // beside this one is two lists that agree until somebody floods a cell.
+        try
+        {
+            Flat();
+        }
+        catch (InvalidOperationException)
+        {
+            _water = held;
+            throw;
+        }
+        Rewet();
+    }
+
+    /// <summary>
+    /// The guard: one body of water is one surface.
+    ///
+    /// Two water cells side by side at different levels is a waterfall, which is
+    /// a different thing entirely and is not what this draws. Asked of
+    /// neighbours rather than of the whole board, because two unconnected ponds
+    /// at two levels are perfectly reasonable.
+    ///
+    /// <b>Asked of <see cref="IsWater"/> rather than of the grid handed in</b>,
+    /// so that it judges the board as it will be read - a map that names its
+    /// deep water on the floor gets the same guard as one that hands in a flood
+    /// mask, and neither can open a waterfall the other would have been refused.
+    /// </summary>
+    private void Flat()
+    {
+        var stepped = new List<string>();
+        for (int r = 0; r < Rows; r++)
+        for (int q = 0; q < Columns; q++)
+        {
+            var cell = new Vector2I(q, r);
+            if (!IsWater(cell))
+                continue;
+            foreach (int heading in EdgeHeadings)
+            {
+                Vector2I next = Step(cell, heading);
+                if (!IsWater(next) || LevelAt(next) == LevelAt(cell))
+                    continue;
+                stepped.Add($"({q},{r}) on {LevelAt(cell)} beside "
+                            + $"({next.X},{next.Y}) on {LevelAt(next)}");
+            }
+        }
+        if (stepped.Count > 0)
+            throw new InvalidOperationException(
+                "one body of water is one surface, and these neighbours are "
+                + "on two levels, which is a waterfall: "
+                + string.Join("; ", stepped.Distinct()));
+    }
+
+    /// <summary>The flooded cells in one fixed order, settled here and nowhere
+    /// else. Two things index by it - the surface mesh writes an ordinal into
+    /// each vertex, and the swell keeps a state per cell - and a second ordering
+    /// beside this one is two lists that agree until somebody floods a
+    /// cell.</summary>
+    private void Rewet()
+    {
         _wet = new List<Vector2I>();
-        if (_water is not null)
-            for (int r = 0; r < Rows; r++)
-            for (int q = 0; q < Columns; q++)
-                if (_water[r * Columns + q])
-                    _wet.Add(new Vector2I(q, r));
+        for (int r = 0; r < Rows; r++)
+        for (int q = 0; q < Columns; q++)
+            if (IsWater(new Vector2I(q, r)))
+                _wet.Add(new Vector2I(q, r));
         _wetIndex = new Dictionary<Vector2I, int>();
         for (int i = 0; i < _wet.Count; i++)
             _wetIndex[_wet[i]] = i;
@@ -1122,7 +1176,8 @@ public sealed partial class HexField : Node2D
     /// The caller wanted that cell; stopping short of it and calling it done is
     /// the kind of near miss that reads as the pathing being wrong.</summary>
     public List<Vector2I> FindPath(Vector2I from, Vector2I to,
-                                   IReadOnlySet<Vector2I>? blocked = null)
+                                   IReadOnlySet<Vector2I>? blocked = null,
+                                   bool masonry = false)
     {
         var path = new List<Vector2I>();
         if (from == to || !InBounds(from) || !InBounds(to))
@@ -1147,7 +1202,13 @@ public sealed partial class HexField : Node2D
                     // cliff and then had the driving refuse it would report a
                     // route it cannot walk. See Passable, which is where the one
                     // statement of what a step may cross lives.
-                    || !Passable(cell, heading))
+                    || !Passable(cell, heading)
+                    // And the masonry, which is a statement about the edge
+                    // rather than about either cell - asked for rather than
+                    // assumed, because driving into a wall is a legal order and
+                    // the bench that does it is not asking for a route that
+                    // respects one. See Blocked.
+                    || (masonry && Blocked(cell, heading)))
                     continue;
                 cameFrom[next] = cell;
                 if (next == to)
@@ -1286,6 +1347,326 @@ public sealed partial class HexField : Node2D
         return Terrain is not null && Terrain.Has(TerrainSet.Default)
             ? TerrainSet.Default : TerrainSet.Plain;
     }
+
+    // --- the two slots -----------------------------------------------------
+
+    /// <summary>
+    /// What each cell's floor is made of, one entry per cell - or null for a
+    /// board that said nothing and is solid ground all over.
+    ///
+    /// <b>Water is not in here, and that is the one seam left in the model.</b>
+    /// <see cref="FoundationAt"/> reads a flooded cell as
+    /// <see cref="Foundation.Shallow"/>, so every reader gets the one slot the
+    /// model promises; the authoring stays split because the flood has a guard
+    /// (<see cref="SetWater"/> refuses a waterfall), an ordering
+    /// (<see cref="WaterCells"/>, which the surface mesh and the swell index by)
+    /// and a panel switch, and none of those has an equivalent here. So the read
+    /// is one slot and the write is still two, which is a thing to finish rather
+    /// than a thing to defend.
+    ///
+    /// Off-board cells are not in here either: <see cref="Plot"/> already says
+    /// which cells are on the board, and a second copy of that is two lists that
+    /// agree until somebody edits a map.
+    /// </summary>
+    private Foundation[]? _ground;
+
+    /// <summary>What stands on each cell, one entry per cell - or null for a
+    /// board with nothing on it.</summary>
+    private Cover[]? _cover;
+
+    /// <summary>What state each cover is in. Beside <see cref="_cover"/> rather
+    /// than packed with it, because the state changes during play - a wood
+    /// catches, a wall is breached - and the cover itself does not.</summary>
+    private CoverState[]? _coverState;
+
+    /// <summary>Whether this board authored either slot. Read by nothing that
+    /// draws; it is here so the self test can tell a board that said nothing
+    /// from one that said solid everywhere.</summary>
+    public bool HasGround => _ground is not null;
+
+    public bool HasCover => _cover is not null;
+
+    /// <summary>
+    /// Lay the floor. One entry per cell, null to take the whole board back to
+    /// solid ground.
+    ///
+    /// Nothing here refuses anything, unlike <see cref="SetWater"/>: a floor
+    /// makes no claim about its neighbours, so there is no arrangement of
+    /// materials that is a mistake in the way a waterfall is.
+    /// </summary>
+    public void SetGround(Foundation[]? ground)
+    {
+        Foundation[]? held = _ground;
+        _ground = ground is not null && ground.Length == Columns * Rows
+            ? ground : null;
+        // A material makes no claim about its neighbours, so there is no
+        // arrangement of them that is a mistake - except the one that is also
+        // water, which is judged by the same guard the flood is. See Flat.
+        try
+        {
+            Flat();
+        }
+        catch (InvalidOperationException)
+        {
+            _ground = held;
+            throw;
+        }
+        Rewet();
+    }
+
+    /// <summary>
+    /// Put the cover on. One entry per cell; the states are optional and default
+    /// to <see cref="CoverState.Intact"/>.
+    ///
+    /// <b>An array of nothing is not an authored board</b> -
+    /// <see cref="SetKinds"/>'s rule, and it is here for the same reason: a
+    /// board handing in one entry per cell and every one of them
+    /// <see cref="Cover.None"/> is a board declaring it has no woods, which is
+    /// a different statement from a board that never spoke. See
+    /// <see cref="CoverAt"/>, where the difference shows.
+    /// </summary>
+    public void SetCover(Cover[]? cover, CoverState[]? states = null)
+    {
+        _cover = cover is not null && cover.Length == Columns * Rows
+                 && Array.Exists(cover, c => c != Cover.None)
+            ? cover : null;
+        _coverState = _cover is null ? null
+            : states is not null && states.Length == Columns * Rows
+                ? states : new CoverState[Columns * Rows];
+        // A walled cell comes up sealed. A map letter says a cell carries
+        // masonry and cannot say which edges - the wall that knows is the one
+        // somebody builds - so the board's own answer is the whole ring, and
+        // whoever stands a prop on it writes the real sides over this. The
+        // alternative is a walled cell that bars nothing until a bench has run,
+        // which is a board that reads differently depending on the scene.
+        _sides = _cover is null ? null : new byte[Columns * Rows];
+        if (_cover is not null)
+            for (int at = 0; at < _cover.Length; at++)
+                if (_cover[at] == Cover.Walls)
+                    _sides![at] = AllSides;
+        QueueRedraw();
+    }
+
+    /// <summary>
+    /// The floor under a cell.
+    ///
+    /// Off the board first, then the water, then what the map laid: the two that
+    /// come first are the two that are true whatever the material underneath is.
+    /// A flooded rock is water, and a tank in it is in water.
+    /// </summary>
+    public Foundation FoundationAt(Vector2I cell)
+    {
+        if (!InBounds(cell) || (Plot is not null && !Plot.Contains(cell)))
+            return Foundation.Void;
+        Foundation laid = _ground is null
+            ? Foundation.Solid : _ground[cell.Y * Columns + cell.X];
+        // A floor that named water is water, at the depth it named. One that did
+        // not is water only if the flood mask says so, and then it is the ford
+        // every board on this project has had.
+        if (laid == Foundation.Shallow || laid == Foundation.Deep)
+            return laid;
+        return IsWater(cell) ? Foundation.Shallow : laid;
+    }
+
+    /// <summary>
+    /// What stands on a cell.
+    ///
+    /// <b>A hashed wood is a wood.</b> A board that authored no cover still has
+    /// trees on it - <see cref="KindAt"/> scatters them - and a cell drawn with
+    /// trees standing on it that answers <see cref="Cover.None"/> is one answer
+    /// too many. So the drawn woods fall through to here until the art layer is
+    /// folded in behind this one; on an authored board the hash may not add
+    /// woods at all, so the fallback cannot contradict a map that spoke.
+    /// </summary>
+    public Cover CoverAt(Vector2I cell)
+    {
+        if (!InBounds(cell))
+            return Cover.None;
+        if (_cover is not null)
+        {
+            Cover laid = _cover[cell.Y * Columns + cell.X];
+            if (laid != Cover.None)
+                return laid;
+        }
+        return Trees && KindAt(cell) == TerrainSet.Forest
+            ? Cover.Forest : Cover.None;
+    }
+
+    /// <summary>What state the cover on a cell is in - intact where the board
+    /// has no state grid, and intact on a cell with no cover, which is the one
+    /// state <see cref="TerrainRules.Allows"/> gives
+    /// <see cref="Cover.None"/>.</summary>
+    public CoverState CoverStateAt(Vector2I cell)
+    {
+        if (!InBounds(cell))
+            return CoverState.Intact;
+        // Masonry does not carry a state of its own: it stands on edges, so what
+        // it is worth is the six sides and the cell's word for it is a reading
+        // off them. Written down beside them it would be a second answer, and
+        // the two would agree until one leaf came down.
+        if (CoverAt(cell) == Cover.Walls)
+            return SidesAt(cell) == 0 ? CoverState.Breached : CoverState.Intact;
+        return _coverState is null || CoverAt(cell) == Cover.None
+            ? CoverState.Intact : _coverState[cell.Y * Columns + cell.X];
+    }
+
+    /// <summary>
+    /// Put the cover on a cell into a state - what a fire spreading or a wall
+    /// coming down does to the board.
+    ///
+    /// <b>Refuses rather than repairs</b>, and refuses off the table: a wood
+    /// cannot be breached and a wall cannot burn, and the list of what each may
+    /// be is <see cref="CoverRule.States"/>. A caller that gets false has asked
+    /// for something that is not a state of the world, and the one thing that
+    /// must not happen is that it quietly becomes one.
+    /// </summary>
+    /// <returns>Whether the cell took it.</returns>
+    public bool SetCoverState(Vector2I cell, CoverState state)
+    {
+        if (!InBounds(cell))
+            return false;
+        // Asked of the effective cover rather than of the grid, so a hashed wood
+        // can be told it is on fire. CoverAt already answers Forest for a cell
+        // with trees drawn on it and nothing authored - the board is what
+        // scattered them - and a cell that burns on screen while the board says
+        // it is untouched is the one answer too many this layer exists to stop.
+        // The grid is made here rather than at load for the reason it is null in
+        // the first place: a board with nothing on it is the board that was here
+        // before, down to what SetCover reads back.
+        Cover over = CoverAt(cell);
+        if (over == Cover.None || !TerrainRules.Allows(over, state))
+            return false;
+        _cover ??= new Cover[Columns * Rows];
+        _cover[cell.Y * Columns + cell.X] = over;
+        // Except masonry, whose state is a reading off its sides - see
+        // CoverStateAt. Refused rather than accepted and ignored: a caller that
+        // wrote Breached here and then read Intact back would have been told the
+        // opposite of what happened. Knock a side down with Breach, or lay the
+        // whole ring with SetSides.
+        if (over == Cover.Walls)
+            return false;
+        _coverState ??= new CoverState[Columns * Rows];
+        _coverState[cell.Y * Columns + cell.X] = state;
+        QueueRedraw();
+        return true;
+    }
+
+    /// <summary>
+    /// Which edges of a cell carry standing masonry, one bit per
+    /// <see cref="EdgeHeadings"/> index - or null on a board with no walls.
+    ///
+    /// <b>Per edge, because that is where a wall stands.</b> A wall is not on a
+    /// cell the way a wood is; it is on the rim, and a ring with one side driven
+    /// through is a ring a tank drives out of and shoots out of on that side and
+    /// no other. The cell was the wrong resolution for both questions, and the
+    /// shooting half already knew it - <see cref="WallProp.Bars"/> answers per
+    /// direction by walking the bricks. This is the board's own record of the
+    /// same fact, kept so that the rules can be asked of a board nobody has
+    /// built props for.
+    ///
+    /// <b>A cell's own six, not the edges it shares.</b> Two neighbours may each
+    /// carry masonry on the edge between them - two rings side by side do - so
+    /// ownership is not a question that has one answer. What crossing that edge
+    /// costs is asked of both, in <see cref="Walled"/>.
+    /// </summary>
+    private byte[]? _sides;
+
+    /// <summary>Every side of a cell, as a mask. The value a cell with a full
+    /// ring on it carries.</summary>
+    public const int AllSides = 0b111111;
+
+    /// <summary>Which of a cell's own six edges carry standing masonry.</summary>
+    public int SidesAt(Vector2I cell) =>
+        _sides is null || !InBounds(cell) || CoverAt(cell) != Cover.Walls
+            ? 0 : _sides[cell.Y * Columns + cell.X];
+
+    /// <summary>Whether this cell carries masonry on this side of itself. The
+    /// half-question; <see cref="Walled"/> is the one worth asking.</summary>
+    public bool SideStands(Vector2I cell, int heading) =>
+        (SidesAt(cell) & (1 << EdgeIndex(heading))) != 0;
+
+    /// <summary>
+    /// Whether standing masonry lies across the edge between a cell and its
+    /// neighbour in a heading - <b>the question everything asks</b>.
+    ///
+    /// Both sides of the edge, because a wall belongs to the cell it was laid on
+    /// and two cells may each have laid one. Nothing crosses an edge either of
+    /// them walled, and it does not matter which.
+    /// </summary>
+    public bool Walled(Vector2I from, int heading) =>
+        SideStands(from, heading)
+        || SideStands(Step(from, heading), Reverse(heading));
+
+    /// <summary>
+    /// Lay the masonry on one cell: which of its edges stand, as a mask.
+    ///
+    /// Written by whoever built the wall, because the geometry is what knows -
+    /// <see cref="WallProp"/> measures its own standing bricks per heading
+    /// rather than deriving the sides from the bearing it was laid on, and this
+    /// is where that measurement is put so the board can be asked without it.
+    /// </summary>
+    public void SetSides(Vector2I cell, int mask)
+    {
+        if (!InBounds(cell))
+            return;
+        _sides ??= new byte[Columns * Rows];
+        _sides[cell.Y * Columns + cell.X] = (byte)(mask & AllSides);
+        QueueRedraw();
+    }
+
+    /// <summary>
+    /// Bring one side of a cell's masonry down - what a ram through a leaf or a
+    /// round into it does to the board.
+    ///
+    /// One side, never the ring: a wall that came down whole because a tank went
+    /// through one leaf of it is the thing the six sides exist to stop being
+    /// said. <see cref="CoverStateAt"/> reads Breached when the last of them
+    /// goes.
+    /// </summary>
+    /// <returns>Whether that side was standing until now.</returns>
+    public bool Breach(Vector2I cell, int heading)
+    {
+        if (!SideStands(cell, heading))
+            return false;
+        _sides![cell.Y * Columns + cell.X] &= (byte)~(1 << EdgeIndex(heading));
+        QueueRedraw();
+        return true;
+    }
+
+    /// <summary>The whole cell in one value - both slots, the state, and the
+    /// height axis beside them. The one read; see <see cref="HexFace"/> for why
+    /// there is one.</summary>
+    public HexFace FaceAt(Vector2I cell) => new()
+    {
+        Ground = FoundationAt(cell),
+        Over = CoverAt(cell),
+        State = CoverStateAt(cell),
+        Level = LevelAt(cell),
+        Ramp = RampHeading(cell),
+    };
+
+    /// <summary>Whether the cover on a cell stops a round crossing it. Asked by
+    /// <see cref="Gunnery.Solve"/> exactly where it asks whether a tank is in
+    /// the way, because from the shell's point of view those are the same
+    /// question.</summary>
+    public bool Screened(Vector2I cell) =>
+        TerrainRules.Screens(CoverAt(cell), CoverStateAt(cell));
+
+    /// <summary>
+    /// Whether a step from a cell in a heading is refused by what stands on the
+    /// edge - the cover half of the question <see cref="Passable"/> answers for
+    /// the ground.
+    ///
+    /// <b>Apart from Passable, and the difference is the whole of how a ram
+    /// works.</b> Passable is asked of every step including the last, so masonry
+    /// folded into it would make a walled cell unreachable and driving into a
+    /// wall an impossible order. Kept apart, the route respects the leaf and a
+    /// ram is still something a caller can ask for: <see cref="FindPath"/> takes
+    /// it as a flag, and the wall bench - whose whole subject is driving into
+    /// masonry - leaves it off on purpose.
+    /// </summary>
+    public bool Blocked(Vector2I from, int heading) =>
+        TerrainRules.Of(Cover.Walls).Blocks && Walled(from, heading);
 
     /// <summary>
     /// Every cell, furthest from the camera first.

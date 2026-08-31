@@ -238,6 +238,8 @@ public sealed partial class EffectsBench : SceneRoot
             Plot = _map.Plot,
         };
         _field.SetKinds(_map.Kinds);
+        _field.SetGround(_map.Ground);
+        _field.SetCover(_map.Over);
         _field.SetRelief(_map.Levels, _map.Ramps);
         // After the relief and never before it, the tank bench's reason word for
         // word: the water's guards are asked about levels and ramps, so water laid

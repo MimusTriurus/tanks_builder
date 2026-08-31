@@ -319,6 +319,11 @@ public sealed partial class TankBench
                  + "; past "
                  + (past.Count > 0 ? string.Join(" ", past) : "none")
                  + $"; {broke} section(s) down"
+                 // What the board now says about that cell's six edges - the
+                 // record the rules read, beside the masonry it is a record of.
+                 // Printed here because a mask that stops falling with the
+                 // leaves is invisible everywhere else.
+                 + $"; sides {Convert.ToString(_field.SidesAt(leg.Wall), 2).PadLeft(6, '0')}"
                  + $"; reach {reach:F2}, top {top:F2}, {off} off the cell"
                  + (still ? "" : "; STILL SETTLING"));
     }

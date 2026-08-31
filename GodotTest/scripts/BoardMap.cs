@@ -105,6 +105,21 @@ public sealed partial class BoardMap
     /// </summary>
     public const char Wall = 'W';
 
+    /// <summary>Sand: a floor a tank crosses slowly. The first letter that is a
+    /// foundation and nothing else - no height, no flood, no props - which is
+    /// what makes it the cheapest proof that the floor is its own slot.</summary>
+    public const char Sand = 's';
+
+    /// <summary>A trench: cover with no art and no props behind it, which is
+    /// exactly why it is here. A cover that is only rules is the test that this
+    /// layer is rules rather than a list of things that get drawn.</summary>
+    public const char Trench = 't';
+
+    /// <summary>A minefield. Cover, hidden, and nothing on the board says so -
+    /// see <see cref="CoverRule.Hidden"/>, which is carried and read by nothing
+    /// yet.</summary>
+    public const char Mine = 'm';
+
     /// <summary>Not on the board at all - see <see cref="HexField.Plot"/>. The
     /// hatched border of a World of Tanks minimap, and drawn as nothing rather
     /// than as a wall: it is the edge of the world, not a feature of it.
@@ -185,10 +200,31 @@ public sealed partial class BoardMap
     /// </summary>
     public bool Height { get; }
 
+    /// <summary>
+    /// What each cell's floor is made of - the first of the two slots a hex has.
+    ///
+    /// <b>Water is not in here</b>, for the reason <see cref="HexField"/> gives
+    /// over its own ground grid: the flood is authored separately because it has
+    /// a guard and an ordering that a material does not, and
+    /// <see cref="HexField.FoundationAt"/> reads a flooded cell as shallow so
+    /// that every reader still sees one slot.
+    ///
+    /// Neither is the board's edge: <see cref="Plot"/> already says which cells
+    /// are on it, and a second copy of that is two lists that agree until
+    /// somebody edits a map.
+    /// </summary>
+    public Foundation[] Ground { get; }
+
+    /// <summary>What stands on each cell - the second slot. One cover per cell,
+    /// exclusive; see <see cref="TankSpriteTest.Cover"/> for why that is a
+    /// decision rather than a limit of the storage.</summary>
+    public Cover[] Over { get; }
+
     private BoardMap(string name, int columns, int rows,
                      IReadOnlyList<Vector2I> homes,
                      int[] levels, bool[] ramps, bool[] water,
                      string?[] kinds, bool[] cliffs, bool[] walls,
+                     Foundation[] ground, Cover[] over,
                      IReadOnlySet<Vector2I>? plot,
                      string paint, bool height)
     {
@@ -202,6 +238,8 @@ public sealed partial class BoardMap
         Kinds = kinds;
         Cliffs = cliffs;
         Walls = walls;
+        Ground = ground;
+        Over = over;
         Plot = plot;
         Paint = paint;
         Height = height;
@@ -250,6 +288,15 @@ public sealed partial class BoardMap
 
     /// <summary>Which cells are flooded, on a field of another size.</summary>
     public bool[] WaterFor(int columns, int rows) => Onto(Water, columns, rows);
+
+    /// <summary>This map's floors on a field of another size. Solid off the end
+    /// of the map, which is what <see cref="Foundation.Solid"/> being the value
+    /// a board that said nothing carries already means.</summary>
+    public Foundation[] GroundFor(int columns, int rows) =>
+        Onto(Ground, columns, rows);
+
+    /// <summary>What stands on each cell, on a field of another size.</summary>
+    public Cover[] OverFor(int columns, int rows) => Onto(Over, columns, rows);
 
     private T[] Onto<T>(T[] cells, int columns, int rows)
     {
@@ -509,6 +556,8 @@ public sealed partial class BoardMap
         var kinds = new string?[columns * rows];
         var cliffs = new bool[columns * rows];
         var walls = new bool[columns * rows];
+        var floor = new Foundation[columns * rows];
+        var over = new Cover[columns * rows];
         var ramped = new bool[columns * rows];
         var plot = new HashSet<Vector2I>();
         var wrong = new List<string>();
@@ -529,6 +578,16 @@ public sealed partial class BoardMap
                     break;
                 case Wood:
                     kinds[at] = TerrainSet.Forest;
+                    over[at] = Cover.Forest;
+                    break;
+                case Sand:
+                    floor[at] = Foundation.Sand;
+                    break;
+                case Trench:
+                    over[at] = Cover.Trench;
+                    break;
+                case Mine:
+                    over[at] = Cover.Minefield;
                     break;
                 case Wall:
                     // Level ground under it, and that is not a simplification:
@@ -538,6 +597,7 @@ public sealed partial class BoardMap
                     // impossible. What gives the prisms their sides is the
                     // plinth, which lifts the whole board at once.
                     walls[at] = true;
+                    over[at] = Cover.Walls;
                     break;
                 case Hill:
                     levels[at] = 1;
@@ -546,6 +606,7 @@ public sealed partial class BoardMap
                 case WoodedHill:
                     levels[at] = 1;
                     kinds[at] = TerrainSet.Forest;
+                    over[at] = Cover.Forest;
                     break;
                 case Low:
                     levels[at] = -1;
@@ -553,6 +614,7 @@ public sealed partial class BoardMap
                 case WoodedLow:
                     levels[at] = -1;
                     kinds[at] = TerrainSet.Forest;
+                    over[at] = Cover.Forest;
                     break;
                 case Wet:
                     levels[at] = -1;
@@ -570,6 +632,7 @@ public sealed partial class BoardMap
                     levels[at] = 2;
                     kinds[at] = TerrainSet.Rise;
                     cliffs[at] = true;
+                    floor[at] = Foundation.Rock;
                     break;
                 default:
                     wrong.Add($"({q},{r}) is an unknown kind {c}");
@@ -599,8 +662,8 @@ public sealed partial class BoardMap
                 levels[at] += plinth;
 
         return Sealed(new BoardMap(name, columns, rows, homes, levels, ramped,
-                                   water, kinds, cliffs, walls, plot, paint,
-                                   height));
+                                   water, kinds, cliffs, walls, floor, over,
+                                   plot, paint, height));
     }
 
     /// <summary>A map written as separate relief, ramp and water grids - the
@@ -628,10 +691,15 @@ public sealed partial class BoardMap
             ramped[at] = rr[q, r] == 'r';
             wet[at] = ww[q, r] == 'w';
         }
+        // Solid everywhere with nothing standing on it: a board written as
+        // three grids says nothing about either slot, and that is what a board
+        // which said nothing is made of. Its flood is the wet grid, as it was.
         return Sealed(new BoardMap(name, columns, rows, homes, levels, ramped,
                                    wet, new string?[columns * rows],
                                    new bool[columns * rows],
-                                   new bool[columns * rows], null, paint,
+                                   new bool[columns * rows],
+                                   new Foundation[columns * rows],
+                                   new Cover[columns * rows], null, paint,
                                    height));
     }
 

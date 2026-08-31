@@ -209,6 +209,7 @@ public static class SelfTest
         Check("every path is contiguous, in bounds and reaches the target",
             bad == 0, $"{bad} bad, first {badDetail}");
 
+        Terrain(field, vehicles, active, Check);
         Relief(field, grove, Check);
         Ramps(field, stage, Check);
         Water(field, grove, Check);
@@ -13499,6 +13500,460 @@ public static class SelfTest
             if (hadWater)
                 field.SetWater(BoardMap.Bench.WaterFor(field.Columns, field.Rows));
         }
+    }
+
+    /// <summary>
+    /// The two slots a hex has - what its floor is made of and what stands on
+    /// it - and the rules the two carry.
+    ///
+    /// A method of its own with the vehicles handed in, because the last of it
+    /// is a shot down a lane: what a cover does to a round is half of what the
+    /// layer is for, and it cannot be asked without two tanks. Everything
+    /// before that runs on boards invented here, for the reason the map checks
+    /// do - none of it needs a tile, a prop or a scene to exist.
+    /// </summary>
+    private static void Terrain(HexField field,
+                                IReadOnlyList<Vehicle>? vehicles, int active,
+                                Action<string, bool, string> Check)
+    {
+        // --- the two slots a hex has --------------------------------------
+        //
+        // Run on probe boards for the reason the maps below are: none of this
+        // needs a tile, a prop or a tank to exist. What a cell is made of and
+        // what stands on it are a table and two grids, so the assertions are
+        // arithmetic and the board they are made against is invented here.
+        Theme("terrain: the two slots a hex has");
+
+        TerrainRules.Ready();
+        Check("terrain.json is read, and everything it names exists",
+            TerrainRules.Loaded && TerrainRules.Error.Length == 0,
+            TerrainRules.Loaded ? TerrainRules.Error
+                : "running on the compiled figures - " + TerrainRules.Error);
+
+        // Both directions, WallConfig's rule: an entry with nothing behind it is
+        // a figure for a floor that does not exist, and a floor with no entry is
+        // one that quietly kept the compiled number. The file is the numbers and
+        // the enums are the vocabulary, so the two have to cover each other.
+        var unspoken = new List<string>();
+        foreach (Foundation ground in TerrainRules.Grounds)
+            if (!TerrainRules.Knows(ground))
+                unspoken.Add(ground.ToString());
+        foreach (Cover kind in TerrainRules.Covers)
+            if (!TerrainRules.Knows(kind))
+                unspoken.Add(kind.ToString());
+        Check("every floor and every cover has a rule behind it",
+            unspoken.Count == 0, string.Join(" ", unspoken));
+
+        // Intact is the one state every cover has to admit - see
+        // TerrainRules.Apply, which refuses a file that takes it away. A cover
+        // that cannot stand intact is broken the moment it is laid.
+        var brokenBorn = TerrainRules.Covers
+            .Where(c => c != Cover.None
+                        && !TerrainRules.Allows(c, CoverState.Intact))
+            .Select(c => c.ToString()).ToList();
+        Check("every cover can stand intact",
+            brokenBorn.Count == 0, string.Join(" ", brokenBorn));
+
+        // The table saying no, which is the half that matters: a state list that
+        // admitted everything would be a list that says nothing. Both of these
+        // are nonsense in the same way and the place they are refused is the
+        // table rather than a switch in whatever asks.
+        Check("a wall cannot burn and a wood cannot be breached",
+            !TerrainRules.Allows(Cover.Walls, CoverState.Burning)
+            && !TerrainRules.Allows(Cover.Forest, CoverState.Breached),
+            "the states a cover may be in are declared per cover");
+
+        // Spent is not gone: the cover is still what it was and on the map it
+        // still reads as woods, and what it stops is nothing. Both halves,
+        // because a burning wood standing is the one that is easy to get wrong -
+        // it is still trees, and on fire.
+        Check("a burning wood still stands and a burnt one does not",
+            TerrainRules.Standing(Cover.Forest, CoverState.Burning)
+            && !TerrainRules.Standing(Cover.Forest, CoverState.Burnt),
+            "burning is a state of a cover that is there");
+
+        var slots = new HexField { Columns = 8, Rows = 6 };
+        var floors = new Foundation[8 * 6];
+        floors[3 * 8 + 3] = Foundation.Sand;
+        floors[3 * 8 + 4] = Foundation.Deep;
+        floors[3 * 8 + 5] = Foundation.Rock;
+        slots.SetGround(floors);
+
+        Check("a board reads back the floors it was given",
+            slots.FoundationAt(new Vector2I(3, 3)) == Foundation.Sand
+            && slots.FoundationAt(new Vector2I(4, 3)) == Foundation.Deep
+            && slots.FoundationAt(new Vector2I(5, 3)) == Foundation.Rock
+            && slots.FoundationAt(new Vector2I(0, 0)) == Foundation.Solid,
+            $"{slots.FoundationAt(new Vector2I(3, 3))} / "
+            + $"{slots.FoundationAt(new Vector2I(4, 3))} / "
+            + $"{slots.FoundationAt(new Vector2I(5, 3))}");
+
+        // The floor is a refusal in the same place the board's edge is, which is
+        // what lets the pathing keep one statement of what a step may cross.
+        //
+        // Asked of every neighbour rather than of a heading picked by eye: two
+        // cells on one row are not neighbours on a staggered grid, and a check
+        // written as if they were would pass on the even columns and mean
+        // nothing on the odd ones.
+        bool Reaches(Vector2I onto) =>
+            HexField.EdgeHeadings.Any(h =>
+                slots.Passable(HexField.Step(onto, h), HexField.Reverse(h)));
+        Check("nothing drives into deep water or on to rock",
+            !Reaches(new Vector2I(4, 3)) && !Reaches(new Vector2I(5, 3))
+            && Reaches(new Vector2I(1, 3)),
+            "deep water and rock are floors, not heights");
+
+        // Sand is the only figure in the file that is not neutral, and no map
+        // authors sand - so this is the whole proof that the ceiling works, and
+        // the reason it can be made without moving a number on a real board.
+        Check("a slow floor caps the drive and a plain one does not",
+            TerrainRules.Speed(slots.FaceAt(new Vector2I(3, 3))) < 1.0f
+            && Math.Abs(TerrainRules.Speed(slots.FaceAt(new Vector2I(0, 0)))
+                        - 1.0f) < 1e-4f,
+            $"sand {TerrainRules.Speed(slots.FaceAt(new Vector2I(3, 3))):F2}, "
+            + $"solid {TerrainRules.Speed(slots.FaceAt(new Vector2I(0, 0))):F2}");
+
+        // Water is read off the floor and authored beside it, and that seam is
+        // the one thing about this model that is unfinished - so it is asserted
+        // rather than left to be discovered: whatever a board's ground grid
+        // says, a flooded cell comes back as water.
+        var wet = new bool[8 * 6];
+        wet[3 * 8 + 1] = true;
+        slots.SetWater(wet);
+        Check("a flooded cell reads as water whatever the map made it of",
+            slots.FoundationAt(new Vector2I(1, 3)) == Foundation.Shallow
+            && slots.FaceAt(new Vector2I(1, 3)).Wet
+            && !slots.FaceAt(new Vector2I(0, 3)).Wet,
+            $"{slots.FoundationAt(new Vector2I(1, 3))}");
+        slots.SetWater(null);
+
+        // And off the board, which is the other value that is not a material.
+        // Plot has said which cells are on the board since the maps arrived; up
+        // to here nothing in the pathing had ever asked it.
+        var yard = new Vector2I(2, 2);
+        var yardOut = HexField.Step(yard, HexField.EdgeHeadings[0]);
+        var fenced = new HexField
+        {
+            Columns = 6, Rows = 6,
+            Plot = new HashSet<Vector2I> { yard, yardOut },
+        };
+        Check("a cell off the plot is a floor nothing drives on to",
+            fenced.FoundationAt(HexField.Step(yard, HexField.EdgeHeadings[3]))
+                == Foundation.Void
+            && fenced.FoundationAt(yard) == Foundation.Solid
+            && fenced.Passable(yard, HexField.EdgeHeadings[0])
+            && !fenced.Passable(yard, HexField.EdgeHeadings[3]),
+            "the board's edge is a floor like any other");
+
+        Theme("terrain: cover in the way");
+
+        // Back to plain ground first: the floors above left deep water and a
+        // rock on this board, and a route refused by the floor would look
+        // exactly like a route refused by a wall - which is the one thing the
+        // checks below are for telling apart.
+        slots.SetGround(null);
+
+        var over = new Cover[8 * 6];
+        over[3 * 8 + 4] = Cover.Walls;
+        over[3 * 8 + 2] = Cover.Forest;
+        slots.SetCover(over);
+
+        Check("a board reads back what was put on it",
+            slots.CoverAt(new Vector2I(4, 3)) == Cover.Walls
+            && slots.CoverAt(new Vector2I(2, 3)) == Cover.Forest
+            && slots.CoverAt(new Vector2I(0, 0)) == Cover.None,
+            $"{slots.CoverAt(new Vector2I(4, 3))} / "
+            + $"{slots.CoverAt(new Vector2I(2, 3))}");
+
+        // The state grid refuses off the table rather than repairing - the shape
+        // SetWater and DeriveRamps already have. A caller that gets false has
+        // asked for something that is not a state of the world, and the one
+        // thing that must not happen is that it quietly becomes one. Asked of
+        // the wood, because masonry has no state of its own to set - see below.
+        Check("a cover takes a state it may be in and refuses one it may not",
+            slots.SetCoverState(new Vector2I(2, 3), CoverState.Burning)
+            && !slots.SetCoverState(new Vector2I(2, 3), CoverState.Breached)
+            && slots.CoverStateAt(new Vector2I(2, 3)) == CoverState.Burning,
+            $"{slots.CoverStateAt(new Vector2I(2, 3))}");
+        slots.SetCoverState(new Vector2I(2, 3), CoverState.Intact);
+
+        // Masonry comes up sealed - a map letter cannot say which edges, and a
+        // walled cell that barred nothing until a bench had run would be a board
+        // that reads differently depending on the scene.
+        Check("a walled cell comes up with all six of its sides standing",
+            slots.SidesAt(new Vector2I(4, 3)) == HexField.AllSides
+            && slots.SidesAt(new Vector2I(2, 3)) == 0
+            && HexField.EdgeHeadings.All(
+                h => slots.SideStands(new Vector2I(4, 3), h)),
+            $"{slots.SidesAt(new Vector2I(4, 3)):x}");
+
+        // The state of a walled cell is a reading off its sides and is refused
+        // as a thing to write - the one cover whose state is derived, because
+        // masonry is the one cover that stands on edges.
+        Check("and its state is read off them rather than written",
+            !slots.SetCoverState(new Vector2I(4, 3), CoverState.Breached)
+            && slots.CoverStateAt(new Vector2I(4, 3)) == CoverState.Intact,
+            "a wall's state is its six sides");
+
+        // What the whole layer is for, now per edge: a wall stops a round
+        // crossing the side it stands on and does nothing to the other five.
+        // This is the resolution the cell could not carry - a ring with one leaf
+        // down is a ring a tank shoots out of on that side and no other.
+        int gate = HexField.EdgeHeadings[2];
+        Check("a leaf brought down opens its own side and no other",
+            slots.Breach(new Vector2I(4, 3), gate)
+            && !slots.SideStands(new Vector2I(4, 3), gate)
+            && HexField.EdgeHeadings.Count(
+                h => slots.SideStands(new Vector2I(4, 3), h)) == 5
+            && slots.CoverStateAt(new Vector2I(4, 3)) == CoverState.Intact,
+            $"{slots.SidesAt(new Vector2I(4, 3)):x}");
+
+        Check("and the same leaf cannot come down twice",
+            !slots.Breach(new Vector2I(4, 3), gate),
+            "a side that is already gone is not a breach");
+
+        // The last of them, which is when the cover is spent - and it is the
+        // reading, not a flag somebody set.
+        foreach (int h in HexField.EdgeHeadings)
+            slots.Breach(new Vector2I(4, 3), h);
+        Check("a ring with every leaf down reads as breached",
+            slots.CoverStateAt(new Vector2I(4, 3)) == CoverState.Breached
+            && slots.SidesAt(new Vector2I(4, 3)) == 0,
+            $"{slots.CoverStateAt(new Vector2I(4, 3))}");
+        slots.SetSides(new Vector2I(4, 3), HexField.AllSides);
+
+        // The edge belongs to both cells and neither: two rings side by side
+        // each carry masonry on the side between them, so crossing is refused by
+        // either and it does not matter which.
+        var mine = new Vector2I(4, 3);
+        int door = HexField.EdgeHeadings[0];
+        Vector2I yon = HexField.Step(mine, door);
+        slots.SetSides(mine, HexField.AllSides & ~(1 << HexField.EdgeIndex(door)));
+        Check("a wall on either side of an edge closes it",
+            !slots.Blocked(mine, door)
+            && slots.SidesAt(yon) == 0
+            && slots.Blocked(HexField.Step(mine, HexField.EdgeHeadings[1]),
+                             HexField.Reverse(HexField.EdgeHeadings[1])),
+            "the edge is asked of both cells");
+        slots.SetSides(mine, HexField.AllSides);
+
+        // The seam that keeps a ram legal. Passable is about the ground, so it
+        // says yes into a walled cell; the refusal is an edge the route is asked
+        // to mind - and the wall bench, whose whole subject is driving into
+        // masonry, does not ask.
+        Check("a wall is not a wall to Passable, and is one to a route minding it",
+            slots.Passable(new Vector2I(3, 3), 90)
+            && slots.Blocked(new Vector2I(4, 3), 90),
+            "Passable answers for the ground");
+
+        // A wall down the whole of column four, which on a staggered grid really
+        // does cut the board in two: every neighbour of a cell in column three
+        // is in column four. So the route that exists without the barricades and
+        // does not exist with them is the one statement worth making, and it
+        // does not depend on counting steps across an offset grid.
+        var fence = new Cover[8 * 6];
+        for (int r = 0; r < 6; r++)
+            fence[r * 8 + 4] = Cover.Walls;
+        slots.SetCover(fence);
+        var far = new Vector2I(6, 3);
+        var near = new Vector2I(2, 3);
+        List<Vector2I> through = slots.FindPath(near, far);
+        List<Vector2I> round = slots.FindPath(near, far, null, masonry: true);
+        Check("a route minding the masonry goes round the wall, not through",
+            through.Count > 0 && through.Any(c => c.X == 4) && round.Count == 0,
+            $"through {through.Count} cells, round {round.Count}");
+
+        // Breach one cell of it and the same order walks - through that cell and
+        // no other, the rest of the course still standing. Not decoration: it is
+        // the half that says the state is read when the route is asked for
+        // rather than baked in when the board was laid.
+        slots.SetSides(new Vector2I(4, 3), 0);
+        List<Vector2I> gap = slots.FindPath(near, far, null, masonry: true);
+        Check("and a breach in it lets the route through",
+            gap.Count > 0 && gap.Contains(new Vector2I(4, 3)),
+            $"{gap.Count} cells");
+
+        if (vehicles is { Count: > 1 })
+        {
+            // The lane is walked rather than assumed: two cells on one row are
+            // deliberately not on a lane on this grid - the check above this
+            // topic asserts exactly that - so a shooter and a target picked by
+            // eye would be testing nothing.
+            var stand = new Vector2I(2, 4);
+            List<Vector2I> shot = slots.Lane(stand, 90, 3);
+            var wall = new Cover[8 * 6];
+            if (shot.Count == 3)
+                wall[shot[1].Y * 8 + shot[1].X] = Cover.Walls;
+            slots.SetCover(wall);
+
+            Vehicle gunner = vehicles[active];
+            Vehicle mark = vehicles[active == 0 ? 1 : 0];
+            Vector2I heldGunner = gunner.Cell, heldMark = mark.Cell;
+            gunner.Cell = stand;
+            mark.Cell = shot.Count == 3 ? shot[2] : stand;
+            Shot walled = Gunnery.Solve(slots, vehicles, gunner, mark);
+            Check("a wall in the lane stops the shell, and says it was the board",
+                shot.Count == 3 && walled.OnLane && !walled.Clear
+                && walled.BlockedAt == shot[1] && walled.ByCover,
+                $"{walled} - a tank in the way and a wall in the way are "
+                + "different orders to give");
+
+            if (shot.Count == 3)
+                slots.SetSides(shot[1], 0);
+            Shot opened = Gunnery.Solve(slots, vehicles, gunner, mark);
+            Check("and the shot is clear through the breach",
+                opened.Clear && opened.Range == 3, $"{opened}");
+
+            // The rim of the shooter's own cell, which is the case the cell was
+            // never able to answer: a tank inside a ring is firing through its
+            // own masonry, and the one wall on the board it is actually inside
+            // would otherwise be the one wall it cannot hit.
+            var ringed = new Cover[8 * 6];
+            ringed[stand.Y * 8 + stand.X] = Cover.Walls;
+            slots.SetCover(ringed);
+            Shot inside = Gunnery.Solve(slots, vehicles, gunner, mark);
+            Check("a tank inside a ring is stopped by its own rim",
+                inside.OnLane && !inside.Clear && inside.ByCover
+                && inside.BlockedAt == shot[0],
+                $"{inside}");
+
+            slots.Breach(stand, 90);
+            Shot out90 = Gunnery.Solve(slots, vehicles, gunner, mark);
+            Check("and shoots out of the leaf it knocked down",
+                out90.Clear, $"{out90}");
+
+            gunner.Cell = heldGunner;
+            mark.Cell = heldMark;
+        }
+
+        // The wood's own state, written by the thing that burns it. The point of
+        // the arrangement rather than a detail of it: everything Wildfire knows
+        // is a function of one age - char, flame, smoke, the handover - and none
+        // of that is a thing a rule can be written against. Two nouns are, and
+        // this is where they arrive on the board.
+        //
+        // On a board of its own with every cell wooded, because what is being
+        // asserted is the clock reaching the cell and not which cells the grove
+        // happened to sow.
+        var burning = new HexField { Columns = 4, Rows = 4 };
+        var woods = new Cover[4 * 4];
+        Array.Fill(woods, Cover.Forest);
+        burning.SetCover(woods);
+        var fire = new Wildfire { Field = burning, Wooded = _ => true };
+        var lit = new Vector2I(1, 1);
+
+        Check("an unlit wood is a wood that is not burning",
+            burning.CoverStateAt(lit) == CoverState.Intact,
+            $"{burning.CoverStateAt(lit)}");
+
+        fire.Light(lit);
+        fire.Tick(0.1);
+        Check("a wood that catches says so on the board",
+            burning.CoverStateAt(lit) == CoverState.Burning
+            && burning.FaceAt(lit).Standing,
+            $"{burning.CoverStateAt(lit)} - burning is a state of a cover that "
+            + "is still there");
+
+        // Past the last tree on the cell, which is the one staggered by the
+        // whole of CatchWithin - the boundary the alight count is already
+        // written against, asked here rather than a second judgement about when
+        // a wood is finished.
+        fire.Tick(fire.BurnFor + fire.CatchWithin + 0.1);
+        Check("and that it is finished when the last tree on it is",
+            burning.CoverStateAt(lit) == CoverState.Burnt
+            && !burning.FaceAt(lit).Standing,
+            $"{burning.CoverStateAt(lit)} - a burnt wood is a hole in the line");
+
+        // The fire spreads, so its neighbours are burning by now and the board
+        // has to have been told about them too - the half that a check on one
+        // lit cell cannot see.
+        //
+        // One more frame first, and it is the spread own rule rather than a
+        // settling time: a cell caught during a tick is lit after the walk that
+        // caught it, so what it is doing is said on the next one. Without this
+        // the count is one and the assertion would be about nothing.
+        fire.Tick(0.1);
+        int caught = 0;
+        for (int q = 0; q < 4; q++)
+        for (int r = 0; r < 4; r++)
+            if (burning.CoverStateAt(new Vector2I(q, r)) != CoverState.Intact)
+                caught++;
+        Check("every cell the fire reached is one the board knows about",
+            caught > 1 && caught == fire.Scorched,
+            $"{caught} cells marked against {fire.Scorched} alight or burnt");
+
+        // The board the harness actually opens on, where the woods are not
+        // authored at all - the terrain hash scatters them - so the cover grid
+        // is null and there is nothing to write a state into. A cell with trees
+        // drawn on it that cannot be told it is on fire is the one answer too
+        // many this layer exists to stop, so the grid is made on demand.
+        //
+        // Asked of the live field rather than of an invented one because the
+        // hash is what has to be asked: a probe board with no terrain loaded has
+        // no woods on it to find.
+        Vector2I? hashed = null;
+        for (int q = 0; q < field.Columns && hashed is null; q++)
+        for (int r = 0; r < field.Rows && hashed is null; r++)
+            if (field.CoverAt(new Vector2I(q, r)) == Cover.Forest)
+                hashed = new Vector2I(q, r);
+        if (hashed is Vector2I wood)
+        {
+            bool took = field.SetCoverState(wood, CoverState.Burning);
+            bool read = field.CoverStateAt(wood) == CoverState.Burning;
+            field.SetCoverState(wood, CoverState.Intact);
+            Check("a wood nobody authored can still be told it is burning",
+                took && read,
+                $"({wood.X},{wood.Y}) took {took}, read back {read}");
+        }
+
+        // And putting the wood back puts the board back, for Swell.Settle's
+        // reason: a state left standing comes back as a board that was burning
+        // before anybody lit it.
+        fire.Douse();
+        int still = 0;
+        for (int q = 0; q < 4; q++)
+        for (int r = 0; r < 4; r++)
+            if (burning.CoverStateAt(new Vector2I(q, r)) != CoverState.Intact)
+                still++;
+        Check("dousing it puts every cell back",
+            still == 0, $"{still} cells still burnt");
+
+        // The two representations of the same board, held against each other.
+        // This is the migration's own check and it is meant to be temporary: the
+        // walls, the cliffs and the wooded kinds are still authored as their own
+        // grids, and the slots are decoded from the same characters. The day one
+        // of them is edited alone, this is what says so.
+        var mismatched = new List<string>();
+        foreach (string name in BoardMap.Names)
+        {
+            BoardMap board;
+            try
+            {
+                board = BoardMap.ByName(name);
+            }
+            catch (Exception)
+            {
+                continue;               // judged, and reported, below
+            }
+            for (int r = 0; r < board.Rows && mismatched.Count < 6; r++)
+            for (int q = 0; q < board.Columns && mismatched.Count < 6; q++)
+            {
+                var cell = new Vector2I(q, r);
+                if (!board.OnBoard(cell))
+                    continue;
+                int at = board.At(cell);
+                if (board.Walls[at] != (board.Over[at] == Cover.Walls))
+                    mismatched.Add($"{name} ({q},{r}) wall");
+                if (board.Cliffs[at] != (board.Ground[at] == Foundation.Rock))
+                    mismatched.Add($"{name} ({q},{r}) rock");
+                if ((board.Kinds[at] == TerrainSet.Forest)
+                    != (board.Over[at] == Cover.Forest))
+                    mismatched.Add($"{name} ({q},{r}) wood");
+            }
+        }
+        Check("every authored board says the same thing twice about its cells",
+            mismatched.Count == 0, string.Join("; ", mismatched));
+
     }
 
     private static void Relief(HexField field, Grove? grove,

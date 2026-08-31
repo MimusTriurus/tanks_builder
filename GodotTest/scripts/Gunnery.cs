@@ -23,8 +23,15 @@ public readonly struct Shot
     /// lane.</summary>
     public int Range { get; init; }
 
-    /// <summary>The cell of the tank standing in the way, if one is.</summary>
+    /// <summary>The cell of whatever stands in the way - a tank, or cover that
+    /// stops a round.</summary>
     public Vector2I? BlockedAt { get; init; }
+
+    /// <summary>Whether what blocks it is the board rather than a tank. Two
+    /// answers rather than one for <see cref="Shot"/>'s own reason: a tank in
+    /// the way moves or is shot first, and a wall in the way is a different
+    /// order entirely - drive round it, or breach it.</summary>
+    public bool ByCover { get; init; }
 
     public bool OnLane => Heading >= 0;
 
@@ -32,7 +39,9 @@ public readonly struct Shot
 
     public override string ToString() =>
         !OnLane ? "no lane"
-        : BlockedAt is Vector2I b ? $"{Heading} deg blocked at ({b.X},{b.Y})"
+        : BlockedAt is Vector2I b
+            ? $"{Heading} deg blocked at ({b.X},{b.Y})"
+              + (ByCover ? " by cover" : "")
         : $"{Heading} deg at {Range}";
 }
 
@@ -82,13 +91,46 @@ public static class Gunnery
             return None;
         List<Vector2I> lane = field.Lane(shooter.Cell, heading, range);
         Vector2I? blocked = null;
-        for (int i = 0; i + 1 < lane.Count; i++)
-            if (Vehicle.At(vehicles, lane[i]) is not null)
+        bool byCover = false;
+        // Cover beside the tanks and in the same walk, because from the round's
+        // point of view they are one question: something is standing in the way
+        // and the shell stops there. Which of the two it was is carried out
+        // separately - see Shot.ByCover - because the two are different orders
+        // to give.
+        //
+        // <b>Masonry is asked of the edge, and the first edge is the shooter's
+        // own rim.</b> A wall stands on the boundary of its cell, so a tank
+        // inside a ring is firing through its own leaf - the one wall on the
+        // board it is actually inside would otherwise be the one wall it could
+        // not hit. The same sentence WallProp.Bars is written under, said here
+        // about a board that may have no props on it at all.
+        Vector2I at = shooter.Cell;
+        for (int i = 0; i < lane.Count && blocked is null; i++)
+        {
+            if (field.Blocked(at, heading))
             {
                 blocked = lane[i];
+                byCover = true;
                 break;
             }
-        return new Shot { Heading = heading, Range = range, BlockedAt = blocked };
+            at = lane[i];
+            // The target's own cell is the last of the lane and is skipped, as
+            // it always was: what stands on the cell being shot at does not stop
+            // the shell aimed at it. The edge on to it is not skipped - that
+            // wall is between them.
+            if (i + 1 >= lane.Count)
+                break;
+            bool tank = Vehicle.At(vehicles, lane[i]) is not null;
+            if (!tank && !field.Screened(lane[i]))
+                continue;
+            blocked = lane[i];
+            byCover = !tank;
+        }
+        return new Shot
+        {
+            Heading = heading, Range = range,
+            BlockedAt = blocked, ByCover = byCover,
+        };
     }
 
     /// <summary>

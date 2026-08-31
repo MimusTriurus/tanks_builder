@@ -817,6 +817,8 @@ public sealed partial class TankBench : SceneRoot
             Columns = _map.Columns, Rows = _map.Rows, Plot = _map.Plot,
         };
         _field.SetKinds(_map.Kinds);
+        _field.SetGround(_map.Ground);
+        _field.SetCover(_map.Over);
         _field.SetRelief(_map.Levels, _map.Ramps);
         // After the relief and never before it: the water's guards are asked
         // about levels and ramps, so water laid on a board with no heights yet
@@ -1086,6 +1088,57 @@ public sealed partial class TankBench : SceneRoot
         prop.Build();
         _walls.Add(prop);
         _walled.Add(cell);
+        Restate(prop);
+    }
+
+    /// <summary>
+    /// Write which of a cell's six edges still carry masonry on to the board -
+    /// <see cref="HexField.SetSides"/>.
+    ///
+    /// <b>Measured off the bricks, never off the bearing and the side count.</b>
+    /// <see cref="WallProp.Bars"/> already refuses to derive it, and for the
+    /// reason that matters twice as much here: what the board records has to
+    /// fall with the leaf, and a mask worked out from the recipe would still say
+    /// six sides stand on a ring a tank has driven through.
+    ///
+    /// The direction of an edge is taken off the field, so this asks the same
+    /// question the round does - <c>Barring</c>, with the shot's direction
+    /// swapped for the six the grid has.
+    /// </summary>
+    private void Restate(WallProp prop)
+    {
+        int mask = 0;
+        Vector2 middle = _field.FlatAnchor(prop.Cell);
+        for (int i = 0; i < HexField.EdgeHeadings.Length; i++)
+        {
+            Vector2I next = HexField.Step(prop.Cell, HexField.EdgeHeadings[i]);
+            if (prop.Bars(_field.FlatAnchor(next) - middle))
+                mask |= 1 << i;
+        }
+        _field.SetSides(prop.Cell, mask);
+        _stated[prop.Cell] = (prop.Rig?.Loose ?? 0, prop.Rig?.Broken ?? 0);
+    }
+
+    /// <summary>What each wall had let go of and broken when the board was last
+    /// told about it. Two ints rather than a re-measure every frame: walking the
+    /// bricks six times per wall is what <see cref="Restate"/> costs, and a wall
+    /// that nothing has hit since the last frame has nothing to say.</summary>
+    private readonly Dictionary<Vector2I, (int Loose, int Broken)> _stated =
+        new();
+
+    /// <summary>Tell the board about any wall that has lost masonry since the
+    /// last frame. Here rather than inside the ram and the round, because both
+    /// of them happen to a rig and settle over the frames after - a leaf let go
+    /// of falls, and it is the falling that takes it off the edge.</summary>
+    private void Restated()
+    {
+        foreach (WallProp prop in _walls)
+        {
+            var now = (prop.Rig?.Loose ?? 0, prop.Rig?.Broken ?? 0);
+            if (_stated.TryGetValue(prop.Cell, out var was) && was == now)
+                continue;
+            Restate(prop);
+        }
     }
 
     /// <summary>Lay them all again - what a size dial, a seed or a side does.
@@ -1795,6 +1848,10 @@ public sealed partial class TankBench : SceneRoot
         // the tank got to this frame, and a round that landed this frame has
         // already been offered to the wall by Fly.
         Ram();
+        // What the ram and the round did to the edges, on to the board. After
+        // both and never inside either: a leaf is taken off its edge by falling,
+        // not by being let go of.
+        Restated();
         // The second leg of a ram, once the run-up has arrived. Here rather than
         // in the order itself because the board's pathing has no way to say
         // "and come in along this heading" - see RamAt.

@@ -1767,6 +1767,11 @@ public sealed partial class Main : SceneRoot
 		// on the board with guards and neither of them asks what a cell is made
 		// of - so a kind that is wrong is wrong on its own and says so on screen.
 		_field.SetKinds(_map.Kinds);
+		// The two slots, beside the kinds and for their reason: what a cell
+		// is made of and what stands on it are statements about that cell
+		// alone, so they go on before anything that has a guard on it.
+		_field.SetGround(_map.Ground);
+		_field.SetCover(_map.Over);
 		if (_grade >= 0.0)
 			_field.StepGrade = _grade;
 		if (_depth >= 0.0)
@@ -1981,6 +1986,15 @@ public sealed partial class Main : SceneRoot
 		// slider drag, and a log line per drag is a log nobody reads.
 		if (_grove is not null)
 			GD.Print("grove: " + _grove.Note());
+		// What the two slots are running on. Printed for walls.json's
+		// reason: a settings file that quietly did not load looks exactly
+		// like one whose settings did nothing.
+		TerrainRules.Ready();
+		GD.Print("terrain: " + (TerrainRules.Loaded
+			? TerrainRules.FileName + " read"
+			  + (TerrainRules.Error.Length > 0
+				  ? ", but " + TerrainRules.Error : "")
+			: "on the compiled figures - " + TerrainRules.Error));
 		// The flag may have picked a tank other than the first, and the trim is
 		// set on selection - so it has to be set once at the start too, or two of
 		// the three come up forward until something is clicked.
@@ -2711,7 +2725,7 @@ public sealed partial class Main : SceneRoot
 		// Round the others rather than through them. A blocked destination gives
 		// no path at all, which is why a click on an occupied cell is read as a
 		// selection before it ever gets here.
-		_path = _field.FindPath(_cell, target, Barred());
+		_path = _field.FindPath(_cell, target, Barred(), masonry: true);
 		_pathStep = 0;
 		// Mouse aim would override both turret modes and make the feature look
 		// broken while the tank drives, so an order takes the turret back.
@@ -2721,10 +2735,17 @@ public sealed partial class Main : SceneRoot
 		_field.QueueRedraw();
 	}
 
-	/// <summary>Everywhere the driven tank may not go. The other tanks and
-	/// nothing else: a forest cell has a clearing in it by construction, so
-	/// every hex on the board is drivable and the woods cost movement nothing
-	/// yet. When they do, this is where that goes.</summary>
+	/// <summary>
+	/// Everywhere the driven tank may not go: the other tanks, and nothing else.
+	///
+	/// <b>The masonry is not a cell and so is not here</b> - a wall stands on the
+	/// rim, and a ring with one leaf driven through is a ring a tank drives out
+	/// of on that side. It reaches the route as an edge instead, through
+	/// <c>masonry: true</c> - see <see cref="HexField.Blocked"/>. A wood is in
+	/// neither: a forest cell has a clearing in it by construction, so it costs
+	/// the route nothing, and what it costs the drive is <c>terrain.json</c>'s to
+	/// say.
+	/// </summary>
 	private HashSet<Vector2I> Barred() =>
 		new(Vehicle.Occupied(_vehicles, Active));
 

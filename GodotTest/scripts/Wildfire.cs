@@ -268,8 +268,16 @@ public sealed class Wildfire
             // precision; everything read off it has finished long before.
             float over = BurnFor + CatchWithin + SmokeFor;
             _age[i] = age = Mathf.Min(age + step, over + 1.0f);
-            if (age < BurnFor + CatchWithin)
+            bool flaming = age < BurnFor + CatchWithin;
+            if (flaming)
                 alight++;
+            // What the board is told, off the boundary the count above already
+            // is: a cell is alight while anything standing on it is in flame,
+            // and the last tree on it is the one staggered by the whole of
+            // CatchWithin. Two readings of one number rather than a judgement of
+            // its own - see Told.
+            Told(new Vector2I(q, r),
+                 flaming ? CoverState.Burning : CoverState.Burnt);
             if (!Enabled)
                 continue;
             var cell = new Vector2I(q, r);
@@ -389,9 +397,39 @@ public sealed class Wildfire
     /// </summary>
     public void Douse()
     {
+        // The board back with the wood, and before the ages go: a cell that has
+        // been forgotten here cannot be found to put right afterwards.
+        for (int q = 0; q < _wide; q++)
+        for (int r = 0; r < _tall; r++)
+        {
+            int i = r * _wide + q;
+            if (i < _age.Length && _age[i] >= 0.0f)
+                Told(new Vector2I(q, r), CoverState.Intact);
+        }
         Array.Fill(_age, -1.0f);
         Alight = 0;
         Scorched = 0;
+    }
+
+    /// <summary>
+    /// Tell the board what the wood on a cell is doing, if it is not what the
+    /// board already thinks.
+    ///
+    /// <b>The state is the board's and the clock is this class's</b>, which is
+    /// the whole of the arrangement: everything here is a function of one age -
+    /// the char, the flame, the smoke, the handover - and none of that is a
+    /// thing a rule can be written against. Burning and Burnt are, and they are
+    /// the two the cell carries.
+    ///
+    /// <b>Only on a change.</b> Written every frame it would be a redraw per
+    /// burning cell per frame for a value that moves twice in the life of a
+    /// fire; asked first, a wood that has been alight for six seconds costs a
+    /// comparison.
+    /// </summary>
+    private void Told(Vector2I cell, CoverState state)
+    {
+        if (Field.CoverStateAt(cell) != state)
+            Field.SetCoverState(cell, state);
     }
 
     public string Note() =>
