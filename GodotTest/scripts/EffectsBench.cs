@@ -6,26 +6,32 @@ using Godot;
 namespace TankSpriteTest;
 
 /// <summary>
-/// A bare board with nothing on it but the effect being judged.
+/// A board with nothing on it but the effect being judged and the four things a
+/// burst can happen against.
 ///
 /// Separate from the harness for <see cref="WoodBench"/>'s reason, and the same
 /// reason again: what is judged here is what a burst looks like, and judging it
 /// inside <see cref="Main"/> means three tanks, eighteen layers, sound, a panel
 /// and fifty-four cells of terrain - on which the burst is one small bright
-/// thing and most of the picture is something else. Here the whole subject is
-/// one flash over flat ground.
+/// thing and most of the picture is something else.
 ///
 /// Run it with the scene as the positional argument, leaving project.godot
 /// alone:
 ///
 ///     Godot_v4.7.2-stable_mono_win64.exe --path GodotTest res://Effects.tscn
 ///
-/// <b>The ground is plain everywhere, and that is the bench's one opinion.</b>
-/// <see cref="TerrainSet.Mixed"/> is what a board wears and it is the wrong
-/// backdrop for this: a burst is judged on its own hue and on how it stands
-/// against the ground, and a ground that changes kind cell to cell moves the
-/// second half of that comparison between one shot and the next. Plain is the
-/// same pixels under every burst.
+/// <b>The board is <see cref="BoardMap.Effects"/>: five by five standing a level
+/// above the datum, a wood in one corner, a pond in the other and a ring of brick
+/// in the middle.</b> It used to be flat plain ground everywhere, and that had a
+/// stated reason - one plate under every burst, so an A/B moves nothing but the
+/// burst. What it also had was every cell drawn as a flat hexagon with no side
+/// faces at all, because the stage skips a prism's walls when the top and the
+/// floor are the same height: a 3D stage looking exactly like the flat one. The
+/// plinth fixes that, and the three features are there because a burst is judged
+/// partly on what hides it and what it hides - and only brick, trees and water can
+/// answer that. The cost is named in <see cref="BoardMap.Effects"/>: the mix is
+/// forced by the wood, so the backdrop varies cell to cell and an A/B is worth
+/// taking on one cell.
 ///
 /// <b>It opens on the stage, like the wood bench, and for the harder half of
 /// that reason.</b> A burst is a thing in the world at a height above a cell:
@@ -57,19 +63,35 @@ public sealed partial class EffectsBench : SceneRoot
     /// measured in.</summary>
     private const string TileTag = "MTP";
 
-    /// <summary>Five by five. Big enough that a burst at the middle has ground
-    /// all round it out to two cells - as far as anything proposed reaches - and
-    /// small enough that the whole board is in one window at the zoom the
-    /// subject wants.</summary>
-    private const int Wide = 5;
-    private const int Tall = 5;
-
-    /// <summary>The cell the next burst goes on, unless a flag or the middle
-    /// button says otherwise.</summary>
-    public static readonly Vector2I Middle = new(Wide / 2, Tall / 2);
+    /// <summary>The cell the next burst goes on, unless a flag, a double click or
+    /// the middle button says otherwise. The middle of the board, which is where
+    /// the ring of brick stands - see <see cref="BoardMap.Effects"/>, which is now
+    /// the only statement of how big this board is.</summary>
+    public static readonly Vector2I Middle =
+        new(BoardMap.Effects.Columns / 2, BoardMap.Effects.Rows / 2);
 
     private HexField _field = null!;
     private Stage3D? _stage;
+
+    /// <summary>
+    /// The board this bench stands on - <see cref="BoardMap.Effects"/>.
+    ///
+    /// <b>A map rather than a plot of plain cells, and the plinth in it is the
+    /// point.</b> The stage skips a prism's walls when the top face and the floor
+    /// are the same height, so a board flat on the datum draws as flat hexagons of
+    /// ground: a 3D stage looking exactly like the 2D one. A level of plinth gives
+    /// every cell its sides.
+    /// </summary>
+    private readonly BoardMap _map = BoardMap.Effects;
+
+    /// <summary>The wood in the corner, the fire that can take it, the pond's
+    /// drawn surface and its swell. Each is the same object the harness uses -
+    /// a bench that reimplements what it stands on is measuring itself.</summary>
+    private Grove? _grove;
+    private Wildfire? _fire;
+    private WaterArt? _surf;
+    private Swell? _sea;
+    private readonly List<WallProp> _walls = new();
 
     /// <summary>The marks bursts have left. Owned here and handed to the stage,
     /// the way the harness owns them: what has been dug is a fact about the
@@ -172,11 +194,11 @@ public sealed partial class EffectsBench : SceneRoot
         SettleForProof(CapturePath is not null);
     }
 
-    /// <summary>Whether q,r names a cell of this board. Checked against the
-    /// declared size rather than against the field, because the flags are read
-    /// before the field is built.</summary>
-    private static bool OnBoard(int q, int r) =>
-        q >= 0 && q < Wide && r >= 0 && r < Tall;
+    /// <summary>Whether q,r names a cell of this board. Asked of the map rather
+    /// than of the field, because the flags are read before the field is
+    /// built.</summary>
+    private bool OnBoard(int q, int r) =>
+        BoardMap.Effects.OnBoard(new Vector2I(q, r));
 
     public override void _Ready()
     {
@@ -200,35 +222,81 @@ public sealed partial class EffectsBench : SceneRoot
             GD.PushWarning($"effects: no {TileTag} atlas ({e.Message}) - no board");
         }
 
+        PropSet props = PropSet.Load(AssetRoot.Props);
+        GD.Print("effects: props " + props.Note);
+
         _field = new HexField
         {
             Atlas = tile,
             Terrain = terrain,
-            Paint = TerrainSet.Plain,
-            Trees = false,
-            Columns = Wide,
-            Rows = Tall,
-            Plot = Board(),
+            // The map's own paint - see BoardMap.Effects on why it is the plain
+            // plate and not the mix.
+            Paint = _map.Paint,
+            Trees = props.Any,
+            Columns = _map.Columns,
+            Rows = _map.Rows,
+            Plot = _map.Plot,
         };
+        _field.SetKinds(_map.Kinds);
+        _field.SetRelief(_map.Levels, _map.Ramps);
+        // After the relief and never before it, the tank bench's reason word for
+        // word: the water's guards are asked about levels and ramps, so water laid
+        // on a board with no heights yet is water judged against a board that does
+        // not exist.
+        _field.SetWater(_map.Water);
         AddChild(_field);
+
+        _grove = new Grove
+        {
+            Field = _field, Props = props, Origin = Vector2.Zero,
+            Enabled = props.Any,
+        };
+        AddChild(_grove);
+        // After the wood, because what can catch is what is standing - see
+        // Grove.Carrying. Nothing lights it yet; a burst that sets a wood alight is
+        // the next thing this board is for.
+        _fire = new Wildfire
+        {
+            Field = _field, Enabled = true, Wooded = _grove.Carrying,
+        };
+        _grove.Fire = _fire;
 
         _camera = new Camera2D
         {
             Zoom = new Vector2(HomeZoom, HomeZoom),
             Enabled = true,
-            Position = _field.CellCentre(Middle),
+            // On the cell the burst will be on rather than on the middle of the
+            // board, which is the same thing until <c>--at</c> is given and then is
+            // not: a capture of a burst on the pond framed on the brick is a
+            // capture of the brick. The reset puts it back on the middle, because
+            // that is what a reset means.
+            Position = _field.CellCentre(_at),
         };
         AddChild(_camera);
 
         // The stage owns the board from here, so the canvas answer is put away:
         // the field's own hexagons would be a canvas item over the entire 3D
         // world, tanks and all - the trap Main.Suppress2D exists for.
+        if (tile is not null)
+        {
+            _grove.Plant();
+            GD.Print("effects: grove " + _grove.Note());
+            _surf = WaterArt.Load(AssetRoot.Water, tile.HexRect);
+            GD.Print("effects: water " + _surf.Note);
+        }
+        _sea = new Swell { Field = _field };
+
         _stage = new Stage3D
         {
             Field = _field, Origin = Vector2.Zero, Eye = _camera,
+            Wood = _grove, Blaze = _fire, Surf = _surf, Sea = _sea,
         };
         AddChild(_stage);
+        // Both canvas answers put away, WoodBench's pair and for its reasons: the
+        // field's own hexagons would be a canvas item over the whole 3D world, and
+        // the grove's nodes would draw every tree twice.
         _field.ShowField = false;
+        _grove.Visible = false;
 
         // The bursts themselves belong to the stage - it is the 3D world, and a
         // burst is a thing standing in it. What is handed over here is the board's
@@ -257,8 +325,50 @@ public sealed partial class EffectsBench : SceneRoot
             Panel(layer);
         }
 
+        // After the stage, because a wall wants the ground it stands on and the
+        // triangles come off the stage - the tank bench's ordering.
+        Brick();
+
         if (_shoot)
             Burst();
+    }
+
+    /// <summary>
+    /// The ring of brick in the middle.
+    ///
+    /// <b>Six sides on one cell</b>, which is <see cref="TankBench.RingSides"/>'s
+    /// own arrangement: what the map marks with <c>W</c> is a cell, and what
+    /// stands on it is one <see cref="WallProp"/> whose recipe runs the whole way
+    /// round. Nothing rams it here - there is no tank on this bench - so what it is
+    /// for is to be something a burst happens next to: brick is the one thing on
+    /// this board with a vertical face, and a burst is judged partly on what it
+    /// hides and what hides it.
+    /// </summary>
+    private void Brick()
+    {
+        if (_stage is null || _field.Atlas is null)
+            return;
+        foreach (Vector2I cell in _map.Walled())
+        {
+            var prop = new WallProp
+            {
+                Field = _field,
+                Stage = _stage,
+                Cell = cell,
+                Recipe = new WallKit.Recipe { Sides = TankBench.RingSides },
+                Borrow = null,
+                // Its own collision channel per wall, the tank bench's reason: every
+                // rig is centred on the world origin, so two on one bit share a
+                // phantom space.
+                Channel = _walls.Count,
+            };
+            AddChild(prop);
+            prop.Bearing = HexField.EdgeHeadings[0];
+            prop.Build();
+            _walls.Add(prop);
+        }
+        if (_walls.Count > 0)
+            GD.Print($"effects: {_walls.Count} ring(s) of brick");
     }
 
     /// <summary>
@@ -490,20 +600,6 @@ public sealed partial class EffectsBench : SceneRoot
         "res://assets/BinbunVFX_Vol2/ExplosionFX/effects/ground/"
         + "vfx_ground_explosion_01.tscn";
 
-    /// <summary>The board, as the set the field is told to keep - a full
-    /// rectangle, said rather than left implicit for <see cref="WoodBench.Board"/>'s
-    /// reason: the plot is what says where the board stops, and a bench that
-    /// agreed with it by accident would stop agreeing the day the board grew.
-    /// </summary>
-    private static HashSet<Vector2I> Board()
-    {
-        var plot = new HashSet<Vector2I>();
-        for (int q = 0; q < Wide; q++)
-        for (int r = 0; r < Tall; r++)
-            plot.Add(new Vector2I(q, r));
-        return plot;
-    }
-
     public override void _Process(double delta)
     {
         delta = FrameClock.FixedStep ?? delta;
@@ -560,16 +656,37 @@ public sealed partial class EffectsBench : SceneRoot
             return $"binbun pack at {packed}x on {_at.X},{_at.Y}\n"
                    + "its smoke renders black here - see docs/blast.md\n"
                    + "SPACE re-fires, R resets, F12 shoots";
-        return $"board {Wide}x{Tall} plain, "
+        return $"board {_map.Columns}x{_map.Rows}, wood, pond and a ring of brick, "
                + (Sheet ? "imported (flipbook) burst" : "computed burst")
                + $" at {_at.X},{_at.Y}\n"
                + $"{_pits.Pits.Count} crater(s) of {Craters.Capacity}\n"
-               + "SPACE fires, TAB the panel, middle click a cell to aim,\n"
+               + "SPACE fires, double click a cell to fire on it,\n"
+               + "TAB the panel, middle click a cell to aim,\n"
                + "middle drag pans, wheel zooms, R resets, F12 shoots";
     }
 
     public override void _UnhandledInput(InputEvent @event)
     {
+        // <b>A double click on the left sets a burst off on that cell.</b> A single
+        // one would be worse than nothing here: it is the gesture every other bench
+        // uses for "take this tank" and "go there", and a click that detonates on
+        // the way past is a click that cannot be used to aim and look. A double
+        // click cannot be made by accident, and it does both things at once - the
+        // reticle moves and the shell lands.
+        if (@event is InputEventMouseButton
+            { ButtonIndex: MouseButton.Left, DoubleClick: true } twice)
+        {
+            Vector2I cell = _field.CellAt(_field.ToLocal(twice.Position));
+            // Not clamped, by the middle button's argument: a click off the board
+            // is a click off the board, and clamping would blow up the cell beside
+            // the one that was pointed at.
+            if (_field.InBounds(cell))
+            {
+                _at = cell;
+                Burst();
+            }
+            return;
+        }
         // One button doing two things with the gesture deciding which, resolved
         // on release because that is the earliest moment the two are
         // distinguishable - SceneRoot.MiddleTapped.

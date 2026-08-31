@@ -1130,6 +1130,94 @@ public sealed partial class BoardMap
         "wall", WallGround, WallRamps, WallHomes, TerrainSet.Default, true,
         plinth: 1);
 
+    /// <summary>
+    /// The effects bench's board: five by five, standing a level above the datum,
+    /// with the three things a burst wants something to happen against.
+    ///
+    /// <b>A level up rather than flat on the datum, and that is what makes the
+    /// hexes read as hexes.</b> <see cref="Stage3D"/> extrudes a prism from a
+    /// cell's top face down to the board's floor and <b>skips the walls when the
+    /// two are the same height</b> - so a board on the datum is drawn as flat
+    /// hexagons of ground with no sides at all, which is exactly what this bench
+    /// looked like. One level of plinth gives every cell its side faces, and
+    /// nothing relative moves: <see cref="Passable"/> reads the same board.
+    /// <see cref="WallMap"/> does this for the same reason.
+    ///
+    /// <b>The pond is a level below its neighbours because it has to be.</b>
+    /// <see cref="Flood"/> refuses a flat dry cell at a surface's own height
+    /// beside it, so <c>w</c> puts it at the plinth minus one and the dry ring
+    /// round it stands a step above - which is also why it is in a corner: three
+    /// neighbours to bank rather than six.
+    ///
+    /// <b>Homes: the middle, which is where the ring of brick stands.</b> No tank
+    /// is built on this bench at all, so this is the cell the wall is stood on -
+    /// <c>WallProp</c> is told a cell, and <see cref="Walled"/> is where it reads
+    /// which. The middle, because a burst is judged in the middle of the window.
+    /// </summary>
+    private static readonly string[] EffectsGround =
+    {
+        // 01234
+        "f....", // r0  a wood in the top-left corner
+        ".....", // r1
+        "..W..", // r2  a ring of brick in the middle
+        ".....", // r3
+        "w....", // r4  a pond in the bottom-left corner
+    };
+
+    /// <summary>
+    /// No ramps, and <b>this map is deliberately not in <see cref="Names"/>.</b>
+    ///
+    /// It was put there, and the audit theme took it apart in three passes, each
+    /// one right: a pond with no ramp into it leaves the wading exemption untested;
+    /// a ramp with three neighbours a level above it has no decided high edge; and
+    /// water reachable only by wading off a corner ramp strands the cells behind
+    /// it. Every one of those is a statement about <b>driving</b>, and the fix for
+    /// each was to bend this pond further out of shape - an L in the corner with a
+    /// slipway nobody uses.
+    ///
+    /// <b>So the exemption is named instead of engineered around.</b> No vehicle
+    /// is ever built on the effects bench: it has no garage, no tick and no
+    /// <c>Vehicle</c> at all, so passability, reachability and beaches are rules
+    /// about a machine that is not there. The five named maps are boards a tank
+    /// drives on and are judged as such; this is a backdrop for one effect, and the
+    /// three things on it are there to stand in front of a burst.
+    ///
+    /// What it does <b>not</b> get exempted from is the structural half, which is
+    /// not optional and not skippable: <see cref="FromGround"/> still throws on an
+    /// unknown letter, a ramp off the board or a ramp on a rock, and
+    /// <see cref="Flood"/> still refuses water it cannot bank. Those are about the
+    /// map being a map.
+    /// </summary>
+    private static readonly string[] EffectsRamps =
+    {
+        ".....",
+        ".....",
+        ".....",
+        ".....",
+        ".....",
+    };
+
+    private static BoardMap? _effects;
+
+    /// <summary>
+    /// The mix, and <b>that is forced rather than chosen - it is the trap this
+    /// file's own remark on <see cref="Paint"/> warns about.</b>
+    ///
+    /// <see cref="HexField.KindAt"/> returns a named plate for every cell if the
+    /// board has one, and never looks at <see cref="Kinds"/>: so with the plain
+    /// plate the wood in the corner is not a wood, it is a plain cell that the
+    /// grove plants nothing on. Measured, not reasoned - the first run of this
+    /// board printed <c>grove 0 props</c>.
+    ///
+    /// What it costs is the opinion this bench held while its board was bare: a
+    /// burst is judged partly on how it stands against the ground, and the mix
+    /// moves that backdrop from cell to cell. So an A/B of two bursts is worth
+    /// taking on the same cell now, which it always was and now matters.
+    /// </summary>
+    public static BoardMap Effects => _effects ??= FromGround(
+        "effects", EffectsGround, EffectsRamps,
+        new[] { new Vector2I(2, 2) }, TerrainSet.Mixed, true, plinth: 1);
+
     public static BoardMap ByName(string name) =>
         name.Trim().ToLowerInvariant() switch
         {
