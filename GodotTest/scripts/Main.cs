@@ -212,7 +212,33 @@ public sealed partial class Main : SceneRoot
 		_tick.TurretHeld = _ => _spinning || _aimWithMouse;
 		_tick.Aim = UpdateAttack;
 		_tick.Launch = RoundFor;
+		// And the fourth: what the board makes of a round that went into it.
+		// A burst is a thing standing on the board, so it is the board's answer
+		// to give - see TankTick.Landed, which was already here and unanswered.
+		_tick.Landed = Splashed;
 	}
+
+	/// <summary>
+	/// A round that went into the field: set a burst off where it landed.
+	///
+	/// <b>The shell already carries both halves of where.</b> Its landing point
+	/// is in board space and its own lift travels with it, which is exactly the
+	/// pair <see cref="Stage3D.Burst"/> wants - so nothing here has to work out
+	/// which cell was hit or how high that cell stands, and nothing can disagree
+	/// with the walk that put the shell there.
+	///
+	/// <b>Only on the stage, and that is the decision rather than a gap.</b> The
+	/// burst is a quad in the 3D world and the mark it leaves is a term in the
+	/// stage's own ground shader; the flat board has nowhere to put either. It is
+	/// legacy, so this is a thing it does not have.
+	///
+	/// A round that hits a tank does not come here at all - see
+	/// <see cref="TankTick.Strike"/> - and that is right: armour is its own
+	/// burst, the second family in docs/blast.md, and it hangs off the tank's own
+	/// picture rather than off the board.
+	/// </summary>
+	private void Splashed(Shell round) =>
+		_stage?.Burst(round.Ground, round.GroundLift);
 
 	/// <summary>Whether the board grows trees at all, and whether one may stand
 	/// where it would cross a tank on its own cell. Parked here for --terrain's
@@ -511,6 +537,12 @@ public sealed partial class Main : SceneRoot
 		}
 	}
 
+	/// <summary>Where shells have blown the ground open. Owned by the harness and
+	/// handed to the stage, exactly as the ruts and the wood's ash are: what has
+	/// been dug is a fact about the board, and which map it is rasterised into is
+	/// a question about the picture.</summary>
+	private readonly Craters _pits = new();
+
 	private void StageOn()
 	{
 		// Asked before the switch and told after it, because the two modes keep
@@ -533,6 +565,11 @@ public sealed partial class Main : SceneRoot
 			// which trees are burning, the stage blackens the ground they stood
 			// on, because the ground is the stage's.
 			Blaze = _fire,
+			// And what shells have blown open, into that same ash map: burnt
+			// ground and dug ground are one statement to the ground shader, and a
+			// second map for the second kind of dark patch would be a second
+			// answer to how dark ground is drawn. See Craters.
+			Pits = _pits,
 			// The pond's surface, by the same division as the wood: the field goes
 			// on deciding which cells are wet and how deep, the stage draws the
 			// surface over them.
@@ -5297,6 +5334,12 @@ public sealed partial class Main : SceneRoot
 		// reset could leave a mark behind it.
 		Tick.ClearRounds();
 		_marks?.Clear();
+		// Every burst out and every crater filled, with the ruts and for their
+		// reason: a board that comes back shelled is a board that was not reset,
+		// and a burst still in the air would go on throwing earth over ground
+		// that had just been made good.
+		_stage?.Quench();
+		_pits.Fill();
 		// With the shells and for the same reason: a front still crossing would
 		// arrive at a wood on a board that had just been put back, and the
 		// flinch is the one thing in the grove that holds a pose with nothing

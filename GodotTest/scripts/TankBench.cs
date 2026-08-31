@@ -984,6 +984,7 @@ public sealed partial class TankBench : SceneRoot
         {
             Field = _field, Origin = _origin, Eye = _camera,
             Marks = _marks, MarksAt = _marks?.Position ?? Vector2.Zero,
+            Pits = _pits,
             Surf = _surf, Sea = _sea, Wash = _wash,
         };
         AddChild(_stage);
@@ -1195,6 +1196,28 @@ public sealed partial class TankBench : SceneRoot
             if (Beside(here, prop.Cell) && prop.Against(foot, way, box) > 0)
                 return true;
         return false;
+    }
+
+    /// <summary>Where shells have blown the ground open - the harness's own field,
+    /// here for its reason: the marks belong to the board and the stage draws
+    /// them.</summary>
+    private readonly Craters _pits = new();
+
+    /// <summary>
+    /// A round that went into the field: raise a burst where it landed, and let
+    /// the walls have it too if it stopped on one of them.
+    ///
+    /// Both, in that order, and neither is conditional on the other: masonry
+    /// taking a shell does not stop earth being thrown, and a board with no walls
+    /// still shows the shot arriving. The harness answers the same hook with the
+    /// first half alone - see <c>Main.Splashed</c> - because it has no walls to
+    /// give the second to.
+    /// </summary>
+    private void Landing(Shell round)
+    {
+        _stage?.Burst(round.Ground, round.GroundLift);
+        if (_walls.Count > 0)
+            Struck(round);
     }
 
     private void Struck(Shell round)
@@ -1624,7 +1647,14 @@ public sealed partial class TankBench : SceneRoot
             // beside Aim and Launch, and null on a board with no walls so the
             // shot goes into the field exactly as it did.
             _tick.Obstacles = _walled;
-            _tick.Landed = _walls.Count > 0 ? Struck : null;
+            // Always answered now, walls or none: a round going into the field
+            // raises a burst wherever it lands, and on a board with walls it may
+            // also have hit one. Two things happen to one shell, so the hook is
+            // one method that does both rather than a hook that picks - the shape
+            // TankTick.Landed already documents, and the alternative is a wall
+            // bench where a shot at open ground is the one shot with nothing to
+            // show.
+            _tick.Landed = Landing;
             _tick.Barred = _walls.Count > 0 ? Barring : null;
             _tick.Shoving = _walls.Count > 0 && _shove ? Pressing : null;
             return _tick;
@@ -2204,6 +2234,10 @@ public sealed partial class TankBench : SceneRoot
         // the drive that made them by design, so a board that was not swept reads
         // as one that had been driven on before anybody touched it.
         _marks?.Clear();
+        // And what shells dug, by the same argument twice over: a crater outlasts
+        // everything, on purpose.
+        _stage?.Quench();
+        _pits.Fill();
         foreach (Vehicle vehicle in _garage)
         {
             Tick.CancelOrder(vehicle);

@@ -1,0 +1,523 @@
+{
+  "groups": [
+    {
+      "id": "he",
+      "title": "HE in the ground",
+      "description": "ground_he: the only burst built. The rest of the taxonomy in docs/blast.md arrives as its own prefix, so nothing here moves for it.",
+      "rows": [
+        {
+          "id": "he.fire_now",
+          "description": "As SPACE does, on the cell under the reticle."
+        },
+        {
+          "id": "he.refire",
+          "description": "A burst is an event, so a dial moved while nothing is in the air changes nothing anybody can see."
+        },
+        {
+          "id": "he.hold",
+          "description": "Stops the clock where it is. An event is judged on a particular moment of itself, and at sixty frames a second those moments are gone before a slider can be dragged."
+        },
+        {
+          "id": "he.scrub",
+          "description": "Where the held clock sits."
+        },
+        {
+          "id": "he.life",
+          "description": "The declared length of the event. Every family has to finish inside it - the self-test says so by name."
+        },
+        {
+          "id": "he.ring_reach",
+          "description": "How wide the rings' own plane is, in tile widths."
+        },
+        {
+          "id": "he.state",
+          "description": "What is in the air and what has been dug."
+        }
+      ]
+    },
+    {
+      "id": "he.crater",
+      "title": "the mark it leaves",
+      "description": "The board's, not the burst's: rasterised into the same ash map the burning forest blackens ground with. See Craters.",
+      "rows": [
+        {
+          "id": "he.crater.wide",
+          "description": "In tile widths. Narrower than a burst is tall: what a shell leaves is a scald round the hole."
+        },
+        {
+          "id": "he.crater.ink",
+          "description": "Capped by the ground shader at ash_keep, so a fresh crater is as dark as ground on this board gets."
+        },
+        {
+          "id": "he.crater.fill",
+          "description": "As R does, without resetting anything else."
+        }
+      ]
+    },
+    {
+      "id": "he.event",
+      "title": "the event",
+      "description": "The one size in the whole thing and the frame both halves share. Everything else is a ratio to the apex.",
+      "rows": [
+        {
+          "id": "he.event.reach",
+          "title": "throw apex",
+          "description": "How high the burst throws, in tile widths. The one size in the whole thing."
+        },
+        {
+          "id": "he.event.spread",
+          "title": "throw spread",
+          "description": "How wide it throws, as a multiple of how high."
+        },
+        {
+          "id": "he.event.root",
+          "title": "seat above ground",
+          "description": "How far above the contact point the burst is seated."
+        },
+        {
+          "id": "he.event.fade",
+          "title": "ground fade band",
+          "description": "The band it fades out over below the seat. There is no drawing under the contact point at all."
+        }
+      ]
+    },
+    {
+      "id": "he.fire",
+      "title": "the fire",
+      "description": "A twentieth of the event: flash, fireball, sparks. Its section is a sphere's, because a fireball is a body.",
+      "rows": [
+        {
+          "id": "he.fire.flash_size",
+          "title": "flash size"
+        },
+        {
+          "id": "he.fire.flash_gain",
+          "title": "flash brightness"
+        },
+        {
+          "id": "he.fire.flash_life",
+          "title": "flash life"
+        },
+        {
+          "id": "he.fire.balls",
+          "title": "fireball bodies"
+        },
+        {
+          "id": "he.fire.ball_size",
+          "title": "fireball size"
+        },
+        {
+          "id": "he.fire.ball_climb",
+          "title": "fireball climb"
+        },
+        {
+          "id": "he.fire.ball_gain",
+          "title": "fireball brightness"
+        },
+        {
+          "id": "he.fire.ball_life",
+          "title": "fireball life"
+        },
+        {
+          "id": "he.fire.sparks",
+          "title": "sparks"
+        },
+        {
+          "id": "he.fire.spark_size",
+          "title": "spark size"
+        },
+        {
+          "id": "he.fire.spark_stretch",
+          "title": "spark length"
+        },
+        {
+          "id": "he.fire.spark_gain",
+          "title": "spark brightness"
+        },
+        {
+          "id": "he.fire.spark_reach",
+          "title": "spark reach"
+        }
+      ]
+    },
+    {
+      "id": "he.earth",
+      "title": "the earth it throws",
+      "description": "Ballistic clods, stated as an apex rather than a speed and a gravity - written the other way the two fight and the cone is a low heap.",
+      "rows": [
+        {
+          "id": "he.earth.clods",
+          "title": "clods"
+        },
+        {
+          "id": "he.earth.clod_size",
+          "title": "clod size"
+        },
+        {
+          "id": "he.earth.clod_stretch",
+          "title": "clod stretch along flight",
+          "description": "Along the flight, not along the quad: a clod at the top of its arc lying vertically is what makes a cone read as thrown earth."
+        },
+        {
+          "id": "he.earth.clod_ink",
+          "title": "clod thickness"
+        },
+        {
+          "id": "he.earth.clod_life",
+          "title": "clod life"
+        },
+        {
+          "id": "he.earth.clod_narrow",
+          "title": "cone: tightest lean"
+        },
+        {
+          "id": "he.earth.clod_wide",
+          "title": "cone: widest lean"
+        },
+        {
+          "id": "he.earth.clod_born",
+          "title": "cone: seat scatter",
+          "description": "Every element leaving through the exact centre makes the base of the cone a needle."
+        }
+      ]
+    },
+    {
+      "id": "he.collar",
+      "title": "the collar along the ground",
+      "description": "The half of a burst that says which cell it happened on. Its elements lie flat, because a ring on the ground is an ellipse under this camera.",
+      "rows": [
+        {
+          "id": "he.collar.count",
+          "title": "puffs"
+        },
+        {
+          "id": "he.collar.size",
+          "title": "puff size"
+        },
+        {
+          "id": "he.collar.flat",
+          "title": "how flat they lie",
+          "description": "Wide across and shallow up."
+        },
+        {
+          "id": "he.collar.spread",
+          "title": "spread along ground"
+        },
+        {
+          "id": "he.collar.climb",
+          "title": "climb"
+        },
+        {
+          "id": "he.collar.ink",
+          "title": "thickness"
+        },
+        {
+          "id": "he.collar.life",
+          "title": "life"
+        }
+      ]
+    },
+    {
+      "id": "he.column",
+      "title": "the column over it",
+      "description": "What is left when the earth has come down, and the thing that gives the event its length.",
+      "rows": [
+        {
+          "id": "he.column.count",
+          "title": "puffs"
+        },
+        {
+          "id": "he.column.size",
+          "title": "puff size"
+        },
+        {
+          "id": "he.column.climb",
+          "title": "climb"
+        },
+        {
+          "id": "he.column.sway",
+          "title": "sway"
+        },
+        {
+          "id": "he.column.ink",
+          "title": "thickness"
+        },
+        {
+          "id": "he.column.life",
+          "title": "life"
+        },
+        {
+          "id": "he.column.born",
+          "title": "starts at"
+        }
+      ]
+    },
+    {
+      "id": "he.dust",
+      "title": "how the dust is shaded",
+      "description": "One mass, not a heap: elements are summed into a thickness and a single surface is lit at the end. The profile is a cloud's - (1-q)^2.55, measured off the CC0 pack's own painted puff - and not a sphere's, whose rim has infinite slope and was the hard edge.",
+      "rows": [
+        {
+          "id": "he.dust.soft",
+          "title": "profile softness",
+          "description": "The profile exponent. 2.55 is measured; a sphere's is 0.5 and its rim is where the hard edge was."
+        },
+        {
+          "id": "he.dust.clod_soft",
+          "title": "clod profile softness",
+          "description": "Crisper than the cloud's, because a clod of earth is a small body - but nowhere near a sphere's."
+        },
+        {
+          "id": "he.dust.ink",
+          "title": "most it may hide",
+          "description": "The most of the ground a cloud may hide. The pack's own puff peaks at 0.35 alpha and its softness is mostly that."
+        },
+        {
+          "id": "he.dust.pack",
+          "title": "how fast it saturates",
+          "description": "How fast piled-up elements stop adding to the mass."
+        },
+        {
+          "id": "he.dust.toe",
+          "title": "toe on the way out",
+          "description": "Thin dust leaves over a longer distance than thick dust."
+        },
+        {
+          "id": "he.dust.tear",
+          "title": "how torn",
+          "description": "Soft alone is airbrush. The field eats the density, not the finished alpha - on the alpha it is a stencil the cloud slides under."
+        },
+        {
+          "id": "he.dust.grain",
+          "title": "tear grain"
+        },
+        {
+          "id": "he.dust.drift",
+          "title": "tear drift"
+        },
+        {
+          "id": "he.dust.steps",
+          "title": "shading steps",
+          "description": "Off the pack's stylised smoke. Banded light reads as a drawn cloud rather than an airbrushed one."
+        },
+        {
+          "id": "he.dust.band",
+          "title": "how much stepping is taken",
+          "description": "Not all of the stepping: taken whole on a mass that saturates to one, the bands are slabs and the line between two slabs is a hard edge."
+        },
+        {
+          "id": "he.dust.seat",
+          "title": "light seat",
+          "description": "Where the light sits with the sun edge-on. Seated low, the quantiser floors the body to the darkest stop."
+        },
+        {
+          "id": "he.dust.ridge",
+          "title": "sunward ridge",
+          "description": "The lit ridge on the sun's side, which lives where the mass is thin."
+        },
+        {
+          "id": "he.dust.dense",
+          "title": "how much thickness darkens",
+          "description": "How much its own thickness darkens it. Earth in the air is dense, so its core is its darkest part."
+        }
+      ]
+    },
+    {
+      "id": "he.ring",
+      "title": "the rings on the ground",
+      "description": "Their own plane, lying flat: on the upright quad a ring loses the half of itself that spreads toward the camera. Light on the ground rather than light of its own - read brighter, two of them are lava.",
+      "rows": [
+        {
+          "id": "he.ring.count",
+          "title": "rings"
+        },
+        {
+          "id": "he.ring.life",
+          "title": "life"
+        },
+        {
+          "id": "he.ring.stagger",
+          "title": "between rings"
+        },
+        {
+          "id": "he.ring.wide",
+          "title": "band width"
+        },
+        {
+          "id": "he.ring.far",
+          "title": "how far out",
+          "description": "How far out, of its own plane. Plus the band's width it has to stay under one, or the plane's edge cuts it."
+        },
+        {
+          "id": "he.ring.gain",
+          "title": "brightness",
+          "description": "Dimmer than it wants to be: a bright orange annulus is the most sprite-like thing a burst can draw."
+        },
+        {
+          "id": "he.ring.tear",
+          "title": "how torn"
+        },
+        {
+          "id": "he.ring.disc_life",
+          "title": "ground flash life"
+        },
+        {
+          "id": "he.ring.disc_wide",
+          "title": "ground flash size"
+        },
+        {
+          "id": "he.ring.disc_gain",
+          "title": "ground flash brightness"
+        }
+      ]
+    },
+    {
+      "id": "sheet",
+      "title": "the imported burst",
+      "description": "Boom.tscn: the reference pack's flipbook cloud (Duarte David, MIT - see assets/ExplosionVFX/NOTICE.md). Sixty-four rendered frames of one smoke puff with a signed normal on each; the particles, the depth fade, the lighting and the glow are this project's, because none of the four survive an orthographic board with no lights on gl_compatibility. See SheetBlast.cs.",
+      "rows": [
+        {
+          "id": "sheet.fire_now",
+          "description": "As SPACE does, on the cell under the reticle."
+        },
+        {
+          "id": "sheet.pair",
+          "description": "Sets the computed burst off under this one. The imported cloud is smoke and fire and nothing else - the ground rings and the cone of thrown earth are the other burst's - so this is how the composition gets looked at rather than argued about."
+        },
+        {
+          "id": "sheet.refire",
+          "description": "A burst is an event, so a dial moved while nothing is in the air changes nothing anybody can see."
+        },
+        {
+          "id": "sheet.hold",
+          "description": "Stops the clock where it is. The pack spends a uniform on the same idea and calls it a debugging aid; here it is the main way a burst gets looked at."
+        },
+        {
+          "id": "sheet.scrub",
+          "description": "Where the held clock sits."
+        },
+        {
+          "id": "sheet.life",
+          "description": "The declared length of the event. The pack's own is 2.13s; shorter here, so the imported burst is not the slower of the two."
+        },
+        {
+          "id": "sheet.state",
+          "description": "What is in the air, which frame of the sheet it is on, and what has been dug."
+        }
+      ]
+    },
+    {
+      "id": "sheet.cloud",
+      "title": "the cloud",
+      "description": "Where the puffs are, which is the whole of the model and lives in C#: a direction, a speed that decays, a birth and a size, all in closed form so the clock can be held and scrubbed.",
+      "rows": [
+        {
+          "id": "sheet.cloud.puffs",
+          "description": "How many puffs go out at the front of the event. The pack's first emitter has twenty."
+        },
+        {
+          "id": "sheet.cloud.trails",
+          "description": "How many arrive afterwards, spread over the whole life. The pack's second emitter, and what stops a flipbook cloud reading as one object fading out: without them every puff is on the same frame of the same sheet and the whole cloud thins in step."
+        },
+        {
+          "id": "sheet.cloud.reach",
+          "description": "How far a puff gets from the seat, in tile widths."
+        },
+        {
+          "id": "sheet.cloud.size",
+          "description": "How wide one puff is drawn at birth, in tile widths. The sheet grows the puff on its own, so this is the first frame's size and not the biggest one's."
+        },
+        {
+          "id": "sheet.cloud.grow",
+          "description": "How much bigger a puff's quad ends than it starts, on top of what the sheet does. The sheet's own growth stops at frame twenty; its last forty frames are a fixed-size cloud dissolving."
+        },
+        {
+          "id": "sheet.cloud.climb",
+          "description": "How far the middle of the cloud rises over its life. The pack has no climb at all - it is an explosion in the air, seen head-on."
+        },
+        {
+          "id": "sheet.cloud.seat",
+          "description": "Where the middle of the cloud starts, above the contact point. Not zero: this camera buries everything below the ground line, so a puff seated on it loses its bottom half."
+        },
+        {
+          "id": "sheet.cloud.flat",
+          "description": "Disc against column. One throws along the ground, nought straight up."
+        },
+        {
+          "id": "sheet.cloud.slow",
+          "description": "How much a puff slows down over its own life - the pack's negative linear accel. One comes to a stop exactly at the end."
+        },
+        {
+          "id": "sheet.cloud.stagger",
+          "description": "How much the puffs disagree about when to leave. The pack's explosiveness of 0.91 is 0.09 of this."
+        },
+        {
+          "id": "sheet.cloud.puff_life",
+          "description": "How much of the event one puff gets. Under one, so a puff born late still finishes its sheet inside the event: a puff cut off mid-flipbook vanishes at full opacity, which is the one artefact of a flipbook that cannot be softened."
+        },
+        {
+          "id": "sheet.cloud.start",
+          "description": "How far into the sheet a puff is born. Cell zero is empty and cell one is a dot, so at nought the burst opens on a bare cell and grows into itself - a puff of smoke starting, rather than a shell going off."
+        },
+        {
+          "id": "sheet.cloud.seed",
+          "description": "Which cloud. The model is a hash of the puff's index and this, so the same seed is the same burst to the pixel."
+        }
+      ]
+    },
+    {
+      "id": "sheet.look",
+      "title": "the sheet",
+      "description": "How one puff is drawn: the flipbook's own numbers, and the fade that replaces the pack's depth buffer.",
+      "rows": [
+        {
+          "id": "sheet.look.ink",
+          "description": "The most of the ground one puff may hide."
+        },
+        {
+          "id": "sheet.look.spin",
+          "description": "How much the sheet is turned per puff. At nought the cloud is twenty copies of one picture, which is the failure a flipbook is most likely to show."
+        },
+        {
+          "id": "sheet.look.still",
+          "description": "Every puff held on one frame of the sheet, or -1 for the animation. The pack's own debugging aid, and the only way to see what a single frame of the flipbook is doing."
+        },
+        {
+          "id": "sheet.look.root",
+          "description": "How far below the seat a puff still draws, in world units."
+        },
+        {
+          "id": "sheet.look.fade",
+          "description": "The band a puff fades out over as it reaches the ground, in world units. This is what the pack reads the depth buffer for; here the ground is known, so it is arithmetic."
+        }
+      ]
+    },
+    {
+      "id": "sheet.fire",
+      "title": "the flame and the light",
+      "description": "The pack's three ramps, unchanged except the smoke's - its own is black-to-white, which is grey smoke, and this board's earth is brown. What is turned here is how bright the fire is, how fast it walks its ramp and where the light comes from.",
+      "rows": [
+        {
+          "id": "sheet.fire.gain",
+          "description": "How bright the flames are. The pack says 5 and means it: it has ACES and bloom behind it, so 5 there is 'bleed'. Here it would be 'clip'."
+        },
+        {
+          "id": "sheet.fire.shift",
+          "description": "How fast a puff's age walks the flame lookup - white, then yellow, then red, then out. The pack warns that high values look wrong, and past about 0.8 the whole cloud starts red."
+        },
+        {
+          "id": "sheet.fire.out",
+          "description": "When the flame is out, in seconds of the event. Keyed to the event and not to a puff's own age, which is the pack's arrangement and right for it: all of its particles are born at once. Here a puff born a second in was reading its own age as young and lighting up - a white fireball opening at the bottom of a dying grey cloud."
+        },
+        {
+          "id": "sheet.fire.lit_seat",
+          "description": "How much light a puff has before the sun reaches it. Well off zero, because a puff's dark side is smoke in daylight, not smoke at night."
+        },
+        {
+          "id": "sheet.fire.lit_gain",
+          "description": "What the sun is worth on top of that. The sun is the board's own - the same vector the terrain's shadows and the water's glint read."
+        }
+      ]
+    }
+  ]
+}

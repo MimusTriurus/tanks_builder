@@ -142,6 +142,12 @@ public sealed partial class Stage3D : Node3D
     /// ground's.</summary>
     public Wildfire? Blaze;
 
+    /// <summary>What the ground has been blown open by, or null for a board that
+    /// keeps no marks. Read rather than owned, for <see cref="Marks"/>'s reason:
+    /// what has been dug is a fact about the board and this is the thing that
+    /// draws it.</summary>
+    public Craters? Pits;
+
     /// <summary>The drawn water surface. Null leaves the pond the flat colour
     /// it was before the art arrived, which is the A/B the toggle exists for -
     /// see <see cref="Pond"/>.</summary>
@@ -341,6 +347,13 @@ public sealed partial class Stage3D : Node3D
         // running on wall-clock time makes every screenshot of a burning wood a
         // different picture, and every A/B across one measures the difference.
         _fireClock = Mathf.PosMod(_fireClock + (float)delta, 3600.0f);
+        // The bursts, on the same step as everything else here - delta was
+        // pinned at the top of this method, so a capture of one is repeatable
+        // for the pond's reason.
+        foreach (ProcBlast blast in _bursting)
+            blast.Tick(delta);
+        foreach (SheetBlast blast in _booming)
+            blast.Tick(delta);
         Soot();
         _deepInk?.SetShaderParameter("foam", Mathf.Max(0.0f, Foam));
         PushSwell();
@@ -810,7 +823,7 @@ void fragment() {{
     /// <summary>That nudge as an offset: up, and back along the view direction by
     /// as much as the lift moved the picture. Given the two camera terms rather
     /// than read off the field so <see cref="Body"/> can stay static.</summary>
-    private static Vector3 Clear(float squash, float rise) =>
+    internal static Vector3 Clear(float squash, float rise) =>
         new(0.0f, Foot, Foot * rise / squash);
 
     /// <summary>
@@ -4899,6 +4912,194 @@ void fragment() {{
     private int _sootWide, _sootTall;
     private Vector4 _sootAt;
 
+
+    /// <summary>
+    /// One dark mark on the ground, into the ash map.
+    ///
+    /// <b>A disc rather than the cell's own hexagon, and it is the same choice
+    /// the contact shadow makes</b>: a round mark on the ground is one that does
+    /// not announce which cell it belongs to. Two burnt neighbours overlap and
+    /// read as one patch, which is what a fire leaves behind; two craters do the
+    /// same, which is what a shelled cell looks like.
+    ///
+    /// Written once because it is now used twice - by the fire, a cell at a time,
+    /// and by a burst, a landing point at a time. The two differ in where the
+    /// mark is and how wide, and in nothing else, which is exactly the shape that
+    /// wants one function rather than two loops that agree until one is edited.
+    ///
+    /// Keeps the darkest of whatever is already there, so a crater inside a burnt
+    /// patch does not lighten it.
+    ///
+    /// <b>How soft the rim is belongs to the caller.</b> A fire's ash spills over
+    /// the seams and wants most of its radius spent fading - that is the whole of
+    /// what stops it drawing the hexagon it came from. A crater is the opposite:
+    /// it is a small mark that has to read as a mark rather than as a shadow, so
+    /// nearly all of it is at full strength and only the last quarter falls off.
+    /// One number, two answers, and read at the fire's value the crater came out
+    /// a soft grey smudge indistinguishable from the tank's own contact shadow.
+    /// </summary>
+    private void Splat(Vector3 at, float wide, float much, float perX, float perZ,
+                       float rim = FireRim)
+    {
+        if (_soot is null || much <= 0.0f || wide <= 0.0f)
+            return;
+        float x0f = (at.X - _sootAt.X) * perX, z0f = (at.Z - _sootAt.Y) * perZ;
+        float reachX = wide * perX, reachZ = wide * perZ;
+        int x0 = Mathf.Max(0, Mathf.FloorToInt(x0f - reachX));
+        int x1 = Mathf.Min(_sootWide - 1, Mathf.CeilToInt(x0f + reachX));
+        int z0 = Mathf.Max(0, Mathf.FloorToInt(z0f - reachZ));
+        int z1 = Mathf.Min(_sootTall - 1, Mathf.CeilToInt(z0f + reachZ));
+        for (int z = z0; z <= z1; z++)
+        for (int x = x0; x <= x1; x++)
+        {
+            float dx = (x - x0f) / Mathf.Max(reachX, 0.0001f);
+            float dz = (z - z0f) / Mathf.Max(reachZ, 0.0001f);
+            float d = Mathf.Sqrt(dx * dx + dz * dz);
+            if (d >= 1.0f)
+                continue;
+            float fall = Mathf.Clamp((1.0f - d) / Mathf.Max(rim, 0.001f), 0.0f, 1.0f);
+            byte want = (byte)Mathf.RoundToInt(255.0f * much * fall);
+            int i = z * _sootWide + x;
+            if (want > _soot[i])
+                _soot[i] = want;
+        }
+    }
+
+    /// <summary>
+    /// How many bursts the board can have going at once.
+    ///
+    /// Six, and they are reused oldest-first: a burst lasts 1.15s, so six of them
+    /// is more than three tanks can start inside one burst's life at any
+    /// reload this game has. Past that the oldest is cut short rather than a
+    /// seventh node being built, which is the failure to prefer - a board under
+    /// heavy fire drops the tail of the burst nobody is looking at any more,
+    /// instead of allocating a quad and a material mid-frame.
+    /// </summary>
+    public const int Bursts = 6;
+
+    /// <summary>How much of a mark's radius is spent fading out, for the fire's
+    /// ash and for a crater - see <see cref="Splat"/>.</summary>
+    private const float FireRim = 0.45f;
+    private const float PitRim = 0.22f;
+
+    private readonly List<ProcBlast> _bursting = new();
+    private int _nextBurst;
+
+    /// <summary>
+    /// Set a burst off on the board, and mark the ground it went off on.
+    ///
+    /// <b>The two together, because they are one event.</b> A caller that had to
+    /// do both would be three callers doing both - the harness, the tank bench
+    /// and the effects bench - and the third one to be written would be the one
+    /// that forgot the mark.
+    ///
+    /// <b><paramref name="spot"/> is in board space</b>, with
+    /// <paramref name="lift"/> the ground's height there - exactly the pair a
+    /// landed shell already carries, and the space <see cref="Trunk"/> and
+    /// <see cref="Ground"/> both take. That is worth saying because getting it
+    /// wrong is silent and was: written to take the field's own space, the quad
+    /// got <see cref="Origin"/> added to a point that already had it while the
+    /// mark got it added to neither, so on a board whose origin is not zero the
+    /// burst stood 220px off the shot and the crater was rasterised off the edge
+    /// of the map. Nothing errored; there was simply no burst where the shell
+    /// went in.
+    ///
+    /// <b>Marks only where it draws, and that is the cost of the decision that
+    /// the 3D board is the board.</b> The mark goes into the ash map, which is a
+    /// term in the stage's own ground shader; on the flat board there is nothing
+    /// to put it in. The flat board is legacy, so this is a thing it does not
+    /// have rather than a thing that is broken.
+    /// </summary>
+    /// <summary>
+    /// What to do to a burst before it goes off, or null to leave it as built.
+    ///
+    /// <b>A hook rather than an exposed pool</b>, by <see cref="TankTick.Launch"/>'s
+    /// argument: the pool is built on the first shot, so a bench holding a panel of
+    /// settings has nothing to write them into until then - and it must not have to
+    /// wait for a shot to be able to set one. Answered, every burst is dressed on
+    /// its way out, whichever of the six it turns out to be.
+    /// </summary>
+    public Action<ProcBlast>? Dress;
+
+    public void Burst(Vector2 spot, float lift)
+    {
+        if (Field.Atlas is null)
+            return;
+        while (_bursting.Count < Bursts)
+        {
+            var made = new ProcBlast();
+            AddChild(made);
+            made.Build(Field.Atlas.HexRect.Size.X, Squash, RiseFactor);
+            _bursting.Add(made);
+        }
+        ProcBlast blast = _bursting[_nextBurst % Bursts];
+        Dress?.Invoke(blast);
+        _nextBurst = (_nextBurst + 1) % Bursts;
+        blast.Sit(spot, lift, Squash, RiseFactor);
+        blast.Fire();
+        Pits?.Dig(spot, lift);
+    }
+
+    /// <summary>The bursts as they stand, for a bench that shows what one is
+    /// doing. Read-only: they are set off through <see cref="Burst"/> and dressed
+    /// through <see cref="Dress"/>, never handed out to be driven.</summary>
+    public IReadOnlyList<ProcBlast> Bursting => _bursting;
+
+    private readonly List<SheetBlast> _booming = new();
+    private int _nextBoom;
+
+    /// <summary>What to do to a sheet burst before it goes off - <see cref="Dress"/>
+    /// for the other kind, and the same argument.</summary>
+    public Action<SheetBlast>? Attire;
+
+    /// <summary>
+    /// The imported burst on the board: the reference pack's flipbook cloud, from
+    /// its own pool.
+    ///
+    /// <b>A second pool rather than a switch inside <see cref="Burst"/>, and the
+    /// two are meant to stand side by side.</b> They are made of different things -
+    /// one computes its shape, the other plays sixty-four rendered frames of one -
+    /// so the only honest comparison is the two on the same board, on the same
+    /// cell, at the same frame. A flag that replaced one with the other would make
+    /// that comparison two runs and a memory of the first.
+    ///
+    /// <paramref name="spot"/> is board space, like <see cref="Burst"/>'s, and it
+    /// digs the same mark: a hole in the ground is a fact about the event, not
+    /// about which effect drew it.
+    /// </summary>
+    public void Boom(Vector2 spot, float lift)
+    {
+        if (Field.Atlas is null)
+            return;
+        while (_booming.Count < Bursts)
+        {
+            var made = new SheetBlast();
+            AddChild(made);
+            made.Build(Field.Atlas.HexRect.Size.X, Squash, RiseFactor);
+            _booming.Add(made);
+        }
+        SheetBlast blast = _booming[_nextBoom % Bursts];
+        Attire?.Invoke(blast);
+        _nextBoom = (_nextBoom + 1) % Bursts;
+        blast.Sit(spot, lift, Squash, RiseFactor);
+        blast.Fire();
+        Pits?.Dig(spot, lift);
+    }
+
+    /// <summary>The sheet bursts as they stand, <see cref="Bursting"/>'s twin and
+    /// read-only for its reason.</summary>
+    public IReadOnlyList<SheetBlast> Booming => _booming;
+
+    /// <summary>Every burst out and nothing drawn - the reset. The craters are the
+    /// board's and are filled by whoever owns them.</summary>
+    public void Quench()
+    {
+        foreach (ProcBlast blast in _bursting)
+            blast.Douse();
+        foreach (SheetBlast blast in _booming)
+            blast.Douse();
+    }
+
     /// <summary>
     /// Blacken the ground the wood burnt on.
     ///
@@ -4916,7 +5117,9 @@ void fragment() {{
     {
         if (_tops?.MaterialOverride is not ShaderMaterial turf)
             return;
-        if (Blaze is null || Blaze.Scorched == 0 || Field.Atlas is null)
+        bool burnt = Blaze is not null && Blaze.Scorched > 0;
+        bool blown = Pits is not null && Pits.Any;
+        if ((!burnt && !blown) || Field.Atlas is null)
         {
             turf.SetShaderParameter("ash_ink", 0.0f);
             return;
@@ -4945,40 +5148,27 @@ void fragment() {{
 
         Array.Clear(_soot);
         float perX = _sootWide * _sootAt.Z, perZ = _sootTall * _sootAt.W;
-        for (int q = 0; q < Field.Columns; q++)
-        for (int r = 0; r < Field.Rows; r++)
-        {
-            var cell = new Vector2I(q, r);
-            float much = Blaze.AshAt(cell);
-            if (much <= 0.0f)
-                continue;
-            Vector3 top = CellTop(cell);
-            float at = (top.X - _sootAt.X) * perX, down = (top.Z - _sootAt.Y) * perZ;
-            float reachX = circum * perX, reachZ = circum * perZ;
-            int x0 = Mathf.Max(0, Mathf.FloorToInt(at - reachX));
-            int x1 = Mathf.Min(_sootWide - 1, Mathf.CeilToInt(at + reachX));
-            int z0 = Mathf.Max(0, Mathf.FloorToInt(down - reachZ));
-            int z1 = Mathf.Min(_sootTall - 1, Mathf.CeilToInt(down + reachZ));
-            for (int z = z0; z <= z1; z++)
-            for (int x = x0; x <= x1; x++)
+        if (burnt)
+            for (int q = 0; q < Field.Columns; q++)
+            for (int r = 0; r < Field.Rows; r++)
             {
-                // A disc rather than the cell's own hexagon, and it is the same
-                // choice the contact shadow makes: a round mark on the ground is
-                // one that does not announce which cell it belongs to. Two burnt
-                // neighbours overlap and read as one patch, which is what a fire
-                // leaves behind.
-                float dx = (x - at) / Mathf.Max(reachX, 0.0001f);
-                float dz = (z - down) / Mathf.Max(reachZ, 0.0001f);
-                float d = Mathf.Sqrt(dx * dx + dz * dz);
-                if (d >= 1.0f)
-                    continue;
-                float fall = Mathf.Clamp((1.0f - d) / 0.45f, 0.0f, 1.0f);
-                byte want = (byte)Mathf.RoundToInt(255.0f * much * fall);
-                int i = z * _sootWide + x;
-                if (want > _soot[i])
-                    _soot[i] = want;
+                var cell = new Vector2I(q, r);
+                float much = Blaze!.AshAt(cell);
+                if (much > 0.0f)
+                    Splat(CellTop(cell), circum, much, perX, perZ);
             }
-        }
+
+        // The second thing that blackens ground, into the same map: a burst digs
+        // a mark a quarter of a cell wide where the round actually landed, rather
+        // than over the cell it landed on - see Craters on why the unit is a
+        // point. Rasterised after the fire so a crater on burnt ground is at
+        // least as dark as the ash it sits in, which is what `if (want > ...)`
+        // inside the splat already arranges.
+        if (blown)
+            foreach (Craters.Pit pit in Pits!.Pits)
+                Splat(Ground(pit.Spot, pit.Lift),
+                      pit.Wide * Field.Atlas.HexRect.Size.X,
+                      pit.Much, perX, perZ, PitRim);
 
         Image img = Image.CreateFromData(_sootWide, _sootTall, false,
                                          Image.Format.R8, _soot);
@@ -5491,8 +5681,23 @@ float flame_life(float age, float ends) {
 // before there was an argument and is bit-identical to it. A tank's leaves the
 // vent at whatever the vent points at, and the stretch has to lie along that or a
 // lick at the seat is a horizontal ellipse across a diagonal flow.
-float flame_facing(vec2 at, vec2 centre, float half_w, float along, vec2 flow,
-                   float lump_seed, out float down) {
+// <b>How far into an element this fragment is, squared</b>: 0 dead centre, 1 at
+// its wobbled rim, and past 1 outside it. This is the whole of *where* a fragment
+// sits inside an element - the ellipse, the flow frame it lies in and the noise
+// that keeps its rim from being a perfect one - and nothing about what it looks
+// like once it is in there.
+//
+// <b>Split out because a sphere and a cloud want the same frame and different
+// profiles.</b> A lick of flame is a body: bright in the middle, dark and thin at
+// its edge, and its section is <c>sqrt(1 - q)</c> exactly - see flame_facing,
+// which is that and is unchanged. Earth in the air is not a body at all; measured
+// off the CC0 pack's own painted puff, its alpha follows <c>(1 - q)^2.57</c> and
+// never reaches full anywhere in the sprite - so the burst's dust puts that
+// profile on this frame instead. Two profiles, one statement of the frame; the
+// alternative was a second copy of the ellipse arithmetic, which is the thing
+// this kit exists to prevent.
+float flame_reach(vec2 at, vec2 centre, float half_w, float along, vec2 flow,
+                  float lump_seed, out float down) {
     vec2 e = at - centre;
     vec2 d = vec2(dot(e, vec2(flow.y, -flow.x)) / max(half_w, 1e-5),
                   dot(e, flow) / max(along, 1e-5));
@@ -5500,12 +5705,17 @@ float flame_facing(vec2 at, vec2 centre, float half_w, float along, vec2 flow,
     float q = dot(d, d);
     // Cheap bail before the noise: most fragments are outside most elements.
     if (q > 2.25) {
-        return 0.0;
+        return 2.25;
     }
     float lump = 1.0 + wobble * (ember_noise(vec2(d.x * 1.6 + lump_seed * 7.3,
                                                   d.y * 1.6 + lump_seed * 3.1))
                                  - 0.5);
-    q /= max(lump * lump, 1e-3);
+    return q / max(lump * lump, 1e-3);
+}
+
+float flame_facing(vec2 at, vec2 centre, float half_w, float along, vec2 flow,
+                   float lump_seed, out float down) {
+    float q = flame_reach(at, centre, half_w, along, flow, lump_seed, down);
     return q >= 1.0 ? 0.0 : sqrt(1.0 - q);
 }
 
