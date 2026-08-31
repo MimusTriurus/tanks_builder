@@ -16,7 +16,7 @@ namespace TankSpriteTest;
 /// different numbers - thirteen model fields and nine uniforms here against
 /// sixty-two uniforms there - so one panel showing both would be one panel
 /// showing whichever half is not being looked at. Everything under the two is
-/// shared: the same board, the same reticle, the same crater, the same stage,
+/// shared: the same board, the same aim, the same crater, the same stage,
 /// the same <see cref="Stage3D.Boom"/> call the harness will make.
 ///
 /// <b>Both pools live in the stage at once and that is on purpose</b> - see

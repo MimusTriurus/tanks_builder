@@ -43,7 +43,7 @@ namespace TankSpriteTest;
 /// the board belongs here. This bench is for the second kind.
 ///
 /// <b>One burst is built: <see cref="ProcBlast"/>, the HE round in the
-/// ground.</b> <c>SPACE</c> sets it off on the cell under the reticle, through
+/// ground.</b> <c>SPACE</c> sets it off on the aimed cell, through
 /// <see cref="Stage3D.Burst"/> - the same call the harness makes when a shell
 /// lands in the field, so what this key shows is what a shot does. It is the
 /// first of the family on purpose - the taxonomy in <c>docs/blast.md</c> has
@@ -372,7 +372,7 @@ public sealed partial class EffectsBench : SceneRoot
     }
 
     /// <summary>
-    /// Set a burst off on the cell under the reticle.
+    /// Set a burst off on the aimed cell.
     ///
     /// <b>Through the stage's own pool rather than a burst of this bench's
     /// own</b>, which is the rule every bench here runs under: a bench that
@@ -416,7 +416,7 @@ public sealed partial class EffectsBench : SceneRoot
     }
 
     /// <summary>
-    /// Stand the pack's explosion where the reticle is, at this board's size, and
+    /// Stand the pack's explosion on the aimed cell, at this board's size, and
     /// play it.
     ///
     /// <b>Its numbers are multiplied rather than its root scaled, and that is
@@ -607,7 +607,6 @@ public sealed partial class EffectsBench : SceneRoot
         // own per-frame work, so a frame that skipped it is a frame the board
         // stood still in.
         _stage?.Place(Array.Empty<Vehicle>());
-        QueueRedraw();
 
         if (_hud is not null)
             _hud.Text = Note();
@@ -618,28 +617,6 @@ public sealed partial class EffectsBench : SceneRoot
             Capture(CapturePath);
             GetTree().Quit();
         }
-    }
-
-    /// <summary>
-    /// The reticle: where the next burst goes.
-    ///
-    /// Drawn on the canvas, which means it lands over the whole 3D board rather
-    /// than in it. That is right for a reticle and wrong for anything else this
-    /// bench will draw - it is a mark on the window, not a thing on the ground,
-    /// and the bursts themselves belong in the stage where the depth buffer can
-    /// hide them.
-    /// </summary>
-    public override void _Draw()
-    {
-        if (_field.Atlas is null)
-            return;
-        Vector2 at = _field.CellCentre(_at);
-        var ink = new Color(1.0f, 0.85f, 0.35f, 0.85f);
-        const float arm = 14.0f, gap = 5.0f;
-        DrawLine(at + new Vector2(-arm, 0.0f), at + new Vector2(-gap, 0.0f), ink, 1.0f);
-        DrawLine(at + new Vector2(gap, 0.0f), at + new Vector2(arm, 0.0f), ink, 1.0f);
-        DrawLine(at + new Vector2(0.0f, -arm), at + new Vector2(0.0f, -gap), ink, 1.0f);
-        DrawLine(at + new Vector2(0.0f, gap), at + new Vector2(0.0f, arm), ink, 1.0f);
     }
 
     /// <summary>What the bench is showing, and - while nothing is built - what
@@ -698,7 +675,7 @@ public sealed partial class EffectsBench : SceneRoot
         // uses for "take this tank" and "go there", and a click that detonates on
         // the way past is a click that cannot be used to aim and look. A double
         // click cannot be made by accident, and it does both things at once - the
-        // reticle moves and the shell lands.
+        // aim moves and the shell lands.
         if (@event is InputEventMouseButton
             { ButtonIndex: MouseButton.Left, DoubleClick: true })
         {
@@ -755,7 +732,7 @@ public sealed partial class EffectsBench : SceneRoot
                 Burst();
                 break;
             case Key.R:
-                // The bench as it opened: the reticle back in the middle and the
+                // The bench as it opened: the aim back in the middle and the
                 // view back home.
                 _at = Middle;
                 // Both halves of a burst: the ones in the air and the marks the

@@ -7,7 +7,7 @@
       "rows": [
         {
           "id": "he.fire_now",
-          "description": "As SPACE does, on the cell under the reticle."
+          "description": "As SPACE does, on the aimed cell."
         },
         {
           "id": "he.refire",
@@ -430,7 +430,7 @@
       "rows": [
         {
           "id": "sheet.fire_now",
-          "description": "As SPACE does, on the cell under the reticle."
+          "description": "As SPACE does, on the aimed cell."
         },
         {
           "id": "sheet.pair",
