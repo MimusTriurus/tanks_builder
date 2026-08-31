@@ -5384,6 +5384,36 @@ public static class SelfTest
             $"{sheeted.Lances} spikes at {sheeted.LanceFast:F2}x - at or under one "
             + "they are drawn inside the cloud, which is the whole of what they are "
             + "for spent on nothing");
+        // <b>The three acts, asserted on the model rather than on a picture.</b>
+        // The complaint that produced them was about the middle one: after the
+        // flash the smoke kept being emitted upward, because the climb was a
+        // monotone curve reaching its maximum on a puff's last frame. So the rise
+        // has to be spent early and the height has to stop being a maximum at the
+        // end - neither of which any capture will say out loud, because a plume
+        // that is still rising and a plume that has stopped look the same in one
+        // frame.
+        float sheetRose = sheeted.Climbing(0.30f, SheetBlast.Role.Cloud);
+        float sheetTop = sheeted.Climbing(0.55f, SheetBlast.Role.Cloud);
+        Check("the imported burst spends its rise in the first third of a puff",
+            sheetRose >= 0.90f * sheetTop,
+            $"{sheetRose / Mathf.Max(sheetTop, 1e-3f):P0} of the way up at a third of the "
+            + "way through - a rise that is still going on at the end is smoke "
+            + "being emitted, not earth that was thrown");
+        Check("and then settles rather than climbing to its last frame",
+            sheeted.Climbing(1.0f, SheetBlast.Role.Cloud) < sheetTop - 0.02f,
+            "the highest the dust ever gets is its own last frame, so it vanishes "
+            + "at the top of its climb - there is no third act at all");
+        // And the coarse half does come back, which is the half of the pair that
+        // makes the other half read: spikes falling past a cloud that is hanging
+        // is what says one of them is earth and the other is dust.
+        float lanceTop = sheeted.Climbing(0.5f, SheetBlast.Role.Lance);
+        Check("and the earth it throws falls back while the dust hangs",
+            sheeted.Climbing(1.0f, SheetBlast.Role.Lance) < 0.5f * lanceTop
+            && sheeted.Climbing(1.0f, SheetBlast.Role.Cloud) > 0.5f * sheetTop,
+            $"lance at {sheeted.Climbing(1.0f, SheetBlast.Role.Lance):F2} of its "
+            + $"apex {lanceTop:F2}, dust at "
+            + $"{sheeted.Climbing(1.0f, SheetBlast.Role.Cloud):F2} - if both do the "
+            + "same thing there is one fraction, not two");
         sheeted.Free();
 
         // An event, not a loop - the whole of what separates this clock from the

@@ -113,7 +113,7 @@ public sealed partial class SheetBlast : Node3D
     /// the sheet does. A little, and not none: the sheet's own growth stops at
     /// frame twenty and its last forty frames are a fixed-size cloud
     /// dissolving.</summary>
-    public const float GrowDefault = 1.45f;
+    public const float GrowDefault = 1.85f;
 
     public float Grow = GrowDefault;
 
@@ -143,7 +143,7 @@ public sealed partial class SheetBlast : Node3D
     /// <c>linear_accel -1</c> against velocities of 0.5 to 1, which is a puff
     /// that has spent most of its travel by the time it is half dead. Nought is
     /// constant speed, one comes to a stop exactly at the end.</summary>
-    public const float SlowDefault = 0.62f;
+    public const float SlowDefault = 0.86f;
 
     public float Slow = SlowDefault;
 
@@ -151,7 +151,7 @@ public sealed partial class SheetBlast : Node3D
     /// share of the life. The pack's <c>explosiveness 0.91</c> is 0.09 of this;
     /// a little more, because a perfectly simultaneous cloud has one silhouette
     /// and reads as a single sprite.</summary>
-    public const float StaggerDefault = 0.12f;
+    public const float StaggerDefault = 0.055f;
 
     public float Stagger = StaggerDefault;
 
@@ -159,7 +159,7 @@ public sealed partial class SheetBlast : Node3D
     /// event. Under one so a puff born late still finishes its sheet inside the
     /// event - a puff cut off mid-flipbook vanishes at full opacity, which is the
     /// one artefact of a flipbook that cannot be softened.</summary>
-    public const float PuffLifeDefault = 0.78f;
+    public const float PuffLifeDefault = 0.90f;
 
     public float PuffLife = PuffLifeDefault;
 
@@ -217,12 +217,15 @@ public sealed partial class SheetBlast : Node3D
     /// stalls (that is <see cref="Slow"/>) while the vertical half keeps going -
     /// see <see cref="Rising"/>.
     /// </summary>
-    public const float RisingDefault = 0.62f;
+    public const float RisingDefault = 0.085f;
 
-    /// <summary>The power the climb runs on. Under one so the column is quick out
-    /// of the ground and slow at the top, which is what buoyant dust does and what
-    /// the reference shows: the plume's head is barely moving while its stem is
-    /// still being fed.</summary>
+    /// <summary>
+    /// How quickly the climb is spent, as a share of a puff's own life.
+    ///
+    /// <b>It used to be the power of a monotone curve, and that was the bug.</b>
+    /// See <see cref="Climbing"/>: small numbers here are what make the rise an
+    /// event rather than a habit.
+    /// </summary>
     public float Rising = RisingDefault;
 
     /// <summary>
@@ -244,6 +247,20 @@ public sealed partial class SheetBlast : Node3D
     public const float StartDefault = 0.11f;
 
     public float Start = StartDefault;
+
+    /// <summary>How much of its climb the dust gives back before it is gone, as a
+    /// share of the climb. Small: dust sags, it does not land - see
+    /// <see cref="Climbing"/>.</summary>
+    public const float SettleDefault = 0.16f;
+
+    public float Settle = SettleDefault;
+
+    /// <summary>How much of its climb a lance gives back by the end of its life, as
+    /// a share of the climb. Coarse earth is thrown, and thrown things fall; at one
+    /// it is back where it started.</summary>
+    public const float FallDefault = 0.98f;
+
+    public float Fall = FallDefault;
 
     /// <summary>Which cloud this is. The model is a hash of the index and this,
     /// so the same seed is the same burst to the pixel and a different one is a
@@ -363,6 +380,53 @@ public sealed partial class SheetBlast : Node3D
     /// and scrubbed. A simulation stepped by delta could not be scrubbed
     /// backwards and could not be captured twice - see <see cref="Hold"/>.
     /// </summary>
+    /// <summary>
+    /// How high one puff has climbed, as a share of the full climb, at
+    /// <paramref name="a"/> of its own life.
+    ///
+    /// <b>This is the shape of the whole event in one function, and the version it
+    /// replaced had no third act at all.</b> That one was <c>pow(a, rising)</c> -
+    /// monotone, reaching its maximum on the puff's very last frame - so the plume
+    /// rose for the entire two seconds and then stopped existing. Nothing ever
+    /// settled, because nothing was ever finished rising. Said out loud it is
+    /// obvious; on the picture it reads as smoke that keeps being emitted upward,
+    /// which is exactly what it was.
+    ///
+    /// What a burst does instead has three acts, and two of them are here:
+    ///
+    /// - <b>Up fast.</b> The ejection is instantaneous - one shove, not a chimney -
+    ///   so the rise is spent early and then saturates. <see cref="Rising"/> is how
+    ///   quickly, as a share of the puff's life; at the default the climb is 90%
+    ///   done in the first fifth of it.
+    /// - <b>Then down slowly.</b> Which is where the two fractions part company.
+    ///   <b>Coarse earth comes back.</b> A lance is thrown, and thrown things fall:
+    ///   its profile is a parabola over its own apex, and <see cref="Fall"/> says
+    ///   how much of the climb it has given back by the end. <b>Dust does not
+    ///   come back, it sags.</b> The mass and the fine fraction lose only
+    ///   <see cref="Settle"/> of their height, late and slowly, which is what a
+    ///   dust column cooling and spreading looks like - and the settling is mostly
+    ///   read off the spreading (see <see cref="Grow"/>) rather than off the sinking.
+    ///
+    /// Public because the self-test asks the model rather than restating it - the
+    /// arrangement <see cref="LastFinish"/> is written under.
+    /// </summary>
+    internal float Climbing(float a, Role role)
+    {
+        if (role == Role.Lance)
+        {
+            // A parabola normalised so Climb still means how high it gets, whatever
+            // Fall is set to: the apex of a*(1-f*a) is 1/(4f).
+            float f = Mathf.Clamp(Fall, 0.05f, 1.4f);
+            return 4.0f * f * a * (1.0f - f * a);
+        }
+        float tau = Mathf.Max(Rising, 0.01f);
+        float up = (1.0f - Mathf.Exp(-a / tau)) / (1.0f - Mathf.Exp(-1.0f / tau));
+        // The sag, and only in the last two thirds: a cloud that starts sinking
+        // while it is still going up has no apex, and an apex is what the eye reads
+        // as the moment the throw was spent.
+        return up - Settle * Mathf.SmoothStep(0.35f, 1.0f, a);
+    }
+
     /// <summary>How many quads the cloud is: the mass, its lances and the smoke
     /// after them.</summary>
     internal int Count =>
@@ -384,7 +448,7 @@ public sealed partial class SheetBlast : Node3D
             bool trail = role == Role.Trail;
             bool lance = role == Role.Lance;
             float born = Birth(k, role) * life;
-            float mine = Share(born / life, role) * life;
+            float mine = Share(k, born / life, role) * life;
             float a = (t - born) / mine;
             if (a <= 0.0f || a >= 1.0f)
             {
@@ -427,16 +491,11 @@ public sealed partial class SheetBlast : Node3D
             // The throw's own speed decays - the pack's negative linear accel,
             // integrated, with Slow=1 coming to a stop exactly at the end.
             float run = a * (1.0f - 0.5f * Slow * a) / Mathf.Max(1.0f - 0.5f * Slow, 1e-3f);
-            // <b>The climb does not, and that is the difference between a puffball
-            // and a plume.</b> Its power is under one, so the column is quick out
-            // of the ground and slow at the top: in the reference the plume's head
-            // is nearly still while its stem is still being fed.
-            float rise = Mathf.Pow(a, Mathf.Max(Rising, 0.05f));
 
             float thrown = Reach * _tile * spd * run;
             float x = Mathf.Cos(lift) * thrown * side;
             float y = seat + Mathf.Sin(lift) * thrown
-                      + Climb * _tile * (trail ? 0.18f : 1.0f) * rise;
+                      + Climb * _tile * (trail ? 0.30f : 1.0f) * Climbing(a, role);
             float wide = Size * _tile
                          * (trail ? 1.45f : 1.0f)
                          * (lance ? Mathf.Max(LanceThin, 0.05f) : 1.0f)
@@ -480,12 +539,19 @@ public sealed partial class SheetBlast : Node3D
         }
     }
 
-    /// <summary>How late in the event the last trail puff may be born, as a share
-    /// of it. The pack's second emitter has no explosiveness at all, so its five
-    /// puffs are spread over the whole lifetime; this stops short of the end
-    /// because a puff still has to play its sheet - see <see cref="Share"/>.
+    /// <summary>
+    /// How late in the event the last trail puff may be born, as a share of it.
+    ///
+    /// <b>This was 0.72, and it was the emitter.</b> The pack's second emitter has
+    /// no explosiveness at all - five puffs spread over its whole lifetime - which
+    /// is right for a fireball hanging in the air and wrong for a shell: nine puffs
+    /// arriving one at a time over a second and a half, each starting small and
+    /// growing, reads as a chimney. <b>A burst ejects once.</b> So the late
+    /// fraction is now born inside the ejection with everything else, and what
+    /// makes it the late fraction is that it is slower and lives longer - which is
+    /// what a fine fraction is.
     /// </summary>
-    public const float TrailSpread = 0.72f;
+    public const float TrailSpread = 0.16f;
 
     /// <summary>
     /// When one puff is born, as a share of the event.
@@ -535,9 +601,27 @@ public sealed partial class SheetBlast : Node3D
     /// the two available - the other is to stop the trails arriving late, which is
     /// the entire reason they exist.
     /// </summary>
-    internal float Share(float born, Role role) =>
-        Mathf.Max(Mathf.Min(role == Role.Lance ? PuffLife * 0.62f : PuffLife,
-                            1.0f - born), 1e-3f);
+    internal float Share(int k, float born, Role role)
+    {
+        // <b>Compressing the births moved the problem to the deaths.</b> With
+        // everything ejected at once - which is what a shell does - every puff was
+        // also on the same frame of the same sheet at the same time, so the whole
+        // cloud thinned in step and the settle act ended in one go: the plume was
+        // simply gone between 0.9s and 1.2s. That is the failure the pack solves by
+        // emitting late, and emitting late is the thing being got rid of. So the
+        // spread is in how long a puff lives rather than in when it starts, which
+        // has the same effect on the eye and none of the chimney.
+        float mine = role switch
+        {
+            // Coarse earth is thrown and lands: it is finished long before the dust.
+            Role.Lance => PuffLife * 0.62f,
+            // The fine fraction is what is still there at the end - that is the
+            // whole of what makes it fine.
+            Role.Trail => PuffLife * 1.20f,
+            _ => PuffLife,
+        } * Mathf.Lerp(0.82f, 1.18f, Hash(k, 53));
+        return Mathf.Max(Mathf.Min(mine, 1.0f - born), 1e-3f);
+    }
 
     /// <summary>How far through the event the last puff to finish finishes, as a
     /// share of it. One or less is the invariant; the self-test asserts it here
@@ -549,7 +633,7 @@ public sealed partial class SheetBlast : Node3D
         {
             Role role = Of(k);
             float born = Birth(k, role);
-            last = Mathf.Max(last, born + Share(born, role));
+            last = Mathf.Max(last, born + Share(k, born, role));
         }
         return last;
     }
@@ -607,6 +691,8 @@ public sealed partial class SheetBlast : Node3D
         "lance_thin" => LanceThin,
         "stretch" => Stretch,
         "rising" => Rising,
+        "settle" => Settle,
+        "fall" => Fall,
         _ => float.NaN,
     };
 
@@ -632,6 +718,8 @@ public sealed partial class SheetBlast : Node3D
             case "lance_thin": LanceThin = value; break;
             case "stretch": Stretch = value; break;
             case "rising": Rising = value; break;
+            case "settle": Settle = value; break;
+            case "fall": Fall = value; break;
             case "seed": Seed = Mathf.RoundToInt(value); break;
             default:
                 GD.PushWarning($"sheet blast: no model number called {name}");
@@ -648,6 +736,7 @@ public sealed partial class SheetBlast : Node3D
         "puffs", "trails", "life", "reach", "size", "grow", "climb", "seat",
         "flat", "slow", "stagger", "puff_life", "start", "seed",
         "lances", "lance_fast", "lance_thin", "stretch", "rising",
+        "settle", "fall",
     };
 
     /// <summary>
@@ -820,7 +909,7 @@ uniform float puff_ink = 0.92;
 
 // How bright the flames are. The pack says 5 and means it - it has ACES and glow
 // behind it, so 5 there is 'bleed'. Here it would be 'clip', so this is 1.7.
-uniform float flame_gain = 2.30;
+uniform float flame_gain = 3.10;
 // How far a puff's age walks the flame lookup. The pack's 0.5 - it warns that
 // high values look wrong, and they do: past about 0.8 the whole cloud starts red.
 uniform float flame_shift = 0.42;
@@ -838,7 +927,7 @@ uniform float flame_shift = 0.42;
 // puff born a second in was reading its own age as young and lighting up: a
 // white fireball opening at the bottom of a dying grey cloud. Fire happens when
 // the shell goes off, not whenever a puff is new.
-uniform float flame_out = 0.26;
+uniform float flame_out = 0.17;
 uniform float time = 0.0;
 
 // The lambert: how much light a puff has before the sun reaches it, and how much

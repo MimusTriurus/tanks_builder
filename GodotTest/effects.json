@@ -417,7 +417,7 @@
         },
         {
           "id": "sheet.cloud.trails",
-          "description": "How many arrive afterwards, spread over the whole life. The pack's second emitter, and what stops a flipbook cloud reading as one object fading out: without them every puff is on the same frame of the same sheet and the whole cloud thins in step."
+          "description": "How many puffs are the fine fraction: slower, wider, low along the ground, and living longer than the rest. They used to be born late - spread over 0.72 of the event, which is the pack's own arrangement - and that was the emitter: nine puffs arriving one at a time over a second and a half, each starting small and growing, reads as a chimney rather than as a shell. A burst ejects once, so what makes these the late fraction is now how long they last, not when they start."
         },
         {
           "id": "sheet.cloud.reach",
@@ -488,7 +488,15 @@
         },
         {
           "id": "sheet.throw.rising",
-          "description": "The power the column's climb runs on. Under one so it is quick out of the ground and slow at the top, which is what buoyant dust does and what the reference shows: the plume's head is nearly still while its stem is still being fed. This against 'how far they get' is the whole of the shape - frame one of the reference is wider than it is tall, frame three is three times taller."
+          "description": "How quickly a puff spends its climb, as a share of its own life. Small numbers are what make the rise an event rather than a habit: this used to be the power of a monotone curve, which meant the plume rose for the entire two seconds and then stopped existing - nothing ever settled, because nothing was ever finished rising. On the picture that reads as smoke being emitted upward, which is what it was."
+        },
+        {
+          "id": "sheet.throw.settle",
+          "description": "How much of its climb the dust gives back before it is gone. Small, and late: dust sags, it does not land. A cloud that starts sinking while it is still going up has no apex, and an apex is what the eye reads as the moment the throw was spent."
+        },
+        {
+          "id": "sheet.throw.fall",
+          "description": "How much of its climb a lance gives back by the end of its life. Coarse earth is thrown, and thrown things fall - at one it is back where it started. This is where the two fractions part company: the spikes come down, the dust only sags."
         }
       ]
     },

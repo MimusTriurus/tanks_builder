@@ -96,7 +96,11 @@ public sealed partial class EffectsBench
         new("sheet.throw", "sheet.throw.stretch", false, "stretch",
             "drawn out along its flight", 1.0, 6.0, 0.05),
         new("sheet.throw", "sheet.throw.rising", false, "rising",
-            "how the column rises", 0.20, 1.60, 0.02),
+            "how fast the rise is spent", 0.01, 0.60, 0.005),
+        new("sheet.throw", "sheet.throw.settle", false, "settle",
+            "how far the dust sags back", 0.0, 0.60, 0.01),
+        new("sheet.throw", "sheet.throw.fall", false, "fall",
+            "how far the earth falls back", 0.05, 1.40, 0.02),
 
         // --- the sheet: how one puff is drawn -------------------------------
         new("sheet.look", "sheet.look.ink", true, "puff_ink",
