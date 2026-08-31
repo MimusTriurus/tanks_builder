@@ -293,6 +293,26 @@ public sealed partial class TankBench : SceneRoot
 
     // --- the dials -----------------------------------------------------------
 
+    /// <summary>Which of the three tracks draws a shot - see
+    /// <see cref="FlashSource"/>.
+    ///
+    /// <b>Here because this is the board a flash can be looked at on.</b> The
+    /// harness has had the choice since there were two tracks, and it is the
+    /// wrong place to use it: its board is a forest, so on every capture of it
+    /// the flash is behind foliage, and the gap between the built track and the
+    /// rendered one had to be measured rather than seen. One tank on a plain
+    /// strip is what the choice was for.
+    ///
+    /// Held on the bench rather than written straight into the sprite for
+    /// <see cref="_recoilLevel"/>'s reason - <see cref="Opening"/> applies it
+    /// once the garage exists, because a flag that wrote through "the driven
+    /// tank" before the tank existed hung the capture instead of failing it.
+    /// </summary>
+    private FlashSource _flashSource = FlashSource.Rendered;
+
+    /// <summary>The painted sheet, shared by every tank in the garage.</summary>
+    private FlashSheet? _sheet;
+
     private double _recoilLevel = 1.0;
     private bool _shadow = true;
     private bool _ruts = true;
@@ -345,6 +365,19 @@ public sealed partial class TankBench : SceneRoot
         ["--no-exhaust"] = new[] { "tank.smoke.on" },
         ["--exhaust"] = new[] { "tank.smoke.level" },
         ["--burning"] = new[] { "tank.smoke.burn" },
+        // The seven below were parsed before they were spoken for, which was
+        // harmless only while bench.json carried no row for them: a flag the
+        // file never contradicts needs nobody to say it was given. The moment
+        // the rows arrived so did their defaults, and a default is applied
+        // after the flags - so `--proc-smoke` would have been set and then
+        // quietly unset by a file that says false.
+        ["--proc-smoke"] = new[] { "tank.smoke.column" },
+        ["--no-proc-smoke"] = new[] { "tank.smoke.column" },
+        ["--proc-fire"] = new[] { "tank.smoke.flame" },
+        ["--no-proc-fire"] = new[] { "tank.smoke.flame" },
+        ["--proc-exhaust"] = new[] { "tank.smoke.plume" },
+        ["--no-proc-exhaust"] = new[] { "tank.smoke.plume" },
+        ["--flash"] = new[] { "tank.gun.flash_source" },
         ["--hit"] = new[] { "tank.armour.side" },
         ["--hit-scale"] = new[] { "tank.armour.calibre" },
         ["--no-shadow"] = new[] { "tank.armour.shadow" },
@@ -494,6 +527,11 @@ public sealed partial class TankBench : SceneRoot
                     break;
                 case "--fire":
                     _fireAtStart = true;
+                    break;
+                // sheet, rendered or built. Spelled the harness's way so one
+                // flag means one thing on both boards.
+                case "--flash" when i + 1 < args.Length:
+                    _flashSource = Shot(args[++i]);
                     break;
                 // Where the gun points to begin with. The harness has had this
                 // for as long as it has had a turret; the bench needed it the
@@ -854,6 +892,9 @@ public sealed partial class TankBench : SceneRoot
     private void Garage()
     {
         var missing = new List<string>();
+        _sheet = FlashSheet.Load(AssetRoot.Sprites + "/Fire_rgba.png");
+        if (_sheet.Error.Length > 0)
+            GD.PushWarning("tank bench: flash sheet - " + _sheet.Error);
         foreach (string tag in MovementProfile.Tags)
         {
             AtlasSet atlas;
@@ -868,7 +909,14 @@ public sealed partial class TankBench : SceneRoot
             }
             _atlases[tag] = atlas;
 
-            var sprite = new TankSprite { Atlas = atlas };
+            // The painted sheet, so all three tracks of the flash source have
+            // something to draw. Without it `--flash sheet` was a value that
+            // selected nothing and said nothing: SheetFlash draws whatever is
+            // in this field and the field was never filled, so what a capture
+            // showed at that setting was the tracer and nothing else. Loaded
+            // once above the loop and shared - it is one texture, and a copy
+            // per tank is a copy per tank.
+            var sprite = new TankSprite { Atlas = atlas, Flash = _sheet };
             AddChild(sprite);
             var vehicle = new Vehicle
             {
@@ -1648,10 +1696,36 @@ public sealed partial class TankBench : SceneRoot
     /// of. Here rather than at parse time for the harness's reason: a flag that
     /// wrote straight through "the driven tank" before the tank existed hung the
     /// capture instead of failing it.</summary>
+    /// <summary>The three tracks, in the order the panel lists them.
+    ///
+    /// <b>One list for the labels and the values.</b> The harness carried them
+    /// as two orderings once - a label array starting at "rendered" against an
+    /// enum starting at Sheet - and the panel file, which picks a row's opening
+    /// value by label, resolved "rendered" to index 0 and set Sheet. Nothing
+    /// said so: the flash still drew, from the other track. 3812px against a
+    /// run-to-run noise of ten.</summary>
+    private static readonly FlashSource[] Sources =
+        { FlashSource.Rendered, FlashSource.Sheet, FlashSource.Built };
+
+    private static readonly string[] SourceNames = { "rendered", "sheet", "built" };
+
+    /// <summary>A track by name, defaulting to the shipped one. Named rather
+    /// than inlined so the flag and the key cannot disagree about what "built"
+    /// means.</summary>
+    private static FlashSource Shot(string name)
+    {
+        int at = Array.FindIndex(SourceNames,
+            n => n.Equals(name, StringComparison.OrdinalIgnoreCase));
+        return at >= 0 ? Sources[at] : FlashSource.Rendered;
+    }
+
     private void Opening()
     {
         foreach (Vehicle vehicle in _garage)
+        {
             vehicle.Recoil.Level = _recoilLevel;
+            vehicle.Sprite.Source = _flashSource;
+        }
         Shadow();
         if (_damageAtStart > 0)
             foreach (string face in Tank.Atlas.HitFaces)
@@ -2197,6 +2271,11 @@ public sealed partial class TankBench : SceneRoot
         _recoilLevel = 1.0;
         _sizeLevel = 1.0;
         _traverse = 1.0;
+        // Back to what the set ships drawing, like every other knob here: the
+        // built track is a thing to ask for, not a thing to come back to.
+        _flashSource = FlashSource.Rendered;
+        foreach (Vehicle vehicle in _garage)
+            vehicle.Sprite.Source = _flashSource;
         // One line rather than one per tank, because the traverse knob is not
         // held on a machine - see Gunnery.TraverseLevel.
         Gunnery.TraverseLevel = 1.0;
@@ -2370,6 +2449,15 @@ public sealed partial class TankBench : SceneRoot
         _panel.Slide("tank.gun.shake_level", "shake level", 0.0, 2.5, 0.05,
                      () => _shake.Level, v => _shake.Level = v, "x",
                      () => $"{Tank.Profile.ShotShake * _shake.Level:F1}px broadside");
+        _panel.Choice("tank.gun.flash_source", "flash source  (V)", SourceNames,
+                      () => Math.Max(Array.IndexOf(Sources, Sprite.Source), 0),
+                      i =>
+                      {
+                          _flashSource = Sources[Math.Clamp(i, 0, Sources.Length - 1)];
+                          foreach (Vehicle vehicle in _garage)
+                              vehicle.Sprite.Source = _flashSource;
+                          Sprite.QueueRedraw();
+                      });
         _panel.Slide("tank.gun.traverse", "traverse level", 0.0, 2.5, 0.05,
                      () => _traverse,
                      v => { _traverse = v; Gunnery.TraverseLevel = v; }, "x",
@@ -2677,6 +2765,13 @@ public sealed partial class TankBench : SceneRoot
                 break;
             case Key.Bracketright:
                 _tick.RecoilShear = !_tick.RecoilShear;
+                break;
+            case Key.V:
+                _flashSource = Sources[(Array.IndexOf(Sources, Sprite.Source) + 1)
+                                       % Sources.Length];
+                foreach (Vehicle vehicle in _garage)
+                    vehicle.Sprite.Source = _flashSource;
+                Sprite.QueueRedraw();
                 break;
             case Key.G:
                 _board = !_board;
