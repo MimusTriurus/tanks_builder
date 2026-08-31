@@ -58,8 +58,11 @@ Sprites/     результат, папка на сцену: <TAG>/{hull,turret,
              track_{left,right}_atlas на разобранной модели,
              shadow_atlas — контактная тень под танком,
              height_atlas — карта высот корпуса и лент: не картинка, а
-             таблица, по которой режется ватерлиния (sprite_height.py);
-             есть у всех трёх
+             таблица, по которой режется ватерлиния (sprite_height.py) и об
+             которую стенд режет собранные им столб, пламя и плюм (ProcSmoke,
+             ProcFire); есть у всех трёх. У burn и fire рядом лежит блок
+             ports — выпуск в мировых единицах, его кладёт stamp_ports.py;
+             у flash и smoke блок bore — канал ствола, его кладёт stamp_bore.py
              barrel_atlas — ствол, если он выделен и ему заказаны фазы,
              frames/ и _check_*.png
              Живых наборов три: LTP, MTP, HTP — по одному на класс.
@@ -238,7 +241,7 @@ Camera, Light
 
 | док | о чём | когда открывать |
 |---|---|---|
-| [docs/tools.md](docs/tools.md) | `tank_parts`, `turret_axis`, `sprite_atlas`, `atlas_pack`, `hex_base`, `split_turret`, `track_split`, `assemble_tank`, `key_on_white`, `water_sheet` | чем меряют, режут и рендерят |
+| [docs/tools.md](docs/tools.md) | `tank_parts`, `turret_axis`, `sprite_atlas`, `atlas_pack`, `hex_base`, `split_turret`, `track_split`, `assemble_tank`, `key_on_white`, `water_sheet`, `stamp_ports`, `stamp_bore` | чем меряют, режут и рендерят |
 | [docs/effects.md](docs/effects.md) | дульная вспышка, выхлоп, пожар танка и его столб, попадание в броню, след от него | ставишь или правишь эффект на танке |
 | [docs/layers.md](docs/layers.md) | `sprite_height`, `ground_shadow`, `barrel_recoil`, `draw_order`, `wreck_pose`, `track_cycle`/`parts_render`, `turret_ring` | слои, которые двигаются относительно корпуса |
 | [docs/pipeline.md](docs/pipeline.md) | `tank_pipeline.run()`, задание `render_set`, что проверяется, листы проверки, числа по трём танкам | гоняешь конвейер целиком или читаешь отчёт |

@@ -4999,7 +4999,10 @@ void fragment() {{
     /// fields is two effects that happen to be in the same place, and the copy is
     /// the whole of the failure.
     /// </summary>
-    private const string EmberNoise = @"
+    /// <summary>The noise the flame and its smoke are both broken up with,
+    /// and now the tank's flame too - it is what <see cref="FlameInk"/>'s
+    /// lumping reads, so the two travel together or neither compiles.</summary>
+    internal const string EmberNoiseCode = @"
 float ember_hash(vec2 p) {
     return fract(sin(dot(p, vec2(41.3, 289.1))) * 43758.5453);
 }
@@ -5168,63 +5171,10 @@ uniform float taper = 0.26;
 uniform float taper_power = 0.90;
 uniform float stretch = 2.30;
 uniform float vary = 0.40;
-uniform float wobble = 0.28;
-uniform float gradient = 0.20;
 uniform float stagger = 0.42;
 uniform float alpha = 0.70;
-uniform float onset = 0.07;
 uniform float fade = 0.55;
 uniform float born_scatter = 1.05;
-// The element's own cross-section, and both halves of it are engine_fire's
-// material rather than a guess at one.
-//
-// <b>The exponent is on the facing, not on the radius.</b> There alpha goes as
-// Layer Weight's Facing to this power, and for a sphere facing is sqrt(1 - r^2);
-// writing pow(1 - r^2, 1.15) instead - which is what this did - is facing^2.3, so
-// every element came out half as soft and a size smaller than it was asked for.
-//
-// <b>The dark lip is load-bearing.</b> engine_fire keeps one for exactly the
-// failure seen here: without it the licks melt into each other instead of keeping
-// a shape. The plume wants the opposite and has its rim nearly the body's colour,
-// because there shapes are the problem.
-//
-// Its hue moved with the ramp's and for the same reason, but less: it stays redder
-// and darker than the body, which is the whole of its job.
-uniform float rim_falloff = 1.15;
-uniform float rim_reach = 0.32;
-uniform vec3 rim_colour = vec3(0.35, 0.088, 0.018);
-uniform float opacity = 0.72;
-// The section across one element, in three bands: a deep core, a bright shoulder,
-// and the dark lip at the very edge.
-//
-// <b>Hue alone does not read, and that was measured.</b> Shifting the ramp across
-// the element makes the shoulder yellower and leaves it *darker*, because both the
-// lip and the alpha fall off monotonically from the middle - so the eye sees one
-// dimming body, not a light edge. The shoulder has to be brighter as well as
-// yellower, which is what shell_gain buys, and the lip has to be pulled in close to
-// the rim to leave room for it - rim_reach 0.32 against the 0.60 it was.
-//
-// <b>The lip stays, and it still has to do its job.</b> It is what keeps the licks
-// from melting into each other, measured; a bright shoulder that reached the edge
-// would light its neighbour's and put the bar back.
-//
-// Where the shoulder sits and how wide it is, in facing: 1 is dead centre, 0 the rim.
-uniform float shell_at = 0.55;
-uniform float shell_gain = 1.35;
-uniform float shell_width = 0.34;
-// And how far the middle of an element and its shoulders sit apart on the ramp: plus
-// this at dead centre, minus it at the rim.
-//
-// <b>A shift along the ramp, not a second set of colours.</b> The ramp already runs
-// from a bright orange at 0 to a deep red at 1, so a cross section is one number on
-// the same curve - which keeps the no-stop-near-white rule true by construction
-// and leaves one place where the flame's colour is written.
-//
-// <b>It does not replace the dark lip, it sits inside it.</b> The lip is what keeps
-// the licks from melting into each other and that was measured; so the section
-// reads middle deep, shoulders bright, and then the lip at the very edge. Three
-// bands out of two numbers.
-uniform float core_hue = 0.26;
 uniform float rate = 0.85;
 
 uniform float seat_size = 1.15;
@@ -5237,43 +5187,16 @@ uniform float ember_reach = 1.15;
 uniform float ember_size = 0.26;
 uniform float ember_gain = 0.85;
 uniform float ember_fade = 1.10;
-uniform vec3 ember_colour = vec3(1.00, 0.38, 0.08);
 
 FLAME_NOISE
 
-// The tank sprite's own hue, hot end to cool, strength in w. NOT engine_fire's
-// config numbers: those are linear and this lands in an sRGB framebuffer - see the
-// note on FlameShader for the measurement and the factor of six.
-vec4 flame_ramp(float t) {
-    vec3 c;
-    float s;
-    if (t < 0.08) {
-        float f = t / 0.08;
-        c = mix(vec3(1.00, 0.50, 0.25), vec3(1.00, 0.455, 0.19), f);
-        s = mix(1.00, 0.95, f);
-    } else if (t < 0.22) {
-        float f = (t - 0.08) / 0.14;
-        c = mix(vec3(1.00, 0.455, 0.19), vec3(1.00, 0.40, 0.10), f);
-        s = mix(0.95, 0.92, f);
-    } else if (t < 0.60) {
-        float f = (t - 0.22) / 0.38;
-        c = mix(vec3(1.00, 0.40, 0.10), vec3(0.85, 0.298, 0.051), f);
-        s = mix(0.92, 0.66, f);
-    } else {
-        float f = (t - 0.60) / 0.40;
-        c = mix(vec3(0.85, 0.298, 0.051), vec3(0.55, 0.171, 0.025), f);
-        s = mix(0.66, 0.26, f);
-    }
-    return vec4(c, s);
-}
+FLAME_INK
 
-// Up from nothing at age 0, back to nothing at age 1 - both ends exactly, or the
-// lap shows a seam.
-float flame_life(float age, float ends) {
-    return (1.0 - exp(-age / max(onset, 1e-4)))
-           * pow(max(1.0 - age, 0.0), ends);
-}
-
+// Stays with the tree rather than going into FlameInk, and it is the one piece
+// that could not be shared: a tree's axis is vertical, so the direction never
+// needs renormalising and the integral closes. A tank's vent points back and
+// up, so its path is marched in Plumes.Path and its elements arrive already
+// placed.
 // How far along the path an element of this age has got, as a fraction of the
 // reach. The integral of exp(gather * a), normalised on the end point - see the
 // summary for why it is in closed form here and marched on the tank.
@@ -5282,76 +5205,6 @@ float flame_climb(float age) {
     return (exp(g * age) - 1.0) / (exp(g) - 1.0);
 }
 
-// One element, premultiplied colour in rgb and its coverage in a. `at` is the
-// fragment in tree heights from the foot, `centre` the element, `half_w` its
-// half-width, `along` its half-length. `body` is its colour in the middle; the rim
-// takes it toward rim_colour.
-//
-// Ellipse rather than a distance to a line, and that is the single biggest thing
-// in the picture: the licks this replaced were flat inside and blurred at the
-// sides, which is a ribbon. A sphere is bright in the middle and dark and thin at
-// its edge, and that is what makes it read as a body.
-// How far into an element this fragment is: 1 dead centre, 0 at its rim, and 0
-// outside it. `down` comes back as +1 at the leading end and -1 at the trailing one.
-float flame_facing(vec2 at, vec2 centre, float half_w, float along, float lump_seed,
-                   out float down) {
-    vec2 d = vec2((at.x - centre.x) / max(half_w, 1e-5),
-                  (at.y - centre.y) / max(along, 1e-5));
-    down = clamp(d.y, -1.0, 1.0);
-    float q = dot(d, d);
-    // Cheap bail before the noise: most fragments are outside most elements.
-    if (q > 2.25) {
-        return 0.0;
-    }
-    float lump = 1.0 + wobble * (ember_noise(vec2(d.x * 1.6 + lump_seed * 7.3,
-                                                  d.y * 1.6 + lump_seed * 3.1))
-                                 - 0.5);
-    q /= max(lump * lump, 1e-3);
-    return q >= 1.0 ? 0.0 : sqrt(1.0 - q);
-}
-
-// One element, premultiplied colour in rgb and its coverage in a. `age` is where it
-// sits on the ramp; the length of it and the section across it both shift that -
-// read once per element the ramp is a flat colour per blob, which is what a stack of
-// coloured balls looks like.
-vec4 flame_blob(vec2 at, vec2 centre, float half_w, float along, float lump_seed,
-                float age, float gain) {
-    float down;
-    float facing = flame_facing(at, centre, half_w, along, lump_seed, down);
-    if (facing <= 0.0) {
-        return vec4(0.0);
-    }
-    float across = clamp((facing - 0.5) * 2.0, -1.0, 1.0);
-    vec4 c = flame_ramp(clamp(age + gradient * (down + 1.0) * 0.5
-                              + core_hue * across, 0.0, 1.0));
-    float shell = 1.0 + ((shell_gain - 1.0)
-                         * max(0.0, 1.0 - (abs(facing - shell_at)
-                                           / max(shell_width, 1e-3))));
-    vec3 col = mix(rim_colour, c.rgb, pow(facing, rim_reach));
-    float a = clamp(pow(facing, rim_falloff) * c.w * shell * gain * opacity,
-                    0.0, 1.0);
-    return vec4(col * a, a);
-}
-
-// An ember: the same body, one flat colour. engine_fire gives them their own rather
-// than a place on the ramp, because they are what is left rather than what is
-// burning - and the lip still applies, so they keep an edge.
-vec4 flame_spark(vec2 at, vec2 centre, float half_w, float along, float lump_seed,
-                 vec3 body, float gain) {
-    float down;
-    float facing = flame_facing(at, centre, half_w, along, lump_seed, down);
-    if (facing <= 0.0) {
-        return vec4(0.0);
-    }
-    vec3 col = mix(rim_colour, body, pow(facing, rim_reach));
-    float a = clamp(pow(facing, rim_falloff) * gain * opacity, 0.0, 1.0);
-    return vec4(col * a, a);
-}
-
-// One element over what is already there.
-vec4 flame_over(vec4 acc, vec4 e) {
-    return vec4(e.rgb + (1.0 - e.a) * acc.rgb, e.a + (1.0 - e.a) * acc.a);
-}
 
 void fragment() {
     if (level <= 0.0) {
@@ -5386,7 +5239,7 @@ void fragment() {
             float gain = 1.0 - seat_flicker + seat_flicker * wave;
             fire = flame_over(fire,
                               flame_blob(at, vec2(off, lift), size,
-                                         size * seat_stretch, fk + 3.0, 0.0,
+                                         size * seat_stretch, vec2(0.0, 1.0), fk + 3.0, 0.0,
                                          seat_gain * gain * alpha));
         }
 
@@ -5408,7 +5261,7 @@ void fragment() {
             float born = seat * born_scatter
                          * (2.0 * ember_hash(vec2(fk, 15.0)) - 1.0);
             fire = flame_over(fire,
-                              flame_blob(at, vec2(born + sway, up), r, r * stretch,
+                              flame_blob(at, vec2(born + sway, up), r, r * stretch, vec2(0.0, 1.0),
                                          fk + 20.0, age, alpha * life));
         }
 
@@ -5428,7 +5281,7 @@ void fragment() {
                          * ember_hash(vec2(fk, 33.0))
                          * cos(6.283185 * ember_hash(vec2(fk, 34.0)));
             fire = flame_over(fire,
-                              flame_spark(at, vec2(sway, up), r, r * 1.6, fk + 40.0,
+                              flame_spark(at, vec2(sway, up), r, r * 1.6, vec2(0.0, 1.0), fk + 40.0,
                                           ember_colour, ember_gain * life));
         }
 
@@ -5507,11 +5360,213 @@ void fragment() {
 }
 ";
 
-    private static readonly Shader Blazing =
-        new() { Code = FlameShader.Replace("FLAME_NOISE", EmberNoise) };
+    /// <summary>
+    /// What one element of a flame is: the ramp, the life, the ellipse,
+    /// the section across it and the dark lip - and the numbers those read.
+    ///
+    /// <b>Shared with the tank's own fire, and that is the point rather
+    /// than the saving.</b> The ramp here is the tank sprite's measured
+    /// hue, fitted to <c>fire_atlas</c> because this lands in an sRGB
+    /// framebuffer where <c>engine_fire</c>'s linear numbers are six times
+    /// too dark in green and blue. A second copy on the tank would be a
+    /// second answer to what colour the fire is, and the two would part
+    /// where nobody compares them - which is the whole complaint the
+    /// tank's built flame exists to answer.
+    ///
+    /// <see cref="FoamEdge"/>'s arrangement: handed to both shaders as
+    /// a format argument, and the check requires it in both
+    /// <em>compiled</em> sources, because a copy still names every
+    /// function it defines.
+    /// </summary>
+    internal const string FlameInk = @"
+uniform float wobble = 0.28;
+uniform float gradient = 0.20;
+uniform float onset = 0.07;
+// The element's own cross-section, and both halves of it are engine_fire's
+// material rather than a guess at one.
+//
+// <b>The exponent is on the facing, not on the radius.</b> There alpha goes as
+// Layer Weight's Facing to this power, and for a sphere facing is sqrt(1 - r^2);
+// writing pow(1 - r^2, 1.15) instead - which is what this did - is facing^2.3, so
+// every element came out half as soft and a size smaller than it was asked for.
+//
+// <b>The dark lip is load-bearing.</b> engine_fire keeps one for exactly the
+// failure seen here: without it the licks melt into each other instead of keeping
+// a shape. The plume wants the opposite and has its rim nearly the body's colour,
+// because there shapes are the problem.
+//
+// Its hue moved with the ramp's and for the same reason, but less: it stays redder
+// and darker than the body, which is the whole of its job.
+uniform float rim_falloff = 1.15;
+uniform float rim_reach = 0.32;
+uniform vec3 rim_colour = vec3(0.35, 0.088, 0.018);
+uniform float opacity = 0.72;
+// The section across one element, in three bands: a deep core, a bright shoulder,
+// and the dark lip at the very edge.
+//
+// <b>Hue alone does not read, and that was measured.</b> Shifting the ramp across
+// the element makes the shoulder yellower and leaves it *darker*, because both the
+// lip and the alpha fall off monotonically from the middle - so the eye sees one
+// dimming body, not a light edge. The shoulder has to be brighter as well as
+// yellower, which is what shell_gain buys, and the lip has to be pulled in close to
+// the rim to leave room for it - rim_reach 0.32 against the 0.60 it was.
+//
+// <b>The lip stays, and it still has to do its job.</b> It is what keeps the licks
+// from melting into each other, measured; a bright shoulder that reached the edge
+// would light its neighbour's and put the bar back.
+//
+// Where the shoulder sits and how wide it is, in facing: 1 is dead centre, 0 the rim.
+uniform float shell_at = 0.55;
+uniform float shell_gain = 1.35;
+uniform float shell_width = 0.34;
+// And how far the middle of an element and its shoulders sit apart on the ramp: plus
+// this at dead centre, minus it at the rim.
+//
+// <b>A shift along the ramp, not a second set of colours.</b> The ramp already runs
+// from a bright orange at 0 to a deep red at 1, so a cross section is one number on
+// the same curve - which keeps the no-stop-near-white rule true by construction
+// and leaves one place where the flame's colour is written.
+//
+// <b>It does not replace the dark lip, it sits inside it.</b> The lip is what keeps
+// the licks from melting into each other and that was measured; so the section
+// reads middle deep, shoulders bright, and then the lip at the very edge. Three
+// bands out of two numbers.
+uniform float core_hue = 0.26;
+// An ember's own colour rather than a place on the ramp, because they are what
+// is left rather than what is burning - and warm rather than the yellow a real
+// spark is, for the ramp's reason twice over: an ember is a few pixels at low
+// alpha, and low-alpha yellow added to a pale field is a grey speck. They read
+// as drizzle before this was pulled toward red.
+//
+// Here rather than in either shader because it is one of the colours the fire
+// is, and the tank's flame asks for it by name.
+uniform vec3 ember_colour = vec3(1.00, 0.38, 0.08);
+// The tank sprite's own hue, hot end to cool, strength in w. NOT engine_fire's
+// config numbers: those are linear and this lands in an sRGB framebuffer - see the
+// note on FlameShader for the measurement and the factor of six.
+vec4 flame_ramp(float t) {
+    vec3 c;
+    float s;
+    if (t < 0.08) {
+        float f = t / 0.08;
+        c = mix(vec3(1.00, 0.50, 0.25), vec3(1.00, 0.455, 0.19), f);
+        s = mix(1.00, 0.95, f);
+    } else if (t < 0.22) {
+        float f = (t - 0.08) / 0.14;
+        c = mix(vec3(1.00, 0.455, 0.19), vec3(1.00, 0.40, 0.10), f);
+        s = mix(0.95, 0.92, f);
+    } else if (t < 0.60) {
+        float f = (t - 0.22) / 0.38;
+        c = mix(vec3(1.00, 0.40, 0.10), vec3(0.85, 0.298, 0.051), f);
+        s = mix(0.92, 0.66, f);
+    } else {
+        float f = (t - 0.60) / 0.40;
+        c = mix(vec3(0.85, 0.298, 0.051), vec3(0.55, 0.171, 0.025), f);
+        s = mix(0.66, 0.26, f);
+    }
+    return vec4(c, s);
+}
+
+// Up from nothing at age 0, back to nothing at age 1 - both ends exactly, or the
+// lap shows a seam.
+float flame_life(float age, float ends) {
+    return (1.0 - exp(-age / max(onset, 1e-4)))
+           * pow(max(1.0 - age, 0.0), ends);
+}
+
+// One element, premultiplied colour in rgb and its coverage in a. `at` is the
+// fragment in tree heights from the foot, `centre` the element, `half_w` its
+// half-width, `along` its half-length. `body` is its colour in the middle; the rim
+// takes it toward rim_colour.
+//
+// Ellipse rather than a distance to a line, and that is the single biggest thing
+// in the picture: the licks this replaced were flat inside and blurred at the
+// sides, which is a ribbon. A sphere is bright in the middle and dark and thin at
+// its edge, and that is what makes it read as a body.
+// How far into an element this fragment is: 1 dead centre, 0 at its rim, and 0
+// outside it. `down` comes back as +1 at the leading end and -1 at the trailing one.
+//
+// <b>`flow` is which way the element lies</b>, as a unit screen vector. A tree's
+// fire climbs straight up the quad and passes vec2(0, 1), which is what this did
+// before there was an argument and is bit-identical to it. A tank's leaves the
+// vent at whatever the vent points at, and the stretch has to lie along that or a
+// lick at the seat is a horizontal ellipse across a diagonal flow.
+float flame_facing(vec2 at, vec2 centre, float half_w, float along, vec2 flow,
+                   float lump_seed, out float down) {
+    vec2 e = at - centre;
+    vec2 d = vec2(dot(e, vec2(flow.y, -flow.x)) / max(half_w, 1e-5),
+                  dot(e, flow) / max(along, 1e-5));
+    down = clamp(d.y, -1.0, 1.0);
+    float q = dot(d, d);
+    // Cheap bail before the noise: most fragments are outside most elements.
+    if (q > 2.25) {
+        return 0.0;
+    }
+    float lump = 1.0 + wobble * (ember_noise(vec2(d.x * 1.6 + lump_seed * 7.3,
+                                                  d.y * 1.6 + lump_seed * 3.1))
+                                 - 0.5);
+    q /= max(lump * lump, 1e-3);
+    return q >= 1.0 ? 0.0 : sqrt(1.0 - q);
+}
+
+// One element, premultiplied colour in rgb and its coverage in a. `age` is where it
+// sits on the ramp; the length of it and the section across it both shift that -
+// read once per element the ramp is a flat colour per blob, which is what a stack of
+// coloured balls looks like.
+vec4 flame_blob(vec2 at, vec2 centre, float half_w, float along, vec2 flow,
+                          float lump_seed,
+                float age, float gain) {
+    float down;
+    float facing = flame_facing(at, centre, half_w, along, flow, lump_seed, down);
+    if (facing <= 0.0) {
+        return vec4(0.0);
+    }
+    float across = clamp((facing - 0.5) * 2.0, -1.0, 1.0);
+    vec4 c = flame_ramp(clamp(age + gradient * (down + 1.0) * 0.5
+                              + core_hue * across, 0.0, 1.0));
+    float shell = 1.0 + ((shell_gain - 1.0)
+                         * max(0.0, 1.0 - (abs(facing - shell_at)
+                                           / max(shell_width, 1e-3))));
+    vec3 col = mix(rim_colour, c.rgb, pow(facing, rim_reach));
+    float a = clamp(pow(facing, rim_falloff) * c.w * shell * gain * opacity,
+                    0.0, 1.0);
+    return vec4(col * a, a);
+}
+
+// An ember: the same body, one flat colour. engine_fire gives them their own rather
+// than a place on the ramp, because they are what is left rather than what is
+// burning - and the lip still applies, so they keep an edge.
+vec4 flame_spark(vec2 at, vec2 centre, float half_w, float along, vec2 flow,
+                           float lump_seed,
+                 vec3 body, float gain) {
+    float down;
+    float facing = flame_facing(at, centre, half_w, along, flow, lump_seed, down);
+    if (facing <= 0.0) {
+        return vec4(0.0);
+    }
+    vec3 col = mix(rim_colour, body, pow(facing, rim_reach));
+    float a = clamp(pow(facing, rim_falloff) * gain * opacity, 0.0, 1.0);
+    return vec4(col * a, a);
+}
+
+// One element over what is already there.
+vec4 flame_over(vec4 acc, vec4 e) {
+    return vec4(e.rgb + (1.0 - e.a) * acc.rgb, e.a + (1.0 - e.a) * acc.a);
+}
+";
+
+    /// <summary>The forest's flame as it is compiled, so the check can ask
+    /// whether it and the tank's are one text. A copy still names every
+    /// function it defines, so nothing shorter than this would notice.
+    /// </summary>
+    internal static readonly string BlazingCode =
+        FlameShader.Replace("FLAME_NOISE", EmberNoiseCode)
+                   .Replace("FLAME_INK", FlameInk);
+
+    private static readonly Shader Blazing = new() { Code = BlazingCode };
 
     private static readonly Shader Smoking =
-        new() { Code = SmokeShader.Replace("FLAME_NOISE", EmberNoise) };
+        new() { Code = SmokeShader.Replace("FLAME_NOISE", EmberNoiseCode) };
 
     /// <summary>
     /// A borrowed layer on a tree: one column of the strip, picked by phase.

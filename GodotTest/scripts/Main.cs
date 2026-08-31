@@ -1096,6 +1096,21 @@ public sealed partial class Main : SceneRoot
 				_tick.ScanEnabled = true;
 			else if (userArgs[i] == "--no-exhaust")
 				_tick.ExhaustEnabled = false;
+			// The smoke column built rather than read - see ProcSmoke. A plain
+			// flag and not a level: which of two ways an effect is drawn is not
+			// a quantity, and the two are meant to be put side by side.
+			else if (userArgs[i] == "--proc-smoke")
+				_tick.ProceduralSmoke = true;
+			else if (userArgs[i] == "--no-proc-smoke")
+				_tick.ProceduralSmoke = false;
+			else if (userArgs[i] == "--proc-fire")
+				_tick.ProceduralFire = true;
+			else if (userArgs[i] == "--no-proc-fire")
+				_tick.ProceduralFire = false;
+			else if (userArgs[i] == "--proc-exhaust")
+				_tick.ProceduralExhaust = true;
+			else if (userArgs[i] == "--no-proc-exhaust")
+				_tick.ProceduralExhaust = false;
 			else if (userArgs[i] == "--no-tracks")
 				_tick.TracksEnabled = false;
 			else if (userArgs[i] == "--no-shadow")
@@ -1296,7 +1311,10 @@ public sealed partial class Main : SceneRoot
 				_flashSource = userArgs[i + 1].Equals("sheet",
 					StringComparison.OrdinalIgnoreCase)
 					? FlashSource.Sheet
-					: FlashSource.Rendered;
+					: userArgs[i + 1].Equals("built",
+						StringComparison.OrdinalIgnoreCase)
+						? FlashSource.Built
+						: FlashSource.Rendered;
 			else if (userArgs[i] == "--turret" && i + 1 < userArgs.Length
 					 && double.TryParse(userArgs[i + 1], out double bearing))
 				_startTurret = bearing;
@@ -3383,6 +3401,12 @@ public sealed partial class Main : SceneRoot
 		["--no-exhaust"] = new[] { "effects.exhaust" },
 		["--exhaust"] = new[] { "effects.exhaust_level" },
 		["--exhaust-ramp"] = new[] { "effects.exhaust_ramp" },
+		["--proc-smoke"] = new[] { "effects.proc_smoke" },
+		["--no-proc-smoke"] = new[] { "effects.proc_smoke" },
+		["--proc-fire"] = new[] { "effects.proc_fire" },
+		["--no-proc-fire"] = new[] { "effects.proc_fire" },
+		["--proc-exhaust"] = new[] { "effects.proc_exhaust" },
+		["--no-proc-exhaust"] = new[] { "effects.proc_exhaust" },
 		["--burning"] = new[] { "effects.fire" },
 		["--flash"] = new[] { "effects.flash_source" },
 		["--recoil-shear"] = new[] { "effects.hull_shear" },
@@ -3682,6 +3706,17 @@ public sealed partial class Main : SceneRoot
 		// level's caption is describing.
 		ui.Toggle("effects.exhaust_ramp", "load ramp instead of two states",
 			() => _tick.ExhaustRamp, on => _tick.ExhaustRamp = on);
+		// Beside the exhaust because it is the same shape of switch: it names
+		// the model, not an optional effect. Reads and writes the board's flag,
+		// so all three tanks change together - a comparison with one tank on
+		// each side of it is no comparison.
+		ui.Toggle("effects.proc_exhaust", "build the plume, do not read it",
+			() => _tick.ProceduralExhaust,
+			on => _tick.ProceduralExhaust = on);
+		ui.Toggle("effects.proc_smoke", "build the smoke column, do not read it",
+			() => _tick.ProceduralSmoke, on => _tick.ProceduralSmoke = on);
+		ui.Toggle("effects.proc_fire", "build the flame, do not read it",
+			() => _tick.ProceduralFire, on => _tick.ProceduralFire = on);
 		// Frames per phase and not just the rate, because that is the question
 		// the drag runs into: the plume is twelve rendered poses stepped a few
 		// times a second, and the ceiling is how briefly a pose can be held
@@ -3717,11 +3752,21 @@ public sealed partial class Main : SceneRoot
 			_burning = on;
 			Tick.UpdateBurn(Active, 0.0);
 		});
-		ui.Choice("effects.flash_source", "flash source  (V)", new[] { "rendered", "sheet" },
-			() => _tank.Source == FlashSource.Rendered ? 0 : 1,
+		// One list for the labels and the values, because panel.json picks a row's
+		// opening value by *label* ("default": "rendered") and the enum's own
+		// order is Sheet, Rendered, Built. Written as two orderings once and the
+		// harness opened on the sheet: the getter handed back (int)Rendered = 1,
+		// which is "sheet" in a list that starts at "rendered", and the file's
+		// default resolved to index 0 and set Sheet through the setter. Nothing
+		// said so - the flash still drew, from the other track.
+		FlashSource[] sources =
+			{ FlashSource.Rendered, FlashSource.Sheet, FlashSource.Built };
+		ui.Choice("effects.flash_source", "flash source  (V)",
+			new[] { "rendered", "sheet", "built" },
+			() => Math.Max(Array.IndexOf(sources, _tank.Source), 0),
 			i =>
 			{
-				_tank.Source = i == 0 ? FlashSource.Rendered : FlashSource.Sheet;
+				_tank.Source = sources[Math.Clamp(i, 0, sources.Length - 1)];
 				_tank.QueueRedraw();
 			});
 		// Above its own level and pivot, because it gates both: a slider on a
@@ -5192,9 +5237,9 @@ public sealed partial class Main : SceneRoot
 				_calibre = (_calibre + 1) % Ordnance.Count;
 				break;
 			case Key.V:
-				_tank.Source = _tank.Source == FlashSource.Rendered
-					? FlashSource.Sheet
-					: FlashSource.Rendered;
+				// Three now, so it cycles rather than toggling. Same key: which
+				// track is drawing is one question however many answers it has.
+				_tank.Source = (FlashSource)(((int)_tank.Source + 1) % 3);
 				_tank.QueueRedraw();
 				break;
 			case Key.Escape: CancelOrder(); break;

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using Godot;
 
 namespace TankSpriteTest;
@@ -587,9 +587,22 @@ void fragment() {
                 return -1;
             return Clock switch
             {
-                Clocks.Exhaust => Tank.ShowExhaust ? Tank.ExhaustPhase : -1,
-                Clocks.BurningSmoke => Tank.Burning ? Tank.BurnPhase : -1,
-                Clocks.BurningFire => Tank.Burning ? Tank.FirePhase : -1,
+                // Stands down for the built plume the same way the column does
+                // below, and the ordering matters: ExhaustPhase already carries
+                // every reason there is no plume at all, so asking it first
+                // leaves this saying only "and something else is drawing it".
+                Clocks.Exhaust => Tank.ShowExhaust && !Tank.ExhaustIsProcedural
+                    ? Tank.ExhaustPhase : -1,
+                // Stands down when the column is being built rather than
+                // read - exactly one of the pair draws, or the tank smokes
+                // twice. See TankSprite.SmokeIsProcedural, which is false on a
+                // set with no stamped port however the flag is set: a switch
+                // that took the smoke away rather than remade it would read as
+                // a broken switch.
+                Clocks.BurningSmoke => Tank.Burning && !Tank.SmokeIsProcedural
+                    ? Tank.BurnPhase : -1,
+                Clocks.BurningFire => Tank.Burning && !Tank.FireIsProcedural
+                    ? Tank.FirePhase : -1,
                 Clocks.HitBurst or Clocks.HitDust => Tank.HitPhase,
                 Clocks.Track => Tank.ShowTracks ? Tank.TrackPhaseOf(Layer) : -1,
                 // No phase axis, so frame 0 of one, like the turret: what it
