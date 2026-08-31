@@ -665,6 +665,32 @@ public sealed partial class EffectsBench : SceneRoot
                + "middle drag pans, wheel zooms, R resets, F12 shoots";
     }
 
+    /// <summary>
+    /// The cell under the mouse, or null if that is not a cell of this board.
+    ///
+    /// <b>One method for both gestures, because the two copies disagreed and the
+    /// disagreement was invisible until the board had height.</b> The double click
+    /// read <c>InputEventMouseButton.Position</c>, which is the pointer in
+    /// <i>viewport</i> pixels, while the middle button reads
+    /// <see cref="Node2D.GetGlobalMousePosition"/>, which is the pointer in the
+    /// world. Those are the same point only at zoom 1 with the camera on the
+    /// window's own middle, so the burst went off on a cell some way from the one
+    /// clicked - and further as the view was zoomed or panned. Nothing errors,
+    /// because a wrong cell is a perfectly good cell.
+    ///
+    /// <b>The lift is <see cref="HexField.CellAt"/>'s business and it does handle
+    /// it</b> - it drops the point by each level the board carries and keeps the
+    /// frontmost answer that agrees about its own level - which matters here now
+    /// that the board stands on a plinth: every cell is drawn a lift higher than
+    /// its flat row, so a flat inverse would answer with the cell in front of the
+    /// one being looked at.
+    /// </summary>
+    private Vector2I? Pointed()
+    {
+        Vector2I cell = _field.CellAt(_field.ToLocal(GetGlobalMousePosition()));
+        return _field.InBounds(cell) ? cell : null;
+    }
+
     public override void _UnhandledInput(InputEvent @event)
     {
         // <b>A double click on the left sets a burst off on that cell.</b> A single
@@ -674,13 +700,12 @@ public sealed partial class EffectsBench : SceneRoot
         // click cannot be made by accident, and it does both things at once - the
         // reticle moves and the shell lands.
         if (@event is InputEventMouseButton
-            { ButtonIndex: MouseButton.Left, DoubleClick: true } twice)
+            { ButtonIndex: MouseButton.Left, DoubleClick: true })
         {
-            Vector2I cell = _field.CellAt(_field.ToLocal(twice.Position));
             // Not clamped, by the middle button's argument: a click off the board
             // is a click off the board, and clamping would blow up the cell beside
             // the one that was pointed at.
-            if (_field.InBounds(cell))
+            if (Pointed() is Vector2I cell)
             {
                 _at = cell;
                 Burst();
@@ -692,13 +717,12 @@ public sealed partial class EffectsBench : SceneRoot
         // distinguishable - SceneRoot.MiddleTapped.
         if (@event is InputEventMouseButton { ButtonIndex: MouseButton.Middle } middle)
         {
-            if (!MiddleTapped(middle, out Vector2 tapped))
+            if (!MiddleTapped(middle, out Vector2 _))
                 return;
-            Vector2I cell = _field.CellAt(_field.ToLocal(tapped));
             // Not clamped, for the wood bench's reason: a click off the plot is
             // a click off the board, and clamping it would aim at the cell
             // beside the one that was pointed at.
-            if (_field.InBounds(cell))
+            if (Pointed() is Vector2I cell)
                 _at = cell;
             return;
         }

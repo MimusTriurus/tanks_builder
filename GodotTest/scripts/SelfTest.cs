@@ -5344,6 +5344,43 @@ public static class SelfTest
             + "will ever move");
         dialBench.Free();
 
+        // <b>The effects board's plinth, which is the whole of why its hexes look
+        // like hexes.</b> Stage3D skips a prism's walls when the top face and the
+        // floor are the same height, so a board on the datum draws as flat
+        // hexagons with no sides - a 3D stage indistinguishable from the flat one.
+        // A letter changed in the grid takes that away silently, because a flat
+        // board is not an error.
+        BoardMap effects = BoardMap.Effects;
+        int pitFlat = 0, pitWet = 0, pitWood = 0, pitWalled;
+        for (int r = 0; r < effects.Rows; r++)
+        for (int q = 0; q < effects.Columns; q++)
+        {
+            var cell = new Vector2I(q, r);
+            int at = effects.At(cell);
+            if (effects.Water[at])
+            {
+                pitWet++;
+                continue;
+            }
+            if (effects.Levels[at] <= 0)
+                pitFlat++;
+            if (effects.Kinds[at] == TerrainSet.Forest)
+                pitWood++;
+        }
+        pitWalled = effects.Walled().Count;
+        Check("the effects board stands a level up, so its hexes have sides",
+            pitFlat == 0,
+            $"{pitFlat} of its dry cells sit on the datum, and a cell whose top is "
+            + "the floor is drawn as a flat hexagon with no side faces at all");
+        // And the three things a burst is judged against are on it. Counted rather
+        // than assumed: they are three letters in a five by five grid, and a
+        // letter is the easiest thing in this project to lose.
+        Check("and carries the wood, the pond and the ring of brick",
+            pitWood == 1 && pitWet == 1 && pitWalled == 1,
+            $"{pitWood} wooded, {pitWet} water, {pitWalled} walled - the burst is judged "
+            + "partly on what hides it and what it hides, and those three are the "
+            + "only things on this board that can answer");
+
         // The crater's own numbers, on the same two terms as the bursts': a name
         // the shader does not declare comes back NaN, and a default outside its
         // slider's band is snapped the moment the panel is built, so the crater
