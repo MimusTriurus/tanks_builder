@@ -5287,10 +5287,12 @@ public static class SelfTest
                   + "no note"
                 : $"effects.json did not load: {dialText.Error}");
         var puffRows = EffectsBench.PuffRows(dialBench).ToList();
+        var scarRows = EffectsBench.ScarRows(dialBench).ToList();
         Check("and the file names nothing the panel does not build",
             dialText.Loaded
             && dialText.RowIds.All(id => dialRows.Any(r => r.Id == id)
                                          || puffRows.Any(r => r.Id == id)
+                                         || scarRows.Any(r => r.Id == id)
                                          || id.StartsWith("he.crater.")
                                          || !id.Contains('.')
                                          || PanelOwn.Contains(id)),
@@ -5341,6 +5343,48 @@ public static class SelfTest
             + "panel and a picture, a number with no slider is a number nobody "
             + "will ever move");
         dialBench.Free();
+
+        // The crater's own numbers, on the same two terms as the bursts': a name
+        // the shader does not declare comes back NaN, and a default outside its
+        // slider's band is snapped the moment the panel is built, so the crater
+        // that opens is not the crater the shader describes.
+        var scarLost = scarRows.Where(r => float.IsNaN((float)r.Opens))
+                               .Select(r => r.Name).ToList();
+        Check("every dial of the crater names a uniform that exists",
+            scarRows.Count > 0 && scarLost.Count == 0,
+            scarLost.Count == 0
+                ? $"{scarRows.Count} dials"
+                : $"{scarLost.Count} name nothing: {string.Join(", ", scarLost.Take(6))}");
+        var scarOut = scarRows
+            .Where(r => r.Opens < r.Lo - 1e-6 || r.Opens > r.Hi + 1e-6)
+            .Select(r => $"{r.Name} {r.Opens:F3} outside {r.Lo:F2}..{r.Hi:F2}")
+            .ToList();
+        Check("and each opens inside its own band",
+            scarOut.Count == 0,
+            scarOut.Count == 0 ? "" : string.Join("; ", scarOut.Take(4)));
+        Check("and the panel file knows the crater's rows as well",
+            dialText.Loaded && scarRows.All(r => dialText.RowIds.Contains(r.Id)),
+            dialText.Loaded
+                ? $"{scarRows.Count(r => !dialText.RowIds.Contains(r.Id))} rows of the "
+                  + "crater are missing from effects.json"
+                : $"effects.json did not load: {dialText.Error}");
+        // <b>The mark is drawn inside its own plane, which is the rule every quad
+        // on this board is written under.</b> The plane is square and the crater is
+        // round, so its corners are 1.41 of the radius: soil drawn out there would
+        // be a mark whose shape is the plane's, and it would be a different shape
+        // on every heading. Read off the shader text, because that is where the cut
+        // is.
+        Check("the crater draws nothing outside the plane it is drawn on",
+            PitArt.Code.Contains("if (r > 1.0)", StringComparison.Ordinal)
+            && PitArt.Code.Contains("ALPHA = 0.0;", StringComparison.Ordinal),
+            "without the cut the corners of the plane show, and a crater with four "
+            + "corners is a decal announcing its own quad");
+        // And it lightens as well as darkens, which is the whole reason it stopped
+        // being a mark in the ash map: that map has one direction.
+        Check("and it is drawn over the ground rather than multiplied into it",
+            PitArt.Code.Contains("blend_mix", StringComparison.Ordinal),
+            "a crater added or multiplied can only go one way from the ground, and "
+            + "a crater is a dark hole in the middle of a pale splash");
 
         // <b>The imported burst is an event on the same terms</b>, and the reason
         // to say it twice is that it keeps a second clock: the sheet's. A cloud

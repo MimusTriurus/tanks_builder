@@ -419,6 +419,59 @@ public sealed partial class EffectsBench
     }
 
     /// <summary>
+    /// The crater's own numbers: how the mark is drawn rather than how big it is.
+    ///
+    /// A third table beside the two bursts', and flat rather than keyed by a part,
+    /// because a crater is one shader. Read out of its text like the others, so the
+    /// panel is a view of the numbers and not a second copy of them.
+    /// </summary>
+    private static readonly (string Id, string Name, string Label,
+                             double Lo, double Hi, double Step)[] Scars =
+    {
+        ("he.crater.bowl", "bowl", "how much of it is the hole", 0.15, 0.85, 0.01),
+        ("he.crater.deep", "deep", "how dark the bottom is", 0.0, 1.0, 0.02),
+        ("he.crater.wall", "wall", "light on the far inner wall", 0.0, 1.50, 0.02),
+        ("he.crater.lip", "lip", "the lit rim above the ground", 0.0, 1.0, 0.02),
+        ("he.crater.rag", "rag", "how ragged the outline is", 0.0, 0.70, 0.02),
+        ("he.crater.fingers", "fingers", "fingers of thrown soil", 1.0, 20.0, 0.5),
+        ("he.crater.streaks", "streaks", "streaks converging on the hole", 4.0, 60.0, 1.0),
+        ("he.crater.apron", "apron", "how much soil is thrown out", 0.0, 1.20, 0.02),
+        ("he.crater.spatter", "spatter", "how far the spatter carries", 0.0, 1.20, 0.02),
+        ("he.crater.grit", "grit", "gravel in the soil", 0.0, 1.0, 0.02),
+        ("he.crater.grain", "grain", "how big that grain is on screen", 0.8, 12.0, 0.1),
+        ("he.crater.stones", "stones", "stones left on top", 0, 32, 1),
+        ("he.crater.stone_size", "stone_size", "how big one stone is, in px", 1.0, 20.0, 0.5),
+        ("he.crater.stone_shade", "stone_shade", "how dark their shadows are", 0.0, 1.0, 0.02),
+    };
+
+    /// <summary>The crater table as the self-test reads it, the two burst tables'
+    /// arrangement.</summary>
+    internal static IEnumerable<(string Id, string Name, double Lo, double Hi,
+                                 double Opens)>
+        ScarRows(EffectsBench bench) =>
+        Scars.Select(r => (r.Id, r.Name, r.Lo, r.Hi, (double)bench.Scarred(r.Name)));
+
+    private readonly Dictionary<string, float> _scarred = new();
+
+    private float Scarred(string name)
+    {
+        if (!_scarred.TryGetValue(name, out float now))
+        {
+            now = ProcBlast.Uniform(PitArt.Code, name);
+            _scarred[name] = now;
+        }
+        return now;
+    }
+
+    /// <summary>Push every crater number into one crater's art - the answer to
+    /// <see cref="Stage3D.Scar"/>, <see cref="Dress"/>'s third twin.</summary>
+    private void Scar(PitArt art)
+    {
+        foreach ((string _, string name, string _, double _, double _, double _) in Scars)
+            art.Dial(name, Scarred(name));
+    }
+
+    /// <summary>
     /// What the ground keeps, which is the same group under either burst.
     ///
     /// <b>The crater is the board's rather than the burst's</b> - see
@@ -437,6 +490,19 @@ public sealed partial class EffectsBench
         _panel.Slide("he.crater.ink", "darkness", 0.0, 1.0, 0.02,
                      () => _pits.Ink, v => _pits.Ink = (float)v);
         _panel.Press("he.crater.fill", "fill them in", () => _pits.Fill());
+        foreach (var scar in Scars)
+        {
+            var it = scar;
+            _panel.Slide(it.Id, it.Label, it.Lo, it.Hi, it.Step,
+                         () => Scarred(it.Name),
+                         v =>
+                         {
+                             _scarred[it.Name] = (float)v;
+                             foreach (PitArt art in _stage?.Etched
+                                                    ?? Array.Empty<PitArt>())
+                                 art.Dial(it.Name, (float)v);
+                         });
+        }
     }
 
     /// <summary>The bursts that exist, or none before the first shot.</summary>

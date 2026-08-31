@@ -20,17 +20,20 @@ namespace TankSpriteTest;
 /// nodes and draws nothing, so it works the same whichever board is up - it is
 /// only the drawing that the flat board cannot do.
 ///
-/// <b>Rasterised into the ash map rather than owning one.</b> Burnt ground and
-/// blown ground are one statement to the ground shader - <c>ash</c>, read in
-/// world XZ, with a soft round falloff whose whole point is that "a round mark on
-/// the ground is one that does not announce which cell it belongs to". A second
-/// map for the second kind of dark patch would be a second answer to how dark
-/// ground is drawn, and the two would part at whichever of them nobody touched.
+/// <b>Drawn by a plane of its own, and it used to be rasterised into the ash map
+/// - a change made on a measurement, not on taste.</b> That map is 8 world units
+/// to the texel, which is right for a fire covering whole cells and leaves a
+/// crater <b>five texels</b> across. Everything that makes a crater read as one is
+/// finer than that, and one more thing about it cannot be drawn there at any
+/// resolution: the soil thrown out of a hole is <b>lighter</b> than the ground it
+/// lands on, and the ash map only darkens. A crater is a dark hole in a pale
+/// splash, so a mark in that map could draw exactly half of it. See
+/// <see cref="PitArt"/>.
 ///
 /// <b>Bounded, and it forgets the oldest</b> - <see cref="TrackMarks.Capacity"/>'s
-/// arrangement. The map is rebuilt whole every frame, so what this costs is one
-/// disc splat per pit per frame; a board that has been shelled for ten minutes
-/// would otherwise pay for every shot of it forever.
+/// arrangement. What a pit costs now is a small plane and a material, built when
+/// it is first needed and reused after that; a board that has been shelled for ten
+/// minutes would otherwise pay for every shot of it forever.
 ///
 /// <b>No fade, and that is a decision rather than an omission.</b> Burnt ground
 /// does not recover either - <c>Wildfire</c>'s ash stays - and a crater healing
@@ -74,6 +77,18 @@ public sealed class Craters
 
     public IReadOnlyList<Pit> Pits => _pits;
 
+    /// <summary>
+    /// How many times this list has changed.
+    ///
+    /// <b>So the stage can put the marks on the board only when there is
+    /// something new to put there.</b> The ash map is rebuilt every frame because
+    /// the fire it draws moves every frame; craters do not - one is dug, and then
+    /// it is a fact until the board is reset. Without this the drawing would set
+    /// ten uniforms on each of forty-eight planes, sixty times a second, to say
+    /// nothing had happened.
+    /// </summary>
+    public int Stamp { get; private set; }
+
     public bool Any => _pits.Count > 0;
 
     /// <summary>Mark the ground. <paramref name="spot"/> is in board space, the
@@ -88,10 +103,15 @@ public sealed class Craters
         if (_pits.Count >= Capacity)
             _pits.RemoveAt(0);
         _pits.Add(new Pit(spot, lift, much, wide));
+        Stamp++;
     }
 
     /// <summary>Ground with nothing on it - the reset. Named for what it does to
     /// the board rather than to the list: a reset that leaves the craters is a
     /// board that was not reset.</summary>
-    public void Fill() => _pits.Clear();
+    public void Fill()
+    {
+        _pits.Clear();
+        Stamp++;
+    }
 }

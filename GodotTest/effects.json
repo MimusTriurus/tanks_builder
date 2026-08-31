@@ -42,7 +42,7 @@
     {
       "id": "he.crater",
       "title": "the mark it leaves",
-      "description": "The board's, not the burst's: rasterised into the same ash map the burning forest blackens ground with. See Craters.",
+      "description": "What a burst leaves in the ground, drawn on a plane of its own rather than marked in the ash map - see PitArt. That map is 8 world units to the texel, which leaves a crater five texels across, and it can only darken; a crater is a dark hole in the middle of a splash of thrown soil, so a mark in it could draw half of one. The depth is painted rather than dented: below the ground line and behind the ground are the same test under this camera, so a real hole is a hole buried by the cell it sits in.",
       "rows": [
         {
           "id": "he.crater.wide",
@@ -55,6 +55,62 @@
         {
           "id": "he.crater.fill",
           "description": "As R does, without resetting anything else."
+        },
+        {
+          "id": "he.crater.bowl",
+          "description": "How much of the mark is the hole. The rest is what came out of it."
+        },
+        {
+          "id": "he.crater.deep",
+          "description": "How dark the bottom of the bowl is."
+        },
+        {
+          "id": "he.crater.wall",
+          "description": "How much the sun lights the far inner wall against the near one. This is the depth: at zero the bowl is a flat dark disc however black its middle."
+        },
+        {
+          "id": "he.crater.lip",
+          "description": "The lit rim standing just outside the hole - the other half of the depth, and the half that says the rim is above the ground rather than painted on it."
+        },
+        {
+          "id": "he.crater.rag",
+          "description": "How ragged the outline is. At zero this is a coin lying on the ground, which is the one thing a crater must not be."
+        },
+        {
+          "id": "he.crater.fingers",
+          "description": "How many fingers of thrown soil there are round the apron."
+        },
+        {
+          "id": "he.crater.streaks",
+          "description": "How many scour marks converge on the hole. Angular, so they narrow as they go in - which is what convergence is. Needs a big crater to read at all."
+        },
+        {
+          "id": "he.crater.apron",
+          "description": "How much soil is thrown out and lying on the surface. Darker than the ground, not lighter: what comes out is damp earth from under a dry crust, and read as pale it was invisible against this board."
+        },
+        {
+          "id": "he.crater.spatter",
+          "description": "How far the detached spatter carries past the fingers - dots rather than a coat, which is what the outer half of the reference art is made of."
+        },
+        {
+          "id": "he.crater.grit",
+          "description": "Gravel through the thrown soil."
+        },
+        {
+          "id": "he.crater.grain",
+          "description": "How big that grain is on screen, in px, so a big crater is not a small one with bigger gravel in it."
+        },
+        {
+          "id": "he.crater.stones",
+          "description": "How many stones are left on top, each with a lit side and a shadow along the board's own sun. Few and large rather than many and small: at the hundred pixels a crater is actually drawn at, eighteen of them read as feathers."
+        },
+        {
+          "id": "he.crater.stone_size",
+          "description": "How big one stone is, in screen px."
+        },
+        {
+          "id": "he.crater.stone_shade",
+          "description": "How dark the stones' own shadows are."
         }
       ]
     },

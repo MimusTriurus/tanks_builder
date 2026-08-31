@@ -354,6 +354,7 @@ public sealed partial class Stage3D : Node3D
             blast.Tick(delta);
         foreach (SheetBlast blast in _booming)
             blast.Tick(delta);
+        Etchings();
         Soot();
         _deepInk?.SetShaderParameter("foam", Mathf.Max(0.0f, Foam));
         PushSwell();
@@ -5104,6 +5105,62 @@ void fragment() {{
     /// read-only for its reason.</summary>
     public IReadOnlyList<SheetBlast> Booming => _booming;
 
+    private readonly List<PitArt> _etched = new();
+    private int _etchedAt = -1;
+
+    /// <summary>What to do to a crater's art before it is shown - Dress's
+    /// argument, third time: the planes are built as craters are dug, so a panel of
+    /// numbers has nothing to write into until the first shot and must not have to
+    /// wait for one.</summary>
+    public Action<PitArt>? Scar;
+
+    /// <summary>The crater art as it stands, for a bench that shows what one is
+    /// made of. Read-only, like the two burst pools.</summary>
+    public IReadOnlyList<PitArt> Etched => _etched;
+
+    /// <summary>
+    /// Put the craters on the board.
+    ///
+    /// <b>Only when the list has changed</b>, which is what
+    /// <see cref="Craters.Stamp"/> is for: a crater is dug once and is then a fact,
+    /// unlike the fire the ash map draws, so re-sending ten uniforms per plane per
+    /// frame would be work done to say nothing happened. A panel turning a dial
+    /// bumps the stamp itself - see <see cref="Restamp"/>.
+    /// </summary>
+    private void Etchings()
+    {
+        if (Pits is null || Field.Atlas is null)
+            return;
+        if (Pits.Stamp == _etchedAt)
+            return;
+        _etchedAt = Pits.Stamp;
+        float tile = Field.Atlas.HexRect.Size.X;
+        for (int k = 0; k < Pits.Pits.Count; k++)
+        {
+            while (_etched.Count <= k)
+            {
+                var made = new PitArt();
+                AddChild(made);
+                made.Build(Squash, RiseFactor);
+                Scar?.Invoke(made);
+                _etched.Add(made);
+            }
+            Craters.Pit pit = Pits.Pits[k];
+            // A seed off the point it was dug at, so two craters are two craters
+            // and the same crater is the same one every frame - and so a reload of
+            // the board draws what it drew before.
+            float seed = Mathf.Abs(pit.Spot.X * 0.37f + pit.Spot.Y * 0.71f) % 64.0f;
+            _etched[k].Show(pit.Spot, pit.Lift, pit.Wide * tile, pit.Much, seed,
+                            Squash, RiseFactor);
+        }
+        for (int k = Pits.Pits.Count; k < _etched.Count; k++)
+            _etched[k].Hide();
+    }
+
+    /// <summary>Draw the craters again on the next frame though the list has not
+    /// changed - what a panel needs after turning one of their numbers.</summary>
+    public void Restamp() => _etchedAt = -1;
+
     /// <summary>Every burst out and nothing drawn - the reset. The craters are the
     /// board's and are filled by whoever owns them.</summary>
     public void Quench()
@@ -5132,8 +5189,7 @@ void fragment() {{
         if (_tops?.MaterialOverride is not ShaderMaterial turf)
             return;
         bool burnt = Blaze is not null && Blaze.Scorched > 0;
-        bool blown = Pits is not null && Pits.Any;
-        if ((!burnt && !blown) || Field.Atlas is null)
+        if (!burnt || Field.Atlas is null)
         {
             turf.SetShaderParameter("ash_ink", 0.0f);
             return;
@@ -5172,17 +5228,11 @@ void fragment() {{
                     Splat(CellTop(cell), circum, much, perX, perZ);
             }
 
-        // The second thing that blackens ground, into the same map: a burst digs
-        // a mark a quarter of a cell wide where the round actually landed, rather
-        // than over the cell it landed on - see Craters on why the unit is a
-        // point. Rasterised after the fire so a crater on burnt ground is at
-        // least as dark as the ash it sits in, which is what `if (want > ...)`
-        // inside the splat already arranges.
-        if (blown)
-            foreach (Craters.Pit pit in Pits!.Pits)
-                Splat(Ground(pit.Spot, pit.Lift),
-                      pit.Wide * Field.Atlas.HexRect.Size.X,
-                      pit.Much, perX, perZ, PitRim);
+        // <b>Craters used to be splatted in here too, and are not any more.</b> The
+        // map is 8 units to the texel and a crater is five texels across, and the
+        // soil a crater throws out is lighter than the ground rather than darker,
+        // which this map cannot say at all - see PitArt. The fire is what is left,
+        // which is what this map was built for.
 
         Image img = Image.CreateFromData(_sootWide, _sootTall, false,
                                          Image.Format.R8, _soot);

@@ -239,6 +239,7 @@ public sealed partial class EffectsBench : SceneRoot
         // pools live in the stage at once and either key may be the one pressed.
         _stage.Dress = Dress;
         _stage.Attire = Attire;
+        _stage.Scar = Scar;
 
         if (!NoUi)
         {
