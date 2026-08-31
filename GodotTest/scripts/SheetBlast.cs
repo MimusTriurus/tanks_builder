@@ -70,7 +70,7 @@ public sealed partial class SheetBlast : Node3D
     /// twenty out at once; this is that, plus a couple, because a hex is 248px
     /// and the cloud is drawn bigger here than the pack's is on screen.
     /// </summary>
-    public const int PuffsDefault = 22;
+    public const int PuffsDefault = 20;
 
     public int Puffs = PuffsDefault;
 
@@ -83,7 +83,7 @@ public sealed partial class SheetBlast : Node3D
     /// puffs on their own do: they are all on the same frame of the same sheet at
     /// the same time, so the whole cloud thins in step.
     /// </summary>
-    public const int TrailsDefault = 6;
+    public const int TrailsDefault = 9;
 
     public int Trails = TrailsDefault;
 
@@ -92,20 +92,20 @@ public sealed partial class SheetBlast : Node3D
     /// as over, and a burst that outlasts the shell's own dust cone
     /// (<see cref="ProcBlast.LifeDefault"/>) would be the slower of the two
     /// bursts.</summary>
-    public const float LifeDefault = 1.55f;
+    public const float LifeDefault = 2.05f;
 
     public float Life = LifeDefault;
 
     /// <summary>How far the cloud's own puffs get from the seat, in tile widths.
     /// The one size of the thing, <see cref="ProcBlast.Reach"/>'s role.</summary>
-    public const float ReachDefault = 0.21f;
+    public const float ReachDefault = 0.17f;
 
     public float Reach = ReachDefault;
 
     /// <summary>How wide one puff is drawn at birth, in tile widths. Note that
     /// the sheet grows the puff on its own - the flipbook is a puff expanding -
     /// so this is the size of the first frame, not of the biggest one.</summary>
-    public const float SizeDefault = 0.155f;
+    public const float SizeDefault = 0.200f;
 
     public float Size = SizeDefault;
 
@@ -121,7 +121,7 @@ public sealed partial class SheetBlast : Node3D
     /// widths. The pack has <c>gravity 0</c> and no climb at all - it is an
     /// explosion in the air, seen head-on. A burst in the ground is seen from
     /// above and has to leave the ground.</summary>
-    public const float ClimbDefault = 0.27f;
+    public const float ClimbDefault = 0.53f;
 
     public float Climb = ClimbDefault;
 
@@ -135,7 +135,7 @@ public sealed partial class SheetBlast : Node3D
     /// <summary>How much of a puff's throw is sideways rather than up. One is a
     /// disc, zero is a column. The pack throws into a full sphere, of which the
     /// bottom half is under the ground here.</summary>
-    public const float FlatDefault = 0.68f;
+    public const float FlatDefault = 0.62f;
 
     public float Flat = FlatDefault;
 
@@ -162,6 +162,68 @@ public sealed partial class SheetBlast : Node3D
     public const float PuffLifeDefault = 0.78f;
 
     public float PuffLife = PuffLifeDefault;
+
+    /// <summary>
+    /// How many of the cloud's puffs are lances: fast, thin, stretched along their
+    /// own flight and thrown further than the mass.
+    ///
+    /// <b>The single feature that makes a burst read as thrown earth rather than
+    /// as smoke</b>, and the reference photograph is made of them: its silhouette
+    /// is not a cloud outline but forty-odd radial spikes, each tapered, each
+    /// overshooting the body it came out of. A flipbook cannot draw one - the sheet
+    /// is a round puff - but a quad can be turned and stretched, and a round puff
+    /// drawn on a quad four times as long as it is wide is a streak with the
+    /// sheet's own curl inside it.
+    ///
+    /// The same trick the computed burst plays on its clods
+    /// (<c>clod_stretch</c>), which is worth saying because it means the idea was
+    /// already in the project and only the flipbook is new.
+    /// </summary>
+    public const int LancesDefault = 26;
+
+    public int Lances = LancesDefault;
+
+    /// <summary>How much faster a lance is than the mass. Over one by definition:
+    /// a spike that does not overshoot the cloud is not a spike, it is part of the
+    /// outline.</summary>
+    public const float LanceFastDefault = 2.20f;
+
+    public float LanceFast = LanceFastDefault;
+
+    /// <summary>How much thinner a lance is than a puff of the mass.</summary>
+    public const float LanceThinDefault = 0.44f;
+
+    public float LanceThin = LanceThinDefault;
+
+    /// <summary>
+    /// How many times its own width a puff is drawn along its flight.
+    ///
+    /// Applied to everything, not only to the lances - the reference's mass is
+    /// itself made of vertically drawn-out lumps, because everything in a burst is
+    /// travelling. It relaxes back toward round as a puff slows, which is what a
+    /// streak that has stopped is.
+    /// </summary>
+    public const float StretchDefault = 2.35f;
+
+    public float Stretch = StretchDefault;
+
+    /// <summary>
+    /// How far the middle of the cloud rises over its life, in tile widths.
+    ///
+    /// <b>Read together with <see cref="Reach"/> this is the whole of the shape,
+    /// and the reference is unambiguous about which of the two wins.</b> Frame one
+    /// is wider than it is tall; frame three is three times taller than it is
+    /// wide, over a base that has stopped growing. So the radial half of the throw
+    /// stalls (that is <see cref="Slow"/>) while the vertical half keeps going -
+    /// see <see cref="Rising"/>.
+    /// </summary>
+    public const float RisingDefault = 0.62f;
+
+    /// <summary>The power the climb runs on. Under one so the column is quick out
+    /// of the ground and slow at the top, which is what buoyant dust does and what
+    /// the reference shows: the plume's head is barely moving while its stem is
+    /// still being fed.</summary>
+    public float Rising = RisingDefault;
 
     /// <summary>
     /// How far into the sheet a puff is born, as a share of it.
@@ -244,7 +306,7 @@ public sealed partial class SheetBlast : Node3D
             Mesh = new QuadMesh { Size = Vector2.One },
             TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
             UseCustomData = true,
-            InstanceCount = Puffs + Trails,
+            InstanceCount = Count,
         };
         _cloud = new MultiMeshInstance3D
         {
@@ -301,21 +363,28 @@ public sealed partial class SheetBlast : Node3D
     /// and scrubbed. A simulation stepped by delta could not be scrubbed
     /// backwards and could not be captured twice - see <see cref="Hold"/>.
     /// </summary>
+    /// <summary>How many quads the cloud is: the mass, its lances and the smoke
+    /// after them.</summary>
+    internal int Count =>
+        Mathf.Max(Puffs, 0) + Mathf.Max(Lances, 0) + Mathf.Max(Trails, 0);
+
     private void Dress()
     {
         if (_many is null)
             return;
-        int want = Mathf.Max(Puffs, 0) + Mathf.Max(Trails, 0);
-        if (_many.InstanceCount != want)
-            _many.InstanceCount = want;
+        if (_many.InstanceCount != Count)
+            _many.InstanceCount = Count;
 
         float t = Mathf.Max(_clock, 0.0f);
         float life = Mathf.Max(Life, 1e-3f);
-        for (int k = 0; k < want; k++)
+        float seat = Seat * _tile;
+        for (int k = 0; k < Count; k++)
         {
-            bool trail = k >= Mathf.Max(Puffs, 0);
-            float born = Birth(k, trail) * life;
-            float mine = Share(born / life, trail) * life;
+            Role role = Of(k);
+            bool trail = role == Role.Trail;
+            bool lance = role == Role.Lance;
+            float born = Birth(k, role) * life;
+            float mine = Share(born / life, role) * life;
             float a = (t - born) / mine;
             if (a <= 0.0f || a >= 1.0f)
             {
@@ -328,25 +397,76 @@ public sealed partial class SheetBlast : Node3D
                 continue;
             }
 
-            float turn = Hash(k, 23) * Mathf.Tau;
-            float up = Mathf.Lerp(1.0f, 0.15f, Flat) * (0.35f + 0.65f * Hash(k, 29));
-            // Speed that decays: the pack's negative linear accel, integrated.
-            // Slow=1 comes to a stop exactly at the end of the puff's own life.
+            // <b>Where it is thrown: an elevation, not a direction round a
+            // circle.</b> A ground burst throws into a hemisphere, and how much of
+            // that hemisphere is sideways rather than up is the one number that
+            // decides whether the thing is a disc or a column. Flat=1 spreads the
+            // elevations evenly from the horizon to straight up; Flat=0 crushes
+            // them against the vertical.
+            float lift = Mathf.Lerp(Mathf.Pi * 0.5f, Mathf.DegToRad(14.0f),
+                                    Mathf.Pow(Hash(k, 23),
+                                              1.0f + 2.0f * (1.0f - Mathf.Clamp(Flat, 0.0f, 1.0f))));
+            float side = Hash(k, 19) < 0.5f ? -1.0f : 1.0f;
+            float spd = (0.45f + 0.85f * Hash(k, 31))
+                        * (trail ? 0.85f : 1.0f)
+                        * (lance ? Mathf.Max(LanceFast, 1.0f) : 1.0f);
+            // <b>The late puffs are the skirt, and that is what the reference does
+            // with them.</b> Its frames two and three have a low dark collar
+            // spreading along the ground under the column, and it is not there in
+            // frame one - it arrives, like they do. So they are pushed toward the
+            // horizontal and given almost none of the climb, which also stops them
+            // reading as a second, weaker plume inside the first.
+            if (trail)
+                lift = Mathf.Min(lift, Mathf.DegToRad(26.0f));
+            // And a lance is thrown up rather than out, because in the reference
+            // the spikes that read are the ones standing clear of the head. A
+            // horizontal one lands inside the skirt and is never seen.
+            if (lance)
+                lift = Mathf.Max(lift, Mathf.DegToRad(40.0f));
+
+            // The throw's own speed decays - the pack's negative linear accel,
+            // integrated, with Slow=1 coming to a stop exactly at the end.
             float run = a * (1.0f - 0.5f * Slow * a) / Mathf.Max(1.0f - 0.5f * Slow, 1e-3f);
-            float far = Reach * _tile * (trail ? 0.55f : 1.0f)
-                        * (0.45f + 0.85f * Hash(k, 31)) * run;
-            float x = Mathf.Cos(turn) * far;
-            float y = Seat * _tile
-                      + Mathf.Sin(turn) * far * up * 0.55f
-                      + Climb * _tile * (trail ? 1.35f : 1.0f) * run;
-            float wide = Size * _tile * (trail ? 1.25f : 1.0f)
+            // <b>The climb does not, and that is the difference between a puffball
+            // and a plume.</b> Its power is under one, so the column is quick out
+            // of the ground and slow at the top: in the reference the plume's head
+            // is nearly still while its stem is still being fed.
+            float rise = Mathf.Pow(a, Mathf.Max(Rising, 0.05f));
+
+            float thrown = Reach * _tile * spd * run;
+            float x = Mathf.Cos(lift) * thrown * side;
+            float y = seat + Mathf.Sin(lift) * thrown
+                      + Climb * _tile * (trail ? 0.18f : 1.0f) * rise;
+            float wide = Size * _tile
+                         * (trail ? 1.45f : 1.0f)
+                         * (lance ? Mathf.Max(LanceThin, 0.05f) : 1.0f)
                          * (0.72f + 0.56f * Hash(k, 37))
                          * Mathf.Lerp(1.0f, Mathf.Max(Grow, 0.05f), a);
 
-            // Screen px into world: x is px, height is px over rise, and z is the
-            // puff's own place in the stack so the order the cloud composites in
-            // is a property of the model rather than of the draw order.
-            var basis = Basis.Identity.Scaled(new Vector3(wide, wide / _rise, 1.0f));
+            // <b>Turned and stretched along its own flight.</b> The quad's up axis
+            // is laid along the line from the seat to where the puff is now and
+            // lengthened; its cross axis keeps the width. That is the reference's
+            // whole silhouette - radial tapered spikes - out of a sheet that only
+            // knows how to draw a round puff. It relaxes back toward round as the
+            // puff slows, because a streak that has stopped travelling is a lump.
+            var along = new Vector2(x, y - seat);
+            along = along.LengthSquared() < 1.0f ? Vector2.Up : along.Normalized();
+            // <b>Most of the stretch is the lance's, and giving all of it to the
+            // mass as well was the first thing to look wrong:</b> twenty long thin
+            // puffs and twenty-six longer thinner ones is not a plume with spikes
+            // coming out of it, it is a feather duster. The reference's mass is
+            // drawn out, not drawn thin - the spikes are what is thin, and they
+            // read as spikes because there is a body behind them.
+            float pull = 1.0f + (Mathf.Max(Stretch, 1.0f) - 1.0f)
+                                * (lance ? 1.9f : 0.42f)
+                                * (1.0f - 0.65f * a);
+            // Built in screen px and divided into world on the way out, so the
+            // stretch looks aligned on screen rather than in the squashed frame the
+            // board is drawn in.
+            var basis = new Basis(
+                new Vector3(-along.Y * wide, along.X * wide / _rise, 0.0f),
+                new Vector3(along.X * wide * pull, along.Y * wide * pull / _rise, 0.0f),
+                new Vector3(0.0f, 0.0f, 1.0f));
             _many.SetInstanceTransform(k, new Transform3D(
                 basis, new Vector3(x, y / _rise, Hash(k, 41) * 4.0f)));
             // The turn as a share of a full one (custom data is safest kept
@@ -356,7 +476,7 @@ public sealed partial class SheetBlast : Node3D
             float phase = Mathf.Clamp(Start, 0.0f, 0.95f);
             _many.SetInstanceCustomData(k, new Color(
                 Hash(k, 43), a, phase + (1.0f - phase) * a,
-                trail ? 0.62f : 1.0f));
+                trail ? 0.62f : lance ? 0.80f : 1.0f));
         }
     }
 
@@ -375,10 +495,29 @@ public sealed partial class SheetBlast : Node3D
     /// <see cref="TrailSpread"/>, because six of them arriving at random would
     /// leave gaps in exactly the stretch they exist to fill.
     /// </summary>
-    internal float Birth(int k, bool trail) =>
-        trail
-            ? (k - Mathf.Max(Puffs, 0) + 0.5f) / Mathf.Max(Trails, 1) * TrailSpread
-            : Hash(k, 11) * Stagger;
+    internal float Birth(int k, Role role) =>
+        role switch
+        {
+            Role.Trail => (k - Mathf.Max(Puffs, 0) - Mathf.Max(Lances, 0) + 0.5f)
+                          / Mathf.Max(Trails, 1) * TrailSpread,
+            // A lance leaves at the front of the event or not at all: it is the
+            // ejecta, and ejecta is thrown by the detonation rather than carried
+            // by the plume.
+            Role.Lance => Hash(k, 11) * Stagger * 0.35f,
+            _ => Hash(k, 11) * Stagger,
+        };
+
+    /// <summary>What one puff is. Three, and the reference photograph is why there
+    /// are not two: the mass, the spikes coming out of it, and the smoke that keeps
+    /// arriving after both.</summary>
+    public enum Role { Cloud, Lance, Trail }
+
+    /// <summary>Which role index <paramref name="k"/> has. Ordered mass, lances,
+    /// trails, so a count can be turned without renumbering the others.</summary>
+    internal Role Of(int k) =>
+        k < Mathf.Max(Puffs, 0) ? Role.Cloud
+        : k < Mathf.Max(Puffs, 0) + Mathf.Max(Lances, 0) ? Role.Lance
+        : Role.Trail;
 
     /// <summary>
     /// How much of the event one puff gets, as a share of it.
@@ -396,8 +535,9 @@ public sealed partial class SheetBlast : Node3D
     /// the two available - the other is to stop the trails arriving late, which is
     /// the entire reason they exist.
     /// </summary>
-    internal float Share(float born, bool trail) =>
-        Mathf.Max(Mathf.Min(PuffLife, 1.0f - born), 1e-3f);
+    internal float Share(float born, Role role) =>
+        Mathf.Max(Mathf.Min(role == Role.Lance ? PuffLife * 0.62f : PuffLife,
+                            1.0f - born), 1e-3f);
 
     /// <summary>How far through the event the last puff to finish finishes, as a
     /// share of it. One or less is the invariant; the self-test asserts it here
@@ -405,12 +545,11 @@ public sealed partial class SheetBlast : Node3D
     internal float LastFinish()
     {
         float last = 0.0f;
-        int cloud = Mathf.Max(Puffs, 0);
-        for (int k = 0; k < cloud + Mathf.Max(Trails, 0); k++)
+        for (int k = 0; k < Count; k++)
         {
-            bool trail = k >= cloud;
-            float born = Birth(k, trail);
-            last = Mathf.Max(last, born + Share(born, trail));
+            Role role = Of(k);
+            float born = Birth(k, role);
+            last = Mathf.Max(last, born + Share(born, role));
         }
         return last;
     }
@@ -463,6 +602,11 @@ public sealed partial class SheetBlast : Node3D
         "puff_life" => PuffLife,
         "start" => Start,
         "seed" => Seed,
+        "lances" => Lances,
+        "lance_fast" => LanceFast,
+        "lance_thin" => LanceThin,
+        "stretch" => Stretch,
+        "rising" => Rising,
         _ => float.NaN,
     };
 
@@ -483,6 +627,11 @@ public sealed partial class SheetBlast : Node3D
             case "stagger": Stagger = value; break;
             case "puff_life": PuffLife = value; break;
             case "start": Start = value; break;
+            case "lances": Lances = Mathf.RoundToInt(value); break;
+            case "lance_fast": LanceFast = value; break;
+            case "lance_thin": LanceThin = value; break;
+            case "stretch": Stretch = value; break;
+            case "rising": Rising = value; break;
             case "seed": Seed = Mathf.RoundToInt(value); break;
             default:
                 GD.PushWarning($"sheet blast: no model number called {name}");
@@ -498,6 +647,7 @@ public sealed partial class SheetBlast : Node3D
     {
         "puffs", "trails", "life", "reach", "size", "grow", "climb", "seat",
         "flat", "slow", "stagger", "puff_life", "start", "seed",
+        "lances", "lance_fast", "lance_thin", "stretch", "rising",
     };
 
     /// <summary>
@@ -694,6 +844,22 @@ uniform float time = 0.0;
 // The lambert: how much light a puff has before the sun reaches it, and how much
 // the sun is worth. Seated well off zero because a puff's dark side is smoke in
 // daylight, not smoke at night.
+// <b>How far above the seat the fire survives, in world units.</b> The reference
+// is emphatic about this and it is the cheapest correction on the list: its
+// fireball is a compact bright ball sitting *on the ground*, a small fraction of
+// the silhouette, and everything above it is already dark. Ours lit the whole
+// cloud, because the flame is keyed to the sheet's brightness and the sheet is
+// bright everywhere.
+uniform float flame_low = 46.0;
+
+// How much lighter the top of the plume is than its base, and over how many world
+// units that happens. Not a light: dust that has been in the air is finer and
+// scatters more, which the reference shows as a pale sand-coloured head over a
+// nearly black core - a difference no lambert produces, because it is a difference
+// in what the dust is rather than in where the sun is.
+uniform float pale = 0.50;
+uniform float pale_high = 130.0;
+
 uniform float lit_seat = 0.58;
 uniform float lit_gain = 0.55;
 uniform vec3 sun = vec3(0.0, 1.0, 0.0);
@@ -754,12 +920,17 @@ void fragment() {
     float lit = lit_seat + lit_gain * clamp(dot(face, normalize(sun)), 0.0, 1.0);
 
     vec3 smoke = texture(smoke_ramp, vec2(bright, 0.5)).rgb * lit;
+    // Finer dust higher up: the ramp read further along is the same earth with
+    // more light in it, so this needs no second palette.
+    smoke = mix(smoke, texture(smoke_ramp, vec2(min(bright + 0.35, 1.0), 0.5)).rgb * lit,
+                pale * clamp(high / max(pale_high, 1.0), 0.0, 1.0));
 
     // The flame: the same brightness, walked along its ramp by the puff's age.
     float gone = texture(flame_fade, vec2(mine.y, 0.5)).r;
     vec3 flame = texture(flame_ramp, vec2(bright + flame_shift * gone, 0.5)).rgb
                  * flame_gain
-                 * (1.0 - smoothstep(0.0, max(flame_out, 1e-3), time));
+                 * (1.0 - smoothstep(0.0, max(flame_out, 1e-3), time))
+                 * (1.0 - smoothstep(0.0, max(flame_low, 1.0), high));
 
     // Added into the albedo rather than into EMISSION: unshaded, and with no
     // environment on this board, EMISSION would be the same number with an extra

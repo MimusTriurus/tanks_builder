@@ -5375,6 +5375,15 @@ public static class SelfTest
             $"flame out at {sheetOut:F2}s against an event of {sheeted.Life:F2}s - "
             + "a fireball still lit while the cloud is dissolving reads as a puff "
             + "of smoke that is on fire, which is not what a shell does");
+        // <b>A spike has to overshoot the mass or it is not a spike.</b> The whole
+        // reason the lances exist is that the reference's silhouette is made of
+        // tapered fingers standing clear of the head; one thrown at the mass's own
+        // speed lands inside the outline and is twenty-six quads nobody can see.
+        Check("and the spikes it throws are faster than the mass they leave",
+            sheeted.LanceFast > 1.0f && sheeted.Lances > 0,
+            $"{sheeted.Lances} spikes at {sheeted.LanceFast:F2}x - at or under one "
+            + "they are drawn inside the cloud, which is the whole of what they are "
+            + "for spent on nothing");
         sheeted.Free();
 
         // An event, not a loop - the whole of what separates this clock from the

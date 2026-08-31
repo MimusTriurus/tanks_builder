@@ -86,6 +86,18 @@ public sealed partial class EffectsBench
         new("sheet.cloud", "sheet.cloud.seed", false, "seed",
             "which cloud", 1, 64, 1),
 
+        // --- the spikes, which are what makes it thrown earth ---------------
+        new("sheet.throw", "sheet.throw.lances", false, "lances",
+            "spikes thrown out of it", 0, 64, 1),
+        new("sheet.throw", "sheet.throw.fast", false, "lance_fast",
+            "how much faster a spike is", 1.0, 4.0, 0.05),
+        new("sheet.throw", "sheet.throw.thin", false, "lance_thin",
+            "how much thinner a spike is", 0.10, 1.0, 0.02),
+        new("sheet.throw", "sheet.throw.stretch", false, "stretch",
+            "drawn out along its flight", 1.0, 6.0, 0.05),
+        new("sheet.throw", "sheet.throw.rising", false, "rising",
+            "how the column rises", 0.20, 1.60, 0.02),
+
         // --- the sheet: how one puff is drawn -------------------------------
         new("sheet.look", "sheet.look.ink", true, "puff_ink",
             "most one puff may hide", 0.10, 1.0, 0.02),
@@ -105,6 +117,12 @@ public sealed partial class EffectsBench
             "how fast the flame walks its ramp", 0.0, 1.0, 0.02),
         new("sheet.fire", "sheet.fire.out", true, "flame_out",
             "flame out by", 0.02, 1.0, 0.02),
+        new("sheet.fire", "sheet.fire.low", true, "flame_low",
+            "fire survives this far up", 4.0, 200.0, 2.0),
+        new("sheet.fire", "sheet.fire.pale", true, "pale",
+            "how much paler the head is", 0.0, 1.0, 0.02),
+        new("sheet.fire", "sheet.fire.pale_high", true, "pale_high",
+            "over how much height", 20.0, 400.0, 5.0),
         new("sheet.fire", "sheet.fire.lit_seat", true, "lit_seat",
             "light before the sun", 0.0, 1.0, 0.02),
         new("sheet.fire", "sheet.fire.lit_gain", true, "lit_gain",

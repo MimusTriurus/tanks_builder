@@ -466,6 +466,33 @@
       ]
     },
     {
+      "id": "sheet.throw",
+      "title": "the spikes",
+      "description": "What the reference photograph is actually made of: its silhouette is not a cloud outline but forty-odd radial tapered spikes, each overshooting the body it came out of. A flipbook cannot draw one - the sheet is a round puff - but a quad can be turned and stretched, and a round puff on a quad four times as long as it is wide is a streak with the sheet's own curl inside it.",
+      "rows": [
+        {
+          "id": "sheet.throw.lances",
+          "description": "How many of the puffs are spikes: faster, thinner, thrown further and drawn out along their flight. Set to nought the burst is a plume of smoke; the spikes are what make it thrown earth."
+        },
+        {
+          "id": "sheet.throw.fast",
+          "description": "How much faster a spike is than the mass. Over one by definition - a spike that does not overshoot the cloud is part of its outline, not a spike."
+        },
+        {
+          "id": "sheet.throw.thin",
+          "description": "How much thinner a spike is than a puff of the mass."
+        },
+        {
+          "id": "sheet.throw.stretch",
+          "description": "How many times its own width a puff is drawn along its flight. Most of it is the spikes' - given whole to the mass as well, the plume becomes a feather duster: the reference's mass is drawn out, not drawn thin, and the spikes read as spikes because there is a body behind them. It relaxes back toward round as a puff slows, because a streak that has stopped travelling is a lump."
+        },
+        {
+          "id": "sheet.throw.rising",
+          "description": "The power the column's climb runs on. Under one so it is quick out of the ground and slow at the top, which is what buoyant dust does and what the reference shows: the plume's head is nearly still while its stem is still being fed. This against 'how far they get' is the whole of the shape - frame one of the reference is wider than it is tall, frame three is three times taller."
+        }
+      ]
+    },
+    {
       "id": "sheet.look",
       "title": "the sheet",
       "description": "How one puff is drawn: the flipbook's own numbers, and the fade that replaces the pack's depth buffer.",
@@ -497,6 +524,18 @@
       "title": "the flame and the light",
       "description": "The pack's three ramps, unchanged except the smoke's - its own is black-to-white, which is grey smoke, and this board's earth is brown. What is turned here is how bright the fire is, how fast it walks its ramp and where the light comes from.",
       "rows": [
+        {
+          "id": "sheet.fire.low",
+          "description": "How far above the seat the fire survives, in world units. The reference is emphatic: its fireball is a compact bright ball sitting on the ground, a small fraction of the silhouette, and everything above it is already dark. Without this the whole cloud lights up, because the flame is keyed to the sheet's brightness and the sheet is bright everywhere."
+        },
+        {
+          "id": "sheet.fire.pale",
+          "description": "How much lighter the head of the plume is than its base. Not a light: dust that has been in the air is finer and scatters more, which the reference shows as a pale sand-coloured head over a nearly black core - a difference no lambert produces, because it is a difference in what the dust is rather than in where the sun is."
+        },
+        {
+          "id": "sheet.fire.pale_high",
+          "description": "Over how much height that happens, in world units."
+        },
         {
           "id": "sheet.fire.gain",
           "description": "How bright the flames are. The pack says 5 and means it: it has ACES and bloom behind it, so 5 there is 'bleed'. Here it would be 'clip'."
