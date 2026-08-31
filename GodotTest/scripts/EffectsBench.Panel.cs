@@ -439,9 +439,7 @@ public sealed partial class EffectsBench
         ("he.crater.spatter", "spatter", "how far the spatter carries", 0.0, 1.20, 0.02),
         ("he.crater.grit", "grit", "gravel in the soil", 0.0, 1.0, 0.02),
         ("he.crater.grain", "grain", "how big that grain is on screen", 0.8, 12.0, 0.1),
-        ("he.crater.stones", "stones", "stones left on top", 0, 32, 1),
-        ("he.crater.stone_size", "stone_size", "how big one stone is, in px", 1.0, 20.0, 0.5),
-        ("he.crater.stone_shade", "stone_shade", "how dark their shadows are", 0.0, 1.0, 0.02),
+        ("he.crater.soft", "soft", "how softly the layers meet", 0.0, 1.0, 0.02),
     };
 
     /// <summary>The crater table as the self-test reads it, the two burst tables'

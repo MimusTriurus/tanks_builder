@@ -101,16 +101,8 @@
           "description": "How big that grain is on screen, in px, so a big crater is not a small one with bigger gravel in it."
         },
         {
-          "id": "he.crater.stones",
-          "description": "How many stones are left on top, each with a lit side and a shadow along the board's own sun. Few and large rather than many and small: at the hundred pixels a crater is actually drawn at, eighteen of them read as feathers."
-        },
-        {
-          "id": "he.crater.stone_size",
-          "description": "How big one stone is, in screen px."
-        },
-        {
-          "id": "he.crater.stone_shade",
-          "description": "How dark the stones' own shadows are."
+          "id": "he.crater.soft",
+          "description": "How wide a band the three layers meet over - the bowl's rim, the apron's outer edge and the lip. One number for all three, because they are one question asked three times. Two of them used to be a step(), which is a seam exactly one fragment wide: a line, on a mark whose whole subject is loose earth."
         }
       ]
     },

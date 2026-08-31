@@ -131,18 +131,21 @@ public sealed partial class PitArt : Node3D
     ///
     /// - <b>the bowl</b>: nearly black at the middle, with streaks converging on
     ///   it, and its far wall lighter than its near one;
-    /// - <b>the apron</b>: soil thrown out and lying on the surface, <b>lighter
-    ///   than the ground</b> - fresh subsoil - fingered and breaking into spatter
-    ///   at the outside;
+    /// - <b>the apron</b>: soil thrown out and lying on the surface, fingered and
+    ///   breaking into spatter at the outside. <b>Darker than the ground here,
+    ///   though the reference reads pale</b> - see the note on the colours;
     /// - <b>the lip</b>: a thin bright edge where the apron meets the hole, which
     ///   is what says the rim stands above the ground rather than being drawn on
-    ///   it;
-    /// - <b>the stones</b>: three dozen chunks with a lit top, a dark side and a
-    ///   cast shadow, sitting on top of everything.
+    ///   it.
     ///
-    /// <b>The apron being lighter is the half that no mark in the ash map could
-    /// ever have drawn</b>, and it is most of why the old one read as a stain: that
-    /// map darkens, and a crater is a dark hole in the middle of a *pale* splash.
+    /// The reference's fourth layer - three dozen stones with lit tops and cast
+    /// shadows - was built and then taken out again; see the note in the shader on
+    /// why a five-pixel stone cannot be any of those three things.
+    ///
+    /// <b>Going both ways from the colour of the ground is the half no mark in the
+    /// ash map could ever have drawn</b>, and it is most of why the old one read as
+    /// a stain: that map darkens, and a crater is a dark hole in the middle of a
+    /// splash.
     /// </summary>
     private const string EtchCode = @"
 shader_type spatial;
@@ -186,15 +189,28 @@ uniform float wall = 0.70;
 // the rim is above the ground rather than painted on it.
 uniform float lip = 0.45;
 
+// <b>How wide a band the layers meet over.</b> One number for all three seams -
+// the bowl's rim, the apron's outer edge and the lip - because they are one
+// question asked three times, and asked separately they would be three answers to
+// keep in step. Two of the three used to be a `step()`, which is a seam exactly one
+// fragment wide: a line, on a mark whose whole subject is loose earth.
+uniform float soft = 0.38;
+
 // The gravel: how strong the fine speckle is and how big its grain is on screen.
 uniform float grit = 0.20;
 uniform float grain = 3.1;
 
-// The stones. Chunks with a lit top, a dark side and a shadow - the part of the
-// reference that makes it read as drawn rather than as blurred.
-uniform int stones = 8;
-uniform float stone_size = 5.2;
-uniform float stone_shade = 0.55;
+// <b>The stones are gone, and they were in the reference.</b> They read there
+// because that picture is a crater filling a frame, where a stone is forty pixels
+// with a top, a side and a shadow. Here a crater is a hundred pixels across and a
+// stone is five: eight grey lumps that cannot be lit, cannot be shaped and cannot
+// cast anything, sitting on top of an otherwise soft mark and announcing every one
+// of those failures. What the ground wants at this size is to read rougher, which
+// is the grit and the spatter's business, not eight objects'.
+//
+// Removed rather than defaulted to zero: a dial permanently at nought is a dial
+// that will be turned by the next person to read the panel, and it will look the
+// way it looked today.
 
 // Earth, subsoil and rock. Not on the panel: ControlPanel has no organ for a
 // colour, and three sliders in place of one is a way to make mud.
@@ -208,8 +224,7 @@ uniform float stone_shade = 0.55;
 uniform vec3 soil_dark : source_color = vec3(0.050, 0.036, 0.024);
 uniform vec3 soil_raw : source_color = vec3(0.300, 0.220, 0.130);
 uniform vec3 soil_pale : source_color = vec3(0.560, 0.470, 0.310);
-uniform vec3 rock_lit : source_color = vec3(0.430, 0.375, 0.295);
-uniform vec3 rock_dark : source_color = vec3(0.130, 0.110, 0.090);
+
 
 float pit_hash(vec2 p) {
     p = fract(p * vec2(443.897, 441.423) + seed * 17.31);
@@ -261,15 +276,20 @@ void fragment() {
         vec2 lit_way = normalize(-cast + vec2(1e-5));
         float face = dot(normalize(d + vec2(1e-5)), lit_way);
 
+        // How wide each seam is, in the radius' own units.
+        float hem = 0.05 + 0.30 * clamp(soft, 0.0, 1.0);
+
         // ---- the apron: what came out, lying on top --------------------------
         float out_at = clamp((r - cup_at) / max(reach - cup_at, 1e-3), 0.0, 1.0);
         float speck = pit_fbm(d * span / max(grain, 0.2));
         // Thick at the rim, thinning outward, and broken into spatter on the way:
         // past the fingers it is dots rather than a coat, which is what the outer
         // half of the reference is made of.
-        float laid = 1.0 - smoothstep(0.35, 1.0, out_at);
+        float laid = 1.0 - smoothstep(0.35 - 0.2 * hem, 1.0, out_at);
         laid = clamp(laid + spatter * (speck - 0.58) * (1.0 - 0.5 * out_at), 0.0, 1.0);
-        laid *= step(r, reach);
+        // Out over a band rather than at a line. This was a step(), and a step on
+        // the outer edge of a splash of earth is the one seam an eye finds first.
+        laid *= 1.0 - smoothstep(reach * (1.0 - hem), reach * (1.0 + 0.55 * hem), r);
 
         // Damp earth at the rim, drying to a pale dust of single grains at the
         // outside - the two directions the ash map could never draw between.
@@ -278,7 +298,9 @@ void fragment() {
 
         // ---- the bowl: the hole ---------------------------------------------
         float in_at = clamp(r / max(cup_at, 1e-3), 0.0, 1.0);
-        float hole = 1.0 - smoothstep(0.86, 1.02, in_at);
+        // The rim of the bowl, over the same band: the hole hands over to the soil
+        // it threw out rather than ending against it.
+        float hole = 1.0 - smoothstep(1.0 - 1.15 * hem, 1.0 + 0.5 * hem, in_at);
         // Streaks converging on the middle. Angular frequency, so they narrow as
         // they go in - which is what convergence is - and they scour the wall
         // rather than the floor, so they fade out at the centre.
@@ -297,50 +319,15 @@ void fragment() {
         // A thin bright edge just outside the hole, brightest where the sun is -
         // the other half of the depth, and the half that says the rim is above the
         // ground rather than painted on it.
-        float brow = (1.0 - smoothstep(0.0, 0.20, abs(r - cup_at) / max(cup_at, 1e-3)))
-                     * lip * clamp(0.25 + 0.85 * face, 0.0, 1.0) * step(cup_at, r);
+        float brow = (1.0 - smoothstep(0.0, 0.20 + 0.5 * hem,
+                                       abs(r - cup_at) / max(cup_at, 1e-3)))
+                     * lip * clamp(0.25 + 0.85 * face, 0.0, 1.0)
+                     // Only outside the hole, and that too over a band: the third
+                     // step() this shader used to have.
+                     * smoothstep(cup_at * (1.0 - hem), cup_at * (1.0 + 0.15 * hem), r);
 
         vec3 tone = mix(skin + soil_pale * brow, cup, hole);
         float cover = clamp(max(laid, hole), 0.0, 1.0);
-
-        // ---- the stones, on top of all of it ---------------------------------
-        // <b>Round lumps with a hashed aspect, not facets.</b> Five-lobed radii at
-        // four pixels across drew grey stars, which is the one thing worse than
-        // no stones at all.
-        float stony = 0.0, shadowy = 0.0, stone_face = 0.0, stone_tint = 0.0;
-        for (int k = 0; k < stones; k++) {
-            float fk = float(k);
-            float ang = pit_hash(vec2(fk, 3.0)) * 6.2831853;
-            // Out on the apron for the most part - a stone in the hole is one that
-            // fell back in, and the reference has one or two of those.
-            float at = cup_at * 0.5 + (reach - cup_at * 0.5) * pit_hash(vec2(fk, 5.0));
-            vec2 c = vec2(cos(ang), sin(ang)) * at;
-            float size = stone_size / max(span, 1.0)
-                         * (0.60 + 0.85 * pit_hash(vec2(fk, 7.0)));
-            vec2 v = d - c;
-            // Squashed a little, by its own hash, so a field of them is not a field
-            // of circles.
-            v.y /= 0.72 + 0.5 * pit_hash(vec2(fk, 13.0));
-            float dist = length(v);
-            float body = 1.0 - smoothstep(size * 0.80, size, dist);
-            if (body > stony) {
-                stony = body;
-                stone_face = dot(normalize(v + vec2(1e-5)), lit_way);
-                stone_tint = pit_hash(vec2(fk, 17.0));
-            }
-            // Its own cast shadow, along the board's sun - the offset every other
-            // shadow on this board uses.
-            shadowy = max(shadowy,
-                          1.0 - smoothstep(size * 0.7, size * 1.3,
-                                           length(v + lit_way * -size * 1.4)));
-        }
-        shadowy = max(shadowy - stony, 0.0);
-        tone = mix(tone, tone * (1.0 - stone_shade), shadowy);
-        cover = max(cover, shadowy * 0.8);
-        vec3 rock = mix(rock_dark, rock_lit, clamp(0.35 + 0.75 * stone_face, 0.0, 1.0));
-        rock *= 0.80 + 0.40 * stone_tint;
-        tone = mix(tone, rock, stony);
-        cover = max(cover, stony);
 
         ALBEDO = tone;
         ALPHA = clamp(cover * ink, 0.0, 1.0);
