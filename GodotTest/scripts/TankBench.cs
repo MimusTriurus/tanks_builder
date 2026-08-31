@@ -1215,7 +1215,9 @@ public sealed partial class TankBench : SceneRoot
     /// </summary>
     private void Landing(Shell round)
     {
-        _stage?.Burst(round.Ground, round.GroundLift);
+        // At the calibre the gun is loaded with - the harness's reason, and the
+        // same dial: TankTick.Calibre is one field both roots read.
+        _stage?.Burst(round.Ground, round.GroundLift, Ordnance.At(_tick.Calibre));
         if (_walls.Count > 0)
             Struck(round);
     }

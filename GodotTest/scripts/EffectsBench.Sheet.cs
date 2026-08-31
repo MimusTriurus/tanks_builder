@@ -202,6 +202,7 @@ public sealed partial class EffectsBench
                 blast.Model(dial.Name, Puffed(dial));
         }
         blast.Life = _puffLife;
+        blast.Might = _might;
         blast.Hold = _hold;
     }
 
@@ -254,6 +255,15 @@ public sealed partial class EffectsBench
                          foreach (SheetBlast blast in Booming())
                              blast.Clock = _scrub;
                      }, "s");
+        _panel.Slide("sheet.might", "how big this burst is", 0.25, 3.00, 0.05,
+                     () => _might, v =>
+                     {
+                         _might = (float)v;
+                         foreach (SheetBlast blast in Booming())
+                             blast.Might = _might;
+                         if (_refire)
+                             Burst();
+                     }, "x");
         _panel.Slide("sheet.life", "whole event", 0.30, 4.00, 0.05,
                      () => _puffLife, v =>
                      {

@@ -42,7 +42,7 @@ Godot_v4.7.2-stable_mono_win64.exe --path GodotTest res://Main.tscn
 (см. [docs/wall-bench.md](docs/wall-bench.md)). Стенд эффектов — две сцены на одной
 доске 5 × 5: `res://Effects.tscn` — вычисленный взрыв, `res://Boom.tscn` — тот же
 стенд с ввезённым из референса (`SheetBlast`, флипбук на 64 кадра). `SPACE`
-подрывает, `TAB` открывает панель, `--fire`/`--at`/`--panel` для снимка, снимок
+подрывает, `TAB` открывает панель, `--fire`/`--at`/`--panel`/`--might` для снимка, снимок
 панели — с `--ui` (см. [docs/blast.md](docs/blast.md)).
 
 **Сцену называй позиционным аргументом всегда, а не полагайся на `run/main_scene`.**
@@ -133,7 +133,10 @@ Godot_v4.7.2-stable_mono_win64.exe --path GodotTest res://Main.tscn
 (крупное падает, пыль обвисает); разброс — в длительности клубов, а не в их
 рождении, потому что взрыв выбрасывает один раз.
 Поднимается `Stage3D.Boom` —
-второй пул на шесть рядом с `Burst`, оба копают воронку
+второй пул на шесть рядом с `Burst`, оба копают воронку и оба берут **размер**
+(`might`): одно число на весь взрыв, масштабом на трансформе от посадки, и воронка
+растёт с ним. В игре его даёт `Ordnance.At(TankTick.Calibre)` — чем заряжено, тем и
+рвёт
 (см. [docs/blast.md](docs/blast.md)),
 `EffectsBench.cs` / `EffectsBench.Panel.cs` / `EffectsBench.Sheet.cs` — две сцены
 на одном скрипте, `Effects.tscn` и `Boom.tscn` (второй — тот же скрипт с

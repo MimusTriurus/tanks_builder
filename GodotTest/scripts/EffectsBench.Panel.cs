@@ -290,10 +290,17 @@ public sealed partial class EffectsBench
         blast.Life = _life;
         blast.Reach = Turned(Dials[0]);
         blast.RingReach = _ringReach;
+        blast.Might = _might;
         if (_field.Atlas is not null)
             blast.Replane(_field.Atlas.HexRect.Size.X);
         blast.Hold = _hold;
     }
+
+    /// <summary>How big a burst this bench sets off, as a multiple of the tuned
+    /// one - the dial <see cref="ProcBlast.Might"/> exists for. Shared by both
+    /// benches because it is a property of the shot rather than of either
+    /// effect.</summary>
+    private float _might = 1.0f;
 
     private float _life = ProcBlast.LifeDefault;
     private float _ringReach = ProcBlast.RingReachDefault;
@@ -367,6 +374,15 @@ public sealed partial class EffectsBench
                          if (_refire)
                              Burst();
                      }, "s");
+        _panel.Slide("he.might", "how big this burst is", 0.25, 3.00, 0.05,
+                     () => _might, v =>
+                     {
+                         _might = (float)v;
+                         foreach (ProcBlast blast in Live())
+                             blast.Might = _might;
+                         if (_refire)
+                             Burst();
+                     }, "x");
         _panel.Slide("he.ring_reach", "ring plane", 0.15, 0.90, 0.01,
                      () => _ringReach, v =>
                      {

@@ -30,6 +30,10 @@
           "description": "How wide the rings' own plane is, in tile widths."
         },
         {
+          "id": "he.might",
+          "description": "How big this burst is, as a multiple of the tuned one. Every length in the effect is in tile widths, so a heavier round is not a different effect - it is this one at 1.4, which is what Ordnance already keeps a list of. A scale on the transform rather than on the four dials it would otherwise take, so the depth nudge, the ring's plane and the seat all follow it and none of them can be forgotten. It scales about the seat, because the seat is where the crater is dug."
+        },
+        {
           "id": "he.state",
           "description": "What is in the air and what has been dug."
         }
@@ -399,6 +403,10 @@
         {
           "id": "sheet.life",
           "description": "The declared length of the event. The pack's own is 2.13s; shorter here, so the imported burst is not the slower of the two."
+        },
+        {
+          "id": "sheet.might",
+          "description": "How big this burst is, as a multiple of the tuned one - see the same dial on the computed burst. The crater grows with it: a bigger round does not leave the same hole."
         },
         {
           "id": "sheet.state",

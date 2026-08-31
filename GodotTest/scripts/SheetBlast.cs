@@ -334,19 +334,67 @@ public sealed partial class SheetBlast : Node3D
             // Toward the camera by the board's own clearance, like every other
             // thing that stands on a cell - two coplanar surfaces are hit_scar's
             // coin toss.
-            Position = Stage3D.Clear(squash, rise),
+            Position = _nudge = Stage3D.Clear(squash, rise),
         };
         AddChild(_cloud);
         Dress();
     }
+
+    /// <summary>
+    /// How big this particular burst is, as a multiple of the tuned one.
+    ///
+    /// <b>The one number the panel did not have, and the one a game asks for
+    /// first.</b> Every length in here is already in tile widths - how far the
+    /// puffs get, how wide one is, how high the column goes, where it is seated -
+    /// so a 152mm round is not a different effect, it is this effect at 1.4. Spread
+    /// across four dials that was four numbers to keep in step per calibre; as one
+    /// it is what <see cref="Ordnance"/> already has a list of.
+    ///
+    /// <b>A scale on the node rather than on the four numbers, and that is not
+    /// laziness.</b> The model's lengths are only half of what has to grow: the
+    /// depth nudge, the ring's own plane, the stretch, the seat all follow from
+    /// them, and a scale on the transform gets every one of those for free and
+    /// cannot get one of them wrong. It scales <b>about the seat</b> - the origin is
+    /// left where <see cref="Stage3D.Trunk"/> put it - because the seat is the point
+    /// the crater is dug at, and a burst that grew about its own middle would drift
+    /// off its own mark. That is the coordinate-space failure this project has
+    /// already paid for once, so there is a check on it.
+    /// </summary>
+    public float Might
+    {
+        get => _might;
+        set
+        {
+            _might = Mathf.Max(value, 0.01f);
+            Stand();
+        }
+    }
+
+    private float _might = 1.0f;
+    private Transform3D _seat = Transform3D.Identity;
+    private Vector3 _nudge;
 
     /// <summary>Where the burst stands, through the transform a tree gets - see
     /// <see cref="ProcBlast.Sit"/>. The seat's own world height goes to the
     /// shader as well, because the ground fade is measured from it.</summary>
     public void Sit(Vector2 ground, float lift, float squash, float rise)
     {
-        Transform = Stage3D.Trunk(ground, lift, 0.0f, squash, rise);
+        _seat = Stage3D.Trunk(ground, lift, 0.0f, squash, rise);
+        Stand();
+    }
+
+    /// <summary>The seat and the size, put together. Apart from <see cref="Sit"/>
+    /// so the size can be turned while a burst is in the air, which is what a panel
+    /// is for.</summary>
+    private void Stand()
+    {
+        Transform = _seat.ScaledLocal(Vector3.One * _might);
         _ink?.SetShaderParameter("seat_y", Transform.Origin.Y);
+        // The depth nudge is a fact about this camera's depth buffer, not about how
+        // big the burst is, so it is divided back out - see Stage3D.Clear on why
+        // two units is the number and why less than one stopped working.
+        if (_cloud is not null)
+            _cloud.Position = _nudge / _might;
     }
 
     public void Fire() => _clock = 0.0f;

@@ -196,7 +196,7 @@ public sealed partial class ProcBlast : Node3D
         // the arrangement the burning tree uses for the same pair, so the dark
         // half is behind the additive one rather than sorting against it by the
         // coin toss two coplanar quads get.
-        Vector3 nudge = Stage3D.Clear(squash, rise);
+        Vector3 nudge = _nudge = Stage3D.Clear(squash, rise);
         _dirt.Position = nudge;
         _fire.Position = nudge * 2.0f;
 
@@ -229,11 +229,63 @@ public sealed partial class ProcBlast : Node3D
         AddChild(_ring);
     }
 
+    /// <summary>
+    /// How big this particular burst is, as a multiple of the tuned one.
+    ///
+    /// <b>The one number the panel did not have, and the one a game asks for
+    /// first.</b> Every length in here is already in tile widths - how far the
+    /// puffs get, how wide one is, how high the column goes, where it is seated -
+    /// so a 152mm round is not a different effect, it is this effect at 1.4. Spread
+    /// across four dials that was four numbers to keep in step per calibre; as one
+    /// it is what <see cref="Ordnance"/> already has a list of.
+    ///
+    /// <b>A scale on the node rather than on the four numbers, and that is not
+    /// laziness.</b> The model's lengths are only half of what has to grow: the
+    /// depth nudge, the ring's own plane, the stretch, the seat all follow from
+    /// them, and a scale on the transform gets every one of those for free and
+    /// cannot get one of them wrong. It scales <b>about the seat</b> - the origin is
+    /// left where <see cref="Stage3D.Trunk"/> put it - because the seat is the point
+    /// the crater is dug at, and a burst that grew about its own middle would drift
+    /// off its own mark. That is the coordinate-space failure this project has
+    /// already paid for once, so there is a check on it.
+    /// </summary>
+    public float Might
+    {
+        get => _might;
+        set
+        {
+            _might = Mathf.Max(value, 0.01f);
+            Stand();
+        }
+    }
+
+    private float _might = 1.0f;
+    private Transform3D _seat = Transform3D.Identity;
+
     /// <summary>Where the burst stands: the flat point it went off on and the
     /// lift of the cell under it, through the same transform a tree gets.
     /// </summary>
-    public void Sit(Vector2 ground, float lift, float squash, float rise) =>
-        Transform = Stage3D.Trunk(ground, lift, 0.0f, squash, rise);
+    public void Sit(Vector2 ground, float lift, float squash, float rise)
+    {
+        _seat = Stage3D.Trunk(ground, lift, 0.0f, squash, rise);
+        Stand();
+    }
+
+    /// <summary>The seat and the size together - <see cref="SheetBlast"/>'s
+    /// arrangement, and the three quads' own nudges are divided back out for its
+    /// reason: a clearance is a clearance whatever size the burst is.</summary>
+    private void Stand()
+    {
+        Transform = _seat.ScaledLocal(Vector3.One * _might);
+        if (_dirt is not null)
+            _dirt.Position = _nudge / _might;
+        if (_fire is not null)
+            _fire.Position = _nudge * 2.0f / _might;
+        if (_ring is not null)
+            _ring.Position = _nudge * 0.5f / _might;
+    }
+
+    private Vector3 _nudge;
 
     /// <summary>Set it off. Restarts rather than refusing, because the organ that
     /// fires it is a key on a bench and a key that answers once every one and a

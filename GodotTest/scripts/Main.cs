@@ -238,7 +238,11 @@ public sealed partial class Main : SceneRoot
 	/// picture rather than off the board.
 	/// </summary>
 	private void Splashed(Shell round) =>
-		_stage?.Burst(round.Ground, round.GroundLift);
+		// <b>At the calibre the gun is loaded with.</b> Ordnance already keeps
+		// the three sizes and the hit decal already reads them; a burst that
+		// ignored them would be the one part of a shot that does not know what
+		// was fired.
+		_stage?.Burst(round.Ground, round.GroundLift, Ordnance.At(_tick.Calibre));
 
 	/// <summary>Whether the board grows trees at all, and whether one may stand
 	/// where it would cross a tank on its own cell. Parked here for --terrain's

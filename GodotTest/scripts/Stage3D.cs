@@ -5021,7 +5021,10 @@ void fragment() {{
     /// </summary>
     public Action<ProcBlast>? Dress;
 
-    public void Burst(Vector2 spot, float lift)
+    /// <param name="might">How big this one is, as a multiple of the tuned burst -
+    /// see <see cref="ProcBlast.Might"/>. The crater grows with it, because a bigger
+    /// round does not leave the same hole.</param>
+    public void Burst(Vector2 spot, float lift, float might = 1.0f)
     {
         if (Field.Atlas is null)
             return;
@@ -5033,11 +5036,19 @@ void fragment() {{
             _bursting.Add(made);
         }
         ProcBlast blast = _bursting[_nextBurst % Bursts];
+        // <b>Reset before the hook, multiplied after it.</b> The pool is reused, so
+        // a size left on a burst is a size the next shot inherits: without this line
+        // the multiply compounds, and on a board where nothing answers Dress it
+        // compounds every shot until the burst fills the screen. The hook says how
+        // big this effect is tuned to be; the argument says how big this round is.
+        blast.Might = 1.0f;
         Dress?.Invoke(blast);
         _nextBurst = (_nextBurst + 1) % Bursts;
+        // The size before the seat: Sit is what puts the two together.
+        blast.Might *= might;
         blast.Sit(spot, lift, Squash, RiseFactor);
         blast.Fire();
-        Pits?.Dig(spot, lift);
+        Pits?.Dig(spot, lift, Pits.Ink, Pits.Wide * might);
     }
 
     /// <summary>The bursts as they stand, for a bench that shows what one is
@@ -5067,7 +5078,7 @@ void fragment() {{
     /// digs the same mark: a hole in the ground is a fact about the event, not
     /// about which effect drew it.
     /// </summary>
-    public void Boom(Vector2 spot, float lift)
+    public void Boom(Vector2 spot, float lift, float might = 1.0f)
     {
         if (Field.Atlas is null)
             return;
@@ -5079,11 +5090,14 @@ void fragment() {{
             _booming.Add(made);
         }
         SheetBlast blast = _booming[_nextBoom % Bursts];
+        // Reset before the hook - see Burst on why the multiply alone compounds.
+        blast.Might = 1.0f;
         Attire?.Invoke(blast);
         _nextBoom = (_nextBoom + 1) % Bursts;
+        blast.Might *= might;
         blast.Sit(spot, lift, Squash, RiseFactor);
         blast.Fire();
-        Pits?.Dig(spot, lift);
+        Pits?.Dig(spot, lift, Pits.Ink, Pits.Wide * might);
     }
 
     /// <summary>The sheet bursts as they stand, <see cref="Bursting"/>'s twin and

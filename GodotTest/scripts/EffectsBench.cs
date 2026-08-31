@@ -131,6 +131,16 @@ public sealed partial class EffectsBench : SceneRoot
                 _shoot = true;
             else if (args[i] == "--sheet")
                 Sheet = true;
+            else if (args[i] == "--might" && i + 1 < args.Length
+                     && float.TryParse(args[i + 1], NumberStyles.Float,
+                                       CultureInfo.InvariantCulture, out float sized))
+            {
+                // How big the burst is, for a capture of three calibres side by
+                // side - the rule --fire and --at exist under: evidence must not
+                // need a hand on the mouse.
+                _might = Mathf.Clamp(sized, 0.25f, 3.0f);
+                i++;
+            }
             else if (args[i] == "--binbun" && i + 1 < args.Length
                      && float.TryParse(args[i + 1], NumberStyles.Float,
                                        CultureInfo.InvariantCulture, out float big))

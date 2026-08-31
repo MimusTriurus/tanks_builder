@@ -5414,6 +5414,34 @@ public static class SelfTest
             + $"apex {lanceTop:F2}, dust at "
             + $"{sheeted.Climbing(1.0f, SheetBlast.Role.Cloud):F2} - if both do the "
             + "same thing there is one fraction, not two");
+        // <b>A bigger burst grows about its seat, and that is the one way this can
+        // go wrong silently.</b> The seat is the point the crater is dug at, so a
+        // scale applied about anything else slides the burst off its own mark by an
+        // amount that grows with the size - the coordinate-space failure this
+        // project has already paid for once, where nothing errors and there is
+        // simply no burst where the shell went in.
+        var sized = new SheetBlast();
+        sized.Sit(new Vector2(120.0f, 64.0f), 53.7f, 0.5f, 0.87f);
+        Vector3 sizedAt = sized.Transform.Origin;
+        sized.Might = 2.5f;
+        Check("a burst grows about the very point it is seated on",
+            sized.Transform.Origin.IsEqualApprox(sizedAt)
+            && Mathf.IsEqualApprox(sized.Transform.Basis.Scale.X, 2.5f)
+            && Mathf.IsEqualApprox(sized.Transform.Basis.Scale.Y, 2.5f),
+            $"seated at {sizedAt} and at {sized.Transform.Origin} once sized "
+            + $"{sized.Transform.Basis.Scale} - a burst that grows about its middle "
+            + "walks off the crater it dug");
+        var sizedToo = new ProcBlast();
+        sizedToo.Sit(new Vector2(120.0f, 64.0f), 53.7f, 0.5f, 0.87f);
+        Vector3 sizedTooAt = sizedToo.Transform.Origin;
+        sizedToo.Might = 0.4f;
+        Check("and the computed one does it the same way",
+            sizedToo.Transform.Origin.IsEqualApprox(sizedTooAt)
+            && Mathf.IsEqualApprox(sizedToo.Transform.Basis.Scale.X, 0.4f),
+            "two bursts sized by two rules is two things to get wrong, and the "
+            + "harness sizes both from one list of calibres");
+        sized.Free();
+        sizedToo.Free();
         sheeted.Free();
 
         // An event, not a loop - the whole of what separates this clock from the
@@ -14561,6 +14589,7 @@ public static class SelfTest
         "he.ring_reach", "he.state", "he.crater.fill",
         "sheet.fire_now", "sheet.pair", "sheet.refire", "sheet.hold",
         "sheet.scrub", "sheet.life", "sheet.state",
+        "he.might", "sheet.might",
     };
 
     /// <summary>A sheet burst fired and run to this age, for a check that wants to
