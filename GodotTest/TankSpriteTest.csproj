@@ -15,7 +15,7 @@
   <ItemGroup>
     <PackageReference Include="com.IvanMurzak.ReflectorNet" Version="5.4.0" />
     <PackageReference Include="com.IvanMurzak.McpPlugin" Version="7.5.2" />
-  </ItemGroup>
+  <PackageReference Include="com.IvanMurzak.Godot.MCP.Particles" Version="*" /><PackageReference Include="com.IvanMurzak.Godot.MCP.Tilemap" Version="*" /><PackageReference Include="com.IvanMurzak.Godot.MCP.Navigation" Version="*" /><PackageReference Include="com.IvanMurzak.Godot.MCP.Animation" Version="*" /><PackageReference Include="com.IvanMurzak.Godot.MCP.CSG" Version="*" /><PackageReference Include="com.IvanMurzak.Godot.MCP.GridMap" Version="*" /><PackageReference Include="com.IvanMurzak.Godot.MCP.PhantomCamera" Version="*" /><PackageReference Include="com.IvanMurzak.Godot.MCP.Beehave" Version="*" /><PackageReference Include="com.IvanMurzak.Godot.MCP.Dialogic" Version="*" /><PackageReference Include="com.IvanMurzak.Godot.MCP.Terrain3D" Version="*" /></ItemGroup>
 
   <ItemGroup>
     <EmbeddedResource Include="addons/godot_mcp/extensions.catalog.json" LogicalName="Godot-MCP.extensions.catalog.json" />
