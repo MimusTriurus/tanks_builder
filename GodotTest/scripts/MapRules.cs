@@ -202,6 +202,22 @@ public static class MapRules
             .ToList();
 
     /// <summary>
+    /// The headings of the neighbours exactly one level BELOW a cell.
+    ///
+    /// <b>Here only to say where the ramp should have gone.</b> A ramp is never
+    /// authored on the high cell - it sits on the low one and climbs out - and
+    /// "descending into a hollow does not work" is what that reads as from the
+    /// top. Nothing judges a board by this; <see cref="RampFaults"/> puts the
+    /// cells it names into the refusal.
+    /// </summary>
+    public static List<int> Below(Draft draft, Vector2I cell) =>
+        HexField.EdgeHeadings
+            .Where(h => draft.On(HexField.Step(cell, h))
+                        && draft.LevelAt(HexField.Step(cell, h))
+                           == draft.LevelAt(cell) - 1)
+            .ToList();
+
+    /// <summary>
     /// Whether a ramp bridging <paramref name="high"/> has something to stand on
     /// at its low end.
     ///
@@ -279,6 +295,25 @@ public static class MapRules
             List<int> up = Above(draft, cell);
             if (up.Count != 1)
             {
+                // What to do about it, not only what is wrong - because both
+                // shapes of this fault have one likely cause and it is not the
+                // one the message used to suggest. See Below.
+                List<int> down = Below(draft, cell);
+                string fix = up.Count == 0
+                    ? down.Count > 0
+                        ? " - a ramp belongs to the LOW cell of a step and "
+                          + "climbs out of it, so it goes on ("
+                          + string.Join(") or (", down.Select(h =>
+                              {
+                                  Vector2I low = HexField.Step(cell, h);
+                                  return $"{low.X},{low.Y}";
+                              }))
+                          + ") and rises back to here"
+                        : " - nothing beside it is a step at all"
+                    : " - a ramp is one plane tilted about one edge, so the low "
+                      + "ground has to meet the high on a single edge: widen it, "
+                      + "or put the ramp where only one of its edges is the rim. "
+                      + "A one-cell hollow has six and can never carry one";
                 faults.Add(new Fault(cell, "ramp.bridge",
                     $"the ramp at ({q},{r}) on level {draft.LevelAt(cell)} has "
                     + (up.Count == 0
@@ -287,7 +322,8 @@ public static class MapRules
                         : $"{up.Count} neighbours a level above it - headings "
                           + string.Join(", ", up)
                           + " - so which edge is its high one is not decided by "
-                          + "the map")));
+                          + "the map")
+                    + fix));
                 continue;
             }
 
