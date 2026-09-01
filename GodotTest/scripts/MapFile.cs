@@ -179,7 +179,87 @@ public static class MapFile
             : PaintFor(file.Ground);
 
         return BoardMap.FromGround(name, file.Ground, file.Ramps, homes, paint,
-                                   file.Height ?? true, file.Plinth ?? 0);
+                                   file.Height ?? true, file.Plinth ?? 0,
+                                   Walling(file.Walls, name));
+    }
+
+    /// <summary>
+    /// The masonry block, cell by cell.
+    ///
+    /// <b>Beside the picture rather than in it, because the alphabet is one
+    /// letter per cell and this is six flags and four numbers.</b> The letter
+    /// still says which cells carry wall - a cell named here and not drawn as
+    /// one is refused in <see cref="BoardMap.FromGround"/> - so the drawing
+    /// stays the map and the block is an annotation on it.
+    ///
+    /// <b>What is absent is silence and not a default</b>, which is
+    /// <see cref="WallConfig"/>'s rule over the same four numbers: a wall that
+    /// did not name its courses takes whatever the wall being laid uses. What is
+    /// present and out of range is refused rather than clamped, and that is
+    /// where this differs from the settings file - a settings file is edited
+    /// live beside a running bench, and a map is the board itself, so a figure
+    /// that means nothing has to be found when the file is read rather than
+    /// when a wall comes up two bricks tall.
+    /// </summary>
+    private static IReadOnlyDictionary<Vector2I, Masonry>? Walling(
+        WallShape[]? said, string name)
+    {
+        if (said is null || said.Length == 0)
+            return null;
+        var walling = new Dictionary<Vector2I, Masonry>();
+        foreach (WallShape shape in said)
+        {
+            if (shape.At is not { Length: 2 })
+                throw new InvalidOperationException(
+                    $"{name}: a wall's at is a pair of numbers, and one of them "
+                    + $"has {shape.At?.Length ?? 0}");
+            var cell = new Vector2I(shape.At[0], shape.At[1]);
+            if (walling.ContainsKey(cell))
+                throw new InvalidOperationException(
+                    $"{name}: ({cell.X},{cell.Y}) has two wall entries, and the "
+                    + "second would win silently");
+
+            var wall = new Masonry();
+            if (shape.Edges is not null)
+            {
+                if (shape.Edges.Length == 0)
+                    throw new InvalidOperationException(
+                        $"{name}: ({cell.X},{cell.Y}) lists no edges - masonry "
+                        + "standing on none of them is a breach rather than a "
+                        + "wall, so take the letter off instead");
+                wall.Edges = 0;
+                foreach (int heading in shape.Edges)
+                {
+                    if (!Masonry.Headings.Contains(heading))
+                        throw new InvalidOperationException(
+                            $"{name}: ({cell.X},{cell.Y}) walls the heading "
+                            + $"{heading}, and a flat-topped hex has its edges "
+                            + "at " + string.Join(", ", Masonry.Headings));
+                    wall.Edges |= 1 << Masonry.Bit(heading);
+                }
+            }
+            foreach (Masonry.Dial dial in Masonry.Dials)
+            {
+                int? asked = dial switch
+                {
+                    Masonry.Dial.Seed => shape.Seed,
+                    Masonry.Dial.Columns => shape.Columns,
+                    Masonry.Dial.Courses => shape.Courses,
+                    _ => shape.Leaves,
+                };
+                if (asked is not int figure)
+                    continue;
+                (int low, int high) = Masonry.Range(dial);
+                if (figure < low || figure > high)
+                    throw new InvalidOperationException(
+                        $"{name}: ({cell.X},{cell.Y}) asks for {figure} "
+                        + $"{dial.ToString().ToLowerInvariant()}, and a wall "
+                        + $"takes {low} to {high}");
+                wall.Set(dial, figure);
+            }
+            walling[cell] = wall;
+        }
+        return walling;
     }
 
     /// <summary>
@@ -418,8 +498,22 @@ public static class MapFile
         text.Append("\n  ],\n");
         text.Append("  \"ramps\": [\n");
         text.Append(string.Join(",\n", ramps.Select(r => "    " + Quote(r))));
-        text.Append("\n  ]\n");
-        text.Append("}\n");
+        text.Append("\n  ]");
+        // The masonry last, under the picture it annotates, and only for the
+        // cells that said something - see Masonry.Plain. A line per walled cell
+        // saying the ring its letter already says would be a block that grows
+        // with the board rather than with the authoring.
+        var said = map.Walled()
+            .Where(c => map.Walling.TryGetValue(c, out Masonry? w) && !w.Plain)
+            .ToList();
+        if (said.Count > 0)
+        {
+            text.Append(",\n\n  \"walls\": [\n");
+            text.Append(string.Join(",\n",
+                said.Select(c => "    " + Line(c, map.Walling[c]))));
+            text.Append("\n  ]");
+        }
+        text.Append("\n}\n");
         return text.ToString();
     }
 
@@ -449,6 +543,19 @@ public static class MapFile
         return path;
     }
 
+    /// <summary>One wall on one line, because it is one statement about one
+    /// cell and a serialiser would put its six edges on six.</summary>
+    private static string Line(Vector2I cell, Masonry wall)
+    {
+        var parts = new List<string> { $"\"at\": [{cell.X}, {cell.Y}]" };
+        if (wall.Edges != Masonry.Ring)
+            parts.Add("\"edges\": [" + string.Join(", ", wall.Standing()) + "]");
+        foreach (Masonry.Dial dial in Masonry.Dials)
+            if (wall.Of(dial) is int figure)
+                parts.Add($"\"{dial.ToString().ToLowerInvariant()}\": {figure}");
+        return "{ " + string.Join(", ", parts) + " }";
+    }
+
     private static string Quote(string raw) =>
         "\"" + raw.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
 
@@ -465,5 +572,16 @@ public static class MapFile
         [JsonPropertyName("homes")] public int[][]? Homes { get; set; }
         [JsonPropertyName("ground")] public string[]? Ground { get; set; }
         [JsonPropertyName("ramps")] public string[]? Ramps { get; set; }
+        [JsonPropertyName("walls")] public WallShape[]? Walls { get; set; }
+    }
+
+    private sealed class WallShape
+    {
+        [JsonPropertyName("at")] public int[]? At { get; set; }
+        [JsonPropertyName("edges")] public int[]? Edges { get; set; }
+        [JsonPropertyName("seed")] public int? Seed { get; set; }
+        [JsonPropertyName("columns")] public int? Columns { get; set; }
+        [JsonPropertyName("courses")] public int? Courses { get; set; }
+        [JsonPropertyName("leaves")] public int? Leaves { get; set; }
     }
 }

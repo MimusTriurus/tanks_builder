@@ -78,6 +78,12 @@ public static class MapRules
         public IReadOnlySet<Vector2I>? Plot;
         public IReadOnlyList<Vector2I> Homes = Array.Empty<Vector2I>();
 
+        /// <summary>What the walled cells carry, for <see cref="WallFaults"/>.
+        /// Empty on a board that authored no shapes, which is a board of closed
+        /// rings and has nothing for that rule to say.</summary>
+        public IReadOnlyDictionary<Vector2I, Masonry> Walling =
+            new Dictionary<Vector2I, Masonry>();
+
         public int At(Vector2I cell) => cell.Y * Columns + cell.X;
 
         public bool On(Vector2I cell) =>
@@ -134,6 +140,7 @@ public static class MapRules
             Cliffs = map.Cliffs,
             Plot = map.Plot,
             Homes = map.Homes,
+            Walling = map.Walling,
         };
     }
 
@@ -502,6 +509,43 @@ public static class MapRules
         return faults;
     }
 
+    // --- masonry -------------------------------------------------------------
+
+    /// <summary>
+    /// Whether each walled cell is one wall.
+    ///
+    /// <b>Never fatal, and that is the difference between this and every other
+    /// rule here.</b> The rest name a board that cannot be built - a ramp on to
+    /// nothing, water falling downhill - and this names one that builds
+    /// perfectly and lays two walls where the author drew one. A cell whose
+    /// edges are two runs is a shape <see cref="WallKit"/> cannot fold into a
+    /// chain, so whoever stands the props gets to decide what to do about it;
+    /// what the author gets is being told, on the stroke, that the far edge just
+    /// clicked is not joined to the near one.
+    ///
+    /// <b>An empty mask is not in here</b>, because it cannot be reached:
+    /// <see cref="MapEdit.Edge"/> refuses the last side and
+    /// <see cref="MapFile"/> refuses an empty list, both naming the same reason
+    /// - masonry standing on nothing is a breach rather than a wall.
+    /// </summary>
+    public static List<Fault> WallFaults(Draft draft)
+    {
+        var faults = new List<Fault>();
+        foreach ((Vector2I cell, Masonry wall) in draft.Walling
+                     .OrderBy(kv => kv.Key.Y).ThenBy(kv => kv.Key.X))
+        {
+            if (!draft.On(cell) || wall.Run() is not null)
+                continue;
+            faults.Add(new Fault(cell, "wall.run",
+                $"the masonry at ({cell.X},{cell.Y}) stands on "
+                + string.Join(", ", wall.Standing())
+                + ", which is two runs - a wall is one folded chain of bricks, "
+                + "so this is two walls on one cell", false,
+                $"({cell.X},{cell.Y}) is two runs of wall"));
+        }
+        return faults;
+    }
+
     // --- the whole board -----------------------------------------------------
 
     /// <summary>
@@ -520,6 +564,7 @@ public static class MapRules
         faults.AddRange(RampFaults(draft));
         faults.AddRange(WaterFaults(draft));
         faults.AddRange(HomeFaults(draft));
+        faults.AddRange(WallFaults(draft));
         return faults;
     }
 

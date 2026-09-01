@@ -56,6 +56,19 @@ public sealed class MapEdit
     private bool[] _ramps = Array.Empty<bool>();
     private List<Vector2I> _homes = new();
 
+    /// <summary>
+    /// What the walled cells carry, keyed by cell.
+    ///
+    /// <b>Kept in step with the letters by <see cref="Sync"/> rather than
+    /// alongside them.</b> The letter is what says a cell has a wall on it, so
+    /// an entry for a cell that stopped being one is a shape nobody can see and
+    /// a save that writes masonry on to open ground - which
+    /// <see cref="BoardMap.FromGround"/> refuses, one board too late. Every
+    /// write of a letter goes through <see cref="Put"/> or <see cref="Plot"/>,
+    /// and both of them end here.
+    /// </summary>
+    private Dictionary<Vector2I, Masonry> _walls = new();
+
     public IReadOnlyList<Vector2I> Homes => _homes;
 
     // --- making one ----------------------------------------------------------
@@ -138,10 +151,24 @@ public sealed class MapEdit
             _ground = new char[map.Columns * map.Rows],
             _ramps = (bool[])map.Ramps.Clone(),
             _homes = map.Homes.ToList(),
+            // Copied rather than referenced: the board a draft was opened from
+            // is somebody else's, and a cached BoardMap.Abbey edited in place
+            // would be every scene in the session drawing the edit.
+            _walls = map.Walling.ToDictionary(kv => kv.Key,
+                                              kv => kv.Value.Copy()),
         };
         for (int r = 0; r < map.Rows; r++)
         for (int q = 0; q < map.Columns; q++)
-            edit._ground[r * map.Columns + q] = ground[r][q];
+        {
+            var cell = new Vector2I(q, r);
+            edit._ground[edit.At(cell)] = ground[r][q];
+            // And the entry every wall letter means, for the cells the board
+            // said nothing about. A board that authored no shapes - which is
+            // every compiled one - would otherwise open with masonry the letters
+            // declare and the panel cannot see, and the first save would write
+            // the same board back without it.
+            edit.Sync(cell);
+        }
         return edit;
     }
 
@@ -188,11 +215,25 @@ public sealed class MapEdit
 
     // --- strokes -------------------------------------------------------------
 
-    private readonly List<(char[] Ground, bool[] Ramps, List<Vector2I> Homes)>
-        _back = new();
+    /// <summary>Everything a stroke can change, in one value. A named shape
+    /// rather than a tuple written out five times: the day a fifth grid is
+    /// added, a tuple is five places to add it and four to forget.</summary>
+    private readonly record struct Snap(char[] Ground, bool[] Ramps,
+                                        List<Vector2I> Homes,
+                                        Dictionary<Vector2I, Masonry> Walls);
 
-    private readonly List<(char[] Ground, bool[] Ramps, List<Vector2I> Homes)>
-        _forward = new();
+    private Snap Taken() => new((char[])_ground.Clone(),
+                                (bool[])_ramps.Clone(), _homes.ToList(),
+                                _walls.ToDictionary(kv => kv.Key,
+                                                    kv => kv.Value.Copy()));
+
+    private void Restore(Snap was) =>
+        (_ground, _ramps, _homes, _walls) =
+            (was.Ground, was.Ramps, was.Homes, was.Walls);
+
+    private readonly List<Snap> _back = new();
+
+    private readonly List<Snap> _forward = new();
 
     /// <summary>How many strokes can still be taken back.</summary>
     public int Depth => _back.Count;
@@ -207,8 +248,7 @@ public sealed class MapEdit
     /// </summary>
     public void Begin()
     {
-        _back.Add(((char[])_ground.Clone(), (bool[])_ramps.Clone(),
-                   _homes.ToList()));
+        _back.Add(Taken());
         _forward.Clear();
     }
 
@@ -216,9 +256,8 @@ public sealed class MapEdit
     {
         if (_back.Count == 0)
             return false;
-        _forward.Add(((char[])_ground.Clone(), (bool[])_ramps.Clone(),
-                      _homes.ToList()));
-        (_ground, _ramps, _homes) = _back[^1];
+        _forward.Add(Taken());
+        Restore(_back[^1]);
         _back.RemoveAt(_back.Count - 1);
         return true;
     }
@@ -227,9 +266,8 @@ public sealed class MapEdit
     {
         if (_forward.Count == 0)
             return false;
-        _back.Add(((char[])_ground.Clone(), (bool[])_ramps.Clone(),
-                   _homes.ToList()));
-        (_ground, _ramps, _homes) = _forward[^1];
+        _back.Add(Taken());
+        Restore(_forward[^1]);
         _forward.RemoveAt(_forward.Count - 1);
         return true;
     }
@@ -261,7 +299,27 @@ public sealed class MapEdit
             return false;
         }
         _ground[At(cell)] = found;
+        Sync(cell);
         return true;
+    }
+
+    /// <summary>
+    /// Bring a cell's masonry into line with its letter: a cell that has just
+    /// become a wall gets the closed ring every bare wall letter means, and one
+    /// that has stopped being a wall loses its entry.
+    ///
+    /// <b>Dropped rather than kept for the author who paints it back.</b> A
+    /// remembered shape would come back on a cell the author walled again for
+    /// other reasons, which is the editor writing a wall nobody drew; and an
+    /// undo brings the whole entry back anyway, which is where "I did not mean
+    /// that" already has an answer.
+    /// </summary>
+    private void Sync(Vector2I cell)
+    {
+        if (GlyphAt(cell).Wall)
+            _walls.TryAdd(cell, new Masonry());
+        else
+            _walls.Remove(cell);
     }
 
     private static string Say(Foundation floor, Cover over, int level, bool water)
@@ -397,6 +455,7 @@ public sealed class MapEdit
         _ground[At(cell)] = on ? BoardMap.Plain : BoardMap.Off;
         if (!on)
             _ramps[At(cell)] = false;
+        Sync(cell);
         return true;
     }
 
@@ -489,6 +548,78 @@ public sealed class MapEdit
             return false;
         }
         _homes.RemoveAt(slot);
+        return true;
+    }
+
+    // --- the masonry ----------------------------------------------------------
+
+    /// <summary>What the cell's wall is, or null on a cell with none. A copy:
+    /// the entry is written through <see cref="Edge"/> and <see cref="Shape"/>
+    /// so that every change to a board is a change this type made.</summary>
+    public Masonry? MasonryAt(Vector2I cell) =>
+        _walls.TryGetValue(cell, out Masonry? wall) ? wall.Copy() : null;
+
+    /// <summary>
+    /// Put masonry on one edge of a cell, or take it off.
+    ///
+    /// <b>The last edge is refused.</b> A cell whose six sides are all down is
+    /// <see cref="CoverState.Breached"/> - a thing that happens to a wall in a
+    /// game rather than a thing a map declares - and it would be written to the
+    /// file as a wall standing on nothing. Taking the cover off is what an
+    /// author means, and it is one tab away.
+    ///
+    /// <b>Two runs are not refused</b>, and that is the other half of the same
+    /// judgement: a wall being drawn passes through being two walls on the way
+    /// to being one, so it is reported by <see cref="Masonry.Run"/> and painted
+    /// rather than blocked - the rule <see cref="Ramp"/> already follows.
+    /// </summary>
+    public bool Edge(Vector2I cell, int heading, bool on, out string why)
+    {
+        why = "";
+        if (!_walls.TryGetValue(cell, out Masonry? wall))
+        {
+            why = $"({cell.X},{cell.Y}) carries no wall";
+            return false;
+        }
+        if (!Masonry.Headings.Contains(heading))
+        {
+            why = $"{heading} is not an edge of a flat-topped hex";
+            return false;
+        }
+        int bit = 1 << Masonry.Bit(heading);
+        if (!on && (wall.Edges & ~bit & Masonry.Ring) == 0)
+        {
+            why = "a wall standing on no sides at all is a breach rather than a "
+                  + "wall - take the cover off instead";
+            return false;
+        }
+        wall.Edges = on ? wall.Edges | bit : wall.Edges & ~bit;
+        return true;
+    }
+
+    /// <summary>One of the four numbers that are a wall's shape, or null to
+    /// take the cell back to silence - see <see cref="Masonry"/>, where null
+    /// being silence rather than a default is argued.</summary>
+    public bool Shape(Vector2I cell, Masonry.Dial dial, int? value,
+                      out string why)
+    {
+        why = "";
+        if (!_walls.TryGetValue(cell, out Masonry? wall))
+        {
+            why = $"({cell.X},{cell.Y}) carries no wall";
+            return false;
+        }
+        if (value is int figure)
+        {
+            (int low, int high) = Masonry.Range(dial);
+            if (figure < low || figure > high)
+            {
+                why = $"a wall takes {low} to {high} "
+                      + $"{dial.ToString().ToLowerInvariant()}, not {figure}";
+                return false;
+            }
+        }
+        wall.Set(dial, value);
         return true;
     }
 
@@ -595,6 +726,7 @@ public sealed class MapEdit
             Ground = new Foundation[Columns * Rows],
             Cliffs = new bool[Columns * Rows],
             Homes = _homes.ToList(),
+            Walling = _walls.ToDictionary(kv => kv.Key, kv => kv.Value.Copy()),
         };
         var plot = new HashSet<Vector2I>();
         for (int r = 0; r < Rows; r++)
@@ -632,7 +764,9 @@ public sealed class MapEdit
         MapFile.MustHaveHomes(_homes, Name);
         return BoardMap.FromGround(Name, Ground(), Ramps(), _homes.ToList(),
                                    Paint ?? MapFile.PaintFor(Ground()), Height,
-                                   Plinth);
+                                   Plinth,
+                                   _walls.ToDictionary(kv => kv.Key,
+                                                       kv => kv.Value.Copy()));
     }
 
     /// <summary>Write the draft to <c>maps/</c> and return the path.

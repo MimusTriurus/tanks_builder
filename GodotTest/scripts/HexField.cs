@@ -1960,6 +1960,30 @@ public sealed partial class HexField : Node2D
     }
 
     /// <summary>
+    /// The two ends of one edge of a cell's top face, in the field's own pixels.
+    ///
+    /// <b>Off <see cref="Corners"/> and <see cref="TopCorners"/> rather than off
+    /// the direction to the neighbour</b>, which is what the editor's first
+    /// attempt did and it drew the marks across the cell: the screen direction to
+    /// a neighbour turned ninety degrees is not the screen direction of the edge
+    /// between them, because the ground is squashed vertically and a rotation does
+    /// not survive a squash. Here so that whoever wants to draw on an edge is
+    /// drawing on the same hexagon <see cref="DrawWalls"/> extrudes from.
+    /// </summary>
+    public (Vector2 A, Vector2 B) EdgeEnds(Vector2I cell, int heading)
+    {
+        Vector2 centre = CellCentre(cell);
+        if (Atlas is null)
+            return (centre, centre);
+        Vector2[] corner = Corners();
+        float[] top = TopCorners(cell);
+        int i = EdgeIndex(heading);
+        int j = (i + 1) % 6;
+        return (centre + corner[i] - new Vector2(0.0f, top[i]),
+                centre + corner[j] - new Vector2(0.0f, top[j]));
+    }
+
+    /// <summary>
     /// How high the <b>ground</b> is under something crossing from one cell to
     /// the next - which is not <see cref="HeightBetween"/>, and the difference is
     /// a quarter of a level.

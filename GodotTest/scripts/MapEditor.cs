@@ -102,7 +102,6 @@ public sealed partial class MapEditor : SceneRoot
 
     private Label _hud = null!;
     private RichTextLabel _report = null!;
-    private Label _palette = null!;
 
     // --- overlays ------------------------------------------------------------
 
@@ -137,6 +136,18 @@ public sealed partial class MapEditor : SceneRoot
                 Map = args[++i];
             else if (args[i] == "--menu" && i + 1 < args.Length)
                 _open = args[++i].ToLowerInvariant();
+            else if (args[i] == "--pick" && i + 1 < args.Length)
+            {
+                // A cell picked from the command line, --layers' reason word for
+                // word: the right panel only exists once a hex has been clicked,
+                // and a capture run has nobody to click one.
+                string[] at = args[++i].Split(',');
+                if (at.Length == 2 && int.TryParse(at[0], out int q)
+                    && int.TryParse(at[1], out int r))
+                    _picked = new Vector2I(q, r);
+                else
+                    GD.PushWarning("--pick wants Q,R, as in --pick 3,2");
+            }
             else if (args[i] == "--layers" && i + 1 < args.Length)
             {
                 // Named rather than left to the keys, for --capture's sake: a
@@ -367,14 +378,25 @@ public sealed partial class MapEditor : SceneRoot
     private void Home()
     {
         Rect2 box = Extent();
+        // The band between the panels rather than the whole window, and the
+        // camera moved off centre by half the difference - otherwise the board
+        // is fitted to a window a third of which it is drawn underneath.
         Vector2 window = GetViewportRect().Size;
-        _camera.Position = box.GetCenter();
-        float fit = Math.Min(window.X / Math.Max(box.Size.X, 1.0f),
-                             window.Y / Math.Max(box.Size.Y, 1.0f));
+        float left = LeftWide + 24.0f, right = RightWide + 24.0f;
+        var band = new Vector2(Math.Max(window.X - left - right, 100.0f),
+                               Math.Max(window.Y - PanelTop - 12.0f, 100.0f));
+        float fit = Math.Min(band.X / Math.Max(box.Size.X, 1.0f),
+                             band.Y / Math.Max(box.Size.Y, 1.0f));
         // A margin, because the outermost cell's own art reaches past its centre
         // and a board fitted exactly touches the window's edge with it.
         float zoom = ZoomAt ?? Math.Clamp(fit * 0.92f, 0.05f, 4.0f);
         _camera.Zoom = new Vector2(zoom, zoom);
+        // Minus, because moving the camera left moves the board right: the
+        // band's middle is (left - right) / 2 off the window's, and the camera
+        // has to be the same distance the other way for the board to land on it.
+        _camera.Position = box.GetCenter()
+            - new Vector2((left - right) * 0.5f, (PanelTop - 12.0f) * 0.5f)
+              / zoom;
     }
 
     /// <summary>The box the drawn board stands in, tops and all.</summary>
@@ -487,6 +509,7 @@ public sealed partial class MapEditor : SceneRoot
     private static readonly Color SiteInk = new(0.62f, 0.95f, 0.66f);
     private static readonly Color BrushInk = new(0.55f, 0.90f, 1.0f);
     private static readonly Color FloodInk = new(0.55f, 0.70f, 1.0f);
+    private static readonly Color BrickInk = new(0.86f, 0.55f, 0.40f);
 
     /// <summary>
     /// The mark a cell carries, through <see cref="HexField.Ink"/>.
@@ -599,6 +622,25 @@ public sealed partial class MapEditor : SceneRoot
                     DrawLine(at, at + (to - at).Normalized() * 16.0f,
                         new Color(SiteInk, 0.8f), 2.0f);
                 }
+
+                // Which edges the masonry stands on, drawn on the edges. The
+                // 3D stage has no bricks in it - a wall on the board is a prop
+                // somebody stands, and nothing stands props from a map yet - so
+                // without this the six checkboxes in the right panel would be
+                // the only place a wall's shape exists.
+                if (editor._edit.MasonryAt(cell) is { } wall)
+                {
+                    foreach (int heading in wall.Standing())
+                    {
+                        (Vector2 a, Vector2 b) =
+                            editor._field.EdgeEnds(cell, heading);
+                        DrawLine(a, b, BrickInk, 5.0f);
+                    }
+                }
+
+                if (cell == editor._picked)
+                    DrawArc(at, 20.0f, 0.0f, Mathf.Tau, 18,
+                        new Color(1, 1, 1, 0.75f), 2.0f);
             }
 
             if (!editor._layers.HasFlag(Layers.Homes))
@@ -650,9 +692,18 @@ public sealed partial class MapEditor : SceneRoot
             {
                 _painting = click.Pressed;
                 if (click.Pressed)
+                {
+                    // The press picks the cell as well as painting it, and the
+                    // press rather than the release: a drag paints forty cells
+                    // and the one the author meant is the one they aimed at.
+                    if (_edit.Inside(_under))
+                        _picked = _under;
                     Stroke(true);
+                }
                 else
+                {
                     Settle();
+                }
             }
             else if (click.ButtonIndex == MouseButton.Right)
             {
@@ -832,8 +883,10 @@ public sealed partial class MapEditor : SceneRoot
         _hud.Text = $"{_edit.Name}  {_edit.Columns}x{_edit.Rows}   {cell}\n"
                     + $"{Tool()}   brush {_radius}   {_edit.Depth} undo\n"
                     + (_said.Length > 0 ? _said : "");
-        _palette.Text = Legend();
         _report.Text = Report();
+        // Last, because the panels read the board this has just described and
+        // the right one rebuilds off it - see MapEditor.Panels.
+        Refresh();
     }
 
     private string Tool() => _tab switch
@@ -844,16 +897,6 @@ public sealed partial class MapEditor : SceneRoot
         MapEdit.Tab.Cover => "cover: " + _cover.ToString().ToLowerInvariant(),
         _ => _rampBrush ? "level: ramp" : $"level: {_level}",
     };
-
-    private string Legend() =>
-        "N new   O open   S save   shift+S save as\n"
-        + "1 floor  2 cover  3 level\n"
-        + "  Q/W/E cycle within the tab\n"
-        + "left paint   right erase\n"
-        + "F fill   H home\n"
-        + "[ ] brush   Z undo   Y redo\n"
-        + "L levels  R ramps  G sites  B flood\n"
-        + "Home recentre";
 
     /// <summary>
     /// The audit, live.
@@ -908,17 +951,19 @@ public sealed partial class MapEditor : SceneRoot
         // The bar first, so what is under it is the board rather than the
         // readout - see MapEditor.Menu.
         Menu(layer);
+        // Then the two panels, and the readout between them - see
+        // MapEditor.Panels. The board is drawn under all three and framed
+        // between them by Home.
+        Tools(layer);
+        Inspect(layer);
 
-        _hud = Text(14.0f, 44.0f, 17);
+        _hud = Text(LeftWide + 26.0f, 44.0f, 17);
         layer.AddChild(_hud);
-
-        _palette = Text(14.0f, 118.0f, 14);
-        layer.AddChild(_palette);
 
         _report = new RichTextLabel
         {
-            Position = new Vector2(14.0f, 320.0f),
-            CustomMinimumSize = new Vector2(560.0f, 420.0f),
+            Position = new Vector2(LeftWide + 26.0f, 106.0f),
+            CustomMinimumSize = new Vector2(520.0f, 420.0f),
             ScrollActive = false,
             BbcodeEnabled = false,
         };
@@ -945,45 +990,28 @@ public sealed partial class MapEditor : SceneRoot
     /// <summary>
     /// Step the brush within the tab.
     ///
-    /// <b>One key per tab rather than a palette to click through.</b> What each
-    /// tab holds is short - three floors, five covers, three heights - and the
-    /// hand is already on the board; a list on the left would be a list to reach
-    /// for between every two strokes.
+    /// <b>Down the same list the left panel lays out</b>, which is
+    /// <see cref="Brushes"/>. The key and the palette were written twice for one
+    /// commit and disagreed about where water was - the key skipped it, because
+    /// water had been a switch on W since before there was a panel to put it on.
     ///
-    /// <b>Shallow and deep are not in the floor's cycle, and that is the format
-    /// rather than an omission.</b> Water on a map is the flood letter, which is
-    /// low ground with water standing in it - see <see cref="MapEdit.Floor"/>, and
-    /// it is <c>W</c> here.
+    /// <b>Shallow and deep are not in the list, and that is the format rather
+    /// than an omission.</b> Water on a map is the flood letter, which is low
+    /// ground with water standing in it - see <see cref="MapEdit.Floor"/>, and it
+    /// is <c>W</c> there.
     /// </summary>
     private void Cycle()
     {
-        switch (_tab)
-        {
-            case MapEdit.Tab.Foundation:
-                _plotBrush = false;
-                _water = false;
-                _floor = _floor switch
-                {
-                    Foundation.Solid => Foundation.Sand,
-                    Foundation.Sand => Foundation.Rock,
-                    _ => Foundation.Solid,
-                };
+        IReadOnlyList<(string Name, Action Pick, Func<bool> On)> brushes =
+            Brushes();
+        int at = 0;
+        for (int i = 0; i < brushes.Count; i++)
+            if (brushes[i].On())
+            {
+                at = i;
                 break;
-            case MapEdit.Tab.Cover:
-                _cover = _cover switch
-                {
-                    Cover.None => Cover.Forest,
-                    Cover.Forest => Cover.Trench,
-                    Cover.Trench => Cover.Minefield,
-                    Cover.Minefield => Cover.Walls,
-                    _ => Cover.None,
-                };
-                break;
-            default:
-                _rampBrush = false;
-                _level = _level switch { 1 => 0, 0 => -1, _ => 1 };
-                break;
-        }
+            }
+        brushes[(at + 1) % brushes.Count].Pick();
     }
 
     /// <summary>The two brushes that are a switch rather than a step: water and

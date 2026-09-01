@@ -15356,6 +15356,156 @@ public static class SelfTest
             draw.Undo();
         }
 
+        Theme("the masonry: six edges, one wall, and a file that says so");
+        {
+            // The mask and the run invert each other, over every wall there is.
+            // Sixty-one of them: six bearings by five counts, plus the ring.
+            var wrong = new List<string>();
+            foreach (int sides in new[] { 1, 2, 3, 4, 5, 6 })
+            foreach (int bearing in sides % 2 == 1
+                         ? Masonry.Headings
+                         : new[] { 0, 60, 120, 180, 240, 300 })
+            {
+                int mask = Masonry.Fan(bearing, sides);
+                int count = Enumerable.Range(0, 6)
+                    .Count(i => (mask & (1 << i)) != 0);
+                (int Bearing, int Sides)? back = Masonry.Run(mask);
+                if (count != sides)
+                    wrong.Add($"{bearing}/{sides} covers {count}");
+                else if (back is not (int said, int many)
+                         || many != sides
+                         || (sides < 6 && said != bearing))
+                    wrong.Add($"{bearing}/{sides} came back as {back}");
+            }
+            Check("a fan of sides and the mask it covers invert each other",
+                wrong.Count == 0, string.Join("; ", wrong));
+
+            // Two runs, which is the one mask that is not a wall. 330 and 210
+            // with 270 taken out of the middle of them.
+            int split = (1 << Masonry.Bit(330)) | (1 << Masonry.Bit(210));
+            Check("edges in two runs are not one wall",
+                Masonry.Run(split) is null, $"{split:b} came back a wall");
+            Check("and neither is a cell with nothing standing",
+                Masonry.Run(0) is null, "an empty mask claimed to be a wall");
+
+            // The bit order is the geometry's, and this is what makes a run of
+            // bits a run of edges - see Masonry.Headings, which is deliberately
+            // not HexField.EdgeHeadings.
+            Check("the mask's bits run round the cell in order",
+                Enumerable.Range(0, 6).All(
+                    i => Masonry.Bit(Masonry.Headings[i]) == i),
+                string.Join(" ", Masonry.Headings.Select(Masonry.Bit)));
+
+            // --- the brush -----------------------------------------------
+            var draw = MapEdit.Blank("masonry", 6, 5);
+            var cell = new Vector2I(2, 2);
+            Check("a cell with no wall on it carries no masonry",
+                draw.MasonryAt(cell) is null, "it had an entry");
+            draw.Over(cell, Cover.Walls, out string why);
+            Check("painting masonry lays a closed ring", why.Length == 0
+                && draw.MasonryAt(cell) is { Edges: Masonry.Ring },
+                why.Length > 0 ? why : "the ring was not laid");
+
+            Check("and taking three sides off leaves one run",
+                draw.Edge(cell, 30, false, out _)
+                && draw.Edge(cell, 90, false, out _)
+                && draw.Edge(cell, 150, false, out _)
+                && draw.MasonryAt(cell)!.Run() is (270, 3),
+                draw.MasonryAt(cell)!.Say());
+
+            // The last side is refused, and the reason is not tidiness: masonry
+            // standing on nothing is CoverState.Breached, which is what happens
+            // to a wall in a game rather than what a map declares.
+            foreach (int heading in new[] { 330, 210 })
+                draw.Edge(cell, heading, false, out _);
+            Check("the last side of a wall cannot be taken off",
+                !draw.Edge(cell, 270, false, out string last)
+                && last.Contains("breach"),
+                last);
+
+            Check("a dial out of range is refused by name",
+                !draw.Shape(cell, Masonry.Dial.Leaves, 99, out string tall)
+                && tall.Contains("leaves"), tall);
+            Check("and one in range is taken and can be taken back",
+                draw.Shape(cell, Masonry.Dial.Leaves, 3, out _)
+                && draw.MasonryAt(cell)!.Leaves == 3
+                && draw.Shape(cell, Masonry.Dial.Leaves, null, out _)
+                && draw.MasonryAt(cell)!.Leaves is null,
+                "the dial did not answer");
+
+            // The letter is what says a cell carries a wall, so the entry
+            // follows the letter both ways - see MapEdit.Sync.
+            draw.Shape(cell, Masonry.Dial.Seed, 7, out _);
+            draw.Over(cell, Cover.Forest, out _);
+            Check("a cell that stops being a wall loses its masonry",
+                draw.MasonryAt(cell) is null, "the entry outlived the letter");
+            draw.Over(cell, Cover.Walls, out _);
+            Check("and one painted again comes back a plain ring",
+                draw.MasonryAt(cell) is { Edges: Masonry.Ring, Seed: null },
+                "a remembered shape came back");
+
+            // One stroke, one undo - the checkbox's end of MapEdit.Begin's rule.
+            draw.Begin();
+            draw.Edge(cell, 30, false, out _);
+            draw.Undo();
+            Check("an undo brings a wall's own edges back",
+                draw.MasonryAt(cell)!.Edges == Masonry.Ring,
+                draw.MasonryAt(cell)!.Say());
+
+            // --- the file ------------------------------------------------
+            draw.Edge(cell, 30, false, out _);
+            draw.Edge(cell, 90, false, out _);
+            draw.Shape(cell, Masonry.Dial.Seed, 42, out _);
+            draw.Shape(cell, Masonry.Dial.Courses, 5, out _);
+            BoardMap built = draw.Build();
+            BoardMap read = MapFile.Parse(MapFile.Write(built), built.Name);
+            Masonry? there = read.MasonryAt(cell);
+            Check("a wall written to a file and read back is the wall that was",
+                there is not null && there.Edges == built.MasonryAt(cell)!.Edges
+                && there.Seed == 42 && there.Courses == 5
+                && there.Columns is null && there.Leaves is null,
+                there?.Say() ?? "nothing came back");
+
+            // A ring that said nothing is not written at all, because the letter
+            // already says it - and it still reads back as a ring.
+            var ring = MapEdit.Blank("bare", 5, 4);
+            ring.Over(new Vector2I(1, 1), Cover.Walls, out _);
+            string text = MapFile.Write(ring.Build());
+            Check("a wall that said nothing puts no line in the file",
+                !text.Contains("walls"), "the block was written anyway");
+            Check("and still comes back a closed ring",
+                MapFile.Parse(text, "bare")
+                    .MasonryAt(new Vector2I(1, 1))!.Edges == Masonry.Ring,
+                "the ring did not survive the round trip");
+
+            // Masonry on open ground is the map disagreeing with itself, and it
+            // reads as a wall shape that quietly did nothing.
+            string stray = text.TrimEnd().TrimEnd('}').TrimEnd()
+                           + ",\n  \"walls\": [ { \"at\": [3, 3] } ]\n}\n";
+            string strayed = "";
+            try
+            {
+                MapFile.Parse(stray, "bare");
+            }
+            catch (Exception e)
+            {
+                strayed = e.Message;
+            }
+            Check("masonry on a cell with no wall is refused",
+                strayed.Contains("carrying no wall"), strayed);
+
+            // And the audit says which walls are two walls.
+            var two = MapEdit.Blank("two", 5, 4);
+            var far = new Vector2I(2, 2);
+            two.Over(far, Cover.Walls, out _);
+            foreach (int heading in new[] { 270, 150, 30 })
+                two.Edge(far, heading, false, out _);
+            Check("a wall drawn as two runs is a fault and not a refusal",
+                two.Faults().Any(f => f.Rule == "wall.run" && f.Cell == far
+                                      && !f.Fatal),
+                string.Join("; ", two.Faults().Select(f => f.Rule)));
+        }
+
         // --- the authored boards ------------------------------------------
         //
         // Run here because a map is data and nothing on the board it describes

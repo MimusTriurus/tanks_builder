@@ -153,6 +153,26 @@ public sealed partial class BoardMap
     /// <see cref="Kinds"/> is read by the grove.</summary>
     public bool[] Walls { get; }
 
+    /// <summary>
+    /// What the walled cells carry, by cell - the edges the masonry stands on
+    /// and the four numbers that are its shape.
+    ///
+    /// <b>Only the cells that said something.</b> A walled cell with no entry is
+    /// a closed ring on the compiled figures, which is what a bare wall letter
+    /// has always meant - see <see cref="HexField.SetCover"/>. So a board that
+    /// never authored a wall's shape is a board with an empty table here, and
+    /// nothing downstream has to tell that from a board that authored a ring.
+    /// Ask <see cref="MasonryAt"/>, which answers for both.
+    /// </summary>
+    public IReadOnlyDictionary<Vector2I, Masonry> Walling { get; }
+
+    /// <summary>What stands on a walled cell: what the board authored, or a
+    /// closed ring on the compiled figures. Null on a cell with no wall.
+    /// </summary>
+    public Masonry? MasonryAt(Vector2I cell) =>
+        !IsWall(cell) ? null
+        : Walling.TryGetValue(cell, out Masonry? said) ? said : new Masonry();
+
     /// <summary>What each cell is made of, or null to leave it to the mix. See
     /// <see cref="HexField.SetKinds"/>.</summary>
     public string?[] Kinds { get; }
@@ -237,7 +257,8 @@ public sealed partial class BoardMap
                      string?[] kinds, bool[] cliffs, bool[] walls,
                      Foundation[] ground, Cover[] over,
                      IReadOnlySet<Vector2I>? plot,
-                     string paint, bool height, int plinth = 0)
+                     string paint, bool height, int plinth = 0,
+                     IReadOnlyDictionary<Vector2I, Masonry>? walling = null)
     {
         Name = name;
         Columns = columns;
@@ -249,6 +270,7 @@ public sealed partial class BoardMap
         Kinds = kinds;
         Cliffs = cliffs;
         Walls = walls;
+        Walling = walling ?? new Dictionary<Vector2I, Masonry>();
         Ground = ground;
         Over = over;
         Plot = plot;
@@ -524,7 +546,10 @@ public sealed partial class BoardMap
     internal static BoardMap FromGround(string name, string[] ground,
                                         string[] ramps,
                                         IReadOnlyList<Vector2I> homes,
-                                        string paint, bool height, int plinth = 0)
+                                        string paint, bool height,
+                                        int plinth = 0,
+                                        IReadOnlyDictionary<Vector2I, Masonry>?
+                                            walling = null)
     {
         int rows = ground.Length;
         int columns = rows == 0 ? 0 : ground[0].Length;
@@ -633,6 +658,15 @@ public sealed partial class BoardMap
                 ramped[at] = true;
         }
 
+        // Masonry on a cell carrying no wall is the map disagreeing with
+        // itself, and it reads as a wall shape that quietly did nothing - the
+        // failure WallConfig.Strays exists to catch one folder over.
+        foreach (Vector2I cell in walling?.Keys ?? Enumerable.Empty<Vector2I>())
+            if (cell.X < 0 || cell.X >= columns || cell.Y < 0 || cell.Y >= rows
+                || !walls[cell.Y * columns + cell.X])
+                wrong.Add($"the masonry at ({cell.X},{cell.Y}) is on a cell "
+                          + "carrying no wall");
+
         if (wrong.Count > 0)
             throw new InvalidOperationException(
                 name + ": " + string.Join("; ", wrong));
@@ -643,7 +677,7 @@ public sealed partial class BoardMap
 
         return Sealed(new BoardMap(name, columns, rows, homes, levels, ramped,
                                    water, kinds, cliffs, walls, floor, over,
-                                   plot, paint, height, plinth));
+                                   plot, paint, height, plinth, walling));
     }
 
     /// <summary>A map written as separate relief, ramp and water grids - the
