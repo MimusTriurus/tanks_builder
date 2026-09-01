@@ -553,6 +553,12 @@ public sealed class MapEdit
 
     // --- the masonry ----------------------------------------------------------
 
+    /// <summary>Every cell carrying masonry, in reading order.
+    /// <see cref="BoardMap.Walled"/>'s answer for a board still being drawn.
+    /// </summary>
+    public IReadOnlyList<Vector2I> Walled() =>
+        _walls.Keys.OrderBy(c => c.Y).ThenBy(c => c.X).ToList();
+
     /// <summary>What the cell's wall is, or null on a cell with none. A copy:
     /// the entry is written through <see cref="Edge"/> and <see cref="Shape"/>
     /// so that every change to a board is a change this type made.</summary>

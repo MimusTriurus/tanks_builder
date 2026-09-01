@@ -15452,6 +15452,50 @@ public static class SelfTest
                 draw.MasonryAt(cell)!.Edges == Masonry.Ring,
                 draw.MasonryAt(cell)!.Say());
 
+            // --- the join to the builder ---------------------------------
+            //
+            // Silence takes WallKit's own figures, which is what makes a tick in
+            // the panel start where the untouched wall already was. The floor of
+            // the range is what it used to start from, and a wall "configured"
+            // by ticking all four came out one course of one leaf.
+            var plain = new Masonry();
+            var stock = new WallKit.Recipe();
+            (WallKit.Recipe Recipe, int Bearing)? laid = plain.Laying();
+            Check("a wall that said nothing lays WallKit's own recipe",
+                laid is not null
+                && laid.Value.Recipe.Seed == stock.Seed
+                && laid.Value.Recipe.Columns == stock.Columns
+                && laid.Value.Recipe.Courses == stock.Courses
+                && laid.Value.Recipe.Leaves == stock.Leaves
+                && laid.Value.Recipe.Sides == 6,
+                laid is null ? "it laid nothing" : plain.Say());
+            Check("and the panel's tick starts from those same figures",
+                Masonry.Dials.All(
+                    d => Masonry.Silence(d) == d switch
+                    {
+                        Masonry.Dial.Seed => stock.Seed,
+                        Masonry.Dial.Columns => stock.Columns,
+                        Masonry.Dial.Courses => stock.Courses,
+                        _ => stock.Leaves,
+                    }),
+                string.Join(" ", Masonry.Dials.Select(Masonry.Silence)));
+
+            var told = new Masonry
+            {
+                Edges = Masonry.Fan(270, 3), Seed = 42, Courses = 5,
+            };
+            (WallKit.Recipe Recipe, int Bearing)? one = told.Laying();
+            Check("a wall that spoke lays what it said and no more",
+                one is (WallKit.Recipe spoke, 270)
+                && spoke.Seed == 42 && spoke.Courses == 5 && spoke.Sides == 3
+                && spoke.Columns == stock.Columns
+                && spoke.Leaves == stock.Leaves,
+                told.Say());
+
+            Check("and two runs lay nothing at all",
+                new Masonry { Edges = split }.Laying() is null,
+                "two walls on one cell were handed to the builder as one");
+
             // --- the file ------------------------------------------------
             draw.Edge(cell, 30, false, out _);
             draw.Edge(cell, 90, false, out _);

@@ -18,14 +18,18 @@ namespace TankSpriteTest;
 /// So a mask that is two runs is a cell nobody can build one wall on, and
 /// <see cref="Run"/> is the conversion that says which masks are buildable.
 ///
-/// <b>Nothing stands props from a map yet, and the even case is where that
-/// shows.</b> <c>TankBench.Walls</c> builds its walls off its own list of
-/// recipes; the day a board's own masonry is laid instead, the convention below
-/// - odd counts centre on an edge, even counts centre on a corner - is what will
-/// be held against the bricks. It is self-consistent (<see cref="Fan"/> and
-/// <see cref="Run"/> invert each other, and the self test says so) and it is
-/// untested against a standing wall. Named so that a wall that comes up rotated
-/// sixty degrees is one sentence away from being explained rather than a day.
+/// <b>The editor lays these for real</b> - see <c>MapEditor.Bricks</c>, which
+/// is the first thing here to stand a wall from a map, and <see cref="Laying"/>,
+/// which is the one join to <see cref="WallKit"/>. <c>TankBench.Walls</c> still
+/// builds its own from its own list of recipes, because that board's walls are a
+/// ring plus four samples each moving one dial - a bench's arrangement rather
+/// than a board's.
+///
+/// So the convention below - odd counts centre on an edge, even counts centre on
+/// a corner - is now held against bricks and not only against itself. It is also
+/// self-consistent: <see cref="Fan"/> and <see cref="Run"/> invert each other and
+/// the self test says so. Both halves matter, because the first is judged by eye
+/// and the second by a number.
 ///
 /// <b>The four numbers are nullable, and null is silence rather than a
 /// default.</b> <see cref="WallConfig"/> holds the same rule over
@@ -221,6 +225,52 @@ public sealed class Masonry
     }
 
     public (int Bearing, int Sides)? Run() => Run(Edges);
+
+    /// <summary>
+    /// What a dial is worth when the cell says nothing: <see cref="WallKit"/>'s
+    /// own compiled figure, read rather than copied.
+    ///
+    /// <b>This is what a tick in the panel starts from, and the floor of the
+    /// range is what it used to start from.</b> A wall "configured" by ticking
+    /// all four boxes came out as one course of one leaf on two columns - the
+    /// minimum of each - which is a single row of bricks and reads as the
+    /// settings having done nothing. Silence and a tick must agree until the
+    /// number is moved; that is the whole meaning of the tick.
+    /// </summary>
+    public static int Silence(Dial dial)
+    {
+        var recipe = new WallKit.Recipe();
+        return dial switch
+        {
+            Dial.Seed => recipe.Seed,
+            Dial.Columns => recipe.Columns,
+            Dial.Courses => recipe.Courses,
+            _ => recipe.Leaves,
+        };
+    }
+
+    /// <summary>
+    /// The wall this cell describes, ready to lay, or null when the edges are
+    /// not one run - see <see cref="Run"/>, where that is argued.
+    ///
+    /// <b>The one join between the map and the builder.</b> Everything the cell
+    /// left silent takes <see cref="WallKit.Recipe"/>'s own figure, because the
+    /// recipe is where those figures live; every dial it set is written over
+    /// that. The bearing comes out beside the recipe rather than in it, because
+    /// <see cref="WallProp.Bearing"/> is where a wall's side lives and
+    /// <c>Recipe.Sides</c> is only how many.
+    /// </summary>
+    public (WallKit.Recipe Recipe, int Bearing)? Laying()
+    {
+        if (Run() is not (int bearing, int sides))
+            return null;
+        var recipe = new WallKit.Recipe { Sides = sides };
+        if (Seed is int seed) recipe.Seed = seed;
+        if (Columns is int columns) recipe.Columns = columns;
+        if (Courses is int courses) recipe.Courses = courses;
+        if (Leaves is int leaves) recipe.Leaves = leaves;
+        return (recipe, bearing);
+    }
 
     /// <summary>What the entry says, for the readout and the report.</summary>
     public string Say()

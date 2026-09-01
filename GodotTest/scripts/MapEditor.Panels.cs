@@ -491,7 +491,9 @@ public sealed partial class MapEditor
             var box = new SpinBox
             {
                 MinValue = low, MaxValue = high, Step = 1,
-                Value = wall.Of(which) ?? Math.Max(low, 1),
+                // Silence's own figure and not the floor of the range - see
+                // Masonry.Silence, which carries what the floor cost.
+                Value = wall.Of(which) ?? Masonry.Silence(which),
                 Editable = wall.Of(which) is not null,
                 SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
             };

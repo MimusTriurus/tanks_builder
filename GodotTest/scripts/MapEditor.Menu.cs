@@ -298,6 +298,7 @@ public sealed partial class MapEditor
     private void Opened(string said)
     {
         _sown = Array.Empty<string?>();
+        _stood = "";
         _dirty = false;
         _said = said;
         Settle();

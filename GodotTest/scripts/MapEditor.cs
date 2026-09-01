@@ -424,6 +424,19 @@ public sealed partial class MapEditor : SceneRoot
             GD.Print($"tabs: clicked to {_tab}, the bar says "
                      + $"{_tabs.GetTabTitle(_tabs.CurrentTab)}, the palette says "
                      + string.Join("/", _picks.Select(b => b.Text)));
+        // Taking a wall off takes its bricks off. The risky half of standing
+        // props from a map: a stale wall left on the board after the cover was
+        // erased looks exactly like the board not having been edited.
+        if (_open == "unwall" && _frame == 20)
+        {
+            var cell = new Vector2I(3, 3);
+            _edit.Begin();
+            _edit.Over(cell, Cover.None, out string _);
+            Settle();
+            GD.Print($"unwall: ({cell.X},{cell.Y}) is now "
+                     + $"'{_edit.LetterAt(cell)}', {_edit.Walled().Count} walled "
+                     + $"cell(s) left, {_bricks.Count} prop(s) standing");
+        }
         if (CapturePath is not null && _frame >= CaptureAt)
         {
             Capture(CapturePath);
@@ -569,7 +582,84 @@ public sealed partial class MapEditor : SceneRoot
         }
         _field.QueueRedraw();
         _marks.QueueRedraw();
+        Bricks();
         Say();
+    }
+
+    private readonly List<WallProp> _bricks = new();
+
+    /// <summary>What the standing walls were built from, so that a stroke which
+    /// touched no masonry does not lay every wall on the board again.</summary>
+    private string _stood = "";
+
+    /// <summary>
+    /// Stand the bricks a walled cell describes.
+    ///
+    /// <b>The first thing on this project to lay a wall from a map</b>, and the
+    /// reason the editor is where it happened is that the editor is where the
+    /// numbers are typed: six edge boxes and four dials that changed nothing on
+    /// screen are six boxes and four dials nobody can judge. <c>TankBench</c>
+    /// still stands its own from its own list of recipes - that board's walls are
+    /// a ring plus four samples, each moving one dial, which is a bench's
+    /// arrangement rather than a board's.
+    ///
+    /// <b>It is <see cref="WallProp"/>'s, all of it.</b> The plan, the fit, the
+    /// rubble and the drawing are the wall bench's, dead literally; what is
+    /// written here is which cells, which recipe and which side - and all three
+    /// come out of <see cref="Masonry.Laying"/>, which is the one join.
+    ///
+    /// <b>No solver.</b> <see cref="WallProp.Solved"/> skips the rig, and there
+    /// is nothing on this board to knock a wall down with: a board being drawn
+    /// has no tanks and no shells, so a rigid body per brick would be physics
+    /// running under a picture nobody can push.
+    ///
+    /// <b>A cell whose edges are two runs stands nothing</b>, and that is not an
+    /// omission - it is the <c>wall.run</c> fault having something to point at.
+    /// The cell is painted as a fault and the rim marks show both runs; what
+    /// cannot be done is laying one chain of bricks along them, which is the
+    /// whole content of the rule.
+    /// </summary>
+    private void Bricks()
+    {
+        if (_stage is null || _field.Atlas is null)
+            return;
+        IReadOnlyList<Vector2I> walled = _edit.Walled();
+        // The relief is in the signature because a wall stands at its cell's own
+        // height - see WallProp.Build, which reads LevelAt - so raising the
+        // ground under one has to lift it.
+        string want = string.Join(";", walled.Select(
+            c => $"{c.X},{c.Y},{_edit.MasonryAt(c)!.Say()},{_field.LevelAt(c)}"));
+        if (want == _stood)
+            return;
+        _stood = want;
+
+        foreach (WallProp was in _bricks)
+        {
+            RemoveChild(was);
+            was.QueueFree();
+        }
+        _bricks.Clear();
+
+        foreach (Vector2I cell in walled)
+        {
+            if (_edit.MasonryAt(cell)?.Laying() is not
+                    ({ } recipe, int bearing))
+                continue;
+            var prop = new WallProp
+            {
+                Field = _field,
+                Stage = _stage,
+                Cell = cell,
+                Recipe = recipe,
+                Borrow = null,
+                Channel = _bricks.Count,
+            };
+            AddChild(prop);
+            prop.Solved = true;
+            prop.Bearing = bearing;
+            prop.Build();
+            _bricks.Add(prop);
+        }
     }
 
     /// <summary>What each cell is painted as, off its own letter. The same two
