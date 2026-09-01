@@ -397,6 +397,33 @@ public sealed partial class MapEditor : SceneRoot
                      + $"{_layers.HasFlag(Layers.Sites)}, "
                      + $"{_sites.Count(kv => !_edit.IsRamp(kv.Key))} free site(s) "
                      + "drawn");
+        // Clicking a tab against pressing its key, which are two paths to one
+        // palette. Cover is picked first and Foundation second, because the
+        // failure needs a tab to have been left: the palette that is wrong is
+        // the one that was already built.
+        if (_open == "tabs" && _frame is 4 or 8 or 12)
+        {
+            int want = _frame switch
+            {
+                4 => (int)MapEdit.Tab.Cover,
+                8 => (int)MapEdit.Tab.Foundation,
+                _ => (int)MapEdit.Tab.Level,
+            };
+            Vector2 at = ((TabBar)_tabs).GetGlobalRect().Position
+                         + _tabs.GetTabRect(want).GetCenter();
+            foreach (bool down in new[] { true, false })
+                Input.ParseInputEvent(new InputEventMouseButton
+                {
+                    ButtonIndex = MouseButton.Left,
+                    Pressed = down,
+                    Position = at,
+                    GlobalPosition = at,
+                });
+        }
+        if (_open == "tabs" && _frame is 6 or 10 or 14)
+            GD.Print($"tabs: clicked to {_tab}, the bar says "
+                     + $"{_tabs.GetTabTitle(_tabs.CurrentTab)}, the palette says "
+                     + string.Join("/", _picks.Select(b => b.Text)));
         if (CapturePath is not null && _frame >= CaptureAt)
         {
             Capture(CapturePath);

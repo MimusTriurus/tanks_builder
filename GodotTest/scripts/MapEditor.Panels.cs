@@ -216,9 +216,15 @@ public sealed partial class MapEditor
         _plotBrush = false;
     }
 
+    /// <summary>Which tab the palette was laid out for, so that
+    /// <see cref="Refresh"/> can ask the question it means. Null before the
+    /// first lay-out.</summary>
+    private MapEdit.Tab? _laid;
+
     /// <summary>Lay out the buttons for the tab that is up.</summary>
     private void Choices()
     {
+        _laid = _tab;
         foreach (Node was in _choices.GetChildren())
         {
             _choices.RemoveChild(was);
@@ -260,14 +266,23 @@ public sealed partial class MapEditor
     private void Refresh()
     {
         _loading = true;
-        if (_tabs.CurrentTab != (int)_tab)
-        {
-            _tabs.CurrentTab = (int)_tab;
-            Choices();
-        }
+        // The bar is told where the tab is either way; setting it to what it
+        // already says emits nothing.
+        _tabs.CurrentTab = (int)_tab;
         IReadOnlyList<(string Name, Action Pick, Func<bool> On)> brushes =
             Brushes();
-        if (_picks.Count != brushes.Count)
+        // Rebuilt when the palette was laid out for another tab - the question
+        // this means - and not when the BAR disagrees with _tab, which is what
+        // it used to ask.
+        //
+        // <b>The two differ exactly on the path the author takes.</b> A click on
+        // the tab moves the bar first and the signal arrives with the two
+        // already agreeing, so nothing was rebuilt; a key moves _tab first, so
+        // it was. And the count fallback hid it: Foundation and Cover both hold
+        // five brushes, so the palette kept the old five with the new tab's name
+        // over them. Level holds four and rebuilt by luck, which is how this
+        // survived a capture of all three.
+        if (_laid != _tab || _picks.Count != brushes.Count)
             Choices();
         else
             for (int i = 0; i < _picks.Count; i++)
