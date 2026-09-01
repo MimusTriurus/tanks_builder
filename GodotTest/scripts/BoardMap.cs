@@ -201,6 +201,17 @@ public sealed partial class BoardMap
     public bool Height { get; }
 
     /// <summary>
+    /// How many levels the whole board stands above the datum.
+    ///
+    /// <b>Kept rather than applied and forgotten, because the letters are
+    /// written relative to it.</b> A cell drawn as plain on a board with a
+    /// plinth of one stands at level 1, so re-encoding its height would write it
+    /// out as a hill - see <see cref="MapFile.Ground"/>, whose round trip is what
+    /// found this. Authoring provenance, and it is the only kind this type keeps.
+    /// </summary>
+    public int Plinth { get; }
+
+    /// <summary>
     /// What each cell's floor is made of - the first of the two slots a hex has.
     ///
     /// <b>Water is not in here</b>, for the reason <see cref="HexField"/> gives
@@ -226,7 +237,7 @@ public sealed partial class BoardMap
                      string?[] kinds, bool[] cliffs, bool[] walls,
                      Foundation[] ground, Cover[] over,
                      IReadOnlySet<Vector2I>? plot,
-                     string paint, bool height)
+                     string paint, bool height, int plinth = 0)
     {
         Name = name;
         Columns = columns;
@@ -243,6 +254,7 @@ public sealed partial class BoardMap
         Plot = plot;
         Paint = paint;
         Height = height;
+        Plinth = plinth;
     }
 
     /// <summary>Every cell carrying a wall, in reading order. A list rather than
@@ -432,51 +444,19 @@ public sealed partial class BoardMap
     /// the bench board, authored long before any of this, passes with exactly one
     /// exception and that exception is its ford at (7,4).
     /// </summary>
-    public IReadOnlyList<Vector2I> Flood() =>
-        Flood(Columns, Rows, Levels, Ramps, Water, Plot);
+    public IReadOnlyList<Vector2I> Flood() => MapRules.Flood(MapRules.Draft.Of(this));
 
     /// <summary>The same on loose arrays, so the rule can be asserted against a
     /// board built for it. Both shipped maps obey it, and a guard nothing ever
     /// trips is a guard whose state nobody knows.</summary>
     public static IReadOnlyList<Vector2I> Flood(
         int columns, int rows, int[] levels, bool[] ramps, bool[] water,
-        IReadOnlySet<Vector2I>? plot)
-    {
-        bool On(Vector2I c) =>
-            c.X >= 0 && c.X < columns && c.Y >= 0 && c.Y < rows
-            && (plot is null || plot.Contains(c));
-        int Of(Vector2I c) => c.Y * columns + c.X;
-
-        var wet = new HashSet<Vector2I>();
-        var queue = new Queue<Vector2I>();
-        for (int r = 0; r < rows; r++)
-        for (int q = 0; q < columns; q++)
+        IReadOnlySet<Vector2I>? plot) =>
+        MapRules.Flood(new MapRules.Draft
         {
-            var cell = new Vector2I(q, r);
-            if (!On(cell) || !water[Of(cell)])
-                continue;
-            wet.Add(cell);
-            queue.Enqueue(cell);
-        }
-
-        var found = new List<Vector2I>();
-        while (queue.Count > 0)
-        {
-            Vector2I at = queue.Dequeue();
-            foreach (int h in HexField.EdgeHeadings)
-            {
-                Vector2I next = HexField.Step(at, h);
-                if (!On(next) || wet.Contains(next) || ramps[Of(next)]
-                    || levels[Of(next)] != levels[Of(at)])
-                    continue;
-                wet.Add(next);
-                found.Add(next);
-                queue.Enqueue(next);
-            }
-        }
-        found.Sort((a, b) => a.Y != b.Y ? a.Y - b.Y : a.X - b.X);
-        return found;
-    }
+            Columns = columns, Rows = rows, Levels = levels, Ramps = ramps,
+            Water = water, Plot = plot,
+        });
 
     /// <summary>
     /// The map, once nothing is left to add to it, or a throw naming what is
@@ -541,10 +521,10 @@ public sealed partial class BoardMap
     /// takes - which is exactly what <see cref="WallBench"/> does to its rosette,
     /// and for the same reason. Uniform, so every relative height in the grid is
     /// untouched and <see cref="Passable"/> reads the same board.</param>
-    private static BoardMap FromGround(string name, string[] ground,
-                                       string[] ramps,
-                                       IReadOnlyList<Vector2I> homes,
-                                       string paint, bool height, int plinth = 0)
+    internal static BoardMap FromGround(string name, string[] ground,
+                                        string[] ramps,
+                                        IReadOnlyList<Vector2I> homes,
+                                        string paint, bool height, int plinth = 0)
     {
         int rows = ground.Length;
         int columns = rows == 0 ? 0 : ground[0].Length;
@@ -663,7 +643,7 @@ public sealed partial class BoardMap
 
         return Sealed(new BoardMap(name, columns, rows, homes, levels, ramped,
                                    water, kinds, cliffs, walls, floor, over,
-                                   plot, paint, height));
+                                   plot, paint, height, plinth));
     }
 
     /// <summary>A map written as separate relief, ramp and water grids - the
@@ -1286,16 +1266,53 @@ public sealed partial class BoardMap
         "effects", EffectsGround, EffectsRamps,
         new[] { new Vector2I(2, 2) }, TerrainSet.Mixed, true, plinth: 1);
 
-    public static BoardMap ByName(string name) =>
-        name.Trim().ToLowerInvariant() switch
+    /// <summary>The maps written in this file. Five, and they are the
+    /// references: the self test judges them, and a file on disk answering to
+    /// one of these names is refused rather than allowed to shadow it.</summary>
+    public static IReadOnlyList<string> Compiled { get; } =
+        new[] { "bench", "abbey", "test", "water", "wall" };
+
+    /// <summary>
+    /// The board of that name, compiled or off disk.
+    ///
+    /// <b>Unknown is still the bench, and that has not changed.</b> A name
+    /// nobody wrote is a typo on a command line, and coming up on the harness
+    /// board is what every scene has always done with one.
+    ///
+    /// <b>A clash throws whichever map was asked for.</b> A file called
+    /// <c>abbey</c> beside the compiled ABBEY is two references under one name -
+    /// see <see cref="MapFile.Clashes"/> - and a checkout in that state is broken
+    /// for every scene, not only for the scene that happened to ask.
+    ///
+    /// <b>Files are not cached and the compiled maps still are.</b> The editor
+    /// writes into that folder while the session is running, so a map read once
+    /// and held would be the board going stale the moment it was saved.
+    /// </summary>
+    public static BoardMap ByName(string name)
+    {
+        IReadOnlyList<string> clash = MapFile.Clashes(Compiled);
+        if (clash.Count > 0)
+            throw new InvalidOperationException(
+                "these map files answer to a name this file already writes, and "
+                + "one of the two is what the self test judges: "
+                + string.Join(" ", clash.Select(c => $"maps/{c}.json")));
+
+        string key = name.Trim().ToLowerInvariant();
+        return key switch
         {
             "abbey" => Abbey,
             "test" => Test,
             "water" => WaterMap,
             "wall" => WallMap,
-            _ => Bench,
+            "bench" => Bench,
+            _ => MapFile.Has(key) ? MapFile.Load(key) : Bench,
         };
+    }
 
-    public static IReadOnlyList<string> Names { get; } =
-        new[] { "bench", "abbey", "test", "water", "wall" };
+    /// <summary>Every board this session can open, compiled first. Not cached:
+    /// a name list settled at startup is a folder that stops answering the
+    /// moment the editor saves into it.</summary>
+    public static IReadOnlyList<string> Names =>
+        Compiled.Concat(MapFile.Names().Where(
+            n => !Compiled.Contains(n, StringComparer.OrdinalIgnoreCase))).ToList();
 }

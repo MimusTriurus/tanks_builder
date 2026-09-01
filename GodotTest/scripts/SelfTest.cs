@@ -14792,6 +14792,570 @@ public static class SelfTest
             shift < gap, $"height moves a cell {shift:F1}px of depth against "
                          + $"{gap:F1}px between the closest two");
 
+        // --- the map rules -------------------------------------------------
+        //
+        // The rules a board is judged by live in MapRules and nowhere else, and
+        // this is what pays for that: on boards built to be broken, the
+        // validator and the field's own guards have to name the same cell.
+        //
+        // <b>Why the theme below still writes its statements out by hand.</b> It
+        // judges the shipped maps, and a check that reads the implementation it
+        // is judging asserts only that the code agrees with itself - the same
+        // argument the bench board's second copy is kept for. So the shipped
+        // boards keep their hand-written statements, and what this adds is the
+        // parity between the two ways of asking.
+        Theme("map rules: the validator and the guards agree");
+        {
+            // Three by three, flat, with one cell a level up and a ramp under
+            // it: the smallest board on which a ramp is legal at all.
+            MapRules.Draft Board(int[] levels, bool[] ramps, bool[] water) => new()
+            {
+                Columns = 3, Rows = 3, Levels = levels, Ramps = ramps,
+                Water = water,
+            };
+            int[] Flat() => new int[9];
+            bool[] None() => new bool[9];
+
+            int[] one = Flat();
+            one[0 * 3 + 1] = 1;            // (1,0) a level up
+            bool[] ramp = None();
+            ramp[1 * 3 + 1] = true;        // (1,1) bridges it at heading 90
+
+            var legal = Board(one, ramp, None());
+            var faults = MapRules.RampFaults(legal);
+            Check("a ramp with one neighbour above it and a foot under it is legal",
+                faults.Count == 0,
+                string.Join("; ", faults.Select(f => f.Text)));
+            Check("and the site list offers exactly that cell at that heading",
+                MapRules.Sites(legal).TryGetValue(new Vector2I(1, 1), out int up)
+                && up == 90,
+                string.Join(" ", MapRules.Sites(legal)
+                    .Select(kv => $"({kv.Key.X},{kv.Key.Y})@{kv.Value}")));
+
+            // Two neighbours above it: which edge is high is not decided by the
+            // map, and this is the one ramp rule the field itself throws on.
+            int[] two = Flat();
+            two[0 * 3 + 1] = 1;
+            two[1 * 3 + 2] = 1;            // (2,1), which is (1,1) stepped at 30
+            var broken = Board(two, ramp, None());
+            List<MapRules.Fault> bridge = MapRules.RampFaults(broken)
+                .Where(f => f.Rule == "ramp.bridge").ToList();
+            Check("two neighbours above a ramp is a fault the validator names",
+                bridge.Count == 1 && bridge[0].Cell == new Vector2I(1, 1),
+                string.Join("; ", bridge.Select(f => f.ToString())));
+
+            var probe = new HexField { Columns = 3, Rows = 3 };
+            try
+            {
+                string threw = "";
+                try
+                {
+                    probe.SetRelief(two, ramp);
+                }
+                catch (Exception e)
+                {
+                    threw = e.Message;
+                }
+                Check("and the field's guard throws the validator's own words",
+                    bridge.Count == 1 && threw == bridge[0].Text,
+                    $"guard said \"{threw}\"");
+
+                // And the legal board builds, so the parity is not two ways of
+                // always refusing.
+                string quiet = "";
+                try
+                {
+                    probe.SetRelief(one, ramp);
+                }
+                catch (Exception e)
+                {
+                    quiet = e.Message;
+                }
+                Check("the legal board builds, so neither is refusing everything",
+                    quiet.Length == 0 && probe.RampHeading(new Vector2I(1, 1)) == 90,
+                    quiet.Length > 0
+                        ? quiet
+                        : $"heading {probe.RampHeading(new Vector2I(1, 1))}");
+
+                // One body of water is one surface: two wet cells on two levels.
+                int[] stepped = Flat();
+                stepped[1 * 3 + 0] = -1;   // (0,1), which is (0,0) stepped at 270
+                bool[] wet = None();
+                wet[0] = true;
+                wet[1 * 3 + 0] = true;
+                var falls = Board(stepped, None(), wet);
+                List<MapRules.Fault> steps = MapRules.StepFaults(falls);
+                Check("water on two levels is a waterfall the validator names",
+                    steps.Count > 0 && steps[0].Cell == new Vector2I(0, 0),
+                    string.Join("; ", steps.Select(f => f.Brief)));
+
+                string refused = "";
+                try
+                {
+                    probe.SetRelief(stepped);
+                    probe.SetWater(wet);
+                }
+                catch (Exception e)
+                {
+                    refused = e.Message;
+                }
+                Check("and the field's guard refuses it naming the same pair",
+                    steps.Count > 0 && refused.Contains(steps[0].Brief),
+                    refused.Length == 0 ? "the guard allowed it" : refused);
+            }
+            finally
+            {
+                probe.Free();
+            }
+
+            // A home is judged by where it is, and all four ways of being
+            // nowhere a tank can park are one rule.
+            var parked = Board(one, ramp, None());
+            parked.Homes = new[] { new Vector2I(1, 1) };
+            Check("a home on a ramp is not somewhere a tank can park",
+                MapRules.HomeFaults(parked).Any(f => f.Rule == "home.park"),
+                "the validator allowed a home on a ramp");
+            parked.Homes = new[] { new Vector2I(0, 2) };
+            Check("and on flat ground it is",
+                MapRules.HomeFaults(parked).Count == 0,
+                string.Join("; ", MapRules.HomeFaults(parked).Select(f => f.Text)));
+        }
+
+        // --- the map file --------------------------------------------------
+        //
+        // A board written to disk and read back has to be the board that was
+        // written, cell for cell. That is the whole of what a file format owes,
+        // and it is the check the format was built around: BoardMap.Plinth
+        // exists because this found a board coming back with its plain ground
+        // re-encoded as hills.
+        Theme("the map file: written and read back is the board that was");
+        {
+            foreach (string name in BoardMap.Compiled)
+            {
+                BoardMap was = BoardMap.ByName(name);
+                BoardMap now;
+                try
+                {
+                    now = MapFile.Parse(MapFile.Write(was), name);
+                }
+                catch (Exception e)
+                {
+                    Check($"{name}: survives the round trip", false, e.Message);
+                    continue;
+                }
+
+                string drifted = "";
+                if (was.Columns != now.Columns || was.Rows != now.Rows)
+                    drifted = $"{now.Columns}x{now.Rows}, was "
+                            + $"{was.Columns}x{was.Rows}";
+                for (int at = 0; at < was.Levels.Length && drifted.Length == 0; at++)
+                {
+                    int q = at % was.Columns, r = at / was.Columns;
+                    string what =
+                        was.Levels[at] != now.Levels[at] ? "level"
+                        : was.Ramps[at] != now.Ramps[at] ? "ramp"
+                        : was.Water[at] != now.Water[at] ? "water"
+                        : was.Cliffs[at] != now.Cliffs[at] ? "rock"
+                        : was.Walls[at] != now.Walls[at] ? "wall"
+                        : was.Ground[at] != now.Ground[at] ? "floor"
+                        : was.Over[at] != now.Over[at] ? "cover"
+                        : was.OnBoard(new Vector2I(q, r))
+                          != now.OnBoard(new Vector2I(q, r)) ? "plot"
+                        : "";
+                    if (what.Length > 0)
+                        drifted = $"({q},{r}) came back with a different {what}";
+                }
+                if (drifted.Length == 0 && !was.Homes.SequenceEqual(now.Homes))
+                    drifted = "the homes drifted";
+                if (drifted.Length == 0 && was.Paint != now.Paint)
+                    drifted = $"paint {now.Paint}, was {was.Paint}";
+                if (drifted.Length == 0 && was.Height != now.Height)
+                    drifted = "height flag flipped";
+                Check($"{name}: written and read back, cell for cell",
+                    drifted.Length == 0, drifted);
+
+                // Kinds are judged apart from the rest, because the bench is
+                // the one board written as three grids and three grids say
+                // nothing about what a cell is made of - see BoardMap, which
+                // says so. The alphabet does say: '1' IS a rise. So the bench
+                // comes back painted, and what is asserted is that the paint it
+                // gains is exactly the paint its letters imply and nothing else.
+                var painted = new List<string>();
+                for (int at = 0; at < was.Kinds.Length; at++)
+                    if (was.Kinds[at] != now.Kinds[at])
+                        painted.Add($"({at % was.Columns},{at / was.Columns}) "
+                                    + $"{was.Kinds[at] ?? "-"} -> "
+                                    + $"{now.Kinds[at] ?? "-"}");
+                if (name == "bench")
+                {
+                    bool implied = true;
+                    for (int at = 0; at < was.Kinds.Length; at++)
+                        if (was.Kinds[at] != now.Kinds[at])
+                            implied &= was.Kinds[at] is null
+                                       && now.Kinds[at] == TerrainSet.Rise
+                                       && was.Levels[at] == 1;
+                    Check("bench: the three-grid board gains exactly the paint "
+                          + "its letters imply",
+                        painted.Count > 0 && implied,
+                        painted.Count == 0
+                            ? "nothing was painted, so the alphabet stopped "
+                              + "naming a rise"
+                            : string.Join(" ", painted));
+                }
+                else
+                {
+                    Check($"{name}: and its kinds with it",
+                        painted.Count == 0, string.Join(" ", painted));
+                }
+            }
+
+            // And once through an actual file, because everything above is a
+            // string in memory and what a format is for is the disk. Written to
+            // the scratch folder rather than to maps/, which is judged.
+            string scratch = System.IO.Path.Combine(AssetRoot.Out, "maps-selftest");
+            try
+            {
+                string path = MapFile.Save(BoardMap.Abbey,
+                    System.IO.Path.Combine(scratch, "abbey.json"));
+                BoardMap back = MapFile.Read(path, "abbey");
+                Check("and once through a real file on disk",
+                    back.Columns == BoardMap.Abbey.Columns
+                    && back.Levels.SequenceEqual(BoardMap.Abbey.Levels),
+                    $"{path} came back {back.Columns}x{back.Rows}");
+            }
+            catch (Exception e)
+            {
+                Check("and once through a real file on disk", false, e.Message);
+            }
+            finally
+            {
+                try
+                {
+                    if (System.IO.Directory.Exists(scratch))
+                        System.IO.Directory.Delete(scratch, true);
+                }
+                catch (Exception)
+                {
+                    // Leaving a scratch folder behind is not a failed check.
+                }
+            }
+
+            // What the reader refuses, and every one of these reads as something
+            // else when it is let through: a ragged row becomes a column of
+            // plain nobody drew, a stale size field becomes a board of the wrong
+            // shape, a map answering to two names becomes a board judged as one
+            // and shown as the other.
+            string good = MapFile.Write(BoardMap.Test);
+            string Refusal(string text, string name)
+            {
+                try
+                {
+                    MapFile.Parse(text, name);
+                    return "";
+                }
+                catch (Exception e)
+                {
+                    return e.Message;
+                }
+            }
+
+            Check("the good file parses, so the refusals are not two ways of "
+                  + "always refusing",
+                Refusal(good, "test").Length == 0, Refusal(good, "test"));
+            Check("a ragged row is refused rather than clipped",
+                Refusal(good.Replace("\"" + MapFile.Ground(BoardMap.Test)[0] + "\"",
+                                     "\"" + MapFile.Ground(BoardMap.Test)[0][1..] + "\""),
+                        "test").Length > 0,
+                "a short row was accepted");
+            Check("a size that stopped agreeing with the drawing is refused",
+                Refusal(good.Replace($"[{BoardMap.Test.Columns}, {BoardMap.Test.Rows}]",
+                                     $"[{BoardMap.Test.Columns + 1}, {BoardMap.Test.Rows}]"),
+                        "test").Length > 0,
+                "a stale size was accepted");
+            Check("a file calling itself something else is refused",
+                Refusal(good, "elsewhere").Length > 0,
+                "a map answered to a name it does not carry");
+            Check("a format this reader does not speak is refused",
+                Refusal(good.Replace("\"format\": 1", "\"format\": 2"), "test")
+                    .Length > 0,
+                "a later format was read as far as it happened to parse");
+            Check("a board with no homes is refused",
+                Refusal(good.Replace(
+                    "\"homes\": [" + string.Join(", ",
+                        BoardMap.Test.Homes.Select(h => $"[{h.X}, {h.Y}]")) + "]",
+                    "\"homes\": []"), "test").Length > 0,
+                "a board nothing can park on was accepted");
+
+            // The clash rule, asserted on the list rather than by writing a file
+            // into maps/ - which would be a check that leaves a second reference
+            // behind if it dies halfway.
+            // The other end of the same rule, and the end that actually
+            // happens: a board opened from the compiled ABBEY keeps its name, so
+            // the ordinary way to get two references under one name is to press
+            // save. Refused before anything is written - by the time ByName
+            // refuses, the file is on disk and every scene is broken.
+            string saved = "";
+            try
+            {
+                MapFile.Save(BoardMap.Abbey);
+            }
+            catch (Exception e)
+            {
+                saved = e.Message;
+            }
+            Check("and saving one under that name is refused before it is written",
+                saved.Length > 0 && !MapFile.Has("abbey"),
+                saved.Length == 0
+                    ? "a compiled board was written into maps/"
+                    : saved);
+
+            Check("a map file may not answer to a compiled board's name",
+                MapFile.Clashes(BoardMap.Compiled).Count == 0,
+                "these shadow a compiled map: "
+                + string.Join(" ", MapFile.Clashes(BoardMap.Compiled)));
+            Check("and the compiled five are all still there",
+                BoardMap.Compiled.All(n => BoardMap.Names.Contains(n)),
+                string.Join(" ", BoardMap.Names));
+        }
+
+        // --- the alphabet and the brushes ----------------------------------
+        //
+        // The letters are decoded in two places - BoardMap.FromGround, which is
+        // the reader of record, and MapFile.Alphabet, which the writer and the
+        // editor need - so the first thing asserted is that the two say the same
+        // thing about every letter there is. Everything after it is the brushes,
+        // and none of it needs a scene: a board being drawn is two grids.
+        Theme("the map alphabet: both readers of a letter say the same thing");
+        {
+            foreach (MapFile.Glyph glyph in MapFile.Alphabet)
+            {
+                // One letter on a board of one cell. Small enough that no guard
+                // has a neighbour to object about, which is what lets every
+                // letter be asked about on its own.
+                BoardMap one;
+                try
+                {
+                    one = BoardMap.FromGround(
+                        $"glyph{glyph.Letter}", new[] { glyph.Letter.ToString() },
+                        new[] { "." }, new[] { new Vector2I(0, 0) },
+                        TerrainSet.Mixed, true);
+                }
+                catch (Exception e)
+                {
+                    Check($"'{glyph.Letter}' reads as a board of one cell", false,
+                        e.Message);
+                    continue;
+                }
+
+                var cell = new Vector2I(0, 0);
+                bool on = glyph.Letter != BoardMap.Off;
+                string said =
+                    one.OnBoard(cell) != on ? "on the board"
+                    : !on ? ""
+                    : one.Ground[0] != glyph.Floor ? $"floor {one.Ground[0]}"
+                    : one.Over[0] != glyph.Over ? $"cover {one.Over[0]}"
+                    : one.Levels[0] != glyph.Level ? $"level {one.Levels[0]}"
+                    : one.Water[0] != glyph.Water ? $"water {one.Water[0]}"
+                    : one.Cliffs[0] != glyph.Cliff ? $"rock {one.Cliffs[0]}"
+                    : one.Walls[0] != glyph.Wall ? $"wall {one.Walls[0]}"
+                    : glyph.Wood && one.Kinds[0] != TerrainSet.Forest
+                        ? $"kind {one.Kinds[0] ?? "-"}"
+                        : "";
+                Check($"'{glyph.Letter}': the table and BoardMap agree",
+                    said.Length == 0,
+                    said.Length == 0 ? "" : $"the map says {said}");
+
+                // And back the other way, so the table is a bijection rather
+                // than two lists that happen to overlap.
+                if (on)
+                    Check($"'{glyph.Letter}': and the axes come back to it",
+                        MapFile.Letter(glyph.Floor, glyph.Over, glyph.Level,
+                                       glyph.Water, glyph.Cliff)
+                        == glyph.Letter,
+                        "came back as "
+                        + (MapFile.Letter(glyph.Floor, glyph.Over, glyph.Level,
+                                          glyph.Water, glyph.Cliff)
+                           ?? '?').ToString());
+            }
+
+            Check("no letter appears twice in the alphabet",
+                MapFile.Alphabet.Select(g => g.Letter).Distinct().Count()
+                == MapFile.Alphabet.Count,
+                new string(MapFile.Alphabet.Select(g => g.Letter).ToArray()));
+        }
+
+        Theme("the map brushes: a board being drawn is two grids");
+        {
+            // Opened, written out, and it is the board that was opened.
+            var edit = MapEdit.Of(BoardMap.Abbey);
+            Check("a map opened for editing writes back its own picture",
+                edit.Ground().SequenceEqual(MapFile.Ground(BoardMap.Abbey))
+                && edit.Ramps().SequenceEqual(MapFile.Ramps(BoardMap.Abbey)),
+                "the grids came back different");
+            BoardMap rebuilt = edit.Build();
+            Check("and builds the board it was opened from",
+                rebuilt.Levels.SequenceEqual(BoardMap.Abbey.Levels)
+                && rebuilt.Water.SequenceEqual(BoardMap.Abbey.Water)
+                && rebuilt.Ramps.SequenceEqual(BoardMap.Abbey.Ramps),
+                "the arrays moved");
+
+            // A fresh board, which is where the brushes are judged: nothing on
+            // it is load-bearing, so a check that breaks it says what it meant.
+            // On the shipped default rather than a size picked here, so what the
+            // brushes are judged on is the board the tool actually opens with.
+            var draw = MapEdit.Blank("scratch", MapEdit.DefaultColumns,
+                                     MapEdit.DefaultRows);
+            Check("a new board is open ground with one home on it",
+                draw.Ground().All(row => row.All(c => c == BoardMap.Plain))
+                && draw.Homes.Count == 1
+                && draw.Columns == 10 && draw.Rows == 10,
+                $"{draw.Columns}x{draw.Rows}: " + string.Join("/", draw.Ground()));
+            Check("and the dialog's suggested proportion is square on the ground",
+                MapEdit.Square(20) == 17,
+                $"20 columns suggested {MapEdit.Square(20)} rows");
+
+            // One stroke, many cells, one undo.
+            var middle = new Vector2I(4, 4);
+            draw.Begin();
+            IReadOnlyList<Vector2I> patch = draw.Ring(middle, 1);
+            Check("a brush of radius one covers a cell and its six neighbours",
+                patch.Count == 7, $"{patch.Count} cells");
+            IReadOnlyList<string> refused = draw.Sweep(patch,
+                c => (draw.Over(c, Cover.Forest, out string why), why));
+            Check("and paints all of them",
+                refused.Count == 0 && patch.All(
+                    c => draw.LetterAt(c) == BoardMap.Wood),
+                string.Join("; ", refused));
+            Check("one stroke is one entry on the stack",
+                draw.Depth == 1, $"{draw.Depth} entries");
+            draw.Undo();
+            Check("and one undo takes the whole stroke back",
+                patch.All(c => draw.LetterAt(c) == BoardMap.Plain)
+                && draw.Depth == 0,
+                string.Join(" ", patch.Where(
+                    c => draw.LetterAt(c) != BoardMap.Plain)
+                    .Select(c => $"({c.X},{c.Y})")));
+            draw.Redo();
+            Check("redo puts it back",
+                patch.All(c => draw.LetterAt(c) == BoardMap.Wood),
+                "the stroke did not come back");
+            draw.Undo();
+
+            // The fill fills what is drawn.
+            Check("the fill takes every cell of one letter",
+                draw.Region(middle).Count == draw.Columns * draw.Rows,
+                $"{draw.Region(middle).Count} of {draw.Columns * draw.Rows}");
+
+            // What the alphabet cannot carry, and every one of these is a cell
+            // that could not be saved if the brush let it through.
+            draw.Begin();
+            draw.Level(middle, 1, out _);
+            Check("sand does not lie on a rise, and the brush says so",
+                !draw.Floor(middle, Foundation.Sand, out string sandWhy),
+                "sand was painted on to level " + draw.GlyphAt(middle).Level);
+            Note("    " + sandWhy);
+            Check("a floor made of water has no letter",
+                !draw.Floor(middle, Foundation.Shallow, out string wetWhy),
+                "shallow was painted");
+            Note("    " + wetWhy);
+            Check("level two is the rock, and it is declared rather than raised "
+                  + "into",
+                !draw.Level(middle, 2, out string highWhy),
+                "a cell was raised to a rock");
+            Note("    " + highWhy);
+            draw.Undo();
+
+            // The rock is the whole cell.
+            draw.Begin();
+            Check("a rock is painted on to open ground",
+                draw.Floor(middle, Foundation.Rock, out string rockWhy)
+                && draw.LetterAt(middle) == BoardMap.Rock, rockWhy);
+            Check("nothing stands on a rock",
+                !draw.Over(middle, Cover.Forest, out _),
+                "a wood was planted on a rock");
+            Check("and no ramp climbs off one",
+                !draw.Ramp(middle, true, out _), "a rock took a ramp");
+            draw.Undo();
+
+            // Water carries its own level, and that is the letter rather than a
+            // side effect.
+            draw.Begin();
+            Check("water stands in low ground, because that is what the letter "
+                  + "says",
+                draw.Water(middle, true, out _)
+                && draw.GlyphAt(middle).Level == -1
+                && draw.LetterAt(middle) == BoardMap.Wet,
+                $"the cell came out {draw.LetterAt(middle)} at level "
+                + $"{draw.GlyphAt(middle).Level}");
+            Check("and raising it out of the water is refused",
+                !draw.Level(middle, 0, out _),
+                "water was lifted to the datum");
+            draw.Undo();
+
+            // The eraser means a different cell on each tab.
+            draw.Begin();
+            draw.Over(middle, Cover.Trench, out _);
+            draw.Erase(middle, MapEdit.Tab.Cover, out _);
+            Check("the eraser on the cover tab takes the cover off",
+                draw.LetterAt(middle) == BoardMap.Plain,
+                $"left {draw.LetterAt(middle)}");
+            draw.Level(middle, 1, out _);
+            draw.Ramp(middle, true, out _);
+            draw.Erase(middle, MapEdit.Tab.Level, out _);
+            Check("and on the level tab it puts the cell back on the datum",
+                draw.GlyphAt(middle).Level == 0 && !draw.IsRamp(middle),
+                $"level {draw.GlyphAt(middle).Level}, ramp "
+                + $"{draw.IsRamp(middle)}");
+            draw.Undo();
+
+            // The last home is not droppable, and a home's cell is not
+            // removable - both are the same rule from two ends.
+            Check("the last home cannot be dropped",
+                !draw.DropHome(0, out _), "a board was left with no homes");
+            Check("and a home's cell cannot be taken off the board",
+                !draw.Plot(draw.Homes[0], false, out _),
+                "a home was left standing off the board");
+
+            // The draft the rules are asked about is built from the letters, so
+            // it cannot disagree with what is drawn.
+            draw.Begin();
+            draw.Level(new Vector2I(4, 3), 1, out _);
+            draw.Ramp(middle, true, out _);
+            MapRules.Draft drafted = draw.Draft();
+            Check("a new board stands on a plinth, so a flat one has sides",
+                draw.Plinth == 1,
+                $"plinth {draw.Plinth} - a board flat on the datum is hexagons "
+                + "of ground and nothing else");
+            Check("the draft the rules see is the picture that is drawn",
+                // Against the plinth, because the letters are written relative
+                // to it and the draft carries the board's own heights - the two
+                // differ by exactly the plinth, and this check is where that
+                // first showed.
+                drafted.LevelAt(new Vector2I(4, 3)) == 1 + draw.Plinth
+                && drafted.IsRamp(middle)
+                && drafted.LevelAt(middle) == draw.Plinth,
+                $"level {drafted.LevelAt(new Vector2I(4, 3))} against plinth "
+                + $"{draw.Plinth}, ramp {drafted.IsRamp(middle)}");
+            Check("and a ramp with one neighbour above it draws no fault",
+                draw.Faults().Count(f => f.Fatal) == 0,
+                string.Join("; ", draw.Faults().Where(f => f.Fatal)
+                    .Select(f => f.Text)));
+
+            // An illegal draft is a list rather than a refusal - which is the
+            // whole reason MapRules returns one - and the board is still there
+            // to go on drawing.
+            draw.Level(new Vector2I(4, 5), 1, out _);
+            Check("a ramp between two rises is a fault, not a refused brush",
+                draw.Faults().Any(f => f.Rule == "ramp.bridge"
+                                       && f.Cell == middle),
+                string.Join("; ", draw.Faults().Select(f => f.Text)));
+            Check("and the letters are still what they were painted",
+                draw.IsRamp(middle)
+                && draw.GlyphAt(new Vector2I(4, 5)).Level == 1,
+                "the draft rolled a brush back");
+            draw.Undo();
+        }
+
         // --- the authored boards ------------------------------------------
         //
         // Run here because a map is data and nothing on the board it describes

@@ -1653,14 +1653,22 @@ public sealed partial class Main : SceneRoot
 		// a broken board is a crash, the same as a ragged row. Without this the
 		// authoring report dies before it can say a word, which is the one place
 		// that cannot afford to.
+		//
+		// **And it exits rather than throwing out of _Ready.** An exception here
+		// leaves the window standing with nothing in it - Godot does not quit on
+		// one - so `--selftest` against a broken board hangs instead of failing,
+		// which is the one outcome worse than a crash. Found by dropping a map
+		// file into `maps/` under a compiled board's name: the refusal is right
+		// and the run never came back. So the board still does not come up, and
+		// the reason is on stdout with a non-zero code behind it.
 		try
 		{
 			_map = BoardMap.ByName(Map);
 		}
-		catch (Exception e) when (_mapReport)
+		catch (Exception e)
 		{
 			GD.Print($"map {Map}: REFUSED {e.Message}");
-			GetTree().Quit();
+			GetTree().Quit(_mapReport ? 0 : 1);
 			return;
 		}
 		// The board's own paint and its own answer about height, both losing to a

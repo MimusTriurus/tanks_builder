@@ -337,8 +337,28 @@ public sealed partial class HexField : Node2D
         QueueRedraw();
     }
 
+    /// <summary>
+    /// Which edge of each marked cell is its high one, or a throw naming the
+    /// first cell where the map does not decide.
+    ///
+    /// <b>The rule lives in <see cref="MapRules"/> and this asks it.</b> It was
+    /// written three times - here, in the audit and in the self test - and three
+    /// copies of one rule agree until somebody edits one; see that type's note
+    /// for what that already cost once.
+    ///
+    /// <b>Only the bridge rule throws, and that has not changed.</b>
+    /// <see cref="MapRules.Footed"/> is the check this deliberately does not
+    /// make: a ramp that can only be entered from the top is a dead end and not
+    /// a board the field cannot build, so it stays something the audit reports
+    /// and the field draws.
+    /// </summary>
     private int[]? DeriveRamps(bool[] marked)
     {
+        MapRules.Draft draft = Drafted(marked);
+        foreach (MapRules.Fault fault in MapRules.RampFaults(draft))
+            if (fault.Rule == "ramp.bridge")
+                throw new InvalidOperationException(fault.Text);
+
         var headings = new int[Columns * Rows];
         bool any = false;
         for (int r = 0; r < Rows; r++)
@@ -346,30 +366,45 @@ public sealed partial class HexField : Node2D
         {
             int at = r * Columns + q;
             headings[at] = -1;
-            var cell = new Vector2I(q, r);
             if (!marked[at])
                 continue;
-            var up = new List<int>();
-            foreach (int heading in EdgeHeadings)
-            {
-                Vector2I next = Step(cell, heading);
-                if (InBounds(next) && LevelAt(next) == LevelAt(cell) + 1)
-                    up.Add(heading);
-            }
-            if (up.Count != 1)
-                throw new InvalidOperationException(
-                    $"the ramp at ({q},{r}) on level {LevelAt(cell)} has "
-                    + (up.Count == 0
-                        ? "no neighbour a level above it, so there is nothing "
-                          + "for it to bridge"
-                        : $"{up.Count} neighbours a level above it - headings "
-                          + string.Join(", ", up)
-                          + " - so which edge is its high one is not decided by "
-                          + "the map"));
-            headings[at] = up[0];
+            headings[at] = MapRules.Above(draft, new Vector2I(q, r))[0];
             any = true;
         }
         return any ? headings : null;
+    }
+
+    /// <summary>
+    /// The board as <see cref="MapRules"/> sees it: this field's own arrays, and
+    /// nothing the rules do not read.
+    ///
+    /// <b>The field is handed boards that are not maps on purpose</b> - the self
+    /// test flattens one to ask the shoreline about a made-up mask - so this
+    /// carries no homes and no cliffs, and the rules that need those are the ones
+    /// a whole map is asked and this is not.
+    /// </summary>
+    private MapRules.Draft Drafted(bool[]? ramps = null) => new()
+    {
+        Columns = Columns,
+        Rows = Rows,
+        Levels = _levels ?? new int[Columns * Rows],
+        Ramps = ramps ?? Marked(),
+        Water = _water ?? new bool[Columns * Rows],
+        Ground = _ground ?? new Foundation[Columns * Rows],
+        Cliffs = new bool[Columns * Rows],
+        Plot = _plot,
+    };
+
+    /// <summary>The derived headings read back as the flags they came from, for
+    /// a rule that asks whether a cell carries a ramp rather than which way it
+    /// tilts.</summary>
+    private bool[] Marked()
+    {
+        var marked = new bool[Columns * Rows];
+        if (_ramps is not null)
+            for (int at = 0; at < marked.Length; at++)
+                marked[at] = _ramps[at] >= 0;
+        return marked;
     }
 
     /// <summary>
@@ -593,22 +628,12 @@ public sealed partial class HexField : Node2D
     /// </summary>
     private void Flat()
     {
-        var stepped = new List<string>();
-        for (int r = 0; r < Rows; r++)
-        for (int q = 0; q < Columns; q++)
-        {
-            var cell = new Vector2I(q, r);
-            if (!IsWater(cell))
-                continue;
-            foreach (int heading in EdgeHeadings)
-            {
-                Vector2I next = Step(cell, heading);
-                if (!IsWater(next) || LevelAt(next) == LevelAt(cell))
-                    continue;
-                stepped.Add($"({q},{r}) on {LevelAt(cell)} beside "
-                            + $"({next.X},{next.Y}) on {LevelAt(next)}");
-            }
-        }
+        // The rule itself is MapRules.StepFaults - see DeriveRamps on why it is
+        // there rather than here. What stays is the shape of the refusal: every
+        // offending pair in one message, because a waterfall is usually a row of
+        // them and one at a time is one round trip each.
+        List<string> stepped = MapRules.StepFaults(Drafted())
+            .Select(f => f.Brief).ToList();
         if (stepped.Count > 0)
             throw new InvalidOperationException(
                 "one body of water is one surface, and these neighbours are "
@@ -1721,6 +1746,22 @@ public sealed partial class HexField : Node2D
     /// and read as terrain - two kinds of ground - instead of as something drawn
     /// on it. The route's amber can be loud because it is a handful of cells;
     /// this is thirty of them.</summary>
+    /// <summary>
+    /// A mark the scene paints itself, asked before the field's own three.
+    ///
+    /// <b>A hook rather than a fourth list, for <c>TankTick.Launch</c>'s
+    /// reason.</b> The three below are the harness's marks - an arc, a route, an
+    /// aim - and they are what a board in a game has on it. The map editor
+    /// paints faults, legal ramp sites and the cell under the brush, and none of
+    /// those is a thing a board has; teaching this class about them would be the
+    /// shared module knowing which scene opened it, which is the one rule every
+    /// root here keeps.
+    ///
+    /// Null for a cell the scene has nothing to say about, so the field's own
+    /// marks still answer underneath.
+    /// </summary>
+    public Func<Vector2I, Color?>? Ink;
+
     private static readonly Color ArcInk = new(1.0f, 0.86f, 0.84f);
     private static readonly Color RouteInk = new(0.85f, 0.95f, 0.65f);
     private static readonly Color DestInk = new(1.0f, 0.78f, 0.30f);
@@ -1759,6 +1800,8 @@ public sealed partial class HexField : Node2D
     /// </summary>
     public Color InkFor(Vector2I cell)
     {
+        if (Ink?.Invoke(cell) is Color painted)
+            return painted;
         foreach (Vector2I at in Aim)
             if (at == cell)
                 return AimInk;

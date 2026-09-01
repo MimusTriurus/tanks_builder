@@ -124,26 +124,6 @@ public sealed partial class BoardMap
     // --- the audit -----------------------------------------------------------
 
     /// <summary>
-    /// Whether a ramp bridging <paramref name="high"/> has something to stand on
-    /// at its low end.
-    ///
-    /// <b>The check the field does not make.</b> <c>DeriveRamps</c> settles which
-    /// edge is high and stops there; <see cref="HexField.Passable"/> then lets a
-    /// ramp be entered along its axis only, and the level it reaches at the low
-    /// end is the ramp's own. So a ramp whose low axis neighbour is off the
-    /// board, on another level, or itself a ramp is enterable from the top and
-    /// nowhere else - a slope drawn on the hillside that leads back to the
-    /// hillside. Nothing throws and nothing on screen says so.
-    /// </summary>
-    private bool Foot(HexField probe, Vector2I cell, int high)
-    {
-        Vector2I foot = HexField.Step(cell, HexField.Reverse(high));
-        return probe.InBounds(foot)
-               && !Ramps[At(foot)]
-               && probe.LevelAt(foot) == probe.LevelAt(cell);
-    }
-
-    /// <summary>
     /// Everything that can be wrong with an authored map, in one report.
     ///
     /// <b>It runs on a probe field rather than the live one.</b> None of what it
@@ -171,50 +151,14 @@ public sealed partial class BoardMap
             // field itself demands of water.
             probe.SetRelief(Levels);
 
-            // Every cell that could carry a ramp, and which way it would tilt.
-            //
-            // The first half is DeriveRamps' rule and not a paraphrase of it:
-            // exactly one in-bounds neighbour a level above.
-            //
-            // <b>The second half is the one the field does not check, and a ramp
-            // that fails it is a dead end that nothing reports.</b> A ramp is
-            // entered and left along its axis only, so besides the high
-            // neighbour it needs its <i>low</i> axis neighbour to be on the
-            // board, at the ramp's own level, and not itself a ramp - otherwise
-            // the only way on to it is down from the top, and the only way off
-            // is back up. Found by building one: a ramp on to the east rise had
-            // the river's low bank below it, and every number about it was
-            // right.
-            //
-            // <b>Water is not skipped, and it used to be.</b> SetWater refused a
-            // ramp under a pond - a slope has no one surface height for water to
-            // stand at - so listing a flooded cell as a site offered something
-            // that could not be taken. That refusal is gone: the pond's plane
-            // crosses the slope instead of needing a height off it, and the
-            // depth buffer cuts the water where the two planes meet. So a
-            // flooded cell is a site like any other, and what taking it makes is
-            // a beach - dry at the head, under water over the back of its run.
-            //
-            // Left in, the skip did not go quiet: it called every beach on every
-            // shipped board BAD, in the words of the guard it outlived.
-            var legal = new Dictionary<Vector2I, int>();
-            for (int r = 0; r < Rows; r++)
-            for (int q = 0; q < Columns; q++)
-            {
-                var cell = new Vector2I(q, r);
-                if (!OnBoard(cell) || Cliffs[At(cell)])
-                    continue;
-                var up = HexField.EdgeHeadings
-                    .Where(h => probe.InBounds(HexField.Step(cell, h))
-                                && probe.LevelAt(HexField.Step(cell, h))
-                                   == probe.LevelAt(cell) + 1)
-                    .ToList();
-                // A site whose high edge is a rock is not a site: it would
-                // hand away the one thing a rock is.
-                if (up.Count == 1 && !IsCliff(HexField.Step(cell, up[0]))
-                    && Foot(probe, cell, up[0]))
-                    legal[cell] = up[0];
-            }
+            // Every cell that could carry a ramp, which way it would tilt,
+            // and what is wrong with the ones the map declared - all of it out
+            // of MapRules, which is the only copy of those rules there is. See
+            // that type: this report, the field's guards and the self test used
+            // to carry three, and the audit once outlived the guard it was
+            // paraphrasing and started calling every beach BAD.
+            MapRules.Draft draft = MapRules.Draft.Of(this);
+            Dictionary<Vector2I, int> legal = MapRules.Sites(draft);
 
             var declared = new List<Vector2I>();
             for (int r = 0; r < Rows; r++)
@@ -225,55 +169,17 @@ public sealed partial class BoardMap
             lines.Add($"ramps: {declared.Count} declared, "
                       + $"{legal.Count} cells could carry one");
 
-            // A ramp that is not a legal site, and why. Named rather than left
-            // to SetRelief, which throws on the first one and says nothing about
-            // the others - which is eight round trips on a board this size.
-            foreach (Vector2I cell in declared.Where(c => !legal.ContainsKey(c)))
-            {
-                var up = HexField.EdgeHeadings
-                    .Where(h => probe.InBounds(HexField.Step(cell, h))
-                                && probe.LevelAt(HexField.Step(cell, h))
-                                   == probe.LevelAt(cell) + 1)
-                    .ToList();
-                if (up.Count != 1)
-                {
-                    lines.Add($"  BAD ({cell.X},{cell.Y}) on level "
-                              + $"{probe.LevelAt(cell)} has {up.Count} "
-                              + "neighbours a level above it"
-                              + (up.Count == 0
-                                  ? ", so there is nothing for it to bridge"
-                                  : " - headings " + string.Join(" ", up)
-                                    + " - so the map does not decide its high "
-                                    + "edge"));
-                    continue;
-                }
-                Vector2I foot = HexField.Step(cell, HexField.Reverse(up[0]));
-                lines.Add($"  BAD ({cell.X},{cell.Y}) bridges {up[0]} but its "
-                          + $"foot ({foot.X},{foot.Y}) is "
-                          + (!probe.InBounds(foot)
-                              ? "off the board"
-                              : Ramps[At(foot)]
-                                  ? "another ramp"
-                                  : $"on level {probe.LevelAt(foot)} and this "
-                                    + $"ramp is on {probe.LevelAt(cell)}")
-                          + " - so it can only be entered from the top and left "
-                          + "the same way");
-            }
-
-            // A ramp whose high edge points at a rock hands away the one thing a
-            // rock is: the rise that cannot be climbed.
-            foreach (Vector2I cell in declared.Where(legal.ContainsKey))
-            {
-                Vector2I high = HexField.Step(cell, legal[cell]);
-                if (IsCliff(high))
-                    lines.Add($"  BAD ({cell.X},{cell.Y}) climbs on to the rock "
-                              + $"at ({high.X},{high.Y})");
-            }
+            // Named rather than left to SetRelief, which throws on the first one
+            // and says nothing about the rest - which is nine round trips on a
+            // board this size.
+            List<MapRules.Fault> faults = MapRules.RampFaults(draft);
+            foreach (MapRules.Fault fault in faults.Where(f => f.Fatal))
+                lines.Add("  BAD " + fault.Text);
 
             // Near-facing ramps, named and allowed. See AbbeyRamps.
-            string near = string.Join(" ", declared.Where(legal.ContainsKey)
-                .Where(c => HexField.NearHeading.Contains(legal[c]))
-                .Select(c => $"({c.X},{c.Y})@{legal[c]}"));
+            string near = string.Join(" ", faults
+                .Where(f => f.Rule == "ramp.near")
+                .Select(f => $"({f.Cell.X},{f.Cell.Y})@{legal.GetValueOrDefault(f.Cell, -1)}"));
             if (near.Length > 0)
                 lines.Add("  facing the camera, so compressed: " + near);
 
@@ -288,35 +194,34 @@ public sealed partial class BoardMap
                   + "surface's own height and are under it: "
                   + string.Join(" ", flood.Select(c => $"({c.X},{c.Y})")));
 
+            foreach (MapRules.Fault fault in MapRules.HomeFaults(draft))
+                lines.Add("  BAD " + fault.Text);
+
             // The field's own guards, on the real arrays.
             probe.SetRelief(Levels, Ramps);
             if (Water.Any(w => w))
                 probe.SetWater(Water);
 
-            // What can be driven to, from every home.
+            // What can be driven to, from every home. The walk is
+            // MapRules.Seen, which asks HexField.Passable rather than growing a
+            // second answer to it; what is written out here is the shape of the
+            // report - a count per home, and the stranded cells listed.
             foreach (Vector2I home in Homes)
             {
-                var seen = new HashSet<Vector2I> { home };
-                var queue = new Queue<Vector2I>();
-                queue.Enqueue(home);
-                while (queue.Count > 0)
-                {
-                    Vector2I at = queue.Dequeue();
-                    foreach (int h in HexField.EdgeHeadings)
-                    {
-                        Vector2I next = HexField.Step(at, h);
-                        if (probe.Passable(at, h) && seen.Add(next))
-                            queue.Enqueue(next);
-                    }
-                }
-
+                HashSet<Vector2I> seen = MapRules.Seen(probe, home);
                 var stranded = new List<Vector2I>();
-                for (int r = 0; r < Rows; r++)
-                for (int q = 0; q < Columns; q++)
+                var climbed = new List<Vector2I>();
+                foreach (Vector2I cell in draft.Cells())
                 {
-                    var cell = new Vector2I(q, r);
-                    if (OnBoard(cell) && !Cliffs[At(cell)] && !seen.Contains(cell))
+                    if (draft.IsCliff(cell))
+                    {
+                        if (seen.Contains(cell))
+                            climbed.Add(cell);
+                    }
+                    else if (!seen.Contains(cell))
+                    {
                         stranded.Add(cell);
+                    }
                 }
 
                 lines.Add($"from home ({home.X},{home.Y}): {seen.Count} cells "
@@ -326,6 +231,11 @@ public sealed partial class BoardMap
                               : ": " + string.Join(" ", stranded.Take(40)
                                   .Select(c => $"({c.X},{c.Y})"))
                                 + (stranded.Count > 40 ? " ..." : "")));
+                if (climbed.Count > 0)
+                    lines.Add($"  BAD {climbed.Count} declared rocks can be "
+                              + "driven on to: "
+                              + string.Join(" ", climbed.Take(20)
+                                  .Select(c => $"({c.X},{c.Y})")));
             }
 
             // The legal sites nothing uses, so a stranded region can be fixed by
