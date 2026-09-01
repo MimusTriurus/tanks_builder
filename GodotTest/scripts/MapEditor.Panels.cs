@@ -200,7 +200,9 @@ public sealed partial class MapEditor
                         () => { _level = want; _rampBrush = false; },
                         () => !_rampBrush && _level == want));
                 }
-                levels.Add(("ramp", () => _rampBrush = true, () => _rampBrush));
+                // Through RampBrush, which is where the sites come on - see
+                // its remarks, which carry why a ramp is one click and not two.
+                levels.Add(("ramp", () => RampBrush(true), () => _rampBrush));
                 return levels;
         }
     }

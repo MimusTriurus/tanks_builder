@@ -376,6 +376,27 @@ public sealed partial class MapEditor : SceneRoot
             GD.Print($"overlay: the report is {_report.GetGlobalRect()} on "
                      + $"filter {(_probeStop ? "Stop" : "Ignore")}, and a click at "
                      + $"its middle reached the board {_clicks} time(s)");
+        // Taking up the ramp brush shows where a ramp can go. Keys rather than
+        // the palette, because a key goes in through ParseInputEvent whole - it
+        // carries no position, so unlike the mouse it does not have to agree
+        // with where the real pointer is (see --menu overlay, which learnt that
+        // the hard way).
+        if (_open == "ramp" && _frame is 4 or 6)
+        {
+            Key key = _frame == 4 ? Key.Key3 : Key.W;
+            GD.Print($"ramp: before {key}, tab {_tab}, ramp brush {_rampBrush}, "
+                     + $"sites {_layers.HasFlag(Layers.Sites)}");
+            foreach (bool down in new[] { true, false })
+                Input.ParseInputEvent(new InputEventKey
+                {
+                    Keycode = key, Pressed = down,
+                });
+        }
+        if (_open == "ramp" && _frame == 8)
+            GD.Print($"ramp: tab {_tab}, ramp brush {_rampBrush}, sites "
+                     + $"{_layers.HasFlag(Layers.Sites)}, "
+                     + $"{_sites.Count(kv => !_edit.IsRamp(kv.Key))} free site(s) "
+                     + "drawn");
         if (CapturePath is not null && _frame >= CaptureAt)
         {
             Capture(CapturePath);
@@ -1082,6 +1103,35 @@ public sealed partial class MapEditor : SceneRoot
     /// the board's edge on the floor tab, the ramp on the height tab. Separate
     /// because each is a statement of its own about a cell rather than another
     /// value of the same axis - the edge of the world most of all.</summary>
+    /// <summary>
+    /// Take up the ramp brush, or put it down - and taking it up turns the ramp
+    /// sites on.
+    ///
+    /// <b>Because a ramp has no direction to author, only a cell.</b> Which edge
+    /// a ramp climbs is derived: <see cref="MapRules.Above"/> wants exactly one
+    /// neighbour a level up, and <see cref="MapRules.Footed"/> wants the
+    /// opposite one on its own level, so a legal ramp cell has exactly one high
+    /// edge and a cell with two is <c>ramp.bridge</c> - not a choice, a fault.
+    /// The tile is drawn as one plane tilted about one edge
+    /// (<see cref="HexField.TopCorners"/>), so this is geometry rather than
+    /// bookkeeping: a cell rising towards two neighbours is not a surface.
+    ///
+    /// So the question the author actually has is "where can one go", not "which
+    /// way should this one face" - and <see cref="MapRules.Sites"/> has answered
+    /// it all along, behind a layer that was off by default. Now the brush turns
+    /// it on: every cell that can take a ramp is painted, with a stem towards
+    /// the edge it would climb, before anything is clicked.
+    ///
+    /// Putting the brush down leaves the layer up. The author may have asked for
+    /// it themselves, and a checkbox that clears itself is a checkbox arguing.
+    /// </summary>
+    private void RampBrush(bool up)
+    {
+        _rampBrush = up;
+        if (up)
+            _layers |= Layers.Sites;
+    }
+
     private void Toggle(bool first)
     {
         switch (_tab)
@@ -1095,7 +1145,7 @@ public sealed partial class MapEditor : SceneRoot
                 _water = false;
                 break;
             case MapEdit.Tab.Level when first:
-                _rampBrush = !_rampBrush;
+                RampBrush(!_rampBrush);
                 break;
         }
     }
