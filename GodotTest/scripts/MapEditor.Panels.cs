@@ -176,15 +176,30 @@ public sealed partial class MapEditor
                         () => Plain() && _floor == Foundation.Solid),
                     ("sand", () => Floor(Foundation.Sand),
                         () => Plain() && _floor == Foundation.Sand),
-                    ("rock", () => Floor(Foundation.Rock),
+                    // The height is in the name because the cell it paints is
+                    // two levels up and declared unclimbable, and the Level tab
+                    // refuses to raise anything that far on purpose - a rock is
+                    // a floor, a height and a declaration at once, so it is
+                    // painted rather than raised into. See MapEdit.Level, whose
+                    // refusal says the same thing to whoever tries the other
+                    // tab first.
+                    ("rock  +2, a cliff", () => Floor(Foundation.Rock),
                         () => Plain() && _floor == Foundation.Rock),
                     // Water is a switch rather than a floor - the alphabet's
                     // water is low ground with water standing in it, and a floor
-                    // made of water has no letter. See MapEdit.Water.
-                    ("water", () => { _water = true; _plotBrush = false; },
+                    // made of water has no letter. See MapEdit.Water. The level
+                    // is in the name for the reason the rock's is.
+                    ("water  -1", () => { _water = true; _plotBrush = false; },
                         () => _water),
-                    ("on the board", () => { _plotBrush = true; _water = false; },
-                        () => _plotBrush),
+                    // The edge of the world, both ways. Off the board was
+                    // reachable only from the right panel: the eraser means
+                    // plain ground on this tab, so there was no brush for it.
+                    ("put on the board",
+                        () => { _plotBrush = true; _plotOn = true; _water = false; },
+                        () => _plotBrush && _plotOn),
+                    ("take off the board",
+                        () => { _plotBrush = true; _plotOn = false; _water = false; },
+                        () => _plotBrush && !_plotOn),
                 };
             case MapEdit.Tab.Cover:
                 return Enum.GetValues<Cover>().Select(over =>

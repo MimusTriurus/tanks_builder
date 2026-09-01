@@ -77,7 +77,7 @@ public sealed partial class MapEditor : SceneRoot
     private Swell? _sea;
     private WaterArt? _surf;
     private Stage3D? _stage;
-    private string?[] _sown = Array.Empty<string?>();
+    private string[] _sown = Array.Empty<string>();
 
     private MapEdit.Tab _tab = MapEdit.Tab.Foundation;
     private int _radius;
@@ -85,6 +85,12 @@ public sealed partial class MapEditor : SceneRoot
     private Cover _cover = Cover.Forest;
     private bool _water;
     private bool _plotBrush;
+
+    /// <summary>Which way the board's-edge brush writes: a cell on to the plot
+    /// or off it. Two statements rather than one toggle, because "empty" and
+    /// "not there" are different cells - see <see cref="MapEdit.Plot"/> - and
+    /// the eraser does not mean either of them.</summary>
+    private bool _plotOn = true;
     private int _level = 1;
     private bool _rampBrush;
     private int _home = -1;
@@ -437,6 +443,37 @@ public sealed partial class MapEditor : SceneRoot
                      + $"'{_edit.LetterAt(cell)}', {_edit.Walled().Count} walled "
                      + $"cell(s) left, {_bricks.Count} prop(s) standing");
         }
+        // Painting water where a bush stands. Grove.Grows already refuses a wet
+        // cell, so what is in question is whether the grove is re-sown at all -
+        // Settle only replants when the KINDS grid moves, and plain and water
+        // are both a null kind.
+        if (_open == "wet" && _frame == 20)
+        {
+            var cell = new Vector2I(3, 2);
+            int was = _grove?.Sown ?? -1;
+            _edit.Begin();
+            _edit.Water(cell, true, out string _);
+            Settle();
+            GD.Print($"wet: ({cell.X},{cell.Y}) is now "
+                     + $"'{_edit.LetterAt(cell)}', water "
+                     + $"{_field.IsWater(cell)}, grove would grow "
+                     + $"{_grove?.Grows(cell)}, sown {was} -> "
+                     + $"{_grove?.Sown}");
+
+            // And the other new brush, through the same Write the stroke uses:
+            // taking a cell off the board had no brush at all - the eraser means
+            // plain ground on this tab - and was reachable only from the right
+            // panel.
+            var edge = new Vector2I(0, 0);
+            _plotBrush = true;
+            _plotOn = false;
+            _edit.Begin();
+            Write(edge);
+            Settle();
+            GD.Print($"wet: with the off-the-board brush ({edge.X},{edge.Y}) is "
+                     + $"'{_edit.LetterAt(edge)}', on the board "
+                     + $"{_edit.OnBoard(edge)}");
+        }
         if (CapturePath is not null && _frame >= CaptureAt)
         {
             Capture(CapturePath);
@@ -574,10 +611,17 @@ public sealed partial class MapEditor : SceneRoot
         // Grove.Plant walks every cell and rolls a species per prop, which is
         // two thousand of them on a board the size of ABBEY - paid once per
         // stroke that changes a wood, and never for a stroke that raises a hill.
+        //
+        // <b>Off Sowing and not off the kinds, and the difference was a pond
+        // with bushes standing in it.</b> Plain ground and water are both a null
+        // kind, so painting water moved nothing in that array and the grove was
+        // never replanted - while Grove.Grows had already stopped growing there.
+        // See Sowing, which asks the two questions the sowing itself asks.
+        string[] sowing = Sowing();
         if (_grove is not null && _field.Atlas is not null
-            && !kinds.SequenceEqual(_sown))
+            && !sowing.SequenceEqual(_sown))
         {
-            _sown = kinds;
+            _sown = sowing;
             _grove.Plant();
         }
         _field.QueueRedraw();
@@ -660,6 +704,31 @@ public sealed partial class MapEditor : SceneRoot
             prop.Build();
             _bricks.Add(prop);
         }
+    }
+
+    /// <summary>
+    /// What the grove would sow on each cell, as the string a stroke is compared
+    /// against.
+    ///
+    /// <b>Through <see cref="Grove.Grows"/> and <see cref="HexField.KindAt"/>
+    /// rather than off the letters</b>, because those two <i>are</i> what
+    /// <see cref="Grove.Plant"/> reads - so a change this misses is a change the
+    /// sowing would not have made either. The first version compared the kinds
+    /// array alone and missed water, which refuses props without changing a
+    /// cell's kind at all; ramps do the same.
+    /// </summary>
+    private string[] Sowing()
+    {
+        var rows = new string[_edit.Columns * _edit.Rows];
+        for (int r = 0; r < _edit.Rows; r++)
+        for (int q = 0; q < _edit.Columns; q++)
+        {
+            var cell = new Vector2I(q, r);
+            rows[r * _edit.Columns + q] =
+                _grove is not null && _grove.Grows(cell)
+                    ? _field.KindAt(cell) : "-";
+        }
+        return rows;
     }
 
     /// <summary>What each cell is painted as, off its own letter. The same two
@@ -981,7 +1050,7 @@ public sealed partial class MapEditor : SceneRoot
         bool ok = _tab switch
         {
             MapEdit.Tab.Foundation =>
-                _plotBrush ? _edit.Plot(cell, true, out why)
+                _plotBrush ? _edit.Plot(cell, _plotOn, out why)
                 : _water ? _edit.Water(cell, true, out why)
                 : _edit.Floor(cell, _floor, out why),
             MapEdit.Tab.Cover => _edit.Over(cell, _cover, out why),
@@ -1073,7 +1142,7 @@ public sealed partial class MapEditor : SceneRoot
     private string Tool() => _tab switch
     {
         MapEdit.Tab.Foundation =>
-            "floor: " + (_plotBrush ? "on the board"
+            "floor: " + (_plotBrush ? (_plotOn ? "on the board" : "off the board")
                 : _water ? "water" : _floor.ToString().ToLowerInvariant()),
         MapEdit.Tab.Cover => "cover: " + _cover.ToString().ToLowerInvariant(),
         _ => _rampBrush ? "level: ramp" : $"level: {_level}",
@@ -1257,8 +1326,12 @@ public sealed partial class MapEditor : SceneRoot
                 _water = !_water;
                 _plotBrush = false;
                 break;
+            // E takes up the board's-edge brush, and pressing it again turns
+            // it round: on the board, then off it. Two brushes on one key
+            // because they are one question asked twice.
             case MapEdit.Tab.Foundation:
-                _plotBrush = !_plotBrush;
+                _plotOn = !_plotBrush || !_plotOn;
+                _plotBrush = true;
                 _water = false;
                 break;
             case MapEdit.Tab.Level when first:

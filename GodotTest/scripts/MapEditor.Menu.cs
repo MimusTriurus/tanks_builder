@@ -297,7 +297,7 @@ public sealed partial class MapEditor
     /// somebody else.</summary>
     private void Opened(string said)
     {
-        _sown = Array.Empty<string?>();
+        _sown = Array.Empty<string>();
         _stood = "";
         _dirty = false;
         _said = said;
