@@ -105,7 +105,11 @@ public sealed partial class MapEditor
         // Beside the bar rather than in it: a MenuBar lays out its PopupMenu
         // children as menus and stacks anything else at its own origin, which
         // put the board's name on top of the word File.
-        _title = new Label { Position = new Vector2(86.0f, 12.0f) };
+        _title = new Label
+        {
+            Position = new Vector2(86.0f, 12.0f),
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
         _title.AddThemeColorOverride("font_color", new Color(0.94f, 0.96f, 1.0f));
         _title.AddThemeConstantOverride("outline_size", 5);
         _title.AddThemeColorOverride("font_outline_color",

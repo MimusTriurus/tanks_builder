@@ -341,6 +341,41 @@ public sealed partial class MapEditor : SceneRoot
                     GlobalPosition = at,
                 });
         }
+        // The readout eating the board, A against B in one run.
+        //
+        // <b>It counts clicks arriving rather than cells picked, and the first
+        // draft of it counted cells and proved nothing.</b> Pointed() asks
+        // GetGlobalMousePosition - the real pointer - so a synthesised event
+        // does not move what the editor thinks is under the cursor, and a
+        // capture run has the mouse wherever the desktop left it. What is
+        // actually in question is whether the click reaches
+        // _UnhandledInput at all: a Control with mouse_filter Stop marks the
+        // event handled and nothing downstream sees it.
+        //
+        // Godot gives Label that filter as Ignore in its own constructor and
+        // leaves every other Control on the inherited Stop, so the report was
+        // an invisible 520x420 button over the top left of the board.
+        if (_open == "overlay" && _frame is 4 or 8)
+        {
+            bool stop = _frame == 4;
+            _report.MouseFilter = stop
+                ? Control.MouseFilterEnum.Stop : Control.MouseFilterEnum.Ignore;
+            Vector2 at = _report.GetGlobalRect().GetCenter();
+            _clicks = 0;
+            foreach (bool down in new[] { true, false })
+                Input.ParseInputEvent(new InputEventMouseButton
+                {
+                    ButtonIndex = MouseButton.Left,
+                    Pressed = down,
+                    Position = at,
+                    GlobalPosition = at,
+                });
+            _probeStop = stop;
+        }
+        if (_open == "overlay" && _frame is 5 or 9)
+            GD.Print($"overlay: the report is {_report.GetGlobalRect()} on "
+                     + $"filter {(_probeStop ? "Stop" : "Ignore")}, and a click at "
+                     + $"its middle reached the board {_clicks} time(s)");
         if (CapturePath is not null && _frame >= CaptureAt)
         {
             Capture(CapturePath);
@@ -349,6 +384,13 @@ public sealed partial class MapEditor : SceneRoot
     }
 
     private int _frame;
+
+    /// <summary>Mouse buttons that reached <see cref="_UnhandledInput"/> since
+    /// the counter was last cleared, for --menu overlay and nothing else.
+    /// </summary>
+    private int _clicks;
+
+    private bool _probeStop;
 
     /// <summary>
     /// Where a cell's top face is drawn, in world pixels.
@@ -684,6 +726,7 @@ public sealed partial class MapEditor : SceneRoot
 
         if (what is InputEventMouseButton click)
         {
+            _clicks++;
             if (click.ButtonIndex == MouseButton.WheelUp && click.Pressed)
                 _camera.Zoom *= 1.1f;
             else if (click.ButtonIndex == MouseButton.WheelDown && click.Pressed)
@@ -966,6 +1009,20 @@ public sealed partial class MapEditor : SceneRoot
             CustomMinimumSize = new Vector2(520.0f, 420.0f),
             ScrollActive = false,
             BbcodeEnabled = false,
+            // And it does not eat the board.
+            //
+            // <b>Godot gives Label mouse_filter Ignore in its own constructor
+            // and leaves every other Control on the inherited Stop</b>, so this
+            // was an invisible 520x420 button over the top left of the board:
+            // every hex under the audit was unclickable, and nothing on screen
+            // said why. The panels are Stop on purpose - a click that lands on
+            // one must not paint the cell behind it - and the readout is the
+            // opposite case, because there is nothing on it to click.
+            //
+            // Proved by --menu overlay, which synthesises a click at the middle
+            // of this rectangle and prints the cell it picked. It printed
+            // (-1,-1).
+            MouseFilter = Control.MouseFilterEnum.Ignore,
         };
         _report.AddThemeColorOverride("default_color",
             new Color(0.86f, 0.92f, 1.0f));
@@ -978,7 +1035,14 @@ public sealed partial class MapEditor : SceneRoot
 
     private static Label Text(float x, float y, int size)
     {
-        var label = new Label { Position = new Vector2(x, y) };
+        // Ignore said out loud rather than left to Label's own constructor,
+        // which is where it comes from: the readout that did eat the board was
+        // the one Control here that is not a Label - see Ui.
+        var label = new Label
+        {
+            Position = new Vector2(x, y),
+            MouseFilter = Control.MouseFilterEnum.Ignore,
+        };
         label.AddThemeColorOverride("font_color", new Color(0.94f, 0.96f, 1.0f));
         label.AddThemeColorOverride("font_outline_color",
             new Color(0, 0, 0, 0.85f));
