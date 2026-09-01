@@ -22,8 +22,8 @@ namespace TankSpriteTest;
 public sealed partial class MapEditor
 {
     private CanvasLayer _layer = null!;
-    /// <summary>The first button of the bar, for --menu poke.</summary>
-    internal Button _bar = null!;
+    /// <summary>The bar itself, for --menu poke.</summary>
+    internal Control _bar = null!;
     private Label _title = null!;
 
     /// <summary>Whether anything has been painted since the last save. Not
@@ -65,48 +65,53 @@ public sealed partial class MapEditor
     {
         _layer = layer;
 
-        var bar = new HBoxContainer { Position = new Vector2(12.0f, 6.0f) };
-        bar.AddThemeConstantOverride("separation", 8);
+        // A menu bar with one menu on it, the way a text editor has one.
+        //
+        // <b>This is the second answer to the same question, and the first one
+        // is worth keeping in view.</b> The bar started as a MenuButton with a
+        // popup, which a synthesised click opened every time (--menu poke) and
+        // which the author could not open at all; it was replaced by four plain
+        // buttons, and then asked for again in this shape. What makes the shape
+        // safe is not the control, it is that <b>every item also has a key</b> -
+        // N, O, S, shift+S, printed in the menu beside its item and handled in
+        // MapEditor's own key switch. A menu that cannot be opened is then an
+        // inconvenience rather than a tool nobody can use.
+        //
+        // <b>The keys are printed rather than registered as accelerators.</b> A
+        // PopupMenu accelerator consumes the key before _UnhandledInput sees it,
+        // so the two paths would be one path with a second place to break; the
+        // label says what to press and the switch is the only thing listening.
+        var bar = new MenuBar
+        {
+            Position = new Vector2(12.0f, 6.0f),
+            // Big enough to hit. Forty-two pixels by thirty-one in a 1600x900
+            // design space is a target the window's own stretch shrinks further.
+            CustomMinimumSize = new Vector2(0.0f, 34.0f),
+        };
+        bar.AddThemeFontSizeOverride("font_size", 17);
         layer.AddChild(bar);
 
-        // Four buttons in a row rather than one button with a popup on it.
-        //
-        // <b>The popup worked and was removed anyway.</b> Driven by a
-        // synthesised click - see MapEditor's --menu poke - it opened all four
-        // items every time, and it still could not be opened by the person the
-        // tool is for. What that leaves is a control whose behaviour cannot be
-        // demonstrated to the author, and the cheapest answer to it is to have
-        // no popup: a button that runs its own line has nothing between the
-        // press and the dialog.
-        //
-        // They are also bigger. Forty-two pixels by thirty-one in a 1600x900
-        // design space is a target the window's own stretch shrinks further, and
-        // the first thing anybody does with this tool is reach for exactly these
-        // four.
-        foreach ((string label, Item item) in new[]
-                 {
-                     ("New board", Item.New), ("Open", Item.Open),
-                     ("Save", Item.Save), ("Save as", Item.SaveAs),
-                 })
-        {
-            var press = new Button
-            {
-                Text = label,
-                CustomMinimumSize = new Vector2(0.0f, 34.0f),
-            };
-            press.AddThemeFontSizeOverride("font_size", 16);
-            Item which = item;
-            press.Pressed += () => Chose(which);
-            bar.AddChild(press);
-            _bar ??= press;
-        }
+        var file = new PopupMenu { Name = "File" };
+        file.AddThemeFontSizeOverride("font_size", 16);
+        file.AddItem("New board...      N", (int)Item.New);
+        file.AddItem("Open...           O", (int)Item.Open);
+        file.AddSeparator();
+        file.AddItem("Save              S", (int)Item.Save);
+        file.AddItem("Save as...  shift+S", (int)Item.SaveAs);
+        file.IdPressed += id => Chose((Item)id);
+        bar.AddChild(file);
+        _bar = bar;
 
-        _title = new Label { Text = "" };
+        // Beside the bar rather than in it: a MenuBar lays out its PopupMenu
+        // children as menus and stacks anything else at its own origin, which
+        // put the board's name on top of the word File.
+        _title = new Label { Position = new Vector2(86.0f, 12.0f) };
         _title.AddThemeColorOverride("font_color", new Color(0.94f, 0.96f, 1.0f));
         _title.AddThemeConstantOverride("outline_size", 5);
         _title.AddThemeColorOverride("font_outline_color",
             new Color(0, 0, 0, 0.85f));
-        bar.AddChild(_title);
+        _title.AddThemeFontSizeOverride("font_size", 16);
+        layer.AddChild(_title);
 
         Dialogs();
     }
