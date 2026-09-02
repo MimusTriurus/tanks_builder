@@ -1083,6 +1083,22 @@ public sealed partial class Main : SceneRoot
 	private bool _heaveOnly;
 
 
+
+	/// <summary>Which frame to press Edit on, for --capture's sake: the way back
+	/// is a scene change, and a capture run has nobody to click it. Main's half
+	/// of the editor's --menu family, and it exists for the same reason.</summary>
+	private int _editAt = -1;
+
+	/// <summary>Hand the board back to the editor. The name goes through
+	/// <see cref="Session"/> the way it came, and <c>Editing</c> goes off: the
+	/// editor is not being sent anywhere, it is being returned to.</summary>
+	private void Edit()
+	{
+		Session.Map = Map;
+		Session.Editing = false;
+		GD.Print($"main: back to the editor on {Map}");
+		GetTree().ChangeSceneToFile("res://Editor.tscn");
+	}
 	/// <summary>
 	/// Which cell each loaded tank parks on.
 	///
@@ -1517,6 +1533,15 @@ public sealed partial class Main : SceneRoot
 			// mean what it says whatever it was launched from.
 			else if (userArgs[i] == "--map" && i + 1 < userArgs.Length)
 				Map = userArgs[++i];
+			// The way back, pressed from the command line - the editor's own
+			// --menu reason word for word: it is a scene change, and a capture
+			// run has nobody to click a button.
+			else if (userArgs[i] == "--edit-at" && i + 1 < userArgs.Length
+				 && int.TryParse(userArgs[i + 1], out int editAt))
+			{
+				_editAt = editAt;
+				i++;
+			}
 			// The board's own report, printed and gone - the authoring tool for
 			// a hand-drawn map. It is here rather than in the self test because
 			// what it is for is the round trip: it enumerates every cell that
@@ -1764,6 +1789,11 @@ public sealed partial class Main : SceneRoot
 		// file into `maps/` under a compiled board's name: the refusal is right
 		// and the run never came back. So the board still does not come up, and
 		// the reason is on stdout with a non-zero code behind it.
+		// The handoff wins over --map: that flag came from the launch which
+		// started the session, and by the time the editor hands a name over it is
+		// stale. See Session.
+		if (Session.Take() is { Length: > 0 } handed)
+			Map = handed;
 		try
 		{
 			_map = BoardMap.ByName(Map);
@@ -2045,6 +2075,23 @@ public sealed partial class Main : SceneRoot
 		_hud.AddThemeColorOverride("font_outline_color", new Color(0, 0, 0, 0.85f));
 		_hud.AddThemeConstantOverride("outline_size", 5);
 		layer.AddChild(_hud);
+
+		// The way back, and it exists only when the editor is what sent us - see
+		// Session, where this one coupling between two roots is argued. A button
+		// rather than only a key because the author who pressed Run has a mouse
+		// in their hand, and a key rather than only a button for the reason every
+		// other switch on this bench has both.
+		if (Session.Editing)
+		{
+			var back = new Button
+			{
+				Text = "Edit   F5",
+				Position = new Vector2(16.0f, 44.0f),
+			};
+			back.AddThemeFontSizeOverride("font_size", 16);
+			back.Pressed += Edit;
+			layer.AddChild(back);
+		}
 
 		if (_loaded.Count == 0)
 		{
@@ -4752,6 +4799,13 @@ public sealed partial class Main : SceneRoot
 
 	public override void _Process(double delta)
 	{
+		// The way back, before the capture: --edit-at fires on its own frame so
+		// that the picture which lands on disk is the editor it returned to.
+		if (_editAt >= 0 && _frames == _editAt && Session.Editing)
+		{
+			Edit();
+			return;
+		}
 		// give the panel and both layers a couple of frames to settle first
 		if (CapturePath is not null && ++_frames > CaptureAt)
 		{
@@ -5439,6 +5493,14 @@ public sealed partial class Main : SceneRoot
 			case Key.T: _tank.ShowTurret = !_tank.ShowTurret; break;
 			case Key.G: BoardShown = !BoardShown; break;
 			case Key.X: _tank.ShowAxis = !_tank.ShowAxis; break;
+			// Back to the editor, on the board that is being played. Only ever
+			// answered when the editor sent us: on a bench nobody handed to,
+			// Session.Editing is false and F5 does nothing, because a harness
+			// that jumped into the map editor on a keypress would be a harness
+			// that lost a session to a typo.
+			case Key.F5 when Session.Editing:
+				Edit();
+				return;
 			case Key.F12:
 				Capture($"{ProjectSettings.GlobalizePath("res://")}shot_{Time.GetTicksMsec()}.png");
 				return;

@@ -184,6 +184,29 @@ public sealed partial class MapEditor : SceneRoot
             }
         }
 
+        // The handoff wins over --map: the flag came from the launch that
+        // started the session, and by the time Edit hands a name back it is
+        // stale. See Session.
+        bool returned = false;
+        if (Session.Take() is { Length: > 0 } back)
+        {
+            Map = back;
+            newColumns = newRows = 0;
+            returned = true;
+        }
+        Session.Editing = false;
+        if (returned)
+        {
+            GD.Print($"editor: back on {Map}");
+            // And the --menu the session was launched with is not fired again.
+            // Command-line args survive a scene change, so a return with
+            // "--menu run" still on them pressed Run a second time and the two
+            // roots handed the session back and forth until the process was
+            // killed - which is what happened. A startup that is a return is a
+            // different startup.
+            _open = "";
+        }
+
         TerrainSet terrain = TerrainSet.Load(AssetRoot.Terrains);
         AtlasSet? tile = null;
         try
@@ -473,6 +496,30 @@ public sealed partial class MapEditor : SceneRoot
             GD.Print($"wet: with the off-the-board brush ({edge.X},{edge.Y}) is "
                      + $"'{_edit.LetterAt(edge)}', on the board "
                      + $"{_edit.OnBoard(edge)}");
+        }
+        // Run, from the command line. The scene change is what makes this
+        // probe worth having: after it, --capture and --capture-at are read
+        // again by Main, so the frame that lands on disk is the harness playing
+        // the board the editor just drew.
+        if (_open == "run" && _frame == 20)
+            Play();
+        // And a board the harness would refuse: Run must not change scene, and
+        // must say which fault stopped it.
+        if (_open == "runbad" && _frame == 20)
+        {
+            // Two neighbours a level above the ramp, which is ramp.bridge and
+            // fatal: the first draft of this raised one and got a perfectly
+            // legal board, so the probe said Run worked when what it had proved
+            // was that the board was fine.
+            _edit.Begin();
+            _edit.Level(new Vector2I(2, 2), 1, out string _);
+            _edit.Level(new Vector2I(3, 2), 1, out string _);
+            _edit.Ramp(new Vector2I(2, 3), true, out string _);
+            Settle();
+            Play();
+            GD.Print($"runbad: after Run the scene is still the editor, "
+                     + $"{_faults.Count(f => f.Fatal)} fatal fault(s), "
+                     + $"said \"{_said}\"");
         }
         if (CapturePath is not null && _frame >= CaptureAt)
         {
@@ -992,6 +1039,7 @@ public sealed partial class MapEditor : SceneRoot
             case Key.O: Chose(Item.Open); return;
             case Key.S when key.ShiftPressed: Chose(Item.SaveAs); return;
             case Key.S: Keep(); return;
+            case Key.F5: Play(); return;
             case Key.L: _layers ^= Layers.Levels; break;
             case Key.R: _layers ^= Layers.Ramps; break;
             case Key.G: _layers ^= Layers.Sites; break;
@@ -1083,6 +1131,46 @@ public sealed partial class MapEditor : SceneRoot
         _said = _edit.Home(_under, slot, out string why)
             ? $"home {slot + 1} at ({_under.X},{_under.Y})" : why;
         Settle();
+    }
+
+    /// <summary>
+    /// Play the board being drawn, in the harness.
+    ///
+    /// <b>It saves first, and that is the shape that was chosen.</b> What is
+    /// played is then what is on disk, so a name is all that has to cross the
+    /// scene change - see <see cref="Session"/>, which carries it. The cost is
+    /// named there too: Run on a compiled board refuses, because
+    /// <see cref="MapFile.Save"/> refuses to shadow one, and the author saves it
+    /// under another name first.
+    ///
+    /// <b>A board with a fatal fault is not run, and the first fault is what it
+    /// says.</b> The harness would refuse it anyway - <c>Main</c> prints
+    /// REFUSED and quits - so a Run that changed scene and came straight back
+    /// would be the same refusal with the readout thrown away.
+    ///
+    /// <b>The undo stack does not survive the round trip</b>, and nothing here
+    /// pretends otherwise: Edit re-opens the saved board, which is the letters,
+    /// the ramps, the masonry and the parkings, and no history.
+    /// </summary>
+    private void Play()
+    {
+        Settle();
+        MapRules.Fault fatal =
+            _faults.FirstOrDefault(f => f.Fatal, default);
+        if (fatal.Rule is { Length: > 0 })
+        {
+            _said = "NOT run: " + fatal.Text;
+            Tell("Not run - the harness would refuse this board.\n\n"
+                 + fatal.Text);
+            Say();
+            return;
+        }
+        if (!Keep())
+            return;
+        Session.Map = _edit.Name;
+        Session.Editing = true;
+        GD.Print($"editor: running {_edit.Name} in the harness");
+        GetTree().ChangeSceneToFile("res://Main.tscn");
     }
 
     /// <summary>

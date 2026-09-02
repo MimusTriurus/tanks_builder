@@ -59,6 +59,7 @@ public sealed partial class MapEditor
         Open,
         Save,
         SaveAs,
+        Run,
     }
 
     private void Menu(CanvasLayer layer)
@@ -98,6 +99,10 @@ public sealed partial class MapEditor
         file.AddSeparator();
         file.AddItem("Save              S", (int)Item.Save);
         file.AddItem("Save as...  shift+S", (int)Item.SaveAs);
+        file.AddSeparator();
+        // Under the saves and separated from them, because it is one of them:
+        // Run saves first and plays what is on disk - see MapEditor.Play.
+        file.AddItem("Run              F5", (int)Item.Run);
         file.IdPressed += id => Chose((Item)id);
         bar.AddChild(file);
         _bar = bar;
@@ -153,6 +158,9 @@ public sealed partial class MapEditor
                 break;
             case Item.Save:
                 Keep();
+                break;
+            case Item.Run:
+                Play();
                 break;
             default:
                 _saveName.Text = _edit.Name;
