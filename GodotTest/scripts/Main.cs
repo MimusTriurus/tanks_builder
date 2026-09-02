@@ -225,6 +225,11 @@ public sealed partial class Main : SceneRoot
 		// a quad in the 3D world, so the flat board answers nothing and a
 		// bounce there draws what it always did.
 		_tick.Bounced = Bounced;
+		// And the seventh: what the board makes of an HE round bursting on a
+		// plate. Same division a third time - see TankTick.Blasted - and the
+		// difference from the sixth is one direction: a mirror there, the plate's
+		// own normal here.
+		_tick.Blasted = Blasted;
 	}
 
 	/// <summary>
@@ -302,6 +307,25 @@ public sealed partial class Main : SceneRoot
 	///
 	/// Only on the stage, for <see cref="Splashed"/>'s reason word for word.
 	/// </summary>
+	/// <summary>
+	/// An HE round that burst on the face of a plate: raise the fireball and the
+	/// soot off the plate it went off against.
+	///
+	/// <b><see cref="Bounced"/> word for word bar the pool it fills</b>, and that
+	/// is worth saying rather than hiding: the seat, the two projections, the
+	/// depth side and the calibre are the same four things, because both are a
+	/// shell arriving at a measured point on a hull. What differs is entirely
+	/// inside the model - <see cref="Vehicle.Blown"/> against
+	/// <see cref="Vehicle.Graze"/>, one subtraction - and the two roots that
+	/// answer these hooks should not be where that shows.
+	///
+	/// Only on the stage, for <see cref="Splashed"/>'s reason word for word.
+	/// </summary>
+	private void Blasted(Vehicle v, Vector2 plate, Vector2 outward, bool behind) =>
+		_stage?.Slam(v.GroundPoint, v.LiftOf(v.GroundPoint), outward,
+					 v.Spot(plate) - v.GroundPoint, behind,
+					 Ordnance.At(_tick.Calibre));
+
 	private void Bounced(Vehicle v, Vector2 plate, Vector2 away, bool behind) =>
 		_stage?.Spall(v.GroundPoint, v.LiftOf(v.GroundPoint), away,
 					  // Two board-space points subtracted, each through its own
@@ -1610,6 +1634,26 @@ public sealed partial class Main : SceneRoot
 			else if (userArgs[i] == "--spall" && i + 1 < userArgs.Length)
 				_tick.Bounce = !userArgs[++i].Equals("off",
 					StringComparison.OrdinalIgnoreCase);
+			// And whether an HE round draws the burst on the plate or the rendered
+			// pair it used to - see TankTick.Slam. Out of FlagRows for --spall's
+			// reason: no panel row to be overruled by.
+			else if (userArgs[i] == "--slam" && i + 1 < userArgs.Length)
+				_tick.Slam = !userArgs[++i].Equals("off",
+					StringComparison.OrdinalIgnoreCase);
+			// What the gun is loaded with, which against armour is now what decides
+			// the picture - see TankTick.Ammo. The bench had this flag from the day
+			// a wall could be shot at and the harness had none, because until the
+			// burst on a plate existed there was nothing here for it to change.
+			else if (userArgs[i] == "--ammo" && i + 1 < userArgs.Length)
+			{
+				string round = userArgs[++i];
+				if (round.Equals("ap", StringComparison.OrdinalIgnoreCase))
+					Tick.Ammo = Shell.Kind.Ap;
+				else if (round.Equals("he", StringComparison.OrdinalIgnoreCase))
+					Tick.Ammo = Shell.Kind.He;
+				else
+					GD.PushWarning($"--ammo {round} is neither he nor ap");
+			}
 			else if (userArgs[i] == "--flash" && i + 1 < userArgs.Length)
 				_flashSource = userArgs[i + 1].Equals("sheet",
 					StringComparison.OrdinalIgnoreCase)
@@ -3823,6 +3867,7 @@ public sealed partial class Main : SceneRoot
 		["--traverse"] = new[] { "gunnery.traverse_level" },
 		["--hit-scale"] = new[] { "armour.calibre" },
 		["--hit-by"] = new[] { "armour.by" },
+		["--ammo"] = new[] { "armour.ammo" },
 		["--destroy"] = new[] { "armour.destroy" },
 		["--turret-sound"] = new[] { "sound.turret_motor" },
 		["--relief"] = new[] { "ground.relief" },
@@ -4405,6 +4450,18 @@ public sealed partial class Main : SceneRoot
 			Enumerable.Range(1, HexField.EdgeHeadings.Length)
 				.Select(i => i.ToString()).ToArray(),
 			() => _hitSide, i => _hitSide = i);
+		// <b>What the gun is loaded with, and against armour it decides the
+		// picture.</b> HE bursts on the face of whatever plate it arrives on and AP
+		// either gets in or comes off it, so this row is what chooses between the
+		// three impacts the bench can draw - see TankTick.Ammo, including that it
+		// deliberately does not touch how deep either round goes.
+		//
+		// <b>It is also the only way to see a ricochet from the U key now</b>, HE
+		// being the default and a shell that explodes not being a shell that
+		// bounces.
+		ui.Choice("armour.ammo", "loaded  (--ammo)", new[] { "he", "ap" },
+			() => (int)Tick.Ammo,
+			i => Tick.Ammo = (Shell.Kind)Math.Clamp(i, 0, 1));
 		// <b>Whose gun, which is the end a keypress does not have.</b> The
 		// matchup table has decided bounce or penetration since it was written -
 		// and only for a shell one tank fired at another, because that is the only
@@ -4464,12 +4521,18 @@ public sealed partial class Main : SceneRoot
 						   // What the dial will do, before it does it - the whole reason
 						   // TankTick.HitDepth is a method and not the same two expressions
 						   // written out wherever they are wanted.
+						   // And what is loaded, because against armour that is now the
+						   // first of the two questions: HE bursts on the plate whatever
+						   // the depth turns out to be, so the depth alone would say
+						   // "ricochet" over a picture that is not one.
+						   + $"{(Tick.Ammo == Shell.Kind.Ap ? "ap" : "he")}   "
 						   + (Tick.HitGun is MovementProfile shot
 							  ? $"dealt by {shot.Tag}: "
 								+ (Tick.HitDepth(Active) is 0
 								   ? "ricochet" : $"level {Tick.HitDepth(Active)}")
 							  : $"loaded x{Calibre:F2}, {Bite} level"
 								+ (Bite == 1 ? "" : "s") + " of armour")
+						   + (Tick.Ammo == Shell.Kind.He ? "   bursts on the plate" : "")
 						   + (_hit.Live ? $"   in the air x{_hit.Scale:F2}" : "")
 						   + (a.HasHit ? "" : "   [no plate table - re-render]");
 			if (!a.HasScars)

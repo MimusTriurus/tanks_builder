@@ -509,6 +509,35 @@ public sealed class Vehicle
     }
 
     /// <summary>
+    /// Where a round burst on this hull, and which way the plate it burst on
+    /// faces: the point of impact in the sprite's own frame, and the plate's own
+    /// outward normal.
+    ///
+    /// <b><see cref="Graze"/> with the subtraction taken off it, and that is the
+    /// whole difference between the two events.</b> A ricochet leaves along the
+    /// mirror of the incoming round, so it needs both bearings and one of them is
+    /// where the shooter stood. HE does not leave: it stops on the face and its
+    /// gases go where the metal is not, which is out along the normal and nowhere
+    /// else - so <paramref name="face"/> is the only thing this asks about, and
+    /// where the round came from does not enter the model at all. See
+    /// <see cref="ProcSlam"/>, which is that sentence as a picture.
+    ///
+    /// Its own method rather than a flag on <see cref="Graze"/> for the reason
+    /// <see cref="Plated"/> is its own: the two callers want different things and
+    /// share the measurement, not the arithmetic. What they share is
+    /// <c>Plated</c>, and it is one call in both.
+    ///
+    /// <c>Out</c> is unnormalised for <see cref="Bore"/>'s reason: it is
+    /// <see cref="AtlasSet.GroundDirection"/>, whose length is the share of a
+    /// ground length that survived the projection.
+    /// </summary>
+    public (Vector2 Plate, Vector2 Out) Blown(string face, float scatter,
+                                              float rise) =>
+        (Plated(face, scatter, rise),
+         Atlas.GroundDirection(Angles.Mod(Sprite.HullFacing
+                                          + Atlas.HitBearing(face), 360.0)));
+
+    /// <summary>
     /// Where a shell struck a plate, in the sprite's own frame: the plate's
     /// centroid plus that shell's own offset on the plate's own two axes.
     ///

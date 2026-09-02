@@ -200,9 +200,9 @@ public sealed partial class ProcSpall : Node3D
             Vector2 away = squat < 1e-6f ? Vector2.Right : flat / squat;
             var side = new Vector2(-away.Y, away.X);
             float cone = Uniform("shard_cone") * (1.0f + (1.0f - squat) * open);
-            // The floor under the reach, which is the shader's own - see
-            // squat_floor. Two statements of it would be a quad that fits the
-            // fan at one bearing and clips it at another.
+            // The floor under the reach, which is the shared frame's own - see
+            // squat_floor and spall_run. Two statements of it would be a quad that
+            // fits the fan at one bearing and clips it at another.
             float floored = Mathf.Lerp(Uniform("squat_floor"), 1.0f, squat);
 
             // The fan, at the top of its own speed spread and at the far edge of
@@ -596,12 +596,45 @@ uniform vec2 plate = vec2(0.0);
 // check that both halves take it from here.
 uniform float squat_floor = 0.55;
 
+// <b>How much wider a cone opens as the projection takes its reach away, and this
+// is the answer to the one case that read badly.</b> A ricochet going straight
+// away from the camera has no horizontal share left at all, so on a billboard
+// every fragment goes up the screen and thirty-four of them in a narrow column is
+// a tongue of flame - which is the one thing that effect must not look like. Seen
+// end-on a cone <em>is</em> a disc, so what squat takes off the distance it gives
+// to the spread, and such a hit splashes rather than stands up. It costs the quad
+// almost nothing: the reach shrinks by squat while the cone grows by this, and the
+// product peaks at 1.06 of the square-on case.
+//
+// <b>In the frame because it is a fact about the camera and not about spall.</b>
+// It was the glow's own until ProcSlam wanted it in both of its halves: a burst on
+// a plate turned away has the same disc for the same reason, and two declarations
+// of one projection are two numbers to keep in step. See squat_floor above, which
+// is the same finding about the same case and was already here.
+uniform float cone_open = 1.60;
+
 // Across the reflection, in the quad's own frame. The fan's lateral spread goes
 // along this, which is an approximation and a knowing one: on the ground lateral
 // is a direction in depth as well as across, and a billboard has no depth. What
 // carries the fan's read is the rake and the stretch, not this.
 vec2 spall_across() {
     return vec2(-away.y, away.x);
+}
+
+// How far anything actually gets, given how much of a ground length the camera
+// left standing - the reach with squat_floor under it. Written out twice in this
+// effect and twice again in ProcSlam before it was a function, which is four
+// copies of one sentence about the projection.
+float spall_run(float far) {
+    return far * mix(squat_floor, 1.0, squat);
+}
+
+// The half-slope a cone actually shows, opened by however much the projection has
+// taken off the reach - see cone_open. Bounds spends the same expression on the C#
+// side, which is the one copy that cannot be helped: a quad is measured before
+// there is a shader to ask.
+float spall_cone(float slope) {
+    return slope * (1.0 + (1.0 - squat) * cone_open);
 }
 
 // <b>There is no early bail here, and that is a finding rather than an
@@ -706,7 +739,7 @@ void fragment() {
         vec2 at = blast_at(UV);
         {
             vec2 side_dir = spall_across();
-            float run = reach * mix(squat_floor, 1.0, squat);
+            float run = spall_run(reach);
 
             // One pass that adds up dust and one that shades the result - the
             // burst's finding, in its own words: a cloud is not a set of things,
@@ -864,16 +897,6 @@ uniform float shard_drag = 0.42;
 // every fragment is at the point of impact.
 uniform float shard_cone = 0.52;
 uniform float shard_lift = 0.85;
-// <b>How much wider the fan opens as the projection takes its reach away, and
-// this is the answer to the one case that read badly.</b> A ricochet going
-// straight away from the camera has no horizontal share left at all, so on a
-// billboard every fragment goes up the screen and thirty-four of them in a
-// narrow column is a tongue of flame - which is the one thing this effect must
-// not look like. Seen end-on a cone <em>is</em> a disc, so what squat takes off
-// the distance it gives to the spread, and such a hit splashes rather than
-// stands up. It costs the quad almost nothing: the reach shrinks by squat while
-// the cone grows by this, and the product peaks at 1.06 of the square-on case.
-uniform float cone_open = 1.60;
 // <b>How much the fan is raked up off the plate, as a share of how far out it
 // gets.</b> Not decoration and not the cone: armour is sloped, so a round that
 // fails to get in is deflected upward as well as sideways, and a fan lying flat
@@ -940,10 +963,10 @@ void fragment() {
         vec2 at = blast_at(UV);
         {
             vec2 side_dir = spall_across();
-            float run = reach * mix(squat_floor, 1.0, squat);
+            float run = spall_run(reach);
             // The fan's half-slope, opened by however much the projection has
             // taken off its reach - see cone_open.
-            float cone = shard_cone * (1.0 + (1.0 - squat) * cone_open);
+            float cone = spall_cone(shard_cone);
             // Alpha-over inside the layer, additive on the way out - the flash's
             // arrangement and the burst's fire's: surfaces stack the way surfaces
             // stack, and the layer as a whole adds light.

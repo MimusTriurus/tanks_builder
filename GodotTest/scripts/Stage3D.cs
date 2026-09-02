@@ -380,6 +380,8 @@ public sealed partial class Stage3D : Node3D
             blast.Tick(delta);
         foreach (ProcKick kick in _kicking)
             kick.Tick(delta);
+        foreach (ProcSlam slam in _slamming)
+            slam.Tick(delta);
         foreach (ProcSpall spall in _spalling)
             spall.Tick(delta);
         Etchings();
@@ -5309,6 +5311,79 @@ void fragment() {{
     /// <summary>The ricochets as they stand, <see cref="Bursting"/>'s twin and
     /// read-only for its reason.</summary>
     public IReadOnlyList<ProcSpall> Spalling => _spalling;
+
+    private readonly List<ProcSlam> _slamming = new();
+    private int _nextSlam;
+
+    /// <summary>What to do to a burst on armour before it goes off -
+    /// <see cref="Dress"/> for the burst, fifth time, and the same argument: the
+    /// pool is built on the first HE round, so a bench holding a panel of
+    /// settings has nothing to write them into until then and must not have to
+    /// wait for one.</summary>
+    public Action<ProcSlam>? Temper;
+
+    /// <summary>
+    /// A high-explosive round bursting on the face of a plate -
+    /// <see cref="ProcSlam"/>.
+    ///
+    /// <b>A fifth pool rather than a case inside <see cref="Spall"/></b>, which
+    /// is the one place the argument needed making again: the two events are on
+    /// the same trigger, at the same measured point, on the same tank. What
+    /// separates them is that they are two <em>pictures</em> with two clocks, and
+    /// a bounce and a burst can land on one hull inside a second of each other -
+    /// two guns, or one gun and a hand-dealt hit. Folded in, the second would
+    /// have restarted the first's clock and one shell's soot would have cut short
+    /// another shell's fan.
+    ///
+    /// <b><paramref name="spot"/> is board space</b>, with <paramref name="lift"/>
+    /// the ground's height there - <see cref="Burst"/>'s pair, and worth
+    /// repeating because getting it wrong is silent and has been.
+    ///
+    /// <paramref name="outward"/> is the plate's own normal as
+    /// <see cref="AtlasSet.GroundDirection"/> gives it - unnormalised, so its
+    /// length is the share of a ground length that survived the projection.
+    /// <paramref name="plate"/> is the point of impact's offset from
+    /// <paramref name="spot"/> in screen px, and <paramref name="behind"/> whether
+    /// that plate is turned away from the camera. All three handed over rather
+    /// than worked out here for <see cref="Spall"/>'s reason, and out of the same
+    /// two measurements.
+    ///
+    /// <b>And it digs nothing</b>, which the other four say too and which this one
+    /// has to say hardest: a shell that went off against a hull did not touch the
+    /// ground it is standing over. The crater under a tank is what
+    /// <c>ammo_rack</c> will be, and that is a different event.
+    /// </summary>
+    public void Slam(Vector2 spot, float lift, Vector2 outward, Vector2 plate,
+                     bool behind, float might = 1.0f)
+    {
+        if (Field.Atlas is null)
+            return;
+        while (_slamming.Count < Bursts)
+        {
+            var made = new ProcSlam();
+            AddChild(made);
+            made.Build(Field.Atlas.HexRect.Size.X, Squash, RiseFactor);
+            _slamming.Add(made);
+        }
+        ProcSlam slam = _slamming[_nextSlam % Bursts];
+        // Reset before the hook, multiplied after it - see Burst on why the
+        // multiply alone compounds every shot until the mass fills the screen.
+        slam.Might = 1.0f;
+        Temper?.Invoke(slam);
+        _nextSlam = (_nextSlam + 1) % Bursts;
+        slam.Might *= might;
+        slam.Sit(spot, lift, Squash, RiseFactor, behind);
+        // Aimed after it is seated and sized, because Aim writes to the materials
+        // and Sit does not touch them - the kick's order, and for its reason: the
+        // pair has to be complete before Fire or the first frame draws the last
+        // round's plate.
+        slam.Aim(outward, plate);
+        slam.Fire();
+    }
+
+    /// <summary>The bursts on armour as they stand, <see cref="Bursting"/>'s twin
+    /// and read-only for its reason.</summary>
+    public IReadOnlyList<ProcSlam> Slamming => _slamming;
 
     private readonly List<PitArt> _etched = new();
     private int _etchedAt = -1;

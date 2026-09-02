@@ -548,6 +548,12 @@ public sealed partial class TankBench : SceneRoot
                     _tick.Bounce = !args[++i].Equals("off",
                         StringComparison.OrdinalIgnoreCase);
                     break;
+                // And whether an HE round draws the burst on the plate - the
+                // harness's flag, spelled its way.
+                case "--slam" when i + 1 < args.Length:
+                    _tick.Slam = !args[++i].Equals("off",
+                        StringComparison.OrdinalIgnoreCase);
+                    break;
                 // sheet, rendered or built. Spelled the harness's way so one
                 // flag means one thing on both boards.
                 case "--flash" when i + 1 < args.Length:
@@ -1332,6 +1338,14 @@ public sealed partial class TankBench : SceneRoot
                       v.Spot(plate) - v.GroundPoint, behind,
                       Ordnance.At(_tick.Calibre));
 
+    /// <summary>The fireball an HE round leaves on a plate - the harness's
+    /// <c>Blasted</c>, and deliberately the same lines for <c>Bounced</c>'s
+    /// reason.</summary>
+    private void Blasted(Vehicle v, Vector2 plate, Vector2 outward, bool behind) =>
+        _stage?.Slam(v.GroundPoint, v.LiftOf(v.GroundPoint), outward,
+                     v.Spot(plate) - v.GroundPoint, behind,
+                     Ordnance.At(_tick.Calibre));
+
     private void Struck(Shell round)
     {
         if (round.Blocked is not Vector2I cell)
@@ -1776,6 +1790,7 @@ public sealed partial class TankBench : SceneRoot
         // And a round that bounced off armour, for the same reason again - see
         // TankTick.Bounced.
         _tick.Bounced = Bounced;
+        _tick.Blasted = Blasted;
             _tick.Barred = _walls.Count > 0 ? Barring : null;
             _tick.Shoving = _walls.Count > 0 && _shove ? Pressing : null;
             return _tick;
@@ -2660,7 +2675,13 @@ public sealed partial class TankBench : SceneRoot
         if (_walls.Count > 0)
         {
             _panel.Heading("wall", "the wall");
-            _panel.Choice("wall.ammo", "loaded",
+            // <b>And this row is no longer only about the wall.</b> It writes
+        // TankTick.Ammo, which since ProcSlam decides which of the three impacts
+        // a hit on armour draws - so the group it sits in is now narrower than
+        // what it does. Left where it is rather than moved: a panel id is what
+        // bench.json and the MCP flag rows are keyed on, and renaming one to fix
+        // a heading is churn with a migration under it.
+        _panel.Choice("wall.ammo", "loaded",
                           new[] { "HE - bursts on the face",
                                   "AP - straight through" },
                           () => (int)_tick.Ammo,

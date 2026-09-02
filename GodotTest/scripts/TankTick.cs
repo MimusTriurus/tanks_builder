@@ -208,11 +208,23 @@ public sealed class TankTick
     /// travels with the round at the trigger (<see cref="Shell.Ammo"/>): turning
     /// the dial while a round is in the air must not change what arrives.
     ///
-    /// <b>Against armour it means nothing yet, and that is named rather than
-    /// done.</b> <see cref="Gunnery.Penetration"/> is a class of gun against a
-    /// class of armour; writing HE and AP into it is a change to what the bench
-    /// <i>does</i> rather than to what it draws, and it is a separate piece of
-    /// work. What it means today is what a wall makes of it.
+    /// <b>Against armour it decides the picture and not the damage, and that
+    /// boundary is deliberate.</b> An HE round bursts on the face of the plate it
+    /// arrives on, whether or not the plate held - see <see cref="ProcSlam"/> and
+    /// the fork in <see cref="Land"/> - so this is what says which of the three
+    /// impacts gets drawn. What it does <em>not</em> touch is
+    /// <see cref="Gunnery.Penetration"/>, which is a class of gun against a class
+    /// of armour and knows nothing of filling: HE and AP go equally deep, kill on
+    /// the same third penetration, and are heard by the same impact recording.
+    /// Writing HE into the damage table is a change to what the bench <i>does</i>
+    /// rather than to what it draws, and it is still a separate piece of work.
+    ///
+    /// <b>And the default is HE, which means the plainest hit on the bench is now
+    /// a burst rather than a bounce.</b> That is the model rather than a
+    /// regression - a shell that explodes does not ricochet - but it does mean
+    /// the ricochet has to be asked for: <c>--ammo ap</c>, or the row beside this
+    /// one. Before this line existed the dial meant nothing here, so a bounce was
+    /// what every kind of round drew.
     /// </summary>
     public Shell.Kind Ammo = Shell.Kind.He;
 
@@ -411,6 +423,50 @@ public sealed class TankTick
     /// the first edit lands in one of them, and this one already has two readers.
     /// </summary>
     public bool Bounce = true;
+
+    /// <summary>
+    /// A high-explosive round bursting on the face of a plate: what the board
+    /// makes of it.
+    ///
+    /// <b><see cref="Bounced"/>'s twin, and the pair is the ammunition.</b> AP
+    /// either gets in or comes off; HE does neither - it stops on the face and
+    /// bursts there whether or not the plate held. So this fires on the round
+    /// rather than on the damage, which is why it is a separate hook and not a
+    /// second case inside the bounce: they are chosen by different questions, and
+    /// the one asked first is the shell's own kind.
+    ///
+    /// Handed the same three things <see cref="Bounced"/> is and out of the same
+    /// two measurements - the point of impact in the victim's own frame, the
+    /// direction unnormalised, and which side of the hull it is on. The direction
+    /// is the difference and it is the whole difference: a mirror there
+    /// (<see cref="Vehicle.Graze"/>), the plate's own outward normal here
+    /// (<see cref="Vehicle.Blown"/>).
+    ///
+    /// Answered by whichever root draws a board that can hold the quad, and
+    /// unanswered on the flat one for <see cref="Landed"/>'s reason - including
+    /// that unanswered draws nothing rather than falling back, so that
+    /// <c>--slam off</c> and "no board for it" do not become one state with two
+    /// causes.
+    /// </summary>
+    public Action<Vehicle, Vector2, Vector2, bool>? Blasted;
+
+    /// <summary>
+    /// Whether an HE round draws the burst on the plate at all.
+    ///
+    /// <see cref="Bounce"/>'s twin and its argument word for word: the built
+    /// burst stands on the board and the rendered pair stands in the tank's
+    /// canvas, so off is the only A/B this layer can have. <c>--slam off</c> on
+    /// both roots, and no panel row.
+    ///
+    /// <b>One place it is not <see cref="Bounce"/> word for word, and it is worth
+    /// the sentence.</b> Off does not force the rendered pair - it drops the round
+    /// back down the damage fork, which is where an HE round went when the
+    /// ammunition meant nothing against armour. So an HE round with this off
+    /// bounces if it did not get in and draws the rendered pair if it did, which
+    /// is exactly the picture the bench had before this layer, and that is what an
+    /// A/B has to hand back.
+    /// </summary>
+    public bool Slam = true;
 
     // --- the frame -----------------------------------------------------------
 
@@ -1839,7 +1895,7 @@ public sealed class TankTick
             return;
         }
         Land(round.Target, round.Face, round.Scatter, round.Rise, round.Calibre,
-             round.Level, 1, round.Bearing);
+             round.Level, 1, round.Bearing, round.Ammo);
     }
 
     /// <summary>Take every round off the board - the reset, and it runs before
@@ -2016,7 +2072,7 @@ public sealed class TankTick
     /// - see <see cref="TankSprite.DamageTo"/>.
     /// </summary>
     public void TakeHit(Vehicle victim, double fromBearing, float calibre,
-                         int? level, int bite)
+                         int? level, int bite, Shell.Kind? ammo = null)
     {
         TankSprite sprite = victim.Sprite;
         AtlasSet atlas = victim.Atlas;
@@ -2050,7 +2106,14 @@ public sealed class TankTick
         float scatter = ScatterAt(victim.HitCount);
         float rise = RiseAt(victim.HitCount);
         string face = atlas.FaceFor(from, sprite.HullFacing);
-        Land(victim, face, scatter, rise, calibre, level, bite, from);
+        // <b>What the gun is loaded with, unless the caller was carrying its
+        // own.</b> A fired shell settled its kind at the trigger and brought it
+        // along, for the reason it brought its calibre; a keypress has no round,
+        // so it spends the dial. Defaulted rather than required because every
+        // caller but one wants the dial, and a required parameter would have them
+        // all writing the same field out.
+        Land(victim, face, scatter, rise, calibre, level, bite, from,
+             ammo ?? Ammo);
     }
 
     /// <summary>A round arriving, with everything about it already settled.
@@ -2060,7 +2123,8 @@ public sealed class TankTick
     /// worked it out at the trigger and carried it. Both end here, so there is
     /// one place where a tank takes a hit however the hit was arranged.</summary>
     public void Land(Vehicle victim, string face, float scatter, float rise,
-                      float calibre, int? level, int bite, double from)
+                      float calibre, int? level, int bite, double from,
+                      Shell.Kind ammo)
     {
         TankSprite sprite = victim.Sprite;
         // How deep it goes is the calibre's business - see TankSprite.Damage.
@@ -2093,8 +2157,31 @@ public sealed class TankTick
         // The calibre goes the same way as the scatter and for the same reason:
         // both are settled the moment the round leaves, so both travel with it
         // rather than being looked up again while it is on screen.
-        bool bounced = got <= 0 && Bounce;
-        if (bounced)
+        //
+        // <b>And the shell's own kind is asked before the plate is, because a
+        // round that bursts does not bounce.</b> HE stops on the face and goes
+        // off there whether or not the armour held, so it is not a third case
+        // beside "in" and "off" - it is a different question, asked first, and
+        // the damage question keeps its own two answers underneath. Read the
+        // other way round - a bounce that then checks the filling - an HE round
+        // that failed to penetrate would have been either a ricochet or a burst
+        // by a rule written in whichever order the two ifs happened to be in.
+        //
+        // <b>Exactly one picture is drawn whichever way this goes, and the scar
+        // is drawn by none of the three.</b> It is written by Damage/DamageTo
+        // above this, which every hit reaches alike, so what the plate keeps does
+        // not depend on which picture was chosen - a bounce keeps its level-0
+        // scorch and an HE hit keeps the mark its own level earned. Worth stating
+        // because the ricochet reads as leaving nothing, and what it leaves
+        // nothing of is the rendered burst.
+        bool burst = ammo == Shell.Kind.He && Slam;
+        bool bounced = !burst && got <= 0 && Bounce;
+        if (burst)
+        {
+            (Vector2 plate, Vector2 outward) = victim.Blown(face, scatter, rise);
+            Blasted?.Invoke(victim, plate, outward, victim.Turned(face));
+        }
+        else if (bounced)
         {
             (Vector2 plate, Vector2 away) = victim.Graze(face, scatter, rise, from);
             Bounced?.Invoke(victim, plate, away, victim.Turned(face));

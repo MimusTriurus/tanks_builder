@@ -5857,18 +5857,24 @@ public static class SelfTest
             // rendered pair, and that a round which gets through draws the
             // rendered pair as it always did. Fired on a live tank and repaired
             // afterwards, which is what the R key does anyway.
+            // <b>Armour-piercing, every one of them, and that is not decoration
+            // on an old check.</b> A bounce is what AP does when it fails to get
+            // in; HE bursts on the face whether it got in or not and draws
+            // ProcSlam instead - see TankTick.Land's fork, where the round's own
+            // kind is asked before the plate's. Passed HE these four would assert
+            // the ricochet against the one round that cannot produce one.
             var fork = new TankTick();
             int bounced = 0;
             fork.Bounced = (_, _, _, _) => bounced++;
             mark.Hit.Reset();
-            fork.Land(mark, plate, 0.0f, 0.0f, 1.0f, 0, 1, outward);
+            fork.Land(mark, plate, 0.0f, 0.0f, 1.0f, 0, 1, outward, Shell.Kind.Ap);
             bool bounceOnly = bounced == 1 && !mark.Hit.Live;
             mark.Hit.Reset();
-            fork.Land(mark, plate, 0.0f, 0.0f, 1.0f, 2, 1, outward);
+            fork.Land(mark, plate, 0.0f, 0.0f, 1.0f, 2, 1, outward, Shell.Kind.Ap);
             bool holeOnly = bounced == 1 && mark.Hit.Live;
             fork.Bounce = false;
             mark.Hit.Reset();
-            fork.Land(mark, plate, 0.0f, 0.0f, 1.0f, 0, 1, outward);
+            fork.Land(mark, plate, 0.0f, 0.0f, 1.0f, 0, 1, outward, Shell.Kind.Ap);
             bool offRestores = bounced == 1 && mark.Hit.Live;
             mark.Hit.Reset();
             mark.Sprite.Repair();
@@ -5923,7 +5929,8 @@ public static class SelfTest
                 {
                     mark.Hit.Reset();
                     int was = bounced;
-                    fork.TakeHit(mark, fork.HitFrom, 1.0f, null, 1);
+                    fork.TakeHit(mark, fork.HitFrom, 1.0f, null, 1,
+                                 Shell.Kind.Ap);
                     bounces &= bounced == was + 1 && !mark.Hit.Live;
                 }
             fork.HitBy = TankTick.NoShooter;
@@ -6018,7 +6025,8 @@ public static class SelfTest
             bool ownPool = stage.Spalling.Any(x => x.Alive)
                            && !stage.Bursting.Any(x => x.Alive)
                            && !stage.Booming.Any(x => x.Alive)
-                           && !stage.Kicking.Any(x => x.Alive);
+                           && !stage.Kicking.Any(x => x.Alive)
+                           && !stage.Slamming.Any(x => x.Alive);
             foreach (ProcSpall x in stage.Spalling)
                 x.Douse();
             Check("and it goes in its own pool, six of them, beside the other"
@@ -6032,6 +6040,341 @@ public static class SelfTest
                 "a round that failed to get through a plate did not dig the "
                 + "ground either - the two bursts dig because a shell arriving in "
                 + "the earth is a hole in it");
+        }
+
+        // <b>"high-explosive" spelled out, and it is the filter word rather than a
+        // flourish.</b> --selftest matches the heading as a case-insensitive
+        // substring, so "HE" selects every theme with the word "the" in it - 1126
+        // checks of 1402, which is the filter reporting that it did something
+        // while doing nothing.
+        Theme("the burst a high-explosive round leaves on the plate it stopped on");
+        // <b>The frame that says the shell stopped, and the ricochet above is
+        // what it is being told apart from.</b> Both are a thing happening at a
+        // measured point on a hull and leaving along a measured direction, both
+        // are two quads on the shared dust and the shared ink, and both are fired
+        // by the same tick from the same landing. What separates them is one
+        // subtraction - a mirror there, the plate's own normal here - and which
+        // families are drawn. So most of what follows is a comparison rather than
+        // a measurement: the numbers that have to differ, and the one element
+        // whose absence is load-bearing.
+        var slam = new ProcSlam();
+        Check("the burst on armour is made of the burst's own dust, a third time",
+            ProcSlam.DustSlamCode.Contains(ProcBlast.DustInk)
+            && ProcSlam.DustSlamCode.Contains(Stage3D.FlameInk)
+            && ProcSlam.FireCode.Contains(Stage3D.FlameInk),
+            "four effects on this board raise dust and one text says what dust "
+            + "is - or eleven tuned numbers exist four times");
+        Check("and it does not redefine what the shared text defines",
+            !ProcSlam.DustSlamCode.Replace(ProcBlast.DustInk, "")
+                     .Contains("void dust_part(")
+            && !ProcSlam.DustSlamCode.Replace(ProcBlast.DustInk, "")
+                        .Contains("float dust_mass("),
+            "a second definition beside the shared one is the copy the shared "
+            + "block was extracted to prevent, wearing the extraction as a "
+            + "disguise");
+        // <b>And the impact frame is shared too, which is the reuse this effect
+        // was written on.</b> Where the round hit, which way the surface faces,
+        // how much of that survived the projection, the floor under the reach and
+        // the cone that opens as the reach closes: five facts about a hit on a
+        // hull under this camera, none of them about spall in particular.
+        Check("and the impact frame is the ricochet's, not a second copy of it",
+            ProcSlam.DustSlamCode.Contains(ProcSpall.SpallFrame)
+            && ProcSlam.FireCode.Contains(ProcSpall.SpallFrame)
+            && !ProcSlam.DustSlamCode.Replace(ProcSpall.SpallFrame, "")
+                        .Contains("uniform vec2  away")
+            && !ProcSlam.FireCode.Replace(ProcSpall.SpallFrame, "")
+                        .Contains("uniform float squat_floor"),
+            "away, squat, plate, squat_floor and cone_open are facts about a hit "
+            + "on a hull seen from this camera, and the two effects that have one "
+            + "should not have two accounts of it");
+        // <b>The move that made that possible, asserted where it can be seen to
+        // have happened.</b> cone_open was the ricochet's glow's own until this
+        // effect wanted it in both halves; declared twice it would be two numbers
+        // for one projection, and declared once in the wrong half it is the black
+        // rectangle squat_floor already cost - see the check on that above.
+        Check("and the cone the projection opens is declared once, in that frame",
+            ProcSpall.SpallFrame.Contains("uniform float cone_open")
+            && !ProcSpall.GlowCode.Replace(ProcSpall.SpallFrame, "")
+                         .Contains("uniform float cone_open")
+            && !ProcSlam.FireCode.Replace(ProcSpall.SpallFrame, "")
+                        .Contains("uniform float cone_open")
+            && !ProcSlam.DustSlamCode.Replace(ProcSpall.SpallFrame, "")
+                        .Contains("uniform float cone_open"),
+            "seen end-on a cone is a disc, and that is a fact about the camera "
+            + "rather than about what is being thrown");
+        Check("and all four halves spend the frame's two expressions rather than"
+              + " writing them out",
+            ProcSpall.SpallFrame.Contains("float spall_run(")
+            && ProcSpall.SpallFrame.Contains("float spall_cone(")
+            && ProcSpall.GlowCode.Contains("spall_run(reach)")
+            && ProcSpall.DustSpallCode.Contains("spall_run(reach)")
+            && ProcSlam.FireCode.Contains("spall_run(reach)")
+            && ProcSlam.DustSlamCode.Contains("spall_run(reach)")
+            && ProcSlam.FireCode.Contains("spall_cone(")
+            && ProcSlam.DustSlamCode.Contains("spall_cone("),
+            "the reach with its floor and the cone with its opening were written "
+            + "out four times between these two effects before they were two "
+            + "functions in the text both of them include");
+        // The quad against the model - the burst's rule, and the third effect to
+        // have this check in these words.
+        (float slamOut, float slamUp) = ProcSlam.Bounds(slam.Reach, Vector2.Zero);
+        Check("the quad holds what the model can produce, across",
+            slamOut <= slam.Flank,
+            $"the model reaches {slamOut:F3} of a tile out against a quad "
+            + $"{slam.Flank:F3} wide - anything past the rim is sliced off flat, "
+            + "and a mass missing its edge reads as a smaller mass");
+        Check("and up",
+            slamUp <= slam.Tall,
+            $"the model climbs {slamUp:F3} of a tile against a quad "
+            + $"{slam.Tall:F3} tall");
+        // With the impact where a real plate puts it - the ricochet's finding and
+        // the same measurement, reused rather than taken again: where the furthest
+        // impact any loaded tank can take is is a fact about the tanks, and this
+        // effect starts at the same point that one does.
+        (float slamFar, float slamHigh) = ProcSlam.Bounds(slam.Reach, spallAt);
+        Check("and it holds them with the impact added, which is where they start",
+            slamFar <= slam.Flank && slamHigh <= slam.Tall,
+            $"{slamFar:F3} out and {slamHigh:F3} up from the furthest impact any "
+            + $"loaded tank can take ({spallAt.X:F3}, {spallAt.Y:F3} of a tile off "
+            + $"its contact point), against a quad {slam.Flank:F3} by "
+            + $"{slam.Tall:F3}");
+        // <b>Shorter and wider than the ricochet, which is the silhouette and is
+        // therefore worth asserting rather than tuning and forgetting.</b> A
+        // volume of gas that air stops at once against fragments leaving at a
+        // kilometre a second: the two read apart on shape before they read apart
+        // on colour, and a burst that grew to the fan's reach would stop doing so.
+        float sootCone = ProcBlast.Uniform(ProcSlam.DustSlamCode, "cloud_cone");
+        float fanCone = ProcBlast.Uniform(ProcSpall.GlowCode, "shard_cone");
+        Check("the burst goes less far than the ricochet and spreads wider",
+            slam.Reach < ProcSpall.ReachDefault && sootCone > fanCone,
+            $"reach {slam.Reach:F2} against the fan's {ProcSpall.ReachDefault:F2}, "
+            + $"cone {sootCone:F2} against {fanCone:F2}");
+        Check("and it lasts longer than the ricochet and nothing like the shell in"
+              + " the ground",
+            slam.Life > ProcSpall.LifeDefault
+            && slam.Life < ProcBlast.LifeDefault,
+            $"{slam.Life:F2}s between the bounce's {ProcSpall.LifeDefault:F2} and "
+            + $"the burst's {ProcBlast.LifeDefault:F2} - there is no ground under "
+            + "this one to feed a column and nothing ballistic to wait for");
+        // <b>The absence, and it is as much of the difference as the fireball
+        // is.</b> The ricochet's two bolts are the round itself carrying on, and
+        // they are most of what makes it read as a bounce. An HE round does not
+        // carry on, so a bolt family appearing here would be the one element that
+        // says the wrong thing about the event.
+        // Asked of the declaration rather than of the word, which is the
+        // substring trap sprite_atlas.by_hints paid for once: this shader's own
+        // comment says there is no bolt here, and a search for the word finds
+        // that sentence.
+        Check("nothing here is the round carrying on",
+            !ProcSlam.FireCode.Contains("uniform int bolts")
+            && ProcSpall.GlowCode.Contains("uniform int bolts"),
+            "the deflected shell is the ricochet's, and it is the element an HE "
+            + "hit must not have - the fan is fragments that fall");
+        float sprayDrop = ProcBlast.Uniform(ProcSlam.FireCode, "spray_drop");
+        float shardDrop = ProcBlast.Uniform(ProcSpall.GlowCode, "shard_drop");
+        Check("and its fragments fall harder than spall does",
+            sprayDrop > shardDrop,
+            $"{sprayDrop:F2} against the fan's {shardDrop:F2} - a piece of a shell "
+            + "that has already gone off has nowhere to be going");
+        // The three windows, in order: the core out before the ball, the ball
+        // before the fragments have fallen, and the soot standing after all three.
+        float coreOut = ProcBlast.Uniform(ProcSlam.FireCode, "core_life");
+        float ballOut = ProcBlast.Uniform(ProcSlam.FireCode, "ball_life")
+                        + ProcBlast.Uniform(ProcSlam.FireCode, "ball_stagger");
+        float sprayOut = ProcBlast.Uniform(ProcSlam.FireCode, "spray_life")
+                         + ProcBlast.Uniform(ProcSlam.FireCode, "spray_stagger");
+        float sootOut = ProcBlast.Uniform(ProcSlam.DustSlamCode, "cloud_life");
+        Check("the core is out before the ball, and the soot outlasts them all",
+            coreOut < ballOut * 0.5f && ballOut < sprayOut && sprayOut < sootOut,
+            $"core {coreOut:F3}s, ball {ballOut:F3}s, fragments {sprayOut:F3}s, "
+            + $"soot {sootOut:F3}s - a shell arriving and its consequences, or "
+            + "four things of one length");
+        // <b>The direction, which is the whole of the model.</b> A plate's own
+        // outward normal, and it does not depend on where the round came from -
+        // the two claims are one check, because the way to say "the arrival
+        // bearing dropped out" is that a glancing shot and a square one burst the
+        // same way while the ricochet's leave differently.
+        if (vehicles is null || vehicles.Count == 0)
+        {
+            Note("  no tanks on this board - nothing to burst a round against");
+        }
+        else
+        {
+            Vehicle mark = vehicles[0];
+            string plate = mark.Atlas.HitFaces[0];
+            double outward = mark.Sprite.HullFacing + mark.Atlas.HitBearing(plate);
+            Vector2 normal = mark.Atlas.GroundDirection(outward);
+            Check("an HE round bursts out along the plate's own normal",
+                mark.Blown(plate, 0.0f, 0.0f).Out.DistanceTo(normal) < 1e-4f,
+                $"{mark.Blown(plate, 0.0f, 0.0f).Out} against the plate's own "
+                + $"outward {normal} - the gases go where the metal is not, which "
+                + "is one direction and not two bearings");
+            Check("and it bursts the same way however the round arrived",
+                mark.Graze(plate, 0.0f, 0.0f, outward).Away
+                       .DistanceTo(normal) < 1e-4f
+                && mark.Graze(plate, 0.0f, 0.0f, outward + 55.0).Away
+                       .DistanceTo(normal) > 1e-3f,
+                "a shell that stopped has no memory of its own bearing, which is "
+                + "exactly what a ricochet is made of - so the square-on bounce "
+                + "coincides with this and the glancing one does not");
+            Check("and the impact point is the plate's own, not a second"
+                  + " measurement of it",
+                mark.Blown(plate, 0.2f, -0.1f).Plate
+                == mark.Plated(plate, 0.2f, -0.1f),
+                "the same one definition the ricochet and the rendered layer both "
+                + "read - four atlas calls written a third time agree until "
+                + "somebody changes how a plate is measured");
+            // <b>The fork, behaviourally, because the fork is the claim - and the
+            // claim is that the round's kind is asked before the plate's.</b> An
+            // HE round bursts whether or not it got in, an AP one bounces only
+            // when it did not, and exactly one picture is drawn in every case.
+            var fork = new TankTick();
+            int went = 0, off = 0;
+            fork.Blasted = (_, _, _, _) => went++;
+            fork.Bounced = (_, _, _, _) => off++;
+            mark.Hit.Reset();
+            fork.Land(mark, plate, 0.0f, 0.0f, 1.0f, 0, 1, outward, Shell.Kind.He);
+            bool heldStill = went == 1 && off == 0 && !mark.Hit.Live;
+            mark.Hit.Reset();
+            fork.Land(mark, plate, 0.0f, 0.0f, 1.0f, 2, 1, outward, Shell.Kind.He);
+            bool throughStill = went == 2 && off == 0 && !mark.Hit.Live;
+            mark.Hit.Reset();
+            fork.Land(mark, plate, 0.0f, 0.0f, 1.0f, 0, 1, outward, Shell.Kind.Ap);
+            bool apBounces = went == 2 && off == 1 && !mark.Hit.Live;
+            // <b>And what the flag restores is the <em>path</em>, not one
+            // picture on it - which is the one place this A/B is not Bounce's
+            // word for word, and it took a failed check to say so.</b> Before
+            // this effect existed the ammunition meant nothing against armour,
+            // so an HE round went down the damage fork like any other: a bounce
+            // when it did not get in, the rendered pair when it did. Off has to
+            // hand back both of those, and an assertion that it hands back the
+            // rendered pair unconditionally is an assertion that the old picture
+            // was something it never was.
+            fork.Slam = false;
+            mark.Hit.Reset();
+            fork.Land(mark, plate, 0.0f, 0.0f, 1.0f, 0, 1, outward, Shell.Kind.He);
+            bool offBounces = went == 2 && off == 2 && !mark.Hit.Live;
+            mark.Hit.Reset();
+            fork.Land(mark, plate, 0.0f, 0.0f, 1.0f, 2, 1, outward, Shell.Kind.He);
+            bool offRestoresHe = offBounces && went == 2 && mark.Hit.Live;
+            fork.Slam = true;
+            // And the mark, which is written above the fork and so is reached by
+            // all three - the sentence docs/blast.md asks for ("the scar already
+            // exists and stays") turning out to need no code at all.
+            mark.Sprite.Repair();
+            mark.Hit.Reset();
+            fork.Land(mark, plate, 0.0f, 0.0f, 1.0f, 1, 1, outward, Shell.Kind.He);
+            int heMarks = mark.Sprite.MarksOn(plate).Count;
+            mark.Sprite.Repair();
+            mark.Hit.Reset();
+            fork.Land(mark, plate, 0.0f, 0.0f, 1.0f, 0, 1, outward, Shell.Kind.Ap);
+            int apMarks = mark.Sprite.MarksOn(plate).Count;
+            mark.Hit.Reset();
+            mark.Sprite.Repair();
+            Check("an HE round that did not get in bursts on the face of the plate",
+                heldStill,
+                $"the burst hook fired {went} time(s) and the bounce hook {off} - "
+                + "a shell that explodes does not ricochet, and it is the round's "
+                + "own kind that says so rather than the damage");
+            Check("and one that did get in bursts in exactly the same way",
+                throughStill,
+                "this is what makes the ammunition the first question rather than "
+                + "a third case: HE stops on the face either way, so the depth "
+                + "cannot be what chooses the picture");
+            Check("while an armour-piercing round still bounces when it fails",
+                apBounces,
+                "the two hooks answer two events, and the one the plate decides is "
+                + "still AP's");
+            Check("and --slam off puts an HE round back on the path it was on"
+                  + " before this layer existed",
+                offRestoresHe,
+                "the built burst stands on the board and the rendered pair in the "
+                + "tank's canvas, so off is the only A/B this layer can have - but "
+                + "what it hands back is the damage fork, which is a bounce and a "
+                + "penetration rather than one picture");
+            Check("and the plate keeps its mark whichever picture was drawn",
+                heMarks == 1 && apMarks == 1,
+                $"{heMarks} mark after a burst and {apMarks} after a bounce - the "
+                + "scar comes out of DamageTo above the fork, so what the armour "
+                + "keeps does not depend on what was drawn over it");
+        }
+        // Aim: both halves of the normal are used and the vertical one is clamped
+        // - the ricochet's pair of checks, and the same reason under them. The
+        // clamp matters more here and costs less: a burst on the plate facing the
+        // shooter is the common case, and a round mass that climbs is still a
+        // round mass.
+        slam.Aim(new Vector2(0.30f, 0.80f), Vector2.Zero);
+        Check("a burst toward the camera keeps its mass above the ground line",
+            slam.Away.Y >= 0.0f,
+            $"away {slam.Away} - below the contact point and behind the ground are "
+            + "one test under this camera");
+        slam.Aim(new Vector2(0.20f, -0.10f), Vector2.Zero);
+        float slamInto = slam.Squat;
+        slam.Aim(new Vector2(1.00f, -0.05f), Vector2.Zero);
+        Check("and one into the screen spreads across less of the picture",
+            slam.Squat > slamInto,
+            $"{slamInto:F2} into the screen against {slam.Squat:F2} across it");
+        Check("and everything starts at the plate rather than at the seat",
+            ProcSlam.FireCode.Contains("plate + away * ")
+            && ProcSlam.DustSlamCode.Contains("vec2 p = plate + "),
+            "the seat is the victim's contact point because that is where the "
+            + "ground is known; a mass placed from there begins inside the tank - "
+            + "the error ProcKick paid for once and ProcSpall inherited");
+        Check("and one family of it deliberately reaches the ground",
+            ProcSlam.DustSlamCode.Contains("uniform float spill_seat")
+            && ProcSlam.DustSlamCode.Contains("(plate.y - spill_seat)"),
+            "everything else here happens up on a plate and could be happening a "
+            + "cell away for all the picture says; the spill is what puts the "
+            + "burst on this tank, and the ground is the one height known exactly");
+        Check("and nothing of it is drawn below the contact line",
+            ProcSlam.DustSlamCode.Contains("blast_footing(at)")
+            && ProcSlam.FireCode.Contains("blast_footing(at)"),
+            "the quad's footing is the one thing standing between the mass and the "
+            + "ground it is seated on");
+        // <b>Darker than the ricochet's pair, and the dark stop is what the
+        // brightness of the whole cloud is.</b> dust_seat minus dust_dense puts a
+        // dense element near 0.24, so almost every pixel shows the dark stop -
+        // the burst's measured finding, and it means this comparison is the
+        // comparison of the two clouds rather than of two swatches.
+        Check("the soot of a burst is darker than the coat a bounce knocks loose",
+            ProcBlast.Colour(ProcSlam.DustSlamCode, "soot_dark").R
+            < ProcBlast.Colour(ProcSpall.DustSpallCode, "coat_dark").R,
+            "what comes off a plate under a bounce is paint and road dirt; what a "
+            + "shell leaves is the soot of a filling that has just burnt");
+        // The depth side, which cannot be read off a picture - the ricochet's
+        // check, and the same trap: two quads standing on one contact point sort
+        // by nothing.
+        slam.Sit(Vector2.Zero, 0.0f, 0.5f, 1.0f, behind: true);
+        bool slamSat = slam.Behind;
+        slam.Sit(Vector2.Zero, 0.0f, 0.5f, 1.0f);
+        Check("a burst on a plate turned away is put behind the tank",
+            slamSat && !slam.Behind,
+            "a fireball drawn over the armour it went off against is a fireball on "
+            + "the wrong side of the hull");
+        if (stage is not null)
+        {
+            // Behavioural, for the burst theme's reason - and here the pool it
+            // must not share is the ricochet's, the two being the same trigger at
+            // the same point on the same tank.
+            stage.Slam(stage.Origin, 0.0f, Vector2.Right, Vector2.Zero, false);
+            bool slamPool = stage.Slamming.Any(x => x.Alive)
+                            && !stage.Spalling.Any(x => x.Alive)
+                            && !stage.Bursting.Any(x => x.Alive)
+                            && !stage.Booming.Any(x => x.Alive)
+                            && !stage.Kicking.Any(x => x.Alive);
+            foreach (ProcSlam x in stage.Slamming)
+                x.Douse();
+            Check("and it goes in its own pool, six of them, beside the other four",
+                slamPool && stage.Slamming.Count == Stage3D.Bursts
+                && !ReferenceEquals(stage.Slamming, stage.Spalling),
+                $"{stage.Slamming.Count} of {Stage3D.Bursts} - a bounce and a "
+                + "burst can land on one hull inside a second of each other, and "
+                + "a shared pool is the second restarting the first's clock");
+            Check("and a burst on armour digs nothing",
+                stage.Pits is null or { Any: false },
+                "a shell that went off against a hull did not touch the ground it "
+                + "is standing over - the crater under a tank is what ammo_rack "
+                + "will be, and that is a different event");
         }
 
         Theme("the engine plume built rather than read");

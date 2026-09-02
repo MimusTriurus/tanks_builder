@@ -908,6 +908,44 @@ void fragment() {
     }
 
     /// <summary>
+    /// One of a shader's own colour stops, read out of its text the way
+    /// <see cref="Uniform"/> reads a number, and for its reason.
+    ///
+    /// <b>Written because the four dust effects on this board are now told apart
+    /// partly by their colour, and that is a claim about a pair rather than about
+    /// a swatch.</b> <c>dust_seat</c> minus <c>dust_dense</c> puts a dense element
+    /// near 0.24, so almost every pixel of a cloud shows its <em>dark</em> stop -
+    /// which makes the dark stop the brightness of the whole cloud, and makes "the
+    /// soot of a burst is darker than the coat a bounce knocks loose" a statement
+    /// that can be checked rather than looked at.
+    ///
+    /// Returns black for a name that is not there, so a renamed stop fails the
+    /// check that uses it rather than throwing inside the test run - the number
+    /// reader's arrangement, with the one difference that a colour has no
+    /// meaningful NaN.
+    /// </summary>
+    internal static Color Colour(string code, string name)
+    {
+        int at = code.IndexOf("uniform vec3 " + name + " = vec3(",
+                              StringComparison.Ordinal);
+        if (at < 0)
+            return Colors.Black;
+        at = code.IndexOf('(', at) + 1;
+        int end = code.IndexOf(')', at);
+        if (end < 0)
+            return Colors.Black;
+        string[] parts = code[at..end].Split(',');
+        float Channel(int n) =>
+            n < parts.Length
+            && float.TryParse(parts[n], NumberStyles.Float,
+                              CultureInfo.InvariantCulture, out float v)
+                ? v : 0.0f;
+        // One channel is what every reader wants and three is what a stop has, so
+        // the whole colour comes back and the caller takes what it is comparing.
+        return new Color(Channel(0), Channel(1), Channel(2));
+    }
+
+    /// <summary>
     /// The rings a burst pushes out along the ground: a bright disc under it at
     /// the instant of the shot, and two rings racing out of that and fading.
     ///
