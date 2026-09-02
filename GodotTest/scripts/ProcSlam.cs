@@ -789,8 +789,16 @@ SPALL_FRAME
 // The core: the filling going off against the metal. One body, three frames, the
 // brightest thing on the board while it is there, and seated on the plate itself -
 // it has nowhere to go yet.
+//
+// <b>Twice the size it was first tuned at, and the argument is the shell rather
+// than the picture: an HE round has a filling.</b> The first pass kept the fire
+// deliberately tight so it would read as the heart of the mass rather than as an
+// orange stain inside it - which it does - but tight enough to read as a heart it
+// also read as an impact spark, and what is going off here is explosive. Doubled
+// together with the ball below, because the two are one event: a large white flash
+// in front of a small orange ball is two things happening.
 uniform float core_life = 0.055;
-uniform float core_size = 0.050;
+uniform float core_size = 0.100;
 // How far off the plate it sits, in its own widths. Small and not zero: the
 // detonation is in front of the armour rather than inside it, and at zero the core
 // reads as a lamp behind the hull.
@@ -798,13 +806,20 @@ uniform float core_lead = 0.55;
 // Past one, and deliberately - ProcBlast's flash's note: a white heart is bought
 // by adding an orange body to itself until it clips, which is brightness rather
 // than a whiter colour.
-uniform float core_gain = 1.85;
+//
+// <b>And it had to go up when the core grew, which is that same note read
+// backwards.</b> Doubling the radius at 1.85 spread the same light over four times
+// the area and the fire came out a flat orange disc - bigger, and no longer a
+// detonation. The lever is the gain, exactly as the note says; a paler colour here
+// would have bought the white by giving up the fire.
+uniform float core_gain = 2.45;
 
 // The ball: the fireball rolling off the face of the plate.
 uniform int balls = 6;
 uniform float ball_life = 0.26;
 uniform float ball_stagger = 0.035;
-uniform float ball_size = 0.044;
+// Doubled with the core, and for its reason - see the note there.
+uniform float ball_size = 0.088;
 uniform float ball_lead = 0.30;
 uniform float ball_spread = 0.55;
 uniform float ball_climb = 0.30;
