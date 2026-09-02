@@ -354,6 +354,8 @@ public sealed partial class Stage3D : Node3D
             blast.Tick(delta);
         foreach (SheetBlast blast in _booming)
             blast.Tick(delta);
+        foreach (ProcKick kick in _kicking)
+            kick.Tick(delta);
         Etchings();
         Soot();
         _deepInk?.SetShaderParameter("foam", Mathf.Max(0.0f, Foam));
@@ -5104,6 +5106,74 @@ void fragment() {{
     /// <summary>The sheet bursts as they stand, <see cref="Bursting"/>'s twin and
     /// read-only for its reason.</summary>
     public IReadOnlyList<SheetBlast> Booming => _booming;
+
+    private readonly List<ProcKick> _kicking = new();
+    private int _nextKick;
+
+    /// <summary>What to do to a kick before it goes off - <see cref="Dress"/> for
+    /// the burst, and the same argument: the pool is built on the first shot, so a
+    /// bench holding a panel of settings has nothing to write them into until
+    /// then, and it must not have to wait for a shot to be able to set one.
+    /// </summary>
+    public Action<ProcKick>? Fit;
+
+    /// <summary>
+    /// The dust a gun blows off the ground, on the board - <see cref="ProcKick"/>.
+    ///
+    /// <b>A third pool rather than a case inside <see cref="Burst"/>, because it is
+    /// a different event on a different trigger.</b> A burst is a round arriving; a
+    /// kick is a round leaving, it happens to every shot whether or not anything is
+    /// hit, and it digs nothing - there is no crater under a muzzle. Folded in, the
+    /// two would have shared a clock and the shot's dust would have outlived or
+    /// pre-empted the impact's by whichever of them fired last.
+    ///
+    /// <b><paramref name="spot"/> is board space</b>, with <paramref name="lift"/>
+    /// the ground's height there - <see cref="Burst"/>'s pair, and worth repeating
+    /// because getting it wrong is silent and has been: written to take the field's
+    /// own space, a quad gets <see cref="Origin"/> added to a point that already
+    /// carries it and stands hundreds of pixels off the thing it belongs to.
+    ///
+    /// <paramref name="along"/> is the gun's ground direction as
+    /// <see cref="AtlasSet.GroundDirection"/> gives it - unnormalised, so its
+    /// length is the share of a ground length that survived the projection. See
+    /// <see cref="ProcKick.Aim"/>: both halves of it are used.
+    ///
+    /// <paramref name="snout"/> is the muzzle's offset from
+    /// <paramref name="spot"/> in screen px. Handed over rather than worked out
+    /// here for <see cref="Vehicle.Bore"/>'s reason: where a gun's mouth is is one
+    /// measurement, and this would be a fourth projection of it.
+    /// </summary>
+    public void Kick(Vector2 spot, float lift, Vector2 along, Vector2 snout,
+                     float might = 1.0f)
+    {
+        if (Field.Atlas is null)
+            return;
+        while (_kicking.Count < Bursts)
+        {
+            var made = new ProcKick();
+            AddChild(made);
+            made.Build(Field.Atlas.HexRect.Size.X, Squash, RiseFactor);
+            _kicking.Add(made);
+        }
+        ProcKick kick = _kicking[_nextKick % Bursts];
+        // Reset before the hook, multiplied after it - see Burst on why the
+        // multiply alone compounds every shot until the cloud fills the screen.
+        kick.Might = 1.0f;
+        Fit?.Invoke(kick);
+        _nextKick = (_nextKick + 1) % Bursts;
+        kick.Might *= might;
+        kick.Sit(spot, lift, Squash, RiseFactor);
+        // Aimed after it is seated and sized, because Aim writes to the materials
+        // and Sit does not touch them - the order is not load-bearing, but the
+        // pair has to be complete before Fire or the first frame draws the last
+        // shot's heading.
+        kick.Aim(along, snout);
+        kick.Fire();
+    }
+
+    /// <summary>The kicks as they stand, <see cref="Bursting"/>'s twin and
+    /// read-only for its reason.</summary>
+    public IReadOnlyList<ProcKick> Kicking => _kicking;
 
     private readonly List<PitArt> _etched = new();
     private int _etchedAt = -1;

@@ -554,6 +554,8 @@ FLAME_INK
 
 BLAST_FRAME
 
+DUST_INK
+
 // The cone: how many, how long each lives, how wide it opens and how hard it
 // falls back. The lean is measured from straight up, so 0.20 is a tight fountain
 // and 1.10 is a fan lying on the ground.
@@ -613,85 +615,12 @@ uniform float column_ink = 1.00;
 // with the sun on it. Read too dark first, and the burst was a black smear.
 uniform vec3 dirt_dark = vec3(0.115, 0.082, 0.055);
 uniform vec3 dirt_lit = vec3(0.790, 0.650, 0.430);
-// <b>How soft an element is, as the exponent of its own profile</b>, and this is
-// the number the whole look turns on.
-//
-// The flame's section is a sphere's - <c>sqrt(1 - q)</c>, an exponent of 0.5 - and
-// that is exactly right for a lick, which is a body: bright in the middle, thin
-// and dark at a rim the eye can find. It is exactly wrong for dust, because a
-// sphere's profile has *infinite slope* at that rim: alpha climbs off zero inside
-// a pixel or two, and no amount of softening anywhere else can undo an edge that
-// steep. That was the hard edge.
-//
-// <b>2.55 is measured, not chosen.</b> The CC0 pack's painted puff - the thing
-// whose smoke reads soft - fits <c>(1 - q)^2.57</c> across all sixty-four of its
-// cells, and its alpha peaks at 0.35 and reaches 0.95 nowhere in the sprite at
-// all: every pixel of it is in transition. Five times the flame's exponent, and
-// that ratio is the difference between a stone and a cloud.
-//
-// The clods keep a crisper one, because a clod of earth *is* a small body - but
-// nowhere near a sphere's.
+// <b>The profile, the tearing, the packing and the light are the shared dust
+// ink's</b> - ProcBlast.DustInk, substituted in above and shared with ProcKick.
+// What stays here is what is this burst's own: the colour of earth in the air,
+// and the crisper profile a clod keeps because a clod of earth *is* a small body
+// - but nowhere near a sphere's.
 uniform float clod_soft = 1.85;
-uniform float dust_soft = 2.55;
-uniform float dust_seat = 0.52;
-uniform float dust_ridge = 0.78;
-uniform float dust_dense = 0.28;
-// How fast piled-up elements stop adding to the mass. The whole reason the
-// silhouette is one shape - see the note on fragment().
-uniform float dust_pack = 3.00;
-// How many steps the light is quantised to, and 0 for none. Taken from the CC0
-// pack's stylised smoke, whose own value is three: banding a cloud's shading
-// reads as a drawn cloud rather than as an airbrushed one, and it is the cheapest
-// thing in this file.
-uniform float dust_steps = 3.0;
-// How much of the stepping is actually taken. <b>Not all of it, and that is the
-// second half of the hard-edge finding.</b> The pack quantises the light on smoke
-// that is never denser than 0.35 alpha, so its bands read as shading; taken whole
-// on a mass that saturates to one they read as slabs, and the line between two
-// slabs is a hard edge however soft the alpha under it is. Half-taken, the banding
-// is visible as shading and the boundary is not a line.
-uniform float dust_band = 0.55;
-// The most of the ground a cloud may hide. Earth in the air is not a wall, and a
-// mass that saturates to one is: at 1.0 the burst read as a hole in the board.
-uniform float dust_ink = 0.72;
-// <b>How the silhouette is torn.</b> Soft is not the same as ragged: with the
-// profile alone the cloud is a smooth blob with a gentle edge, which reads as
-// airbrush. The pack gets its raggedness from a painted sprite; here the summed
-// density is eaten by a noise field, which is what the tree's own smoke does with
-// its <c>torn</c> term. Drifting, because a static field is a stencil the cloud
-// slides under.
-uniform float dust_tear = 0.38;
-uniform float dust_grain = 13.0;
-uniform float dust_drift = 0.10;
-// A toe on the way out, so thin dust fades over a longer distance than a dense
-// core does. The pack spends a whole ramp on this idea - soft_blend_ramp, which
-// widens the depth fade for its wispiest pixels - and on a board with no depth
-// fade to widen it lands here instead.
-uniform float dust_toe = 1.20;
-
-// <b>What an element contributes, rather than what it looks like.</b> This is the
-// change that took the burst from a heap of ellipses to a cloud: an element hands
-// back how much earth it puts in the way and which way its own surface leans, and
-// nothing else. It has no colour, no rim and no light of its own, because those
-// are what made forty-four of them read as forty-four things.
-//
-// <c>w</c> is its coverage, <c>lean</c> its outward direction weighted by that
-// coverage - summed over the mass it points where the cloud thins, which is the
-// only normal a cloud has.
-void dust_part(vec2 at, vec2 centre, float half_w, float along, vec2 flow,
-               float lump_seed, float gain, float soft, float age,
-               inout float dens, inout vec2 lean, inout float years) {
-    float down;
-    // The shared frame, and this element's own profile on it - see flame_reach.
-    float q = flame_reach(at, centre, half_w, along, flow, lump_seed, down);
-    if (q >= 1.0) {
-        return;
-    }
-    float w = pow(1.0 - q, soft) * gain;
-    dens += w;
-    lean += normalize(at - centre + vec2(1e-5, 1e-5)) * w;
-    years += w * age;
-}
 
 void fragment() {
     if (level <= 0.0) {
@@ -787,46 +716,10 @@ void fragment() {
             ALBEDO = vec3(0.0);
             ALPHA = 0.0;
         } else {
-            // <b>Saturating, so a pile-up stops reading as a pile.</b> Overlaps
-            // add thickness and thickness runs out of effect, which is what a
-            // volume does - and it is what keeps twenty elements in one place from
-            // being twenty times as opaque as one.
-            // Torn first, so the noise eats the density rather than the picture:
-            // a field applied to the finished alpha is a stencil lying on the
-            // screen, while one applied to the thickness is dust that is genuinely
-            // thinner in places.
-            float torn = 1.0 - dust_tear
-                         + dust_tear * ember_fbm(at * dust_grain
-                                                 + vec2(0.0, -time * dust_drift
-                                                              * dust_grain));
-            float mass = 1.0 - exp(-dens * torn * dust_pack);
-            // And a toe: thin dust leaves over a longer distance than thick dust.
-            mass = pow(mass, dust_toe);
-            // The cloud's own normal, out of the sum: where the mass thins.
-            vec2 face = length(lean) < 1e-5 ? vec2(0.0, 1.0) : normalize(lean);
-            float side = dot(face, normalize(sun.xy));
-            // The ridge lives at the edge, where the mass is thin, and the body
-            // darkens as it thickens - the same statement as before, now made once
-            // about the whole cloud instead of once per element.
-            // <b>Seated high enough that three steps land on three bands.</b>
-            // The quantiser floors, so a light term that sits at 0.16 - which is
-            // what a seat of 0.46 minus a dense body gives - floors to nothing and
-            // the whole cloud comes out at its darkest stop. Measured: near-black.
-            // Seated at 0.52 the three bands land where they are wanted: the
-            // dense core away from the sun floors to the darkest stop, the body
-            // lands mid and the thin sunward edge tops out. Seated at 0.62 nothing
-            // reached the bottom band at all and the cloud was the same value as
-            // the ground it stood on - a pale smudge, which on this board is the
-            // other way to be invisible.
-            float lit = clamp(dust_seat + dust_ridge * side * (1.0 - mass)
-                              - dust_dense * mass, 0.0, 1.0);
-            if (dust_steps > 1.5) {
-                // The pack's own formula, over-ranging by design: it brightens the
-                // top band, which is what stops three steps reading as three greys.
-                float banded = clamp(floor(lit * dust_steps) / (dust_steps - 1.0),
-                                     0.0, 1.0);
-                lit = mix(lit, banded, dust_band);
-            }
+            // One surface, lit once, out of the summed thickness - both halves
+            // are the shared dust ink's, and the two colours are this burst's.
+            float mass = dust_mass(at, dens);
+            float lit = dust_lit(mass, lean);
             ALBEDO = mix(dirt_dark, dirt_lit, lit);
             ALPHA = clamp(mass * dust_ink * level * blast_footing(at), 0.0, 1.0);
         }
@@ -1113,10 +1006,166 @@ void fragment() {
     /// <summary>The dust as it is compiled - the shared noise, the shared ink and
     /// the shared frame, put together in one place so a check can ask whether the
     /// burst and the forest's fire are one text.</summary>
+    /// <summary>
+    /// What a cloud of earth is made of - the profile, the tearing, the packing
+    /// and the light on the finished mass - as one text, shared with
+    /// <see cref="ProcKick"/>.
+    ///
+    /// <b><see cref="Stage3D.FlameInk"/>'s move at a smaller scale, and for its
+    /// reason.</b> A shell's earth and a gun's blown dust are the same dust; what
+    /// differs is the colour and which elements there are, and those stay with
+    /// each shader. Eleven tuned numbers written out twice would agree until the
+    /// first sweep landed in one of them.
+    ///
+    /// Substituted after <see cref="BlastFrame"/> and after the ink, because it
+    /// reads <c>time</c> and <c>sun</c> from the first and <c>flame_reach</c> from
+    /// the second.
+    /// </summary>
+    internal const string DustInk = @"
+// <b>What a cloud of earth is made of, shared by everything on this board that
+// raises one.</b> <see cref=""Stage3D.FlameInk""/> at a smaller scale and for
+// exactly its reason: the dust a shell throws up and the dust a gun blows off the
+// ground are the same dust - the same profile, the same tearing, the same
+// packing, the same light - and eleven tuned numbers written twice part company
+// at whichever of them nobody put side by side.
+//
+// What is *not* in here is what differs: the colour, and which elements there
+// are. A burst's earth is dark and warm and thrown up out of a seat; a muzzle's
+// is pale at first and blown along the bore. Those are the two shaders' own.
+
+// <b>How soft an element is, as the exponent of its own profile</b>, and this is
+// the number the whole look turns on.
+//
+// The flame's section is a sphere's - <c>sqrt(1 - q)</c>, an exponent of 0.5 - and
+// that is exactly right for a lick, which is a body: bright in the middle, thin
+// and dark at a rim the eye can find. It is exactly wrong for dust, because a
+// sphere's profile has *infinite slope* at that rim: alpha climbs off zero inside
+// a pixel or two, and no amount of softening anywhere else can undo an edge that
+// steep. That was the hard edge.
+//
+// <b>2.55 is measured, not chosen.</b> The CC0 pack's painted puff - the thing
+// whose smoke reads soft - fits <c>(1 - q)^2.57</c> across all sixty-four of its
+// cells, and its alpha peaks at 0.35 and reaches 0.95 nowhere in the sprite at
+// all: every pixel of it is in transition. Five times the flame's exponent, and
+// that ratio is the difference between a stone and a cloud.
+//
+// A body of earth small enough to read as a body - a clod - keeps a crisper one,
+// and that is the shader's own number rather than this block's.
+uniform float dust_soft = 2.55;
+uniform float dust_seat = 0.52;
+uniform float dust_ridge = 0.78;
+uniform float dust_dense = 0.28;
+// How fast piled-up elements stop adding to the mass. The whole reason the
+// silhouette is one shape - see the note on fragment().
+uniform float dust_pack = 3.00;
+// How many steps the light is quantised to, and 0 for none. Taken from the CC0
+// pack's stylised smoke, whose own value is three: banding a cloud's shading
+// reads as a drawn cloud rather than as an airbrushed one, and it is the cheapest
+// thing in this file.
+uniform float dust_steps = 3.0;
+// How much of the stepping is actually taken. <b>Not all of it, and that is the
+// second half of the hard-edge finding.</b> The pack quantises the light on smoke
+// that is never denser than 0.35 alpha, so its bands read as shading; taken whole
+// on a mass that saturates to one they read as slabs, and the line between two
+// slabs is a hard edge however soft the alpha under it is. Half-taken, the banding
+// is visible as shading and the boundary is not a line.
+uniform float dust_band = 0.55;
+// The most of the ground a cloud may hide. Earth in the air is not a wall, and a
+// mass that saturates to one is: at 1.0 the burst read as a hole in the board.
+uniform float dust_ink = 0.72;
+// <b>How the silhouette is torn.</b> Soft is not the same as ragged: with the
+// profile alone the cloud is a smooth blob with a gentle edge, which reads as
+// airbrush. The pack gets its raggedness from a painted sprite; here the summed
+// density is eaten by a noise field, which is what the tree's own smoke does with
+// its <c>torn</c> term. Drifting, because a static field is a stencil the cloud
+// slides under.
+uniform float dust_tear = 0.38;
+uniform float dust_grain = 13.0;
+uniform float dust_drift = 0.10;
+// A toe on the way out, so thin dust fades over a longer distance than a dense
+// core does. The pack spends a whole ramp on this idea - soft_blend_ramp, which
+// widens the depth fade for its wispiest pixels - and on a board with no depth
+// fade to widen it lands here instead.
+uniform float dust_toe = 1.20;
+
+// <b>What an element contributes, rather than what it looks like.</b> This is the
+// change that took the burst from a heap of ellipses to a cloud: an element hands
+// back how much earth it puts in the way and which way its own surface leans, and
+// nothing else. It has no colour, no rim and no light of its own, because those
+// are what made forty-four of them read as forty-four things.
+//
+// <c>w</c> is its coverage, <c>lean</c> its outward direction weighted by that
+// coverage - summed over the mass it points where the cloud thins, which is the
+// only normal a cloud has.
+void dust_part(vec2 at, vec2 centre, float half_w, float along, vec2 flow,
+               float lump_seed, float gain, float soft, float age,
+               inout float dens, inout vec2 lean, inout float years) {
+    float down;
+    // The shared frame, and this element's own profile on it - see flame_reach.
+    float q = flame_reach(at, centre, half_w, along, flow, lump_seed, down);
+    if (q >= 1.0) {
+        return;
+    }
+    float w = pow(1.0 - q, soft) * gain;
+    dens += w;
+    lean += normalize(at - centre + vec2(1e-5, 1e-5)) * w;
+    years += w * age;
+}
+
+// <b>Saturating, so a pile-up stops reading as a pile.</b> Overlaps add thickness
+// and thickness runs out of effect, which is what a volume does - and it is what
+// keeps twenty elements in one place from being twenty times as opaque as one.
+//
+// Torn first, so the noise eats the density rather than the picture: a field
+// applied to the finished alpha is a stencil lying on the screen, while one
+// applied to the thickness is dust that is genuinely thinner in places.
+float dust_mass(vec2 at, float dens) {
+    float torn = 1.0 - dust_tear
+                 + dust_tear * ember_fbm(at * dust_grain
+                                         + vec2(0.0, -time * dust_drift
+                                                      * dust_grain));
+    float mass = 1.0 - exp(-dens * torn * dust_pack);
+    // And a toe: thin dust leaves over a longer distance than thick dust.
+    return pow(mass, dust_toe);
+}
+
+// Where on its own ramp the finished cloud sits: one surface lit once, off the
+// sum of the elements' leans rather than per element - see dust_part.
+//
+// The ridge lives at the edge, where the mass is thin, and the body darkens as it
+// thickens.
+//
+// <b>Seated high enough that three steps land on three bands.</b> The quantiser
+// floors, so a light term that sits at 0.16 - which is what a seat of 0.46 minus
+// a dense body gives - floors to nothing and the whole cloud comes out at its
+// darkest stop. Measured: near-black. Seated at 0.52 the three bands land where
+// they are wanted: the dense core away from the sun floors to the darkest stop,
+// the body lands mid and the thin sunward edge tops out. Seated at 0.62 nothing
+// reached the bottom band at all and the cloud was the same value as the ground
+// it stood on - a pale smudge, which on this board is the other way to be
+// invisible.
+float dust_lit(float mass, vec2 lean) {
+    // The cloud's own normal, out of the sum: where the mass thins.
+    vec2 face = length(lean) < 1e-5 ? vec2(0.0, 1.0) : normalize(lean);
+    float side = dot(face, normalize(sun.xy));
+    float lit = clamp(dust_seat + dust_ridge * side * (1.0 - mass)
+                      - dust_dense * mass, 0.0, 1.0);
+    if (dust_steps > 1.5) {
+        // The pack's own formula, over-ranging by design: it brightens the top
+        // band, which is what stops three steps reading as three greys.
+        float banded = clamp(floor(lit * dust_steps) / (dust_steps - 1.0),
+                             0.0, 1.0);
+        lit = mix(lit, banded, dust_band);
+    }
+    return lit;
+}
+";
+
     internal static readonly string DustCode =
         DustShader.Replace("FLAME_NOISE", Stage3D.EmberNoiseCode)
                   .Replace("FLAME_INK", Stage3D.FlameInk)
-                  .Replace("BLAST_FRAME", BlastFrame);
+                  .Replace("BLAST_FRAME", BlastFrame)
+                  .Replace("DUST_INK", DustInk);
 
     internal static readonly string FireCode =
         FireShader.Replace("FLAME_NOISE", Stage3D.EmberNoiseCode)

@@ -1275,6 +1275,18 @@ public sealed partial class TankBench : SceneRoot
             Struck(round);
     }
 
+    /// <summary>The dust a gun blows off the ground - the harness's
+    /// <c>Kicked</c>, and deliberately the same two lines rather than a bench
+    /// variant of them.</summary>
+    private void Kicked(Vehicle v, Vector2 along) =>
+        _stage?.Kick(v.GroundPoint, v.LiftOf(v.GroundPoint), along,
+                     // Two board-space points subtracted, each through its own one
+                     // definition - Vehicle.Spot and Vehicle.GroundPoint - rather
+                     // than an offset assembled here out of a scale and an atlas
+                     // field. Same reason Vehicle.Bore exists at all.
+                     v.Spot(v.Bore(v.Sprite.TurretFacing).Tube) - v.GroundPoint,
+                     Ordnance.At(_tick.Calibre));
+
     private void Struck(Shell round)
     {
         if (round.Blocked is not Vector2I cell)
@@ -1710,6 +1722,12 @@ public sealed partial class TankBench : SceneRoot
             // bench where a shot at open ground is the one shot with nothing to
             // show.
             _tick.Landed = Landing;
+        // And the gun going off over the board, which happens on every shot
+        // whether or not anything is hit - see TankTick.Kicked. Answered here as
+        // well as on the harness because this bench is where one tank's shot is
+        // looked at closely, and a bench missing half the effect would be a
+        // bench measuring something else.
+        _tick.Kicked = Kicked;
             _tick.Barred = _walls.Count > 0 ? Barring : null;
             _tick.Shoving = _walls.Count > 0 && _shove ? Pressing : null;
             return _tick;

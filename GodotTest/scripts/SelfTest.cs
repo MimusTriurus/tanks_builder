@@ -5579,6 +5579,117 @@ public static class SelfTest
             !pits.Any,
             "a board that comes back shelled is a board that was not reset");
 
+        Theme("the dust a gun kicks off the ground");
+        // ProcKick, and the four frames of a firing tank it was read off. Most of
+        // these are the burst's own assertions asked of the second effect built
+        // out of the same dust - which is the point of there being one dust.
+        var kick = new ProcKick();
+        Check("the kick is made of the burst's dust rather than a second dust",
+            ProcKick.DustKickCode.Contains(ProcBlast.DustInk)
+            && ProcKick.DustKickCode.Contains(Stage3D.FlameInk)
+            && ProcKick.GlowCode.Contains(Stage3D.FlameInk),
+            "the profile, the tearing, the packing and the light on a cloud of "
+            + "earth are one text, or eleven tuned numbers exist twice");
+        Check("and the burst reads that same text, not a copy of it",
+            ProcBlast.DustCode.Contains(ProcBlast.DustInk)
+            && ProcBlast.DustInk.Contains("void dust_part(")
+            && ProcBlast.DustInk.Contains("float dust_mass(")
+            && ProcBlast.DustInk.Contains("float dust_lit("),
+            "the shared block has to be what both of them actually compile");
+        Check("and neither of them redefines what the shared text defines",
+            !ProcKick.DustKickCode.Replace(ProcBlast.DustInk, "")
+                     .Contains("void dust_part(")
+            && !ProcBlast.DustCode.Replace(ProcBlast.DustInk, "")
+                         .Contains("float dust_mass("),
+            "a second definition beside the shared one is the copy this was "
+            + "extracted to prevent, wearing the extraction as a disguise");
+        // The one that caught a real defect before any screenshot was taken - and
+        // the one the burst has for the same reason, in the same words: the quad
+        // holds what the model can produce, not what it happens to draw.
+        (float kickOut, float kickUp) = ProcKick.Bounds(kick.Reach, Vector2.Zero);
+        Check("the quad holds what the model can produce, across",
+            kickOut <= kick.Flank,
+            $"the model reaches {kickOut:F3} of a tile out against a quad "
+            + $"{kick.Flank:F3} wide - anything past the rim is sliced off flat, "
+            + "and a cloud missing its outermost lumps reads as a smaller cloud");
+        Check("and up",
+            kickUp <= kick.Tall,
+            $"the model climbs {kickUp:F3} of a tile against a quad {kick.Tall:F3} "
+            + "tall - measured at 1.06 by 0.58 the settled dust had a straight "
+            + "top edge and a straight right one");
+        // And with the muzzle where a real gun puts it, because that is where
+        // every element starts - see ProcKick.Aim on the shot that came out as an
+        // orange mass lying on the engine deck.
+        //
+        // <b>Off the tanks that are loaded, not off a plausible number.</b> How
+        // far a muzzle stands from the contact point is a fact about three
+        // rendered guns and every heading of each, and the worst of them is what
+        // the quad has to hold - the heavy's stubby howitzer and the light's long
+        // tube are nothing like each other. Taken over all of them, so a fourth
+        // tank with a longer gun fails this rather than clipping quietly.
+        float kickSnout = 0.0f;
+        Vector2 kickSnoutAt = Vector2.Zero;
+        foreach (Vehicle v in vehicles)
+        {
+            float tile = Mathf.Max(v.Atlas.HexRect.Size.X, 1);
+            for (int step = 0; step < 24; step++)
+            {
+                double heading = step * 360.0 / 24.0;
+                Vector2 kickTube = v.Atlas.Muzzle(v.Atlas.FrameFor(heading))
+                               - v.Atlas.Anchor;
+                Vector2 off = (kickTube - v.Atlas.GroundOffset) * v.Sprite.BodyScale
+                              / tile;
+                var quad = new Vector2(off.X, -off.Y);
+                if (quad.Length() > kickSnout)
+                {
+                    kickSnout = quad.Length();
+                    kickSnoutAt = quad;
+                }
+            }
+        }
+        (float kickFar, float kickHigh) = ProcKick.Bounds(kick.Reach, kickSnoutAt);
+        Check("and it holds them with the snout added, which is where they start",
+            kickFar <= kick.Flank && kickHigh <= kick.Tall,
+            $"{kickFar:F3} out and {kickHigh:F3} up from the furthest muzzle any "
+            + $"loaded tank has ({kickSnoutAt.X:F3}, {kickSnoutAt.Y:F3} of a tile off its "
+            + $"contact point), against a quad {kick.Flank:F3} by {kick.Tall:F3}");
+        // The event, against the two clocks it is not.
+        Check("the cloud outlives the flash by a multiple, not a margin",
+            kick.Life > 2.0f * EffectLayer.Hold.Sum() / 60.0f,
+            $"{kick.Life:F2}s against the shot sheet's "
+            + $"{EffectLayer.Hold.Sum() / 60.0f:F2}s - the reference's last frame "
+            + "is settled brown dust, which no 34-frame table can reach");
+        Check("and the light is a tenth of it, not half",
+            ProcBlast.Uniform(ProcKick.GlowCode, "core_life") < 0.15f * kick.Life,
+            "the same elements held four times as long read as something burning "
+            + "on the deck rather than as a gun going off");
+        // Aim: both halves of the ground direction are used, and the vertical one
+        // is clamped - see the class note on why there is no drawing below the
+        // contact line.
+        kick.Aim(new Vector2(0.30f, 0.80f), Vector2.Zero);
+        Check("a shot toward the camera keeps its dust above the ground line",
+            kick.Blow.Y >= 0.0f,
+            $"blow {kick.Blow} - below the contact point and behind the ground "
+            + "are one test under this camera, so dust aimed down is dust sliced "
+            + "off flat");
+        kick.Aim(new Vector2(0.20f, -0.10f), Vector2.Zero);
+        float kickInto = kick.Squat;
+        kick.Aim(new Vector2(1.00f, -0.05f), Vector2.Zero);
+        Check("and a shot into the screen throws its dust across less of the picture",
+            kick.Squat > kickInto,
+            $"{kickInto:F2} into the screen against {kick.Squat:F2} across it - the "
+            + "same number the camera shake takes off the same trigger");
+        Check("and the dust starts at the muzzle rather than at the seat",
+            ProcKick.DustKickCode.Contains("dot(at - snout, blow)")
+            && ProcKick.DustKickCode.Contains("vec2 p = snout + "),
+            "the seat is the contact point because that is where the ground is "
+            + "known; a cloud placed from there begins inside the tank");
+        Check("and nothing of it is drawn below the contact line",
+            ProcKick.DustKickCode.Contains("blast_footing(at)")
+            && ProcKick.GlowCode.Contains("blast_footing(at)"),
+            "the quad's footing is the one thing standing between the cloud and "
+            + "the ground it is seated on");
+
         Theme("the engine plume built rather than read");
         // The plume is ProcSmoke's second configuration, so almost everything
         // about the model is already asserted above and what is left is the pair:

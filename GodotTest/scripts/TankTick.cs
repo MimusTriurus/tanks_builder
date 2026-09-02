@@ -296,6 +296,26 @@ public sealed class TankTick
     /// </summary>
     public Action<Shell>? Landed;
 
+    /// <summary>
+    /// What the board makes of the gun going off on it: the dust the muzzle
+    /// blast blows off the ground - <see cref="ProcKick"/>.
+    ///
+    /// <b><see cref="Landed"/>'s twin at the other end of the shot, and a
+    /// separate hook rather than a second thing done inside it.</b> A round
+    /// arriving and a round leaving are two events on two triggers, and only one
+    /// of them happens for certain: a gun laid on nobody still kicks its own
+    /// dust, and a round that hits a tank never reaches Landed at all.
+    ///
+    /// Answered by whichever root draws a board that can hold a cloud, and
+    /// unanswered on the flat one for <see cref="Landed"/>'s reason - the effect
+    /// is a quad in the 3D world and the legacy board has nowhere to put it.
+    ///
+    /// The direction is the gun's own ground direction, unnormalised, so the
+    /// receiver gets both which way and how much of it survived the projection -
+    /// the same number the camera shake takes off this trigger.
+    /// </summary>
+    public Action<Vehicle, Vector2>? Kicked;
+
     // --- the frame -----------------------------------------------------------
 
     /// <summary>
@@ -1758,11 +1778,17 @@ public sealed class TankTick
     /// left engaging a target goes on firing after you have selected somebody
     /// else - which is the whole of the attack scene.
     ///
-    /// <b>Five things off one trigger now, and the fifth is the shell.</b> It was
+    /// <b>Six things off one trigger now, and the fifth is the shell.</b> It was
     /// four, and the round was wired to the standing order alone - so the one
     /// shot a person fires by hand was the one with nothing in it. Who the round
     /// is for is asked of <see cref="Launch"/>, which is the harness's answer;
     /// unanswered, the shot goes at the ground.
+    ///
+    /// <b>The sixth is the ground, and it is the only one that belongs to neither
+    /// the tank nor the round.</b> A muzzle blast blows dust off the board it is
+    /// standing over - see <see cref="Kicked"/> - which is a thing on the board
+    /// with its own clock, three times the length of the flash's, and so it is
+    /// the board's to raise rather than the sprite's to draw.
     /// </summary>
     public void Fire(Vehicle v)
     {
@@ -1795,6 +1821,14 @@ public sealed class TankTick
         if (Wood is not null)
             Wood.Shock(v.GroundPoint - Origin,
                          v.Profile.ShotShake * Wood.ShotBlast);
+        // And the ground the gun is standing over, which is the sixth thing off
+        // the one trigger and the only one that is neither the tank nor the round:
+        // a muzzle blast blows dust off the board. Along the gun's own ground
+        // direction and unnormalised, for the shake's reason twice over - the
+        // dust goes where the gun points, and a shot into the screen throws it
+        // across less of the picture. Any tank's gun, not just the driven one.
+        if (v.Atlas is not null)
+            Kicked?.Invoke(v, v.Atlas.GroundDirection(v.Sprite.TurretFacing));
         // Third thing off one trigger, and a third clock, for the same reason:
         // the gun's report is 1.2s on the light and 3.4s on the heavy, and neither
         // is the 34 frames the flash runs or the 28 the tube takes to come home.

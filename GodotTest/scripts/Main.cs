@@ -216,6 +216,10 @@ public sealed partial class Main : SceneRoot
 		// A burst is a thing standing on the board, so it is the board's answer
 		// to give - see TankTick.Landed, which was already here and unanswered.
 		_tick.Landed = Splashed;
+		// And the fifth: what the board makes of the gun going off over it. The
+		// same division as the fourth - see TankTick.Kicked - and answered here for
+		// the same reason: the cloud is a quad in the 3D world.
+		_tick.Kicked = Kicked;
 	}
 
 	/// <summary>
@@ -243,6 +247,32 @@ public sealed partial class Main : SceneRoot
 		// ignored them would be the one part of a shot that does not know what
 		// was fired.
 		_stage?.Burst(round.Ground, round.GroundLift, Ordnance.At(_tick.Calibre));
+
+	/// <summary>
+	/// A gun going off over the board: raise the dust its muzzle blast blows off
+	/// the ground.
+	///
+	/// <b>Seated on the tank's contact point, not on its muzzle</b> - see
+	/// <see cref="ProcKick.Sit"/>. The muzzle is up in the air and the quad's
+	/// bottom edge is the ground, so where the dust ends up is the model's
+	/// business; what this has to supply is a point on the board and the lift
+	/// there, and the contact point is the one place both are known exactly.
+	///
+	/// <b>At the calibre the gun is loaded with</b>, <see cref="Splashed"/>'s
+	/// reason and the same dial: a bigger round does not blow the same dust, and
+	/// this is the one part of a shot that would otherwise not know what was
+	/// fired.
+	///
+	/// Only on the stage, for <see cref="Splashed"/>'s reason word for word.
+	/// </summary>
+	private void Kicked(Vehicle v, Vector2 along) =>
+		_stage?.Kick(v.GroundPoint, v.LiftOf(v.GroundPoint), along,
+					// Two board-space points subtracted, each through its own one
+					// definition - Vehicle.Spot and Vehicle.GroundPoint - rather
+					// than an offset assembled here out of a scale and an atlas
+					// field. Same reason Vehicle.Bore exists at all.
+					v.Spot(v.Bore(v.Sprite.TurretFacing).Tube) - v.GroundPoint,
+					Ordnance.At(_tick.Calibre));
 
 	/// <summary>Whether the board grows trees at all, and whether one may stand
 	/// where it would cross a tank on its own cell. Parked here for --terrain's

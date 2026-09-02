@@ -11,7 +11,8 @@ Godot_v4.7.2-stable_mono_win64_console.exe --path GodotTest res://Main.tscn -- -
 ### Фильтр по темам, и правило, когда чем пользоваться
 
 `--selftest <фильтр>` (либо `--selftest=<фильтр>`) докладывает только названные
-темы: `wall`, `water,ripples`, `relief`, `burst`. `--selftest list` печатает
+темы: `wall`, `water,ripples`, `relief`, `burst`, `kick`.
+`--selftest list` печатает
 список тем и не проверяет ничего.
 
 **Правило: пока правишь — фильтр по своей теме, перед коммитом — полный
