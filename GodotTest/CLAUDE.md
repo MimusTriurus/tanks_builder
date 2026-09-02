@@ -158,7 +158,9 @@ Godot_v4.7.2-stable_mono_win64.exe --path GodotTest res://Main.tscn
 Поднимается `Stage3D.Boom` —
 второй пул на шесть рядом с `Burst`, оба копают воронку и оба берут **размер**
 (`might`): одно число на весь взрыв, масштабом на трансформе от посадки, и воронка
-растёт с ним. В игре его даёт `Ordnance.At(TankTick.Calibre)` — чем заряжено, тем и
+растёт с ним. **Он же тот, который поднимает доска по умолчанию**: снаряд,
+ушедший в поле, идёт через `Stage3D.Land` — один метод на оба корня, — и
+`Stage3D.Blast` выбирает, чем его рисовать; `--burst built` берёт вычисленный. В игре его даёт `Ordnance.At(TankTick.Calibre)` — чем заряжено, тем и
 рвёт
 (см. [docs/blast.md](docs/blast.md)),
 `EffectsBench.cs` / `EffectsBench.Panel.cs` / `EffectsBench.Sheet.cs` — две сцены

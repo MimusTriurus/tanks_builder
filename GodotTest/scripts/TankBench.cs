@@ -310,6 +310,11 @@ public sealed partial class TankBench : SceneRoot
     /// </summary>
     private FlashSource _flashSource = FlashSource.Rendered;
 
+    /// <summary>Which burst a landed round raises, from <c>--burst</c> - the
+    /// harness's field and the same default, because the stage's default is what
+    /// both of them are agreeing with.</summary>
+    private BlastSource _blastSource = BlastSource.Sheet;
+
     /// <summary>The painted sheet, shared by every tank in the garage.</summary>
     private FlashSheet? _sheet;
 
@@ -527,6 +532,14 @@ public sealed partial class TankBench : SceneRoot
                     break;
                 case "--fire":
                     _fireAtStart = true;
+                    break;
+                // Which burst a landed round raises - the harness's flag, spelled
+                // its way so one flag means one thing on both boards.
+                case "--burst" when i + 1 < args.Length:
+                    _blastSource = args[++i].Equals("built",
+                        StringComparison.OrdinalIgnoreCase)
+                        ? BlastSource.Built
+                        : BlastSource.Sheet;
                     break;
                 // sheet, rendered or built. Spelled the harness's way so one
                 // flag means one thing on both boards.
@@ -988,6 +1001,8 @@ public sealed partial class TankBench : SceneRoot
             Marks = _marks, MarksAt = _marks?.Position ?? Vector2.Zero,
             Pits = _pits,
             Surf = _surf, Sea = _sea, Wash = _wash,
+            // Which of the two bursts a landed round raises - see Stage3D.Blast.
+            Blast = _blastSource,
         };
         AddChild(_stage);
         foreach (Vehicle vehicle in _garage)
@@ -1270,7 +1285,7 @@ public sealed partial class TankBench : SceneRoot
     {
         // At the calibre the gun is loaded with - the harness's reason, and the
         // same dial: TankTick.Calibre is one field both roots read.
-        _stage?.Burst(round.Ground, round.GroundLift, Ordnance.At(_tick.Calibre));
+        _stage?.Land(round.Ground, round.GroundLift, Ordnance.At(_tick.Calibre));
         if (_walls.Count > 0)
             Struck(round);
     }

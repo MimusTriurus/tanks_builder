@@ -5579,6 +5579,58 @@ public static class SelfTest
             !pits.Any,
             "a board that comes back shelled is a board that was not reset");
 
+        Theme("which burst the board raises");
+        // Two implementations of one effect - docs/blast.md - and which of them a
+        // landed round raises is a setting on the stage rather than a swap of the
+        // call. These are the three things that can go wrong with that: the
+        // default, the routing, and the two pools staying separate.
+        if (stage is null)
+        {
+            Note("  no stage on this board - nothing to raise a burst on");
+        }
+        else
+        {
+            Check("the board raises the imported burst by default",
+                stage.Blast == BlastSource.Sheet,
+                $"the stage says {stage.Blast} - the flipbook is what ships, and "
+                + "--burst built is how the computed one is asked for");
+            // <b>Behavioural, because the routing is the claim.</b> A test that
+            // read the field would be a test that the field is the field; what
+            // has to be true is that Land puts the round in the pool the field
+            // names. Fired on the live stage and put back out afterwards - at
+            // startup there is nothing on the board to disturb, and a clock at -1
+            // draws nothing.
+            BlastSource was = stage.Blast;
+            Vector2 nowhere = stage.Origin;
+            stage.Blast = BlastSource.Sheet;
+            stage.Land(nowhere, 0.0f);
+            bool sheetLit = stage.Booming.Any(b => b.Alive)
+                            && !stage.Bursting.Any(b => b.Alive);
+            foreach (SheetBlast b in stage.Booming)
+                b.Douse();
+            stage.Blast = BlastSource.Built;
+            stage.Land(nowhere, 0.0f);
+            bool builtLit = stage.Bursting.Any(b => b.Alive)
+                            && !stage.Booming.Any(b => b.Alive);
+            foreach (ProcBlast b in stage.Bursting)
+                b.Douse();
+            stage.Blast = was;
+            stage.Pits?.Fill();
+            Check("and Land puts the round in the pool the setting names",
+                sheetLit && builtLit,
+                $"sheet asked for gave {(sheetLit ? "the sheet" : "the wrong pool")}, "
+                + $"built gave {(builtLit ? "the computed one" : "the wrong pool")} "
+                + "- a setting that does not route is a flag that reads as not "
+                + "arriving");
+            Check("and the two pools are separate, six each",
+                stage.Bursting.Count == Stage3D.Bursts
+                && stage.Booming.Count == Stage3D.Bursts
+                && !ReferenceEquals(stage.Bursting, stage.Booming),
+                $"{stage.Bursting.Count} computed and {stage.Booming.Count} "
+                + "imported - one shared pool would make the choice a thing that "
+                + "outlives the round that made it");
+        }
+
         Theme("the dust a gun kicks off the ground");
         // ProcKick, and the four frames of a firing tank it was read off. Most of
         // these are the burst's own assertions asked of the second effect built

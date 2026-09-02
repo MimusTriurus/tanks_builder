@@ -231,6 +231,11 @@ public sealed partial class Main : SceneRoot
 	/// which cell was hit or how high that cell stands, and nothing can disagree
 	/// with the walk that put the shell there.
 	///
+	/// <b>Which of the two bursts it is comes off the stage</b>
+	/// (<see cref="Stage3D.Blast"/>, the flipbook by default, <c>--burst</c> to
+	/// pick), through the one method both roots call - see
+	/// <see cref="Stage3D.Land"/> on why that is a method and not two calls.
+	///
 	/// <b>Only on the stage, and that is the decision rather than a gap.</b> The
 	/// burst is a quad in the 3D world and the mark it leaves is a term in the
 	/// stage's own ground shader; the flat board has nowhere to put either. It is
@@ -246,7 +251,7 @@ public sealed partial class Main : SceneRoot
 		// the three sizes and the hit decal already reads them; a burst that
 		// ignored them would be the one part of a shot that does not know what
 		// was fired.
-		_stage?.Burst(round.Ground, round.GroundLift, Ordnance.At(_tick.Calibre));
+		_stage?.Land(round.Ground, round.GroundLift, Ordnance.At(_tick.Calibre));
 
 	/// <summary>
 	/// A gun going off over the board: raise the dust its muzzle blast blows off
@@ -659,6 +664,8 @@ public sealed partial class Main : SceneRoot
 		_stage = new Stage3D
 		{
 			Field = _field, Origin = _origin, Eye = _camera,
+			// Which of the two bursts a landed round raises - see Stage3D.Blast.
+			Blast = _blastSource,
 			// The ruts are laid in the marks' own space and read in the space a
 			// tank's GroundPoint is in; both nodes are children of this one, so
 			// the offset is the marks' own position. Handed over rather than
@@ -1162,6 +1169,12 @@ public sealed partial class Main : SceneRoot
 	/// it falls back on its own for a tank that has none.</summary>
 	private FlashSource _flashSource = FlashSource.Rendered;
 
+	/// <summary>Which burst a landed round raises, from <c>--burst</c>. Pushed
+	/// onto the stage when it is built; the stage's own default is the same one,
+	/// so a run with no flag and a run with <c>--burst sheet</c> are one
+	/// picture.</summary>
+	private BlastSource _blastSource = BlastSource.Sheet;
+
 	/// <summary>Recoil taken by the turret alone - key L, or --recoil-turret.
 	/// Held here as well as on the tank because the flag is parsed before the
 	/// tank exists, exactly as the flash source is.</summary>
@@ -1536,6 +1549,14 @@ public sealed partial class Main : SceneRoot
 			// replaced it without also changing its level or its pivot.
 			else if (userArgs[i] == "--recoil-shear")
 				_tick.RecoilShear = true;
+			// Which burst a landed round raises - see Stage3D.Blast. Not in
+			// FlagRows, because it has no panel row to be overruled by: the
+			// choice lives on the stage rather than in panel.json.
+			else if (userArgs[i] == "--burst" && i + 1 < userArgs.Length)
+				_blastSource = userArgs[++i].Equals("built",
+					StringComparison.OrdinalIgnoreCase)
+					? BlastSource.Built
+					: BlastSource.Sheet;
 			else if (userArgs[i] == "--flash" && i + 1 < userArgs.Length)
 				_flashSource = userArgs[i + 1].Equals("sheet",
 					StringComparison.OrdinalIgnoreCase)

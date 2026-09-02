@@ -38,6 +38,30 @@ namespace TankSpriteTest;
 /// <see cref="Vehicle.GroundPoint"/>, the ring, the depth and the thirteen call
 /// sites that read it did not have to be told about any of this.
 /// </summary>
+/// <summary>
+/// Which of the two bursts a round landing on the board raises.
+///
+/// <b>Two implementations of one effect, not two effects</b> - see docs/blast.md:
+/// <see cref="ProcBlast"/> computes its shape, <see cref="SheetBlast"/> plays
+/// sixty-four rendered frames of one. They dig the same crater, take the same
+/// size and answer the same hook, so which one arrives is a choice about the
+/// picture and nothing else.
+///
+/// Named the way <see cref="FlashSource"/> is named, and for its reason: the
+/// muzzle flash has had three sources and one word for each of them since it was
+/// written, so a second concept of "the built one" would be a second vocabulary
+/// for the same idea.
+/// </summary>
+public enum BlastSource
+{
+    /// <summary>The imported flipbook - <see cref="SheetBlast"/>. The default.
+    /// </summary>
+    Sheet,
+
+    /// <summary>The computed burst - <see cref="ProcBlast"/>.</summary>
+    Built,
+}
+
 public sealed partial class Stage3D : Node3D
 {
     public HexField Field = null!;
@@ -5106,6 +5130,48 @@ void fragment() {{
     /// <summary>The sheet bursts as they stand, <see cref="Bursting"/>'s twin and
     /// read-only for its reason.</summary>
     public IReadOnlyList<SheetBlast> Booming => _booming;
+
+    /// <summary>
+    /// Which burst a round landing on the board raises.
+    ///
+    /// <b>The flipbook, and that is a decision about the picture rather than
+    /// about the code.</b> Both are built, both are tuned and both are kept; what
+    /// the imported one has is sixty-four frames of a simulated cloud, which is
+    /// more internal structure than a fragment computing eighty sections can
+    /// afford per frame. What it lacks is the ground half - no rings spreading on
+    /// the cell, no cone of thrown earth - and <see cref="ProcBlast"/> is best at
+    /// exactly those. The effects bench can draw them together (see
+    /// <c>EffectsBench.Sheet</c> and its <c>_pair</c>) precisely so the question
+    /// stays a picture; this is the answer the *board* ships with.
+    ///
+    /// <b>A setting on the stage, not a swap of the call.</b> Replacing the call
+    /// would have taken the computed burst off the game board altogether - the
+    /// half of the pair with sixty-two tuned dials and a panel to drive them - and
+    /// left "compare them on the real board" as a code edit.
+    /// </summary>
+    public BlastSource Blast = BlastSource.Sheet;
+
+    /// <summary>
+    /// A round that went into the board: raise whichever burst is asked for.
+    ///
+    /// <b>One method both roots call, and that is the whole of why it exists.</b>
+    /// The harness and the tank bench each answered <c>TankTick.Landed</c> with
+    /// their own <see cref="Burst"/> call - two copies of one sentence, which is
+    /// exactly the arrangement <see cref="Burst"/>'s own note warns about for the
+    /// crater. A choice made in two places is a choice that agrees until one of
+    /// them is edited.
+    ///
+    /// Both halves of the crater and the size travel with it, because both
+    /// <see cref="Burst"/> and <see cref="Boom"/> already take them: nothing here
+    /// knows anything the callers did not already have to say.
+    /// </summary>
+    public void Land(Vector2 spot, float lift, float might = 1.0f)
+    {
+        if (Blast == BlastSource.Built)
+            Burst(spot, lift, might);
+        else
+            Boom(spot, lift, might);
+    }
 
     private readonly List<ProcKick> _kicking = new();
     private int _nextKick;
