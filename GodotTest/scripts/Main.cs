@@ -1082,6 +1082,109 @@ public sealed partial class Main : SceneRoot
 	private bool _rollOnly;
 	private bool _heaveOnly;
 
+
+	/// <summary>
+	/// Which cell each loaded tank parks on.
+	///
+	/// <b>The board's parkings, by the class each one asked for and then in
+	/// order.</b> A parking that names a class takes that tank wherever it is in
+	/// the load order (see <see cref="Parking"/>, where the class is argued as a
+	/// preference rather than a roster); one that names nobody takes whoever is
+	/// left. So a board that says nothing pairs exactly as it always did - the
+	/// bench's three homes still take LTP, MTP, HTP in that order - and a board
+	/// that names one moves that one without disturbing the rest.
+	///
+	/// <b>And nobody is parked on top of anybody, which is what this replaced.</b>
+	/// It was <c>Homes[Math.Min(i, Homes.Count - 1)]</c>: on a board declaring one
+	/// parking - the water board does - all three tanks took it and stood inside
+	/// each other, which on screen is one tank. A tank with no parking left now
+	/// stands on the nearest cell it could park on and the line below says so,
+	/// because three tanks on a one-parking board is the board being asked for
+	/// something it did not declare.
+	/// </summary>
+	private Vector2I[] Park()
+	{
+		// Which parking each tank claims is Parking.Pair's - pure, and judged
+		// by the self test without a board. What is left here is the half that
+		// needs the ground: where a tank with no parking of its own stands.
+		int[] slots = Parking.Pair(_map.Parked, _loaded);
+		var where = new Vector2I[_loaded.Count];
+		var taken = new HashSet<Vector2I>();
+		var beside = new List<string>();
+		for (int i = 0; i < _loaded.Count; i++)
+			if (slots[i] >= 0)
+			{
+				where[i] = _map.Parked[slots[i]].Cell;
+				taken.Add(where[i]);
+			}
+		for (int i = 0; i < _loaded.Count; i++)
+		{
+			if (slots[i] >= 0)
+				continue;
+			where[i] = Beside(taken);
+			taken.Add(where[i]);
+			beside.Add($"{_loaded[i]} at ({where[i].X},{where[i].Y})");
+		}
+
+		GD.Print($"map {_map.Name}: {_map.Parked.Count} parking(s), "
+				 + string.Join(" ", Enumerable.Range(0, _loaded.Count).Select(
+					 i => $"{_loaded[i]}@({where[i].X},{where[i].Y})"))
+				 + (beside.Count > 0
+					 ? " - no parking of their own: " + string.Join(", ", beside)
+					 : ""));
+		return where;
+	}
+
+	/// <summary>
+	/// The nearest cell to the last parking that a tank could stand on and
+	/// nobody has taken.
+	///
+	/// <b>Two passes, and the second one exists because of a real board.</b> The
+	/// first asks <see cref="MapRules.HomeFaults"/>'s own four questions - on the
+	/// board, not a rock, not water, not a ramp - which is what a <i>declared</i>
+	/// home has to be. On the water board that finds nothing: it is 144 cells of
+	/// which exactly one is dry, and its rosette is six ramps running down into
+	/// the pond. So the second pass takes a cell a tank can merely be on - a ford
+	/// or a slope, both of which a tank drives through - because standing in the
+	/// shallows beside the island is a picture, and three tanks inside each other
+	/// is not.
+	/// </summary>
+	private Vector2I Beside(HashSet<Vector2I> taken)
+	{
+		Vector2I from = _map.Homes.Count > 0
+			? _map.Homes[^1] : new Vector2I(0, 0);
+		foreach (bool strict in new[] { true, false })
+		{
+			var seen = new HashSet<Vector2I> { from };
+			var edge = new List<Vector2I> { from };
+			for (int step = 0; step < 4; step++)
+			{
+				var next = new List<Vector2I>();
+				foreach (Vector2I at in edge)
+				foreach (int heading in HexField.EdgeHeadings)
+				{
+					Vector2I to = HexField.Step(at, heading);
+					if (!seen.Add(to))
+						continue;
+					next.Add(to);
+					if (Parkable(to, strict) && !taken.Contains(to))
+						return to;
+				}
+				edge = next;
+			}
+		}
+		// Nothing within four rings either way: back on the parking, stacked as
+		// before, and the printed line has already named it.
+		return from;
+	}
+
+	private bool Parkable(Vector2I cell, bool strict)
+	{
+		if (!_map.OnBoard(cell) || _map.IsCliff(cell))
+			return false;
+		int at = _map.At(cell);
+		return !strict || (!_map.Water[at] && !_map.Ramps[at]);
+	}
 	private bool Moving => _pathStep < _path.Count;
 
 	public override void _Ready()
@@ -1830,11 +1933,12 @@ public sealed partial class Main : SceneRoot
 		};
 		_grove.Fire = _fire;
 
-		// One vehicle per atlas that loaded, parked along BoardMap.BenchHomes. Built here
-		// rather than swapped later: each one keeps its own atlas for good, so
-		// nothing has to be reconfigured when the selection changes - which is
-		// most of what switching class used to be, and every line of it was a
-		// chance for one clock to be left pointing at the previous tank.
+		// One vehicle per atlas that loaded, parked on the board's own parkings.
+		// Built here rather than swapped later: each one keeps its own atlas for
+		// good, so nothing has to be reconfigured when the selection changes -
+		// which is most of what switching class used to be, and every line of it
+		// was a chance for one clock to be left pointing at the previous tank.
+		Vector2I[] parks = Park();
 		for (int i = 0; i < _loaded.Count; i++)
 		{
 			string tag = _loaded[i];
@@ -1851,7 +1955,7 @@ public sealed partial class Main : SceneRoot
 				Atlas = _atlases[tag],
 				Sprite = sprite,
 				Profile = MovementProfile.For(tag),
-				HomeCell = _map.Homes[Math.Min(i, _map.Homes.Count - 1)],
+				HomeCell = parks[i],
 			};
 			vehicle.Cell = vehicle.HomeCell;
 			// The ground that gets to stand in front of this one. A child of the

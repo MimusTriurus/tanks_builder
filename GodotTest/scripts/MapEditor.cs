@@ -896,7 +896,8 @@ public sealed partial class MapEditor : SceneRoot
                 return;
             for (int i = 0; i < editor._edit.Homes.Count; i++)
             {
-                Vector2 at = editor.Top(editor._edit.Homes[i]);
+                Parking home = editor._edit.Homes[i];
+                Vector2 at = editor.Top(home.Cell);
                 DrawArc(at, 26.0f, 0.0f, Mathf.Tau, 24,
                     new Color(0.6f, 1.0f, 0.9f, 0.9f), 2.5f);
                 DrawString(font, at + new Vector2(-4.0f, -28.0f),
@@ -1175,8 +1176,9 @@ public sealed partial class MapEditor : SceneRoot
         // ramps would be reachability on a board the author is not drawing.
         if (_faults.All(f => !f.Fatal))
         {
-            foreach (Vector2I home in _edit.Homes)
+            foreach (Parking parked in _edit.Homes)
             {
+                Vector2I home = parked.Cell;
                 HashSet<Vector2I> seen = MapRules.Seen(_field, home);
                 int stranded = draft.Cells()
                     .Count(c => !draft.IsCliff(c) && !seen.Contains(c));

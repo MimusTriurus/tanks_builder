@@ -163,15 +163,7 @@ public static class MapFile
                     + $"ground grid is {columns} x {rows}");
         }
 
-        var homes = new List<Vector2I>();
-        foreach (int[] home in file.Homes ?? Array.Empty<int[]>())
-        {
-            if (home is not { Length: 2 })
-                throw new InvalidOperationException(
-                    $"{name}: a home is a pair of numbers, and one of them has "
-                    + $"{home?.Length ?? 0}");
-            homes.Add(new Vector2I(home[0], home[1]));
-        }
+        IReadOnlyList<Parking> homes = Parkings(file.Homes, name);
         MustHaveHomes(homes, name);
 
         string paint = file.Paint is { Length: > 0 }
@@ -263,6 +255,56 @@ public static class MapFile
     }
 
     /// <summary>
+    /// The parkings a file declares, in either of the two shapes it may write
+    /// them.
+    ///
+    /// <b>A bare pair and an object mean the same thing, and both stay.</b>
+    /// <c>[8, 16]</c> is a parking that names nobody - which is what every board
+    /// wrote before a class could be asked for - and
+    /// <c>{ "at": [8, 16], "class": "HTP" }</c> is one that does. Reading only
+    /// the object would break every file on disk; writing only the object would
+    /// rewrite every board the first time one was saved, which is a diff nobody
+    /// asked for over a field nobody set.
+    /// </summary>
+    private static IReadOnlyList<Parking> Parkings(JsonElement[]? said,
+                                                   string name)
+    {
+        var homes = new List<Parking>();
+        foreach (JsonElement home in said ?? Array.Empty<JsonElement>())
+        {
+            if (home.ValueKind == JsonValueKind.Array)
+            {
+                homes.Add(new Parking(Pair(home, name)));
+                continue;
+            }
+            if (home.ValueKind != JsonValueKind.Object)
+                throw new InvalidOperationException(
+                    $"{name}: a home is a pair of numbers or an object with an "
+                    + $"\"at\" in it, and this is {home.ValueKind}");
+            if (!home.TryGetProperty("at", out JsonElement at))
+                throw new InvalidOperationException(
+                    $"{name}: a home written as an object needs an \"at\"");
+            string? crew = home.TryGetProperty("class", out JsonElement said_)
+                           && said_.ValueKind == JsonValueKind.String
+                ? said_.GetString() : null;
+            homes.Add(new Parking(Pair(at, name),
+                                  crew is { Length: > 0 } ? crew : null));
+        }
+        return homes;
+    }
+
+    private static Vector2I Pair(JsonElement pair, string name)
+    {
+        if (pair.ValueKind != JsonValueKind.Array
+            || pair.GetArrayLength() != 2)
+            throw new InvalidOperationException(
+                $"{name}: a home is a pair of numbers, and one of them has "
+                + (pair.ValueKind == JsonValueKind.Array
+                    ? pair.GetArrayLength().ToString() : pair.ValueKind.ToString()));
+        return new Vector2I(pair[0].GetInt32(), pair[1].GetInt32());
+    }
+
+    /// <summary>
     /// A board with no homes is refused.
     ///
     /// Here rather than at each caller because both of them - the file and the
@@ -271,7 +313,7 @@ public static class MapFile
     /// a broken map, and it has nothing to say about a board nothing can be
     /// parked on.
     /// </summary>
-    public static void MustHaveHomes(IReadOnlyList<Vector2I> homes, string name)
+    public static void MustHaveHomes(IReadOnlyList<Parking> homes, string name)
     {
         if (homes.Count == 0)
             throw new InvalidOperationException(
@@ -489,8 +531,14 @@ public static class MapFile
         text.Append($"  \"height\": {(map.Height ? "true" : "false")},\n");
         if (map.Plinth != 0)
             text.Append($"  \"plinth\": {map.Plinth},\n");
+        // A parking that named nobody is written as the bare pair it always
+        // was - see Parkings, where both shapes are argued.
         text.Append("  \"homes\": ["
-                    + string.Join(", ", map.Homes.Select(h => $"[{h.X}, {h.Y}]"))
+                    + string.Join(", ", map.Parked.Select(
+                        p => p.Class is { Length: > 0 } tag
+                            ? $"{{ \"at\": [{p.Cell.X}, {p.Cell.Y}], "
+                              + $"\"class\": {Quote(tag)} }}"
+                            : $"[{p.Cell.X}, {p.Cell.Y}]"))
                     + "],\n");
         text.Append("\n");
         text.Append("  \"ground\": [\n");
@@ -569,7 +617,7 @@ public static class MapFile
         [JsonPropertyName("paint")] public string? Paint { get; set; }
         [JsonPropertyName("height")] public bool? Height { get; set; }
         [JsonPropertyName("plinth")] public int? Plinth { get; set; }
-        [JsonPropertyName("homes")] public int[][]? Homes { get; set; }
+        [JsonPropertyName("homes")] public JsonElement[]? Homes { get; set; }
         [JsonPropertyName("ground")] public string[]? Ground { get; set; }
         [JsonPropertyName("ramps")] public string[]? Ramps { get; set; }
         [JsonPropertyName("walls")] public WallShape[]? Walls { get; set; }

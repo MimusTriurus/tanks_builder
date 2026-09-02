@@ -133,8 +133,25 @@ public sealed partial class BoardMap
     public int Rows { get; }
 
     /// <summary>Where the tanks park, one per class. The first is the one a
-    /// single-tank run gets.</summary>
+    /// single-tank run gets.
+    ///
+    /// <b>Cells only, and <see cref="Parked"/> is the whole statement.</b> Every
+    /// reader that wants a place wants this; the class a home asks for is a
+    /// second field on a second reader, and a parallel array of classes beside
+    /// this one is the arrangement this project keeps refusing.</summary>
     public IReadOnlyList<Vector2I> Homes { get; }
+
+    /// <summary>
+    /// The parkings a board declares: a cell each, and optionally which class
+    /// the board wants standing on it.
+    ///
+    /// <b>A preference and not a roster.</b> Which tanks exist is still the
+    /// harness's - one per atlas that loaded - so a class named here says where
+    /// that one goes if it is on the board, and a home that names nobody takes
+    /// whoever is left. See <c>Main.Park</c>, which is the one place the two
+    /// meet.
+    /// </summary>
+    public IReadOnlyList<Parking> Parked { get; }
 
     /// <summary>Height per cell, for <see cref="HexField.SetRelief"/>.</summary>
     public int[] Levels { get; }
@@ -252,7 +269,7 @@ public sealed partial class BoardMap
     public Cover[] Over { get; }
 
     private BoardMap(string name, int columns, int rows,
-                     IReadOnlyList<Vector2I> homes,
+                     IReadOnlyList<Parking> homes,
                      int[] levels, bool[] ramps, bool[] water,
                      string?[] kinds, bool[] cliffs, bool[] walls,
                      Foundation[] ground, Cover[] over,
@@ -263,7 +280,8 @@ public sealed partial class BoardMap
         Name = name;
         Columns = columns;
         Rows = rows;
-        Homes = homes;
+        Parked = homes;
+        Homes = homes.Select(p => p.Cell).ToList();
         Levels = levels;
         Ramps = ramps;
         Water = water;
@@ -545,12 +563,13 @@ public sealed partial class BoardMap
     /// untouched and <see cref="Passable"/> reads the same board.</param>
     internal static BoardMap FromGround(string name, string[] ground,
                                         string[] ramps,
-                                        IReadOnlyList<Vector2I> homes,
+                                        IReadOnlyList<Parking> homes,
                                         string paint, bool height,
                                         int plinth = 0,
                                         IReadOnlyDictionary<Vector2I, Masonry>?
                                             walling = null)
     {
+        MustCrew(name, homes);
         int rows = ground.Length;
         int columns = rows == 0 ? 0 : ground[0].Length;
         char[,] g = Read(name + " ground", ground, columns, rows);
@@ -680,14 +699,46 @@ public sealed partial class BoardMap
                                    plot, paint, height, plinth, walling));
     }
 
+    /// <summary>
+    /// Every class a board's parkings ask for is a class this build has, and no
+    /// two ask for the same one.
+    ///
+    /// <b>Both halves are a statement the board could not honour.</b> A tag
+    /// nothing answers to is a home that will silently take whoever is left -
+    /// <see cref="WallConfig.Strays"/>'s failure, one folder over - and two
+    /// homes asking for the same class is two parkings for one tank, which
+    /// leaves the second holding nobody however the pairing is written.
+    /// </summary>
+    private static void MustCrew(string name, IReadOnlyList<Parking> homes)
+    {
+        var asked = new List<string>();
+        foreach (Parking home in homes)
+        {
+            if (home.Class is not { Length: > 0 } tag)
+                continue;
+            if (!MovementProfile.Tags.Contains(tag, StringComparer.OrdinalIgnoreCase))
+                throw new InvalidOperationException(
+                    $"{name}: the home at ({home.Cell.X},{home.Cell.Y}) asks for "
+                    + $"class {tag}, and this build has "
+                    + string.Join(", ", MovementProfile.Tags));
+            if (asked.Contains(tag, StringComparer.OrdinalIgnoreCase))
+                throw new InvalidOperationException(
+                    $"{name}: two homes ask for class {tag}, and there is one "
+                    + "tank of each - so the second would stand empty whatever "
+                    + "the pairing does");
+            asked.Add(tag);
+        }
+    }
+
     /// <summary>A map written as separate relief, ramp and water grids - the
     /// harness board, unchanged.</summary>
     private static BoardMap FromLayers(string name, int columns, int rows,
                                        string[] relief, string[] ramps,
                                        string[] water,
-                                       IReadOnlyList<Vector2I> homes,
+                                       IReadOnlyList<Parking> homes,
                                        string paint, bool height)
     {
+        MustCrew(name, homes);
         char[,] g = Read(name + " relief", relief, columns, rows);
         char[,] rr = Read(name + " ramps", ramps, columns, rows);
         char[,] ww = Read(name + " water", water, columns, rows);
@@ -884,8 +935,11 @@ public sealed partial class BoardMap
     /// meeting the top are all things a tank on the summit says at a glance and an
     /// empty summit does not. R puts it back there rather than into the line, which
     /// is what makes it a home and not a start.</summary>
-    public static readonly Vector2I[] BenchHomes =
-        { new(11, 3), new(4, BenchHomeRow), new(6, BenchHomeRow) };
+    public static readonly Parking[] BenchHomes =
+    {
+        new Vector2I(11, 3), new Vector2I(4, BenchHomeRow),
+        new Vector2I(6, BenchHomeRow),
+    };
 
     /// <summary>The harness board, off the three grids above.
     ///
@@ -983,8 +1037,10 @@ public sealed partial class BoardMap
     /// away; the other two are there so that <c>--map test</c> on the harness,
     /// which builds one vehicle per atlas, does not park three of them on one
     /// hex.</summary>
-    private static readonly Vector2I[] TestHomes =
-        { new(4, 2), new(4, 3), new(5, 3) };
+    private static readonly Parking[] TestHomes =
+    {
+        new Vector2I(4, 2), new Vector2I(4, 3), new Vector2I(5, 3),
+    };
 
     private static BoardMap? _test;
 
@@ -1097,7 +1153,7 @@ public sealed partial class BoardMap
 
     /// <summary>The centre, and nothing else can be one - see the ground's
     /// note.</summary>
-    private static readonly Vector2I[] WaterHomes = { new(6, 6) };
+    private static readonly Parking[] WaterHomes = { new Vector2I(6, 6) };
 
     private static BoardMap? _water;
 
@@ -1199,8 +1255,10 @@ public sealed partial class BoardMap
     /// which builds one vehicle per atlas, does not stand three of them on one
     /// hex - and they sit two cells out on the 210 and 330 lanes, which carry no
     /// wall.</summary>
-    private static readonly Vector2I[] WallHomes =
-        { new(3, 3), new(1, 4), new(5, 4) };
+    private static readonly Parking[] WallHomes =
+    {
+        new Vector2I(3, 3), new Vector2I(1, 4), new Vector2I(5, 4),
+    };
 
     private static BoardMap? _wall;
 
@@ -1298,7 +1356,8 @@ public sealed partial class BoardMap
     /// </summary>
     public static BoardMap Effects => _effects ??= FromGround(
         "effects", EffectsGround, EffectsRamps,
-        new[] { new Vector2I(2, 2) }, TerrainSet.Mixed, true, plinth: 1);
+        new Parking[] { new Vector2I(2, 2) }, TerrainSet.Mixed, true,
+        plinth: 1);
 
     /// <summary>The maps written in this file. Five, and they are the
     /// references: the self test judges them, and a file on disk answering to

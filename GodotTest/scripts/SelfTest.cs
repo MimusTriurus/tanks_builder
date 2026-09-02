@@ -15137,7 +15137,8 @@ public static class SelfTest
                 {
                     one = BoardMap.FromGround(
                         $"glyph{glyph.Letter}", new[] { glyph.Letter.ToString() },
-                        new[] { "." }, new[] { new Vector2I(0, 0) },
+                        new[] { "." },
+                        new Parking[] { new Vector2I(0, 0) },
                         TerrainSet.Mixed, true);
                 }
                 catch (Exception e)
@@ -15313,7 +15314,7 @@ public static class SelfTest
             Check("the last home cannot be dropped",
                 !draw.DropHome(0, out _), "a board was left with no homes");
             Check("and a home's cell cannot be taken off the board",
-                !draw.Plot(draw.Homes[0], false, out _),
+                !draw.Plot(draw.Homes[0].Cell, false, out _),
                 "a home was left standing off the board");
 
             // The draft the rules are asked about is built from the letters, so
@@ -15548,6 +15549,105 @@ public static class SelfTest
                 two.Faults().Any(f => f.Rule == "wall.run" && f.Cell == far
                                       && !f.Fatal),
                 string.Join("; ", two.Faults().Select(f => f.Rule)));
+        }
+
+        Theme("the parkings: where the tanks stand and who the board asked for");
+        {
+            // --- the pairing, without a board ----------------------------
+            string[] loaded = MovementProfile.Tags;
+            var plain = new Parking[]
+            {
+                new Vector2I(1, 1), new Vector2I(2, 1), new Vector2I(3, 1),
+            };
+            Check("a board that names no class pairs in order, as it always did",
+                Parking.Pair(plain, loaded).SequenceEqual(new[] { 0, 1, 2 }),
+                string.Join(" ", Parking.Pair(plain, loaded)));
+
+            // The last parking asks for the first tank, so it moves and the
+            // other two close up behind it.
+            var named = new Parking[]
+            {
+                new Vector2I(1, 1), new Vector2I(2, 1),
+                new Parking(new Vector2I(3, 1), loaded[0]),
+            };
+            Check("and a parking that names a class takes that tank",
+                Parking.Pair(named, loaded).SequenceEqual(new[] { 2, 0, 1 }),
+                string.Join(" ", Parking.Pair(named, loaded)));
+
+            // The failure this replaced: Homes[Math.Min(i, Count - 1)] put every
+            // extra tank on the last parking, and three tanks inside each other
+            // is one tank on screen.
+            var one = new Parking[] { new Vector2I(6, 6) };
+            Check("a tank with no parking is -1 rather than stacked on the last",
+                Parking.Pair(one, loaded).SequenceEqual(new[] { 0, -1, -1 }),
+                string.Join(" ", Parking.Pair(one, loaded)));
+
+            // --- what a board may declare --------------------------------
+            foreach ((string tag, string wrong, string what) in new[]
+                     {
+                         ("NOPE", "class NOPE", "a class no build has"),
+                         (loaded[0], "two homes ask", "one class twice"),
+                     })
+            {
+                var homes = new Parking[]
+                {
+                    new Parking(new Vector2I(1, 1), loaded[0]),
+                    new Parking(new Vector2I(2, 1), tag),
+                };
+                string said = "";
+                try
+                {
+                    BoardMap.FromGround("crew", new[] { "...", "..." },
+                        new[] { "...", "..." }, homes, TerrainSet.Mixed, true);
+                }
+                catch (Exception e)
+                {
+                    said = e.Message;
+                }
+                Check($"a board asking for {what} is refused",
+                    said.Contains(wrong), said.Length == 0 ? "it was taken" : said);
+            }
+
+            // --- the file ------------------------------------------------
+            var draw = MapEdit.Blank("parked", 6, 5);
+            draw.Home(new Vector2I(1, 1), 1, out _);
+            Check("a fresh home names nobody",
+                draw.Homes[1].Class is null, draw.Homes[1].ToString());
+
+            Check("a class this build has not got is refused by name",
+                !draw.Crew(1, "NOPE", out string nope)
+                && nope.Contains("not a class"), nope);
+            string twice = "";
+            Check("and one another home already asked for, by which home",
+                draw.Crew(0, loaded[0], out _)
+                && !draw.Crew(1, loaded[0], out twice)
+                && twice.Contains("home 1"), twice);
+            Check("moving a home keeps the class it asked for",
+                draw.Home(new Vector2I(2, 2), 0, out _)
+                && draw.Homes[0] == new Parking(new Vector2I(2, 2), loaded[0]),
+                draw.Homes[0].ToString());
+
+            string text = MapFile.Write(draw.Build());
+            BoardMap back = MapFile.Parse(text, "parked");
+            Check("a class written to a file and read back is the class that was",
+                back.Parked[0] == draw.Homes[0]
+                && back.Parked[1] == draw.Homes[1],
+                string.Join(" ", back.Parked));
+            Check("the home that named nobody is still written as a bare pair",
+                text.Contains($"[{draw.Homes[1].Cell.X}, {draw.Homes[1].Cell.Y}]"),
+                text.Split("\"homes\"")[1].Split("\n")[0]);
+
+            // Every shipped board writes the shape it always wrote, so no file
+            // on disk and no compiled map changes because this field exists.
+            var rewritten = new List<string>();
+            foreach (string name in BoardMap.Compiled)
+            {
+                BoardMap map = BoardMap.ByName(name);
+                if (map.Parked.Any(p => p.Class is not null))
+                    rewritten.Add(name);
+            }
+            Check("no shipped board asks for a class, so none of them moved",
+                rewritten.Count == 0, string.Join(" ", rewritten));
         }
 
         // --- the authored boards ------------------------------------------

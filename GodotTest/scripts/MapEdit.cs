@@ -54,7 +54,7 @@ public sealed class MapEdit
 
     private char[] _ground = Array.Empty<char>();
     private bool[] _ramps = Array.Empty<bool>();
-    private List<Vector2I> _homes = new();
+    private List<Parking> _homes = new();
 
     /// <summary>
     /// What the walled cells carry, keyed by cell.
@@ -69,7 +69,19 @@ public sealed class MapEdit
     /// </summary>
     private Dictionary<Vector2I, Masonry> _walls = new();
 
-    public IReadOnlyList<Vector2I> Homes => _homes;
+    /// <summary>The parkings, cell and class each - see
+    /// <see cref="Parking"/>.</summary>
+    public IReadOnlyList<Parking> Homes => _homes;
+
+    /// <summary>Whether a cell is one of them, which is the question the plot
+    /// brush and the panel ask.</summary>
+    public int SlotAt(Vector2I cell)
+    {
+        for (int i = 0; i < _homes.Count; i++)
+            if (_homes[i].Cell == cell)
+                return i;
+        return -1;
+    }
 
     // --- making one ----------------------------------------------------------
 
@@ -110,7 +122,7 @@ public sealed class MapEdit
         // the reachability audit has nothing to say about it - and starting with
         // that refusal standing would be a new board that is broken before it is
         // touched.
-        edit._homes.Add(new Vector2I(columns / 2, rows - 1));
+        edit._homes.Add(new Parking(new Vector2I(columns / 2, rows - 1)));
         return edit;
     }
 
@@ -150,7 +162,7 @@ public sealed class MapEdit
             Rows = map.Rows,
             _ground = new char[map.Columns * map.Rows],
             _ramps = (bool[])map.Ramps.Clone(),
-            _homes = map.Homes.ToList(),
+            _homes = map.Parked.ToList(),
             // Copied rather than referenced: the board a draft was opened from
             // is somebody else's, and a cached BoardMap.Abbey edited in place
             // would be every scene in the session drawing the edit.
@@ -219,7 +231,7 @@ public sealed class MapEdit
     /// rather than a tuple written out five times: the day a fifth grid is
     /// added, a tuple is five places to add it and four to forget.</summary>
     private readonly record struct Snap(char[] Ground, bool[] Ramps,
-                                        List<Vector2I> Homes,
+                                        List<Parking> Homes,
                                         Dictionary<Vector2I, Masonry> Walls);
 
     private Snap Taken() => new((char[])_ground.Clone(),
@@ -446,7 +458,7 @@ public sealed class MapEdit
             why = $"({cell.X},{cell.Y}) is off the grid";
             return false;
         }
-        if (!on && _homes.Contains(cell))
+        if (!on && SlotAt(cell) >= 0)
         {
             why = $"({cell.X},{cell.Y}) is a home - move it before taking its "
                   + "cell off the board";
@@ -527,9 +539,53 @@ public sealed class MapEdit
             return false;
         }
         if (slot >= _homes.Count)
-            _homes.Add(cell);
+            _homes.Add(new Parking(cell));
         else
-            _homes[slot] = cell;
+            // The class the slot asked for is kept: moving a parking is moving
+            // it, and a home that forgot who it was for on being dragged is a
+            // second statement made by a gesture about the first.
+            _homes[slot] = _homes[slot] with { Cell = cell };
+        return true;
+    }
+
+    /// <summary>
+    /// Which class a parking asks for, or null for whoever is left over.
+    ///
+    /// <b>Refused for a class this build has not got, and for one already
+    /// asked for.</b> Both are statements the board could not honour, and both
+    /// are what <see cref="BoardMap.MustCrew"/> would throw on at save - so they
+    /// are refused here, where the author is looking, rather than there.
+    /// </summary>
+    public bool Crew(int slot, string? tag, out string why)
+    {
+        why = "";
+        if (slot < 0 || slot >= _homes.Count)
+        {
+            why = $"there is no home {slot}";
+            return false;
+        }
+        if (tag is { Length: > 0 })
+        {
+            if (!MovementProfile.Tags.Contains(tag,
+                    StringComparer.OrdinalIgnoreCase))
+            {
+                why = $"{tag} is not a class this build has - "
+                      + string.Join(", ", MovementProfile.Tags);
+                return false;
+            }
+            for (int i = 0; i < _homes.Count; i++)
+                if (i != slot && string.Equals(_homes[i].Class, tag,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    why = $"home {i + 1} already asks for {tag}, and there is "
+                          + "one tank of each";
+                    return false;
+                }
+        }
+        _homes[slot] = _homes[slot] with
+        {
+            Class = tag is { Length: > 0 } ? tag : null,
+        };
         return true;
     }
 
@@ -731,7 +787,7 @@ public sealed class MapEdit
             Water = new bool[Columns * Rows],
             Ground = new Foundation[Columns * Rows],
             Cliffs = new bool[Columns * Rows],
-            Homes = _homes.ToList(),
+            Homes = _homes.Select(h => h.Cell).ToList(),
             Walling = _walls.ToDictionary(kv => kv.Key, kv => kv.Value.Copy()),
         };
         var plot = new HashSet<Vector2I>();

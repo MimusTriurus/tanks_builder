@@ -118,8 +118,10 @@ public sealed partial class BoardMap
     /// one height, which is the comparison the class sizes are judged by - see
     /// <c>MovementProfile.Size</c>. The north edge is where an opposing set
     /// would go; nothing here has two sides yet.</summary>
-    private static readonly Vector2I[] AbbeyHomes =
-        { new(8, 16), new(10, 16), new(12, 16) };
+    private static readonly Parking[] AbbeyHomes =
+    {
+        new Vector2I(8, 16), new Vector2I(10, 16), new Vector2I(12, 16),
+    };
 
     // --- the audit -----------------------------------------------------------
 

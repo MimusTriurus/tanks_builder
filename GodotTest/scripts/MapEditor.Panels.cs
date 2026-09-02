@@ -336,7 +336,7 @@ public sealed partial class MapEditor
             ? "none"
             : $"{_picked.X},{_picked.Y} {_edit.LetterAt(_picked)} "
               + $"{(_edit.IsRamp(_picked) ? "r" : "-")} "
-              + $"{Slot(_picked)}";
+              + $"{_edit.SlotAt(_picked)}";
 
     private void Fit()
     {
@@ -429,10 +429,11 @@ public sealed partial class MapEditor
 
         // --- home ------------------------------------------------------------
         into.AddChild(Heading("Home"));
-        int slot = Slot(_picked);
+        int slot = _edit.SlotAt(_picked);
         if (slot >= 0)
         {
             into.AddChild(Note($"home {slot + 1} of {_edit.Homes.Count}"));
+            Crew(into, slot);
             into.AddChild(Does("drop this home",
                 () => _edit.DropHome(slot, out string why) ? "" : why));
         }
@@ -535,16 +536,6 @@ public sealed partial class MapEditor
 
     // --- the small parts -----------------------------------------------------
 
-    /// <summary>Which home a cell is, or -1. A walk rather than IndexOf,
-    /// which a read-only list does not have.</summary>
-    private int Slot(Vector2I cell)
-    {
-        for (int i = 0; i < _edit.Homes.Count; i++)
-            if (_edit.Homes[i] == cell)
-                return i;
-        return -1;
-    }
-
     private static Label Heading(string text)
     {
         var label = new Label { Text = text };
@@ -563,6 +554,56 @@ public sealed partial class MapEditor
         };
         label.AddThemeFontSizeOverride("font_size", 12);
         return label;
+    }
+
+    /// <summary>
+    /// Which class a parking asks for.
+    ///
+    /// <b>"anybody" is the first entry and it is not a class.</b> A parking that
+    /// names nobody takes whoever the load order has left - see
+    /// <see cref="Parking"/> - and that is what almost every home on almost
+    /// every board wants; naming one is the exception, so the exception is the
+    /// thing you have to go and pick.
+    ///
+    /// The refusal comes back from <see cref="MapEdit.Crew"/> - a class this
+    /// build has not got, or one another home already asked for - and the
+    /// dropdown is put back to what it was, the way the edge boxes are.
+    /// </summary>
+    private void Crew(VBoxContainer into, int slot)
+    {
+        string? asked = _edit.Homes[slot].Class;
+        var pick = new OptionButton();
+        pick.AddItem("anybody");
+        foreach (string tag in MovementProfile.Tags)
+            pick.AddItem(tag);
+        int at = asked is null
+            ? 0 : Array.FindIndex(MovementProfile.Tags,
+                      t => string.Equals(t, asked,
+                          StringComparison.OrdinalIgnoreCase)) + 1;
+        pick.Selected = Math.Max(0, at);
+        int was = pick.Selected;
+        pick.ItemSelected += index =>
+        {
+            if (_loading)
+                return;
+            string? tag = index == 0
+                ? null : MovementProfile.Tags[(int)index - 1];
+            bool ok = false;
+            Wrote(() =>
+            {
+                ok = _edit.Crew(slot, tag, out string why);
+                return ok ? "" : why;
+            });
+            if (ok)
+            {
+                was = (int)index;
+                return;
+            }
+            _loading = true;
+            pick.Selected = was;
+            _loading = false;
+        };
+        into.AddChild(Field("class", pick));
     }
 
     /// <summary>A label and a control, the right panel's own - narrower
