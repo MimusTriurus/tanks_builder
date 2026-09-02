@@ -547,6 +547,80 @@ public sealed partial class Main : SceneRoot
 	/// a question about the picture.</summary>
 	private readonly Craters _pits = new();
 
+
+	/// <summary>The masonry standing on the board, one prop per walled cell.
+	/// </summary>
+	private readonly List<WallProp> _bricks = new();
+
+	/// <summary>
+	/// Stand the bricks the map's walled cells describe.
+	///
+	/// <b>The harness drew no walls at all, and the letter had said there were
+	/// some since the format existed.</b> <see cref="HexField.SetCover"/> is
+	/// called with them, so a walled cell has always barred movement and fire
+	/// here - what was missing was the picture, and a board whose walls stop a
+	/// tank and cannot be seen is worse than one with no walls on it. The editor
+	/// grew this first (<c>MapEditor.Bricks</c>) because that is where the
+	/// numbers are typed; pressing Run then showed a board with the masonry
+	/// gone, which is how it surfaced.
+	///
+	/// <b>All of it is <see cref="WallProp"/>'s</b>, and the recipe and the side
+	/// come out of <see cref="Masonry.Laying"/> - the one join. <c>TankBench</c>
+	/// still stands its own from its own list, because that board's walls are a
+	/// ring plus four samples each moving one dial: a bench's arrangement.
+	///
+	/// <b>No solver, and that is the half this does not answer.</b> Every
+	/// <see cref="WallRig"/> is centred on the world origin, so each needs its
+	/// own collision bit to keep one heap out of another's phantom space - see
+	/// <c>TankBench.Stand</c>, which numbers five of them. A map may declare
+	/// twenty, and there are thirty-two bits in all, so how a board's walls share
+	/// them is a question with a real answer that nobody has needed yet. Until
+	/// then the masonry stands, bars what the cover grid says it bars, and does
+	/// not come down.
+	///
+	/// <b>Belongs to the stage, so it is built with it and dropped with it.</b>
+	/// <see cref="WallProp"/> requires a <see cref="Stage3D"/>: the 2D board has
+	/// no depth to sort bricks against.
+	/// </summary>
+	private void Bricks()
+	{
+		Rubble();
+		if (_stage is null || _field.Atlas is null)
+			return;
+		foreach (Vector2I cell in _map.Walled())
+		{
+			if (_map.MasonryAt(cell)?.Laying() is not
+					({ } recipe, int bearing))
+				continue;
+			var prop = new WallProp
+			{
+				Field = _field,
+				Stage = _stage,
+				Cell = cell,
+				Recipe = recipe,
+				Borrow = null,
+				Channel = _bricks.Count,
+			};
+			AddChild(prop);
+			// See the remarks: standing, and nothing to knock it down with yet.
+			prop.Solved = true;
+			prop.Bearing = bearing;
+			prop.Build();
+			_bricks.Add(prop);
+		}
+		if (_bricks.Count > 0)
+			GD.Print($"map {_map.Name}: {_bricks.Count} wall(s) standing");
+	}
+
+	private void Rubble()
+	{
+		foreach (WallProp was in _bricks)
+		{
+			RemoveChild(was);
+			was.QueueFree();
+		}
+		_bricks.Clear();
+	}
 	private void StageOn()
 	{
 		// Asked before the switch and told after it, because the two modes keep
@@ -603,6 +677,9 @@ public sealed partial class Main : SceneRoot
 		_field.ShowField = false;
 		_stage.ShowEdges = _cellEdges;
 		_stage.ShowBoard = board;
+		// Last, because a wall is sorted against the ground the stage has
+		// just laid out.
+		Bricks();
 	}
 
 	private void StageOff()
@@ -610,6 +687,9 @@ public sealed partial class Main : SceneRoot
 		if (_stage is null)
 			return;
 		bool board = BoardShown;
+		// The masonry first: it is the stage's, and a prop outliving the
+		// stage it sorts against is a brick drawn into nothing.
+		Rubble();
 		_stage.Give();
 		_stage.QueueFree();
 		_stage = null;
