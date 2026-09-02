@@ -105,6 +105,28 @@ public sealed partial class BoardMap
     /// </summary>
     public const char Wall = 'W';
 
+    /// <summary>
+    /// A brick wall standing on a rise, one level up.
+    ///
+    /// <b>The letter is picked rather than derived, and that is worth saying
+    /// once.</b> A one-character alphabet cannot compose "wall" with "one level
+    /// up"; the pairs that do compose are the wood's (<see cref="Wood"/> /
+    /// <see cref="WoodedHill"/>, <see cref="Low"/> / <see cref="WoodedLow"/>) and
+    /// they are lowercase-uppercase, which <see cref="Wall"/> has already spent.
+    /// So <c>X</c>, and <see cref="MapFile.Alphabet"/> is the only place it means
+    /// anything. A wall needs no wooded variant - nothing stands on masonry - so
+    /// it needs no lowercase partner either.
+    ///
+    /// <b>Level ground under a wall was the rule and this is the exception being
+    /// asked for.</b> <see cref="Wall"/>'s own note says why the flat one is
+    /// flat: with ramps on the board <see cref="HexField.Passable"/> reduces to
+    /// "the same level", so a wall's cell raised above its neighbours cannot be
+    /// driven on to and the ram is impossible. That is still true of this one -
+    /// a walled rise is reached by a ramp or not at all, which is a thing an
+    /// author may want and could not write.
+    /// </summary>
+    public const char WallHill = 'X';
+
     /// <summary>Sand: a floor a tank crosses slowly. The first letter that is a
     /// foundation and nothing else - no height, no flood, no props - which is
     /// what makes it the cheapest proof that the floor is its own slot.</summary>
@@ -620,6 +642,16 @@ public sealed partial class BoardMap
                     // not be driven on to at all and the ram would be
                     // impossible. What gives the prisms their sides is the
                     // plinth, which lifts the whole board at once.
+                    walls[at] = true;
+                    over[at] = Cover.Walls;
+                    break;
+                case WallHill:
+                    // The rise's two statements plus the wall's two. Written out
+                    // rather than falling through Hill, because a case that
+                    // reaches another case's body is a case somebody will edit
+                    // one of.
+                    levels[at] = 1;
+                    kinds[at] = TerrainSet.Rise;
                     walls[at] = true;
                     over[at] = Cover.Walls;
                     break;

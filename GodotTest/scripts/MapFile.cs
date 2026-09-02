@@ -333,7 +333,7 @@ public static class MapFile
     public static string PaintFor(IReadOnlyList<string> ground) =>
         ground.Any(row => row.Any(
             c => c is BoardMap.Wood or BoardMap.WoodedHill or BoardMap.WoodedLow
-                   or BoardMap.Hill or BoardMap.Rock))
+                   or BoardMap.Hill or BoardMap.Rock or BoardMap.WallHill))
             ? TerrainSet.Mixed
             : TerrainSet.Default;
 
@@ -459,6 +459,8 @@ public static class MapFile
         new Glyph(BoardMap.Wet, Foundation.Solid, Cover.None, -1, water: true),
         new Glyph(BoardMap.Rock, Foundation.Rock, Cover.None, 2, cliff: true),
         new Glyph(BoardMap.Wall, Foundation.Solid, Cover.Walls, 0, wall: true),
+        new Glyph(BoardMap.WallHill, Foundation.Solid, Cover.Walls, 1,
+                  wall: true),
         new Glyph(BoardMap.Sand, Foundation.Sand, Cover.None, 0),
         new Glyph(BoardMap.Trench, Foundation.Solid, Cover.Trench, 0),
         new Glyph(BoardMap.Mine, Foundation.Solid, Cover.Minefield, 0),

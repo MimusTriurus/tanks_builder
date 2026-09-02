@@ -1,4 +1,4 @@
-{
+﻿{
   "groups": [
 	{
 	  "id": "tank",
@@ -19,7 +19,7 @@
 			1.5,
 			0.05
 		  ],
-		  "default": 0.5
+		  "default": 0.8
 		},
 		{
 		  "id": "tank.info",

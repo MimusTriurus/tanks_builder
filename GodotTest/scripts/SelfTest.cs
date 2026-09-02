@@ -6650,9 +6650,21 @@ public static class SelfTest
         // The one that matters for the seam. A bump lifts the whole vehicle and
         // the turret is bolted to the ring; exempting it from heave as well
         // would part the two by a pixel or two at the join on every jolt.
+        // Against the SNAPPED jolt and not against Shake itself, which is what
+        // this said and what made it fail the day the size dial moved. Heave is
+        // Shake put on the pixel grid of what it is drawn into - see
+        // TankSprite.SnapHeave, which exists for that - so the two coincide only
+        // when Shake happens to land on that grid: -2 does at scale 0.5 and 1.0
+        // and does not at 0.8, where it becomes -2.5 and draws as the same -2
+        // device pixels. The subject of this check is the stabiliser, and
+        // asserting grid alignment as well was asserting something else.
         Check("heave is shared whatever the stabiliser is doing",
-            tank.HeaveFor(true) == tank.HeaveFor(false) && tank.HeaveFor(true) == tank.Shake,
-            $"{tank.HeaveFor(true)} vs {tank.HeaveFor(false)}");
+            tank.HeaveFor(true) == tank.HeaveFor(false)
+            && tank.HeaveFor(true)
+               == (float)TankSprite.SnapHeave(tank.Shake, tank.HeaveScale),
+            $"{tank.HeaveFor(true)} vs {tank.HeaveFor(false)}, snapped "
+            + $"{TankSprite.SnapHeave(tank.Shake, tank.HeaveScale)} at scale "
+            + $"{tank.HeaveScale}");
 
         // And the one part that is not part of the tank takes the bump the way a
         // shadow takes it: along the sun rather than up the screen. Both halves,
