@@ -230,6 +230,61 @@ public sealed class TankTick
     /// <summary>The heading <see cref="HitSide"/> names.</summary>
     public double HitFrom => HexField.EdgeHeadings[HitSide];
 
+    /// <summary>
+    /// Which class of gun the next hand-dealt hit comes out of, as an index into
+    /// <see cref="MovementProfile.Tags"/>, or <see cref="NoShooter"/> for a round
+    /// with nobody behind it.
+    ///
+    /// <b>The dial that makes a keypress mean the same thing as a shot.</b>
+    /// <see cref="Gunnery.Penetration"/> is a class of gun against a class of
+    /// armour, and a fired round has both ends of that - so a bounce or a
+    /// penetration follows the matchup table by construction, and has since the
+    /// table was written. A keypress had only one end: no shooter, so no
+    /// matchup, so the depth came from <see cref="Calibre"/>'s bite instead.
+    /// Which means the manual hit could not show a ricochet at all without the
+    /// calibre being dropped to its smallest, and then only on a clean plate -
+    /// an accident of <see cref="Ordnance.BiteFor"/> rather than a control.
+    ///
+    /// <b>Both paths are kept, and they answer different questions.</b> The bite
+    /// walks one plate through scorch, gouge and breach over three presses,
+    /// which is what shows that the scar's phase axis is damage rather than
+    /// three renders of one drawing - see <see cref="TankSprite.Damage"/>. This
+    /// one reproduces one cell of the matchup: a light gun into this hull, over
+    /// and over, stays a ricochet however many times it lands.
+    ///
+    /// <b>Opens at <see cref="NoShooter"/></b>, because that is what the U key
+    /// has always done and a default that moved would move every capture of it.
+    /// A dial here rather than on a root for <see cref="Calibre"/>'s reason: it
+    /// already has two readers.
+    /// </summary>
+    public int HitBy = NoShooter;
+
+    /// <summary>No gun behind the next manual hit - the bite decides how deep it
+    /// gets. Named rather than left as a bare -1, because it is a state with a
+    /// meaning rather than a missing value: it is the one round on this bench
+    /// that nobody fired.</summary>
+    public const int NoShooter = -1;
+
+    /// <summary>The class <see cref="HitBy"/> names, or null with no shooter.
+    /// </summary>
+    public MovementProfile? HitGun =>
+        HitBy >= 0 && HitBy < MovementProfile.All.Length
+            ? MovementProfile.All[HitBy] : null;
+
+    /// <summary>
+    /// How deep the next manual hit may get into <paramref name="victim"/>, or
+    /// null for a round with no ceiling.
+    ///
+    /// <b>One method because it is read in two places and they must not
+    /// disagree</b>: <see cref="TakeHit"/> spends it, and both roots' panels
+    /// report it so the dial can say what it will do before it does it. A
+    /// readout that re-derived the matchup would agree with the shot until
+    /// somebody changed the table.
+    /// </summary>
+    public int? HitDepth(Vehicle victim) =>
+        HitGun is MovementProfile gun
+            ? Gunnery.Penetration(gun, victim.Profile) : null;
+
     /// <summary>Whether a round in the air is drawn. The flight is not on a
     /// switch - it is what puts time between the report and the impact - so this
     /// is the drawing alone, and it reaches the rounds already up: see
@@ -1967,6 +2022,12 @@ public sealed class TankTick
         AtlasSet atlas = victim.Atlas;
         if (!atlas.HasHit)
             return;
+        // <b>The dial fills in the end a keypress does not have.</b> A caller
+        // that already knows the level - one tank shooting another - keeps it;
+        // one that passed null gets whatever HitBy says, which is either the
+        // matchup against this hull or still null. See HitBy on why a manual hit
+        // could not show a ricochet before this line existed.
+        level ??= HitDepth(victim);
         // Snapped, not taken as given: a shell arrives from a neighbouring
         // cell, so every angle anything hands in resolves to one of the six
         // sides rather than to itself.

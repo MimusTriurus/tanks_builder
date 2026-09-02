@@ -384,6 +384,7 @@ public sealed partial class TankBench : SceneRoot
         ["--no-proc-exhaust"] = new[] { "tank.smoke.plume" },
         ["--flash"] = new[] { "tank.gun.flash_source" },
         ["--hit"] = new[] { "tank.armour.side" },
+        ["--hit-by"] = new[] { "tank.armour.by" },
         ["--hit-scale"] = new[] { "tank.armour.calibre" },
         ["--no-shadow"] = new[] { "tank.armour.shadow" },
         ["--strike"] = new[] { "wall.ammo" },
@@ -561,6 +562,20 @@ public sealed partial class TankBench : SceneRoot
                                      && Number(args[i + 1]) is double lay:
                     _turretAtStart = lay;
                     i++;
+                    break;
+                // Which class of gun a hand-dealt hit comes out of - the
+                // harness's flag, spelled its way.
+                case "--hit-by" when i + 1 < args.Length:
+                    // The name is read out before the search, and that is not
+                    // style: FindIndex calls its predicate once per class, so an
+                    // argument fetched with ++i inside it walks the whole command
+                    // line - which it did, and the flag after this one was never
+                    // seen at all.
+                    string gun = args[++i];
+                    _tick.HitBy = Array.FindIndex(
+                        MovementProfile.Tags,
+                        tag => tag.StartsWith(gun,
+                                              StringComparison.OrdinalIgnoreCase));
                     break;
                 case "--hit" when i + 1 < args.Length && Number(args[i + 1]) is double deg:
                     _hitAtStart = deg;
@@ -2613,6 +2628,11 @@ public sealed partial class TankBench : SceneRoot
                            + $"{HitFrom:F0} deg",
                      Array.ConvertAll(HexField.EdgeHeadings, d => $"{d}"),
                      () => _hitSide, i => _hitSide = i);
+        // Whose gun, which is the end a keypress does not have - see
+        // TankTick.HitBy, and the harness's row of the same name.
+        _panel.Choice("tank.armour.by", "hit dealt by",
+                      new[] { "nobody" }.Concat(MovementProfile.Tags).ToArray(),
+                      () => _tick.HitBy + 1, i => _tick.HitBy = i - 1);
         _panel.Choice("tank.armour.calibre", "calibre",
                       new[] { "light", "medium", "heavy" },
                       () => _tick.Calibre,

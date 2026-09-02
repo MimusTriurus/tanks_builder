@@ -1487,6 +1487,20 @@ public sealed partial class Main : SceneRoot
 			else if (userArgs[i] == "--hit" && i + 1 < userArgs.Length
 					 && double.TryParse(userArgs[i + 1], out double from))
 				_hitAtStart = from;
+			// Which class of gun a hand-dealt hit comes out of - see TankTick.HitBy.
+			// A name rather than an index, for --tank's reason: "lt" is a tank and
+			// "0" is a position in a list nobody can see.
+			else if (userArgs[i] == "--hit-by" && i + 1 < userArgs.Length)
+			{
+				// Read out before the search rather than fetched inside it:
+				// FindIndex calls its predicate once per class, so a ++i in
+				// there walks the command line and eats the next flag. It did.
+				string gun = userArgs[++i];
+				Tick.HitBy = Array.FindIndex(
+					MovementProfile.Tags,
+					tag => tag.StartsWith(gun,
+										  StringComparison.OrdinalIgnoreCase));
+			}
 			// Which tank the driven one opens fire on, by the same index the
 			// number keys use. A capture of an engagement otherwise needs a hand
 			// on the mouse, which is the one thing --capture exists to avoid.
@@ -3808,6 +3822,7 @@ public sealed partial class Main : SceneRoot
 		["--shell-speed"] = new[] { "gunnery.shell_speed" },
 		["--traverse"] = new[] { "gunnery.traverse_level" },
 		["--hit-scale"] = new[] { "armour.calibre" },
+		["--hit-by"] = new[] { "armour.by" },
 		["--destroy"] = new[] { "armour.destroy" },
 		["--turret-sound"] = new[] { "sound.turret_motor" },
 		["--relief"] = new[] { "ground.relief" },
@@ -4390,6 +4405,15 @@ public sealed partial class Main : SceneRoot
 			Enumerable.Range(1, HexField.EdgeHeadings.Length)
 				.Select(i => i.ToString()).ToArray(),
 			() => _hitSide, i => _hitSide = i);
+		// <b>Whose gun, which is the end a keypress does not have.</b> The
+		// matchup table has decided bounce or penetration since it was written -
+		// and only for a shell one tank fired at another, because that is the only
+		// round with a class at both ends. Named classes rather than levels: the
+		// question the table answers is "can this gun get in", and a level is its
+		// answer rather than its input. See TankTick.HitBy.
+		ui.Choice("armour.by", "hit dealt by  (--hit-by)",
+			new[] { "nobody" }.Concat(MovementProfile.Tags).ToArray(),
+			() => Tick.HitBy + 1, i => Tick.HitBy = i - 1);
 		ui.Choice("armour.calibre", "calibre  (Y)", new[] { "0.7x", "1.0x", "1.4x" },
 			() => _calibre,
 			i =>
@@ -4436,8 +4460,16 @@ public sealed partial class Main : SceneRoot
 						   + $" / {a.HitPhases}"
 						   + $"   {(_hit.Face == "" ? "-" : _hit.Face)}"
 						   + $"   {(_tank.HitBehind ? "behind" : "in front")}"
-						   + $"\nloaded x{Calibre:F2}, {Bite} level"
-						   + (Bite == 1 ? "" : "s") + " of armour"
+						   + "\n"
+						   // What the dial will do, before it does it - the whole reason
+						   // TankTick.HitDepth is a method and not the same two expressions
+						   // written out wherever they are wanted.
+						   + (Tick.HitGun is MovementProfile shot
+							  ? $"dealt by {shot.Tag}: "
+								+ (Tick.HitDepth(Active) is 0
+								   ? "ricochet" : $"level {Tick.HitDepth(Active)}")
+							  : $"loaded x{Calibre:F2}, {Bite} level"
+								+ (Bite == 1 ? "" : "s") + " of armour")
 						   + (_hit.Live ? $"   in the air x{_hit.Scale:F2}" : "")
 						   + (a.HasHit ? "" : "   [no plate table - re-render]");
 			if (!a.HasScars)

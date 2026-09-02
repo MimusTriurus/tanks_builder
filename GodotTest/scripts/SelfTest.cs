@@ -5889,6 +5889,57 @@ public static class SelfTest
                 "the built ricochet stands on the board and the rendered pair in "
                 + "the tank's canvas, so this flag is the only A/B this layer can "
                 + "have");
+
+            // <b>And which rounds those are is the class matchup, on the key as
+            // well as in a firefight.</b> A fired shell has a class at both ends
+            // so the table has always decided it; a keypress had only one, so the
+            // depth came off the calibre's bite and a bounce could not be asked
+            // for at all. TankTick.HitBy is the missing end. Checked against
+            // Gunnery.Penetration rather than against a written-out table,
+            // because the table is already asserted cell by cell where it lives -
+            // what is claimed here is that the dial spends *that* answer.
+            Check("the manual hit opens with nobody behind it",
+                fork.HitBy == TankTick.NoShooter && fork.HitGun is null
+                && fork.HitDepth(mark) is null,
+                $"HitBy {fork.HitBy} - a default that moved would move every "
+                + "capture of the U key, and the bite is what walks one plate "
+                + "through all three of its levels");
+            bool follows = true, bounces = true;
+            for (int by = 0; by < MovementProfile.All.Length; by++)
+            {
+                fork.HitBy = by;
+                follows &= fork.HitDepth(mark)
+                           == Gunnery.Penetration(MovementProfile.All[by],
+                                                  mark.Profile);
+            }
+            // The one that says it is a matchup and not a counter: a gun that
+            // cannot get in never gets in, however many times it lands. The bite
+            // path is the opposite by design, which is why both are kept.
+            MovementProfile weak = MovementProfile.Light;
+            fork.HitBy = Array.IndexOf(MovementProfile.All, weak);
+            fork.Bounce = true;
+            if (Gunnery.Penetration(weak, mark.Profile) == 0)
+                for (int shot = 0; shot < 4; shot++)
+                {
+                    mark.Hit.Reset();
+                    int was = bounced;
+                    fork.TakeHit(mark, fork.HitFrom, 1.0f, null, 1);
+                    bounces &= bounced == was + 1 && !mark.Hit.Live;
+                }
+            fork.HitBy = TankTick.NoShooter;
+            mark.Hit.Reset();
+            mark.Sprite.Repair();
+            Check("and named a class it spends the matchup's own answer",
+                follows,
+                "the table is asserted cell by cell where it lives; what this "
+                + "says is that the dial reads it rather than deciding again");
+            Check("and a gun that cannot get in never gets in, however many"
+                  + " times it lands",
+                bounces,
+                $"a {weak.Tag} gun into a {mark.Profile.Tag} hull is level "
+                + $"{Gunnery.Penetration(weak, mark.Profile)}, and four rounds of "
+                + "it have to be four ricochets - the bite walks a plate deeper "
+                + "on purpose and this must not");
         }
         // The three windows, in order: the flash is out before the fan, the fan
         // before the dust. Held the same length they are a firework.
