@@ -1461,7 +1461,7 @@ public sealed partial class TankBench : SceneRoot
         if (_field.Atlas is null || _stage is null)
             return;
         Vector2 flight = round.To - round.From;
-        int edge = Crossed(round, prop, flight);
+        int edge = Crossed(prop, flight);
         Vector2 normal = _field.Atlas.GroundDirection(edge);
         // Which face of that side was hit. Zero-length is a guard rather than a
         // case - a round that landed where it started blocked on nothing - and it
@@ -1596,20 +1596,75 @@ public sealed partial class TankBench : SceneRoot
     ///
     /// Its own method because the answer has two cases and neither is the wall's
     /// declared bearing - see <see cref="Breached"/>, where the whole of that is
-    /// argued. <paramref name="flight"/> is handed in rather than taken again so
-    /// the side and the face-normal's sign are read off one vector.
+    /// argued.
+    ///
+    /// <b>The two cases are told apart by where the shooter stands, and the first
+    /// attempt asked the landing point instead - which is the second reason a
+    /// burst came out behind the wall.</b> <c>Track</c> says so in its own
+    /// docstring: the line is drawn from the muzzle, which already stands a little
+    /// way along the shot from the cell centre the walk starts at, so what is
+    /// drawn <em>reaches a little into the cell that stopped it</em>. So
+    /// <c>CellAt(round.Ground)</c> is sometimes the wall's own cell for a round
+    /// fired from outside it - and read as "the shooter is inside", which is what
+    /// that test meant, it took the branch for a round LEAVING the cell and
+    /// answered with the side it would leave by. The far one. The burst then sat
+    /// on the boundary beyond the masonry, which is exactly what was reported: the
+    /// round breaks the wall and goes off behind it.
+    ///
+    /// Asked of the tank instead, which is a fact the bench holds rather than a
+    /// point it has to round to a cell - and the same test <see cref="Struck"/>
+    /// already spends on the same question, so the picture and the solver cannot
+    /// disagree about which side of the wall the shot came from.
+    ///
+    /// <b>And the side itself is the flight snapped to one of the six rather than
+    /// a heading between two cells.</b> A round travels down a hex lane, so the
+    /// snap is exact; taken between the wall's cell and the shooter's it would
+    /// need them to be neighbours, which a shot from two cells down the lane is
+    /// not. Reversed for a shooter outside, because the side a round enters by is
+    /// the one facing back along its flight.
+    ///
+    /// <b>But the side the round came in by is not always a side with masonry on
+    /// it, and then the snap alone puts the burst on an empty boundary of the
+    /// right cell.</b> A wall covers a run of edges rather than all six - the
+    /// samples on this board cover three - so a round arriving from the open side
+    /// crosses bare ground, enters the cell and meets the leaf further round. And
+    /// a shell is stopped by the <em>cell</em> (see <c>_blocking</c> on why that is
+    /// still coarse), so it stops whichever side it came in by.
+    ///
+    /// So the bricks are asked, and asked with the same measurement the board is
+    /// told about the wall with: of the six sides, take those
+    /// <see cref="WallProp.Bars"/> answers for and keep the one nearest the way
+    /// the round was going. Six calls, and <see cref="Restate"/> already makes
+    /// them every time a wall loses a piece. When none bars - which the coarse
+    /// obstacle rule can produce, a ring stopping a round aimed through its own
+    /// breach - the snap stands, and that is the honest answer for a cell that
+    /// stopped a shell without having anything on the side it came in by.
     /// </summary>
-    private int Crossed(Shell round, WallProp prop, Vector2 flight)
+    private int Crossed(WallProp prop, Vector2 flight)
     {
-        Vector2I before = _field.CellAt(round.Ground - _origin);
-        if (before != prop.Cell
-            && HexField.HeadingTo(prop.Cell, before) is int side and >= 0)
-            return side;
-        // Leaving the cell it is standing on - the shooter is inside the wall -
-        // or a walk whose last two cells are not neighbours, which the snap
-        // answers for either way rather than leaving the caller a -1.
-        return HexField.EdgeHeadings[
-            Angles.SideFor(Gunnery.HeadingOf(flight))];
+        Vector2 look = Tank.Cell == prop.Cell ? flight : -flight;
+        int snapped = HexField.EdgeHeadings[
+            Angles.SideFor(Gunnery.HeadingOf(look))];
+        if (look.LengthSquared() < 1.0f)
+            return snapped;
+        Vector2 want = look.Normalized();
+        Vector2 middle = _field.FlatAnchor(prop.Cell);
+        int best = -1;
+        float nearest = -2.0f;
+        foreach (int heading in HexField.EdgeHeadings)
+        {
+            Vector2 to = _field.FlatAnchor(HexField.Step(prop.Cell, heading))
+                         - middle;
+            if (to.LengthSquared() < 1.0f || !prop.Bars(to))
+                continue;
+            float score = to.Normalized().Dot(want);
+            if (score > nearest)
+            {
+                nearest = score;
+                best = heading;
+            }
+        }
+        return best >= 0 ? best : snapped;
     }
 
     /// <summary>Whether a crossing breaks masonry: only under an order that
