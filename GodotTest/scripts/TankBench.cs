@@ -1299,22 +1299,142 @@ public sealed partial class TankBench : SceneRoot
     private readonly Craters _pits = new();
 
     /// <summary>
-    /// A round that went into the field: raise a burst where it landed, and let
-    /// the walls have it too if it stopped on one of them.
+    /// A round that went into the field: raise a burst where it landed - in the
+    /// ground, or against the masonry that stopped it.
     ///
-    /// Both, in that order, and neither is conditional on the other: masonry
-    /// taking a shell does not stop earth being thrown, and a board with no walls
-    /// still shows the shot arriving. The harness answers the same hook with the
-    /// first half alone - see <c>Main.Splashed</c> - because it has no walls to
-    /// give the second to.
+    /// <b>One of the two, and it used to be both.</b> The old arrangement raised
+    /// the earth cone and then let the walls have the shell as well, on the
+    /// argument that masonry taking a round does not stop earth being thrown -
+    /// which was true of the physics and became false of the picture the day the
+    /// wall had one. What it drew was a shell stopping in the air at a wall's own
+    /// boundary and a crater opening in the ground just short of it: the reported
+    /// complaint, and correctly reported. A round that stopped on a wall did not
+    /// arrive in the earth, and now the earth is not what it draws.
+    ///
+    /// The physics is untouched and still unconditional - <see cref="Struck"/>
+    /// pushes the courses either way, because that half was never the thing that
+    /// looked wrong.
+    ///
+    /// The harness answers the same hook with the ground alone - see
+    /// <c>Main.Splashed</c> - because it has no walls for a round to stop on.
     /// </summary>
     private void Landing(Shell round)
     {
-        // At the calibre the gun is loaded with - the harness's reason, and the
-        // same dial: TankTick.Calibre is one field both roots read.
-        _stage?.Land(round.Ground, round.GroundLift, Ordnance.At(_tick.Calibre));
+        // Asked before anything is drawn, which is the fork on armour's own
+        // ordering and for its reason: the one question whose answer decides which
+        // picture this is has to be asked first.
+        WallProp? hit = _walls.Count > 0 ? Standing(round) : null;
+        if (hit is null)
+            // At the calibre the gun is loaded with - the harness's reason, and
+            // the same dial: TankTick.Calibre is one field both roots read.
+            _stage?.Land(round.Ground, round.GroundLift,
+                         Ordnance.At(_tick.Calibre));
+        else
+            Breached(round, hit);
         if (_walls.Count > 0)
             Struck(round);
+    }
+
+    /// <summary>The wall a round stopped on, or null for one that went into the
+    /// ground. <see cref="Struck"/>'s own first two lines, split out because the
+    /// answer is now wanted before anything is drawn as well as when the courses
+    /// are pushed - and one walk of the list is the only way the picture and the
+    /// physics cannot disagree about which wall it was.</summary>
+    private WallProp? Standing(Shell round)
+    {
+        if (round.Blocked is not Vector2I cell)
+            return null;
+        foreach (WallProp prop in _walls)
+            if (prop.Cell == cell)
+                return prop;
+        return null;
+    }
+
+    /// <summary>
+    /// A round that burst against masonry: the lime dust and the short flash, on
+    /// the face it hit.
+    ///
+    /// <b>The same effect the armour burst is, with its surface named</b> - see
+    /// <see cref="ProcSlam.Face"/>, where the four differences are argued. What is
+    /// this method's own is the geometry, and all three terms of it come off the
+    /// wall rather than off the shell.
+    ///
+    /// <b>The direction is the wall's own plane, not the reverse of the
+    /// flight.</b> A wall stands on a flat side of its cell and knows which
+    /// (<see cref="WallProp.Bearing"/>), so its face normal is that bearing on the
+    /// ground - exact for a plane, where the reverse flight is only exact head-on.
+    /// The sign is which side the round came from: a flight running against the
+    /// normal came from the front of it, and one running with it hit the back -
+    /// which happens on this board, where the tank stands inside a ring of its
+    /// own.
+    ///
+    /// <b>The seat is on the wall, and the round's own landing point is not
+    /// it.</b> That was the first thing tried, because it is the pair
+    /// <c>Stage3D.Land</c> already takes and its lift is known - and it put the
+    /// burst inside the ring, over the tank. A wall stands on the <em>boundary</em>
+    /// of its cell, so a tank in a ring is firing at its own leaf: the cell that
+    /// blocked the shot is the cell the shooter is standing on, and the landing
+    /// point is a few pixels past the muzzle. So the point comes off the wall
+    /// instead - the middle of the boundary it stands on, which is halfway between
+    /// its own cell's centre and the centre of the cell across that side.
+    ///
+    /// <b>Off the flat layout rather than off <c>CellCentre</c>, because the cell
+    /// across may not be on the board at all.</b> A wall on a rim cell has a
+    /// neighbour that does not exist, and <c>CellCentre</c> asks the terrain how
+    /// high it is; <c>FlatAnchor</c> is pure layout arithmetic and answers for any
+    /// pair of coordinates. The height subtracted is then the wall's own cell's,
+    /// which is always a cell there is an answer for. On this board the ring sits
+    /// in the middle and the difference never shows, which is exactly why it is
+    /// written down.
+    ///
+    /// <b>What is not modelled is where <em>along</em> the wall it burst</b> - the
+    /// crossing point of the flight and the boundary would give it, and the guard
+    /// arithmetic that keeps such a solve on the masonry costs more lines than a
+    /// hex side is wide: the side is a cell across, the burst is a third of a cell,
+    /// so the middle of it is on the wall in every case this board can produce.
+    ///
+    /// <b>And the height is the wall's, halved.</b> A round with no target flies
+    /// level at the ground (<see cref="Shell.ToLift"/>), so the shell itself has
+    /// no impact height to give and the wall is the only thing that does:
+    /// <c>Pile().Top</c> is the highest brick in world units, and a world height
+    /// is a screen lift divided by the field's rise, so multiplying it back is the
+    /// wall's own top in the pixels this effect measures in. Half of it, because a
+    /// round crossing a cell arrives at the middle of the courses rather than at
+    /// the coping.
+    /// </summary>
+    private void Breached(Shell round, WallProp prop)
+    {
+        if (_field.Atlas is null || _stage is null)
+            return;
+        Vector2 flight = round.To - round.From;
+        Vector2 normal = _field.Atlas.GroundDirection(prop.Bearing);
+        // Which side of the plane the round came from. Zero-length is a guard
+        // rather than a case - a round that landed where it started blocked on
+        // nothing - and it keeps the wall's declared front.
+        if (flight.LengthSquared() > 1.0f && flight.Dot(normal) > 0.0f)
+            normal = -normal;
+        Vector2I over = HexField.Step(prop.Cell, Mathf.RoundToInt(prop.Bearing));
+        Vector2 mid = (_field.FlatAnchor(prop.Cell) + _field.FlatAnchor(over))
+                      * 0.5f
+                      - new Vector2(0.0f, _field.TopAt(prop.Cell))
+                      + _field.CentreOffset;
+        float top = prop.Pile().Top * _field.RiseFactor;
+        _stage.Slam(_stage.Origin + mid,
+                    _field.LevelAt(prop.Cell) * _field.Lift, normal,
+                    // Screen y grows downward, so up the wall is negative - the
+                    // flip ProcSlam.Aim undoes on the way in.
+                    new Vector2(0.0f, -top * 0.5f), behind: false,
+                    Ordnance.At(_tick.Calibre),
+                    // <b>And which of the two masonry events it is, off the round
+                    // the wall is already being broken by.</b> WallRig has taken
+                    // the same distinction since the day it could be shot at -
+                    // Strike.He pushes a field over a section, Strike.Ap makes a
+                    // hole - so the picture reading it from the same field is the
+                    // picture and the physics agreeing by construction. Drawn the
+                    // one way for both, an AP round came out as a lime fireball,
+                    // which is the one thing it is not.
+                    round.Ammo == Shell.Kind.Ap
+                        ? ProcSlam.Surface.Pierced : ProcSlam.Surface.Masonry);
     }
 
     /// <summary>The dust a gun blows off the ground - the harness's
@@ -1348,12 +1468,11 @@ public sealed partial class TankBench : SceneRoot
 
     private void Struck(Shell round)
     {
-        if (round.Blocked is not Vector2I cell)
-            return;
-        foreach (WallProp prop in _walls)
+        // The same walk Landing already did, through the one method that does it -
+        // see Standing. Written out twice, the picture and the physics could
+        // answer two different walls on a board where two share a cell.
+        if (Standing(round) is WallProp prop)
         {
-            if (prop.Cell != cell)
-                continue;
             Vector2 flight = round.To - round.From;
             if (flight.LengthSquared() < 1.0f)
                 return;
@@ -1376,7 +1495,6 @@ public sealed partial class TankBench : SceneRoot
                       prop.Into(flight.Normalized()),
                       (float)(round.Calibre * _wallForce), _wallBeam,
                       inside ? 0.0f : float.NegativeInfinity);
-            return;
         }
     }
 

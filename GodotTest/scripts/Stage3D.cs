@@ -5352,9 +5352,16 @@ void fragment() {{
     /// has to say hardest: a shell that went off against a hull did not touch the
     /// ground it is standing over. The crater under a tank is what
     /// <c>ammo_rack</c> will be, and that is a different event.
+    ///
+    /// <paramref name="face"/> is what the round burst against - armour or
+    /// masonry, see <see cref="ProcSlam.Face"/>. A parameter rather than a second
+    /// method because the two are one picture with four terms flipped, and a fact
+    /// of the shot rather than a setting: only the caller that watched the round
+    /// arrive knows what it arrived at.
     /// </summary>
     public void Slam(Vector2 spot, float lift, Vector2 outward, Vector2 plate,
-                     bool behind, float might = 1.0f)
+                     bool behind, float might = 1.0f,
+                     ProcSlam.Surface face = ProcSlam.Surface.Armour)
     {
         if (Field.Atlas is null)
             return;
@@ -5372,6 +5379,11 @@ void fragment() {{
         Temper?.Invoke(slam);
         _nextSlam = (_nextSlam + 1) % Bursts;
         slam.Might *= might;
+        // <b>The surface after the hook, like the size and for its reason.</b> A
+        // bench dressing a pool has no business deciding what the last round hit,
+        // and the caller does: this is the one thing about the burst that is a
+        // fact of the shot rather than a setting.
+        slam.Face = face;
         slam.Sit(spot, lift, Squash, RiseFactor, behind);
         // Aimed after it is seated and sized, because Aim writes to the materials
         // and Sit does not touch them - the kick's order, and for its reason: the

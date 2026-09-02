@@ -63,14 +63,25 @@ namespace TankSpriteTest;
 /// <b>time is a uniform, not <c>TIME</c></b> - <see cref="ProcBlast"/>'s two
 /// conventions, both for their own reasons.
 ///
-/// <b>One set of numbers, and the second one is named rather than written.</b>
-/// docs/blast.md's <c>wall_he</c> is this text with a paler dust, no fireball to
-/// speak of and its mass running along the wall instead of out from it - a table
-/// of uniforms, not a shader. It is not here because a round cannot yet arrive at
-/// masonry on this bench at all: cover stops a shot short (see
-/// <see cref="Gunnery.Solve"/>) and a round that goes into the field raises
-/// <c>ground_he</c>, so what that effect needs first is a call site rather than a
-/// picture.
+/// <b>Two surfaces, one text, and the switch is a single uniform.</b>
+/// docs/blast.md's <c>wall_he</c> turned out to be exactly what it was predicted
+/// to be - this picture with a paler dust, hardly any fire and its mass running
+/// along the wall instead of out from it - so it is <see cref="Face"/> rather than
+/// a second shader. Every number of both sets lives in the shader text, as the
+/// tuned numbers on this board always do; what C# writes is the one number that
+/// says which surface this is, and every masonry term is a <c>mix</c> against
+/// zero, so an armour burst is the same arithmetic it was before the second
+/// surface existed.
+///
+/// <b>What masonry differs by, and each of the four is a fact about brick rather
+/// than a taste.</b> The dust is lime and there is more of it, because a wall is
+/// made of the stuff that ends up in the air. The fire is a third of the armour
+/// burst's, because the round's filling is the whole of the fuel and a plate at
+/// least has paint on it. The mass runs <em>along</em> the face, because a wall is
+/// a plane and it channels what bursts against it. And <b>the fragments are drawn
+/// at zero gain, because <see cref="WallRig"/> throws real brick bodies</b> - a
+/// drawn shard beside a simulated one is two accounts of the same debris, and the
+/// simulated one is the one that knocks the wall down.
 /// </summary>
 public sealed partial class ProcSlam : Node3D
 {
@@ -280,6 +291,10 @@ public sealed partial class ProcSlam : Node3D
         // rather than sorting against it by the coin toss two coplanar quads get.
         _nudge = Stage3D.Clear(squash, rise);
         Stand();
+        // The surface last, because it writes to the materials the two lines
+        // above have only just made - and because a pool rebuilt under a bench
+        // that had set one must not quietly come back as armour.
+        Wear();
     }
 
     /// <summary>How big this one is, as a multiple of the tuned burst -
@@ -330,6 +345,67 @@ public sealed partial class ProcSlam : Node3D
     /// <see cref="Sit"/> was told - for the check, which cannot read a node's depth
     /// off a picture.</summary>
     public bool Behind => _side < 0.0f;
+
+    /// <summary>
+    /// What the round burst against: armour, or masonry.
+    ///
+    /// <b>A number written to both materials rather than a second effect</b>, for
+    /// the reason in the class note: the two pictures are the same six families
+    /// with four differences, and each of the four is a <c>mix</c> the shader
+    /// takes against this. Settable at any time and applied at once, so
+    /// <see cref="Stage3D.Slam"/> can name the surface at the moment a round
+    /// arrives - which is the only moment anybody knows it.
+    ///
+    /// Armour is the default because it is what the effect was tuned on, and
+    /// because a burst whose surface nobody set should draw the picture that was
+    /// judged by eye rather than the one derived from it.
+    /// </summary>
+    public Surface Face
+    {
+        get => _face;
+        set
+        {
+            _face = value;
+            Wear();
+        }
+    }
+
+    /// <summary>
+    /// The three: a burst on steel, a burst on brick, and a round that went
+    /// <em>through</em> brick.
+    ///
+    /// <b>The third is here because leaving it out drew the wrong event</b>, and
+    /// it was visible in one frame: an armour-piercing round punching a wall came
+    /// out as the same lime burst with the same orange flare, and what an AP round
+    /// does to masonry is make a hole and a cloud of dust. It has no filling, so
+    /// it has no fire at all, and it puts less of the wall in the air because it
+    /// spends its energy going through rather than pushing outward.
+    ///
+    /// <b>It is not <c>pierce</c> from docs/blast.md's list, and it must not be
+    /// read as it.</b> That one is a hole with light coming out of it and a wisp
+    /// afterwards, and none of that is drawn here - this is the masonry burst with
+    /// the filling taken out, which is a stand-in and is named as one. Item 2 of
+    /// that list is still unwritten.
+    /// </summary>
+    public enum Surface { Armour, Masonry, Pierced }
+
+    private Surface _face = Surface.Armour;
+
+    /// <summary>The surface written to both halves - the two numbers C# owns of
+    /// the three sets, and the reason none of the three is duplicated here. Two
+    /// rather than one because the second says which <em>kind</em> of masonry
+    /// event it is, and the pair is what lets three pictures be one text.
+    /// </summary>
+    private void Wear()
+    {
+        float brick = _face is Surface.Masonry or Surface.Pierced ? 1.0f : 0.0f;
+        float through = _face == Surface.Pierced ? 1.0f : 0.0f;
+        foreach (ShaderMaterial? ink in new[] { _dustInk, _fireInk })
+        {
+            ink?.SetShaderParameter("masonry", brick);
+            ink?.SetShaderParameter("pierce", through);
+        }
+    }
 
     /// <summary>
     /// Which way the plate faces, and where on the tank the round burst.
@@ -642,6 +718,46 @@ uniform float wash_ink = 0.42;
 uniform vec3 soot_dark = vec3(0.352, 0.338, 0.325);
 uniform vec3 soot_lit = vec3(0.818, 0.806, 0.788);
 
+// <b>What surface this burst is on: 0 armour, 1 masonry - see ProcSlam.Face.</b>
+// Every masonry term below is a mix against this, so at zero the arithmetic is
+// what it was before the second surface existed and the picture judged by eye is
+// the picture that comes out.
+uniform float masonry = 0.0;
+
+// <b>Lime, and much paler than soot.</b> What comes off a plate is the soot of a
+// filling that has just burnt; what comes off a wall is the wall - mortar dust and
+// crushed brick, which is nearly white and only faintly warm. It is the pale end
+// of the four pairs on this board where the soot is the dark end, and the two
+// stand furthest apart of any two dusts here on purpose: a burst on brick and a
+// burst on steel are told apart at a glance by colour before anything else.
+uniform vec3 lime_dark = vec3(0.512, 0.494, 0.455);
+uniform vec3 lime_lit = vec3(0.902, 0.884, 0.836);
+
+// <b>How much of the mass's travel goes ALONG the face rather than out of it.</b>
+// A wall is a plane and it channels what bursts against it - the dust runs off
+// both ways down the courses instead of standing out from the impact in a
+// hemisphere, and that is the one thing in this picture that is about the shape of
+// the surface rather than about what it is made of. Armour has no such shape to
+// give: a hull is a box of facets the size of the burst itself.
+uniform float along_face = 0.55;
+
+// And how opaque it is against the soot's own helping. <b>Under one, and the
+// first pass had it at 1.30 on the argument that a wall is made of the stuff that
+// ends up in the air - which is true of how much dust there is and wrong about
+// what to spend it on.</b> 1.30 over dust_ink 0.70 is 0.91, and a mass that
+// saturates reads as a hole cut in the board: the courtyard went white and the
+// near wall with it. The extra dust a wall gives is spent on the spread instead -
+// see along_face, which is where the difference belongs anyway, because it is the
+// wall's shape that makes a burst on brick look unlike one on steel.
+uniform float stone_dust = 0.92;
+
+// <b>And whether the round went through rather than bursting: 0 or 1, and only
+// meaningful with masonry set - see ProcSlam.Surface.Pierced.</b> A round that
+// pierces puts less of the wall in the air, because it spends itself going through
+// instead of pushing outward.
+uniform float pierce = 0.0;
+uniform float bore_dust = 0.62;
+
 void fragment() {
     if (level <= 0.0) {
         ALBEDO = vec3(0.0);
@@ -657,6 +773,9 @@ void fragment() {
             vec2 lean = vec2(0.0);
             float years = 0.0;
 
+            // How far the mass leans off the normal and onto the face, and it
+            // is nought on armour - see along_face.
+            float lane_at = along_face * masonry;
             for (int k = 0; k < cloud; k++) {
                 float fk = float(k);
                 float born = cloud_stagger * ember_hash(vec2(fk, 71.0));
@@ -670,7 +789,14 @@ void fragment() {
                                * (1.45 * ember_hash(vec2(fk, 74.0)) - 0.45)
                                + cloud_climb * run * pow(a, 0.85)
                                  * (0.30 + 0.95 * ember_hash(vec2(fk, 75.0)));
-                    vec2 p = plate + away * out_at + side_dir * wide
+                    // The lane this one takes: out of the surface on armour, and
+                    // on masonry leaning down the courses one way or the other.
+                    // Its own side per element rather than one side for the
+                    // family, because a wall channels dust both ways.
+                    float hand = ember_hash(vec2(fk, 77.0)) < 0.5 ? -1.0 : 1.0;
+                    vec2 lane = normalize(mix(away, side_dir * hand, lane_at)
+                                          + vec2(1e-5, 1e-5));
+                    vec2 p = plate + lane * out_at + side_dir * wide
                              + vec2(0.0, up);
                     float r = cloud_size * (0.60 + 0.90 * ember_hash(vec2(fk, 76.0)))
                               * (0.62 + 0.65 * a);
@@ -736,9 +862,11 @@ void fragment() {
             } else {
                 float mass = dust_mass(at, dens);
                 float lit = dust_lit(mass, lean);
-                ALBEDO = mix(soot_dark, soot_lit, lit);
-                ALPHA = clamp(mass * dust_ink * level * blast_footing(at),
-                              0.0, 1.0);
+                ALBEDO = mix(mix(soot_dark, soot_lit, lit),
+                             mix(lime_dark, lime_lit, lit), masonry);
+                ALPHA = clamp(mass * dust_ink * mix(1.0, stone_dust, masonry)
+                              * mix(1.0, bore_dust, pierce)
+                              * level * blast_footing(at), 0.0, 1.0);
             }
         }
     }
@@ -847,6 +975,32 @@ uniform float spray_gain = 0.70;
 uniform vec3 spray_hot = vec3(1.000, 0.900, 0.680);
 uniform float spray_cool = 0.70;
 
+// <b>What surface this burst is on: 0 armour, 1 masonry - ProcSlam.Face, and the
+// dust half declares the same number for the same reason.</b>
+uniform float masonry = 0.0;
+
+// <b>How much of the fire a burst on brick keeps.</b> A third, and the argument is
+// the fuel: against armour the round's filling burns and the plate's paint and
+// primer burn with it, while a wall is lime and fired clay and contributes nothing
+// at all. So on masonry this is a flash and not a fireball, and what the picture is
+// instead is the dust - see stone_dust.
+uniform float stone_fire = 0.32;
+
+// <b>And no fragments whatever, which is the one place a number is zero because
+// something else already draws the thing.</b> WallRig.Burst pushes real brick
+// bodies out of the courses; a drawn shard beside a simulated one is two accounts
+// of the same debris, and the simulated one is the account that knocks the wall
+// down. Kept as a gain rather than a count because a count cannot be a uniform
+// this loop reads - the loop still runs and draws nothing, which is cheap and is
+// named here rather than discovered.
+uniform float stone_spray = 0.0;
+
+// <b>Whether the round went through rather than bursting - the dust half declares
+// the same number, see ProcSlam.Surface.Pierced.</b> There is no fire in this case
+// at all, and that is not a small number but a nought: an armour-piercing round
+// has no filling, so the only light a wall gives it is none.
+uniform float pierce = 0.0;
+
 void fragment() {
     if (level <= 0.0) {
         ALBEDO = vec3(0.0);
@@ -860,10 +1014,13 @@ void fragment() {
             // the way surfaces stack, and the layer as a whole adds light.
             vec4 lit = vec4(0.0);
 
+            // How much fire this surface has in it at all - see stone_fire, and
+            // pierce, which takes the rest of it.
+            float fuel = mix(1.0, stone_fire, masonry) * (1.0 - pierce);
             float ca = time / max(core_life, 1e-4);
             if (ca < 1.0) {
                 float r = core_size * (0.45 + 0.80 * sqrt(ca));
-                float gain = core_gain * pow(max(1.0 - ca, 0.0), 1.30);
+                float gain = core_gain * fuel * pow(max(1.0 - ca, 0.0), 1.30);
                 lit = flame_over(lit,
                                  flame_blob(at, plate + away * (core_size * core_lead),
                                             r, r * 0.85, away, 2.0, 0.0, gain));
@@ -897,7 +1054,8 @@ void fragment() {
                                                 // disc.
                                                 clamp(a + 0.40 * ember_hash(vec2(fk, 106.0)),
                                                       0.0, 1.0),
-                                                ball_gain * flame_life(a, 0.80)));
+                                                ball_gain * fuel
+                                                * flame_life(a, 0.80)));
                 }
             }
 
@@ -928,7 +1086,8 @@ void fragment() {
                     float draw = mix(spray_long
                                      * (0.45 + 1.15 * ember_hash(vec2(fk, 116.0))),
                                      1.0, clamp(a * 1.45, 0.0, 1.0));
-                    float gain = spray_gain * (1.0 - exp(-a / 0.025))
+                    float gain = spray_gain * mix(1.0, stone_spray, masonry)
+                                 * (1.0 - exp(-a / 0.025))
                                  * pow(max(1.0 - a, 0.0), 1.35);
                     vec3 body = mix(spray_hot, ember_colour,
                                     smoothstep(0.0, max(spray_cool, 1e-3), a));

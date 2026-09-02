@@ -6375,7 +6375,88 @@ public static class SelfTest
                 "a shell that went off against a hull did not touch the ground it "
                 + "is standing over - the crater under a tank is what ammo_rack "
                 + "will be, and that is a different event");
+
+            // <b>And the same pool draws masonry, which is where the two surfaces
+            // are told apart behaviourally rather than by reading the text.</b>
+            // What has to be true is that naming a surface reaches the materials
+            // at all - a property that silently failed to write would leave a
+            // brick burst drawing steel, and no number anywhere would say so.
+            stage.Slam(stage.Origin, 0.0f, Vector2.Right, Vector2.Zero, false,
+                       1.0f, ProcSlam.Surface.Pierced);
+            bool named = stage.Slamming.Any(x => x.Alive
+                                                 && x.Face == ProcSlam.Surface.Pierced);
+            foreach (ProcSlam x in stage.Slamming)
+                x.Douse();
+            Check("and the surface a round burst against reaches the burst",
+                named,
+                "armour, brick, or a round that went through brick - three "
+                + "pictures out of one text, and the only thing C# owns of the "
+                + "three sets is which one this is");
         }
+        // <b>Three surfaces, one text, and this is the claim that keeps it one
+        // text.</b> Every masonry term is a mix against a uniform that opens at
+        // nought, so an armour burst is the arithmetic it was before brick
+        // existed - which matters because the armour numbers are the ones that
+        // were judged by eye, and a second surface must not have quietly
+        // retuned them.
+        Check("brick and steel are one shader with the switch at nought",
+            ProcBlast.Uniform(ProcSlam.DustSlamCode, "masonry") == 0.0f
+            && ProcBlast.Uniform(ProcSlam.FireCode, "masonry") == 0.0f
+            && ProcBlast.Uniform(ProcSlam.DustSlamCode, "pierce") == 0.0f
+            && ProcBlast.Uniform(ProcSlam.FireCode, "pierce") == 0.0f
+            && ProcSlam.DustSlamCode.Contains("mix(1.0, stone_dust, masonry)")
+            && ProcSlam.DustSlamCode.Contains("along_face * masonry")
+            && ProcSlam.FireCode.Contains("mix(1.0, stone_fire, masonry)"),
+            "the armour numbers are the ones judged by eye, and a second surface "
+            + "that shifted them by a fraction would be a retune wearing a "
+            + "feature's clothes");
+        // The colours, and the pair is the point rather than either swatch: the
+        // dark stop is what a cloud's brightness is - see the soot check above -
+        // so this is the comparison the picture actually makes, HE on steel beside
+        // HE on brick.
+        //
+        // <b>Claimed of the two surfaces of this effect and not of all four dusts
+        // on the board, which is where the first version of this check was simply
+        // wrong.</b> It asserted lime paler than the ricochet's coat as well; lime
+        // is 0.512 and the coat is 0.545, so they are a near tie and the assertion
+        // failed. Nothing needed retuning - crushed mortar and steel primer with
+        // road dirt in it are genuinely about as pale as each other, and there is
+        // no frame anywhere in which those two stand side by side. What has to
+        // hold is the pair a picture can put together.
+        Check("and lime is much the paler of this effect's two dusts",
+            ProcBlast.Colour(ProcSlam.DustSlamCode, "lime_dark").R
+            > ProcBlast.Colour(ProcSlam.DustSlamCode, "soot_dark").R + 0.10f,
+            $"lime {ProcBlast.Colour(ProcSlam.DustSlamCode, "lime_dark").R:F3} "
+            + $"against soot {ProcBlast.Colour(ProcSlam.DustSlamCode, "soot_dark").R:F3}"
+            + " - what comes off a wall is the wall, and what comes off a plate is "
+            + "the soot of a filling; the two are told apart by colour before "
+            + "anything else");
+        // <b>The two things about masonry that are not tuning.</b> The fragments
+        // are at nought because something else draws them, and a pierced wall has
+        // no fire because the round had no filling - a nought rather than a small
+        // number, which is the difference between "less of it" and "none".
+        Check("a burst on brick draws no fragments, because the rig throws real"
+              + " ones",
+            ProcBlast.Uniform(ProcSlam.FireCode, "stone_spray") == 0.0f
+            && ProcSlam.FireCode.Contains("mix(1.0, stone_spray, masonry)"),
+            "WallRig.Burst pushes brick bodies out of the courses; a drawn shard "
+            + "beside a simulated one is two accounts of one debris, and the "
+            + "simulated one is what knocks the wall down");
+        Check("and a round that went through has no fire at all",
+            ProcSlam.FireCode.Contains("* (1.0 - pierce)")
+            && ProcBlast.Uniform(ProcSlam.DustSlamCode, "bore_dust") < 1.0f,
+            "an armour-piercing round has no filling, so the light a wall gives "
+            + "it is none - drawn the one way for both, AP came out as a lime "
+            + "fireball, which is the one thing it is not");
+        // And the geometry the third surface must NOT change: along_face turns the
+        // travel, it does not lengthen it, so the quad measured for armour holds
+        // for brick without Bounds having to know a surface exists.
+        Check("and leaning the mass along a wall turns its travel rather than"
+              + " lengthening it",
+            ProcSlam.DustSlamCode.Contains("normalize(mix(away, side_dir * hand,"),
+            "a mix of two unit directions renormalised is a direction, so the "
+            + "quad Bounds measured for a hull is the quad a wall needs - which "
+            + "is why Bounds takes a reach and a plate and no surface");
 
         Theme("the engine plume built rather than read");
         // The plume is ProcSmoke's second configuration, so almost everything
