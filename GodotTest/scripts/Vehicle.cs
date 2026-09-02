@@ -467,6 +467,82 @@ public sealed class Vehicle
          Atlas.GroundDirection(heading));
 
     /// <summary>
+    /// Where a round struck this hull, and which way it went after failing to get
+    /// in: the point of impact in the sprite's own frame, and the reflection of
+    /// the shot about the plate's outward normal.
+    ///
+    /// <b>One measurement with two projections, and <see cref="Bore"/>'s
+    /// argument entire.</b> The caller wants the point in board space
+    /// (<see cref="Spot"/>) and its height off the ground
+    /// (<see cref="LiftOf"/>), and both roots would otherwise assemble the same
+    /// four terms out of four atlas calls apiece - four copies of a measurement
+    /// that agree until somebody changes how a plate is measured. What is
+    /// genuinely the caller's is the transform; this is not.
+    ///
+    /// <b>The mirror is two bearings and one subtraction, and both bearings are
+    /// already here.</b> <see cref="AtlasSet.HitBearing"/> is where the plate
+    /// looks as an offset from the hull's heading - the number
+    /// <see cref="AtlasSet.FaceFor"/> picked the plate with -
+    /// and <paramref name="from"/> is where the shooter stands, in the same
+    /// bearing space, because that is what <c>FaceFor</c> compared it against.
+    /// Reflecting a direction of travel about the plate's tangent gives
+    /// <c>2 * outward - from</c>; a round arriving square on
+    /// (<c>from == outward</c>) goes straight back at the shooter, which is the
+    /// one case worth checking by hand and the one the check checks.
+    ///
+    /// <b>Specular, and knowingly.</b> A real ricochet leaves nearer the plate's
+    /// tangent than a mirror does, because the round digs in and slides before it
+    /// departs. That bias is well inside the fan's own half-angle - see
+    /// <see cref="ProcSpall"/> - so stating it here would be a second statement
+    /// of a spread the effect already has.
+    ///
+    /// <c>Away</c> is unnormalised for <see cref="Bore"/>'s reason: it is
+    /// <see cref="AtlasSet.GroundDirection"/>, whose length is the share of a
+    /// ground length that survived the projection.
+    /// </summary>
+    public (Vector2 Plate, Vector2 Away) Graze(string face, float scatter,
+                                               float rise, double from)
+    {
+        double outward = Sprite.HullFacing + Atlas.HitBearing(face);
+        return (Plated(face, scatter, rise),
+                Atlas.GroundDirection(Angles.Mod(2.0 * outward - from, 360.0)));
+    }
+
+    /// <summary>
+    /// Where a shell struck a plate, in the sprite's own frame: the plate's
+    /// centroid plus that shell's own offset on the plate's own two axes.
+    ///
+    /// <b>Its own method because it is read from two places at two rates.</b> The
+    /// rendered hit layer wants it every frame the dust is settling - the hull can
+    /// turn while it does, and the mark has to stay on the metal - while
+    /// <see cref="Graze"/> wants it once, at the moment of impact, along with the
+    /// mirror. Written out at both, the four atlas calls would be two copies that
+    /// agree until somebody changes how a plate is measured.
+    ///
+    /// <b>Fractions of the plate's two half-extents, not pixels</b>, which is
+    /// <see cref="TankSprite.MarkOffset"/>'s reason: both screen axes turn with
+    /// the hull, so a fraction of each stays on the armour at all twenty-four
+    /// headings where a pixel offset is right at one of them.
+    /// <paramref name="scatter"/> and <paramref name="rise"/> are the very pair
+    /// the mark and the burst already share - one shell, one place it landed.
+    /// </summary>
+    public Vector2 Plated(string face, float scatter, float rise)
+    {
+        double hull = Sprite.HullFacing;
+        return Atlas.HitOffset(face, hull)
+               + Atlas.HitTangent(face, hull) * scatter
+               + Atlas.HitSlope(face, hull) * rise;
+    }
+
+    /// <summary>Whether a hit on <paramref name="face"/> is on a plate turned
+    /// away from the camera, and so belongs behind the tank rather than over it.
+    /// The sign <see cref="AtlasSet.HitFacing"/> exists for, read in the one place
+    /// so the rendered layer and the built one cannot disagree about which side of
+    /// a hull a hit is on - see <see cref="TankSprite.HitBehind"/>.</summary>
+    public bool Turned(string face) =>
+        Atlas.HitFacing(face, Sprite.HullFacing) <= 0.0;
+
+    /// <summary>
     /// The rounds this gun has in the air, and the smoke they are still laying.
     ///
     /// <b>On the tank because a round belongs to the gun that fired it</b>, not

@@ -220,6 +220,11 @@ public sealed partial class Main : SceneRoot
 		// same division as the fourth - see TankTick.Kicked - and answered here for
 		// the same reason: the cloud is a quad in the 3D world.
 		_tick.Kicked = Kicked;
+		// And the sixth: what the board makes of a round that bounced off
+		// armour. Same division again - see TankTick.Bounced - and the fan is
+		// a quad in the 3D world, so the flat board answers nothing and a
+		// bounce there draws what it always did.
+		_tick.Bounced = Bounced;
 	}
 
 	/// <summary>
@@ -278,6 +283,34 @@ public sealed partial class Main : SceneRoot
 					// field. Same reason Vehicle.Bore exists at all.
 					v.Spot(v.Bore(v.Sprite.TurretFacing).Tube) - v.GroundPoint,
 					Ordnance.At(_tick.Calibre));
+
+	/// <summary>
+	/// A round that struck armour and did not get in: throw the spall off the
+	/// plate it bounced from.
+	///
+	/// <b>Seated on the victim's contact point, not on the point of impact</b> -
+	/// <see cref="Kicked"/>'s line word for word, and for the same reason: the
+	/// quad's bottom edge is the ground, and the impact is up on a plate. Where
+	/// on the tank it happened arrives as an offset, measured once in
+	/// <see cref="Vehicle.Graze"/> and projected here through the two definitions
+	/// that already exist.
+	///
+	/// <b>At the calibre the gun is loaded with</b>, for <see cref="Splashed"/>'s
+	/// reason - though this is the one of the three where the size means the least,
+	/// a ricochet being about what the armour did rather than about how much shell
+	/// arrived.
+	///
+	/// Only on the stage, for <see cref="Splashed"/>'s reason word for word.
+	/// </summary>
+	private void Bounced(Vehicle v, Vector2 plate, Vector2 away, bool behind) =>
+		_stage?.Spall(v.GroundPoint, v.LiftOf(v.GroundPoint), away,
+					  // Two board-space points subtracted, each through its own
+					  // one definition - Kicked's note, and the same trap under
+					  // it: on the staged board every sprite lives in a render
+					  // target of its own, so ToGlobal would answer in a
+					  // different space per tank.
+					  v.Spot(plate) - v.GroundPoint, behind,
+					  Ordnance.At(_tick.Calibre));
 
 	/// <summary>Whether the board grows trees at all, and whether one may stand
 	/// where it would cross a tank on its own cell. Parked here for --terrain's
@@ -1557,6 +1590,12 @@ public sealed partial class Main : SceneRoot
 					StringComparison.OrdinalIgnoreCase)
 					? BlastSource.Built
 					: BlastSource.Sheet;
+			// Whether a bounce draws the built ricochet or the rendered burst it
+			// used to - see TankTick.Bounce. Out of FlagRows for --burst's
+			// reason: no panel row to be overruled by.
+			else if (userArgs[i] == "--spall" && i + 1 < userArgs.Length)
+				_tick.Bounce = !userArgs[++i].Equals("off",
+					StringComparison.OrdinalIgnoreCase);
 			else if (userArgs[i] == "--flash" && i + 1 < userArgs.Length)
 				_flashSource = userArgs[i + 1].Equals("sheet",
 					StringComparison.OrdinalIgnoreCase)

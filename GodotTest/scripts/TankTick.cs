@@ -316,6 +316,47 @@ public sealed class TankTick
     /// </summary>
     public Action<Vehicle, Vector2>? Kicked;
 
+    /// <summary>
+    /// A round that struck armour and did not get through - <see cref="ProcSpall"/>.
+    ///
+    /// <b>Fired instead of the rendered burst rather than beside it</b>, which is
+    /// the whole reason it exists: see <see cref="Land"/>. A ricochet and a
+    /// penetration were one picture, and everything else on this bench already
+    /// told them apart.
+    ///
+    /// Handed the measurement rather than the plate it happened on, on
+    /// <see cref="Kicked"/>'s model: the point of impact in the victim's own
+    /// frame, the reflected direction unnormalised, and which side of the hull it
+    /// is on. All three come out of <see cref="Vehicle.Graze"/> and
+    /// <see cref="Vehicle.Turned"/> in one place, so the two roots that answer
+    /// this are one line each and neither of them re-measures a plate.
+    ///
+    /// Answered by whichever root draws a board that can hold the quad, and
+    /// unanswered on the flat one for <see cref="Landed"/>'s reason. Unanswered,
+    /// a bounce draws nothing at all - which is deliberate rather than a
+    /// fallback: the alternative is a hook whose absence quietly restores the
+    /// picture it was written to replace, and then <c>--spall off</c> and "no
+    /// board for it" become the same state with two causes.
+    /// </summary>
+    public Action<Vehicle, Vector2, Vector2, bool>? Bounced;
+
+    /// <summary>
+    /// Whether a round that fails to penetrate draws the ricochet at all.
+    ///
+    /// <b>The A/B, and the only one this layer can have.</b> The built ricochet
+    /// stands on the board and the rendered burst stands in the tank's canvas, so
+    /// unlike the muzzle flash's three sources they cannot be swapped in one
+    /// frame and looked at side by side; off, a bounce draws the rendered pair it
+    /// always did. <c>--spall off</c> on both roots, and no panel row - see
+    /// <c>Stage3D.Blast</c> on why a flag with nothing to overrule stays out of
+    /// <c>FlagRows</c>.
+    ///
+    /// Here rather than on a root, for the reason <see cref="Calibre"/> and
+    /// <see cref="HitSide"/> are here: a dial written in two places agrees until
+    /// the first edit lands in one of them, and this one already has two readers.
+    /// </summary>
+    public bool Bounce = true;
+
     // --- the frame -----------------------------------------------------------
 
     /// <summary>
@@ -1600,6 +1641,9 @@ public sealed class TankTick
             // travels with the shell, because the alternative is a round that
             // changes calibre in flight because somebody turned a dial.
             Face = shot.Face,
+            // Which way it came from, for the plate it will hit to mirror it
+            // about - see Shell.Bearing.
+            Bearing = fromBearing,
             Scatter = shot.Scatter,
             Rise = shot.Rise,
             Calibre = Ordnance.At(Calibre),
@@ -1740,7 +1784,7 @@ public sealed class TankTick
             return;
         }
         Land(round.Target, round.Face, round.Scatter, round.Rise, round.Calibre,
-             round.Level, 1);
+             round.Level, 1, round.Bearing);
     }
 
     /// <summary>Take every round off the board - the reset, and it runs before
@@ -1945,7 +1989,7 @@ public sealed class TankTick
         float scatter = ScatterAt(victim.HitCount);
         float rise = RiseAt(victim.HitCount);
         string face = atlas.FaceFor(from, sprite.HullFacing);
-        Land(victim, face, scatter, rise, calibre, level, bite);
+        Land(victim, face, scatter, rise, calibre, level, bite, from);
     }
 
     /// <summary>A round arriving, with everything about it already settled.
@@ -1955,20 +1999,49 @@ public sealed class TankTick
     /// worked it out at the trigger and carried it. Both end here, so there is
     /// one place where a tank takes a hit however the hit was arranged.</summary>
     public void Land(Vehicle victim, string face, float scatter, float rise,
-                      float calibre, int? level, int bite)
+                      float calibre, int? level, int bite, double from)
     {
         TankSprite sprite = victim.Sprite;
-        // The calibre goes the same way as the scatter and for the same reason:
-        // both are settled the moment the round leaves, so both travel with it
-        // rather than being looked up again while it is on screen.
-        victim.Hit.Strike(face, scatter, rise, calibre);
         // How deep it goes is the calibre's business - see TankSprite.Damage.
         // A light round still walks a plate scorch -> gouge -> breach over three
         // hits, which is what shows that the phase axis is damage and not three
         // renders of one drawing; a heavy one gets there in one.
+        //
+        // <b>Asked before anything is drawn, which it was not.</b> The rendered
+        // burst used to be started first and the depth worked out after, because
+        // nothing drawn depended on the depth; a round that bounces now draws
+        // something else entirely, so the one question whose answer decides which
+        // picture this is has to be asked first. Nothing else moved: the mark and
+        // the loop touch different state.
         int got = level is int cap
             ? sprite.DamageTo(face, scatter, rise, cap)
             : sprite.Damage(face, scatter, rise, bite);
+        // <b>A round that did not get in draws the ricochet instead of the
+        // rendered burst, not as well as it.</b> Two impacts drawn for one shell
+        // is the double model this project spends its docstrings refusing, and
+        // the two would not even agree: the rendered pair is a puff of earth-tan
+        // dust with a warm core, which is a shell going in. The whole point of
+        // this layer is that it looks like a shell not going in.
+        //
+        // The threshold is not a new one. Zero is exactly "the gun did not
+        // out-class the armour" - Gunnery.Penetration's own answer, already what
+        // the impact sound switches on and already what the kill tally counts -
+        // so the picture, the ear and the tally agree by construction rather than
+        // by three comparisons kept in step.
+        //
+        // The calibre goes the same way as the scatter and for the same reason:
+        // both are settled the moment the round leaves, so both travel with it
+        // rather than being looked up again while it is on screen.
+        bool bounced = got <= 0 && Bounce;
+        if (bounced)
+        {
+            (Vector2 plate, Vector2 away) = victim.Graze(face, scatter, rise, from);
+            Bounced?.Invoke(victim, plate, away, victim.Turned(face));
+        }
+        else
+        {
+            victim.Hit.Strike(face, scatter, rise, calibre);
+        }
         // The sound is chosen by the same level the mark is, so a round that
         // bounces is heard bouncing and one that goes through is heard going
         // through. Not the calibre directly: a light round on armour already
@@ -2073,7 +2146,6 @@ public sealed class TankTick
 
     private void UpdateHit(Vehicle v, double delta)
     {
-        AtlasSet atlas = v.Atlas;
         TankSprite sprite = v.Sprite;
         HitLoop hit = v.Hit;
         int phase = hit.Phase;
@@ -2082,12 +2154,8 @@ public sealed class TankTick
             // Read every frame, not once at the strike: the hull can turn while
             // the dust is still settling, and the hit has to stay on the plate
             // it landed on rather than sliding round with the heading.
-            sprite.HitOffset = atlas.HitOffset(hit.Face, sprite.HullFacing)
-                               + atlas.HitTangent(hit.Face, sprite.HullFacing)
-                                 * hit.Scatter
-                               + atlas.HitSlope(hit.Face, sprite.HullFacing)
-                                 * hit.Rise;
-            sprite.HitBehind = atlas.HitFacing(hit.Face, sprite.HullFacing) <= 0.0;
+            sprite.HitOffset = v.Plated(hit.Face, hit.Scatter, hit.Rise);
+            sprite.HitBehind = v.Turned(hit.Face);
             // The shell's calibre, not the dial's. Pushed from here alongside
             // the other two things the layer needs and cannot work out for
             // itself, so what is drawn is what was fired.

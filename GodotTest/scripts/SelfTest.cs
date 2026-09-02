@@ -5742,6 +5742,247 @@ public static class SelfTest
             "the quad's footing is the one thing standing between the cloud and "
             + "the ground it is seated on");
 
+        Theme("the spall a plate throws when a round bounces off it");
+        // ProcSpall. Most of this is the burst's and the kick's own assertions
+        // asked of the third effect built out of the same dust - which is the
+        // point of there being one dust - plus the two things that are this
+        // effect's own: the mirror, and the fork that makes a ricochet a
+        // different picture from a penetration.
+        var spall = new ProcSpall();
+        Check("the ricochet is made of the burst's dust rather than a third dust",
+            ProcSpall.DustSpallCode.Contains(ProcBlast.DustInk)
+            && ProcSpall.DustSpallCode.Contains(Stage3D.FlameInk)
+            && ProcSpall.GlowCode.Contains(Stage3D.FlameInk),
+            "the profile, the tearing, the packing and the light on a cloud of "
+            + "dust are one text, or eleven tuned numbers exist three times");
+        Check("and it does not redefine what the shared text defines",
+            !ProcSpall.DustSpallCode.Replace(ProcBlast.DustInk, "")
+                      .Contains("void dust_part(")
+            && !ProcSpall.DustSpallCode.Replace(ProcBlast.DustInk, "")
+                         .Contains("float dust_mass("),
+            "a second definition beside the shared one is the copy the shared "
+            + "block was extracted to prevent, wearing the extraction as a "
+            + "disguise");
+        // The quad against the model - the burst's rule, the kick's first defect,
+        // and the reason both of them have this check in these words.
+        (float spallOut, float spallUp) = ProcSpall.Bounds(spall.Reach,
+                                                           Vector2.Zero);
+        Check("the quad holds what the model can produce, across",
+            spallOut <= spall.Flank,
+            $"the model reaches {spallOut:F3} of a tile out against a quad "
+            + $"{spall.Flank:F3} wide - anything past the rim is sliced off flat, "
+            + "and a fan missing its fastest sparks reads as a smaller fan");
+        Check("and up",
+            spallUp <= spall.Tall,
+            $"the model climbs {spallUp:F3} of a tile against a quad "
+            + $"{spall.Tall:F3} tall");
+        // <b>And with the impact where a real plate puts it, which on this effect
+        // is the larger of the two terms going up.</b> A plate is on the side of a
+        // hull, so the point of impact stands most of a tank's height above its
+        // own contact point and the fan climbs from there - the kick's snout
+        // finding, worse here because armour is higher up than a muzzle is far
+        // out. Taken over every plate of every loaded tank at all 24 headings and
+        // at the four corners of the scatter, so a fourth tank with a taller hull
+        // fails this rather than clipping quietly.
+        float spallReach = 0.0f;
+        Vector2 spallAt = Vector2.Zero;
+        if (vehicles is not null)
+            foreach (Vehicle v in vehicles)
+            {
+                float tile = Mathf.Max(v.Atlas.HexRect.Size.X, 1);
+                foreach (string face in v.Atlas.HitFaces)
+                    for (int step = 0; step < 24; step++)
+                    {
+                        double heading = step * 360.0 / 24.0;
+                        Vector2 middle = v.Atlas.HitOffset(face, heading);
+                        Vector2 tangent = v.Atlas.HitTangent(face, heading);
+                        Vector2 slope = v.Atlas.HitSlope(face, heading);
+                        for (int corner = 0; corner < 4; corner++)
+                        {
+                            float along = (corner & 1) == 0
+                                ? TankTick.ScatterLimit : -TankTick.ScatterLimit;
+                            float rise = (corner & 2) == 0 ? 0.3f : -0.3f;
+                            Vector2 hit = middle + tangent * along + slope * rise;
+                            Vector2 off = (hit - v.Atlas.GroundOffset)
+                                          * v.Sprite.BodyScale / tile;
+                            var quad = new Vector2(off.X, -off.Y);
+                            if (quad.Length() > spallReach)
+                            {
+                                spallReach = quad.Length();
+                                spallAt = quad;
+                            }
+                        }
+                    }
+            }
+        (float spallFar, float spallHigh) = ProcSpall.Bounds(spall.Reach, spallAt);
+        Check("and it holds them with the impact added, which is where they start",
+            spallFar <= spall.Flank && spallHigh <= spall.Tall,
+            $"{spallFar:F3} out and {spallHigh:F3} up from the furthest impact any "
+            + $"loaded tank can take ({spallAt.X:F3}, {spallAt.Y:F3} of a tile off "
+            + $"its contact point), against a quad {spall.Flank:F3} by "
+            + $"{spall.Tall:F3}");
+        // The mirror, which is what makes this effect worth drawing at all - and
+        // the one cell of it anybody can check by hand is the square one.
+        if (vehicles is null || vehicles.Count == 0)
+        {
+            Note("  no tanks on this board - nothing to bounce a round off");
+        }
+        else
+        {
+            Vehicle mark = vehicles[0];
+            string plate = mark.Atlas.HitFaces[0];
+            double outward = mark.Sprite.HullFacing + mark.Atlas.HitBearing(plate);
+            Vector2 square = mark.Graze(plate, 0.0f, 0.0f, outward).Away;
+            Check("a round arriving square on goes straight back at the shooter",
+                square.DistanceTo(mark.Atlas.GroundDirection(outward)) < 1e-4f,
+                $"{square} against the plate's own outward "
+                + $"{mark.Atlas.GroundDirection(outward)} - the mirror is "
+                + "2*outward - from, and this is the cell of it anybody can check");
+            Vector2 thrown = mark.Graze(plate, 0.0f, 0.0f, outward + 55.0).Away;
+            Check("and a glancing one leaves as far the other side of the normal",
+                thrown.DistanceTo(
+                    mark.Atlas.GroundDirection(outward - 55.0)) < 1e-4f,
+                $"arriving 55 degrees off the normal it left along {thrown} rather "
+                + $"than {mark.Atlas.GroundDirection(outward - 55.0)} - a fan that "
+                + "does not swing with the shot is a fan that says nothing");
+            Check("and the impact point is the plate's own, not a second"
+                  + " measurement of it",
+                mark.Graze(plate, 0.2f, -0.1f, outward).Plate
+                == mark.Plated(plate, 0.2f, -0.1f),
+                "the rendered layer reads the same point every frame the dust is "
+                + "settling, and two copies of four atlas calls agree until "
+                + "somebody changes how a plate is measured");
+            // <b>The fork, behaviourally, because the fork is the claim.</b> What
+            // has to be true is that a round which bounces draws this and not the
+            // rendered pair, and that a round which gets through draws the
+            // rendered pair as it always did. Fired on a live tank and repaired
+            // afterwards, which is what the R key does anyway.
+            var fork = new TankTick();
+            int bounced = 0;
+            fork.Bounced = (_, _, _, _) => bounced++;
+            mark.Hit.Reset();
+            fork.Land(mark, plate, 0.0f, 0.0f, 1.0f, 0, 1, outward);
+            bool bounceOnly = bounced == 1 && !mark.Hit.Live;
+            mark.Hit.Reset();
+            fork.Land(mark, plate, 0.0f, 0.0f, 1.0f, 2, 1, outward);
+            bool holeOnly = bounced == 1 && mark.Hit.Live;
+            fork.Bounce = false;
+            mark.Hit.Reset();
+            fork.Land(mark, plate, 0.0f, 0.0f, 1.0f, 0, 1, outward);
+            bool offRestores = bounced == 1 && mark.Hit.Live;
+            mark.Hit.Reset();
+            mark.Sprite.Repair();
+            Check("a round that bounces draws the ricochet and not the rendered"
+                  + " burst",
+                bounceOnly,
+                $"the hook fired {bounced} time(s) and the rendered hit was "
+                + "started when it should have been left alone - two impacts "
+                + "drawn for one shell is the double model, and the rendered pair "
+                + "is a shell going in");
+            Check("and a round that gets through draws the rendered burst as it"
+                  + " always did",
+                holeOnly,
+                "the fork is Gunnery.Penetration's own zero - the threshold the "
+                + "impact sound and the kill tally already switch on");
+            Check("and --spall off gives the old picture back",
+                offRestores,
+                "the built ricochet stands on the board and the rendered pair in "
+                + "the tank's canvas, so this flag is the only A/B this layer can "
+                + "have");
+        }
+        // The three windows, in order: the flash is out before the fan, the fan
+        // before the dust. Held the same length they are a firework.
+        float bloomOut = ProcBlast.Uniform(ProcSpall.GlowCode, "bloom_life");
+        float fanOut = ProcBlast.Uniform(ProcSpall.GlowCode, "shard_life")
+                       + ProcBlast.Uniform(ProcSpall.GlowCode, "shard_stagger");
+        float coatOut = ProcBlast.Uniform(ProcSpall.DustSpallCode, "puff_life");
+        Check("the flash is out before the fan and the fan before the dust",
+            bloomOut < fanOut * 0.5f && fanOut < coatOut,
+            $"flash {bloomOut:F3}s, fan {fanOut:F3}s, dust {coatOut:F3}s - one "
+            + "thing arriving and its consequences, or three things of one length");
+        Check("and the whole of it is over inside a second",
+            spall.Life < 1.0f && spall.Life < ProcKick.LifeDefault,
+            $"{spall.Life:F2}s against the muzzle dust's "
+            + $"{ProcKick.LifeDefault:F2}s - an event whose dust hangs about is "
+            + "an event that did something, and this one did not");
+        // Aim: both halves of the reflected direction are used, and the vertical
+        // one is clamped - the kick's pair of checks, and the same reason under
+        // them.
+        spall.Aim(new Vector2(0.30f, 0.80f), Vector2.Zero);
+        Check("a ricochet toward the camera keeps its spall above the ground line",
+            spall.Away.Y >= 0.0f,
+            $"away {spall.Away} - below the contact point and behind the ground "
+            + "are one test under this camera, so spall aimed down is spall "
+            + "sliced off flat");
+        spall.Aim(new Vector2(0.20f, -0.10f), Vector2.Zero);
+        float spallInto = spall.Squat;
+        spall.Aim(new Vector2(1.00f, -0.05f), Vector2.Zero);
+        Check("and one into the screen throws its spall across less of the picture",
+            spall.Squat > spallInto,
+            $"{spallInto:F2} into the screen against {spall.Squat:F2} across it");
+        Check("and everything starts at the plate rather than at the seat",
+            ProcSpall.GlowCode.Contains("vec2 p = plate + ")
+            && ProcSpall.DustSpallCode.Contains("vec2 p = plate + "),
+            "the seat is the victim's contact point because that is where the "
+            + "ground is known; a fan placed from there begins inside the tank - "
+            + "the error ProcKick already paid for once");
+        // <b>The one thing the compiler found and no check did.</b> Declared in
+        // the glow alone, the dust half compiled to nothing - unknown identifier -
+        // and a material whose shader failed draws a black rectangle the size of
+        // its quad across the board. What both halves spend belongs in the frame
+        // they share, and this is that claim rather than a spelling test: the
+        // frame has to declare it and neither shader may declare it again.
+        Check("what both halves spend is declared in the frame they share",
+            ProcSpall.SpallFrame.Contains("uniform float squat_floor")
+            && ProcSpall.DustSpallCode.Contains("squat_floor")
+            && ProcSpall.GlowCode.Contains("squat_floor")
+            && !ProcSpall.DustSpallCode.Replace(ProcSpall.SpallFrame, "")
+                         .Contains("uniform float squat_floor")
+            && !ProcSpall.GlowCode.Replace(ProcSpall.SpallFrame, "")
+                         .Contains("uniform float squat_floor"),
+            "a number one half declares and the other uses is a half that does "
+            + "not compile, and a quad whose shader failed is a black rectangle "
+            + "over the board");
+        Check("and nothing of it is drawn below the contact line",
+            ProcSpall.DustSpallCode.Contains("blast_footing(at)")
+            && ProcSpall.GlowCode.Contains("blast_footing(at)"),
+            "the quad's footing is the one thing standing between the fan and the "
+            + "ground it is seated on");
+        // The depth side, which cannot be read off a picture: spall off the far
+        // plate of a hull has to be behind the hull it came from.
+        spall.Sit(Vector2.Zero, 0.0f, 0.5f, 1.0f, behind: true);
+        bool sat = spall.Behind;
+        spall.Sit(Vector2.Zero, 0.0f, 0.5f, 1.0f);
+        Check("a bounce off a plate turned away is put behind the tank",
+            sat && !spall.Behind,
+            "two quads standing on one contact point sort by nothing, so spall "
+            + "thrown off the far side would be drawn over the armour that "
+            + "stopped the round");
+        if (stage is not null)
+        {
+            // Behavioural, for the burst theme's reason: what has to be true is
+            // that Spall puts the fan in its own pool rather than in one of the
+            // other three. Fired on the live stage and put back out afterwards.
+            stage.Spall(stage.Origin, 0.0f, Vector2.Right, Vector2.Zero, false);
+            bool ownPool = stage.Spalling.Any(x => x.Alive)
+                           && !stage.Bursting.Any(x => x.Alive)
+                           && !stage.Booming.Any(x => x.Alive)
+                           && !stage.Kicking.Any(x => x.Alive);
+            foreach (ProcSpall x in stage.Spalling)
+                x.Douse();
+            Check("and it goes in its own pool, six of them, beside the other"
+                  + " three",
+                ownPool && stage.Spalling.Count == Stage3D.Bursts
+                && !ReferenceEquals(stage.Spalling, stage.Kicking),
+                $"{stage.Spalling.Count} of {Stage3D.Bursts} - a shared pool is "
+                + "one shell's spall cutting another shell's burst short");
+            Check("and a ricochet digs nothing",
+                stage.Pits is null or { Any: false },
+                "a round that failed to get through a plate did not dig the "
+                + "ground either - the two bursts dig because a shell arriving in "
+                + "the earth is a hole in it");
+        }
+
         Theme("the engine plume built rather than read");
         // The plume is ProcSmoke's second configuration, so almost everything
         // about the model is already asserted above and what is left is the pair:

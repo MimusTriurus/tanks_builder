@@ -403,6 +403,29 @@ public sealed partial class Shell : Node2D
     /// </summary>
     public required string Face { get; init; }
 
+    /// <summary>
+    /// Where the shooter stood, as a bearing, and the reason it is carried is
+    /// <see cref="Face"/>'s.
+    ///
+    /// <b>It is what the plate was chosen with</b> - see
+    /// <see cref="AtlasSet.FaceFor"/> - and what a ricochet is mirrored about
+    /// once it arrives (<see cref="Vehicle.Graze"/>). Six values and no more: a
+    /// round comes in across a flat side of a hex, so the bearing is one of
+    /// <see cref="HexField.EdgeHeadings"/>.
+    ///
+    /// <b>Not derivable from where the round is.</b> Its own launch point is
+    /// here already, so the travel direction across the screen could be
+    /// subtracted out - but reflecting about a plate needs a <em>bearing</em>,
+    /// and a screen vector is a bearing that has been through the camera's
+    /// squash. Inverting that is a second statement of the projection, which is
+    /// the way two layers come apart.
+    ///
+    /// Not required, and the default is honest: the round that goes into the
+    /// field has no plate and no bearing to mirror about, exactly as it has no
+    /// <see cref="Face"/>.
+    /// </summary>
+    public double Bearing { get; init; }
+
     public required float Scatter { get; init; }
 
     /// <summary>

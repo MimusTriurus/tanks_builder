@@ -541,6 +541,12 @@ public sealed partial class TankBench : SceneRoot
                         ? BlastSource.Built
                         : BlastSource.Sheet;
                     break;
+                // Whether a bounce draws the built ricochet or the rendered burst
+                // it used to - the harness's flag, spelled its way.
+                case "--spall" when i + 1 < args.Length:
+                    _tick.Bounce = !args[++i].Equals("off",
+                        StringComparison.OrdinalIgnoreCase);
+                    break;
                 // sheet, rendered or built. Spelled the harness's way so one
                 // flag means one thing on both boards.
                 case "--flash" when i + 1 < args.Length:
@@ -1302,6 +1308,15 @@ public sealed partial class TankBench : SceneRoot
                      v.Spot(v.Bore(v.Sprite.TurretFacing).Tube) - v.GroundPoint,
                      Ordnance.At(_tick.Calibre));
 
+    /// <summary>The spall a bounced round throws off a plate - the harness's
+    /// <c>Bounced</c>, and deliberately the same lines rather than a bench
+    /// variant of them. This is the board where one tank's hit is looked at
+    /// closely, so it is the one that most needs it.</summary>
+    private void Bounced(Vehicle v, Vector2 plate, Vector2 away, bool behind) =>
+        _stage?.Spall(v.GroundPoint, v.LiftOf(v.GroundPoint), away,
+                      v.Spot(plate) - v.GroundPoint, behind,
+                      Ordnance.At(_tick.Calibre));
+
     private void Struck(Shell round)
     {
         if (round.Blocked is not Vector2I cell)
@@ -1743,6 +1758,9 @@ public sealed partial class TankBench : SceneRoot
         // looked at closely, and a bench missing half the effect would be a
         // bench measuring something else.
         _tick.Kicked = Kicked;
+        // And a round that bounced off armour, for the same reason again - see
+        // TankTick.Bounced.
+        _tick.Bounced = Bounced;
             _tick.Barred = _walls.Count > 0 ? Barring : null;
             _tick.Shoving = _walls.Count > 0 && _shove ? Pressing : null;
             return _tick;

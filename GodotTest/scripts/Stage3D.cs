@@ -380,6 +380,8 @@ public sealed partial class Stage3D : Node3D
             blast.Tick(delta);
         foreach (ProcKick kick in _kicking)
             kick.Tick(delta);
+        foreach (ProcSpall spall in _spalling)
+            spall.Tick(delta);
         Etchings();
         Soot();
         _deepInk?.SetShaderParameter("foam", Mathf.Max(0.0f, Foam));
@@ -5240,6 +5242,73 @@ void fragment() {{
     /// <summary>The kicks as they stand, <see cref="Bursting"/>'s twin and
     /// read-only for its reason.</summary>
     public IReadOnlyList<ProcKick> Kicking => _kicking;
+
+    private readonly List<ProcSpall> _spalling = new();
+    private int _nextSpall;
+
+    /// <summary>What to do to a ricochet before it goes off - <see cref="Dress"/>
+    /// for the burst, fourth time, and the same argument: the pool is built on the
+    /// first bounce, so a bench holding a panel of settings has nothing to write
+    /// them into until then and must not have to wait for one.</summary>
+    public Action<ProcSpall>? Hone;
+
+    /// <summary>
+    /// A round that struck armour and bounced - <see cref="ProcSpall"/>.
+    ///
+    /// <b>A fourth pool rather than a case inside <see cref="Burst"/> or
+    /// <see cref="Kick"/></b>, for the kick's reason: it is a different event on a
+    /// different trigger, it happens to the tank that was <em>hit</em> rather than
+    /// to the one that fired, and it digs nothing - a round that failed to get
+    /// through a plate did not dig anything either. Folded in, the pools would
+    /// have shared a clock and one shell's spall would have cut short another
+    /// shell's burst.
+    ///
+    /// <b><paramref name="spot"/> is board space</b>, with <paramref name="lift"/>
+    /// the ground's height there - <see cref="Burst"/>'s pair, and worth
+    /// repeating because getting it wrong is silent and has been.
+    ///
+    /// <paramref name="away"/> is the reflected direction as
+    /// <see cref="AtlasSet.GroundDirection"/> gives it - unnormalised, so its
+    /// length is the share of a ground length that survived the projection. See
+    /// <see cref="ProcSpall.Aim"/>: both halves of it are used.
+    ///
+    /// <paramref name="plate"/> is the point of impact's offset from
+    /// <paramref name="spot"/> in screen px, and <paramref name="behind"/> whether
+    /// that plate is turned away from the camera. Both handed over rather than
+    /// worked out here for <see cref="Vehicle.Bore"/>'s reason: where a shell hit
+    /// a hull is one measurement, and this would be another projection of it.
+    /// </summary>
+    public void Spall(Vector2 spot, float lift, Vector2 away, Vector2 plate,
+                      bool behind, float might = 1.0f)
+    {
+        if (Field.Atlas is null)
+            return;
+        while (_spalling.Count < Bursts)
+        {
+            var made = new ProcSpall();
+            AddChild(made);
+            made.Build(Field.Atlas.HexRect.Size.X, Squash, RiseFactor);
+            _spalling.Add(made);
+        }
+        ProcSpall spall = _spalling[_nextSpall % Bursts];
+        // Reset before the hook, multiplied after it - see Burst on why the
+        // multiply alone compounds every shot until the fan fills the screen.
+        spall.Might = 1.0f;
+        Hone?.Invoke(spall);
+        _nextSpall = (_nextSpall + 1) % Bursts;
+        spall.Might *= might;
+        spall.Sit(spot, lift, Squash, RiseFactor, behind);
+        // Aimed after it is seated and sized, because Aim writes to the materials
+        // and Sit does not touch them - the kick's order, and for its reason: the
+        // pair has to be complete before Fire or the first frame draws the last
+        // round's plate.
+        spall.Aim(away, plate);
+        spall.Fire();
+    }
+
+    /// <summary>The ricochets as they stand, <see cref="Bursting"/>'s twin and
+    /// read-only for its reason.</summary>
+    public IReadOnlyList<ProcSpall> Spalling => _spalling;
 
     private readonly List<PitArt> _etched = new();
     private int _etchedAt = -1;
