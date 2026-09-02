@@ -1359,14 +1359,29 @@ public sealed partial class TankBench : SceneRoot
     /// this method's own is the geometry, and all three terms of it come off the
     /// wall rather than off the shell.
     ///
-    /// <b>The direction is the wall's own plane, not the reverse of the
-    /// flight.</b> A wall stands on a flat side of its cell and knows which
-    /// (<see cref="WallProp.Bearing"/>), so its face normal is that bearing on the
-    /// ground - exact for a plane, where the reverse flight is only exact head-on.
-    /// The sign is which side the round came from: a flight running against the
-    /// normal came from the front of it, and one running with it hit the back -
-    /// which happens on this board, where the tank stands inside a ring of its
-    /// own.
+    /// <b>Which side of the cell the round crossed, and it is not
+    /// <see cref="WallProp.Bearing"/>.</b> That was the first answer and it was
+    /// wrong in a way one board could not show: <c>Bearing</c> is the
+    /// <em>middle</em> of a run of sides (see <see cref="Masonry.Run"/>), and a
+    /// ring - every side standing - reports 270 by convention because any bearing
+    /// closes the same ring. So the burst was seated on the 270 boundary whichever
+    /// leaf the round hit. On the ring bench 270 is the near wall and it looked
+    /// right; on a map whose wall stands anywhere else it put the burst on bare
+    /// ground across the cell, which is what was reported.
+    ///
+    /// The side is the one the round <em>walked through</em>, so it comes off the
+    /// walk: <see cref="Shell.Ground"/> is one sample short of the blocking cell,
+    /// so the cell it lies in is the cell before - and the heading from the wall's
+    /// cell to that one is the side. When the two are the same cell the shooter is
+    /// standing inside the wall, which this board does on purpose, and then the
+    /// round is <em>leaving</em>: the side is its own flight snapped to one of the
+    /// six, exactly as <c>TankTick.Barred</c> asks it.
+    ///
+    /// <b>The direction is that side's own plane, not the reverse of the
+    /// flight</b> - exact for a plane, where the reverse flight is exact only
+    /// head-on. The sign is which face of it was hit: a flight running with the
+    /// side's outward direction went out through it and struck the inner face, and
+    /// one running against it came from outside.
     ///
     /// <b>The seat is on the wall, and the round's own landing point is not
     /// it.</b> That was the first thing tried, because it is the pair
@@ -1407,13 +1422,14 @@ public sealed partial class TankBench : SceneRoot
         if (_field.Atlas is null || _stage is null)
             return;
         Vector2 flight = round.To - round.From;
-        Vector2 normal = _field.Atlas.GroundDirection(prop.Bearing);
-        // Which side of the plane the round came from. Zero-length is a guard
-        // rather than a case - a round that landed where it started blocked on
-        // nothing - and it keeps the wall's declared front.
+        int edge = Crossed(round, prop, flight);
+        Vector2 normal = _field.Atlas.GroundDirection(edge);
+        // Which face of that side was hit. Zero-length is a guard rather than a
+        // case - a round that landed where it started blocked on nothing - and it
+        // keeps the outward face.
         if (flight.LengthSquared() > 1.0f && flight.Dot(normal) > 0.0f)
             normal = -normal;
-        Vector2I over = HexField.Step(prop.Cell, Mathf.RoundToInt(prop.Bearing));
+        Vector2I over = HexField.Step(prop.Cell, edge);
         Vector2 mid = (_field.FlatAnchor(prop.Cell) + _field.FlatAnchor(over))
                       * 0.5f
                       - new Vector2(0.0f, _field.TopAt(prop.Cell))
@@ -1423,8 +1439,32 @@ public sealed partial class TankBench : SceneRoot
                     _field.LevelAt(prop.Cell) * _field.Lift, normal,
                     // Screen y grows downward, so up the wall is negative - the
                     // flip ProcSlam.Aim undoes on the way in.
-                    new Vector2(0.0f, -top * 0.5f), behind: false,
-                    Ordnance.At(_tick.Calibre),
+                    new Vector2(0.0f, -top * 0.5f),
+                    // <b>Which side of the shooter the wall is on, and it is not
+                    // always the near one.</b> ProcSlam's depth side was written
+                    // for a plate on a hull, where two quads stand on one contact
+                    // point and sort by nothing; a wall burst is seated on the
+                    // wall and sorts on its own, so this is only the clearance's
+                    // sign - but the sign was wrong for a leaf standing further
+                    // from the camera than the tank, and it showed as the flash
+                    // being drawn over the barrel pointing at it. Up the screen is
+                    // further away on this board, which is the same test
+                    // everything else here is written under.
+                    behind: (_stage.Origin + mid).Y < Tank.GroundPoint.Y,
+                    // <b>Half again the calibre, because a wall gives a burst
+                    // far more to throw than a plate does.</b> Reported as the
+                    // flash being too small for a shell that demolishes masonry,
+                    // and the size is the honest half of that answer: the charge
+                    // is the charge, but what ends up in the air is the surface,
+                    // and a cell-wide wall of brick is not a facet of armour.
+                    //
+                    // Might rather than a bigger reach inside the shader, and that
+                    // is not a preference: reach is what Bounds measures the quad
+                    // from, so a shader-side multiplier would grow the picture
+                    // past the quad built for it - the one failure the quad check
+                    // exists to catch. Might is a scale on the transform, so the
+                    // quad comes with it.
+                    Ordnance.At(_tick.Calibre) * 1.45f,
                     // <b>And which of the two masonry events it is, off the round
                     // the wall is already being broken by.</b> WallRig has taken
                     // the same distinction since the day it could be shot at -
@@ -1496,6 +1536,27 @@ public sealed partial class TankBench : SceneRoot
                       (float)(round.Calibre * _wallForce), _wallBeam,
                       inside ? 0.0f : float.NegativeInfinity);
         }
+    }
+
+    /// <summary>
+    /// Which of the six sides of a wall's cell a round crossed, as a heading.
+    ///
+    /// Its own method because the answer has two cases and neither is the wall's
+    /// declared bearing - see <see cref="Breached"/>, where the whole of that is
+    /// argued. <paramref name="flight"/> is handed in rather than taken again so
+    /// the side and the face-normal's sign are read off one vector.
+    /// </summary>
+    private int Crossed(Shell round, WallProp prop, Vector2 flight)
+    {
+        Vector2I before = _field.CellAt(round.Ground - _origin);
+        if (before != prop.Cell
+            && HexField.HeadingTo(prop.Cell, before) is int side and >= 0)
+            return side;
+        // Leaving the cell it is standing on - the shooter is inside the wall -
+        // or a walk whose last two cells are not neighbours, which the snap
+        // answers for either way rather than leaving the caller a -1.
+        return HexField.EdgeHeadings[
+            Angles.SideFor(Gunnery.HeadingOf(flight))];
     }
 
     /// <summary>Whether a crossing breaks masonry: only under an order that

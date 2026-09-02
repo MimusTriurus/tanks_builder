@@ -979,12 +979,19 @@ uniform float spray_cool = 0.70;
 // dust half declares the same number for the same reason.</b>
 uniform float masonry = 0.0;
 
-// <b>How much of the fire a burst on brick keeps.</b> A third, and the argument is
-// the fuel: against armour the round's filling burns and the plate's paint and
-// primer burn with it, while a wall is lime and fired clay and contributes nothing
-// at all. So on masonry this is a flash and not a fireball, and what the picture is
-// instead is the dust - see stone_dust.
-uniform float stone_fire = 0.32;
+// <b>How much of the FIREBALL a burst on brick keeps</b>, and the word matters:
+// against armour the round's filling burns and the plate's paint and primer burn
+// with it, while a wall is lime and fired clay and has nothing to add. So the gas
+// that rolls off a wall is less of it than rolls off a hull.
+//
+// <b>What this deliberately no longer touches is the core, and that was a real
+// defect rather than a taste.</b> It scaled both, so a shell that demolishes a
+// wall detonated more dimly than the same shell against a plate - and the
+// detonation is the filling going off, which is the same filling whatever it meets.
+// Reported as the flash being too small for a round that breaks masonry, and
+// correctly: the surface may take the fireball away and it has no business taking
+// the explosion away with it.
+uniform float stone_fire = 0.55;
 
 // <b>And no fragments whatever, which is the one place a number is zero because
 // something else already draws the thing.</b> WallRig.Burst pushes real brick
@@ -1014,13 +1021,17 @@ void fragment() {
             // the way surfaces stack, and the layer as a whole adds light.
             vec4 lit = vec4(0.0);
 
-            // How much fire this surface has in it at all - see stone_fire, and
-            // pierce, which takes the rest of it.
+            // How much of the FIREBALL this surface feeds - see stone_fire. The
+            // core is not in it: that is the shell's own filling and it is the
+            // same shell on any surface.
             float fuel = mix(1.0, stone_fire, masonry) * (1.0 - pierce);
+            // What the round itself brings, which only a round with no filling at
+            // all is without - see pierce.
+            float charge = 1.0 - pierce;
             float ca = time / max(core_life, 1e-4);
             if (ca < 1.0) {
                 float r = core_size * (0.45 + 0.80 * sqrt(ca));
-                float gain = core_gain * fuel * pow(max(1.0 - ca, 0.0), 1.30);
+                float gain = core_gain * charge * pow(max(1.0 - ca, 0.0), 1.30);
                 lit = flame_over(lit,
                                  flame_blob(at, plate + away * (core_size * core_lead),
                                             r, r * 0.85, away, 2.0, 0.0, gain));

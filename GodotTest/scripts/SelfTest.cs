@@ -6448,6 +6448,36 @@ public static class SelfTest
             "an armour-piercing round has no filling, so the light a wall gives "
             + "it is none - drawn the one way for both, AP came out as a lime "
             + "fireball, which is the one thing it is not");
+        // <b>And the property the placement bug rested on, asserted where it can
+        // be seen rather than left as a sentence in a docstring.</b> The masonry
+        // burst was first seated on WallProp.Bearing, which reads as "the side the
+        // wall stands on" and is not that: it is the MIDDLE of a run of sides, and
+        // a ring reports 270 whatever it is made of, because any bearing closes
+        // the same ring. So every leaf of a ring drew its burst on the 270
+        // boundary - which on the ring bench is the near wall and looked right,
+        // and on a map whose wall stands elsewhere put the burst on bare ground
+        // across the cell. Reported from a screenshot, and invisible in every
+        // number the bench prints.
+        Check("a wall's bearing is the middle of its run and cannot say which"
+              + " side was hit",
+            Masonry.Run(Masonry.Ring) is (270, 6)
+            && Masonry.Run(1 << Masonry.Bit(30)) is (30, 1)
+            && Masonry.Run(Masonry.Ring & ~(1 << Masonry.Bit(270))) is not (270, _),
+            "a ring closes the same ring from any bearing, so 270 is a convention "
+            + "there rather than a measurement - the side a round crossed has to "
+            + "come off the walk that crossed it");
+        // Which is what the fix leans on, and it is one round trip: the side
+        // between two neighbouring cells is recoverable from the pair.
+        bool sides = true;
+        foreach (int heading in HexField.EdgeHeadings)
+            foreach (Vector2I cell in new[] { new Vector2I(3, 3), new Vector2I(4, 3) })
+                sides &= HexField.HeadingTo(cell, HexField.Step(cell, heading))
+                         == heading;
+        Check("and the side between two cells is recoverable from the pair",
+            sides,
+            "both parities of the stagger, because the odd column is offset half a "
+            + "cell and a side that only round-trips on one of them is a burst on "
+            + "the wrong leaf every other column");
         // And the geometry the third surface must NOT change: along_face turns the
         // travel, it does not lengthen it, so the quad measured for armour holds
         // for brick without Bounds having to know a surface exists.
