@@ -948,6 +948,15 @@ public sealed partial class BoardMap
     /// that draws it, and left the other three boards here; the self test and
     /// <see cref="Relief3D"/> then reached into the harness for a level array.
     /// They ask this map for one now - see <see cref="LevelsFor"/>.</summary>
+    /// <b>It says soil and it draws as the mix, and that is not a mistake in
+    /// this line.</b> What paints it is panel.json's opening value for the
+    /// terrain row, which overrides a compiled board's own paint - named in Main
+    /// beside the claim that does not cover it. Two rules meet on this board and
+    /// neither may simply give way: the self test refuses a no-kinds board that
+    /// names the mix (its ground would be chosen by a hash), and the whole wood
+    /// suite runs here and has no subject without trees. Whichever way that is
+    /// settled is a decision about the reference board, so it is written down
+    /// rather than taken in passing.
     public static BoardMap Bench => _bench ??= FromLayers(
         "bench", 14, 6, BenchRelief, BenchRamps, BenchWater, BenchHomes,
         TerrainSet.Default, false);

@@ -1087,6 +1087,11 @@ public sealed partial class Main : SceneRoot
 	/// <summary>Which frame to press Edit on, for --capture's sake: the way back
 	/// is a scene change, and a capture run has nobody to click it. Main's half
 	/// of the editor's --menu family, and it exists for the same reason.</summary>
+	/// <summary>Whether the board came through <see cref="Session"/> rather than
+	/// from a flag. Read once, by the paint: what the editor hands over must come
+	/// up as the editor drew it.</summary>
+	private bool _handed;
+
 	private int _editAt = -1;
 
 	/// <summary>Hand the board back to the editor. The name goes through
@@ -1100,107 +1105,61 @@ public sealed partial class Main : SceneRoot
 		GetTree().ChangeSceneToFile("res://Editor.tscn");
 	}
 	/// <summary>
-	/// Which cell each loaded tank parks on.
+	/// Which cell each tank on the board parks on - and which tanks are on the
+	/// board at all.
 	///
-	/// <b>The board's parkings, by the class each one asked for and then in
-	/// order.</b> A parking that names a class takes that tank wherever it is in
-	/// the load order (see <see cref="Parking"/>, where the class is argued as a
-	/// preference rather than a roster); one that names nobody takes whoever is
-	/// left. So a board that says nothing pairs exactly as it always did - the
-	/// bench's three homes still take LTP, MTP, HTP in that order - and a board
-	/// that names one moves that one without disturbing the rest.
+	/// <b>One tank per parking, and the board is what says how many.</b> That is
+	/// the whole rule: a board declaring one parking gets one tank. It replaced
+	/// two wrong answers in a row. First <c>Homes[Math.Min(i, Count - 1)]</c>,
+	/// which put every extra tank on the last parking - three tanks inside each
+	/// other, which on screen is one tank. Then a search for a free cell beside
+	/// it, which stopped them overlapping and still put three tanks on a board
+	/// that had asked for one. A parking is a declaration, and the roster follows
+	/// it.
 	///
-	/// <b>And nobody is parked on top of anybody, which is what this replaced.</b>
-	/// It was <c>Homes[Math.Min(i, Homes.Count - 1)]</c>: on a board declaring one
-	/// parking - the water board does - all three tanks took it and stood inside
-	/// each other, which on screen is one tank. A tank with no parking left now
-	/// stands on the nearest cell it could park on and the line below says so,
-	/// because three tanks on a one-parking board is the board being asked for
-	/// something it did not declare.
+	/// <b>Which tank, by the class each parking asked for and then in order.</b>
+	/// See <see cref="Parking.Pair"/>: a parking that names a class takes that
+	/// tank wherever it is in the load order, one that names nobody takes whoever
+	/// is left. So a board that says nothing pairs exactly as it always did - the
+	/// bench's three parkings still take LTP, MTP, HTP - and a one-parking board
+	/// gets the first tag unless it asks for another.
+	///
+	/// <b><see cref="_loaded"/> is trimmed to the tanks that got one</b>, because
+	/// every reader of it wants the tanks on the board: the driving dropdown, the
+	/// attack list, the number keys. What atlases loaded is said once on the
+	/// printed line and then stops being a thing anything decides by.
 	/// </summary>
 	private Vector2I[] Park()
 	{
-		// Which parking each tank claims is Parking.Pair's - pure, and judged
-		// by the self test without a board. What is left here is the half that
-		// needs the ground: where a tank with no parking of its own stands.
+		// Which parking each tank claims is Parking.Pair's - pure, and judged by
+		// the self test without a board.
 		int[] slots = Parking.Pair(_map.Parked, _loaded);
-		var where = new Vector2I[_loaded.Count];
-		var taken = new HashSet<Vector2I>();
-		var beside = new List<string>();
+		var where = new List<Vector2I>();
+		var driving = new List<string>();
+		var idle = new List<string>();
 		for (int i = 0; i < _loaded.Count; i++)
 			if (slots[i] >= 0)
 			{
-				where[i] = _map.Parked[slots[i]].Cell;
-				taken.Add(where[i]);
+				driving.Add(_loaded[i]);
+				where.Add(_map.Parked[slots[i]].Cell);
 			}
-		for (int i = 0; i < _loaded.Count; i++)
-		{
-			if (slots[i] >= 0)
-				continue;
-			where[i] = Beside(taken);
-			taken.Add(where[i]);
-			beside.Add($"{_loaded[i]} at ({where[i].X},{where[i].Y})");
-		}
+			else
+			{
+				idle.Add(_loaded[i]);
+			}
 
 		GD.Print($"map {_map.Name}: {_map.Parked.Count} parking(s), "
-				 + string.Join(" ", Enumerable.Range(0, _loaded.Count).Select(
-					 i => $"{_loaded[i]}@({where[i].X},{where[i].Y})"))
-				 + (beside.Count > 0
-					 ? " - no parking of their own: " + string.Join(", ", beside)
+				 + string.Join(" ", Enumerable.Range(0, driving.Count).Select(
+					 i => $"{driving[i]}@({where[i].X},{where[i].Y})"))
+				 + (idle.Count > 0
+					 ? " - not on the board, the map declared no parking for "
+					   + string.Join(", ", idle)
 					 : ""));
-		return where;
+		_loaded.Clear();
+		_loaded.AddRange(driving);
+		return where.ToArray();
 	}
 
-	/// <summary>
-	/// The nearest cell to the last parking that a tank could stand on and
-	/// nobody has taken.
-	///
-	/// <b>Two passes, and the second one exists because of a real board.</b> The
-	/// first asks <see cref="MapRules.HomeFaults"/>'s own four questions - on the
-	/// board, not a rock, not water, not a ramp - which is what a <i>declared</i>
-	/// home has to be. On the water board that finds nothing: it is 144 cells of
-	/// which exactly one is dry, and its rosette is six ramps running down into
-	/// the pond. So the second pass takes a cell a tank can merely be on - a ford
-	/// or a slope, both of which a tank drives through - because standing in the
-	/// shallows beside the island is a picture, and three tanks inside each other
-	/// is not.
-	/// </summary>
-	private Vector2I Beside(HashSet<Vector2I> taken)
-	{
-		Vector2I from = _map.Homes.Count > 0
-			? _map.Homes[^1] : new Vector2I(0, 0);
-		foreach (bool strict in new[] { true, false })
-		{
-			var seen = new HashSet<Vector2I> { from };
-			var edge = new List<Vector2I> { from };
-			for (int step = 0; step < 4; step++)
-			{
-				var next = new List<Vector2I>();
-				foreach (Vector2I at in edge)
-				foreach (int heading in HexField.EdgeHeadings)
-				{
-					Vector2I to = HexField.Step(at, heading);
-					if (!seen.Add(to))
-						continue;
-					next.Add(to);
-					if (Parkable(to, strict) && !taken.Contains(to))
-						return to;
-				}
-				edge = next;
-			}
-		}
-		// Nothing within four rings either way: back on the parking, stacked as
-		// before, and the printed line has already named it.
-		return from;
-	}
-
-	private bool Parkable(Vector2I cell, bool strict)
-	{
-		if (!_map.OnBoard(cell) || _map.IsCliff(cell))
-			return false;
-		int at = _map.At(cell);
-		return !strict || (!_map.Water[at] && !_map.Ramps[at]);
-	}
 	private bool Moving => _pathStep < _path.Count;
 
 	public override void _Ready()
@@ -1236,14 +1195,14 @@ public sealed partial class Main : SceneRoot
 			// --selftest=wall. Taken as a value only when it is not another flag,
 			// so a bare --selftest followed by --no-ui still means all of them.
 			if (userArgs[i] == "--selftest"
-			    || userArgs[i].StartsWith("--selftest=", StringComparison.Ordinal))
+				|| userArgs[i].StartsWith("--selftest=", StringComparison.Ordinal))
 			{
 				_selfTest = true;
 				int eq = userArgs[i].IndexOf('=');
 				if (eq > 0)
 					_selfTestOnly = userArgs[i][(eq + 1)..];
 				else if (i + 1 < userArgs.Length
-				         && !userArgs[i + 1].StartsWith("--", StringComparison.Ordinal))
+						 && !userArgs[i + 1].StartsWith("--", StringComparison.Ordinal))
 					_selfTestOnly = userArgs[++i];
 			}
 			else if (userArgs[i] == "--pitch")
@@ -1793,7 +1752,10 @@ public sealed partial class Main : SceneRoot
 		// started the session, and by the time the editor hands a name over it is
 		// stale. See Session.
 		if (Session.Take() is { Length: > 0 } handed)
+		{
 			Map = handed;
+			_handed = true;
+		}
 		try
 		{
 			_map = BoardMap.ByName(Map);
@@ -1809,7 +1771,35 @@ public sealed partial class Main : SceneRoot
 		// the value already sitting there: the default paint is a real plate name
 		// and the default height is off, so a map that needs either has to say so.
 		if (!_paintAsked)
+		{
 			_paint = _map.Paint;
+			// And the terrain row is claimed when the editor handed this
+			// board over, because otherwise panel.json undoes the line above
+			// a few hundred lines later: OpenDefaults sets every row the file
+			// has an opening value for unless a flag claimed it, and the file
+			// says "mixed". So a board drawn in the editor with no woods on it
+			// came up as a forest - the trap BoardMap.Paint was written
+			// against, running the other way: a named plate above the map's
+			// own answer. Measured rather than reasoned about: the grove
+			// planted 252 props on "soil" and then 437 on "mixed" one frame
+			// later, in the same run.
+			//
+			// <b>The handoff only, and the wider defect is named not fixed.</b>
+			// panel.json overrides a COMPILED board's paint the same way, and
+			// claiming the row for every board was tried: the bench board then
+			// draws the soil it declares, six wood checks lose their subject
+			// ("vegetation/tree loaded and never planted"), and naming the mix
+			// on it instead is refused by the check that a no-kinds board must
+			// not - its ground would be chosen by a hash. Two rules meet on
+			// that board and settling them is a decision about the reference
+			// board, not a bug fix. See BoardMap.Bench.
+			//
+			// What the editor hands over is different in kind: its whole
+			// contract is that the game shows what was drawn, so a dial's
+			// opening value may not repaint it.
+			if (_handed)
+				_flagged.Add("ground.terrain");
+		}
 		if (_map.Height)
 		{
 			_relief = true;
