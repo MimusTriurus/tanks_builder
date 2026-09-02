@@ -11532,14 +11532,13 @@ public static class SelfTest
                     && probe.FlatCellAt(from + dir.Normalized() * shutRun) != wall,
                     "the landing point is inside the blocking cell, so asking it "
                     + "which cell it is in would have answered");
-                // And the cell it fires from, which is the one cell a set of
-                // cells cannot speak for: a wall stands on the rim of its own
-                // hex, so a tank inside a ring of it was firing straight through
-                // its own masonry. Both halves, because the default is what every
-                // other board on this project answers and the other is the whole
-                // feature.
+                // And masonry, which no set of cells can speak for: a wall stands
+                // on the rim of a hex rather than in it, so which edge it is on is
+                // the whole question. Asked of every cell of the walk and of a
+                // direction - see TankTick.Barred.
                 (float rimRun, Vector2I? rimAt, bool rimStop) =
-                    TankTick.Track(probe, from, dir, top, none, rim: true);
+                    TankTick.Track(probe, from, dir, top, none,
+                                   (cell, _) => cell == home);
                 Check("a line crosses the cell it fires from when nothing on it "
                       + "bars the way out",
                     !openStop && openAt is null,
@@ -11549,6 +11548,34 @@ public static class SelfTest
                       + "its rim rather than in it",
                     rimStop && rimAt == home && rimRun > 0.0f,
                     $"stopped at {rimAt} after {rimRun:F0}px");
+                // <b>And it is asked all the way down, which is what a breach is
+                // worth.</b> A wall on a cell further along the line stops the
+                // round there; the same wall asked about a different direction
+                // does not stop it at all. Reported as firing through a hole in a
+                // ring and hitting the leaf beside it - the wall was an edge to
+                // the rim test and a whole cell to the obstacle set, and the cell
+                // won.
+                Vector2I along = probe.FlatCellAt(from + dir.Normalized()
+                                                  * probe.Atlas!.HexRect.Size.X);
+                (float farRun, Vector2I? farAt, bool farStop) =
+                    TankTick.Track(probe, from, dir, top, none,
+                                   (cell, _) => cell == along);
+                (float thruRun, Vector2I? thruAt, bool thruStop) =
+                    TankTick.Track(probe, from, dir, top, none,
+                                   // Barring only the way the round is NOT going:
+                                   // the same masonry, the other face.
+                                   (cell, way) => cell == along
+                                                  && way.Dot(dir) > 0.0f);
+                Check("and masonry on a cell down the line stops the round there",
+                    farStop && farAt == along && farRun > 0.0f && along != home,
+                    $"stopped at {farAt} after {farRun:F0}px, with the wall on "
+                    + $"{along} and the gun on {home}");
+                Check("and a breach is a way through, which is what asking per"
+                      + " direction buys",
+                    !thruStop && thruAt is null && thruRun > farRun,
+                    $"ran {thruRun:F0}px past a wall that bars the other face, "
+                    + $"against {farRun:F0}px into one that bars this one - a set "
+                    + "of cells answers both the same, and answered the wrong one");
 
                 // The wiring, which is the half that rots: Track is handed a set
                 // and Reach is what builds one. A tank is wanted for that, and a

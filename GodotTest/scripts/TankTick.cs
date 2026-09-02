@@ -97,6 +97,13 @@ public sealed class TankTick
     /// driven through bars five.</summary>
     public Func<Vector2I, Vector2, bool>? Barred;
 
+    // <b>And it is asked of every cell of the walk, not only the one the gun
+    // stands on.</b> It began as the firing cell's exception - everything else
+    // solid filled a cell, so the cell under the gun was the one case a cell set
+    // could not answer - and that left walls being two things at once: an edge
+    // here and a whole cell in Obstacles. The cell won, so a breach was not a way
+    // through. See Track.
+
     /// <summary>Whether this tank is pressing against masonry right now, and so
     /// may only go at <see cref="MovementProfile.WallSpeed"/> -
     /// see <see cref="SpeedCap"/>.
@@ -1537,19 +1544,20 @@ public sealed class TankTick
         foreach (Vehicle other in Vehicles)
             if (!ReferenceEquals(other, shooter))
                 tanks.Add(other.Cell);
-        // And whatever else on the board is solid. Unioned rather than asked
+        // And whatever else on the board fills a cell. Unioned rather than asked
         // separately, because Track's whole question is "which cells are not to
         // be crossed" and a shell does not care which kind of thing is in one.
+        //
+        // <b>Masonry is not in here and must not be</b>: a wall stands on a cell's
+        // edges, so putting its cell in this set stops every round that crosses
+        // the cell rather than the ones that cross the wall. That is what it used
+        // to do, and a breached ring went on stopping shots aimed through the
+        // breach. See Barred, which is asked per cell and per direction, and
+        // Track, which now asks it all the way down the walk.
         foreach (Vector2I cell in Obstacles)
             tanks.Add(cell);
-        // And whether the cell it fires from stops it on the way out - see Barred.
-        // Asked of the walk's own starting cell rather than of Vehicle.Cell: those
-        // are the same hex whenever the tank is parked, and the walk is what the
-        // answer is for.
-        bool rim = Barred is not null
-                   && Barred(Field.FlatCellAt(ground), dir);
         return Track(Field, ground, dir, top + Field.Lift * Clearance, tanks,
-                     rim);
+                     Barred);
     }
 
     /// <summary>
@@ -1564,11 +1572,20 @@ public sealed class TankTick
     /// written under, and the fourth place this board has charged for the
     /// difference.
     ///
-    /// <b>What stands on the cell it fires from is asked separately</b>, through
-    /// <paramref name="rim"/>, and defaults to no. Everything solid on this board
-    /// fills a cell, so skipping the one under the gun is the rule rather than the
-    /// exception; a wall stands on that cell's edges instead, and is the only
-    /// thing that has ever needed the other answer. See <see cref="Barred"/>.
+    /// <b>Masonry is asked of every cell and of a direction</b>, through
+    /// <paramref name="barred"/> - the cell the gun stands on as the round leaves
+    /// it, and every cell after as the round arrives at it. Everything else solid
+    /// on this board fills a cell and goes in <paramref name="tanks"/>; a wall
+    /// stands on a cell's <em>edges</em>, so a set of cells cannot say which of
+    /// them it is on.
+    ///
+    /// <b>It was one bool for the firing cell alone, and that was the whole of the
+    /// coarseness.</b> A wall was a cell in <paramref name="tanks"/> as well, so a
+    /// round crossing a walled cell stopped there whatever edge it crossed: a ring
+    /// with one leaf breached went on stopping rounds aimed through the gap, and
+    /// the burst then went off on whichever leaf was still standing nearest the
+    /// shot. Reported as firing through a hole and hitting the wall beside it.
+    /// Asked per cell and per direction, a breach is a way through.
     ///
     /// <b>Ground blocks the line when it stands higher than the line does</b>, and
     /// a level line has one height everywhere - <paramref name="top"/> - so that
@@ -1587,7 +1604,8 @@ public sealed class TankTick
     /// </summary>
     internal static (float Run, Vector2I? At, bool Blocked) Track(
         HexField field, Vector2 from, Vector2 dir, float top,
-        IReadOnlySet<Vector2I> tanks, bool rim = false)
+        IReadOnlySet<Vector2I> tanks,
+        Func<Vector2I, Vector2, bool>? barred = null)
     {
         if (field.Atlas is null || dir.LengthSquared() < 1e-9f)
             return (0.0f, null, false);
@@ -1605,12 +1623,12 @@ public sealed class TankTick
             Vector2I cell = field.FlatCellAt(from + step * run);
             if (cell == here)
                 continue;
-            // The rim of the cell it fired from, if something stands on it - the
-            // sample before the walk left, by the same reading as every other stop
-            // below. Tested here rather than before the loop so the run is the
-            // distance to the edge rather than zero: a wall on this cell is met
-            // where the cell ends, not at the muzzle.
-            if (rim && here == start)
+            // The rim of the cell it fired from, if something stands across the
+            // way out - the sample before the walk left, by the same reading as
+            // every other stop below. Tested here rather than before the loop so
+            // the run is the distance to the edge rather than zero: a wall on this
+            // cell is met where the cell ends, not at the muzzle.
+            if (here == start && barred is not null && barred(start, step))
                 return (run - grain, start, true);
             here = cell;
             // Stopped at the near side of whatever stopped it - the sample before
@@ -1623,6 +1641,11 @@ public sealed class TankTick
             // of a cell reads as stopping at nothing.
             if (!field.InBounds(cell))
                 return (run - grain, null, false);
+            // Masonry on the side of the cell the round is entering by, which is
+            // the side facing back along the shot - the same question the firing
+            // cell is asked, read the other way round.
+            if (barred is not null && barred(cell, -step))
+                return (run - grain, cell, true);
             if (tanks.Contains(cell) || field.TopAt(cell) > top)
                 return (run - grain, cell, true);
         }

@@ -1158,47 +1158,8 @@ public sealed partial class TankBench : SceneRoot
                 mask |= 1 << i;
         }
         _field.SetSides(prop.Cell, mask);
-        // <b>And whether a shell is still stopped by this cell, which has to be
-        // the same truth the board was just told and was not.</b> The set handed
-        // to TankTick.Obstacles was the build-time register of which cells had
-        // walls stood on them - written once, never cleared - so a wall that had
-        // been knocked flat went on stopping rounds at its own boundary forever,
-        // and the burst went off against masonry that was lying on the ground.
-        // Reported as the collider outliving the wall, and that is exactly what it
-        // was.
-        //
-        // Maintained here rather than recomputed per frame because this is the one
-        // pass that already knows: Restated calls it for any wall that has lost a
-        // piece since the last frame, and walking six edges of every wall every
-        // frame is what that guard exists to avoid.
-        if (mask != 0)
-            _blocking.Add(prop.Cell);
-        else
-            _blocking.Remove(prop.Cell);
         _stated[prop.Cell] = (prop.Rig?.Loose ?? 0, prop.Rig?.Broken ?? 0);
     }
-
-    /// <summary>
-    /// The cells a shell is stopped by, live - <see cref="Restate"/>'s own second
-    /// output.
-    ///
-    /// <b>Not <c>_walled</c>, which is the register of where a wall was stood and
-    /// must not lose entries</b>: two of the three places that read it ask "has
-    /// one been built here yet" while laying the board out, so a set that emptied
-    /// as walls fell would stand them all again. Two sets because they answer two
-    /// questions, and the one the shell asks is about now.
-    ///
-    /// <b>What this is still coarse about, and it is named rather than left to be
-    /// found.</b> A cell is an obstacle while <em>any</em> of its edges carries
-    /// masonry, so a ring with one leaf breached still stops a round crossing the
-    /// other five - including one aimed through the gap. Edge-exactness from an
-    /// arbitrary cell means asking <see cref="TankTick.Barred"/> for every cell of
-    /// the walk rather than only for the one the gun stands on, which is a change
-    /// to <c>Track</c>'s own shape and to the checks written against it. The gap
-    /// this leaves is a shot through a breach in a wall that still stands
-    /// elsewhere; the gap it closes is a wall that is not there at all.
-    /// </summary>
-    private readonly HashSet<Vector2I> _blocking = new();
 
     /// <summary>What each wall had let go of and broken when the board was last
     /// told about it. Two ints rather than a re-measure every frame: walking the
@@ -2059,7 +2020,15 @@ public sealed partial class TankBench : SceneRoot
             // because both are facts about the board this frame - the third hook
             // beside Aim and Launch, and null on a board with no walls so the
             // shot goes into the field exactly as it did.
-            _tick.Obstacles = _blocking;
+            // <b>Nothing, and that is the point: masonry is not a cell.</b> A
+            // live set of walled cells was here for one commit and it was the
+            // wrong shape - it kept a breached ring stopping rounds aimed through
+            // the breach, because a set of cells cannot say which edge a wall is
+            // on. TankTick.Barred says, and Track now asks it all the way down the
+            // walk, so the wall answers once and answers per edge. Left assigned
+            // rather than deleted because a board with something cell-shaped and
+            // solid on it is exactly what this field is for.
+            _tick.Obstacles = new HashSet<Vector2I>();
             // Always answered now, walls or none: a round going into the field
             // raises a burst wherever it lands, and on a board with walls it may
             // also have hit one. Two things happen to one shell, so the hook is
