@@ -1434,23 +1434,37 @@ public sealed partial class TankBench : SceneRoot
                       * 0.5f
                       - new Vector2(0.0f, _field.TopAt(prop.Cell))
                       + _field.CentreOffset;
-        float top = prop.Pile().Top * _field.RiseFactor;
+        // <b>Pile measures in fractions of a hex radius, not in world
+        // pixels, and taking it for pixels made the wall 0.43px tall.</b> Its
+        // Reach is what Coverage is compared against, and Coverage is a share of
+        // the cell - so Top is that same share, and a share becomes a screen lift
+        // through the cell's own half-width and the field's rise. Measured, not
+        // reasoned: the trace said Top 0.5, which as pixels is nothing and as
+        // half a hex radius is a wall 53px tall.
+        float top = prop.Pile().Top * (_field.Atlas.HexRect.Size.X * 0.5f)
+                    * _field.RiseFactor;
         _stage.Slam(_stage.Origin + mid,
                     _field.LevelAt(prop.Cell) * _field.Lift, normal,
                     // Screen y grows downward, so up the wall is negative - the
                     // flip ProcSlam.Aim undoes on the way in.
                     new Vector2(0.0f, -top * 0.5f),
-                    // <b>Which side of the shooter the wall is on, and it is not
-                    // always the near one.</b> ProcSlam's depth side was written
-                    // for a plate on a hull, where two quads stand on one contact
-                    // point and sort by nothing; a wall burst is seated on the
-                    // wall and sorts on its own, so this is only the clearance's
-                    // sign - but the sign was wrong for a leaf standing further
-                    // from the camera than the tank, and it showed as the flash
-                    // being drawn over the barrel pointing at it. Up the screen is
-                    // further away on this board, which is the same test
-                    // everything else here is written under.
-                    behind: (_stage.Origin + mid).Y < Tank.GroundPoint.Y,
+                    // <b>Which face of the wall was hit, which is the normal's
+                    // own question and not the wall's position.</b> Asked as "is
+                    // this leaf further up the screen than the tank" it came out
+                    // backwards for the case this board is built around: a tank
+                    // inside a ring firing north hits the north leaf's INNER face,
+                    // which looks back at the camera, and the burst belongs in
+                    // front of the bricks. The leaf is up-screen of the tank all
+                    // the same, so that test drew the whole event behind the wall
+                    // it went off against - reported, and visible as a pale mass
+                    // hanging past the rubble.
+                    //
+                    // The normal already knows: it was flipped above to point out
+                    // of the face the round arrived on, so a normal running down
+                    // the screen faces the camera and one running up faces away.
+                    // Screen y grows downward, which is the same sentence the rest
+                    // of this file is written under.
+                    behind: normal.Y < 0.0f,
                     // <b>Half again the calibre, because a wall gives a burst
                     // far more to throw than a plate does.</b> Reported as the
                     // flash being too small for a shell that demolishes masonry,

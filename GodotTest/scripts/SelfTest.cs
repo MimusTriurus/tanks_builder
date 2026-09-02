@@ -6478,6 +6478,32 @@ public static class SelfTest
             "both parities of the stagger, because the odd column is offset half a "
             + "cell and a side that only round-trips on one of them is a burst on "
             + "the wrong leaf every other column");
+        // <b>And the size does not walk the place the round hit, which is the
+        // second thing a screenshot had to report.</b> Might is a scale on the
+        // transform, so everything in the quad's frame is multiplied by it - and
+        // the impact point is not a length of this effect, it is a measured place
+        // on a hull or a wall. Left in, a 1.4-calibre burst put its own impact
+        // point 1.4 times further from the tank's foot than the round landed, and
+        // on masonry at 1.45 it lifted the whole event a wall's height above the
+        // courses.
+        // <b>The quantity that has to hold is the point in the world, not the
+        // number the shader is given.</b> The shader's copy is divided by the size
+        // precisely so the transform's multiply cancels it, so of course it moves
+        // with Might - asserting that it does not was asking the wrong question,
+        // and the check said so before any picture had to.
+        var slamAt = new ProcSlam();
+        slamAt.Aim(Vector2.Right, new Vector2(0.0f, -60.0f));
+        bool stays = !slamAt.Plate.IsEqualApprox(Vector2.Zero);
+        foreach (float size in new[] { 1.0f, 1.45f, 0.7f, 2.0f })
+        {
+            slamAt.Might = size;
+            stays &= (slamAt.Placed * slamAt.Might).IsEqualApprox(slamAt.Plate);
+        }
+        Check("and how big the burst is does not move where the round hit",
+            stays,
+            $"the impact stands at {slamAt.Plate} of a tile off the seat at every "
+            + "size - a measurement divided back out of the scale, exactly as the "
+            + "quads' own clearance is, and for the same reason");
         // And the geometry the third surface must NOT change: along_face turns the
         // travel, it does not lengthen it, so the quad measured for armour holds
         // for brick without Bounds having to know a surface exists.

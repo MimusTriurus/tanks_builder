@@ -178,8 +178,12 @@ public sealed partial class ProcSlam : Node3D
     {
         float open = Uniform("cone_open");
         float floor = Uniform("squat_floor");
-        float coreR = Uniform("core_size") * 1.50f;
-        float ballR = Uniform("ball_size") * 1.50f * Uniform("ball_stretch");
+        // <b>At the biggest the fire can be, which is masonry's</b> - the rule
+        // is what the model can produce and the surface is not known when a quad
+        // is built. See stone_bloom.
+        float bloom = MathF.Max(Uniform("stone_bloom"), 1.0f);
+        float coreR = Uniform("core_size") * bloom * 1.50f;
+        float ballR = Uniform("ball_size") * bloom * 1.50f * Uniform("ball_stretch");
         float sprayR = Uniform("spray_size") * 1.70f * Uniform("spray_long") * 1.65f;
         float cloudR = Uniform("cloud_size") * 1.50f * 1.35f;
         float spillR = Uniform("spill_size") * 1.55f * Uniform("spill_long");
@@ -207,7 +211,8 @@ public sealed partial class ProcSlam : Node3D
 
             // The core, which barely moves: out of the plate by a fraction of its
             // own size.
-            Reach(outward * (Uniform("core_size") * Uniform("core_lead")), coreR);
+            Reach(outward * (Uniform("core_size") * bloom * Uniform("core_lead")),
+                  coreR);
             // The fireball, at the far edge of its cone and at the top of its
             // climb. The climb is added rather than maximised against, because hot
             // gas rises while it is still going out.
@@ -297,9 +302,21 @@ public sealed partial class ProcSlam : Node3D
         Wear();
     }
 
-    /// <summary>How big this one is, as a multiple of the tuned burst -
+    /// <summary>
+    /// How big this one is, as a multiple of the tuned burst -
     /// <see cref="ProcBlast.Might"/>'s argument entire, including that it scales
-    /// about the seat rather than about its own middle.</summary>
+    /// about the seat rather than about its own middle.
+    ///
+    /// <b>What it does <em>not</em> scale is where the round hit</b>, and that
+    /// took a report to notice. The size is a scale on the transform, so
+    /// everything written in the quad's own frame is multiplied by it - and the
+    /// impact point is not a length of this effect, it is a measured place on a
+    /// hull or on a wall. Left in, a 1.4-calibre burst put its own impact point
+    /// 1.4 times further from the tank's foot than the round actually landed, and
+    /// on masonry at 1.45 it lifted the whole event most of a wall's height above
+    /// the courses. So the point is divided back out, exactly as the quads'
+    /// clearance is - see <see cref="Stand"/>, whose line this is.
+    /// </summary>
     public float Might
     {
         get => _might;
@@ -307,6 +324,9 @@ public sealed partial class ProcSlam : Node3D
         {
             _might = Mathf.Max(value, 0.01f);
             Stand();
+            // The impact point is a measurement rather than a size, so it has to
+            // be rewritten whenever the size it is divided by changes.
+            Place();
         }
     }
 
@@ -446,11 +466,22 @@ public sealed partial class ProcSlam : Node3D
         {
             ink?.SetShaderParameter("away", faced);
             ink?.SetShaderParameter("squat", squat);
-            ink?.SetShaderParameter("plate", hit);
         }
         Away = faced;
         Squat = squat;
         Plate = hit;
+        Place();
+    }
+
+    /// <summary>The impact point as the shader sees it: the measurement divided by
+    /// the size, so a bigger burst goes off in the same place - see
+    /// <see cref="Might"/>, where the defect this exists for is written out.
+    /// </summary>
+    private void Place()
+    {
+        Vector2 hit = Plate / Mathf.Max(_might, 0.01f);
+        _dustInk?.SetShaderParameter("plate", hit);
+        _fireInk?.SetShaderParameter("plate", hit);
     }
 
     /// <summary>Which way the plate faces and how much of the throw survived the
@@ -460,8 +491,16 @@ public sealed partial class ProcSlam : Node3D
     public float Squat { get; private set; } = 1.0f;
 
     /// <summary>Where the round burst, over the seat, in tile widths - what
-    /// <see cref="Aim"/> made of the offset it was handed.</summary>
+    /// <see cref="Aim"/> made of the offset it was handed. <b>The measurement</b>,
+    /// which is not what the shader is given: see <see cref="Placed"/>.</summary>
     public Vector2 Plate { get; private set; } = Vector2.Zero;
+
+    /// <summary>The impact point as the shader actually has it - the measurement
+    /// divided by the size, so a bigger burst goes off in the same place. Exposed
+    /// because the invariant is invisible otherwise: nothing about a picture says
+    /// whether its own scale walked the point it started from, and this one did.
+    /// See <see cref="Might"/>.</summary>
+    public Vector2 Placed => Plate / Mathf.Max(_might, 0.01f);
 
     /// <summary>The hex's own width in screen px, kept because <see cref="Aim"/> is
     /// handed the impact point in px and every length in the model is in tiles.
@@ -993,6 +1032,21 @@ uniform float masonry = 0.0;
 // the explosion away with it.
 uniform float stone_fire = 0.55;
 
+// <b>How much bigger the fire is on brick, as a multiple of its own size.</b> Not
+// its brightness - that is stone_fire and core_gain, and both were already spent
+// once on this complaint - but the volume of it, which is what was actually being
+// asked for: a round that takes a wall apart should look like it, and a flash
+// scaled for a facet of armour does not read at all against a cell-wide wall of
+// brick.
+//
+// <b>ProcSlam.Bounds allows for this at every surface rather than only at
+// masonry</b>, which is the rule about the quad holding what the model CAN
+// produce rather than what it happens to draw: a quad cut to the armour sizes
+// would slice the brick flash off flat, and a flash missing its edge reads as a
+// smaller flash rather than as a bug. What that costs is fill rate on an armour
+// burst, and it is the cheaper of the two mistakes by a wide margin.
+uniform float stone_bloom = 1.85;
+
 // <b>And no fragments whatever, which is the one place a number is zero because
 // something else already draws the thing.</b> WallRig.Burst pushes real brick
 // bodies out of the courses; a drawn shard beside a simulated one is two accounts
@@ -1028,9 +1082,11 @@ void fragment() {
             // What the round itself brings, which only a round with no filling at
             // all is without - see pierce.
             float charge = 1.0 - pierce;
+            // How big the fire is on this surface - see stone_bloom.
+            float bloom = mix(1.0, stone_bloom, masonry);
             float ca = time / max(core_life, 1e-4);
             if (ca < 1.0) {
-                float r = core_size * (0.45 + 0.80 * sqrt(ca));
+                float r = core_size * bloom * (0.45 + 0.80 * sqrt(ca));
                 float gain = core_gain * charge * pow(max(1.0 - ca, 0.0), 1.30);
                 lit = flame_over(lit,
                                  flame_blob(at, plate + away * (core_size * core_lead),
@@ -1052,7 +1108,8 @@ void fragment() {
                                + ball_climb * run * pow(a, 1.15);
                     vec2 p = plate + away * out_at + side_dir * wide
                              + vec2(0.0, up);
-                    float r = ball_size * (0.55 + 0.90 * ember_hash(vec2(fk, 105.0)))
+                    float r = ball_size * bloom
+                              * (0.55 + 0.90 * ember_hash(vec2(fk, 105.0)))
                               * (0.50 + 0.85 * a);
                     lit = flame_over(lit,
                                      flame_blob(at, p, r, r * ball_stretch,
