@@ -38,30 +38,6 @@ namespace TankSpriteTest;
 /// <see cref="Vehicle.GroundPoint"/>, the ring, the depth and the thirteen call
 /// sites that read it did not have to be told about any of this.
 /// </summary>
-/// <summary>
-/// Which of the two bursts a round landing on the board raises.
-///
-/// <b>Two implementations of one effect, not two effects</b> - see docs/blast.md:
-/// <see cref="ProcBlast"/> computes its shape, <see cref="SheetBlast"/> plays
-/// sixty-four rendered frames of one. They dig the same crater, take the same
-/// size and answer the same hook, so which one arrives is a choice about the
-/// picture and nothing else.
-///
-/// Named the way <see cref="FlashSource"/> is named, and for its reason: the
-/// muzzle flash has had three sources and one word for each of them since it was
-/// written, so a second concept of "the built one" would be a second vocabulary
-/// for the same idea.
-/// </summary>
-public enum BlastSource
-{
-    /// <summary>The imported flipbook - <see cref="SheetBlast"/>. The default.
-    /// </summary>
-    Sheet,
-
-    /// <summary>The computed burst - <see cref="ProcBlast"/>.</summary>
-    Built,
-}
-
 public sealed partial class Stage3D : Node3D
 {
     public HexField Field = null!;
@@ -369,8 +345,6 @@ public sealed partial class Stage3D : Node3D
         // The bursts, on the same step as everything else here - delta was
         // pinned at the top of this method, so a capture of one is repeatable
         // for the pond's reason.
-        foreach (ProcBlast blast in _bursting)
-            blast.Tick(delta);
         foreach (SheetBlast blast in _booming)
             blast.Tick(delta);
         foreach (ProcKick kick in _kicking)
@@ -5051,34 +5025,9 @@ void fragment() {{
     private const float ScaldRim = 0.30f;
     private const float PitRim = 0.22f;
 
-    private readonly List<ProcBlast> _bursting = new();
-    private int _nextBurst;
+    private readonly List<SheetBlast> _booming = new();
+    private int _nextBoom;
 
-    /// <summary>
-    /// Set a burst off on the board, and mark the ground it went off on.
-    ///
-    /// <b>The two together, because they are one event.</b> A caller that had to
-    /// do both would be three callers doing both - the harness, the tank bench
-    /// and the effects bench - and the third one to be written would be the one
-    /// that forgot the mark.
-    ///
-    /// <b><paramref name="spot"/> is in board space</b>, with
-    /// <paramref name="lift"/> the ground's height there - exactly the pair a
-    /// landed shell already carries, and the space <see cref="Trunk"/> and
-    /// <see cref="Ground"/> both take. That is worth saying because getting it
-    /// wrong is silent and was: written to take the field's own space, the quad
-    /// got <see cref="Origin"/> added to a point that already had it while the
-    /// mark got it added to neither, so on a board whose origin is not zero the
-    /// burst stood 220px off the shot and the crater was rasterised off the edge
-    /// of the map. Nothing errored; there was simply no burst where the shell
-    /// went in.
-    ///
-    /// <b>Marks only where it draws, and that is the cost of the decision that
-    /// the 3D board is the board.</b> The mark goes into the ash map, which is a
-    /// term in the stage's own ground shader; on the flat board there is nothing
-    /// to put it in. The flat board is legacy, so this is a thing it does not
-    /// have rather than a thing that is broken.
-    /// </summary>
     /// <summary>
     /// What to do to a burst before it goes off, or null to leave it as built.
     ///
@@ -5088,48 +5037,6 @@ void fragment() {{
     /// wait for a shot to be able to set one. Answered, every burst is dressed on
     /// its way out, whichever of the six it turns out to be.
     /// </summary>
-    public Action<ProcBlast>? Dress;
-
-    /// <param name="might">How big this one is, as a multiple of the tuned burst -
-    /// see <see cref="ProcBlast.Might"/>. The crater grows with it, because a bigger
-    /// round does not leave the same hole.</param>
-    public void Burst(Vector2 spot, float lift, float might = 1.0f)
-    {
-        if (Field.Atlas is null)
-            return;
-        while (_bursting.Count < Bursts)
-        {
-            var made = new ProcBlast();
-            AddChild(made);
-            made.Build(Field.Atlas.HexRect.Size.X, Squash, RiseFactor);
-            _bursting.Add(made);
-        }
-        ProcBlast blast = _bursting[_nextBurst % Bursts];
-        // <b>Reset before the hook, multiplied after it.</b> The pool is reused, so
-        // a size left on a burst is a size the next shot inherits: without this line
-        // the multiply compounds, and on a board where nothing answers Dress it
-        // compounds every shot until the burst fills the screen. The hook says how
-        // big this effect is tuned to be; the argument says how big this round is.
-        blast.Might = 1.0f;
-        Dress?.Invoke(blast);
-        _nextBurst = (_nextBurst + 1) % Bursts;
-        // The size before the seat: Sit is what puts the two together.
-        blast.Might *= might;
-        blast.Sit(spot, lift, Squash, RiseFactor);
-        blast.Fire();
-        Pits?.Dig(spot, lift, Pits.Ink, Pits.Wide * might);
-    }
-
-    /// <summary>The bursts as they stand, for a bench that shows what one is
-    /// doing. Read-only: they are set off through <see cref="Burst"/> and dressed
-    /// through <see cref="Dress"/>, never handed out to be driven.</summary>
-    public IReadOnlyList<ProcBlast> Bursting => _bursting;
-
-    private readonly List<SheetBlast> _booming = new();
-    private int _nextBoom;
-
-    /// <summary>What to do to a sheet burst before it goes off - <see cref="Dress"/>
-    /// for the other kind, and the same argument.</summary>
     public Action<SheetBlast>? Attire;
 
     /// <summary>
@@ -5169,59 +5076,40 @@ void fragment() {{
         Pits?.Dig(spot, lift, Pits.Ink, Pits.Wide * might);
     }
 
-    /// <summary>The sheet bursts as they stand, <see cref="Bursting"/>'s twin and
-    /// read-only for its reason.</summary>
+    /// <summary>The bursts as they stand, for a bench that shows what one is
+    /// doing. Read-only: they are set off through <see cref="Boom"/> and dressed
+    /// through <see cref="Attire"/>, never handed out to be driven.</summary>
     public IReadOnlyList<SheetBlast> Booming => _booming;
 
     /// <summary>
-    /// Which burst a round landing on the board raises.
-    ///
-    /// <b>The flipbook, and that is a decision about the picture rather than
-    /// about the code.</b> Both are built, both are tuned and both are kept; what
-    /// the imported one has is sixty-four frames of a simulated cloud, which is
-    /// more internal structure than a fragment computing eighty sections can
-    /// afford per frame. What it lacks is the ground half - no rings spreading on
-    /// the cell, no cone of thrown earth - and <see cref="ProcBlast"/> is best at
-    /// exactly those. The effects bench can draw them together (see
-    /// <c>EffectsBench.Sheet</c> and its <c>_pair</c>) precisely so the question
-    /// stays a picture; this is the answer the *board* ships with.
-    ///
-    /// <b>A setting on the stage, not a swap of the call.</b> Replacing the call
-    /// would have taken the computed burst off the game board altogether - the
-    /// half of the pair with sixty-two tuned dials and a panel to drive them - and
-    /// left "compare them on the real board" as a code edit.
-    /// </summary>
-    public BlastSource Blast = BlastSource.Sheet;
-
-    /// <summary>
-    /// A round that went into the board: raise whichever burst is asked for.
+    /// A round that went into the board: earth or water, whichever is under it.
     ///
     /// <b>One method both roots call, and that is the whole of why it exists.</b>
     /// The harness and the tank bench each answered <c>TankTick.Landed</c> with
-    /// their own <see cref="Burst"/> call - two copies of one sentence, which is
-    /// exactly the arrangement <see cref="Burst"/>'s own note warns about for the
-    /// crater. A choice made in two places is a choice that agrees until one of
-    /// them is edited.
+    /// their own burst call - two copies of one sentence, which is exactly the
+    /// arrangement <see cref="Boom"/>'s own note warns about for the crater. A
+    /// choice made in two places is a choice that agrees until one of them is
+    /// edited.
     ///
-    /// Both halves of the crater and the size travel with it, because both
-    /// <see cref="Burst"/> and <see cref="Boom"/> already take them: nothing here
-    /// knows anything the callers did not already have to say.
+    /// <b>There used to be a second earth burst here and a setting to pick it.</b>
+    /// Two implementations of one picture - one computing its shape per fragment,
+    /// one playing sixty-four rendered frames of a simulated cloud - and the
+    /// choice shipped as <c>BlastSource</c> with <c>--burst built</c> to ask for
+    /// the computed one. The comparison is over: the flipbook won it on earth and
+    /// then on water, so what is left is one burst and no setting. See
+    /// <c>docs/blast.md</c> for what came off with it.
     /// </summary>
     public void Land(Vector2 spot, float lift, float might = 1.0f)
     {
-        // <b>Wet first, and neither of the two below is about water.</b> They are
-        // one picture computed and the same picture rendered, and both of them
-        // are earth - so on a wet cell the choice between them is not a choice,
-        // it is the wrong answer twice. See Wet, and Spout for the A/B.
+        // <b>Wet first.</b> The burst below is earth - a cloud the colour of
+        // thrown ground, with a crater under it - so on a wet cell it is simply
+        // the wrong answer. See Wet, and Spout for the A/B.
         if (Spout && Wet(spot, out float top))
         {
             Splash(spot, top, might);
             return;
         }
-        if (Blast == BlastSource.Built)
-            Burst(spot, lift, might);
-        else
-            Boom(spot, lift, might);
+        Boom(spot, lift, might);
     }
 
     private readonly List<ProcKick> _kicking = new();
@@ -5809,8 +5697,6 @@ void fragment() {{
     /// board's and are filled by whoever owns them.</summary>
     public void Quench()
     {
-        foreach (ProcBlast blast in _bursting)
-            blast.Douse();
         foreach (SheetBlast blast in _booming)
             blast.Douse();
         // The plume too, and it belongs with these two rather than with the three

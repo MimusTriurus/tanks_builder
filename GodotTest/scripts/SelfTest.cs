@@ -5145,186 +5145,19 @@ public static class SelfTest
             "one flag drives both, so neither half can be judged on its own");
 
         Theme("the burst in the ground");
-        // ground_he, and the first of the family docs/blast.md lays out. Three of
-        // these are about the same thing from different sides: a burst is made of
-        // the forest's own elements, thrown by one statement of a throw, and it
-        // has to fit in the quad that runs it per fragment.
-        var burst = new ProcBlast();
-        Check("the burst is made of the same elements as the forest's fire",
-            ProcBlast.DustCode.Contains(Stage3D.FlameInk)
-            && ProcBlast.FireCode.Contains(Stage3D.FlameInk),
-            "one of the two halves is carrying its own copy of what an element "
-            + "is, and a copy still names every function it defines - so it "
-            + "compiles, draws, and parts from the other where nobody looks");
-        Check("and both halves are thrown by one statement of a throw",
-            ProcBlast.DustCode.Contains("vec4 blast_throw(")
-            && ProcBlast.FireCode.Contains("vec4 blast_throw(")
-            && ProcBlast.DustCode.Contains("blast_throw(a, reach")
-            && ProcBlast.FireCode.Contains("blast_throw(a, reach"),
-            "the earth and the sparks are thrown by the same explosion, so two "
-            + "paths for them is two answers to one question");
-        Check("the dust takes light away where the fire adds it",
-            ProcBlast.FireCode.Contains("blend_add")
-            && !ProcBlast.DustCode.Contains("blend_add"),
-            "the pair is one effect and the order is the effect - dark under, "
-            + "light over. The additive half over pale ground arrives at almost "
-            + "nothing without the dark one behind it");
-
-        // The pixel version of this is a bounding box against the quad, and it is
-        // in the note on Flank. This is the same claim asked of the model, which
-        // is the half that can be asked without a board: everything thrown has to
-        // land inside the rectangle the fragment stage covers, because what
-        // reaches the edge is not faded, it is sliced off flat.
-        // Off the object rather than out of the shader text, because this is the
-        // one number C# owns: the quad is built in C# and the throw is quoted
-        // against it, so the shader is told what it is on every material.
-        float blastReach = burst.Reach;
-        float blastSpread = ProcBlast.Uniform(ProcBlast.DustCode, "spread");
-        float blastBorn = ProcBlast.Uniform(ProcBlast.DustCode, "clod_born");
-        float blastClod = ProcBlast.Uniform(ProcBlast.DustCode, "clod_size");
-        float blastCollarOut = ProcBlast.Uniform(ProcBlast.DustCode, "collar_spread");
-        float blastCollarR = ProcBlast.Uniform(ProcBlast.DustCode, "collar_size");
-        float blastCollarFlat = ProcBlast.Uniform(ProcBlast.DustCode, "collar_flat");
-        float blastClimb = ProcBlast.Uniform(ProcBlast.DustCode, "column_climb");
-        float blastSparkRun = ProcBlast.Uniform(ProcBlast.FireCode, "spark_reach");
-        float blastLean = ProcBlast.Uniform(ProcBlast.DustCode, "clod_wide");
-        float blastColumnR = ProcBlast.Uniform(ProcBlast.DustCode, "column_size");
-        // The widest and the tallest anything gets, at the top of each family's
-        // own size roll - 2.1 for a clod and 1.45 for the other two, both read off
-        // the loops beside them.
+        // ground_he, the first of the family docs/blast.md lays out - and what is
+        // left here is the imported burst, the crater and the panel that drives
+        // them.
         //
-        // Two terms of this were wrong the first time and no screenshot caught
-        // either, which is the case for asking the model as well as the pixels.
-        // The cone's sideways travel is its lean's sine and not its whole throw,
-        // so the bound came out a fifth too wide; and the widest element in the
-        // burst is not the cone at all but the collar, which lies flat and so
-        // reaches out by its own length rather than by its radius.
-        float blastWidest = Mathf.Max(
-            blastBorn + blastReach * blastSpread * Mathf.Sin(blastLean)
-                + blastClod * 2.1f,
-            blastCollarOut + blastCollarR * 1.45f * blastCollarFlat);
-        float blastTallest = Mathf.Max(
-            Mathf.Max(blastReach + blastClod * 2.1f, blastReach * blastSparkRun),
-            blastClimb + blastColumnR * 1.45f);
-        Check("everything the burst throws lands inside its own quad",
-            blastWidest > 0.0f && blastTallest > 0.0f
-            && blastWidest < burst.Flank && blastTallest < burst.Tall,
-            $"reaches {blastWidest:F3} across and {blastTallest:F3} up against a quad of "
-            + $"{burst.Flank:F3} and {burst.Tall:F3} tile widths");
-        Check("and the quad is not so big that the fragments are wasted",
-            blastWidest > burst.Flank * 0.55f && blastTallest > burst.Tall * 0.55f,
-            "every fragment of this quad runs eighty-odd sections, so margin "
-            + "nobody draws in is not free the way an oversized atlas cell is");
-
-        // <b>One mass, not a heap of shaded ellipses</b> - the change the burst
-        // was asked for by eye and the reason the dust has a pass of its own. Each
-        // element hands back thickness and lean; nothing composites an element
-        // over another, because doing so gives every one of them its own dark lip
-        // and its own lit ridge and the eye then counts them. Asserted on the text
-        // because the failure it guards against is a return to flame_over, which
-        // compiles, draws, and looks like a pile of potatoes.
-        Check("the dust is summed into one mass rather than composited",
-            ProcBlast.DustCode.Contains("void dust_part(")
-            // Against the ink's own text removed, because the ink is where
-            // flame_over is declared - the claim is that the dust never calls it,
-            // not that the shared kit stopped offering it. The plume's check has
-            // the same shape for the same reason.
-            && !ProcBlast.DustCode.Replace(Stage3D.FlameInk, "")
-                         .Contains("flame_over("),
-            "an element drawn over an element is a thing beside a thing, and "
-            + "forty-four of them read as forty-four of them - which is what a "
-            + "cloud is not");
-        // <b>A cloud's profile, not a sphere's, and the numbers are measured.</b>
-        // The CC0 pack's painted puff - the thing whose smoke reads soft - fits
-        // (1 - q)^2.57 across all sixty-four of its cells and peaks at 0.35 alpha,
-        // reaching 0.95 nowhere in the sprite. A sphere's section is (1 - q)^0.5
-        // with infinite slope at its rim, which is an edge no amount of softening
-        // elsewhere can undo. This is the check that stops it going back.
-        Check("the dust wears a cloud's profile and the fire a sphere's",
-            ProcBlast.Uniform(ProcBlast.DustCode, "dust_soft") > 2.0f
-            && ProcBlast.DustCode.Contains("flame_reach(")
-            && !ProcBlast.DustCode.Replace(Stage3D.FlameInk, "")
-                         .Contains("flame_facing(")
-            && ProcBlast.FireCode.Contains("flame_blob("),
-            $"dust exponent {ProcBlast.Uniform(ProcBlast.DustCode, "dust_soft"):F2} "
-            + "against a sphere's 0.5 - and a sphere's rim is where the hard edge "
-            + "was");
-        Check("and both are built on one statement of where a fragment is",
-            Stage3D.FlameInk.Contains("float flame_reach(")
-            && Stage3D.FlameInk.Contains("flame_reach(at, centre, half_w, along, flow, lump_seed, down)"),
-            "the frame - the ellipse, its flow and its wobble - is shared and the "
-            + "profile is not, which is the only split that avoids a second copy "
-            + "of the arithmetic");
-        Check("the dust is never opaque",
-            ProcBlast.Uniform(ProcBlast.DustCode, "dust_ink") < 0.85f,
-            "earth in the air is not a wall; the pack's own puff peaks at 0.35 "
-            + "alpha and its softness is mostly that");
-        Check("and its bands are not taken whole",
-            ProcBlast.Uniform(ProcBlast.DustCode, "dust_band") < 1.0f,
-            "quantised light on a mass that saturates to one gives slabs, and the "
-            + "line between two slabs is a hard edge however soft the alpha under "
-            + "it is - which is what it was");
-        Check("its silhouette is torn as well as soft",
-            ProcBlast.DustCode.Contains("ember_fbm(at * dust_grain")
-            && ProcBlast.Uniform(ProcBlast.DustCode, "dust_tear") > 0.1f,
-            "soft alone is airbrush: the pack gets its raggedness from a painted "
-            + "sprite and this gets it from a field eating the density");
-
-        Check("and it is shaded in steps, which is the pack's own trick",
-            ProcBlast.DustCode.Contains("floor(lit * dust_steps)")
-            && ProcBlast.Uniform(ProcBlast.DustCode, "dust_steps") >= 2.0f,
-            "banding a cloud's light is what makes it read as drawn rather than "
-            + "airbrushed - three steps, off the CC0 pack's stylised smoke");
-
-        // <b>The rings lie on their own plane, on the ground.</b> They cannot go on
-        // the upright quad: below the contact point and behind the ground are one
-        // test under this camera, so the half of a ring that spreads toward the
-        // viewer would be sliced off flat. The pack answers this the same way, with
-        // cylinder meshes lying flat.
-        Check("the ground rings are not drawn on the upright quad",
-            !ProcBlast.RingCode.Contains("blast_footing")
-            && !ProcBlast.RingCode.Contains("blast_at("),
-            "on that quad a ring loses the half of itself that comes toward the "
-            + "camera, and what is left reads as an arc rather than a ring");
-        Check("and a ring stays inside the plane it is drawn on",
-            ProcBlast.Uniform(ProcBlast.RingCode, "ring_far")
-                + ProcBlast.Uniform(ProcBlast.RingCode, "ring_wide") < 1.0f,
-            $"reaches {ProcBlast.Uniform(ProcBlast.RingCode, "ring_far"):F2} of its "
-            + "plane plus its own band, and past one the band is cut by the plane's "
-            + "own edge - a straight line across a ring");
-
-        // <b>The event is staggered, which is the other half of what the pack
-        // does with an AnimationPlayer.</b> Every family has its own window, and
-        // the ratio between the fire's and the dust's is the shape of the thing:
-        // read at one window for all of them - which is what this was - a burst is
-        // one puff rather than something that happened and then settled.
-        float blastFire = Mathf.Max(
-            ProcBlast.Uniform(ProcBlast.FireCode, "flash_life"),
-            ProcBlast.Uniform(ProcBlast.FireCode, "ball_stagger")
-                + ProcBlast.Uniform(ProcBlast.FireCode, "ball_life"));
-        float blastRing = ProcBlast.Uniform(ProcBlast.RingCode, "ring_stagger")
-                          + ProcBlast.Uniform(ProcBlast.RingCode, "ring_life");
-        float blastEarth = ProcBlast.Uniform(ProcBlast.DustCode, "clod_stagger")
-                           + ProcBlast.Uniform(ProcBlast.DustCode, "clod_life");
-        float blastDust = ProcBlast.Uniform(ProcBlast.DustCode, "column_born")
-                          + ProcBlast.Uniform(ProcBlast.DustCode, "column_stagger")
-                          + ProcBlast.Uniform(ProcBlast.DustCode, "column_life");
-        Check("the fire is a small fraction of the event and the dust is the rest",
-            blastFire > 0.0f && blastDust > blastFire * 4.0f,
-            $"fire out at {blastFire:F2}s, dust at {blastDust:F2}s - and a burst "
-            + "whose families all start and end together is one puff");
-        Check("and every one of them is over before the clock is",
-            Mathf.Max(Mathf.Max(blastFire, blastRing),
-                      Mathf.Max(blastEarth, blastDust)) <= burst.Life,
-            $"the longest runs to {Mathf.Max(blastEarth, blastDust):F2}s against a "
-            + $"clock of {burst.Life:F2}s, so it is cut off mid-air rather than "
-            + "finishing");
-        Check("the ring is gone before the earth has landed",
-            blastRing < blastEarth,
-            $"ring out at {blastRing:F2}s against earth down at {blastEarth:F2}s - "
-            + "a shockwave still racing when the clods have settled is a shockwave "
-            + "nobody reads as one");
-
+        // <b>There were two implementations of this picture and there is now
+        // one.</b> A computed burst - three quads, sixty-two uniforms, its shape
+        // solved per fragment - stood beside the flipbook so the two could be
+        // judged on one board at one frame. The flipbook won, on earth and then on
+        // water, and everything that was only ever about the other one came off
+        // with BlastSource.Built: its pool, its quads, its panel and the twenty
+        // checks that were here. What is kept of it is the text four other effects
+        // compile into themselves - the dust, the frame and the rings - and those
+        // are asserted where they are used, which is in the four themes below.
         // <b>The panel is a view of the shaders' uniforms, so the two have to
         // agree about what exists.</b> Every dial names a uniform in a particular
         // shader and opens on that uniform's own default; a typo in either half is
@@ -5333,41 +5166,13 @@ public static class SelfTest
         // of these are declared int and were being read as float, which came back
         // NaN, and every loop the panel governed ran zero times.
         var dialBench = new EffectsBench();
-        var dialRows = EffectsBench.DialRows(dialBench).ToList();
-        var dialLost = dialRows
-            .Where(r => float.IsNaN((float)r.Opens))
-            .Select(r => r.Name).ToList();
-        Check("every dial on the effects panel names a uniform that exists",
-            dialRows.Count > 0 && dialLost.Count == 0,
-            dialLost.Count == 0
-                ? $"{dialRows.Count} dials"
-                : $"{dialLost.Count} name nothing: {string.Join(", ", dialLost.Take(6))}");
-        var dialOut = dialRows
-            .Where(r => r.Opens < r.Lo - 1e-6 || r.Opens > r.Hi + 1e-6)
-            .Select(r => $"{r.Name} {r.Opens:F3} outside {r.Lo:F2}..{r.Hi:F2}")
-            .ToList();
-        Check("and opens inside the band its slider may move over",
-            dialOut.Count == 0,
-            dialOut.Count == 0 ? "" : string.Join("; ", dialOut.Take(4))
-                + " - a slider whose default is outside its range snaps the "
-                + "number the moment the panel is built, so the burst that opens "
-                + "is not the burst the shader describes");
         var dialText = PanelText.Load(
             ProjectSettings.GlobalizePath("res://") + "effects.json");
-        Check("and the panel file knows every one of them",
-            dialText.Loaded
-            && dialRows.All(r => dialText.RowIds.Contains(r.Id)),
-            dialText.Loaded
-                ? $"{dialRows.Count(r => !dialText.RowIds.Contains(r.Id))} rows are "
-                  + "missing from effects.json, so they open with a bare name and "
-                  + "no note"
-                : $"effects.json did not load: {dialText.Error}");
         var puffRows = EffectsBench.PuffRows(dialBench).ToList();
         var scarRows = EffectsBench.ScarRows(dialBench).ToList();
         Check("and the file names nothing the panel does not build",
             dialText.Loaded
-            && dialText.RowIds.All(id => dialRows.Any(r => r.Id == id)
-                                         || puffRows.Any(r => r.Id == id)
+            && dialText.RowIds.All(id => puffRows.Any(r => r.Id == id)
                                          || scarRows.Any(r => r.Id == id)
                                          || id.StartsWith("he.crater.")
                                          || !id.Contains('.')
@@ -5588,27 +5393,8 @@ public static class SelfTest
             $"seated at {sizedAt} and at {sized.Transform.Origin} once sized "
             + $"{sized.Transform.Basis.Scale} - a burst that grows about its middle "
             + "walks off the crater it dug");
-        var sizedToo = new ProcBlast();
-        sizedToo.Sit(new Vector2(120.0f, 64.0f), 53.7f, 0.5f, 0.87f);
-        Vector3 sizedTooAt = sizedToo.Transform.Origin;
-        sizedToo.Might = 0.4f;
-        Check("and the computed one does it the same way",
-            sizedToo.Transform.Origin.IsEqualApprox(sizedTooAt)
-            && Mathf.IsEqualApprox(sizedToo.Transform.Basis.Scale.X, 0.4f),
-            "two bursts sized by two rules is two things to get wrong, and the "
-            + "harness sizes both from one list of calibres");
         sized.Free();
-        sizedToo.Free();
         sheeted.Free();
-
-        // An event, not a loop - the whole of what separates this clock from the
-        // fire's. Out means nothing drawn, rather than resting on a first frame.
-        Check("the burst is out until it is fired, and out again when it is done",
-            !burst.Alive
-            && Fired(burst, 0.0).Alive
-            && !Fired(burst, burst.Life + 0.05).Alive,
-            "a burst that rests on a frame is a scorch mark that never leaves, "
-            + "and one that never ends is a board that fills up with them");
 
         // The one that broke, and it broke silently: the quad is placed by Trunk
         // and the mark is rasterised by Ground, so the two have to be reading the
@@ -5654,58 +5440,6 @@ public static class SelfTest
             !pits.Any,
             "a board that comes back shelled is a board that was not reset");
 
-        Theme("which burst the board raises");
-        // Two implementations of one effect - docs/blast.md - and which of them a
-        // landed round raises is a setting on the stage rather than a swap of the
-        // call. These are the three things that can go wrong with that: the
-        // default, the routing, and the two pools staying separate.
-        if (stage is null)
-        {
-            Note("  no stage on this board - nothing to raise a burst on");
-        }
-        else
-        {
-            Check("the board raises the imported burst by default",
-                stage.Blast == BlastSource.Sheet,
-                $"the stage says {stage.Blast} - the flipbook is what ships, and "
-                + "--burst built is how the computed one is asked for");
-            // <b>Behavioural, because the routing is the claim.</b> A test that
-            // read the field would be a test that the field is the field; what
-            // has to be true is that Land puts the round in the pool the field
-            // names. Fired on the live stage and put back out afterwards - at
-            // startup there is nothing on the board to disturb, and a clock at -1
-            // draws nothing.
-            BlastSource was = stage.Blast;
-            Vector2 nowhere = stage.Origin;
-            stage.Blast = BlastSource.Sheet;
-            stage.Land(nowhere, 0.0f);
-            bool sheetLit = stage.Booming.Any(b => b.Alive)
-                            && !stage.Bursting.Any(b => b.Alive);
-            foreach (SheetBlast b in stage.Booming)
-                b.Douse();
-            stage.Blast = BlastSource.Built;
-            stage.Land(nowhere, 0.0f);
-            bool builtLit = stage.Bursting.Any(b => b.Alive)
-                            && !stage.Booming.Any(b => b.Alive);
-            foreach (ProcBlast b in stage.Bursting)
-                b.Douse();
-            stage.Blast = was;
-            stage.Pits?.Fill();
-            Check("and Land puts the round in the pool the setting names",
-                sheetLit && builtLit,
-                $"sheet asked for gave {(sheetLit ? "the sheet" : "the wrong pool")}, "
-                + $"built gave {(builtLit ? "the computed one" : "the wrong pool")} "
-                + "- a setting that does not route is a flag that reads as not "
-                + "arriving");
-            Check("and the two pools are separate, six each",
-                stage.Bursting.Count == Stage3D.Bursts
-                && stage.Booming.Count == Stage3D.Bursts
-                && !ReferenceEquals(stage.Bursting, stage.Booming),
-                $"{stage.Bursting.Count} computed and {stage.Booming.Count} "
-                + "imported - one shared pool would make the choice a thing that "
-                + "outlives the round that made it");
-        }
-
         Theme("the dust a gun kicks off the ground");
         // ProcKick, and the four frames of a firing tank it was read off. Most of
         // these are the burst's own assertions asked of the second effect built
@@ -5717,17 +5451,20 @@ public static class SelfTest
             && ProcKick.GlowCode.Contains(Stage3D.FlameInk),
             "the profile, the tearing, the packing and the light on a cloud of "
             + "earth are one text, or eleven tuned numbers exist twice");
-        Check("and the burst reads that same text, not a copy of it",
-            ProcBlast.DustCode.Contains(ProcBlast.DustInk)
+        Check("and the other three read that same text, not a copy of it",
+            ProcSlam.DustSlamCode.Contains(ProcBlast.DustInk)
+            && ProcSpall.DustSpallCode.Contains(ProcBlast.DustInk)
+            && ProcRack.DustCode.Contains(ProcBlast.DustInk)
             && ProcBlast.DustInk.Contains("void dust_part(")
             && ProcBlast.DustInk.Contains("float dust_mass(")
             && ProcBlast.DustInk.Contains("float dust_lit("),
-            "the shared block has to be what both of them actually compile");
+            "the shared block has to be what all four of them actually compile - "
+            + "and it is all that is left of the burst it was extracted from");
         Check("and neither of them redefines what the shared text defines",
             !ProcKick.DustKickCode.Replace(ProcBlast.DustInk, "")
                      .Contains("void dust_part(")
-            && !ProcBlast.DustCode.Replace(ProcBlast.DustInk, "")
-                         .Contains("float dust_mass("),
+            && !ProcSlam.DustSlamCode.Replace(ProcBlast.DustInk, "")
+                          .Contains("float dust_mass("),
             "a second definition beside the shared one is the copy this was "
             + "extracted to prevent, wearing the extraction as a disguise");
         // The one that caught a real defect before any screenshot was taken - and
@@ -6098,7 +5835,6 @@ public static class SelfTest
             // other three. Fired on the live stage and put back out afterwards.
             stage.Spall(stage.Origin, 0.0f, Vector2.Right, Vector2.Zero, false);
             bool ownPool = stage.Spalling.Any(x => x.Alive)
-                           && !stage.Bursting.Any(x => x.Alive)
                            && !stage.Booming.Any(x => x.Alive)
                            && !stage.Kicking.Any(x => x.Alive)
                            && !stage.Slamming.Any(x => x.Alive);
@@ -6227,9 +5963,9 @@ public static class SelfTest
         Check("and it lasts longer than the ricochet and nothing like the shell in"
               + " the ground",
             slam.Life > ProcSpall.LifeDefault
-            && slam.Life < ProcBlast.LifeDefault,
+            && slam.Life < SheetBlast.LifeDefault,
             $"{slam.Life:F2}s between the bounce's {ProcSpall.LifeDefault:F2} and "
-            + $"the burst's {ProcBlast.LifeDefault:F2} - there is no ground under "
+            + $"the burst's {SheetBlast.LifeDefault:F2} - there is no ground under "
             + "this one to feed a column and nothing ballistic to wait for");
         // <b>The absence, and it is as much of the difference as the fireball
         // is.</b> The ricochet's two bolts are the round itself carrying on, and
@@ -6434,7 +6170,6 @@ public static class SelfTest
             stage.Slam(stage.Origin, 0.0f, Vector2.Right, Vector2.Zero, false);
             bool slamPool = stage.Slamming.Any(x => x.Alive)
                             && !stage.Spalling.Any(x => x.Alive)
-                            && !stage.Bursting.Any(x => x.Alive)
                             && !stage.Booming.Any(x => x.Alive)
                             && !stage.Kicking.Any(x => x.Alive);
             foreach (ProcSlam x in stage.Slamming)
@@ -6779,7 +6514,6 @@ public static class SelfTest
         // plume.
         Check("every built mass on this board opts out of shading, or it is black",
             ProcRack.DustCode.Contains("render_mode unshaded")
-            && ProcBlast.DustCode.Contains("render_mode unshaded")
             && ProcKick.DustKickCode.Contains("render_mode unshaded")
             && ProcSlam.DustSlamCode.Contains("render_mode unshaded")
             && ProcSpall.DustSpallCode.Contains("render_mode unshaded")
@@ -6934,16 +6668,18 @@ public static class SelfTest
         // is.</b> Every other burst throws along the ground; this one is confined
         // by a hull and leaves through the roof, and a quad cut to a burst's
         // proportions would take the column off flat.
+        var groundBurst = new SheetBlast();
         Check("and it is the one burst on this board that is taller than wide",
             rack.Tall > rack.Flank * 2.0f
-            && new ProcBlast().Tall < new ProcBlast().Flank * 2.0f
+            && groundBurst.Climb < groundBurst.Reach * 4.0f
             && slam.Tall < slam.Flank * 2.0f
             && spall.Tall < spall.Flank * 2.0f,
             $"{rack.Flank * 2.0f:F2} wide by {rack.Tall:F2} tall, against the "
-            + $"crater's {new ProcBlast().Flank * 2.0f:F2} by "
-            + $"{new ProcBlast().Tall:F2}, the plate burst's "
+            + $"burst in the ground climbing {groundBurst.Climb:F2} on a reach of "
+            + $"{groundBurst.Reach:F2}, the plate burst's "
             + $"{slam.Flank * 2.0f:F2} by {slam.Tall:F2} and the ricochet's "
             + $"{spall.Flank * 2.0f:F2} by {spall.Tall:F2}");
+        groundBurst.Free();
         // <b>The deck does not move with the size, and the check asserts the
         // product rather than the number.</b> This is the defect ProcSlam paid
         // for - a burst that put its own impact point Might times too far from
@@ -17507,15 +17243,5 @@ public static class SelfTest
         var board = new Craters();
         board.Dig(spot, lift, much, wide);
         return !board.Any;
-    }
-
-    /// <summary>A burst set off and run on for so long, so the clock can be
-    /// asserted without a frame going past. Ticked in one step rather than sixty:
-    /// the clock is a sum, so the two are the same number.</summary>
-    private static ProcBlast Fired(ProcBlast burst, double after)
-    {
-        burst.Fire();
-        burst.Tick(after);
-        return burst;
     }
 }

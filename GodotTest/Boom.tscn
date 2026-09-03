@@ -1,7 +1,0 @@
-[gd_scene format=3]
-
-[ext_resource type="Script" path="res://scripts/EffectsBench.cs" id="1_effects"]
-
-[node name="Boom" type="Node2D"]
-script = ExtResource("1_effects")
-Sheet = true

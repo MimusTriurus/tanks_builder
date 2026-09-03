@@ -43,7 +43,7 @@ public sealed partial class PitArt : Node3D
     private readonly Dictionary<string, float> _live = new();
 
     /// <summary>Build the plane. The two camera terms are the field's, handed in
-    /// rather than read, for <see cref="ProcBlast.Build"/>'s reason.</summary>
+    /// rather than read, for <see cref="SheetBlast.Build"/>'s reason.</summary>
     public void Build(float squash, float rise)
     {
         _ink = new ShaderMaterial { Shader = Etching, RenderPriority = Stage3D.StandOrder };
@@ -96,7 +96,7 @@ public sealed partial class PitArt : Node3D
             _decal.Visible = false;
     }
 
-    /// <summary>One number of the crater shader, live - <see cref="ProcBlast.Dial"/>
+    /// <summary>One number of the crater shader, live - <see cref="SheetBlast.Dial"/>
     /// exactly, read out of the shader's own text for its reason.</summary>
     public float Dial(string uniform)
     {

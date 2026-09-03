@@ -100,7 +100,7 @@ public sealed partial class ProcSlam : Node3D
     public float Reach = ReachDefault;
 
     /// <summary>The two numbers something else has to be able to ask for -
-    /// <see cref="ProcBlast.ReachDefault"/>'s arrangement and its reason: the
+    /// <see cref="SheetBlast.ReachDefault"/>'s arrangement and its reason: the
     /// frame's uniforms are declared at zero on purpose, so the shader text is not
     /// where a panel can read an opening value.</summary>
     public const float ReachDefault = 0.30f;
@@ -124,7 +124,7 @@ public sealed partial class ProcSlam : Node3D
     public float Tall = 1.25f;
 
     /// <summary>How far above the contact point the effect is seated, and the band
-    /// it fades out over below that - <see cref="ProcBlast.Root"/>'s pair and its
+    /// it fades out over below that - the burst frame's own <c>root</c> pair and its
     /// reason, at the ricochet's values because the ground is the ground.
     /// </summary>
     public float Root = 0.02f;
@@ -304,7 +304,7 @@ public sealed partial class ProcSlam : Node3D
 
     /// <summary>
     /// How big this one is, as a multiple of the tuned burst -
-    /// <see cref="ProcBlast.Might"/>'s argument entire, including that it scales
+    /// <see cref="SheetBlast.Might"/>'s argument entire, including that it scales
     /// about the seat rather than about its own middle.
     ///
     /// <b>What it does <em>not</em> scale is where the round hit</b>, and that
@@ -508,11 +508,11 @@ public sealed partial class ProcSlam : Node3D
     private float _tile = 1.0f;
 
     /// <summary>Set it off. Restarts rather than refusing, for
-    /// <see cref="ProcBlast.Fire"/>'s reason: the organ that fires it is a key on a
+    /// <see cref="SheetBlast.Fire"/>'s reason: the organ that fires it is a key on a
     /// bench.</summary>
     public void Fire() => _clock = 0.0f;
 
-    /// <summary>Whether the clock stands still - <see cref="ProcBlast.Hold"/>, and
+    /// <summary>Whether the clock stands still - <see cref="SheetBlast.Hold"/>, and
     /// the main way an event gets looked at.</summary>
     public bool Hold;
 

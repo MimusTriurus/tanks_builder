@@ -743,7 +743,6 @@ public sealed partial class Main : SceneRoot
 		{
 			Field = _field, Origin = _origin, Eye = _camera,
 			// Which of the two bursts a landed round raises - see Stage3D.Blast.
-			Blast = _blastSource,
 			// And whether a round into the pond raises a plume instead of either
 			// of them - see Stage3D.Spout.
 			Spout = _spout,
@@ -1250,16 +1249,9 @@ public sealed partial class Main : SceneRoot
 	/// it falls back on its own for a tank that has none.</summary>
 	private FlashSource _flashSource = FlashSource.Rendered;
 
-	/// <summary>Which burst a landed round raises, from <c>--burst</c>. Pushed
-	/// onto the stage when it is built; the stage's own default is the same one,
-	/// so a run with no flag and a run with <c>--burst sheet</c> are one
-	/// picture.</summary>
-	private BlastSource _blastSource = BlastSource.Sheet;
-
 	/// <summary>Whether a round into water raises a plume - see
 	/// <see cref="Stage3D.Spout"/>. Held here rather than written straight to the
-	/// stage for <see cref="_blastSource"/>'s reason: flags are parsed before the
-	/// board is built.</summary>
+	/// stage because flags are parsed before the board is built.</summary>
 	private bool _spout = true;
 
 	/// <summary>Recoil taken by the turret alone - key L, or --recoil-turret.
@@ -1650,14 +1642,6 @@ public sealed partial class Main : SceneRoot
 			// replaced it without also changing its level or its pivot.
 			else if (userArgs[i] == "--recoil-shear")
 				_tick.RecoilShear = true;
-			// Which burst a landed round raises - see Stage3D.Blast. Not in
-			// FlagRows, because it has no panel row to be overruled by: the
-			// choice lives on the stage rather than in panel.json.
-			else if (userArgs[i] == "--burst" && i + 1 < userArgs.Length)
-				_blastSource = userArgs[++i].Equals("built",
-					StringComparison.OrdinalIgnoreCase)
-					? BlastSource.Built
-					: BlastSource.Sheet;
 			// Whether a bounce draws the built ricochet or the rendered burst it
 			// used to - see TankTick.Bounce. Out of FlagRows for --burst's
 			// reason: no panel row to be overruled by.

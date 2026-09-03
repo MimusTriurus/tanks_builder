@@ -19,20 +19,14 @@ namespace TankSpriteTest;
 /// shared: the same board, the same aim, the same crater, the same stage,
 /// the same <see cref="Stage3D.Boom"/> call the harness will make.
 ///
-/// <b>Both pools live in the stage at once and that is on purpose</b> - see
-/// <see cref="Stage3D.Boom"/>. The comparison worth having is the two bursts on
-/// one board at one frame, and a flag that swapped one for the other would make
-/// that a comparison against a memory.
+/// <b>It won the comparison it was imported for, and then the comparison
+/// ended.</b> Both bursts lived in the stage at once, on one board at one frame,
+/// because that is the only honest way to judge two pictures of one event - and
+/// this is the one that stayed. What came off with the other is listed in
+/// docs/blast.md.
 /// </summary>
 public sealed partial class EffectsBench
 {
-    /// <summary>Which burst this scene is about: the flipbook one when set, the
-    /// computed one otherwise. An export so <c>Boom.tscn</c> is the same script
-    /// with one field turned on rather than a second copy of this bench, and a
-    /// flag as well (<c>--sheet</c>) so a capture of either can be taken off
-    /// either scene.</summary>
-    [Export] public bool Sheet;
-
     /// <summary>
     /// One dial of the imported burst: which half of it owns the number.
     ///
@@ -40,8 +34,8 @@ public sealed partial class EffectsBench
     /// The model is in C# - where the puffs are, when they are born, how fast they
     /// slow down - and the look is in the shader, and a dial has to know which,
     /// because writing a model number into a material is silent and writing a
-    /// uniform into the model is a warning. <see cref="ProcBlast"/> needed no such
-    /// distinction: every one of its sixty-two numbers is a uniform.
+    /// uniform into the model is a warning. The computed burst this outlived needed
+    /// no such distinction: every one of its sixty-two numbers was a uniform.
     /// </summary>
     private readonly record struct Puff(string Group, string Id, bool Shader,
                                         string Name, string Label,
@@ -54,7 +48,8 @@ public sealed partial class EffectsBench
     /// the whole argument for the import: the shape does not need describing,
     /// because it was simulated once and rendered into sixty-four frames. What is
     /// left to say is how many puffs there are, where they go, and how they are
-    /// lit.
+    /// lit. That ratio is also why the computed burst is gone - see
+    /// docs/blast.md.
     /// </summary>
     private static readonly Puff[] Puffs =
     {
@@ -208,23 +203,15 @@ public sealed partial class EffectsBench
 
     private float _puffLife = SheetBlast.LifeDefault;
 
-    /// <summary>Whether the computed burst goes off under the imported one, so the
-    /// two can be seen composed rather than compared - see
-    /// <see cref="Burst"/>. Off, because what this scene judges is the import.
-    /// </summary>
-    private bool _pair;
-
-    /// <summary>The sheet bursts that exist, or none before the first shot.</summary>
     private IEnumerable<SheetBlast> Booming() =>
         _stage?.Booming ?? Array.Empty<SheetBlast>();
 
     /// <summary>
     /// The imported burst's side of the panel.
     ///
-    /// Same five organs at the top as the computed burst's - fire, refire, hold,
-    /// scrub, readout - because those are properties of an event rather than of
-    /// one effect, and then its own three groups. The crater group is the board's
-    /// and is built by the caller for both.
+    /// Five organs at the top - fire, refire, hold, scrub, readout - because those
+    /// are properties of an event rather than of one effect, and then its own three
+    /// groups. The crater group is the board's and is built by the caller.
     /// </summary>
     private void SheetPanel()
     {
@@ -232,13 +219,6 @@ public sealed partial class EffectsBench
             return;
         _panel.Heading("sheet", "the imported burst");
         _panel.Press("sheet.fire_now", "set one off", Burst);
-        _panel.Toggle("sheet.pair", "with the computed burst under it",
-                      () => _pair, v =>
-                      {
-                          _pair = v;
-                          if (_refire)
-                              Burst();
-                      });
         _panel.Toggle("sheet.refire", "restart on every change",
                       () => _refire, v => _refire = v);
         _panel.Toggle("sheet.hold", "hold the clock",

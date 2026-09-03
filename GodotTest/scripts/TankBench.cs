@@ -310,11 +310,6 @@ public sealed partial class TankBench : SceneRoot
     /// </summary>
     private FlashSource _flashSource = FlashSource.Rendered;
 
-    /// <summary>Which burst a landed round raises, from <c>--burst</c> - the
-    /// harness's field and the same default, because the stage's default is what
-    /// both of them are agreeing with.</summary>
-    private BlastSource _blastSource = BlastSource.Sheet;
-
     /// <summary>Whether a round into water raises a plume - see
     /// <see cref="Stage3D.Spout"/>.</summary>
     private bool _spout = true;
@@ -537,14 +532,6 @@ public sealed partial class TankBench : SceneRoot
                     break;
                 case "--fire":
                     _fireAtStart = true;
-                    break;
-                // Which burst a landed round raises - the harness's flag, spelled
-                // its way so one flag means one thing on both boards.
-                case "--burst" when i + 1 < args.Length:
-                    _blastSource = args[++i].Equals("built",
-                        StringComparison.OrdinalIgnoreCase)
-                        ? BlastSource.Built
-                        : BlastSource.Sheet;
                     break;
                 // Whether a bounce draws the built ricochet or the rendered burst
                 // it used to - the harness's flag, spelled its way.
@@ -1052,7 +1039,6 @@ public sealed partial class TankBench : SceneRoot
             Pits = _pits,
             Surf = _surf, Sea = _sea, Wash = _wash,
             // Which of the two bursts a landed round raises - see Stage3D.Blast.
-            Blast = _blastSource,
             // And whether a round into the pond raises a plume - Stage3D.Spout.
             Spout = _spout,
         };

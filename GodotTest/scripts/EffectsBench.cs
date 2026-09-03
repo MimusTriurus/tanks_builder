@@ -152,8 +152,6 @@ public sealed partial class EffectsBench : SceneRoot
                 continue;
             if (args[i] == "--fire")
                 _shoot = true;
-            else if (args[i] == "--sheet")
-                Sheet = true;
             else if (args[i] == "--might" && i + 1 < args.Length
                      && float.TryParse(args[i + 1], NumberStyles.Float,
                                        CultureInfo.InvariantCulture, out float sized))
@@ -317,7 +315,6 @@ public sealed partial class EffectsBench : SceneRoot
         // Every burst opens on whatever the panel says, whichever of the six it
         // turns out to be - see EffectsBench.Panel. Both kinds, because both
         // pools live in the stage at once and either key may be the one pressed.
-        _stage.Dress = Dress;
         _stage.Attire = Attire;
         _stage.Scar = Scar;
 
@@ -405,39 +402,18 @@ public sealed partial class EffectsBench : SceneRoot
         }
         if (_stage is null)
             return;
-        // Which of the two this scene is about. The board, the crater and the
-        // hook are the same either way; what differs is which pool the shot comes
-        // out of - see EffectsBench.Sheet on why that is a scene and not a
-        // setting.
         Vector2 spot = _stage.Origin + _field.CellCentre(_at);
         float lift = _field.LevelAt(_at) * _field.Lift;
-        // <b>And on the pond, neither of the two is the subject.</b> This bench
-        // exists to put the computed burst and the imported one on the same cell
-        // at the same frame - see EffectsBench.Sheet - and on water that
-        // comparison has no meaning: both of them are earth, and the answer for
-        // water is a third effect with nothing to be compared against. So the wet
-        // cell goes where the board's own shots go, through the one question the
-        // stage owns. The pond in the far corner of this board is what the plume
-        // was judged on.
+        // <b>And on the pond it is not this burst but this burst white.</b> The
+        // wet cell goes where the board's own shots go, through the one question
+        // the stage owns - see Stage3D.Wet and SheetBlast.Wet. The pond in the far
+        // corner of this board is what that was judged on.
         if (_stage.Wet(spot, out float top))
         {
             _stage.Splash(spot, top);
             return;
         }
-        if (Sheet)
-        {
-            _stage.Boom(spot, lift);
-            // <b>And the computed one too, when asked.</b> The imported cloud is
-            // smoke and fire and nothing else - no ground rings, no cone of thrown
-            // earth - and those are what the other burst is best at. Whether the
-            // answer is one effect or the flipbook cloud wearing the other's
-            // ground layer is a question about a picture, so the bench can draw
-            // the picture: see docs/blast.md.
-            if (_pair)
-                _stage.Burst(spot, lift);
-        }
-        else
-            _stage.Burst(spot, lift);
+        _stage.Boom(spot, lift);
     }
 
     /// <summary>
@@ -663,8 +639,7 @@ public sealed partial class EffectsBench : SceneRoot
                    + "its smoke renders black here - see docs/blast.md\n"
                    + "SPACE re-fires, R resets, F12 shoots";
         return $"board {_map.Columns}x{_map.Rows}, wood, pond and a ring of brick, "
-               + (Sheet ? "imported (flipbook) burst" : "computed burst")
-               + $" at {_at.X},{_at.Y}\n"
+               + $"burst at {_at.X},{_at.Y}\n"
                + $"{_pits.Pits.Count} crater(s) of {Craters.Capacity}\n"
                + "SPACE fires, double click a cell to fire on it,\n"
                + "TAB the panel, middle click a cell to aim,\n"

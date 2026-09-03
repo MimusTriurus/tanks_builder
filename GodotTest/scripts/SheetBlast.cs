@@ -90,14 +90,14 @@ public sealed partial class SheetBlast : Node3D
     /// <summary>The whole event, in seconds. The pack's 2.13 shortened: at 2.13
     /// the tail is a grey smear standing on the board long after the shot reads
     /// as over, and a burst that outlasts the shell's own dust cone
-    /// (<see cref="ProcBlast.LifeDefault"/>) would be the slower of the two
+    /// (<see cref="SheetBlast.LifeDefault"/>) would be the slower of the two
     /// bursts.</summary>
     public const float LifeDefault = 2.05f;
 
     public float Life = LifeDefault;
 
     /// <summary>How far the cloud's own puffs get from the seat, in tile widths.
-    /// The one size of the thing, <see cref="ProcBlast.Reach"/>'s role.</summary>
+    /// The one size of the thing, <see cref="SheetBlast.Reach"/>'s role.</summary>
     public const float ReachDefault = 0.17f;
 
     public float Reach = ReachDefault;
@@ -299,7 +299,7 @@ public sealed partial class SheetBlast : Node3D
 
     public float Age => _clock;
 
-    /// <summary>Whether the clock stands still - <see cref="ProcBlast.Hold"/>'s
+    /// <summary>Whether the clock stands still - <see cref="SheetBlast.Hold"/>'s
     /// reason, word for word, and the pack agrees: it spends a uniform
     /// (<c>still_frame</c>) on freezing every particle on one frame of the sheet.
     /// That uniform is here too, and this is the other half of it - the frame the
@@ -327,7 +327,7 @@ public sealed partial class SheetBlast : Node3D
     /// <summary>
     /// Build the cloud. <paramref name="tile"/> is the hex's width in screen px -
     /// every length above is in those - and the two camera terms are the field's,
-    /// handed in rather than read, for <see cref="ProcBlast.Build"/>'s reason.
+    /// handed in rather than read, for <see cref="SheetBlast.Build"/>'s reason.
     /// </summary>
     public void Build(float tile, float squash, float rise)
     {
@@ -401,7 +401,7 @@ public sealed partial class SheetBlast : Node3D
     private Vector3 _nudge;
 
     /// <summary>Where the burst stands, through the transform a tree gets - see
-    /// <see cref="ProcBlast.Sit"/>. The seat's own world height goes to the
+    /// <see cref="SheetBlast.Sit"/>. The seat's own world height goes to the
     /// shader as well, because the ground fade is measured from it.</summary>
     public void Sit(Vector2 ground, float lift, float squash, float rise)
     {
@@ -712,7 +712,7 @@ public sealed partial class SheetBlast : Node3D
         return last;
     }
 
-    /// <summary>One number of the puff shader, live - <see cref="ProcBlast.Dial"/>
+    /// <summary>One number of the puff shader, live - <see cref="SheetBlast.Dial"/>
     /// exactly, and read out of the shader's own text for the same reason: the
     /// uniforms are where the numbers live.</summary>
     public float Dial(string uniform)

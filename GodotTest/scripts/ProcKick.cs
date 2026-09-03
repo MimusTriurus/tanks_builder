@@ -83,7 +83,7 @@ public sealed partial class ProcKick : Node3D
     public float Reach = ReachDefault;
 
     /// <summary>The three numbers something else has to be able to ask for -
-    /// <see cref="ProcBlast.ReachDefault"/>'s arrangement and its reason: the
+    /// <see cref="SheetBlast.ReachDefault"/>'s arrangement and its reason: the
     /// frame's uniforms are declared at zero on purpose, so the shader text is
     /// not where a panel can read an opening value.</summary>
     public const float ReachDefault = 0.62f;
@@ -137,7 +137,7 @@ public sealed partial class ProcKick : Node3D
     public float Back = BackDefault;
 
     /// <summary>How far above the contact point the cloud is seated, and the
-    /// band it fades out over below that - <see cref="ProcBlast.Root"/>'s pair
+    /// band it fades out over below that - the burst frame's own <c>root</c> pair
     /// and its reason. Smaller than the burst's, because this sits *on* the
     /// ground rather than a little above it.</summary>
     public float Root = 0.02f;
@@ -249,7 +249,7 @@ public sealed partial class ProcKick : Node3D
     }
 
     /// <summary>How big this one is, as a multiple of the tuned kick -
-    /// <see cref="ProcBlast.Might"/>'s argument entire, including that it scales
+    /// <see cref="SheetBlast.Might"/>'s argument entire, including that it scales
     /// about the seat rather than about its own middle.</summary>
     public float Might
     {
@@ -359,11 +359,11 @@ public sealed partial class ProcKick : Node3D
     private float _tile = 1.0f;
 
     /// <summary>Set it off. Restarts rather than refusing, for
-    /// <see cref="ProcBlast.Fire"/>'s reason: the organ that fires it is a key on
+    /// <see cref="SheetBlast.Fire"/>'s reason: the organ that fires it is a key on
     /// a bench.</summary>
     public void Fire() => _clock = 0.0f;
 
-    /// <summary>Whether the clock stands still - <see cref="ProcBlast.Hold"/>,
+    /// <summary>Whether the clock stands still - <see cref="SheetBlast.Hold"/>,
     /// and the main way an event gets looked at.</summary>
     public bool Hold;
 
@@ -401,7 +401,7 @@ public sealed partial class ProcKick : Node3D
 
     /// <summary>One number of one of the two shaders, live - read out of the
     /// shader's own text the first time it is asked for and never kept twice.
-    /// <see cref="ProcBlast.Dial(ProcBlast.Part, string)"/>'s arrangement and its
+    /// <see cref="SheetBlast.Dial(string)"/>'s arrangement and its
     /// reason: the uniforms are where the numbers live, so a panel carrying its
     /// own copy of a default agrees until the first edit lands in one of
     /// them.</summary>

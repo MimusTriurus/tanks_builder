@@ -69,7 +69,7 @@ namespace TankSpriteTest;
 public sealed partial class ProcRack : Node3D
 {
     /// <summary>
-    /// How high it throws, in tile widths - <see cref="ProcBlast.Reach"/>'s
+    /// How high it throws, in tile widths - <see cref="SheetBlast.Reach"/>'s
     /// number and its argument entire: every other length in here is a ratio to
     /// it, so a bigger rack is this rack at a bigger <see cref="Might"/> rather
     /// than a second set of numbers.
@@ -82,7 +82,7 @@ public sealed partial class ProcRack : Node3D
     public float Reach = ReachDefault;
 
     /// <summary>The two numbers something else has to be able to ask for -
-    /// <see cref="ProcBlast.ReachDefault"/>'s reason: a bench that wants to reset
+    /// <see cref="SheetBlast.ReachDefault"/>'s reason: a bench that wants to reset
     /// a dial needs the tuned value, and reading it off a live instance gets
     /// whatever the last shot left.</summary>
     public const float ReachDefault = 0.55f;
@@ -113,14 +113,14 @@ public sealed partial class ProcRack : Node3D
     public float Tall = 1.85f;
 
     /// <summary>How far above the contact point the effect is seated, and the
-    /// band it fades out over below it - <see cref="ProcBlast.Root"/>'s pair,
+    /// band it fades out over below it - the burst frame's own <c>root</c> pair,
     /// unchanged, because the ground under a wreck is the same ground.</summary>
     public float Root = 0.02f;
     public float Fade = 0.050f;
 
     /// <summary>How far the rings' own plane reaches, in tile widths - the plane
     /// is what carries them, so this is a mesh size rather than a uniform.
-    /// Short of <see cref="ProcBlast.RingReachDefault"/>: a rack lifts the hull it
+    /// Short of the crater rings' own reach: a rack lifts the hull it
     /// is inside rather than the cell it is standing on, so the ring on the ground
     /// is the smaller half of the event here and the larger half there.</summary>
     public float RingReach = 0.34f;
@@ -410,12 +410,12 @@ public sealed partial class ProcRack : Node3D
     }
 
     /// <summary>Set it off. Restarts rather than refusing, for
-    /// <see cref="ProcBlast.Fire"/>'s reason: a pool hands out the oldest slot,
+    /// <see cref="SheetBlast.Fire"/>'s reason: a pool hands out the oldest slot,
     /// and a slot that refused to restart would be a burst that did not
     /// happen.</summary>
     public void Fire() => _clock = 0.0f;
 
-    /// <summary>Whether the clock stands still - <see cref="ProcBlast.Hold"/>,
+    /// <summary>Whether the clock stands still - <see cref="SheetBlast.Hold"/>,
     /// and by its reason.</summary>
     public bool Hold;
 
