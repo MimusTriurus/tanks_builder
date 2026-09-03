@@ -79,11 +79,11 @@ public sealed partial class ProcSpout : Node3D
     /// it, so a bigger round is this plume at a bigger <see cref="Might"/> rather
     /// than a second set of numbers.
     ///
-    /// <b>Half again the ground burst's, and that is the model rather than the
-    /// taste.</b> Earth has to be broken before it can be thrown and most of the
-    /// energy goes into breaking it; water is already loose, so the same round
-    /// puts more of itself into height. Short of the rack's, which is a confined
-    /// charge venting through a hole.
+    /// <b>It governs the BODY of water and not the vapour</b>, which is the
+    /// structure of an underwater burst and is read off a reference film: the bulk
+    /// goes up a fraction of what the vapour does and is back in the pond while
+    /// the vapour still stands over it. The vapour's height is
+    /// <c>column_climb</c>, and it is more than twice this.
     /// </summary>
     public float Reach = ReachDefault;
 
@@ -91,7 +91,8 @@ public sealed partial class ProcSpout : Node3D
     /// <see cref="ProcBlast.ReachDefault"/>'s reason: a bench that wants to reset
     /// a dial needs the tuned value, and reading it off a live instance gets
     /// whatever the last shot left.</summary>
-    public const float ReachDefault = 0.42f;
+    /// <inheritdoc cref="Reach"/>
+    public const float ReachDefault = 0.40f;
 
     /// <summary>
     /// How long the whole event runs.
@@ -102,7 +103,7 @@ public sealed partial class ProcSpout : Node3D
     /// haze standing over the entry. Water leaves no mark, so when it is finished
     /// the cell is exactly what it was.
     /// </summary>
-    public const float LifeDefault = 1.60f;
+    public const float LifeDefault = 2.00f;
 
     /// <summary>
     /// The quad, in tile widths: half-width either side of the seat, and height
@@ -113,7 +114,7 @@ public sealed partial class ProcSpout : Node3D
     /// height. Checked against <see cref="Bounds"/>, which is asked of the model.
     /// </summary>
     public float Flank = 0.62f;
-    public float Tall = 0.86f;
+    public float Tall = 1.45f;
 
     /// <summary>
     /// How far above the contact point the effect is seated, and the band it
@@ -201,7 +202,10 @@ public sealed partial class ProcSpout : Node3D
 
         // The column: the tallest thing here, and what the quad's height is cut
         // to.
-        float columnR = Uniform("column_size") * 1.45f * 1.50f;
+        // The widest an element of it gets is at its foot, where the taper is
+        // at 1.20 - see the column loop, which is the one place this file departs
+        // from the burst's own code.
+        float columnR = Uniform("column_size") * 1.45f * 1.20f;
         Reach(new Vector2(Uniform("column_sway"), Uniform("column_climb") * 1.25f),
               columnR, columnR * 1.25f);
 
@@ -470,30 +474,37 @@ BLAST_FRAME
 
 DUST_INK
 
-// The cone: how many, how long each lives, how wide it opens and how hard it
-// falls back. The lean is measured from straight up. <b>The burst's own numbers,
-// and the count is the whole of why this reads as water rather than as
-// confetti</b>: forty-four small elements over a narrow cone overlap into one
-// volume, and the shared ink's saturation is what turns the pile into a mass. The
-// first version of this family was twenty long crisp drops on their own paths,
-// and every one of them read as a separate white shape - which was reported, in
-// those words, as cartoonish.
-uniform int clods = 44;
+// <b>The body of water, and it is the family that rises less and comes back
+// fast.</b> That pairing is the whole structure of an underwater burst, and it was
+// read off a reference film rather than reasoned: the bulk of the water goes up a
+// fraction of what the vapour does and is back in the pond while the vapour is
+// still standing over it. So this family is ballistic - it rises and falls under
+// blast_throw, which is what earth's cone already did - and the vapour above it
+// does not fall at all. See column.
+//
+// <b>Bigger, softer and more numerous than the burst's clods, because it is a
+// mass rather than a fringe.</b> Earth's cone IS the thrown clods and its column
+// is a thin tail behind them; here the cone has to be the trunk, so its elements
+// are two thirds larger, the profile is nearer the cloud's than the clod's, and
+// the count is what makes them overlap into one volume. The first version of this
+// was twenty long crisp drops on their own paths and every one read as a separate
+// white shape - reported, in those words, as cartoonish.
+uniform int clods = 52;
 // <b>The burst's own, after a pass spent shortening it for the wrong reason.</b>
 // The cone fans out towards the end of its life and its elements stop overlapping,
 // which on white foam reads as lumps rather than as spray - and a shorter life
 // makes that WORSE, not better, because the age is a fraction of it: at 0.46 the
 // same element is further along its own arc at the same instant. What carries the
 // mass is not this family at all; see column.
-uniform float clod_life = 0.62;
+uniform float clod_life = 0.85;
 uniform float clod_stagger = 0.05;
 uniform float clod_narrow = 0.16;
-// <b>Wider than earth's, and it is the one number of the cone that water
-// changes.</b> A crater aims its own earth: the walls are what throw it into a
-// cone in the first place. A hole in water has no walls, so what leaves it leaves
-// in every direction there is.
-uniform float clod_wide = 0.95;
-uniform float clod_size = 0.024;
+// <b>Narrower than earth's, and for the reason the size is bigger: this is a
+// trunk.</b> The wide cone is what a crater's walls do to earth leaving them; the
+// body of water lifted by a charge under it goes up as a column and only its
+// outside sprays. What leaves sideways is the collar and the fastest few of these.
+uniform float clod_wide = 0.70;
+uniform float clod_size = 0.040;
 uniform float clod_stretch = 1.35;
 // <b>The burst's gain, restored after being lowered.</b> Cohesion here comes from
 // DENSITY, not from restraint: the shared ink saturates a pile-up, so a cone whose
@@ -505,11 +516,13 @@ uniform float clod_ink = 1.10;
 // How far off the middle an element starts - the burst's number and its reason:
 // everything leaving through the exact centre makes the base of the column a
 // needle and the cone a symmetrical flower.
-uniform float clod_born = 0.075;
-// The profile a thrown body keeps, against the cloud's own - the burst's number.
-// A clod of earth is a small body and so is a drop of water; what is NOT here is
-// the crisp 1.15 the first version reached for, which is what drew pills.
-uniform float clod_soft = 1.85;
+uniform float clod_born = 0.060;
+// <b>Softer than a clod of earth and short of the cloud, which is what a body of
+// water in the air actually is.</b> The burst keeps 1.85 because a clod is a small
+// hard body; this family is the trunk, so it wants most of the cloud's transition
+// and none of the crisp 1.15 the first version reached for - that number is what
+// drew pills.
+uniform float clod_soft = 2.20;
 
 // The collar: what is pushed out along the surface, and the half of the event
 // that says which cell it happened on. Elements lie flat - wide across and
@@ -532,28 +545,25 @@ uniform float collar_size = 0.038;
 uniform float collar_flat = 2.30;
 uniform float collar_ink = 1.00;
 
-// The column: what is still there when the water has come down, and what gives
-// the event its length. <b>Half the burst's life, and that is the one difference
-// between earth in the air and water in the air.</b> Dust hangs - it is ground
-// fine enough to be carried - and a plume falls back, so what is left over the
-// cell after a second is a haze rather than a column, and it is thinner and
-// shorter-lived than the earth's by construction.
-// <b>Bigger and denser than the burst's, and this is the family that had to
-// change.</b> A shell in earth throws a cone and leaves a thin column behind it;
-// a shell in water throws a cone that is the RAGGED FRINGE of a mass, and the mass
-// is the plume itself - which is what a suspension of water is, and what the cone
-// on its own can never be, because forty-four elements on forty-four paths stop
-// overlapping by construction. Read as the burst's thin tail the picture was a
-// handful of separate white lumps at every frame; the fix was to put a volume
-// behind them.
-uniform int column = 22;
-uniform float column_life = 1.05;
+// <b>The vapour and the fine spray: the tallest thing here by a distance, and the
+// slowest to leave.</b> This is the other half of the structure the reference
+// shows - it goes up twice as far as the body of water does and it does not come
+// back, because what is in it is too fine to fall. Earth's column is the same
+// family doing the same thing for a different reason: dust hangs because it is
+// ground fine enough to be carried. Water arrives at the same picture by boiling.
+//
+// So the two are told apart by height and by fate, not by colour: the body rises
+// less and drops fast, the vapour rises most and thins slowly. Read at the body's
+// own height - which is where this started, at 0.52 against a throw of 0.42 - the
+// two families sat on top of each other and the plume had no column at all.
+uniform int column = 26;
+uniform float column_life = 1.45;
 uniform float column_born = 0.02;
-uniform float column_stagger = 0.22;
-uniform float column_sway = 0.15;
-uniform float column_climb = 0.52;
-uniform float column_size = 0.075;
-uniform float column_ink = 1.05;
+uniform float column_stagger = 0.26;
+uniform float column_sway = 0.10;
+uniform float column_climb = 0.95;
+uniform float column_size = 0.085;
+uniform float column_ink = 1.00;
 
 // <b>What water in the air is, at its darkest and fully lit</b> - and this pair
 // is the whole of what makes the burst's own model into a plume. The dark stop is
@@ -592,8 +602,22 @@ void fragment() {
                              * pow(a, 0.75);
                 float up = column_climb * pow(a, 0.70)
                            * (0.30 + 0.95 * ember_hash(vec2(fk, 53.0)));
+                // <b>Thinner the higher it is, which is the one line of the
+                // burst's own loop that water turns round.</b> Earth's column
+                // widens with age and mushrooms, because dust spreads as it rises
+                // and there is nothing feeding it from below. A vapour column over
+                // a plume is fed from below all the while, so it is widest at its
+                // foot and tapers - and read the earth's way this family drew a
+                // head wider than its own trunk with a waist between them, which
+                // is a mushroom cloud rather than a spout.
+                // <b>Not called ''tall'': that is the quad's own height, declared
+                // by the shared frame.</b> A local of that name compiles to nothing
+                // on this backend and the whole quad draws solid black - which is
+                // how a failed shader looks here, and it looks nothing like a
+                // mistake in a number.
+                float high = clamp(up / max(column_climb, 1e-3), 0.0, 1.0);
                 float r = column_size * (0.55 + 0.9 * ember_hash(vec2(fk, 54.0)))
-                          * (0.45 + 1.05 * a);
+                          * (1.20 - 0.60 * high);
                 float gain = column_ink * (1.0 - exp(-a / 0.10))
                              * pow(max(1.0 - a, 0.0), 1.25);
                 dust_part(at, vec2(sway, up), r, r * 1.25, vec2(0.0, 1.0),
