@@ -4467,44 +4467,21 @@ public static class SelfTest
                 && TankTick.RackedBy(null),
                 "the plate that took the killing round is the one measured fact "
                 + "about it, so it is what chooses between the two deaths");
-            // <b>The pose is a cut and always will be, so it is hidden rather
-            // than softened.</b> There is no half-way frame between a turret laid
-            // on its ring and one knocked off it - the two are different layers of
-            // the atlas - and rendering one would be a third pose saying what a
-            // cut already says. What the veil buys is that the cut happens behind
-            // the thickest of the detonation. Measured, not chosen: coverage of
-            // the hull box peaks at 33.6% at 0.23s and dips to 17.6% at 0.13s, so
-            // the first reading of this number put the cut in the dip.
-            var veiled = new Wreck();
-            veiled.Veil = Wreck.VeilSeconds;
-            veiled.Kill(true);
-            Check("a death with something drawing over it holds the old pose",
-                veiled.Dead && !veiled.Posed,
-                "the swap is one frame, and on the frame of death there is "
-                + "nothing over it yet");
-            veiled.Update(Wreck.VeilSeconds * 0.5);
-            bool held = !veiled.Posed;
-            veiled.Update(Wreck.VeilSeconds);
-            Check("and swaps it once the cover is up", held && veiled.Posed,
-                $"posed {veiled.Posed} at {veiled.Age:F3}s against a veil of "
-                + $"{Wreck.VeilSeconds:F2}s");
-            // <b>And nought by default, which is the half that keeps --rack off
-            // honest.</b> A veil with no picture under it is a tank that visibly
-            // stumbles for a fifth of a second before it dies - worse than the cut
-            // it was covering - so the number is spent by the caller that knows
-            // something is drawing and by nobody else.
-            var bare = new Wreck();
-            bare.Kill(true);
-            Check("and a death with nothing drawing over it poses at once",
-                bare.Veil == 0.0 && bare.Posed,
-                "a veil over nothing is a stumble, not a cover");
-            // The cut lands inside the effect rather than after it, which is the
-            // one relation between these two numbers that has to hold.
-            Check("and the cover is still running when the pose swaps",
-                Wreck.VeilSeconds > 0.0
-                && Wreck.VeilSeconds < ProcRack.LifeDefault * 0.5,
-                $"a veil of {Wreck.VeilSeconds:F2}s inside a detonation of "
-                + $"{ProcRack.LifeDefault:F2}s");
+            // <b>The pose is a cut and always will be - there is no half-way
+            // frame between a turret laid on its ring and one knocked off it, the
+            // two being different layers of the atlas - and it goes on the frame
+            // of death, which is a decision that was tried the other way round.
+            // </b> Delayed 0.22s it landed under the thickest of the detonation's
+            // soot and hid three and a half times as many pixels, and it read as
+            // two events: a blast on an intact tank, and then a broken one. So
+            // this asserts that nothing stands between dying and being wrecked -
+            // the field that used to is gone rather than set to nought, because a
+            // knob whose only correct setting is off is not a knob.
+            var atOnce = new Wreck();
+            Check("nothing stands between the blast and the broken pose",
+                atOnce.Kill(true) && atOnce.Dead && atOnce.Age == 0.0,
+                "the blast is not what happens before a tank breaks, it is the "
+                + "tank breaking");
             // The flame goes out and the column does not. That asymmetry is the
             // effect: a burnt-out hull smoking is what says where one died from
             // across the board, and a wreck that goes quiet is a tank that was

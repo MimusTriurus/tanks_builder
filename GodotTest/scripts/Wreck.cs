@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 
 namespace TankSpriteTest;
 
@@ -95,54 +95,25 @@ public sealed class Wreck
     /// </summary>
     public bool Racked { get; private set; }
 
-    /// <summary>
-    /// How long the pose waits before it swaps, in seconds.
-    ///
-    /// <b>Because the swap is one frame and always will be.</b> The paint chars
-    /// over a second and a half, but the pose is a different layer of the atlas -
-    /// the turret drooped, both belts slack - so it can only ever cut. Reported
-    /// as exactly that, and it is not a thing a ramp can fix: there is no half-way
-    /// frame between a turret laid on its ring and one knocked off it, and
-    /// rendering one would be a third pose to say what a cut already says.
-    ///
-    /// <b>So the cut is hidden rather than softened, and the difference matters
-    /// for what gets built.</b> Making the burst bigger - which is the obvious
-    /// answer - buys less than it looks: <see cref="ProcRack"/>'s fire is additive
-    /// and additive light brightens what is behind it rather than hiding it. What
-    /// hides is the soot, and it is at its thickest a tenth of a second in. Moving
-    /// the cut to meet it costs one number; making the fire big enough to blind
-    /// the eye through it costs the whole look of the effect.
-    ///
-    /// <b>Set by the caller and nought by default</b>, because a board that is not
-    /// drawing the detonation has nothing to hide behind - see
-    /// <see cref="TankTick.Kill"/>. A veil with no picture under it is a tank that
-    /// visibly stumbles for a tenth of a second before it dies, which is worse
-    /// than the cut it was covering.
-    /// </summary>
-    public double Veil;
-
-    /// <summary>
-    /// The tuned veil - what <see cref="TankTick"/> spends when there is a
-    /// detonation drawing.
-    ///
-    /// <b>Measured rather than picked, and the first guess was wrong by
-    /// two-thirds.</b> Read at 0.10s the cut landed in the <em>dip</em>: the
-    /// coverage of the hull box runs 21% at 0.03s, sits on a plateau of about 23%,
-    /// falls to 17.6% at 0.13s as the jets collapse and the soot has not yet
-    /// built, and peaks at 28.7% at 0.27s. So a tenth of a second moved the cut to
-    /// the one moment there was least to hide behind. Thirteen frames puts it on
-    /// the peak.
-    ///
-    /// <b>And the honest number is still 29%, not 100%.</b> The cut itself moves
-    /// about 4000px of a 19800px box, so this hides most of what changes and not
-    /// all of it - see <see cref="Veil"/> on why the alternative, a fire big
-    /// enough to blind the eye through, costs the look of the whole effect.
-    /// </summary>
-    public const double VeilSeconds = 0.22;
-
-    /// <summary>Whether the wrecked pose is showing yet. True on a live tank's
-    /// death frame only when nothing was asked to cover it.</summary>
-    public bool Posed => Dead && Age >= Veil;
+    // <b>The pose swaps on the frame the tank dies, and a mechanism for delaying
+    // it was built here and taken back out.</b> The swap is a cut by construction
+    // - the drooped turret and the slack belts are different layers of the atlas,
+    // and there is no half-way frame between a turret laid on its ring and one
+    // knocked off it - so the question was only ever where to put it. Held back
+    // 0.22s it landed under the thickest of ProcRack's soot and hid three and a
+    // half times as many pixels: 1116 against 3953 of a 19800px hull box.
+    //
+    // It read worse, by the one criterion a measurement of coverage cannot see. A
+    // detonation that goes off on an intact tank and leaves a broken one a fifth
+    // of a second later is TWO events. The blast is not what happens before the
+    // tank breaks; it IS the tank breaking. So the cut goes at the blast, takes
+    // the thinner cover, and the field and the constant that delayed it are gone
+    // rather than parked at zero - a knob whose only correct setting is off is not
+    // a knob.
+    //
+    // What survives that experiment is on ProcRack rather than here: the skirt is
+    // thicker because the belts are at the bottom of the silhouette, where nothing
+    // else in that model reaches, and they change on the frame the flash arrives.
 
     /// <summary>Seconds since it died. Counted up rather than compared against a
     /// clock, for the reason the reload is: --capture and --trace fix the time
@@ -173,7 +144,6 @@ public sealed class Wreck
     {
         Dead = false;
         Racked = false;
-        Veil = 0.0;
         Age = 0.0;
     }
 

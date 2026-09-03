@@ -825,10 +825,10 @@ uniform float skirt_long = 1.85;
 // How high off the ground it sits. Not the deck: this one leaves under the tank.
 uniform float skirt_seat = 0.035;
 // <b>Thicker than a skirt of dust wants to be, and the reason is the belts.</b>
-// The pose swaps under this effect - see Wreck.Veil - and the two things that
-// change are the turret and the two tracks. The tracks are at the bottom of the
-// silhouette, which is where nothing else in this model reaches, so this family
-// is the only cover the cut has down there.
+// The wrecked pose arrives on the frame the flash does - see Wreck - and the two
+// things that change are the turret and the two tracks. The tracks are at the
+// bottom of the silhouette, which is where nothing else in this model reaches, so
+// this family is the only cover those frames have down there.
 uniform float skirt_ink = 0.70;
 
 // <b>Darker than it was first written, because over this ground it came out
