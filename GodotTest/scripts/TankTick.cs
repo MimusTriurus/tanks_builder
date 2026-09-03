@@ -1532,6 +1532,14 @@ public sealed class TankTick
         // second shove or a second sound: both are sent above, and a detonation
         // that shook the trees again would be two accounts of one death - the
         // double model this file spends its comments refusing.
+        // <b>And the pose waits for the picture, if there is one.</b> See
+        // Wreck.Veil: the swap from a running tank to a wreck is one frame by
+        // construction, and what this buys is that the frame happens behind the
+        // thickest of the soot instead of in the open. Spent only when something
+        // is actually drawing - a board with no detonation on it gets the cut, and
+        // it gets it immediately, because a veil over nothing is a stumble.
+        if (Rack && v.Wreck.Racked && Detonated is not null)
+            v.Wreck.Veil = Wreck.VeilSeconds;
         if (Rack && v.Wreck.Racked && v.Atlas is not null)
             Detonated?.Invoke(
                 v,
@@ -1578,7 +1586,10 @@ public sealed class TankTick
         // it: the turret dropping is the event, the char is the aftermath. Set
         // here rather than in Kill so that a reset which clears the wreck clears
         // this too, through the one path that owns the state.
-        s.Wrecked = true;
+        // <b>Not Dead: Posed.</b> The two differ for the tenth of a second the
+        // detonation is at its thickest - see Wreck.Veil - and they differ nowhere
+        // else, because Veil is nought unless something asked for it.
+        s.Wrecked = v.Wreck.Posed;
         s.Char = v.Wreck.Char;
         s.FireDensity = (float)v.Wreck.Blaze;
         s.SmokeDensity = (float)v.Wreck.Smoke;

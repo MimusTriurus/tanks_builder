@@ -810,21 +810,26 @@ uniform int soot = 14;
 uniform float soot_life = 1.25;
 uniform float soot_stagger = 0.16;
 uniform float soot_size = 0.105;
-uniform float soot_climb = 0.80;
+uniform float soot_climb = 0.68;
 uniform float soot_cone = 0.44;
 uniform float soot_ink = 1.00;
 
 // The skirt: dust pushed out from under the hull. Flat, both ways, and seated on
 // the ground rather than on the deck.
-uniform int skirt = 8;
-uniform float skirt_life = 0.62;
+uniform int skirt = 10;
+uniform float skirt_life = 0.75;
 uniform float skirt_stagger = 0.05;
 uniform float skirt_run = 0.40;
 uniform float skirt_size = 0.078;
 uniform float skirt_long = 1.85;
 // How high off the ground it sits. Not the deck: this one leaves under the tank.
-uniform float skirt_seat = 0.022;
-uniform float skirt_ink = 0.58;
+uniform float skirt_seat = 0.035;
+// <b>Thicker than a skirt of dust wants to be, and the reason is the belts.</b>
+// The pose swaps under this effect - see Wreck.Veil - and the two things that
+// change are the turret and the two tracks. The tracks are at the bottom of the
+// silhouette, which is where nothing else in this model reaches, so this family
+// is the only cover the cut has down there.
+uniform float skirt_ink = 0.70;
 
 // <b>Darker than it was first written, because over this ground it came out
 // tan.</b> The head stands against desert and takes the ball's own orange from

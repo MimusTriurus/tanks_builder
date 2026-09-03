@@ -1118,6 +1118,14 @@ void fragment() {{
         var centre = new Vector2(PaintSize * 0.5f, PaintSize * 0.5f);
         foreach (Vehicle vehicle in vehicles)
         {
+            // <b>Before the stand, because a hull without one still burnt the
+            // ground.</b> Asked here rather than off a hook - see Scald - and
+            // asked of the wreck rather than of the frame it died on, so it is
+            // right on a board that was resumed or reset.
+            if (vehicle.Wreck.Dead)
+                Scald(vehicle);
+            else
+                _scalded.Remove(vehicle);
             if (!_stands.TryGetValue(vehicle, out Stand? stand))
                 continue;
             // The sprite draws at the position the harness gave it, in the
@@ -5013,6 +5021,11 @@ void fragment() {{
     /// <summary>How much of a mark's radius is spent fading out, for the fire's
     /// ash and for a crater - see <see cref="Splat"/>.</summary>
     private const float FireRim = 0.45f;
+
+    /// <summary>How much of a scorch's radius is its own soft edge. Harder than
+    /// the fire's: ash blown off a burning wood thins out over its whole width,
+    /// and a hull burns where it stands - what it leaves has an edge.</summary>
+    private const float ScaldRim = 0.30f;
     private const float PitRim = 0.22f;
 
     private readonly List<ProcBlast> _bursting = new();
@@ -5466,6 +5479,98 @@ void fragment() {{
     /// read-only for its reason.</summary>
     public IReadOnlyList<ProcRack> Racking => _racking;
 
+    /// <summary>
+    /// Where a hull has burnt the ground under it: what is left after the
+    /// detonation and the eighteen seconds of fire behind it.
+    ///
+    /// <b>An ash mark and not a crater, which is the fifth time this page says
+    /// "it digs nothing" and the first time the sentence has an exception.</b>
+    /// <see cref="Craters"/>'s own note is what decides it, read forwards: that
+    /// map is 8 world units to the texel and cannot say <em>lighter</em> at all,
+    /// so a crater - a dark hole in a pale splash of thrown soil - could only ever
+    /// be drawn half right there, and it left for a plane of its own. A scorch is
+    /// the other thing: it is only dark, and it is a cell wide rather than five
+    /// texels. That is the exact shape this map was built for - a fire covering
+    /// whole cells - and it is why the burnt forest is still rasterised into it.
+    ///
+    /// <b>And there is no hole to draw anyway.</b> A round that goes off inside a
+    /// hull is under its own lid: the ground takes the heat and none of the
+    /// blast, so what a wreck leaves is scorched earth rather than an excavation.
+    ///
+    /// <b>A point rather than a cell</b>, for <see cref="Craters"/>'s reason -
+    /// a mask built from a per-cell number draws the grid - even though a tank
+    /// dies standing on one. What it is splatted at is its contact point, so a
+    /// hull that died half over a rim scorches half over the rim.
+    ///
+    /// <b>It does not fade</b>, again the crater's argument: burnt ground does
+    /// not recover, and the wreck is sitting on it for the rest of the match in
+    /// any case. Bounded like the pits are, oldest forgotten - a bound on cost
+    /// and not a claim that the earth healed.
+    /// </summary>
+    private readonly List<(Vector2 Spot, float Lift)> _scalds = new();
+
+    /// <summary>Which hulls have already scorched their ground, so a wreck
+    /// burning for the rest of the match marks it once. Keyed by the tank rather
+    /// than counted, because a board can lose three of them.</summary>
+    private readonly HashSet<Vehicle> _scalded = new();
+
+    /// <summary>How many the board remembers - <see cref="Craters.Capacity"/>'s
+    /// argument at a tenth of the number, because a tank dies once and there are
+    /// three of them.</summary>
+    public const int Scalds = 8;
+
+    /// <summary>How wide a wreck's scorch is, in tile widths, and how dark.
+    ///
+    /// <b>Wider than the tank, which is the whole of whether it can be seen.</b>
+    /// The hull is sitting on the middle of it for the rest of the match, so what
+    /// shows is the ring outside the tracks - and a mark cut to the silhouette
+    /// would be a mark nobody ever sees. Darker than the forest's ash for the
+    /// opposite reason: a burnt tree is a scatter of ash over grass and this is
+    /// where a fuel fire stood.
+    /// </summary>
+    /// <b>Cut back from 1.24 of a tile across after one look.</b> Read that wide
+    /// it reached well onto the next cell and stopped saying burnt ground at all -
+    /// it said vignette, because a mark bigger than the thing that made it has no
+    /// cause on the board. Slightly wider than the hull is the whole requirement.
+    public float ScaldWide = 0.45f;
+    public float ScaldInk = 0.88f;
+
+    /// <summary>The scorches as they stand, for the checks.</summary>
+    public IReadOnlyList<(Vector2 Spot, float Lift)> Scalding => _scalds;
+
+    /// <summary>
+    /// Mark the ground under a hull that has died.
+    ///
+    /// <b>Raised by the stage off board state rather than handed over by a
+    /// hook</b>, which is the split <see cref="Craters"/> and <c>Wildfire</c>
+    /// both live under: that a hull burnt here is a fact, and which map it is
+    /// rasterised into is a question about the picture. <see cref="Place"/>
+    /// already walks every tank every frame and already knows where its feet are,
+    /// so a hook would be a second path to a thing this one cannot miss.
+    ///
+    /// <b>Every death and not only a detonation</b>, unlike the burst: a hull
+    /// that merely caught fire burns for eighteen seconds in the same place, and
+    /// the ground does not ask which of the two deaths it was.
+    /// </summary>
+    private void Scald(Vehicle vehicle)
+    {
+        if (!_scalded.Add(vehicle))
+            return;
+        if (_scalds.Count >= Scalds)
+            _scalds.RemoveAt(0);
+        // <b>Board space, and NOT the wood solver's space.</b> Origin is what
+        // TankTick takes off a point before handing it to the forest, and taking
+        // it off here as well put the mark a tank's height up the screen of the
+        // hull it belongs to - Burst's own warning, which says getting this wrong
+        // is silent and has been. What Slam, Spall and Rack are all handed is
+        // GroundPoint untouched, and this is the same point.
+        _scalds.Add((vehicle.GroundPoint,
+                     vehicle.LiftOf(vehicle.GroundPoint)));
+        // The map is rebuilt from the list, so dropping it is the whole of asking
+        // for a redraw - Soot's own arrangement for the fire.
+        _soot = null;
+    }
+
     private readonly List<PitArt> _etched = new();
     private int _etchedAt = -1;
 
@@ -5550,7 +5655,8 @@ void fragment() {{
         if (_tops?.MaterialOverride is not ShaderMaterial turf)
             return;
         bool burnt = Blaze is not null && Blaze.Scorched > 0;
-        if (!burnt || Field.Atlas is null)
+        bool scalded = _scalds.Count > 0;
+        if ((!burnt && !scalded) || Field.Atlas is null)
         {
             turf.SetShaderParameter("ash_ink", 0.0f);
             return;
@@ -5588,6 +5694,14 @@ void fragment() {{
                 if (much > 0.0f)
                     Splat(CellTop(cell), circum, much, perX, perZ);
             }
+
+        // <b>And what a burnt-out hull left, which is the one thing that has ever
+        // come back into this map.</b> Same splat as a burnt cell and for the same
+        // reason it is allowed: a scorch is only dark and it is a cell wide. See
+        // Scald, and see below for what a crater is instead.
+        foreach ((Vector2 spot, float lift) in _scalds)
+            Splat(Ground(spot, lift), ScaldWide * circum * 2.0f, ScaldInk,
+                  perX, perZ, ScaldRim);
 
         // <b>Craters used to be splatted in here too, and are not any more.</b> The
         // map is 8 units to the texel and a crater is five texels across, and the
