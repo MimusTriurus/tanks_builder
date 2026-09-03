@@ -6706,13 +6706,11 @@ public static class SelfTest
         // of thrown earth, because Land was handed a point and a lift and never
         // asked whether the point was wet. See Stage3D.Wet, which is the whole of
         // the fix, and ProcSpout, which is the answer to it.
-        Check("all three of its quads are made of the board's own noise and ink",
+        Check("both of its quads are made of the board's own noise and ink",
             ProcSpout.FoamCode.Contains(Stage3D.EmberNoiseCode)
             && ProcSpout.FoamCode.Contains(ProcBlast.DustInk)
-            && ProcSpout.SmokeCode.Contains(ProcBlast.DustInk)
             && ProcSpout.FireCode.Contains(Stage3D.FlameInk)
             && ProcSpout.FoamCode.Contains(ProcBlast.FrameCode)
-            && ProcSpout.SmokeCode.Contains(ProcBlast.FrameCode)
             && ProcSpout.FireCode.Contains(ProcBlast.FrameCode),
             "seven effects on this board raise a mass of many elements, and they "
             + "are one text");
@@ -6735,16 +6733,26 @@ public static class SelfTest
         // twice: a text required to contain a shared block cannot also be required
         // to lack a definition from it.
         string spoutOwn = Own(ProcSpout.FoamCode);
-        string smokeOwn = Own(ProcSpout.SmokeCode);
         string fireOwn = Own(ProcSpout.FireCode);
-        Check("the two masses do not add light and the fire does nothing else",
-            !spoutOwn.Contains("blend_add") && !smokeOwn.Contains("blend_add")
+        Check("the mass does not add light and the flash does nothing else",
+            !spoutOwn.Contains("blend_add")
             && fireOwn.Contains("blend_add")
             && !fireOwn.Contains("dust_part")
-            && !spoutOwn.Contains("flame_blob") && !smokeOwn.Contains("flame_blob")
+            && !spoutOwn.Contains("flame_blob")
             && fireOwn.Contains("flame_blob"),
-            "a mass of water hides what is behind it and a flame adds to it; a "
+            "a mass of water hides what is behind it and a flash adds to it; a "
             + "quad that did both would be answering neither");
+        // <b>And there is no dark mass in it at all any more.</b> One was built,
+        // off a nine-frame sheet of a shell bursting ON the surface, and it was
+        // the mass of the event there; the reference this is built to is a charge
+        // going off UNDER one, which throws water and no smoke. Asserted rather
+        // than left to the numbers, because a smoke quad is what this file had
+        // and a colour is all that would be left of it.
+        Check("and no quad of it draws smoke",
+            !spoutOwn.Contains("smoke_dark") && !spoutOwn.Contains("smoke_climb")
+            && !fireOwn.Contains("smoke_dark"),
+            "the column here is water, and a grey stop on it is the picture this "
+            + "class exists to replace");
         // <b>The mass of this event is the smoke, which is the finding the
         // reference forced twice over.</b> The first build was a white geyser and
         // the second a white suspension; the sheet shows white spikes for a fifth
@@ -6752,13 +6760,29 @@ public static class SelfTest
         // the column has to be taller than the water is thrown - measured, not
         // asserted by eye, because the pass that had them equal drew a plume with
         // no column at all.
-        Check("and the column goes higher than the water is thrown",
-            ProcBlast.Uniform(ProcSpout.SmokeCode, "smoke_climb", 0.0f)
-            > ProcSpout.ReachDefault
-            && ProcBlast.Uniform(ProcSpout.SmokeCode, "smoke_life", 0.0f)
-               > ProcBlast.Uniform(ProcSpout.FoamCode, "spike_life", 0.0f) * 3.0f,
-            $"column {ProcBlast.Uniform(ProcSpout.SmokeCode, "smoke_climb", 0.0f)}"
-            + $" of a tile against a throw of {ProcSpout.ReachDefault}");
+        // <b>Up fast and down slowly, which is the whole of what was asked for
+        // and the reason the shared parabola is not used here.</b> blast_throw
+        // states its arc as an apex and is therefore symmetric - equal time up,
+        // equal time down - which is right for a clod of earth and wrong for
+        // water: what settles slowly is the divided part, held by drag rather
+        // than falling free. So the column has its own envelope, and the share of
+        // its life spent rising is what this asserts.
+        float conePeak = ProcBlast.Uniform(ProcSpout.FoamCode, "cone_peak", 0.0f);
+        Check("the column rises in a fifth of its life and settles over the rest",
+            conePeak > 0.0f && conePeak < 0.22f
+            && ProcBlast.Uniform(ProcSpout.FoamCode, "cone_fall", 0.0f) > 1.0f
+            && ProcBlast.Uniform(ProcSpout.FoamCode, "cone_rise", 9.0f) < 1.0f,
+            $"it tops out at {conePeak:P0} of its life");
+        // And it is a column rather than a heap: three times as tall as the trunk
+        // it stands on is wide, which is the reference read off the picture.
+        Check("and it is three times as tall as its own trunk is wide",
+            ProcSpout.ReachDefault
+            > ProcBlast.Uniform(ProcSpout.FoamCode, "cone_foot", 9.0f) * 2.0f * 2.5f
+            && ProcBlast.Uniform(ProcSpout.FoamCode, "cone_head", 9.0f)
+               < ProcBlast.Uniform(ProcSpout.FoamCode, "cone_foot", 0.0f),
+            $"{ProcSpout.ReachDefault} of a tile tall on a trunk "
+            + $"{ProcBlast.Uniform(ProcSpout.FoamCode, "cone_foot", 0.0f) * 2.0f}"
+            + " wide, tapering");
         // <b>And the spray is drawn with the crispest profile in the project,
         // which is the single thing that most decides whether it reads as
         // water.</b> Every other mass here is soft and round because dust and
@@ -6766,14 +6790,23 @@ public static class SelfTest
         // builds of this class were reported as wrong for missing it - one for
         // making the spray round, one for making it a cloud - so it is asserted
         // against both of the profiles it must not be.
-        Check("and the spray is sharper than dust and sharper than a clod",
-            ProcBlast.Uniform(ProcSpout.FoamCode, "spike_soft", 9.0f)
-            < ProcBlast.Uniform(ProcBlast.DustInk, "dust_soft", 0.0f)
-            && ProcBlast.Uniform(ProcSpout.FoamCode, "spike_soft", 9.0f)
-               < ProcBlast.Uniform(ProcBlast.DustCode, "clod_soft", 0.0f)
-            && ProcBlast.Uniform(ProcSpout.FoamCode, "spike_stretch", 0.0f) > 3.0f,
-            "a finger of water has an edge, and a round soft element cannot say "
-            + "so however it is coloured");
+        // <b>And its elements are soft and barely stretched, which is the
+        // correction of the two worst pictures this class produced.</b> Twenty
+        // long crisp elements read as pills and were reported as cartoonish;
+        // forty longer, crisper ones read as white feathers and were reported in
+        // stronger words. The finding both times is the same and it is asserted
+        // here rather than remembered: on this board a mass reads only while its
+        // elements are INDISTINGUISHABLE, so what tears the silhouette has to be
+        // the field over the summed density - which is how the burst in earth
+        // gets a ragged edge out of round elements - and never the shape of one
+        // element.
+        Check("and its own elements are soft, so none of them can be picked out",
+            ProcBlast.Uniform(ProcSpout.FoamCode, "cone_soft", 0.0f)
+            > ProcBlast.Uniform(ProcBlast.DustCode, "clod_soft", 9.0f)
+            && ProcBlast.Uniform(ProcSpout.FoamCode, "cone_long", 9.0f) < 1.6f
+            && ProcBlast.Uniform(ProcSpout.FoamCode, "cone", 0.0f) >= 48.0f,
+            "an element with an edge is an element the eye picks out, and forty "
+            + "picked-out elements are not a mass however they are coloured");
         // <b>And every mass on this board has to say unshaded, which is the bug
         // this theme was written after finding.</b> There is no light in the 3D
         // world here at all - see Stage3D on why - so a spatial shader that does
@@ -6784,7 +6817,6 @@ public static class SelfTest
         // dark, so nothing about the picture said the shading was gone.
         Check("every built mass on this board opts out of shading, or it is black",
             ProcSpout.FoamCode.Contains("render_mode unshaded")
-            && ProcSpout.SmokeCode.Contains("render_mode unshaded")
             && ProcRack.DustCode.Contains("render_mode unshaded")
             && ProcBlast.DustCode.Contains("render_mode unshaded")
             && ProcKick.DustKickCode.Contains("render_mode unshaded")
@@ -6833,7 +6865,7 @@ public static class SelfTest
         // spoutBank.
         Check("the ring on the surface is solved rather than drawn",
             !ProcSpout.FoamCode.Contains(ProcBlast.RingCode)
-            && !ProcSpout.SmokeCode.Contains(ProcBlast.RingCode)
+            && !ProcSpout.FireCode.Contains(ProcBlast.RingCode)
             && !ProcSpout.FoamCode.Contains("ring_gain")
             && ProcRack.DustCode.Length > 0,
             "ProcRack takes the burst's ring text outright; this one has no ring "

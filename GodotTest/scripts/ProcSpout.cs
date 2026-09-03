@@ -107,7 +107,7 @@ public sealed partial class ProcSpout : Node3D
     /// <see cref="ProcBlast.ReachDefault"/>'s reason: a bench that wants to reset
     /// a dial needs the tuned value, and reading it off a live instance gets
     /// whatever the last shot left.</summary>
-    public const float ReachDefault = 0.52f;
+    public const float ReachDefault = 1.05f;
 
     /// <summary>
     /// How long the whole event runs.
@@ -119,7 +119,7 @@ public sealed partial class ProcSpout : Node3D
     /// burst in earth - and for the same reason, which is that smoke is the only
     /// thing here that neither falls nor burns out.
     /// </summary>
-    public const float LifeDefault = 2.80f;
+    public const float LifeDefault = 2.00f;
 
     /// <summary>
     /// The quad, in tile widths: half-width either side of the seat, and height
@@ -128,8 +128,8 @@ public sealed partial class ProcSpout : Node3D
     /// Checked against <see cref="Bounds"/>, which is asked of the model - the
     /// quad holds what the model CAN produce, not what it happens to draw.
     /// </summary>
-    public float Flank = 0.78f;
-    public float Tall = 1.55f;
+    public float Flank = 0.66f;
+    public float Tall = 1.52f;
 
     /// <summary>
     /// How far above the contact point the effect is seated, and the band it
@@ -155,10 +155,8 @@ public sealed partial class ProcSpout : Node3D
     /// doing.</summary>
     public float Age => _clock;
 
-    private MeshInstance3D? _smoke;
     private MeshInstance3D? _foam;
     private MeshInstance3D? _fire;
-    private ShaderMaterial? _smokeInk;
     private ShaderMaterial? _foamInk;
     private ShaderMaterial? _fireInk;
     private Vector3 _nudge;
@@ -180,10 +178,15 @@ public sealed partial class ProcSpout : Node3D
     /// with, unchanged, because smoke is what that ink was written for; one
     /// material cannot hold both.
     /// </summary>
-    public const float Seat = 0.62f;
+// <b>Seated high with a large negative lean, which is the correction of a
+    /// picture that read as steam.</b> At seat 0.42 with a lean of -0.10 the
+    /// arithmetic put the thin sunward edge at 0.94 and the dense core at 0.52 -
+    /// bright rims round a mid-grey interior, which is exactly how a cloud is lit
+    /// and exactly not how a column of water is. White where it is thick.
+    public const float Seat = 0.55f;
 
     /// <inheritdoc cref="Seat"/>
-    public const float Dense = -0.10f;
+    public const float Dense = -0.35f;
 
     /// <summary>
     /// The furthest the model can put anything, in tile widths: how far out
@@ -211,19 +214,12 @@ public sealed partial class ProcSpout : Node3D
             up = Mathf.Max(up, Mathf.Abs(at.Y) + tall);
         }
 
-        float spread = ProcBlast.Uniform(FoamCode, "spread", 1.15f);
-
-        // The spikes, at the far end of the widest one's throw and at the apex of
-        // the fastest one's. Two elements, not one, which is why the pads are
-        // taken apart: the apex of blast_throw is reach*fast at the middle of a
-        // life and its furthest is reach*spread*sin(lean) at the end of one, and
-        // no element is at both.
-        float born = Uniform("spike_born");
-        float spikeR = Uniform("spike_size") * 2.00f;
-        float spikeLong = spikeR * Uniform("spike_stretch") * 1.55f;
-        Reach(new Vector2(born + reach * spread * Mathf.Sin(Uniform("spike_wide")),
-                          reach + born * 0.45f),
-              spikeR, spikeLong);
+        // The column, at the top of its envelope: the tallest element is the
+        // one that sits at the head of it, and its own body is drawn stretched
+        // upright.
+        float coneR = Uniform("cone_size") * 1.45f * (1.0f + Uniform("cone_bloom"));
+        Reach(new Vector2(Uniform("cone_foot"), reach * 1.20f),
+              coneR, coneR * Uniform("cone_long"));
 
         // The skirt on the surface: the widest thing here, and its long axis is
         // the across one because it lies flat.
@@ -231,15 +227,8 @@ public sealed partial class ProcSpout : Node3D
         Reach(new Vector2(Uniform("skirt_run"), Uniform("skirt_climb") * 1.20f),
               skirtR * Uniform("skirt_flat"), skirtR);
 
-        // The column: the tallest thing here, and what the quad's height is cut
-        // to. It widens with height, so its own cone is part of the reach.
-        float smokeR = Uniform("smoke_size") * 1.45f * 1.60f;
-        float smokeUp = Uniform("smoke_climb") * 1.30f;
-        Reach(new Vector2(Uniform("smoke_sway") + smokeUp * Uniform("smoke_cone"),
-                          smokeUp),
-              smokeR, smokeR * 1.25f);
-
-        // And the fire, which does not travel: it sits at the foot and grows.
+        // And the flash, which does not travel: it sits at the waterline and
+        // grows.
         float fireR = Uniform("blaze_size") * 1.50f * 1.30f;
         Reach(new Vector2(Uniform("blaze_run"),
                           Uniform("blaze_seat") + Uniform("blaze_climb")),
@@ -254,9 +243,7 @@ public sealed partial class ProcSpout : Node3D
     /// the other two fall through to it.</summary>
     private static float Uniform(string name) =>
         ProcBlast.Uniform(FoamCode, name,
-                          ProcBlast.Uniform(SmokeCode, name,
-                                            ProcBlast.Uniform(FireCode, name,
-                                                              0.0f)));
+                          ProcBlast.Uniform(FireCode, name, 0.0f));
 
     /// <summary>The quad, in screen px: from <c>-Foot</c> across <c>Size</c>,
     /// which is what <see cref="Stage3D.Stem"/> takes -
@@ -277,10 +264,8 @@ public sealed partial class ProcSpout : Node3D
         (Vector2 foot, Vector2 size) = Quad(tile, Flank, Tall);
         ArrayMesh shape = Stage3D.Stem(foot, size, rise);
 
-        _smokeInk = Ink(Smoking, Part.Smoke);
         _foamInk = Ink(Foaming, Part.Foam);
         _fireInk = Ink(Blazing, Part.Fire);
-        _smoke = Slab(shape, _smokeInk);
         _foam = Slab(shape, _foamInk);
         _fire = Slab(shape, _fireInk);
 
@@ -341,12 +326,10 @@ public sealed partial class ProcSpout : Node3D
     private void Stand()
     {
         Transform = _seat.ScaledLocal(Vector3.One * _might);
-        if (_smoke is not null)
-            _smoke.Position = _nudge / _might;
         if (_foam is not null)
-            _foam.Position = _nudge * 2.0f / _might;
+            _foam.Position = _nudge / _might;
         if (_fire is not null)
-            _fire.Position = _nudge * 3.0f / _might;
+            _fire.Position = _nudge * 2.0f / _might;
     }
 
     /// <summary>Set it off. Restarts rather than refusing, for
@@ -380,8 +363,6 @@ public sealed partial class ProcSpout : Node3D
         }
 
         bool on = _clock >= 0.0f;
-        if (_smoke is not null)
-            _smoke.Visible = on;
         if (_foam is not null)
             _foam.Visible = on;
         if (_fire is not null)
@@ -389,14 +370,13 @@ public sealed partial class ProcSpout : Node3D
         if (!on)
             return;
 
-        _smokeInk?.SetShaderParameter("time", _clock);
         _foamInk?.SetShaderParameter("time", _clock);
         _fireInk?.SetShaderParameter("time", _clock);
     }
 
     /// <summary>Which of the three a number belongs to.
     /// <see cref="Part.Frame"/> is the pair the quad itself declares.</summary>
-    public enum Part { Frame, Smoke, Foam, Fire }
+    public enum Part { Frame, Foam, Fire }
 
     /// <summary>One number of one of the three shaders, live - read out of the
     /// material rather than off the text, so a panel shows what is running.
@@ -416,7 +396,6 @@ public sealed partial class ProcSpout : Node3D
         _live[part + ":" + uniform] = value;
         if (part == Part.Frame)
         {
-            _smokeInk?.SetShaderParameter(uniform, value);
             _foamInk?.SetShaderParameter(uniform, value);
             _fireInk?.SetShaderParameter(uniform, value);
             return;
@@ -429,14 +408,12 @@ public sealed partial class ProcSpout : Node3D
 
     private static string Source(Part part) => part switch
     {
-        Part.Smoke => SmokeCode,
         Part.Fire => FireCode,
         _ => FoamCode,
     };
 
     private ShaderMaterial? Coat(Part part) => part switch
     {
-        Part.Smoke => _smokeInk,
         Part.Fire => _fireInk,
         _ => _foamInk,
     };
@@ -484,30 +461,13 @@ public sealed partial class ProcSpout : Node3D
             ink.SetShaderParameter("dust_dense", Dense);
             // The sunward edge no longer has to carry the whole of the white, so a
             // term tuned to do that now only shapes it.
-            ink.SetShaderParameter("dust_ridge", 0.62f);
+            ink.SetShaderParameter("dust_ridge", 0.35f);
             // <b>Torn harder than earth, and this is the number that makes a sheet
             // of water into fingers.</b> Dust is ragged at its rim because that is
             // where it thins; thrown water is ragged all through, because it is
             // tearing into drops as it goes.
-            ink.SetShaderParameter("dust_tear", 0.62f);
-            ink.SetShaderParameter("dust_grain", 18.0f);
-        }
-        if (part == Part.Smoke)
-        {
-            // <b>The smoke takes the shared ink as written, and that is the point
-            // of it being a second quad.</b> Every number in ProcBlast.DustInk was
-            // tuned on a mass of earth and smoke in the air: the profile, the
-            // tearing, the packing, the seat, the banding and the sign of the
-            // thickness term. Nothing here overrides any of them except how much
-            // of the board it may hide.
-            ink.SetShaderParameter("dust_ink", 0.92f);
-            // <b>Torn harder and coarser than the burst's, because this column is
-            // eight times the size of the one that number was tuned on.</b> A
-            // tearing field at the earth's grain over a mass this big is a fine
-            // stipple, and what a billowing column reads by is lumps the size of
-            // its own puffs.
-            ink.SetShaderParameter("dust_tear", 0.50f);
-            ink.SetShaderParameter("dust_grain", 8.0f);
+            ink.SetShaderParameter("dust_tear", 0.45f);
+            ink.SetShaderParameter("dust_grain", 14.0f);
         }
         return ink;
     }
@@ -535,39 +495,62 @@ BLAST_FRAME
 
 DUST_INK
 
-// The spikes: thrown water, on the shared parabola. Sharp, long, radiating, and
-// the whole picture for the first fifth of a second.
-uniform int spikes = 40;
-// <b>Short, because the spray is over before the column is up.</b> On the
-// reference the white has stopped climbing by the third frame of nine and is a
-// skirt from there on; what is long here is the skirt and the smoke.
-uniform float spike_life = 0.55;
-// <b>Spread wide, because a spray that all leaves at once is a spray that
-// detaches.</b> At 0.045 all forty went up together and by a quarter of a second
-// there was nothing at the surface at all - the same failure the column of an
-// earlier pass had, and the same answer the burst already uses: the family holds
-// on to its own foot by the stagger of its births, not by any mechanism.
-uniform float spike_stagger = 0.20;
-// The narrowest and the widest launch, off straight up in radians. Wide: a hole
-// in a surface has no walls to aim what leaves it, which is what a crater has and
-// why earth's cone is narrower than this.
-uniform float spike_narrow = 0.22;
-uniform float spike_wide = 1.05;
-// <b>Thin and very long, which is what a spike is.</b> The stretch is the largest
-// on this board after the rack's jets, and unlike those it is on an element the
-// size of a drop rather than of a tongue.
-uniform float spike_size = 0.017;
-uniform float spike_stretch = 4.20;
-uniform float spike_ink = 1.25;
-// How far off the middle one starts - the burst's number and its reason:
-// everything leaving through the exact centre makes the base a needle.
-uniform float spike_born = 0.055;
-// <b>The crispest profile in the project, and it is the point of the family.</b>
-// dust_soft is 2.55 because a cloud is in transition everywhere and a clod of
-// earth keeps 1.85 because it is a small body; a finger of water has an edge, and
-// the whole read of thrown water is that its edges are sharp. Short of the
-// flame's 0.5, which has infinite slope at the rim.
-uniform float spike_soft = 0.95;
+// <b>The column: one mass of water, going up fast and coming down slowly.</b>
+//
+// <b>It is a stack rather than a throw, and that is what makes it a column.</b>
+// Each element sits at its own fraction of the column's current height, and the
+// column's width at that fraction runs from cone_foot at the waterline to
+// cone_head at the top - so the family IS the shape, and it grows and sags as a
+// whole instead of forty things flying apart. Written as a throw, which is where
+// this class started twice, the elements separate by construction: forty bodies
+// on forty paths stop overlapping, and on white water each one then reads as its
+// own object.
+// <b>Ninety-six, and the count is set by the trunk rather than by taste.</b> A
+// trunk 0.42 of a tile across has to be several elements wide before its edge can
+// be torn rather than scalloped, and its whole height has to be layered: read at
+// sixty-four elements of 0.075 each blob WAS the trunk, and the column came out a
+// heap of soft puffs - which is the same failure as the feathers with the sign
+// reversed, an element the eye can pick out.
+uniform int cone = 120;
+uniform float cone_life = 1.80;
+uniform float cone_stagger = 0.10;
+// How high it goes: <c>reach</c>, and here that is the whole column rather than a
+// throw. Three times the width of its own trunk, which is the reference.
+
+// <b>Where in its life it tops out, and the two exponents either side.</b> This
+// is the request stated as one envelope: up in a sixth of the time, down over the
+// other five sixths.
+//
+// <b>The shared blast_throw cannot say it, and that is why it is not used
+// here.</b> A parabola stated as an apex is symmetric - equal time up and equal
+// time down - which is right for a clod of earth and wrong for water: what comes
+// down slowly is the divided part, held by drag rather than falling free. Fast
+// with deceleration on the way up, slow then accelerating on the way down.
+uniform float cone_peak = 0.15;
+uniform float cone_rise = 0.55;
+uniform float cone_fall = 1.60;
+// The trunk, at the waterline and at the head. Wide foot, narrow top: the taper
+// is what says water rather than smoke, which entrains and mushrooms.
+uniform float cone_foot = 0.175;
+uniform float cone_head = 0.09;
+uniform float cone_size = 0.038;
+// How much longer than wide, along its own travel. <b>Small, and it is the number
+// two builds of this class got wrong.</b> At 2.6 and at 4.2 the elements became
+// readable objects - drops, then feathers - and forty readable objects are not a
+// mass however they are coloured. What a stretch is for here is the grain of the
+// column, not the shape of a drop.
+uniform float cone_long = 1.30;
+// <b>Soft, near the cloud's own.</b> dust_soft is 2.55 because a mass in
+// transition everywhere has no edge to count; a clod of earth keeps 1.85 because
+// it is a small hard body. Water in a column of this size is nearer the first,
+// and the 0.95 an earlier pass reached for is what drew the feathers: an element
+// with an edge is an element the eye can pick out.
+uniform float cone_soft = 2.20;
+uniform float cone_ink = 1.70;
+// How much bigger an element is at the head than at the foot. The cauliflower:
+// what tears on the reference is the top, because that is where the water has
+// been in the air longest.
+uniform float cone_bloom = 0.45;
 
 // The skirt: what the spray leaves lying on the surface, spreading. Flat, both
 // ways, and the longest-lived thing in the water - on the reference it is still
@@ -576,7 +559,7 @@ uniform int skirt = 26;
 uniform float skirt_life = 1.90;
 uniform float skirt_born = 0.03;
 uniform float skirt_stagger = 0.30;
-uniform float skirt_run = 0.34;
+uniform float skirt_run = 0.40;
 uniform float skirt_climb = 0.10;
 uniform float skirt_size = 0.046;
 uniform float skirt_flat = 1.90;
@@ -625,35 +608,43 @@ void fragment() {
             }
         }
 
-        for (int k = 0; k < spikes; k++) {
+        for (int k = 0; k < cone; k++) {
             float fk = float(k);
-            float born = spike_stagger * ember_hash(vec2(fk, 71.0));
-            float a = (time - born) / max(spike_life, 1e-3);
+            float born = cone_stagger * ember_hash(vec2(fk, 71.0));
+            float a = (time - born) / max(cone_life, 1e-3);
             if (a > 0.0 && a < 1.0) {
-                float leaning = mix(spike_narrow, spike_wide,
-                                    ember_hash(vec2(fk, 72.0)));
-                float side = ember_hash(vec2(fk, 73.0)) < 0.5 ? -1.0 : 1.0;
-                float fast = mix(0.45, 1.0, ember_hash(vec2(fk, 74.0)));
-                vec2 seat = vec2(spike_born * (2.0 * ember_hash(vec2(fk, 76.0)) - 1.0),
-                                 spike_born * 0.45 * ember_hash(vec2(fk, 77.0)));
-                // The shared parabola, stated as an apex - see blast_throw. Back on
-                // the surface exactly at the end of its life, which for water is
-                // the whole of what happens to it: a drop does not settle, it is
-                // absorbed.
-                vec4 thrown = blast_throw(a, reach, fast, leaning, side);
-                vec2 p = seat + thrown.xy;
-                vec2 flow = thrown.zw;
-                float r = spike_size * (0.45 + 1.55 * ember_hash(vec2(fk, 75.0)));
-                // <b>Longest while it is being thrown and shortening as it
-                // stops.</b> A finger of water is drawn by its own travel: at the
-                // top of an arc it is a short blob and on the way out it is a
-                // streak, which is what every photograph of a splash shows and
-                // what a fixed length cannot say.
-                float draw = spike_stretch * (0.45 + 1.10 * fast)
-                             * (1.0 - 0.55 * a);
-                dust_part(at, p, r, r * max(draw, 1.0), flow,
-                          fk + 71.0, spike_ink * (1.0 - smoothstep(0.55, 1.0, a)),
-                          spike_soft, a, dens, lean, years);
+                // Where up the column this element sits, and therefore how wide
+                // the column is where it is.
+                float s = ember_hash(vec2(fk, 72.0));
+                // <b>Up fast, down slowly - and the top comes down first.</b> The
+                // exponent of the fall is scaled by how high the element is, so
+                // the head collapses while the foot is still standing, which is
+                // what a column of water does and what one envelope for all of
+                // them cannot say.
+                float fall = cone_fall * (1.35 - 0.55 * s);
+                float env = a < cone_peak
+                    ? pow(a / max(cone_peak, 1e-3), cone_rise)
+                    : 1.0 - pow((a - cone_peak) / max(1.0 - cone_peak, 1e-3),
+                                fall);
+                env = clamp(env, 0.0, 1.0);
+                float fast = 0.75 + 0.45 * ember_hash(vec2(fk, 73.0));
+                float up = reach * fast * env * s;
+                float span = mix(cone_foot, cone_head, s) * (0.55 + 0.60 * env);
+                float wide = span * (2.0 * ember_hash(vec2(fk, 74.0)) - 1.0);
+                // <b>And an element grows with the column, which is what keeps
+                // the trunk solid while it extends.</b> The same ninety-six
+                // elements are spread over three times the height at the top of
+                // the envelope as at the start, so a fixed radius makes coverage
+                // fall as the column rises - measured on the picture: solid at
+                // the fifth frame, a chain of separate beads by the eighteenth.
+                float r = cone_size * (0.55 + 0.90 * ember_hash(vec2(fk, 75.0)))
+                          * (1.0 - cone_bloom + 2.0 * cone_bloom * s)
+                          * (0.70 + 0.75 * env);
+                float gain = cone_ink * (1.0 - exp(-a / 0.020))
+                             * pow(max(1.0 - a, 0.0), 0.65);
+                dust_part(at, vec2(wide, up), r, r * cone_long,
+                          vec2(0.0, 1.0), fk + 71.0, gain, cone_soft, a,
+                          dens, lean, years);
             }
         }
 
@@ -671,125 +662,6 @@ void fragment() {
 ";
 
     /// <summary>
-    /// The smoke: the column that comes out of the middle and is the mass of this
-    /// event.
-    ///
-    /// <b>The burst's own column, and it takes the shared ink as written.</b> That
-    /// ink was tuned on exactly this - a mass of smoke and earth in the air - so
-    /// nothing here overrides its profile, its tearing, its packing, its seat or
-    /// the sign of its thickness term. What is this file's own is that the column
-    /// is the <em>subject</em> rather than the tail: it is born late, it outlives
-    /// everything, it widens as it rises, and it pales as it dies.
-    ///
-    /// <b>It mushrooms, and that is the reference rather than the earth.</b> A
-    /// pass of this class had the column taper upward, on the argument that a
-    /// vapour plume is fed from below; the sheet shows a billowing head wider than
-    /// its own foot from the third frame on, because what is rising is hot gas and
-    /// it entrains as it goes.
-    /// </summary>
-    private const string SmokeShader = @"
-shader_type spatial;
-render_mode unshaded, cull_disabled, depth_draw_never;
-
-FLAME_NOISE
-
-FLAME_INK
-
-BLAST_FRAME
-
-DUST_INK
-
-// The column. Born after the water, because on the reference the first two frames
-// have none of it at all - and that gap is what makes the spray read as the thing
-// that happened first.
-uniform int smoke = 44;
-uniform float smoke_life = 2.30;
-uniform float smoke_born = 0.09;
-uniform float smoke_stagger = 0.40;
-// How high it goes, in tile widths. <b>Not a ratio of the throw</b>: the water is
-// thrown once and comes back, and this keeps rising long after it is gone - so the
-// two heights are two facts and the taller of them is this one.
-uniform float smoke_climb = 0.86;
-// How far off the middle it leans as it climbs, and how much it sways. The cone is
-// what makes the head wider than the foot.
-uniform float smoke_cone = 0.26;
-uniform float smoke_sway = 0.10;
-// <b>Half again the burst's column, because here the column IS the burst.</b>
-// Read at the earth's size it came out a thin wisp trailing off the pond - which
-// is what the burst's column is for, being its tail. On the reference this is
-// the largest thing in seven frames out of nine.
-uniform float smoke_size = 0.130;
-uniform float smoke_ink = 1.75;
-
-// <b>What the smoke of a shell over water is, at its darkest and fully lit.</b>
-// Grey and cool, against the burst's warm earth: what is in this column is
-// propellant and burnt filling with water vapour through it, not the ground. Read
-// at the earth's stops it came out tan and the picture was a burst on a beach.
-// Still short of a real black, for ProcBlast.DustInk's measured reason - a
-// saturating mass at a black stop reads as a hole cut in the board.
-uniform vec3 smoke_dark : source_color = vec3(0.150, 0.148, 0.152);
-uniform vec3 smoke_lit : source_color = vec3(0.620, 0.612, 0.600);
-// <b>How much of the way to its lit stop the whole column drifts as it dies.</b>
-// The last two frames of the reference are the same cloud gone pale - it is
-// thinning, and thin smoke is lit through. Written as a lift of the ramp rather
-// than as a second colour, so there is one pair of stops and this is where on it
-// the cloud sits.
-// <b>A quarter, not a half.</b> Read at 0.45 the column was pale from the moment
-// it appeared - the drift is off the MEAN age of the mass, and a column being fed
-// from below has old elements in it throughout, so a large lift makes the whole
-// cloud grey rather than making its end grey. On the reference the pallor is the
-// last two frames of nine and nothing before them.
-uniform float smoke_pale = 0.22;
-
-void fragment() {
-    if (level <= 0.0) {
-        ALBEDO = vec3(0.0);
-        ALPHA = 0.0;
-    } else {
-        vec2 at = blast_at(UV);
-        float dens = 0.0;
-        vec2 lean = vec2(0.0);
-        float years = 0.0;
-
-        for (int k = 0; k < smoke; k++) {
-            float fk = float(k);
-            float born = smoke_born + smoke_stagger * ember_hash(vec2(fk, 51.0));
-            float a = (time - born) / max(smoke_life, 1e-3);
-            if (a > 0.0 && a < 1.0) {
-                float fast = 0.35 + 0.95 * ember_hash(vec2(fk, 52.0));
-                float up = smoke_climb * fast * pow(a, 0.62);
-                // Out with height rather than with age: the head is wide because it
-                // is high, which is what entrainment looks like from outside.
-                float wide = up * smoke_cone
-                             * (2.0 * ember_hash(vec2(fk, 53.0)) - 1.0)
-                           + smoke_sway * (2.0 * ember_hash(vec2(fk, 56.0)) - 1.0)
-                             * pow(a, 0.75);
-                float r = smoke_size * (0.55 + 0.9 * ember_hash(vec2(fk, 54.0)))
-                          * (0.45 + 1.15 * a);
-                float gain = smoke_ink * (1.0 - exp(-a / 0.09))
-                             * pow(max(1.0 - a, 0.0), 1.20);
-                dust_part(at, vec2(wide, up), r, r * 1.25, vec2(0.0, 1.0),
-                          fk + 51.0, gain, dust_soft, a, dens, lean, years);
-            }
-        }
-
-        if (dens <= 1e-4) {
-            ALBEDO = vec3(0.0);
-            ALPHA = 0.0;
-        } else {
-            float mass = dust_mass(at, dens);
-            float lit = dust_lit(mass, lean);
-            // The mean age of the mass, which the shared ink already accumulates -
-            // ProcKick's arrangement, and here it drifts the whole cloud up its own
-            // ramp as it thins. See smoke_pale.
-            float old = clamp(years / max(dens, 1e-4), 0.0, 1.0);
-            ALBEDO = mix(smoke_dark, smoke_lit,
-                         clamp(lit + smoke_pale * old, 0.0, 1.0));
-            ALPHA = clamp(mass * dust_ink * level * blast_footing(at), 0.0, 1.0);
-        }
-    }
-}
-";
 
     /// <summary>
     /// The fire at the foot: the filling burning at the waterline.
@@ -820,28 +692,27 @@ FLAME_INK
 
 BLAST_FRAME
 
-// The blaze at the waterline. Late, brief and low - the reference has none in its
-// first two frames, most of it in the middle three and none in the last.
-uniform int blaze = 9;
-// <b>Late, and it is the reference that says how late.</b> Its first two frames
-// have no fire and no smoke; the orange core appears once the column is already
-// standing, burns through three frames and is out before the last two. Born at
-// 0.16 it lit before there was any smoke to be the only warm thing in, and read
-// as an orange ball floating on the pond.
-uniform float blaze_born = 0.40;
-uniform float blaze_life = 0.95;
-uniform float blaze_stagger = 0.35;
-// How far it sits above the surface, and how far out along it. Low and wide
-// rather than tall: what is burning is at the base of the column, spread over the
-// water it is standing in.
-uniform float blaze_seat = 0.045;
-uniform float blaze_run = 0.10;
-uniform float blaze_size = 0.050;
-uniform float blaze_climb = 0.10;
-// Squat: the fire is wider than it is high, which is what keeps it at the foot
-// rather than reading as a small column of its own.
-uniform float blaze_squat = 0.72;
-uniform float blaze_gain = 1.45;
+// <b>The flash of the burst, at the waterline.</b> The dark column that used to
+// stand over this is gone - it was read off a nine-frame sheet of a shell
+// bursting on the surface, and the reference this is built to is a charge going
+// off under one, which throws water and no smoke at all. What is kept of the fire
+// is the flash: the round going off, which is the first thing in every burst on
+// this board and is over before the column is up.
+uniform int blaze = 6;
+uniform float blaze_born = 0.0;
+uniform float blaze_life = 0.16;
+uniform float blaze_stagger = 0.03;
+// How far it sits above the surface, and how far out along it. Low and tight:
+// this is the charge, not a fire burning on the water.
+uniform float blaze_seat = 0.030;
+uniform float blaze_run = 0.070;
+uniform float blaze_size = 0.100;
+uniform float blaze_climb = 0.045;
+uniform float blaze_squat = 0.80;
+// Past one, and deliberately - every fire on this board spends this note: a white
+// heart is bought by adding an orange body to itself until it clips. That is
+// brightness, not a whiter colour.
+uniform float blaze_gain = 3.20;
 
 void fragment() {
     if (level <= 0.0) {
@@ -897,19 +768,11 @@ void fragment() {
                   .Replace("DUST_INK", ProcBlast.DustInk);
 
     /// <inheritdoc cref="FoamCode"/>
-    internal static readonly string SmokeCode =
-        SmokeShader.Replace("FLAME_NOISE", Stage3D.EmberNoiseCode)
-                   .Replace("FLAME_INK", Stage3D.FlameInk)
-                   .Replace("BLAST_FRAME", ProcBlast.FrameCode)
-                   .Replace("DUST_INK", ProcBlast.DustInk);
-
-    /// <inheritdoc cref="FoamCode"/>
     internal static readonly string FireCode =
         FireShader.Replace("FLAME_NOISE", Stage3D.EmberNoiseCode)
                   .Replace("FLAME_INK", Stage3D.FlameInk)
                   .Replace("BLAST_FRAME", ProcBlast.FrameCode);
 
     private static readonly Shader Foaming = new() { Code = FoamCode };
-    private static readonly Shader Smoking = new() { Code = SmokeCode };
     private static readonly Shader Blazing = new() { Code = FireCode };
 }
