@@ -784,7 +784,7 @@ void fragment() {
     /// </summary>
     private const string DustRackShader = @"
 shader_type spatial;
-render_mode cull_disabled, depth_draw_never;
+render_mode unshaded, cull_disabled, depth_draw_never;
 
 FLAME_NOISE
 

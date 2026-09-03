@@ -315,6 +315,10 @@ public sealed partial class TankBench : SceneRoot
     /// both of them are agreeing with.</summary>
     private BlastSource _blastSource = BlastSource.Sheet;
 
+    /// <summary>Whether a round into water raises a plume - see
+    /// <see cref="Stage3D.Spout"/>.</summary>
+    private bool _spout = true;
+
     /// <summary>The painted sheet, shared by every tank in the garage.</summary>
     private FlashSheet? _sheet;
 
@@ -544,6 +548,13 @@ public sealed partial class TankBench : SceneRoot
                     break;
                 // Whether a bounce draws the built ricochet or the rendered burst
                 // it used to - the harness's flag, spelled its way.
+                // Whether a round into the pond raises a plume - the
+                // harness's flag, spelled its way. This board has a pond on two
+                // of its three maps, so it is the one that shows it.
+                case "--spout" when i + 1 < args.Length:
+                    _spout = !args[++i].Equals("off",
+                        StringComparison.OrdinalIgnoreCase);
+                    break;
                 case "--spall" when i + 1 < args.Length:
                     _tick.Bounce = !args[++i].Equals("off",
                         StringComparison.OrdinalIgnoreCase);
@@ -1042,6 +1053,8 @@ public sealed partial class TankBench : SceneRoot
             Surf = _surf, Sea = _sea, Wash = _wash,
             // Which of the two bursts a landed round raises - see Stage3D.Blast.
             Blast = _blastSource,
+            // And whether a round into the pond raises a plume - Stage3D.Spout.
+            Spout = _spout,
         };
         AddChild(_stage);
         foreach (Vehicle vehicle in _garage)

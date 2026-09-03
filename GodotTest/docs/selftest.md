@@ -54,7 +54,7 @@ headless, а всё, что заканчивается картинкой** — 
 
 `--selftest <фильтр>` (либо `--selftest=<фильтр>`) докладывает только названные
 темы: `wall`, `water,ripples`, `relief`, `burst`, `kick`, `spall`, `explosive`,
-`detonation`, `got through`.
+`detonation`, `got through`, `into water`.
 `--selftest list` печатает
 список тем и не проверяет ничего.
 

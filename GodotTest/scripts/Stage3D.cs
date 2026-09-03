@@ -386,6 +386,8 @@ public sealed partial class Stage3D : Node3D
             spall.Tick(delta);
         foreach (ProcRack rack in _racking)
             rack.Tick(delta);
+        foreach (ProcSpout spout in _spouting)
+            spout.Tick(delta);
         Etchings();
         Soot();
         _deepInk?.SetShaderParameter("foam", Mathf.Max(0.0f, Foam));
@@ -5186,6 +5188,15 @@ void fragment() {{
     /// </summary>
     public void Land(Vector2 spot, float lift, float might = 1.0f)
     {
+        // <b>Wet first, and neither of the two below is about water.</b> They are
+        // one picture computed and the same picture rendered, and both of them
+        // are earth - so on a wet cell the choice between them is not a choice,
+        // it is the wrong answer twice. See Wet, and Spout for the A/B.
+        if (Spout && Wet(spot, out float top))
+        {
+            Splash(spot, top, might);
+            return;
+        }
         if (Blast == BlastSource.Built)
             Burst(spot, lift, might);
         else
@@ -5479,6 +5490,112 @@ void fragment() {{
     /// read-only for its reason.</summary>
     public IReadOnlyList<ProcRack> Racking => _racking;
 
+    private readonly List<ProcSpout> _spouting = new();
+    private int _nextSpout;
+
+    /// <summary>What to do to a plume before it goes up - <see cref="Dress"/> for
+    /// the burst, seventh time, same argument: the pool is built on the first
+    /// round into the water, and a panel must not have to wait for one.</summary>
+    public Action<ProcSpout>? Drench;
+
+    /// <summary>
+    /// Whether a round landing in water raises a plume or the burst it used to.
+    ///
+    /// <b>On the stage rather than on the tick, which is where the other three
+    /// switches of this shape live.</b> <c>--spall</c>, <c>--slam</c> and
+    /// <c>--rack</c> each gate a <em>fact about a shot</em> and belong with the
+    /// shot; this gates what the <em>board</em> makes of a point on itself, and
+    /// the board is the only thing that knows the point is wet. It sits beside
+    /// <see cref="Blast"/> for that reason and is read in the same method.
+    ///
+    /// Off, a round into the pond throws a cone of earth again - which is what it
+    /// did until this was written, so the flag is the A/B against the picture
+    /// that was reported as wrong.
+    /// </summary>
+    public bool Spout = true;
+
+    /// <summary>
+    /// Whether this point of the board is water, and how high that water stands.
+    ///
+    /// <b>The one question the board was never asked, and the whole of what made
+    /// <c>water_he</c> a bug rather than a gap.</b> A landed round carries a point
+    /// and the lift it was fired from - see <c>TankTick.Loose</c>, which states
+    /// the level-gun assumption it is made under - and every burst on this board
+    /// took that pair without asking what was underneath. So a shell into the
+    /// pond raised a cone of thrown earth, and nothing errored, because a wet
+    /// cell is a perfectly good cell.
+    ///
+    /// <b>The surface and not the bed</b>, which is the second half of the same
+    /// answer: <see cref="HexField.WaterTop"/> stands
+    /// <see cref="HexField.WaterRise"/> over the floor of the cell it fills, and
+    /// seated on the lift that travelled with the round the plume would come up
+    /// out of the bottom of the pond. Asked here rather than at the two call
+    /// sites, so the picture and the ring cannot disagree about where the surface
+    /// is.
+    /// </summary>
+    public bool Wet(Vector2 spot, out float top)
+    {
+        top = 0.0f;
+        if (Field.Atlas is null || !Field.HasWater)
+            return false;
+        Vector2I cell = Field.CellAt(spot - Origin);
+        if (!Field.IsWater(cell))
+            return false;
+        top = Field.WaterTop(cell);
+        return true;
+    }
+
+    /// <summary>
+    /// A round that went into water - <see cref="ProcSpout"/>.
+    ///
+    /// <b>A seventh pool, and the first one whose ground half is not drawn at
+    /// all.</b> The ring this event leaves on the surface is solved rather than
+    /// laid on a plane of its own: <see cref="Wash"/> is a damped wave field with
+    /// reflecting banks, so a hole punched in it spreads at the field's own speed
+    /// and comes back off the shore. See <see cref="Ripples.Strike"/> - and see
+    /// <see cref="ProcSpout"/>, which therefore has no ring layer, because a drawn
+    /// ring beside a solved one is two accounts of one surface.
+    ///
+    /// <b><paramref name="top"/> is the water's own height, not the cell's</b> -
+    /// <see cref="Wet"/> is what hands it over, and it is the whole of what this
+    /// effect needs the field for.
+    ///
+    /// <b>And it digs nothing.</b> Seventh time, and the only time it needs no
+    /// argument: a hole in water is the effect. <see cref="Pits"/> is not touched,
+    /// so a shot into the pond leaves the cell exactly as it found it.
+    /// </summary>
+    public void Splash(Vector2 spot, float top, float might = 1.0f)
+    {
+        if (Field.Atlas is null)
+            return;
+        while (_spouting.Count < Bursts)
+        {
+            var made = new ProcSpout();
+            AddChild(made);
+            made.Build(Field.Atlas.HexRect.Size.X, Squash, RiseFactor);
+            _spouting.Add(made);
+        }
+        ProcSpout spout = _spouting[_nextSpout % Bursts];
+        // Reset before the hook, multiplied after it - see Burst on why the
+        // multiply alone compounds until the plume fills the screen.
+        spout.Might = 1.0f;
+        Drench?.Invoke(spout);
+        _nextSpout = (_nextSpout + 1) % Bursts;
+        spout.Might *= might;
+        spout.Sit(spot, top, Squash, RiseFactor);
+        spout.Fire();
+        // And the hole in the water, in the field's own space. The one expression
+        // that puts a board point on the pond's surface is this class's - see
+        // Ground - and a second copy of it in a caller is how a push comes to
+        // land a level away from the splash it belongs to.
+        Vector3 at = Ground(spot, top);
+        Wash?.Strike(new Vector2(at.X, at.Z), might);
+    }
+
+    /// <summary>The plumes as they stand, <see cref="Bursting"/>'s twin and
+    /// read-only for its reason.</summary>
+    public IReadOnlyList<ProcSpout> Spouting => _spouting;
+
     /// <summary>
     /// Where a hull has burnt the ground under it: what is left after the
     /// detonation and the eighteen seconds of fire behind it.
@@ -5635,6 +5752,11 @@ void fragment() {{
             blast.Douse();
         foreach (SheetBlast blast in _booming)
             blast.Douse();
+        // The plume too, and it belongs with these two rather than with the three
+        // that hang off armour: all three of these are what the board makes of a
+        // round landing on it, and Land is the one method that picks between them.
+        foreach (ProcSpout spout in _spouting)
+            spout.Douse();
     }
 
     /// <summary>

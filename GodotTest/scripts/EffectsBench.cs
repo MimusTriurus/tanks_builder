@@ -401,6 +401,19 @@ public sealed partial class EffectsBench : SceneRoot
         // setting.
         Vector2 spot = _stage.Origin + _field.CellCentre(_at);
         float lift = _field.LevelAt(_at) * _field.Lift;
+        // <b>And on the pond, neither of the two is the subject.</b> This bench
+        // exists to put the computed burst and the imported one on the same cell
+        // at the same frame - see EffectsBench.Sheet - and on water that
+        // comparison has no meaning: both of them are earth, and the answer for
+        // water is a third effect with nothing to be compared against. So the wet
+        // cell goes where the board's own shots go, through the one question the
+        // stage owns. The pond in the far corner of this board is what the plume
+        // was judged on.
+        if (_stage.Wet(spot, out float top))
+        {
+            _stage.Splash(spot, top);
+            return;
+        }
         if (Sheet)
         {
             _stage.Boom(spot, lift);

@@ -6691,6 +6691,145 @@ public static class SelfTest
                 $"pierce at child {lit}, turret at {turret}");
         }
 
+        Theme("the plume a round throws when it goes into water instead");
+        // <b>The one entry in the taxonomy that was a bug rather than a gap.</b>
+        // The other unbuilt items are pictures nobody has drawn; this one had a
+        // picture and it was the wrong one - a round into the pond raised a cone
+        // of thrown earth, because Land was handed a point and a lift and never
+        // asked whether the point was wet. See Stage3D.Wet, which is the whole of
+        // the fix, and ProcSpout, which is the answer to it.
+        Check("the plume is made of the board's own noise, ink and frame",
+            ProcSpout.SpoutCode.Contains(Stage3D.EmberNoiseCode)
+            && ProcSpout.SpoutCode.Contains(ProcBlast.DustInk)
+            && ProcSpout.SpoutCode.Contains(ProcBlast.FrameCode)
+            && !ProcSpout.SpoutCode.Contains("uniform float dust_soft = 2.55;\n"
+                                             + "uniform float dust_seat"),
+            "six effects on this board raise a mass of many elements, and they "
+            + "are one text");
+        // <b>One quad, and no fire at all.</b> Every other burst here is a dark
+        // mass with light in front of it, because an explosion in air makes
+        // light; a shell going into a pond makes a hole, and whatever light there
+        // was is under the water by the time anything is thrown. So there is no
+        // additive layer in this file - not a dimmed one, not a small flash - and
+        // that makes it the simplest effect on the board.
+        // Asked of what the file is its own, because the shared ink DECLARES
+        // flame_blob - the self-contradicting check this project has now written
+        // twice: a text required to contain a shared block cannot also be
+        // required to lack a definition from it.
+        string spoutOwn = ProcSpout.SpoutCode
+            .Replace(Stage3D.FlameInk, "")
+            .Replace(Stage3D.EmberNoiseCode, "")
+            .Replace(ProcBlast.DustInk, "")
+            .Replace(ProcBlast.FrameCode, "");
+        Check("and there is no fire in it at all, so there is one quad",
+            !spoutOwn.Contains("blend_add")
+            && !spoutOwn.Contains("flame_blob")
+            && !spoutOwn.Contains("flash_gain")
+            && !spoutOwn.Contains("ball_climb"),
+            "water_he is the entry in docs/blast.md that asks for no fire, and "
+            + "a dimmed fireball would be answering a different one");
+        // <b>And every mass on this board has to say unshaded, which is the bug
+        // this theme was written after finding.</b> There is no light in the 3D
+        // world here at all - see Stage3D on why - so a spatial shader that does
+        // not opt out of shading has its ALBEDO multiplied by the ambient and
+        // comes out black. The plume was written without it and drew two black
+        // tongues over the pond; ProcRack shipped without it, and its head of
+        // soot got away with it for exactly one reason - soot is meant to be
+        // dark, so nothing about the picture said the shading was gone.
+        Check("every built mass on this board opts out of shading, or it is black",
+            ProcSpout.SpoutCode.Contains("render_mode unshaded")
+            && ProcRack.DustCode.Contains("render_mode unshaded")
+            && ProcBlast.DustCode.Contains("render_mode unshaded")
+            && ProcKick.DustKickCode.Contains("render_mode unshaded")
+            && ProcSlam.DustSlamCode.Contains("render_mode unshaded")
+            && ProcSpall.DustSpallCode.Contains("render_mode unshaded"),
+            "there is no light in this world, so a shaded ALBEDO is multiplied "
+            + "by the ambient and the mass draws black");
+        // <b>Seated at nought, alone on this board.</b> Every other burst stands a
+        // little above the face it went off on, so that its elements do not draw
+        // through ground that is opaque and beneath them. Here the face IS the
+        // water and the water is where the plume goes back to, so the surface is
+        // exactly where this effect ends - and blast_footing, which needed no
+        // change at all, is what cuts it there.
+        var spout = new ProcSpout();
+        Check("the plume is seated on the surface and every other burst above one",
+            spout.Root == 0.0f && new ProcBlast().Root > 0.0f
+            && new ProcRack().Root > 0.0f,
+            $"spout root {spout.Root}, burst {new ProcBlast().Root}");
+        // The quad holds what the model CAN produce, not what it happens to draw -
+        // ProcSlam's finding, and it is asked of the model here as everywhere.
+        (float spoutAlong, float spoutUp) = ProcSpout.Bounds(spout.Reach);
+        Check("and the quad holds everything the plume can throw",
+            spoutAlong <= spout.Flank && spoutUp <= spout.Tall
+            && spoutAlong > spout.Flank * 0.5f && spoutUp > spout.Tall * 0.5f,
+            $"model reaches {spoutAlong:F3} x {spoutUp:F3} of a tile, quad is "
+            + $"{spout.Flank:F3} x {spout.Tall:F3}");
+        // <b>And the light leans the other way, which is the one number in the
+        // shared ink that water cannot take as written.</b> A mass of earth
+        // darkens as it thickens because earth absorbs; water brightens as it
+        // thickens, for the same reason a thin film of it is clear. Read at the
+        // earth's sign the plume came out a teal shape with a white rim - which
+        // reads as something rising UNDER the surface rather than out of it.
+        Check("and thickness brightens water where it darkens earth",
+            ProcSpout.Dense < 0.0f
+            && ProcBlast.Uniform(ProcBlast.DustInk, "dust_dense") > 0.0f
+            && ProcSpout.Seat > 0.0f,
+            $"spout dense {ProcSpout.Dense}, the ink's own "
+            + $"{ProcBlast.Uniform(ProcBlast.DustInk, "dust_dense")}");
+        // <b>There is no ring layer in it, and the absence is the finding.</b>
+        // Every other burst lays its ground rings on a plane of its own, because
+        // the ground it went off on cannot answer for itself. Water can: the
+        // ripple field is a damped wave equation with reflecting spoutBanks, so a hole
+        // punched in it spreads a ring at the field's own speed and comes back off
+        // the shore. A drawn ring beside a solved one would be two accounts of one
+        // surface - and the drawn one would be the account that walked through the
+        // spoutBank.
+        Check("the ring on the surface is solved rather than drawn",
+            !ProcSpout.SpoutCode.Contains(ProcBlast.RingCode)
+            && !ProcSpout.SpoutCode.Contains("ring_gain")
+            && ProcRack.DustCode.Length > 0,
+            "ProcRack takes the burst's ring text outright; this one has no ring "
+            + "of its own at all");
+        // And the hole itself, on a field laid by hand: no board, no pond, no
+        // stage - Ripples is a plain class for exactly this reason.
+        var spoutPool = new Ripples();
+        spoutPool.Fit(new Rect2(-200.0f, -200.0f, 400.0f, 400.0f), 0.5f, 1L,
+                 _ => true);
+        Check("a field with no strike in it is flat water",
+            spoutPool.Wide > 0 && spoutPool.Peak == 0.0f,
+            $"{spoutPool.Wide}x{spoutPool.Tall} texels, peak {spoutPool.Peak}");
+        spoutPool.Strike(Vector2.Zero);
+        float dug = spoutPool.Height(Vector2.Zero);
+        Check("and a round going in leaves a hole, not a hill",
+            dug < -1.0f, $"the middle is at {dug:F2} world units");
+        // <b>At rest, which is what makes it a splash rather than a click.</b> The
+        // recurrence reads the previous step to get a velocity, so denting only the
+        // present field launches the hole at whatever speed the difference implies.
+        // Dented in both, the surface is displaced and still - the initial
+        // condition a drop in a pond actually has.
+        spoutPool.Tick(1.0 / 60.0);
+        Check("and it starts at rest, so the first step does not fling it",
+            spoutPool.Height(Vector2.Zero) < dug * 0.6f,
+            $"{dug:F2} became {spoutPool.Height(Vector2.Zero):F2} in one step");
+        for (int k = 0; k < 30; k++)
+            spoutPool.Tick(1.0 / 60.0);
+        Check("and the hole becomes a ring that travels outward",
+            Mathf.Abs(spoutPool.Height(new Vector2(100.0f, 0.0f))) > 0.05f
+            && Mathf.Abs(spoutPool.Height(new Vector2(100.0f, 0.0f)))
+               > Mathf.Abs(spoutPool.Height(Vector2.Zero)) * 0.25f,
+            $"middle {spoutPool.Height(Vector2.Zero):F2}, 100 units out "
+            + $"{spoutPool.Height(new Vector2(100.0f, 0.0f)):F2}");
+        // Dry texels are a wall, both ways: a strike on the spoutBank pushes nothing,
+        // for the reason a hull half out of the water pushes only the half of it
+        // that is in.
+        var spoutBank = new Ripples();
+        spoutBank.Fit(new Rect2(-200.0f, -200.0f, 400.0f, 400.0f), 0.5f, 2L,
+                 at => at.X < -20.0f);
+        spoutBank.Strike(new Vector2(120.0f, 0.0f));
+        Check("and a round that lands on the bank pushes no water at all",
+            spoutBank.Wide > 0 && spoutBank.Peak == 0.0f,
+            $"peak {spoutBank.Peak} on a field whose wet half is nowhere near it");
+
         Theme("the detonation that ends a tank, and the fire it hands over to");
         // <b>The one effect on this board whose job is a seam.</b> Every other
         // picture here answers a shell; this one answers a state change, and what

@@ -744,6 +744,9 @@ public sealed partial class Main : SceneRoot
 			Field = _field, Origin = _origin, Eye = _camera,
 			// Which of the two bursts a landed round raises - see Stage3D.Blast.
 			Blast = _blastSource,
+			// And whether a round into the pond raises a plume instead of either
+			// of them - see Stage3D.Spout.
+			Spout = _spout,
 			// The ruts are laid in the marks' own space and read in the space a
 			// tank's GroundPoint is in; both nodes are children of this one, so
 			// the offset is the marks' own position. Handed over rather than
@@ -1253,6 +1256,12 @@ public sealed partial class Main : SceneRoot
 	/// picture.</summary>
 	private BlastSource _blastSource = BlastSource.Sheet;
 
+	/// <summary>Whether a round into water raises a plume - see
+	/// <see cref="Stage3D.Spout"/>. Held here rather than written straight to the
+	/// stage for <see cref="_blastSource"/>'s reason: flags are parsed before the
+	/// board is built.</summary>
+	private bool _spout = true;
+
 	/// <summary>Recoil taken by the turret alone - key L, or --recoil-turret.
 	/// Held here as well as on the tank because the flag is parsed before the
 	/// tank exists, exactly as the flash source is.</summary>
@@ -1673,6 +1682,13 @@ public sealed partial class Main : SceneRoot
 			// leaves the rendered pair, which is the picture this used to have.
 			else if (userArgs[i] == "--pierce" && i + 1 < userArgs.Length)
 				_tick.Pierce = !userArgs[++i].Equals("off",
+					StringComparison.OrdinalIgnoreCase);
+			// And whether a round into the pond raises a plume or the cone of
+			// earth it used to - see Stage3D.Spout. Beside --burst rather than
+			// with the three armour flags, because the board is what knows a
+			// point of itself is wet.
+			else if (userArgs[i] == "--spout" && i + 1 < userArgs.Length)
+				_spout = !userArgs[++i].Equals("off",
 					StringComparison.OrdinalIgnoreCase);
 			// What the gun is loaded with, which against armour is now what decides
 			// the picture - see TankTick.Ammo. The bench had this flag from the day

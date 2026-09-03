@@ -370,6 +370,78 @@ public sealed class Ripples
         Lobe(at - way * Reach, -push * Push * Level);
     }
 
+    /// <summary>
+    /// How deep a round entering the water pushes it, in world units - and the
+    /// radius of the hole it makes, in world units of world XZ.
+    ///
+    /// <b>A displacement rather than a forcing, which is the whole difference
+    /// from <see cref="Note"/>.</b> A hull ploughing through water pushes it for
+    /// as long as it is there, so it is a rate; a shell is gone in a frame and
+    /// what it leaves behind is a hole. Written as a rate it would have to be
+    /// some sixty times <see cref="Push"/> for one frame, and the number would
+    /// then mean nothing at any other frame rate - which is the one thing a field
+    /// stepped at a fixed <see cref="Step"/> exists not to have.
+    ///
+    /// <b>Tighter than <see cref="Spread"/>, and the reason is what makes the
+    /// ring.</b> A lobe as wide as a hull's is a swell; a ring is what a
+    /// <em>small</em> hole turns into, because the surface has to fetch the water
+    /// back from all round it. Half a hull's lobe, which is about a fifth of a
+    /// tile.
+    /// </summary>
+    public const float Dent = 9.0f;
+
+    /// <inheritdoc cref="Dent"/>
+    public const float Bore = 32.0f;
+
+    /// <summary>
+    /// Say that something went into the water here, this hard: a hole, at rest.
+    ///
+    /// <b>The ring on the surface of a shell burst, and it is solved rather than
+    /// drawn.</b> Every other burst on this board lays its ground rings on a
+    /// plane of their own (<c>ProcBlast.RingCode</c>) because the ground it went
+    /// off on cannot answer; water can. So <c>water_he</c> has no ring layer at
+    /// all - a drawn ring beside a solved one would be two accounts of one
+    /// surface, and the drawn one would be the one that did not come back off the
+    /// bank.
+    ///
+    /// <b>Both fields, so the water starts at rest.</b> The recurrence reads the
+    /// previous step to get a velocity, so denting only the present one launches
+    /// the hole at whatever speed the difference implies - a click rather than a
+    /// splash. Dented in both, the surface is displaced and still, which is the
+    /// initial condition a drop in a pond actually has.
+    ///
+    /// Baked here rather than left to <see cref="Tick"/>, so a strike shows on
+    /// the surface on the frame it happened even if no step ran on that frame.
+    /// </summary>
+    public void Strike(Vector2 at, float might = 1.0f)
+    {
+        if (!Enabled || Wide == 0 || might <= 0.0f)
+            return;
+        float deep = Dent * might * Level;
+        int i0 = Mathf.FloorToInt((at.X - Bore - Box.Position.X) / Cell.X);
+        int i1 = Mathf.CeilToInt((at.X + Bore - Box.Position.X) / Cell.X);
+        int j0 = Mathf.FloorToInt((at.Y - Bore - Box.Position.Y) / Cell.Y);
+        int j1 = Mathf.CeilToInt((at.Y + Bore - Box.Position.Y) / Cell.Y);
+        for (int j = Mathf.Max(j0, 0); j <= Mathf.Min(j1, Tall - 1); j++)
+        for (int i = Mathf.Max(i0, 0); i <= Mathf.Min(i1, Wide - 1); i++)
+        {
+            int k = j * Wide + i;
+            if (!_wet[k])
+                continue;
+            float r = Middle(i, j).DistanceTo(at) / Bore;
+            if (r >= 1.0f)
+                continue;
+            // The cosine <see cref="Lobe"/> uses and for its reason: the field
+            // differentiates what it is given, so a hole with a hard rim puts a
+            // crease in the surface at its own boundary and the eye reads the
+            // shape of the source rather than a ring.
+            float dip = deep * (0.5f + 0.5f * Mathf.Cos(r * Mathf.Pi));
+            _now[k] -= dip;
+            _was[k] -= dip;
+        }
+        Bake();
+    }
+
     /// <summary>One half of the pair: a smooth blob of forcing, in height a
     /// second. Skips dry texels, so a hull half out of the water pushes only the
     /// half of it that is in.</summary>
