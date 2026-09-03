@@ -169,7 +169,7 @@ public sealed partial class Main
 			TankSprite s = v.Sprite;
 			return string.Format(CultureInfo.InvariantCulture,
 				"{0}{1} {2,-3} cell {3},{4}  hull {5,6:F1}  turret {6,6:F1}"
-				+ "  speed {7,6:F1}  pen {8}/{9}{10}{11}{12}{13}",
+				+ "  speed {7,6:F1}  pen {8}/{9}{10}{11}{12}{13}{14}{15}",
 				i == _active ? "*" : " ", i, v.Tag,
 				v.Cell.X, v.Cell.Y,
 				s.HullFacing, s.TurretFacing, v.Speed,
@@ -177,7 +177,9 @@ public sealed partial class Main
 				s.Wrecked ? "  wrecked" : "",
 				v.Burning ? "  burning" : "",
 				v.Wading ? "  wading" : "",
-				v.Target is not null ? $"  -> {v.Target.Tag}" : "");
+				v.Target is not null ? $"  -> {v.Target.Tag}" : "",
+				v.Mark is Vector2I mk ? $"  shell {mk.X},{mk.Y}" : "",
+				v.Charge is Vector2I rm ? $"  ram {rm.X},{rm.Y}" : "");
 		}));
 	}
 
@@ -236,6 +238,45 @@ public sealed partial class Main
 			return "a tank is not its own target";
 		Engage(Active, _vehicles[index]);
 		return $"{Active.Tag} engaging {_vehicles[index].Tag}";
+	}
+
+	/// <summary>
+	/// Order one round into a cell - the right click. Nothing is fired here: the
+	/// tank lays its gun and the round leaves once the same five gates an
+	/// engagement waits on agree, and then the order is spent. Which gate is
+	/// refusing is what <c>--trace</c>'s <c>aim</c> field reports.
+	/// </summary>
+	public string ShellCell(int col, int row)
+	{
+		if (_vehicles.Count == 0)
+			return "no tanks loaded";
+		Vector2I cell = _field.ClampCell(new Vector2I(col, row));
+		OrderShot(Active, cell);
+		if (Active.Mark is null)
+			return $"{Active.Tag} is standing on {cell.X},{cell.Y}";
+		Vehicle? hull = Vehicle.At(_vehicles, cell);
+		return $"{Active.Tag} to put one round into {cell.X},{cell.Y}"
+			   + (hull is null ? "" : $" - {hull.Tag} is standing there");
+	}
+
+	/// <summary>
+	/// Order the driven tank to ram the one standing on a cell - the double
+	/// click. A drive order with an intent on it: the route is driven the
+	/// ordinary way and the ram lands when the hulls meet. Nothing to ram, or no
+	/// route to it, and it is a plain drive - which is what the answer says.
+	/// </summary>
+	public string RamCell(int col, int row)
+	{
+		if (_vehicles.Count == 0)
+			return "no tanks loaded";
+		Vector2I cell = _field.ClampCell(new Vector2I(col, row));
+		OrderRam(cell);
+		if (Active.Charge is not null)
+			return $"{Active.Tag} ramming "
+				   + $"{Vehicle.At(_vehicles, cell)!.Tag} at {cell.X},{cell.Y}";
+		return $"{Active.Tag} driving at {cell.X},{cell.Y} - "
+			   + (Vehicle.At(_vehicles, cell) is null
+				   ? "nothing there to ram" : "no route to it");
 	}
 
 	/// <summary>Destroy a tank outright - the middle-click on it.</summary>

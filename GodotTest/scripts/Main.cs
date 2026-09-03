@@ -895,7 +895,7 @@ public sealed partial class Main : SceneRoot
 
 	/// <summary>What the gunnery marks were last painted for. See the repaint in
 	/// <see cref="_Process"/>.</summary>
-	private (int, Vector2I, Vehicle?, Vector2I?, bool) _painted;
+	private (int, Vector2I, Vehicle?, Vector2I?, Vector2I?, bool) _painted;
 
 	private Label _hud = null!;
 	private Camera2D _camera = null!;
@@ -924,6 +924,16 @@ public sealed partial class Main : SceneRoot
 
 
 	private readonly Vector2 _origin = new(220, 200);
+
+	/// <summary>Which tank was being driven before the last left click took
+	/// another one, or -1 when that click was not a selection.
+	///
+	/// One int, and it exists for the double click: the ram is given on the
+	/// second press of a gesture whose first press has already handed the
+	/// selection to the hull being pointed at. See <c>_UnhandledInput</c>.
+	/// Cleared by the double click that spends it, so a click, a pause and a
+	/// double click somewhere else cannot take the selection back.</summary>
+	private int _pickedFrom = -1;
 
 
 	private Vector2I _cell
@@ -1232,6 +1242,17 @@ public sealed partial class Main : SceneRoot
 	/// <summary>--attack &lt;n&gt;: the driven tank opens fire on vehicle n, by the
 	/// index the number keys use.</summary>
 	private int? _attackAtStart;
+	/// <summary>--shell &lt;q,r&gt;: one round into that cell, which is the right
+	/// button. A cell rather than an index for the reason the order is one: what
+	/// is standing there is the trigger's business, and a hex is the only way to
+	/// say "into the wood" at all.</summary>
+	private Vector2I? _shellAtStart;
+	/// <summary>--ram &lt;q,r&gt;: drive into whoever is standing on that cell,
+	/// which is the double click. A cell and not an index, so that it says the
+	/// same thing the gesture says - the tank being rammed is the one on the hex
+	/// pointed at, and on a board where somebody has moved those are two
+	/// different orders.</summary>
+	private Vector2I? _ramAtStart;
 	/// <summary>--damage &lt;n&gt;: every plate already marked n levels deep, so a
 	/// capture of a knocked-about tank does not need n presses of U.</summary>
 	private int _damageAtStart;
@@ -1991,6 +2012,42 @@ public sealed partial class Main : SceneRoot
 						CaptureAt = 90;
 				}
 			}
+			// The right button, as a flag: one round into a cell. Beside --drive
+			// rather than beside --attack, because what it takes is a hex.
+			//
+			// <b>And it moves the capture frame for --drive's reason, doubled.</b>
+			// A round ordered into a hex leaves when the turret has come round
+			// and the reload is up, which is a second or more after the press -
+			// so the default frame of a bare --capture is a frame with nothing in
+			// it, and a run whose evidence is "no shot" is the one outcome the
+			// flag exists to avoid.
+			else if (userArgs[i] == "--shell" && i + 1 < userArgs.Length)
+			{
+				string[] parts = userArgs[i + 1].Split(',');
+				if (parts.Length == 2
+					&& int.TryParse(parts[0], out int col)
+					&& int.TryParse(parts[1], out int row))
+				{
+					_shellAtStart = new Vector2I(col, row);
+					if (!CaptureAtAsked)
+						CaptureAt = 90;
+				}
+			}
+			// The double click, as a flag: drive into whoever is on that cell.
+			// The same frame default as --drive and for the same reason - a ram
+			// is a drive, and the frame worth having is one mid-leg.
+			else if (userArgs[i] == "--ram" && i + 1 < userArgs.Length)
+			{
+				string[] parts = userArgs[i + 1].Split(',');
+				if (parts.Length == 2
+					&& int.TryParse(parts[0], out int col)
+					&& int.TryParse(parts[1], out int row))
+				{
+					_ramAtStart = new Vector2I(col, row);
+					if (!CaptureAtAsked)
+						CaptureAt = 90;
+				}
+			}
 		}
 
 		// The board, before anything that stands on one. A map that will not load
@@ -2560,6 +2617,15 @@ public sealed partial class Main : SceneRoot
 			OrderMoveTo(_field.ClampCell(_driveTo.Value));
 		if (_attackAtStart is int foe && foe >= 0 && foe < _vehicles.Count)
 			Engage(Active, _vehicles[foe]);
+		// After --attack, because the two are the same gun and the later order
+		// stands - which is the rule the buttons obey, said here so that a run
+		// given both flags does what a session given both clicks does.
+		if (_shellAtStart is not null)
+			OrderShot(Active, _field.ClampCell(_shellAtStart.Value));
+		// And after --drive, for the same reason on the other order: a ram is a
+		// drive with an intent, so the last one given is the one being driven.
+		if (_ramAtStart is not null)
+			OrderRam(_field.ClampCell(_ramAtStart.Value));
 		if (_fireAtStart)
 			Fire();
 		if (_hitAtStart is not null)
@@ -2625,6 +2691,9 @@ public sealed partial class Main : SceneRoot
 		if (shooter.Wreck.Dead || target?.Wreck.Dead == true)
 			target = null;
 		shooter.Target = ReferenceEquals(shooter, target) ? null : target;
+		// One gun, one order - see Vehicle.Mark. Whichever arrived last stands,
+		// and this is one of the two doors that says so.
+		shooter.Mark = null;
 		shooter.Solution = Gunnery.None;
 		if (shooter == Active)
 		{
@@ -2644,12 +2713,19 @@ public sealed partial class Main : SceneRoot
 	/// of them: with nobody to shoot at they are clutter, and with a target that
 	/// is not on a lane they are the answer to the question the player now has,
 	/// which is not "why did it not fire" but "where do I have to drive".
+	///
+	/// <b>An order to shell a cell draws them too</b>, for exactly that reason: a
+	/// hex off every lane is a hex this tank cannot shell from here, and the arcs
+	/// are where the answer is written. The ring under the target is not drawn for
+	/// one, and that is not an omission - it marks a hull that is being shot at,
+	/// and a cell has no hull to mark.
 	/// </summary>
 	private void PaintGunnery()
 	{
 		if (_targetRing is not null)
 			_targetRing.Target = Active.Target;
-		if (Active.Target is null)
+		Vector2I? aimed = Active.Target?.Cell ?? Active.Mark;
+		if (aimed is null)
 		{
 			_field.Arcs = Array.Empty<Vector2I>();
 			_field.Aim = Array.Empty<Vector2I>();
@@ -2670,7 +2746,7 @@ public sealed partial class Main : SceneRoot
 					break;
 			}
 		_field.Arcs = arcs;
-		Shot shot = Gunnery.Solve(_field, _vehicles, Active, Active.Target);
+		Shot shot = Gunnery.Solve(_field, _vehicles, Active, aimed.Value);
 		_field.Aim = shot.Clear
 			? _field.Lane(Active.Cell, shot.Heading, shot.Range)
 			: Array.Empty<Vector2I>();
@@ -3057,15 +3133,38 @@ public sealed partial class Main : SceneRoot
 	private string AimLine()
 	{
 		Vehicle v = Active;
-		if (v.Target is null)
-			return "-" + Flying();
+		// The ram, first and on its own line's front, because it is the one order
+		// here that is not the gun's: a tank can be driving at somebody while its
+		// gun has nothing to say, and a field that reported only the gun would
+		// call that "-".
+		string ram = v.Charge is Vector2I into
+			? $"ram ({into.X},{into.Y}) "
+			  + (v.Moving ? $"{v.LegDone:F2} of the leg" : "no route") + " "
+			: "";
+		if (v.Target is null && v.Mark is null)
+			return ram + "-" + Flying();
+		// What was ordered, in the two words that tell them apart: a cell is one
+		// round and a tag is until told otherwise.
+		string what = v.Target is not null
+			? v.Target.Tag : $"cell ({v.Mark!.Value.X},{v.Mark.Value.Y})";
 		if (!v.Solution.OnLane)
-			return $"{v.Target.Tag} no lane";
+			return $"{ram}{what} no lane";
 		string state = v.Solution.BlockedAt is Vector2I b ? $"blocked ({b.X},{b.Y})"
 			: v.Moving ? "moving"
 			: !Gunnery.Laid(v.Sprite.TurretFacing, v.Solution.Heading) ? "laying"
 			: v.ReloadLeft > 0.0 ? $"loading {v.ReloadLeft:F1}s"
 			: "ready";
+		// A round ordered into a hex with nothing on it has no plate, no matchup
+		// and no tally to report - every field below this line is about a hull.
+		// Said as the cell and the state alone rather than with three zeroes,
+		// which would read as a matchup that had been worked out.
+		if (v.Target is null)
+		{
+			Vehicle? hull = Vehicle.At(_vehicles, v.Mark!.Value);
+			return $"{ram}{what}@{v.Solution.Heading}deg/{v.Solution.Range}"
+				   + $" {state} onto "
+				   + (hull is null ? "the ground" : hull.Tag) + Flying();
+		}
 		// What the shooting has achieved, which is otherwise unreadable from
 		// outside: the trace prints the driven tank, and in an engagement the
 		// driven tank is usually the one doing the damage rather than taking it.
@@ -3082,7 +3181,7 @@ public sealed partial class Main : SceneRoot
 		// have taken.
 		string near = $" pen {v.Target.Sprite.Penetrations}"
 					  + $"/{Gunnery.PenetrationsToKill}";
-		return $"{v.Target.Tag}@{v.Solution.Heading}deg/{v.Solution.Range} {state}"
+		return $"{ram}{v.Target.Tag}@{v.Solution.Heading}deg/{v.Solution.Range} {state}"
 			   + $" {face} {v.Target.Sprite.ScarLevel(face)}/{cap}{near}{flying}";
 	}
 
@@ -3138,6 +3237,12 @@ public sealed partial class Main : SceneRoot
 		// selection before it ever gets here.
 		_path = _field.FindPath(_cell, target, Barred(), masonry: true);
 		_pathStep = 0;
+		// A plain drive is not a ram, and this is the door that says so: the two
+		// are the same order with an intent on one of them, so the intent has to
+		// come off whenever the order is given again without it. Otherwise a tank
+		// pulled off a ram by a left click delivers it anyway if the new route
+		// happens to run past the hull it was aimed at.
+		Active.Charge = null;
 		// Mouse aim would override both turret modes and make the feature look
 		// broken while the tank drives, so an order takes the turret back.
 		_aimWithMouse = false;
@@ -3159,6 +3264,185 @@ public sealed partial class Main : SceneRoot
 	/// </summary>
 	private HashSet<Vector2I> Barred() =>
 		new(Vehicle.Occupied(_vehicles, Active));
+
+	/// <summary>
+	/// One round into a cell: the right button's whole order.
+	///
+	/// <b>It fires nothing here.</b> The five gates are the engagement's five -
+	/// a lane, a clear one, a standstill, a laid gun, a loaded round - and they
+	/// are checked in <see cref="UpdateAttack"/> frame by frame, because the
+	/// gun may have to be swung round and the tank may have to stop first. So a
+	/// press is an order and the shot happens when the tank can make it, which
+	/// is the same promise the standing engagement makes and the reason the two
+	/// share every line of the laying.
+	///
+	/// <b>One press is one round, and that is the only difference from an
+	/// engagement.</b> The order is cleared by the shot leaving - see
+	/// <see cref="UpdateAttack"/> - so a gun told to shell a cell shells it once
+	/// and stops. Held between the press and the shot rather than fired on the
+	/// press, because a round that went off before the turret came round would
+	/// leave down whatever lane the gun happened to be on.
+	///
+	/// The driven tank's own cell cancels, for the reason a left click on it is
+	/// "stay put": a gun laid on the hull carrying it is not a shot.
+	/// </summary>
+	private void OrderShot(Vehicle shooter, Vector2I cell)
+	{
+		// A wreck has no gun. Refused here rather than at the click, so the panel
+		// and a tool get the same answer the mouse does - Engage's argument.
+		if (shooter.Wreck.Dead || !_field.InBounds(cell))
+			return;
+		shooter.Mark = cell == shooter.Cell ? null : cell;
+		// The two turret modes would fight the gun for the ring, which is the
+		// same reason a move order and an engagement both take them back.
+		if (shooter.Mark is not null)
+		{
+			shooter.Target = null;
+			if (shooter == Active)
+			{
+				_aimWithMouse = false;
+				_spinning = false;
+			}
+		}
+		shooter.Solution = Gunnery.None;
+		PaintGunnery();
+	}
+
+	/// <summary>
+	/// Drive into the tank standing on a cell: the double click's order.
+	///
+	/// <b>A ram is a drive order with an intent on it</b>, which is how the wall
+	/// bench's ram is written too. The route is found the ordinary way and driven
+	/// at the ordinary speed; the only thing the intent buys is that the tank
+	/// standing on the destination is lifted out of what bars the route, so the
+	/// last leg is a leg into an occupied cell rather than no route at all. What
+	/// happens when the hulls meet is <see cref="RamContact"/>.
+	///
+	/// <b>A ram needs a hull to ram.</b> Double-clicked on empty ground this is
+	/// the move order the first press of the gesture already gave, and the intent
+	/// is dropped rather than remembered - there is nothing on the cell for it to
+	/// mean anything about, and an intent that survives until somebody drives
+	/// onto that cell would be a ram delivered minutes later by a tank that has
+	/// long since arrived. A wreck is not a hull either: it is scenery that fills
+	/// a cell, so its cell stays barred and the order comes to nothing, exactly
+	/// as a left click on it does.
+	/// </summary>
+	private void OrderRam(Vector2I cell)
+	{
+		if (!_field.InBounds(cell) || cell == _cell || Active.Wreck.Dead)
+			return;
+		Vehicle? victim = Vehicle.At(_vehicles, cell);
+		if (victim is not null && victim.Wreck.Dead)
+			victim = null;
+		HashSet<Vector2I> barred = Barred();
+		if (victim is not null)
+			barred.Remove(cell);
+		_path = _field.FindPath(_cell, cell, barred, masonry: true);
+		_pathStep = 0;
+		_aimWithMouse = false;
+		_spinning = false;
+		// Only when there is both something to hit and a way to reach it. A ram
+		// with no route is a ram that never happens, and left standing it would
+		// go off the moment some later order happened to take this tank past.
+		Active.Charge = victim is not null && _path.Count > 0 ? cell : null;
+		_field.Highlight = _path;
+		_field.QueueRedraw();
+	}
+
+	/// <summary>
+	/// How far into its last leg a tank has to be for the hulls to be touching,
+	/// as a fraction of that leg.
+	///
+	/// <b>A third, and it was read off the pictures rather than worked out.</b>
+	/// Four frames of one approach, captured at a tenth, a quarter, a third and
+	/// four ninths of the last leg: at a tenth there is open ground between the
+	/// two silhouettes, at a third they just meet, and by four ninths the rammer
+	/// is drawn over the hull it is hitting. So a third.
+	///
+	/// <b>It was written at a half from arithmetic, and both numbers in that
+	/// arithmetic were wrong.</b> The sum was "hulls are 191 to 212px long
+	/// against a cell pitch of about 190, so they touch half way" - but the pitch
+	/// is 216 flat px (measured off three craters ordered into one column, 108px
+	/// apart on screen against a projection that halves the vertical), the hull
+	/// length is a broadside figure that no approach is ever seen at, and neither
+	/// of them is the thing that decides: what touches is two <em>silhouettes</em>
+	/// on a diagonal, guns and turret overhang included. A number about what the
+	/// eye sees has to be measured where the eye is.
+	/// </summary>
+	public const float RamContact = 1.0f / 3.0f;
+
+	/// <summary>
+	/// The hulls meeting, for every tank that has been told to ram - the whole of
+	/// what a ram does.
+	///
+	/// <b>Resolved on the leg rather than on arrival, because there is no
+	/// arrival.</b> The destination is a cell somebody is standing on: driven to
+	/// the end it would put two tanks on one cell, and one cell holding two tanks
+	/// is a board where <see cref="Vehicle.At"/> answers with whichever of them
+	/// it met first - selection, pathing and gunnery all quietly picking one. So
+	/// the ram lands at <see cref="RamContact"/> of the last leg and the order is
+	/// cancelled there, which leaves the rammer parked on the cell it came from
+	/// with its nose against the hull it hit. That is also what it should look
+	/// like: a tank does not drive through another one.
+	///
+	/// <b>Both hulls take it, and which of them takes anything is the class
+	/// table</b> - see <see cref="Gunnery.RamLevel"/>. Two calls, the same level
+	/// function read each way round, because a collision has two sides and only
+	/// one event: doing it once and mirroring the number would be the same
+	/// sentence written twice.
+	///
+	/// The bearing is the drive heading, which is a flat side of the hex by
+	/// construction - the last leg of a route is a step onto a neighbour - so the
+	/// armour model is handed the number it wants without a snap, exactly as the
+	/// six firing lanes hand it one.
+	/// </summary>
+	private void RamContacts()
+	{
+		foreach (Vehicle v in _vehicles)
+		{
+			if (v.Charge is not Vector2I onto)
+				continue;
+			Vehicle? victim = Vehicle.At(_vehicles, onto);
+			// Gone, dead, or arrived without ever touching anybody: the order is
+			// spent either way. Cleared on standing still rather than kept, for
+			// OrderRam's reason - an intent that outlives its drive is a ram
+			// delivered by some later order.
+			if (v.Wreck.Dead || victim is null || victim == v
+				|| victim.Wreck.Dead)
+			{
+				v.Charge = null;
+				continue;
+			}
+			if (!v.Moving)
+			{
+				v.Charge = null;
+				continue;
+			}
+			if (v.Onto != onto || v.LegDone < RamContact)
+				continue;
+			double bearing = HexField.HeadingTo(v.Cell, onto);
+			// The struck hull first, then the one that struck it. Order matters
+			// only for the kill: a ram that finishes the victim must not have the
+			// rammer's own dent land on a tank the same frame declared a wreck.
+			Tick.Rammed(victim, Angles.Mod(bearing + 180.0, 360.0),
+						Gunnery.RamLevel(v.Profile, victim.Profile));
+			Tick.Rammed(v, bearing,
+						Gunnery.RamLevel(victim.Profile, v.Profile));
+			// One shove into the one spring, from the hull that was driven: two
+			// tanks colliding is one event on the view, which is the argument the
+			// camera shake is a single object for. Along the drive heading and
+			// unnormalised, so a ram into the screen jolts less than one across
+			// it - the shot's rule, on the same camera.
+			if (_tick.ShakeOn)
+				_shake.Fire(v.Atlas.GroundDirection(bearing),
+							v.Profile.ShotShake);
+			v.Charge = null;
+			// Stopped where it stands rather than parked back onto the cell it
+			// came from - a hex away from the hull it just hit, which is a ram
+			// that reads as never having happened. See TankTick.Halt.
+			Tick.Halt(v);
+		}
+	}
 
 	private void CancelOrder() => Tick.CancelOrder(Active);
 
@@ -3447,6 +3731,22 @@ public sealed partial class Main : SceneRoot
 	/// </summary>
 	private bool RoundFor(Vehicle shooter)
 	{
+		// <b>An order to shell a cell answers here and nowhere else, and it
+		// answers with whoever is standing on that cell.</b> Empty ground is
+		// false - the round goes at the board, which is the whole point of being
+		// able to order it - and this branch returns either way rather than
+		// falling through to the tube below: a hull further down the same lane is
+		// laid on, and taking it would be the round arriving somewhere other than
+		// the hex it was sent to. See Vehicle.Mark.
+		if (shooter.Mark is Vector2I sent)
+		{
+			return shooter.Solution.Clear
+				   && Vehicle.At(_vehicles, sent) is Vehicle there
+				   && there.Atlas.HasHit
+				   && Tick.Shoot(shooter, there,
+								 Angles.Mod(shooter.Solution.Heading + 180.0,
+											360.0));
+		}
 		if (shooter.Target is not null && shooter.Solution.Clear
 			&& Gunnery.Laid(shooter.Sprite.TurretFacing, shooter.Solution.Heading)
 			&& shooter.Target.Atlas.HasHit)
@@ -3798,12 +4098,19 @@ public sealed partial class Main : SceneRoot
 		// A wreck holds no target and cannot be given one, so this is belt and
 		// braces - but the gate is stated here as well as at the kill because
 		// the gun is the one thing that must not go off from a burnt-out hull.
-		if (v.Target is null || v.Wreck.Dead)
+		if (v.Wreck.Dead || (v.Target is null && v.Mark is null))
 		{
 			v.Solution = Gunnery.None;
 			return;
 		}
-		v.Solution = Gunnery.Solve(_field, _vehicles, v, v.Target);
+		// <b>One cell, whichever of the two orders named it</b> - a tank to
+		// engage, or a hex to put one round into. Everything below this line is
+		// the same for both, and that is the argument for solving against a cell
+		// rather than against a tank: the lane, the traverse, the five gates and
+		// the reload are facts about where the gun is pointing, not about what
+		// happens to be standing there. See Vehicle.Mark.
+		Vector2I at = v.Target?.Cell ?? v.Mark!.Value;
+		v.Solution = Gunnery.Solve(_field, _vehicles, v, at);
 
 		// Where the gun is allowed to point. On a lane that is the lane; off one
 		// it is the nearest flat side to where the target actually is, so the
@@ -3813,7 +4120,7 @@ public sealed partial class Main : SceneRoot
 		int onto = v.Solution.OnLane
 			? v.Solution.Heading
 			: HexField.EdgeHeadings[Angles.SideFor(Gunnery.HeadingOf(
-				  v.Target.GroundPoint - v.GroundPoint))];
+				  (v.Target?.GroundPoint ?? Standpoint(at)) - v.GroundPoint))];
 		double was = v.Sprite.TurretFacing;
 		v.Sprite.TurretFacing = Gunnery.Traverse(
 			was, onto, Gunnery.TraverseRate(v.Profile) * delta);
@@ -3827,8 +4134,29 @@ public sealed partial class Main : SceneRoot
 		// answered by Aimed, which both this and the Z key now go through. The
 		// round arrives from the far end of the lane it left along, which is the
 		// whole reason the gun is restricted to the six.
-		Tick.Fire(v);
+		//
+		// The cell goes with it so that a round sent at the ground stops on the
+		// hex it was sent to rather than running on to whatever finally blocks
+		// it - see TankTick.Loose. Null for an engagement, which has a hull to
+		// stop it.
+		Tick.Fire(v, v.Mark);
+		// <b>And the order is spent.</b> One press, one round: the mark is
+		// cleared by the shot leaving rather than by the press, because
+		// everything between the two is the gun getting itself into a state where
+		// it can fire at all. Cleared after Fire and not before - Launch reads it
+		// to decide whether this round is for a hull or for the ground.
+		v.Mark = null;
 	}
+
+	/// <summary>Where a tank standing on a cell would touch the ground, in the
+	/// space <see cref="Vehicle.GroundPoint"/> is measured in.
+	///
+	/// The lifted anchor rather than the flat one, because what it is compared
+	/// against is a drawn contact point: a cell up on the crown is drawn higher,
+	/// and a heading read off the flat row would be the heading to a cell nobody
+	/// is standing on. One line, named because two readers want it and a second
+	/// copy of <c>_origin +</c> is how they come to disagree.</summary>
+	private Vector2 Standpoint(Vector2I cell) => _origin + _field.CellAnchor(cell);
 
 	/// <summary>The hit runs on screen frames for the shot's reason: it is a
 	/// hand-timed table of held frames, and under --capture the clock is fixed
@@ -5377,6 +5705,11 @@ public sealed partial class Main : SceneRoot
 		foreach (Vehicle v in _vehicles)
 			Tick.Run(v, delta);
 
+		// Right after they have moved and before anything reads the board: a ram
+		// is a fact about where a hull got to this frame, and it stops the tank
+		// that delivered it. See RamContacts.
+		RamContacts();
+
 		// After every tank has moved, so a round aimed at a tank sees where that
 		// tank got to this frame rather than last frame - the same ordering the
 		// belts and the audio already need, and for the same reason.
@@ -5536,8 +5869,12 @@ public sealed partial class Main : SceneRoot
 		// clear when the order was given stops being clear when somebody drives
 		// into it. Memoised because that is a handful of cells rebuilt and a
 		// redraw of the whole field, and neither is free at sixty a second.
+		// The mark is in it for the target's reason: an order to shell a cell
+		// paints the same six arcs and the same live lane, and a lane that was
+		// clear when the order was given stops being clear when somebody drives
+		// into it.
 		var mark = (_active, Active.Cell, Active.Target, Active.Target?.Cell,
-					Active.Solution.Clear);
+					Active.Mark, Active.Solution.Clear);
 		if (mark != _painted)
 		{
 			_painted = mark;
@@ -5608,6 +5945,30 @@ public sealed partial class Main : SceneRoot
 				_panel?.Sync();
 			return;
 		}
+		// <b>The double click first, because the second press of one is also an
+		// ordinary press</b> and the ordinary press would order the drive again
+		// underneath the ram. Left before the single-click branch and returning,
+		// which is the only ordering that makes the gesture one thing.
+		if (@event is InputEventMouseButton
+			{ ButtonIndex: MouseButton.Left, DoubleClick: true }
+			&& _vehicles.Count > 0 && _tank.Atlas is not null)
+		{
+			Vector2I onto = _field.ClampCell(
+				_field.CellAt(_field.ToLocal(GetGlobalMousePosition())));
+			// <b>And the selection the first press made is taken back, which is
+			// what makes ramming a tank possible at all.</b> A double click on a
+			// hull begins with a single click on a hull, and that is "drive that
+			// one" - so by the time the second press arrives the tank under the
+			// cursor is the tank in hand, and the order would be a hull ramming
+			// itself. Reverted rather than deferred: a click that waited to see
+			// whether a second one was coming would make every selection on this
+			// bench feel late. See _pickedFrom.
+			if (_pickedFrom >= 0 && Vehicle.At(_vehicles, onto) == Active)
+				Select(_pickedFrom);
+			_pickedFrom = -1;
+			OrderRam(onto);
+			return;
+		}
 		if (@event is InputEventMouseButton { Pressed: true } mouse)
 		{
 			if (mouse.ButtonIndex == MouseButton.Left && _vehicles.Count > 0
@@ -5619,23 +5980,38 @@ public sealed partial class Main : SceneRoot
 				// means "go there". One click, and which of the two it is decided
 				// by what is standing on the cell rather than by a modifier.
 				int pick = Vehicle.SelectionFor(_vehicles, _active, cell);
+				// Remembered before it is acted on, for the double click above:
+				// what it needs to know is not "who is being driven" but "who was
+				// being driven before this click", and this is the only place that
+				// can say so.
+				_pickedFrom = pick >= 0 ? _active : -1;
 				if (pick >= 0)
 					Select(pick);
 				else
 					OrderMoveTo(cell);
 				return;
 			}
-			// The right button is the gun and nothing else. Symmetrical with the
-			// left: what is standing on the cell decides, so a tank there means
-			// "shoot that one" and empty ground means "stop shooting". The
-			// driven tank's own cell resolves to the second - see Engage - which
-			// is the same reading left-clicking yourself gets.
+			// <b>The right button is the gun, and it says a cell rather than a
+			// tank.</b> One press is one round into that hex - see OrderShot -
+			// and what is standing there is answered at the trigger instead of
+			// here: a shell into the ground and a shell into a hull are one shot
+			// with one set of rules, and the button that gives the order has no
+			// business knowing which of the two it will turn out to be.
+			//
+			// It used to mean "attack that tank until told otherwise", and the
+			// standing engagement is still what --attack, the panel row and
+			// bench-attack give. The mouse gives single rounds; the difference is
+			// worth having, because a shot at a cell is the only order that can
+			// be given at a wood, a wall or a patch of water.
+			//
+			// The driven tank's own cell reads as "stop", which is the same
+			// reading left-clicking yourself gets.
 			if (mouse.ButtonIndex == MouseButton.Right && _vehicles.Count > 0
 				&& _tank.Atlas is not null)
 			{
 				Vector2 local = _field.ToLocal(GetGlobalMousePosition());
 				Vector2I cell = _field.ClampCell(_field.CellAt(local));
-				Engage(Active, Vehicle.At(_vehicles, cell));
+				OrderShot(Active, cell);
 				_panel?.Sync();
 				return;
 			}
@@ -5877,6 +6253,12 @@ public sealed partial class Main : SceneRoot
 			// R means the bench as it opened, and a tank left engaging would
 			// start putting holes back into the armour that was just fixed.
 			v.Target = null;
+			// Both of the mouse's orders with it, and for the same sentence: R
+			// means the bench as it opened, and a tank left with a round owed to
+			// a hex or a hull owed a ram would spend it on the board that was
+			// just put back.
+			v.Mark = null;
+			v.Charge = null;
 			v.Solution = Gunnery.None;
 			v.ReloadLeft = 0.0;
 			v.Hit.Reset();

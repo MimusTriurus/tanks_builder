@@ -8486,6 +8486,134 @@ public static class SelfTest
             $"tolerance {Gunnery.LayTolerance} - loose enough and the tank "
             + "shoots along a lane it is not pointing down");
 
+        // ---- the right button: one round into a cell -----------------------
+        //
+        // The order is given by cell rather than by tank, so the solution has to
+        // be about cells all the way down. Asserted against the tank overload
+        // rather than trusted: the two are one method now, and the day somebody
+        // gives the tank one a shortcut of its own is the day a shell into a hull
+        // and a shell into the ground under it stop being the same shot.
+        if (vehicles is { Count: > 1 })
+        {
+            Vehicle shooter = vehicles[active];
+            int mark = 0;
+            foreach (Vehicle other in vehicles)
+            {
+                if (ReferenceEquals(other, shooter))
+                    continue;
+                Shot byTank = Gunnery.Solve(field, vehicles, shooter, other);
+                Shot byCell = Gunnery.Solve(field, vehicles, shooter, other.Cell);
+                if (byTank.Heading != byCell.Heading
+                    || byTank.Range != byCell.Range
+                    || byTank.BlockedAt != byCell.BlockedAt
+                    || byTank.ByCover != byCell.ByCover)
+                    mark++;
+            }
+            Check("a shot at a cell is the shot at whoever is standing on it",
+                mark == 0,
+                $"{mark} of {vehicles.Count - 1} disagree - the lane, the range "
+                + "and what is in the way are facts about two cells");
+            Check("and a gun laid on its own cell has no solution at all",
+                !Gunnery.Solve(field, vehicles, shooter, shooter.Cell).OnLane,
+                "clicking yourself is 'stop', which is what a right click on the "
+                + "tank in hand has always meant");
+            // Both orders drive one turret and spend one reload, so a tank
+            // holding the two would be a tank whose gun has two ideas about
+            // where it is pointing. Asserted on the live board because the two
+            // doors that keep it - Engage and OrderShot - are the harness's.
+            Check("no tank holds a target and a marked cell at once",
+                vehicles.All(v => v.Target is null || v.Mark is null),
+                string.Join(", ", vehicles.Select(
+                    v => $"{v.Tag} {(v.Target?.Tag ?? "-")}/{v.Mark?.ToString() ?? "-"}")));
+        }
+
+        // Where a round sent at a cell comes down. The flight is measured from
+        // the muzzle, which stands 60-70px down the bore ahead of the contact
+        // point the walk is measured from - so a stop worked out from the wrong
+        // one of those two lands the burst over the far rim of the cell that was
+        // ordered. Every lane, every range the board has, and the tank's own
+        // ground direction rather than a direction invented here.
+        if (tank.Atlas is not null)
+        {
+            var origin = new Vector2(220, 220);       // any origin: it cancels
+            var seat = new Vector2I(4, 3);
+            int astray = 0;
+            var worst = "";
+            foreach (int lane in HexField.EdgeHeadings)
+            {
+                Vector2 dir = tank.Atlas.GroundDirection(lane).Normalized();
+                if (dir.LengthSquared() < 0.5f)
+                    continue;
+                List<Vector2I> down = field.Lane(seat, lane);
+                for (int i = 0; i < down.Count; i++)
+                {
+                    // A muzzle a bore's length out of the hull, which is the
+                    // whole of what this check is about.
+                    Vector2 from = origin + field.CellCentre(seat) + dir * 70.0f;
+                    Vector2 down_to = from + dir * TankTick.Sent(
+                        field, origin, from, down[i]);
+                    if (field.CellAt(down_to - origin) == down[i])
+                        continue;
+                    astray++;
+                    if (worst.Length == 0)
+                        worst = $"lane {lane} at {i + 1} landed on "
+                                + $"{field.CellAt(down_to - origin)} "
+                                + $"rather than {down[i]}";
+                }
+            }
+            Check("a round sent at a cell comes down on that cell",
+                astray == 0, astray == 0 ? "" : $"{astray} astray, first {worst}");
+        }
+
+        // ---- the double click: the ram ------------------------------------
+        //
+        // The table, and it is the gun's table with one deliberate difference:
+        // >= where the gun has >. A shell either gets through or it scorches the
+        // paint; two hulls of one class meeting at speed dent each other, and
+        // that is the whole reason a ram is a decision rather than a free hit.
+        MovementProfile ramLt = MovementProfile.For("LTP");
+        MovementProfile ramMt = MovementProfile.For("MTP");
+        MovementProfile ramHt = MovementProfile.For("HTP");
+        Check("the heavier hull wins a ram and equals dent each other",
+            Gunnery.RamLevel(ramHt, ramLt) == 1 && Gunnery.RamLevel(ramLt, ramHt) == 0
+            && Gunnery.RamLevel(ramMt, ramMt) == 1 && Gunnery.RamLevel(ramMt, ramLt) == 1
+            && Gunnery.RamLevel(ramLt, ramMt) == 0,
+            $"ht->lt {Gunnery.RamLevel(ramHt, ramLt)}, lt->ht {Gunnery.RamLevel(ramLt, ramHt)}, "
+            + $"mt->mt {Gunnery.RamLevel(ramMt, ramMt)}");
+        // The two halves of one collision, and the asymmetry is the content: a
+        // ram is one-sided exactly when the classes differ.
+        Check("and the exchange is one-sided only between different classes",
+            MovementProfile.Tags.All(
+                a => MovementProfile.Tags.All(b =>
+                    (Gunnery.RamLevel(MovementProfile.For(a),
+                                      MovementProfile.For(b))
+                     == Gunnery.RamLevel(MovementProfile.For(b),
+                                         MovementProfile.For(a)))
+                    == (MovementProfile.For(a).Rank
+                        == MovementProfile.For(b).Rank))),
+            "read each way round it has to answer the same thing only where "
+            + "the two hulls are the same weight");
+        // A ram cannot breach, which is what keeps it worth one round of a gun
+        // that could hurt that hull at all rather than a shortcut past three.
+        Check("a ram gouges and never breaches, and it counts towards the kill",
+            MovementProfile.Tags.All(
+                a => MovementProfile.Tags.All(
+                    b => Gunnery.RamLevel(MovementProfile.For(a),
+                                          MovementProfile.For(b)) <= 1))
+            && TankSprite.Penetrating(Gunnery.RamLevel(ramMt, ramMt))
+            && !TankSprite.Penetrating(Gunnery.RamLevel(ramLt, ramHt))
+            && Gunnery.PenetrationsToKill == 3,
+            $"a heavy round gets {Gunnery.Penetration(ramHt, ramLt)} levels deep and a "
+            + "ram must not");
+        // Where the hulls meet, as a fraction of the last leg. Read off four
+        // captured frames of one approach rather than worked out - see
+        // Main.RamContact - so what is asserted here is only that it is inside
+        // the leg it is a fraction of: a contact at nought fires before the tank
+        // has moved and one at one fires when it is on top of the other hull.
+        Check("the ram lands inside the leg that delivers it",
+            Main.RamContact > 0.0f && Main.RamContact < 0.5f,
+            $"{Main.RamContact:F2} of the leg");
+
         // Where a shell lands against where the gun is pointing, on the real
         // geometry rather than on a made-up plate: the shooter stands one or two
         // cells down a lane, its muzzle is the one the flash comes out of, and

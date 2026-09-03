@@ -72,10 +72,34 @@ public class McpBench
 	public string Fire(string? nothing = null)
 		=> MainThread.Instance.Run(() => Main.Live?.FireGun() ?? NoBench);
 
+	[AiTool("bench-shell", Title = "Bench / Shell A Cell", OpenWorldHint = false)]
+	[Description("Order the driven tank to put one round into a cell, as a right click on "
+		+ "a hex does. One call is one round: the tank lays its gun and fires on its own "
+		+ "once it has a firing lane, a clear one, a standstill, a laid gun and a loaded "
+		+ "round - not before - and the order is then spent. A tank standing on that cell "
+		+ "is hit by the armour model; empty ground gets the burst and a crater.")]
+	public string Shell(
+		[Description("Column of the cell to shell.")] int col,
+		[Description("Row of the cell to shell.")] int row)
+		=> MainThread.Instance.Run(() => Main.Live?.ShellCell(col, row) ?? NoBench);
+
+	[AiTool("bench-ram", Title = "Bench / Ram A Tank", OpenWorldHint = false)]
+	[Description("Order the driven tank to ram the tank standing on a cell, as a double "
+		+ "left click on it does. The route is driven the ordinary way and the ram lands "
+		+ "when the hulls meet, denting both by class - the heavier hull wins the "
+		+ "exchange, equals dent each other, and three dents kill like three rounds. "
+		+ "Nothing on the cell, or no route to it, and it is a plain drive.")]
+	public string Ram(
+		[Description("Column of the cell to ram into.")] int col,
+		[Description("Row of the cell to ram into.")] int row)
+		=> MainThread.Instance.Run(() => Main.Live?.RamCell(col, row) ?? NoBench);
+
 	[AiTool("bench-attack", Title = "Bench / Attack Tank", OpenWorldHint = false)]
-	[Description("Order the driven tank to attack another by index, as a right click on it "
-		+ "does. It lays its gun and opens fire on its own once it has a firing lane, a "
-		+ "clear one, a standstill, a laid gun and a loaded round - not before.")]
+	[Description("Order the driven tank to attack another by index until told otherwise - "
+		+ "what the panel's target row and --attack give. It lays its gun and opens fire "
+		+ "on its own once it has a firing lane, a clear one, a standstill, a laid gun "
+		+ "and a loaded round - not before - and goes on firing. The mouse's right button "
+		+ "gives single rounds instead; that is bench-shell.")]
 	public string Attack(
 		[Description("Zero-based index of the tank to attack.")] int index)
 		=> MainThread.Instance.Run(() => Main.Live?.AttackTank(index) ?? NoBench);

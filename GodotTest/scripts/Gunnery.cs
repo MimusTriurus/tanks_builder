@@ -82,11 +82,31 @@ public static class Gunnery
     /// standing then.
     /// </summary>
     public static Shot Solve(HexField field, IReadOnlyList<Vehicle> vehicles,
-                             Vehicle shooter, Vehicle target)
+                             Vehicle shooter, Vehicle target) =>
+        ReferenceEquals(shooter, target)
+            ? None : Solve(field, vehicles, shooter, target.Cell);
+
+    /// <summary>
+    /// The same solution against a <em>cell</em> rather than against a tank.
+    ///
+    /// <b>The one the right button asks for, and the tank overload is now written
+    /// on top of it.</b> Nothing in the walk ever wanted the target itself: it
+    /// wanted the cell to reach, and everything about the shell - the lane, the
+    /// range, who is standing in the way, the wall on an edge - is a fact about
+    /// two cells. A shell put into empty ground is the same shot as one put into
+    /// a tank standing on that ground, which is the whole reason the order is
+    /// given by cell.
+    ///
+    /// The shooter's own cell answers <see cref="None"/> for the reason a tank
+    /// cannot be its own target: a gun laid on the hull carrying it is not a
+    /// shot, and both buttons read a click on yourself as "stop".
+    /// </summary>
+    public static Shot Solve(HexField field, IReadOnlyList<Vehicle> vehicles,
+                             Vehicle shooter, Vector2I onto)
     {
-        if (ReferenceEquals(shooter, target))
+        if (onto == shooter.Cell)
             return None;
-        (int heading, int range) = field.LaneTo(shooter.Cell, target.Cell);
+        (int heading, int range) = field.LaneTo(shooter.Cell, onto);
         if (heading < 0)
             return None;
         List<Vector2I> lane = field.Lane(shooter.Cell, heading, range);
@@ -170,6 +190,41 @@ public static class Gunnery
     /// </summary>
     public static int Penetration(MovementProfile gun, MovementProfile armour) =>
         gun.Rank > armour.Rank ? gun.Rank : 0;
+
+    /// <summary>
+    /// How deep a ram gets into the hull it is driven into, as a damage level -
+    /// what <see cref="Penetration"/> answers for a shell.
+    ///
+    /// <b>One level, and it is the same level whoever rams whoever.</b> A ram has
+    /// no calibre to spend: what arrives is a hull, and the two hulls in the
+    /// collision are the same two objects whichever way round the order was
+    /// given. So the only question is who takes it, and that is
+    /// <see cref="RamLevel"/>'s whole content read twice - once each way.
+    ///
+    /// <code>
+    ///          rams LTP  rams MTP  rams HTP
+    ///   LTP       1         0         0
+    ///   MTP       1         1         0
+    ///   HTP       1         1         1
+    /// </code>
+    ///
+    /// <b>The heavier hull wins the exchange and equals hurt each other</b>, which
+    /// is <see cref="Penetration"/>'s shape with one deliberate difference: this
+    /// one is <c>&gt;=</c> where the gun's table is <c>&gt;</c>. A gun that does
+    /// not out-class the armour scorches the paint, because a shell either gets
+    /// through or it does not; two hulls of one class meeting at speed dent each
+    /// other, because there is no plate in a ram that is not also a ram. So a
+    /// medium ramming a medium is the one exchange both sides lose, and it is
+    /// meant to be - it is the reason a ram is a decision rather than a free hit.
+    ///
+    /// Level 1 rather than the rammer's rank, and that is the difference from a
+    /// shell that matters most: a ram cannot breach. It gouges, it counts towards
+    /// <see cref="PenetrationsToKill"/> like anything else that gets past the
+    /// paint, and three of them finish a tank - the same three, so a ram is
+    /// worth exactly one round of whatever gun could hurt that hull at all.
+    /// </summary>
+    public static int RamLevel(MovementProfile hull, MovementProfile other) =>
+        hull.Rank >= other.Rank ? 1 : 0;
 
     /// <summary>
     /// How many rounds have to get past the paint before the tank is finished.

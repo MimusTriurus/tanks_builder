@@ -416,7 +416,42 @@ public sealed class Vehicle
     /// </summary>
     public Vehicle? Target;
 
-    /// <summary>The solution against <see cref="Target"/> as of this frame.
+    /// <summary>
+    /// The cell this tank has been told to put <em>one</em> round into, or null.
+    ///
+    /// <b>The right button's order, and it is a cell rather than a tank on
+    /// purpose.</b> A shell goes where it is sent; whether a hull happens to be
+    /// standing there is answered at the trigger and nowhere else - see
+    /// <c>Main.RoundFor</c> - so shelling a wood, a rock and a tank are one
+    /// order with one set of rules rather than three.
+    ///
+    /// <b>Exclusive with <see cref="Target"/>, because a gun does one thing.</b>
+    /// Both are laid through the same traverse and both spend the same reload, so
+    /// a tank holding the two would be a tank whose gun has two ideas about where
+    /// it is pointing - the failure the harness has already paid for once at the
+    /// trigger. Whichever order arrived last is the one that stands.
+    ///
+    /// Cleared by the shot leaving, which is what makes one press one round.
+    /// </summary>
+    public Vector2I? Mark;
+
+    /// <summary>
+    /// The cell this tank has been told to ram, or null.
+    ///
+    /// <b>A drive order with an intent on it</b>, exactly as the wall bench's ram
+    /// is: the route is found the ordinary way and driven at the ordinary speed,
+    /// and what makes it a ram is that the destination is a cell somebody is
+    /// standing on and that the double click asked for it. Held here rather than
+    /// derived from the path, because a path that ends on an occupied cell is
+    /// also what a stale order looks like after the tank on it drove off.
+    ///
+    /// Cleared by the contact, by arriving without one, and by any plain move
+    /// order - see <c>Main.OrderRam</c>.
+    /// </summary>
+    public Vector2I? Charge;
+
+    /// <summary>The solution against <see cref="Target"/> or <see cref="Mark"/> as
+    /// of this frame.
     ///
     /// Kept rather than re-derived by everything that wants it - the fire gate,
     /// the lanes drawn on the ground, the panel, the trace. Solved once per

@@ -866,6 +866,38 @@ public sealed class TankTick
             ? v.Atlas.TrackArm
             : v.Atlas.HullSpan * PivotRadiusFraction) * v.Sprite.BodyScale;
 
+    /// <summary>
+    /// Stopped where it stands rather than on a cell - what a ram does at the
+    /// moment the hulls meet.
+    ///
+    /// <b>The order comes off and the drawn position stays.</b> Parking would put
+    /// the tank back on the middle of the cell it came from, a full hex from the
+    /// hull it just hit, and a ram whose picture is two tanks a cell apart is a
+    /// ram that reads as never having happened. So the sprite is left where the
+    /// leg had got it: nose against the other tank, which is what a collision
+    /// looks like and where the collision was.
+    ///
+    /// <b>The leg's own bookkeeping is cleared even so, and that is the whole
+    /// reason this is not just a cancel.</b> LegDone is what the position is
+    /// derived from while a leg runs, so a leg abandoned half way and left at
+    /// half would make the next order begin half way along itself - the trap
+    /// <see cref="Park"/> names. LegBlend goes with it because the two faces it
+    /// mixes are the cell this tank is still standing in and one it never
+    /// reached.
+    ///
+    /// Everything else Park writes - the heights, the waterline, the slope - is
+    /// left as the leg had it, exactly as <c>ESC</c> leaves it: they are facts
+    /// about where the tank is, and where it is is here.
+    /// </summary>
+    public void Halt(Vehicle v)
+    {
+        CancelOrder(v);
+        v.LegDone = 0.0f;
+        v.LegBlend = 0.0f;
+        v.Travel = Vector2.Zero;
+        v.Levelling = false;
+    }
+
     public void CancelOrder(Vehicle v)
     {
         v.Path = new List<Vector2I>();
@@ -1513,6 +1545,12 @@ public sealed class TankTick
         v.PathStep = 0;
         v.Speed = 0.0;
         v.Target = null;
+        // And the two orders the mouse gives, for the target's reason: a wreck
+        // has no gun to spend a round with and nothing left to drive at. Its own
+        // orders only - a mark on the cell a wreck is standing on is still a
+        // perfectly good order to somebody else, because a cell is a cell.
+        v.Mark = null;
+        v.Charge = null;
         v.Scan.Suspend();
         // It burns because it has just been destroyed, not because the key was
         // pressed - and the key can no longer put it out, since a wreck that
@@ -1960,8 +1998,29 @@ public sealed class TankTick
     /// arrival bearing has to be a flat side of the hex or
     /// <c>AtlasSet.FaceFor</c> is handed a number it cannot use - and a round
     /// going at the ground never asks for a plate.
+    ///
+    /// <b><paramref name="onto"/> shortens the flight and never lengthens or
+    /// bends it.</b> An order to shell a cell says where the round stops; it does
+    /// not say which way the gun points, because the six lanes already do and the
+    /// order is only ever given down one of them. So the walk still decides the
+    /// direction and still decides what the round is allowed to cross - a wall or
+    /// a hull short of the cell stops it there, exactly as it stops a shot fired
+    /// by hand - and this is the lesser of the two runs. Written as a minimum
+    /// rather than as an assignment for that reason: a round told to land four
+    /// cells away through a wall two cells away lands on the wall.
+    ///
+    /// <b>Measured from the muzzle and in the board's own space, which is the
+    /// space the answer is spent in.</b> The walk is measured from the contact
+    /// point and then spent from the tube - 60 to 70px of difference the ray and
+    /// the round both carry, and rightly, because what it decides there is which
+    /// cell stops the line. Here it decides where a burst goes off, and 60px on a
+    /// 190px cell pitch is most of the way to the next hex: measured from the
+    /// contact point, a round sent one cell away landed over the far rim. So this
+    /// one is <c>|anchor - muzzle|</c>, and the round lands on the cell's own
+    /// anchor exactly - the point a tank standing there would touch the ground
+    /// at, which is what "into that hex" has to mean.
     /// </summary>
-    private void Loose(Vehicle shooter)
+    private void Loose(Vehicle shooter, Vector2I? onto = null)
     {
         if (Field?.Atlas is null)
             return;
@@ -1975,6 +2034,8 @@ public sealed class TankTick
         // in too, so the direction carries it across unchanged.
         Vector2 from = shooter.Spot(tube);
         (float run, Vector2I? at, bool blocked) = Reach(shooter, dir);
+        if (onto is Vector2I sent)
+            run = Mathf.Min(run, Sent(Field, Origin, from, sent));
         float lift = shooter.LiftOf(from);
         Send(shooter, new Shell
         {
@@ -2004,6 +2065,27 @@ public sealed class TankTick
             Level = 0,
         });
     }
+
+    /// <summary>How far a round has to run from <paramref name="from"/> to come
+    /// down on a cell's own anchor, in the board's space.
+    ///
+    /// A named static because it is the whole of what an order to shell a cell
+    /// means, and because a check cannot conjure a vehicle - the reason
+    /// <see cref="Vehicle.WadingAt"/> and <see cref="VehicleAudio.ImpactFor"/>
+    /// are ones too. The lifted centre rather than the flat one: what it is
+    /// compared against is a drawn point, and a cell up on a crown is drawn
+    /// higher.
+    ///
+    /// <b>The centre and not the anchor, which is the trap the field documents
+    /// and this was written into anyway.</b> A cell's anchor is the turret axis
+    /// projected to screen and floats some 57px above the ground the hexagon lies
+    /// on - <see cref="HexField.CentreOffset"/> - so aiming at it put every burst
+    /// a quarter of a cell short along the lane. Measured: the crater from a round
+    /// ordered into (4,4) came down at y=529 against the selection ring on that
+    /// same cell at y=586, x identical to the pixel.</summary>
+    public static float Sent(HexField field, Vector2 origin, Vector2 from,
+                             Vector2I onto) =>
+        (origin + field.CellCentre(onto) - from).Length();
 
     /// <summary>
     /// Every round in the air, one frame on.
@@ -2108,8 +2190,16 @@ public sealed class TankTick
     /// standing over - see <see cref="Kicked"/> - which is a thing on the board
     /// with its own clock, three times the length of the flash's, and so it is
     /// the board's to raise rather than the sprite's to draw.
+    ///
+    /// <paramref name="onto"/> is the cell the round was <em>sent to</em>, for a
+    /// gun firing on an order to shell a cell, and null for a gun fired by hand.
+    /// It reaches nothing but <see cref="Loose"/>, and there it is a stop rather
+    /// than an aim: see that method. Passed rather than read off the vehicle
+    /// because who the gun is shooting at is the harness's half of a shot and has
+    /// been since the trigger was made one - the same argument
+    /// <see cref="Launch"/> is a hook for.
     /// </summary>
-    public void Fire(Vehicle v)
+    public void Fire(Vehicle v, Vector2I? onto = null)
     {
         v.ShotFrame = 0;
         v.ReloadLeft = v.Profile.ReloadTime;
@@ -2155,7 +2245,7 @@ public sealed class TankTick
         // And the round, last because it is the only one of the five that leaves
         // the tank. Who it is for is the caller's to know - see Launch.
         if (Launch is null || !Launch(v))
-            Loose(v);
+            Loose(v, onto);
     }
 
     /// <summary>The shot runs on screen frames, not seconds. The sheet is a
@@ -2278,6 +2368,53 @@ public sealed class TankTick
         // all writing the same field out.
         Land(victim, face, scatter, rise, calibre, level, bite, from,
              ammo ?? Ammo);
+    }
+
+    /// <summary>
+    /// One hull driven into another: a dent on the plate it struck, the crew
+    /// hearing it, and the kill if that was the third one.
+    ///
+    /// <b>Beside <see cref="TakeHit"/> rather than through it, and the difference
+    /// is everything that is not here.</b> A shell arriving brings a burst, a
+    /// spall or a slam off the plate, a light inside the hull if it got through,
+    /// a shock to the wood and a calibre to remember - all of which are pictures
+    /// of a round, and there is no round in a ram. What a ram and a shell do have
+    /// in common is the only thing taken: a plate is picked off the bearing, it
+    /// takes a level, and three levels past the paint finish the tank. So this is
+    /// <see cref="Land"/>'s tail and nothing of its body.
+    ///
+    /// <b>The mark it leaves is a shell's mark, and that is a borrowing said out
+    /// loud rather than a fresh layer.</b> The armour has three rendered scar
+    /// levels and no fourth for a dent; drawing nothing at all would make a tank
+    /// three rams from dead look exactly like one that had never been touched,
+    /// which is the worse of the two lies. See <see cref="Gunnery.RamLevel"/> for
+    /// what a ram is worth against what.
+    ///
+    /// Returns the level of the mark, or -1 for a hull with no armour measured -
+    /// <see cref="TakeHit"/>'s answer, for the same reason.
+    /// </summary>
+    public int Rammed(Vehicle victim, double fromBearing, int level)
+    {
+        if (!victim.Atlas.HasHit)
+            return -1;
+        // Snapped to a side, as every bearing anything hands in is: the ram comes
+        // out of a neighbouring cell, so it arrives along a flat side by
+        // construction - this is the guard, not the conversion.
+        double from = HexField.EdgeHeadings[Angles.SideFor(fromBearing)];
+        // The same counter a shell bumps, because it is what puts this dent
+        // somewhere other than the last one - see ScatterAt. A ram counts into
+        // the same tally for the same reason it takes the same plate: what the
+        // hull has been through is one number.
+        victim.HitCount++;
+        string face = victim.Atlas.FaceFor(from, victim.Sprite.HullFacing);
+        int got = victim.Sprite.DamageTo(face, ScatterAt(victim.HitCount),
+                                         RiseAt(victim.HitCount), level);
+        // The impact take, chosen by the level for the reason a shell's is: a ram
+        // that only scuffs the paint is heard scuffing it.
+        victim.Audio?.Struck(got, victim.HitCount);
+        if (victim.Sprite.Penetrations >= Gunnery.PenetrationsToKill)
+            Kill(victim, face);
+        return got;
     }
 
     /// <summary>A round arriving, with everything about it already settled.
