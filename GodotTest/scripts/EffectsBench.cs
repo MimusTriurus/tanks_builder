@@ -91,6 +91,7 @@ public sealed partial class EffectsBench : SceneRoot
     private Wildfire? _fire;
     private WaterArt? _surf;
     private Swell? _sea;
+    private Ripples? _wash;
     private readonly List<WallProp> _walls = new();
 
     /// <summary>The marks bursts have left. Owned here and handed to the stage,
@@ -287,11 +288,20 @@ public sealed partial class EffectsBench : SceneRoot
             GD.Print("effects: water " + _surf.Note);
         }
         _sea = new Swell { Field = _field };
+        // <b>And the pond answers, which it did not until the shell that goes
+        // into it was drawn.</b> This bench had no ripple field at all: it judges
+        // bursts, and every burst it judged went off on earth. The one that goes
+        // off in water leaves its mark on the surface rather than in the cell -
+        // see Stage3D.Splash - so a bench without the field would be judging that
+        // burst with half of it missing, and the half that is missing is the half
+        // it was asked for.
+        _wash = new Ripples();
 
         _stage = new Stage3D
         {
             Field = _field, Origin = Vector2.Zero, Eye = _camera,
             Wood = _grove, Blaze = _fire, Surf = _surf, Sea = _sea,
+            Wash = _wash,
         };
         AddChild(_stage);
         // Both canvas answers put away, WoodBench's pair and for its reasons: the
@@ -622,6 +632,10 @@ public sealed partial class EffectsBench : SceneRoot
         // own per-frame work, so a frame that skipped it is a frame the board
         // stood still in.
         _stage?.Place(Array.Empty<Vehicle>());
+        // After the stage, for the reason the harness steps it after every tank
+        // has been noted: what the water is being asked to do is not known until
+        // whatever is asking has asked.
+        _wash?.Tick(delta);
 
         if (_hud is not null)
             _hud.Text = Note();

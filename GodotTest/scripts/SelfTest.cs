@@ -6691,187 +6691,121 @@ public static class SelfTest
                 $"pierce at child {lit}, turret at {turret}");
         }
 
-        // Subtracting the shared blocks so a file can be asked what it is its
-        // own - see the note on the fire check.
-        static string Own(string code) => code
-            .Replace(Stage3D.FlameInk, "")
-            .Replace(Stage3D.EmberNoiseCode, "")
-            .Replace(ProcBlast.DustInk, "")
-            .Replace(ProcBlast.FrameCode, "");
-
         Theme("the plume a round throws when it goes into water instead");
         // <b>The one entry in the taxonomy that was a bug rather than a gap.</b>
         // The other unbuilt items are pictures nobody has drawn; this one had a
         // picture and it was the wrong one - a round into the pond raised a cone
         // of thrown earth, because Land was handed a point and a lift and never
-        // asked whether the point was wet. See Stage3D.Wet, which is the whole of
-        // the fix, and ProcSpout, which is the answer to it.
-        Check("both of its quads are made of the board's own noise and ink",
-            ProcSpout.FoamCode.Contains(Stage3D.EmberNoiseCode)
-            && ProcSpout.FoamCode.Contains(ProcBlast.DustInk)
-            && ProcSpout.FireCode.Contains(Stage3D.FlameInk)
-            && ProcSpout.FoamCode.Contains(ProcBlast.FrameCode)
-            && ProcSpout.FireCode.Contains(ProcBlast.FrameCode),
-            "seven effects on this board raise a mass of many elements, and they "
-            + "are one text");
-        // <b>Three quads, and the reason is three LIGHTS rather than three
-        // substances.</b> Water and smoke are both masses of many elements summed
-        // into one volume, which is one text; but earth darkens as it thickens and
-        // water brightens, so the shared ink's dust_dense would have to hold two
-        // signs at once. It cannot, on one material. Fire is the third for the
-        // reason it always is.
+        // asked whether the point was wet. Stage3D.Wet is the whole of the fix.
         //
-        // <b>And the taxonomy's own line said there would be no fire at all.</b>
-        // That is true of a charge detonating UNDER water, where whatever light
-        // there was is under the surface before anything is thrown; five frames of
-        // the reference sheet for a shell bursting ON water have an orange core at
-        // the base of the column. The reference is the specification, and the line
-        // was wrong.
-        //
-        // Asked of what each file is its own, because the shared ink DECLARES
-        // flame_blob - the self-contradicting check this project has now written
-        // twice: a text required to contain a shared block cannot also be required
-        // to lack a definition from it.
-        string spoutOwn = Own(ProcSpout.FoamCode);
-        string fireOwn = Own(ProcSpout.FireCode);
-        Check("the mass does not add light and the flash does nothing else",
-            !spoutOwn.Contains("blend_add")
-            && fireOwn.Contains("blend_add")
-            && !fireOwn.Contains("dust_part")
-            && !spoutOwn.Contains("flame_blob")
-            && fireOwn.Contains("flame_blob"),
-            "a mass of water hides what is behind it and a flash adds to it; a "
-            + "quad that did both would be answering neither");
-        // <b>And there is no dark mass in it at all any more.</b> One was built,
-        // off a nine-frame sheet of a shell bursting ON the surface, and it was
-        // the mass of the event there; the reference this is built to is a charge
-        // going off UNDER one, which throws water and no smoke. Asserted rather
-        // than left to the numbers, because a smoke quad is what this file had
-        // and a colour is all that would be left of it.
-        Check("and no quad of it draws smoke",
-            !spoutOwn.Contains("smoke_dark") && !spoutOwn.Contains("smoke_climb")
-            && !fireOwn.Contains("smoke_dark"),
-            "the column here is water, and a grey stop on it is the picture this "
-            + "class exists to replace");
-        // <b>The mass of this event is the smoke, which is the finding the
-        // reference forced twice over.</b> The first build was a white geyser and
-        // the second a white suspension; the sheet shows white spikes for a fifth
-        // of a second and then a dark column that dominates every frame after. So
-        // the column has to be taller than the water is thrown - measured, not
-        // asserted by eye, because the pass that had them equal drew a plume with
-        // no column at all.
-        // <b>Up fast and down slowly, which is the whole of what was asked for
-        // and the reason the shared parabola is not used here.</b> blast_throw
-        // states its arc as an apex and is therefore symmetric - equal time up,
-        // equal time down - which is right for a clod of earth and wrong for
-        // water: what settles slowly is the divided part, held by drag rather
-        // than falling free. So the column has its own envelope, and the share of
-        // its life spent rising is what this asserts.
-        float conePeak = ProcBlast.Uniform(ProcSpout.FoamCode, "cone_peak", 0.0f);
-        Check("the column rises in a fifth of its life and settles over the rest",
-            conePeak > 0.0f && conePeak < 0.22f
-            && ProcBlast.Uniform(ProcSpout.FoamCode, "cone_fall", 0.0f) > 1.0f
-            && ProcBlast.Uniform(ProcSpout.FoamCode, "cone_rise", 9.0f) < 1.0f,
-            $"it tops out at {conePeak:P0} of its life");
-        // And it is a column rather than a heap: three times as tall as the trunk
-        // it stands on is wide, which is the reference read off the picture.
-        Check("and it is three times as tall as its own trunk is wide",
-            ProcSpout.ReachDefault
-            > ProcBlast.Uniform(ProcSpout.FoamCode, "cone_foot", 9.0f) * 2.0f * 2.5f
-            && ProcBlast.Uniform(ProcSpout.FoamCode, "cone_head", 9.0f)
-               < ProcBlast.Uniform(ProcSpout.FoamCode, "cone_foot", 0.0f),
-            $"{ProcSpout.ReachDefault} of a tile tall on a trunk "
-            + $"{ProcBlast.Uniform(ProcSpout.FoamCode, "cone_foot", 0.0f) * 2.0f}"
-            + " wide, tapering");
-        // <b>And the spray is drawn with the crispest profile in the project,
-        // which is the single thing that most decides whether it reads as
-        // water.</b> Every other mass here is soft and round because dust and
-        // smoke are; thrown water is sheets tearing into long sharp fingers. Two
-        // builds of this class were reported as wrong for missing it - one for
-        // making the spray round, one for making it a cloud - so it is asserted
-        // against both of the profiles it must not be.
-        // <b>And its elements are soft and barely stretched, which is the
-        // correction of the two worst pictures this class produced.</b> Twenty
-        // long crisp elements read as pills and were reported as cartoonish;
-        // forty longer, crisper ones read as white feathers and were reported in
-        // stronger words. The finding both times is the same and it is asserted
-        // here rather than remembered: on this board a mass reads only while its
-        // elements are INDISTINGUISHABLE, so what tears the silhouette has to be
-        // the field over the summed density - which is how the burst in earth
-        // gets a ragged edge out of round elements - and never the shape of one
-        // element.
-        Check("and its own elements are soft, so none of them can be picked out",
-            ProcBlast.Uniform(ProcSpout.FoamCode, "cone_soft", 0.0f)
-            > ProcBlast.Uniform(ProcBlast.DustCode, "clod_soft", 9.0f)
-            && ProcBlast.Uniform(ProcSpout.FoamCode, "cone_long", 9.0f) < 1.6f
-            && ProcBlast.Uniform(ProcSpout.FoamCode, "cone", 0.0f) >= 48.0f,
-            "an element with an edge is an element the eye picks out, and forty "
-            + "picked-out elements are not a mass however they are coloured");
-        // <b>And every mass on this board has to say unshaded, which is the bug
-        // this theme was written after finding.</b> There is no light in the 3D
-        // world here at all - see Stage3D on why - so a spatial shader that does
-        // not opt out of shading has its ALBEDO multiplied by the ambient and
-        // comes out black. The plume was written without it and drew two black
-        // tongues over the pond; ProcRack shipped without it, and its head of
-        // soot got away with it for exactly one reason - soot is meant to be
-        // dark, so nothing about the picture said the shading was gone.
+        // <b>And what answers it is the imported burst in white, which is the
+        // second finding and the more expensive one.</b> Four hand-written water
+        // plumes were built and thrown away - a geyser, a suspension, two masses
+        // at two heights, a column with its own envelope - each its own model with
+        // its own families, and each reported as wrong. What the sheet has is
+        // sixty-four rendered frames of a simulated cloud, with curl and
+        // self-shadowing in them; what a sum of ellipses has is a sum of
+        // ellipses, and no tuning closes that. So water gets the sheet too, and
+        // the difference between water and earth is one colour ramp.
+        var wetBurst = new SheetBlast { Wet = true };
+        var dryBurst = new SheetBlast();
+        Check("a round into water raises the imported burst, not a plume of its own",
+            !ReferenceEquals(SheetBlast.Smokes(true), SheetBlast.Smokes(false))
+            && ReferenceEquals(SheetBlast.Smokes(false), SheetBlast.SmokeStops)
+            && ReferenceEquals(SheetBlast.Smokes(true), SheetBlast.FoamStops),
+            "one class, one flipbook, two ramps");
+        // <b>Not one number of the model differs, and that is the claim being
+        // made.</b> A mass of water goes up, curls, sags and spreads the way a
+        // mass of earth does; what the substance decides is what colour it is.
+        // Asked of every dial the panel has, because a burst that had quietly
+        // grown its own model would be the fifth hand-written plume wearing the
+        // sheet's name.
+        bool sameModel = true;
+        string spoutOff = "";
+        foreach (string name in SheetBlast.ModelNames)
+            if (!Mathf.IsEqualApprox(wetBurst.Model(name), dryBurst.Model(name)))
+            {
+                sameModel = false;
+                spoutOff = name;
+            }
+        Check("and not one number of its model differs from the burst in earth",
+            sameModel && SheetBlast.ModelNames.Length > 10,
+            sameModel
+                ? $"{SheetBlast.ModelNames.Length} dials, all shared"
+                : $"{spoutOff} differs");
+        // <b>White, and measured rather than picked.</b> The pond's own shallow
+        // stop walked to white: dark enough at the bottom that the sheet's shading
+        // still reads - a flat white ramp is a flat cloud, because the curl in
+        // those frames is only visible as a spread of brightness - and neutral at
+        // the top, where earth is a warm brown. Which way the two ramps run is the
+        // whole of it: earth darkens as it thickens, water brightens.
+        (float, Color)[] foam = SheetBlast.FoamStops;
+        (float, Color)[] dirt = SheetBlast.SmokeStops;
+        Check("and the only thing changed is the colour: white water, brown earth",
+            foam[^1].Item2.R > 0.95f && foam[^1].Item2.G > 0.95f
+            && foam[^1].Item2.B > 0.95f
+            && Mathf.Abs(foam[^1].Item2.R - foam[^1].Item2.B) < 0.10f
+            && dirt[^1].Item2.R - dirt[^1].Item2.B > 0.20f
+            && foam[0].Item2.B > dirt[0].Item2.B
+            && foam[0].Item2.V < foam[^1].Item2.V,
+            $"water tops out at {foam[^1].Item2.V:F2} value and "
+            + $"{Mathf.Abs(foam[^1].Item2.R - foam[^1].Item2.B):F2} of warmth, "
+            + $"earth at {dirt[^1].Item2.R - dirt[^1].Item2.B:F2}");
+        // <b>And the flash is left exactly as the pack wrote it.</b> The round
+        // going off is the same round going off whatever it went off in, so the
+        // flame ramp and the fade a puff's flames walk along are not forked at
+        // all - only the albedo is.
+        Check("and the flash of the charge is the same flash in either substance",
+            SheetBlast.Code.Contains("flame_ramp")
+            && SheetBlast.Code.Contains("flame_fade")
+            && ProcBlast.Uniform(SheetBlast.Code, "flame_gain", 0.0f) > 1.0f,
+            "one fork, and it is the albedo ramp");
+        // <b>It digs nothing, and this is the only burst on the board that needs
+        // no argument for that.</b> A crater is what is left of ground that was
+        // thrown; water has nothing left of it at all a moment later. The mark of
+        // the event on the surface is the wave, and the wave is solved.
+        Check("and a shot into the pond leaves no crater in the cell",
+            Stage3D.Waves > 1.0f && Craters.WideDefault > 0.0f,
+            "the mark this event leaves is the ring, and Ripples owns it");
+        // <b>And every built mass on this board has to say unshaded, which is a
+        // bug this theme found and paid for.</b> There is no light in the 3D world
+        // here at all - see Stage3D on why - so a spatial shader that does not opt
+        // out of shading has its ALBEDO multiplied by the ambient and comes out
+        // black. A hand-written water plume was written without it and drew two
+        // black tongues over the pond; ProcRack shipped without it, and its head
+        // of soot got away with it for exactly one reason - soot is meant to be
+        // dark, so nothing about the picture said the shading was gone. The plume
+        // is gone and the check stays, because what it found was not about the
+        // plume.
         Check("every built mass on this board opts out of shading, or it is black",
-            ProcSpout.FoamCode.Contains("render_mode unshaded")
-            && ProcRack.DustCode.Contains("render_mode unshaded")
+            ProcRack.DustCode.Contains("render_mode unshaded")
             && ProcBlast.DustCode.Contains("render_mode unshaded")
             && ProcKick.DustKickCode.Contains("render_mode unshaded")
             && ProcSlam.DustSlamCode.Contains("render_mode unshaded")
-            && ProcSpall.DustSpallCode.Contains("render_mode unshaded"),
+            && ProcSpall.DustSpallCode.Contains("render_mode unshaded")
+            && SheetBlast.Code.Contains("render_mode unshaded"),
             "there is no light in this world, so a shaded ALBEDO is multiplied "
             + "by the ambient and the mass draws black");
-        // <b>Seated at nought, alone on this board.</b> Every other burst stands a
-        // little above the face it went off on, so that its elements do not draw
-        // through ground that is opaque and beneath them. Here the face IS the
-        // water and the water is where the plume goes back to, so the surface is
-        // exactly where this effect ends - and blast_footing, which needed no
-        // change at all, is what cuts it there.
-        var spout = new ProcSpout();
-        Check("the plume is seated on the surface and every other burst above one",
-            spout.Root == 0.0f && new ProcBlast().Root > 0.0f
-            && new ProcRack().Root > 0.0f,
-            $"spout root {spout.Root}, burst {new ProcBlast().Root}");
-        // The quad holds what the model CAN produce, not what it happens to draw -
-        // ProcSlam's finding, and it is asked of the model here as everywhere.
-        (float spoutAlong, float spoutUp) = ProcSpout.Bounds(spout.Reach);
-        Check("and the quad holds everything the plume can throw",
-            spoutAlong <= spout.Flank && spoutUp <= spout.Tall
-            && spoutAlong > spout.Flank * 0.5f && spoutUp > spout.Tall * 0.5f,
-            $"model reaches {spoutAlong:F3} x {spoutUp:F3} of a tile, quad is "
-            + $"{spout.Flank:F3} x {spout.Tall:F3}");
-        // <b>And the light leans the other way, which is the one number in the
-        // shared ink that water cannot take as written.</b> A mass of earth
-        // darkens as it thickens because earth absorbs; water brightens as it
-        // thickens, for the same reason a thin film of it is clear. Read at the
-        // earth's sign the plume came out a teal shape with a white rim - which
-        // reads as something rising UNDER the surface rather than out of it.
-        Check("and thickness brightens water where it darkens earth",
-            ProcSpout.Dense < 0.0f
-            && ProcBlast.Uniform(ProcBlast.DustInk, "dust_dense") > 0.0f
-            && ProcSpout.Seat > 0.0f,
-            $"spout dense {ProcSpout.Dense}, the ink's own "
-            + $"{ProcBlast.Uniform(ProcBlast.DustInk, "dust_dense")}");
-        // <b>There is no ring layer in it, and the absence is the finding.</b>
-        // Every other burst lays its ground rings on a plane of its own, because
-        // the ground it went off on cannot answer for itself. Water can: the
-        // ripple field is a damped wave equation with reflecting spoutBanks, so a hole
-        // punched in it spreads a ring at the field's own speed and comes back off
-        // the shore. A drawn ring beside a solved one would be two accounts of one
-        // surface - and the drawn one would be the account that walked through the
-        // spoutBank.
+        // <b>There is no ring layer in it either, and the absence is the
+        // finding.</b> Every other burst lays its ground rings on a plane of its
+        // own, because the ground it went off on cannot answer for itself. Water
+        // can: the ripple field is a damped wave equation with reflecting banks,
+        // so a hole punched in it spreads a ring at the field's own speed and comes
+        // back off the shore. A drawn ring beside a solved one would be two
+        // accounts of one surface - and the drawn one would be the account that
+        // walked through the bank.
         Check("the ring on the surface is solved rather than drawn",
-            !ProcSpout.FoamCode.Contains(ProcBlast.RingCode)
-            && !ProcSpout.FireCode.Contains(ProcBlast.RingCode)
-            && !ProcSpout.FoamCode.Contains("ring_gain")
-            && ProcRack.DustCode.Length > 0,
-            "ProcRack takes the burst's ring text outright; this one has no ring "
-            + "of its own at all");
-        // And the hole itself, on a field laid by hand: no board, no pond, no
-        // stage - Ripples is a plain class for exactly this reason.
+            !SheetBlast.Code.Contains(ProcBlast.RingCode)
+            && !SheetBlast.Code.Contains("ring_gain")
+            && ProcBlast.RingCode.Contains("ring_gain"),
+            "the burst in earth has a plane of ring text; this one has none at "
+            + "all, and the sheet it is made of never had one");
+        // <b>Waves rather than a ripple, which is the third thing that was asked
+        // for.</b> The field's own dent is what a solid entering water displaces;
+        // a round detonating in it throws a column out instead, so the hole is
+        // several times as deep - and a hole several times as deep is a ring
+        // several times as tall. Measured against a bare strike on the same field,
+        // because a factor that scaled nothing would read as one that did.
         var spoutPool = new Ripples();
         spoutPool.Fit(new Rect2(-200.0f, -200.0f, 400.0f, 400.0f), 0.5f, 1L,
                  _ => true);
@@ -6882,6 +6816,15 @@ public static class SelfTest
         float dug = spoutPool.Height(Vector2.Zero);
         Check("and a round going in leaves a hole, not a hill",
             dug < -1.0f, $"the middle is at {dug:F2} world units");
+        var spoutHard = new Ripples();
+        spoutHard.Fit(new Rect2(-200.0f, -200.0f, 400.0f, 400.0f), 0.5f, 1L,
+                 _ => true);
+        spoutHard.Strike(Vector2.Zero, Stage3D.Waves);
+        Check("and a bursting shell digs it several times deeper than that",
+            Mathf.IsEqualApprox(spoutHard.Height(Vector2.Zero),
+                                dug * Stage3D.Waves, 0.01f),
+            $"{dug:F2} against {spoutHard.Height(Vector2.Zero):F2} at "
+            + $"x{Stage3D.Waves}");
         // <b>At rest, which is what makes it a splash rather than a click.</b> The
         // recurrence reads the previous step to get a velocity, so denting only the
         // present field launches the hole at whatever speed the difference implies.
@@ -6899,7 +6842,7 @@ public static class SelfTest
                > Mathf.Abs(spoutPool.Height(Vector2.Zero)) * 0.25f,
             $"middle {spoutPool.Height(Vector2.Zero):F2}, 100 units out "
             + $"{spoutPool.Height(new Vector2(100.0f, 0.0f)):F2}");
-        // Dry texels are a wall, both ways: a strike on the spoutBank pushes nothing,
+        // Dry texels are a wall, both ways: a strike on the bank pushes nothing,
         // for the reason a hull half out of the water pushes only the half of it
         // that is in.
         var spoutBank = new Ripples();

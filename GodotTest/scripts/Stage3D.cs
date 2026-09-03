@@ -330,12 +330,7 @@ public sealed partial class Stage3D : Node3D
         // given or a lane going up. Fifty-four prisms is nothing to build; sixty
         // times a second for a board that has not changed is still nothing worth
         // spending.
-        string want = Signature();
-        if (want != _built)
-        {
-            Build();
-            _built = want;
-        }
+        Standing();
         // Outside the gate too, and for the swell's reason: the switch is not
         // part of what the board is made of, so folding it into the signature
         // would rebuild every prism to answer a checkbox - and leaving it in
@@ -386,7 +381,7 @@ public sealed partial class Stage3D : Node3D
             spall.Tick(delta);
         foreach (ProcRack rack in _racking)
             rack.Tick(delta);
-        foreach (ProcSpout spout in _spouting)
+        foreach (SheetBlast spout in _spouting)
             spout.Tick(delta);
         Etchings();
         Soot();
@@ -1710,6 +1705,32 @@ void fragment() {{
     /// interior seam carrying two bands to the board's outer edge's one, which is
     /// honest - a seam is a boundary twice over.
     /// </summary>
+    /// <summary>
+    /// Build the board if what a cell wears has changed since it was last built.
+    ///
+    /// <b>Lifted out of the frame so that something raised before the first frame
+    /// can ask for it, which is a bug a shot into water found.</b> Laying the
+    /// ripple field is part of building the pond - the field is state, so it is
+    /// laid exactly when the pond's shape is - and a bench that fires at
+    /// <c>_Ready</c> fired into a field of nought texels. The hole was punched
+    /// into nothing and lost, silently, because a strike outside the field's box
+    /// is exactly what a shot that lands off the pond looks like.
+    ///
+    /// Idempotent by <see cref="Signature"/>, which is what makes it safe to ask
+    /// for twice in a frame: fifty-four prisms is nothing to build, and sixty
+    /// times a second for a board that has not changed is still nothing worth
+    /// spending.
+    /// </summary>
+    private void Standing()
+    {
+        string want = Signature();
+        if (want != _built)
+        {
+            Build();
+            _built = want;
+        }
+    }
+
     private void Build()
     {
         if (Field.Atlas is null)
@@ -5490,13 +5511,13 @@ void fragment() {{
     /// read-only for its reason.</summary>
     public IReadOnlyList<ProcRack> Racking => _racking;
 
-    private readonly List<ProcSpout> _spouting = new();
+    private readonly List<SheetBlast> _spouting = new();
     private int _nextSpout;
 
     /// <summary>What to do to a plume before it goes up - <see cref="Dress"/> for
     /// the burst, seventh time, same argument: the pool is built on the first
     /// round into the water, and a panel must not have to wait for one.</summary>
-    public Action<ProcSpout>? Drench;
+    public Action<SheetBlast>? Drench;
 
     /// <summary>
     /// Whether a round landing in water raises a plume or the burst it used to.
@@ -5508,9 +5529,9 @@ void fragment() {{
     /// the board is the only thing that knows the point is wet. It sits beside
     /// <see cref="Blast"/> for that reason and is read in the same method.
     ///
-    /// Off, a round into the pond throws a cone of earth again - which is what it
+    /// Off, a round into the pond throws the earth burst again - which is what it
     /// did until this was written, so the flag is the A/B against the picture
-    /// that was reported as wrong.
+    /// that was reported as wrong: same cloud, brown, with a crater under it.
     /// </summary>
     public bool Spout = true;
 
@@ -5546,36 +5567,50 @@ void fragment() {{
     }
 
     /// <summary>
-    /// A round that went into water - <see cref="ProcSpout"/>.
+    /// A round that went into water: the imported burst, in white.
     ///
-    /// <b>A seventh pool, and the first one whose ground half is not drawn at
-    /// all.</b> The ring this event leaves on the surface is solved rather than
-    /// laid on a plane of its own: <see cref="Wash"/> is a damped wave field with
-    /// reflecting banks, so a hole punched in it spreads at the field's own speed
-    /// and comes back off the shore. See <see cref="Ripples.Strike"/> - and see
-    /// <see cref="ProcSpout"/>, which therefore has no ring layer, because a drawn
-    /// ring beside a solved one is two accounts of one surface.
+    /// <b>The same <see cref="SheetBlast"/> the board raises on earth, from a
+    /// pool of its own, with one ramp swapped - and that swap is the finding
+    /// rather than a shortcut.</b> A shell into a pond throws the event this class
+    /// already draws: a mass of many puffs going up, curling, sagging and
+    /// spreading, with the round's own flash under it. What the substance decides
+    /// is the colour; how the mass moves it does not decide at all. See
+    /// <see cref="SheetBlast.Wet"/>, which is the whole of the difference, and
+    /// what it cost to learn.
+    ///
+    /// <b>A third pool rather than a flag on <see cref="Boom"/>, for the reason
+    /// the second one exists.</b> A pool is a set of built nodes, and what is
+    /// built into these is the white ramp: <see cref="SheetBlast.Build"/> reads
+    /// <see cref="SheetBlast.Wet"/> once. Sharing the earth pool would mean
+    /// rebuilding a material per shot, on the pool a bench compares against.
     ///
     /// <b><paramref name="top"/> is the water's own height, not the cell's</b> -
     /// <see cref="Wet"/> is what hands it over, and it is the whole of what this
     /// effect needs the field for.
     ///
-    /// <b>And it digs nothing.</b> Seventh time, and the only time it needs no
-    /// argument: a hole in water is the effect. <see cref="Pits"/> is not touched,
-    /// so a shot into the pond leaves the cell exactly as it found it.
+    /// <b>And it digs nothing.</b> The one burst on this board that needs no
+    /// argument for that: a hole in water is not a mark, it is the wave, and the
+    /// wave is <see cref="Ripples"/>'s. <see cref="Pits"/> is not touched, so a
+    /// shot into the pond leaves the cell exactly as it found it - which is the
+    /// second half of what was asked for, the first being the colour.
     /// </summary>
     public void Splash(Vector2 spot, float top, float might = 1.0f)
     {
         if (Field.Atlas is null)
             return;
+        // <b>The pond before the shell that goes into it.</b> Every other burst
+        // needs nothing of the board but a point; this one needs the ripple field,
+        // and the field is laid when the pond is built. See Standing.
+        Standing();
         while (_spouting.Count < Bursts)
         {
-            var made = new ProcSpout();
+            // Wet before Build, because the ramp is baked into the material there.
+            var made = new SheetBlast { Wet = true };
             AddChild(made);
             made.Build(Field.Atlas.HexRect.Size.X, Squash, RiseFactor);
             _spouting.Add(made);
         }
-        ProcSpout spout = _spouting[_nextSpout % Bursts];
+        SheetBlast spout = _spouting[_nextSpout % Bursts];
         // Reset before the hook, multiplied after it - see Burst on why the
         // multiply alone compounds until the plume fills the screen.
         spout.Might = 1.0f;
@@ -5584,17 +5619,43 @@ void fragment() {{
         spout.Might *= might;
         spout.Sit(spot, top, Squash, RiseFactor);
         spout.Fire();
-        // And the hole in the water, in the field's own space. The one expression
-        // that puts a board point on the pond's surface is this class's - see
-        // Ground - and a second copy of it in a caller is how a push comes to
-        // land a level away from the splash it belongs to.
+        // And the waves, in the field's own space. The one expression that puts a
+        // board point on the pond's surface is this class's - see Ground - and a
+        // second copy of it in a caller is how a push comes to land a level away
+        // from the splash it belongs to.
+        //
+        // <b>Hard, and by a named factor rather than by folding it into the
+        // field's own numbers.</b> Ripples.Dent is what one shell does to still
+        // water; this is the shell a HE round is, and it is asked for as waves
+        // rather than a ripple. Kept here because it is a fact about this
+        // effect - a hull's wake, a ford and a drop all go through the same field
+        // and none of them wants it.
         Vector3 at = Ground(spot, top);
-        Wash?.Strike(new Vector2(at.X, at.Z), might);
+        Wash?.Strike(new Vector2(at.X, at.Z), might * Waves);
     }
+
+    /// <summary>
+    /// How much harder a bursting shell hits the water than
+    /// <see cref="Ripples.Dent"/> alone says.
+    ///
+    /// <b>Three, and the number is the difference between a ripple and a wave.</b>
+    /// The field's own dent is tuned to a thing entering water - it is what a
+    /// solid going in displaces - and a round detonating there does not enter it,
+    /// it throws a column of it out. What that leaves is a hole several times as
+    /// deep, and a hole several times as deep is a ring several times as tall,
+    /// which is what carries to the bank and back.
+    ///
+    /// <b>It scales the displacement and nothing else, which is why it is safe to
+    /// turn.</b> The five-point stencil's stability bound is on the coupling, not
+    /// on the amplitude - see <see cref="Ripples.Bound"/> - so a deeper hole
+    /// spreads at exactly the same speed, with the same reflections, and only
+    /// stands taller. Every aspect ratio of the wave is untouched.
+    /// </summary>
+    public const float Waves = 3.0f;
 
     /// <summary>The plumes as they stand, <see cref="Bursting"/>'s twin and
     /// read-only for its reason.</summary>
-    public IReadOnlyList<ProcSpout> Spouting => _spouting;
+    public IReadOnlyList<SheetBlast> Spouting => _spouting;
 
     /// <summary>
     /// Where a hull has burnt the ground under it: what is left after the
@@ -5755,7 +5816,7 @@ void fragment() {{
         // The plume too, and it belongs with these two rather than with the three
         // that hang off armour: all three of these are what the board makes of a
         // round landing on it, and Land is the one method that picks between them.
-        foreach (ProcSpout spout in _spouting)
+        foreach (SheetBlast spout in _spouting)
             spout.Douse();
     }
 

@@ -267,6 +267,32 @@ public sealed partial class SheetBlast : Node3D
     /// different cloud with the same numbers.</summary>
     public int Seed = 1;
 
+    /// <summary>
+    /// Whether this burst went off in water rather than in earth.
+    ///
+    /// <b>One ramp, and that is the whole of the difference - which is the
+    /// finding, not a shortcut.</b> A shell into a pond throws the same event this
+    /// class already draws: a mass of many puffs that goes up, curls, sags and
+    /// spreads, with the round's own flash at the bottom of it. The substance the
+    /// mass is made of changes what colour it is and nothing else about how it
+    /// moves, so what changes here is <see cref="SmokeStops"/> for
+    /// <see cref="FoamStops"/> and not one number of the model.
+    ///
+    /// <b>Four builds of a hand-written water plume were thrown away to arrive
+    /// at that sentence.</b> Each of them was its own model - its own families,
+    /// its own envelope, its own elements - and each was reported as wrong for the
+    /// same reason underneath: sixty-four rendered frames of a simulated cloud
+    /// carry curl and self-shadowing that a sum of ellipses does not have, and no
+    /// amount of tuning on the sum buys it. The sheet has them. So the sheet is
+    /// what water gets too.
+    ///
+    /// Read in <see cref="Build"/>, so it is set on a node before it is built -
+    /// which is what <see cref="Stage3D.Splash"/>'s own pool does. The flame ramp
+    /// and the fade are left exactly as the pack wrote them: the flash of the
+    /// charge is the same flash whatever it went off in.
+    /// </summary>
+    public bool Wet;
+
     private float _clock = -1.0f;
 
     public bool Alive => _clock >= 0.0f;
@@ -312,7 +338,7 @@ public sealed partial class SheetBlast : Node3D
         _ink.SetShaderParameter("sheet", Art("puff_sheet.png", ref _sheet));
         _ink.SetShaderParameter("bulge", Art("puff_bulge.png", ref _bulge));
         _ink.SetShaderParameter("dent", Art("puff_dent.png", ref _dent));
-        _ink.SetShaderParameter("smoke_ramp", Ramp(SmokeStops, 256));
+        _ink.SetShaderParameter("smoke_ramp", Ramp(Smokes(Wet), 256));
         _ink.SetShaderParameter("flame_ramp", Ramp(FlameStops, 256));
         _ink.SetShaderParameter("flame_fade", Ramp(FadeStops, 64));
         _ink.SetShaderParameter("sun", Stage3D.Sun);
@@ -882,12 +908,41 @@ public sealed partial class SheetBlast : Node3D
     /// which is grey smoke, and grey smoke on this board is the wrong earth. These
     /// are the dust cone's own two dirt colours, so the two bursts throw up the
     /// same ground.</summary>
-    private static readonly (float, Color)[] SmokeStops =
+    internal static readonly (float, Color)[] SmokeStops =
     {
         (0.00f, new Color(0.168f, 0.130f, 0.098f)),
         (0.50f, new Color(0.470f, 0.385f, 0.290f)),
         (1.00f, new Color(0.930f, 0.820f, 0.630f)),
     };
+
+    /// <summary>
+    /// The same ramp for a burst in water: white, and measured rather than
+    /// picked.
+    ///
+    /// <b>Dark, mid and light of the pond it comes out of, walked to white.</b>
+    /// The computed surface's own <c>shallow</c> is (0.24, 0.52, 0.50), and water
+    /// thrown into the air is that water with light through it: so the dark stop
+    /// is the pond lifted, the middle is where foam starts and the top is white
+    /// with the faintest of that green-blue left in it. Neutral grey would read as
+    /// smoke, and pure white at every stop would throw the sheet's own shading
+    /// away - the curl in those sixty-four frames is <em>only</em> visible as a
+    /// spread of brightness, so a flat ramp is a flat cloud.
+    ///
+    /// <b>And it climbs where the earth's ramp is dark.</b> A mass of earth
+    /// darkens as it thickens, because earth absorbs; water brightens, for the
+    /// reason a thin film of it is clear. Which way round the ramp runs is the
+    /// whole of that, and it is why this is a ramp swap rather than a tint.
+    /// </summary>
+    internal static readonly (float, Color)[] FoamStops =
+    {
+        (0.00f, new Color(0.395f, 0.585f, 0.580f)),
+        (0.50f, new Color(0.780f, 0.880f, 0.885f)),
+        (1.00f, new Color(0.985f, 0.995f, 1.000f)),
+    };
+
+    /// <summary>Which of the two the burst is made of - <see cref="Wet"/>'s one
+    /// consequence, as a method so a check can ask for it.</summary>
+    internal static (float, Color)[] Smokes(bool wet) => wet ? FoamStops : SmokeStops;
 
     /// <summary>Brightness plus the age shift to the colour of the flame, copied
     /// stop for stop from the pack: nothing, then white, then a warm yellow, then
