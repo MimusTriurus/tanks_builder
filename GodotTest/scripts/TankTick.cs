@@ -458,6 +458,74 @@ public sealed class TankTick
     public Action<Vehicle, Vector2, Vector2, bool>? Blasted;
 
     /// <summary>
+    /// A tank's ammunition going off - the detonation that ends a hull rather
+    /// than one that lands on it. See <see cref="ProcRack"/>.
+    ///
+    /// <b>Raised from <see cref="Kill"/> and nowhere else, which makes it the one
+    /// effect on this board that is not on a shell's trigger.</b> Every other
+    /// picture here answers a round arriving or leaving; this one answers a state
+    /// change, and the state is what it hands over to - see
+    /// <see cref="Wreck.RiseSeconds"/>.
+    ///
+    /// Handed the victim, where its turret ring sits above its feet in screen px,
+    /// and how big the detonation is. <b>The deck rather than a plate</b>: nothing
+    /// about this event depends on where the last round hit, only on where the
+    /// hull's openings are, and <c>anchor_px</c> is the ring by construction. See
+    /// <see cref="ProcRack.Aim"/>.
+    ///
+    /// <b>The size is the tank's own drawn scale, and a measured hull length is
+    /// the wrong lever on these assets rather than a better one.</b> That was the
+    /// first plan: a hull that fills more of a cell holds more ammunition, which
+    /// is a measurement instead of a table. <see cref="AtlasSet.HullSpan"/>'s own
+    /// note says why it cannot be - LTP, MTP and HTP come out 188, 183 and 182px
+    /// broadside, so all three models are rendered the same physical size and the
+    /// heavy is fractionally the <em>smallest</em>. Whatever difference the
+    /// classes have on this board is <see cref="MovementProfile.Size"/>'s doing,
+    /// so the size a tank is drawn at is not a proxy for how big it is - it is
+    /// the only statement of it there is.
+    ///
+    /// Answered by whichever root draws a board that can hold the quad, and
+    /// unanswered on the flat one for <see cref="Landed"/>'s reason.
+    /// </summary>
+    public Action<Vehicle, Vector2, float>? Detonated;
+
+    /// <summary>
+    /// Whether a tank that dies draws its ammunition going off.
+    ///
+    /// <see cref="Slam"/>'s twin and its argument: the detonation stands on the
+    /// board and there is no rendered layer for it at all, so off is the only A/B
+    /// it can have. <c>--rack off</c> on both roots, and no panel row.
+    ///
+    /// <b>What off does <em>not</em> take back is the fire coming up</b>, and
+    /// that is worth stating because the last two of these flags each needed the
+    /// sentence. <see cref="Wreck.RiseSeconds"/> is a correction to a defect that
+    /// existed before anything was drawn - a flame at full strength on the frame
+    /// of death - and it stands whether or not this picture is drawn. Off is the
+    /// A/B for the quad; the ramp is not on trial.
+    /// </summary>
+    public bool Rack = true;
+
+    /// <summary>
+    /// Which of the two deaths a killing blow on <paramref name="face"/> is:
+    /// true the ammunition, false the fuel.
+    ///
+    /// <b>The plate decides, because the plate is the one thing about the killing
+    /// round that is already measured.</b> A round through the rear plate is in
+    /// the engine bay and what it finds there is fuel and a powerpack; anywhere
+    /// else in the hull it is among stowage. That is a claim about where things
+    /// are in a tank rather than a dice roll, which is what
+    /// <see cref="Wreck.Racked"/> needs it to be - the wreck keeps the answer for
+    /// the rest of the battle.
+    ///
+    /// <b>And no plate at all is the ammunition</b>, which is the six callers who
+    /// kill by hand: a keypress, the middle button, the bench's button and the
+    /// MCP tool. That gesture is asking for the loud one - there is no way to aim
+    /// it at an engine deck and no reason to want the quieter death from a debug
+    /// key.
+    /// </summary>
+    internal static bool RackedBy(string? face) => face != "rear";
+
+    /// <summary>
     /// Whether an HE round draws the burst on the plate at all.
     ///
     /// <see cref="Bounce"/>'s twin and its argument word for word: the built
@@ -1409,10 +1477,20 @@ public sealed class TankTick
     /// Everything here is the tank ceasing to be a machine. Most of the read is
     /// in this list rather than in any pixel: on this field a live tank trembles,
     /// smokes, scans with its turret and rocks when it moves.
+    ///
+    /// <b>And now one pixel of it is an event.</b> Which of the two deaths this
+    /// is - see <see cref="RackedBy"/> - and the detonation that draws it, which
+    /// hands over to the fire this method has always lit. That handover is the
+    /// whole of <see cref="ProcRack"/>; before it, the flame and the column
+    /// arrived at full strength on this very frame.
+    ///
+    /// <paramref name="face"/> is the plate the killing round landed on, or null
+    /// where there was no round - see <see cref="RackedBy"/>, which is the only
+    /// thing that reads it.
     /// </summary>
-    public void Kill(Vehicle v)
+    public void Kill(Vehicle v, string? face = null)
     {
-        if (!v.Wreck.Kill())
+        if (!v.Wreck.Kill(RackedBy(face)))
             return;
         v.Path.Clear();
         v.PathStep = 0;
@@ -1439,7 +1517,48 @@ public sealed class TankTick
         // does not blow up again.
         if (Wood is not null)
             Wood.Shock(v.GroundPoint - Origin, Wood.DeathBlast);
+        // <b>And the camera, which this event has been missing since before it
+        // had a picture</b> - named as a debt in docs/blast.md, and a line.
+        //
+        // Straight up the screen, and that is the one direction in this model
+        // that is not a bearing: gases leaving a wrecked hull go out of its roof,
+        // and vertical is what fully survives this camera's projection - which is
+        // exactly what the length of this vector means. See CameraShake.Fire.
+        if (ShakeOn && v.Wreck.Racked)
+            Shake?.Fire(new Vector2(0.0f, -1.0f),
+                        v.Profile.ShotShake * DeathShake);
+        // <b>The picture last, because everything above it is what a dead tank
+        // is and this is only what it looked like.</b> Nothing here may raise a
+        // second shove or a second sound: both are sent above, and a detonation
+        // that shook the trees again would be two accounts of one death - the
+        // double model this file spends its comments refusing.
+        if (Rack && v.Wreck.Racked && v.Atlas is not null)
+            Detonated?.Invoke(
+                v,
+                // The deck as drawn, which is the map's own rise times the scale
+                // this hull is on screen at - the same product every other
+                // measured point on a tank goes through before it reaches the
+                // board. See ProcRack.Aim.
+                new Vector2(0.0f, (float)v.Atlas.HeightSpanPx
+                                  * v.Sprite.BodyScale),
+                // <b>And the size is the tank's, not the shell's</b> - see
+                // Detonated. The drawn scale rather than MovementProfile.Size,
+                // because the two part whenever the size dial is off one and what
+                // is being asked is how big this tank is on this board.
+                v.Sprite.BodyScale);
     }
+
+    /// <summary>
+    /// How much harder a detonation shakes the camera than that tank's own gun.
+    ///
+    /// <b>Off the class's own <see cref="MovementProfile.ShotShake"/> rather than
+    /// a number per class, because the table already says how heavy a tank is in
+    /// the only terms this camera has.</b> A heavy's gun moves the view 7px and a
+    /// light's 3, so a heavy dying moves it 15 and a light 6.6 - and the ratio
+    /// between the two deaths is the ratio the board already draws between the
+    /// two guns.
+    /// </summary>
+    public const double DeathShake = 2.15;
 
     /// <summary>
     /// The wreck settling, once a frame.
@@ -2238,8 +2357,11 @@ public sealed class TankTick
         // so this asks the tank what it has taken rather than judging the shell
         // that just landed: a plate a heavy has already breached goes no deeper,
         // and a kill read off this round's level would stall there.
+        // <b>With the plate that did it</b>, which is what decides whether the
+        // ammunition or the fuel went - see RackedBy. In scope here and nowhere
+        // else: the six callers that kill by hand have no round and no plate.
         if (sprite.Penetrations >= Gunnery.PenetrationsToKill)
-            Kill(victim);
+            Kill(victim, face);
     }
 
     /// <summary>Where the nth shell lands along its plate, as a fraction of the

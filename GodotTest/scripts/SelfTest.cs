@@ -4401,12 +4401,72 @@ public static class SelfTest
                 hulk.Blaze == 1.0 && hulk.Smoke == 1.0,
                 $"blaze {hulk.Blaze:F2}, smoke {hulk.Smoke:F2}");
 
-            Check("the killing blow lands once", hulk.Kill() && !hulk.Kill(),
+            Check("the killing blow lands once",
+                hulk.Kill(true) && !hulk.Kill(true),
                 "a second round restarted the death");
+            // <b>And the fire comes up rather than being switched on.</b> This is
+            // the seam ProcRack exists for and it was wrong before there was
+            // anything to put in it: Blaze answered one on the frame of death, so
+            // the flame and the column arrived at full strength instantly.
+            // Asserted at nought because the frame of death is the frame that was
+            // wrong, and asserted on both halves because the column had the same
+            // fault at 55% - its own floor, taken as read.
+            Check("the fire has not arrived on the frame of death",
+                hulk.Rise == 0.0 && hulk.Blaze == 0.0 && hulk.Smoke == 0.0,
+                $"rise {hulk.Rise:F2}, blaze {hulk.Blaze:F2}, "
+                + $"smoke {hulk.Smoke:F2} - a lamp switched on, which is what "
+                + "ProcSmoke calls a conveyor beside a continuous one");
+            // Monotone up to the handover, because a ramp that overshoots or
+            // wobbles is a fire that catches twice.
+            double climbed = -1.0;
+            bool rising = true;
+            for (int i = 0; i <= 40; i++)
+            {
+                var probe = new Wreck();
+                probe.Kill(true);
+                probe.Update(Wreck.RiseSeconds * i / 40.0);
+                rising &= probe.Blaze >= climbed - 1e-9;
+                climbed = probe.Blaze;
+            }
+            Check("and it comes up without going back down",
+                rising && Math.Abs(climbed - 1.0) < 1e-6,
+                $"ended at {climbed:F3} of a fire");
             for (int i = 0; i < 60; i++)
                 hulk.Update(Wreck.CharSeconds / 60.0);
             Check("the paint chars and stops charring",
                 Math.Abs(hulk.Char - 1.0) < 1e-6, $"char {hulk.Char:F3}");
+            // <b>And the char is the handover, which is why there is one number
+            // rather than two.</b> The paint blackens over exactly the window the
+            // detonation dies in, so a change to either moves both - stated as an
+            // alias in Wreck rather than as 1.4 twice.
+            Check("the fire is fully up when the paint has finished charring",
+                Wreck.RiseSeconds == Wreck.CharSeconds
+                && Math.Abs(hulk.Blaze - 1.0) < 1e-6,
+                $"rise {Wreck.RiseSeconds:F2}s against char "
+                + $"{Wreck.CharSeconds:F2}s, blaze {hulk.Blaze:F3}");
+            // <b>Which of the two deaths it was, kept by the wreck.</b> The plate
+            // decides and nothing may change it afterwards - a hull that goes on
+            // being shot at does not die a second and different death.
+            Check("the wreck remembers which death it died",
+                hulk.Racked && !new Wreck().Racked,
+                "the fuel death and the rack are one picture unless the wreck "
+                + "keeps the answer");
+            var fuelled = new Wreck();
+            fuelled.Kill(false);
+            Check("and a fuel death is not a rack, however hard it is shot after",
+                !fuelled.Racked && !fuelled.Kill(true) && !fuelled.Racked,
+                "a later round turned one death into the other");
+            // The fork itself, which is a claim about where things are in a tank:
+            // the rear plate is the engine bay, everywhere else is stowage. And no
+            // plate at all is the loud one - that is the debug key, the middle
+            // button, the bench button and the MCP tool, none of which can aim at
+            // a deck.
+            Check("the rear plate is the fuel and the other three the ammunition",
+                !TankTick.RackedBy("rear") && TankTick.RackedBy("front")
+                && TankTick.RackedBy("left") && TankTick.RackedBy("right")
+                && TankTick.RackedBy(null),
+                "the plate that took the killing round is the one measured fact "
+                + "about it, so it is what chooses between the two deaths");
             // The flame goes out and the column does not. That asymmetry is the
             // effect: a burnt-out hull smoking is what says where one died from
             // across the board, and a wreck that goes quiet is a tank that was
@@ -6513,6 +6573,172 @@ public static class SelfTest
             "a mix of two unit directions renormalised is a direction, so the "
             + "quad Bounds measured for a hull is the quad a wall needs - which "
             + "is why Bounds takes a reach and a plate and no surface");
+
+        Theme("the detonation that ends a tank, and the fire it hands over to");
+        // <b>The one effect on this board whose job is a seam.</b> Every other
+        // picture here answers a shell; this one answers a state change, and what
+        // it is worth is decided at the join - see the wreck's own theme above for
+        // the ramp it hands over to. So what follows is the model, the quad and
+        // the two things that must NOT be here: a bearing, and a second column.
+        var rack = new ProcRack();
+        Check("the detonation is made of the burst's own dust, a fourth time",
+            ProcRack.DustCode.Contains(ProcBlast.DustInk)
+            && ProcRack.DustCode.Contains(Stage3D.FlameInk)
+            && ProcRack.FireCode.Contains(Stage3D.FlameInk)
+            && ProcRack.DustCode.Contains(ProcBlast.FrameCode)
+            && ProcRack.FireCode.Contains(ProcBlast.FrameCode),
+            "five effects on this board raise dust and one text says what dust "
+            + "is - or eleven tuned numbers exist five times");
+        Check("and it does not redefine what the shared text defines",
+            !ProcRack.DustCode.Replace(ProcBlast.DustInk, "")
+                     .Contains("void dust_part(")
+            && !ProcRack.DustCode.Replace(ProcBlast.DustInk, "")
+                        .Contains("float dust_mass(")
+            && !ProcRack.FireCode.Replace(ProcBlast.FrameCode, "")
+                        .Contains("vec2 blast_at("),
+            "a second definition beside the shared one is the copy the shared "
+            + "block was extracted to prevent, wearing the extraction as a "
+            + "disguise");
+        // <b>The rings are the ground burst's outright, not a fifth copy of a
+        // torn annulus.</b> Two numbers differ and they are set on the material,
+        // which is what sharing a compiled shader is for.
+        Check("and the rings on the ground are the crater's own text",
+            ProcBlast.RingCode.Contains("uniform int rings")
+            && !ProcRack.FireCode.Contains("uniform int rings")
+            && !ProcRack.DustCode.Contains("uniform int rings"),
+            "a ring spreading on a cell is the same statement whichever event "
+            + "spread it, and this one only wants it dimmer");
+        // <b>And there is no bearing in it at all, which is the whole of what
+        // tells it apart from the burst on a plate.</b> Gases leaving a wrecked
+        // hull do not know which way the hull was facing, so the impact frame two
+        // other effects share is deliberately absent - included, three of its
+        // four numbers would be constants and the fourth would be a lie.
+        Check("and nothing in it has a bearing, which the plate burst's frame is"
+              + " entirely about",
+            !ProcRack.FireCode.Contains(ProcSpall.SpallFrame)
+            && !ProcRack.DustCode.Contains(ProcSpall.SpallFrame)
+            && !ProcRack.FireCode.Contains("uniform float squat")
+            && !ProcRack.DustCode.Contains("uniform float squat"),
+            "away, squat and cone_open are facts about a surface a round hit; "
+            + "there is no surface here, only a roof");
+        // The quad against the model - the burst's rule, and the fourth effect to
+        // have this check in these words.
+        (float rackOut, float rackUp) = ProcRack.Bounds(rack.Reach, Vector2.Zero);
+        Check("the quad holds what the model can produce, across",
+            rackOut <= rack.Flank,
+            $"the model reaches {rackOut:F3} of a tile out against a quad "
+            + $"{rack.Flank:F3} wide - anything past the rim is sliced off flat");
+        Check("and up",
+            rackUp <= rack.Tall,
+            $"the model climbs {rackUp:F3} of a tile against a quad "
+            + $"{rack.Tall:F3} tall");
+        // <b>With the deck under it, which is where every element of this effect
+        // starts.</b> Taken over the loaded tanks rather than assumed, so a
+        // fourth tank with a taller hull fails this rather than clipping quietly -
+        // the ricochet's arrangement, and one term instead of four because the
+        // ring is on the tank's own axis and the horizontal half is nought by
+        // construction.
+        float deckUp = 0.0f;
+        if (vehicles is not null)
+            foreach (Vehicle v in vehicles)
+                deckUp = Mathf.Max(deckUp,
+                    (float)v.Atlas.HeightSpanPx * v.Sprite.BodyScale
+                    / Mathf.Max(v.Atlas.HexRect.Size.X, 1));
+        var deckAt = new Vector2(0.0f, deckUp);
+        (float rackFar, float rackHigh) = ProcRack.Bounds(rack.Reach, deckAt);
+        Check("and it holds them from the deck of the tallest tank loaded",
+            rackFar <= rack.Flank && rackHigh <= rack.Tall,
+            $"{rackFar:F3} out and {rackHigh:F3} up from a deck {deckUp:F3} of a "
+            + $"tile over the tracks, against a quad {rack.Flank:F3} by "
+            + $"{rack.Tall:F3}");
+        // <b>It is taller than it is wide, and it is the only effect here that
+        // is.</b> Every other burst throws along the ground; this one is confined
+        // by a hull and leaves through the roof, and a quad cut to a burst's
+        // proportions would take the column off flat.
+        Check("and it is the one burst on this board that is taller than wide",
+            rack.Tall > rack.Flank * 2.0f
+            && new ProcBlast().Tall < new ProcBlast().Flank * 2.0f
+            && slam.Tall < slam.Flank * 2.0f
+            && spall.Tall < spall.Flank * 2.0f,
+            $"{rack.Flank * 2.0f:F2} wide by {rack.Tall:F2} tall, against the "
+            + $"crater's {new ProcBlast().Flank * 2.0f:F2} by "
+            + $"{new ProcBlast().Tall:F2}, the plate burst's "
+            + $"{slam.Flank * 2.0f:F2} by {slam.Tall:F2} and the ricochet's "
+            + $"{spall.Flank * 2.0f:F2} by {spall.Tall:F2}");
+        // <b>The deck does not move with the size, and the check asserts the
+        // product rather than the number.</b> This is the defect ProcSlam paid
+        // for - a burst that put its own impact point Might times too far from
+        // the tank's foot - and the first check written for it there asserted
+        // that the shader's number does not move with Might, which is asserting
+        // the bug: the number is divided by Might precisely so the transform
+        // cancels it.
+        var rackSized = new ProcRack();
+        rackSized.Aim(new Vector2(0.0f, 0.42f));
+        bool rackHeld = true;
+        foreach (float might in new[] { 0.7f, 1.0f, 1.15f, 1.4f })
+        {
+            rackSized.Might = might;
+            rackHeld &= (rackSized.Placed * might - rackSized.Deck).Length() < 1e-5f;
+        }
+        Check("the deck the ring sits at is a measurement, not a length of the"
+              + " effect",
+            rackHeld && rackSized.Deck == new Vector2(0.0f, 0.42f),
+            $"at Might {rackSized.Might:F2} the shader has {rackSized.Placed.Y:F4} and "
+            + $"the measurement is {rackSized.Deck.Y:F4} - the product is what has "
+            + "to come back, because the transform multiplies by the same size");
+        // The clock: an event that runs out rather than a loop - HitLoop's
+        // convention, and the fifth effect to stand on it.
+        var rackClock = new ProcRack();
+        Check("nothing is drawn before it goes off",
+            !rackClock.Alive && rackClock.Age < 0.0f, $"age {rackClock.Age:F2}");
+        rackClock.Fire();
+        rackClock.Tick(ProcRack.LifeDefault * 0.5);
+        Check("and it is running in the middle of its own life", rackClock.Alive,
+            $"age {rackClock.Age:F2} of {ProcRack.LifeDefault:F2}");
+        rackClock.Tick(ProcRack.LifeDefault);
+        Check("and out at the end of it, rather than holding a last frame",
+            !rackClock.Alive,
+            $"age {rackClock.Age:F2} - a detonation that held would be a wreck with "
+            + "two columns, one of them frozen");
+        // <b>And the life is the handover, which is the number this whole class
+        // is about.</b> The fire is out and the head gone before the wreck's own
+        // column is up; longer, and the board carries two columns off one hull.
+        Check("and it is over by the time the wreck's fire is fully up",
+            ProcRack.LifeDefault >= Wreck.RiseSeconds
+            && ProcRack.LifeDefault < Wreck.RiseSeconds * 2.0,
+            $"{ProcRack.LifeDefault:F2}s of detonation against a handover of "
+            + $"{Wreck.RiseSeconds:F2}s - short of it leaves a hole between the "
+            + "two, and twice it is the second column this class exists not to "
+            + "draw");
+        // <b>And it does not draw one, which is the seam stated as an
+        // absence.</b> The long column belongs to the wreck; the head here dies
+        // with the fire that made it.
+        Check("the detonation raises a head of soot and not a column",
+            ProcBlast.Uniform(ProcRack.DustCode, "soot_life", 0.0f)
+                <= (float)Wreck.RiseSeconds
+            && !ProcRack.DustCode.Contains("uniform int column"),
+            "two columns off one hull, one fading while the other grows, is the "
+            + "double account this project spends its docstrings refusing");
+        // <b>The one number that is zero because something else already draws the
+        // thing</b>, read the other way round from stone_spray: there are no
+        // fragments of iron here at all yet, and the reason is that the first pass
+        // was scoped to the fire and the ground. Named rather than discovered.
+        Check("and there is no iron in it yet, which is the second pass",
+            !ProcRack.FireCode.Contains("uniform int spray")
+            && !ProcRack.FireCode.Contains("uniform int shards"),
+            "hatches, roadwheels and casing pieces are what a rack throws, and "
+            + "this pass draws the fire and the ground");
+        // The camera, which this event has been missing since before it had a
+        // picture. Off the class's own shot shake, so the ratio between two deaths
+        // is the ratio the board already draws between two guns.
+        Check("a detonation shakes the camera harder than that tank's own gun",
+            TankTick.DeathShake > 1.0
+            && MovementProfile.For("HTP").ShotShake * TankTick.DeathShake
+               > MovementProfile.For("HTP").ShotShake,
+            $"x{TankTick.DeathShake:F2} of a shot, which on the heavy is "
+            + $"{MovementProfile.For("HTP").ShotShake * TankTick.DeathShake:F1}px "
+            + "and on the light "
+            + $"{MovementProfile.For("LTP").ShotShake * TankTick.DeathShake:F1}px");
 
         Theme("the engine plume built rather than read");
         // The plume is ProcSmoke's second configuration, so almost everything

@@ -384,6 +384,8 @@ public sealed partial class Stage3D : Node3D
             slam.Tick(delta);
         foreach (ProcSpall spall in _spalling)
             spall.Tick(delta);
+        foreach (ProcRack rack in _racking)
+            rack.Tick(delta);
         Etchings();
         Soot();
         _deepInk?.SetShaderParameter("foam", Mathf.Max(0.0f, Foam));
@@ -5396,6 +5398,73 @@ void fragment() {{
     /// <summary>The bursts on armour as they stand, <see cref="Bursting"/>'s twin
     /// and read-only for its reason.</summary>
     public IReadOnlyList<ProcSlam> Slamming => _slamming;
+
+    private readonly List<ProcRack> _racking = new();
+    private int _nextRack;
+
+    /// <summary>What to do to a detonation before it goes off -
+    /// <see cref="Dress"/> for the burst, sixth time and last, with the same
+    /// argument every time: the pool is built on the first one, so a bench
+    /// holding a panel of settings has nothing to write them into until then and
+    /// must not have to wait for a tank to die.</summary>
+    public Action<ProcRack>? Charge;
+
+    /// <summary>
+    /// A tank's ammunition going off - <see cref="ProcRack"/>.
+    ///
+    /// <b>A sixth pool, and here the argument for a pool at all is the weakest it
+    /// has been</b>: a hull dies once, and <see cref="Wreck.Kill"/> already
+    /// refuses to kill it twice. What the pool buys is two tanks dying inside one
+    /// event's length of each other, which on a board where three of them shoot
+    /// at each other is not a corner case, and it buys it for the price of the
+    /// five that already exist.
+    ///
+    /// <b><paramref name="spot"/> is board space</b>, with <paramref name="lift"/>
+    /// the ground's height there - <see cref="Burst"/>'s pair, and worth
+    /// repeating because getting it wrong is silent and has been.
+    ///
+    /// <paramref name="deck"/> is where the turret ring sits above
+    /// <paramref name="spot"/>, in screen px. <b>Handed over rather than worked
+    /// out here, and it is the one measurement this effect takes</b> - see
+    /// <see cref="ProcRack.Aim"/> on why the horizontal half of it is nought by
+    /// construction.
+    ///
+    /// <b>And it digs nothing, which is the fifth time that sentence is written
+    /// on this page and the first time it is arguable.</b>
+    /// <see cref="Slam"/>'s own note says the crater under a tank is what this
+    /// event would be - and standing on the board it is still wrong: the hull is
+    /// its own lid, and what a mark under a wreck would do is sit under a wreck,
+    /// unseen, for the rest of the battle. A scorch reaching out past the tracks
+    /// is a different claim and one worth making later; a hole is not.
+    /// </summary>
+    public void Rack(Vector2 spot, float lift, Vector2 deck, float might = 1.0f)
+    {
+        if (Field.Atlas is null)
+            return;
+        while (_racking.Count < Bursts)
+        {
+            var made = new ProcRack();
+            AddChild(made);
+            made.Build(Field.Atlas.HexRect.Size.X, Squash, RiseFactor);
+            _racking.Add(made);
+        }
+        ProcRack rack = _racking[_nextRack % Bursts];
+        // Reset before the hook, multiplied after it - see Burst on why the
+        // multiply alone compounds until the column fills the screen.
+        rack.Might = 1.0f;
+        Charge?.Invoke(rack);
+        _nextRack = (_nextRack + 1) % Bursts;
+        rack.Might *= might;
+        rack.Sit(spot, lift, Squash, RiseFactor);
+        // Aimed after it is seated and sized, because Aim writes to the materials
+        // and Sit does not touch them - the kick's order, and for its reason.
+        rack.Aim(deck / Mathf.Max(Field.Atlas.HexRect.Size.X, 1.0f));
+        rack.Fire();
+    }
+
+    /// <summary>The detonations as they stand, <see cref="Bursting"/>'s twin and
+    /// read-only for its reason.</summary>
+    public IReadOnlyList<ProcRack> Racking => _racking;
 
     private readonly List<PitArt> _etched = new();
     private int _etchedAt = -1;

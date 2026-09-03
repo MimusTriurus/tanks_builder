@@ -1215,6 +1215,10 @@ float dust_lit(float mass, vec2 lean) {
                   .Replace("FLAME_INK", Stage3D.FlameInk);
 
     private static readonly Shader Dusting = new() { Code = DustCode };
-    private static readonly Shader Ringing = new() { Code = RingCode };
+    // <b>Shared with ProcRack rather than compiled twice</b>, which is what
+    // sharing the text is for: two Shader objects off one string are two compiled
+    // programs saying the same thing, and the uniforms that differ between a
+    // crater's rings and a rack's are per-material anyway.
+    internal static readonly Shader Ringing = new() { Code = RingCode };
     private static readonly Shader Bursting = new() { Code = FireCode };
 }

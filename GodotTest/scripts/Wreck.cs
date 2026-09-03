@@ -27,6 +27,31 @@ public sealed class Wreck
     /// because the thing being shown is over by then.</summary>
     public const double CharSeconds = 1.4;
 
+    /// <summary>
+    /// How long the fire takes to come up, and it is <see cref="CharSeconds"/>
+    /// because they are one window.
+    ///
+    /// <b>This is the seam <see cref="ProcRack"/> exists for, and it was wrong
+    /// before there was anything to put in it.</b> A hull dies, <c>Burning</c>
+    /// goes true and <see cref="Blaze"/> answered <em>one</em> on that same
+    /// frame - so the flame and the column arrived at full strength instantly,
+    /// which is the lamp-switched-on failure <see cref="ProcSmoke"/> names in its
+    /// own words about conveyors. Nothing was drawing the moment of death, so
+    /// there was nothing for the fire to come up behind.
+    ///
+    /// <b>Equal to the char rather than tuned beside it.</b> The paint blackening
+    /// was already the aftermath and already this long; the detonation dies over
+    /// exactly that window, so one ramp does both and there is no second number
+    /// to keep in step. Written as an alias rather than as 1.4 so that moving the
+    /// char moves the handover with it - they are the same second of the same
+    /// event.
+    ///
+    /// <b>And it is a ramp on death only.</b> A tank set alight by the key burns
+    /// at full from the first frame, because being on fire and being dead are
+    /// different things and only one of them starts with an explosion.
+    /// </summary>
+    public const double RiseSeconds = CharSeconds;
+
     /// <summary>How long it burns hard before the flame starts to go, and how
     /// long it takes to go. A burning wreck is what the fire layers were
     /// rendered for; what is new here is that it eventually stops.</summary>
@@ -49,6 +74,27 @@ public sealed class Wreck
 
     public bool Dead { get; private set; }
 
+    /// <summary>
+    /// Whether the ammunition went off, as against the fuel - which of the two
+    /// deaths this was.
+    ///
+    /// <b>A fact about the killing blow, kept on the wreck because the wreck is
+    /// what outlives it.</b> The plate that took the last round decides it - see
+    /// <see cref="TankTick.Kill"/> - and once it is decided nothing may change
+    /// it, for <see cref="Kill"/>'s own reason: a hull that goes on being shot at
+    /// does not die a second and different death.
+    ///
+    /// <b>What it is for beyond choosing the picture.</b> Two things this project
+    /// has already argued about. <c>fuel_flash</c> is the other half of the fork
+    /// and is not built. And the turret's cant - knocked off the hull, which this
+    /// file removed on the grounds that it is "a claim about what happened to this
+    /// particular tank, and the wreck does not know that" - is a claim a rack
+    /// detonation is entitled to make and a fire in the engine bay is not. So the
+    /// wreck does know now, and the cant is waiting on a heading offset for the
+    /// wreck's turret layer rather than on the argument.
+    /// </summary>
+    public bool Racked { get; private set; }
+
     /// <summary>Seconds since it died. Counted up rather than compared against a
     /// clock, for the reason the reload is: --capture and --trace fix the time
     /// step so two runs can be diffed, and a count is the same number of frames
@@ -58,12 +104,18 @@ public sealed class Wreck
     /// <summary>Kill it, and say whether this was the killing blow. False on a
     /// wreck, so a hull that goes on being shot at does not restart its own
     /// death - the sound, the turret's cant and the age all belong to the one
-    /// round that did it.</summary>
-    public bool Kill()
+    /// round that did it.
+    ///
+    /// <paramref name="racked"/> is which of the two deaths it was - see
+    /// <see cref="Racked"/>. Required rather than defaulted, because a default is
+    /// how a fork gets forgotten at one of its call sites and the caller that
+    /// forgot it is the caller that knew.</summary>
+    public bool Kill(bool racked)
     {
         if (Dead)
             return false;
         Dead = true;
+        Racked = racked;
         Age = 0.0;
         return true;
     }
@@ -71,6 +123,7 @@ public sealed class Wreck
     public void Reset()
     {
         Dead = false;
+        Racked = false;
         Age = 0.0;
     }
 
@@ -84,16 +137,35 @@ public sealed class Wreck
     public double Char =>
         Dead ? Math.Clamp(Age / CharSeconds, 0.0, 1.0) : 0.0;
 
+    /// <summary>How much of the fire has arrived - nought on the frame of death,
+    /// one by <see cref="RiseSeconds"/>, and one outright on a tank that is
+    /// merely alight. See <see cref="RiseSeconds"/>: this is the whole of the
+    /// handover from the detonation to the state it leaves behind.</summary>
+    public double Rise =>
+        !Dead ? 1.0 : Math.Clamp(Age / RiseSeconds, 0.0, 1.0);
+
     /// <summary>How much flame is left. One on a live tank, so a hull set
     /// burning by the key burns at full - being on fire and being dead are
-    /// different things and only one of them ends.</summary>
+    /// different things and only one of them ends.
+    ///
+    /// <b>Multiplied by the rise rather than starting there</b>, so the shape
+    /// below is untouched: the flame comes up over the first second and a half,
+    /// burns hard, and then goes exactly as it did.</summary>
     public double Blaze =>
         !Dead ? 1.0
-        : Age <= BlazeSeconds ? 1.0
-        : Math.Clamp(1.0 - (Age - BlazeSeconds) / DieSeconds, 0.0, 1.0);
+        : Rise * (Age <= BlazeSeconds
+                  ? 1.0
+                  : Math.Clamp(1.0 - (Age - BlazeSeconds) / DieSeconds, 0.0, 1.0));
 
     /// <summary>How much column is left: it thins with the flame and then
-    /// stays.</summary>
-    public double Smoke => 1.0 - (1.0 - SmokeFloor) * (1.0 - Blaze);
+    /// stays.
+    ///
+    /// <b>The rise is on this too, and it has to be.</b> The floor is what a
+    /// burnt-out hull keeps for the rest of the battle - and taken as read on the
+    /// frame of death it put 55% of a column on the board instantly, which is the
+    /// same lamp the flame was, only dimmer. A column climbing out of the
+    /// detonation is the thing the detonation is handing over.</summary>
+    public double Smoke =>
+        Rise * (1.0 - (1.0 - SmokeFloor) * (1.0 - Blaze));
 
 }

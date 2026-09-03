@@ -230,6 +230,11 @@ public sealed partial class Main : SceneRoot
 		// difference from the sixth is one direction: a mirror there, the plate's
 		// own normal here.
 		_tick.Blasted = Blasted;
+		// And the eighth, which is the first one that is not a shell: what the
+		// board makes of a tank whose ammunition went off - see
+		// TankTick.Detonated. Same division as the other three and the same
+		// answer on the flat board, where a hull dies as it always did.
+		_tick.Detonated = Detonated;
 	}
 
 	/// <summary>
@@ -325,6 +330,22 @@ public sealed partial class Main : SceneRoot
 		_stage?.Slam(v.GroundPoint, v.LiftOf(v.GroundPoint), outward,
 					 v.Spot(plate) - v.GroundPoint, behind,
 					 Ordnance.At(_tick.Calibre));
+
+	/// <summary>
+	/// A tank whose ammunition went off: raise the detonation over its own deck.
+	///
+	/// <b>Three lines where the other three effects take five, and the two it
+	/// does without are the point.</b> There is no plate to project, because
+	/// nothing about this event depends on where the last round hit; and there is
+	/// no depth side, because what comes out of a turret ring is outside the hull
+	/// by the time it is drawn. The size does not come from
+	/// <see cref="Ordnance"/> either - it is the tank that blew up, not the shell
+	/// that arrived. See <see cref="TankTick.Detonated"/>.
+	///
+	/// Only on the stage, for <see cref="Splashed"/>'s reason word for word.
+	/// </summary>
+	private void Detonated(Vehicle v, Vector2 deck, float might) =>
+		_stage?.Rack(v.GroundPoint, v.LiftOf(v.GroundPoint), deck, might);
 
 	private void Bounced(Vehicle v, Vector2 plate, Vector2 away, bool behind) =>
 		_stage?.Spall(v.GroundPoint, v.LiftOf(v.GroundPoint), away,
@@ -1639,6 +1660,13 @@ public sealed partial class Main : SceneRoot
 			// reason: no panel row to be overruled by.
 			else if (userArgs[i] == "--slam" && i + 1 < userArgs.Length)
 				_tick.Slam = !userArgs[++i].Equals("off",
+					StringComparison.OrdinalIgnoreCase);
+			// And whether a tank that dies draws its ammunition going off - see
+			// TankTick.Rack. Out of FlagRows for --spall's reason, and off does
+			// not take the fire's ramp back with it: that is a correction, not
+			// this picture.
+			else if (userArgs[i] == "--rack" && i + 1 < userArgs.Length)
+				_tick.Rack = !userArgs[++i].Equals("off",
 					StringComparison.OrdinalIgnoreCase);
 			// What the gun is loaded with, which against armour is now what decides
 			// the picture - see TankTick.Ammo. The bench had this flag from the day

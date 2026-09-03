@@ -554,6 +554,12 @@ public sealed partial class TankBench : SceneRoot
                     _tick.Slam = !args[++i].Equals("off",
                         StringComparison.OrdinalIgnoreCase);
                     break;
+                // And whether a dying tank draws its ammunition going off - the
+                // harness's flag, spelled its way.
+                case "--rack" when i + 1 < args.Length:
+                    _tick.Rack = !args[++i].Equals("off",
+                        StringComparison.OrdinalIgnoreCase);
+                    break;
                 // sheet, rendered or built. Spelled the harness's way so one
                 // flag means one thing on both boards.
                 case "--flash" when i + 1 < args.Length:
@@ -1520,6 +1526,13 @@ public sealed partial class TankBench : SceneRoot
                      v.Spot(plate) - v.GroundPoint, behind,
                      Ordnance.At(_tick.Calibre));
 
+    /// <summary>The detonation a dying tank raises - the harness's
+    /// <c>Detonated</c>, and deliberately the same line for <c>Bounced</c>'s
+    /// reason. This bench is the one with a button that kills the tank outright,
+    /// so it is where the event is actually looked at.</summary>
+    private void Detonated(Vehicle v, Vector2 deck, float might) =>
+        _stage?.Rack(v.GroundPoint, v.LiftOf(v.GroundPoint), deck, might);
+
     private void Struck(Shell round)
     {
         // The same walk Landing already did, through the one method that does it -
@@ -2047,6 +2060,9 @@ public sealed partial class TankBench : SceneRoot
         // TankTick.Bounced.
         _tick.Bounced = Bounced;
         _tick.Blasted = Blasted;
+        // And a tank whose ammunition went off - see TankTick.Detonated. The
+        // button and the middle click on this bench both end here.
+        _tick.Detonated = Detonated;
             _tick.Barred = _walls.Count > 0 ? Barring : null;
             _tick.Shoving = _walls.Count > 0 && _shove ? Pressing : null;
             return _tick;
