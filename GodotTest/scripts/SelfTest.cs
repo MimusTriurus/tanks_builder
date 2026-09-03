@@ -6691,6 +6691,14 @@ public static class SelfTest
                 $"pierce at child {lit}, turret at {turret}");
         }
 
+        // Subtracting the shared blocks so a file can be asked what it is its
+        // own - see the note on the fire check.
+        static string Own(string code) => code
+            .Replace(Stage3D.FlameInk, "")
+            .Replace(Stage3D.EmberNoiseCode, "")
+            .Replace(ProcBlast.DustInk, "")
+            .Replace(ProcBlast.FrameCode, "");
+
         Theme("the plume a round throws when it goes into water instead");
         // <b>The one entry in the taxonomy that was a bug rather than a gap.</b>
         // The other unbuilt items are pictures nobody has drawn; this one had a
@@ -6698,36 +6706,74 @@ public static class SelfTest
         // of thrown earth, because Land was handed a point and a lift and never
         // asked whether the point was wet. See Stage3D.Wet, which is the whole of
         // the fix, and ProcSpout, which is the answer to it.
-        Check("the plume is made of the board's own noise, ink and frame",
-            ProcSpout.SpoutCode.Contains(Stage3D.EmberNoiseCode)
-            && ProcSpout.SpoutCode.Contains(ProcBlast.DustInk)
-            && ProcSpout.SpoutCode.Contains(ProcBlast.FrameCode)
-            && !ProcSpout.SpoutCode.Contains("uniform float dust_soft = 2.55;\n"
-                                             + "uniform float dust_seat"),
-            "six effects on this board raise a mass of many elements, and they "
+        Check("all three of its quads are made of the board's own noise and ink",
+            ProcSpout.FoamCode.Contains(Stage3D.EmberNoiseCode)
+            && ProcSpout.FoamCode.Contains(ProcBlast.DustInk)
+            && ProcSpout.SmokeCode.Contains(ProcBlast.DustInk)
+            && ProcSpout.FireCode.Contains(Stage3D.FlameInk)
+            && ProcSpout.FoamCode.Contains(ProcBlast.FrameCode)
+            && ProcSpout.SmokeCode.Contains(ProcBlast.FrameCode)
+            && ProcSpout.FireCode.Contains(ProcBlast.FrameCode),
+            "seven effects on this board raise a mass of many elements, and they "
             + "are one text");
-        // <b>One quad, and no fire at all.</b> Every other burst here is a dark
-        // mass with light in front of it, because an explosion in air makes
-        // light; a shell going into a pond makes a hole, and whatever light there
-        // was is under the water by the time anything is thrown. So there is no
-        // additive layer in this file - not a dimmed one, not a small flash - and
-        // that makes it the simplest effect on the board.
-        // Asked of what the file is its own, because the shared ink DECLARES
+        // <b>Three quads, and the reason is three LIGHTS rather than three
+        // substances.</b> Water and smoke are both masses of many elements summed
+        // into one volume, which is one text; but earth darkens as it thickens and
+        // water brightens, so the shared ink's dust_dense would have to hold two
+        // signs at once. It cannot, on one material. Fire is the third for the
+        // reason it always is.
+        //
+        // <b>And the taxonomy's own line said there would be no fire at all.</b>
+        // That is true of a charge detonating UNDER water, where whatever light
+        // there was is under the surface before anything is thrown; five frames of
+        // the reference sheet for a shell bursting ON water have an orange core at
+        // the base of the column. The reference is the specification, and the line
+        // was wrong.
+        //
+        // Asked of what each file is its own, because the shared ink DECLARES
         // flame_blob - the self-contradicting check this project has now written
-        // twice: a text required to contain a shared block cannot also be
-        // required to lack a definition from it.
-        string spoutOwn = ProcSpout.SpoutCode
-            .Replace(Stage3D.FlameInk, "")
-            .Replace(Stage3D.EmberNoiseCode, "")
-            .Replace(ProcBlast.DustInk, "")
-            .Replace(ProcBlast.FrameCode, "");
-        Check("and there is no fire in it at all, so there is one quad",
-            !spoutOwn.Contains("blend_add")
-            && !spoutOwn.Contains("flame_blob")
-            && !spoutOwn.Contains("flash_gain")
-            && !spoutOwn.Contains("ball_climb"),
-            "water_he is the entry in docs/blast.md that asks for no fire, and "
-            + "a dimmed fireball would be answering a different one");
+        // twice: a text required to contain a shared block cannot also be required
+        // to lack a definition from it.
+        string spoutOwn = Own(ProcSpout.FoamCode);
+        string smokeOwn = Own(ProcSpout.SmokeCode);
+        string fireOwn = Own(ProcSpout.FireCode);
+        Check("the two masses do not add light and the fire does nothing else",
+            !spoutOwn.Contains("blend_add") && !smokeOwn.Contains("blend_add")
+            && fireOwn.Contains("blend_add")
+            && !fireOwn.Contains("dust_part")
+            && !spoutOwn.Contains("flame_blob") && !smokeOwn.Contains("flame_blob")
+            && fireOwn.Contains("flame_blob"),
+            "a mass of water hides what is behind it and a flame adds to it; a "
+            + "quad that did both would be answering neither");
+        // <b>The mass of this event is the smoke, which is the finding the
+        // reference forced twice over.</b> The first build was a white geyser and
+        // the second a white suspension; the sheet shows white spikes for a fifth
+        // of a second and then a dark column that dominates every frame after. So
+        // the column has to be taller than the water is thrown - measured, not
+        // asserted by eye, because the pass that had them equal drew a plume with
+        // no column at all.
+        Check("and the column goes higher than the water is thrown",
+            ProcBlast.Uniform(ProcSpout.SmokeCode, "smoke_climb", 0.0f)
+            > ProcSpout.ReachDefault
+            && ProcBlast.Uniform(ProcSpout.SmokeCode, "smoke_life", 0.0f)
+               > ProcBlast.Uniform(ProcSpout.FoamCode, "spike_life", 0.0f) * 3.0f,
+            $"column {ProcBlast.Uniform(ProcSpout.SmokeCode, "smoke_climb", 0.0f)}"
+            + $" of a tile against a throw of {ProcSpout.ReachDefault}");
+        // <b>And the spray is drawn with the crispest profile in the project,
+        // which is the single thing that most decides whether it reads as
+        // water.</b> Every other mass here is soft and round because dust and
+        // smoke are; thrown water is sheets tearing into long sharp fingers. Two
+        // builds of this class were reported as wrong for missing it - one for
+        // making the spray round, one for making it a cloud - so it is asserted
+        // against both of the profiles it must not be.
+        Check("and the spray is sharper than dust and sharper than a clod",
+            ProcBlast.Uniform(ProcSpout.FoamCode, "spike_soft", 9.0f)
+            < ProcBlast.Uniform(ProcBlast.DustInk, "dust_soft", 0.0f)
+            && ProcBlast.Uniform(ProcSpout.FoamCode, "spike_soft", 9.0f)
+               < ProcBlast.Uniform(ProcBlast.DustCode, "clod_soft", 0.0f)
+            && ProcBlast.Uniform(ProcSpout.FoamCode, "spike_stretch", 0.0f) > 3.0f,
+            "a finger of water has an edge, and a round soft element cannot say "
+            + "so however it is coloured");
         // <b>And every mass on this board has to say unshaded, which is the bug
         // this theme was written after finding.</b> There is no light in the 3D
         // world here at all - see Stage3D on why - so a spatial shader that does
@@ -6737,7 +6783,8 @@ public static class SelfTest
         // soot got away with it for exactly one reason - soot is meant to be
         // dark, so nothing about the picture said the shading was gone.
         Check("every built mass on this board opts out of shading, or it is black",
-            ProcSpout.SpoutCode.Contains("render_mode unshaded")
+            ProcSpout.FoamCode.Contains("render_mode unshaded")
+            && ProcSpout.SmokeCode.Contains("render_mode unshaded")
             && ProcRack.DustCode.Contains("render_mode unshaded")
             && ProcBlast.DustCode.Contains("render_mode unshaded")
             && ProcKick.DustKickCode.Contains("render_mode unshaded")
@@ -6785,8 +6832,9 @@ public static class SelfTest
         // surface - and the drawn one would be the account that walked through the
         // spoutBank.
         Check("the ring on the surface is solved rather than drawn",
-            !ProcSpout.SpoutCode.Contains(ProcBlast.RingCode)
-            && !ProcSpout.SpoutCode.Contains("ring_gain")
+            !ProcSpout.FoamCode.Contains(ProcBlast.RingCode)
+            && !ProcSpout.SmokeCode.Contains(ProcBlast.RingCode)
+            && !ProcSpout.FoamCode.Contains("ring_gain")
             && ProcRack.DustCode.Length > 0,
             "ProcRack takes the burst's ring text outright; this one has no ring "
             + "of its own at all");
