@@ -560,6 +560,12 @@ public sealed partial class TankBench : SceneRoot
                     _tick.Rack = !args[++i].Equals("off",
                         StringComparison.OrdinalIgnoreCase);
                     break;
+                // And whether a round that got through lights the hull from
+                // inside - the harness's flag, spelled its way.
+                case "--pierce" when i + 1 < args.Length:
+                    _tick.Pierce = !args[++i].Equals("off",
+                        StringComparison.OrdinalIgnoreCase);
+                    break;
                 // sheet, rendered or built. Spelled the harness's way so one
                 // flag means one thing on both boards.
                 case "--flash" when i + 1 < args.Length:

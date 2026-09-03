@@ -1668,6 +1668,12 @@ public sealed partial class Main : SceneRoot
 			else if (userArgs[i] == "--rack" && i + 1 < userArgs.Length)
 				_tick.Rack = !userArgs[++i].Equals("off",
 					StringComparison.OrdinalIgnoreCase);
+			// And whether a round that got through lights the hull from inside -
+			// see TankTick.Pierce. Out of FlagRows for --spall's reason, and off
+			// leaves the rendered pair, which is the picture this used to have.
+			else if (userArgs[i] == "--pierce" && i + 1 < userArgs.Length)
+				_tick.Pierce = !userArgs[++i].Equals("off",
+					StringComparison.OrdinalIgnoreCase);
 			// What the gun is loaded with, which against armour is now what decides
 			// the picture - see TankTick.Ammo. The bench had this flag from the day
 			// a wall could be shot at and the harness had none, because until the

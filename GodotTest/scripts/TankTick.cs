@@ -506,6 +506,23 @@ public sealed class TankTick
     public bool Rack = true;
 
     /// <summary>
+    /// Whether a round that got through lights the hull from inside.
+    ///
+    /// <see cref="Slam"/>'s twin in shape and not in argument. The other three
+    /// flags each swap a built picture for a rendered one, so off means "the
+    /// picture this used to have"; there is no rendered twin of this layer at all,
+    /// so off means the rendered pair on its own - which is exactly the picture a
+    /// penetration had, and the only A/B available.
+    ///
+    /// <b>It gates the fact rather than the layer</b>, which is what keeps one
+    /// answer in one place: with it off a hit is simply not recorded as having got
+    /// in, so nothing downstream has to know about a flag. The damage is not
+    /// touched - <see cref="Gunnery.Penetration"/> decided that above this and
+    /// the plate keeps what it earned.
+    /// </summary>
+    public bool Pierce = true;
+
+    /// <summary>
     /// Which of the two deaths a killing blow on <paramref name="face"/> is:
     /// true the ammunition, false the fuel.
     ///
@@ -2335,7 +2352,15 @@ public sealed class TankTick
         }
         else
         {
-            victim.Hit.Strike(face, scatter, rise, calibre);
+            // <b>And whether it got in travels with it, which is the one thing
+            // the rendered pair never said.</b> That pair is the outside of a
+            // penetration - a puff of earth-tan dust with a warm core - and it is
+            // drawn identically whether the round went through or merely failed to
+            // bounce. See ProcPierce, which is the inside and is drawn as well as
+            // the pair rather than instead of it: one shell, two sides of one
+            // plate, one picture each.
+            victim.Hit.Strike(face, scatter, rise, calibre,
+                              Pierce && got > 0);
         }
         // The sound is chosen by the same level the mark is, so a round that
         // bounces is heard bouncing and one that goes through is heard going
@@ -2458,7 +2483,12 @@ public sealed class TankTick
             // the other two things the layer needs and cannot work out for
             // itself, so what is drawn is what was fired.
             sprite.HitScale = hit.Scale;
+            sprite.HitThrough = hit.Through;
         }
+        // The frame beside the phase it rounds to - see HitLoop.Elapsed. Written
+        // every frame rather than on change, because it changes every frame by
+        // definition.
+        sprite.HitFrame = hit.Elapsed;
         if (phase != sprite.HitPhase)
         {
             sprite.HitPhase = phase;

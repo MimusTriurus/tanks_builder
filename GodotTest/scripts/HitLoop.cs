@@ -82,7 +82,32 @@ public sealed class HitLoop
     /// life, whatever the dial does in the meantime.</summary>
     public float Scale { get; private set; } = 1.0f;
 
+    /// <summary>
+    /// Whether this one got through the armour.
+    ///
+    /// <b>Carried on the hit for the reason the calibre is</b>, and that note is
+    /// the argument entire: everything about a shell that is settled when it
+    /// lands belongs to the hit rather than to the tank. A hull can be shot at
+    /// again while this dust is still in the air, and the light inside it has to
+    /// belong to the round that let it in.
+    ///
+    /// Read by <see cref="ProcPierce"/> and by nothing else, because it is the
+    /// one layer for which the answer is the whole subject. The threshold is not
+    /// a new one - <see cref="Gunnery.Penetration"/>'s zero, which the sound, the
+    /// kill tally, the ricochet and now this all switch on.
+    /// </summary>
+    public bool Through { get; private set; }
+
     private int _frame = -1;
+
+    /// <summary>Screen frames since it landed, or -1. Beside
+    /// <see cref="Phase"/> rather than instead of it, for
+    /// <c>TankSprite.ExhaustCycle</c>'s reason: a rendered layer wants the phase
+    /// its atlas was built with, and a built one wants the frame the phase was
+    /// rounded from. The first two phases are one frame each, which is what an
+    /// instant needs and what a table of ten cannot give past frame two.
+    /// </summary>
+    public int Elapsed => _frame;
 
     public int Phase => PhaseAt(_frame);
 
@@ -93,12 +118,13 @@ public sealed class HitLoop
     /// landing is a second hit, and the useful thing to see is the newest.
     /// </summary>
     public void Strike(string face, float scatter = 0.0f, float rise = 0.0f,
-                       float scale = 1.0f)
+                       float scale = 1.0f, bool through = false)
     {
         Face = face;
         Scatter = scatter;
         Rise = rise;
         Scale = scale;
+        Through = through;
         _frame = 0;
     }
 
@@ -117,5 +143,6 @@ public sealed class HitLoop
         Scatter = 0.0f;
         Rise = 0.0f;
         Scale = 1.0f;
+        Through = false;
     }
 }

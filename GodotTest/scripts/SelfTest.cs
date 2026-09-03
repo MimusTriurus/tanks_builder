@@ -6589,6 +6589,108 @@ public static class SelfTest
             + "quad Bounds measured for a hull is the quad a wall needs - which "
             + "is why Bounds takes a reach and a plate and no surface");
 
+        Theme("the light a round that got through leaves inside the hull");
+        // <b>The only layer on this tank that ADDS to a picture instead of
+        // replacing one, and that is a finding rather than a licence.</b> The
+        // ricochet and the burst on the plate each went in instead of the
+        // rendered pair, because two accounts of one shell arriving is the double
+        // model this project refuses. This is not a second account: the rendered
+        // pair is the OUTSIDE of a penetration - ProcSlam's own note calls it a
+        // puff of earth-tan dust with a warm core, which is a shell going in - and
+        // what was never drawn is the other side of the plate.
+        Check("the light inside is made of the board's own noise and nothing else",
+            ProcPierce.GlowCode.Contains(Stage3D.EmberNoiseCode)
+            // The shared block taken out first, which is how every other theme
+            // here asks this - written the other way round the check demands the
+            // shared text and then forbids a definition that is IN it, so it can
+            // only fail.
+            && !ProcPierce.GlowCode.Replace(Stage3D.EmberNoiseCode, "")
+                          .Contains("float ember_fbm("),
+            "one field breaks up every flame, cloud and glow on this board");
+        // <b>And it is a canvas shader, which is the one thing about it that is
+        // not a copy of the four spatial effects.</b> Section A of docs/blast.md
+        // says the three hits on armour belong in the sprite's own render target;
+        // the ricochet and the plate burst both left it, and this is the pierce
+        // the argument was always about - light from INSIDE is an assertion about
+        // the hull's own alpha, and the hull's alpha exists nowhere else.
+        Check("and it is a canvas shader with no quad in tile widths",
+            ProcPierce.GlowCode.Contains("shader_type canvas_item")
+            && !ProcPierce.GlowCode.Contains(ProcBlast.FrameCode)
+            && !ProcPierce.GlowCode.Contains("uniform float reach"),
+            "foot_v, tall and reach are a billboard standing on the ground; this "
+            + "one is drawn in the tank's own picture");
+        // <b>The mask is the thing being drawn, and it must stay that way.</b>
+        // COLOR.a is the hull's own silhouette, so the light can only land where
+        // there is armour - with no second texture, no second sample and no
+        // second copy of where the hull is this frame. Sampling TEXTURE is the
+        // trap TankSprite.CharShader already paid for: on this backend a shader
+        // that samples what COLOR already holds gets texel times texel.
+        Check("and the hull's own alpha is the mask, sampled from nothing",
+            ProcPierce.GlowCode.Contains("COLOR.a")
+            && !ProcPierce.GlowCode.Contains("texture(TEXTURE"),
+            "light that is not multiplied by the silhouette is a decal pasted "
+            + "over the tank, and a second sample of the texture is doubled");
+        // <b>And UV is the TEXTURE's coordinate here, not the quad's - which
+        // cost four tuning passes before it was found.</b> A canvas item drawn
+        // with DrawTextureRectRegion gets UV over the region inside the whole
+        // sheet, so on a 5x5 grid it runs 0.31..0.35 rather than 0..1. Read as
+        // the quad's own space the glow still landed on the tank, in two small
+        // patches where the expression happened to dip under its threshold, and
+        // every pass moved them without ever explaining them. So the remap is
+        // asserted rather than trusted.
+        Check("and the quad's own space is reached through the region, because UV"
+              + " is the sheet's",
+            ProcPierce.GlowCode.Contains("uniform vec2 uv_at")
+            && ProcPierce.GlowCode.Contains("uniform vec2 uv_span")
+            && ProcPierce.GlowCode.Contains("(UV - uv_at)")
+            && !ProcPierce.GlowCode.Contains("UV * quad"),
+            "a frame of a packed sheet has no corner at UV zero, and a shader "
+            + "that assumes one measures from the sheet's corner instead");
+        // Whether it got through travels on the hit, for the reason the calibre
+        // does: everything settled when the shell landed belongs to the shell.
+        var wentIn = new HitLoop();
+        Check("a fresh hit has not got through anything",
+            !wentIn.Through, "the default has to be the quiet one");
+        wentIn.Strike("front", 0.0f, 0.0f, 1.0f, true);
+        wentIn.Advance();
+        Check("and one that got through says so for as long as it runs",
+            wentIn.Through && wentIn.Elapsed == 1 && wentIn.Live,
+            $"through {wentIn.Through}, frame {wentIn.Elapsed}");
+        wentIn.Reset();
+        Check("and a reset takes it back",
+            !wentIn.Through && wentIn.Elapsed < 0,
+            "a hull shot again must not inherit the last round's answer");
+        // <b>The frame beside the phase, which is why both exist.</b> A rendered
+        // layer wants the phase its atlas was built with; a built one wants the
+        // frame the phase was rounded from - and the first two phases are one
+        // frame each, which is exactly the resolution an instant needs.
+        var flash = new HitLoop();
+        flash.Strike("front", 0.0f, 0.0f, 1.0f, true);
+        Check("and the frame is finer than the phase where the light lives",
+            flash.Elapsed == 0 && HitLoop.Hold[0] == 1 && HitLoop.Hold[1] == 1
+            && HitLoop.Duration > 6,
+            $"phases hold {HitLoop.Hold[0]} and {HitLoop.Hold[1]} frames of "
+            + $"{HitLoop.Duration}");
+        // <b>Under the turret, and that is what gives the ring's seam its
+        // shape.</b> What leaks there is light getting out from beneath the
+        // turret, so the turret has to be drawn after it - and tree order is the
+        // ordering for everything that never moves in the stack.
+        if (tank is not null)
+        {
+            int lit = -1, turret = -1;
+            for (int i = 0; i < tank.GetChildCount(); i++)
+            {
+                Node child = tank.GetChild(i);
+                if (child is ProcPierce)
+                    lit = i;
+                if (child is EffectLayer { Layer: "turret" })
+                    turret = i;
+            }
+            Check("the light draws under the turret, where a ring seam is",
+                lit >= 0 && turret >= 0 && lit < turret,
+                $"pierce at child {lit}, turret at {turret}");
+        }
+
         Theme("the detonation that ends a tank, and the fire it hands over to");
         // <b>The one effect on this board whose job is a seam.</b> Every other
         // picture here answers a shell; this one answers a state change, and what

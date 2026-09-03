@@ -285,6 +285,14 @@ public sealed partial class TankSprite : Node2D
     /// shot, so it runs out rather than wrapping - see <see cref="HitLoop"/>.</summary>
     public int HitPhase = -1;
 
+    /// <summary>Screen frames since the live hit landed, and whether it got
+    /// through - <see cref="HitLoop.Elapsed"/> and <see cref="HitLoop.Through"/>,
+    /// mirrored here the way <see cref="HitPhase"/> is and for its reason: the
+    /// sprite is the picture and does not know which vehicle it draws. Read by
+    /// <see cref="ProcPierce"/>.</summary>
+    public int HitFrame = -1;
+    public bool HitThrough;
+
     /// <summary>Where each belt is in its cycle, or -1 with no belts to show.
     /// Driven by <see cref="TrackLoop"/> off distance travelled, not off a
     /// timer: the belt is what the ground is winding against.
@@ -1383,6 +1391,13 @@ public sealed partial class TankSprite : Node2D
                 AddChild(Fume = new ProcFume { Tank = this });
             if (name == "flash")
                 AddChild(Flare = new ProcFlash { Tank = this });
+            // <b>The light inside the hull, in the slot before the turret</b> -
+            // added on the last scar, which is the layer the turret follows. Under
+            // the turret on purpose: what leaks at the ring is light getting out
+            // from under it, so the turret is what gives that family its shape.
+            // See ProcPierce.
+            if (name == AtlasSet.ScarNames[^1])
+                AddChild(Wound = new ProcPierce { Tank = this });
         }
     }
 
@@ -1393,6 +1408,13 @@ public sealed partial class TankSprite : Node2D
     /// <summary>The built muzzle flash, in <see cref="LayerOrder"/>'s flash
     /// slot.</summary>
     public ProcFlash? Flare { get; private set; }
+
+    /// <summary>The light a round that got through leaves inside the hull, in the
+    /// slot before the turret - <see cref="ProcPierce"/>. The one built layer on
+    /// this tank with no rendered twin: it adds to the rendered pair rather than
+    /// standing in for it, because the pair already draws the outside of a
+    /// penetration and nothing has ever drawn the inside.</summary>
+    public ProcPierce? Wound { get; private set; }
 
     /// <summary>The procedural column, built in <see cref="LayerOrder"/>'s burn
     /// slot. Kept so the checks and the readout can ask what it put up.</summary>
