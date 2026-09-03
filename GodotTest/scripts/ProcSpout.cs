@@ -91,7 +91,7 @@ public sealed partial class ProcSpout : Node3D
     /// <see cref="ProcBlast.ReachDefault"/>'s reason: a bench that wants to reset
     /// a dial needs the tuned value, and reading it off a live instance gets
     /// whatever the last shot left.</summary>
-    public const float ReachDefault = 0.58f;
+    public const float ReachDefault = 0.42f;
 
     /// <summary>
     /// How long the whole event runs.
@@ -102,7 +102,7 @@ public sealed partial class ProcSpout : Node3D
     /// haze standing over the entry. Water leaves no mark, so when it is finished
     /// the cell is exactly what it was.
     /// </summary>
-    public const float LifeDefault = 1.90f;
+    public const float LifeDefault = 1.60f;
 
     /// <summary>
     /// The quad, in tile widths: half-width either side of the seat, and height
@@ -112,8 +112,8 @@ public sealed partial class ProcSpout : Node3D
     /// crown round its foot, so the crown sets the width and the stem sets the
     /// height. Checked against <see cref="Bounds"/>, which is asked of the model.
     /// </summary>
-    public float Flank = 0.68f;
-    public float Tall = 1.00f;
+    public float Flank = 0.62f;
+    public float Tall = 0.86f;
 
     /// <summary>
     /// How far above the contact point the effect is seated, and the band it
@@ -173,42 +173,37 @@ public sealed partial class ProcSpout : Node3D
             up = Mathf.Max(up, Mathf.Abs(at.Y) + tall);
         }
 
-        // The crown: the sheet of water standing up round the entry. The widest
-        // thing here, and what the quad's width is cut to.
-        float crownOut = Uniform("crown_run") * reach * 1.40f;
-        float crownUp = Uniform("crown_climb") * reach * 1.20f;
-        float crownR = Uniform("crown_size") * 1.50f;
-        Reach(new Vector2(crownOut, crownUp),
-              crownR * Uniform("crown_flat"), crownR);
+        float spread = ProcBlast.Uniform(SpoutCode, "spread", 1.15f);
 
-        // The stem: the jet up the middle. The tallest thing here, and what the
-        // quad's height is cut to. Stretched upright, so its long axis is the
-        // vertical one.
-        // The fastest element at the top of its climb, and it spans its own
-        // height from half of it - see stem_stretch, which is a span here and not
-        // a stretch.
-        float stemUp = Uniform("stem_rise") * reach * 1.20f;
-        float stemR = Uniform("stem_size") * 1.70f;
-        Reach(new Vector2(stemUp * Uniform("stem_lean"), stemUp * 0.5f),
-              stemR, stemUp * Uniform("stem_stretch") * 0.5f + stemR);
+        // <b>The thrown water, and it is the only family <paramref name="reach"/>
+        // governs</b> - the burst's arrangement exactly: the cone is a ratio of
+        // the throw, and the collar and the column are absolute tile widths,
+        // because how far dust is pushed along the ground is not a share of how
+        // hard earth was thrown.
+        //
+        // Two elements, not one, which is why the pads are taken apart: the apex
+        // of blast_throw is <c>reach*fast</c> at the middle of a life, and its
+        // furthest is <c>reach*spread*sin(lean)</c> at the end of one, and no
+        // element is at both.
+        float born = Uniform("clod_born");
+        float clodR = Uniform("clod_size") * 2.10f;
+        float clodLong = clodR * (1.0f + Uniform("clod_stretch"));
+        Reach(new Vector2(born + reach * spread * Mathf.Sin(Uniform("clod_wide")),
+                          reach + born * 0.45f),
+              clodR, clodLong);
 
-        // The spray, at the top of the fastest drop's arc and at the far end of
-        // the widest one's. Two different elements, which is why the pads are
-        // taken apart: the apex of blast_throw is run*fast, at the middle of a
-        // life, and the reach of it is run*spread*sin(lean) at the end of one -
-        // no element is at both.
-        float dropR = Uniform("drop_size") * 1.70f;
-        float fast = reach * 1.0f;
-        float wide = reach * ProcBlast.Uniform(SpoutCode, "spread", 1.15f)
-                     * Mathf.Sin(Uniform("drop_wide"));
-        Reach(new Vector2(wide, fast), dropR, dropR * 2.0f);
+        // The collar along the surface: the widest thing low down, and its long
+        // axis is the across one because it lies flat.
+        float collarR = Uniform("collar_size") * 1.45f * 1.55f;
+        Reach(new Vector2(Uniform("collar_spread"),
+                          Uniform("collar_climb") * 1.20f),
+              collarR * Uniform("collar_flat"), collarR);
 
-        // And the haze, which outlives the rest and is the last thing to leave
-        // the quad.
-        float mistR = Uniform("mist_size") * 1.50f;
-        Reach(new Vector2(Uniform("mist_run") * reach * 1.30f,
-                          Uniform("mist_climb") * reach * 1.25f),
-              mistR * 1.30f, mistR);
+        // The column: the tallest thing here, and what the quad's height is cut
+        // to.
+        float columnR = Uniform("column_size") * 1.45f * 1.50f;
+        Reach(new Vector2(Uniform("column_sway"), Uniform("column_climb") * 1.25f),
+              columnR, columnR * 1.25f);
 
         return (along, up);
     }
@@ -436,13 +431,10 @@ public sealed partial class ProcSpout : Node3D
         // tearing either way - see ProcBlast.DustInk - so this is one number
         // rather than a second mechanism.
         ink.SetShaderParameter("dust_tear", 0.52f);
-        // <b>And the throw goes up more than it goes out</b> - spread is the
-        // shared frame's own number (see ProcBlast.FrameCode), tuned at 1.15 on
-        // earth thrown out of a crater, whose walls are what aim it sideways in
-        // the first place. Water leaves a hole with no walls, so its drops keep
-        // more of the throw as height; read at the earth's number half the spray
-        // landed on the dry bank two cells away.
-        ink.SetShaderParameter("spread", 0.85f);
+        // <b>And the throw is the burst's throw, left alone.</b> It was
+        // overridden here once, when the spray was twenty long crisp drops and
+        // half of them landed on the dry bank; what was wrong was the drops, not
+        // the parabola they were on.
         ink.SetShaderParameter("dust_grain", 16.0f);
         return ink;
     }
@@ -478,133 +470,96 @@ BLAST_FRAME
 
 DUST_INK
 
-// The crown: the conical sheet that stands up round the hole on the first frames.
-// Outward fast and upward slowly, every element lying along its own way out - the
-// burst's collar, turned up off the ground, and it is the family that says a
-// *surface* was hit rather than a volume.
-uniform int crown = 12;
-// <b>Long enough to still be there when the stem is up, which is not how a
-// crown behaves and is what the picture asked for anyway.</b> At 0.22 the family
-// was over before the jet had climbed, and between the two there was a plume
-// standing in the air with nothing at all at the waterline - a shape flying over
-// the pond rather than coming out of it. What holds a splash to its surface is
-// the foam at the foot of it, and this is the family that has any.
-uniform float crown_life = 0.38;
-uniform float crown_stagger = 0.02;
-// <b>Short, and it has to be: this length is spent across the screen and the
-// cell is only so wide.</b> At 0.62 of the throw the two sides of the crown
-// reached a quarter of a tile past the water and the family drew a sheet of foam
-// standing on the dry bank - the one thing a splash cannot do. What says a
-// surface was hit is the angle of the sheet, not how far it gets.
-uniform float crown_run = 0.40;
-// <b>Climbing nearly as fast as it runs, and that is what makes it a crown.</b>
-// Every element here is stretched along its own way out, so the ratio of these
-// two IS the angle of the sheet: at 0.52 against 0.72 the family came out as two
-// flat wings lying on the water - a shape spreading under the surface rather than
-// a wall of water standing up out of it.
-// <b>Low, and lower than the run rather than level with it.</b> Read at 0.62 the
-// sheet climbed to a third of a tile and, stretched along its own way out, drew
-// two long blades standing over the far bank - a pair of wings, and the stem was
-// behind them. A crown is a SKIRT: what it says is that a surface was hit, and it
-// says it at the waterline. The height in this effect belongs to the stem.
-uniform float crown_climb = 0.42;
-uniform float crown_size = 0.044;
-// How much longer than wide, along its own way out. A sheet, not a puff: what
-// stands up round a splash is a wall of water with a torn top edge.
-uniform float crown_flat = 1.35;
-uniform float crown_ink = 1.15;
+// The cone: how many, how long each lives, how wide it opens and how hard it
+// falls back. The lean is measured from straight up. <b>The burst's own numbers,
+// and the count is the whole of why this reads as water rather than as
+// confetti</b>: forty-four small elements over a narrow cone overlap into one
+// volume, and the shared ink's saturation is what turns the pile into a mass. The
+// first version of this family was twenty long crisp drops on their own paths,
+// and every one of them read as a separate white shape - which was reported, in
+// those words, as cartoonish.
+uniform int clods = 44;
+// <b>The burst's own, after a pass spent shortening it for the wrong reason.</b>
+// The cone fans out towards the end of its life and its elements stop overlapping,
+// which on white foam reads as lumps rather than as spray - and a shorter life
+// makes that WORSE, not better, because the age is a fraction of it: at 0.46 the
+// same element is further along its own arc at the same instant. What carries the
+// mass is not this family at all; see column.
+uniform float clod_life = 0.62;
+uniform float clod_stagger = 0.05;
+uniform float clod_narrow = 0.16;
+// <b>Wider than earth's, and it is the one number of the cone that water
+// changes.</b> A crater aims its own earth: the walls are what throw it into a
+// cone in the first place. A hole in water has no walls, so what leaves it leaves
+// in every direction there is.
+uniform float clod_wide = 0.95;
+uniform float clod_size = 0.024;
+uniform float clod_stretch = 1.35;
+// <b>The burst's gain, restored after being lowered.</b> Cohesion here comes from
+// DENSITY, not from restraint: the shared ink saturates a pile-up, so a cone whose
+// elements overlap is one mass and the same cone at three quarters of the gain is
+// forty-four visible lumps. Lowering this was an attempt to hide the late thinning
+// and it broke the early frames instead - the fix for the late half is that there
+// is no late half. See clod_life.
+uniform float clod_ink = 1.10;
+// How far off the middle an element starts - the burst's number and its reason:
+// everything leaving through the exact centre makes the base of the column a
+// needle and the cone a symmetrical flower.
+uniform float clod_born = 0.075;
+// The profile a thrown body keeps, against the cloud's own - the burst's number.
+// A clod of earth is a small body and so is a drop of water; what is NOT here is
+// the crisp 1.15 the first version reached for, which is what drew pills.
+uniform float clod_soft = 1.85;
 
-// The stem: the jet that comes up the middle once the hole starts closing. Late,
-// narrow, tall, and by far the most of what a splash reads as at a distance.
-// <b>Ten rather than seven, and their speeds within a third of each other.</b>
-// Seven elements over a range of 0.55 to 1.40 separated into two or three tall
-// tongues flying apart with clear water between them - which is what a handful of
-// independent bodies looks like, and it is the comb failure ProcSpall paid for
-// turned inside out. A jet is one body that breaks up at its top.
-uniform int stem = 10;
-// <b>Born after the crown rather than with it, and that is the whole of the
-// sequencing.</b> A jet leaves when the water rushing back in from all sides
-// meets itself, so it cannot start on the frame the hole is made - and drawn from
-// nought it composited into the crown and the pair came out a single white bush.
-uniform float stem_born = 0.055;
-uniform float stem_life = 0.75;
-uniform float stem_stagger = 0.030;
-uniform float stem_rise = 1.00;
-uniform float stem_size = 0.040;
-// <b>How much of its own height an element spans - which is not a stretch, and
-// the difference is the one structural finding in this model.</b>
-//
-// Written as a stretch, the way every other family on this board is written, the
-// jet is a body of a fixed shape that travels: it leaves the surface and by the
-// time it is up there is clear water between it and the pond, so the plume flies
-// over the cell instead of coming out of it. Measured on the picture: a hundred
-// pixels of gap, with the foam still sitting on the water below it.
-//
-// A Rayleigh jet is attached to its own surface by definition - it IS the water
-// being squeezed out of the closing hole - so an element here spans from about the
-// waterline to its own height, and is seated at half of it. Slightly over one, so
-// the foot goes a little under the surface and is cut by it rather than ending on
-// it. Nothing travels; the column grows.
-uniform float stem_stretch = 1.15;
-// How far off vertical they lean. Small, and not nought, for the rack's reason:
-// seven tongues on one line is a comb.
-// <b>Nearly straight up, because the lean opens with height and a fork is what
-// that draws.</b> At 0.10 the ten elements split into two prongs over the top half
-// of the climb - a pair of ears, and the eye reads two jets instead of one
-// breaking up. Not nought, for the comb.
-uniform float stem_lean = 0.055;
-uniform float stem_ink = 1.20;
+// The collar: what is pushed out along the surface, and the half of the event
+// that says which cell it happened on. Elements lie flat - wide across and
+// shallow up - because under this camera a ring on the ground is an ellipse.
+// <b>Climbing rather more than the burst's, and that is the crown.</b> Dust is
+// shoved along the ground; water thrown out of a hole in a surface stands up as it
+// goes, and the angle of that sheet is the second thing that says a SURFACE was
+// hit.
+uniform int collar = 24;
+uniform float collar_life = 0.55;
+uniform float collar_born = 0.05;
+uniform float collar_stagger = 0.12;
+uniform float collar_spread = 0.26;
+uniform float collar_climb = 0.16;
+// The burst's own, after being widened by a third for one pass: at 0.050 with
+// this stretch the family reached most of a tile either way and the middle of the
+// event was a flat white slab lying across the pond - which is the hedge the
+// burst's own note warns about, arrived at from the other direction.
+uniform float collar_size = 0.038;
+uniform float collar_flat = 2.30;
+uniform float collar_ink = 1.00;
 
-// The spray: drops thrown out of the crown, arcing and coming back in. <b>The one
-// family on this board whose elements end below where they started</b>, and what
-// cuts them is the surface itself - see ProcSpout.Root and blast_footing.
-uniform int drops = 40;
-uniform float drop_life = 0.85;
-uniform float drop_stagger = 0.06;
-// <b>Small, and the first number of this whole model that had to be measured
-// rather than reasoned.</b> At 0.026 of a tile, stretched by 2.6 and drawn on the
-// crispest profile here, twenty of them came out as 120px petals standing in a
-// row over the pond - not spray at all, and by half a second they were the entire
-// picture. A drop is the smallest body on this board and it has to be drawn like
-// one; what makes twenty of them read as spray is that each is a streak, not that
-// each is a shape.
-uniform float drop_size = 0.008;
-// The narrowest and the widest launch, off straight up in radians. Wider than the
-// burst's clods: earth leaves a crater in a cone because it was broken out of the
-// walls of one, and water leaves a hole in every direction at once.
-uniform float drop_narrow = 0.30;
-uniform float drop_wide = 0.90;
-// How much a drop stretches along its own travel. Large, and it is what makes
-// twenty of them read as drops rather than as grit: a drop in flight is drawn as
-// the streak it covers in a frame, which is what every photograph of a splash
-// shows.
-uniform float drop_stretch = 2.60;
-// <b>Crisper than the shared cloud, and crisper than a clod of earth.</b>
-// dust_soft is 2.55 because a cloud is in transition everywhere; a clod keeps
-// 1.85 because it is a small body. A drop of water is the smallest body here and
-// the only one with a specular edge in life, so it takes the sharpest profile on
-// the board - short of the flame's 0.5, which has infinite slope at the rim.
-uniform float drop_soft = 1.15;
-uniform float drop_ink = 0.85;
+// The column: what is still there when the water has come down, and what gives
+// the event its length. <b>Half the burst's life, and that is the one difference
+// between earth in the air and water in the air.</b> Dust hangs - it is ground
+// fine enough to be carried - and a plume falls back, so what is left over the
+// cell after a second is a haze rather than a column, and it is thinner and
+// shorter-lived than the earth's by construction.
+// <b>Bigger and denser than the burst's, and this is the family that had to
+// change.</b> A shell in earth throws a cone and leaves a thin column behind it;
+// a shell in water throws a cone that is the RAGGED FRINGE of a mass, and the mass
+// is the plume itself - which is what a suspension of water is, and what the cone
+// on its own can never be, because forty-four elements on forty-four paths stop
+// overlapping by construction. Read as the burst's thin tail the picture was a
+// handful of separate white lumps at every frame; the fix was to put a volume
+// behind them.
+uniform int column = 22;
+uniform float column_life = 1.05;
+uniform float column_born = 0.02;
+uniform float column_stagger = 0.22;
+uniform float column_sway = 0.15;
+uniform float column_climb = 0.52;
+uniform float column_size = 0.075;
+uniform float column_ink = 1.05;
 
-// The haze: what hangs over the entry once the water is back. Low, wide, thin,
-// and the last thing to go - so the cell is left settling rather than switched
-// off.
-uniform int mist = 9;
-uniform float mist_life = 1.30;
-uniform float mist_born = 0.10;
-uniform float mist_stagger = 0.22;
-uniform float mist_run = 0.38;
-uniform float mist_climb = 0.30;
-uniform float mist_size = 0.100;
-uniform float mist_ink = 0.55;
-
-// <b>The dark stop is the pond's own colour with light through it, and it is
-// measured off the surface's own shader rather than picked.</b> Stage3D's
-// computed water declares shallow = (0.24, 0.52, 0.50); water in the air is that
-// lifted toward white, because what makes a plume pale is the air whipped into
-// it. Read at a grey stop the whole thing came out as dust - which is the very
-// picture this class exists to replace.
+// <b>What water in the air is, at its darkest and fully lit</b> - and this pair
+// is the whole of what makes the burst's own model into a plume. The dark stop is
+// measured off the pond rather than picked: Stage3D's computed surface declares
+// shallow = (0.24, 0.52, 0.50), and water in the air is that with light through
+// it, because what makes a plume pale is the air whipped into it.
 uniform vec3 water_dark : source_color = vec3(0.455, 0.655, 0.645);
 // <b>And the pale stop is very nearly white, which is correct exactly once on
 // this board.</b> Every other effect buys white by clipping an additive sum, and
@@ -618,102 +573,80 @@ void fragment() {
         ALPHA = 0.0;
     } else {
         vec2 at = blast_at(UV);
+        // One pass that adds up water and one that shades the result - the
+        // burst's finding, unchanged and the reason this file is the burst: an
+        // element hands back how much it puts in the way and which way its
+        // surface leans, and a single surface is lit at the end. Compositing each
+        // over the last gives every one of them its own rim, and then the eye
+        // counts them.
         float dens = 0.0;
-        float years = 0.0;
         vec2 lean = vec2(0.0);
+        float years = 0.0;
 
-        for (int k = 0; k < crown; k++) {
+        for (int k = 0; k < column; k++) {
             float fk = float(k);
-            float born = crown_stagger * ember_hash(vec2(fk, 211.0));
-            float a = (time - born) / max(crown_life, 1e-3);
+            float born = column_born + column_stagger * ember_hash(vec2(fk, 51.0));
+            float a = (time - born) / max(column_life, 1e-3);
             if (a > 0.0 && a < 1.0) {
-                float side = ember_hash(vec2(fk, 212.0)) < 0.5 ? -1.0 : 1.0;
-                float fast = 0.45 + 0.95 * ember_hash(vec2(fk, 213.0));
-                float out_at = crown_run * reach * side * fast * pow(a, 0.55);
-                float up = crown_climb * reach * fast * pow(a, 0.62);
-                float r = crown_size * (0.60 + 0.90 * ember_hash(vec2(fk, 214.0)))
-                          * (0.55 + 0.95 * a);
-                // Along its own way out, which is what makes it a sheet: the
-                // element is stretched on the line from the hole to where it is,
-                // so the family reads as one wall opening rather than as a row of
-                // puffs standing in a circle.
-                vec2 p = vec2(out_at, up);
-                vec2 flow = length(p) < 1e-4 ? vec2(1.0, 0.0) : normalize(p);
-                // Steeply out, because the family outlives its own shape:
-                // it is here at 0.38s to hold the waterline, and an element still
-                // at full weight late in that is a blade rather than foam.
-                float gain = crown_ink * (1.0 - exp(-a / 0.020))
-                             * pow(max(1.0 - a, 0.0), 2.20);
-                dust_part(at, p, r, r * crown_flat, flow, fk + 211.0,
-                          gain, dust_soft, a, dens, lean, years);
+                float sway = column_sway * (2.0 * ember_hash(vec2(fk, 52.0)) - 1.0)
+                             * pow(a, 0.75);
+                float up = column_climb * pow(a, 0.70)
+                           * (0.30 + 0.95 * ember_hash(vec2(fk, 53.0)));
+                float r = column_size * (0.55 + 0.9 * ember_hash(vec2(fk, 54.0)))
+                          * (0.45 + 1.05 * a);
+                float gain = column_ink * (1.0 - exp(-a / 0.10))
+                             * pow(max(1.0 - a, 0.0), 1.25);
+                dust_part(at, vec2(sway, up), r, r * 1.25, vec2(0.0, 1.0),
+                          fk + 51.0, gain, dust_soft, a, dens, lean, years);
             }
         }
 
-        for (int k = 0; k < stem; k++) {
+        for (int k = 0; k < collar; k++) {
             float fk = float(k);
-            float born = stem_born + stem_stagger * ember_hash(vec2(fk, 221.0));
-            float a = (time - born) / max(stem_life, 1e-3);
+            float born = collar_born + collar_stagger * ember_hash(vec2(fk, 61.0));
+            float a = (time - born) / max(collar_life, 1e-3);
             if (a > 0.0 && a < 1.0) {
-                float fast = 0.70 + 0.50 * ember_hash(vec2(fk, 222.0));
-                float up = stem_rise * reach * fast * pow(a, 0.58);
-                float wide = up * stem_lean
-                             * (2.0 * ember_hash(vec2(fk, 223.0)) - 1.0);
-                float r = stem_size * (0.55 + 1.00 * ember_hash(vec2(fk, 224.0)))
-                          * (0.70 + 0.60 * a);
-                // Spanning its own height and seated at half of it, so the
-                // column is rooted in the surface however high it has got - see
-                // stem_stretch, which is what that number means here.
-                float draw = max(up * stem_stretch * 0.5, r * 1.10);
-                vec2 p = vec2(wide, up * 0.5);
-                float gain = stem_ink * (1.0 - exp(-a / 0.045))
-                             * pow(max(1.0 - a, 0.0), 1.35);
-                dust_part(at, p, r, draw, vec2(0.0, 1.0), fk + 221.0,
-                          gain, dust_soft, a, dens, lean, years);
+                // Out along the surface and up, the second slower than the first:
+                // a burst spreads before it climbs, and a mass doing both at one
+                // rate is a ball.
+                float side = 2.0 * ember_hash(vec2(fk, 62.0)) - 1.0;
+                float out_at = collar_spread * side * pow(a, 0.55);
+                float up = collar_climb * pow(a, 0.85)
+                           * (0.35 + 0.85 * ember_hash(vec2(fk, 63.0)));
+                float r = collar_size * (0.55 + 0.9 * ember_hash(vec2(fk, 64.0)))
+                          * (0.45 + 1.10 * a);
+                float gain = collar_ink * (1.0 - exp(-a / 0.06))
+                             * pow(max(1.0 - a, 0.0), 1.30);
+                dust_part(at, vec2(out_at, up), r, r * collar_flat,
+                          vec2(1.0, 0.0), fk + 61.0, gain, dust_soft, a,
+                          dens, lean, years);
             }
         }
 
-        for (int k = 0; k < drops; k++) {
+        for (int k = 0; k < clods; k++) {
             float fk = float(k);
-            float born = drop_stagger * ember_hash(vec2(fk, 231.0));
-            float a = (time - born) / max(drop_life, 1e-3);
+            float born = clod_stagger * ember_hash(vec2(fk, 71.0));
+            float a = (time - born) / max(clod_life, 1e-3);
             if (a > 0.0 && a < 1.0) {
-                float leaning = mix(drop_narrow, drop_wide,
-                                    ember_hash(vec2(fk, 232.0)));
-                float side = ember_hash(vec2(fk, 233.0)) < 0.5 ? -1.0 : 1.0;
-                float fast = mix(0.40, 1.0, ember_hash(vec2(fk, 234.0)));
-                // The shared parabola, stated as an apex - see blast_throw. Back
-                // on the surface exactly at the end of its life, which for water
-                // is the whole of what happens to it: a drop does not settle, it
-                // is absorbed.
+                float leaning = mix(clod_narrow, clod_wide,
+                                    ember_hash(vec2(fk, 72.0)));
+                float side = ember_hash(vec2(fk, 73.0)) < 0.5 ? -1.0 : 1.0;
+                float fast = mix(0.45, 1.0, ember_hash(vec2(fk, 74.0)));
+                vec2 seat = vec2(clod_born * (2.0 * ember_hash(vec2(fk, 76.0)) - 1.0),
+                                 clod_born * 0.45 * ember_hash(vec2(fk, 77.0)));
+                // The shared parabola, stated as an apex - see blast_throw. On the
+                // surface exactly at the end of its life, which for water is the
+                // whole of what happens to it: a drop does not settle, it is
+                // absorbed.
                 vec4 thrown = blast_throw(a, reach, fast, leaning, side);
-                float r = drop_size * (0.45 + 1.60 * ember_hash(vec2(fk, 235.0)));
-                // Thins on the way in rather than on the way out: what takes a
-                // drop out of the picture is the surface, not the air.
-                float gain = drop_ink * (1.0 - exp(-a / 0.030))
-                             * (1.0 - smoothstep(0.72, 1.0, a));
-                dust_part(at, thrown.xy, r, r * drop_stretch, thrown.zw,
-                          fk + 231.0, gain, drop_soft, a, dens, lean, years);
-            }
-        }
-
-        for (int k = 0; k < mist; k++) {
-            float fk = float(k);
-            float born = mist_born + mist_stagger * ember_hash(vec2(fk, 241.0));
-            float a = (time - born) / max(mist_life, 1e-3);
-            if (a > 0.0 && a < 1.0) {
-                float side = 2.0 * ember_hash(vec2(fk, 242.0)) - 1.0;
-                float out_at = mist_run * reach * side * pow(a, 0.45);
-                float up = mist_climb * reach * pow(a, 0.65)
-                           * (0.40 + 0.90 * ember_hash(vec2(fk, 243.0)));
-                float r = mist_size * (0.60 + 0.85 * ember_hash(vec2(fk, 244.0)))
-                          * (0.55 + 1.05 * a);
-                float gain = mist_ink * (1.0 - exp(-a / 0.14))
-                             * pow(max(1.0 - a, 0.0), 1.10);
-                // Lying along the surface, which is where a haze over water
-                // stands: an element on end here would be a small column, and
-                // there is one of those already.
-                dust_part(at, vec2(out_at, up), r, r * 1.55, vec2(1.0, 0.0),
-                          fk + 241.0, gain, dust_soft, a, dens, lean, years);
+                vec2 p = seat + thrown.xy;
+                vec2 flow = thrown.zw;
+                float r = clod_size * (0.40 + 1.7 * ember_hash(vec2(fk, 75.0)))
+                          * (1.0 - 0.25 * a);
+                float gain = clod_ink * (1.0 - exp(-a / 0.05))
+                             * (1.0 - smoothstep(0.60, 1.0, a));
+                dust_part(at, p, r, r * (1.0 + clod_stretch * fast), flow,
+                          fk + 71.0, gain, clod_soft, a, dens, lean, years);
             }
         }
 
@@ -721,6 +654,9 @@ void fragment() {
             ALBEDO = vec3(0.0);
             ALPHA = 0.0;
         } else {
+            // One surface, lit once, out of the summed thickness - both halves
+            // are the shared dust ink's, and the two colours and the SIGN of the
+            // thickness term are this effect's own. See ProcSpout.Dense.
             float mass = dust_mass(at, dens);
             float lit = dust_lit(mass, lean);
             ALBEDO = mix(water_dark, water_lit, lit);
