@@ -31,7 +31,7 @@ footprint is inside the hull's) and for the scars, which sit on hull plates that
 have not moved.
 
 So the wreck costs one turret layer and two belt layers, 24 frames each, against
-the live set's 46MB - see CLAUDE.md for the measured figures.
+the live set's 46MB - see docs/pipeline.md for the measured figures.
 
 The void under the turret, which is a gift from the assets
 ----------------------------------------------------------

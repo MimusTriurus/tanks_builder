@@ -55,7 +55,7 @@ CANON_SUFFIX = ".Geometry"
 ROOT_SUFFIX = ".World"
 
 # The layer roots of the parts layout, and the meshes each is expected to hold.
-# A name here is a fact about the canon, not a preference - see CLAUDE.md.
+# A name here is a fact about the canon, not a preference - see docs/tank-scene.md.
 PARTS_ROOTS = {
     "hull": "Hull.World",
     "turret": "Turret.World",
@@ -111,7 +111,7 @@ def layout(scene=None):
         return "single"
     raise RuntimeError(
         "this scene is neither layout: no `world` root, and not all of %s. "
-        "See the canonical structure in CLAUDE.md."
+        "See the canonical structure in docs/tank-scene.md."
         % sorted(PARTS_ROOTS.values()))
 
 

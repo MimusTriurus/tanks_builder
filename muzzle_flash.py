@@ -11,7 +11,7 @@ Two objects, and they are two layers on purpose
 composited with **normal alpha**. That is not a stylistic split, it is the only
 honest one: fire adds light to what is behind it and smoke takes it away, and a
 single layer cannot do both. The same conclusion was reached the hard way when
-keying the bought sheet - see key_on_white.ps1 in CLAUDE.md.
+keying the bought sheet - see key_on_white.ps1 in docs/tools.md.
 
 The whole reason to render it rather than paint it
 --------------------------------------------------

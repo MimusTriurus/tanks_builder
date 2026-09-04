@@ -1,6 +1,6 @@
 # Два слоя клетки: пол и покрытие (`Terrain.cs`, `terrain.json`)
 
-Часть [GodotTest/CLAUDE.md](../CLAUDE.md) — стенда на Godot. Раскрой файлов, запуск и управление там; карты, которые этими слоями пользуются, — в [docs/board.md](board.md).
+Часть [GodotTest/CLAUDE.md](../CLAUDE.md) — стенда на Godot. Запуск, управление и правило про корни там, раскрой файлов — в [docs/architecture.md](architecture.md); карты, которые этими слоями пользуются, — в [docs/board.md](board.md).
 
 ## Клетка — это два слота и одна ось
 

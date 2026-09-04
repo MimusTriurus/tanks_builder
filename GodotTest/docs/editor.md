@@ -1,6 +1,6 @@
 # Редактор карт (`MapRules.cs`, `Editor.tscn`)
 
-Часть [GodotTest/CLAUDE.md](../CLAUDE.md) — стенда на Godot. Раскрой файлов, запуск и управление там; сами карты и доски — в [docs/board.md](board.md), два слота клетки — в [docs/terrain.md](terrain.md).
+Часть [GodotTest/CLAUDE.md](../CLAUDE.md) — стенда на Godot. Запуск, управление и правило про корни там, раскрой файлов — в [docs/architecture.md](architecture.md); сами карты и доски — в [docs/board.md](board.md), два слота клетки — в [docs/terrain.md](terrain.md).
 
 ## Что это
 

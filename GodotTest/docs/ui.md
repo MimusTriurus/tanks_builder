@@ -1,6 +1,6 @@
 # Танки на доске, метки и панель
 
-Часть [GodotTest/CLAUDE.md](../CLAUDE.md) — стенда на Godot. Раскрой файлов, запуск и управление там; конвейер спрайтов — в [корневом CLAUDE.md](../../CLAUDE.md).
+Часть [GodotTest/CLAUDE.md](../CLAUDE.md) — стенда на Godot. Запуск, управление и правило про корни там, раскрой файлов — в [docs/architecture.md](architecture.md); конвейер спрайтов — в [корневом CLAUDE.md](../../CLAUDE.md).
 
 ## Контактная тень (`shadow`, панель, `--no-shadow`)
 
