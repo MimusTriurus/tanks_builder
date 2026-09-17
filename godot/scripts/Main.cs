@@ -406,10 +406,9 @@ public sealed partial class Main : SceneRoot
 	///
 	/// Only on the stage, for <see cref="Splashed"/>'s reason word for word.
 	/// </summary>
-	private void Sparked(Vehicle v, Vector2 plate, Vector2 outward, bool behind,
+	private void Sparked(Vehicle v, Vector2 at, Vector2 outward, bool behind,
 						 float might) =>
-		_stage?.Scrape(v.GroundPoint, v.LiftOf(v.GroundPoint), outward,
-					   v.Spot(plate) - v.GroundPoint, behind, might);
+		_stage?.Scrape(at, v.LiftOf(at), outward, Vector2.Zero, behind, might);
 
 	private void Bounced(Vehicle v, Vector2 plate, Vector2 away, bool behind) =>
 		_stage?.Spall(v.GroundPoint, v.LiftOf(v.GroundPoint), away,
@@ -5831,7 +5830,7 @@ public sealed partial class Main : SceneRoot
 		// Right after they have moved and before anything reads the board: a ram
 		// is a fact about where a hull got to this frame, and it stops the tank
 		// that delivered it. See RamContacts.
-		Tick.RamContacts();
+		Tick.RamContacts(delta);
 
 		// After every tank has moved, so a round aimed at a tank sees where that
 		// tank got to this frame rather than last frame - the same ordering the

@@ -6246,12 +6246,16 @@ void fragment() {{
     /// second copy of them would be two statements of one event - the argument
     /// <see cref="Mine"/> is written under, one method along.
     ///
-    /// <b>Seated on the hull it happened to, not on the seam between the two.</b>
-    /// Both tanks get one of these, each on its own foot, because a quad standing
-    /// between two billboards sorts by nothing at all and draws across whichever
-    /// hull is nearer - see <see cref="TankTick.Bumped"/>, where the dust met
-    /// exactly that and had to be thrown sideways instead. On its own tank's foot
-    /// a fan sorts with everything else that stands on the board.
+    /// <b>Seated wherever the caller says, and the ram says the seam.</b> The
+    /// dust of that same collision could not be seated between the hulls
+    /// (<see cref="TankTick.Bumped"/>, at length): a quad standing between two
+    /// billboards sorts by nothing at all. This one can, because what decides
+    /// whether a hull hides its own sparks is the rung rather than the seat -
+    /// see below. It was seated on each tank's own foot at first, with the point
+    /// of contact carried in <paramref name="plate"/>, and that offset turns out
+    /// to move the fan by a quarter of what it is handed: fine for one frame of
+    /// contact, wrong for a push that lasts a hex - TankTick.Sparked has the
+    /// measurement.
     ///
     /// <b>Which side of that hull it is on is said with the rung, not with the
     /// clearance.</b> <paramref name="behind"/> is still passed - it holds the two

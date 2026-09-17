@@ -607,9 +607,8 @@ public sealed partial class EventBench : SceneRoot
             TankTick.RamKick, Stage3D.DressOrder);
         // And the metal of that same collision: the ricochet's fan with no round
         // in it, one per hull and seated on the hull - see TankTick.Sparked.
-        _tick.Sparked = (v, plate, outward, behind, might) => _stage?.Scrape(
-            v.GroundPoint, v.LiftOf(v.GroundPoint), outward,
-            v.Spot(plate) - v.GroundPoint, behind, might);
+        _tick.Sparked = (v, at, outward, behind, might) => _stage?.Scrape(
+            at, v.LiftOf(at), outward, Vector2.Zero, behind, might);
         _tick.Bounced = (v, plate, away, behind) => _stage?.Spall(
             v.GroundPoint, v.LiftOf(v.GroundPoint), away,
             v.Spot(plate) - v.GroundPoint, behind, Ordnance.At(_tick.Calibre));
@@ -728,7 +727,7 @@ public sealed partial class EventBench : SceneRoot
         // Right after they have moved and before anything reads the board - the
         // harness's order and its reason: a ram is a fact about where a hull got
         // to this frame. See TankTick.RamContacts.
-        Tick.RamContacts();
+        Tick.RamContacts(delta);
         Tick.Fly(delta);
         // And after both, the tank bench's order and for its reasons: the box
         // the wall feels is where the tank got to this frame, a round that

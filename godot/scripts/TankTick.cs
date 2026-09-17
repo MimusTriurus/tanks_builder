@@ -846,7 +846,18 @@ public sealed class TankTick
     public void Run(Vehicle v, double delta)
     {
         if (v.Moving)
+        {
+            // An order taking over from a reverse: the backing out of a push is
+            // abandoned where it stands, because an order is the tank driving
+            // itself again - CancelOrder says the same thing for the other way
+            // in, and a belt left reversed would wind backwards under a tank
+            // going forwards.
+            v.Backing = null;
+            v.Dwell = 0.0;
             AdvanceOrder(v, delta);
+        }
+        else if (v.Backing is not null)
+            AdvanceBacking(v, delta);
         else if (v.Pitch.Moving || v.Speed != 0.0 || v.Sprite.Shake != 0.0)
         {
             // Standing still is not the same as having always been standing:
@@ -1363,6 +1374,11 @@ public sealed class TankTick
         // it skids, which is what it is doing. The mark under it is still laid -
         // see TrackMarks.Lay, which takes its place from the hull rather than
         // from the belts.
+        // Backing out of a push winds the same belts the other way - see
+        // BackOff. Signed rather than a case: the loop and the sound both take
+        // this one number, so a tank reversing cannot be heard going forwards.
+        if (v.Backing is not null)
+            return TrackLoop.Split(-v.Speed * delta, swing, radius);
         if (v.Shoved is not null)
             return (0.0, 0.0);
         return TrackLoop.Split(v.Speed * delta, swing, radius);
@@ -1438,6 +1454,256 @@ public sealed class TankTick
         victim.LegBlend = 0.0f;
         // After the path, because the cap is asked of the leg being driven.
         victim.Speed = Math.Min(speed, SpeedCap(victim));
+    }
+
+    /// <summary>How long the two hulls stand against each other before the
+    /// pusher backs off, in seconds. A beat rather than a pause: hulls that part
+    /// on the frame they stop never look as though they had been touching.
+    /// </summary>
+    public const double RamDwell = 0.22;
+
+    /// <summary>Seconds between bursts of metal off the two plates while a push
+    /// is on - see <see cref="Grinds"/>.</summary>
+    public const double RamGrind = 0.09;
+
+    /// <summary>How big each of those bursts is against the fan thrown at the
+    /// moment of contact. Well under one: the meeting is the event, and what
+    /// follows it is that event going on.</summary>
+    public const float RamGrindSpark = 0.35f;
+
+    /// <summary>Seconds between spills of ground from under the pair while a
+    /// push is on - see <see cref="Grinds"/>.</summary>
+    public const double RamPlough = 0.22;
+
+    /// <summary>How fast a hull backs out of a push, as a fraction of its own
+    /// cruise. Reverse is the slower gear on anything tracked and a third is the
+    /// shape of it - measured against the crawl, which was the first thing tried:
+    /// <see cref="MovementProfile.CornerFraction"/> is 12%, a pivot's speed, and
+    /// at 21px/s the heavy spent longer backing a third of a leg out than it had
+    /// spent pushing the whole hex.</summary>
+    public const double RamBack = 0.35;
+
+    /// <summary>The hull <paramref name="v"/> has its nose against, or null when
+    /// it is pushing nobody.
+    ///
+    /// Read off the pushed hull rather than kept on both of them, because two
+    /// fields pointing at each other are one fact plus a future disagreement -
+    /// the reason the mass table is not written twice either. The list is five
+    /// long on the biggest board there is.</summary>
+    public Vehicle? Pushed(Vehicle v)
+    {
+        foreach (Vehicle other in Vehicles)
+            if (ReferenceEquals(other.Shover, v))
+                return other;
+        return null;
+    }
+
+    /// <summary>
+    /// A push in progress, frame by frame: one speed for the two hulls, metal
+    /// off the plates while they grind, and the end of it.
+    ///
+    /// <b>The pusher drives and the pushed one is carried.</b> Both still run
+    /// legs of their own - that is what gives the shoved tank its mine, its bank
+    /// and its ramp for nothing - but the speed is the pusher's, converted into
+    /// the leg's own units: a leg is crossed in its own span of pixels, so a
+    /// victim whose leg is the shorter of the two (a step on to a ramp) is given
+    /// proportionally less of it and the pair stay exactly as far apart as they
+    /// were at the moment they touched. That distance is
+    /// <see cref="RamContact"/> of a leg, and holding it is what keeps the two
+    /// silhouettes overlapping for the whole hex instead of one leaving the
+    /// other behind.
+    ///
+    /// <b>It ends when the shoved hull arrives, and only its first leg is
+    /// pushed.</b> A shove that runs out down a ramp is two legs, and nothing
+    /// pushes a tank down a slope: the second one it takes on its own.
+    /// </summary>
+    public void Pushes(double delta)
+    {
+        foreach (Vehicle victim in Vehicles)
+        {
+            if (victim.Shover is not Vehicle pusher)
+                continue;
+            // <b>Letting go is not the same ending as arriving.</b> The hull
+            // behind may have been given somewhere else to be, been stopped, or
+            // been knocked out, and the test for all three is whether it is
+            // still driving into the tank in front of it. Then the field simply
+            // clears: the shoved hull keeps the legs it was thrown along and
+            // finishes them on its own engine, and nobody backs out of anything.
+            if (pusher.Wreck.Out || !pusher.Moving
+                || (pusher.Onto != victim.Cell && pusher.Onto != victim.Onto))
+            {
+                victim.Shover = null;
+                continue;
+            }
+            // Arriving: the shoved hull is on the hex it was thrown at, or has
+            // started the second leg of a slide, which nothing is pushing it
+            // down. This is the ending the reverse belongs to.
+            if (!victim.Moving || victim.PathStep > 0 || victim.Wreck.Dead)
+            {
+                victim.Shover = null;
+                BackOff(pusher);
+                continue;
+            }
+            double span = LegSpan(pusher);
+            victim.Speed = span > 0.001
+                ? pusher.Speed * LegSpan(victim) / span
+                : pusher.Speed;
+            Grinds(pusher, victim, delta);
+        }
+    }
+
+    /// <summary>The flat length of the leg a tank is driving, which is the unit
+    /// its progress is counted in - see <see cref="AdvanceOrder"/>, where the
+    /// frame's budget is spent against exactly this.</summary>
+    private double LegSpan(Vehicle v) =>
+        !v.Moving
+            ? 0.0
+            : (Field.FlatAnchor(v.Onto.X, v.Onto.Y)
+               - Field.FlatAnchor(v.Cell.X, v.Cell.Y)).Length();
+
+    /// <summary>
+    /// What a push throws off while it lasts: metal, and ground.
+    ///
+    /// <b>The sparks are the contact's own fan, repeated.</b> Steel held against
+    /// steel under a running engine is not one event, and one fan at the moment
+    /// of contact was the whole of what a ram had to say for itself - said in a
+    /// single frame. Each burst is a fraction of that one
+    /// (<see cref="RamGrindSpark"/>), so the meeting is still the loudest thing
+    /// in the sequence and what follows is the sound of it going on.
+    ///
+    /// <b>The ground is on a clock of its own</b> - <see cref="RamPlough"/> -
+    /// because a cloud is sized at the root and cannot be asked for a smaller
+    /// one, only for a rarer one. Seated on the seam and thrown across the push,
+    /// which is <see cref="Bumped"/>'s rule and the contact's: what a collision
+    /// squeezes out goes out to the sides, where there is ground to see it
+    /// against.
+    /// </summary>
+    private void Grinds(Vehicle pusher, Vehicle victim, double delta)
+    {
+        int heading = HexField.HeadingTo(pusher.Cell, pusher.Onto);
+        if (heading < 0)
+            return;
+        Vector2 seam = (pusher.GroundPoint + victim.GroundPoint) * 0.5f;
+        pusher.Grind -= delta;
+        if (pusher.Grind <= 0.0)
+        {
+            pusher.Grind = RamGrind;
+            float scale = RamSparkFor(pusher.Profile) * RamGrindSpark;
+            Scrape(pusher, seam, Struck(pusher, heading), scale);
+            Scrape(victim, seam,
+                   Struck(victim, Angles.Mod(heading + 180.0, 360.0)), scale);
+        }
+        pusher.Plough -= delta;
+        if (pusher.Plough > 0.0)
+            return;
+        pusher.Plough = RamPlough;
+        Vector2 across = pusher.Atlas.GroundDirection(heading + 90.0);
+        Bumped?.Invoke(pusher, seam, across);
+        Bumped?.Invoke(pusher, seam, -across);
+    }
+
+    /// <summary>
+    /// The end of a push: the pusher comes off the hull it shoved.
+    ///
+    /// Three endings, told apart by how far the pusher got rather than by a flag,
+    /// because the path answers it either way:
+    ///
+    /// <list type="bullet">
+    /// <item><b>A leg to spare</b> - it never crossed on to the hex it cleared.
+    /// The extra cell was only ever somewhere for the nose to be, so it comes off
+    /// and the order ends where the player gave it.</item>
+    /// <item><b>On that extra leg</b> - the ordinary ending: a third of a leg
+    /// past the middle of the victim's hex, which it now reverses out of.</item>
+    /// <item><b>Not under way at all</b> - something else has stopped it already,
+    /// and there is nothing to undo.</item>
+    /// </list>
+    /// </summary>
+    private void BackOff(Vehicle v)
+    {
+        if (!v.Moving)
+            return;
+        if (v.Path.Count - v.PathStep > 1)
+        {
+            v.Path = v.Path.GetRange(0, v.PathStep + 1);
+            return;
+        }
+        Vector2I ahead = v.Path[v.PathStep];
+        float done = v.LegDone;
+        CancelOrder(v);
+        v.LegDone = done;
+        v.Backing = ahead;
+        v.Dwell = RamDwell;
+    }
+
+    /// <summary>
+    /// A hull reversing the last third of a leg, out of the hull it has just
+    /// finished pushing - <see cref="Vehicle.Backing"/>.
+    ///
+    /// <b>The same leg, run backwards.</b> <see cref="Vehicle.LegDone"/> is what
+    /// the drawn position is interpolated from, so backing out is that number
+    /// running down: the height, the waterline and the lean go on coming off the
+    /// same pair of cells they already came from, and the hull ends parked on the
+    /// cell it has been standing in all along, with nothing to put back.
+    ///
+    /// <b>In its own reverse gear</b> - <see cref="RamBack"/>, a fraction of the
+    /// class cruise like every other figure that moves a hull. The cornering
+    /// crawl was tried first and is what named the number: at 12% of cruise the
+    /// heavy took longer to back a third of a leg out than it had taken to push
+    /// the whole hex.
+    ///
+    /// The nose dips as it pulls back, which is the acceleration ratio with its
+    /// sign turned over: reversing throws the weight the opposite way from
+    /// pulling away, and the spring takes the same channel either way - see
+    /// <see cref="UpdatePitch"/>.
+    /// </summary>
+    private void AdvanceBacking(Vehicle v, double delta)
+    {
+        if (v.Backing is not Vector2I ahead)
+            return;
+        // The beat the two hulls spend standing against each other - see
+        // Vehicle.Dwell.
+        if (v.Dwell > 0.0)
+        {
+            v.Dwell -= delta;
+            v.Speed = 0.0;
+            UpdatePitch(v, 0.0, delta);
+            UpdateRumble(v, delta);
+            v.Sprite.QueueRedraw();
+            return;
+        }
+        double before = v.Speed;
+        float span = (Field.FlatAnchor(ahead.X, ahead.Y)
+                      - Field.FlatAnchor(v.Cell.X, v.Cell.Y)).Length();
+        // Braked by a ceiling rather than by a pedal, which is AdvanceOrder's
+        // rule and its reason: what is left of the reverse is LegDone of the
+        // leg, and a ceiling that runs down with it finishes the deceleration
+        // instead of having it cut off by arrival. Without it the hull came off
+        // a third of a hex at 61px/s and stopped in one frame.
+        double ceiling = Math.Sqrt(2.0 * v.Profile.Accel
+                                   * Math.Max(v.LegDone * span, 0.0));
+        v.Speed = Math.Min(Math.Min(v.Profile.TopSpeed * RamBack, ceiling),
+                           v.Speed + v.Profile.Accel * delta);
+        double ratio = delta > 0.0
+            ? Math.Clamp((v.Speed - before) / (v.Profile.Accel * delta), -1.0, 1.0)
+            : 0.0;
+        float step = span > 0.001f ? (float)(v.Speed * delta) / span : 1.0f;
+        v.LegDone -= step;
+        if (v.LegDone <= 0.0f)
+        {
+            v.LegDone = 0.0f;
+            v.Backing = null;
+            v.Speed = 0.0;
+            Park(v, placed: false);
+        }
+        else
+        {
+            v.Sprite.Position = StandBetween(v, v.Cell, ahead, v.LegDone);
+            Climb(v, ahead);
+            Depth(v);
+        }
+        UpdatePitch(v, -ratio, delta);
+        UpdateRumble(v, delta);
+        v.Sprite.QueueRedraw();
     }
 
     /// <summary>
@@ -1531,14 +1797,19 @@ public sealed class TankTick
     /// along the plate's own normal (<see cref="Vehicle.Blown"/>) and nothing
     /// carries on past it - <see cref="Stage3D.Scrape"/>.
     ///
-    /// <b>Fired twice, once per hull, and the two seats are the point.</b> The
-    /// dust of this same collision could not be seated where the hulls met
-    /// (<see cref="Bumped"/>, at length): a quad between two billboards sorts by
-    /// nothing. This one is not seated there either - each fan stands on its own
-    /// tank's contact point, where the depth side the spall layer carries can put
-    /// it in front of that tank or behind it. Same collision, two pictures of it,
-    /// one per hull, exactly as the armour model already deals a ram both ways
-    /// round.
+    ///
+    /// <b>Fired twice, once per hull, and both are seated where the hulls
+    /// met.</b> The point handed over is a place on the board - the seam, lifted
+    /// by a fraction of that hull's own span - rather than a point of the
+    /// sprite, and the root sits the fan on it. It used to be seated on each
+    /// tank's own foot, with the seam carried alongside as a plate offset, and
+    /// measured that offset moves the fan about 25px where the seam is 60 away:
+    /// one frame of contact forgave it, a push a hex long did not - the rammer's
+    /// sparks came off its own flank, a hull behind the collision, and travelled
+    /// with it. What the two fans still differ in is the plate: each hull is
+    /// asked for the one that met the other, and the metal leaves along its own
+    /// normal. Which side of its hull that is still decides the rung, which is
+    /// what sorts the quad - see <see cref="Stage3D.Scrape"/>.
     ///
     /// <b>Before the rules are asked, with the dust and the shake.</b> Two hulls
     /// met; whether anything may then be shoved is about what follows, and a ram
@@ -1641,8 +1912,10 @@ public sealed class TankTick
     /// rams too - one contact rule for the gesture, the event and the tool, and
     /// no root that knows which of them called it.
     /// </summary>
-    public void RamContacts()
+    public void RamContacts(double delta)
     {
+        // The pushes already under way, before any new contact - see Pushes.
+        Pushes(delta);
         foreach (Vehicle v in Vehicles)
         {
             if (v.Charge is not Vector2I onto)
@@ -1742,6 +2015,18 @@ public sealed class TankTick
             // frames after, so the check is a dip rather than a stop.
             Shove(victim, push.Legs, heading, v.Speed * keep);
             v.Speed *= keep;
+            // And from here the two are one thing until the hex has been
+            // crossed - see Pushes. The shoved hull's engine goes off
+            // (Vehicle.Shover) and the pusher is given one leg more than it was
+            // ordered, the hex the victim is being thrown at, so that its nose
+            // has ground to be over while it pushes. It never arrives there: the
+            // push ends when the victim does, a third of a leg short of that
+            // cell's middle, and the third is backed out again - see BackOff.
+            victim.Shover = v;
+            v.Path = v.Path.GetRange(0, v.PathStep + 1);
+            v.Path.Add(push.Legs[0]);
+            v.Grind = RamGrind;
+            v.Plough = RamPlough;
         }
     }
 
@@ -1795,10 +2080,11 @@ public sealed class TankTick
         if (Sparked is null)
             return;
         // Up the screen is up on this board, so the height is one subtraction -
-        // and it is in the sprite's own px, because that is the frame the hook
-        // hands over and the frame a plate's offset is measured in.
-        Vector2 at = v.Unspot(seam)
-                     - new Vector2(0.0f, RamSparkHigh * v.Atlas.HullSpan);
+        // and it is in board px, scaled by this hull's own size, because the
+        // point handed over is a place on the board rather than a place on a
+        // sprite. See Sparked, where the seat used to be the hull's own foot.
+        Vector2 at = seam - new Vector2(
+            0.0f, RamSparkHigh * v.Atlas.HullSpan * v.Sprite.BodyScale);
         Sparked(v, at, v.Blown(face, 0.0f, 0.0f).Out, v.Turned(face), might);
     }
 
@@ -1810,6 +2096,11 @@ public sealed class TankTick
         // The push ends with the path it was: an order that replaces a shove is
         // a tank driving itself again, and so is a shove run out to its end.
         v.Shoved = null;
+        // And so does a reverse out of one - see BackOff, which sets these two
+        // straight after calling this. R comes through here for every tank on
+        // the board, which is the other reason they are cleared in one place.
+        v.Backing = null;
+        v.Dwell = 0.0;
         if (v != Driven)
             return;
         Field.Highlight = Array.Empty<Vector2I>();
@@ -1894,6 +2185,13 @@ public sealed class TankTick
         // their product" that already holds for the other two.
         if (Shoving is not null && Shoving(v))
             cap = Math.Min(cap, MovementProfile.WallSpeed);
+        // And a hull in front of the nose, which is the heaviest thing a tank
+        // ever pushes - see Pushes. The pair crosses the hex at RamKeep of
+        // whichever of the two grounds is the slower: the momentum share is the
+        // speed two hulls that do not bounce leave a contact at, and the ground
+        // under the one being pushed is ground the pair has to get over.
+        if (Pushed(v) is Vehicle under)
+            cap = Math.Min(cap, SpeedCap(under)) * RamKeep(v.Profile, under.Profile);
         return cap;
     }
 
@@ -1915,6 +2213,11 @@ public sealed class TankTick
         // going at the wall's figure whatever else is true of the leg.
         if (Shoving is not null && Shoving(v))
             return "shoving";
+        // Pushing another hull, which is neither the board's doing nor this
+        // tank's class - see Pushes. Named first for masonry's reason: while it
+        // is on it is the cap in force, whatever the ground under either tank.
+        if (Pushed(v) is not null)
+            return "pushing";
         Vector2I next = v.Path[v.PathStep];
         bool grade = Field.IsGrade(v.Cell, next), wet = Field.IsWet(v.Cell, next);
         // Swimming names the lowest of the water caps, which is the one in
@@ -1947,7 +2250,16 @@ public sealed class TankTick
         // keeps the heading it had - see Vehicle.Shoved. Everything below the
         // branch is the same driving, which is the point of putting the
         // difference here rather than in a second mover.
-        if (v.Shoved is null && Math.Abs(diff) > 0.5)
+        // <b>A hull with another one's nose in it is not driving.</b> Its speed
+        // is the pusher's, written every frame by <see cref="Pushes"/>, and
+        // there is no engine here to add to it or take it off. Left to the
+        // ordinary branch the shoved hull accelerates up to its own ceiling and
+        // walks out from under the tank that is pushing it, which is what the
+        // first ram looked like: one shunt and a hull sliding away on its own.
+        // See Vehicle.Shover.
+        if (v.Shover is not null)
+            accelRatio = 0.0;
+        else if (v.Shoved is null && Math.Abs(diff) > 0.5)
         {
             // Slow to the cornering crawl and swing round while still creeping.
             // The crawl is a floor, never a target to speed up to, so a standing

@@ -85,13 +85,15 @@ public class McpBench
 
 	[AiTool("bench-ram", Title = "Bench / Ram A Tank", OpenWorldHint = false)]
 	[Description("Order the driven tank to ram the tank standing on a cell, as a double "
-		+ "left click on it does. The route is driven the ordinary way and the ram lands "
-		+ "when the hulls meet: neither hull is damaged, the one that was hit is thrown "
-		+ "one hex on along the ram keeping its hull heading, and the rammer takes the "
-		+ "hex it came from. Whether it may - the mass table, the hex behind the target, "
-		+ "walls, ramps, the board's edge - is decided at the moment of contact, and a "
-		+ "refusal is printed and leaves the rammer stopped against the hull. Nothing on "
-		+ "the cell, or no route to it, and it is a plain drive.")]
+		+ "left click on it does. The route is driven the ordinary way and the hulls "
+		+ "lock when they meet: neither is damaged, and the rammer pushes the other one "
+		+ "a whole hex along the ram - both at one speed, the pair throwing sparks and "
+		+ "ground off the seam, the pushed hull keeping its hull heading. When it "
+		+ "arrives the rammer is a third of a leg too far in, rests a beat and backs out "
+		+ "on to the hex it cleared. Whether it may - the mass table, the hex behind the "
+		+ "target, walls, ramps, the board's edge - is decided at the moment of contact, "
+		+ "and a refusal is printed and leaves the rammer stopped against the hull. "
+		+ "Nothing on the cell, or no route to it, and it is a plain drive.")]
 	public string Ram(
 		[Description("Column of the cell to ram into.")] int col,
 		[Description("Row of the cell to ram into.")] int row)

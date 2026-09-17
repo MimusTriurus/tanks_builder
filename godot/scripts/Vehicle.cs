@@ -64,6 +64,62 @@ public sealed class Vehicle
     /// </summary>
     public int? Shoved;
 
+    /// <summary>
+    /// The hull whose nose is against this one, or null when nothing is pushing
+    /// it - GDD units.md, "Таран", and docs/combat.md, "Таран: двойной щелчок".
+    ///
+    /// <b>A hull being pushed has no engine of its own.</b> <see cref="Shoved"/>
+    /// says the hull is not steering; this says it is not driving either. Every
+    /// frame of the push its speed is written from the hull behind it
+    /// (<c>TankTick.Pushes</c>) and <c>TankTick.AdvanceOrder</c> leaves it alone,
+    /// so the two stay in contact for the whole hex instead of the victim
+    /// accelerating away under its own ceiling - which is what a shove started at
+    /// a speed and then left to itself looked like, and what read as a bounce.
+    ///
+    /// Cleared when the push ends, which is the frame the pushed hull reaches
+    /// the hex it was thrown at. What happens to it after that - a slide down a
+    /// ramp, a fall off a bank - it does on its own, because nothing is pushing
+    /// it down a slope.
+    /// </summary>
+    public Vehicle? Shover;
+
+    /// <summary>
+    /// The cell this hull is easing back out of, or null when it is not backing
+    /// up.
+    ///
+    /// <b>A push ends with the pusher too far in.</b> It drove a cell further
+    /// than it was ordered so its nose had somewhere to be while it shoved, and
+    /// when the shoved hull arrives the pusher is a third of a leg past the
+    /// middle of the hex it just cleared - see <c>TankTick.RamContact</c>, whose
+    /// fraction this is the same fraction of. So it reverses that third and
+    /// parks: the cell it ends on is the victim's old hex, which is what the
+    /// rules promise, and the picture is a tank backing off a hull it has just
+    /// shunted rather than one teleporting to a cell centre.
+    ///
+    /// Held as the cell ahead rather than as a distance because that is what the
+    /// drawn position is interpolated against: <see cref="LegDone"/> keeps its
+    /// meaning, it simply runs down instead of up.
+    /// </summary>
+    public Vector2I? Backing;
+
+    /// <summary>Seconds left of the two hulls standing against each other before
+    /// the pusher backs off - <c>TankTick.RamDwell</c>. A beat, not a pause: two
+    /// hulls that part the same frame they stop never look as though they were
+    /// ever touching.</summary>
+    public double Dwell;
+
+    /// <summary>Seconds to the next burst of metal off the plates while a push
+    /// is on - <c>TankTick.RamGrind</c>. On the pusher, because there is one
+    /// contact and two hulls at it.</summary>
+    public double Grind;
+
+    /// <summary>Seconds to the next spill of ground from under the pair while a
+    /// push is on - <c>TankTick.RamPlough</c>. Beside <see cref="Grind"/> rather
+    /// than sharing its clock: the metal goes on all the way across and the
+    /// ground comes out in shovelfuls, and one accumulator would make the dust
+    /// as busy as the sparks.</summary>
+    public double Plough;
+
     /// <summary>The cell it is driving onto, or the one it is standing in while
     /// parked. Named here because two things now mix the two cells' faces by
     /// <see cref="LegBlend"/> - the body's lean and the mark under it - and the
