@@ -1,0 +1,69 @@
+# Blender's rolling backups. The .blend beside them is the file of record, and
+# each backup is another 57MB of the same thing.
+*.blend1
+*.blend2
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Godot / .NET build output. .godot/ is a rebuildable import cache and the mono
+# build drops compiled assemblies inside it.
+godot/.godot/
+godot/bin/
+godot/obj/
+godot/*.sln
+
+# Harness screenshots (F12) and one-off verification captures
+godot/shot_*.png
+godot/_verify.png
+
+# Scratch output from ad-hoc script runs; Sprites/ is the real output and is
+# tracked.
+out/
+
+# Sound set for the bench, staged by stage_sounds.sh from a Blitzkrieg 2
+# checkout. Not tracked, and it must not be: Nival's licence for that release is
+# non-commercial and revocable, so the bytes stay off this repository and the
+# script is the record of where they came from. Re-run it to rebuild the folder.
+Sounds/
+
+# Rider's project files. Per-machine and rewritten constantly - workspace.xml
+# alone changes on every window move - and they say nothing about either shop.
+godot/.idea/
+pipeline/.idea/
+
+# Skill documents for the bench's own MCP tools, written by the addon's
+# godot-skill-generate step from the [AiTool] attributes in the C# beside them.
+# Generated, not authored: the tool declarations are the record, and these fifty
+# files are a rendering of them that regenerates on demand and would otherwise
+# turn up in a diff every time a description is reworded.
+godot/.claude/skills/
+
+# A hand-made backup of the csproj from the day the build was pointed at an
+# installed engine. Git is the backup.
+godot/TankSpriteTest.csproj.old
+
+# Claude Code's per-machine settings. Its sibling .claude/settings.json IS
+# tracked - that one declares the project's MCP server and belongs to the repo,
+# the same way .mcp.json does. This one accumulates whatever a session happened
+# to allow, including absolute scratchpad paths, so it is nobody else's.
+.claude/settings.local.json
+
+# Past renders: the single-mesh HT/LT/MT sets and one previous run of every
+# parts-built tank, kept on disk because an atlas is judged against its
+# predecessor. Four thousand files that nothing loads do not belong in the
+# tree, and since the history was reset there is nothing to fall back on -
+# these files on disk are the only copy of the previous runs.
+Sprites/Obsolete/
+
+# The 3D sources: generator output (.glb) and the Blender scenes built from it
+# (.blend). These used to live in LFS, and that is exactly why the repository
+# grew to eleven gigabytes - a .blend is a quarter of a gigabyte and is
+# rewritten in full on every save, so each turret re-split added another copy
+# forever. They are inputs, not results: the pipeline reads them and writes
+# Sprites/, and Sprites/ is the contract the bench reads. So the bytes stay on
+# disk and out of git, and nothing here versions them - keep your own copy.
+assets/Input3D/
+assets/Parts3D/
+assets/Scenes/

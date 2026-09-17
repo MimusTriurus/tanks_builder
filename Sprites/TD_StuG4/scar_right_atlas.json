@@ -1,0 +1,1145 @@
+{
+  "atlas": "scar_right_atlas.png",
+  "tile": [
+    256,
+    256
+  ],
+  "grid": {
+    "columns": 24,
+    "rows": 3
+  },
+  "count": 24,
+  "phases": 3,
+  "rendered": [
+    "Scar"
+  ],
+  "excluded": [],
+  "view": {
+    "projection": "ortho",
+    "elevation": 30.0,
+    "azimuth": 0.0,
+    "spin": "object",
+    "direction": "ccw"
+  },
+  "spin_pivot": [
+    0.0,
+    0.10203,
+    -0.003423
+  ],
+  "ortho_scale": 1.3110305404663087,
+  "units_per_pixel": 0.0051212130486965185,
+  "anchor_px": [
+    128.0,
+    118.08827114105225
+  ],
+  "frames": [
+    {
+      "index": 0,
+      "angle": 0.0,
+      "phase": 0,
+      "col": 0,
+      "row": 0,
+      "rect": [
+        70,
+        282,
+        2,
+        23
+      ],
+      "off": [
+        74,
+        125
+      ],
+      "label": "side @ 270 deg"
+    },
+    {
+      "index": 1,
+      "angle": 15.0,
+      "phase": 0,
+      "col": 1,
+      "row": 0,
+      "rect": [
+        103,
+        198,
+        11,
+        27
+      ],
+      "off": [
+        71,
+        130
+      ],
+      "label": "corner @ 285 deg"
+    },
+    {
+      "index": 2,
+      "angle": 30.0,
+      "phase": 0,
+      "col": 2,
+      "row": 0,
+      "rect": [
+        1,
+        227,
+        19,
+        27
+      ],
+      "off": [
+        72,
+        136
+      ],
+      "label": "corner @ 300 deg"
+    },
+    {
+      "index": 3,
+      "angle": 45.0,
+      "phase": 0,
+      "col": 3,
+      "row": 0,
+      "rect": [
+        1,
+        255,
+        26,
+        26
+      ],
+      "off": [
+        76,
+        142
+      ],
+      "label": "corner @ 315 deg"
+    },
+    {
+      "index": 4,
+      "angle": 60.0,
+      "phase": 0,
+      "col": 4,
+      "row": 0,
+      "rect": [
+        1,
+        282,
+        32,
+        25
+      ],
+      "off": [
+        84,
+        147
+      ],
+      "label": "side @ 330 deg"
+    },
+    {
+      "index": 5,
+      "angle": 75.0,
+      "phase": 0,
+      "col": 5,
+      "row": 0,
+      "rect": [
+        34,
+        282,
+        35,
+        25
+      ],
+      "off": [
+        95,
+        150
+      ],
+      "label": "corner @ 345 deg"
+    },
+    {
+      "index": 6,
+      "angle": 90.0,
+      "phase": 0,
+      "col": 6,
+      "row": 0,
+      "rect": [
+        28,
+        255,
+        36,
+        26
+      ],
+      "off": [
+        108,
+        151
+      ],
+      "label": "corner @ 0 deg"
+    },
+    {
+      "index": 7,
+      "angle": 105.0,
+      "phase": 0,
+      "col": 7,
+      "row": 0,
+      "rect": [
+        65,
+        255,
+        35,
+        26
+      ],
+      "off": [
+        122,
+        150
+      ],
+      "label": "corner @ 15 deg"
+    },
+    {
+      "index": 8,
+      "angle": 120.0,
+      "phase": 0,
+      "col": 8,
+      "row": 0,
+      "rect": [
+        21,
+        227,
+        31,
+        27
+      ],
+      "off": [
+        137,
+        147
+      ],
+      "label": "side @ 30 deg"
+    },
+    {
+      "index": 9,
+      "angle": 135.0,
+      "phase": 0,
+      "col": 9,
+      "row": 0,
+      "rect": [
+        37,
+        137,
+        26,
+        29
+      ],
+      "off": [
+        151,
+        142
+      ],
+      "label": "corner @ 45 deg"
+    },
+    {
+      "index": 10,
+      "angle": 150.0,
+      "phase": 0,
+      "col": 10,
+      "row": 0,
+      "rect": [
+        90,
+        40,
+        19,
+        31
+      ],
+      "off": [
+        163,
+        136
+      ],
+      "label": "corner @ 60 deg"
+    },
+    {
+      "index": 11,
+      "angle": 165.0,
+      "phase": 0,
+      "col": 11,
+      "row": 0,
+      "rect": [
+        21,
+        40,
+        10,
+        32
+      ],
+      "off": [
+        173,
+        130
+      ],
+      "label": "corner @ 75 deg"
+    },
+    {
+      "index": 12,
+      "angle": 180.0,
+      "phase": 0,
+      "col": 12,
+      "row": 0,
+      "rect": [
+        37,
+        168,
+        2,
+        28
+      ],
+      "off": [
+        180,
+        125
+      ],
+      "label": "side @ 90 deg"
+    },
+    {
+      "index": 13,
+      "angle": 195.0,
+      "phase": 0,
+      "col": 13,
+      "row": 0,
+      "rect": null,
+      "label": "corner @ 105 deg"
+    },
+    {
+      "index": 14,
+      "angle": 210.0,
+      "phase": 0,
+      "col": 14,
+      "row": 0,
+      "rect": null,
+      "label": "corner @ 120 deg"
+    },
+    {
+      "index": 15,
+      "angle": 225.0,
+      "phase": 0,
+      "col": 15,
+      "row": 0,
+      "rect": null,
+      "label": "corner @ 135 deg"
+    },
+    {
+      "index": 16,
+      "angle": 240.0,
+      "phase": 0,
+      "col": 16,
+      "row": 0,
+      "rect": null,
+      "label": "side @ 150 deg"
+    },
+    {
+      "index": 17,
+      "angle": 255.0,
+      "phase": 0,
+      "col": 17,
+      "row": 0,
+      "rect": null,
+      "label": "corner @ 165 deg"
+    },
+    {
+      "index": 18,
+      "angle": 270.0,
+      "phase": 0,
+      "col": 18,
+      "row": 0,
+      "rect": null,
+      "label": "corner @ 180 deg"
+    },
+    {
+      "index": 19,
+      "angle": 285.0,
+      "phase": 0,
+      "col": 19,
+      "row": 0,
+      "rect": null,
+      "label": "corner @ 195 deg"
+    },
+    {
+      "index": 20,
+      "angle": 300.0,
+      "phase": 0,
+      "col": 20,
+      "row": 0,
+      "rect": null,
+      "label": "side @ 210 deg"
+    },
+    {
+      "index": 21,
+      "angle": 315.0,
+      "phase": 0,
+      "col": 21,
+      "row": 0,
+      "rect": null,
+      "label": "corner @ 225 deg"
+    },
+    {
+      "index": 22,
+      "angle": 330.0,
+      "phase": 0,
+      "col": 22,
+      "row": 0,
+      "rect": null,
+      "label": "corner @ 240 deg"
+    },
+    {
+      "index": 23,
+      "angle": 345.0,
+      "phase": 0,
+      "col": 23,
+      "row": 0,
+      "rect": null,
+      "label": "corner @ 255 deg"
+    },
+    {
+      "index": 24,
+      "angle": 0.0,
+      "phase": 1,
+      "col": 0,
+      "row": 1,
+      "rect": [
+        40,
+        168,
+        2,
+        28
+      ],
+      "off": [
+        74,
+        123
+      ],
+      "label": "side @ 270 deg"
+    },
+    {
+      "index": 25,
+      "angle": 15.0,
+      "phase": 1,
+      "col": 1,
+      "row": 1,
+      "rect": [
+        95,
+        1,
+        14,
+        33
+      ],
+      "off": [
+        70,
+        127
+      ],
+      "label": "corner @ 285 deg"
+    },
+    {
+      "index": 26,
+      "angle": 30.0,
+      "phase": 1,
+      "col": 2,
+      "row": 1,
+      "rect": [
+        32,
+        40,
+        26,
+        32
+      ],
+      "off": [
+        68,
+        134
+      ],
+      "label": "corner @ 300 deg"
+    },
+    {
+      "index": 27,
+      "angle": 45.0,
+      "phase": 1,
+      "col": 3,
+      "row": 1,
+      "rect": [
+        1,
+        106,
+        36,
+        30
+      ],
+      "off": [
+        71,
+        140
+      ],
+      "label": "corner @ 315 deg"
+    },
+    {
+      "index": 28,
+      "angle": 60.0,
+      "phase": 1,
+      "col": 4,
+      "row": 1,
+      "rect": [
+        43,
+        168,
+        44,
+        28
+      ],
+      "off": [
+        78,
+        146
+      ],
+      "label": "side @ 330 deg"
+    },
+    {
+      "index": 29,
+      "angle": 75.0,
+      "phase": 1,
+      "col": 5,
+      "row": 1,
+      "rect": [
+        53,
+        227,
+        49,
+        27
+      ],
+      "off": [
+        88,
+        149
+      ],
+      "label": "corner @ 345 deg"
+    },
+    {
+      "index": 30,
+      "angle": 90.0,
+      "phase": 1,
+      "col": 6,
+      "row": 1,
+      "rect": [
+        1,
+        198,
+        51,
+        28
+      ],
+      "off": [
+        100,
+        150
+      ],
+      "label": "corner @ 0 deg"
+    },
+    {
+      "index": 31,
+      "angle": 105.0,
+      "phase": 1,
+      "col": 7,
+      "row": 1,
+      "rect": [
+        53,
+        198,
+        49,
+        28
+      ],
+      "off": [
+        115,
+        149
+      ],
+      "label": "corner @ 15 deg"
+    },
+    {
+      "index": 32,
+      "angle": 120.0,
+      "phase": 1,
+      "col": 8,
+      "row": 1,
+      "rect": [
+        1,
+        74,
+        44,
+        31
+      ],
+      "off": [
+        130,
+        145
+      ],
+      "label": "side @ 30 deg"
+    },
+    {
+      "index": 33,
+      "angle": 135.0,
+      "phase": 1,
+      "col": 9,
+      "row": 1,
+      "rect": [
+        54,
+        1,
+        36,
+        34
+      ],
+      "off": [
+        146,
+        140
+      ],
+      "label": "corner @ 45 deg"
+    },
+    {
+      "index": 34,
+      "angle": 150.0,
+      "phase": 1,
+      "col": 10,
+      "row": 1,
+      "rect": [
+        16,
+        1,
+        25,
+        36
+      ],
+      "off": [
+        160,
+        134
+      ],
+      "label": "corner @ 60 deg"
+    },
+    {
+      "index": 35,
+      "angle": 165.0,
+      "phase": 1,
+      "col": 11,
+      "row": 1,
+      "rect": [
+        1,
+        1,
+        14,
+        38
+      ],
+      "off": [
+        171,
+        127
+      ],
+      "label": "corner @ 75 deg"
+    },
+    {
+      "index": 36,
+      "angle": 180.0,
+      "phase": 1,
+      "col": 12,
+      "row": 1,
+      "rect": [
+        91,
+        1,
+        3,
+        34
+      ],
+      "off": [
+        179,
+        122
+      ],
+      "label": "side @ 90 deg"
+    },
+    {
+      "index": 37,
+      "angle": 195.0,
+      "phase": 1,
+      "col": 13,
+      "row": 1,
+      "rect": [
+        84,
+        282,
+        4,
+        7
+      ],
+      "off": [
+        177,
+        115
+      ],
+      "label": "corner @ 105 deg"
+    },
+    {
+      "index": 38,
+      "angle": 210.0,
+      "phase": 1,
+      "col": 14,
+      "row": 1,
+      "rect": null,
+      "label": "corner @ 120 deg"
+    },
+    {
+      "index": 39,
+      "angle": 225.0,
+      "phase": 1,
+      "col": 15,
+      "row": 1,
+      "rect": null,
+      "label": "corner @ 135 deg"
+    },
+    {
+      "index": 40,
+      "angle": 240.0,
+      "phase": 1,
+      "col": 16,
+      "row": 1,
+      "rect": null,
+      "label": "side @ 150 deg"
+    },
+    {
+      "index": 41,
+      "angle": 255.0,
+      "phase": 1,
+      "col": 17,
+      "row": 1,
+      "rect": null,
+      "label": "corner @ 165 deg"
+    },
+    {
+      "index": 42,
+      "angle": 270.0,
+      "phase": 1,
+      "col": 18,
+      "row": 1,
+      "rect": null,
+      "label": "corner @ 180 deg"
+    },
+    {
+      "index": 43,
+      "angle": 285.0,
+      "phase": 1,
+      "col": 19,
+      "row": 1,
+      "rect": null,
+      "label": "corner @ 195 deg"
+    },
+    {
+      "index": 44,
+      "angle": 300.0,
+      "phase": 1,
+      "col": 20,
+      "row": 1,
+      "rect": null,
+      "label": "side @ 210 deg"
+    },
+    {
+      "index": 45,
+      "angle": 315.0,
+      "phase": 1,
+      "col": 21,
+      "row": 1,
+      "rect": null,
+      "label": "corner @ 225 deg"
+    },
+    {
+      "index": 46,
+      "angle": 330.0,
+      "phase": 1,
+      "col": 22,
+      "row": 1,
+      "rect": null,
+      "label": "corner @ 240 deg"
+    },
+    {
+      "index": 47,
+      "angle": 345.0,
+      "phase": 1,
+      "col": 23,
+      "row": 1,
+      "rect": [
+        79,
+        282,
+        4,
+        8
+      ],
+      "off": [
+        75,
+        115
+      ],
+      "label": "corner @ 255 deg"
+    },
+    {
+      "index": 48,
+      "angle": 0.0,
+      "phase": 2,
+      "col": 0,
+      "row": 2,
+      "rect": [
+        103,
+        227,
+        2,
+        27
+      ],
+      "off": [
+        74,
+        123
+      ],
+      "label": "side @ 270 deg"
+    },
+    {
+      "index": 49,
+      "angle": 15.0,
+      "phase": 2,
+      "col": 1,
+      "row": 2,
+      "rect": [
+        46,
+        74,
+        11,
+        31
+      ],
+      "off": [
+        71,
+        128
+      ],
+      "label": "corner @ 285 deg"
+    },
+    {
+      "index": 50,
+      "angle": 30.0,
+      "phase": 2,
+      "col": 2,
+      "row": 2,
+      "rect": [
+        58,
+        74,
+        19,
+        31
+      ],
+      "off": [
+        72,
+        134
+      ],
+      "label": "corner @ 300 deg"
+    },
+    {
+      "index": 51,
+      "angle": 45.0,
+      "phase": 2,
+      "col": 3,
+      "row": 2,
+      "rect": [
+        38,
+        106,
+        25,
+        30
+      ],
+      "off": [
+        77,
+        140
+      ],
+      "label": "corner @ 315 deg"
+    },
+    {
+      "index": 52,
+      "angle": 60.0,
+      "phase": 2,
+      "col": 4,
+      "row": 2,
+      "rect": [
+        64,
+        137,
+        32,
+        29
+      ],
+      "off": [
+        84,
+        145
+      ],
+      "label": "side @ 330 deg"
+    },
+    {
+      "index": 53,
+      "angle": 75.0,
+      "phase": 2,
+      "col": 5,
+      "row": 2,
+      "rect": [
+        1,
+        168,
+        35,
+        29
+      ],
+      "off": [
+        95,
+        148
+      ],
+      "label": "corner @ 345 deg"
+    },
+    {
+      "index": 54,
+      "angle": 90.0,
+      "phase": 2,
+      "col": 6,
+      "row": 2,
+      "rect": [
+        64,
+        106,
+        36,
+        30
+      ],
+      "off": [
+        108,
+        149
+      ],
+      "label": "corner @ 0 deg"
+    },
+    {
+      "index": 55,
+      "angle": 105.0,
+      "phase": 2,
+      "col": 7,
+      "row": 2,
+      "rect": [
+        1,
+        137,
+        35,
+        30
+      ],
+      "off": [
+        122,
+        148
+      ],
+      "label": "corner @ 15 deg"
+    },
+    {
+      "index": 56,
+      "angle": 120.0,
+      "phase": 2,
+      "col": 8,
+      "row": 2,
+      "rect": [
+        78,
+        74,
+        31,
+        31
+      ],
+      "off": [
+        137,
+        145
+      ],
+      "label": "side @ 30 deg"
+    },
+    {
+      "index": 57,
+      "angle": 135.0,
+      "phase": 2,
+      "col": 9,
+      "row": 2,
+      "rect": [
+        59,
+        40,
+        26,
+        32
+      ],
+      "off": [
+        151,
+        141
+      ],
+      "label": "corner @ 45 deg"
+    },
+    {
+      "index": 58,
+      "angle": 150.0,
+      "phase": 2,
+      "col": 10,
+      "row": 2,
+      "rect": [
+        1,
+        40,
+        19,
+        33
+      ],
+      "off": [
+        163,
+        135
+      ],
+      "label": "corner @ 60 deg"
+    },
+    {
+      "index": 59,
+      "angle": 165.0,
+      "phase": 2,
+      "col": 11,
+      "row": 2,
+      "rect": [
+        42,
+        1,
+        11,
+        35
+      ],
+      "off": [
+        173,
+        128
+      ],
+      "label": "corner @ 75 deg"
+    },
+    {
+      "index": 60,
+      "angle": 180.0,
+      "phase": 2,
+      "col": 12,
+      "row": 2,
+      "rect": [
+        86,
+        40,
+        3,
+        32
+      ],
+      "off": [
+        179,
+        123
+      ],
+      "label": "side @ 90 deg"
+    },
+    {
+      "index": 61,
+      "angle": 195.0,
+      "phase": 2,
+      "col": 13,
+      "row": 2,
+      "rect": [
+        89,
+        282,
+        5,
+        7
+      ],
+      "off": [
+        176,
+        115
+      ],
+      "label": "corner @ 105 deg"
+    },
+    {
+      "index": 62,
+      "angle": 210.0,
+      "phase": 2,
+      "col": 14,
+      "row": 2,
+      "rect": [
+        95,
+        282,
+        1,
+        1
+      ],
+      "off": [
+        175,
+        112
+      ],
+      "label": "corner @ 120 deg"
+    },
+    {
+      "index": 63,
+      "angle": 225.0,
+      "phase": 2,
+      "col": 15,
+      "row": 2,
+      "rect": null,
+      "label": "corner @ 135 deg"
+    },
+    {
+      "index": 64,
+      "angle": 240.0,
+      "phase": 2,
+      "col": 16,
+      "row": 2,
+      "rect": null,
+      "label": "side @ 150 deg"
+    },
+    {
+      "index": 65,
+      "angle": 255.0,
+      "phase": 2,
+      "col": 17,
+      "row": 2,
+      "rect": null,
+      "label": "corner @ 165 deg"
+    },
+    {
+      "index": 66,
+      "angle": 270.0,
+      "phase": 2,
+      "col": 18,
+      "row": 2,
+      "rect": null,
+      "label": "corner @ 180 deg"
+    },
+    {
+      "index": 67,
+      "angle": 285.0,
+      "phase": 2,
+      "col": 19,
+      "row": 2,
+      "rect": null,
+      "label": "corner @ 195 deg"
+    },
+    {
+      "index": 68,
+      "angle": 300.0,
+      "phase": 2,
+      "col": 20,
+      "row": 2,
+      "rect": null,
+      "label": "side @ 210 deg"
+    },
+    {
+      "index": 69,
+      "angle": 315.0,
+      "phase": 2,
+      "col": 21,
+      "row": 2,
+      "rect": null,
+      "label": "corner @ 225 deg"
+    },
+    {
+      "index": 70,
+      "angle": 330.0,
+      "phase": 2,
+      "col": 22,
+      "row": 2,
+      "rect": [
+        97,
+        282,
+        1,
+        1
+      ],
+      "off": [
+        84,
+        109
+      ],
+      "label": "corner @ 240 deg"
+    },
+    {
+      "index": 71,
+      "angle": 345.0,
+      "phase": 2,
+      "col": 23,
+      "row": 2,
+      "rect": [
+        73,
+        282,
+        5,
+        9
+      ],
+      "off": [
+        75,
+        114
+      ],
+      "label": "corner @ 255 deg"
+    }
+  ],
+  "packed": true,
+  "over_turret": [
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false
+  ],
+  "over_turret_margin": [
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    1.0,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null,
+    null
+  ],
+  "layer": "scar_right",
+  "static": false
+}

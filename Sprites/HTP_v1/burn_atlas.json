@@ -1,0 +1,5297 @@
+{
+  "atlas": "burn_atlas.png",
+  "tile": [
+    384,
+    384
+  ],
+  "grid": {
+    "columns": 24,
+    "rows": 12
+  },
+  "count": 24,
+  "phases": 12,
+  "rendered": [
+    "Burn"
+  ],
+  "excluded": [],
+  "view": {
+    "projection": "ortho",
+    "elevation": 30.0,
+    "azimuth": 0.0,
+    "spin": "object",
+    "direction": "ccw"
+  },
+  "spin_pivot": [
+    0.0,
+    0.05706,
+    -0.005581
+  ],
+  "ortho_scale": 2.032293519973755,
+  "units_per_pixel": 0.00529243104159832,
+  "anchor_px": [
+    192.0,
+    175.9035758972168
+  ],
+  "frames": [
+    {
+      "index": 0,
+      "angle": 0.0,
+      "phase": 0,
+      "col": 0,
+      "row": 0,
+      "rect": [
+        176,
+        515,
+        68,
+        95
+      ],
+      "off": [
+        158,
+        71
+      ],
+      "label": "side @ 270 deg"
+    },
+    {
+      "index": 1,
+      "angle": 15.0,
+      "phase": 0,
+      "col": 1,
+      "row": 0,
+      "rect": [
+        351,
+        707,
+        75,
+        93
+      ],
+      "off": [
+        140,
+        72
+      ],
+      "label": "corner @ 285 deg"
+    },
+    {
+      "index": 2,
+      "angle": 30.0,
+      "phase": 0,
+      "col": 2,
+      "row": 0,
+      "rect": [
+        427,
+        707,
+        81,
+        93
+      ],
+      "off": [
+        125,
+        74
+      ],
+      "label": "corner @ 300 deg"
+    },
+    {
+      "index": 3,
+      "angle": 45.0,
+      "phase": 0,
+      "col": 3,
+      "row": 0,
+      "rect": [
+        733,
+        802,
+        84,
+        92
+      ],
+      "off": [
+        111,
+        79
+      ],
+      "label": "corner @ 315 deg"
+    },
+    {
+      "index": 4,
+      "angle": 60.0,
+      "phase": 0,
+      "col": 4,
+      "row": 0,
+      "rect": [
+        457,
+        1081,
+        84,
+        90
+      ],
+      "off": [
+        101,
+        86
+      ],
+      "label": "side @ 330 deg"
+    },
+    {
+      "index": 5,
+      "angle": 75.0,
+      "phase": 0,
+      "col": 5,
+      "row": 0,
+      "rect": [
+        356,
+        1354,
+        77,
+        88
+      ],
+      "off": [
+        98,
+        94
+      ],
+      "label": "corner @ 345 deg"
+    },
+    {
+      "index": 6,
+      "angle": 90.0,
+      "phase": 0,
+      "col": 6,
+      "row": 0,
+      "rect": [
+        849,
+        1173,
+        68,
+        89
+      ],
+      "off": [
+        101,
+        102
+      ],
+      "label": "corner @ 0 deg"
+    },
+    {
+      "index": 7,
+      "angle": 105.0,
+      "phase": 0,
+      "col": 7,
+      "row": 0,
+      "rect": [
+        918,
+        1173,
+        60,
+        89
+      ],
+      "off": [
+        107,
+        110
+      ],
+      "label": "corner @ 15 deg"
+    },
+    {
+      "index": 8,
+      "angle": 120.0,
+      "phase": 0,
+      "col": 8,
+      "row": 0,
+      "rect": [
+        1,
+        1264,
+        50,
+        89
+      ],
+      "off": [
+        119,
+        118
+      ],
+      "label": "side @ 30 deg"
+    },
+    {
+      "index": 9,
+      "angle": 135.0,
+      "phase": 0,
+      "col": 9,
+      "row": 0,
+      "rect": [
+        487,
+        896,
+        54,
+        91
+      ],
+      "off": [
+        129,
+        122
+      ],
+      "label": "corner @ 45 deg"
+    },
+    {
+      "index": 10,
+      "angle": 150.0,
+      "phase": 0,
+      "col": 10,
+      "row": 0,
+      "rect": [
+        542,
+        896,
+        57,
+        91
+      ],
+      "off": [
+        140,
+        126
+      ],
+      "label": "corner @ 60 deg"
+    },
+    {
+      "index": 11,
+      "angle": 165.0,
+      "phase": 0,
+      "col": 11,
+      "row": 0,
+      "rect": [
+        600,
+        896,
+        61,
+        91
+      ],
+      "off": [
+        149,
+        129
+      ],
+      "label": "corner @ 75 deg"
+    },
+    {
+      "index": 12,
+      "angle": 180.0,
+      "phase": 0,
+      "col": 12,
+      "row": 0,
+      "rect": [
+        662,
+        896,
+        68,
+        91
+      ],
+      "off": [
+        158,
+        130
+      ],
+      "label": "side @ 90 deg"
+    },
+    {
+      "index": 13,
+      "angle": 195.0,
+      "phase": 0,
+      "col": 13,
+      "row": 0,
+      "rect": [
+        509,
+        707,
+        75,
+        93
+      ],
+      "off": [
+        169,
+        127
+      ],
+      "label": "corner @ 105 deg"
+    },
+    {
+      "index": 14,
+      "angle": 210.0,
+      "phase": 0,
+      "col": 14,
+      "row": 0,
+      "rect": [
+        585,
+        707,
+        81,
+        93
+      ],
+      "off": [
+        178,
+        123
+      ],
+      "label": "corner @ 120 deg"
+    },
+    {
+      "index": 15,
+      "angle": 225.0,
+      "phase": 0,
+      "col": 15,
+      "row": 0,
+      "rect": [
+        667,
+        707,
+        84,
+        93
+      ],
+      "off": [
+        189,
+        118
+      ],
+      "label": "corner @ 135 deg"
+    },
+    {
+      "index": 16,
+      "angle": 240.0,
+      "phase": 0,
+      "col": 16,
+      "row": 0,
+      "rect": [
+        1,
+        612,
+        84,
+        94
+      ],
+      "off": [
+        199,
+        112
+      ],
+      "label": "side @ 150 deg"
+    },
+    {
+      "index": 17,
+      "angle": 255.0,
+      "phase": 0,
+      "col": 17,
+      "row": 0,
+      "rect": [
+        661,
+        217,
+        77,
+        98
+      ],
+      "off": [
+        209,
+        104
+      ],
+      "label": "corner @ 165 deg"
+    },
+    {
+      "index": 18,
+      "angle": 270.0,
+      "phase": 0,
+      "col": 18,
+      "row": 0,
+      "rect": [
+        554,
+        114,
+        68,
+        100
+      ],
+      "off": [
+        215,
+        96
+      ],
+      "label": "corner @ 180 deg"
+    },
+    {
+      "index": 19,
+      "angle": 285.0,
+      "phase": 0,
+      "col": 19,
+      "row": 0,
+      "rect": [
+        623,
+        114,
+        60,
+        100
+      ],
+      "off": [
+        217,
+        89
+      ],
+      "label": "corner @ 195 deg"
+    },
+    {
+      "index": 20,
+      "angle": 300.0,
+      "phase": 0,
+      "col": 20,
+      "row": 0,
+      "rect": [
+        52,
+        114,
+        51,
+        101
+      ],
+      "off": [
+        214,
+        82
+      ],
+      "label": "side @ 210 deg"
+    },
+    {
+      "index": 21,
+      "angle": 315.0,
+      "phase": 0,
+      "col": 21,
+      "row": 0,
+      "rect": [
+        104,
+        114,
+        54,
+        101
+      ],
+      "off": [
+        201,
+        76
+      ],
+      "label": "corner @ 225 deg"
+    },
+    {
+      "index": 22,
+      "angle": 330.0,
+      "phase": 0,
+      "col": 22,
+      "row": 0,
+      "rect": [
+        684,
+        114,
+        57,
+        100
+      ],
+      "off": [
+        187,
+        72
+      ],
+      "label": "corner @ 240 deg"
+    },
+    {
+      "index": 23,
+      "angle": 345.0,
+      "phase": 0,
+      "col": 23,
+      "row": 0,
+      "rect": [
+        739,
+        217,
+        61,
+        98
+      ],
+      "off": [
+        174,
+        70
+      ],
+      "label": "corner @ 255 deg"
+    },
+    {
+      "index": 24,
+      "angle": 0.0,
+      "phase": 1,
+      "col": 0,
+      "row": 1,
+      "rect": [
+        752,
+        707,
+        69,
+        93
+      ],
+      "off": [
+        158,
+        71
+      ],
+      "label": "side @ 270 deg"
+    },
+    {
+      "index": 25,
+      "angle": 15.0,
+      "phase": 1,
+      "col": 1,
+      "row": 1,
+      "rect": [
+        52,
+        1264,
+        76,
+        89
+      ],
+      "off": [
+        140,
+        74
+      ],
+      "label": "corner @ 285 deg"
+    },
+    {
+      "index": 26,
+      "angle": 30.0,
+      "phase": 1,
+      "col": 2,
+      "row": 1,
+      "rect": [
+        84,
+        1621,
+        81,
+        86
+      ],
+      "off": [
+        125,
+        81
+      ],
+      "label": "corner @ 300 deg"
+    },
+    {
+      "index": 27,
+      "angle": 45.0,
+      "phase": 1,
+      "col": 3,
+      "row": 1,
+      "rect": [
+        912,
+        1709,
+        85,
+        83
+      ],
+      "off": [
+        111,
+        89
+      ],
+      "label": "corner @ 315 deg"
+    },
+    {
+      "index": 28,
+      "angle": 60.0,
+      "phase": 1,
+      "col": 4,
+      "row": 1,
+      "rect": [
+        898,
+        1621,
+        84,
+        85
+      ],
+      "off": [
+        101,
+        93
+      ],
+      "label": "side @ 330 deg"
+    },
+    {
+      "index": 29,
+      "angle": 75.0,
+      "phase": 1,
+      "col": 5,
+      "row": 1,
+      "rect": [
+        542,
+        1081,
+        77,
+        90
+      ],
+      "off": [
+        98,
+        97
+      ],
+      "label": "corner @ 345 deg"
+    },
+    {
+      "index": 30,
+      "angle": 90.0,
+      "phase": 1,
+      "col": 6,
+      "row": 1,
+      "rect": [
+        822,
+        707,
+        69,
+        93
+      ],
+      "off": [
+        100,
+        102
+      ],
+      "label": "corner @ 0 deg"
+    },
+    {
+      "index": 31,
+      "angle": 105.0,
+      "phase": 1,
+      "col": 7,
+      "row": 1,
+      "rect": [
+        245,
+        515,
+        60,
+        95
+      ],
+      "off": [
+        107,
+        108
+      ],
+      "label": "corner @ 15 deg"
+    },
+    {
+      "index": 32,
+      "angle": 120.0,
+      "phase": 1,
+      "col": 8,
+      "row": 1,
+      "rect": [
+        242,
+        417,
+        50,
+        96
+      ],
+      "off": [
+        119,
+        114
+      ],
+      "label": "side @ 30 deg"
+    },
+    {
+      "index": 33,
+      "angle": 135.0,
+      "phase": 1,
+      "col": 9,
+      "row": 1,
+      "rect": [
+        801,
+        217,
+        43,
+        98
+      ],
+      "off": [
+        132,
+        118
+      ],
+      "label": "corner @ 45 deg"
+    },
+    {
+      "index": 34,
+      "angle": 150.0,
+      "phase": 1,
+      "col": 10,
+      "row": 1,
+      "rect": [
+        845,
+        217,
+        45,
+        98
+      ],
+      "off": [
+        140,
+        122
+      ],
+      "label": "corner @ 60 deg"
+    },
+    {
+      "index": 35,
+      "angle": 165.0,
+      "phase": 1,
+      "col": 11,
+      "row": 1,
+      "rect": [
+        358,
+        318,
+        58,
+        97
+      ],
+      "off": [
+        148,
+        125
+      ],
+      "label": "corner @ 75 deg"
+    },
+    {
+      "index": 36,
+      "angle": 180.0,
+      "phase": 1,
+      "col": 12,
+      "row": 1,
+      "rect": [
+        293,
+        417,
+        69,
+        96
+      ],
+      "off": [
+        157,
+        127
+      ],
+      "label": "side @ 90 deg"
+    },
+    {
+      "index": 37,
+      "angle": 195.0,
+      "phase": 1,
+      "col": 13,
+      "row": 1,
+      "rect": [
+        86,
+        612,
+        76,
+        94
+      ],
+      "off": [
+        168,
+        128
+      ],
+      "label": "corner @ 105 deg"
+    },
+    {
+      "index": 38,
+      "angle": 210.0,
+      "phase": 1,
+      "col": 14,
+      "row": 1,
+      "rect": [
+        620,
+        1081,
+        81,
+        90
+      ],
+      "off": [
+        178,
+        128
+      ],
+      "label": "corner @ 120 deg"
+    },
+    {
+      "index": 39,
+      "angle": 225.0,
+      "phase": 1,
+      "col": 15,
+      "row": 1,
+      "rect": [
+        166,
+        1621,
+        85,
+        86
+      ],
+      "off": [
+        188,
+        127
+      ],
+      "label": "corner @ 135 deg"
+    },
+    {
+      "index": 40,
+      "angle": 240.0,
+      "phase": 1,
+      "col": 16,
+      "row": 1,
+      "rect": [
+        890,
+        1444,
+        84,
+        87
+      ],
+      "off": [
+        199,
+        119
+      ],
+      "label": "side @ 150 deg"
+    },
+    {
+      "index": 41,
+      "angle": 255.0,
+      "phase": 1,
+      "col": 17,
+      "row": 1,
+      "rect": [
+        702,
+        1081,
+        77,
+        90
+      ],
+      "off": [
+        209,
+        109
+      ],
+      "label": "corner @ 165 deg"
+    },
+    {
+      "index": 42,
+      "angle": 270.0,
+      "phase": 1,
+      "col": 18,
+      "row": 1,
+      "rect": [
+        818,
+        802,
+        69,
+        92
+      ],
+      "off": [
+        215,
+        99
+      ],
+      "label": "corner @ 180 deg"
+    },
+    {
+      "index": 43,
+      "angle": 285.0,
+      "phase": 1,
+      "col": 19,
+      "row": 1,
+      "rect": [
+        163,
+        612,
+        60,
+        94
+      ],
+      "off": [
+        217,
+        90
+      ],
+      "label": "corner @ 195 deg"
+    },
+    {
+      "index": 44,
+      "angle": 300.0,
+      "phase": 1,
+      "col": 20,
+      "row": 1,
+      "rect": [
+        306,
+        515,
+        50,
+        95
+      ],
+      "off": [
+        215,
+        82
+      ],
+      "label": "side @ 210 deg"
+    },
+    {
+      "index": 45,
+      "angle": 315.0,
+      "phase": 1,
+      "col": 21,
+      "row": 1,
+      "rect": [
+        363,
+        417,
+        43,
+        96
+      ],
+      "off": [
+        209,
+        76
+      ],
+      "label": "corner @ 225 deg"
+    },
+    {
+      "index": 46,
+      "angle": 330.0,
+      "phase": 1,
+      "col": 22,
+      "row": 1,
+      "rect": [
+        417,
+        318,
+        45,
+        97
+      ],
+      "off": [
+        199,
+        71
+      ],
+      "label": "corner @ 240 deg"
+    },
+    {
+      "index": 47,
+      "angle": 345.0,
+      "phase": 1,
+      "col": 23,
+      "row": 1,
+      "rect": [
+        407,
+        417,
+        58,
+        96
+      ],
+      "off": [
+        178,
+        69
+      ],
+      "label": "corner @ 255 deg"
+    },
+    {
+      "index": 48,
+      "angle": 0.0,
+      "phase": 2,
+      "col": 0,
+      "row": 2,
+      "rect": [
+        252,
+        1621,
+        68,
+        86
+      ],
+      "off": [
+        160,
+        79
+      ],
+      "label": "side @ 270 deg"
+    },
+    {
+      "index": 49,
+      "angle": 15.0,
+      "phase": 2,
+      "col": 1,
+      "row": 2,
+      "rect": [
+        1,
+        1795,
+        74,
+        83
+      ],
+      "off": [
+        143,
+        83
+      ],
+      "label": "corner @ 285 deg"
+    },
+    {
+      "index": 50,
+      "angle": 30.0,
+      "phase": 2,
+      "col": 2,
+      "row": 2,
+      "rect": [
+        76,
+        1795,
+        80,
+        83
+      ],
+      "off": [
+        126,
+        86
+      ],
+      "label": "corner @ 300 deg"
+    },
+    {
+      "index": 51,
+      "angle": 45.0,
+      "phase": 2,
+      "col": 3,
+      "row": 2,
+      "rect": [
+        321,
+        1621,
+        84,
+        86
+      ],
+      "off": [
+        112,
+        87
+      ],
+      "label": "corner @ 315 deg"
+    },
+    {
+      "index": 52,
+      "angle": 60.0,
+      "phase": 2,
+      "col": 4,
+      "row": 2,
+      "rect": [
+        129,
+        1264,
+        83,
+        89
+      ],
+      "off": [
+        103,
+        89
+      ],
+      "label": "side @ 330 deg"
+    },
+    {
+      "index": 53,
+      "angle": 75.0,
+      "phase": 2,
+      "col": 5,
+      "row": 2,
+      "rect": [
+        357,
+        515,
+        77,
+        95
+      ],
+      "off": [
+        99,
+        93
+      ],
+      "label": "corner @ 345 deg"
+    },
+    {
+      "index": 54,
+      "angle": 90.0,
+      "phase": 2,
+      "col": 6,
+      "row": 2,
+      "rect": [
+        159,
+        114,
+        70,
+        101
+      ],
+      "off": [
+        100,
+        98
+      ],
+      "label": "corner @ 0 deg"
+    },
+    {
+      "index": 55,
+      "angle": 105.0,
+      "phase": 2,
+      "col": 7,
+      "row": 2,
+      "rect": [
+        432,
+        1,
+        62,
+        106
+      ],
+      "off": [
+        106,
+        104
+      ],
+      "label": "corner @ 15 deg"
+    },
+    {
+      "index": 56,
+      "angle": 120.0,
+      "phase": 2,
+      "col": 8,
+      "row": 2,
+      "rect": [
+        153,
+        1,
+        52,
+        109
+      ],
+      "off": [
+        118,
+        110
+      ],
+      "label": "side @ 30 deg"
+    },
+    {
+      "index": 57,
+      "angle": 135.0,
+      "phase": 2,
+      "col": 9,
+      "row": 2,
+      "rect": [
+        49,
+        1,
+        45,
+        111
+      ],
+      "off": [
+        131,
+        115
+      ],
+      "label": "corner @ 45 deg"
+    },
+    {
+      "index": 58,
+      "angle": 150.0,
+      "phase": 2,
+      "col": 10,
+      "row": 2,
+      "rect": [
+        1,
+        1,
+        47,
+        112
+      ],
+      "off": [
+        139,
+        118
+      ],
+      "label": "corner @ 60 deg"
+    },
+    {
+      "index": 59,
+      "angle": 165.0,
+      "phase": 2,
+      "col": 11,
+      "row": 2,
+      "rect": [
+        95,
+        1,
+        57,
+        111
+      ],
+      "off": [
+        148,
+        121
+      ],
+      "label": "corner @ 75 deg"
+    },
+    {
+      "index": 60,
+      "angle": 180.0,
+      "phase": 2,
+      "col": 12,
+      "row": 2,
+      "rect": [
+        206,
+        1,
+        68,
+        109
+      ],
+      "off": [
+        156,
+        123
+      ],
+      "label": "side @ 90 deg"
+    },
+    {
+      "index": 61,
+      "angle": 195.0,
+      "phase": 2,
+      "col": 13,
+      "row": 2,
+      "rect": [
+        495,
+        1,
+        74,
+        105
+      ],
+      "off": [
+        167,
+        124
+      ],
+      "label": "corner @ 105 deg"
+    },
+    {
+      "index": 62,
+      "angle": 210.0,
+      "phase": 2,
+      "col": 14,
+      "row": 2,
+      "rect": [
+        174,
+        217,
+        80,
+        99
+      ],
+      "off": [
+        178,
+        124
+      ],
+      "label": "corner @ 120 deg"
+    },
+    {
+      "index": 63,
+      "angle": 225.0,
+      "phase": 2,
+      "col": 15,
+      "row": 2,
+      "rect": [
+        888,
+        802,
+        84,
+        92
+      ],
+      "off": [
+        188,
+        123
+      ],
+      "label": "corner @ 135 deg"
+    },
+    {
+      "index": 64,
+      "angle": 240.0,
+      "phase": 2,
+      "col": 16,
+      "row": 2,
+      "rect": [
+        1,
+        1709,
+        83,
+        85
+      ],
+      "off": [
+        198,
+        121
+      ],
+      "label": "side @ 150 deg"
+    },
+    {
+      "index": 65,
+      "angle": 255.0,
+      "phase": 2,
+      "col": 17,
+      "row": 2,
+      "rect": [
+        157,
+        1795,
+        77,
+        83
+      ],
+      "off": [
+        208,
+        116
+      ],
+      "label": "corner @ 165 deg"
+    },
+    {
+      "index": 66,
+      "angle": 270.0,
+      "phase": 2,
+      "col": 18,
+      "row": 2,
+      "rect": [
+        85,
+        1709,
+        71,
+        85
+      ],
+      "off": [
+        213,
+        107
+      ],
+      "label": "corner @ 180 deg"
+    },
+    {
+      "index": 67,
+      "angle": 285.0,
+      "phase": 2,
+      "col": 19,
+      "row": 2,
+      "rect": [
+        1,
+        1533,
+        62,
+        87
+      ],
+      "off": [
+        216,
+        98
+      ],
+      "label": "corner @ 195 deg"
+    },
+    {
+      "index": 68,
+      "angle": 300.0,
+      "phase": 2,
+      "col": 20,
+      "row": 2,
+      "rect": [
+        434,
+        1354,
+        52,
+        88
+      ],
+      "off": [
+        214,
+        91
+      ],
+      "label": "side @ 210 deg"
+    },
+    {
+      "index": 69,
+      "angle": 315.0,
+      "phase": 2,
+      "col": 21,
+      "row": 2,
+      "rect": [
+        213,
+        1264,
+        45,
+        89
+      ],
+      "off": [
+        208,
+        84
+      ],
+      "label": "corner @ 225 deg"
+    },
+    {
+      "index": 70,
+      "angle": 330.0,
+      "phase": 2,
+      "col": 22,
+      "row": 2,
+      "rect": [
+        487,
+        1354,
+        47,
+        88
+      ],
+      "off": [
+        198,
+        80
+      ],
+      "label": "corner @ 240 deg"
+    },
+    {
+      "index": 71,
+      "angle": 345.0,
+      "phase": 2,
+      "col": 23,
+      "row": 2,
+      "rect": [
+        535,
+        1354,
+        57,
+        88
+      ],
+      "off": [
+        179,
+        78
+      ],
+      "label": "corner @ 255 deg"
+    },
+    {
+      "index": 72,
+      "angle": 0.0,
+      "phase": 3,
+      "col": 0,
+      "row": 3,
+      "rect": [
+        892,
+        707,
+        68,
+        93
+      ],
+      "off": [
+        160,
+        76
+      ],
+      "label": "side @ 270 deg"
+    },
+    {
+      "index": 73,
+      "angle": 15.0,
+      "phase": 3,
+      "col": 1,
+      "row": 3,
+      "rect": [
+        259,
+        1264,
+        75,
+        89
+      ],
+      "off": [
+        143,
+        79
+      ],
+      "label": "corner @ 285 deg"
+    },
+    {
+      "index": 74,
+      "angle": 30.0,
+      "phase": 3,
+      "col": 2,
+      "row": 3,
+      "rect": [
+        235,
+        1795,
+        80,
+        83
+      ],
+      "off": [
+        126,
+        85
+      ],
+      "label": "corner @ 300 deg"
+    },
+    {
+      "index": 75,
+      "angle": 45.0,
+      "phase": 3,
+      "col": 3,
+      "row": 3,
+      "rect": [
+        742,
+        1795,
+        84,
+        79
+      ],
+      "off": [
+        112,
+        91
+      ],
+      "label": "corner @ 315 deg"
+    },
+    {
+      "index": 76,
+      "angle": 60.0,
+      "phase": 3,
+      "col": 4,
+      "row": 3,
+      "rect": [
+        574,
+        1709,
+        82,
+        84
+      ],
+      "off": [
+        103,
+        94
+      ],
+      "label": "side @ 330 deg"
+    },
+    {
+      "index": 77,
+      "angle": 75.0,
+      "phase": 3,
+      "col": 5,
+      "row": 3,
+      "rect": [
+        335,
+        1264,
+        79,
+        89
+      ],
+      "off": [
+        98,
+        99
+      ],
+      "label": "corner @ 345 deg"
+    },
+    {
+      "index": 78,
+      "angle": 90.0,
+      "phase": 3,
+      "col": 6,
+      "row": 3,
+      "rect": [
+        1,
+        802,
+        72,
+        93
+      ],
+      "off": [
+        99,
+        105
+      ],
+      "label": "corner @ 0 deg"
+    },
+    {
+      "index": 79,
+      "angle": 105.0,
+      "phase": 3,
+      "col": 7,
+      "row": 3,
+      "rect": [
+        463,
+        318,
+        63,
+        97
+      ],
+      "off": [
+        106,
+        110
+      ],
+      "label": "corner @ 15 deg"
+    },
+    {
+      "index": 80,
+      "angle": 120.0,
+      "phase": 3,
+      "col": 8,
+      "row": 3,
+      "rect": [
+        742,
+        114,
+        52,
+        100
+      ],
+      "off": [
+        118,
+        115
+      ],
+      "label": "side @ 30 deg"
+    },
+    {
+      "index": 81,
+      "angle": 135.0,
+      "phase": 3,
+      "col": 9,
+      "row": 3,
+      "rect": [
+        230,
+        114,
+        47,
+        101
+      ],
+      "off": [
+        129,
+        120
+      ],
+      "label": "corner @ 45 deg"
+    },
+    {
+      "index": 82,
+      "angle": 150.0,
+      "phase": 3,
+      "col": 10,
+      "row": 3,
+      "rect": [
+        742,
+        1,
+        47,
+        102
+      ],
+      "off": [
+        139,
+        123
+      ],
+      "label": "corner @ 60 deg"
+    },
+    {
+      "index": 83,
+      "angle": 165.0,
+      "phase": 3,
+      "col": 11,
+      "row": 3,
+      "rect": [
+        790,
+        1,
+        58,
+        102
+      ],
+      "off": [
+        147,
+        125
+      ],
+      "label": "corner @ 75 deg"
+    },
+    {
+      "index": 84,
+      "angle": 180.0,
+      "phase": 3,
+      "col": 12,
+      "row": 3,
+      "rect": [
+        255,
+        217,
+        68,
+        99
+      ],
+      "off": [
+        156,
+        127
+      ],
+      "label": "side @ 90 deg"
+    },
+    {
+      "index": 85,
+      "angle": 195.0,
+      "phase": 3,
+      "col": 13,
+      "row": 3,
+      "rect": [
+        466,
+        417,
+        74,
+        96
+      ],
+      "off": [
+        167,
+        127
+      ],
+      "label": "corner @ 105 deg"
+    },
+    {
+      "index": 86,
+      "angle": 210.0,
+      "phase": 3,
+      "col": 14,
+      "row": 3,
+      "rect": [
+        731,
+        896,
+        80,
+        91
+      ],
+      "off": [
+        178,
+        126
+      ],
+      "label": "corner @ 120 deg"
+    },
+    {
+      "index": 87,
+      "angle": 225.0,
+      "phase": 3,
+      "col": 15,
+      "row": 3,
+      "rect": [
+        593,
+        1354,
+        84,
+        88
+      ],
+      "off": [
+        188,
+        123
+      ],
+      "label": "corner @ 135 deg"
+    },
+    {
+      "index": 88,
+      "angle": 240.0,
+      "phase": 3,
+      "col": 16,
+      "row": 3,
+      "rect": [
+        64,
+        1533,
+        82,
+        87
+      ],
+      "off": [
+        199,
+        121
+      ],
+      "label": "side @ 150 deg"
+    },
+    {
+      "index": 89,
+      "angle": 255.0,
+      "phase": 3,
+      "col": 17,
+      "row": 3,
+      "rect": [
+        780,
+        1081,
+        79,
+        90
+      ],
+      "off": [
+        207,
+        113
+      ],
+      "label": "corner @ 165 deg"
+    },
+    {
+      "index": 90,
+      "angle": 270.0,
+      "phase": 3,
+      "col": 18,
+      "row": 3,
+      "rect": [
+        224,
+        612,
+        72,
+        94
+      ],
+      "off": [
+        212,
+        104
+      ],
+      "label": "corner @ 180 deg"
+    },
+    {
+      "index": 91,
+      "angle": 285.0,
+      "phase": 3,
+      "col": 19,
+      "row": 3,
+      "rect": [
+        891,
+        217,
+        63,
+        98
+      ],
+      "off": [
+        215,
+        95
+      ],
+      "label": "corner @ 195 deg"
+    },
+    {
+      "index": 92,
+      "angle": 300.0,
+      "phase": 3,
+      "col": 20,
+      "row": 3,
+      "rect": [
+        795,
+        114,
+        52,
+        100
+      ],
+      "off": [
+        214,
+        87
+      ],
+      "label": "side @ 210 deg"
+    },
+    {
+      "index": 93,
+      "angle": 315.0,
+      "phase": 3,
+      "col": 21,
+      "row": 3,
+      "rect": [
+        848,
+        114,
+        47,
+        100
+      ],
+      "off": [
+        208,
+        81
+      ],
+      "label": "corner @ 225 deg"
+    },
+    {
+      "index": 94,
+      "angle": 330.0,
+      "phase": 3,
+      "col": 22,
+      "row": 3,
+      "rect": [
+        324,
+        217,
+        47,
+        99
+      ],
+      "off": [
+        198,
+        77
+      ],
+      "label": "corner @ 240 deg"
+    },
+    {
+      "index": 95,
+      "angle": 345.0,
+      "phase": 3,
+      "col": 23,
+      "row": 3,
+      "rect": [
+        527,
+        318,
+        58,
+        97
+      ],
+      "off": [
+        179,
+        75
+      ],
+      "label": "corner @ 255 deg"
+    },
+    {
+      "index": 96,
+      "angle": 0.0,
+      "phase": 4,
+      "col": 0,
+      "row": 4,
+      "rect": [
+        1,
+        896,
+        67,
+        92
+      ],
+      "off": [
+        162,
+        74
+      ],
+      "label": "side @ 270 deg"
+    },
+    {
+      "index": 97,
+      "angle": 15.0,
+      "phase": 4,
+      "col": 1,
+      "row": 4,
+      "rect": [
+        147,
+        1533,
+        74,
+        87
+      ],
+      "off": [
+        144,
+        78
+      ],
+      "label": "corner @ 285 deg"
+    },
+    {
+      "index": 98,
+      "angle": 30.0,
+      "phase": 4,
+      "col": 2,
+      "row": 4,
+      "rect": [
+        316,
+        1795,
+        81,
+        83
+      ],
+      "off": [
+        126,
+        84
+      ],
+      "label": "corner @ 300 deg"
+    },
+    {
+      "index": 99,
+      "angle": 45.0,
+      "phase": 4,
+      "col": 3,
+      "row": 4,
+      "rect": [
+        398,
+        1795,
+        86,
+        83
+      ],
+      "off": [
+        111,
+        87
+      ],
+      "label": "corner @ 315 deg"
+    },
+    {
+      "index": 100,
+      "angle": 60.0,
+      "phase": 4,
+      "col": 4,
+      "row": 4,
+      "rect": [
+        678,
+        1354,
+        83,
+        88
+      ],
+      "off": [
+        103,
+        91
+      ],
+      "label": "side @ 330 deg"
+    },
+    {
+      "index": 101,
+      "angle": 75.0,
+      "phase": 4,
+      "col": 5,
+      "row": 4,
+      "rect": [
+        74,
+        802,
+        80,
+        93
+      ],
+      "off": [
+        98,
+        95
+      ],
+      "label": "corner @ 345 deg"
+    },
+    {
+      "index": 102,
+      "angle": 90.0,
+      "phase": 4,
+      "col": 6,
+      "row": 4,
+      "rect": [
+        541,
+        417,
+        73,
+        96
+      ],
+      "off": [
+        99,
+        101
+      ],
+      "label": "corner @ 0 deg"
+    },
+    {
+      "index": 103,
+      "angle": 105.0,
+      "phase": 4,
+      "col": 7,
+      "row": 4,
+      "rect": [
+        372,
+        217,
+        65,
+        99
+      ],
+      "off": [
+        105,
+        108
+      ],
+      "label": "corner @ 15 deg"
+    },
+    {
+      "index": 104,
+      "angle": 120.0,
+      "phase": 4,
+      "col": 8,
+      "row": 4,
+      "rect": [
+        278,
+        114,
+        52,
+        101
+      ],
+      "off": [
+        117,
+        114
+      ],
+      "label": "side @ 30 deg"
+    },
+    {
+      "index": 105,
+      "angle": 135.0,
+      "phase": 4,
+      "col": 9,
+      "row": 4,
+      "rect": [
+        849,
+        1,
+        45,
+        102
+      ],
+      "off": [
+        128,
+        119
+      ],
+      "label": "corner @ 45 deg"
+    },
+    {
+      "index": 106,
+      "angle": 150.0,
+      "phase": 4,
+      "col": 10,
+      "row": 4,
+      "rect": [
+        693,
+        1,
+        48,
+        103
+      ],
+      "off": [
+        138,
+        123
+      ],
+      "label": "corner @ 60 deg"
+    },
+    {
+      "index": 107,
+      "angle": 165.0,
+      "phase": 4,
+      "col": 11,
+      "row": 4,
+      "rect": [
+        895,
+        1,
+        56,
+        102
+      ],
+      "off": [
+        147,
+        126
+      ],
+      "label": "corner @ 75 deg"
+    },
+    {
+      "index": 108,
+      "angle": 180.0,
+      "phase": 4,
+      "col": 12,
+      "row": 4,
+      "rect": [
+        438,
+        217,
+        67,
+        99
+      ],
+      "off": [
+        155,
+        128
+      ],
+      "label": "side @ 90 deg"
+    },
+    {
+      "index": 109,
+      "angle": 195.0,
+      "phase": 4,
+      "col": 13,
+      "row": 4,
+      "rect": [
+        615,
+        417,
+        74,
+        96
+      ],
+      "off": [
+        166,
+        128
+      ],
+      "label": "corner @ 105 deg"
+    },
+    {
+      "index": 110,
+      "angle": 210.0,
+      "phase": 4,
+      "col": 14,
+      "row": 4,
+      "rect": [
+        812,
+        896,
+        81,
+        91
+      ],
+      "off": [
+        177,
+        127
+      ],
+      "label": "corner @ 120 deg"
+    },
+    {
+      "index": 111,
+      "angle": 225.0,
+      "phase": 4,
+      "col": 15,
+      "row": 4,
+      "rect": [
+        157,
+        1709,
+        86,
+        85
+      ],
+      "off": [
+        187,
+        125
+      ],
+      "label": "corner @ 135 deg"
+    },
+    {
+      "index": 112,
+      "angle": 240.0,
+      "phase": 4,
+      "col": 16,
+      "row": 4,
+      "rect": [
+        657,
+        1709,
+        83,
+        84
+      ],
+      "off": [
+        198,
+        121
+      ],
+      "label": "side @ 150 deg"
+    },
+    {
+      "index": 113,
+      "angle": 255.0,
+      "phase": 4,
+      "col": 17,
+      "row": 4,
+      "rect": [
+        244,
+        1709,
+        80,
+        85
+      ],
+      "off": [
+        206,
+        116
+      ],
+      "label": "corner @ 165 deg"
+    },
+    {
+      "index": 114,
+      "angle": 270.0,
+      "phase": 4,
+      "col": 18,
+      "row": 4,
+      "rect": [
+        762,
+        1354,
+        73,
+        88
+      ],
+      "off": [
+        212,
+        107
+      ],
+      "label": "corner @ 180 deg"
+    },
+    {
+      "index": 115,
+      "angle": 285.0,
+      "phase": 4,
+      "col": 19,
+      "row": 4,
+      "rect": [
+        297,
+        612,
+        65,
+        94
+      ],
+      "off": [
+        214,
+        96
+      ],
+      "label": "corner @ 195 deg"
+    },
+    {
+      "index": 116,
+      "angle": 300.0,
+      "phase": 4,
+      "col": 20,
+      "row": 4,
+      "rect": [
+        690,
+        417,
+        52,
+        96
+      ],
+      "off": [
+        215,
+        88
+      ],
+      "label": "side @ 210 deg"
+    },
+    {
+      "index": 117,
+      "angle": 315.0,
+      "phase": 4,
+      "col": 21,
+      "row": 4,
+      "rect": [
+        586,
+        318,
+        45,
+        97
+      ],
+      "off": [
+        211,
+        81
+      ],
+      "label": "corner @ 225 deg"
+    },
+    {
+      "index": 118,
+      "angle": 330.0,
+      "phase": 4,
+      "col": 22,
+      "row": 4,
+      "rect": [
+        632,
+        318,
+        47,
+        97
+      ],
+      "off": [
+        199,
+        76
+      ],
+      "label": "corner @ 240 deg"
+    },
+    {
+      "index": 119,
+      "angle": 345.0,
+      "phase": 4,
+      "col": 23,
+      "row": 4,
+      "rect": [
+        435,
+        515,
+        56,
+        95
+      ],
+      "off": [
+        181,
+        74
+      ],
+      "label": "corner @ 255 deg"
+    },
+    {
+      "index": 120,
+      "angle": 0.0,
+      "phase": 5,
+      "col": 0,
+      "row": 5,
+      "rect": [
+        743,
+        417,
+        68,
+        96
+      ],
+      "off": [
+        162,
+        71
+      ],
+      "label": "side @ 270 deg"
+    },
+    {
+      "index": 121,
+      "angle": 15.0,
+      "phase": 5,
+      "col": 1,
+      "row": 5,
+      "rect": [
+        155,
+        802,
+        76,
+        93
+      ],
+      "off": [
+        143,
+        74
+      ],
+      "label": "corner @ 285 deg"
+    },
+    {
+      "index": 122,
+      "angle": 30.0,
+      "phase": 5,
+      "col": 2,
+      "row": 5,
+      "rect": [
+        415,
+        1264,
+        82,
+        89
+      ],
+      "off": [
+        126,
+        80
+      ],
+      "label": "corner @ 300 deg"
+    },
+    {
+      "index": 123,
+      "angle": 45.0,
+      "phase": 5,
+      "col": 3,
+      "row": 5,
+      "rect": [
+        741,
+        1709,
+        87,
+        84
+      ],
+      "off": [
+        111,
+        88
+      ],
+      "label": "corner @ 315 deg"
+    },
+    {
+      "index": 124,
+      "angle": 60.0,
+      "phase": 5,
+      "col": 4,
+      "row": 5,
+      "rect": [
+        485,
+        1795,
+        84,
+        83
+      ],
+      "off": [
+        103,
+        93
+      ],
+      "label": "side @ 330 deg"
+    },
+    {
+      "index": 125,
+      "angle": 75.0,
+      "phase": 5,
+      "col": 5,
+      "row": 5,
+      "rect": [
+        406,
+        1621,
+        81,
+        86
+      ],
+      "off": [
+        98,
+        98
+      ],
+      "label": "corner @ 345 deg"
+    },
+    {
+      "index": 126,
+      "angle": 90.0,
+      "phase": 5,
+      "col": 6,
+      "row": 5,
+      "rect": [
+        894,
+        896,
+        74,
+        91
+      ],
+      "off": [
+        99,
+        102
+      ],
+      "label": "corner @ 0 deg"
+    },
+    {
+      "index": 127,
+      "angle": 105.0,
+      "phase": 5,
+      "col": 7,
+      "row": 5,
+      "rect": [
+        492,
+        515,
+        66,
+        95
+      ],
+      "off": [
+        105,
+        107
+      ],
+      "label": "corner @ 15 deg"
+    },
+    {
+      "index": 128,
+      "angle": 120.0,
+      "phase": 5,
+      "col": 8,
+      "row": 5,
+      "rect": [
+        955,
+        217,
+        53,
+        98
+      ],
+      "off": [
+        117,
+        112
+      ],
+      "label": "side @ 30 deg"
+    },
+    {
+      "index": 129,
+      "angle": 135.0,
+      "phase": 5,
+      "col": 9,
+      "row": 5,
+      "rect": [
+        896,
+        114,
+        48,
+        100
+      ],
+      "off": [
+        127,
+        117
+      ],
+      "label": "corner @ 45 deg"
+    },
+    {
+      "index": 130,
+      "angle": 150.0,
+      "phase": 5,
+      "col": 10,
+      "row": 5,
+      "rect": [
+        506,
+        217,
+        49,
+        99
+      ],
+      "off": [
+        138,
+        122
+      ],
+      "label": "corner @ 60 deg"
+    },
+    {
+      "index": 131,
+      "angle": 165.0,
+      "phase": 5,
+      "col": 11,
+      "row": 5,
+      "rect": [
+        680,
+        318,
+        58,
+        97
+      ],
+      "off": [
+        146,
+        126
+      ],
+      "label": "corner @ 75 deg"
+    },
+    {
+      "index": 132,
+      "angle": 180.0,
+      "phase": 5,
+      "col": 12,
+      "row": 5,
+      "rect": [
+        363,
+        612,
+        68,
+        94
+      ],
+      "off": [
+        154,
+        128
+      ],
+      "label": "side @ 90 deg"
+    },
+    {
+      "index": 133,
+      "angle": 195.0,
+      "phase": 5,
+      "col": 13,
+      "row": 5,
+      "rect": [
+        498,
+        1264,
+        76,
+        89
+      ],
+      "off": [
+        165,
+        129
+      ],
+      "label": "corner @ 105 deg"
+    },
+    {
+      "index": 134,
+      "angle": 210.0,
+      "phase": 5,
+      "col": 14,
+      "row": 5,
+      "rect": [
+        829,
+        1709,
+        82,
+        84
+      ],
+      "off": [
+        176,
+        130
+      ],
+      "label": "corner @ 120 deg"
+    },
+    {
+      "index": 135,
+      "angle": 225.0,
+      "phase": 5,
+      "col": 15,
+      "row": 5,
+      "rect": [
+        570,
+        1795,
+        86,
+        83
+      ],
+      "off": [
+        186,
+        128
+      ],
+      "label": "corner @ 135 deg"
+    },
+    {
+      "index": 136,
+      "angle": 240.0,
+      "phase": 5,
+      "col": 16,
+      "row": 5,
+      "rect": [
+        657,
+        1795,
+        84,
+        83
+      ],
+      "off": [
+        197,
+        123
+      ],
+      "label": "side @ 150 deg"
+    },
+    {
+      "index": 137,
+      "angle": 255.0,
+      "phase": 5,
+      "col": 17,
+      "row": 5,
+      "rect": [
+        488,
+        1621,
+        81,
+        86
+      ],
+      "off": [
+        205,
+        114
+      ],
+      "label": "corner @ 165 deg"
+    },
+    {
+      "index": 138,
+      "angle": 270.0,
+      "phase": 5,
+      "col": 18,
+      "row": 5,
+      "rect": [
+        1,
+        989,
+        74,
+        91
+      ],
+      "off": [
+        211,
+        103
+      ],
+      "label": "corner @ 180 deg"
+    },
+    {
+      "index": 139,
+      "angle": 285.0,
+      "phase": 5,
+      "col": 19,
+      "row": 5,
+      "rect": [
+        432,
+        612,
+        66,
+        94
+      ],
+      "off": [
+        213,
+        93
+      ],
+      "label": "corner @ 195 deg"
+    },
+    {
+      "index": 140,
+      "angle": 300.0,
+      "phase": 5,
+      "col": 20,
+      "row": 5,
+      "rect": [
+        812,
+        417,
+        53,
+        96
+      ],
+      "off": [
+        214,
+        85
+      ],
+      "label": "side @ 210 deg"
+    },
+    {
+      "index": 141,
+      "angle": 315.0,
+      "phase": 5,
+      "col": 21,
+      "row": 5,
+      "rect": [
+        739,
+        318,
+        48,
+        97
+      ],
+      "off": [
+        209,
+        78
+      ],
+      "label": "corner @ 225 deg"
+    },
+    {
+      "index": 142,
+      "angle": 330.0,
+      "phase": 5,
+      "col": 22,
+      "row": 5,
+      "rect": [
+        788,
+        318,
+        49,
+        97
+      ],
+      "off": [
+        197,
+        73
+      ],
+      "label": "corner @ 240 deg"
+    },
+    {
+      "index": 143,
+      "angle": 345.0,
+      "phase": 5,
+      "col": 23,
+      "row": 5,
+      "rect": [
+        838,
+        318,
+        58,
+        97
+      ],
+      "off": [
+        180,
+        71
+      ],
+      "label": "corner @ 255 deg"
+    },
+    {
+      "index": 144,
+      "angle": 0.0,
+      "phase": 6,
+      "col": 0,
+      "row": 6,
+      "rect": [
+        232,
+        802,
+        69,
+        93
+      ],
+      "off": [
+        161,
+        75
+      ],
+      "label": "side @ 270 deg"
+    },
+    {
+      "index": 145,
+      "angle": 15.0,
+      "phase": 6,
+      "col": 1,
+      "row": 6,
+      "rect": [
+        575,
+        1264,
+        77,
+        89
+      ],
+      "off": [
+        143,
+        77
+      ],
+      "label": "corner @ 285 deg"
+    },
+    {
+      "index": 146,
+      "angle": 30.0,
+      "phase": 6,
+      "col": 2,
+      "row": 6,
+      "rect": [
+        222,
+        1533,
+        82,
+        87
+      ],
+      "off": [
+        127,
+        80
+      ],
+      "label": "corner @ 300 deg"
+    },
+    {
+      "index": 147,
+      "angle": 45.0,
+      "phase": 6,
+      "col": 3,
+      "row": 6,
+      "rect": [
+        325,
+        1709,
+        85,
+        85
+      ],
+      "off": [
+        114,
+        85
+      ],
+      "label": "corner @ 315 deg"
+    },
+    {
+      "index": 148,
+      "angle": 60.0,
+      "phase": 6,
+      "col": 4,
+      "row": 6,
+      "rect": [
+        836,
+        1354,
+        84,
+        88
+      ],
+      "off": [
+        104,
+        90
+      ],
+      "label": "side @ 330 deg"
+    },
+    {
+      "index": 149,
+      "angle": 75.0,
+      "phase": 6,
+      "col": 5,
+      "row": 6,
+      "rect": [
+        499,
+        612,
+        78,
+        94
+      ],
+      "off": [
+        101,
+        94
+      ],
+      "label": "corner @ 345 deg"
+    },
+    {
+      "index": 150,
+      "angle": 90.0,
+      "phase": 6,
+      "col": 6,
+      "row": 6,
+      "rect": [
+        945,
+        114,
+        71,
+        100
+      ],
+      "off": [
+        103,
+        98
+      ],
+      "label": "corner @ 0 deg"
+    },
+    {
+      "index": 151,
+      "angle": 105.0,
+      "phase": 6,
+      "col": 7,
+      "row": 6,
+      "rect": [
+        630,
+        1,
+        62,
+        104
+      ],
+      "off": [
+        110,
+        103
+      ],
+      "label": "corner @ 15 deg"
+    },
+    {
+      "index": 152,
+      "angle": 120.0,
+      "phase": 6,
+      "col": 8,
+      "row": 6,
+      "rect": [
+        326,
+        1,
+        53,
+        107
+      ],
+      "off": [
+        117,
+        108
+      ],
+      "label": "side @ 30 deg"
+    },
+    {
+      "index": 153,
+      "angle": 135.0,
+      "phase": 6,
+      "col": 9,
+      "row": 6,
+      "rect": [
+        275,
+        1,
+        50,
+        108
+      ],
+      "off": [
+        126,
+        113
+      ],
+      "label": "corner @ 45 deg"
+    },
+    {
+      "index": 154,
+      "angle": 150.0,
+      "phase": 6,
+      "col": 10,
+      "row": 6,
+      "rect": [
+        380,
+        1,
+        51,
+        107
+      ],
+      "off": [
+        138,
+        118
+      ],
+      "label": "corner @ 60 deg"
+    },
+    {
+      "index": 155,
+      "angle": 165.0,
+      "phase": 6,
+      "col": 11,
+      "row": 6,
+      "rect": [
+        570,
+        1,
+        59,
+        105
+      ],
+      "off": [
+        146,
+        122
+      ],
+      "label": "corner @ 75 deg"
+    },
+    {
+      "index": 156,
+      "angle": 180.0,
+      "phase": 6,
+      "col": 12,
+      "row": 6,
+      "rect": [
+        952,
+        1,
+        69,
+        102
+      ],
+      "off": [
+        154,
+        124
+      ],
+      "label": "side @ 90 deg"
+    },
+    {
+      "index": 157,
+      "angle": 195.0,
+      "phase": 6,
+      "col": 13,
+      "row": 6,
+      "rect": [
+        897,
+        318,
+        77,
+        97
+      ],
+      "off": [
+        164,
+        125
+      ],
+      "label": "corner @ 105 deg"
+    },
+    {
+      "index": 158,
+      "angle": 210.0,
+      "phase": 6,
+      "col": 14,
+      "row": 6,
+      "rect": [
+        76,
+        989,
+        82,
+        91
+      ],
+      "off": [
+        175,
+        126
+      ],
+      "label": "corner @ 120 deg"
+    },
+    {
+      "index": 159,
+      "angle": 225.0,
+      "phase": 6,
+      "col": 15,
+      "row": 6,
+      "rect": [
+        570,
+        1621,
+        85,
+        86
+      ],
+      "off": [
+        185,
+        124
+      ],
+      "label": "corner @ 135 deg"
+    },
+    {
+      "index": 160,
+      "angle": 240.0,
+      "phase": 6,
+      "col": 16,
+      "row": 6,
+      "rect": [
+        656,
+        1621,
+        84,
+        86
+      ],
+      "off": [
+        196,
+        120
+      ],
+      "label": "side @ 150 deg"
+    },
+    {
+      "index": 161,
+      "angle": 255.0,
+      "phase": 6,
+      "col": 17,
+      "row": 6,
+      "rect": [
+        653,
+        1264,
+        78,
+        89
+      ],
+      "off": [
+        205,
+        113
+      ],
+      "label": "corner @ 165 deg"
+    },
+    {
+      "index": 162,
+      "angle": 270.0,
+      "phase": 6,
+      "col": 18,
+      "row": 6,
+      "rect": [
+        159,
+        989,
+        71,
+        91
+      ],
+      "off": [
+        210,
+        105
+      ],
+      "label": "corner @ 180 deg"
+    },
+    {
+      "index": 163,
+      "angle": 285.0,
+      "phase": 6,
+      "col": 19,
+      "row": 6,
+      "rect": [
+        578,
+        612,
+        62,
+        94
+      ],
+      "off": [
+        212,
+        97
+      ],
+      "label": "corner @ 195 deg"
+    },
+    {
+      "index": 164,
+      "angle": 300.0,
+      "phase": 6,
+      "col": 20,
+      "row": 6,
+      "rect": [
+        641,
+        612,
+        53,
+        94
+      ],
+      "off": [
+        214,
+        91
+      ],
+      "label": "side @ 210 deg"
+    },
+    {
+      "index": 165,
+      "angle": 315.0,
+      "phase": 6,
+      "col": 21,
+      "row": 6,
+      "rect": [
+        559,
+        515,
+        50,
+        95
+      ],
+      "off": [
+        208,
+        84
+      ],
+      "label": "corner @ 225 deg"
+    },
+    {
+      "index": 166,
+      "angle": 330.0,
+      "phase": 6,
+      "col": 22,
+      "row": 6,
+      "rect": [
+        610,
+        515,
+        51,
+        95
+      ],
+      "off": [
+        195,
+        79
+      ],
+      "label": "corner @ 240 deg"
+    },
+    {
+      "index": 167,
+      "angle": 345.0,
+      "phase": 6,
+      "col": 23,
+      "row": 6,
+      "rect": [
+        695,
+        612,
+        59,
+        94
+      ],
+      "off": [
+        179,
+        76
+      ],
+      "label": "corner @ 255 deg"
+    },
+    {
+      "index": 168,
+      "angle": 0.0,
+      "phase": 7,
+      "col": 0,
+      "row": 7,
+      "rect": [
+        755,
+        612,
+        61,
+        94
+      ],
+      "off": [
+        160,
+        75
+      ],
+      "label": "side @ 270 deg"
+    },
+    {
+      "index": 169,
+      "angle": 15.0,
+      "phase": 7,
+      "col": 1,
+      "row": 7,
+      "rect": [
+        231,
+        989,
+        70,
+        91
+      ],
+      "off": [
+        142,
+        77
+      ],
+      "label": "corner @ 285 deg"
+    },
+    {
+      "index": 170,
+      "angle": 30.0,
+      "phase": 7,
+      "col": 2,
+      "row": 7,
+      "rect": [
+        732,
+        1264,
+        75,
+        89
+      ],
+      "off": [
+        127,
+        79
+      ],
+      "label": "corner @ 300 deg"
+    },
+    {
+      "index": 171,
+      "angle": 45.0,
+      "phase": 7,
+      "col": 3,
+      "row": 7,
+      "rect": [
+        305,
+        1533,
+        79,
+        87
+      ],
+      "off": [
+        113,
+        83
+      ],
+      "label": "corner @ 315 deg"
+    },
+    {
+      "index": 172,
+      "angle": 60.0,
+      "phase": 7,
+      "col": 4,
+      "row": 7,
+      "rect": [
+        921,
+        1354,
+        77,
+        88
+      ],
+      "off": [
+        104,
+        89
+      ],
+      "label": "side @ 330 deg"
+    },
+    {
+      "index": 173,
+      "angle": 75.0,
+      "phase": 7,
+      "col": 5,
+      "row": 7,
+      "rect": [
+        1,
+        1444,
+        71,
+        88
+      ],
+      "off": [
+        100,
+        96
+      ],
+      "label": "corner @ 345 deg"
+    },
+    {
+      "index": 174,
+      "angle": 90.0,
+      "phase": 7,
+      "col": 6,
+      "row": 7,
+      "rect": [
+        860,
+        1081,
+        62,
+        90
+      ],
+      "off": [
+        103,
+        102
+      ],
+      "label": "corner @ 0 deg"
+    },
+    {
+      "index": 175,
+      "angle": 105.0,
+      "phase": 7,
+      "col": 7,
+      "row": 7,
+      "rect": [
+        69,
+        896,
+        56,
+        92
+      ],
+      "off": [
+        109,
+        109
+      ],
+      "label": "corner @ 15 deg"
+    },
+    {
+      "index": 176,
+      "angle": 120.0,
+      "phase": 7,
+      "col": 8,
+      "row": 7,
+      "rect": [
+        817,
+        612,
+        50,
+        94
+      ],
+      "off": [
+        117,
+        115
+      ],
+      "label": "side @ 30 deg"
+    },
+    {
+      "index": 177,
+      "angle": 135.0,
+      "phase": 7,
+      "col": 9,
+      "row": 7,
+      "rect": [
+        868,
+        612,
+        52,
+        94
+      ],
+      "off": [
+        125,
+        121
+      ],
+      "label": "corner @ 45 deg"
+    },
+    {
+      "index": 178,
+      "angle": 150.0,
+      "phase": 7,
+      "col": 10,
+      "row": 7,
+      "rect": [
+        921,
+        612,
+        53,
+        94
+      ],
+      "off": [
+        137,
+        126
+      ],
+      "label": "corner @ 60 deg"
+    },
+    {
+      "index": 179,
+      "angle": 165.0,
+      "phase": 7,
+      "col": 11,
+      "row": 7,
+      "rect": [
+        302,
+        989,
+        54,
+        91
+      ],
+      "off": [
+        152,
+        130
+      ],
+      "label": "corner @ 75 deg"
+    },
+    {
+      "index": 180,
+      "angle": 180.0,
+      "phase": 7,
+      "col": 12,
+      "row": 7,
+      "rect": [
+        73,
+        1444,
+        61,
+        88
+      ],
+      "off": [
+        163,
+        133
+      ],
+      "label": "side @ 90 deg"
+    },
+    {
+      "index": 181,
+      "angle": 195.0,
+      "phase": 7,
+      "col": 13,
+      "row": 7,
+      "rect": [
+        135,
+        1444,
+        70,
+        88
+      ],
+      "off": [
+        172,
+        132
+      ],
+      "label": "corner @ 105 deg"
+    },
+    {
+      "index": 182,
+      "angle": 210.0,
+      "phase": 7,
+      "col": 14,
+      "row": 7,
+      "rect": [
+        206,
+        1444,
+        75,
+        88
+      ],
+      "off": [
+        182,
+        129
+      ],
+      "label": "corner @ 120 deg"
+    },
+    {
+      "index": 183,
+      "angle": 225.0,
+      "phase": 7,
+      "col": 15,
+      "row": 7,
+      "rect": [
+        282,
+        1444,
+        79,
+        88
+      ],
+      "off": [
+        192,
+        124
+      ],
+      "label": "corner @ 135 deg"
+    },
+    {
+      "index": 184,
+      "angle": 240.0,
+      "phase": 7,
+      "col": 16,
+      "row": 7,
+      "rect": [
+        808,
+        1264,
+        77,
+        89
+      ],
+      "off": [
+        203,
+        119
+      ],
+      "label": "side @ 150 deg"
+    },
+    {
+      "index": 185,
+      "angle": 255.0,
+      "phase": 7,
+      "col": 17,
+      "row": 7,
+      "rect": [
+        302,
+        802,
+        71,
+        93
+      ],
+      "off": [
+        213,
+        111
+      ],
+      "label": "corner @ 165 deg"
+    },
+    {
+      "index": 186,
+      "angle": 270.0,
+      "phase": 7,
+      "col": 18,
+      "row": 7,
+      "rect": [
+        1,
+        417,
+        62,
+        97
+      ],
+      "off": [
+        219,
+        102
+      ],
+      "label": "corner @ 180 deg"
+    },
+    {
+      "index": 187,
+      "angle": 285.0,
+      "phase": 7,
+      "col": 19,
+      "row": 7,
+      "rect": [
+        1,
+        318,
+        56,
+        98
+      ],
+      "off": [
+        219,
+        95
+      ],
+      "label": "corner @ 195 deg"
+    },
+    {
+      "index": 188,
+      "angle": 300.0,
+      "phase": 7,
+      "col": 20,
+      "row": 7,
+      "rect": [
+        556,
+        217,
+        50,
+        99
+      ],
+      "off": [
+        217,
+        88
+      ],
+      "label": "side @ 210 deg"
+    },
+    {
+      "index": 189,
+      "angle": 315.0,
+      "phase": 7,
+      "col": 21,
+      "row": 7,
+      "rect": [
+        607,
+        217,
+        53,
+        99
+      ],
+      "off": [
+        206,
+        82
+      ],
+      "label": "corner @ 225 deg"
+    },
+    {
+      "index": 190,
+      "angle": 330.0,
+      "phase": 7,
+      "col": 22,
+      "row": 7,
+      "rect": [
+        58,
+        318,
+        53,
+        98
+      ],
+      "off": [
+        194,
+        77
+      ],
+      "label": "corner @ 240 deg"
+    },
+    {
+      "index": 191,
+      "angle": 345.0,
+      "phase": 7,
+      "col": 23,
+      "row": 7,
+      "rect": [
+        866,
+        417,
+        54,
+        96
+      ],
+      "off": [
+        178,
+        75
+      ],
+      "label": "corner @ 255 deg"
+    },
+    {
+      "index": 192,
+      "angle": 0.0,
+      "phase": 8,
+      "col": 0,
+      "row": 8,
+      "rect": [
+        921,
+        417,
+        62,
+        96
+      ],
+      "off": [
+        160,
+        73
+      ],
+      "label": "side @ 270 deg"
+    },
+    {
+      "index": 193,
+      "angle": 15.0,
+      "phase": 8,
+      "col": 1,
+      "row": 8,
+      "rect": [
+        662,
+        515,
+        71,
+        95
+      ],
+      "off": [
+        142,
+        73
+      ],
+      "label": "corner @ 285 deg"
+    },
+    {
+      "index": 194,
+      "angle": 30.0,
+      "phase": 8,
+      "col": 2,
+      "row": 8,
+      "rect": [
+        374,
+        802,
+        77,
+        93
+      ],
+      "off": [
+        126,
+        76
+      ],
+      "label": "corner @ 300 deg"
+    },
+    {
+      "index": 195,
+      "angle": 45.0,
+      "phase": 8,
+      "col": 3,
+      "row": 8,
+      "rect": [
+        357,
+        989,
+        80,
+        91
+      ],
+      "off": [
+        113,
+        80
+      ],
+      "label": "corner @ 315 deg"
+    },
+    {
+      "index": 196,
+      "angle": 60.0,
+      "phase": 8,
+      "col": 4,
+      "row": 8,
+      "rect": [
+        438,
+        989,
+        79,
+        91
+      ],
+      "off": [
+        103,
+        86
+      ],
+      "label": "side @ 330 deg"
+    },
+    {
+      "index": 197,
+      "angle": 75.0,
+      "phase": 8,
+      "col": 5,
+      "row": 8,
+      "rect": [
+        518,
+        989,
+        73,
+        91
+      ],
+      "off": [
+        99,
+        93
+      ],
+      "label": "corner @ 345 deg"
+    },
+    {
+      "index": 198,
+      "angle": 90.0,
+      "phase": 8,
+      "col": 6,
+      "row": 8,
+      "rect": [
+        886,
+        1264,
+        64,
+        89
+      ],
+      "off": [
+        102,
+        102
+      ],
+      "label": "corner @ 0 deg"
+    },
+    {
+      "index": 199,
+      "angle": 105.0,
+      "phase": 8,
+      "col": 7,
+      "row": 8,
+      "rect": [
+        923,
+        1081,
+        55,
+        90
+      ],
+      "off": [
+        109,
+        109
+      ],
+      "label": "corner @ 15 deg"
+    },
+    {
+      "index": 200,
+      "angle": 120.0,
+      "phase": 8,
+      "col": 8,
+      "row": 8,
+      "rect": [
+        1,
+        1173,
+        49,
+        90
+      ],
+      "off": [
+        117,
+        116
+      ],
+      "label": "side @ 30 deg"
+    },
+    {
+      "index": 201,
+      "angle": 135.0,
+      "phase": 8,
+      "col": 9,
+      "row": 8,
+      "rect": [
+        51,
+        1173,
+        55,
+        90
+      ],
+      "off": [
+        124,
+        122
+      ],
+      "label": "corner @ 45 deg"
+    },
+    {
+      "index": 202,
+      "angle": 150.0,
+      "phase": 8,
+      "col": 10,
+      "row": 8,
+      "rect": [
+        107,
+        1173,
+        56,
+        90
+      ],
+      "off": [
+        136,
+        127
+      ],
+      "label": "corner @ 60 deg"
+    },
+    {
+      "index": 203,
+      "angle": 165.0,
+      "phase": 8,
+      "col": 11,
+      "row": 8,
+      "rect": [
+        164,
+        1173,
+        56,
+        90
+      ],
+      "off": [
+        151,
+        129
+      ],
+      "label": "corner @ 75 deg"
+    },
+    {
+      "index": 204,
+      "angle": 180.0,
+      "phase": 8,
+      "col": 12,
+      "row": 8,
+      "rect": [
+        592,
+        989,
+        62,
+        91
+      ],
+      "off": [
+        162,
+        129
+      ],
+      "label": "side @ 90 deg"
+    },
+    {
+      "index": 205,
+      "angle": 195.0,
+      "phase": 8,
+      "col": 13,
+      "row": 8,
+      "rect": [
+        655,
+        989,
+        71,
+        91
+      ],
+      "off": [
+        171,
+        128
+      ],
+      "label": "corner @ 105 deg"
+    },
+    {
+      "index": 206,
+      "angle": 210.0,
+      "phase": 8,
+      "col": 14,
+      "row": 8,
+      "rect": [
+        727,
+        989,
+        76,
+        91
+      ],
+      "off": [
+        181,
+        125
+      ],
+      "label": "corner @ 120 deg"
+    },
+    {
+      "index": 207,
+      "angle": 225.0,
+      "phase": 8,
+      "col": 15,
+      "row": 8,
+      "rect": [
+        804,
+        989,
+        80,
+        91
+      ],
+      "off": [
+        191,
+        121
+      ],
+      "label": "corner @ 135 deg"
+    },
+    {
+      "index": 208,
+      "angle": 240.0,
+      "phase": 8,
+      "col": 16,
+      "row": 8,
+      "rect": [
+        126,
+        896,
+        79,
+        92
+      ],
+      "off": [
+        202,
+        116
+      ],
+      "label": "side @ 150 deg"
+    },
+    {
+      "index": 209,
+      "angle": 255.0,
+      "phase": 8,
+      "col": 17,
+      "row": 8,
+      "rect": [
+        734,
+        515,
+        73,
+        95
+      ],
+      "off": [
+        212,
+        109
+      ],
+      "label": "corner @ 165 deg"
+    },
+    {
+      "index": 210,
+      "angle": 270.0,
+      "phase": 8,
+      "col": 18,
+      "row": 8,
+      "rect": [
+        112,
+        318,
+        64,
+        98
+      ],
+      "off": [
+        218,
+        101
+      ],
+      "label": "corner @ 180 deg"
+    },
+    {
+      "index": 211,
+      "angle": 285.0,
+      "phase": 8,
+      "col": 19,
+      "row": 8,
+      "rect": [
+        1,
+        217,
+        55,
+        100
+      ],
+      "off": [
+        220,
+        93
+      ],
+      "label": "corner @ 195 deg"
+    },
+    {
+      "index": 212,
+      "angle": 300.0,
+      "phase": 8,
+      "col": 20,
+      "row": 8,
+      "rect": [
+        1,
+        114,
+        50,
+        102
+      ],
+      "off": [
+        217,
+        85
+      ],
+      "label": "side @ 210 deg"
+    },
+    {
+      "index": 213,
+      "angle": 315.0,
+      "phase": 8,
+      "col": 21,
+      "row": 8,
+      "rect": [
+        331,
+        114,
+        55,
+        101
+      ],
+      "off": [
+        205,
+        79
+      ],
+      "label": "corner @ 225 deg"
+    },
+    {
+      "index": 214,
+      "angle": 330.0,
+      "phase": 8,
+      "col": 22,
+      "row": 8,
+      "rect": [
+        387,
+        114,
+        56,
+        101
+      ],
+      "off": [
+        192,
+        75
+      ],
+      "label": "corner @ 240 deg"
+    },
+    {
+      "index": 215,
+      "angle": 345.0,
+      "phase": 8,
+      "col": 23,
+      "row": 8,
+      "rect": [
+        177,
+        318,
+        56,
+        98
+      ],
+      "off": [
+        177,
+        74
+      ],
+      "label": "corner @ 255 deg"
+    },
+    {
+      "index": 216,
+      "angle": 0.0,
+      "phase": 9,
+      "col": 0,
+      "row": 9,
+      "rect": [
+        1,
+        515,
+        64,
+        96
+      ],
+      "off": [
+        159,
+        71
+      ],
+      "label": "side @ 270 deg"
+    },
+    {
+      "index": 217,
+      "angle": 15.0,
+      "phase": 9,
+      "col": 1,
+      "row": 9,
+      "rect": [
+        452,
+        802,
+        73,
+        93
+      ],
+      "off": [
+        141,
+        73
+      ],
+      "label": "corner @ 285 deg"
+    },
+    {
+      "index": 218,
+      "angle": 30.0,
+      "phase": 9,
+      "col": 2,
+      "row": 9,
+      "rect": [
+        362,
+        1444,
+        78,
+        88
+      ],
+      "off": [
+        126,
+        79
+      ],
+      "label": "corner @ 300 deg"
+    },
+    {
+      "index": 219,
+      "angle": 45.0,
+      "phase": 9,
+      "col": 3,
+      "row": 9,
+      "rect": [
+        385,
+        1533,
+        81,
+        87
+      ],
+      "off": [
+        112,
+        85
+      ],
+      "label": "corner @ 315 deg"
+    },
+    {
+      "index": 220,
+      "angle": 60.0,
+      "phase": 9,
+      "col": 4,
+      "row": 9,
+      "rect": [
+        1,
+        1354,
+        80,
+        89
+      ],
+      "off": [
+        103,
+        90
+      ],
+      "label": "side @ 330 deg"
+    },
+    {
+      "index": 221,
+      "angle": 75.0,
+      "phase": 9,
+      "col": 5,
+      "row": 9,
+      "rect": [
+        221,
+        1173,
+        74,
+        90
+      ],
+      "off": [
+        99,
+        97
+      ],
+      "label": "corner @ 345 deg"
+    },
+    {
+      "index": 222,
+      "angle": 90.0,
+      "phase": 9,
+      "col": 6,
+      "row": 9,
+      "rect": [
+        885,
+        989,
+        65,
+        91
+      ],
+      "off": [
+        102,
+        104
+      ],
+      "label": "corner @ 0 deg"
+    },
+    {
+      "index": 223,
+      "angle": 105.0,
+      "phase": 9,
+      "col": 7,
+      "row": 9,
+      "rect": [
+        951,
+        989,
+        57,
+        91
+      ],
+      "off": [
+        108,
+        112
+      ],
+      "label": "corner @ 15 deg"
+    },
+    {
+      "index": 224,
+      "angle": 120.0,
+      "phase": 9,
+      "col": 8,
+      "row": 9,
+      "rect": [
+        1,
+        1081,
+        51,
+        91
+      ],
+      "off": [
+        116,
+        119
+      ],
+      "label": "side @ 30 deg"
+    },
+    {
+      "index": 225,
+      "angle": 135.0,
+      "phase": 9,
+      "col": 9,
+      "row": 9,
+      "rect": [
+        53,
+        1081,
+        57,
+        91
+      ],
+      "off": [
+        123,
+        125
+      ],
+      "label": "corner @ 45 deg"
+    },
+    {
+      "index": 226,
+      "angle": 150.0,
+      "phase": 9,
+      "col": 10,
+      "row": 9,
+      "rect": [
+        111,
+        1081,
+        58,
+        91
+      ],
+      "off": [
+        135,
+        130
+      ],
+      "label": "corner @ 60 deg"
+    },
+    {
+      "index": 227,
+      "angle": 165.0,
+      "phase": 9,
+      "col": 11,
+      "row": 9,
+      "rect": [
+        206,
+        896,
+        57,
+        92
+      ],
+      "off": [
+        150,
+        132
+      ],
+      "label": "corner @ 75 deg"
+    },
+    {
+      "index": 228,
+      "angle": 180.0,
+      "phase": 9,
+      "col": 12,
+      "row": 9,
+      "rect": [
+        526,
+        802,
+        64,
+        93
+      ],
+      "off": [
+        161,
+        131
+      ],
+      "label": "side @ 90 deg"
+    },
+    {
+      "index": 229,
+      "angle": 195.0,
+      "phase": 9,
+      "col": 13,
+      "row": 9,
+      "rect": [
+        1,
+        707,
+        73,
+        94
+      ],
+      "off": [
+        170,
+        129
+      ],
+      "label": "corner @ 105 deg"
+    },
+    {
+      "index": 230,
+      "angle": 210.0,
+      "phase": 9,
+      "col": 14,
+      "row": 9,
+      "rect": [
+        75,
+        707,
+        78,
+        94
+      ],
+      "off": [
+        180,
+        125
+      ],
+      "label": "corner @ 120 deg"
+    },
+    {
+      "index": 231,
+      "angle": 225.0,
+      "phase": 9,
+      "col": 15,
+      "row": 9,
+      "rect": [
+        591,
+        802,
+        81,
+        93
+      ],
+      "off": [
+        191,
+        120
+      ],
+      "label": "corner @ 135 deg"
+    },
+    {
+      "index": 232,
+      "angle": 240.0,
+      "phase": 9,
+      "col": 16,
+      "row": 9,
+      "rect": [
+        264,
+        896,
+        80,
+        92
+      ],
+      "off": [
+        201,
+        114
+      ],
+      "label": "side @ 150 deg"
+    },
+    {
+      "index": 233,
+      "angle": 255.0,
+      "phase": 9,
+      "col": 17,
+      "row": 9,
+      "rect": [
+        808,
+        515,
+        74,
+        95
+      ],
+      "off": [
+        211,
+        106
+      ],
+      "label": "corner @ 165 deg"
+    },
+    {
+      "index": 234,
+      "angle": 270.0,
+      "phase": 9,
+      "col": 18,
+      "row": 9,
+      "rect": [
+        234,
+        318,
+        65,
+        98
+      ],
+      "off": [
+        217,
+        97
+      ],
+      "label": "corner @ 180 deg"
+    },
+    {
+      "index": 235,
+      "angle": 285.0,
+      "phase": 9,
+      "col": 19,
+      "row": 9,
+      "rect": [
+        57,
+        217,
+        57,
+        100
+      ],
+      "off": [
+        219,
+        89
+      ],
+      "label": "corner @ 195 deg"
+    },
+    {
+      "index": 236,
+      "angle": 300.0,
+      "phase": 9,
+      "col": 20,
+      "row": 9,
+      "rect": [
+        444,
+        114,
+        51,
+        101
+      ],
+      "off": [
+        217,
+        81
+      ],
+      "label": "side @ 210 deg"
+    },
+    {
+      "index": 237,
+      "angle": 315.0,
+      "phase": 9,
+      "col": 21,
+      "row": 9,
+      "rect": [
+        496,
+        114,
+        57,
+        101
+      ],
+      "off": [
+        204,
+        75
+      ],
+      "label": "corner @ 225 deg"
+    },
+    {
+      "index": 238,
+      "angle": 330.0,
+      "phase": 9,
+      "col": 22,
+      "row": 9,
+      "rect": [
+        115,
+        217,
+        58,
+        100
+      ],
+      "off": [
+        191,
+        71
+      ],
+      "label": "corner @ 240 deg"
+    },
+    {
+      "index": 239,
+      "angle": 345.0,
+      "phase": 9,
+      "col": 23,
+      "row": 9,
+      "rect": [
+        300,
+        318,
+        57,
+        98
+      ],
+      "off": [
+        177,
+        70
+      ],
+      "label": "corner @ 255 deg"
+    },
+    {
+      "index": 240,
+      "angle": 0.0,
+      "phase": 10,
+      "col": 0,
+      "row": 10,
+      "rect": [
+        441,
+        1444,
+        65,
+        88
+      ],
+      "off": [
+        159,
+        75
+      ],
+      "label": "side @ 270 deg"
+    },
+    {
+      "index": 241,
+      "angle": 15.0,
+      "phase": 10,
+      "col": 1,
+      "row": 10,
+      "rect": [
+        507,
+        1444,
+        73,
+        88
+      ],
+      "off": [
+        141,
+        76
+      ],
+      "label": "corner @ 285 deg"
+    },
+    {
+      "index": 242,
+      "angle": 30.0,
+      "phase": 10,
+      "col": 2,
+      "row": 10,
+      "rect": [
+        82,
+        1354,
+        79,
+        89
+      ],
+      "off": [
+        126,
+        78
+      ],
+      "label": "corner @ 300 deg"
+    },
+    {
+      "index": 243,
+      "angle": 45.0,
+      "phase": 10,
+      "col": 3,
+      "row": 10,
+      "rect": [
+        296,
+        1173,
+        82,
+        90
+      ],
+      "off": [
+        112,
+        81
+      ],
+      "label": "corner @ 315 deg"
+    },
+    {
+      "index": 244,
+      "angle": 60.0,
+      "phase": 10,
+      "col": 4,
+      "row": 10,
+      "rect": [
+        345,
+        896,
+        82,
+        92
+      ],
+      "off": [
+        102,
+        86
+      ],
+      "label": "side @ 330 deg"
+    },
+    {
+      "index": 245,
+      "angle": 75.0,
+      "phase": 10,
+      "col": 5,
+      "row": 10,
+      "rect": [
+        154,
+        707,
+        75,
+        94
+      ],
+      "off": [
+        99,
+        93
+      ],
+      "label": "corner @ 345 deg"
+    },
+    {
+      "index": 246,
+      "angle": 90.0,
+      "phase": 10,
+      "col": 6,
+      "row": 10,
+      "rect": [
+        64,
+        417,
+        66,
+        97
+      ],
+      "off": [
+        101,
+        100
+      ],
+      "label": "corner @ 0 deg"
+    },
+    {
+      "index": 247,
+      "angle": 105.0,
+      "phase": 10,
+      "col": 7,
+      "row": 10,
+      "rect": [
+        131,
+        417,
+        57,
+        97
+      ],
+      "off": [
+        108,
+        109
+      ],
+      "label": "corner @ 15 deg"
+    },
+    {
+      "index": 248,
+      "angle": 120.0,
+      "phase": 10,
+      "col": 8,
+      "row": 10,
+      "rect": [
+        189,
+        417,
+        52,
+        97
+      ],
+      "off": [
+        116,
+        117
+      ],
+      "label": "side @ 30 deg"
+    },
+    {
+      "index": 249,
+      "angle": 135.0,
+      "phase": 10,
+      "col": 9,
+      "row": 10,
+      "rect": [
+        883,
+        515,
+        59,
+        95
+      ],
+      "off": [
+        122,
+        125
+      ],
+      "label": "corner @ 45 deg"
+    },
+    {
+      "index": 250,
+      "angle": 150.0,
+      "phase": 10,
+      "col": 10,
+      "row": 10,
+      "rect": [
+        230,
+        707,
+        60,
+        94
+      ],
+      "off": [
+        134,
+        130
+      ],
+      "label": "corner @ 60 deg"
+    },
+    {
+      "index": 251,
+      "angle": 165.0,
+      "phase": 10,
+      "col": 11,
+      "row": 10,
+      "rect": [
+        673,
+        802,
+        59,
+        93
+      ],
+      "off": [
+        149,
+        133
+      ],
+      "label": "corner @ 75 deg"
+    },
+    {
+      "index": 252,
+      "angle": 180.0,
+      "phase": 10,
+      "col": 12,
+      "row": 10,
+      "rect": [
+        162,
+        1354,
+        65,
+        89
+      ],
+      "off": [
+        160,
+        136
+      ],
+      "label": "side @ 90 deg"
+    },
+    {
+      "index": 253,
+      "angle": 195.0,
+      "phase": 10,
+      "col": 13,
+      "row": 10,
+      "rect": [
+        741,
+        1621,
+        73,
+        86
+      ],
+      "off": [
+        170,
+        136
+      ],
+      "label": "corner @ 105 deg"
+    },
+    {
+      "index": 254,
+      "angle": 210.0,
+      "phase": 10,
+      "col": 14,
+      "row": 10,
+      "rect": [
+        411,
+        1709,
+        79,
+        85
+      ],
+      "off": [
+        179,
+        132
+      ],
+      "label": "corner @ 120 deg"
+    },
+    {
+      "index": 255,
+      "angle": 225.0,
+      "phase": 10,
+      "col": 15,
+      "row": 10,
+      "rect": [
+        491,
+        1709,
+        82,
+        85
+      ],
+      "off": [
+        190,
+        127
+      ],
+      "label": "corner @ 135 deg"
+    },
+    {
+      "index": 256,
+      "angle": 240.0,
+      "phase": 10,
+      "col": 16,
+      "row": 10,
+      "rect": [
+        815,
+        1621,
+        82,
+        86
+      ],
+      "off": [
+        200,
+        120
+      ],
+      "label": "side @ 150 deg"
+    },
+    {
+      "index": 257,
+      "angle": 255.0,
+      "phase": 10,
+      "col": 17,
+      "row": 10,
+      "rect": [
+        467,
+        1533,
+        75,
+        87
+      ],
+      "off": [
+        210,
+        113
+      ],
+      "label": "corner @ 165 deg"
+    },
+    {
+      "index": 258,
+      "angle": 270.0,
+      "phase": 10,
+      "col": 18,
+      "row": 10,
+      "rect": [
+        543,
+        1533,
+        66,
+        87
+      ],
+      "off": [
+        217,
+        105
+      ],
+      "label": "corner @ 180 deg"
+    },
+    {
+      "index": 259,
+      "angle": 285.0,
+      "phase": 10,
+      "col": 19,
+      "row": 10,
+      "rect": [
+        581,
+        1444,
+        57,
+        88
+      ],
+      "off": [
+        219,
+        97
+      ],
+      "label": "corner @ 195 deg"
+    },
+    {
+      "index": 260,
+      "angle": 300.0,
+      "phase": 10,
+      "col": 20,
+      "row": 10,
+      "rect": [
+        639,
+        1444,
+        52,
+        88
+      ],
+      "off": [
+        216,
+        90
+      ],
+      "label": "side @ 210 deg"
+    },
+    {
+      "index": 261,
+      "angle": 315.0,
+      "phase": 10,
+      "col": 21,
+      "row": 10,
+      "rect": [
+        228,
+        1354,
+        59,
+        89
+      ],
+      "off": [
+        203,
+        83
+      ],
+      "label": "corner @ 225 deg"
+    },
+    {
+      "index": 262,
+      "angle": 330.0,
+      "phase": 10,
+      "col": 22,
+      "row": 10,
+      "rect": [
+        692,
+        1444,
+        60,
+        88
+      ],
+      "off": [
+        190,
+        79
+      ],
+      "label": "corner @ 240 deg"
+    },
+    {
+      "index": 263,
+      "angle": 345.0,
+      "phase": 10,
+      "col": 23,
+      "row": 10,
+      "rect": [
+        610,
+        1533,
+        59,
+        87
+      ],
+      "off": [
+        176,
+        76
+      ],
+      "label": "corner @ 255 deg"
+    },
+    {
+      "index": 264,
+      "angle": 0.0,
+      "phase": 11,
+      "col": 0,
+      "row": 11,
+      "rect": [
+        670,
+        1533,
+        66,
+        87
+      ],
+      "off": [
+        159,
+        74
+      ],
+      "label": "side @ 270 deg"
+    },
+    {
+      "index": 265,
+      "angle": 15.0,
+      "phase": 11,
+      "col": 1,
+      "row": 11,
+      "rect": [
+        737,
+        1533,
+        75,
+        87
+      ],
+      "off": [
+        140,
+        75
+      ],
+      "label": "corner @ 285 deg"
+    },
+    {
+      "index": 266,
+      "angle": 30.0,
+      "phase": 11,
+      "col": 2,
+      "row": 11,
+      "rect": [
+        813,
+        1533,
+        80,
+        87
+      ],
+      "off": [
+        125,
+        78
+      ],
+      "label": "corner @ 300 deg"
+    },
+    {
+      "index": 267,
+      "angle": 45.0,
+      "phase": 11,
+      "col": 3,
+      "row": 11,
+      "rect": [
+        894,
+        1533,
+        83,
+        87
+      ],
+      "off": [
+        112,
+        83
+      ],
+      "label": "corner @ 315 deg"
+    },
+    {
+      "index": 268,
+      "angle": 60.0,
+      "phase": 11,
+      "col": 4,
+      "row": 11,
+      "rect": [
+        1,
+        1621,
+        82,
+        87
+      ],
+      "off": [
+        102,
+        90
+      ],
+      "label": "side @ 330 deg"
+    },
+    {
+      "index": 269,
+      "angle": 75.0,
+      "phase": 11,
+      "col": 5,
+      "row": 11,
+      "rect": [
+        753,
+        1444,
+        76,
+        88
+      ],
+      "off": [
+        98,
+        97
+      ],
+      "label": "corner @ 345 deg"
+    },
+    {
+      "index": 270,
+      "angle": 90.0,
+      "phase": 11,
+      "col": 6,
+      "row": 11,
+      "rect": [
+        288,
+        1354,
+        67,
+        89
+      ],
+      "off": [
+        101,
+        105
+      ],
+      "label": "corner @ 0 deg"
+    },
+    {
+      "index": 271,
+      "angle": 105.0,
+      "phase": 11,
+      "col": 7,
+      "row": 11,
+      "rect": [
+        428,
+        896,
+        58,
+        92
+      ],
+      "off": [
+        108,
+        111
+      ],
+      "label": "corner @ 15 deg"
+    },
+    {
+      "index": 272,
+      "angle": 120.0,
+      "phase": 11,
+      "col": 8,
+      "row": 11,
+      "rect": [
+        943,
+        515,
+        50,
+        95
+      ],
+      "off": [
+        119,
+        117
+      ],
+      "label": "side @ 30 deg"
+    },
+    {
+      "index": 273,
+      "angle": 135.0,
+      "phase": 11,
+      "col": 9,
+      "row": 11,
+      "rect": [
+        66,
+        515,
+        53,
+        96
+      ],
+      "off": [
+        129,
+        122
+      ],
+      "label": "corner @ 45 deg"
+    },
+    {
+      "index": 274,
+      "angle": 150.0,
+      "phase": 11,
+      "col": 10,
+      "row": 11,
+      "rect": [
+        120,
+        515,
+        55,
+        96
+      ],
+      "off": [
+        141,
+        127
+      ],
+      "label": "corner @ 60 deg"
+    },
+    {
+      "index": 275,
+      "angle": 165.0,
+      "phase": 11,
+      "col": 11,
+      "row": 11,
+      "rect": [
+        291,
+        707,
+        59,
+        94
+      ],
+      "off": [
+        150,
+        131
+      ],
+      "label": "corner @ 75 deg"
+    },
+    {
+      "index": 276,
+      "angle": 180.0,
+      "phase": 11,
+      "col": 12,
+      "row": 11,
+      "rect": [
+        170,
+        1081,
+        67,
+        91
+      ],
+      "off": [
+        159,
+        133
+      ],
+      "label": "side @ 90 deg"
+    },
+    {
+      "index": 277,
+      "angle": 195.0,
+      "phase": 11,
+      "col": 13,
+      "row": 11,
+      "rect": [
+        379,
+        1173,
+        75,
+        90
+      ],
+      "off": [
+        169,
+        131
+      ],
+      "label": "corner @ 105 deg"
+    },
+    {
+      "index": 278,
+      "angle": 210.0,
+      "phase": 11,
+      "col": 14,
+      "row": 11,
+      "rect": [
+        238,
+        1081,
+        80,
+        91
+      ],
+      "off": [
+        179,
+        127
+      ],
+      "label": "corner @ 120 deg"
+    },
+    {
+      "index": 279,
+      "angle": 225.0,
+      "phase": 11,
+      "col": 15,
+      "row": 11,
+      "rect": [
+        319,
+        1081,
+        83,
+        91
+      ],
+      "off": [
+        189,
+        122
+      ],
+      "label": "corner @ 135 deg"
+    },
+    {
+      "index": 280,
+      "angle": 240.0,
+      "phase": 11,
+      "col": 16,
+      "row": 11,
+      "rect": [
+        455,
+        1173,
+        82,
+        90
+      ],
+      "off": [
+        200,
+        116
+      ],
+      "label": "side @ 150 deg"
+    },
+    {
+      "index": 281,
+      "angle": 255.0,
+      "phase": 11,
+      "col": 17,
+      "row": 11,
+      "rect": [
+        538,
+        1173,
+        76,
+        90
+      ],
+      "off": [
+        210,
+        108
+      ],
+      "label": "corner @ 165 deg"
+    },
+    {
+      "index": 282,
+      "angle": 270.0,
+      "phase": 11,
+      "col": 18,
+      "row": 11,
+      "rect": [
+        615,
+        1173,
+        67,
+        90
+      ],
+      "off": [
+        216,
+        100
+      ],
+      "label": "corner @ 180 deg"
+    },
+    {
+      "index": 283,
+      "angle": 285.0,
+      "phase": 11,
+      "col": 19,
+      "row": 11,
+      "rect": [
+        683,
+        1173,
+        58,
+        90
+      ],
+      "off": [
+        218,
+        93
+      ],
+      "label": "corner @ 195 deg"
+    },
+    {
+      "index": 284,
+      "angle": 300.0,
+      "phase": 11,
+      "col": 20,
+      "row": 11,
+      "rect": [
+        742,
+        1173,
+        50,
+        90
+      ],
+      "off": [
+        215,
+        86
+      ],
+      "label": "side @ 210 deg"
+    },
+    {
+      "index": 285,
+      "angle": 315.0,
+      "phase": 11,
+      "col": 21,
+      "row": 11,
+      "rect": [
+        403,
+        1081,
+        53,
+        91
+      ],
+      "off": [
+        202,
+        79
+      ],
+      "label": "corner @ 225 deg"
+    },
+    {
+      "index": 286,
+      "angle": 330.0,
+      "phase": 11,
+      "col": 22,
+      "row": 11,
+      "rect": [
+        793,
+        1173,
+        55,
+        90
+      ],
+      "off": [
+        188,
+        75
+      ],
+      "label": "corner @ 240 deg"
+    },
+    {
+      "index": 287,
+      "angle": 345.0,
+      "phase": 11,
+      "col": 23,
+      "row": 11,
+      "rect": [
+        830,
+        1444,
+        59,
+        88
+      ],
+      "off": [
+        175,
+        74
+      ],
+      "label": "corner @ 255 deg"
+    }
+  ],
+  "packed": true,
+  "over_turret": [
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    false,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    true,
+    false,
+    false,
+    false,
+    false
+  ],
+  "over_turret_margin": [
+    0.99,
+    0.99,
+    0.988,
+    0.983,
+    0.944,
+    0.872,
+    0.613,
+    0.053,
+    0.556,
+    0.863,
+    0.916,
+    0.93,
+    0.932,
+    0.922,
+    0.906,
+    0.87,
+    0.785,
+    0.667,
+    0.491,
+    0.081,
+    0.514,
+    0.943,
+    0.977,
+    0.99
+  ],
+  "layer": "burn",
+  "static": false,
+  "ports": {
+    "hull_length": 0.79924,
+    "hull_length_from": "hull atlas broadside fit",
+    "hull_width": 0.522648,
+    "hull_fit_residual": 0.05952,
+    "list": [
+      {
+        "point": [
+          -0.00174,
+          0.36549,
+          -0.06105
+        ],
+        "dir": [
+          0.00012,
+          -0.0069,
+          0.99998
+        ],
+        "radius": 0.1312
+      }
+    ]
+  }
+}

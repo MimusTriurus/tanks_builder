@@ -1,0 +1,23 @@
+<Project Sdk="Godot.NET.Sdk/4.7.2">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <Nullable>enable</Nullable>
+    <LangVersion>12</LangVersion>
+    <RootNamespace>TankSpriteTest</RootNamespace>
+  </PropertyGroup>
+
+  <!--
+    Godot-MCP (addons/godot_mcp, v0.20.1). Versions are the ones that release
+    pins; the addon sources compile into this assembly, so a mismatch here is a
+    build error, not a runtime surprise.
+  -->
+  <ItemGroup>
+    <PackageReference Include="com.IvanMurzak.ReflectorNet" Version="5.4.0" />
+    <PackageReference Include="com.IvanMurzak.McpPlugin" Version="7.5.2" />
+  <PackageReference Include="com.IvanMurzak.Godot.MCP.Particles" Version="*" /><PackageReference Include="com.IvanMurzak.Godot.MCP.Tilemap" Version="*" /><PackageReference Include="com.IvanMurzak.Godot.MCP.Navigation" Version="*" /><PackageReference Include="com.IvanMurzak.Godot.MCP.Animation" Version="*" /><PackageReference Include="com.IvanMurzak.Godot.MCP.CSG" Version="*" /><PackageReference Include="com.IvanMurzak.Godot.MCP.GridMap" Version="*" /><PackageReference Include="com.IvanMurzak.Godot.MCP.PhantomCamera" Version="*" /><PackageReference Include="com.IvanMurzak.Godot.MCP.Beehave" Version="*" /><PackageReference Include="com.IvanMurzak.Godot.MCP.Dialogic" Version="*" /><PackageReference Include="com.IvanMurzak.Godot.MCP.Terrain3D" Version="*" /></ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="addons/godot_mcp/extensions.catalog.json" LogicalName="Godot-MCP.extensions.catalog.json" />
+  </ItemGroup>
+</Project>

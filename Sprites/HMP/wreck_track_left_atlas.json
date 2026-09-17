@@ -1,0 +1,475 @@
+{
+  "atlas": "wreck_track_left_atlas.png",
+  "tile": [
+    256,
+    256
+  ],
+  "grid": {
+    "columns": 5,
+    "rows": 5
+  },
+  "count": 24,
+  "phases": 1,
+  "rendered": [
+    "L.Caterpillar.Rebuilt",
+    "L.Rolls.Geometry"
+  ],
+  "excluded": [
+    "L.Caterpillar.Geometry"
+  ],
+  "view": {
+    "projection": "ortho",
+    "elevation": 30.0,
+    "azimuth": 0.0,
+    "spin": "object",
+    "direction": "ccw"
+  },
+  "spin_pivot": [
+    0.0,
+    0.00421,
+    -0.012046
+  ],
+  "ortho_scale": 1.626195764541626,
+  "units_per_pixel": 0.006352327205240727,
+  "anchor_px": [
+    128.0,
+    118.72468757629395
+  ],
+  "frames": [
+    {
+      "index": 0,
+      "angle": 0.0,
+      "phase": 0,
+      "col": 0,
+      "row": 0,
+      "rect": [
+        1,
+        1,
+        34,
+        108
+      ],
+      "off": [
+        66,
+        103
+      ],
+      "label": "side @ 270 deg"
+    },
+    {
+      "index": 1,
+      "angle": 15.0,
+      "phase": 0,
+      "col": 1,
+      "row": 0,
+      "rect": [
+        36,
+        1,
+        54,
+        107
+      ],
+      "off": [
+        64,
+        111
+      ],
+      "label": "corner @ 285 deg"
+    },
+    {
+      "index": 2,
+      "angle": 30.0,
+      "phase": 0,
+      "col": 2,
+      "row": 0,
+      "rect": [
+        274,
+        1,
+        98,
+        96
+      ],
+      "off": [
+        41,
+        125
+      ],
+      "label": "corner @ 300 deg"
+    },
+    {
+      "index": 3,
+      "angle": 45.0,
+      "phase": 0,
+      "col": 3,
+      "row": 0,
+      "rect": [
+        782,
+        1,
+        127,
+        87
+      ],
+      "off": [
+        33,
+        134
+      ],
+      "label": "corner @ 315 deg"
+    },
+    {
+      "index": 4,
+      "angle": 60.0,
+      "phase": 0,
+      "col": 4,
+      "row": 0,
+      "rect": [
+        284,
+        110,
+        150,
+        73
+      ],
+      "off": [
+        30,
+        145
+      ],
+      "label": "side @ 330 deg"
+    },
+    {
+      "index": 5,
+      "angle": 75.0,
+      "phase": 0,
+      "col": 0,
+      "row": 1,
+      "rect": [
+        1,
+        190,
+        163,
+        58
+      ],
+      "off": [
+        35,
+        154
+      ],
+      "label": "corner @ 345 deg"
+    },
+    {
+      "index": 6,
+      "angle": 90.0,
+      "phase": 0,
+      "col": 1,
+      "row": 1,
+      "rect": [
+        475,
+        190,
+        166,
+        45
+      ],
+      "off": [
+        45,
+        159
+      ],
+      "label": "corner @ 0 deg"
+    },
+    {
+      "index": 7,
+      "angle": 105.0,
+      "phase": 0,
+      "col": 2,
+      "row": 1,
+      "rect": [
+        809,
+        190,
+        168,
+        39
+      ],
+      "off": [
+        56,
+        162
+      ],
+      "label": "corner @ 15 deg"
+    },
+    {
+      "index": 8,
+      "angle": 120.0,
+      "phase": 0,
+      "col": 3,
+      "row": 1,
+      "rect": [
+        165,
+        190,
+        160,
+        55
+      ],
+      "off": [
+        71,
+        152
+      ],
+      "label": "side @ 30 deg"
+    },
+    {
+      "index": 9,
+      "angle": 135.0,
+      "phase": 0,
+      "col": 4,
+      "row": 1,
+      "rect": [
+        435,
+        110,
+        140,
+        69
+      ],
+      "off": [
+        90,
+        141
+      ],
+      "label": "corner @ 45 deg"
+    },
+    {
+      "index": 10,
+      "angle": 150.0,
+      "phase": 0,
+      "col": 0,
+      "row": 2,
+      "rect": [
+        910,
+        1,
+        111,
+        81
+      ],
+      "off": [
+        112,
+        130
+      ],
+      "label": "corner @ 60 deg"
+    },
+    {
+      "index": 11,
+      "angle": 165.0,
+      "phase": 0,
+      "col": 1,
+      "row": 2,
+      "rect": [
+        607,
+        1,
+        75,
+        89
+      ],
+      "off": [
+        134,
+        119
+      ],
+      "label": "corner @ 75 deg"
+    },
+    {
+      "index": 12,
+      "angle": 180.0,
+      "phase": 0,
+      "col": 2,
+      "row": 2,
+      "rect": [
+        436,
+        1,
+        34,
+        92
+      ],
+      "off": [
+        156,
+        111
+      ],
+      "label": "side @ 90 deg"
+    },
+    {
+      "index": 13,
+      "angle": 195.0,
+      "phase": 0,
+      "col": 3,
+      "row": 2,
+      "rect": [
+        373,
+        1,
+        62,
+        93
+      ],
+      "off": [
+        138,
+        105
+      ],
+      "label": "corner @ 105 deg"
+    },
+    {
+      "index": 14,
+      "angle": 210.0,
+      "phase": 0,
+      "col": 4,
+      "row": 2,
+      "rect": [
+        683,
+        1,
+        98,
+        88
+      ],
+      "off": [
+        117,
+        102
+      ],
+      "label": "corner @ 120 deg"
+    },
+    {
+      "index": 15,
+      "angle": 225.0,
+      "phase": 0,
+      "col": 0,
+      "row": 3,
+      "rect": [
+        1,
+        110,
+        127,
+        79
+      ],
+      "off": [
+        96,
+        102
+      ],
+      "label": "corner @ 135 deg"
+    },
+    {
+      "index": 16,
+      "angle": 240.0,
+      "phase": 0,
+      "col": 1,
+      "row": 3,
+      "rect": [
+        576,
+        110,
+        149,
+        68
+      ],
+      "off": [
+        77,
+        104
+      ],
+      "label": "side @ 150 deg"
+    },
+    {
+      "index": 17,
+      "angle": 255.0,
+      "phase": 0,
+      "col": 2,
+      "row": 3,
+      "rect": [
+        326,
+        190,
+        148,
+        54
+      ],
+      "off": [
+        73,
+        108
+      ],
+      "label": "corner @ 165 deg"
+    },
+    {
+      "index": 18,
+      "angle": 270.0,
+      "phase": 0,
+      "col": 3,
+      "row": 3,
+      "rect": [
+        642,
+        190,
+        166,
+        40
+      ],
+      "off": [
+        45,
+        112
+      ],
+      "label": "corner @ 180 deg"
+    },
+    {
+      "index": 19,
+      "angle": 285.0,
+      "phase": 0,
+      "col": 4,
+      "row": 3,
+      "rect": [
+        726,
+        110,
+        161,
+        61
+      ],
+      "off": [
+        32,
+        105
+      ],
+      "label": "corner @ 195 deg"
+    },
+    {
+      "index": 20,
+      "angle": 300.0,
+      "phase": 0,
+      "col": 0,
+      "row": 4,
+      "rect": [
+        129,
+        110,
+        154,
+        77
+      ],
+      "off": [
+        25,
+        99
+      ],
+      "label": "side @ 210 deg"
+    },
+    {
+      "index": 21,
+      "angle": 315.0,
+      "phase": 0,
+      "col": 1,
+      "row": 4,
+      "rect": [
+        471,
+        1,
+        135,
+        91
+      ],
+      "off": [
+        26,
+        96
+      ],
+      "label": "corner @ 225 deg"
+    },
+    {
+      "index": 22,
+      "angle": 330.0,
+      "phase": 0,
+      "col": 2,
+      "row": 4,
+      "rect": [
+        165,
+        1,
+        108,
+        101
+      ],
+      "off": [
+        33,
+        96
+      ],
+      "label": "corner @ 240 deg"
+    },
+    {
+      "index": 23,
+      "angle": 345.0,
+      "phase": 0,
+      "col": 3,
+      "row": 4,
+      "rect": [
+        91,
+        1,
+        73,
+        107
+      ],
+      "off": [
+        47,
+        98
+      ],
+      "label": "corner @ 255 deg"
+    }
+  ],
+  "packed": true,
+  "layer": "wreck_track_left",
+  "static": false
+}

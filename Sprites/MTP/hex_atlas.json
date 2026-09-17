@@ -1,0 +1,58 @@
+{
+  "atlas": "hex_atlas.png",
+  "tile": [
+    256,
+    256
+  ],
+  "grid": {
+    "columns": 1,
+    "rows": 1
+  },
+  "count": 1,
+  "phases": 1,
+  "rendered": [
+    "Hex"
+  ],
+  "excluded": [],
+  "view": {
+    "projection": "ortho",
+    "elevation": 30.0,
+    "azimuth": 0.0,
+    "spin": "object",
+    "direction": "ccw"
+  },
+  "spin_pivot": [
+    0.0,
+    0.00654,
+    -0.026647
+  ],
+  "ortho_scale": 1.5264372634887695,
+  "units_per_pixel": 0.005962645560503006,
+  "anchor_px": [
+    128.0,
+    116.27326583862305
+  ],
+  "frames": [
+    {
+      "index": 0,
+      "angle": 0.0,
+      "phase": 0,
+      "col": 0,
+      "row": 0,
+      "rect": [
+        1,
+        1,
+        248,
+        109
+      ],
+      "off": [
+        4,
+        119
+      ],
+      "label": "static tile"
+    }
+  ],
+  "packed": true,
+  "layer": "hex",
+  "static": true
+}

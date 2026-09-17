@@ -1,0 +1,16 @@
+{
+  "enabledMcpjsonServers": ["godot"],
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python \"$CLAUDE_PROJECT_DIR/.claude/hooks/godot_status.py\""
+          }
+        ]
+      }
+    ]
+  }
+}

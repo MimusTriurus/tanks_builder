@@ -1,0 +1,6457 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using Godot;
+
+namespace TankSpriteTest;
+
+/// <summary>
+/// Test harness for the tank sprite atlases: a hex field, one tank driving
+/// around it, and independent control of hull and turret headings.
+///
+/// What it is actually for, in order:
+///   1. does the turret turn independently of the hull, with no seam gap
+///   2. does the turret stay pinned to its axis instead of orbiting (SPACE)
+///   3. does the tank sit centred in its cell at all twelve headings
+///   4. does the field tessellate without gaps or overlap
+/// </summary>
+public sealed partial class Main : SceneRoot
+{
+	/// <summary>Four frames is enough for the harness: nothing has to have
+	/// moved for a shot of the board to be worth looking at.</summary>
+	public Main() : base(4) { }
+
+	/// <summary>The five folders the bench reads, all off <see cref="AssetRoot"/>
+	/// - which derives them from where this project sits rather than naming a
+	/// machine. They were literals until the repository moved and renamed all
+	/// five at once; see AssetRoot for what that costs and why nothing said so.
+	///
+	/// Private, and the test reads <see cref="AssetRoot"/> for itself: it used to
+	/// carry its own copy of the path, which is the whole reason there is one name
+	/// now - but the one name is AssetRoot's, not this node's.</summary>
+	private static readonly string SpritesRoot = AssetRoot.Sprites;
+	private static readonly string SoundsRoot = AssetRoot.Sounds;
+	private static readonly string TerrainsRoot = AssetRoot.Terrains;
+	private static readonly string PropsRoot = AssetRoot.Props;
+	private static readonly string WaterRoot = AssetRoot.Water;
+
+	/// <summary>
+	/// One directory every class reads its pixels from, or null for one per tag.
+	///
+	/// Null, which is the normal state: all three classes now have an atlas of
+	/// their own, so each wears its own pixels and the field shows three tanks
+	/// rather than one tank three times.
+	///
+	/// It is there for the case it was used for twice - a new layer landing on
+	/// one tank ahead of the others. Setting it to a tag makes every class read
+	/// that tank's atlases, so the layer can be judged in motion instead of on a
+	/// contact sheet. It swaps the *pixels*, not the class: <see
+	/// cref="AtlasSet.Tag"/> stays the tag it was asked for, so <see
+	/// cref="MovementProfile"/> still gives each tank its own speed, acceleration
+	/// and size - which makes it a sharper test of the size logic than the real
+	/// thing, not a weaker one, because three identical sprites at 0.85, 1.00 and
+	/// 1.15 have nothing but the scale to explain any difference between them.
+	///
+	/// Whichever tank is being looked at is the one to lend. The heavy earned its
+	/// turn because its gun is a short fat howitzer rather than a rod: the muzzle
+	/// the bench finds off the barrel layer is a stub 27x19 px on the away
+	/// headings, the hardest case for <see cref="AtlasSet.FindMuzzles"/> and the
+	/// one its no-erosion fallback pass exists for.
+	/// </summary>
+	private const string? SharedSpriteDir = null;
+
+	/// <summary>Which directory the pixels actually come from this run:
+	/// <see cref="SharedSpriteDir"/> unless `--sprites` said otherwise.
+	///
+	/// The flag exists because the case this is for - a layer landing on one
+	/// tank before the others - is exactly the case where editing a constant and
+	/// rebuilding is the wrong shape of work. It is the same argument the two
+	/// slider flags make: the thing being judged is a picture, and taking it
+	/// twice should not need a source edit between the two.</summary>
+	private string? _spriteDir = SharedSpriteDir;
+
+	private const double SpinSpeed = 90.0;      // deg/sec, for the wobble check
+
+	private readonly Dictionary<string, AtlasSet> _atlases = new();
+	private readonly List<string> _loaded = new();
+
+	/// <summary>One sound set per class, plus the shared one. Split the way the
+	/// pixels are: what a tank is, per tank; what happens to it, once - see
+	/// <see cref="SoundSet"/>.</summary>
+	private readonly Dictionary<string, SoundSet> _sounds = new();
+	private SoundSet _commonSounds = null!;
+
+	/// <summary>Sound on, as every other effect is on a switch. Off silences,
+	/// it does not unload, so an A/B is one keypress apart.</summary>
+	private bool _soundEnabled = true;
+
+	/// <summary>
+	/// The tracer drawn, or the round flying invisibly - key none, --tracer, or
+	/// the panel. **On by default, and it switches the drawing only.**
+	///
+	/// The flight itself is not optional and must not become so: it is what puts
+	/// time between the report and the impact, which is the whole reason the
+	/// round exists (see <see cref="Shell"/>). Switching this off gives back
+	/// exactly the picture the bench had before there was a tracer, with the
+	/// timing that came with it - which is the A/B worth having, and would not be
+	/// one if the shell stopped flying too.
+	///
+	/// **It was off, and the reason it was has expired.** A debug line that
+	/// crept into an A/B would be measuring itself, so while the tracer was one
+	/// stroke of plain code that was the right default. It is now a drawn layer
+	/// with a calibre, a trail and two levels of its own - something to be judged
+	/// rather than something to keep out of the way - and a feature you have to
+	/// switch on to see is a feature nobody looks at. The comparison is still one
+	/// click away, which is all it ever needed to be.
+	///
+	/// The default itself belongs to the round rather than to this board -
+	/// see <see cref="Shell.TracerOnByDefault"/>, which is where it is named,
+	/// and the switch itself is <see cref="TankTick.TracerVisible"/>, which is
+	/// where the rounds are.
+	/// </summary>
+	private bool _tracerVisible
+	{
+		get => Tick.TracerVisible;
+		set => Tick.TracerVisible = value;
+	}
+
+	/// <summary>The turret's traverse motor - --no-turret-sound, or the panel.
+	/// On; the default is the voice's own, at
+	/// <see cref="VehicleAudio.TurretSoundOnByDefault"/>.</summary>
+	private bool _turretSound = VehicleAudio.TurretSoundOnByDefault;
+
+	/// <summary>
+	/// All three tanks, in the order they loaded, which is also key order and the
+	/// order they are parked in from left to right.
+	///
+	/// Three at once rather than one wearing three atlases in turn, because the
+	/// size difference is a comparison and a comparison needs both terms on
+	/// screen: 0.85x against 1.15x cannot be judged from memory across a key
+	/// press. Everything a tank owns is in <see cref="Vehicle"/>; what is left
+	/// here belongs to the harness.
+	/// </summary>
+	private readonly List<Vehicle> _vehicles = new();
+
+	/// <summary>Which one the keys drive. Selected by clicking it, by a number
+	/// key, or from the panel - three ways into one field, which is what stops
+	/// them disagreeing.</summary>
+	private int _active = 1;                    // MTP - the reference tank
+
+	private Vehicle Active => _vehicles[_active];
+
+	/// <summary>The sprite of the tank being driven. A property rather than a
+	/// field so that every line written against the old single-tank harness still
+	/// says what it said - it just now says it about whichever tank is
+	/// selected.</summary>
+	private TankSprite _tank => Active.Sprite;
+
+	private HexField _field = null!;
+	private TerrainSet? _terrain;
+	private TrackMarks? _marks;
+	private PropSet? _props;
+	private Grove? _grove;
+
+	/// <summary>What a frame does to a tank: the drive, the placement and every
+	/// clock, in one object shared with <see cref="TankBench"/>. See
+	/// <see cref="TankTick"/> for why it is not written twice.</summary>
+	/// <summary>This board's tick, and the twelve switches with it - see
+	/// <see cref="TankTick.PitchEnabled"/>. The pitch opens off here and on at
+	/// the tank bench, and that is the one they disagree about: there the ride is
+	/// the subject, here it is a thing to switch on with P and look at.</summary>
+	private readonly TankTick _tick = new() { PitchEnabled = false };
+
+	/// <summary>The tick with this frame's world already on it.
+	///
+	/// <b>A property rather than the field, so that reaching for it and telling
+	/// it what the world is are one act.</b> Every caller here is either the
+	/// frame loop or a key that has just moved a switch, and those two fail in
+	/// opposite directions if the binding is left to the loop alone: a key
+	/// applied through last frame's binding does nothing until the next frame -
+	/// which is exactly what <c>PitchChanged</c> and its four neighbours exist
+	/// to prevent - and a call made before the first frame reaches a tick with
+	/// no board on it. Twenty-five assignments, a few dozen times a frame; the
+	/// alternative is a list of places that have to remember.</summary>
+	private TankTick Tick
+	{
+		get
+		{
+			Bind();
+			return _tick;
+		}
+	}
+
+	/// <summary>Hand the tick this frame's world and this frame's switches.
+	///
+	/// Every frame rather than once, and that is the same rule the tremble level
+	/// and the exhaust level already follow here: a switch pushed only when it is
+	/// dragged leaves anything built afterwards on the tuned figure, and a switch
+	/// pushed only at start-up is overwritten by the first drag. One method, so
+	/// that "did the tick get told" is a question with one place to look.</summary>
+	private void Bind()
+	{
+		_tick.Field = _field;
+		_tick.Origin = _origin;
+		_tick.Terrain = _terrain;
+		_tick.Marks = _marks;
+		_tick.Wood = _grove;
+		_tick.Shake = _shake;
+		_tick.Vehicles = _vehicles;
+		_tick.Driven = _vehicles.Count > 0 ? Active : null;
+		_tick.ViewZoom = _camera?.Zoom.X ?? 1.0f;
+		_tick.Staged = Staged;
+
+		// Where a round's node hangs. The board and never the tank - see
+		// TankTick.Deck.
+		_tick.Deck = this;
+
+		// The three the tick cannot answer for itself. All are the harness's own:
+		// the spin key and mouse aim suspend the scan, and gunnery is about two
+		// tanks - who is being engaged, whose lane, whose armour. See TankTick.Aim
+		// and TankTick.Launch.
+		_tick.TurretHeld = _ => _spinning || _aimWithMouse;
+		_tick.Aim = UpdateAttack;
+		_tick.Launch = RoundFor;
+		// And the fourth: what the board makes of a round that went into it.
+		// A burst is a thing standing on the board, so it is the board's answer
+		// to give - see TankTick.Landed, which was already here and unanswered.
+		_tick.Landed = Splashed;
+		// A hull dropping into the pond throws its bow wave and its fans, heavier
+		// by class - see TankTick.Plunged and Plunge; the look is the panel's.
+		_tick.Plunged = (v, spot, top, might) => Plunged(v, spot, top, might);
+		// And the fifth: what the board makes of the gun going off over it. The
+		// same division as the fourth - see TankTick.Kicked - and answered here for
+		// the same reason: the cloud is a quad in the 3D world.
+		_tick.Kicked = Kicked;
+		// And the same cloud off a different event: two hulls meeting in a ram -
+		// see TankTick.Bumped. One call per hull, so this line says nothing about
+		// rams at all.
+		_tick.Bumped = Bumped;
+		// And the metal of that same collision, which is the ricochet's fan with
+		// no round in it - see TankTick.Sparked. One call per hull like the cloud
+		// above, and unlike it seated on the hull rather than between the two.
+		_tick.Sparked = Sparked;
+		// And the sixth: what the board makes of a round that bounced off
+		// armour. Same division again - see TankTick.Bounced - and the fan is
+		// a quad in the 3D world, so the flat board answers nothing and a
+		// bounce there draws what it always did.
+		_tick.Bounced = Bounced;
+		// And the seventh: what the board makes of an HE round bursting on a
+		// plate. Same division a third time - see TankTick.Blasted - and the
+		// difference from the sixth is one direction: a mirror there, the plate's
+		// own normal here.
+		_tick.Blasted = Blasted;
+		// And the eighth, which is the first one that is not a shell: what the
+		// board makes of a tank whose ammunition went off - see
+		// TankTick.Detonated. Same division as the other three and the same
+		// answer on the flat board, where a hull dies as it always did.
+		_tick.Detonated = Detonated;
+		_tick.Flashed = Flashed;
+		// And the ninth, which is neither a shell nor the hull it hit: a mine
+		// going off under a tank that drove over it - see TankTick.Mined. A burst
+		// at a point on the board, and the tank standing on it hides most of it.
+		_tick.Mined = Mined;
+	}
+
+	/// <summary>
+	/// A round that went into the field: set a burst off where it landed.
+	///
+	/// <b>The shell already carries both halves of where.</b> Its landing point
+	/// is in board space and its own lift travels with it, which is exactly the
+	/// pair <see cref="Stage3D.Burst"/> wants - so nothing here has to work out
+	/// which cell was hit or how high that cell stands, and nothing can disagree
+	/// with the walk that put the shell there.
+	///
+	/// <b>Which of the two bursts it is comes off the stage</b>
+	/// (<see cref="Stage3D.Blast"/>, the flipbook by default, <c>--burst</c> to
+	/// pick), through the one method both roots call - see
+	/// <see cref="Stage3D.Land"/> on why that is a method and not two calls.
+	///
+	/// <b>Only on the stage, and that is the decision rather than a gap.</b> The
+	/// burst is a quad in the 3D world and the mark it leaves is a term in the
+	/// stage's own ground shader; the flat board has nowhere to put either. It is
+	/// legacy, so this is a thing it does not have.
+	///
+	/// A round that hits a tank does not come here at all - see
+	/// <see cref="TankTick.Strike"/> - and that is right: armour is its own
+	/// burst, the second family in docs/blast.md, and it hangs off the tank's own
+	/// picture rather than off the board.
+	/// </summary>
+	private void Splashed(Shell round) =>
+		// <b>At the calibre the gun is loaded with.</b> Ordnance already keeps
+		// the three sizes and the hit decal already reads them; a burst that
+		// ignored them would be the one part of a shot that does not know what
+		// was fired.
+		_stage?.Land(round.Ground, round.GroundLift, Ordnance.At(_tick.Calibre));
+
+	/// <summary>
+	/// A gun going off over the board: raise the dust its muzzle blast blows off
+	/// the ground.
+	///
+	/// <b>Seated on the tank's contact point, not on its muzzle</b> - see
+	/// <see cref="ProcKick.Sit"/>. The muzzle is up in the air and the quad's
+	/// bottom edge is the ground, so where the dust ends up is the model's
+	/// business; what this has to supply is a point on the board and the lift
+	/// there, and the contact point is the one place both are known exactly.
+	///
+	/// <b>At the calibre the gun is loaded with</b>, <see cref="Splashed"/>'s
+	/// reason and the same dial: a bigger round does not blow the same dust, and
+	/// this is the one part of a shot that would otherwise not know what was
+	/// fired.
+	///
+	/// Only on the stage, for <see cref="Splashed"/>'s reason word for word.
+	/// </summary>
+	/// <summary>
+	/// Two hulls meeting: the dust a ram throws off the ground under each of
+	/// them - <see cref="TankTick.Bumped"/>.
+	///
+	/// <b><see cref="Kicked"/> with no snout.</b> The gun's cloud is thrown by
+	/// gas leaving a tube that is up on the turret, so it is handed where that
+	/// tube is; a ram throws the ground itself, from under the hull that is
+	/// being pushed over it, and there is nothing above the tracks to offset it
+	/// by. Seated on the contact patch and aimed along the ram, which is the
+	/// heading both hulls are being moved along.
+	/// </summary>
+	private void Bumped(Vehicle v, Vector2 spot, Vector2 along) =>
+		_stage?.Kick(spot, v.LiftOf(spot), along, Vector2.Zero,
+					 TankTick.RamKick, Stage3D.DressOrder);
+
+	/// <summary>A crown reaching the ground in a wood the heavy drove into: the
+	/// cloud it throws, at its own point and once per trunk - see
+	/// <see cref="Grove.Thud"/>, which carries why the wood raises this and the
+	/// tick does not.</summary>
+	private void Thudded(Vector2I cell, Vector2 at, Vector2 along) =>
+		_stage?.Kick(_origin + at, _field.LevelAt(cell) * _field.Lift, along,
+					 Vector2.Zero, TankTick.FellKick, Stage3D.DressOrder,
+					 // Earth, not propellant: nobody lit this wood.
+					 ProcKick.Cloud.Ground);
+
+	private void Kicked(Vehicle v, Vector2 along) =>
+		_stage?.Kick(v.GroundPoint, v.LiftOf(v.GroundPoint), along,
+					// Two board-space points subtracted, each through its own one
+					// definition - Vehicle.Spot and Vehicle.GroundPoint - rather
+					// than an offset assembled here out of a scale and an atlas
+					// field. Same reason Vehicle.Bore exists at all.
+					v.Spot(v.Bore(v.Sprite.TurretFacing).Tube) - v.GroundPoint,
+					Ordnance.At(_tick.Calibre));
+
+	/// <summary>
+	/// A round that struck armour and did not get in: throw the spall off the
+	/// plate it bounced from.
+	///
+	/// <b>Seated on the victim's contact point, not on the point of impact</b> -
+	/// <see cref="Kicked"/>'s line word for word, and for the same reason: the
+	/// quad's bottom edge is the ground, and the impact is up on a plate. Where
+	/// on the tank it happened arrives as an offset, measured once in
+	/// <see cref="Vehicle.Graze"/> and projected here through the two definitions
+	/// that already exist.
+	///
+	/// <b>At the calibre the gun is loaded with</b>, for <see cref="Splashed"/>'s
+	/// reason - though this is the one of the three where the size means the least,
+	/// a ricochet being about what the armour did rather than about how much shell
+	/// arrived.
+	///
+	/// Only on the stage, for <see cref="Splashed"/>'s reason word for word.
+	/// </summary>
+	/// <summary>
+	/// An HE round that burst on the face of a plate: raise the fireball and the
+	/// soot off the plate it went off against.
+	///
+	/// <b><see cref="Bounced"/> word for word bar the pool it fills</b>, and that
+	/// is worth saying rather than hiding: the seat, the two projections, the
+	/// depth side and the calibre are the same four things, because both are a
+	/// shell arriving at a measured point on a hull. What differs is entirely
+	/// inside the model - <see cref="Vehicle.Blown"/> against
+	/// <see cref="Vehicle.Graze"/>, one subtraction - and the two roots that
+	/// answer these hooks should not be where that shows.
+	///
+	/// Only on the stage, for <see cref="Splashed"/>'s reason word for word.
+	/// </summary>
+	private void Blasted(Vehicle v, Vector2 plate, Vector2 outward, bool behind) =>
+		_stage?.Slam(v.GroundPoint, v.LiftOf(v.GroundPoint), outward,
+					 v.Spot(plate) - v.GroundPoint, behind,
+					 Ordnance.At(_tick.Calibre));
+
+	/// <summary>
+	/// A tank whose ammunition went off: raise the detonation over its own deck.
+	///
+	/// <b>Three lines where the other three effects take five, and the two it
+	/// does without are the point.</b> There is no plate to project, because
+	/// nothing about this event depends on where the last round hit; and there is
+	/// no depth side, because what comes out of a turret ring is outside the hull
+	/// by the time it is drawn. The size does not come from
+	/// <see cref="Ordnance"/> either - it is the tank that blew up, not the shell
+	/// that arrived. See <see cref="TankTick.Detonated"/>.
+	///
+	/// Only on the stage, for <see cref="Splashed"/>'s reason word for word.
+	/// </summary>
+	private void Detonated(Vehicle v, Vector2 deck, float might) =>
+		_stage?.Detonate(v.GroundPoint, v.LiftOf(v.GroundPoint), deck, might);
+
+	private void Flashed(Vehicle v, Vector2 deck, float might) =>
+		_stage?.Flash(v.GroundPoint, v.LiftOf(v.GroundPoint), deck, might);
+
+	/// <summary>A mine: at the point it was buried, seated there rather than on
+	/// the tank's foot (see Stage3D.Mine), and at the height the tank standing
+	/// over it is standing at - see TankTick.Mined.</summary>
+	private void Mined(Vehicle v, Vector2 at, Vector2 away, float might) =>
+		_stage?.Mine(at, v.LiftOf(v.GroundPoint), away, might,
+					 Mines.Ahead(v, at));
+
+	/// <summary>Two hulls meeting in a ram: the scale off the plate one of them
+	/// met the other on. <see cref="Bounced"/> word for word bar the round and
+	/// the size - see <see cref="Stage3D.Scrape"/> for what taking the round out
+	/// costs and why it is the same pool, and <see cref="TankTick.Sparked"/> for
+	/// why the size arrives with the event instead of coming from the gun.
+	///
+	/// Only on the stage, for <see cref="Splashed"/>'s reason word for word.
+	/// </summary>
+	private void Sparked(Vehicle v, Vector2 plate, Vector2 outward, bool behind,
+						 float might) =>
+		_stage?.Scrape(v.GroundPoint, v.LiftOf(v.GroundPoint), outward,
+					   v.Spot(plate) - v.GroundPoint, behind, might);
+
+	private void Bounced(Vehicle v, Vector2 plate, Vector2 away, bool behind) =>
+		_stage?.Spall(v.GroundPoint, v.LiftOf(v.GroundPoint), away,
+					  // Two board-space points subtracted, each through its own
+					  // one definition - Kicked's note, and the same trap under
+					  // it: on the staged board every sprite lives in a render
+					  // target of its own, so ToGlobal would answer in a
+					  // different space per tank.
+					  v.Spot(plate) - v.GroundPoint, behind,
+					  Ordnance.At(_tick.Calibre));
+
+	/// <summary>Whether the board grows trees at all, and whether one may stand
+	/// where it would cross a tank on its own cell. Parked here for --terrain's
+	/// reason: both are read before the field exists. How *much* forest there is
+	/// is the terrain paint - forest is a kind of ground, not a dial.</summary>
+	private bool _trees = true;
+	private bool _clearFront;
+	private float _ghost = Grove.GhostByDefault;
+	private double _wind = -1.0;
+	private double _blast = -1.0;
+	private double _brush = -1.0;
+
+	/// <summary>Whether the belts leave anything behind. On by default: a tank
+	/// that leaves no mark is the picture the bench already had, so the A/B this
+	/// layer is judged by is the one that needs the flag, not the one that needs
+	/// the default.</summary>
+	private bool _rutsEnabled = true;
+
+	/// <summary>Which ground the board is painted with - a kind's name, or
+	/// mixed. Parked here rather than on the field because --terrain is read
+	/// before the field exists, the trap named beside <c>_flashSource</c>.
+	/// </summary>
+	private string _paint = TerrainSet.Default;
+
+	/// <summary>Whether --terrain was given. The board carries a paint of its own
+	/// (see <see cref="BoardMap.Paint"/>) and it has to lose to an explicit flag
+	/// while winning over the built-in default - which the value alone cannot tell
+	/// apart from a flag, because that default is a real plate name.</summary>
+	private bool _paintAsked;
+
+	/// <summary>Whether the board has height on it. See --relief.</summary>
+	private bool _relief;
+
+	/// <summary>Whether the height on it may be driven. Kept apart from
+	/// <see cref="_relief"/> because they are two different statements about the
+	/// board: one puts levels on it, the other says where they may be crossed -
+	/// and a board with levels and no ramps is exactly how this walked before
+	/// there were ramps, which is the A/B. See --no-ramps.</summary>
+	private bool _ramps = true;
+
+	/// <summary>
+	/// Whether this run gets ramps at all - which is to say, whether the board is
+	/// being drawn by something that can draw a slope.
+	///
+	/// <b>Ramps are a 3D-stage feature, and that is a limit rather than a
+	/// choice.</b> The 2D board draws a cell as one flat hexagon at one lift and
+	/// has no way to express a tilted top, so a ramp there is a cell that paths
+	/// like a slope and is painted like a step. Worse, the rule that decides what
+	/// hides a tank - <see cref="HexField.Occluders"/> and <see cref="ReliefCap"/>
+	/// under it - is written in whole levels, so a surface half a level up is a
+	/// height it cannot answer for: measured, 24 of 28 climbs let a tank out from
+	/// behind the ground early once a ramp was in the leg.
+	///
+	/// The stage has none of that machinery - the depth buffer answers instead -
+	/// so this is the one mode where a ramp is both drawn and judged correctly.
+	/// </summary>
+	private bool Ramped => _ramps && _stage3d;
+
+	/// <summary>Whether the board is flooded where the map says it is. See
+	/// --no-water.</summary>
+	private bool _water = true;
+
+	/// <summary>The depth asked for on the command line, or negative for
+	/// whatever the field and panel.json settle on. Parked here rather than
+	/// written straight to the field for --terrain's reason: the flag is read
+	/// before the field exists.</summary>
+	private double _depth = -1.0;
+
+	/// <summary>The deep water's depth asked for on the command line, or
+	/// negative for the field's own default - <see cref="_depth"/>'s reason.</summary>
+	private double _deepDepth = -1.0;
+
+	/// <summary>How far under its level the deep water's bed is drawn, if
+	/// <c>--deep-bed</c> said, or negative for the field's own default - see
+	/// <see cref="HexField.DeepBed"/>.</summary>
+	private double _deepBed = -1.0;
+
+	/// <summary>Which of the two looks a hull's plunge into the pond is thrown
+	/// in - see <see cref="Plunge.Style"/>. <c>--splash calm|cinematic</c>, the
+	/// row <c>ground.splash</c>.</summary>
+	private Plunge.Style _splash = Plunge.Style.Cinematic;
+
+	/// <summary>The names the panel and the flag know the two looks by, in
+	/// enum order.</summary>
+	public static readonly string[] SplashNames = { "calm", "cinematic" };
+
+	/// <summary>What the board makes of a hull going into deep water off the
+	/// bank - <see cref="TankTick.Plunged"/>'s answer: the hull's own heading
+	/// and length to the stage, the look from the panel.</summary>
+	private void Plunged(Vehicle v, Vector2 spot, float top, float might)
+	{
+		if (_stage is null || v.Atlas is null)
+			return;
+		_stage.Plunge(spot, top, Plunge.Heading(v),
+			v.Atlas.HullSpan * v.Sprite.BodyScale * 0.5f, might, _splash);
+	}
+
+	/// <summary>
+	/// Whether this run gets water at all - which is to say, whether the board is
+	/// being drawn by something that can draw a surface standing above the ground.
+	///
+	/// <b>A stage feature, for <see cref="Ramped"/>'s reason and not a weaker
+	/// one.</b> The 2D board draws a cell as one flat hexagon and has no way to
+	/// express anything standing over it, so the most it could do is tint the
+	/// plate - and a tinted plate with a tank standing dry on top of it is not a
+	/// ford, it is a blue cell. What makes this water is that the tank goes into
+	/// it, and going into it is a height, which is the one thing the flat board
+	/// has never had.
+	/// </summary>
+	private bool Watered => _water && _stage3d;
+
+	/// <summary>The drawn surface, once the tile it is checked against exists.
+	/// </summary>
+	private WaterArt? _waterArt;
+
+	/// <summary>Whether the pond wears its art or the flat colour. See
+	/// --flat-water: the fallback colour is the art's own average, so this
+	/// toggle swaps the texture and nothing else.</summary>
+	private bool _waterPaint = true;
+
+	/// <summary>What the stage is handed: the strip, or nothing when the toggle
+	/// is off or the file is not on disk.</summary>
+	private WaterArt? Surf => _waterPaint ? _waterArt : null;
+
+	/// <summary>Seconds for one turn of the water's frames, and whether one frame
+	/// is carried into the next. Parked here for --terrain's reason: both are read
+	/// before the stage exists, and both are pushed at it every frame rather than
+	/// on the drag, so a stage built later does not come up on the built-in.
+	/// </summary>
+	private double _swellPeriod = Stage3D.SwellPeriodDefault;
+	private bool _swellBlend = Stage3D.SwellBlendDefault;
+
+	/// <summary>How much foam a stirred cell throws, over the strip that already
+	/// said it was stirred. Lives on the bench rather than on a tank for the
+	/// reason every effect switch does: how foamy water is is a question about
+	/// the water, and the pond is one body of it.</summary>
+	private float _foam = Stage3D.FoamDefault;
+
+	/// <summary>Whether the pond is computed or drawn from the strip. See
+	/// --drawn-water: the surface as it was, which is the A/B this is judged by.
+	/// </summary>
+	private bool _deepWater = Stage3D.DeepDefault;
+
+	/// <summary>Whether the board's own things cast shadows along the sun. Apart
+	/// from the tank's contact shadow, which is a different claim: that one says
+	/// "a tank is standing here" and commits to no direction at all, this one is
+	/// the board saying where the sun is. Two switches because they are two
+	/// statements, and because the A/B for either is a pair of frames the other
+	/// must not be moving in.</summary>
+	private bool _castShadows = true;
+
+	/// <summary>Whether a prop darkens the ground right at its foot. Its own
+	/// field beside the cast's, because they are two claims - see
+	/// <see cref="Stage3D.ContactShadows"/> - and the A/B of either wants the
+	/// other to sit still.</summary>
+	private bool _propContact = true;
+
+	/// <summary>How stirred up each flooded cell is. Built with the field, ticked
+	/// here and drawn by the stage - the same division the belt marks have, and for
+	/// the same reason: what the tanks did to the ground is neither the ground's
+	/// business nor the renderer's.</summary>
+	private Swell? _sea;
+
+	/// <summary>The trail the tanks leave on the water. Built beside the swell
+	/// and for the same division of labour: what the tanks did to the water is
+	/// neither the water's business nor the renderer's.</summary>
+	private Wake? _wake;
+
+	/// <summary>Whether a trail is laid at all. See --no-wake.</summary>
+	private bool _wakes = true;
+
+	/// <summary>The pond's own surface, advanced every frame and pushed by whatever
+	/// drives through it. Built beside the swell and the wake, by the same division
+	/// of labour: what the tanks did to the water is neither the water's business
+	/// nor the renderer's.</summary>
+	private Ripples? _wash;
+
+	/// <summary>Whether that field is stepped at all. See --no-ripples, which is
+	/// the pond as it was before it and the A/B it is judged by.</summary>
+	private bool _ripples = true;
+
+	/// <summary>How hard a hull shoves the water, over the field's own figure. See
+	/// --ripple, and Ripples.Level for why this is the only dial it has.</summary>
+	private float _rippleLevel = 1.0f;
+
+	/// <summary>Whether the painted crest ahead of a wading hull is drawn - the old
+	/// answer, kept for the comparison. See --bow.</summary>
+	private bool _bows = Stage3D.BowBandOnByDefault;
+
+	/// <summary>Whether the water answers the tanks. See --still-water: the pond
+	/// as it was, which is the A/B this is judged by.</summary>
+	private bool _seaReacts = true;
+
+	/// <summary>
+	/// Whether the board and the tanks are drawn by the depth buffer rather than
+	/// by paint order. See <see cref="Stage3D"/>.
+	///
+	/// A flag while the two exist side by side, and not because the answer is in
+	/// doubt - the ground rule it replaces is four members of
+	/// <see cref="HexField"/> and all of <see cref="ReliefCap"/>, and it replaces
+	/// them with nothing. It is a flag because the A/B is the only honest way to
+	/// hand the board over one piece at a time: every measurement this bench has
+	/// taken is a pixel diff of two runs, and a switch is what lets the two runs
+	/// exist.
+	///
+	/// <b>It says which board this run has, not which board --3d asked for, and
+	/// that distinction cost the ramps.</b> The flag is read before the stage
+	/// exists - <see cref="SetRelief"/> hangs the ramp mask on it while the field
+	/// is being built - so it cannot simply be <see cref="Staged"/>. But it was
+	/// only ever written by the flag, and the stage has three other ways in: the
+	/// panel row, panel.json's default for it, and the key. Opened with
+	/// <c>view.stage</c> defaulted true and no <c>--3d</c> on the line, the stage
+	/// came up and this stayed false, so <see cref="Ramped"/> stayed false and the
+	/// board had no ramps on it - a mode switch that arrives by every path except
+	/// the one the feature reads. So the setter of <see cref="Staged"/> writes it
+	/// too, and the board is the truth.
+	/// </summary>
+	private bool _stage3d;
+
+	/// <summary>Whether <c>--no-3d</c> was given. Held apart from
+	/// <see cref="_stage3d"/> rather than clearing it, because the two are asked at
+	/// different times: the flag is parsed before the field exists and the refusal
+	/// has to survive <c>panel.json</c>'s default for <c>view.stage</c>, which is
+	/// what closed the only door to the 2D board.</summary>
+	private bool _noStage;
+
+	private Stage3D? _stage;
+
+	/// <summary>Which cells of the wood are alight. Null until the board is
+	/// built, like the sea.</summary>
+	private Wildfire? _fire;
+
+	/// <summary>Whether the wood can catch at all - <c>--no-tree-fire</c>. Held
+	/// as the bench's own rather than only on the fire, for the reason every
+	/// other flag here is: it is asked before the board exists.</summary>
+	private bool _woodFire = true;
+
+	/// <summary>A cell to set alight once the board is up, from
+	/// <c>--burn-wood q,r</c>. A screenshot of a burning wood otherwise wants a
+	/// hand on the mouse, and --capture exists so it does not.</summary>
+	private Vector2I? _lightAt;
+
+	/// <summary>How many trees are in flame and how many have burnt out. Off the
+	/// grove rather than the fire: the fire knows which cells are alight, and
+	/// which trees that comes to is the wood's own answer - a cell of scrub burns
+	/// without a trunk on it.</summary>
+	private (int Burning, int Burnt, int Sooted) Ablaze() =>
+		_grove?.Ablaze() ?? (0, 0, 0);
+
+	/// <summary>
+	/// Whether each cell of the stage wears an outline at its rim. See
+	/// <see cref="Stage3D.ShowEdges"/> for why it has to be drawn rather than
+	/// uncovered.
+	///
+	/// Held here and not only on the stage for <see cref="Staged"/>'s rule: the
+	/// stage is built and thrown away by a click, and an answer that lives only
+	/// on it comes back as the default every time it is rebuilt - which is one
+	/// row silently un-choosing what the user chose.
+	/// </summary>
+	private bool _cellEdges = true;
+
+	/// <summary>
+	/// Whether the board is drawn, asked of whichever board is drawing it.
+	///
+	/// <b>The G key and its panel row were writing the 2D field's flag
+	/// unconditionally</b>, so under the stage either one drew the canvas board
+	/// back over the entire 3D world - the same trap <see cref="FlagRows"/>
+	/// exists for, except reachable by clicking rather than by editing. One
+	/// definition rather than a check at each of the two, because a third caller
+	/// is how the two come to disagree.
+	/// </summary>
+	private bool BoardShown
+	{
+		get => _stage?.ShowBoard ?? _field.ShowField;
+		set
+		{
+			if (_stage is not null)
+			{
+				_stage.ShowBoard = value;
+				return;
+			}
+			_field.ShowField = value;
+			_field.QueueRedraw();
+		}
+	}
+
+	/// <summary>
+	/// Whether the depth buffer is drawing the board and the tanks.
+	///
+	/// <b>Live rather than a restart, and everything awkward about it is one
+	/// idea: what the stage has not taken over yet is suppressed, never
+	/// assigned.</b> The obvious way to keep the ruts off a 3D board is to clear
+	/// the flag their own panel row reads - and then turning the stage off again
+	/// hands that row back a value the user never chose. One row writing another
+	/// row's field is <see cref="FlagRows"/>'s trap with the file swapped for a
+	/// click. So the ruts, the trees and the 2D rings keep their own answers and
+	/// are merely hidden while somebody else owns the board; the board's own row
+	/// is carried across by hand, because there the two modes have genuinely
+	/// different nodes to say it to.
+	///
+	/// The cap is the exception and is destroyed rather than hidden: a null cap
+	/// is already the one word for "the depth buffer decides here" - see
+	/// <see cref="Depth"/> - and a hidden one would be a second.
+	/// </summary>
+	private bool Staged
+	{
+		get => _stage is not null;
+		set
+		{
+			if (value == Staged)
+				return;
+			if (value)
+				StageOn();
+			else
+				StageOff();
+			// The flag follows the board, not the other way round - see
+			// <see cref="_stage3d"/>. Written before the ramps are re-asked,
+			// because Ramped reads it.
+			_stage3d = value;
+			Suppress2D(Staged);
+			// Whether a ramp exists at all is a property of who draws the board,
+			// so handing the board over is a change to its heights.
+			ApplyRamps();
+			ApplyWater();
+		}
+	}
+
+	/// <summary>Where shells have blown the ground open. Owned by the harness and
+	/// handed to the stage, exactly as the ruts and the wood's ash are: what has
+	/// been dug is a fact about the board, and which map it is rasterised into is
+	/// a question about the picture.</summary>
+	private readonly Craters _pits = new();
+
+
+	/// <summary>The masonry standing on the board, one prop per walled cell.
+	/// </summary>
+	private readonly List<WallProp> _bricks = new();
+
+	/// <summary>
+	/// Stand the bricks the map's walled cells describe.
+	///
+	/// <b>The harness drew no walls at all, and the letter had said there were
+	/// some since the format existed.</b> <see cref="HexField.SetCover"/> is
+	/// called with them, so a walled cell has always barred movement and fire
+	/// here - what was missing was the picture, and a board whose walls stop a
+	/// tank and cannot be seen is worse than one with no walls on it. The editor
+	/// grew this first (<c>MapEditor.Bricks</c>) because that is where the
+	/// numbers are typed; pressing Run then showed a board with the masonry
+	/// gone, which is how it surfaced.
+	///
+	/// <b>All of it is <see cref="WallProp"/>'s</b>, and the recipe and the side
+	/// come out of <see cref="Masonry.Laying"/> - the one join. <c>TankBench</c>
+	/// still stands its own from its own list, because that board's walls are a
+	/// ring plus four samples each moving one dial: a bench's arrangement.
+	///
+	/// <b>No solver, and that is the half this does not answer.</b> Every
+	/// <see cref="WallRig"/> is centred on the world origin, so each needs its
+	/// own collision bit to keep one heap out of another's phantom space - see
+	/// <c>TankBench.Stand</c>, which numbers five of them. A map may declare
+	/// twenty, and there are thirty-two bits in all, so how a board's walls share
+	/// them is a question with a real answer that nobody has needed yet. Until
+	/// then the masonry stands, bars what the cover grid says it bars, and does
+	/// not come down.
+	///
+	/// <b>Belongs to the stage, so it is built with it and dropped with it.</b>
+	/// <see cref="WallProp"/> requires a <see cref="Stage3D"/>: the 2D board has
+	/// no depth to sort bricks against.
+	/// </summary>
+	private void Bricks()
+	{
+		Rubble();
+		if (_stage is null || _field.Atlas is null)
+			return;
+		foreach (Vector2I cell in _map.Walled())
+		{
+			if (_map.MasonryAt(cell)?.Laying() is not
+					({ } recipe, int bearing))
+				continue;
+			var prop = new WallProp
+			{
+				Field = _field,
+				Stage = _stage,
+				Cell = cell,
+				Recipe = recipe,
+				Borrow = null,
+				Channel = _bricks.Count,
+			};
+			AddChild(prop);
+			// See the remarks: standing, and nothing to knock it down with yet.
+			prop.Solved = true;
+			prop.Bearing = bearing;
+			prop.Build();
+			_bricks.Add(prop);
+		}
+		if (_bricks.Count > 0)
+			GD.Print($"map {_map.Name}: {_bricks.Count} wall(s) standing");
+	}
+
+	private void Rubble()
+	{
+		foreach (WallProp was in _bricks)
+		{
+			RemoveChild(was);
+			was.QueueFree();
+		}
+		_bricks.Clear();
+	}
+	private void StageOn()
+	{
+		// Asked before the switch and told after it, because the two modes keep
+		// it in different places and the question is the user's, not the mode's.
+		bool board = BoardShown;
+		_stage = new Stage3D
+		{
+			Field = _field, Origin = _origin, Eye = _camera,
+			// Which of the two bursts a landed round raises - see Stage3D.Blast.
+			// And whether a round into the pond raises a plume instead of either
+			// of them - see Stage3D.Spout.
+			Spout = _spout,
+			// The ruts are laid in the marks' own space and read in the space a
+			// tank's GroundPoint is in; both nodes are children of this one, so
+			// the offset is the marks' own position. Handed over rather than
+			// assumed to be zero, which is what it is - see Stage3D.MarksAt.
+			Marks = _marks, MarksAt = _marks?.Position ?? Vector2.Zero,
+			// The wood, by the same division: the grove goes on deciding where
+			// its trees stand and how they lean, the stage draws them where the
+			// depth buffer can judge them. No shift to hand over - a PropNode's
+			// own position already carries Origin.
+			Wood = _grove,
+			// And the ash it leaves, by the same division again: the wood says
+			// which trees are burning, the stage blackens the ground they stood
+			// on, because the ground is the stage's.
+			Blaze = _fire,
+			// And what shells have blown open, into that same ash map: burnt
+			// ground and dug ground are one statement to the ground shader, and a
+			// second map for the second kind of dark patch would be a second
+			// answer to how dark ground is drawn. See Craters.
+			Pits = _pits,
+			// The pond's surface, by the same division as the wood: the field goes
+			// on deciding which cells are wet and how deep, the stage draws the
+			// surface over them.
+			Surf = Surf,
+			// And what each of its cells is doing, by the same division again.
+			Sea = _sea,
+			// And the ripples on it. In the initialiser rather than pushed per
+			// frame like the wake, because the stage lays the field out when it
+			// builds the pond - which happens inside this constructor, so a field
+			// arriving a frame later would arrive to a board that had already
+			// decided it had none.
+			Wash = _wash,
+		};
+		AddChild(_stage);
+		foreach (Vehicle vehicle in _vehicles)
+		{
+			_stage.Take(vehicle);
+			// Freed now rather than queued, and measured rather than reasoned:
+			// queued, the bench came down with leaked-instance warnings when the
+			// switch was thrown from the panel, though not when it was thrown by
+			// the flag one phase earlier. Immediate, neither does. Whatever the
+			// deferred free is waiting on, it is waiting on something the panel
+			// has already changed.
+			vehicle.Cap?.Free();
+			vehicle.Cap = null;
+		}
+		_field.ShowField = false;
+		_stage.ShowEdges = _cellEdges;
+		_stage.ShowBoard = board;
+		// Last, because a wall is sorted against the ground the stage has
+		// just laid out.
+		Bricks();
+	}
+
+	private void StageOff()
+	{
+		if (_stage is null)
+			return;
+		bool board = BoardShown;
+		// The masonry first: it is the stage's, and a prop outliving the
+		// stage it sorts against is a brick drawn into nothing.
+		Rubble();
+		_stage.Give();
+		_stage.QueueFree();
+		_stage = null;
+		foreach (Vehicle vehicle in _vehicles)
+		{
+			var cap = new ReliefCap { Field = _field, Marks = _marks };
+			vehicle.Sprite.AddChild(cap);
+			vehicle.Cap = cap;
+			// A cap paints nothing until it is told where its tank stands, and
+			// it is told by Depth - which otherwise runs only on a step and on
+			// Park. Without this the board came back with no cliff hiding
+			// anything, standing tanks drawn whole over the cell in front of
+			// them, and the tank had to be driven a pixel to repair itself.
+			Tick.Depth(vehicle);
+		}
+		_field.ShowField = board;
+		_field.QueueRedraw();
+	}
+
+	/// <summary>Hide, never clear: canvas items are drawn over the entire 3D
+	/// world, so every 2D thing the stage has not taken over yet has to be out
+	/// of the way while it owns the board - and has to come back saying what its
+	/// own row says, not what this one wanted. The list is exactly what slices B
+	/// and C are.</summary>
+	private void Suppress2D(bool staged)
+	{
+		if (_marks is not null)
+			_marks.Visible = !staged;                   // the stage draws its own
+		if (_grove is not null)
+			_grove.Visible = !staged;                   // the stage draws its own
+		if (_ring is not null)
+			_ring.Visible = !staged;                    // the stage draws its own
+		if (_targetRing is not null)
+			_targetRing.Visible = !staged;
+	}
+
+	/// <summary>How steep one level is, or negative for the tuned default -
+	/// zero is a legal setting here, being a board that is flat while still
+	/// carrying levels.</summary>
+	private double _grade = -1.0;
+
+	/// <summary>
+	/// Which board this session is on. See <see cref="BoardMap"/>.
+	///
+	/// <b>An export rather than only a flag, and that is what makes a scene of
+	/// another map cost four lines.</b> A Godot scene can set an exported
+	/// property, so <c>Abbey.tscn</c> is this same node with this string changed -
+	/// no second script, and every mechanism the harness owns comes with it.
+	/// <c>--map</c> still overrides, because a flag is the more specific
+	/// statement: a screenshot taken with one has to mean what it says whatever
+	/// scene it was taken from.
+	/// </summary>
+	[Export] public string Map = "bench";
+
+	/// <summary>The board itself, resolved once before the field is built. Every
+	/// height, flood, kind and home comes off this. Its grids are <see cref="BoardMap"/>'s,
+	/// beside the other three boards' - see <see cref="BoardMap.Bench"/>.</summary>
+	private BoardMap _map = BoardMap.Bench;
+
+	/// <summary>What the terrain dropdown offers: mixed, then whatever loaded.
+	/// Built from the set rather than listed here, so drawing a new hex is a
+	/// file drop and nothing else.</summary>
+	private readonly List<string> _paints = new() { TerrainSet.Mixed };
+
+	/// <summary>The two things a turret can do while the hull turns under it,
+	/// in the order the panel offers them. Holding is index 0 because it is what
+	/// the layered atlases exist to show.</summary>
+	private static readonly string[] TurretModes =
+		{ "holds its heading", "rides the hull" };
+
+	/// <summary>The ring on the ground under the tank being driven, or null on a
+	/// run that has no interface - see <see cref="SelectionRing"/>.</summary>
+	private SelectionRing? _ring;
+
+	/// <summary>The same mark in red, under whoever the driven tank is shooting
+	/// at. Two rings rather than one that changes colour: both statements are
+	/// true at once and about different tanks.</summary>
+	private SelectionRing? _targetRing;
+
+	/// <summary>The debug overlay over the shots - see <see cref="AimRay"/>.
+	/// Built on every run, unlike the rings: it draws nothing until it is asked
+	/// to, so it cannot get into a capture by accident, and a node that exists
+	/// only when there is an interface cannot be switched into one that has
+	/// none.</summary>
+	private AimRay? _aimRay;
+
+	/// <summary>What the gunnery marks were last painted for. See the repaint in
+	/// <see cref="_Process"/>.</summary>
+	private (int, Vector2I, Vehicle?, Vector2I?, Vector2I?, bool) _painted;
+
+	private Label _hud = null!;
+	private Camera2D _camera = null!;
+
+	/// <summary>What the view opens at. See --zoom, and the panel's missing zoom
+	/// row for why this is a flag and not a slider.</summary>
+
+	/// <summary>Where the view is parked, and where R puts it back.
+	///
+	/// Read off the board rather than written down. It was <c>(760, 500)</c>,
+	/// which was the middle of a nine-column board and became the middle of
+	/// nothing when the board went to fourteen - the bench opened on the left half
+	/// with the rosette off screen, so seeing the thing it was widened for took a
+	/// drag of the middle button every run. Flat anchors, not lifted ones: which
+	/// way the view looks should not move when a hill is put on the board.</summary>
+	private Vector2 ViewHome =>
+		_origin + (_field.FlatAnchor(0, 0)
+				   + _field.FlatAnchor(_field.Columns - 1, _field.Rows - 1)) * 0.5f
+		+ _field.CentreOffset;
+
+	/// <summary>The view's own spring. One for the board, not one per tank: the
+	/// camera is a single thing and three guns firing into it is three impulses
+	/// into one spring, which is what compounding means and what a shake per
+	/// vehicle could not express.</summary>
+	private readonly CameraShake _shake = new();
+
+
+	private readonly Vector2 _origin = new(220, 200);
+
+	/// <summary>Which tank was being driven before the last left click took
+	/// another one, or -1 when that click was not a selection.
+	///
+	/// One int, and it exists for the double click: the ram is given on the
+	/// second press of a gesture whose first press has already handed the
+	/// selection to the hull being pointed at. See <c>_UnhandledInput</c>.
+	/// Cleared by the double click that spends it, so a click, a pause and a
+	/// double click somewhere else cannot take the selection back.</summary>
+	private int _pickedFrom = -1;
+
+
+	private Vector2I _cell
+	{
+		get => Active.Cell;
+		set => Active.Cell = value;
+	}
+
+	private List<Vector2I> _path
+	{
+		get => Active.Path;
+		set => Active.Path = value;
+	}
+
+	private int _pathStep
+	{
+		get => Active.PathStep;
+		set => Active.PathStep = value;
+	}
+
+	private double _speed
+	{
+		get => Active.Speed;
+		set => Active.Speed = value;
+	}
+
+	private MovementProfile _profile => Active.Profile;
+
+	/// <summary>A multiplier over every class's <see cref="MovementProfile.Size"/>,
+	/// on the panel and on --size. A multiplier rather than a size, for the reason
+	/// the tremble level is one: the three class figures are deliberately spread,
+	/// and a dial that set the size directly would flatten that spread the first
+	/// time it was touched. This asks "all of them bigger" and leaves the ratios
+	/// where they were chosen.</summary>
+	private double _sizeLevel = 1.0;
+	/// <summary>
+	/// The driven tank's own state, read through the names the harness has always
+	/// used for it.
+	///
+	/// Every one of these used to be a field, when there was one tank. As
+	/// properties onto <see cref="Active"/> they mean what they always meant -
+	/// "the tank being driven" - so a key, a panel row and the trace all keep
+	/// pointing at the right vehicle without a hundred call sites learning about
+	/// the list. The per-frame update methods take a <see cref="Vehicle"/>
+	/// explicitly instead, because those have to run for the tanks nobody is
+	/// driving too: three idle tanks with dead engines would be three sprites.
+	/// </summary>
+	private BodyPitch _pitch => Active.Pitch;
+
+	/// <summary>Body pitch is off unless asked for - key P, or --pitch on a
+	/// capture run. It is an interpretation of the sprites rather than
+	/// something the atlases contain, so the plain rendered motion stays the
+	/// default and the effect is something you switch on to compare against
+	/// it.</summary>
+
+	private BodyRumble _rumble => Active.Rumble;
+	/// <summary>Ground rumble - key B, or --rumble. Off again: the whole-pixel
+	/// jolt turned out to be a stronger reading of the ground than wanted, and
+	/// the engine tremble now covers moving as well as standing, so the two
+	/// stack rather than divide the work.</summary>
+
+	private EngineTremble _tremble => Active.Tremble;
+	/// <summary>Engine tremble, standing or moving. The one vibration that is on
+	/// by default: a tank that slides over the ground with nothing moving on it
+	/// is wrong in a way the plain render is not. Key I, or --no-tremble.</summary>
+
+	/// <summary>
+	/// How hard the engines shake, over the tuned pair - the panel's slider and
+	/// --tremble.
+	///
+	/// <b>Held here rather than on the driven tank's own
+	/// <see cref="EngineTremble.Level"/>, which is where it was, and that was the
+	/// bug.</b> How hard an engine shakes is a question about the effect, so it
+	/// reaches all three - the same rule the switch beside it follows, and the
+	/// reason the switch has always been a field here. Written on the vehicle it
+	/// left the other two shaking at the tuned figure, so dragging the slider
+	/// changed a third of the board and read as a slider that did nothing.
+	///
+	/// Pushed in <see cref="UpdateTremble"/> rather than on the drag, so a tank
+	/// built later cannot miss it.
+	/// </summary>
+
+	private TurretScan _scan => Active.Scan;
+	/// <summary>Idle turret traverse - key N, or --scan.</summary>
+
+	private TrackLoop _track => Active.Track;
+	/// <summary>The belts winding - key C, or --no-tracks. On by default, and
+	/// not really an option: a tank has tracks and they move. The switch is so
+	/// the hull layer can be looked at without them.</summary>
+
+	/// <summary>Whether the tanks are drawn standing on their shadows.
+	///
+	/// No key, and that is not an oversight: A-Z are all bound, and so are
+	/// Space, Tab, Escape, F12, Key1..Key9, '[' and ']'. The panel is where a
+	/// switch goes once the mnemonics have run out - the tracer and the traverse
+	/// motor are there for the same reason - and the flag exists because a
+	/// screenshot is the evidence and taking it twice should not need a hand on
+	/// the mouse.</summary>
+	private bool _shadowEnabled = true;
+
+	/// <summary>
+	/// The gun tube sliding back on the shot - key '[', or --no-barrel-recoil.
+	///
+	/// On by default, like the belts and the exhaust and for the same reason: it
+	/// is a rendered layer, not an interpretation laid over one, so there is
+	/// nothing to be cautious about. The switch earns its place as an A/B - the
+	/// travel is about four pixels and whether that reads is a question you
+	/// answer by turning it off, not by remembering.
+	///
+	/// Off does not hide the layer. The tube holds its rest pose, which is
+	/// exactly how every tank looked before it had one, so the comparison is
+	/// against the old picture rather than against a tank with no gun.
+	/// </summary>
+
+	/// <summary>
+	/// The hull rocking back on the shot - key ']', or --recoil-shear.
+	///
+	/// **Off, and it is the only effect here that is off because something else
+	/// replaced it.** The burning tank is off because burning is the exception;
+	/// this is off because the gun now recoils for real. <see cref="Recoil"/>
+	/// shears the rendered sprite about a pivot to fake a body that pitched,
+	/// which is the same class of approximation as the turret yaw that could not
+	/// be drawn at all: the sprite has no depth, so the second term of a rotation
+	/// is unavailable and the vertical part has to be damped to a quarter to stop
+	/// a rigid hull reading as rubber.
+	///
+	/// The tube's recoil needs none of that - it is geometry that was rendered
+	/// from twelve angles, so it is simply true. Leaving a shear on top of it
+	/// means every shot shows one real movement and one invented one, and the
+	/// invented one is the larger.
+	///
+	/// Kept rather than deleted, for the painted flash sheet's reason: "the
+	/// rendered one is better" stays an assertion until the two can be put side
+	/// by side. Asking for a level with --recoil, or for a pivot with
+	/// --recoil-turret, switches it back on - asking for the setting is asking
+	/// for the effect.
+	/// </summary>
+
+	private ExhaustLoop _exhaust => Active.Exhaust;
+	/// <summary>Engine exhaust - key O, or --no-exhaust. On by default, and for
+	/// the same reason as the tremble: an engine that is running is running, and
+	/// a tank showing no sign of it reads as switched off. Unlike the tremble it
+	/// costs nothing to be sure of - the plume is a layer that was rendered, not
+	/// an interpretation laid over one.</summary>
+
+	/// <summary>
+	/// How fast the plume walks its loop, as a multiplier over the pair of rates
+	/// - see <see cref="ExhaustLoop.Level"/>.
+	///
+	/// The board's, not the driven tank's, for the reason the tremble's is: how
+	/// hard the exhaust cycles is a question about the effect and not about one
+	/// machine, so it reaches all three. A level written onto the selected
+	/// vehicle moves a third of the board and reads as a slider that does
+	/// nothing.
+	///
+	/// Pushed in <see cref="UpdateExhaust"/> rather than on the drag, so a tank
+	/// built later cannot miss it.
+	/// </summary>
+
+	/// <summary>
+	/// The analogue load ramp instead of the two states - the panel's "load
+	/// ramp" row, or --exhaust-ramp. Off by default, and the only effect switch
+	/// here that names a superseded model rather than an optional effect: the
+	/// fire is off because a burning tank is exceptional, the hull shear because
+	/// the tube recoils for real, and this because the ramp was a faithful model
+	/// of something twelve rendered poses cannot carry - see
+	/// <see cref="ExhaustLoop.Binary"/>.
+	///
+	/// Kept rather than deleted for the reason the flash sheet is kept: "the step
+	/// reads better" stays a claim until both are on screen.
+	/// </summary>
+
+	private BurnLoop _burn => Active.Burn;
+	/// <summary>The tank on fire - key J, or --burning. Off by default, and
+	/// unlike the exhaust that is not a preference: a tank that is not burning
+	/// is the normal case, and a harness that opens with one on fire would be
+	/// showing the exception. It gets its own key rather than riding on the
+	/// exhaust's so the two can be seen apart - they come off the same stamped
+	/// port and it is worth being able to prove the layers are not the same
+	/// layer.</summary>
+	private bool _burning
+	{
+		get => Active.Burning;
+		set => Active.Burning = value;
+	}
+
+	/// <summary>A shell arriving - key U. An event rather than a mode, so there
+	/// is nothing to switch on: each press is one hit.</summary>
+	private HitLoop _hit => Active.Hit;
+
+	/// <summary>
+	/// Which side of the hex the shooter is standing on, as an index into
+	/// <see cref="HexField.EdgeHeadings"/>.
+	///
+	/// Six bearings, not any bearing - see <see cref="Angles.SideFor"/>, which
+	/// is where any angle is answered with one of them.
+	///
+	/// It walked a free bearing in steps of 90 before this, seeded off the
+	/// plate normals so the choice between two neighbouring plates got
+	/// exercised. Two of the six now land square on a normal, which is not a
+	/// regression but the grid: where the shooter can stand is not a knob. The
+	/// boundary is asserted in the self-test at 44 and 46 degrees off, which
+	/// never depended on the key anyway.
+	///
+	/// Six against four plates means a lap cannot put one shell on each - two
+	/// plates take two. It does reach all four from every hull heading, which
+	/// is the property worth keeping and is checked.
+	/// </summary>
+	/// <summary>Which side the next hand-dealt hit comes from. On the tick, with
+	/// the calibre and for the same reason - see
+	/// <see cref="TankTick.HitSide"/>.</summary>
+	private int _hitSide
+	{
+		get => Tick.HitSide;
+		set => Tick.HitSide = value;
+	}
+
+	private double HitFrom => Tick.HitFrom;
+
+	private int _hitCount
+	{
+		get => Active.HitCount;
+		set => Active.HitCount = value;
+	}
+
+	/// <summary>Which calibre is loaded. On the tick rather than here, because
+	/// the shot is, and because both roots kept one - see
+	/// <see cref="TankTick.Calibre"/>.</summary>
+	private int _calibre
+	{
+		get => Tick.Calibre;
+		set => Tick.Calibre = value;
+	}
+
+	/// <summary>What the next shell will go off at.
+	///
+	/// Read once, when the trigger goes, and handed to the hit - see
+	/// <see cref="HitLoop.Scale"/>. It used to be written straight onto the tank
+	/// and read again on every draw, which made it a property of the dial rather
+	/// than of the round: turning it while the dust was settling resized a shell
+	/// that had already landed. Same argument as the scatter, and the same
+	/// answer.</summary>
+	private float Calibre => Ordnance.At(_calibre);
+
+	/// <summary>How many levels of armour the loaded round goes through in one
+	/// hit.
+	///
+	/// The position in the calibre list rather than a table beside it: the
+	/// calibres are ordered, there are as many of them as there are levels of
+	/// damage, and "the smallest round does one level" is the whole rule. A
+	/// second list would be a second thing to keep in step with the first.
+	/// </summary>
+	private int Bite => Ordnance.BiteFor(_calibre);
+
+	private FlashSheet _flash = null!;
+	private Recoil _recoil => Active.Recoil;
+	/// <summary>Screen frames since the shot went off, or -1 between shots.</summary>
+	private int _shotFrame
+	{
+		get => Active.ShotFrame;
+		set => Active.ShotFrame = value;
+	}
+
+	private bool _spinning;
+	private bool _aimWithMouse;
+
+	// `godot --path <dir> -- --capture <file>` renders a few frames, saves a
+	// screenshot and quits, so the harness can be checked without a human at
+	// the keyboard. F12 does the same thing interactively.
+
+	/// <summary>Whether <c>--capture-at</c> was on the line.
+	///
+	/// <b>Named because --drive used to overwrite it and say nothing.</b> An order
+	/// carries its own default frame - ninety, far enough along to be mid-path -
+	/// and it wrote that over an explicit frame whenever --drive came after
+	/// --capture-at on the command line. Which is a flag that works or does not by
+	/// argument order, and it fails in the quietest possible way: the capture is
+	/// taken, of the right board, at the wrong moment. Two frames of a pond that
+	/// nobody had driven into yet compared identical, and the conclusion drawn
+	/// from them was that the water did not answer the tanks.</summary>
+	private int _frames;
+	private bool _selfTest;
+
+	/// <summary>Which themes of the self-test to report, or null for all of them.
+	/// See <see cref="SelfTest.Run"/>: a filtered run does every check and reports
+	/// the ones asked for, which is what makes "the whole run before a commit" a
+	/// rule rather than a suggestion.</summary>
+	private string? _selfTestOnly;
+
+	/// <summary>Print the board's audit and quit - see
+	/// <see cref="BoardMap.Audit"/>. Answered before anything is built, because
+	/// what it reports is the map and a map that will not load cannot build a
+	/// scene to report from.</summary>
+	private bool _mapReport;
+
+	private Vector2I? _driveTo;
+	// Prints one line of state per frame and quits. Picking a frame to
+	// screenshot by arithmetic does not work - the pivot length depends on
+	// which heading the pathfinder chose - so read it off instead.
+	private int _traceFrames;
+	private string? _startTag;
+	private bool _fireAtStart;
+	/// <summary>--hit &lt;deg&gt;: take one on the way in, from that bearing. A
+	/// bearing rather than a plate name, because that is what the game has.</summary>
+	private double? _hitAtStart;
+	/// <summary>--attack &lt;n&gt;: the driven tank opens fire on vehicle n, by the
+	/// index the number keys use.</summary>
+	private int? _attackAtStart;
+	/// <summary>--shell &lt;q,r&gt;: one round into that cell, which is the right
+	/// button. A cell rather than an index for the reason the order is one: what
+	/// is standing there is the trigger's business, and a hex is the only way to
+	/// say "into the wood" at all.</summary>
+	private Vector2I? _shellAtStart;
+	/// <summary>--ram &lt;q,r&gt;: drive into whoever is standing on that cell,
+	/// which is the double click. A cell and not an index, so that it says the
+	/// same thing the gesture says - the tank being rammed is the one on the hex
+	/// pointed at, and on a board where somebody has moved those are two
+	/// different orders.</summary>
+	private Vector2I? _ramAtStart;
+	/// <summary>--damage &lt;n&gt;: every plate already marked n levels deep, so a
+	/// capture of a knocked-about tank does not need n presses of U.</summary>
+	private int _damageAtStart;
+
+	/// <summary>The side panel, and whether to build it at all.
+	///
+	/// Off under --capture and --trace unless --ui says otherwise, because a
+	/// capture is evidence: an A/B of two sprite renders must not differ by a
+	/// panel that happened to be open. --ui forces it back on for a screenshot
+	/// of the harness itself.</summary>
+	private ControlPanel? _panel;
+	private double? _startTurret;
+	/// <summary>Which flash to start with - key V, or --flash sheet|rendered.
+	/// Rendered by default: it is the one the pipeline exists to produce, and
+	/// it falls back on its own for a tank that has none.</summary>
+	private FlashSource _flashSource = FlashSource.Built;
+
+	/// <summary>Whether a round into water raises a plume - see
+	/// <see cref="Stage3D.Spout"/>. Held here rather than written straight to the
+	/// stage because flags are parsed before the board is built.</summary>
+	private bool _spout = true;
+
+	/// <summary>Recoil taken by the turret alone - key L, or --recoil-turret.
+	/// Held here as well as on the tank because the flag is parsed before the
+	/// tank exists, exactly as the flash source is.</summary>
+	private bool _recoilTurretOnly;
+
+	/// <summary>
+	/// Three more flag values held until there is a tank to put them on:
+	/// --burning, --tremble and --recoil.
+	///
+	/// The reason is the one already written above for the flash source and the
+	/// recoil mode, and it grew teeth when the harness went to three tanks: these
+	/// three used to be written straight through the properties that mean "the
+	/// tank being driven", and the argument loop runs before any tank exists. What
+	/// used to be a write to a field that was simply there became an index into an
+	/// empty list - the window opened, the scene never built, and --capture hung
+	/// rather than failing. Anything a flag sets that belongs to a vehicle waits
+	/// here until the vehicles are built.
+	/// </summary>
+	private bool _burnAtStart;
+
+	/// <summary>Whether the driven tank opens already destroyed. Held here
+	/// rather than written straight through the property, for the reason every
+	/// other start-up state is: the flags are parsed before the vehicles exist,
+	/// and reaching for "the driven tank" then is a read of an empty list -
+	/// which hung --capture rather than failing it.</summary>
+	private bool _deadAtStart;
+	private bool _outAtStart;
+	private double _recoilAtStart = 1.0;
+	private bool _rollOnly;
+	private bool _heaveOnly;
+
+
+
+	/// <summary>Which frame to press Edit on, for --capture's sake: the way back
+	/// is a scene change, and a capture run has nobody to click it. Main's half
+	/// of the editor's --menu family, and it exists for the same reason.</summary>
+	/// <summary>Whether the board came through <see cref="Session"/> rather than
+	/// from a flag. Read once, by the paint: what the editor hands over must come
+	/// up as the editor drew it.</summary>
+	private bool _handed;
+
+	private int _editAt = -1;
+
+	/// <summary>Hand the board back to the editor. The name goes through
+	/// <see cref="Session"/> the way it came, and <c>Editing</c> goes off: the
+	/// editor is not being sent anywhere, it is being returned to.</summary>
+	private void Edit()
+	{
+		Session.Map = Map;
+		Session.Editing = false;
+		GD.Print($"main: back to the editor on {Map}");
+		GetTree().ChangeSceneToFile("res://Editor.tscn");
+	}
+	/// <summary>
+	/// Which cell each tank on the board parks on - and which tanks are on the
+	/// board at all.
+	///
+	/// <b>One tank per parking, and the board is what says how many.</b> That is
+	/// the whole rule: a board declaring one parking gets one tank. It replaced
+	/// two wrong answers in a row. First <c>Homes[Math.Min(i, Count - 1)]</c>,
+	/// which put every extra tank on the last parking - three tanks inside each
+	/// other, which on screen is one tank. Then a search for a free cell beside
+	/// it, which stopped them overlapping and still put three tanks on a board
+	/// that had asked for one. A parking is a declaration, and the roster follows
+	/// it.
+	///
+	/// <b>Which tank, by the class each parking asked for and then in order.</b>
+	/// See <see cref="Parking.Pair"/>: a parking that names a class takes that
+	/// tank wherever it is in the load order, one that names nobody takes whoever
+	/// is left. So a board that says nothing pairs exactly as it always did - the
+	/// bench's three parkings still take LTP, MTP, HTP - and a one-parking board
+	/// gets the first tag unless it asks for another.
+	///
+	/// <b><see cref="_loaded"/> is trimmed to the tanks that got one</b>, because
+	/// every reader of it wants the tanks on the board: the driving dropdown, the
+	/// attack list, the number keys. What atlases loaded is said once on the
+	/// printed line and then stops being a thing anything decides by.
+	/// </summary>
+	private Vector2I[] Park()
+	{
+		// Which parking each tank claims is Parking.Pair's - pure, and judged by
+		// the self test without a board.
+		int[] slots = Parking.Pair(_map.Parked, _loaded);
+		var where = new List<Vector2I>();
+		var driving = new List<string>();
+		var idle = new List<string>();
+		for (int i = 0; i < _loaded.Count; i++)
+			if (slots[i] >= 0)
+			{
+				driving.Add(_loaded[i]);
+				where.Add(_map.Parked[slots[i]].Cell);
+			}
+			else
+			{
+				idle.Add(_loaded[i]);
+			}
+
+		GD.Print($"map {_map.Name}: {_map.Parked.Count} parking(s), "
+				 + string.Join(" ", Enumerable.Range(0, driving.Count).Select(
+					 i => $"{driving[i]}@({where[i].X},{where[i].Y})"))
+				 + (idle.Count > 0
+					 ? " - not on the board, the map declared no parking for "
+					   + string.Join(", ", idle)
+					 : ""));
+		_loaded.Clear();
+		_loaded.AddRange(driving);
+		return where.ToArray();
+	}
+
+	private bool Moving => _pathStep < _path.Count;
+
+	public override void _Ready()
+	{
+		string[] userArgs = OS.GetCmdlineUserArgs();
+		if (Array.IndexOf(userArgs, "--capture") >= 0
+			|| Array.IndexOf(userArgs, "--trace") >= 0)
+			FrameClock.FixedStep = 1.0 / 60.0;
+		// Which panel rows the command line has spoken for, so panel.json does
+		// not then overrule it. The order is compiled-in default, then the file,
+		// then the flag: a flag is the more specific statement, and a capture
+		// taken with one has to mean what it says whatever the file holds.
+		//
+		// Read off the arguments here rather than set inside each branch,
+		// because there are twenty-odd of them and a branch that forgot to
+		// claim its row would fail in the quietest way there is - the flag
+		// works, and then the file undoes it a hundred lines later.
+		foreach (string arg in userArgs)
+		{
+			string name = arg.Split('=')[0];
+			if (FlagRows.TryGetValue(name, out string[]? claimed))
+				foreach (string id in claimed)
+					_flagged.Add(id);
+		}
+		for (int i = 0; i < userArgs.Length; i++)
+		{
+			// The five that are about the run rather than about the board - see
+			// SceneRoot. The copy of them that used to stand at the head of this
+			// chain was one of four.
+			if (ReadCommonFlag(userArgs, ref i))
+				continue;
+			// A theme filter may follow it, either as --selftest wall or as
+			// --selftest=wall. Taken as a value only when it is not another flag,
+			// so a bare --selftest followed by --no-ui still means all of them.
+			if (userArgs[i] == "--selftest"
+				|| userArgs[i].StartsWith("--selftest=", StringComparison.Ordinal))
+			{
+				_selfTest = true;
+				int eq = userArgs[i].IndexOf('=');
+				if (eq > 0)
+					_selfTestOnly = userArgs[i][(eq + 1)..];
+				else if (i + 1 < userArgs.Length
+						 && !userArgs[i + 1].StartsWith("--", StringComparison.Ordinal))
+					_selfTestOnly = userArgs[++i];
+			}
+			else if (userArgs[i] == "--pitch")
+				_tick.PitchEnabled = true;
+			else if (userArgs[i] == "--rumble")
+				_tick.RumbleEnabled = true;
+			else if (userArgs[i] == "--no-tremble")
+				_tick.TrembleEnabled = false;
+			else if (userArgs[i] == "--scan")
+				_tick.ScanEnabled = true;
+			else if (userArgs[i] == "--no-exhaust")
+				_tick.ExhaustEnabled = false;
+			// The smoke column built rather than read - see ProcSmoke. A plain
+			// flag and not a level: which of two ways an effect is drawn is not
+			// a quantity, and the two are meant to be put side by side.
+			else if (userArgs[i] == "--proc-smoke")
+				_tick.ProceduralSmoke = true;
+			else if (userArgs[i] == "--no-proc-smoke")
+				_tick.ProceduralSmoke = false;
+			else if (userArgs[i] == "--proc-fire")
+				_tick.ProceduralFire = true;
+			else if (userArgs[i] == "--no-proc-fire")
+				_tick.ProceduralFire = false;
+			else if (userArgs[i] == "--proc-exhaust")
+				_tick.ProceduralExhaust = true;
+			else if (userArgs[i] == "--no-proc-exhaust")
+				_tick.ProceduralExhaust = false;
+			else if (userArgs[i] == "--no-tracks")
+				_tick.TracksEnabled = false;
+			else if (userArgs[i] == "--no-shadow")
+				_shadowEnabled = false;
+			else if (userArgs[i] == "--no-cast-shadows")
+				_castShadows = false;
+			else if (userArgs[i] == "--no-prop-contact")
+				_propContact = false;
+			else if (userArgs[i] == "--no-sound")
+				_soundEnabled = false;
+			// On, so the shape here is --no-mcp turning it off - and --mcp kept
+			// beside it because it was the flag that switched it on, and a flag
+			// that silently stops existing reads as a flag that stopped working.
+			// Neither reaches --capture, --trace or --selftest: those refuse the
+			// connection at StartMcp whatever was asked for, which is where a
+			// guarantee about evidence belongs. See Main.Mcp.cs.
+			else if (userArgs[i] == "--mcp")
+				_mcpEnabled = true;
+			else if (userArgs[i] == "--no-mcp")
+				_mcpEnabled = false;
+			// Both off by default, so both flags switch *on* - the opposite
+			// shape to --no-tracks and its neighbours, and the same shape as
+			// --pitch and --rumble, which are also off.
+			else if (userArgs[i] == "--tracer")
+				_tracerVisible = true;
+			// Straight onto the static, which is why it is one: the flags are read
+			// before a node exists, and a flag writing through a node that is not
+			// there yet is the trap that hung the capture instead of failing it.
+			else if (userArgs[i] == "--aim-ray")
+				AimRay.On = true;
+			else if (userArgs[i] == "--no-tracer-smoke")
+				Shell.SmokeOn = false;
+			// Both directions, the shape --water and --no-water already have: the
+			// trail is off now (see Shell.SmokeOnByDefault), so the interesting
+			// half of the A/B is the one that switches it on, and a flag that
+			// only ever agreed with the default would be a flag nobody could
+			// take the other picture with.
+			else if (userArgs[i] == "--tracer-smoke")
+			{
+				Shell.SmokeOn = true;
+				_tracerVisible = true;
+			}
+			else if (userArgs[i] == "--smoke-life" && i + 1 < userArgs.Length
+					 && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+						 CultureInfo.InvariantCulture, out double smokeLife))
+				Shell.SmokeSeconds = (float)smokeLife;
+			// Asking for the size is asking for the tracer, the shape
+			// --recoil <x> already set: a flag that tuned something invisible
+			// would look like a flag that did not arrive.
+			else if (userArgs[i] == "--tracer-size" && i + 1 < userArgs.Length
+					 && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+						 CultureInfo.InvariantCulture, out double tracerLevel))
+			{
+				Shell.TracerLevel = tracerLevel;
+				_tracerVisible = true;
+			}
+			// Same shape, and asking for the trail's size is asking for the
+			// trail: a level over a thing that is switched off is a flag that
+			// did not arrive as far as the picture is concerned.
+			else if (userArgs[i] == "--smoke-size" && i + 1 < userArgs.Length
+					 && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+						 CultureInfo.InvariantCulture, out double smokeLevel))
+			{
+				Shell.SmokeLevel = smokeLevel;
+				Shell.SmokeOn = true;
+				_tracerVisible = true;
+			}
+			// Asking for the length is asking for the tracer, --tracer-size's
+			// shape: a level over something invisible is a flag that did not
+			// arrive as far as the picture is concerned.
+			else if (userArgs[i] == "--streak" && i + 1 < userArgs.Length
+					 && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+						 CultureInfo.InvariantCulture, out double streakLevel))
+			{
+				Shell.StreakLevel = streakLevel;
+				_tracerVisible = true;
+			}
+			else if (userArgs[i] == "--streak-width" && i + 1 < userArgs.Length
+					 && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+						 CultureInfo.InvariantCulture, out double widthLevel))
+			{
+				Shell.WidthLevel = widthLevel;
+				_tracerVisible = true;
+			}
+			else if (userArgs[i] == "--shell-speed" && i + 1 < userArgs.Length
+					 && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+						 CultureInfo.InvariantCulture, out double shellLevel))
+				Shell.SpeedLevel = shellLevel;
+			else if (userArgs[i] == "--no-turret-sound")
+				_turretSound = false;
+			else if (userArgs[i] == "--no-barrel-recoil")
+				_tick.RecoilTube = false;
+			else if (userArgs[i] == "--burning")
+				_burnAtStart = true;
+			else if (userArgs[i] == "--destroy")
+				_deadAtStart = true;
+			else if (userArgs[i] == "--ram-dents")
+				_tick.RamDents = true;
+			else if (userArgs[i] == "--knockout")
+				_outAtStart = true;
+			else if (userArgs[i] == "--fire")
+				_fireAtStart = true;
+			else if (userArgs[i] == "--hit" && i + 1 < userArgs.Length
+					 && double.TryParse(userArgs[i + 1], out double from))
+				_hitAtStart = from;
+			// Which class of gun a hand-dealt hit comes out of - see TankTick.HitBy.
+			// A name rather than an index, for --tank's reason: "lt" is a tank and
+			// "0" is a position in a list nobody can see.
+			else if (userArgs[i] == "--hit-by" && i + 1 < userArgs.Length)
+			{
+				// Read out before the search rather than fetched inside it:
+				// FindIndex calls its predicate once per class, so a ++i in
+				// there walks the command line and eats the next flag. It did.
+				string gun = userArgs[++i];
+				Tick.HitBy = Array.FindIndex(
+					MovementProfile.Tags,
+					tag => tag.StartsWith(gun,
+										  StringComparison.OrdinalIgnoreCase));
+			}
+			// Which tank the driven one opens fire on, by the same index the
+			// number keys use. A capture of an engagement otherwise needs a hand
+			// on the mouse, which is the one thing --capture exists to avoid.
+			else if (userArgs[i] == "--attack" && i + 1 < userArgs.Length
+					 && int.TryParse(userArgs[i + 1], out int quarry))
+				_attackAtStart = quarry;
+			// Invariant culture, and this is the first flag that needs saying
+			// so: the machine is set to a locale whose decimal mark is a comma,
+			// so a plain TryParse of "1.4" fails, leaves the default in place
+			// and produces two identical captures from two different calibres -
+			// which reads as "the scale does nothing" rather than as a parse.
+			else if (userArgs[i] == "--damage" && i + 1 < userArgs.Length
+					 && int.TryParse(userArgs[i + 1], out int deep))
+				_damageAtStart = deep;
+			// Snapped to one of the three, like --hit is snapped to a side of
+			// the hex: the gun has the calibres it has, and the flag picks from
+			// the same list the key and the dropdown do.
+			else if (userArgs[i] == "--hit-scale" && i + 1 < userArgs.Length
+					 && float.TryParse(userArgs[i + 1], NumberStyles.Float,
+						 CultureInfo.InvariantCulture, out float calibre))
+				_calibre = Ordnance.For(calibre);
+			// The panel sliders, on the command line for the same reason the
+			// calibre is: a slider is judged by a picture, and taking that
+			// picture twice at two settings cannot need a hand on the mouse.
+			else if (userArgs[i] == "--size" && i + 1 < userArgs.Length
+					 && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+						 CultureInfo.InvariantCulture, out double sizeLevel))
+				_sizeLevel = sizeLevel;
+			else if (userArgs[i] == "--tremble" && i + 1 < userArgs.Length
+					 && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+						 CultureInfo.InvariantCulture, out double trembleLevel))
+				// Straight onto the board's level, not onto a start-up copy of it:
+				// the vehicles read it every frame, so there is nothing to wait
+				// for - see _tick.TrembleLevel. The copy was needed while the slider
+				// wrote one tank's own amplitude and the flag had to write three.
+				_tick.TrembleLevel = trembleLevel;
+			// Asking for a rate is not asking for the effect, unlike the recoil
+			// level: the exhaust is on by default, so --no-exhaust and this one
+			// are about different things and neither implies the other.
+			else if (userArgs[i] == "--exhaust" && i + 1 < userArgs.Length
+					 && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+						 CultureInfo.InvariantCulture, out double exhaustLevel))
+				_tick.ExhaustLevel = exhaustLevel;
+			// A mode and not a level, so it gets a bare flag - the same shape as
+			// --recoil-turret. It does not imply --exhaust: the level means the
+			// same thing to both models, because it multiplies the pair either
+			// way.
+			else if (userArgs[i] == "--exhaust-ramp")
+				_tick.ExhaustRamp = true;
+			// Straight onto the static rather than waiting for the vehicles like
+			// the tremble does: this one is not held on a machine, because the
+			// rate has two readers that share no object. See Gunnery.TraverseRate.
+			else if (userArgs[i] == "--traverse" && i + 1 < userArgs.Length
+					 && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+						 CultureInfo.InvariantCulture, out double traverseLevel))
+				Gunnery.TraverseLevel = traverseLevel;
+			// Both of these turn the shear back on as well as configuring it.
+			// It is off by default now that the tube recoils for real, and a flag
+			// that set a level on a switched-off effect would look like a flag
+			// that did not arrive - the same failure --hit-scale had when the
+			// decimal separator ate it.
+			// On, and optionally at a level: `--shake` alone turns it on, and a
+			// number after it sets the level too. One flag rather than two
+			// because they are one question - the level is meaningless with the
+			// shake off, so asking for a level is asking for the shake.
+			else if (userArgs[i] == "--shake")
+			{
+				// Every source, because that is what the flag has always meant
+				// to whoever typed it: "let me see the camera move". The rows
+				// below are where one source is singled out - see TankTick.Shook.
+				foreach (TankTick.Tremor one in _tick.Shakes)
+					one.On = true;
+				if (i + 1 < userArgs.Length
+					&& double.TryParse(userArgs[i + 1], NumberStyles.Float,
+						CultureInfo.InvariantCulture, out double shakeLevel))
+				{
+					_shake.Level = shakeLevel;
+					i++;
+				}
+			}
+			else if (userArgs[i] == "--recoil" && i + 1 < userArgs.Length
+					 && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+						 CultureInfo.InvariantCulture, out double recoilLevel))
+			{
+				_recoilAtStart = recoilLevel;
+				_tick.RecoilShear = true;
+			}
+			// A mode rather than a level, and it needs a flag for the reason the
+			// two slider levels do: the pair is judged by a screenshot, and
+			// taking one on each setting should not need a hand on the keyboard.
+			else if (userArgs[i] == "--recoil-turret")
+			{
+				_recoilTurretOnly = true;
+				_tick.RecoilShear = true;
+			}
+			// The plain switch, for looking at the shear against the tube that
+			// replaced it without also changing its level or its pivot.
+			else if (userArgs[i] == "--recoil-shear")
+				_tick.RecoilShear = true;
+			// Whether a bounce draws the built ricochet or the rendered burst it
+			// used to - see TankTick.Bounce. Out of FlagRows for --burst's
+			// reason: no panel row to be overruled by.
+			else if (userArgs[i] == "--spall" && i + 1 < userArgs.Length)
+				_tick.Bounce = !userArgs[++i].Equals("off",
+					StringComparison.OrdinalIgnoreCase);
+			// And whether an HE round draws the burst on the plate or the rendered
+			// pair it used to - see TankTick.Slam. Out of FlagRows for --spall's
+			// reason: no panel row to be overruled by.
+			else if (userArgs[i] == "--slam" && i + 1 < userArgs.Length)
+				_tick.Slam = !userArgs[++i].Equals("off",
+					StringComparison.OrdinalIgnoreCase);
+			// And whether a tank that dies draws its ammunition going off - see
+			// TankTick.Rack. Out of FlagRows for --spall's reason, and off does
+			// not take the fire's ramp back with it: that is a correction, not
+			// this picture.
+			else if (userArgs[i] == "--rack" && i + 1 < userArgs.Length)
+				_tick.Rack = !userArgs[++i].Equals("off",
+					StringComparison.OrdinalIgnoreCase);
+			// And whether a round that got through lights the hull from inside -
+			// see TankTick.Pierce. Out of FlagRows for --spall's reason, and off
+			// leaves the rendered pair, which is the picture this used to have.
+			else if (userArgs[i] == "--pierce" && i + 1 < userArgs.Length)
+				_tick.Pierce = !userArgs[++i].Equals("off",
+					StringComparison.OrdinalIgnoreCase);
+			// And whether a round into the pond raises a plume or the cone of
+			// earth it used to - see Stage3D.Spout. Beside --burst rather than
+			// with the three armour flags, because the board is what knows a
+			// point of itself is wet.
+			else if (userArgs[i] == "--spout" && i + 1 < userArgs.Length)
+				_spout = !userArgs[++i].Equals("off",
+					StringComparison.OrdinalIgnoreCase);
+			// What the gun is loaded with, which against armour is now what decides
+			// the picture - see TankTick.Ammo. The bench had this flag from the day
+			// a wall could be shot at and the harness had none, because until the
+			// burst on a plate existed there was nothing here for it to change.
+			else if (userArgs[i] == "--ammo" && i + 1 < userArgs.Length)
+			{
+				string round = userArgs[++i];
+				if (round.Equals("ap", StringComparison.OrdinalIgnoreCase))
+					Tick.Ammo = Shell.Kind.Ap;
+				else if (round.Equals("he", StringComparison.OrdinalIgnoreCase))
+					Tick.Ammo = Shell.Kind.He;
+				else
+					GD.PushWarning($"--ammo {round} is neither he nor ap");
+			}
+			else if (userArgs[i] == "--flash" && i + 1 < userArgs.Length)
+				_flashSource = userArgs[i + 1].Equals("sheet",
+					StringComparison.OrdinalIgnoreCase)
+					? FlashSource.Sheet
+					: userArgs[i + 1].Equals("built",
+						StringComparison.OrdinalIgnoreCase)
+						? FlashSource.Built
+						: FlashSource.Rendered;
+			else if (userArgs[i] == "--turret" && i + 1 < userArgs.Length
+					 && double.TryParse(userArgs[i + 1], out double bearing))
+				_startTurret = bearing;
+			else if (userArgs[i] == "--tank" && i + 1 < userArgs.Length)
+				_startTag = userArgs[i + 1].ToUpperInvariant();
+			else if (userArgs[i] == "--roll-only")
+			{
+				// Isolates the roll by silencing the heave. The two cannot be
+				// told apart in a screenshot otherwise: a vertical jolt shifts
+				// content between rows, and where the silhouette narrows - the
+				// gun, the turret - that reads as a horizontal shift of over
+				// two pixels which has nothing to do with roll.
+				//
+				// The amplitude waits for the tanks to exist, like the other
+				// per-vehicle flag values above.
+				_tick.RumbleEnabled = true;
+				_rollOnly = true;
+			}
+			else if (userArgs[i] == "--heave-only")
+			{
+				// The other half of the pair above, and it is here because a
+				// half of an A/B that cannot be taken is not an A/B. The roll
+				// had a flag and the heave did not, so every measurement of the
+				// heave so far was taken with the roll resampling the sprite
+				// underneath it.
+				//
+				// Silences the roll rather than the heave: same reason, other
+				// side. The amplitude waits for the tanks to exist.
+				_tick.RumbleEnabled = true;
+				_heaveOnly = true;
+			}
+			else if (userArgs[i] == "--trace" && i + 1 < userArgs.Length
+					 && int.TryParse(userArgs[i + 1], out int frames))
+				_traceFrames = frames;
+			else if (userArgs[i] == "--sprites" && i + 1 < userArgs.Length)
+				_spriteDir = userArgs[++i];
+			// A kind's name, or "mixed". A capture of one kind against another
+			// is the whole reason a paint exists, and it must not need a hand on
+			// the mouse - the argument every other A/B flag here makes.
+			else if (userArgs[i] == "--terrain" && i + 1 < userArgs.Length)
+			{
+				_paint = userArgs[++i];
+				_paintAsked = true;
+			}
+			else if (userArgs[i] == "--no-ruts")
+				_rutsEnabled = false;
+			// Height on the board. A flag rather than the default, because
+			// everything the bench measures is a pixel difference between two
+			// captures and a hill in the frame is a hill in both halves of every
+			// one of them. Off, the field draws exactly what it drew before there
+			// was relief - see HexField.HasRelief.
+			else if (userArgs[i] == "--relief")
+				_relief = true;
+			// Which board. Overrides the scene's export, for the reason every
+			// other flag overrides panel.json: a capture taken with a flag has to
+			// mean what it says whatever it was launched from.
+			else if (userArgs[i] == "--map" && i + 1 < userArgs.Length)
+				Map = userArgs[++i];
+			// The way back, pressed from the command line - the editor's own
+			// --menu reason word for word: it is a scene change, and a capture
+			// run has nobody to click a button.
+			else if (userArgs[i] == "--edit-at" && i + 1 < userArgs.Length
+				 && int.TryParse(userArgs[i + 1], out int editAt))
+			{
+				_editAt = editAt;
+				i++;
+			}
+			// The board's own report, printed and gone - the authoring tool for
+			// a hand-drawn map. It is here rather than in the self test because
+			// what it is for is the round trip: it enumerates every cell that
+			// could carry a ramp, and a map is written by picking off that list.
+			// See BoardMap.Audit.
+			else if (userArgs[i] == "--map-report")
+				_mapReport = true;
+			// The A/B the ramps are judged by, and the reason it is a flag rather
+			// than only a panel row: a screenshot is the evidence, and taking it
+			// twice must not need an edit between the two. Off, every level
+			// change goes back to being a cliff a tank may simply climb, which is
+			// how the board walked before ramps - see HexField.Passable.
+			else if (userArgs[i] == "--no-ramps")
+				_ramps = false;
+			// The other picture of a drive into deep water: no wading gear, so
+			// the pond stops the engine - see TankTick.Amphibious.
+			else if (userArgs[i] == "--no-amphibious")
+				_tick.Amphibious = false;
+			// The A/B the water is judged by, and the only one there is: the pond
+			// is five cells of one board, so what it costs and what it looks like
+			// are both differences against that same board dry.
+			else if (userArgs[i] == "--no-water")
+				_water = false;
+			// And the way back on, for a run whose panel.json turned it off.
+			else if (userArgs[i] == "--water")
+				_water = true;
+			// The pond wearing the flat colour instead of its own surface. A
+			// second A/B inside the first, and a narrow one on purpose: the
+			// fallback colour is the strip's measured average, so the two frames
+			// differ by the texture and by nothing else. Anything the paint is
+			// blamed for that survives this flag is the water, not the art.
+			else if (userArgs[i] == "--flat-water")
+				_waterPaint = false;
+			// How fast the swell goes round, in seconds. Seconds and not a level,
+			// because there is no per-class triple under it - the same call
+			// --smoke-life made.
+			else if (userArgs[i] == "--swell" && i + 1 < userArgs.Length
+					 && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+										CultureInfo.InvariantCulture, out double turn))
+			{
+				_swellPeriod = turn;
+				i++;
+			}
+			// And the stepped loop back, which is the A/B the blend is judged by:
+			// four frames cannot be made smooth by choosing when to change them,
+			// so this is the only way to see what choosing when actually buys.
+			else if (userArgs[i] == "--hard-swell")
+				_swellBlend = false;
+			// The pond that answers nobody, which is the A/B this is judged by:
+			// the chop and the splash are the only things on the board that read
+			// the tanks, so the difference against a still pond is the whole
+			// claim. Not the same as --flat-water - that takes the picture away,
+			// this leaves it and takes away the reaction.
+			else if (userArgs[i] == "--still-water")
+				_seaReacts = false;
+			// The pond with the strip doing the talking on its own, which is the
+			// A/B the foam is judged by - and it is the strong form of it: off
+			// has to give back the very same picture, byte for byte, or the foam
+			// is not a detail on the band but a replacement for it.
+			// The drawn strip back, which is the A/B the computed surface is
+			// judged by. Not the same as --flat-water: that one chooses between
+			// two ways of drawing the strip, this chooses whether there is a
+			// strip at all.
+			// The water without a trail on it, which is the A/B the wake is
+			// judged by. Its own flag rather than a share of --still-water: the
+			// swell is what a cell is doing and this is a line across cells, and
+			// one switch for both would measure two things.
+			else if (userArgs[i] == "--no-wake")
+				_wakes = false;
+			// And the water without a crest ahead of the hull, which is the A/B
+			// the bow is judged by. Its own flag beside --no-wake and not a share
+			// of it: what the water does in front of a tank and what it does
+			// behind are two statements, and an A/B of either wants the other to
+			// hold still.
+			// And the painted crest, which is off now that the field pushes the
+			// water - so the flag turns it *on*, and it is the A/B the pushed one
+			// is judged by rather than a way of removing it.
+			else if (userArgs[i] == "--bow")
+				_bows = true;
+			else if (userArgs[i] == "--no-bow")
+				_bows = false;
+			// The pond without a simulation on it, which is the A/B the field is
+			// judged by. Its own flag beside --still-water and --no-wake for the
+			// reason those two are apart: a hexagon's state, a line of stamps and a
+			// surface that propagates are three statements, and one switch for any
+			// pair of them would measure two things.
+			else if (userArgs[i] == "--no-ripples")
+				_ripples = false;
+			// How hard, over the row above rather than instead of it: asking for
+			// an amount is asking for the thing, the argument --recoil <x> already
+			// makes.
+			else if (userArgs[i] == "--ripple" && i + 1 < userArgs.Length
+					 && float.TryParse(userArgs[i + 1], NumberStyles.Float,
+									   CultureInfo.InvariantCulture,
+									   out float shove))
+			{
+				_rippleLevel = Mathf.Max(0.0f, shove);
+				_ripples = true;
+				i++;
+			}
+			else if (userArgs[i] == "--drawn-water")
+				_deepWater = false;
+			else if (userArgs[i] == "--no-foam")
+				_foam = 0.0f;
+			// How much of it, over the row above rather than instead of it: asking
+			// for an amount is asking for the foam, the argument --recoil <x>
+			// already makes.
+			else if (userArgs[i] == "--foam" && i + 1 < userArgs.Length
+					 && float.TryParse(userArgs[i + 1], NumberStyles.Float,
+									   CultureInfo.InvariantCulture, out float froth))
+			{
+				_foam = Mathf.Max(0.0f, froth);
+				i++;
+			}
+			// How deep, over the row above rather than instead of it: a depth
+			// asked for is water asked for, or the flag would look like one that
+			// did not arrive - the argument --recoil <x> already makes.
+			else if (userArgs[i] == "--depth" && i + 1 < userArgs.Length
+					 && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+										CultureInfo.InvariantCulture, out double sunk))
+			{
+				_depth = sunk;
+				_water = true;
+				i++;
+			}
+			// How far under the bank the deep water stands - a picture setting,
+			// see HexField.DeepDepth. Not a water flag: deep water is on the map
+			// or it is not, and this only says how full the hollow is.
+			else if (userArgs[i] == "--deep-depth" && i + 1 < userArgs.Length
+					 && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+										CultureInfo.InvariantCulture, out double brim))
+			{
+				_deepDepth = brim;
+				i++;
+			}
+			// How far under its level the pond's bed is drawn - a picture setting
+			// too, see HexField.DeepBed; the level itself does not move.
+			else if (userArgs[i] == "--deep-bed" && i + 1 < userArgs.Length
+					 && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+										CultureInfo.InvariantCulture, out double bed))
+			{
+				_deepBed = bed;
+				i++;
+			}
+			// Which look a hull's plunge is thrown in - see Plunge.Style.
+			else if (userArgs[i] == "--splash" && i + 1 < userArgs.Length)
+			{
+				int look = Array.IndexOf(SplashNames, userArgs[i + 1].ToLowerInvariant());
+				if (look >= 0)
+					_splash = (Plunge.Style)look;
+				else
+					GD.PushWarning($"--splash wants calm or cinematic, got '{userArgs[i + 1]}'");
+				i++;
+			}
+			// Height is the whole reason this exists, so asking for the stage
+			// asks for the board that needs it - the argument --grade already
+			// makes for --relief.
+			else if (userArgs[i] == "--3d")
+			{
+				_stage3d = true;
+				_relief = true;
+			}
+			// And the way back, which panel.json's default for view.stage took
+			// away: the stage opens by default now, so the 2D board - the thing
+			// every measurement on the stage is measured against - had no path
+			// from the command line at all. A flag rather than an edit to the
+			// file, by the rule the whole bench runs on: a capture is evidence,
+			// and taking it twice must not need an edit between the two.
+			else if (userArgs[i] == "--no-tree-fire")
+				_woodFire = false;
+			else if (userArgs[i] == "--burn-wood" && i + 1 < userArgs.Length)
+			{
+				string[] cell = userArgs[++i].Split(',');
+				if (cell.Length == 2
+					&& int.TryParse(cell[0], out int bq)
+					&& int.TryParse(cell[1], out int br))
+					_lightAt = new Vector2I(bq, br);
+			}
+			else if (userArgs[i] == "--no-3d")
+				_noStage = true;
+			// The A/B the outline is judged by, and the reason it is a flag: the
+			// question it answers is whether the board still reads as ground with
+			// a line on every cell, and that is two captures, not a hand on the
+			// mouse.
+			else if (userArgs[i] == "--no-cell-edges")
+				_cellEdges = false;
+			// Invariant culture, the trap named beside --hit-scale.
+			else if (userArgs[i] == "--grade" && i + 1 < userArgs.Length
+					 && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+										CultureInfo.InvariantCulture, out double grade))
+			{
+				i++;
+				_grade = grade;
+				_relief = true;     // asking how steep it is asks for it
+			}
+			// The one control the panel refuses to carry, and for the reason it
+			// refuses: zoom moves the whole picture, so a row on it could silently
+			// rescale any A/B taken from the panel, and one measurement has already
+			// been lost to a stray wheel over the window. A start-up flag has none
+			// of that - it is fixed for the run and printed by --trace - and the
+			// board is now wider than the window, so a capture of all of it needs
+			// this. Around the view's own centre, which is where the wheel zooms.
+			// No number: how much forest there is comes from --terrain, because
+			// forest is one of the kinds of ground. This is the A/B - the same
+			// board with the tree layer off.
+			else if (userArgs[i] == "--no-forest")
+				_trees = false;
+			// Invariant culture, the trap named beside --hit-scale.
+			else if (userArgs[i] == "--ghost" && i + 1 < userArgs.Length
+					 && float.TryParse(userArgs[i + 1], NumberStyles.Float,
+									   CultureInfo.InvariantCulture, out float ghost))
+			{
+				i++;
+				_ghost = Math.Clamp(ghost, 0.0f, 1.0f);
+			}
+			else if (userArgs[i] == "--clear-front")
+				_clearFront = true;
+			// Invariant culture, the trap named beside --hit-scale. Zero is
+			// still weather - the still board - so this is not a switch.
+			else if (userArgs[i] == "--wind" && i + 1 < userArgs.Length
+					 && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+										CultureInfo.InvariantCulture,
+										out double gust))
+			{
+				i++;
+				_wind = Math.Max(0.0, gust);
+			}
+			// Same shape as --wind and for the same reason: zero is the A/B, a
+			// board where a gun goes off in a wood and the wood does not notice.
+			else if (userArgs[i] == "--blast" && i + 1 < userArgs.Length
+					 && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+										CultureInfo.InvariantCulture,
+										out double blast))
+			{
+				i++;
+				_blast = Math.Max(0.0, blast);
+			}
+			else if (userArgs[i] == "--brush" && i + 1 < userArgs.Length
+					 && double.TryParse(userArgs[i + 1], NumberStyles.Float,
+										CultureInfo.InvariantCulture,
+										out double brush))
+			{
+				i++;
+				_brush = Math.Max(0.0, brush);
+			}
+			else if (userArgs[i] == "--drive" && i + 1 < userArgs.Length)
+			{
+				string[] parts = userArgs[i + 1].Split(',');
+				if (parts.Length == 2
+					&& int.TryParse(parts[0], out int col)
+					&& int.TryParse(parts[1], out int row))
+				{
+					_driveTo = new Vector2I(col, row);
+					// Long enough to be mid-path, and only when nobody said
+					// when - see CaptureAtAsked. Written unconditionally, this
+					// line made --capture-at work or not by which side of
+					// --drive it was written on.
+					if (!CaptureAtAsked)
+						CaptureAt = 90;
+				}
+			}
+			// The right button, as a flag: one round into a cell. Beside --drive
+			// rather than beside --attack, because what it takes is a hex.
+			//
+			// <b>And it moves the capture frame for --drive's reason, doubled.</b>
+			// A round ordered into a hex leaves when the turret has come round
+			// and the reload is up, which is a second or more after the press -
+			// so the default frame of a bare --capture is a frame with nothing in
+			// it, and a run whose evidence is "no shot" is the one outcome the
+			// flag exists to avoid.
+			else if (userArgs[i] == "--shell" && i + 1 < userArgs.Length)
+			{
+				string[] parts = userArgs[i + 1].Split(',');
+				if (parts.Length == 2
+					&& int.TryParse(parts[0], out int col)
+					&& int.TryParse(parts[1], out int row))
+				{
+					_shellAtStart = new Vector2I(col, row);
+					if (!CaptureAtAsked)
+						CaptureAt = 90;
+				}
+			}
+			// The double click, as a flag: drive into whoever is on that cell.
+			// The same frame default as --drive and for the same reason - a ram
+			// is a drive, and the frame worth having is one mid-leg.
+			else if (userArgs[i] == "--ram" && i + 1 < userArgs.Length)
+			{
+				string[] parts = userArgs[i + 1].Split(',');
+				if (parts.Length == 2
+					&& int.TryParse(parts[0], out int col)
+					&& int.TryParse(parts[1], out int row))
+				{
+					_ramAtStart = new Vector2I(col, row);
+					if (!CaptureAtAsked)
+						CaptureAt = 90;
+				}
+			}
+		}
+
+		// The board, before anything that stands on one. A map that will not load
+		// throws here, with the cell it disagrees with itself about - and that is
+		// worth more than a board that comes up plain, which is what a decoder
+		// that clipped would have given.
+		// A map that refuses to load has to be explained rather than thrown,
+		// but only to the tool whose whole job is explaining it: everywhere else
+		// a broken board is a crash, the same as a ragged row. Without this the
+		// authoring report dies before it can say a word, which is the one place
+		// that cannot afford to.
+		//
+		// **And it exits rather than throwing out of _Ready.** An exception here
+		// leaves the window standing with nothing in it - Godot does not quit on
+		// one - so `--selftest` against a broken board hangs instead of failing,
+		// which is the one outcome worse than a crash. Found by dropping a map
+		// file into `maps/` under a compiled board's name: the refusal is right
+		// and the run never came back. So the board still does not come up, and
+		// the reason is on stdout with a non-zero code behind it.
+		// The handoff wins over --map: that flag came from the launch which
+		// started the session, and by the time the editor hands a name over it is
+		// stale. See Session.
+		if (Session.Take() is { Length: > 0 } handed)
+		{
+			Map = handed;
+			_handed = true;
+		}
+		try
+		{
+			_map = BoardMap.ByName(Map);
+		}
+		catch (Exception e)
+		{
+			GD.Print($"map {Map}: REFUSED {e.Message}");
+			GetTree().Quit(_mapReport ? 0 : 1);
+			return;
+		}
+		// The board's own paint and its own answer about height, both losing to a
+		// flag and winning over the built-in default. Neither can be inferred from
+		// the value already sitting there: the default paint is a real plate name
+		// and the default height is off, so a map that needs either has to say so.
+		if (!_paintAsked)
+		{
+			_paint = _map.Paint;
+			// And the terrain row is claimed when the editor handed this
+			// board over, because otherwise panel.json undoes the line above
+			// a few hundred lines later: OpenDefaults sets every row the file
+			// has an opening value for unless a flag claimed it, and the file
+			// says "mixed". So a board drawn in the editor with no woods on it
+			// came up as a forest - the trap BoardMap.Paint was written
+			// against, running the other way: a named plate above the map's
+			// own answer. Measured rather than reasoned about: the grove
+			// planted 252 props on "soil" and then 437 on "mixed" one frame
+			// later, in the same run.
+			//
+			// <b>The handoff only, and the wider defect is named not fixed.</b>
+			// panel.json overrides a COMPILED board's paint the same way, and
+			// claiming the row for every board was tried: the bench board then
+			// draws the soil it declares, six wood checks lose their subject
+			// ("vegetation/tree loaded and never planted"), and naming the mix
+			// on it instead is refused by the check that a no-kinds board must
+			// not - its ground would be chosen by a hash. Two rules meet on
+			// that board and settling them is a decision about the reference
+			// board, not a bug fix. See BoardMap.Bench.
+			//
+			// What the editor hands over is different in kind: its whole
+			// contract is that the game shows what was drawn, so a dial's
+			// opening value may not repaint it.
+			if (_handed)
+				_flagged.Add("ground.terrain");
+		}
+		if (_map.Height)
+		{
+			_relief = true;
+			_stage3d = true;
+		}
+		GD.Print($"board {_map.Name}: {_map.Columns} x {_map.Rows}, "
+				 + string.Join(", ", _map.Tally()
+					 .Where(t => t.Count > 0)
+					 .Select(t => $"{t.Count} {t.What}"))
+				 + $", paint {_paint}" + (_map.Height ? ", height" : ""));
+
+		// The authoring report, and nothing else this run: what it is about is
+		// the map, so a scene built around it would only be in the way.
+		if (_mapReport)
+		{
+			foreach (string line in _map.Audit())
+				GD.Print(line);
+			GetTree().Quit();
+			return;
+		}
+
+		// A capture is evidence, so it gets no panel unless one is asked for. A
+		// trace counts as evidence too, which is why the base is told rather than
+		// left to read CapturePath for itself.
+		SettleForProof(CapturePath is not null || _traceFrames > 0);
+
+		var failures = new List<string>();
+		foreach (string tag in MovementProfile.Tags)
+		{
+			AtlasSet atlas = AtlasSet.Load(SpritesRoot, tag, _spriteDir ?? tag);
+			if (atlas.Error.Length > 0)
+				failures.Add($"{tag}: {atlas.Error}");
+			else
+			{
+				_atlases[tag] = atlas;
+				_loaded.Add(tag);
+			}
+		}
+
+		_flash = FlashSheet.Load($"{SpritesRoot}/Fire_rgba.png");
+		if (_flash.Error.Length > 0)
+			failures.Add($"flash: {_flash.Error}");
+
+		// Sound is loaded but never required. A missing set does not go into
+		// `failures`, because that list is about a bench that cannot show what it
+		// was asked to show, and this one still can - it just does it quietly.
+		// Printed instead, once per set, so "I hear nothing" has an answer in the
+		// log rather than in the source.
+		_commonSounds = SoundSet.Load(SoundsRoot, SoundSet.CommonTag);
+		GD.Print(_commonSounds.Summary());
+		foreach (string tag in _loaded)
+		{
+			SoundSet set = SoundSet.Load(SoundsRoot, tag);
+			GD.Print(set.Summary());
+			_sounds[tag] = set;
+		}
+
+		// Loaded but never required, exactly like the sound: a missing set does
+		// not go into `failures`, because that list is about a bench that cannot
+		// show what it was asked to show, and this one still can.
+		_terrain = TerrainSet.Load(TerrainsRoot);
+		GD.Print("terrain: " + _terrain.Note);
+		// The markers, for the events bench's reason word for word - MineArt.
+		GD.Print("markers: "
+				 + (MineArt.Read(AssetRoot.Markers)
+					 ? $"mine {MineArt.Span:F0}px of art at {MineArt.Wide:F2} of a tile"
+					 : $"none at {AssetRoot.Markers}"));
+		_paints.AddRange(_terrain.Names);
+		// Forest is a kind too, and the one that is not a file - so it is not
+		// held against the loaded plates here. Whether it can be offered at all
+		// is settled a few lines down, once the props are in.
+		if (_paint != TerrainSet.Mixed && _paint != TerrainSet.Forest
+			&& !_terrain.Has(_paint))
+		{
+			GD.PushWarning($"--terrain {_paint} is not one of "
+						   + string.Join(", ", _terrain.Names) + "; using mixed");
+			_paint = TerrainSet.Mixed;
+		}
+
+		_props = PropSet.Load(PropsRoot);
+		GD.Print("props: " + _props.Note);
+		// Offered only when there is something to grow. A board scattered with
+		// cells that claim to be woods and are soil would be worse than one with
+		// no woods on it - the same argument that refuses a --terrain naming a
+		// kind that did not load.
+		_trees &= _props.Any;
+		if (_trees)
+			_paints.Add(TerrainSet.Forest);
+		if (_paint == TerrainSet.Forest && !_trees)
+		{
+			GD.PushWarning("--terrain forest with no tree art; using mixed");
+			_paint = TerrainSet.Mixed;
+		}
+
+		_field = new HexField
+		{
+			Terrain = _terrain, Paint = _paint, Trees = _trees,
+			Columns = _map.Columns, Rows = _map.Rows, Plot = _map.Plot,
+		};
+		// Before the heights and the flood, because those two are the only things
+		// on the board with guards and neither of them asks what a cell is made
+		// of - so a kind that is wrong is wrong on its own and says so on screen.
+		_field.SetKinds(_map.Kinds);
+		// The two slots, beside the kinds and for their reason: what a cell
+		// is made of and what stands on it are statements about that cell
+		// alone, so they go on before anything that has a guard on it.
+		_field.SetGround(_map.Ground);
+		_field.SetCover(_map.Over);
+		if (_grade >= 0.0)
+			_field.StepGrade = _grade;
+		if (_depth >= 0.0)
+			_field.WaterDepth = _depth;
+		if (_deepDepth >= 0.0)
+			_field.DeepDepth = _deepDepth;
+		if (_deepBed >= 0.0)
+			_field.DeepBed = _deepBed;
+		if (_relief)
+			_field.SetRelief(_map.Levels, Ramped ? _map.Ramps : null);
+		// After the relief and never before it: the water's guards are asked about
+		// levels and ramps, so water laid on a board that has not got its heights
+		// yet is water judged against a board that does not exist.
+		if (Watered)
+			_field.SetWater(_map.Water);
+		// After the mask, because the cells it keeps a state for are the field's
+		// list and that list is settled by SetWater.
+		_sea = new Swell { Field = _field, Enabled = _seaReacts };
+		_wake = new Wake { Enabled = _wakes };
+		// Empty of a field until the stage lays one over the pond it builds: what
+		// the box is depends on which cells came out wet, and that is settled by
+		// the mesh rather than by the mask.
+		_wash = new Ripples { Enabled = _ripples };
+		AddChild(_field);
+		_marks = new TrackMarks { Enabled = _rutsEnabled };
+		AddChild(_marks);
+		// Added before the vehicles, so a tree and a tank that come out on the
+		// same foot row - the same ZIndex - resolve to the tank. Being stood on
+		// is the tank's job.
+		_grove = new Grove
+		{
+			Field = _field, Props = _props, Origin = _origin,
+			Enabled = _trees, ClearFront = _clearFront, Ghost = _ghost,
+		};
+		// Negative means the flag was not given, so the tuned default stands -
+		// zero is a legal setting here, not an absence, because a still board
+		// is the A/B this one is judged against.
+		if (_wind >= 0.0)
+			_grove.Wind = _wind;
+		if (_blast >= 0.0)
+			_grove.Blast = _blast;
+		if (_brush >= 0.0)
+			_grove.Brushing = _brush;
+		// The one hook the board raises rather than a tank: a crown reaching the
+		// ground under a bulldozer. Wired here and not beside the tick's nine,
+		// because the wood is built long after those are.
+		_grove.Thud = Thudded;
+		AddChild(_grove);
+		// After the wood, because what can catch is what is standing: the fire
+		// asks the grove and the grove asks its planted list. See
+		// Grove.Carrying - a forest cell whose trees all fell to the budget has
+		// nothing to burn, and a fire on it would blacken a field.
+		_fire = new Wildfire
+		{
+			Field = _field, Enabled = _woodFire, Wooded = _grove.Carrying,
+		};
+		_grove.Fire = _fire;
+
+		// One vehicle per atlas that loaded, parked on the board's own parkings.
+		// Built here rather than swapped later: each one keeps its own atlas for
+		// good, so nothing has to be reconfigured when the selection changes -
+		// which is most of what switching class used to be, and every line of it
+		// was a chance for one clock to be left pointing at the previous tank.
+		Vector2I[] parks = Park();
+		for (int i = 0; i < _loaded.Count; i++)
+		{
+			string tag = _loaded[i];
+			// The sprite, the vehicle and its clocks - Fleet.Crew, shared with
+			// the benches. What the harness adds on top is its own: the flash
+			// source and the recoil switch off its flags, the cap and the audio.
+			// The seed is its place in the list rather than its tag: the
+			// identity wanted is "which machine on this board", and --sprites
+			// can put three machines on one tank's pixels without making them
+			// one machine.
+			Vehicle vehicle = Fleet.Crew(this, tag, _atlases[tag], _flash,
+										 parks[i], (ulong)i + 1UL);
+			TankSprite sprite = vehicle.Sprite;
+			sprite.Source = _flashSource;
+			sprite.RecoilTurretOnly = _recoilTurretOnly;
+			// The ground that gets to stand in front of this one. A child of the
+			// sprite, so its z index is relative to the tank's and no cell
+			// repainted for this tank can land on another one - see ReliefCap.
+			// Built whether or not the board has relief: it draws nothing at all
+			// on a flat one, and a node that only exists under a flag is a node
+			// nobody exercises.
+			// Built here even when the bench is about to open on the stage, and
+			// taken away by StageOn: the stage is a switch now, so "which mode
+			// did we start in" must stop deciding which nodes exist at all.
+			var cap = new ReliefCap { Field = _field, Marks = _marks };
+			sprite.AddChild(cap);
+			vehicle.Cap = cap;
+			_vehicles.Add(vehicle);
+
+			// Its own players, for the reason its clocks are its own: one shared
+			// engine node would put three tanks in phase, and three engines
+			// beating as one is one engine three times as loud. Skipped entirely
+			// when nothing loaded rather than built mute, so a silent bench has
+			// no audio nodes at all.
+			SoundSet own = _sounds.TryGetValue(tag, out SoundSet? s)
+				? s : SoundSet.Load(SoundsRoot, tag);
+			if (own.Any || _commonSounds.Any)
+			{
+				var audio = new VehicleAudio
+				{
+					Own = own,
+					Common = _commonSounds,
+					Enabled = _soundEnabled && !_selfTest,
+					TurretMotor = _turretSound,
+				};
+				AddChild(audio);
+				vehicle.Audio = audio;
+			}
+		}
+
+		// Judging whether two layers line up is a pixel-level question, so the
+		// harness has to be able to get close. Sprites are drawn at 1:1 by
+		// default; zoom only changes the view, never the atlas sampling.
+		// Parked below, once the field has its atlas: ViewHome is measured in tiles
+		// and HexField.FlatAnchor answers Vector2.Zero until there is one, so asked
+		// here it would quietly hand back the origin - which is a corner of the
+		// board and looks like a view that simply was not moved.
+		_camera = new Camera2D { Zoom = new Vector2(ZoomAt ?? 1.0f, ZoomAt ?? 1.0f), Enabled = true };
+		AddChild(_camera);
+
+		var layer = new CanvasLayer();
+		AddChild(layer);
+		// The only thing left on the scene itself: the message that says nothing
+		// loaded. Everything the corner used to carry - the key list, and the
+		// live numbers beside it - is in the panel now, where the numbers sit
+		// next to the control that moves them instead of in a block that had to
+		// be read against one. A run with --no-ui gets neither, which is what a
+		// capture wants.
+		_hud = new Label { Position = new Vector2(16, 12) };
+		_hud.AddThemeColorOverride("font_color", new Color(0.92f, 0.95f, 1.0f));
+		_hud.AddThemeColorOverride("font_outline_color", new Color(0, 0, 0, 0.85f));
+		_hud.AddThemeConstantOverride("outline_size", 5);
+		layer.AddChild(_hud);
+
+		// The way back, and it exists only when the editor is what sent us - see
+		// Session, where this one coupling between two roots is argued. A button
+		// rather than only a key because the author who pressed Run has a mouse
+		// in their hand, and a key rather than only a button for the reason every
+		// other switch on this bench has both.
+		if (Session.Editing)
+		{
+			var back = new Button
+			{
+				Text = "Edit   F5",
+				Position = new Vector2(16.0f, 44.0f),
+			};
+			back.AddThemeFontSizeOverride("font_size", 16);
+			back.Pressed += Edit;
+			layer.AddChild(back);
+		}
+
+		if (_loaded.Count == 0)
+		{
+			_hud.Text = $"No atlases loaded from {SpritesRoot}\n\n"
+						+ string.Join("\n", failures);
+			return;
+		}
+		if (failures.Count > 0)
+			GD.PushWarning("some atlases failed: " + string.Join(", ", failures));
+
+		if (_startTag is not null && _loaded.IndexOf(_startTag) >= 0)
+			_active = _loaded.IndexOf(_startTag);
+		// Clamped because how many tanks are on disk decides how many there are:
+		// the default points at the medium, and a run with only one atlas present
+		// must select that one rather than throw.
+		_active = Math.Clamp(_active, 0, _vehicles.Count - 1);
+		// The field takes its tile from a tank, and now there are three of them.
+		// The medium's, always: the grid is one grid, so it cannot follow the
+		// selection, and the reference tank is the one drawn as rendered.
+		_field.Atlas = _vehicles[Math.Min(1, _vehicles.Count - 1)].Atlas;
+		// And now the view can be parked on the board, which is measured in that
+		// tile - see the camera above.
+		_camera.Position = ViewHome;
+		// Said out loud rather than drawn crooked. The hexagon's aspect ratio is
+		// its camera angle, and CellAt inverts the *rendered* tile's - so ground
+		// drawn at another elevation stops the hexagon on screen being the cell
+		// under the mouse, and the miss grows toward the board's edge rather
+		// than showing up in the middle where anyone would look.
+		// The pond's surface, here rather than beside the terrain, because it is
+		// checked against the rendered tile and the tile is only settled on the
+		// line above. Optional the same way: no strip on disk leaves the water the
+		// flat colour it was, which is the A/B the toggle is for.
+		_waterArt = WaterArt.Load(WaterRoot, _field.Atlas.HexRect);
+		GD.Print("water: " + _waterArt.Note);
+		if (_terrain is not null && _terrain.Any
+			&& !_terrain.CameraAgrees(_field.Atlas.HexRect))
+			GD.PushWarning(
+				$"terrain art is {_terrain.CameraError(_field.Atlas.HexRect) * 100.0f:F0}%"
+				+ " off the rendered tile's camera - clicks will drift from the"
+				+ " hexagons they land on");
+		// The stage, before the tanks are parked: it reparents each sprite into
+		// its own render target, and a sprite moved after it has been placed
+		// would be placed in the space it has just left.
+		if (_stage3d)
+			Staged = true;
+		ApplySize();
+		foreach (Vehicle vehicle in _vehicles)
+			Tick.Park(vehicle);
+		SowGrove();
+		// Once, here, rather than inside the sowing: it runs again on every
+		// slider drag, and a log line per drag is a log nobody reads.
+		if (_grove is not null)
+			GD.Print("grove: " + _grove.Note());
+		// What the two slots are running on. Printed for walls.json's
+		// reason: a settings file that quietly did not load looks exactly
+		// like one whose settings did nothing.
+		TerrainRules.Ready();
+		GD.Print("terrain: " + (TerrainRules.Loaded
+			? TerrainRules.FileName + " read"
+			  + (TerrainRules.Error.Length > 0
+				  ? ", but " + TerrainRules.Error : "")
+			: "on the compiled figures - " + TerrainRules.Error));
+		// The flag may have picked a tank other than the first, and the trim is
+		// set on selection - so it has to be set once at the start too, or two of
+		// the three come up forward until something is clicked.
+		FocusSound();
+		// Same shape: --no-shadow is parsed before any vehicle exists, so the
+		// switch has to be pushed once the vehicles do. The trap this repeats is
+		// named beside `_flashSource` - flags that wrote straight through
+		// "the driven tank" hung the capture instead of failing it.
+		ShadowChanged();
+
+		// The mark on whoever is being driven. Absent under --capture and --trace
+		// for the reason the panel is: a capture is evidence, and an A/B of two
+		// renders must not differ by a marker. --ui brings both back.
+		// On the stage the ring is geometry lying on the cell - see
+		// Stage3D.BuildRing. A canvas ring would be drawn over the tanks, and a
+		// mark that covers what it points at is not a mark. So both are built
+		// whatever mode the bench opens in and merely hidden while the stage
+		// owns the ground - the switch is live now, and a node that exists only
+		// in one mode cannot be switched into the other.
+		if (!NoUi)
+		{
+			_ring = new SelectionRing { Field = _field, Target = Active };
+			AddChild(_ring);
+			_targetRing = new SelectionRing
+			{
+				Field = _field,
+				Target = null,
+				Ink = SelectionRing.Hostile,
+				// Tighter than the selection's, so on the day a tank is both
+				// yours and somebody's target the two rings are two rings.
+				Inset = 0.70f,
+			};
+			AddChild(_targetRing);
+			Suppress2D(Staged);
+		}
+
+		// The debug line over a shot, outside the panel's guard on purpose. The
+		// rings are absent under --capture because a marker nobody asked for must
+		// not turn up in evidence; this one is off by default, so the guard it
+		// needs is the switch it already has - and a flag that could not reach a
+		// capture would be a flag with nowhere to be used.
+		//
+		// Not suppressed on the stage either, for the reason the tracer is not:
+		// it describes the round, so wherever the round is drawn this belongs
+		// over it.
+		_aimRay = new AimRay();
+		AddChild(_aimRay);
+
+		// Before the self-test, which now checks the rows against panel.json,
+		// and before the start-up flags, so the panel's first Sync sees what they
+		// did rather than the defaults.
+		//
+		// Built whether or not it is shown, because the rows are now the only
+		// path panel.json has into the harness - each opening value goes through
+		// the very setter the checkbox and the key use, so the file cannot reach
+		// anything the panel cannot. A capture wants the file's settings just as
+		// much as a session does; what --no-ui withholds is the widget, not the
+		// wiring. Attached to the tree only when it is to be seen: standing off
+		// the tree, Prepare() has already made the frame the rows go into, which
+		// is the same thing the self-test relies on.
+		// The per-class tracer and trail sizes, beside the panel's file because
+		// they are the same kind of thing: authored numbers that want restarting
+		// rather than rebuilding to change. Applied here rather than at parse time
+		// because there is nothing to race - the file sets the class triple, the
+		// flags set a level over it, so neither can overrule the other.
+		_classConfig = ClassConfig.Load(null);
+		if (_classConfig.Loaded)
+			_classConfig.Apply();
+		else
+			GD.Print($"[classes] {ClassConfig.FileName}: {_classConfig.Error}"
+					 + " - falling back to the compiled per-class figures");
+
+		_panelText = PanelText.Load(null);
+		if (!_panelText.Loaded)
+			GD.Print($"[panel] {PanelText.FileName}: {_panelText.Error}"
+					 + " - falling back to the built-in labels and defaults");
+		_panel = new ControlPanel { Text = _panelText };
+		_panel.Prepare();
+		if (!NoUi)
+		{
+			layer.AddChild(_panel);
+			_panel.AddHandle();
+		}
+		BuildPanel();
+		_panel.OpenDefaults(_flagged);
+		if (NoUi)
+		{
+			// Nothing will ever draw or sync it, and a detached branch of
+			// Controls left lying about is a wall of leak warnings at exit that
+			// would hide a real one later.
+			_panel.QueueFree();
+			_panel = null;
+		}
+
+		if (_selfTest)
+		{
+			int failed = SelfTest.Run(_field, _tank, _atlases, _vehicles, _active,
+									  _ring, _commonSounds, _sounds, _panel, _grove,
+									  _stage, _selfTestOnly);
+			GetTree().Quit(failed == 0 ? 0 : 1);
+			return;
+		}
+		// The flag values that had to wait for a tank to exist. The recoil level
+		// goes on every tank: it is a harness setting, and a slider judged on one
+		// tank while the other two ran at a different amplitude would be measuring
+		// the difference. Burning goes on the selected one alone, because that is
+		// what J does and what makes a burning tank next to an intact one possible.
+		//
+		// The tremble level is not here any more: it is the board's, pushed every
+		// frame by UpdateTremble, so a copy applied once at start-up would be
+		// overwritten by it - which is exactly what happened, and it read as the
+		// flag not arriving.
+		foreach (Vehicle vehicle in _vehicles)
+		{
+			vehicle.Recoil.Level = _recoilAtStart;
+			if (_rollOnly)
+				vehicle.Rumble.Amplitude = 0.0;
+			if (_heaveOnly)
+				vehicle.Rumble.RollAmplitude = 0.0;
+		}
+		// Said out loud rather than left to the row claim: --no-3d works because
+		// FlagRows keeps panel.json's default off view.stage, and a table entry is
+		// not where a refusal should live on its own - drop the entry and the flag
+		// stops working with nothing to read. Here it also covers the file having
+		// turned the stage on before this point.
+		if (_noStage)
+			Staged = false;
+		// The wood, before anything about the tanks: the fire is the board's
+		// state and a screenshot of it wants the front to have had time to walk,
+		// which --capture-at is for. Refused rather than silent if the cell has
+		// nothing on it - a flag naming a field is a flag that did not work.
+		if (_lightAt is Vector2I spark && _fire?.Light(spark) != true)
+			GD.PushWarning($"--burn-wood {spark.X},{spark.Y} has no wood on it");
+		Active.Burning = _burnAtStart;
+		// After the burning flag, because a wreck lights its own fire and would
+		// otherwise be put out by a flag that was not asked for.
+		if (_outAtStart)
+			Tick.Disable(Active);
+		if (_deadAtStart)
+			Tick.Kill(Active);
+		if (_startTurret is not null)
+			_tank.TurretFacing = Angles.Mod(_startTurret.Value, 360.0);
+		for (int i = 0; i < _damageAtStart; i++)
+			foreach (string face in _tank.Atlas?.HitFaces
+									?? (IReadOnlyList<string>)Array.Empty<string>())
+			{
+				// One increment, read twice: the two axes are two views of the
+				// same round, and stepping the counter between them would scatter
+				// a shell that does not exist.
+				int n = ++_hitCount;
+				_tank.Damage(face, TankTick.ScatterAt(n), TankTick.RiseAt(n));
+			}
+		if (_driveTo is not null)
+			OrderMoveTo(_field.ClampCell(_driveTo.Value));
+		if (_attackAtStart is int foe && foe >= 0 && foe < _vehicles.Count)
+			Engage(Active, _vehicles[foe]);
+		// After --attack, because the two are the same gun and the later order
+		// stands - which is the rule the buttons obey, said here so that a run
+		// given both flags does what a session given both clicks does.
+		if (_shellAtStart is not null)
+			OrderShot(Active, _field.ClampCell(_shellAtStart.Value));
+		// And after --drive, for the same reason on the other order: a ram is a
+		// drive with an intent, so the last one given is the one being driven.
+		if (_ramAtStart is not null)
+			OrderRam(_field.ClampCell(_ramAtStart.Value));
+		if (_fireAtStart)
+			Fire();
+		if (_hitAtStart is not null)
+			TakeHit(_hitAtStart.Value);
+
+		// Last, after every start-up flag has landed. An agent's first call is for
+		// the state, and a connection opened before --drive or --destroy had been
+		// applied would answer about a board still being set up.
+		StartMcp();
+	}
+
+	private string CurrentTag() => Active.Tag;
+
+	/// <summary>
+	/// Take control of one of the tanks.
+	///
+	/// All it does is move the selection. Switching class used to rebuild every
+	/// clock and clear the damage, because one tank was wearing another tank's
+	/// atlas; now each vehicle keeps its own for good, so a burning tank left
+	/// selected stays burning, a holed plate stays holed, and coming back to a
+	/// tank finds it as it was left. That is the property the bench needs - three
+	/// tanks in three different states, side by side.
+	/// </summary>
+	private void Select(int index)
+	{
+		if (index < 0 || index >= _vehicles.Count)
+			return;
+		_active = index;
+		// The ring marks whoever is being driven, so it is set here and nowhere
+		// else - it follows the tank's own contact patch from there, including
+		// while it drives.
+		if (_ring is not null)
+			_ring.Target = Active;
+		// The highlight belongs to whoever is being driven, so it follows the
+		// selection rather than staying on the last order given.
+		_field.Highlight = Active.Path.GetRange(
+			Math.Min(Active.PathStep, Active.Path.Count),
+			Active.Path.Count - Math.Min(Active.PathStep, Active.Path.Count));
+		_field.QueueRedraw();
+		// The gunnery marks belong to the driven tank too, for the same reason
+		// the route does: every tank may be engaging something, and what is
+		// painted on the ground is what the tank in hand can see.
+		PaintGunnery();
+		FocusSound();
+		_panel?.Sync();
+		_tank.QueueRedraw();
+	}
+
+	/// <summary>
+	/// Point a tank's gun at another one, or at nobody.
+	///
+	/// One way in, called by the right button, by the panel and by --attack, so
+	/// the three cannot disagree about what a target is. A tank cannot be given
+	/// itself: right-clicking your own tank means "stop shooting", which is the
+	/// same shape as left-clicking it meaning "stay put".
+	/// </summary>
+	private void Engage(Vehicle shooter, Vehicle? target)
+	{
+		// Neither end of an engagement may be a wreck: a burnt-out hull has no
+		// gun, and shooting at one is a fight with nothing on the other side of
+		// it. Both refusals land here rather than at the three call sites, which
+		// is what this one way in is for.
+		if (shooter.Wreck.Out || target?.Wreck.Dead == true)
+			target = null;
+		shooter.Target = ReferenceEquals(shooter, target) ? null : target;
+		// One gun, one order - see Vehicle.Mark. Whichever arrived last stands,
+		// and this is one of the two doors that says so.
+		shooter.Mark = null;
+		shooter.Solution = Gunnery.None;
+		if (shooter == Active)
+		{
+			// Both of these drive the turret and would fight the gun for it,
+			// which is the same reason a move order takes them back.
+			_aimWithMouse = false;
+			_spinning = false;
+		}
+		PaintGunnery();
+	}
+
+	/// <summary>
+	/// The lanes, the live one and the ring under the target - all off the driven
+	/// tank, all recomputed together.
+	///
+	/// The six arcs are only drawn once there is a target, and that is the point
+	/// of them: with nobody to shoot at they are clutter, and with a target that
+	/// is not on a lane they are the answer to the question the player now has,
+	/// which is not "why did it not fire" but "where do I have to drive".
+	///
+	/// <b>An order to shell a cell draws them too</b>, for exactly that reason: a
+	/// hex off every lane is a hex this tank cannot shell from here, and the arcs
+	/// are where the answer is written. The ring under the target is not drawn for
+	/// one, and that is not an omission - it marks a hull that is being shot at,
+	/// and a cell has no hull to mark.
+	/// </summary>
+	private void PaintGunnery()
+	{
+		if (_targetRing is not null)
+			_targetRing.Target = Active.Target;
+		Vector2I? aimed = Active.Target?.Cell ?? Active.Mark;
+		if (aimed is null)
+		{
+			_field.Arcs = Array.Empty<Vector2I>();
+			_field.Aim = Array.Empty<Vector2I>();
+			_field.QueueRedraw();
+			return;
+		}
+		var arcs = new List<Vector2I>();
+		foreach (int heading in HexField.EdgeHeadings)
+			foreach (Vector2I cell in _field.Lane(Active.Cell, heading))
+			{
+				arcs.Add(cell);
+				// Stops at the first tank, that one included. A lane painted
+				// straight through a hull would promise reach the shell has not
+				// got, and where it stops is the same "blocked" the solution
+				// reports - said on the ground, where it does not have to be
+				// read.
+				if (Vehicle.At(_vehicles, cell) is not null)
+					break;
+			}
+		_field.Arcs = arcs;
+		Shot shot = Gunnery.Solve(_field, _vehicles, Active, aimed.Value);
+		_field.Aim = shot.Clear
+			? _field.Lane(Active.Cell, shot.Heading, shot.Range)
+			: Array.Empty<Vector2I>();
+		_field.QueueRedraw();
+	}
+
+	/// <summary>
+	/// Bring the driven tank's voice forward and set the other two back.
+	///
+	/// Set here beside the ring, and for the same reason it is: both say which
+	/// tank is yours, and one place to say it is one place for the two to
+	/// disagree. The ring can put its mark on the ground because the sprites are
+	/// what is being judged and must not be touched; sound has no ground, and
+	/// three engines at one level sum into one, so the only mark available is
+	/// level. See <see cref="VehicleAudio.Focused"/>.
+	/// </summary>
+	private void FocusSound()
+	{
+		for (int i = 0; i < _vehicles.Count; i++)
+			if (_vehicles[i].Audio is not null)
+				_vehicles[i].Audio!.Focused = i == _active;
+	}
+
+	/// <summary>The class's size onto every tank - <see cref="Fleet.Resize"/>,
+	/// with this root's level.</summary>
+	private void ApplySize()
+	{
+		foreach (Vehicle vehicle in _vehicles)
+			Fleet.Resize(vehicle, _sizeLevel);
+	}
+
+
+
+
+	/// <summary>
+	/// Plant the board, with the keep-out and the clearance constant taken from
+	/// the tanks that are actually on it rather than written down.
+	///
+	/// The keep-out is the contact patch swept over every heading: half the belt
+	/// length and the half-gauge are the two sides of it, so its radius is their
+	/// diagonal. The widest tank of the three, but at the size it was
+	/// <i>rendered</i> - the class scale is the bench's, named in CLAUDE.md as
+	/// something that will not exist in the game, and a clearing sized by it
+	/// would be 15% too big for the same reason the tanks are 15% apart.
+	///
+	/// It matters more than it looks. At 1.15 the radius is 101 ground px
+	/// against a hexagon 107 tall, so the ring left over is six pixels deep at
+	/// the top - thinner than a tree's roots, and a wooded cell came out with
+	/// two trees on it whatever the lattice was set to. Unscaled it is 83, and
+	/// the ring is 24 deep.
+	/// </summary>
+	private void SowGrove()
+	{
+		if (_grove is null)
+			return;
+		double keepOut = 0.0, below = 0.0;
+		foreach (Vehicle vehicle in _vehicles)
+		{
+			double half = vehicle.Atlas.TrackLength * 0.5;
+			double arm = vehicle.Atlas.TrackArm;
+			if (half > 0.0 && arm > 0.0)
+				keepOut = Math.Max(keepOut, Math.Sqrt(half * half + arm * arm));
+			below = Math.Max(below, ReachBelow(vehicle.Atlas));
+		}
+		if (keepOut > 0.0)
+			_grove.KeepOut = keepOut;
+		if (below > 0.0)
+			_grove.TankBelow = below;
+		_grove.Plant();
+	}
+
+	/// <summary>
+	/// Every cell a tank is in the way of: where its body is, and where it is
+	/// headed.
+	///
+	/// Two readings, because the wood has to open before the tank arrives and
+	/// close after it has gone, and neither end is the cell its centre is in.
+	///
+	/// <b>Where its body is</b> is the contact patch, not the centre point - so
+	/// a cell stays counted until the tank has entirely left it rather than
+	/// until its middle has. Sampled by asking which cell six points on the
+	/// patch's rim fall in, rather than by measuring a disc against a hexagon:
+	/// the cell arithmetic answers that exactly, slanted edges and all, and an
+	/// outside-distance to a hexagon would be a second description of the same
+	/// shape - the trap <see cref="Grove.EdgeRoom"/> already names from the
+	/// other side.
+	///
+	/// <b>And that patch is stepped in flat space, never on the screen.</b> The
+	/// keep-out is a distance across the ground, while
+	/// <see cref="HexField.CellAt"/> is the picker - which cell is <i>drawn</i> at
+	/// this pixel - and the two stop agreeing the moment the tank is standing a
+	/// level down. Measured, parked in the ford at (6,5): the lift is 64.8px, and
+	/// the probe going straight left carries no vertical offset at all
+	/// (<c>sin(pi) = 0</c>), so it walks the whole 83px along the tank's own drawn
+	/// row - which is exactly the row the bank at (5,5) is drawn on. The picker
+	/// answered (5,5) honestly, being the nearer cell painted there, and the wood
+	/// on the bank opened for a tank that was a level below it and a cell away.
+	/// With the lift put back the same six probes all answer (6,5).
+	///
+	/// The same trap the selection ring and the pond already carry, and the third
+	/// place it has been paid: see <see cref="HexField.Bare"/>, which is what a
+	/// drawn row is turned back into a ground row with.
+	///
+	/// <b>Where it is headed</b> is the step it is on, taken from the order the
+	/// moment it starts rather than when the patch first touches. At rest the
+	/// patch reaches 88 ground px and the neighbour's edge is 107 away, so a
+	/// tank that has just been told to drive into a wood is still 19px short of
+	/// touching it - and a wood that opens 19px late opens after the tank has
+	/// visibly set off, which reads as the trees noticing.
+	/// </summary>
+	private HashSet<Vector2I> Standing() =>
+		_grove is null ? new HashSet<Vector2I>()
+					   : Fleet.Standing(_vehicles, _field, _grove, _origin);
+
+	/// <summary>The cells whose wood is coming down - see
+	/// <see cref="Fleet.Razing"/>. Beside <see cref="Standing"/> and not
+	/// folded into it, because the reveal asks two questions of the two
+	/// sets.</summary>
+	private HashSet<Vector2I> Razing() =>
+		_grove is null ? new HashSet<Vector2I>() : Fleet.Razing(_vehicles);
+
+
+	/// <summary>Cells carrying trees.</summary>
+	/// <summary>How hard the driven tank is shouldering the water, 0 parked
+	/// through 1 at the ford's own ceiling, and nought when it is not in the
+	/// water at all. For the trace: the crest is drawn by the surface out of a
+	/// vector nothing else prints, so a bow that never appears could be the
+	/// switch, the shader or a tank that is dry, and those are three fixes.
+	/// </summary>
+	private float BowPush()
+	{
+		Vehicle? v = Active;
+		if (v is null || !v.Wading)
+			return 0.0f;
+		return Mathf.Clamp(
+			(float)(v.Speed / Math.Max(v.Profile.WaterSpeed, 1e-4)), 0.0f, 1.0f);
+	}
+
+	private int Wooded()
+	{
+		if (_grove is null)
+			return 0;
+		int n = 0;
+		for (int q = 0; q < _field.Columns; q++)
+		for (int r = 0; r < _field.Rows; r++)
+			if (_grove.IsForest(new Vector2I(q, r)))
+				n++;
+		return n;
+	}
+
+	/// <summary>Trees on the thinnest wooded cell, and on the fullest. The two
+	/// numbers the two counts are about: a total says nothing about the cell
+	/// that came out a field, nor about the one that came out a thicket.
+	/// </summary>
+	private int Thinnest() => Extreme(true);
+
+	private int Thickest() => Extreme(false);
+
+	private int Extreme(bool least)
+	{
+		if (_grove is null || _grove.Planted == 0)
+			return 0;
+		var counts = new Dictionary<Vector2I, int>();
+		foreach (PropNode tree in _grove.Standing)
+			counts[tree.Cell] = counts.GetValueOrDefault(tree.Cell) + 1;
+		int found = least ? int.MaxValue : 0;
+		for (int q = 0; q < _field.Columns; q++)
+		for (int r = 0; r < _field.Rows; r++)
+		{
+			var cell = new Vector2I(q, r);
+			if (!_grove.IsForest(cell))
+				continue;
+			int n = counts.GetValueOrDefault(cell);
+			found = least ? Math.Min(found, n) : Math.Max(found, n);
+		}
+		return found == int.MaxValue ? 0 : found;
+	}
+
+	/// <summary>How far a tank reaches below its own contact point, in tile px.
+	/// Not zero and not small: the belts hang in front of the turret axis, so a
+	/// tank covers ground it is not standing on, and a prop that ignored it
+	/// would clear the contact point and cross the tracks.</summary>
+	private static double ReachBelow(AtlasSet atlas)
+	{
+		double contact = atlas.Anchor.Y + atlas.GroundOffset.Y;
+		double below = 0.0;
+		foreach (string layer in new[] { "hull", AtlasSet.TrackNames[0],
+										 AtlasSet.TrackNames[1] })
+		{
+			if (!atlas.Has(layer))
+				continue;
+			int frames = atlas.CountOf(layer) * Math.Max(1, atlas.PhasesOf(layer));
+			for (int i = 0; i < frames; i++)
+			{
+				Vector2 size = atlas.SizeOf(layer, i);
+				if (size.Y <= 0.0f)
+					continue;
+				below = Math.Max(below,
+								 atlas.OffsetOf(layer, i).Y + size.Y - contact);
+			}
+		}
+		return below;
+	}
+
+
+	private void SnapToCell() => Tick.Park(Active);
+
+	/// <summary>
+	/// A global effect toggle reaching every tank.
+	///
+	/// These five are settings of the harness, not of a vehicle: "show me the
+	/// ground rumble" is a question about the effect, and answering it on one tank
+	/// while the other two sat still would make the comparison the toggle exists
+	/// for impossible. Burning is the exception and stays per tank - see
+	/// <see cref="Vehicle.Burning"/>.
+	///
+	/// One method per toggle, called by both the key and the panel row, so the two
+	/// cannot come to mean different things.
+	/// </summary>
+	private void PitchChanged()
+	{
+		foreach (Vehicle v in _vehicles)
+			Tick.UpdatePitch(v, 0.0, 0.0);
+	}
+
+	/// <summary>One source's channel flipped from the panel: the switch, and the
+	/// spring put down when nothing is left to feed it. Put down rather than
+	/// left ringing, because a view parked a few pixels out by a switch is a
+	/// board whose camera is wrong and says nothing about why.</summary>
+	private void Shaken(TankTick.Shook what, bool on)
+	{
+		_tick.ShakeOf(what).On = on;
+		if (_tick.Shaking)
+			return;
+		_shake.Reset();
+		_camera.Offset = Vector2.Zero;
+	}
+
+	private void RumbleChanged()
+	{
+		foreach (Vehicle v in _vehicles)
+		{
+			Tick.UpdateRumble(v, 0.0);
+			// Asked for here, the way ShadowChanged asks. Without it the switch
+			// leans on the tremble redrawing every frame - that is, on a
+			// different effect being on - and with both off the last jolt stays
+			// on screen. Latent rather than live today, which is exactly the
+			// sort of thing that stops being latent later.
+			v.Sprite.QueueRedraw();
+		}
+	}
+
+	private void TrembleChanged()
+	{
+		foreach (Vehicle v in _vehicles)
+			Tick.UpdateTremble(v, 0.0);
+	}
+
+	private void ExhaustChanged()
+	{
+		foreach (Vehicle v in _vehicles)
+			Tick.UpdateExhaust(v, 0.0);
+	}
+
+	/// <summary>Push the switch to every tank. The shadow is a question about
+	/// the effect and not about one vehicle, so it reaches all three - the same
+	/// rule the movement effects follow, and the opposite of the fire, which is
+	/// a state one tank is in.</summary>
+	private void ShadowChanged()
+	{
+		foreach (Vehicle v in _vehicles)
+		{
+			v.Sprite.ShowShadow = _shadowEnabled;
+			v.Sprite.QueueRedraw();
+		}
+	}
+
+	private void TracksChanged()
+	{
+		foreach (Vehicle v in _vehicles)
+			Tick.UpdateTracks(v, (0.0, 0.0), 0.0);
+	}
+
+
+
+	private void ScanChanged()
+	{
+		if (_tick.ScanEnabled)
+			return;
+		foreach (Vehicle v in _vehicles)
+			v.Scan.Reset();
+	}
+
+	/// <summary>Push the switch to every tank. Setting the flag alone would leave
+	/// the loops running: they are gated by volume rather than stopped, so that
+	/// nudging the stick does not restart the belt from sample zero.</summary>
+	private void SoundChanged()
+	{
+		foreach (Vehicle v in _vehicles)
+			if (v.Audio is not null)
+			{
+				v.Audio.Enabled = _soundEnabled;
+				v.Audio.TurretMotor = _turretSound;
+			}
+	}
+
+	/// <summary>
+	/// The tracer on and off, on the rounds already up as well as the next one.
+	///
+	/// Reaching into the shells in flight is the point rather than an extra:
+	/// switching a drawing off has to take effect on what is being drawn, and a
+	/// round that kept its tracer because it was launched a moment ago would read
+	/// as the switch not working.
+	/// </summary>
+	private void TracerChanged() => Tick.ShowRounds();
+
+	/// <summary>
+	/// Rounds in the air, and how far the nearest one has got. A shot that seems
+	/// to do nothing is either a shell still flying or a shell that was never
+	/// launched, and from outside those are the same picture.
+	///
+	/// <b>Beside the aim rather than inside it</b>, because a round in the air is
+	/// a fact about the board and not about having a target: a shot fired by hand
+	/// has no target at all, and reported only through the engagement it would be
+	/// the one shot nothing could be read about. See <see cref="Shoot"/>.
+	///
+	/// Rounds still in the air, not rounds still on screen: the smoke hangs for a
+	/// second after the last of them has landed, and a count of those would report
+	/// a shot that is over as a shot in progress.
+	/// </summary>
+	private string Flying()
+	{
+		var all = new List<Shell>();
+		foreach (Vehicle v in _vehicles)
+			all.AddRange(v.Rounds);
+		List<Shell> up = all.FindAll(s => !s.Arrived);
+		return up.Count == 0
+			? (all.Count == 0 ? "" : $" [{all.Count} smoking]")
+			: $" [{up.Count} up, {up[0].Fraction:F2}"
+			  // And how high the first of them is standing, for the one round in
+			  // the game that is ever off the ground - a lob read on the trace as
+			  // a flat shot that is taking its time is the failure this prints
+			  // against. Nothing at all on a flat round, which is every round the
+			  // other four classes fire.
+			  + (up[0].Lofted
+				  ? $", {up[0].Height:F0}px up of {up[0].Apex:F0}" : "")
+			  // How far off its own barrel this one is going to land. Normally
+			  // zero by construction; anything else is the clamp that keeps the
+			  // mark on the armour, and that is not visible in the picture.
+			  + $", bore {up[0].BoreMiss:F1}px"
+			  // How fast and how big, because both are levels now and a level
+			  // that did not arrive looks exactly like one that did.
+			  // Two calibres, because they are two settings now: a trail tuned
+			  // against a streak that turned out to be the same number would be
+			  // two dials that agree by accident.
+			  + $", {Shell.Speed:F0}px/s cal {up[0].TracerSize:F2}"
+			  + $"/{up[0].SmokeSize:F2}"
+			  + $"{(Shell.SmokeOn ? "" : " nosmoke")}"
+			  + $"{(_tracerVisible ? "" : " unseen")}]";
+	}
+
+	/// <summary>
+	/// The gunnery field for <c>--trace</c> and for the panel.
+	///
+	/// It reports the reason rather than a yes or no, because from outside a
+	/// tank that is not shooting looks the same whether it has no line, has
+	/// somebody in the way, is still swinging its gun round or is simply
+	/// reloading - and the first two are answered by driving somewhere else
+	/// while the last two are answered by waiting.
+	/// </summary>
+	private string AimLine()
+	{
+		Vehicle v = Active;
+		// The ram, first and on its own line's front, because it is the one order
+		// here that is not the gun's: a tank can be driving at somebody while its
+		// gun has nothing to say, and a field that reported only the gun would
+		// call that "-".
+		string ram = v.Charge is Vector2I into
+			? $"ram ({into.X},{into.Y}) "
+			  + (v.Moving ? $"{v.LegDone:F2} of the leg" : "no route") + " "
+			: "";
+		if (v.Target is null && v.Mark is null)
+			return ram + "-" + Flying();
+		// What was ordered, in the two words that tell them apart: a cell is one
+		// round and a tag is until told otherwise.
+		string what = v.Target is not null
+			? v.Target.Tag : $"cell ({v.Mark!.Value.X},{v.Mark.Value.Y})";
+		if (!v.Solution.OnLane)
+			return $"{ram}{what} no lane";
+		string state = v.Solution.BlockedAt is Vector2I b ? $"blocked ({b.X},{b.Y})"
+			: v.Moving ? "moving"
+			: !Gunnery.Laid(v.Sprite.TurretFacing, v.Solution.Heading) ? "laying"
+			: v.ReloadLeft > 0.0 ? $"loading {v.ReloadLeft:F1}s"
+			: "ready";
+		// A round ordered into a hex with nothing on it has no plate, no matchup
+		// and no tally to report - every field below this line is about a hull.
+		// Said as the cell and the state alone rather than with three zeroes,
+		// which would read as a matchup that had been worked out.
+		if (v.Target is null)
+		{
+			Vehicle? hull = Vehicle.At(_vehicles, v.Mark!.Value);
+			return $"{ram}{what}@{v.Solution.Heading}deg/{v.Solution.Range}"
+				   + $" {state} onto "
+				   + (hull is null ? "the ground" : hull.Tag) + Flying();
+		}
+		// What the shooting has achieved, which is otherwise unreadable from
+		// outside: the trace prints the driven tank, and in an engagement the
+		// driven tank is usually the one doing the damage rather than taking it.
+		// The plate this lane lands on, how deep this gun can ever get into it,
+		// and how deep it has got - so a light tank stuck at 0/0 on a heavy is
+		// the matchup working rather than the shells missing.
+		string face = v.Target.Atlas.FaceFor(
+			Angles.Mod(v.Solution.Heading + 180.0, 360.0), v.Target.Sprite.HullFacing);
+		int cap = Gunnery.Penetration(v.Profile, v.Target.Profile);
+		string flying = Flying();
+		// And how near the end the target is, which the plate cannot say: three
+		// rounds finish it wherever they landed, so a tank whose front plate reads
+		// 1/1 may be one round from dead or three, depending on what its flanks
+		// have taken.
+		string near = v.Target.Wreck.Disabled
+			? " knocked out"
+			: $" pen {v.Target.Sprite.Penetrations}";
+		return $"{ram}{v.Target.Tag}@{v.Solution.Heading}deg/{v.Solution.Range} {state}"
+			   + $" {face} {v.Target.Sprite.ScarLevel(face)}/{cap}{near}{flying}";
+	}
+
+	/// <summary>
+	/// The audio field for <c>--trace</c>: what was asked for, then what came out.
+	///
+	/// The peak is read off the master bus rather than inferred from the gates,
+	/// and that is the whole value of the line. Gates are this code's own opinion
+	/// of how loud it is being; the peak is the mixer's, and the two part company
+	/// exactly where the interesting failures are - a stream that loaded but is
+	/// silent, a device that never opened, a loop paused at the wrong moment.
+	/// </summary>
+	private string SoundLine()
+	{
+		VehicleAudio? a = Active.Audio;
+		if (a is null)
+			return "none";
+		float peak = Mathf.Max(AudioServer.GetBusPeakVolumeLeftDb(0, 0),
+							   AudioServer.GetBusPeakVolumeRightDb(0, 0));
+		// Every tank's trim, not just the driven one's, because the whole claim
+		// is about the *balance* between them: one number cannot show that two
+		// others moved back.
+		var trims = new List<string>();
+		foreach (Vehicle vehicle in _vehicles)
+			trims.Add(vehicle.Audio is null ? "--" : $"{vehicle.Audio.AppliedDb:F0}");
+		return $"{(_soundEnabled ? "on " : "off")}"
+			   + $" eng {a.EngineGate:F2}@{a.EnginePitch:F2}"
+			   + $" trk {a.TrackGate:F2}@{a.TrackPitch:F2}"
+			   // The ring, which is the only loop whose gate cannot be guessed
+			   // from anything else on the line: a stabilised turret is being
+			   // driven hard while the tank drives straight and the gun holds
+			   // still on screen.
+			   + $" trt {a.TurretGate:F2}@{a.TurretPitch:F2}"
+			   // 'off' and 'not turning' are the same two numbers and not the
+			   // same thing - the tube's lesson, and this one is off by default
+			   // so it is the reading you get unless you asked otherwise.
+			   + $"{(_turretSound ? "" : "!off")}"
+			   + $" brn {a.BurnGate:F2}"
+			   + $" mix[{string.Join("/", trims)}]"
+			   + $" peak {(float.IsNegativeInfinity(peak) ? -99.0f : peak),6:F1}dB";
+	}
+
+	// --- orders ------------------------------------------------------------
+
+	private void OrderMoveTo(Vector2I target)
+	{
+		// A wreck does not take orders. Refused here rather than at the click,
+		// so the panel and a future script get the same answer the mouse does.
+		if (!_field.InBounds(target) || target == _cell || Active.Wreck.Out)
+			return;
+		// Round the others rather than through them. A blocked destination gives
+		// no path at all, which is why a click on an occupied cell is read as a
+		// selection before it ever gets here.
+		_path = _field.FindPath(_cell, target, Barred(), masonry: true,
+		                        bulldozer: Active.Profile.Bulldozes);
+		_pathStep = 0;
+		// A plain drive is not a ram, and this is the door that says so: the two
+		// are the same order with an intent on one of them, so the intent has to
+		// come off whenever the order is given again without it. Otherwise a tank
+		// pulled off a ram by a left click delivers it anyway if the new route
+		// happens to run past the hull it was aimed at.
+		Active.Charge = null;
+		// Mouse aim would override both turret modes and make the feature look
+		// broken while the tank drives, so an order takes the turret back.
+		_aimWithMouse = false;
+		_spinning = false;
+		_field.Highlight = _path;
+		_field.QueueRedraw();
+	}
+
+	/// <summary>
+	/// Everywhere the driven tank may not go: the other tanks, and nothing else.
+	///
+	/// <b>The masonry is not a cell and so is not here</b> - a wall stands on the
+	/// rim, and a ring with one leaf driven through is a ring a tank drives out
+	/// of on that side. It reaches the route as an edge instead, through
+	/// <c>masonry: true</c> - see <see cref="HexField.Blocked"/>. A wood is in
+	/// neither: a forest cell has a clearing in it by construction, so it costs
+	/// the route nothing, and what it costs the drive is <c>terrain.json</c>'s to
+	/// say.
+	/// </summary>
+	private HashSet<Vector2I> Barred() =>
+		new(Vehicle.Occupied(_vehicles, Active));
+
+	/// <summary>
+	/// One round into a cell: the right button's whole order.
+	///
+	/// <b>It fires nothing here.</b> The five gates are the engagement's five -
+	/// a lane, a clear one, a standstill, a laid gun, a loaded round - and they
+	/// are checked in <see cref="UpdateAttack"/> frame by frame, because the
+	/// gun may have to be swung round and the tank may have to stop first. So a
+	/// press is an order and the shot happens when the tank can make it, which
+	/// is the same promise the standing engagement makes and the reason the two
+	/// share every line of the laying.
+	///
+	/// <b>One press is one round, and that is the only difference from an
+	/// engagement.</b> The order is cleared by the shot leaving - see
+	/// <see cref="UpdateAttack"/> - so a gun told to shell a cell shells it once
+	/// and stops. Held between the press and the shot rather than fired on the
+	/// press, because a round that went off before the turret came round would
+	/// leave down whatever lane the gun happened to be on.
+	///
+	/// The driven tank's own cell cancels, for the reason a left click on it is
+	/// "stay put": a gun laid on the hull carrying it is not a shot.
+	/// </summary>
+	private void OrderShot(Vehicle shooter, Vector2I cell)
+	{
+		// A wreck has no gun. Refused here rather than at the click, so the panel
+		// and a tool get the same answer the mouse does - Engage's argument.
+		if (shooter.Wreck.Out || !_field.InBounds(cell))
+			return;
+		shooter.Mark = cell == shooter.Cell ? null : cell;
+		// The two turret modes would fight the gun for the ring, which is the
+		// same reason a move order and an engagement both take them back.
+		if (shooter.Mark is not null)
+		{
+			shooter.Target = null;
+			if (shooter == Active)
+			{
+				_aimWithMouse = false;
+				_spinning = false;
+			}
+		}
+		shooter.Solution = Gunnery.None;
+		PaintGunnery();
+	}
+
+	/// <summary>
+	/// Drive into the tank standing on a cell: the double click's order.
+	///
+	/// <b>A ram is a drive order with an intent on it</b>, which is how the wall
+	/// bench's ram is written too. The route is found the ordinary way and driven
+	/// at the ordinary speed; the only thing the intent buys is that the tank
+	/// standing on the destination is lifted out of what bars the route, so the
+	/// last leg is a leg into an occupied cell rather than no route at all. What
+	/// happens when the hulls meet is <see cref="TankTick.RamContacts"/>.
+	///
+	/// <b>A ram needs a hull to ram.</b> Double-clicked on empty ground this is
+	/// the move order the first press of the gesture already gave, and the intent
+	/// is dropped rather than remembered - there is nothing on the cell for it to
+	/// mean anything about, and an intent that survives until somebody drives
+	/// onto that cell would be a ram delivered minutes later by a tank that has
+	/// long since arrived. A wreck is not a hull either: it is scenery that fills
+	/// a cell, so its cell stays barred and the order comes to nothing, exactly
+	/// as a left click on it does.
+	/// </summary>
+	private void OrderRam(Vector2I cell)
+	{
+		if (!_field.InBounds(cell) || cell == _cell || Active.Wreck.Out)
+			return;
+		Vehicle? victim = Vehicle.At(_vehicles, cell);
+		if (victim is not null && victim.Wreck.Dead)
+			victim = null;
+		HashSet<Vector2I> barred = Barred();
+		if (victim is not null)
+			barred.Remove(cell);
+		_path = _field.FindPath(_cell, cell, barred, masonry: true,
+								bulldozer: Active.Profile.Bulldozes);
+		_pathStep = 0;
+		_aimWithMouse = false;
+		_spinning = false;
+		// Only when there is both something to hit and a way to reach it. A ram
+		// with no route is a ram that never happens, and left standing it would
+		// go off the moment some later order happened to take this tank past.
+		Active.Charge = victim is not null && _path.Count > 0 ? cell : null;
+		_field.Highlight = _path;
+		_field.QueueRedraw();
+	}
+
+	// <b>The ram contact lives in TankTick now (2026-09-11).</b> What happens
+	// when two hulls meet is the same on every board - and the event bench rams
+	// too, so a copy here would be the harness owning a rule two roots play. The
+	// gesture is still this file's: OrderRam above sets the intent, the tick
+	// spends it - see TankTick.RamContacts and Ramming.
+
+	private void CancelOrder() => Tick.CancelOrder(Active);
+
+
+
+
+
+	/// <summary>
+	/// What the slope is doing to the drawn body, this frame.
+	///
+	/// The grade is worked out from the live state rather than stashed when the
+	/// leg begins, and that is not tidiness. Parking happens at every cell of a
+	/// multi-cell climb, so a stored grade would be cleared and set again at each
+	/// boundary - a notch in the middle of a climb, once per hex, which reads as
+	/// the suspension catching rather than as anything about the ground.
+	///
+	/// Runs for a standing tank too, because settling back to level after
+	/// arriving is the other half of the spring. On a board with no relief the
+	/// target is zero for ever and the angle never leaves it, so nothing here
+	/// costs a flat board a pixel.
+	/// </summary>
+	/// <summary>
+	/// Put height on the board, or take it off, with everything standing on it
+	/// already standing on it.
+	///
+	/// The switch is not the interesting part - the settling afterwards is, and
+	/// every line of it is something that would otherwise be wrong until the next
+	/// time it happened to be recomputed:
+	///
+	/// <list type="bullet">
+	/// <item><b>Orders are cancelled.</b> A route was found against the board it
+	/// was found on, and the climb limit is part of that board: a path that
+	/// walked a cell which has just become a two-level step is a path the driving
+	/// will refuse, and a tank that stops halfway through an order reads as the
+	/// pathing being broken.</item>
+	/// <item><b>Everybody is parked.</b> Standing still is where the two heights
+	/// are read and where the depth is stamped, and a tank whose cell just rose
+	/// forty-six pixels is otherwise left hanging under it.</item>
+	/// <item><b>The lean is reset rather than sprung down.</b> It is not a slope
+	/// that changed, it is the board; letting the spring settle from wherever it
+	/// was would draw a tank leaning into ground that has just been taken
+	/// away.</item>
+	/// <item><b>The ruts are cleared.</b> They were laid at the height the ground
+	/// was then, and there is no honest place to put them now - a ribbon that
+	/// half climbs is worse than no ribbon.</item>
+	/// <item><b>The wood is re-sown.</b> Trees are planted off the cell centre
+	/// and sorted off its depth, both of which just moved.</item>
+	/// </list>
+	/// </summary>
+	/// <summary>Put the ramps on the board or take them off. <see cref="Settle"/>
+	/// for the same reason relief does: a route found with a ramp in it is not
+	/// walkable without one, so the orders cannot stand.</summary>
+	private void SetRamps(bool on)
+	{
+		// Already there is not a change, for SetRelief's reason - panel.json
+		// applies its defaults through this setter, and Settle cancels orders.
+		if (on == _field.HasRamps)
+			return;
+		_ramps = on;
+		ApplyRamps();
+	}
+
+	/// <summary>Put the board's ramps where <see cref="Ramped"/> says they should
+	/// be. Two ways in, and both are a change of mind about the board rather than
+	/// about the ramps: the row above, and handing the board to the stage or
+	/// taking it back. Silent when it agrees already, because <see cref="Settle"/>
+	/// is not free - it cancels orders, which is the trap named on
+	/// <see cref="SetRelief"/>.</summary>
+	private void ApplyRamps()
+	{
+		if (_field is null || !_relief || Ramped == _field.HasRamps)
+			return;
+		_field.SetRelief(_map.Levels, Ramped ? _map.Ramps : null);
+		Reflood();
+		Settle();
+	}
+
+	/// <summary>Ask the water's guards again, because what they are asked about
+	/// has just moved. The mask never changes; whether it is legal does - a pond
+	/// that is a flat five cells on a board with no relief is a pond with a ramp
+	/// under it once the pit arrives, and the failure that guard prevents is a
+	/// surface wedged along a slope rather than a refusal.</summary>
+	private void Reflood()
+	{
+		if (_field is not null && _field.HasWater)
+			_field.SetWater(_map.Water);
+	}
+
+	/// <summary>Put the water on the board or take it off. <see cref="Settle"/>
+	/// for <see cref="SetRelief"/>'s reason and one of its own: a tank parked in
+	/// the pond has a waterline on it, and the frame after the water goes away it
+	/// must not still be wearing one.</summary>
+	private void SetWater(bool on)
+	{
+		if (on == _field.HasWater)
+			return;
+		_water = on;
+		ApplyWater();
+	}
+
+	/// <summary>Put the board's water where <see cref="Watered"/> says it should
+	/// be. Two ways in, exactly as <see cref="ApplyRamps"/> has: the row, and
+	/// handing the board to the stage or taking it back.</summary>
+	private void ApplyWater()
+	{
+		if (_field is null || Watered == _field.HasWater)
+			return;
+		_field.SetWater(Watered ? _map.Water : null);
+		Settle();
+	}
+
+	/// <summary>Paint the pond or leave it flat. No <see cref="Settle"/> and no
+	/// reflood: nothing about the board's shape, its depths or anybody's waterline
+	/// moves - this swaps a texture for a colour that was measured off that same
+	/// texture, which is the whole point of it being an A/B. The stage notices on
+	/// its own, because whether the surface is drawn is part of its signature.
+	/// </summary>
+	private void SetWaterPaint(bool on)
+	{
+		_waterPaint = on;
+		if (_stage is not null)
+			_stage.Surf = Surf;
+	}
+
+	/// <summary>How tall a tank is drawn above the ground, at the medium's scale -
+	/// see <see cref="AtlasSet.DrawnHeight"/>. The medium because the depth is one
+	/// number for the board while three tanks of three sizes stand in it, and the
+	/// class that is 1.00 by definition is the one to quote it against.</summary>
+	private float DrawnHeight => _field.Atlas?.DrawnHeight ?? 0.0f;
+
+	/// <summary>Where the depth stops reading as a ford in either direction.
+	/// Named rather than written into the caption, because the check measures
+	/// against them too and a threshold with two copies is a threshold that moves
+	/// in one of them.</summary>
+	public const double ShallowAt = 0.15;
+	public const double SunkAt = 0.45;
+
+	/// <summary>How long a single frame of the water may be held before the loop
+	/// stops reading as motion, in screen frames. Named because the caption and
+	/// the check both want it, and a threshold with two copies is a threshold that
+	/// moves in one of them.
+	///
+	/// Twenty is a third of a second. It is the far side of the same argument
+	/// <see cref="ExhaustLoop.FloorFramesPerPhase"/> makes from the near side -
+	/// under two frames a cycle flickers, over twenty it is a slideshow - and the
+	/// tuned 2.4s sits at 36, which is why the water was called jerky.</summary>
+	public const double StepsAt = 20.0;
+
+	/// <summary>How deep the water stands. Everything settles for
+	/// <see cref="SetGrade"/>'s reason narrowed to one thing: no height on the
+	/// board moves, but every waterline on a tank standing in it does, and those
+	/// are pushed per frame from the cell rather than held - so this is really
+	/// only here to keep the row and the field one answer.</summary>
+	private void SetDepth(double depth)
+	{
+		if (Math.Abs(depth - _field.WaterDepth) < 1e-9)
+			return;
+		_depth = depth;
+		_field.WaterDepth = depth;
+		_field.QueueRedraw();
+	}
+
+	/// <summary>The same for the deep water's depth - see
+	/// <see cref="HexField.DeepDepth"/>.</summary>
+	private void SetDeepDepth(double depth)
+	{
+		if (Math.Abs(depth - _field.DeepDepth) < 1e-9)
+			return;
+		_deepDepth = depth;
+		_field.DeepDepth = depth;
+		_field.QueueRedraw();
+	}
+
+	/// <summary>And for how far under its level the pond's bed is drawn - see
+	/// <see cref="HexField.DeepBed"/>. The stage rebuilds off its own signature,
+	/// which carries the number.</summary>
+	private void SetDeepBed(double bed)
+	{
+		if (Math.Abs(bed - _field.DeepBed) < 1e-9)
+			return;
+		_deepBed = bed;
+		_field.DeepBed = bed;
+		_field.QueueRedraw();
+	}
+
+	private void SetRelief(bool on)
+	{
+		_relief = on;
+		// Already there is not a change, and the settling below is not free: it
+		// cancels orders. panel.json applies its defaults through this setter -
+		// which is the point of them being defaults rather than field
+		// initialisers - so a board that comes up flat and is told to be flat
+		// would have thrown away whatever --drive had just asked for, and the
+		// capture would show a tank standing where it started.
+		if (on == _field.HasRelief)
+			return;
+		_field.SetRelief(on ? _map.Levels : null,
+						 on && Ramped ? _map.Ramps : null);
+		Reflood();
+		Settle();
+	}
+
+	/// <summary>The settling every change to the board's heights needs. See
+	/// <see cref="SetRelief"/> for what each line is for.</summary>
+	private void Settle()
+	{
+		foreach (Vehicle v in _vehicles)
+		{
+			Tick.CancelOrder(v);
+			v.Lean.Reset();
+			v.Sprite.Climb = 0.0;
+			v.Sprite.Slope = Vector2.Zero;
+			v.Sprite.Rise = 1.0f;
+			Tick.Park(v);
+		}
+		_marks?.Clear();
+		// The pond too, and beside the belt marks because it is the same kind of
+		// thing: what the tanks did to the ground. A swell left standing comes
+		// back as water that was breaking before anybody drove into it - and this
+		// runs when the water itself is taken off the board, where a state held
+		// against cells that no longer exist is worse than wrong.
+		_sea?.Settle();
+		// And the ripples, for the swell's reason exactly: a field left standing
+		// comes back as a pond somebody had driven through.
+		_wash?.Settle();
+		SowGrove();
+		_field.QueueRedraw();
+	}
+
+	/// <summary>
+	/// Which cells are drawn over this tank, for the trace.
+	///
+	/// Prints the level it stands on beside the count, because a count of none
+	/// has two quite different meanings and only the level tells them apart:
+	/// nothing on the board is above this tank - which is the answer whenever it
+	/// is up on the crown - or something is and the promotion failed. The first
+	/// is the rule working; the second is a bug, and on screen they are the same
+	/// picture.
+	/// </summary>
+	private string Hiding(Vehicle v)
+	{
+		if (!_field.HasRelief)
+			return "flat";
+		float row = v.GroundPoint.Y - _origin.Y + v.Height;
+		var over = _field.Occluders(row, v.Height, Tick.TankBox(v));
+		(int _, int high) = _field.LevelRange;
+		int level = Mathf.RoundToInt(v.Height / Math.Max(_field.Lift, 0.01f));
+		string where = $"on {level:+0;-0;0} of {high:+0;-0;0}";
+		// The climb split while there is one: "the hex covers the tail and not
+		// the nose" and "the promotion failed" are the same picture, and only
+		// the pair tells them apart.
+		if (Mathf.Abs(v.Standing - v.Trailing) > 0.5f)
+			where += $", tail {v.Trailing:F0} off nose {v.Standing:F0}";
+		return over.Count == 0
+			? $"none, {where}"
+			: $"{over.Count} ({string.Join(" ", over.Select(c => $"{c.X},{c.Y}"))})"
+			  + $", {where}";
+	}
+
+	/// <summary>
+	/// How steep a level is. Everything standing on the board settles the way it
+	/// does for <see cref="SetRelief"/>, and for the same reasons - every height
+	/// on the board has just changed.
+	/// </summary>
+	private void SetGrade(double grade)
+	{
+		if (Math.Abs(grade - _field.StepGrade) < 1e-9)
+			return;
+		_grade = grade;
+		_field.StepGrade = grade;
+		Settle();
+	}
+
+
+
+	/// <summary>Fire. Restarts the flash from frame zero rather than being
+	/// ignored while one is running, so holding the key reads as a rate of fire
+	/// instead of doing nothing.
+	///
+	/// The round comes out of the same call - see <see cref="TankTick.Fire"/> -
+	/// and who it is for is answered by <see cref="RoundFor"/>.</summary>
+	private void Fire() => Tick.Fire(Active);
+
+	/// <summary>
+	/// Who the round leaving this gun is for, and the harness's whole half of a
+	/// shot: <see cref="TankTick.Launch"/> asks, and false sends it at the ground.
+	///
+	/// <b>One place decides, and both triggers come through it.</b> The standing
+	/// order and the Z key used to launch their own rounds - one of them did not
+	/// launch anything at all - and a gun with two ideas about who it is shooting
+	/// is the sort of thing that reads correctly on the shot anybody checks.
+	///
+	/// Two ways to be aimed at somebody, and they are the same rule read from two
+	/// ends. Engaged: the solution is the lane, and by the time the gate lets the
+	/// shot through it is clear and the gun is laid. By hand: whatever the gun is
+	/// laid on right now - <see cref="LaidOn"/>, which answers with the
+	/// <em>first</em> tank down the lane, so somebody in the way stops the shell
+	/// here for the reason they do there.
+	///
+	/// Either way it is <see cref="Launch"/> that puts the round up, so one round
+	/// is one set of rules. The lane turned round is exactly the bearing the
+	/// armour model wants, which is what the six lanes are for -
+	/// <see cref="AtlasSet.FaceFor"/> is handed a flat side of the hex and never
+	/// an angle between two.
+	///
+	/// No reload gate on the hand shot, and none was here before: the key restarts
+	/// the flash on every press by design, and a bench control that answered a
+	/// third of the time would read as one that half works.
+	/// </summary>
+	private bool RoundFor(Vehicle shooter)
+	{
+		// <b>An order to shell a cell answers here and nowhere else, and it
+		// answers with whoever is standing on that cell.</b> Empty ground is
+		// false - the round goes at the board, which is the whole point of being
+		// able to order it - and this branch returns either way rather than
+		// falling through to the tube below: a hull further down the same lane is
+		// laid on, and taking it would be the round arriving somewhere other than
+		// the hex it was sent to. See Vehicle.Mark.
+		if (shooter.Mark is Vector2I sent)
+		{
+			return shooter.Solution.Clear
+				   && Vehicle.At(_vehicles, sent) is Vehicle there
+				   && there.Atlas.HasHit
+				   && Tick.Shoot(shooter, there,
+								 Angles.Mod(shooter.Solution.Heading + 180.0,
+											360.0));
+		}
+		if (shooter.Target is not null && shooter.Solution.Clear
+			&& Gunnery.Laid(shooter.Sprite.TurretFacing, shooter.Solution.Heading)
+			&& shooter.Target.Atlas.HasHit)
+		{
+			return Tick.Shoot(shooter, shooter.Target,
+							  Angles.Mod(shooter.Solution.Heading + 180.0, 360.0));
+		}
+		if (LaidOn(shooter, out int lane) is Vehicle mark && mark.Atlas.HasHit)
+		{
+			return Tick.Shoot(shooter, mark, Angles.Mod(lane + 180.0, 360.0));
+		}
+		return false;
+	}
+
+	/// <summary>
+	/// Take a hit from <paramref name="fromBearing"/>, a world heading.
+	///
+	/// The plate is chosen by the atlas rather than named here, because that is
+	/// the path the game will take: a shooter stands somewhere, and which
+	/// armour that lands on is geometry. The scatter runs along the plate's own
+	/// screen tangent, so it slides across the metal instead of off it.
+	/// </summary>
+	private void TakeHit(double fromBearing)
+	{
+		// The key and the flag aim the harness dial, so this one moves it. A
+		// shell arriving from another tank must not: the dial says which side
+		// the *next* manual hit comes from, and a firefight rewriting it would
+		// make the panel a report of what happened rather than a control.
+		_hitSide = Angles.SideFor(fromBearing);
+		Tick.TakeHit(Active, HitFrom, Calibre, null, Bite);
+	}
+
+	/// <summary>
+	/// One tank's round into another tank, with the classes deciding how deep it
+	/// gets.
+	///
+	/// The shell that came out of a gun knows something the key-press shell
+	/// cannot: who fired it. That is all the difference between the two paths -
+	/// <see cref="Gunnery.Penetration"/> turns the pair of classes into a level,
+	/// and the level is a ceiling rather than a bite, so a light tank never holes
+	/// a heavy however long it keeps at it.
+	///
+	/// The calibre dial still sizes the burst. It is the harness's control over
+	/// what a shell looks like, and nothing about the matchup makes it wrong -
+	/// what it no longer does on this path is decide the damage, which is now the
+	/// classes' business.
+	/// </summary>
+	private void TakeHit(Vehicle shooter, Vehicle victim, double fromBearing) =>
+		Tick.TakeHit(victim, fromBearing, Calibre,
+				Gunnery.Penetration(shooter.Profile, victim.Profile), 1);
+
+	/// <summary>Where one gun would hole one tank, and what the round would be
+	/// aimed through to get there. Everything the launch settles at the trigger
+	/// except the calibre and the penetration level, which are dials rather than
+	/// geometry.
+	///
+	/// <paramref name="Muzzle"/> is in board space, not in the shooter's own
+	/// picture: it is what the round is launched from. The ray needs the other
+	/// space and gets it from <see cref="BoreOf"/>.</summary>
+	/// <summary>
+	/// The gun's own line: where the muzzle is, and a vector along the bore out
+	/// of it. Both in the shooter's own picture, which is the harness's canvas
+	/// on the flat board and the tank's own 512px viewport on the staged one -
+	/// and that is the space the ray wants, because <see cref="Stage3D.Screen"/>
+	/// takes a pixel of a tank's paint and answers where it went. <b>The round
+	/// wants the other one</b>: two of these cannot be subtracted across tanks
+	/// on the staged board, so <see cref="Aim"/> takes the same measurement
+	/// through <see cref="Vehicle.Spot"/> instead of reusing this.
+	///
+	/// <b>One place, because three different things are drawn along it</b> - the
+	/// hole a round would make in another tank, the sighting line of a gun laid on
+	/// nothing, and the line down a lane the gun is still coming round to. Built
+	/// twice, the tube and the mark would part company for the quietest of reasons
+	/// available: they would agree wherever anybody compared them and differ on
+	/// the one heading nobody did.
+	///
+	/// The direction is the ground direction of a heading, not the muzzle minus
+	/// the anchor: a tank gun is level, and a level line in the world projects to
+	/// exactly the ground direction on screen, while the ring-to-muzzle vector
+	/// also carries however far the trunnions sit above the ring. The same
+	/// measurement the flash points itself by.
+	///
+	/// <paramref name="heading"/> is which heading, and it is asked for rather
+	/// than read off the turret because the two part company for one real case:
+	/// under a standing order the round leaves along the <b>lane</b>, and the gun
+	/// may still be traversing onto it. The hole itself is always solved down the
+	/// turret's own bore - <see cref="Gunnery.ScatterOntoBore"/> puts it on the
+	/// drawn tube - so that caller passes the turret and only the ray passes a
+	/// lane.
+	///
+	/// The muzzle comes off the turret layer for the frame the gun is showing, so
+	/// it foreshortens by itself and comes out of the tube on every heading.
+	/// </summary>
+	private static (Vector2 Muzzle, Vector2 Along) BoreOf(Vehicle shooter,
+														  double heading)
+	{
+		(Vector2 tube, Vector2 along) = shooter.Bore(heading);
+		Vector2 launched = shooter.Sprite.ToGlobal(tube);
+		return (launched, shooter.Sprite.ToGlobal(tube + along * 100.0f) - launched);
+	}
+
+	/// <summary>
+	/// Hand the overlay every gun's aim for this frame - see
+	/// <see cref="AimRay"/>.
+	///
+	/// <b>Solved every frame rather than when the order is given</b>, because
+	/// every input to it moves: the turret is traversing, the target is driving,
+	/// and the plate the lane arrives on changes as the target's hull turns.
+	///
+	/// <b>Only a gun that could actually fire gets a ray</b>, and the two
+	/// exclusions are different in kind. Off a lane there is no round at all and
+	/// no plate either - the bearing the armour is chosen by *is* the lane turned
+	/// round, so a ray would have to invent one. Blocked, the round exists and
+	/// hits the tank in the way, so a line drawn to the target would be a
+	/// straightforward lie about where it lands. Loading is neither: the shot is
+	/// coming, and the whole point of the ray is to be read before it does.
+	///
+	/// Every tank, not the driven one: a tank left engaging goes on firing after
+	/// you have selected somebody else, which is most of what the attack scene
+	/// is.
+	/// </summary>
+	private void AimRays()
+	{
+		if (_aimRay is null)
+			return;
+		_aimRay.Clear();
+		if (!AimRay.On)
+			return;
+		foreach (Vehicle v in _vehicles)
+		{
+			if (v.Wreck.Out)
+				continue;
+			bool driving = ReferenceEquals(v, Active);
+			// Who the round is for, if anybody, and which way it leaves. The
+			// standing order first - and down the lane rather than down the tube,
+			// because that is where the round goes and the gun may still be coming
+			// round to it. Then, for the tank being driven, whatever its gun has
+			// been laid on by hand; then nothing, which is still a line.
+			if (v.Target is not null && v.Solution.Clear)
+				Sight(v, v.Target, v.Solution.Heading);
+			else if (driving && LaidOn(v, out int heading) is Vehicle mark)
+				Sight(v, mark, heading);
+			else if (driving)
+				Sight(v, null, v.Sprite.TurretFacing);
+		}
+	}
+
+	/// <summary>
+	/// The tank this gun is laid on, and the lane it is laid down - or null for a
+	/// gun pointing at nothing.
+	///
+	/// <b>Laid rather than nearest, and that is the whole of what keeps the mark
+	/// honest.</b> A shell leaves along a flat side of the hex and along no other
+	/// bearing, so a gun sitting between lanes has no answer at all: snapping to
+	/// the nearest one would claim a hole for a shot the tank cannot fire without
+	/// traversing first, and the ring would sit off the end of its own line. Half
+	/// the drawn courses are lanes and half are not - the atlas steps 15 degrees
+	/// and the lanes are 60 apart - so the ring comes and goes as the turret
+	/// sweeps, which is the rule being shown rather than a flicker.
+	///
+	/// <b>The first tank down the lane, not the one being aimed at</b>, because
+	/// that is the one the round stops in: the same walk
+	/// <see cref="Gunnery.Solve"/> calls blocking, asked from the other end. So a
+	/// gun laid past somebody marks the somebody, which is the answer the blocked
+	/// case could only refuse to give.
+	/// </summary>
+	private Vehicle? LaidOn(Vehicle shooter, out int heading)
+	{
+		heading = -1;
+		foreach (int lane in HexField.EdgeHeadings)
+			if (Gunnery.Laid(shooter.Sprite.TurretFacing, lane))
+			{
+				heading = lane;
+				break;
+			}
+		if (heading < 0)
+			return null;
+		foreach (Vector2I cell in _field.Lane(shooter.Cell, heading))
+			if (Vehicle.At(_vehicles, cell) is Vehicle mark)
+				return mark;
+		return null;
+	}
+
+	/// <summary>
+	/// One gun's ray: how far the line gets, and whether its end is a hole.
+	///
+	/// <b>The line stops at the first thing in the way, and the ring appears only
+	/// if that thing was the tank the round is for.</b> One rule for all three
+	/// cases, which is what stops the picture contradicting itself: a line drawn
+	/// through a hill to a ring beyond it says two things at once, and a line
+	/// stopped at the hill with the ring still out there says them further apart.
+	///
+	/// <b>Which means the ray is stricter than the gun, and that is worth saying
+	/// out loud.</b> <see cref="Gunnery.Solve"/> only knows about tanks in the
+	/// lane - terrain is not in the firing rules at all - so on a board with
+	/// relief an ordered shot across a wall still fires and still hits, while this
+	/// line stops at the wall. The overlay is not guessing there: it is reading
+	/// the board the shot is crossing. Closing the gap means teaching
+	/// <c>Solve</c> about height, which is a change to what the bench does rather
+	/// than to what it draws.
+	/// </summary>
+	private void Sight(Vehicle shooter, Vehicle? victim, double heading)
+	{
+		(Vector2 muzzle, Vector2 along) = BoreOf(shooter, heading);
+		if (along.LengthSquared() < 1e-6f)
+			return;
+		Vector2 dir = along.Normalized();
+		(float run, Vector2I? at, bool blocked) = Tick.Reach(shooter, dir);
+		// The hole, but only if the line got as far as the tank it belongs to. The
+		// point itself still comes out of the firing code and is not touched here -
+		// see Aim, and see AimRay for why two copies of it would be the quiet kind
+		// of wrong.
+		//
+		// One past the count standing now, which is the serial the next round will
+		// carry - see Aim. Off by one and the ray marks the hole the *last* round
+		// made, which on a plate that has already been hit is a mark a few pixels
+		// away from a mark: right enough to pass a glance and wrong about the thing
+		// it is for.
+		if (victim is not null && at == victim.Cell
+			&& TankTick.AimAt(shooter, victim, Angles.Mod(heading + 180.0, 360.0),
+				   victim.HitCount + 1) is TankTick.Aimed shot)
+		{
+			Onto(shooter, victim, muzzle, shot);
+			return;
+		}
+		Lay(shooter, muzzle, dir * run,
+			blocked ? AimRay.Tip.Stop : AimRay.Tip.Open);
+	}
+
+	/// <summary>
+	/// Hand over a ray that ends in a hole, with both ends converted for the
+	/// board being drawn.
+	///
+	/// Both ends are pixels of a tank's own picture, and what that means depends
+	/// on who is drawing the board.
+	///
+	/// Flat, the sprite hangs in the harness's canvas and ToGlobal is already a
+	/// canvas point. Staged, the sprite lives in a SubViewport of its own and is
+	/// shown on a quad (<see cref="Stage3D.Take"/>), so the same call answers in
+	/// that viewport's own 512px space - numbers that read as screen space put
+	/// the mark in the corner of the window: present, confident and about
+	/// nothing. So the stage is asked where its own pixel went
+	/// (<see cref="Stage3D.Screen"/>, the billboard read backwards) and the
+	/// answer, which is in screen space, is brought into the canvas the ray is
+	/// drawn in.
+	///
+	/// <b>Undoing the canvas transform is the half that is easy to forget:</b>
+	/// the overlay is a canvas item under a Camera2D, so a screen pixel written
+	/// into it as-is would be out by the zoom and the pan - and centred at 1.00x
+	/// both are near enough to identity to look right.
+	/// </summary>
+	private void Onto(Vehicle shooter, Vehicle victim, Vector2 muzzle,
+					  TankTick.Aimed shot)
+	{
+		Vector2 hole = victim.Sprite.ToGlobal(shot.Impact);
+		if (!Staged)
+		{
+			_aimRay!.Aim(muzzle, hole, AimRay.Tip.Hole);
+			return;
+		}
+		if (_stage!.Screen(shooter, muzzle) is not Vector2 gun
+			|| _stage.Screen(victim, hole) is not Vector2 mark)
+			return;
+		Transform2D back = GetViewport().CanvasTransform.AffineInverse();
+		_aimRay!.Aim(back * gun, back * mark, AimRay.Tip.Hole);
+	}
+
+	/// <summary>
+	/// Hand over a ray that ends on the ground rather than in a tank: the gun's
+	/// own line, run out as far as the walk got.
+	///
+	/// <b>The run is a ground offset, and on the staged board it goes through the
+	/// camera rather than being added to the screen point.</b> That board's
+	/// orthographic size is the viewport height over the zoom, so one world unit
+	/// is one screen pixel at 1.00x and nowhere else; added on afterwards the ray
+	/// would be a fixed screen length over a board that scales, which is the
+	/// zoom-dependent length this replaced. See <see cref="Stage3D.Screen"/>. On
+	/// the flat board the canvas is the ground, so the offset goes on directly and
+	/// the camera scales it with everything else.
+	/// </summary>
+	private void Lay(Vehicle shooter, Vector2 muzzle, Vector2 run, AimRay.Tip tip)
+	{
+		if (!Staged)
+		{
+			_aimRay!.Aim(muzzle, muzzle + run, tip);
+			return;
+		}
+		if (_stage!.Screen(shooter, muzzle) is not Vector2 gun
+			|| _stage.Screen(shooter, muzzle, run) is not Vector2 far)
+			return;
+		Transform2D back = GetViewport().CanvasTransform.AffineInverse();
+		_aimRay!.Aim(back * gun, back * far, tip);
+	}
+
+	/// <summary>
+	/// The aiming ray's state for <c>--trace</c>.
+	///
+	/// Four answers rather than a count, because they are repaired in four
+	/// different places and every one of them is the same empty picture on
+	/// screen: switched off, no node at all, on with nobody aiming, and on with
+	/// something to aim at that failed to draw. Under --capture there is no panel
+	/// to read any of it off.
+	///
+	/// And how many of the rays are marked, which is not the same question as how
+	/// many there are: a line running out and a line ending in a hole are the two
+	/// things the overlay says, they look nothing alike and the count cannot tell
+	/// them apart.
+	///
+	/// There used to be a fifth - <c>!staged</c> - while the ray refused the 3D
+	/// board. The stage answers now (see <see cref="Stage3D.Screen"/>), so what
+	/// is left is the honest count on either board.
+	/// </summary>
+	private string AimRayLine() =>
+		!AimRay.On ? "!off"
+		: _aimRay is null ? "!gone"
+		: $"{_aimRay.Count} laid/{_aimRay.Marked} marked/{_aimRay.Stopped} stopped"
+		  + (_aimRay.Drawn ? "" : " blank");
+
+	/// <summary>
+	/// One tank engaging another: lay the gun, and fire when it is laid, loaded
+	/// and there is a line.
+	///
+	/// **The rule that shapes all of it is that a gun fires down a flat side of
+	/// the hex and nowhere else.** Six lanes out of a cell, so a target that is
+	/// not standing on one cannot be shot at from here at all - the turret comes
+	/// round to the nearest lane and stops there, visibly not lined up, and the
+	/// six arcs go down on the ground saying where to drive. Moving is the
+	/// player's business: the right button says who, the left button says where,
+	/// and a tank that drove itself into a firing position would be answering
+	/// the second question with the first.
+	///
+	/// Three more gates, each of which is a thing that would otherwise have to
+	/// be noticed on screen:
+	///
+	/// - **Stopped.** The lane is computed from the cell the tank is standing
+	///   in, and a tank between two cells is standing in neither. Firing on the
+	///   move would mean picking one of them, which is a decision with no right
+	///   answer rather than an implementation detail.
+	/// - **Not through somebody.** A tank in the lane stops the shell. It is
+	///   also the only reason a solution can go away without either tank moving,
+	///   which is why <see cref="Shot"/> reports it separately.
+	/// - **Loaded.** Per class, and the one figure that makes a heavy feel heavy
+	///   while standing perfectly still.
+	/// </summary>
+	private void UpdateAttack(Vehicle v, double delta)
+	{
+		if (v.ReloadLeft > 0.0)
+			v.ReloadLeft = Math.Max(0.0, v.ReloadLeft - delta);
+		// A wreck holds no target and cannot be given one, so this is belt and
+		// braces - but the gate is stated here as well as at the kill because
+		// the gun is the one thing that must not go off from a burnt-out hull.
+		if (v.Wreck.Out || (v.Target is null && v.Mark is null))
+		{
+			v.Solution = Gunnery.None;
+			return;
+		}
+		// <b>One cell, whichever of the two orders named it</b> - a tank to
+		// engage, or a hex to put one round into. Everything below this line is
+		// the same for both, and that is the argument for solving against a cell
+		// rather than against a tank: the lane, the traverse, the five gates and
+		// the reload are facts about where the gun is pointing, not about what
+		// happens to be standing there. See Vehicle.Mark.
+		Vector2I at = v.Target?.Cell ?? v.Mark!.Value;
+		v.Solution = Gunnery.Solve(_field, _vehicles, v, at);
+
+		// Where the gun is allowed to point. On a lane that is the lane; off one
+		// it is the nearest flat side to where the target actually is, so the
+		// turret tracks rather than parking at whatever heading it was left on.
+		// The eye then reads "aimed at it but not down a lane", which is exactly
+		// the situation.
+		int onto = v.Solution.OnLane
+			? v.Solution.Heading
+			: HexField.EdgeHeadings[Angles.SideFor(Gunnery.HeadingOf(
+				  (v.Target?.GroundPoint ?? Standpoint(at)) - v.GroundPoint))];
+		// <b>And what gets swung to point it there is the ring or the whole tank.</b>
+		// A destroyer and a mortar carry the gun in the hull, so laying it is a
+		// hull turn - the GDD spends that in steps out of the same budget as
+		// driving, and it is the price both of them pay for a gun that out-classes
+		// the heavy's. Here it is spent in degrees per second off the movement
+		// table's own hull rate; see Gunnery.LayRate.
+		//
+		// Only while standing, and that is not a nicety: the hull under a drive
+		// order is steered by AdvanceOrder towards the next cell of the path, and
+		// two controllers writing one heading in one frame is a tank that shudders
+		// between them. The fire gate below already refuses a moving tank, so a
+		// casemate lays its gun in the pause after it arrives - which is what a
+		// casemate does.
+		double was = v.Sprite.TurretFacing;
+		if (v.Profile.Turreted)
+		{
+			v.Sprite.TurretFacing = Gunnery.Traverse(
+				was, onto, Gunnery.LayRate(v.Profile) * delta);
+		}
+		else if (!v.Moving)
+		{
+			double swing = Angles.WrapAngle(
+				Gunnery.Traverse(was, onto, Gunnery.LayRate(v.Profile) * delta) - was);
+			v.Sprite.TurnHull(swing);
+		}
+		// <b>And the other axis, which is not a swing at all.</b> The ring turns
+		// the gun about the board; this lifts it off the board, and the board is
+		// what decides how far: a target `cells` away and `levels` up stands at
+		// atan(grade·levels/cells), which is the very expression the renderer
+		// built the tube's ladder out of - see Gunnery.SightDeg and
+		// pipeline/barrel_recoil.ladder. Unlike the traverse it takes no time:
+		// there is no rendered movement between two rungs, and a tube that
+		// crawled up an eleven-pose ladder would be eleven poses of stutter.
+		Tick.Lay(v, at);
+		if (v.Sprite.TurretFacing != was)
+			v.Sprite.QueueRedraw();
+
+		if (v.Moving || !v.Solution.Clear || v.ReloadLeft > 0.0
+			|| !Gunnery.Laid(v.Sprite.TurretFacing, v.Solution.Heading))
+			return;
+		// One call, and the round comes out of it: which tank it is for is
+		// answered by Aimed, which both this and the Z key now go through. The
+		// round arrives from the far end of the lane it left along, which is the
+		// whole reason the gun is restricted to the six.
+		//
+		// The cell goes with it so that a round sent at the ground stops on the
+		// hex it was sent to rather than running on to whatever finally blocks
+		// it - see TankTick.Loose. Null for an engagement, which has a hull to
+		// stop it.
+		Tick.Fire(v, v.Mark);
+		// <b>And the order is spent.</b> One press, one round: the mark is
+		// cleared by the shot leaving rather than by the press, because
+		// everything between the two is the gun getting itself into a state where
+		// it can fire at all. Cleared after Fire and not before - Launch reads it
+		// to decide whether this round is for a hull or for the ground.
+		v.Mark = null;
+	}
+
+	/// <summary>Where a tank standing on a cell would touch the ground, in the
+	/// space <see cref="Vehicle.GroundPoint"/> is measured in.
+	///
+	/// The lifted anchor rather than the flat one, because what it is compared
+	/// against is a drawn contact point: a cell up on the crown is drawn higher,
+	/// and a heading read off the flat row would be the heading to a cell nobody
+	/// is standing on. One line, named because two readers want it and a second
+	/// copy of <c>_origin +</c> is how they come to disagree.</summary>
+	private Vector2 Standpoint(Vector2I cell) => _origin + _field.CellAnchor(cell);
+
+	/// <summary>The hit runs on screen frames for the shot's reason: it is a
+	/// hand-timed table of held frames, and under --capture the clock is fixed
+	/// at 1/60 so the same frame lands in two runs.</summary>
+	/// <summary>
+	/// Every row in the side panel, each one a pair of delegates onto the field
+	/// the keys already write.
+	///
+	/// Not one control here owns a value. That is the whole design and it is
+	/// worth the awkwardness of the lambdas: state changed from anywhere - a
+	/// key, a start-up flag, R resetting the lot, a class switch clearing the
+	/// damage - shows up in the panel next frame without anything having to
+	/// tell it. The alternative keeps a copy per widget and they drift.
+	///
+	/// The key each row duplicates is on its label, because the panel is a way
+	/// to find the keys, not a replacement for them: a screenshot of a session
+	/// should still be reproducible from the keyboard.
+	/// </summary>
+	/// <summary>
+	/// Which panel row each start-up flag speaks for.
+	///
+	/// One table rather than a claim inside each parsing branch, because it is
+	/// the sort of list that is only correct when it can be read at once: a flag
+	/// missing from it still works and is then quietly overruled by panel.json,
+	/// which looks like the flag not arriving at all. The self-test walks it and
+	/// requires every id in it to be a row the panel actually has.
+	/// </summary>
+	private static readonly Dictionary<string, string[]> FlagRows = new()
+	{
+		["--tank"] = new[] { "tank.driving" },
+		["--size"] = new[] { "tank.size" },
+		["--turret"] = new[] { "heading.turret" },
+		["--scan"] = new[] { "heading.scan" },
+		["--pitch"] = new[] { "ride.pitch" },
+		["--rumble"] = new[] { "ride.rumble" },
+		["--roll-only"] = new[] { "ride.rumble" },
+		["--heave-only"] = new[] { "ride.rumble" },
+		["--no-tremble"] = new[] { "ride.tremble" },
+		["--tremble"] = new[] { "ride.tremble_level" },
+		["--no-shadow"] = new[] { "effects.shadow" },
+		["--no-tracks"] = new[] { "effects.tracks" },
+		["--no-ruts"] = new[] { "effects.ruts" },
+		["--no-exhaust"] = new[] { "effects.exhaust" },
+		["--exhaust"] = new[] { "effects.exhaust_level" },
+		["--exhaust-ramp"] = new[] { "effects.exhaust_ramp" },
+		["--proc-smoke"] = new[] { "effects.proc_smoke" },
+		["--no-proc-smoke"] = new[] { "effects.proc_smoke" },
+		["--proc-fire"] = new[] { "effects.proc_fire" },
+		["--no-proc-fire"] = new[] { "effects.proc_fire" },
+		["--proc-exhaust"] = new[] { "effects.proc_exhaust" },
+		["--no-proc-exhaust"] = new[] { "effects.proc_exhaust" },
+		["--burning"] = new[] { "effects.fire" },
+		["--flash"] = new[] { "effects.flash_source" },
+		["--recoil-shear"] = new[] { "effects.hull_shear" },
+		["--recoil"] = new[] { "effects.hull_shear", "effects.recoil_level" },
+		["--recoil-turret"] = new[] { "effects.hull_shear", "effects.recoil_turret" },
+		["--no-barrel-recoil"] = new[] { "effects.tube_recoil" },
+		["--shake"] = new[]
+		{
+			"effects.camera_shake", "effects.ram_shake", "effects.mine_shake",
+			"effects.shake_level",
+		},
+		["--tracer"] = new[] { "gunnery.tracer" },
+		["--aim-ray"] = new[] { "gunnery.aim_ray" },
+		["--no-tracer-smoke"] = new[] { "gunnery.tracer_smoke" },
+		["--tracer-smoke"] = new[] { "gunnery.tracer_smoke", "gunnery.tracer" },
+		["--smoke-life"] = new[] { "gunnery.smoke_life" },
+		["--tracer-size"] = new[] { "gunnery.tracer_size", "gunnery.tracer" },
+		["--smoke-size"] = new[]
+			{ "gunnery.smoke_size", "gunnery.tracer_smoke", "gunnery.tracer" },
+		["--streak"] = new[] { "gunnery.streak_length", "gunnery.tracer" },
+		["--streak-width"] = new[] { "gunnery.streak_width", "gunnery.tracer" },
+		["--shell-speed"] = new[] { "gunnery.shell_speed" },
+		["--traverse"] = new[] { "gunnery.traverse_level" },
+		["--hit-scale"] = new[] { "armour.calibre" },
+		["--hit-by"] = new[] { "armour.by" },
+		["--ammo"] = new[] { "armour.ammo" },
+		["--destroy"] = new[] { "armour.destroy" },
+		["--knockout"] = new[] { "armour.knockout" },
+		["--ram-dents"] = new[] { "armour.ram_dents" },
+		["--turret-sound"] = new[] { "sound.turret_motor" },
+		["--relief"] = new[] { "ground.relief" },
+		["--no-ramps"] = new[] { "ground.ramps" },
+		["--no-amphibious"] = new[] { "tank.amphibious" },
+		["--no-water"] = new[] { "ground.water" },
+		["--water"] = new[] { "ground.water" },
+		["--depth"] = new[] { "ground.water", "ground.depth" },
+		["--deep-depth"] = new[] { "ground.deep_depth" },
+		["--deep-bed"] = new[] { "ground.deep_bed" },
+		["--flat-water"] = new[] { "ground.water_paint" },
+		["--swell"] = new[] { "ground.swell" },
+		["--hard-swell"] = new[] { "ground.swell_blend" },
+		["--still-water"] = new[] { "ground.water_react" },
+		["--drawn-water"] = new[] { "ground.deep" },
+		["--no-wake"] = new[] { "ground.wake" },
+	["--no-bow"] = new[] { "ground.bow" },
+		["--bow"] = new[] { "ground.bow" },
+		["--no-ripples"] = new[] { "ground.ripples" },
+		["--ripple"] = new[] { "ground.ripples", "ground.ripple_level" },
+		["--no-foam"] = new[] { "ground.foam" },
+		["--foam"] = new[] { "ground.foam" },
+		// The stage asks for height as well as for itself, so it declares both -
+		// the board came up flat the first time because "ground.relief" was not
+		// declared, which from outside looks exactly like a flag that did not
+		// arrive.
+		//
+		// <b>Four rows were declared here and two of them were the wrong fix.</b>
+		// "view.field" was added after the 2D board came back over the whole 3D
+		// world and cost an afternoon of measuring the wrong board; the ruts and
+		// the trees followed, on the same reasoning and with a worse trap, since
+		// nothing has driven on the opening frame and a rut layer switched back
+		// on by the file draws nothing until somebody gives an order. But a
+		// declaration only silences the file - it left the row itself writing
+		// straight through to the 2D node, one click from the same picture. All
+		// three now suppress rather than assign (see <see cref="Staged"/>) and
+		// the board's row addresses whichever board is drawing, so the file is
+		// free to answer them and this list is down to what the flag really owns.
+		["--3d"] = new[] { "view.stage", "ground.relief" },
+		["--no-3d"] = new[] { "view.stage" },
+		["--no-cell-edges"] = new[] { "view.edges" },
+		["--grade"] = new[] { "ground.relief", "ground.grade" },
+		["--terrain"] = new[] { "ground.terrain" },
+		["--no-forest"] = new[] { "ground.forest" },
+		["--no-tree-fire"] = new[] { "ground.wood_fire" },
+		["--no-cast-shadows"] = new[] { "ground.shadows" },
+		["--no-prop-contact"] = new[] { "ground.prop_contact" },
+		["--ghost"] = new[] { "ground.ghost" },
+		["--clear-front"] = new[] { "ground.clearfront" },
+		["--wind"] = new[] { "ground.wind" },
+		["--blast"] = new[] { "ground.blast" },
+		["--brush"] = new[] { "ground.brush" },
+	};
+
+	private readonly HashSet<string> _flagged = new();
+
+	/// <summary>Names, descriptions, ranges and opening values, off panel.json.
+	/// Held on the harness rather than only on the panel because --no-ui frees
+	/// the panel and the trace still has to be able to say whether the file was
+	/// read.</summary>
+	private PanelText _panelText = PanelText.Load(null);
+
+	/// <summary>Held for the same reason: the trace has to be able to say whether
+	/// the per-class file loaded, and under --no-ui there is no panel to notice it
+	/// on. A file that quietly did not load looks exactly like a file whose
+	/// numbers did nothing.</summary>
+	private ClassConfig _classConfig = new();
+
+	/// <summary>Every row a start-up flag speaks for, flattened. Exposed so the
+	/// self-test can require each one to be a row the panel really has: a flag
+	/// naming a row that does not exist protects nothing, so panel.json
+	/// overrules it and the flag looks like it never arrived.</summary>
+	public static IEnumerable<string> FlaggedRows =>
+		FlagRows.Values.SelectMany(v => v).Distinct();
+
+	private void BuildPanel()
+	{
+		ControlPanel ui = _panel!;
+
+		ui.Heading("tank");
+		// Which of the three is being driven. Not "(1/2/3)": how many tanks load
+		// is whatever is on disk, so enumerating them here goes stale every time
+		// one is added, and it already had.
+		ui.Choice("tank.driving", "driving  (number keys, or click it)", _loaded,
+			() => _active, Select);
+		// Whether the pond is swum or drowned in - one switch for every hull, see
+		// TankTick.Amphibious for why it is not per class.
+		ui.Toggle("tank.amphibious", "wading gear on every class  (--no-amphibious)",
+			() => _tick.Amphibious, v => _tick.Amphibious = v);
+		// A multiplier over the three class figures, not a size - see _sizeLevel.
+		// The caption is in pixels of hull against pixels of cell, because "1.15x"
+		// answers nothing the dial is pulled for: whether the heavy reads heavier
+		// than the medium, and whether it has outgrown the hex it stands on.
+		ui.Slide("tank.size", "size level", 0.5, 1.5, 0.05,
+			() => _sizeLevel, v => { _sizeLevel = v; ApplySize(); }, "x",
+			() =>
+			{
+				AtlasSet a = _tank.Atlas!;
+				double span = a.HullSpan * _tank.BodyScale;
+				double cell = a.HexRect.Size.X * 0.75;
+				// Short enough to fit the panel's width: the caption is clipped,
+				// not wrapped, and a number that has run off the edge is not a
+				// number.
+				return $"class {_profile.Size:F2}x   {span:F0}px hull broadside"
+					   + $" / {cell:F0}px cell";
+			});
+		ui.Readout("tank.info", () =>
+		{
+			AtlasSet a = _tank.Atlas!;
+			string order = Moving
+				? $"-> ({_path[^1].X},{_path[^1].Y}), {_path.Count - _pathStep} left"
+				: "idle";
+			return $"{a.Count} headings, {a.Tile.X}px, {a.UnitsPerPixel:F5} u/px\n"
+				   + $"cell ({_cell.X},{_cell.Y})  {order}";
+		});
+
+		ui.Heading("heading");
+		// Stepped by the atlas's own frame, not smoothly: twelve rendered
+		// frames is what there is, and a slider that glides between them says
+		// the sprite turns more finely than it does.
+		ui.Slide("heading.hull", "hull  (A/D)", 0.0, 330.0, 30.0,
+			() => Math.Round(_tank.HullFacing / 30.0) * 30.0,
+			v => { CancelOrder(); _tank.HullFacing = Angles.Mod(v, 360.0); }, " deg");
+		ui.Slide("heading.turret", "turret  (Q/E)", 0.0, 330.0, 30.0,
+			() => Math.Round(_tank.TurretFacing / 30.0) * 30.0,
+			v => { _aimWithMouse = false; _tank.TurretFacing = Angles.Mod(v, 360.0); }, " deg");
+		// Two named states rather than a checkbox, and the reason is the reading
+		// that went wrong: it used to say "turret locked", and a traverse lock
+		// locks the turret *to the hull*, so the label promised the opposite of
+		// what the switch does. A checkbox can only name one of the two states
+		// and leaves the other to be guessed - which is exactly what happened.
+		// A caption long enough to name both is clipped, not wrapped.
+		ui.Choice("heading.mode", "turret through a hull turn  (F)", TurretModes,
+			() => _tank.TurretHoldsHeading ? 0 : 1,
+			i => _tank.TurretHoldsHeading = i == 0);
+		ui.Toggle("heading.mouse", "aim with mouse  (M)",
+			() => _aimWithMouse, on => _aimWithMouse = on);
+		ui.Toggle("heading.spin", "spin turret  (SPACE)", () => _spinning, on => _spinning = on);
+		ui.Toggle("heading.scan", "scan on the spot  (N)", () => _tick.ScanEnabled, on =>
+		{
+			_tick.ScanEnabled = on;
+			ScanChanged();
+		});
+		// Which frame each heading resolves to. The pair is the thing worth
+		// seeing rather than either alone: two layers off the same axis, and a
+		// sprite set that has come apart says so here first.
+		ui.Readout("heading.frames", () =>
+		{
+			Vector2I frames = _tank.FrameIndices();
+			return $"hull {_tank.HullFacing,6:F1} deg -> frame {frames.X,2}\n"
+				   + $"turret {_tank.TurretFacing,6:F1} deg -> frame {frames.Y,2}"
+				   // The sway, and the arc it is allowed - a bare offset says
+				   // nothing about whether one frame either side is what is on
+				   // screen, which is the only thing anyone turns this on to see.
+				   + $"   scan {_scan.Offset,6:F1} of +-"
+				   + $"{_scan.MaxSteps * 360.0 / _tank.Atlas!.Count:F0} deg";
+		});
+
+		ui.Heading("ride");
+		ui.Toggle("ride.pitch", "body pitch  (P)", () => _tick.PitchEnabled, on =>
+		{
+			_tick.PitchEnabled = on;
+			PitchChanged();
+		});
+		ui.Toggle("ride.rumble", "ground rumble  (B)", () => _tick.RumbleEnabled, on =>
+		{
+			_tick.RumbleEnabled = on;
+			RumbleChanged();
+		});
+		ui.Toggle("ride.tremble", "engine tremble  (I)", () => _tick.TrembleEnabled, on =>
+		{
+			_tick.TrembleEnabled = on;
+			TrembleChanged();
+		});
+		// A multiplier over the tuned pair rather than a raw amplitude - see
+		// EngineTremble.Level for why the standing and moving figures must keep
+		// their ratio. The caption carries the stern travel in pixels, because
+		// the multiplier says nothing about whether it is visible and the pixel
+		// figure is the whole argument the value was chosen on.
+		//
+		// Reads and writes the board's level, not the driven tank's - see
+		// _tick.TrembleLevel.
+		ui.Slide("ride.tremble_level", "engine tremble level", 0.0, 2.5, 0.05,
+			() => _tick.TrembleLevel, v => _tick.TrembleLevel = v, "x",
+			() => $"{_tremble.TravelAt(_speed, _tick.TrembleLevel):F2}px"
+				  + " of stern travel at this speed");
+		ui.Toggle("ride.stabiliser", "turret stabiliser  (K)",
+			() => _tank.TurretStabilised, on => _tank.TurretStabilised = on);
+		ui.Readout("ride.info", () =>
+			$"speed {_speed,6:F0} / {Tick.SpeedCap(Active):F0} px/s"
+			+ (Tick.SpeedCap(Active) < _profile.TopSpeed
+				? $" {Tick.SpeedCapWhy(Active)} (of {_profile.TopSpeed:F0})" : "")
+			+ $"   ramp {_profile.RampTime:F2}s over {_profile.RampDistance:F0}px\n"
+			+ $"turn {_profile.TurnRate:F0} deg/s   corner {_profile.CornerSpeed:F0} px/s\n"
+			+ $"pitch {_tank.Pitch,7:F4}   roll {_tank.Roll,7:F4}"
+			+ $"   heave {_tank.Heave,4:F1}px of {_tank.Shake,5:F2}\n"
+			+ $"tremble {_tank.TremblePitch,7:F4} / {_tank.TrembleYaw,7:F4}"
+			+ $" at {_tremble.PitchRateAt(_speed),4:F1} Hz\n"
+			// Where it lands, which the two amplitudes above do not say: the
+			// stern's own travel and the bow's, the pair whose ratio is the whole
+			// of what this effect was fixed for. See TankSprite.SternWeight.
+			+ $"stern {_tank.TrembleTravelPx(bow: false),5:F2}px   bow {_tank.TrembleTravelPx(bow: true),5:F2}px");
+
+		ui.Heading("effects");
+		// First, because it is the only thing here that is under the tank
+		// rather than on it, and because it is the one switch whose A/B is the
+		// whole argument for the layer: with it off the tank reads as a decal
+		// laid on the field, which is the complaint it answers.
+		ui.Toggle("effects.shadow", "contact shadow", () => _shadowEnabled, on =>
+		{
+			_shadowEnabled = on;
+			ShadowChanged();
+		});
+		ui.Readout("effects.shadow_info", () =>
+		{
+			AtlasSet? a = _tank.Atlas;
+			string where = _spriteDir is null ? "" : $", borrowed from {_spriteDir}";
+			// headings beside it, because the two arrived together and the
+			// second is the one nothing on screen announces: a tank rendered at
+			// twelve turns in 30 deg steps beside one that turns in 15
+			return a?.HasShadow == true
+				? $"shadow  rendered, {a.Count} headings{where}"
+				: $"shadow  [none - {a?.Count ?? 0} headings{where}, re-render]";
+		});
+		ui.Toggle("effects.tracks", "tracks wind  (C)", () => _tick.TracksEnabled, on =>
+		{
+			_tick.TracksEnabled = on;
+			TracksChanged();
+		});
+		// No key: the alphabet is gone, and so are [ ] and \. The panel is
+		// where a switch is found by name; the flag is there because a capture
+		// is evidence and taking it twice must not need a hand on the mouse.
+		ui.Toggle("effects.ruts", "track marks  (--no-ruts)", () => _marks?.Enabled == true, on =>
+		{
+			if (_marks is null)
+				return;
+			_marks.Enabled = on;
+			_marks.QueueRedraw();
+		});
+		ui.Readout("effects.ruts_info", () =>
+		{
+			AtlasSet a = _tank.Atlas!;
+			if (!a.HasTracks || _marks is null)
+				return "ruts  [none - needs a parts-built model]";
+			// Width and gauge together, because the pair is what the eye reads:
+			// a rut of the right width at the wrong gauge is two ruts of some
+			// other tank.
+			return $"ruts {_marks.Count} pts, fading over {TrackMarks.Life:F0}s\n"
+				   + $"{a.TrackWidth * _tank.BodyScale:F0}px wide at "
+				   + $"{a.TrackArm * 2.0 * _tank.BodyScale:F0}px gauge, "
+				   + $"{a.TrackPitch * _tank.BodyScale:F1}px shoe";
+		});
+		// The belt is the one layer tied to the ground rather than to a clock,
+		// so what it is worth saying about it is how well it is keeping up. The
+		// cap is a real limit and not a setting to hide: past it the tread would
+		// alias and run backwards, so it slips instead, and that shows here.
+		ui.Readout("effects.track_info", () =>
+		{
+			AtlasSet a = _tank.Atlas!;
+			if (!a.HasTracks)
+				return "tracks  [none - needs a parts-built model]";
+			string phase = _tank.TrackPhaseLeft < 0
+				? " - / -"
+				: $"{_tank.TrackPhaseLeft,2} /{_tank.TrackPhaseRight,2}";
+			return $"track {phase} of {a.TrackPhases}"
+				   // as drawn, not as rendered: the size dial moves it, and the
+				   // sync speed below moves with it
+				   + $"   link {_track.LinkOnScreen,5:F1}px"
+				   + $"\nin step to {_track.SyncSpeed,3:F0} px/s"
+				   + $" of {_profile.TopSpeed:F0}"
+				   + $"   slipping {(1.0 - _track.Slip) * 100.0,3:F0}%"
+				   // Both thresholds, because they answer different questions:
+				   // where the links stop being countable, and where the belt
+				   // stops keeping up with the ground.
+				   + $"\nsmears from {_track.BlurSpeed,3:F0} px/s"
+				   + $"   blur {_track.Blur * 100.0,3:F0}%";
+		});
+		ui.Toggle("effects.exhaust", "engine exhaust  (O)", () => _tick.ExhaustEnabled, on =>
+		{
+			_tick.ExhaustEnabled = on;
+			ExhaustChanged();
+		});
+		// Above the level rather than below it, because it decides what the
+		// level's caption is describing.
+		ui.Toggle("effects.exhaust_ramp", "load ramp instead of two states",
+			() => _tick.ExhaustRamp, on => _tick.ExhaustRamp = on);
+		// Beside the exhaust because it is the same shape of switch: it names
+		// the model, not an optional effect. Reads and writes the board's flag,
+		// so all three tanks change together - a comparison with one tank on
+		// each side of it is no comparison.
+		ui.Toggle("effects.proc_exhaust", "build the plume, do not read it",
+			() => _tick.ProceduralExhaust,
+			on => _tick.ProceduralExhaust = on);
+		ui.Toggle("effects.proc_smoke", "build the smoke column, do not read it",
+			() => _tick.ProceduralSmoke, on => _tick.ProceduralSmoke = on);
+		ui.Toggle("effects.proc_fire", "build the flame, do not read it",
+			() => _tick.ProceduralFire, on => _tick.ProceduralFire = on);
+		// Frames per phase and not just the rate, because that is the question
+		// the drag runs into: the plume is twelve rendered poses stepped a few
+		// times a second, and the ceiling is how briefly a pose can be held
+		// before the loop reads as a flicker rather than as smoke. The rate
+		// alone does not say how close to it you are, and the multiplier says
+		// less than that.
+		//
+		// Reads the board's level rather than the driven tank's - see
+		// _tick.ExhaustLevel and ExhaustLoop.RateAt(speed, level).
+		ui.Slide("effects.exhaust_level", "exhaust rate", 0.0, 3.0, 0.05,
+			() => _tick.ExhaustLevel, v => _tick.ExhaustLevel = v, "x",
+			() =>
+			{
+				double rate = _exhaust.RateAt(_speed, _tick.ExhaustLevel);
+				double held = ExhaustLoop.FramesPerPhase(rate);
+				// Which state, and not only the rate it works out to: the two
+				// models can agree on a number and mean different things by it,
+				// and "resting" on a tank that is plainly rolling is the one
+				// failure this row could show and otherwise would not.
+				return (_tick.ExhaustRamp
+						   ? $"ramp {_exhaust.Response(_speed) * 100.0,3:F0}%"
+						   : _exhaust.Response(_speed) > 0.0 ? "working" : "resting")
+					   + $",  {rate,4:F1} phases/s at this speed"
+					   + (double.IsInfinity(held)
+						   ? ",  stopped"
+						   : $",  {held:F1} frames a phase")
+					   + (held < ExhaustLoop.FloorFramesPerPhase
+						   ? $" - under {ExhaustLoop.FloorFramesPerPhase:F0}, flickers"
+						   : "");
+			});
+		ui.Toggle("effects.fire", "on fire  (J)", () => _burning, on =>
+		{
+			_burning = on;
+			Tick.UpdateBurn(Active, 0.0);
+		});
+		// One list for the labels and the values, because panel.json picks a row's
+		// opening value by *label* ("default": "rendered") and the enum's own
+		// order is Sheet, Rendered, Built. Written as two orderings once and the
+		// harness opened on the sheet: the getter handed back (int)Rendered = 1,
+		// which is "sheet" in a list that starts at "rendered", and the file's
+		// default resolved to index 0 and set Sheet through the setter. Nothing
+		// said so - the flash still drew, from the other track.
+		FlashSource[] sources =
+			{ FlashSource.Rendered, FlashSource.Sheet, FlashSource.Built };
+		ui.Choice("effects.flash_source", "flash source  (V)",
+			new[] { "rendered", "sheet", "built" },
+			() => Math.Max(Array.IndexOf(sources, _tank.Source), 0),
+			i =>
+			{
+				_tank.Source = sources[Math.Clamp(i, 0, sources.Length - 1)];
+				_tank.QueueRedraw();
+			});
+		// Above its own level and pivot, because it gates both: a slider on a
+		// switched-off effect is a slider that looks broken.
+		ui.Toggle("effects.hull_shear", "hull shear on the shot  (])",
+			() => _tick.RecoilShear, on => _tick.RecoilShear = on);
+		// Read when the trigger goes, not while the hull is rocking, so this
+		// sets the next shot rather than the one in the air.
+		ui.Slide("effects.recoil_level", "recoil level", 0.0, 2.5, 0.05,
+			() => _recoil.Level, v => _recoil.Level = v, "x",
+			() => _tick.RecoilShear
+				? $"kick peaks at {_recoil.PeakFor(_recoil.Level):F3}"
+				  + $", rigid body ends at {Recoil.RigidBodyPeak:F3}"
+				: "the shear is off - the tube recoils for real instead");
+		// Under the recoil rows because it is the same trigger seen from
+		// outside the tank: those two say what the vehicle does, this says what
+		// the view does.
+		ui.Toggle("effects.camera_shake", "camera shake: the gun",
+			() => _tick.ShakeOn, on => Shaken(TankTick.Shook.Gun, on));
+		// Its own row rather than the gun's, and on where the gun's is off - see
+		// TankTick.Shakes. A ram is a decision a player makes two or three times
+		// a battle, which is the death's argument and not the reload's.
+		ui.Toggle("effects.ram_shake", "camera shake: the ram",
+			() => _tick.ShakeOf(TankTick.Shook.Ram).On,
+			on => Shaken(TankTick.Shook.Ram, on));
+		ui.Toggle("effects.mine_shake", "camera shake: the mine",
+			() => _tick.ShakeOf(TankTick.Shook.Mine).On,
+			on => Shaken(TankTick.Shook.Mine, on));
+		ui.Slide("effects.shake_level", "shake level", 0.0, 2.5, 0.05,
+			() => _shake.Level, v => _shake.Level = v, "x",
+			() => _tick.ShakeOn
+				// The class amplitude is what the level multiplies, so quoting
+				// the level alone would answer nothing: the same 1.00x is three
+				// pixels on the light and seven on the heavy. Across the screen,
+				// because that is where the unnormalised direction is longest
+				// and so where the number is the one worth guarding.
+				? $"{_profile.ShotShake * _shake.Level:F1}px broadside, "
+				  + $"{_profile.ShotShake * _shake.Level * 0.5:F1}px into the "
+				  + "screen"
+				: "off - every A/B near a shot would measure this instead");
+		ui.Toggle("effects.recoil_turret", "recoil on turret only  (L)",
+			() => _tank.RecoilTurretOnly, on => _tank.RecoilTurretOnly = on);
+		ui.Toggle("effects.tube_recoil", "gun tube recoils  ([)",
+			() => _tick.RecoilTube, on => _tick.RecoilTube = on);
+		// What the tube is doing and what it cost. The stroke in pixels is the
+		// number the whole layer is judged on - four is what it was authored to,
+		// and it is a fraction of that on the headings where the bore points at
+		// the camera, which is projection rather than a fault. Said here because
+		// "phase 2 of 5" answers nothing about whether it reads.
+		ui.Readout("effects.tube_info", () =>
+		{
+			AtlasSet a = _tank.Atlas!;
+			if (!a.HasRecoil)
+				return "gun tube  [none - split a Barrel and render it]";
+			string phase = _tank.RecoilPhase == 0
+				? "rest" : $"{_tank.RecoilPhase,2}";
+			RecoilLoop tube = Active.Barrel;
+			return $"tube {phase} / {a.RecoilPhases - 1}"
+				   + $"   {tube.Duration} frames"
+				   + $" ({tube.Duration / 60.0,4:F2}s)"
+				   + $"\nheld {string.Join("/", RecoilLoop.HoldsFor(a.RecoilPhases))}"
+				   + "   kick under the flash, return in the open";
+		});
+		ui.Press("effects.fire_button", "fire  (Z)", Fire);
+		// Phase counters against the number of phases that were rendered. A
+		// clock that has walked off the end of its atlas shows up here as a
+		// number out of range, and nowhere else until the layer goes blank.
+		ui.Readout("effects.phase_info", () =>
+		{
+			AtlasSet a = _tank.Atlas!;
+			string phase(int p) => p < 0 ? " -" : $"{p,2}";
+			return $"exhaust {phase(_tank.ExhaustPhase)} / {a.ExhaustPhases}"
+				   + $" at {_exhaust.RateAt(_speed),4:F1} /s"
+				   + $"   density {_exhaust.Density,4:F2}"
+				   + (a.HasExhaust ? "" : "   [none - split an Engine]")
+				   + $"\nfire {phase(_tank.FirePhase)} at {_burn.FireRate,4:F1} /s"
+				   + $"   smoke {phase(_tank.BurnPhase)} at {_burn.SmokeRate,4:F1} /s"
+				   + $" / {a.BurnPhases}"
+				   + (a.HasBurning ? "" : "   [none - split an Engine]")
+				   + "\n" + (_tank.ActiveSource == FlashSource.Rendered
+					   ? $"shot phase {phase(_tank.ShotPhase)} / {EffectLayer.Hold.Length}"
+						 + $"   tile {a.TileOf("flash").X}px"
+					   : $"shot frame {phase(_tank.FlashFrame)} / {FlashSheet.Hold.Length}"
+						 + $"   muzzle {a.Muzzle(_tank.TurretFacing, _tank.BarrelRung)}")
+				   + (_tank.Source == FlashSource.Rendered && !_tank.CanRender
+					   ? "   [falling back - split a Barrel]" : "")
+				   // Which body is taking the kick, and about what. The seam cost
+				   // is not printed because it is zero in both arrangements by
+				   // construction - shared, the two move together; on the turret
+				   // alone, the pivot *is* the seam. That is asserted in the
+				   // self-test, where a claim that cannot vary belongs.
+				   + $"\nrecoil {_recoil.Pitch,7:F4} / {_recoil.Roll,7:F4}"
+				   + "   on " + (_tank.RecoilTurretOnly
+					   ? "turret, about the ring"
+					   : "hull+turret, about the ground");
+		});
+
+		ui.Heading("gunnery");
+		// A dropdown rather than the six buttons the shot bearing gets: those
+		// are directions and have a shape, this is a list of tanks and how many
+		// there are is whatever loaded. "nobody" is first so index 0 is the
+		// ceasefire, which is what the right button on empty ground does too.
+		ui.Choice("gunnery.target", "target  (right-click a tank)",
+			new[] { "nobody" }.Concat(_loaded).ToArray(),
+			() => Active.Target is null ? 0 : _vehicles.IndexOf(Active.Target) + 1,
+			i => Engage(Active, i == 0 ? null : _vehicles[i - 1]));
+		// The reason, not a yes or no - see AimLine. The second line is what the
+		// rule costs, which is the question the rule raises: a gun that fires
+		// down six lanes can be pointed at a tank it cannot hit, and the number
+		// of cells it *could* hit from here is the answer to "so where do I go".
+		// The drawing only - the round flies either way, because the flight is
+		// what puts time between the report and the impact. Off by default, so
+		// the switch shows what the bench looked like before there was a tracer
+		// *with* the timing that came with it, which is the comparison worth
+		// having.
+		ui.Toggle("gunnery.tracer", "shell tracer  (--tracer)",
+			() => _tracerVisible,
+			on => { _tracerVisible = on; TracerChanged(); });
+		// The trail is what makes the tracer continuous once the round outruns
+		// its own streak, so the switch is here to be able to see that rather
+		// than to be told it.
+		ui.Toggle("gunnery.tracer_smoke", "tracer smoke  (--no-tracer-smoke)",
+			() => Shell.SmokeOn, on => Shell.SmokeOn = on);
+		// Seconds, not a multiplier, because there is no class triple under it -
+		// see Shell.SmokeSeconds. The caption turns it into the length of trail
+		// it buys at the speed currently set, which is the thing being looked at,
+		// and says how long the line hangs after the round has gone.
+		ui.Slide("gunnery.smoke_life", "tracer smoke life", 0.1, 3.0, 0.05,
+			() => Shell.SmokeSeconds, v => Shell.SmokeSeconds = (float)v, "s",
+			() => $"{Shell.SmokeSeconds * Shell.Speed:F0}px of trail,"
+				  + $" hangs {Shell.SmokeSeconds:F1}s after impact");
+		// Sized against the class triple, so this is a multiplier - the rule the
+		// tremble, size and traverse levels follow. The caption prints the head
+		// in pixels for the driven tank, because a few pixels of bright on a
+		// field of grass is the thing being judged and "1.00x" says nothing
+		// about it.
+		ui.Slide("gunnery.tracer_size", "tracer size level", 0.3, 3.0, 0.05,
+			() => Shell.TracerLevel, v => Shell.TracerLevel = v, "x",
+			() =>
+			{
+				double cal = Active.Profile.TracerCalibre * Shell.TracerLevel;
+				return $"{2.0 * Shell.BodySize * cal:F1}px across,"
+					   + $" {Shell.StreakSize * cal:F0}px streak"
+					   + $" on the {Active.Tag}";
+			});
+		// Length apart from width, because the two answer to different things: the
+		// width is the reference's proportion, the length is paired with the
+		// speed. So the caption prints the streak against the ground the head
+		// crosses in a frame - which is the whole of whether the line holds
+		// together - rather than printing the multiplier back.
+		ui.Slide("gunnery.streak_length", "tracer streak length level",
+			0.3, 2.0, 0.05,
+			() => Shell.StreakLevel, v => Shell.StreakLevel = v, "x",
+			() =>
+			{
+				double cal = Active.Profile.TracerCalibre * Shell.StreakLevel;
+				double len = Shell.Streak * cal;   // cal already carries the level
+				double step = Shell.Speed / 60.0;
+				return $"{len:F0}px streak against {step:F0}px of path a frame"
+					   + (len < step ? " - dotted" : "");
+			});
+		// Width apart from length, because the pair of them is the proportion -
+		// see Shell.WidthLevel. So the caption prints the proportion rather than
+		// the multiplier: how wide it is says nothing on its own, and how long
+		// against how wide is the whole of whether it reads as a streak.
+		ui.Slide("gunnery.streak_width", "tracer streak width level",
+			0.4, 2.5, 0.05,
+			() => Shell.WidthLevel, v => Shell.WidthLevel = v, "x",
+			() =>
+			{
+				double cal = Active.Profile.TracerCalibre;
+				double wide = 2.0 * Shell.BodySize * cal;
+				double len = Shell.StreakSize * cal;
+				return $"{wide:F1}px across, {len / Math.Max(wide, 0.01):F1}:1"
+					   + (len < 6.0 * wide ? " - a domino" : "");
+			});
+		// A second level rather than the same one, because the streak and the
+		// trail are judged against different things - see Shell.SmokeSize. Its
+		// triple lives in classes.json and is wider than the tracer's: a soft line
+		// has room a two-pixel head has not.
+		ui.Slide("gunnery.smoke_size", "tracer smoke size level", 0.3, 3.0, 0.05,
+			() => Shell.SmokeLevel, v => Shell.SmokeLevel = v, "x",
+			() =>
+			{
+				double cal = Active.Profile.SmokeCalibre * Shell.SmokeLevel;
+				// Width across, at birth and at the end of a puff's life, because
+				// "a line that softens" and "a cloud that blooms" are the same
+				// effect at two numbers and the second one reads as a road.
+				double born = 2.0 * Shell.SmokeSeed * cal;
+				double old = 2.0 * (Shell.SmokeSeed
+									+ Shell.SmokeGrow * Shell.SmokeSeconds) * cal;
+				return $"{born:F1}px wide fresh, {old:F0}px by the end"
+					   + $" on the {Active.Tag}";
+			});
+		// The aiming ray, after the tracer cluster because that is what it is next
+		// to in kind and apart from in purpose: those five tune what a round in
+		// flight looks like, this one draws where a round that has not been fired
+		// yet would land. Off by default - see AimRay.OnByDefault - so it cannot
+		// get into an A/B by accident, which is the argument the tracer itself was
+		// off under while it was one stroke of debug line.
+		ui.Toggle("gunnery.aim_ray", "aiming ray  (--aim-ray)",
+			() => AimRay.On, on => AimRay.On = on);
+		// Frames, not px/s, is what this slider is about: the round exists to put
+		// time between the report and the impact, and the point-blank shot is
+		// where that time runs out first. Four frames is the floor the self-test
+		// holds; the slider is allowed past it and says so.
+		ui.Slide("gunnery.shell_speed", "shell speed level", 0.4, 2.5, 0.05,
+			() => Shell.SpeedLevel, v => Shell.SpeedLevel = v, "x",
+			() =>
+			{
+				double frames = Shell.PointBlank / Shell.Speed * 60.0;
+				return $"{Shell.Speed:F0} px/s, {frames:F1} frames point blank"
+					   + (frames < 4.0 ? " - inside the gun report" : "");
+			});
+		// A multiplier over the three class figures, not a rate - see
+		// Gunnery.TraverseLevel. The caption carries the swing beside the hull's
+		// own, because the ratio between those two is what "sluggish" was
+		// reporting and the multiplier on its own says nothing about it.
+		ui.Slide("gunnery.traverse_level", "turret traverse level", 0.2, 3.0, 0.05,
+			() => Gunnery.TraverseLevel, v => Gunnery.TraverseLevel = v, "x",
+			() =>
+			{
+				MovementProfile p = Active.Profile;
+				// A class with no ring says so instead of dividing by nought. The
+				// dial is still shown, because it is one knob for every tank on the
+				// board and two of them simply are not listening.
+				if (!p.Turreted)
+					return $"no ring - the hull lays this gun, 180 deg in "
+						   + $"{180.0 / p.TurnRate:F2}s at {p.TurnRate:F0} deg/s";
+				double rate = Math.Max(Gunnery.TraverseRate(p), 1e-6);
+				return $"{rate:F0} deg/s, 180 deg in {180.0 / rate:F2}s"
+					   + $" vs hull {180.0 / p.TurnRate:F2}s";
+			});
+		ui.Readout("gunnery.info", () =>
+			$"{AimLine()}\nreload {Active.Profile.ReloadTime:F1}s, "
+			+ (Active.Profile.Turreted
+				? $"traverse {Gunnery.TraverseRate(Active.Profile):F0} deg/s"
+				  + $" ({Active.Profile.TurretRate:F0} x {Gunnery.TraverseLevel:F2}), "
+				: $"casemate, laid by the hull at "
+				  + $"{Active.Profile.TurnRate:F0} deg/s, ")
+			+ $"{_field.Arcs.Count} cells down the six lanes");
+
+		ui.Heading("armour");
+		// A side of the hex rather than a bearing, because that is what the
+		// game has: a shell comes from a neighbouring cell, and there are six
+		// of those. A slider ran 0..355 here and offered 66 bearings that
+		// cannot happen.
+		ui.Radio("armour.side", () => $"shot comes from side {_hitSide + 1}"
+					   + $" - {HitFrom:F0} deg  (U steps)",
+			Enumerable.Range(1, HexField.EdgeHeadings.Length)
+				.Select(i => i.ToString()).ToArray(),
+			() => _hitSide, i => _hitSide = i);
+		// <b>What the gun is loaded with, and against armour it decides the
+		// picture.</b> HE bursts on the face of whatever plate it arrives on and AP
+		// either gets in or comes off it, so this row is what chooses between the
+		// three impacts the bench can draw - see TankTick.Ammo, including that it
+		// deliberately does not touch how deep either round goes.
+		//
+		// <b>It is also the only way to see a ricochet from the U key now</b>, HE
+		// being the default and a shell that explodes not being a shell that
+		// bounces.
+		ui.Choice("armour.ammo", "loaded  (--ammo)", new[] { "he", "ap" },
+			() => (int)Tick.Ammo,
+			i => Tick.Ammo = (Shell.Kind)Math.Clamp(i, 0, 1));
+		// <b>Whose gun, which is the end a keypress does not have.</b> The
+		// matchup table has decided bounce or penetration since it was written -
+		// and only for a shell one tank fired at another, because that is the only
+		// round with a class at both ends. Named classes rather than levels: the
+		// question the table answers is "can this gun get in", and a level is its
+		// answer rather than its input. See TankTick.HitBy.
+		ui.Choice("armour.by", "hit dealt by  (--hit-by)",
+			new[] { "nobody" }.Concat(MovementProfile.Tags).ToArray(),
+			() => Tick.HitBy + 1, i => Tick.HitBy = i - 1);
+		ui.Choice("armour.calibre", "calibre  (Y)", new[] { "0.7x", "1.0x", "1.4x" },
+			() => _calibre,
+			i =>
+			{
+				// Only what the *next* shell will be. Nothing on screen moves:
+				// a round already in the air keeps the calibre it went off at.
+				_calibre = i;
+			});
+		// Takes the bearing on the slider rather than walking it on, so the
+		// panel can aim and the key can sweep.
+		ui.PressPair("armour.hit", "take a hit", () => TakeHit(HitFrom),
+					 "repair", () => _tank.Repair());
+		// No key. A-Z are gone, and so are the brackets and the backslash, and
+		// the next free key is no longer a mnemonic - the tracer and the
+		// traverse motor took the same answer. A button rather than a switch
+		// because destruction happens rather than is; putting it back is what
+		// reset and repair are for.
+		ui.Press("armour.knockout", "knock this tank out  (--knockout)",
+				 () => Tick.Disable(Active));
+		ui.Press("armour.destroy", "destroy this tank  (--destroy)",
+				 () => Tick.Kill(Active));
+		// The stand's first ram, kept as a switch - see TankTick.RamDents. A
+		// switch rather than a button because it is a model and not an event:
+		// what it changes is what the next ram will be.
+		ui.Toggle("armour.ram_dents", "a ram dents both hulls  (--ram-dents)",
+				  () => _tick.RamDents, on => _tick.RamDents = on);
+		ui.Readout("armour.wreck", () =>
+			// How near the end it is, first, because that is the number a
+			// firefight makes you want and the picture cannot give: a tank two
+			// rounds in looks exactly like a tank one round in.
+			!Active.Wreck.Dead
+			? (Active.Wreck.Disabled
+			   ? $"knocked out {Active.Wreck.OutAge:F1}s ago, dim {Active.Wreck.Char:F2},"
+				 + $" smoke {Active.Wreck.Smoulder:F2}"
+			   : $"intact, {_tank.Penetrations} penetrations taken")
+			: $"wrecked {Active.Wreck.Age:F1}s ago"
+			  + $"   char {Active.Wreck.Char:F2}"
+			  + $"   flame {Active.Wreck.Blaze:F2}, column {Active.Wreck.Smoke:F2}"
+			  // Whether the pose is rendered at all, beside the char. A tank
+			  // whose atlas predates the wreck layers is charred and level, and
+			  // from the picture that is indistinguishable from a pose that did
+			  // not take.
+			  + (Active.Atlas.HasWreck
+				 ? Active.Atlas.HasWreckTracks ? "   posed" : "   posed, belts live"
+				 : "   no wreck pose in this atlas"));
+		ui.Readout("armour.info", () =>
+		{
+			AtlasSet a = _tank.Atlas!;
+			// Two calibres side by side on purpose: what the next round will be,
+			// and what the one on screen went off at. They differ for as long as
+			// a shell outlives a turn of the dial, and seeing that is the point.
+			string burst = $"burst {(_tank.HitPhase < 0 ? " -" : $"{_tank.HitPhase,2}")}"
+						   + $" / {a.HitPhases}"
+						   + $"   {(_hit.Face == "" ? "-" : _hit.Face)}"
+						   + $"   {(_tank.HitBehind ? "behind" : "in front")}"
+						   + "\n"
+						   // What the dial will do, before it does it - the whole reason
+						   // TankTick.HitDepth is a method and not the same two expressions
+						   // written out wherever they are wanted.
+						   // And what is loaded, because against armour that is now the
+						   // first of the two questions: HE bursts on the plate whatever
+						   // the depth turns out to be, so the depth alone would say
+						   // "ricochet" over a picture that is not one.
+						   + $"{(Tick.Ammo == Shell.Kind.Ap ? "ap" : "he")}   "
+						   + (Tick.HitGun is MovementProfile shot
+							  ? $"dealt by {shot.Tag}: "
+								+ (Tick.HitDepth(Active) is 0
+								   ? "ricochet" : $"level {Tick.HitDepth(Active)}")
+							  : $"loaded x{Calibre:F2}, {Bite} level"
+								+ (Bite == 1 ? "" : "s") + " of armour")
+						   + (Tick.Ammo == Shell.Kind.He ? "   bursts on the plate" : "")
+						   + (_hit.Live ? $"   in the air x{_hit.Scale:F2}" : "")
+						   + (a.HasHit ? "" : "   [no plate table - re-render]");
+			if (!a.HasScars)
+				return burst + "\nno scar layers - re-render this scene";
+			// The levels each plate is carrying, oldest first - "front 012" is a
+			// plate that has taken three. The list rather than the worst,
+			// because the marks accumulate and how many there are is the thing
+			// no still frame shows.
+			return burst + "\n" + string.Join("\n", a.HitFaces.Select(f =>
+				$"{f,-6} {(_tank.MarksOn(f).Count == 0 ? "clean" : string.Concat(_tank.MarksOn(f).Select(m => m.Level)))}"
+				+ $"   worked {_tank.Wear(f)} / {a.ScarLevels}"));
+		});
+
+		// The sound had no rows at all until now, which was an omission rather
+		// than a decision: the panel is where a switch is found by name, and '\'
+		// is not a name. The motor gets its own line beside the master because it
+		// is the one voice that was built rather than recorded and the one whose
+		// level was argued for rather than heard.
+		ui.Heading("sound");
+		ui.Toggle("sound.master", "sound  (\\)", () => _soundEnabled,
+				  on => { _soundEnabled = on; SoundChanged(); });
+		ui.Toggle("sound.turret_motor", "turret motor  (--no-turret-sound)", () => _turretSound,
+				  on => { _turretSound = on; SoundChanged(); });
+		ui.Readout("sound.info", () =>
+		{
+			VehicleAudio? a = Active.Audio;
+			if (a is null)
+				return "no sound loaded - run stage_sounds.sh";
+			// The bus peak rather than the gates: gates say what was asked for,
+			// the peak says what came out, and only the second one tells a set
+			// that loaded from a set that is audible.
+			float peak = AudioServer.GetBusPeakVolumeLeftDb(0, 0);
+			return $"ring {a.TurretGate:F2} at {a.TurretPitch:F2}x, "
+				   + $"motor {a.TurretDb:F0}dB\n"
+				   + $"bus peak {(float.IsNegativeInfinity(peak) ? -99.0f : peak):F1}dB";
+		});
+
+		ui.Heading("ground");
+		// A dropdown rather than numbered buttons: how many kinds load is
+		// whatever is on disk, so a fixed row of them goes stale the first time
+		// one is drawn - the lesson the tank list already taught. "mixed" heads
+		// it because it is the board as a map would build it; the rest are there
+		// to hold one kind still and look at it.
+		ui.Choice("ground.terrain", "terrain  (--terrain)", _paints,
+			() => Math.Max(0, _paints.IndexOf(_field.Paint)),
+			i =>
+			{
+				_field.Paint = _paints[i];
+				_paint = _field.Paint;
+				// Forest is a kind of ground, so choosing the ground chooses
+				// where the woods are - and the trees are nodes rather than
+				// pixels of the plate, so redrawing the field does not touch
+				// them. Left out, the board painted forest came up as bare soil
+				// until something else happened to re-sow, which reads as the
+				// kind not existing rather than as a missing call.
+				SowGrove();
+				_field.QueueRedraw();
+			});
+		// The board's shape, where the row above is its paint. Two rows and not
+		// one, because they are two different things about the ground and only
+		// one of them is a picture: a kind does not cost movement, block a lane
+		// or hide a tank behind it, and a level does all three. See TerrainSet.
+		ui.Toggle("ground.relief", "height on the board  (--relief)",
+			() => _field.HasRelief, SetRelief);
+		// Reads the board rather than the request, and that is deliberate: outside
+		// --3d there is nothing that can draw a slope, so the box springs back and
+		// says so. A row that claimed the ramps were on while the board had none
+		// would be the quiet half of the same failure.
+		ui.Toggle("ground.ramps", "ramps on the levels  (--no-ramps)",
+			() => _field.HasRamps, SetRamps);
+		// The board rather than the request, for the row above's reason exactly:
+		// outside --3d nothing can draw a surface standing over the ground, so the
+		// box springs back and says so.
+		ui.Toggle("ground.water", "water in the pit  (--no-water)",
+			() => _field.HasWater, SetWater);
+		// How deep it stands, in the units it is authored in and the units it is
+		// judged in. The fraction is what carries across tiles; the pixels and what
+		// they cover are what says whether it reads as a ford, and only the second
+		// pair answers the question the slider is dragged to answer.
+		ui.Slide("ground.depth", "how deep the water is  (--depth)",
+			0.10, 1.20, 0.05,
+			() => _field.WaterDepth, SetDepth,
+			"of a level", () =>
+			{
+				float deep = _field.WaterRise;
+				float tall = DrawnHeight;
+				double part = tall > 0.0f ? deep / tall : 0.0;
+				return $"{deep:F0}px, {part:P0} of a medium's drawn height"
+					   + (part > SunkAt
+						  ? $"   - past {SunkAt:P0} it reads as sinking, not fording"
+						  : part < ShallowAt
+							  ? $"   - under {ShallowAt:P0} there is nothing to see"
+							  : "");
+			});
+		// How far under the bank the deep water stands. A picture setting and not
+		// a rule - see HexField.DeepDepth - so the readout is the rim, in pixels.
+		ui.Slide("ground.deep_depth", "how deep the deep water is  (--deep-depth)",
+			0.50, 1.00, 0.05,
+			() => _field.DeepDepth, SetDeepDepth,
+			"of a level", () => $"{_field.DeepRise:F0}px over the bed, "
+								+ $"{_field.Lift - _field.DeepRise:F0}px under the bank");
+		// And how far under its level the bed is drawn. Also a picture setting:
+		// the level the pond counts as stays at -1 whatever this says - see
+		// HexField.DeepBed for what a real second level would have cost.
+		ui.Slide("ground.deep_bed", "how deep the pond is drawn  (--deep-bed)",
+			0.00, 2.00, 0.25,
+			() => _field.DeepBed, SetDeepBed,
+			"of a level under -1",
+			() => $"bed drawn {_field.Lift * (float)_field.DeepBed:F0}px under its level");
+		// And what a hull throws going into that water: the bow wave alone, or
+		// the fans a hull high - see Plunge.Style. Takes the next plunge.
+		ui.Choice("ground.splash", "splash off the bank  (--splash)", SplashNames,
+			() => (int)_splash, i => _splash = (Plunge.Style)i);
+		// Reads the flag rather than the stage, and that is not laziness: the row
+		// has to say what was asked for even on a run where there is no strip on
+		// disk to draw, or a bench with the art missing would show the box ticking
+		// itself off and blame the toggle for the file.
+		ui.Toggle("ground.water_paint", "drawn water surface  (--flat-water)",
+			() => _waterPaint, SetWaterPaint);
+		// How fast the swell turns, and what it costs in the units the complaint
+		// was made in: how long one frame is held, and how many screen frames that
+		// is. Both, because the first says how the water reads and the second says
+		// when it stops being an animation at all.
+		ui.Slide("ground.swell", "water speed  (--swell)",
+			0.4, 6.0, 0.2,
+			() => _swellPeriod, v => _swellPeriod = v,
+			"s per turn", () =>
+			{
+				int frames = _waterArt?.Frames ?? 0;
+				if (frames < 1 || _swellPeriod <= 0.0)
+					return "no drawn surface to turn";
+				double held = _swellPeriod / frames;
+				return $"{frames} frames, {held:F2}s each = {held * 60.0:F0} screen"
+					   + " frames"
+					   + (_swellBlend
+						  ? "   - crossed, so the step is not seen"
+						  : held * 60.0 > StepsAt
+							  ? $"   - over {StepsAt:F0} it reads as a slideshow"
+							  : "");
+			});
+		// The A/B, and the only thing that answers "jerky": four frames step at
+		// any speed, so the choice is between stepping and dissolving.
+		ui.Toggle("ground.swell_blend", "carry each frame into the next  (--hard-swell)",
+			() => _swellBlend, v => _swellBlend = v);
+		// Whether the water answers the tanks at all, and what it is doing right
+		// now - the second is a readout because the bench measures it and nobody
+		// sets it, which is the whole of what a readout is.
+		// Which pond this is. Above the rows that describe the strip, because
+		// with this on most of them are describing something that is not being
+		// drawn.
+		ui.Toggle("ground.deep", "computed surface  (--drawn-water)",
+			() => _deepWater, v => _deepWater = v);
+		ui.Toggle("ground.wake", "tanks leave a wake  (--no-wake)",
+			() => _wakes, v => _wakes = v);
+		ui.Toggle("ground.ripples", "the water is simulated  (--no-ripples)",
+			() => _ripples, v => _ripples = v);
+		ui.Readout("ground.ripple_state", () =>
+		{
+			if (_wash is not { Wide: > 0 })
+				return "no field on the board";
+			if (!_ripples)
+				return "off - flat water, as it was before this";
+			return $"{_wash.Peak:F2} units at its tallest"
+				   + $"   ({_wash.Wide}x{_wash.Tall} texels, "
+				   + $"{_wash.Cell.X:F0} world units across)";
+		});
+		ui.Slide("ground.ripple_level", "how hard a hull shoves  (--ripple)",
+			0.0, 6.0, 0.25,
+			() => _rippleLevel, v => _rippleLevel = (float)v,
+			"x", () =>
+			{
+				if (_wash is not { Wide: > 0 })
+					return "no field on the board";
+				if (!_ripples)
+					return "off - flat water, as it was before this";
+				if (_rippleLevel <= 0.0f)
+					return "nothing pushes - the pond only ever settles";
+				return $"{Ripples.Push * _rippleLevel:F1} units of height a second "
+					   + $"at full shove, {_wash.Peak:F2} standing now"
+					   + (_wash.Peak >= Stage3D.WashCrest
+							  ? "   (over the foam's cut)" : "");
+			});
+		ui.Toggle("ground.bow", "paint the bow crest as well  (--bow)",
+			() => _bows, v => _bows = v);
+		ui.Toggle("ground.water_react", "water answers the tanks  (--still-water)",
+			() => _seaReacts, v => _seaReacts = v);
+		ui.Readout("ground.water_state", () =>
+		{
+			if (_sea is null || _field.WaterCells.Count == 0)
+				return "no water on the board";
+			float peak = _sea.Peak;
+			string band = peak >= Swell.SplashBand - 0.5f ? "breaking"
+						: peak >= Swell.ChurnBand - 0.5f ? "chop" : "calm";
+			return $"{peak:F2} of {Swell.SplashBand:F0} at its busiest, {band}"
+				   + $"   ({_field.WaterCells.Count} cells)";
+		});
+		// A multiplier over none, not an opacity: what the foam is allowed to say
+		// is set by the band under it, and a knob that wrote the amount directly
+		// would let it speak where the strip says calm - which is the one thing it
+		// must not do. The line under it names the rung, because "1.00x" answers
+		// none of the questions the slider gets dragged for.
+		ui.Slide("ground.foam", "foam on stirred water  (--foam / --no-foam)",
+			0.0, 2.0, 0.05,
+			() => _foam, v => _foam = (float)v,
+			"x", () =>
+			{
+				if (_sea is null || _field.WaterCells.Count == 0)
+					return "no water on the board";
+				if (_foam <= 0.0f)
+					return "off - the strip talks on its own, as it did before this";
+				float peak = _sea.Peak;
+				return peak >= Swell.SplashBand - 0.5f
+						   ? "a raft, on the breaking band"
+					   : peak >= Swell.ChurnBand - 0.5f
+						   ? "flecks, on the chop"
+						   : "nothing to foam - calm water takes none by construction";
+			});
+		// The number that decides whether a hill reads as one, and the only
+		// reason it is a dial rather than a constant: a level is worth
+		// grade * sqrt(3) * R * cos(e) on screen, and against a hexagon 54.5px
+		// from centre to edge that is what says how much of a tank standing
+		// behind a rise the rise gets to hide. See the note under it.
+		ui.Slide("ground.grade", "how steep one level is  (--grade)",
+			0.05, 0.60, 0.05,
+			() => _field.StepGrade, SetGrade,
+			"rise per hex", () =>
+			{
+				float lift = _field.Lift;
+				float half = _field.Atlas is null ? 0.0f
+					: _field.Atlas.HexRect.Size.Y * 0.5f;
+				// What a rise one row in front takes off a tank behind it. Its
+				// face begins at contact + 2*half - lift, so it reaches the hull
+				// only once a level is worth more than half a hexagon - which at
+				// the tuned 1:4 it is not, and that is the whole of why a hill
+				// there hides tracks and nothing else.
+				float hull = lift - half;
+				return $"1:{1.0 / Math.Max(0.001, _field.StepGrade):F1}, "
+					   + $"{lift:F0}px a level"
+					   + (hull > 0.0f
+						  ? $"   - a rise one hex ahead hides {hull:F0}px of a "
+							+ "tank's hull behind it"
+						  : $"   - below {half:F0}px a rise hides tracks only, "
+							+ $"never hull (needs 1:{2.0 * half / (lift / Math.Max(0.001, _field.StepGrade)):F1})");
+			});
+		// What the cursor is over, and everything that cell uses to decide
+		// whether it covers the driven tank.
+		//
+		// Here rather than on the scene, where the numbers would be next to the
+		// thing they are about: the panel is the one place this bench shows its
+		// figures, and a label following the mouse is in every screenshot. It is
+		// in the ground group because it is about the ground.
+		//
+		// It exists because "that hex should be covering the tank" cannot be
+		// settled by looking - it took two rounds of screenshots to find that the
+		// ordering was right and the grade was too shallow. All of it is one
+		// question asked in four numbers: which cell, how high, is it in front,
+		// and where its face begins against where the tank stands.
+		ui.Readout("ground.hover", () =>
+		{
+			if (_field.Atlas is null)
+				return "no atlas";
+			Vector2 local = _field.ToLocal(GetGlobalMousePosition());
+			Vector2I cell = _field.CellAt(local);
+			if (!_field.InBounds(cell))
+				return "off the board";
+			string what = $"hex {cell.X},{cell.Y}   level "
+						  + $"{_field.LevelAt(cell):+0;-0;0}   {_field.KindAt(cell)}";
+			if (!_field.HasRelief)
+				return what + "\nflat board - nothing covers anything";
+
+			Vehicle v = Active;
+			float row = v.GroundPoint.Y - _origin.Y + v.Height;
+			bool hides = _field.Occluders(row, v.Height).Contains(cell);
+			// Where this cell's face begins against where the tank's belts touch
+			// down. Positive means the face starts above the contact row, which
+			// is the only way a cell can reach hull rather than track - and the
+			// number that said the hill was too low to reach either.
+			float half = _field.Atlas.HexRect.Size.Y * 0.5f;
+			float top = _field.CellCentre(cell).Y - half;
+			float over = (row - v.Height) - top;
+			float nearer = _field.DepthOf(cell) - _field.Depth(row, v.Height);
+			return what + $"\nvs {v.Tag} on {cell.X},{cell.Y} == "
+				   + $"{(cell == v.Cell ? "same cell" : $"{v.Cell.X},{v.Cell.Y}")}"
+				   + $"   {(hides ? "COVERS it" : "does not cover it")}\n"
+				   + $"face starts {over:+0.0;-0.0;0.0}px "
+				   + (over > 0.0f ? "above" : "below") + " its contact row, "
+				   + $"{nearer:+0.0;-0.0;0.0}px nearer the camera";
+		});
+		// A switch, not a dial: how much forest there is comes from the terrain
+		// list above, because forest is one of the kinds of ground. This is the
+		// A/B - the same board with the trees taken off it.
+		ui.Toggle("ground.forest", "trees  (--no-forest)",
+			() => _grove?.Enabled == true,
+			on =>
+			{
+				if (_grove is null) return;
+				_grove.Enabled = on;
+				_field.Trees = on;
+				SowGrove();
+				_field.QueueRedraw();
+			});
+		// The fire's own three rows: whether the wood can catch, a way to light
+		// it without a hand on the mouse, and what it is doing. The last one is
+		// not decoration - a fire that has stopped spreading and one that was
+		// never lit are the same still picture.
+		ui.Toggle("ground.wood_fire", "the wood can burn  (--no-tree-fire)",
+			() => _fire?.Enabled == true,
+			on =>
+			{
+				_woodFire = on;
+				if (_fire is null) return;
+				_fire.Enabled = on;
+				// Off puts it out rather than freezing it, for the reason the
+				// reset does: a board left half burnt with the fire switched off
+				// is a board nobody can put back.
+				if (!on)
+				{
+					_fire.Douse();
+					_grove?.Smoulder();
+				}
+			});
+		ui.Press("ground.light_wood", "set a wooded cell alight  (middle-click one)",
+			() =>
+			{
+				// The middle of the board, or the nearest cell to it with
+				// anything on it: a button cannot be aimed, and a button that
+				// lights nothing because the centre happens to be a field reads
+				// as a button that does not work.
+				if (_fire is null || _grove is null) return;
+				var mid = new Vector2I(_field.Columns / 2, _field.Rows / 2);
+				Vector2I? best = null;
+				double near = double.MaxValue;
+				for (int q = 0; q < _field.Columns; q++)
+				for (int r = 0; r < _field.Rows; r++)
+				{
+					var cell = new Vector2I(q, r);
+					if (_fire.LitAt(cell) || !_grove.Carrying(cell))
+						continue;
+					double d = (cell - mid).Length();
+					if (d >= near)
+						continue;
+					near = d;
+					best = cell;
+				}
+				if (best is Vector2I spot)
+					_fire.Light(spot);
+			});
+		ui.Readout("ground.fire_state", () =>
+			_fire is null ? "no board"
+			: _fire.Scorched == 0 ? "nothing has burnt"
+			: $"{_fire.Scorched} cells burnt, {_fire.Alight} alight, "
+			  + $"{Ablaze().Burning} in flame, {Ablaze().Burnt} burnt out, "
+			  + $"{Ablaze().Sooted} only sooted");
+		// Read live rather than at the moment a tank enters, unlike the shell's
+		// calibre: this is not something a round carries, it is how the wood is
+		// being drawn right now, and dragging it while a tank sits in the trees
+		// is exactly how it gets judged.
+		ui.Toggle("ground.shadows", "cast shadows  (--no-cast-shadows)",
+			() => _castShadows, on => _castShadows = on);
+		ui.Toggle("ground.prop_contact",
+			"ground darkened under a prop  (--no-prop-contact)",
+			() => _propContact, on => _propContact = on);
+		ui.Slide("ground.ghost", "trees over a tank in them  (--ghost)",
+			0.0, 1.0, 0.05,
+			() => _grove?.Ghost ?? 0.0,
+			v => { if (_grove is not null) _grove.Ghost = (float)v; },
+			"alpha", () =>
+			{
+				if (_grove is null)
+					return "";
+				int hidden = _grove.Standing.Count(t => t.Modulate.A < 0.99f);
+				return $"{hidden} trees faded now"
+					   + (_grove.Ghost <= 0.001f
+						  ? "   - gone: a tank standing in a field"
+						  : _grove.Ghost >= 0.999f
+							? "   - solid: the wood keeps the tank" : "");
+			});
+		// Two sliders stepping whole trees, clamped against each other in the
+		// setters rather than left to disagree - a floor above the ceiling is
+		// not a board anyone wanted to see, and refusing it here is cheaper
+		// than deciding which of the two wins during sowing.
+		ui.Slide("ground.least", "trees per wooded cell, at least", 0.0, 20.0, 1.0,
+			() => _grove?.Minimum ?? 0,
+			v =>
+			{
+				if (_grove is null) return;
+				_grove.Minimum = (int)v;
+				if (_grove.Maximum > 0 && _grove.Maximum < _grove.Minimum)
+					_grove.Maximum = _grove.Minimum;
+				SowGrove();
+			},
+			"", () => _grove is null ? "" : $"{Wooded()} wooded cells, "
+				+ $"{_grove.Planted} trees, {Thinnest()} on the emptiest");
+		ui.Slide("ground.most", "and at most  (0 for no ceiling)", 0.0, 20.0, 1.0,
+			() => _grove?.Maximum ?? 0,
+			v =>
+			{
+				if (_grove is null) return;
+				_grove.Maximum = (int)v;
+				if (_grove.Maximum > 0 && _grove.Maximum < _grove.Minimum)
+					_grove.Minimum = _grove.Maximum;
+				SowGrove();
+			},
+			"", () => _grove is null ? "" : $"{Thickest()} on the fullest"
+				+ (_grove.Maximum > 0 ? "" : "   - whatever the ground allows"));
+		// What actually grew, by kind. The spot picks among the trees that fit
+		// it, so a wide prop is thinned by the ground rather than by any
+		// setting - and there is nowhere else that would say so: a kind that
+		// never gets planted looks exactly like a kind nobody drew.
+		ui.Readout("ground.props", () =>
+		{
+			if (_props is null || !_props.Any)
+				return "no tree art";
+			var grown = new int[_props.Count];
+			foreach (PropNode tree in _grove?.Standing ?? new List<PropNode>())
+				grown[tree.Species]++;
+			return string.Join("\n", Enumerable.Range(0, _props.Count).Select(
+				k => $"{_props.NameOf(k)}  {grown[k]} grown, "
+					 + $"{_props.RiseOf(k) * (_grove?.ScaleOf(k) ?? 0.0f):F0}px tall, "
+					 + $"base {_props.RootOf(k) * (_grove?.ScaleOf(k) ?? 0.0f):F1}px"));
+		});
+		// The rule that cannot be had, kept as a switch so that is visible
+		// rather than asserted. See Grove.ClearFront: a 111px tree needs 142px
+		// of clearance in front of a tank and a hexagon offers 54, so switching
+		// it on empties the front of every clearing.
+		// In crown pixels, because that is what it looks like - the shear it
+		// becomes is what makes a taller tree lean further, and that part is
+		// not up for tuning. The caption reads the widest lean on the board
+		// right now rather than the setting, because the gust travels and the
+		// number the setting names is only reached where the gust is.
+		ui.Slide("ground.wind", "wind, crown drift  (--wind)", 0.0, 8.0, 0.2,
+			() => _grove?.Wind ?? 0.0,
+			v => { if (_grove is not null) _grove.Wind = v; },
+			"px", () =>
+			{
+				if (_grove is null || _grove.Planted == 0)
+					return "";
+				double most = _grove.Standing.Max(t => Math.Abs(t.Drift));
+				return _grove.Wind <= 0.0
+					? "still - the board is a photograph of a board"
+					: $"{most:F1}px at the most leaning crown just now";
+			});
+		// A multiplier over the three per-event strengths, not a strength: a
+		// shot, a hit and a tank going up are meant to be told apart by how hard
+		// the wood answers, and a knob that set the amplitude directly would
+		// flatten that on the first drag - the argument the tremble level and
+		// the class size both make. Read at the moment something goes off, like
+		// the recoil level: the kick is delivered once and the rest is a spring
+		// ringing down.
+		ui.Slide("ground.blast", "blast wave, crown shove  (--blast)",
+			0.0, 3.0, 0.1,
+			() => _grove?.Blast ?? 0.0,
+			v => { if (_grove is not null) _grove.Blast = v; },
+			"x", () =>
+			{
+				if (_grove is null || _grove.Planted == 0)
+					return "";
+				if (_grove.Blast <= 0.0)
+					return "deaf - a gun goes off in the wood and nothing moves";
+				double most = _grove.Standing.Max(t => Math.Abs(t.Flinch * t.Rise));
+				return $"{_grove.ShotBlast * _profile.ShotShake * _grove.Blast:F1}"
+					   + $"/{_grove.HitBlast * _grove.Blast:F0}"
+					   + $"/{_grove.DeathBlast * _grove.Blast:F0}px"
+					   + " at the source for a shot/hit/kill"
+					   + (_grove.Waves > 0
+						  ? $"   - {_grove.Waves} crossing, {most:F1}px flinching"
+						  : "");
+			});
+		// Its own row rather than a share of the blast's, because it is its own
+		// mechanism: a force while the hull is near against an impulse once, and
+		// the pair of them is the A/B that shows the difference. In crown pixels
+		// like the wind, because that is what both are looked at in.
+		ui.Slide("ground.brush", "hull through the trees  (--brush)",
+			0.0, 15.0, 0.5,
+			() => _grove?.Brushing ?? 0.0,
+			v => { if (_grove is not null) _grove.Brushing = v; },
+			"px", () =>
+			{
+				if (_grove is null)
+					return "";
+				if (_grove.Brushing <= 0.0)
+					return "a tank drives through the wood and nothing gives";
+				double sped = Math.Min(1.0, Active.Speed / _grove.BrushSpeed);
+				return $"{_grove.Brushing * sped:F1}px right against the hull at "
+					   + $"{Active.Speed:F0}px/s"
+					   + (Active.Speed <= 0.0
+						  ? "   - parked, so nothing is being pushed" : "");
+			});
+		ui.Toggle("ground.clearfront", "no tree may cross a tank  (--clear-front)",
+			() => _grove?.ClearFront == true,
+			on => { if (_grove is not null) { _grove.ClearFront = on; SowGrove(); } });
+		ui.Readout("ground.info", () =>
+		{
+			if (_terrain is null || !_terrain.Any)
+				return "no terrain art - rendered tile";
+			Rect2I hex = _field.Atlas!.HexRect;
+			// The camera error in the panel as well as the log, because it is
+			// the one number here that decides whether the picture can be
+			// trusted at all, and a warning printed at startup has scrolled off
+			// by the time anyone is looking at the board.
+			return $"{_terrain.Names.Count} kinds, plate {_terrain.Plate.Size.X}"
+				   + $"x{_terrain.Plate.Size.Y} at {_terrain.ScaleTo(hex):F3}x\n"
+				   + $"camera {_terrain.CameraError(hex) * 100.0f:F1}% off"
+				   + (_terrain.CameraAgrees(hex) ? "" : "  <- clicks will drift");
+		});
+
+		ui.Heading("view");
+		// No zoom row. The wheel already does it, and a slider on it is the one
+		// control that would silently rescale every A/B taken from the panel:
+		// almost everything measured here is a pixel diff of two captures, and
+		// a nudged zoom moves the whole picture rather than a silhouette. It is
+		// in --trace for exactly that reason, and a readout is what it wants to
+		// be, not a knob.
+		ui.Toggle("view.hull", "hull layer  (H)", () => _tank.ShowHull, on => _tank.ShowHull = on);
+		ui.Toggle("view.turret", "turret layer  (T)",
+			() => _tank.ShowTurret, on => _tank.ShowTurret = on);
+		ui.Toggle("view.field", "hex field  (G)", () => BoardShown,
+				  on => BoardShown = on);
+		// No key: A-Z, the brackets and the backslash are all spoken for, and the
+		// next free key is not a mnemonic. The panel is where a switch is found
+		// by name - the same answer the tracer and the traverse motor got.
+		ui.Toggle("view.stage", "3d stage", () => Staged, on => Staged = on);
+		ui.Toggle("view.edges", "cell outlines", () => _cellEdges, on =>
+		{
+			_cellEdges = on;
+			if (_stage is not null)
+				_stage.ShowEdges = on;
+		});
+		ui.Toggle("view.axis", "axis cross  (X)", () => _tank.ShowAxis, on => _tank.ShowAxis = on);
+		ui.PressPair("view.reset", "reset  (R)", ResetAll,
+					 "screenshot  (F12)", () => Capture(
+						 $"{ProjectSettings.GlobalizePath("res://")}shot_{Time.GetTicksMsec()}.png"));
+	}
+
+
+
+	// --- frame -------------------------------------------------------------
+
+	public override void _Process(double delta)
+	{
+		// The way back, before the capture: --edit-at fires on its own frame so
+		// that the picture which lands on disk is the editor it returned to.
+		if (_editAt >= 0 && _frames == _editAt && Session.Editing)
+		{
+			Edit();
+			return;
+		}
+		// give the panel and both layers a couple of frames to settle first
+		if (CapturePath is not null && ++_frames > CaptureAt)
+		{
+			Capture(CapturePath);
+			GetTree().Quit();
+			return;
+		}
+
+		if (_vehicles.Count == 0 || _tank.Atlas is null)
+			return;
+
+		// A capture run steps at a fixed rate so two runs land on the same
+		// state at the same frame number. On real deltas they drift a frame or
+		// two apart, and comparing a pitch-on shot against a pitch-off shot
+		// then measures the drift instead: caught once when the two runs were
+		// mid-pivot on either side of a 30 deg sprite boundary and "differed"
+		// by 91k pixels.
+		if (CapturePath is not null || _traceFrames > 0)
+			delta = FrameClock.FixedStep ?? 1.0 / 60.0;
+
+		if (_traceFrames > 0)
+		{
+			// Which tank the line is about. There are three of them now and only
+			// one is being driven, so a trace without this says nothing about
+			// whether the selection went where the flag asked - the same reason
+			// the zoom and the size are printed here.
+			GD.Print($"{_frames,4}  {Active.Tag,-3}"
+					 + $"  hull {_tank.HullFacing,6:F1}  speed {_speed,6:F1}"
+					 // What it is allowed to be doing, and only when that is not the
+					 // class figure. A tank crawling up a bank and a tank that lost
+					 // its order look the same on a still and read the same in a bare
+					 // speed; "grade" is the frame this leg is capped on. See
+					 // Main.SpeedCap.
+					 + (Tick.SpeedCap(Active) < _profile.TopSpeed
+						? $"/{Tick.SpeedCap(Active),5:F0} {Tick.SpeedCapWhy(Active)}" : "")
+					 // Whether it is in the water at all, which the cap above does
+					 // not say: a tank parked in a ford is capped by nothing,
+					 // because it is not moving, and it is still wading.
+					 + (Active.Wading ? $"  wet {Active.Waterline,5:F0}" : "")
+					 // The slope under the tank and what it is drawn as. Both,
+					 // because they answer different questions: a grade with no
+					 // angle beside it is a spring that did not arrive, and an angle
+					 // with no grade is a lean nothing on the board asked for. And
+					 // here rather than only on the panel, because a tank standing
+					 // level on a visible slope is exactly the failure a capture is
+					 // taken to judge - see Main.SurfaceGrade.
+					 + $"  lean {Active.Sprite.Climb,8:F5}@{Tick.SurfaceGrade(Active),6:F3}"
+					 // And what the same plane does to the shadow, which the lean
+					 // beside it cannot report: driving straight into the screen
+					 // the body's rotation is zero and the footprint is still
+					 // stretched half again. Two numbers that are only ever both
+					 // nought on flat ground. See TankSprite.Slope.
+					 + $"/{Active.Sprite.Slope.X,6:F3},{Active.Sprite.Slope.Y,6:F3}"
+					 // Which of the two ways the stage is drawing it, because the
+					 // grade beside it does not answer that: a tank parked across a
+					 // ramp feels no slope along its heading and is still standing on
+					 // one. See Vehicle.OnSlope.
+					 + (Active.Levelling || Active.OnSlope ? " over" : " depth")
+					 + $"  pitch {_tank.Pitch,8:F5}  shake {_tank.Heave,4:F1}"
+					 + $"  roll {_tank.Roll,8:F5}  trem {_tank.TremblePitch,8:F5}"
+					 + $"/{_tank.TrembleYaw,8:F5}"
+					 // The two ends, because the amplitudes beside them cannot say
+					 // which end of the tank moves and that is the whole statement
+					 // this effect makes. A bow figure that grows with the stern's is
+					 // a tremble that has gone back to shaking the whole hull.
+					 + $"@{_tank.TrembleTravelPx(bow: false),4:F1}/{_tank.TrembleTravelPx(bow: true),4:F1}px"
+					 + $"  scan {_scan.Offset,6:F1}"
+					 + $"  turret {_tank.TurretFacing,6:F1}"
+					 // The rate the gun is driven at, in the channel that
+					 // survives --no-ui. A traverse that is quietly still on the
+					 // tuned figure looks exactly like one the flag reached, and
+					 // the only difference between the two is how long a lay
+					 // takes - which a still frame cannot show at all.
+					 + $"  trv {Gunnery.TraverseRate(Active.Profile),4:F0}"
+					 + $"x{Gunnery.TraverseLevel,4:F2}"
+					 + $"  shot {_tank.FlashFrame,3}"
+					 + $"  recoil {_recoil.Pitch,8:F5}/{_recoil.Roll,8:F5}"
+					 // Which body is taking it, in the channel that survives
+					 // --no-ui. A mode that quietly failed to apply would send
+					 // you looking at the spring rather than at the flag - the
+					 // zoom is printed here for the same reason.
+					 + $"@{(_tank.RecoilTurretOnly ? "turret" : "body")}"
+					 // and whether it is on at all. Off is the default now, so a
+					 // trace of zeroes is the normal case rather than a spring
+					 // that failed to fire - which is exactly the confusion the
+					 // '@turret'/'@body' marker was added to prevent.
+					 + $"{(_tick.RecoilShear ? "" : "!off")}"
+					 // The level beside the phase, for the reason the traverse
+				 // prints its own: "the tuned figure is in" and "the flag
+				 // arrived" are the same picture.
+				 + $"  exh {_tank.ExhaustPhase,2}@{_exhaust.Phase,5:F2}"
+				 + $" x{_tick.ExhaustLevel,4:F2}"
+				 // Which model, because the two agree at both ends: a trace taken
+				 // standing still, or at cruise, cannot tell them apart, and those
+				 // are the two frames most likely to be traced.
+				 + (_tick.ExhaustRamp
+					 ? $"ramp{_exhaust.Response(_speed),4:F2}"
+					 : _exhaust.Response(_speed) > 0.0 ? "work" : "rest")
+					 // slip as well as phase: the cap is a real limit, and a
+					 // belt quietly running at two thirds of the ground is not
+					 // something to have to work out from the phase alone
+					 + $"  trk {_tank.TrackPhaseLeft,2}/{_tank.TrackPhaseRight,2}"
+					 + $"@{_track.Phase,5:F2}"
+					 + $" x{_track.Slip,4:F2}"
+					 // and the smear, because a fully blurred belt and a stopped
+					 // one look alike in a phase number and nothing alike on
+					 // screen
+					 + $" b{_track.Blur,4:F2}"
+					 // The tube, in the channel that survives --no-ui, and with
+					 // the switch beside it: 'rest' with the flag off and 'rest'
+					 // between shots are the same number and not the same thing.
+					 + $"  tube {_tank.RecoilPhase,2}"
+					 + $"{(_tick.RecoilTube ? "" : "!off")}"
+					 + $"  burn {_tank.FirePhase,2}/{_tank.BurnPhase,2}"
+					 // The wreck, and the char beside it: a tank that is dead
+					 // and a tank that is dead and has finished blackening are
+					 // the same word and different pictures, and the panel is
+					 // not there under --capture.
+					 + $"  wreck {(Active.Wreck.Dead ? $"{Active.Wreck.Age,5:F1}s" : " alive")}"
+					 // How far through the three it is. Alive is now a range
+					 // rather than a state, and nothing in the picture says which
+					 // end of it a tank is at.
+					 + $" pen {_tank.Penetrations}{(Active.Wreck.Disabled ? " out" : "")}"
+					 // whether the pose exists, because a charred level turret
+					 // and a pose that failed are the same picture
+					 + (Active.Atlas.HasWreck
+						? Active.Atlas.HasWreckTracks ? " posed" : " posed-turret"
+						: " unposed")
+					 + $" c{Active.Wreck.Char:F2}"
+					 + $" f{_tank.FireDensity:F2}"
+					 + $"  hit {_tank.HitPhase,2}@{(_hit.Face == "" ? "-" : _hit.Face)}"
+					 + $" x{_hit.Scale:F2}"
+					 // Sound has no screenshot, so this is the only place it can
+					 // be judged from outside. The gates and pitches say what was
+					 // asked for; the master bus peak says what actually came out,
+					 // and only the second one can tell a set that loaded from a
+					 // set that is audible. A trace with rising gates and a peak
+					 // pinned at -inf is the shape of a device that never opened.
+					 + $"  snd {SoundLine()}"
+					 // What the gun thinks, in the channel that survives
+					 // --no-ui. "no lane" and "blocked" are two different
+					 // reasons a tank is standing there not firing, and from
+					 // outside they look identical.
+					 + $"  aim {AimLine()}"
+					 // The debug overlay, because an overlay switched on with nothing
+					 // to say and one that failed to draw are the same empty picture -
+					 // and under --capture there is no panel to read the switch off.
+					 + $"  aimray {AimRayLine()}"
+					 + $"  cell ({_cell.X},{_cell.Y})"
+					 // Size for the same reason as the zoom: two captures at two
+					 // sizes that came out identical would send you looking at
+					 // the scale code rather than at whether the flag parsed.
+					 + $"  size {_tank.BodyScale:F2}x"
+					 // Zoom, because a capture run has no panel to read it off
+					 // and a stray wheel over the window has already cost one
+					 // measurement: the A/B then differs by the whole picture
+					 // rather than by the silhouette.
+					 + $"  zoom {_camera.Zoom.X:F2}x"
+					 // Which ground is drawn over this tank, and which cells.
+					 // "It should be hidden by that hex" is an argument about a
+					 // picture and cannot be settled on one: the two answers -
+					 // the cell is not higher, and the cell is higher and the
+					 // repaint did not happen - look identical on screen and are
+					 // repaired in different places. This says which.
+					 + $"  hidden {Hiding(Active)}"
+					 // A capture whose pixels came off another tank has to say
+					 // so: nothing in the picture does, and every conclusion
+					 // drawn from it is about that tank's atlas rather than
+					 // this class's.
+					 + (_spriteDir is null ? "" : $"  sprites {_spriteDir}")
+					 // Whether the settings file was read, in the channel that
+					 // survives --no-ui. A panel.json that quietly did not load
+					 // looks exactly like one whose settings did nothing, and
+					 // under --no-ui there is no panel to notice it on.
+					 + $"  panel {(_panelText.Loaded ? "json" : "built-in")}"
+					 // And the same for the per-class file. Two files now, and
+					 // they answer for different things: one for the panel's text
+					 // and openings, one for the class triples. A capture taken on
+					 // the compiled figures is a capture of a different tank.
+					 + $"  classes {(_classConfig.Loaded ? "json" : "built-in")}"
+					 // Same argument as the line above: a board of one kind and
+					 // a board of a mix are two different pictures, and neither
+					 // says which it is.
+					 + $"  ground {_field.Paint}"
+					 // What the water is doing, and under the driven tank as well
+					 // as at its worst. Two numbers because they fail apart: a
+					 // pond that reacts to nobody and one that reacts to the wrong
+					 // cell are the same still picture, and the trace is the only
+					 // channel that survives --no-ui.
+					 + (_sea is null || _field.WaterCells.Count == 0 ? "  sea -"
+						: $"  sea {_sea.StateAt(_field.CellAt(Active.GroundPoint - _origin)):F2}"
+						  + $"/{_sea.Peak:F2}"
+						  // How many cells are running the milder half of their
+						  // band, which is what a cell being left over shows.
+						  // Counted rather than shown for the driven tank's own
+						  // cell: the cell it is leaving is by definition the one
+						  // it is no longer standing in, so read off the tank it
+						  // would always be nought.
+						  + $"/{_sea.Mild}mild"
+						  // What the foam is set to, and !off rather than a
+						  // nought, because a pond nobody has stirred and a pond
+						  // with the foam turned off are the same clean picture.
+						  + (_foam > 0.0f ? $"/{_foam:F2}foam" : "/!off")
+						  + (_deepWater ? "/deep" : "/strip")
+						  + (_wakes ? $"/{_wake?.Count ?? 0}wake" : "/!nowake")
+						  // How hard the driven tank is shouldering the water,
+						  // because a crest that is not there and a crest whose
+						  // push came out nought are the same still water.
+						  + (_bows ? $"/{BowPush():F2}bow" : "/!noband")
+						  // What the simulation is holding: how tall the tallest
+						  // ripple is and how many steps the last frame ran. Two
+						  // numbers because they fail apart - a field nobody pushed
+						  // and a field that is not being stepped at all are the
+						  // same flat water, and a frame that ran into the step cap
+						  // is a third thing again.
+						  + (_wash is not { Wide: > 0 } ? "/!nofield"
+							 : !_ripples ? "/!noripple"
+							 : $"/{_wash.Peak:F2}x{_wash.Steps}"
+							   + $"@{_rippleLevel:F2}wash")
+						  + (_seaReacts ? "" : "!still"))
+					 // Trees, wooded cells, and how many of those no tank may
+					 // enter. Three numbers because a board with no props, a
+					 // board whose props were all refused and a board sown at
+					 // zero coverage are one empty picture and three faults.
+					 + $"  forest {_grove?.Planted ?? 0}t/{Wooded()}c"
+					 + $"/{Thinnest()}min"
+					 // How many are standing aside right now. The one number
+					 // that says when the wood opened and when it closed, and
+					 // neither end is visible in a still frame: the fade is
+					 // gradual by design, so a screenshot shows a state and not
+					 // the moment it started.
+					 + $"/{_grove?.Standing.Count(t => t.Modulate.A < 0.99f) ?? 0}fade"
+					 + (_grove?.Enabled == true ? "" : "!off")
+					 + (_grove?.ClearFront == true ? "!clear" : "")
+					 // The fire, and it takes four numbers because it fails in
+					 // four ways that look alike in a still frame: a wood nobody
+					 // lit, a fire that lit one cell and stopped, a front that
+					 // walked and left no trees burning, and a burn that never
+					 // finished. Cells lit, cells still alight, trees in flame,
+					 // trees burnt out.
+					 + (_fire is null ? "  fire -"
+						: $"  fire {_fire.Scorched}c/{_fire.Alight}lit"
+						  + $"/{Ablaze().Burning}t/{Ablaze().Burnt}ash"
+						  + $"/{Ablaze().Sooted}soot"
+						  + (_fire.Enabled ? "" : "!off"))
+					 // The blast: fronts still crossing and the hardest-shoved
+					 // crown - which counts the hulls pushing through as well,
+					 // because both drive the one spring. A wave delivers over a
+					 // third of a second, so a single frame of a capture can sit
+					 // either side of the one it was aimed at, and the two look
+					 // the same in a still.
+					 // '!deaf' rather than nothing, for the shake's reason -
+					 // switched off and nothing having gone off are two zeroes.
+					 + $"  blast {_grove?.Waves ?? 0}w/"
+					 + $"{(_grove is { Planted: > 0 } g ? g.Standing.Max(t => Math.Abs(t.Flinch * t.Rise)) : 0.0f):F1}px"
+					 + (_grove is null || _grove.Blast > 0.0 ? "" : "!deaf")
+					 // '!off' rather than nothing, because a still camera and a
+					 // switched-off one are the same two zeroes - the marker the
+					 // recoil spring and the tracer already carry.
+					 + $"  ruts {_marks?.Count ?? 0}@{_marks?.WidthOf(Active) ?? 0.0:F1}px"
+					 + (_marks?.Enabled == true ? "" : "!off")
+					 + $"  shake {_shake.ScreenOffset(_camera.Zoom.X)}"
+					 + (_tick.ShakeOn ? "" : "!off"));
+			if (++_frames >= _traceFrames)
+			{
+				GetTree().Quit();
+				return;
+			}
+		}
+
+		// Every tank, not just the one being driven. Three tanks with two of them
+		// frozen would not be a comparison of three tanks: the engine of a tank
+		// nobody is driving is still running, and the whole reason the tremble is
+		// on by default is that a vehicle with nothing moving on it is wrong in a
+		// way a still render is not.
+		// The order the clocks are wound in, and every line of why, is
+		// TankTick.Run - lifted out whole so that the bench and the harness
+		// drive a tank the same way rather than two ways that agree until one
+		// of them is edited. The binding rides on the property - see Tick.
+		foreach (Vehicle v in _vehicles)
+			Tick.Run(v, delta);
+
+		// Right after they have moved and before anything reads the board: a ram
+		// is a fact about where a hull got to this frame, and it stops the tank
+		// that delivered it. See RamContacts.
+		Tick.RamContacts();
+
+		// After every tank has moved, so a round aimed at a tank sees where that
+		// tank got to this frame rather than last frame - the same ordering the
+		// belts and the audio already need, and for the same reason.
+		Tick.Fly(delta);
+		// With them and just after, for the same ordering reason: the ray is solved
+		// from where the turrets ended up this frame, and a ray solved before the
+		// traverse would trail the gun it comes out of by a frame.
+		AimRays();
+
+		// Same ordering argument, one step further out: which cells are occupied
+		// is a fact about where the tanks ended up, so the wood clears for the
+		// cell a tank is entering rather than the one it left. Live cells rather
+		// than reached ones - a tank spends most of an order between two, and
+		// the trees have to be out of the way for the crossing, not after it.
+		_grove?.Reveal(Standing(), delta, Razing(),
+					   Fleet.Treading(_vehicles, _origin));
+		// The hulls shoulder the wood aside, before Blow integrates what they
+		// and the blast between them asked for. Every tank rather than the
+		// driven one, for the reason its gun is: a tank left under orders goes
+		// on driving after you have selected somebody else.
+		if (_grove is not null)
+			Fleet.Shoulder(_vehicles, _grove, _origin, delta);
+		// Before the wood reads it, and after the tanks have moved: the fire is a
+		// state of the board and the trees are a view of it, which is the order
+		// the sea and its surface run in too.
+		_fire?.Tick(delta);
+		_grove?.Smoulder();
+		_grove?.Blow(delta);
+
+		// The view last of all, after everything that could have fired this
+		// frame: a shot has to reach the spring on the frame it goes off, or the
+		// jolt lands one frame behind its own flash.
+		//
+		// Written whenever the spring is moving *or* the camera is displaced, so
+		// that switching the shake off mid-ring-down puts the view back rather
+		// than leaving it parked a few pixels out - the trap the recoil spring
+		// already documents.
+		// The spring runs whenever anything can feed it - the gun's shake or the
+		// death's, each behind its own switch at the source - and is put down only
+		// when both are off, so a switch flipped mid-ring does not park the view
+		// a few pixels out. See TankTick.Shook, which is the list of them.
+		if (_tick.Shaking)
+			_shake.Update(delta);
+		else if (_shake.Moving)
+			_shake.Reset();
+		Vector2 want = _tick.Shaking
+			? _shake.ScreenOffset(_camera.Zoom.X) : Vector2.Zero;
+		if (_camera.Offset != want)
+			_camera.Offset = want;
+
+		// The stage after both: it mirrors the camera and follows every tank, so
+		// anything written to either past this point would be a frame late on
+		// the board and on time on the tanks - which reads as the hill sliding
+		// under them.
+		if (_stage is not null)
+		{
+			_stage.Selected = NoUi ? null : Active;
+			// And the red one beside it. On the flat board this is a second
+			// SelectionRing; on the stage it is a second band of the same mesh,
+			// for the reason the first one is geometry at all - a canvas ring
+			// is drawn over the tanks, and a mark that covers what it points at
+			// is not a mark. Suppress2D hides both 2D rings while the stage
+			// owns the ground, so without this line the target simply lost its
+			// mark on the way into 3D.
+			_stage.Quarry = NoUi ? null : Active.Target;
+			// Every frame rather than on the drag, for the tremble level's reason:
+			// a stage handed the board later would otherwise sit on the built-in
+			// while the row it is a view of says something else.
+			_stage.SwellPeriod = (float)_swellPeriod;
+			_stage.SwellBlend = _swellBlend;
+			_stage.Foam = _foam;
+			_stage.Deep = _deepWater;
+			_stage.CastShadows = _castShadows;
+			_stage.ContactShadows = _propContact;
+			_stage.Trail = _wake;
+			_stage.Bows = _bows;
+			// Before Place, because the tint a wading tank wears is read off its
+			// own cell's state and Place is where that is pushed at the sprite.
+			if (_sea is not null)
+			{
+				_sea.Enabled = _seaReacts;
+				// Every tank noted before anything is stepped: the chop is "is
+				// anybody in this cell now", which is not known until they all
+				// have been. Indexed by place in the list rather than by the
+				// object, because the swell has no business knowing what a tank
+				// is - see Swell.Note.
+				for (int i = 0; i < _vehicles.Count; i++)
+				{
+					// Less the origin, like every other read of a ground point
+					// against the board: the point is in the tanks' space and
+					// the field answers in its own. Left off, every tank stirs
+					// a cell it is nowhere near, and the pond looks like a pond
+					// that answers nobody.
+					// The point itself as well as the cell it falls in, and in the
+					// tanks' own space: the cell is what the water reacts to, the
+					// point is where the foam sits. Not the origin-less one - the
+					// surface is built in this space too, so the two agree.
+					//
+					// And the lift of the water beside the point, because the
+					// point is a drawn row and the mark is painted on the pond
+					// rather than on the bed - see Stage3D.Ground, which the stage
+					// reads the pair back through. The cell resolved once for all
+					// three answers, so none of them can be about another one.
+					Vector2I wet = _field.CellAt(_vehicles[i].GroundPoint - _origin);
+					float sea = _field.WaterTop(wet);
+					_sea.Note(i, wet, _vehicles[i].Speed > Swell.StirAbove,
+							  _vehicles[i].GroundPoint, sea);
+					// And the trail, off the same point and the same threshold.
+					// In water rather than in a flooded cell: what a wake needs
+					// is a surface to be left on, which is the same question the
+					// waterline already answers.
+					_wake?.Note(i, _vehicles[i].GroundPoint, sea,
+								_vehicles[i].Speed > Wake.DriveAbove,
+								_field.IsWater(wet));
+				}
+				_sea.Tick(delta);
+				_wake?.Tick(delta);
+			}
+			// And the field, after them and on the same rule: every tank noted
+			// before anything is stepped, because two tanks pushing one patch of
+			// water add up and that is not known until both have spoken.
+			if (_wash is not null)
+			{
+				_wash.Enabled = _ripples;
+				_wash.Level = _rippleLevel;
+				foreach (Vehicle vehicle in _vehicles)
+				{
+					if (!vehicle.Wading)
+						continue;
+					// The same share of the ford's own ceiling the painted crest
+					// is scaled by, and read the same way: what a tank can do in
+					// water is what full push through water means.
+					float shove = Mathf.Clamp(
+						(float)(vehicle.Speed
+								/ Mathf.Max(vehicle.Profile.WaterSpeed, 1e-4)),
+						0.0f, 1.0f);
+					// In world XZ, both of them, because a ring is round on the
+					// water and the tanks' own space is the one the camera has
+					// already squashed - the mapping the swell's mark and the
+					// wake's stamps go through on their way to the shader, done
+					// here instead because the field is stepped in this space.
+					// Ground and not World, because GroundPoint is a drawn row: the
+				// stage owns the one expression that puts the lift back, and a
+				// second copy of it here is how the push comes to land a level
+				// away from the tank. The water's lift rather than Contact's
+				// ground, so the crest comes up on the tank's own row along with
+				// the trail and the blot - all three are marks on the pond, and
+				// two of them agreeing is not enough. See Stage3D.Ground.
+				Vector3 at = _stage.Ground(
+					vehicle.GroundPoint,
+					_field.WaterTop(_field.CellAt(vehicle.GroundPoint - _origin)));
+					Vector3 way = _stage.World(
+						vehicle.Atlas.GroundDirection(
+							vehicle.Sprite.HullFacing), 0.0f);
+					_wash.Note(new Vector2(at.X, at.Z),
+							   new Vector2(way.X, way.Z), shove);
+				}
+				_wash.Tick(delta);
+			}
+			_stage.Place(_vehicles);
+		}
+
+		// The marks are about the driven tank and both tanks move, so they are
+		// repainted on change rather than on a target being set: a lane that was
+		// clear when the order was given stops being clear when somebody drives
+		// into it. Memoised because that is a handful of cells rebuilt and a
+		// redraw of the whole field, and neither is free at sixty a second.
+		// The mark is in it for the target's reason: an order to shell a cell
+		// paints the same six arcs and the same live lane, and a lane that was
+		// clear when the order was given stops being clear when somebody drives
+		// into it.
+		var mark = (_active, Active.Cell, Active.Target, Active.Target?.Cell,
+					Active.Mark, Active.Solution.Clear);
+		if (mark != _painted)
+		{
+			_painted = mark;
+			PaintGunnery();
+		}
+
+		// Both of these are turret controls, and a tank that has been told what
+		// to shoot at is already using its turret. Left in, the spin would wind
+		// the gun off the target once a frame and the engagement would read as a
+		// turret that cannot hold a lay.
+		if (Active.Target is not null)
+		{
+			// nothing - UpdateAttack has the gun
+		}
+		else if (!Moving && _spinning)
+		{
+			_tank.TurretFacing = Angles.Mod(_tank.TurretFacing + SpinSpeed * delta, 360.0);
+			_tank.QueueRedraw();
+		}
+		else if (!Moving && _aimWithMouse)
+		{
+			Vector2 toMouse = GetGlobalMousePosition() - _tank.GlobalPosition;
+			if (toMouse.Length() > 8.0f)
+			{
+				double facing = Gunnery.HeadingOf(toMouse);
+				if (Math.Abs(facing - _tank.TurretFacing) > 0.01)
+				{
+					_tank.TurretFacing = facing;
+					_tank.QueueRedraw();
+				}
+			}
+		}
+	}
+
+	public override void _UnhandledInput(InputEvent @event)
+	{
+		// The middle button does two things, and the gesture decides which: a
+		// drag pans, a tap destroys whatever is standing on the cell. Sharing it
+		// rather than taking another key because there is no key left worth
+		// taking, and because destroying a tank for a test wants to be aimed at
+		// one - which is a thing the mouse can say and the keyboard cannot.
+		// See SceneRoot.MiddleTapped for the resolving.
+		if (@event is InputEventMouseButton
+			{ ButtonIndex: MouseButton.Middle } middle)
+		{
+			if (!MiddleTapped(middle, out Vector2 tapped))
+				return;
+			Vector2I at = _field.ClampCell(
+				_field.CellAt(_field.ToLocal(tapped)));
+			// By cell, like the left and right buttons: the cell is the unit the
+			// game is played in, and a silhouette overhangs its own hex, so
+			// picking by pixels would let a click on the ground beside a tank
+			// destroy it.
+			//
+			// And what is on the cell decides which of the two destructions it is,
+			// the way it decides between selecting and ordering on the left
+			// button: a tank on it is destroyed, and a wood on it is set alight.
+			// The tank wins the tie because a tank parked in a wood is the thing
+			// being aimed at - there is no way to aim at the trees under it, and
+			// the fire spreads onto that cell by itself in a few seconds anyway.
+			if (_vehicles.Count > 0 && _tank.Atlas is not null
+				&& Vehicle.At(_vehicles, at) is Vehicle mark)
+			{
+				Tick.Kill(mark);
+				_panel?.Sync();
+			}
+			else if (_fire?.Light(at) == true)
+				_panel?.Sync();
+			return;
+		}
+		// <b>The double click first, because the second press of one is also an
+		// ordinary press</b> and the ordinary press would order the drive again
+		// underneath the ram. Left before the single-click branch and returning,
+		// which is the only ordering that makes the gesture one thing.
+		if (@event is InputEventMouseButton
+			{ ButtonIndex: MouseButton.Left, DoubleClick: true }
+			&& _vehicles.Count > 0 && _tank.Atlas is not null)
+		{
+			Vector2I onto = _field.ClampCell(
+				_field.CellAt(_field.ToLocal(GetGlobalMousePosition())));
+			// <b>And the selection the first press made is taken back, which is
+			// what makes ramming a tank possible at all.</b> A double click on a
+			// hull begins with a single click on a hull, and that is "drive that
+			// one" - so by the time the second press arrives the tank under the
+			// cursor is the tank in hand, and the order would be a hull ramming
+			// itself. Reverted rather than deferred: a click that waited to see
+			// whether a second one was coming would make every selection on this
+			// bench feel late. See _pickedFrom.
+			if (_pickedFrom >= 0 && Vehicle.At(_vehicles, onto) == Active)
+				Select(_pickedFrom);
+			_pickedFrom = -1;
+			OrderRam(onto);
+			return;
+		}
+		if (@event is InputEventMouseButton { Pressed: true } mouse)
+		{
+			if (mouse.ButtonIndex == MouseButton.Left && _vehicles.Count > 0
+				&& _tank.Atlas is not null)
+			{
+				Vector2 local = _field.ToLocal(GetGlobalMousePosition());
+				Vector2I cell = _field.ClampCell(_field.CellAt(local));
+				// A tank there means "drive that one from now on"; empty ground
+				// means "go there". One click, and which of the two it is decided
+				// by what is standing on the cell rather than by a modifier.
+				int pick = Vehicle.SelectionFor(_vehicles, _active, cell);
+				// Remembered before it is acted on, for the double click above:
+				// what it needs to know is not "who is being driven" but "who was
+				// being driven before this click", and this is the only place that
+				// can say so.
+				_pickedFrom = pick >= 0 ? _active : -1;
+				if (pick >= 0)
+					Select(pick);
+				else
+					OrderMoveTo(cell);
+				return;
+			}
+			// <b>The right button is the gun, and it says a cell rather than a
+			// tank.</b> One press is one round into that hex - see OrderShot -
+			// and what is standing there is answered at the trigger instead of
+			// here: a shell into the ground and a shell into a hull are one shot
+			// with one set of rules, and the button that gives the order has no
+			// business knowing which of the two it will turn out to be.
+			//
+			// It used to mean "attack that tank until told otherwise", and the
+			// standing engagement is still what --attack, the panel row and
+			// bench-attack give. The mouse gives single rounds; the difference is
+			// worth having, because a shot at a cell is the only order that can
+			// be given at a wood, a wall or a patch of water.
+			//
+			// The driven tank's own cell reads as "stop", which is the same
+			// reading left-clicking yourself gets.
+			if (mouse.ButtonIndex == MouseButton.Right && _vehicles.Count > 0
+				&& _tank.Atlas is not null)
+			{
+				Vector2 local = _field.ToLocal(GetGlobalMousePosition());
+				Vector2I cell = _field.ClampCell(_field.CellAt(local));
+				OrderShot(Active, cell);
+				_panel?.Sync();
+				return;
+			}
+			float factor = mouse.ButtonIndex switch
+			{
+				MouseButton.WheelUp => 1.25f,
+				MouseButton.WheelDown => 0.8f,
+				_ => 1.0f,
+			};
+			if (factor != 1.0f)
+			{
+				float zoom = Mathf.Clamp(_camera.Zoom.X * factor, 0.25f, 8.0f);
+				_camera.Zoom = new Vector2(zoom, zoom);
+			}
+			return;
+		}
+		if (@event is InputEventMouseMotion motion
+			&& (motion.ButtonMask & MouseButtonMask.Middle) != 0)
+		{
+			_camera.Position -= motion.Relative / _camera.Zoom;
+			return;
+		}
+		if (@event is not InputEventKey { Pressed: true, Echo: false } key)
+			return;
+		if (_vehicles.Count == 0 || _tank.Atlas is null)
+			return;
+
+		double step = 360.0 / _tank.Atlas.Count;
+		switch (key.Keycode)
+		{
+			case Key.A: _tank.TurnHull(step); break;
+			case Key.D: _tank.TurnHull(-step); break;
+			case Key.Q:
+				_aimWithMouse = false;
+				_tank.TurretFacing = Angles.Mod(_tank.TurretFacing + step, 360.0);
+				break;
+			case Key.E:
+				_aimWithMouse = false;
+				_tank.TurretFacing = Angles.Mod(_tank.TurretFacing - step, 360.0);
+				break;
+			case Key.W:
+				OrderMoveTo(_field.Neighbour(_cell, _tank.HullFacing));
+				break;
+			case Key.S:
+				OrderMoveTo(_field.Neighbour(_cell, Angles.Mod(_tank.HullFacing + 180.0, 360.0)));
+				break;
+			case Key.F: _tank.TurretHoldsHeading = !_tank.TurretHoldsHeading; break;
+			case Key.P:
+				_tick.PitchEnabled = !_tick.PitchEnabled;
+				PitchChanged();
+				break;
+			case Key.B:
+				_tick.RumbleEnabled = !_tick.RumbleEnabled;
+				RumbleChanged();
+				break;
+			case Key.I:
+				_tick.TrembleEnabled = !_tick.TrembleEnabled;
+				TrembleChanged();
+				break;
+			case Key.N:
+				_tick.ScanEnabled = !_tick.ScanEnabled;
+				ScanChanged();
+				break;
+			case Key.O:
+				_tick.ExhaustEnabled = !_tick.ExhaustEnabled;
+				ExhaustChanged();
+				break;
+			case Key.C:
+				_tick.TracksEnabled = !_tick.TracksEnabled;
+				TracksChanged();
+				break;
+			// Beside the belts, because it is the same kind of switch: both are
+			// parts of the tank on layers of their own, and both are off only to
+			// be compared against.
+			//
+			// '[' because every letter is taken - A to Z are all bound, and so
+			// are Space, Tab, Escape, F12 and Key1..Key9 - and this is the first
+			// free key outside an existing range. The bracket at least points the
+			// way the tube goes.
+			case Key.Bracketleft:
+				_tick.RecoilTube = !_tick.RecoilTube;
+				break;
+			// '\' because the note on '[' has now come true twice over: A-Z are
+			// all bound, '[' went to the tube and ']' to the shear, so this is
+			// the next free key in the same physical cluster. There is no
+			// mnemonic left to have - the shortage is the reason, and the panel
+			// is where a switch is found by name.
+			//
+			// Harness-wide like the pitch and the rumble rather than per tank:
+			// judging sound on one tank while two run silent throws away the
+			// comparison it is on a switch for.
+			case Key.Backslash:
+				_soundEnabled = !_soundEnabled;
+				SoundChanged();
+				break;
+			// Next to the tube it was replaced by, which is the comparison this
+			// key exists for. ']' for the same reason '[' is '[': the letters are
+			// gone.
+			case Key.Bracketright:
+				_tick.RecoilShear = !_tick.RecoilShear;
+				break;
+			case Key.J:
+				_burning = !_burning;
+				Tick.UpdateBurn(Active, 0.0);
+				break;
+			case Key.K: _tank.TurretStabilised = !_tank.TurretStabilised; break;
+			// Next to the stabiliser deliberately: both answer "what does the
+			// turret do that the hull does not".
+			case Key.L: _tank.RecoilTurretOnly = !_tank.RecoilTurretOnly; break;
+			case Key.Z: Fire(); break;
+			case Key.U:
+				TakeHit(HexField.EdgeHeadings[
+					(_hitSide + 1) % HexField.EdgeHeadings.Length]);
+				break;
+			case Key.Y:
+				_calibre = (_calibre + 1) % Ordnance.Count;
+				break;
+			case Key.V:
+				// Three now, so it cycles rather than toggling. Same key: which
+				// track is drawing is one question however many answers it has.
+				_tank.Source = (FlashSource)(((int)_tank.Source + 1) % 3);
+				_tank.QueueRedraw();
+				break;
+			case Key.Escape: CancelOrder(); break;
+			// A range rather than one label per tank, and that is the fix for a
+			// bug this line has now had twice: the list ended at Key4 when MTP
+			// was added and at Key5 when HTP was, and each time the new tank was
+			// simply unreachable from the keyboard while everything else about it
+			// worked. The clamp below already answers "what if that tank is not
+			// there", so the labels never needed to know how many there are.
+			case >= Key.Key1 and <= Key.Key9:
+				// Godot's Key enum is backed by long, so this needs the cast.
+				// Clamped rather than assumed to be in range: the number of
+				// tanks that loaded is whatever is on disk, and a key for one
+				// that is not there should do nothing rather than throw.
+				int pick = (int)(key.Keycode - Key.Key1);
+				if (pick >= _vehicles.Count)
+					break;
+				Select(pick);
+				break;
+			case Key.Space: _spinning = !_spinning; break;
+			case Key.M: _aimWithMouse = !_aimWithMouse; break;
+			case Key.H: _tank.ShowHull = !_tank.ShowHull; break;
+			case Key.T: _tank.ShowTurret = !_tank.ShowTurret; break;
+			case Key.G: BoardShown = !BoardShown; break;
+			case Key.X: _tank.ShowAxis = !_tank.ShowAxis; break;
+			// Back to the editor, on the board that is being played. Only ever
+			// answered when the editor sent us: on a bench nobody handed to,
+			// Session.Editing is false and F5 does nothing, because a harness
+			// that jumped into the map editor on a keypress would be a harness
+			// that lost a session to a typo.
+			case Key.F5 when Session.Editing:
+				Edit();
+				return;
+			case Key.F12:
+				Capture($"{ProjectSettings.GlobalizePath("res://")}shot_{Time.GetTicksMsec()}.png");
+				return;
+			case Key.R:
+				ResetAll();
+				break;
+			case Key.Tab:
+				_panel?.Flip();
+				break;
+			default: return;
+		}
+
+		_tank.QueueRedraw();
+	}
+
+	/// <summary>Everything back to how it started. A method rather than a case
+	/// in the key switch because the panel's Reset has to be the same reset -
+	/// two lists of things to clear is one list that will fall behind.
+	///
+	/// All three tanks, not just the one being driven, and back to their own home
+	/// cells. "How it started" is the bench as it opens: three tanks parked in a
+	/// row. A reset that tidied one of them and left the other two where they had
+	/// driven to would be the one key you cannot trust.</summary>
+	private void ResetAll()
+	{
+		_spinning = false;
+		_aimWithMouse = false;
+		// Before the tanks are repaired, not after: a round still in the air would
+		// land on armour that had just been made good, which is the one way this
+		// reset could leave a mark behind it.
+		Tick.ClearRounds();
+		_marks?.Clear();
+		// Every burst out and every crater filled, with the ruts and for their
+		// reason: a board that comes back shelled is a board that was not reset,
+		// and a burst still in the air would go on throwing earth over ground
+		// that had just been made good.
+		_stage?.Quench();
+		_pits.Fill();
+		// And the covers the board was laid with, which is the one part of it
+		// nothing else owns: a mine that has gone off is spent, and R has to be
+		// able to play the same scene twice. The wood's own restore is below and
+		// writes the same states.
+		_field.SetCover(_map.Over);
+		// With the shells and for the same reason: a front still crossing would
+		// arrive at a wood on a board that had just been put back, and the
+		// flinch is the one thing in the grove that holds a pose with nothing
+		// driving it. The wind is not reset - it is weather, and it was blowing
+		// before the key was pressed.
+		_grove?.Calm();
+		// And the wood is put back green. With the flinch and for its reason: a
+		// board left burning would come back as one that was alight before
+		// anybody lit it, and the ash on the ground says so for good.
+		_fire?.Douse();
+		// And a wood a bulldozer flattened is standing again - after the covers
+		// above, which is what lets it grow there, and before the smoulder,
+		// which paints the fire on to whatever is standing. See Grove.Regrow.
+		_grove?.Regrow();
+		_grove?.Smoulder();
+		foreach (Vehicle v in _vehicles)
+		{
+			Tick.CancelOrder(v);
+			TankSprite s = v.Sprite;
+			s.HullFacing = 270.0;
+			s.TurretFacing = 270.0;
+			v.Pitch.Reset();
+			s.Pitch = 0.0;
+			v.Rumble.Reset();
+			s.Shake = 0.0;
+			s.Roll = 0.0;
+			v.Tremble.Reset();
+			s.TremblePitch = 0.0;
+			s.TrembleYaw = 0.0;
+			v.Exhaust.Reset();
+			s.ExhaustPhase = -1;
+			v.TrackLeft.Reset();
+			v.TrackRight.Reset();
+			s.TrackPhaseLeft = -1;
+			s.TrackPhaseRight = -1;
+			s.TrackBlurLeft = 0.0;
+			s.TrackBlurRight = 0.0;
+			// Before the fire is put out, because a wreck is what keeps
+			// relighting it - see UpdateWreck.
+			v.Wreck.Reset();
+			s.Wrecked = false;
+			s.Char = 0.0;
+			s.FireDensity = 1.0f;
+			s.SmokeDensity = 1.0f;
+			v.Burning = false;
+			v.Burn.Reset();
+			s.Burning = false;
+			s.FirePhase = -1;
+			s.BurnPhase = -1;
+			// The ceasefire is part of the reset for the reason the repair is:
+			// R means the bench as it opened, and a tank left engaging would
+			// start putting holes back into the armour that was just fixed.
+			v.Target = null;
+			// Both of the mouse's orders with it, and for the same sentence: R
+			// means the bench as it opened, and a tank left with a round owed to
+			// a hex or a hull owed a ram would spend it on the board that was
+			// just put back.
+			v.Mark = null;
+			v.Charge = null;
+			v.Solution = Gunnery.None;
+			v.ReloadLeft = 0.0;
+			v.Hit.Reset();
+			v.HitCount = 0;
+			s.HitPhase = -1;
+			s.Repair();
+			v.Scan.Reset();
+			v.Recoil.Reset();
+			// The levels go back to their tuned values along with everything
+			// else. They are settings rather than state, which argues the other
+			// way, but a reset whose job is "back to the baseline" that leaves
+			// the shake at two and a half would be lying about what it did - and
+			// the tuned value is the one worth being able to get back to in one
+			// key.
+			v.Tremble.Level = 1.0;
+			v.Recoil.Level = 1.0;
+			v.ShotFrame = -1;
+			s.FlashFrame = -1;
+			s.ShotPhase = -1;
+			s.Source = _flashSource;
+			// Back to what the command line asked for, not to false: "how it
+			// started" is well defined here because there is a flag, which is the
+			// same reason the flash source above goes back to _flashSource.
+			s.RecoilTurretOnly = _recoilTurretOnly;
+			s.RecoilPitch = 0.0;
+			s.RecoilRoll = 0.0;
+			v.Cell = v.HomeCell;
+			Tick.Park(v);
+		}
+		_sizeLevel = 1.0;
+		// With the other levels, and it is one line rather than one per tank
+		// because the traverse knob is not held on a machine - see
+		// Gunnery.TraverseLevel.
+		Gunnery.TraverseLevel = 1.0;
+		Shell.SpeedLevel = 1.0;
+		Shell.TracerLevel = 1.0;
+		Shell.SmokeLevel = 1.0;
+		Shell.SmokeOn = Shell.SmokeOnByDefault;
+		Shell.SmokeSeconds = Shell.TunedSmokeSeconds;
+		ApplySize();
+		PaintGunnery();
+		// <b>The camera is not reset, and that is the point of the gesture.</b>
+		// R puts the scene back so the same thing can be watched again - and
+		// watching it again means from where it was being watched, at the zoom it
+		// was being watched at. Homing the view made every replay start by
+		// finding the tank a second time. What is cleared here is the shake's own
+		// displacement, which is not a view the user chose: a held offset with
+		// nothing driving it is the spring's version of the same fault.
+
+		// and the shake, which holds a displacement with nothing driving it -
+		// the same reason the recoil spring is reset rather than left leaning
+		_shake.Reset();
+		_camera.Offset = Vector2.Zero;
+	}
+
+}
