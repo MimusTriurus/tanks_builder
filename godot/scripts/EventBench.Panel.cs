@@ -198,6 +198,15 @@ public sealed partial class EventBench
                 "up from below", () => _play?.Tier(Actor, Target, true, 0));
         Button("tank.hit.tier.blind", "a hex back: no shot",
                () => _play?.Tier(Actor, Target, false, 1));
+        // The same two pictures over the board's other drop, which is twice as
+        // deep and the last one the rules admit at this range: two levels over
+        // two cells is atan(step_grade), the ladder's top rung. Its own row
+        // rather than a knob on the one above, because what the pair judges is
+        // the tube against the lane and two depths in one row would be two
+        // answers under one caption.
+        Buttons("tank.hit.tier.steep", "two levels down",
+                () => _play?.Tier(Actor, Target, false, 0, 2),
+                "two levels up", () => _play?.Tier(Actor, Target, true, 0, 2));
         Buttons("tank.state.out", "knocked out", () => _play?.KnockOut(Target),
                 "destroyed", () => _play?.Destroy(Target));
         Buttons("tank.state.fire", "catches fire", () => _play?.Burn(Target),

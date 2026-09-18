@@ -376,11 +376,15 @@ public sealed class Playback
     /// level up and would make the picture argue with itself) and nothing
     /// screening the lane.
     ///
-    /// <b>One level and not two.</b> Two would be a drop no gun may be laid down
-    /// at this range at all - <see cref="Gunnery.Reaches"/> - and the button is
-    /// for looking at the rule working, not at its edge.
+    /// <b>How deep the drop is, is the caller's.</b> One level is the rule
+    /// working; two over the same two cells is the rule's edge -
+    /// <c>atan(step_grade)</c> exactly, the top rung of the rendered ladder and
+    /// <see cref="Gunnery.Reaches"/>'s own limit, which admits a level per cell
+    /// of range and no more. Three would be past it at this range and there is
+    /// nothing to look at: no mounting was ever drawn there.
     /// </summary>
-    private Brink? Edge(Vehicle a, Vehicle b)
+    /// <param name="drop">Levels between the brink and the floor - 1 or 2.</param>
+    private Brink? Edge(Vehicle a, Vehicle b, int drop)
     {
         foreach (int down in Downhill)
         for (int q = 0; q < Field.Columns; q++)
@@ -390,7 +394,7 @@ public sealed class Playback
             Vector2I low = HexField.Step(high, down);
             Vector2I far = HexField.Step(low, down);
             Vector2I behind = HexField.Step(high, (down + 180) % 360);
-            if (Field.LevelAt(low) != Field.LevelAt(high) - 1
+            if (Field.LevelAt(low) != Field.LevelAt(high) - drop
                 || !Field.InBounds(low) || !Field.InBounds(far)
                 || !Field.InBounds(behind)
                 || Field.LevelAt(far) != Field.LevelAt(low)
@@ -470,7 +474,18 @@ public sealed class Playback
     /// than a number picked here, for the reason the solution is: a button about
     /// the rules that invented one of them would be worth less than no button.
     /// </summary>
-    public void Tier(Vehicle shooter, Vehicle victim, bool uphill, int back)
+    /// <param name="drop">Levels between the two, which is what makes the
+    /// second pair of knobs a second event rather than the same one on other
+    /// cells. At one level over two cells the tube stands at 7.1 degrees; at two
+    /// it stands at 14.04, <c>atan(step_grade)</c> exactly - the top rung of the
+    /// ladder, the steepest the pipeline ever rendered and the last position
+    /// <see cref="Gunnery.Reaches"/> admits. It is also the one shot where the
+    /// downhill rule in <see cref="Gunnery.LayDeg"/> is worth the most: laid on
+    /// the sight line the tube covers the whole ladder, and laid with the flat
+    /// superelevation on top of it, as it was, it came out three rungs
+    /// short.</param>
+    public void Tier(Vehicle shooter, Vehicle victim, bool uphill, int back,
+                     int drop = 1)
     {
         if (ReferenceEquals(shooter, victim))
         {
@@ -478,25 +493,25 @@ public sealed class Playback
                          null);
             return;
         }
-        if (Edge(shooter, victim) is not Brink drop)
+        if (Edge(shooter, victim, drop) is not Brink brink)
         {
-            Todo?.Invoke("no drop on this board with room either side of it",
-                         shooter, null);
+            Todo?.Invoke($"no {drop}-level drop on this board with room either "
+                         + "side of it", shooter, null);
             return;
         }
-        Vector2I top = back > 0 ? drop.Behind : drop.High;
+        Vector2I top = back > 0 ? brink.Behind : brink.High;
         Vehicle upper = uphill ? victim : shooter;
         Vehicle lower = uphill ? shooter : victim;
         Now_($"{upper.Tag} on the rise at ({top.X},{top.Y}), {lower.Tag} below at "
-             + $"({drop.Far.X},{drop.Far.Y})",
+             + $"({brink.Far.X},{brink.Far.Y})",
              () =>
              {
                  // Both put before either is aimed: the bearing is read off two
                  // ground points, and one of them would still be the old cell.
                  upper.Cell = top;
-                 lower.Cell = drop.Far;
-                 upper.Sprite.HullFacing = drop.Down;
-                 lower.Sprite.HullFacing = Angles.Mod(drop.Down + 180.0, 360.0);
+                 lower.Cell = brink.Far;
+                 upper.Sprite.HullFacing = brink.Down;
+                 lower.Sprite.HullFacing = Angles.Mod(brink.Down + 180.0, 360.0);
                  Tick.Park(upper);
                  Tick.Park(lower);
                  Lay(upper, lower);

@@ -1,4 +1,4 @@
-using Godot;
+﻿using Godot;
 
 namespace TankSpriteTest;
 
@@ -31,6 +31,36 @@ public sealed partial class BoardMap
     /// structural half: unknown letters, ramps off the board, water that cannot
     /// bank.
     ///
+    /// <b>A shelf over a pit in the top right corner, because two levels is the
+    /// steepest shot the rules allow and nothing else on this board could ask
+    /// for it.</b> The shelf <c>(8,0)</c>-<c>(9,0)</c> stands a level over plain
+    /// ground and the pit <c>(10,1)</c>-<c>(11,1)</c> a level under it, so a gun
+    /// on <c>(9,0)</c> firing down 330 drops two levels over two cells:
+    /// <c>atan(step_grade)</c> exactly, which is the ladder's top rung,
+    /// <see cref="Gunnery.Reaches"/>'s own limit (two levels want two cells) and
+    /// the steepest the tube was ever rendered at. A cell nearer is a position
+    /// the rules refuse; a cell further is the shallower shot the ravine already
+    /// shows. <see cref="Playback.Edge"/> finds it the way it finds the ravine -
+    /// by shape and not by name - and 330 is the heading it looks along first,
+    /// which is why the drop is cut on that diagonal rather than down a column:
+    /// straight at the camera the tube foreshortens to nothing and this is the
+    /// one board feature whose whole subject is the tube's angle.
+    ///
+    /// <b>Both cells of the pit are in it and not beside it.</b> The fire rule
+    /// takes the floor of a shot to be the lower of its two ends and lets
+    /// nothing strictly between stand above that floor, so a shelf with one low
+    /// cell under it and plain ground past it would be a shot blocked by the
+    /// ground it was fired over - see <see cref="Gunnery.Solve"/>. The shelf is
+    /// two cells for the other half of the same rule: <c>(8,0)</c> is the hex
+    /// back from the brink, where the shooter's own plateau blocks it.
+    ///
+    /// <b>Neither end carries a ramp, and neither needs one.</b> The pit is
+    /// walled by the board's edge on two sides and by plain ground on the rest,
+    /// which leaves no cell with the single higher neighbour a ramp wants; the
+    /// tanks are <em>put</em> on these four cells by the event and never driven
+    /// to them, which is <see cref="Playback.Tier"/>'s own contract. It is a
+    /// shooting gallery, not a road.
+    ///
     /// <b>A mine and a ring of brick two cells from a parking on purpose.</b>
     /// These are the props the events act on, and a tank that has to drive
     /// three cells to reach them is three cells of animation in front of every
@@ -42,8 +72,8 @@ public sealed partial class BoardMap
     private static readonly string[] EventsGround =
     {
         // 0123456789AB
-        ".....ff.....", // r0  a wood at the top middle
-        ".11..f...W..", // r1  a rise top left; a ring of brick at (9,1)
+        ".....ff.11..", // r0  a wood at the top middle; the shelf at (8,0),(9,0)
+        ".11..f...Wvv", // r1  a rise top left; brick at (9,1); the pit at (10,1),(11,1)
         "............", // r2  ramp on (1,2) climbs north on to (1,1)
         "....m.......", // r3  a mine between the two parkings on this row
         "............", // r4  (7,4) is the ravine's rim: the ramp's high edge
