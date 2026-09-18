@@ -7532,6 +7532,28 @@ public static class SelfTest
                 && !ReferenceEquals(stage.Spalling, stage.Kicking),
                 $"{stage.Spalling.Count} of {Stage3D.Bursts} - a shared pool is "
                 + "one shell's spall cutting another shell's burst short");
+            // And the other half of that split, which is the one a ram needs:
+            // a collision draws from a ring of its own, and it draws without the
+            // shell's signature - see ProcSpall.Cause. Spalling was doused on the
+            // line above, so anything alive in it now is a Scrape that went to
+            // the wrong ring.
+            stage.Scrape(stage.Origin, 0.0f, Vector2.Right, Vector2.Zero, false);
+            ProcSpall? met = stage.Scraping.FirstOrDefault(x => x.Alive);
+            bool noShell =
+                met is not null
+                && met.Dial(ProcSpall.Part.Glow, "bloom_gain") == 0.0f
+                && met.Dial(ProcSpall.Part.Glow, "bolt_gain") == 0.0f;
+            bool apart = !stage.Spalling.Any(x => x.Alive)
+                         && !ReferenceEquals(stage.Spalling, stage.Scraping);
+            foreach (ProcSpall x in stage.Scraping)
+                x.Douse();
+            Check("and two hulls meeting draw from a ring of their own, with no"
+                  + " round in the fan",
+                noShell && apart,
+                "the flash is what a round makes of itself and a ram has no "
+                + "round; and one ring for both is a push at two fans a burst "
+                + "coming round inside its own life, cutting every fan - its own "
+                + "and any ricochet fired beside it - to a third of itself");
             Check("and a ricochet digs nothing",
                 stage.Pits is null or { Any: false },
                 "a round that failed to get through a plate did not dig the "

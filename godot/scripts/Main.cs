@@ -223,13 +223,12 @@ public sealed partial class Main : SceneRoot
 		// same division as the fourth - see TankTick.Kicked - and answered here for
 		// the same reason: the cloud is a quad in the 3D world.
 		_tick.Kicked = Kicked;
-		// And the same cloud off a different event: two hulls meeting in a ram -
-		// see TankTick.Bumped. One call per hull, so this line says nothing about
-		// rams at all.
+		// And the same cloud off a different event: a hull coming down off a
+		// bank - see TankTick.Bumped, which carries why a ram raises none.
 		_tick.Bumped = Bumped;
-		// And the metal of that same collision, which is the ricochet's fan with
-		// no round in it - see TankTick.Sparked. One call per hull like the cloud
-		// above, and unlike it seated on the hull rather than between the two.
+		// And the metal of two hulls meeting, which is the ricochet's fan with no
+		// round in it - see TankTick.Sparked. One call per hull, seated on the
+		// seam between the two.
 		_tick.Sparked = Sparked;
 		// And the sixth: what the board makes of a round that bounced off
 		// armour. Same division again - see TankTick.Bounced - and the fan is
@@ -302,15 +301,14 @@ public sealed partial class Main : SceneRoot
 	/// Only on the stage, for <see cref="Splashed"/>'s reason word for word.
 	/// </summary>
 	/// <summary>
-	/// Two hulls meeting: the dust a ram throws off the ground under each of
-	/// them - <see cref="TankTick.Bumped"/>.
+	/// A hull coming down off a bank: the ground thrown out from under its
+	/// tracks as it lands - <see cref="TankTick.Bumped"/>.
 	///
 	/// <b><see cref="Kicked"/> with no snout.</b> The gun's cloud is thrown by
 	/// gas leaving a tube that is up on the turret, so it is handed where that
-	/// tube is; a ram throws the ground itself, from under the hull that is
-	/// being pushed over it, and there is nothing above the tracks to offset it
-	/// by. Seated on the contact patch and aimed along the ram, which is the
-	/// heading both hulls are being moved along.
+	/// tube is; a landing throws the ground itself, from under the hull coming
+	/// down on it, and there is nothing above the tracks to offset it by. Seated
+	/// on the contact patch and aimed across the way the hull was going.
 	/// </summary>
 	private void Bumped(Vehicle v, Vector2 spot, Vector2 along) =>
 		_stage?.Kick(spot, v.LiftOf(spot), along, Vector2.Zero,

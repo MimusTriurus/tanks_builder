@@ -260,16 +260,82 @@ public sealed partial class ProcSpall : Node3D
         ProcBlast.Uniform(GlowCode, name,
                           ProcBlast.Uniform(DustSpallCode, name, 0.0f));
 
-    /// <summary>The deflected round's own strength, as the shader declares it.
+    /// <summary>
+    /// What struck the plate, which is the whole of what this effect has to be
+    /// told about itself.
     ///
-    /// <b>Public because a caller that turns it down has to be able to put it
+    /// <b>Two causes, one picture, and the split is where the physics splits.</b>
+    /// Metal coming off armour is metal coming off armour - the fan, the coat
+    /// knocked loose, the sparks that reach the ground - and drawing that twice
+    /// would be two statements of one event. What actually differs is whether a
+    /// <em>round</em> was there: the flash on the plate (<c>bloom</c>, "what the
+    /// round makes of itself") and the deflected lump leaving it (<c>bolts</c>)
+    /// are the shell's own signature and nothing else in the file is.
+    ///
+    /// <b>Said as a cause rather than as a switch per family</b>, because a
+    /// switch per family is a caller remembering both. It was one - <c>shell</c>,
+    /// which took the bolt out and left the flash in, so a ram drew the bloom of
+    /// a round that was not there: a near-white <c>blend_add</c> bloom on the
+    /// seam between two hulls, relit faster than it could fade. See
+    /// <see cref="Blame"/>.
+    /// </summary>
+    public enum Cause
+    {
+        /// <summary>A shell that struck armour and did not get in.</summary>
+        Round,
+        /// <summary>Two hulls meeting, or one grinding along another - no round,
+        /// so no flash and nothing flying on past.</summary>
+        Contact,
+    }
+
+    /// <summary>The shell's two signatures, as the shader declares them.
+    ///
+    /// <b>Public because <see cref="Blame"/> has to be able to put them
     /// back.</b> These effects are pooled and <see cref="Dial(Part, string,
-    /// float)"/> writes into the instance, so a fan fired with no bolt in it
-    /// leaves that instance with no bolt in it - and the next ricochet drawn out
-    /// of the pool would be a round that vanished at the plate. See
-    /// <see cref="Stage3D.Spall"/>, which resets this per throw exactly as it
-    /// resets <see cref="Might"/> and for that reset's own reason.</summary>
+    /// float)"/> writes into the instance, so a fan fired without them leaves
+    /// that instance without them. The two causes now draw from rings of their
+    /// own, so nothing can cross any more - and the cause is still stated per
+    /// throw rather than per ring, because one call that says what this fan is
+    /// leaves no way to state half of it.</summary>
     public static float BoltGain => Uniform("bolt_gain");
+    public static float BloomGain => Uniform("bloom_gain");
+
+    /// <summary>A shell's own streak, as the shader declares it -
+    /// <see cref="ContactShard"/>'s other half.</summary>
+    public static float ShardSize => Uniform("shard_size");
+
+    /// <summary>
+    /// How thick the metal of a collision is drawn, where a shell's is
+    /// <see cref="ShardSize"/> = 0.0072 of a tile.
+    ///
+    /// <b>Thicker, and it is a statement about the two metals rather than a
+    /// legibility patch.</b> Spall off a shell is grams leaving at the speed of
+    /// the round: hair-thin, long and fast, which is what the ricochet's numbers
+    /// draw. Two hulls grinding throw fewer, fatter, slower sparks off a plate
+    /// nothing is passing through. Drawn at the shell's width they are the right
+    /// picture of the wrong event.
+    ///
+    /// <b>And they have to survive <see cref="Might"/>, which is a scale on the
+    /// whole node.</b> A contact is quoted at <c>TankTick.RamSparkFor</c> - 0.75
+    /// for the medium - so the shell's streak arrives on screen at
+    /// 0.0072 x 248 x 0.75 = 1.3px, and under the old repeat scale it was 0.47px:
+    /// nothing at all, which is why a ram appeared to have no sparks once the
+    /// flash that was standing in for them was taken out. At this width the same
+    /// streak lands at about 2px.
+    /// </summary>
+    public const float ContactShard = 0.008f;
+
+    /// <summary>Put the shell's signature in or take it out, and draw the metal
+    /// the way that cause throws it - the one call that makes a fan a ricochet or
+    /// a collision. Every family together, always, because half an answer here is
+    /// the bug this replaced.</summary>
+    public void Blame(Cause cause)
+    {
+        bool shell = cause == Cause.Round;
+        Dial(Part.Glow, "bolt_gain", shell ? BoltGain : 0.0f);
+        Dial(Part.Glow, "bloom_gain", shell ? BloomGain : 0.0f);
+        Dial(Part.Glow, "shard_size", shell ? ShardSize : ContactShard);
+    }
 
     /// <summary>The quad, in screen px: from <c>-Foot</c> across <c>Size</c>,
     /// which is what <see cref="Stage3D.Stem"/> takes. Its bottom edge is the

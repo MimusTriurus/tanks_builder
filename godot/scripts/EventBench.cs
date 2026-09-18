@@ -600,8 +600,8 @@ public sealed partial class EventBench : SceneRoot
             v.GroundPoint, v.LiftOf(v.GroundPoint), along,
             v.Spot(v.Bore(v.Sprite.TurretFacing).Tube) - v.GroundPoint,
             Ordnance.At(_tick.Calibre));
-        // Two hulls meeting, and a hull coming down off a bank - one cloud, the
-        // gun's without its muzzle offset. See TankTick.Bumped.
+        // A hull coming down off a bank - the gun's cloud without its muzzle
+        // offset. See TankTick.Bumped, and why a ram raises none.
         _tick.Bumped = (v, spot, along) => _stage?.Kick(
             spot, v.LiftOf(spot), along, Vector2.Zero,
             TankTick.RamKick, Stage3D.DressOrder);

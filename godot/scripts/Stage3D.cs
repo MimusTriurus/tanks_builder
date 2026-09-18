@@ -383,6 +383,11 @@ public sealed partial class Stage3D : Node3D
             slam.Tick(delta);
         foreach (ProcSpall spall in _spalling)
             spall.Tick(delta);
+        // And the collisions, which are the same effect out of the other ring -
+        // see Emit. A pool that is filled and never ticked is an effect that is
+        // fired and never drawn, and the two lines have to be added together.
+        foreach (ProcSpall spall in _scraping)
+            spall.Tick(delta);
         foreach (ProcRack rack in _racking)
             rack.Tick(delta);
         foreach (ProcWave wave in _waving)
@@ -6155,6 +6160,8 @@ void fragment() {{
 
     private readonly List<ProcSpall> _spalling = new();
     private int _nextSpall;
+    private readonly List<ProcSpall> _scraping = new();
+    private int _nextScrape;
 
     /// <summary>What to do to a ricochet before it goes off - <see cref="Dress"/>
     /// for the burst, fourth time, and the same argument: the pool is built on the
@@ -6188,43 +6195,66 @@ void fragment() {{
     /// worked out here for <see cref="Vehicle.Bore"/>'s reason: where a shell hit
     /// a hull is one measurement, and this would be another projection of it.
     /// </summary>
-    /// <param name="shell">Whether a round was what arrived. False takes the
-    /// deflected lump out of the fan (<c>bolt_gain</c>) and nothing else: the
-    /// smoke half was measured off and on over a ram and came to two puffs of ten
-    /// px at the contact points, which is not worth a second switch.
-    /// <see cref="Scrape"/> is the caller that wants it and carries the
-    /// argument.</param>
     /// <param name="order">Which rung it sorts on - <see cref="StandOrder"/> for
     /// a fan that stands clear of the hull it came off, and see
     /// <see cref="ProcSpall.Order"/> for the one that cannot use it.</param>
     public void Spall(Vector2 spot, float lift, Vector2 away, Vector2 plate,
-                      bool behind, float might = 1.0f, bool shell = true,
-                      int order = StandOrder)
+                      bool behind, float might = 1.0f, int order = StandOrder) =>
+        Emit(_spalling, ref _nextSpall, ProcSpall.Cause.Round,
+             spot, lift, away, plate, behind, might, order);
+
+    /// <summary>
+    /// One fan out of one of the two pools - the whole of what <see cref="Spall"/>
+    /// and <see cref="Scrape"/> differ in, which is a cause and a pool.
+    ///
+    /// <b>A ring per cause, and it is this class's own argument applied once
+    /// more.</b> <see cref="Spall"/> has a pool rather than a case inside
+    /// <see cref="Burst"/> because one shell's spall must not cut another shell's
+    /// burst short - <see cref="ProcSpall.Fire"/> is a clock set to nought, so a
+    /// pooled effect handed out again is an effect cut short. A collision is as
+    /// different from a ricochet as a ricochet is from a burst: different
+    /// trigger, different hull, no round. Sharing the ring, a ram would cut a
+    /// ricochet fired in the same second, and the deeper it was in the ring the
+    /// less of either was left.
+    ///
+    /// <b>Both are one throw each, and that is the state this settled into.</b> A
+    /// push used to grind for as long as it lasted, two fans every 0.09s, which
+    /// owned the ring outright: it came round every 0.27s against a
+    /// <see cref="ProcSpall.Life"/> of 0.95s and no fan of either kind reached a
+    /// third of itself. That stream is gone - see <c>TankTick.Pushes</c> - so the
+    /// rings are no longer about rate; they are about two events not being one.
+    ///
+    /// <b>A ring that is filled has to be ticked.</b> Both are walked in
+    /// <c>_Process</c>, by a line each, and a ring added here without its line there
+    /// is an effect fired and never drawn: it happened, and nothing about the picture
+    /// said so.
+    /// </summary>
+    private void Emit(List<ProcSpall> pool, ref int next, ProcSpall.Cause cause,
+                      Vector2 spot, float lift, Vector2 away, Vector2 plate,
+                      bool behind, float might, int order)
     {
         if (Field.Atlas is null)
             return;
-        while (_spalling.Count < Bursts)
+        while (pool.Count < Bursts)
         {
             var made = new ProcSpall();
             AddChild(made);
             made.Build(Field.Atlas.HexRect.Size.X, Squash, RiseFactor);
-            _spalling.Add(made);
+            pool.Add(made);
         }
-        ProcSpall spall = _spalling[_nextSpall % Bursts];
+        ProcSpall spall = pool[next % Bursts];
         // Reset before the hook, multiplied after it - see Burst on why the
         // multiply alone compounds every shot until the fan fills the screen.
         spall.Might = 1.0f;
-        // And the round itself, on Might's own arrangement and for its reason:
-        // written back before the hook, so a fan fired without one does not leave
-        // the pooled effect without one for good, and a bench's own value still
-        // wins over both.
-        spall.Dial(ProcSpall.Part.Glow, "bolt_gain", ProcSpall.BoltGain);
+        // And what struck the plate, on Might's own arrangement and for its
+        // reason: stated before the hook, so a bench's own value still wins over
+        // it, and stated whole rather than one family at a time - see
+        // ProcSpall.Blame.
+        spall.Blame(cause);
         Hone?.Invoke(spall);
-        _nextSpall = (_nextSpall + 1) % Bursts;
+        next = (next + 1) % Bursts;
         spall.Might *= might;
         spall.Order = order;
-        if (!shell)
-            spall.Dial(ProcSpall.Part.Glow, "bolt_gain", 0.0f);
         spall.Sit(spot, lift, Squash, RiseFactor, behind);
         // Aimed after it is seated and sized, because Aim writes to the materials
         // and Sit does not touch them - the kick's order, and for its reason: the
@@ -6269,12 +6299,16 @@ void fragment() {{
     /// </summary>
     public void Scrape(Vector2 spot, float lift, Vector2 outward, Vector2 plate,
                        bool behind, float might = 1.0f) =>
-        Spall(spot, lift, outward, plate, behind, might, shell: false,
-              order: behind ? DressOrder : StandOrder);
+        Emit(_scraping, ref _nextScrape, ProcSpall.Cause.Contact,
+             spot, lift, outward, plate, behind, might,
+             behind ? DressOrder : StandOrder);
 
     /// <summary>The ricochets as they stand, <see cref="Bursting"/>'s twin and
-    /// read-only for its reason.</summary>
+    /// read-only for its reason - and beside it the collisions, which are the
+    /// same effect out of the other ring. Two lists rather than one for
+    /// <see cref="Emit"/>'s reason, and they are asserted to be two.</summary>
     public IReadOnlyList<ProcSpall> Spalling => _spalling;
+    public IReadOnlyList<ProcSpall> Scraping => _scraping;
 
     private readonly List<ProcSlam> _slamming = new();
     private int _nextSlam;

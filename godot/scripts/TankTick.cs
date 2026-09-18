@@ -1462,19 +1462,6 @@ public sealed class TankTick
     /// </summary>
     public const double RamDwell = 0.22;
 
-    /// <summary>Seconds between bursts of metal off the two plates while a push
-    /// is on - see <see cref="Grinds"/>.</summary>
-    public const double RamGrind = 0.09;
-
-    /// <summary>How big each of those bursts is against the fan thrown at the
-    /// moment of contact. Well under one: the meeting is the event, and what
-    /// follows it is that event going on.</summary>
-    public const float RamGrindSpark = 0.35f;
-
-    /// <summary>Seconds between spills of ground from under the pair while a
-    /// push is on - see <see cref="Grinds"/>.</summary>
-    public const double RamPlough = 0.22;
-
     /// <summary>How fast a hull backs out of a push, as a fraction of its own
     /// cruise. Reverse is the slower gear on anything tracked and a third is the
     /// shape of it - measured against the crawl, which was the first thing tried:
@@ -1499,8 +1486,14 @@ public sealed class TankTick
     }
 
     /// <summary>
-    /// A push in progress, frame by frame: one speed for the two hulls, metal
-    /// off the plates while they grind, and the end of it.
+    /// A push in progress, frame by frame: one speed for the two hulls, and the
+    /// end of it.
+    ///
+    /// <b>Nothing is drawn from here (2026-09-18).</b> The pair used to throw
+    /// metal off the seam for as long as they were touching - see
+    /// <see cref="RamContacts"/>, which now holds the whole of what a ram draws.
+    /// A push is a state, and a state that keeps emitting is the one shape this
+    /// effect must not take.
     ///
     /// <b>The pusher drives and the pushed one is carried.</b> Both still run
     /// legs of their own - that is what gives the shoved tank its mine, its bank
@@ -1548,7 +1541,6 @@ public sealed class TankTick
             victim.Speed = span > 0.001
                 ? pusher.Speed * LegSpan(victim) / span
                 : pusher.Speed;
-            Grinds(pusher, victim, delta);
         }
     }
 
@@ -1560,47 +1552,6 @@ public sealed class TankTick
             ? 0.0
             : (Field.FlatAnchor(v.Onto.X, v.Onto.Y)
                - Field.FlatAnchor(v.Cell.X, v.Cell.Y)).Length();
-
-    /// <summary>
-    /// What a push throws off while it lasts: metal, and ground.
-    ///
-    /// <b>The sparks are the contact's own fan, repeated.</b> Steel held against
-    /// steel under a running engine is not one event, and one fan at the moment
-    /// of contact was the whole of what a ram had to say for itself - said in a
-    /// single frame. Each burst is a fraction of that one
-    /// (<see cref="RamGrindSpark"/>), so the meeting is still the loudest thing
-    /// in the sequence and what follows is the sound of it going on.
-    ///
-    /// <b>The ground is on a clock of its own</b> - <see cref="RamPlough"/> -
-    /// because a cloud is sized at the root and cannot be asked for a smaller
-    /// one, only for a rarer one. Seated on the seam and thrown across the push,
-    /// which is <see cref="Bumped"/>'s rule and the contact's: what a collision
-    /// squeezes out goes out to the sides, where there is ground to see it
-    /// against.
-    /// </summary>
-    private void Grinds(Vehicle pusher, Vehicle victim, double delta)
-    {
-        int heading = HexField.HeadingTo(pusher.Cell, pusher.Onto);
-        if (heading < 0)
-            return;
-        Vector2 seam = (pusher.GroundPoint + victim.GroundPoint) * 0.5f;
-        pusher.Grind -= delta;
-        if (pusher.Grind <= 0.0)
-        {
-            pusher.Grind = RamGrind;
-            float scale = RamSparkFor(pusher.Profile) * RamGrindSpark;
-            Scrape(pusher, seam, Struck(pusher, heading), scale);
-            Scrape(victim, seam,
-                   Struck(victim, Angles.Mod(heading + 180.0, 360.0)), scale);
-        }
-        pusher.Plough -= delta;
-        if (pusher.Plough > 0.0)
-            return;
-        pusher.Plough = RamPlough;
-        Vector2 across = pusher.Atlas.GroundDirection(heading + 90.0);
-        Bumped?.Invoke(pusher, seam, across);
-        Bumped?.Invoke(pusher, seam, -across);
-    }
 
     /// <summary>
     /// The end of a push: the pusher comes off the hull it shoved.
@@ -1744,25 +1695,22 @@ public sealed class TankTick
     public bool RamDents;
 
     /// <summary>
-    /// A hull arriving somewhere hard: two of them meeting in a ram, or one of
-    /// them coming down off a bank it was thrown over.
+    /// A hull arriving somewhere hard: one coming down off a bank, by its own
+    /// drive or on the fall a ram threw it over.
     ///
-    /// <b>One hook for both, because it is one picture</b> - ground thrown out
-    /// from under the tracks, along the way the hull was going. Telling them
-    /// apart would be a root knowing which of two events its cloud is for, and
-    /// the cloud is the same cloud.
-    ///
-    /// <b>Thrown out sideways, from the seam rather than from under a hull.</b>
-    /// The first cut seated one cloud on each hull's own contact patch and let it
-    /// blow along the ram, and the pictures said two things at once: on the
-    /// standing rung the quad drew <em>across the armour</em> - a white veil over
-    /// both tanks, the trap <c>Stage3D.Mine</c> names word for word - and on the
-    /// dress rung it was hidden under the hull that made it and might as well not
-    /// have fired. Both are the same fact: a hull is a billboard and the ground
-    /// under its middle is not visible. What a collision really squeezes out goes
-    /// out to the sides, so the seat is the seam between the two hulls and the
-    /// direction is across the ram, once each way; on the dress rung it lies on
-    /// the ground where there is ground to see.
+    /// <b>The ram itself raises nothing here any more (2026-09-18)</b>, and what
+    /// that cost is kept written down, because it is what a second attempt would
+    /// have to beat. A cloud seated on a hull's own contact patch and blown along
+    /// the ram said two things at once: on the standing rung the quad drew
+    /// <em>across the armour</em> - a white veil over both tanks, the trap
+    /// <c>Stage3D.Mine</c> names word for word - and on the dress rung it was
+    /// hidden under the hull that made it and might as well not have fired. Both
+    /// are one fact: a hull is a billboard and the ground under its middle is not
+    /// visible. Seating it on the seam and throwing it sideways answered that and
+    /// spent the volume instead - what came out was quieter than two hulls
+    /// meeting wants, and the loudness needed a depth side ProcKick has not got.
+    /// So the collision is carried by the metal, which has one, and this hook
+    /// keeps the event it was never ambiguous for: a landing.
     ///
     /// The spot is a board point rather than the vehicle's own, because that is
     /// the whole of what this hook had to learn. The vehicle is still handed over
@@ -1771,10 +1719,13 @@ public sealed class TankTick
     /// </summary>
     public Action<Vehicle, Vector2, Vector2>? Bumped;
 
-    /// <summary>How much cloud a ram throws, against a gun's round of the
-    /// reference calibre. One: two hulls at walking pace move about as much
-    /// ground as a shot's own blast does, and the number is here rather than at
-    /// the root so both roots throw the same dust.</summary>
+    /// <summary>How much cloud a hull coming down off a bank throws, against a
+    /// gun's round of the reference calibre. Named for the ram because the ram
+    /// is what it was measured on - a hull at walking pace moves about as much
+    /// ground as a shot's own blast does - and left at that measurement now the
+    /// ram raises none: the landing is the same picture and was never drawn at
+    /// another size. Here rather than at the root so both roots throw the same
+    /// dust.</summary>
     public const float RamKick = 0.5f;
 
     /// <summary>How much cloud a crown coming down throws, on
@@ -1941,20 +1892,18 @@ public sealed class TankTick
             int heading = HexField.HeadingTo(v.Cell, onto);
             Vector2 along = v.Atlas.GroundDirection(heading);
             // The seam: halfway between the two contact patches, which is where
-            // the hulls met. Both clouds are seated there and thrown across the
-            // ram, one each way - see Bumped.
+            // the hulls met and where the metal comes off - see Sparked.
+            //
+            // <b>And no ground off it (2026-09-18).</b> The contact threw the
+            // fall's cloud from here as well, across the ram and once each way.
+            // Measured, it was quieter than two hulls meeting wants, and louder
+            // was not on offer: the volume would have brought back the veil
+            // across both hulls, because ProcKick has no depth side to be hidden
+            // behind - see Bumped, which carries what those attempts found. What
+            // says a collision happened is the metal, which has one.
             Vector2 seam = (v.GroundPoint + victim.GroundPoint) * 0.5f;
-            Vector2 across = v.Atlas.GroundDirection(heading + 90.0);
             v.Charge = null;
-            // Both hulls throw dust and the view takes one shove, and all three
-            // happen whatever the rules then allow: two tanks met, and a refusal
-            // is about what follows rather than about the meeting. One shove into
-            // the one spring, from the hull that was driven - unnormalised, so a
-            // ram into the screen jolts less than one across it, which is the
-            // shot's rule on the same camera.
-            Bumped?.Invoke(v, seam, across);
-            Bumped?.Invoke(v, seam, -across);
-            // And the metal, on each hull's own plate rather than on the seam -
+            // The metal, on each hull's own plate rather than on the seam -
             // see Sparked. The rammer's class sizes both fans, and each hull is
             // asked for the plate that met the other one: the plate whose normal
             // looks along the ram, which for the victim is the one looking back
@@ -1975,7 +1924,12 @@ public sealed class TankTick
             }
             // The knock and the ring after it, on the ram's own channel - see
             // Shook. A collision is not an explosion, so the ring is well under
-            // a death's.
+            // a death's. Given whatever the rules then allow, which is the
+            // sparks' rule too: two tanks met, and a refusal is about what
+            // follows rather than about the meeting. One shove into the one
+            // spring, from the hull that was driven - unnormalised, so a ram
+            // into the screen jolts less than one across it, which is the shot's
+            // rule on the same camera.
             Quake(Shook.Ram, v, along);
             // And the wood, which is the same event told to the other thing on
             // the board that can answer it - Fire's line and its argument, off
@@ -2025,8 +1979,6 @@ public sealed class TankTick
             victim.Shover = v;
             v.Path = v.Path.GetRange(0, v.PathStep + 1);
             v.Path.Add(push.Legs[0]);
-            v.Grind = RamGrind;
-            v.Plough = RamPlough;
         }
     }
 

@@ -108,18 +108,6 @@ public sealed class Vehicle
     /// ever touching.</summary>
     public double Dwell;
 
-    /// <summary>Seconds to the next burst of metal off the plates while a push
-    /// is on - <c>TankTick.RamGrind</c>. On the pusher, because there is one
-    /// contact and two hulls at it.</summary>
-    public double Grind;
-
-    /// <summary>Seconds to the next spill of ground from under the pair while a
-    /// push is on - <c>TankTick.RamPlough</c>. Beside <see cref="Grind"/> rather
-    /// than sharing its clock: the metal goes on all the way across and the
-    /// ground comes out in shovelfuls, and one accumulator would make the dust
-    /// as busy as the sparks.</summary>
-    public double Plough;
-
     /// <summary>The cell it is driving onto, or the one it is standing in while
     /// parked. Named here because two things now mix the two cells' faces by
     /// <see cref="LegBlend"/> - the body's lean and the mark under it - and the
