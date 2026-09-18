@@ -10777,7 +10777,7 @@ public static class SelfTest
                 if (byTank.Heading != byCell.Heading
                     || byTank.Range != byCell.Range
                     || byTank.BlockedAt != byCell.BlockedAt
-                    || byTank.ByCover != byCell.ByCover)
+                    || byTank.Stop != byCell.Stop)
                     mark++;
             }
             Check("a shot at a cell is the shot at whoever is standing on it",
@@ -12756,6 +12756,189 @@ public static class SelfTest
             unseen.QueueFree();
 
             round.QueueFree();
+
+            // ---- the levels: who may shoot whom across a drop ---------------
+            //
+            // GDD field.md, "Уровни и линия огня". The whole rule is one
+            // comparison - Gunnery.Overtops - and what is asserted here is that
+            // the position everybody talks about, the brink, is something it
+            // produces rather than something anybody wrote down.
+            Theme("relief: fire across a brink");
+
+            // A straight run of five cells, found rather than written down: this
+            // file runs against whatever board the session opened, and a
+            // hard-coded lane is a check that quietly stops being about levels on
+            // a narrower one.
+            Vector2I origin = Vector2I.Zero;
+            var run = new List<Vector2I>();
+            for (int q = 0; q < field.Columns && run.Count < 5; q++)
+            for (int r = 0; r < field.Rows && run.Count < 5; r++)
+            foreach (int h in HexField.EdgeHeadings)
+            {
+                var leg = new List<Vector2I>();
+                Vector2I step = new Vector2I(q, r);
+                for (int i = 0; i < 5; i++)
+                {
+                    step = HexField.Step(step, h);
+                    if (!field.InBounds(step))
+                        break;
+                    leg.Add(step);
+                }
+                if (leg.Count == 5)
+                {
+                    origin = new Vector2I(q, r);
+                    run = leg;
+                    break;
+                }
+            }
+            Check("the board holds a lane long enough to stand a hill on",
+                run.Count == 5,
+                $"{run.Count} cells of five on a {field.Columns}x{field.Rows} "
+                + "board - everything below is about a lane");
+
+            if (run.Count == 5)
+            {
+                // far  foot  brink  back  ...  - one valley cell between two
+                // tops, so the same lane carries the shot up, the shot down and
+                // the shot across.
+                Vector2I far = origin;
+                Vector2I foot = run[0];
+                Vector2I brink = run[1];
+                Vector2I back = run[2];
+                var levels = new int[field.Columns * field.Rows];
+                levels[far.Y * field.Columns + far.X] = 1;
+                foreach (Vector2I high in run.GetRange(1, 4))
+                    levels[high.Y * field.Columns + high.X] = 1;
+                field.SetRelief(levels);
+                try
+                {
+                    // No vehicles at all, which is the point: every answer below
+                    // is the board's, and a hull wandering into the lane would
+                    // make the sweep at the end say something else.
+                    var alone = Array.Empty<Vehicle>();
+
+                    shooter.Cell = brink;
+                    Shot down = Gunnery.Solve(field, alone, shooter, foot);
+                    shooter.Cell = back;
+                    Shot shy = Gunnery.Solve(field, alone, shooter, foot);
+                    Check("a tank on the brink shoots the ground below it",
+                        down.Clear && down.Range == 1, $"{down}");
+                    Check("and one hex back from it shoots nothing down there",
+                        shy.OnLane && shy.BlockedAt == brink
+                        && shy.Stop == Barrier.Ground,
+                        $"{shy} - what is in the way is its own plateau, which "
+                        + "is the whole of why the brink is a position worth "
+                        + "taking");
+
+                    shooter.Cell = foot;
+                    Shot up = Gunnery.Solve(field, alone, shooter, brink);
+                    Shot blind = Gunnery.Solve(field, alone, shooter, back);
+                    Check("the plain shoots whoever leans over the brink",
+                        up.Clear && up.Range == 1, $"{up}");
+                    Check("and nobody standing behind it",
+                        blind.OnLane && blind.BlockedAt == brink
+                        && blind.Stop == Barrier.Ground,
+                        $"{blind} - the same cell stops it both ways, which is "
+                        + "what 'strictly between' buys");
+
+                    shooter.Cell = far;
+                    Shot over = Gunnery.Solve(field, alone, shooter, brink);
+                    Check("and two tops shoot each other over the valley between",
+                        over.Clear && over.Range == 2,
+                        $"{over} - GDD field.md: ground below the lower end "
+                        + "does not screen it");
+
+                    // GDD classes.md, "HM": the bomb comes down on any level,
+                    // missing everything between. A hill that stopped a lob
+                    // would be a hill that stopped the one thing the class
+                    // exists for - so the ground half of the rules is asked of
+                    // guns only, and this is where that is said out loud.
+                    Vehicle? lobber = vehicles.FirstOrDefault(
+                        v => v.Profile.Lobs);
+                    Vector2I heldLob = lobber?.Cell ?? Vector2I.Zero;
+                    if (lobber is not null)
+                        lobber.Cell = back;
+                    Shot lobbed = lobber is null
+                        ? Gunnery.None
+                        : Gunnery.Solve(field, alone, lobber, foot);
+                    if (lobber is not null)
+                        lobber.Cell = heldLob;
+                    Check("a mortar behind the brink drops one over it all the same",
+                        lobber is not null && lobbed.Clear,
+                        lobber is null
+                            ? "no lobbing class on this board - one tank per "
+                              + "class is what the five parkings are for"
+                            : $"{lobbed} - the gun standing here is blocked and "
+                              + "the mortar must not be");
+
+                    // The pair the mounting cannot draw, asserted as a rule
+                    // rather than left to the tube's stop - pipeline
+                    // barrel_recoil.ladder drops 26.6 degrees with a note.
+                    shooter.Cell = brink;
+                    var pit = new int[field.Columns * field.Rows];
+                    Array.Copy(levels, pit, levels.Length);
+                    pit[foot.Y * field.Columns + foot.X] = -1;
+                    field.SetRelief(pit);
+                    Shot sheer = Gunnery.Solve(field, alone, shooter, foot);
+                    Check("two levels on to the next hex is no shot at all",
+                        sheer.OnLane && !sheer.Clear
+                        && sheer.Stop == Barrier.Ground,
+                        $"{sheer} - the position is legal and the mounting is "
+                        + "not, and the rules say the same thing the ladder does");
+                    field.SetRelief(levels);
+
+                    // Which is that claim in general: the slope a gun may be laid
+                    // down and the cap the ladder was generated under are one
+                    // number said twice.
+                    double cap = Gunnery.SightDeg(1, 1, field.StepGrade);
+                    int apart = 0;
+                    for (int lv = 0; lv <= 3; lv++)
+                    for (int cells = 1; cells <= 6; cells++)
+                        if (Gunnery.Reaches(lv, cells)
+                            != Gunnery.SightDeg(cells, lv, field.StepGrade)
+                               <= cap + 1e-9)
+                            apart++;
+                    Check("the slope a gun may be laid down is the ladder's cap",
+                        apart == 0 && !Gunnery.Reaches(2, 1),
+                        $"{apart} pairs disagree with atan(step_grade) = "
+                        + $"{cap:F3} deg");
+
+                    // And the invariant the whole rule rests on. Not "the two
+                    // directions agree" - that would pass on a rule that had two
+                    // clauses and happened to match today - but that there is
+                    // nothing for them to disagree about: the cells strictly
+                    // between two others are one set, read from either end.
+                    int lopsided = 0;
+                    var firstLopsided = "";
+                    for (int q = 0; q < field.Columns; q++)
+                    for (int r = 0; r < field.Rows; r++)
+                    for (int c = 0; c < field.Columns; c++)
+                    for (int d = 0; d < field.Rows; d++)
+                    {
+                        var a = new Vector2I(q, r);
+                        var b = new Vector2I(c, d);
+                        if (a == b)
+                            continue;
+                        shooter.Cell = a;
+                        Shot outward = Gunnery.Solve(field, alone, shooter, b);
+                        shooter.Cell = b;
+                        Shot home = Gunnery.Solve(field, alone, shooter, a);
+                        if (outward.Clear == home.Clear)
+                            continue;
+                        lopsided++;
+                        if (firstLopsided.Length == 0)
+                            firstLopsided = $"({a.X},{a.Y}) to ({b.X},{b.Y}): "
+                                          + $"{outward} against {home}";
+                    }
+                    Check("and no shot on this board goes one way only",
+                        lopsided == 0,
+                        $"{lopsided} pairs, first {firstLopsided}");
+                }
+                finally
+                {
+                    field.SetRelief(null);
+                }
+            }
 
             shooter.Cell = wasShooter;
             foe.Cell = wasFoe;
@@ -19363,7 +19546,7 @@ public static class SelfTest
             Shot walled = Gunnery.Solve(slots, vehicles, gunner, mark);
             Check("a wall in the lane stops the shell, and says it was the board",
                 shot.Count == 3 && walled.OnLane && !walled.Clear
-                && walled.BlockedAt == shot[1] && walled.ByCover,
+                && walled.BlockedAt == shot[1] && walled.Stop == Barrier.Cover,
                 $"{walled} - a tank in the way and a wall in the way are "
                 + "different orders to give");
 
@@ -19382,7 +19565,7 @@ public static class SelfTest
             slots.SetCover(ringed);
             Shot inside = Gunnery.Solve(slots, vehicles, gunner, mark);
             Check("a tank inside a ring is stopped by its own rim",
-                inside.OnLane && !inside.Clear && inside.ByCover
+                inside.OnLane && !inside.Clear && inside.Stop == Barrier.Cover
                 && inside.BlockedAt == shot[0],
                 $"{inside}");
 

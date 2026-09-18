@@ -156,6 +156,38 @@ public sealed class Vehicle
     /// arranged it.</summary>
     public Vector2 LastGroundPoint;
 
+    /// <summary>
+    /// Where the gun's tube stands, in degrees above the ground - the same
+    /// quantity <see cref="AtlasSet.LayOf"/> answers, so the two can be compared
+    /// without either knowing the other's rung.
+    ///
+    /// <b>Continuous, although only eleven poses of it are drawn.</b> The ladder
+    /// is the render and <see cref="AtlasSet.RungFor"/> snaps to it every frame;
+    /// what is stepped here is the gun, not the picture, and an angle kept in
+    /// rungs would arrive at the wanted one a rung early or late depending on
+    /// which way it came.
+    ///
+    /// NaN until a tick seeds it off the atlas, because the rest angle is the
+    /// model's own droop and this class has no atlas at construction - see
+    /// <c>TankTick.SeedTube</c>.
+    /// </summary>
+    public double TubeDeg = double.NaN;
+
+    /// <summary>The angle the tube is being driven to - <c>TankTick.Train</c>
+    /// writes it, <c>TankTick.UpdateTube</c> walks towards it.</summary>
+    public double TubeWants = double.NaN;
+
+    /// <summary>
+    /// Seconds the tube is held where it stands, refusing to move - the beat
+    /// before the shot and the beat after it.
+    ///
+    /// <b>One counter for two pauses, because they never overlap.</b> The gun
+    /// settles on its angle, fires, and only then is held again; a second field
+    /// would be a second field that is nought whenever the first is not. See
+    /// <c>TankTick.TubeSettle</c> and <c>TankTick.TubeHold</c>.
+    /// </summary>
+    public double TubeDwell;
+
     public bool Moving => PathStep < Path.Count;
 
     /// <summary>How far off the datum it is drawn, in screen px. Carried in the

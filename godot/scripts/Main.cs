@@ -3250,9 +3250,20 @@ public sealed partial class Main : SceneRoot
 			? v.Target.Tag : $"cell ({v.Mark!.Value.X},{v.Mark.Value.Y})";
 		if (!v.Solution.OnLane)
 			return $"{ram}{what} no lane";
-		string state = v.Solution.BlockedAt is Vector2I b ? $"blocked ({b.X},{b.Y})"
+		// What is in the way as well as where, because the three are three
+		// different orders to give - see Gunnery.Barrier. "ground" is the one
+		// that has no fix on this cell at all: drive to the brink.
+		string state = v.Solution.BlockedAt is Vector2I b
+			? $"blocked ({b.X},{b.Y}) by "
+			  + v.Solution.Stop.ToString().ToLowerInvariant()
 			: v.Moving ? "moving"
-			: !Gunnery.Laid(v.Sprite.TurretFacing, v.Solution.Heading) ? "laying"
+			// Both axes under one word, because the gate is one gate: a tank
+			// whose ring has arrived and whose tube has not is still a tank
+			// laying its gun, and "ready" printed over a shot that will not
+			// come for another tenth of a second is the panel telling the
+			// difference wrong - see TankTick.Trained.
+			: !Gunnery.Laid(v.Sprite.TurretFacing, v.Solution.Heading)
+			  || !Tick.Trained(v) ? "laying"
 			: v.ReloadLeft > 0.0 ? $"loading {v.ReloadLeft:F1}s"
 			: "ready";
 		// A round ordered into a hex with nothing on it has no plate, no matchup
@@ -3977,14 +3988,18 @@ public sealed partial class Main : SceneRoot
 	/// through a hill to a ring beyond it says two things at once, and a line
 	/// stopped at the hill with the ring still out there says them further apart.
 	///
-	/// <b>Which means the ray is stricter than the gun, and that is worth saying
-	/// out loud.</b> <see cref="Gunnery.Solve"/> only knows about tanks in the
-	/// lane - terrain is not in the firing rules at all - so on a board with
-	/// relief an ordered shot across a wall still fires and still hits, while this
-	/// line stops at the wall. The overlay is not guessing there: it is reading
-	/// the board the shot is crossing. Closing the gap means teaching
-	/// <c>Solve</c> about height, which is a change to what the bench does rather
-	/// than to what it draws.
+	/// <b>The ray and the gun read the board the same way now, and that used to be
+	/// the standing complaint here.</b> <see cref="Gunnery.Solve"/> knew only
+	/// about tanks in the lane, so an ordered shot flew through a hill this line
+	/// stopped at. Both are under <see cref="Gunnery.Overtops"/> today: the floor
+	/// a shot runs along is the lower of its two ends, and the ray is handed the
+	/// cell the round is for so it can use the same floor - see
+	/// <c>TankTick.Reach</c>.
+	///
+	/// <b>What is left between them is a drawing and says so.</b> The ray is a
+	/// level line walked in flat space and the shot is a lane of whole hexes, so
+	/// the two can differ by where inside a cell the line stops - never by which
+	/// cell stopped it.
 	/// </summary>
 	private void Sight(Vehicle shooter, Vehicle? victim, double heading)
 	{
@@ -3992,7 +4007,8 @@ public sealed partial class Main : SceneRoot
 		if (along.LengthSquared() < 1e-6f)
 			return;
 		Vector2 dir = along.Normalized();
-		(float run, Vector2I? at, bool blocked) = Tick.Reach(shooter, dir);
+		(float run, Vector2I? at, bool blocked) =
+			Tick.Reach(shooter, dir, victim?.Cell);
 		// The hole, but only if the line got as far as the tank it belongs to. The
 		// point itself still comes out of the firing code and is not touched here -
 		// see Aim, and see AimRay for why two copies of it would be the quiet kind
@@ -4131,8 +4147,10 @@ public sealed partial class Main : SceneRoot
 	/// </summary>
 	private void UpdateAttack(Vehicle v, double delta)
 	{
-		if (v.ReloadLeft > 0.0)
-			v.ReloadLeft = Math.Max(0.0, v.ReloadLeft - delta);
+		// The reload used to be counted down here and is now counted down in
+		// TankTick.Run - see UpdateReload. It is a fact about a gun, and every
+		// root runs the tick while only this one has an attack loop.
+		//
 		// A wreck holds no target and cannot be given one, so this is belt and
 		// braces - but the gate is stated here as well as at the kill because
 		// the gun is the one thing that must not go off from a burnt-out hull.
@@ -4192,12 +4210,18 @@ public sealed partial class Main : SceneRoot
 		// pipeline/barrel_recoil.ladder. Unlike the traverse it takes no time:
 		// there is no rendered movement between two rungs, and a tube that
 		// crawled up an eleven-pose ladder would be eleven poses of stutter.
-		Tick.Lay(v, at);
+		Tick.Train(v, at);
 		if (v.Sprite.TurretFacing != was)
 			v.Sprite.QueueRedraw();
 
+		// <b>And the tube is a gate now, beside the ring.</b> It used to arrive
+		// between two frames, so there was nothing to wait for; driven at a rate
+		// it can be half way up when everything else is ready, and a round sent
+		// then leaves along an angle nobody asked for - Gunnery.Laid's own
+		// argument, said about the other axis. See TankTick.Trained.
 		if (v.Moving || !v.Solution.Clear || v.ReloadLeft > 0.0
-			|| !Gunnery.Laid(v.Sprite.TurretFacing, v.Solution.Heading))
+			|| !Gunnery.Laid(v.Sprite.TurretFacing, v.Solution.Heading)
+			|| !Tick.Trained(v))
 			return;
 		// One call, and the round comes out of it: which tank it is for is
 		// answered by Aimed, which both this and the Z key now go through. The
@@ -5656,6 +5680,14 @@ public sealed partial class Main : SceneRoot
 					 // between shots are the same number and not the same thing.
 					 + $"  tube {_tank.RecoilPhase,2}"
 					 + $"{(_tick.RecoilTube ? "" : "!off")}"
+					 // And the tube's other axis beside it, because `tube` above
+					 // is the recoil and reads as if it covered both. The rung is
+					 // what is drawn and the degrees are what the board asked
+					 // for, so a lay that is snapped and a lay that is travelling
+					 // are two different lines rather than one.
+					 + $"  lay {_tank.BarrelRung,2}"
+					 + $"@{Active.Atlas?.LayOf(_tank.BarrelRung) ?? 0.0,6:F2}"
+					 + $"->{(double.IsNaN(Active.TubeWants) ? 0.0 : Active.TubeWants),6:F2}"
 					 + $"  burn {_tank.FirePhase,2}/{_tank.BurnPhase,2}"
 					 // The wreck, and the char beside it: a tank that is dead
 					 // and a tank that is dead and has finished blackening are

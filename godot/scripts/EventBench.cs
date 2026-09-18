@@ -837,6 +837,16 @@ public sealed partial class EventBench : SceneRoot
             Vehicle v = _vehicles[i];
             lines.Add($"{(i == _actor ? ">" : " ")}{i} {v.Tag} ({v.Cell.X},{v.Cell.Y})"
                       + $" hull {v.Sprite.HullFacing:F0} turret {v.Sprite.TurretFacing:F0}"
+                      // And the other axis, which the panel has to say because
+                      // the picture barely can: a rung of elevation moves the
+                      // muzzle three to six pixels on a 256px tile, so "the
+                      // tube is laid" and "the tube is level" look alike on one
+                      // frame and read differently here. Level is printed as
+                      // level rather than as its own rest angle - what is being
+                      // asked is whether the board moved it.
+                      + $" tube {v.Sprite.BarrelRung}"
+                      + (v.Atlas is null || v.Sprite.BarrelRung == 0 ? " (level)"
+                         : $" ({v.Atlas.LayOf(v.Sprite.BarrelRung):+0.00;-0.00}°)")
                       + (v.Wreck.Dead ? " DEAD" : "")
                       + (v.Burning ? " burning" : "")
                       // Afloat before wading, because a tank in deep water is

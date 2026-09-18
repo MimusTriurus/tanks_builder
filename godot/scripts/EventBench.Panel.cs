@@ -105,6 +105,22 @@ public sealed partial class EventBench
                      () => Target.Profile.Turreted
                          ? $"{Angles.WrapAngle(Target.Sprite.TurretFacing - Target.Sprite.HullFacing):F0} deg off the bow"
                          : "a casemate: the gun is the hull");
+        // The gun's other axis, three numbers, because this is the bench that
+        // judges it and a rebuild per guess is not judging. Rate first: it is
+        // the one the other two are read against - a beat is worth having only
+        // beside a movement long enough to have beats.
+        _panel.Slide("bench.tube_rate", "gun elevation rate", 5.0, 120.0, 5.0,
+                     () => TankTick.TubeRate, v => TankTick.TubeRate = v, "°/s",
+                     () => $"{Gunnery.SightDeg(1, 1, _field.StepGrade) / TankTick.TubeRate:F2}s "
+                           + "for the steepest lay the rules allow");
+        _panel.Slide("bench.tube_settle", "pause: laid, before the shot",
+                     0.0, 1.5, 0.05,
+                     () => TankTick.TubeSettle, v => TankTick.TubeSettle = v, "s");
+        _panel.Slide("bench.tube_hold", "pause: after the shot, before it comes down",
+                     0.0, 1.5, 0.05,
+                     () => TankTick.TubeHold, v => TankTick.TubeHold = v, "s",
+                     () => $"plus the recoil's own {RecoilLoop.DurationFor(Target.Atlas?.RecoilPhases ?? 5)} "
+                           + "frames, which nothing moves through");
         _panel.Slide("bench.speed", "playback speed", 0.25, 4.0, 0.25,
                      () => _speed, v => _speed = v, "x");
         _panel.Readout("bench.state", Note);
@@ -172,6 +188,16 @@ public sealed partial class EventBench
         Buttons("tank.hit.top", "HM from above",
                 () => _play?.Lob(Actor, Target, _face),
                 "HM into the hex", () => _play?.LobAt(Actor, _cell, _face));
+        // The board picks the cells, not bench.cell: this event is about a drop
+        // and the two positions either side of it, and a cell knob would let it
+        // be pressed on the flat, where it has nothing to show. Three buttons
+        // because the rule has three pictures - down, up, and the refusal that
+        // makes the brink a position worth taking. See Playback.Tier.
+        Buttons("tank.hit.tier", "down off the brink",
+                () => _play?.Tier(Actor, Target, false, 0),
+                "up from below", () => _play?.Tier(Actor, Target, true, 0));
+        Button("tank.hit.tier.blind", "a hex back: no shot",
+               () => _play?.Tier(Actor, Target, false, 1));
         Buttons("tank.state.out", "knocked out", () => _play?.KnockOut(Target),
                 "destroyed", () => _play?.Destroy(Target));
         Buttons("tank.state.fire", "catches fire", () => _play?.Burn(Target),

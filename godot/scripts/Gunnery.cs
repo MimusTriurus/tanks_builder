@@ -7,11 +7,12 @@ namespace TankSpriteTest;
 /// <summary>
 /// What a shooter can and cannot do to a target from where it stands.
 ///
-/// Three fields rather than one bool, because "cannot shoot" has three
+/// Three fields rather than one bool, because "cannot shoot" has several
 /// different answers and the player has to be told which: not on a lane means
-/// drive somewhere else, blocked means the tank in the way has to move or be
-/// shot first, and clear means the only thing left is the traverse and the
-/// reload. A single flag would make all three read as the feature not working.
+/// drive somewhere else, blocked means whatever is in the way has to be dealt
+/// with first - and <see cref="Barrier"/> says what kind of dealing - and clear
+/// means the only thing left is the traverse and the reload. A single flag would
+/// make all of them read as the feature not working.
 /// </summary>
 public readonly struct Shot
 {
@@ -27,11 +28,9 @@ public readonly struct Shot
     /// stops a round.</summary>
     public Vector2I? BlockedAt { get; init; }
 
-    /// <summary>Whether what blocks it is the board rather than a tank. Two
-    /// answers rather than one for <see cref="Shot"/>'s own reason: a tank in
-    /// the way moves or is shot first, and a wall in the way is a different
-    /// order entirely - drive round it, or breach it.</summary>
-    public bool ByCover { get; init; }
+    /// <summary>What stopped the round short, or <see cref="Barrier.None"/> when
+    /// nothing did.</summary>
+    public Barrier Stop { get; init; }
 
     public bool OnLane => Heading >= 0;
 
@@ -40,9 +39,35 @@ public readonly struct Shot
     public override string ToString() =>
         !OnLane ? "no lane"
         : BlockedAt is Vector2I b
-            ? $"{Heading} deg blocked at ({b.X},{b.Y})"
-              + (ByCover ? " by cover" : "")
+            ? $"{Heading} deg blocked at ({b.X},{b.Y}) by "
+              + Stop.ToString().ToLowerInvariant()
         : $"{Heading} deg at {Range}";
+}
+
+/// <summary>
+/// What stands between a gun and what it is laid on.
+///
+/// <b>Three kinds rather than a bool, because each one is a different order to
+/// give.</b> A hull in the way moves or is shot first; masonry is driven round
+/// or breached; ground is neither - the tank has to go somewhere else to stand,
+/// and on a board with levels that somewhere is usually one hex forward, on to
+/// the brink. Folded into one flag they all read as the gun not working.
+/// </summary>
+public enum Barrier
+{
+    /// <summary>Nothing did - see <see cref="Shot.Clear"/>.</summary>
+    None,
+
+    /// <summary>A hull standing in the lane, whole or knocked out.</summary>
+    Tank,
+
+    /// <summary>What the cell carries or what stands on its edge: a wood, a
+    /// smoke screen, masonry.</summary>
+    Cover,
+
+    /// <summary>The board itself - see <see cref="Gunnery.Overtops"/> and
+    /// <see cref="Gunnery.Reaches"/>.</summary>
+    Ground,
 }
 
 /// <summary>
@@ -59,6 +84,68 @@ public static class Gunnery
     /// <c>default(Shot)</c>, which would say heading 0 - a real direction, and
     /// the one pointing up and right.</summary>
     public static readonly Shot None = new() { Heading = -1, Range = 0 };
+
+    // --- the board's own half of the rules -----------------------------------
+
+    /// <summary>
+    /// Whether the ground on a cell stands in the way of a round travelling
+    /// between two others - GDD field.md, "Уровни и линия огня".
+    ///
+    /// <b>The floor is the lower of the two ends, and every level rule on this
+    /// board falls out of that one sentence.</b> Two tanks on the plain are
+    /// blocked by a hill between them and not by a pit; two tanks on two hills
+    /// shoot over the valley; and a tank on a hill firing down at the plain is
+    /// blocked by <em>its own plateau</em> - because the floor is the plain's,
+    /// not the hill's - unless it is standing on the brink, where the first hex
+    /// of the lane is already the lower level. That last one is the rule this was
+    /// written for, and it is worth noticing that nothing here says "brink": the
+    /// position falls out.
+    ///
+    /// <b>And so does its counterpart, because the cells strictly between two
+    /// others are the same set read from either end.</b> A shot that is legal
+    /// downhill is legal uphill, and no wording can drift the two apart - what
+    /// there is to check is not that the two agree but that they cannot
+    /// disagree.
+    ///
+    /// <b>Strictly between, so this is never asked of the two ends.</b> A tank is
+    /// not blocked by the ground it stands on, and the hill a target stands on is
+    /// what makes the shot uphill rather than what stops it - the same rule the
+    /// lane walk already follows for cover.
+    ///
+    /// A whole level and not <see cref="HexField.TopAt"/>: a ramp belongs to the
+    /// low cell it climbs from (GDD field.md, "Рампа"), so an empty ramp does not
+    /// screen that level and does screen the one below. Its drawn top is half a
+    /// level up, and the picture agrees - see <c>TankTick.Clearance</c>.
+    /// </summary>
+    public static bool Overtops(HexField field, Vector2I cell, Vector2I from,
+                                Vector2I onto) =>
+        field.LevelAt(cell)
+        > Math.Min(field.LevelAt(from), field.LevelAt(onto));
+
+    /// <summary>
+    /// Whether a mounting can be laid down a slope this steep: at most one level
+    /// of drop per cell of range.
+    ///
+    /// <b>Not a taste and not a balance figure - it is the ladder on the
+    /// sheet.</b> The tube is only ever drawn at the elevations the pipeline
+    /// rendered, and those were generated from
+    /// <c>atan(step_grade*levels/cells)</c> over every position the board admits,
+    /// capped at <c>atan(step_grade)</c> - <c>pipeline/barrel_recoil.ladder</c>.
+    /// One level over one cell is that cap exactly; two levels over one cell
+    /// wants 26.6 degrees and was dropped with a note, the pipeline's own words
+    /// being "the position is legal and the mounting is not". This is the rule
+    /// that makes it illegal too, so the two sides agree instead of one of them
+    /// quietly laying a tube at its stop.
+    ///
+    /// Written as <c>levels &lt;= cells</c> rather than as a table of angles,
+    /// because that is what the inequality reduces to at any grade: the cap and
+    /// the step are the same arctangent and it cancels. Change
+    /// <see cref="HexField.StepGrade"/> and this stays true; change the cap and it
+    /// does not, which is why the self test asserts the pair rather than trusting
+    /// it.
+    /// </summary>
+    public static bool Reaches(int levels, int cells) =>
+        Math.Abs(levels) <= cells;
 
     /// <summary>
     /// How near the lane the gun has to be laid before it will fire, in degrees.
@@ -111,11 +198,26 @@ public static class Gunnery
             return None;
         List<Vector2I> lane = field.Lane(shooter.Cell, heading, range);
         Vector2I? blocked = null;
-        bool byCover = false;
+        Barrier stop = Barrier.None;
+        // <b>The board's half of the rules is asked of guns and not of the
+        // mortar</b> - GDD classes.md, "HM": the bomb "приходит сверху, на любой
+        // уровень, минуя всё, что стоит между стрелком и гексом". A lob that a
+        // hill could stop is a lob with no reason to exist, the whole of what
+        // separates "стреляет" from "стреляет навесом" being that it goes over
+        // what a gun has to go through.
+        //
+        // <b>Only this half.</b> The walk below still stops a mortar at a hull or
+        // a wood in the lane, which the same sentence says it should not - that
+        // is older than the levels and is written down where it lives, in
+        // <c>TankTick.Loose</c>, which unblocks the bomb once it is away. Two
+        // halves of one exemption in two places is worth knowing about; folding
+        // the second one in here is a change to what the mortar may be ordered to
+        // do, not to what the ground does.
+        bool lobs = shooter.Profile.Lobs;
         // Cover beside the tanks and in the same walk, because from the round's
         // point of view they are one question: something is standing in the way
         // and the shell stops there. Which of the two it was is carried out
-        // separately - see Shot.ByCover - because the two are different orders
+        // separately - see Shot.Stop - because the two are different orders
         // to give.
         //
         // <b>Masonry is asked of the edge, and the first edge is the shooter's
@@ -130,7 +232,7 @@ public static class Gunnery
             if (field.Blocked(at, heading))
             {
                 blocked = lane[i];
-                byCover = true;
+                stop = Barrier.Cover;
                 break;
             }
             at = lane[i];
@@ -140,16 +242,39 @@ public static class Gunnery
             // wall is between them.
             if (i + 1 >= lane.Count)
                 break;
+            // Ground before the hull standing on it, and the order is the answer
+            // rather than an ordering: a tank on a rise between two tanks on the
+            // flat is out of this shot because of where it is standing, and
+            // "move it or shoot it first" would be advice about a tank that
+            // cannot be shot either.
+            if (!lobs && Overtops(field, lane[i], shooter.Cell, onto))
+            {
+                blocked = lane[i];
+                stop = Barrier.Ground;
+                break;
+            }
             bool tank = Vehicle.At(vehicles, lane[i]) is not null;
             if (!tank && !field.Screened(lane[i]))
                 continue;
             blocked = lane[i];
-            byCover = !tank;
+            stop = tank ? Barrier.Tank : Barrier.Cover;
+        }
+        // And last the slope itself - after the walk, so that "the first thing in
+        // the way" stays true for everything the walk can see. It only ever fires
+        // where the walk has nothing to look at: two levels on to a neighbouring
+        // hex, where the cliff face is the whole of what is between them.
+        // Reported at the target's own cell, because that is where the round
+        // stops - against the face under it.
+        if (blocked is null && !lobs
+            && !Reaches(field.LevelAt(onto) - field.LevelAt(shooter.Cell), range))
+        {
+            blocked = onto;
+            stop = Barrier.Ground;
         }
         return new Shot
         {
             Heading = heading, Range = range,
-            BlockedAt = blocked, ByCover = byCover,
+            BlockedAt = blocked, Stop = stop,
         };
     }
 

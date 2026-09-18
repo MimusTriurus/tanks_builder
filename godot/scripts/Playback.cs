@@ -156,8 +156,29 @@ public sealed class Playback
     {
         int from = HexField.EdgeHeadings[Side(side)];
         StandOff(shooter, victim, from);
-        Enqueue($"shot {shooter.Tag} -> {victim.Tag} from {from} level {level}"
+        Train(shooter, () => victim.Cell);
+        Trigger(shooter, victim,
+                $"shot {shooter.Tag} -> {victim.Tag} from {from} level {level}"
                 + (goes == Shell.Onward.Stops ? "" : $" and {goes} on"),
+                level, goes);
+    }
+
+    /// <summary>
+    /// The round itself, once the shooter is standing where it is going to fire
+    /// from - the second half of <see cref="Shot"/>.
+    ///
+    /// <b>Apart from the standing off because one caller must not do it.</b>
+    /// <see cref="Tier"/> puts its two tanks on cells it chose off the board's
+    /// relief, and a stand-off would walk the shooter back on to the flat -
+    /// which is the one thing that button exists to avoid.
+    ///
+    /// Done when nothing the shooter fired is still in the air, which also
+    /// covers a round that flew on: it is still in the air.
+    /// </summary>
+    private void Trigger(Vehicle shooter, Vehicle victim, string what, int level,
+                         Shell.Onward goes = Shell.Onward.Stops)
+    {
+        Enqueue(what,
                 () => Tick.Fire(shooter, null,
                     v => Tick.Shoot(v, victim, Bearing(v, victim), level,
                                     // A round that flies on is a solid shot,
@@ -230,10 +251,16 @@ public sealed class Playback
             }
             else
                 Todo?.Invoke($"no cell to shoot from at {from}", shooter, null);
+            // And the tube back to rest, so the lay that follows is a lay: a gun
+            // left where the last press put it has nothing to travel, and the
+            // movement the step exists to show happens once and never again.
+            Tick.StowTube(shooter);
             // Laid on the victim wherever the shooter ended up: the bore is
             // where the round leaves from, and an unlaid gun is a round that
-            // starts beside the tank - TankTick.AimAt.
-            double lay = Gunnery.HeadingOf(victim.GroundPoint - shooter.GroundPoint);
+            // starts beside the tank - TankTick.AimAt. Down the lane rather than
+            // at the picture, which is the same number on the flat and is not
+            // one across a drop - see Bearing.
+            double lay = Onto(shooter, victim);
             // And whatever the ring was owed is forgotten with it: a gun put on
             // a bearing by hand is not a gun coming round, and a stow left over
             // from an earlier event would walk it off the victim mid-flight.
@@ -250,8 +277,10 @@ public sealed class Playback
     }
 
     /// <summary>A cell a tank can be put on: on the board, dry or a ford,
-    /// unwalled, and nobody else's.</summary>
-    private bool Standable(Vector2I cell, Vehicle who)
+    /// unwalled, and nobody else's. <paramref name="who"/> may be null, which
+    /// asks the question of nobody in particular - see <see cref="Edge"/>.
+    /// </summary>
+    private bool Standable(Vector2I cell, Vehicle? who)
     {
         if (!Field.InBounds(cell) || Field.IsDeep(cell)
             || Field.CoverAt(cell) == Cover.Walls)
@@ -260,11 +289,280 @@ public sealed class Playback
         return other is null || other == who;
     }
 
-    /// <summary>The bearing a shot arrives on, read off the two tanks - the
-    /// harness's own arithmetic, <c>Solution.Heading + 180</c>.</summary>
-    private static double Bearing(Vehicle shooter, Vehicle victim) =>
-        Angles.Mod(Gunnery.HeadingOf(victim.GroundPoint - shooter.GroundPoint)
-                   + 180.0, 360.0);
+    /// <summary>
+    /// The bearing a shot arrives on - the harness's own arithmetic,
+    /// <c>Solution.Heading + 180</c>.
+    ///
+    /// <b>The lane and not the direction on screen, and on a board with levels
+    /// those are two different numbers.</b> A cell's drawn position carries its
+    /// lift, so a target one level down sits lower on the screen than its own
+    /// hex would put it: subtracting two ground points across a drop came out
+    /// ten degrees off the lane the round actually flies. Ten degrees is nothing
+    /// to the tracer and everything to the plate, the faces being sixty apart -
+    /// near a boundary it picks the neighbouring one. Measured on the levels
+    /// button: hull laid on 330, turret reading 320.
+    ///
+    /// The ground points are still the fallback, for the one case that has no
+    /// lane: a shooter <see cref="StandOff"/> could not place squarely.
+    /// </summary>
+    private double Bearing(Vehicle shooter, Vehicle victim)
+    {
+        (int heading, _) = Field.LaneTo(shooter.Cell, victim.Cell);
+        return Angles.Mod(
+            (heading >= 0
+                ? heading
+                : Gunnery.HeadingOf(victim.GroundPoint - shooter.GroundPoint))
+            + 180.0, 360.0);
+    }
+
+    /// <summary>Which way one tank's gun has to point to be laid on another -
+    /// the lane when there is one, for <see cref="Bearing"/>'s reason, and the
+    /// line between the two pictures when there is not.</summary>
+    private double Onto(Vehicle who, Vehicle at)
+    {
+        (int heading, _) = Field.LaneTo(who.Cell, at.Cell);
+        return heading >= 0 ? heading
+            : Gunnery.HeadingOf(at.GroundPoint - who.GroundPoint);
+    }
+
+    /// <summary>
+    /// The gun coming up - or down - on to the angle the board asks for, as a
+    /// step of its own.
+    ///
+    /// <b>A step rather than a line inside the shot, because it takes time
+    /// now.</b> <see cref="TankTick.UpdateTube"/> walks the tube at a rate, so a
+    /// button that trained and fired in one frame would fire along a tube still
+    /// at rest - and on the mortar that is a bomb leaving a level barrel. Waited
+    /// on the way the queue waits on everything: the step is done when the tube
+    /// is where it was sent.
+    /// </summary>
+    /// <param name="onto">Asked when the step starts and not when it is
+    /// queued, because a step in front of it may be what puts the target
+    /// where it is going to be shot. Queued eagerly it trained on the cell the
+    /// victim was parked on at the button press - measured on the levels
+    /// button, which lays a gun at a ravine and was handed a home three hexes
+    /// off the lane.</param>
+    private void Train(Vehicle shooter, Func<Vector2I> onto)
+    {
+        Enqueue($"{shooter.Tag} lays its gun",
+                () => Tick.Train(shooter, onto()),
+                // <b>Loaded as well as laid, and the reload is the half that is
+                // easy to leave out.</b> A gun is stowed while it loads
+                // (TankTick.Train), so a step that waited only on the tube would
+                // be answered at rest by a tank still holding the last round's
+                // countdown - and the trigger behind it would fire a level
+                // barrel. The harness gate says the same thing in one condition;
+                // here it is two, because the tube has to be re-asked after the
+                // countdown ends. Costs nothing on the first press of a fresh
+                // board and a reload on every press after.
+                _ =>
+                {
+                    if (shooter.ReloadLeft > 0.0)
+                        return false;
+                    Tick.Train(shooter, onto());
+                    return Tick.Trained(shooter);
+                });
+    }
+
+    /// <summary>
+    /// A drop on this board with room either side of it: the cell on the brink,
+    /// the cell one back from it, and two cells down the lane past it.
+    ///
+    /// <b>Found on the board rather than written down</b>, because this module
+    /// knows no scene and must not know a map either - the event bench's ravine
+    /// is not a fact about <see cref="Playback"/>. What is a fact is the shape
+    /// the event needs: one level of drop, flat ground behind the top and flat
+    /// ground below it, no ramp anywhere in the four (a ramp's top stands half a
+    /// level up and would make the picture argue with itself) and nothing
+    /// screening the lane.
+    ///
+    /// <b>One level and not two.</b> Two would be a drop no gun may be laid down
+    /// at this range at all - <see cref="Gunnery.Reaches"/> - and the button is
+    /// for looking at the rule working, not at its edge.
+    /// </summary>
+    private Brink? Edge(Vehicle a, Vehicle b)
+    {
+        foreach (int down in Downhill)
+        for (int q = 0; q < Field.Columns; q++)
+        for (int r = 0; r < Field.Rows; r++)
+        {
+            var high = new Vector2I(q, r);
+            Vector2I low = HexField.Step(high, down);
+            Vector2I far = HexField.Step(low, down);
+            Vector2I behind = HexField.Step(high, (down + 180) % 360);
+            if (Field.LevelAt(low) != Field.LevelAt(high) - 1
+                || !Field.InBounds(low) || !Field.InBounds(far)
+                || !Field.InBounds(behind)
+                || Field.LevelAt(far) != Field.LevelAt(low)
+                || Field.LevelAt(behind) != Field.LevelAt(high))
+                continue;
+            if (Field.IsRamp(high) || Field.IsRamp(low) || Field.IsRamp(far)
+                || Field.IsRamp(behind))
+                continue;
+            // Free of everything but the two tanks about to be put there: a
+            // third hull on one of the four would be a hull inside another one.
+            bool room = true;
+            foreach (Vector2I cell in new[] { high, behind, low, far })
+                room &= Standable(cell, null)
+                        || Vehicle.At(Tick.Vehicles, cell) == a
+                        || Vehicle.At(Tick.Vehicles, cell) == b;
+            if (!room || Field.Screened(low))
+                continue;
+            return new Brink(high, behind, low, far, down);
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// <see cref="HexField.EdgeHeadings"/>, ordered by how well a drop along
+    /// them will read - the heading is the outer loop of <see cref="Edge"/> for
+    /// exactly this, so a worse-reading drop earlier on the board does not win.
+    ///
+    /// <b>The camera has a say and it is not a preference.</b> Under this
+    /// projection a cell to the north draws <em>higher</em> up the screen, so a
+    /// shot going one level down along 30 draws going up - which is the picture
+    /// this button exists to make legible saying the opposite of what it means.
+    /// Measured on the first capture of it: the tank on the rise fired at a
+    /// target visibly above it.
+    ///
+    /// <b>And the two diagonals before the straight run at the camera</b>, which
+    /// is the second thing the same capture said. Along 270 the drop reads
+    /// correctly and the <em>tube</em> does not: it points at the lens, so the
+    /// one angle the button exists to show is foreshortened to nothing. On 330
+    /// and 210 the drop still runs towards the camera and the gun is seen at
+    /// three quarters, which is where a rung of elevation is worth a pixel.
+    /// </summary>
+    private static readonly int[] Downhill = { 330, 210, 270, 30, 150, 90 };
+
+    /// <summary>The four cells one drop gives an event to stand on, and the
+    /// heading that runs down it.</summary>
+    private readonly record struct Brink(Vector2I High, Vector2I Behind,
+                                         Vector2I Low, Vector2I Far, int Down);
+
+    /// <summary>
+    /// A shot between two levels - GDD field.md, "Огонь между уровнями: кромка".
+    ///
+    /// <b>The only button here whose outcome is not decided in advance, and that
+    /// is the event.</b> Everywhere else on this bench a shot is
+    /// <see cref="TankTick.Shoot"/> with its answer handed in, because what is
+    /// being looked at is the picture. Here what is being looked at is the
+    /// <em>rule</em>: the two tanks are put where the board's relief puts them
+    /// and <see cref="Gunnery.Solve"/> is asked, out loud, whether there is a
+    /// shot. A button that fired regardless would show the tube depressing and
+    /// prove nothing about when it may.
+    ///
+    /// Three pictures out of two knobs:
+    /// <list type="bullet">
+    /// <item><paramref name="uphill"/> false, <paramref name="back"/> 0 - the
+    /// upper tank on the brink, firing down two cells. The tube drops a rendered
+    /// rung (7.1 degrees at two cells of one level) and the round lands.</item>
+    /// <item><paramref name="uphill"/> true - the same pair read from the
+    /// bottom, the tube up the same angle. Legal for the same reason and by the
+    /// same cells, which is the half of the rule nobody believes until they see
+    /// it.</item>
+    /// <item><paramref name="back"/> 1 - the upper tank one hex back from the
+    /// brink. Its own plateau is now strictly between the two, the solution says
+    /// so, and nothing is fired. This is the position the whole rule exists to
+    /// make a decision.</item>
+    /// </list>
+    ///
+    /// The damage is the classes' own (<see cref="Gunnery.Penetration"/>) rather
+    /// than a number picked here, for the reason the solution is: a button about
+    /// the rules that invented one of them would be worth less than no button.
+    /// </summary>
+    public void Tier(Vehicle shooter, Vehicle victim, bool uphill, int back)
+    {
+        if (ReferenceEquals(shooter, victim))
+        {
+            Todo?.Invoke("a tank cannot shoot itself across a level", shooter,
+                         null);
+            return;
+        }
+        if (Edge(shooter, victim) is not Brink drop)
+        {
+            Todo?.Invoke("no drop on this board with room either side of it",
+                         shooter, null);
+            return;
+        }
+        Vector2I top = back > 0 ? drop.Behind : drop.High;
+        Vehicle upper = uphill ? victim : shooter;
+        Vehicle lower = uphill ? shooter : victim;
+        Now_($"{upper.Tag} on the rise at ({top.X},{top.Y}), {lower.Tag} below at "
+             + $"({drop.Far.X},{drop.Far.Y})",
+             () =>
+             {
+                 // Both put before either is aimed: the bearing is read off two
+                 // ground points, and one of them would still be the old cell.
+                 upper.Cell = top;
+                 lower.Cell = drop.Far;
+                 upper.Sprite.HullFacing = drop.Down;
+                 lower.Sprite.HullFacing = Angles.Mod(drop.Down + 180.0, 360.0);
+                 Tick.Park(upper);
+                 Tick.Park(lower);
+                 Lay(upper, lower);
+                 Lay(lower, upper);
+                 Tick.StowTube(upper);
+                 Tick.StowTube(lower);
+             });
+        // And the other axis, as its own step, because it is the one there is to
+        // watch: the tube walks from rest to the angle the drop asks for. Asked
+        // of a refused shot as well - a gun that never tried to lay would leave
+        // the refusal looking like the bench not having noticed the levels.
+        Train(shooter, () => victim.Cell);
+        // Named after the two positions rather than after two levels: the levels
+        // are read where the step is built, which is before the step that moves
+        // anybody has run, and the tank standing on the rise is not always the
+        // one firing.
+        Enqueue($"{shooter.Tag} shoots {(uphill ? "up" : "down")} at "
+                + $"{victim.Tag}, {upper.Tag} "
+                + (back > 0 ? "a hex back from the brink" : "on the brink"),
+                () =>
+                {
+                    Shot shot = Gunnery.Solve(Field, Tick.Vehicles, shooter,
+                                              victim.Cell);
+                    // The tube's own two numbers beside the solution, because
+                    // the elevation is the half of this event that is easiest
+                    // to look straight at and not see: five degrees is a few
+                    // pixels of sprite, and "it did not move" and "it moved a
+                    // rung" are indistinguishable by eye on one frame.
+                    double wants = Gunnery.LayDeg(
+                        shooter.Profile, shot.Range,
+                        Field.LevelAt(victim.Cell) - Field.LevelAt(shooter.Cell),
+                        Field.StepGrade);
+                    int rung = shooter.Atlas?.RungFor(wants) ?? 0;
+                    GD.Print($"playback: level {Field.LevelAt(shooter.Cell)} -> "
+                             + $"{Field.LevelAt(victim.Cell)}, {shot}, tube "
+                             + $"wants {wants:F2} deg, rung {rung} at "
+                             + $"{shooter.Atlas?.LayOf(rung) ?? 0.0:F2} deg");
+                    if (!shot.Clear)
+                    {
+                        Todo?.Invoke($"no shot: {shot}", shooter, null);
+                        return;
+                    }
+                    Tick.Fire(shooter, null,
+                        v => Tick.Shoot(v, victim, Bearing(v, victim),
+                                        Gunnery.Penetration(v.Profile,
+                                                            victim.Profile)));
+                },
+                _ => shooter.Rounds.All(r => r.Arrived));
+    }
+
+    /// <summary>Point one tank's gun at another, wherever the two are standing -
+    /// the half of <see cref="StandOff"/> that is not about where to stand.
+    /// </summary>
+    private void Lay(Vehicle who, Vehicle at)
+    {
+        double lay = Onto(who, at);
+        Tick.DropSwing(who);
+        if (who.Profile.Turreted)
+            who.Sprite.TurretFacing = lay;
+        else
+        {
+            who.Sprite.HullFacing = lay;
+            Tick.Park(who);
+        }
+        who.Sprite.QueueRedraw();
+    }
 
     /// <summary>
     /// A round that bounced and went on - GDD units.md "Рикошет", and
@@ -321,6 +619,7 @@ public sealed class Playback
             return;
         int from = HexField.EdgeHeadings[Side(side)];
         StandOff(shooter, victim, from, LobCells);
+        Train(shooter, () => victim.Cell);
         Enqueue($"lob {shooter.Tag} -> {victim.Tag} from {from}",
                 () => Tick.Fire(shooter, null,
                     v => Tick.Shoot(v, victim, Bearing(v, victim))),
@@ -388,6 +687,7 @@ public sealed class Playback
             Tick.Park(shooter);
             shooter.Sprite.QueueRedraw();
         });
+        Train(shooter, () => cell);
         Enqueue($"lob {shooter.Tag} -> ({cell.X},{cell.Y}) from {from}",
                 () => Tick.Fire(shooter, cell),
                 _ => shooter.Rounds.All(r => r.Arrived));

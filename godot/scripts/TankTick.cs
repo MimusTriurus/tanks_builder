@@ -889,6 +889,11 @@ public sealed class TankTick
         // gunnery, which takes the turret away from it - the ring has three
         // possible drivers and they run in order of who yields to whom.
         UpdateTurret(v, delta);
+        // The other axis of the same gun, driven on the same frame - see
+        // UpdateTube. Beside the ring rather than inside the gunnery because
+        // every root runs this and only one of them has an attack loop.
+        UpdateTube(v, delta);
+        UpdateReload(v, delta);
         UpdateScan(v, delta);
         Aim?.Invoke(v, delta);
         UpdateShot(v, delta);
@@ -2057,6 +2062,10 @@ public sealed class TankTick
         // the board, which is the other reason they are cleared in one place.
         v.Backing = null;
         v.Dwell = 0.0;
+        // And the gun comes down with the order that raised it - the ring's own
+        // rule about the other axis, see SwingForward. R comes through here for
+        // every tank on the board, so a reset puts every tube back to rest.
+        StowTube(v);
         if (v != Driven)
             return;
         Field.Highlight = Array.Empty<Vector2I>();
@@ -3438,8 +3447,16 @@ public sealed class TankTick
     /// about a point does - the lift goes back on. See <see cref="HexField.Bare"/>
     /// and <c>Main.Patch</c>.
     /// </summary>
+    /// <param name="onto">The cell the round is for, when there is one. It only
+    /// ever lowers the line, and that is <see cref="Gunnery.Overtops"/> arriving
+    /// here: the floor a shot runs along is the lower of its two ends, so a gun
+    /// laid on the plain from a hilltop is stopped by its own plateau unless it
+    /// has come out to the brink. Left out, the line runs at the shooter's own
+    /// level - which is what a sighting line down an empty heading is, there
+    /// being no second end to be lower.</param>
     public (float Run, Vector2I? At, bool Blocked) Reach(Vehicle shooter,
-                                                         Vector2 dir)
+                                                         Vector2 dir,
+                                                         Vector2I? onto = null)
     {
         float top = Field.Bare(shooter.Ground);
         var ground = new Vector2(shooter.GroundPoint.X - Origin.X,
@@ -3463,7 +3480,12 @@ public sealed class TankTick
         // Track, which now asks it all the way down the walk.
         foreach (Vector2I cell in Obstacles)
             tanks.Add(cell);
-        return Track(Field, ground, dir, top + Field.Lift * Clearance, tanks,
+        // The line the walk is measured against, which is not always the height
+        // the walk starts at - see the parameter. Taken off TopAt rather than off
+        // the tank standing there, because what a round clears is ground.
+        float line = onto is Vector2I mark
+            ? Math.Min(top, Field.TopAt(mark)) : top;
+        return Track(Field, ground, dir, line + Field.Lift * Clearance, tanks,
                      Barred);
     }
 
@@ -3736,62 +3758,278 @@ public sealed class TankTick
     /// no ricochet to fly - GDD units.md, "рикошет бывает только от выстрелов
     /// LT, MT и HT".
     /// </summary>
-    public float Lay(Vehicle shooter, Vector2I? onto)
+    public void Train(Vehicle v, Vector2I? onto)
+    {
+        SeedTube(v);
+        // <b>Moving stows it, and that is the ring's own rule said about the
+        // other axis</b> - see SwingForward. A tank crossing the board with its
+        // gun held at the angle of a target it has not reached is a tank aiming
+        // at nothing; and deciding it here rather than in UpdateTube is what
+        // keeps one writer on the want, so the two cannot argue frame by frame.
+        // <b>And loading stows it too, which is what makes the return a
+        // return.</b> Fire puts the tube back to rest; without this the very
+        // next frame of an attack loop would ask for the firing angle again and
+        // the gun would come straight back up through its own recoil. A gun is
+        // loaded at its loading angle, so the reload is exactly the window the
+        // tube is down for - and the frame it runs out, the lay begins. The
+        // Trained gate then holds the next round until the tube has arrived, so
+        // the cycle is lay, fire, return, lay.
+        v.TubeWants = v.Moving || Field is null || v.ReloadLeft > 0.0
+            ? RestTube(v) : Wanted(v, onto).Deg;
+    }
+
+    /// <summary>
+    /// Count the loading down.
+    ///
+    /// <b>Here rather than in the harness's attack loop, where it lived.</b> A
+    /// reload is a fact about a gun and every root runs this tick, while only
+    /// one of them has an attack loop - so on every bench a tank that fired
+    /// carried its countdown forever. Nothing read it there until the tube
+    /// started stowing to load (see <see cref="Train"/>), and then it read as a
+    /// gun that never came back up: the event bench's queue waited on a reload
+    /// that was not running. The rule the file is written under says where this
+    /// goes - a shared module knows no scene.
+    /// </summary>
+    private static void UpdateReload(Vehicle v, double delta)
+    {
+        if (v.ReloadLeft > 0.0)
+            v.ReloadLeft = Math.Max(0.0, v.ReloadLeft - delta);
+    }
+
+    /// <summary>Bring the tube back to where the model left it - what moving
+    /// does to it, and what a dropped order does.</summary>
+    public void StowTube(Vehicle v)
+    {
+        SeedTube(v);
+        v.TubeWants = RestTube(v);
+    }
+
+    /// <summary>
+    /// Whether the tube is standing at the angle it was asked for.
+    ///
+    /// <b>The vertical half of <see cref="Gunnery.Laid"/>, and a gate for the
+    /// same reason</b>: a gun that fires while still coming up sends the round
+    /// along an angle nobody asked for, and the picture - a tube visibly on its
+    /// way - says so at the moment the shot is least deniable. Same tolerance,
+    /// because <see cref="UpdateTube"/> lands exactly the way
+    /// <see cref="Gunnery.Traverse"/> does and the slack is there to survive the
+    /// last partial step rather than to allow a shot that is off.
+    /// </summary>
+    public bool Trained(Vehicle v)
+    {
+        SeedTube(v);
+        return Math.Abs(v.TubeDeg - v.TubeWants) <= Gunnery.LayTolerance
+               && v.TubeDwell <= 0.0 && !v.Barrel.Live;
+    }
+
+    /// <summary>Where this tank's tube sits when nothing is asked of it: the
+    /// angle the model was built at - see <see cref="AtlasSet.RestDeg"/>. Not
+    /// nought, and on the mortar not near it.</summary>
+    private static double RestTube(Vehicle v) => v.Atlas?.LayOf(0) ?? 0.0;
+
+    /// <summary>Seed the two angles off the atlas the first time anybody asks.
+    /// A tank is built before it is dressed, so neither can be an initialiser.
+    /// </summary>
+    private static void SeedTube(Vehicle v)
+    {
+        if (double.IsNaN(v.TubeDeg))
+            v.TubeDeg = RestTube(v);
+        if (double.IsNaN(v.TubeWants))
+            v.TubeWants = RestTube(v);
+    }
+
+    /// <summary>
+    /// How fast the tube is driven, in degrees per second.
+    ///
+    /// <b>One figure for all five, because this is the mantlet and not the
+    /// ring.</b> <see cref="MovementProfile.TurretRate"/> is per class since a
+    /// heavy turret is part of what makes a heavy feel heavy; there is no such
+    /// column for elevation, and inventing three numbers to fill one would be
+    /// three numbers nobody measured.
+    ///
+    /// <b>Sized off the movement, not off the pose - which is the correction
+    /// this number came to by measurement.</b> The first cut was 60 deg/s, on
+    /// the reasoning that the rungs sit three and a half degrees apart and each
+    /// pose wants three or four frames to be a pose. Timed on the bench, the
+    /// whole lay for a shot one level down at two cells - 4.76 degrees, two
+    /// rungs - took 0.07s: four frames, which is a snap with extra steps. What
+    /// has to read is the <em>lay</em>, not the rung, and a movement of a few
+    /// pixels needs a third of a second before the eye calls it a movement.
+    ///
+    /// At 20 deg/s that same lay is 0.24s and holds each pose about ten frames;
+    /// the steepest the rules allow, one level over one cell, is 0.7s. Slower
+    /// than that and the gun becomes what the player waits for - and it is still
+    /// three times what a real hydraulic mounting does, the traverse here being
+    /// arcade-fast for the same reason.
+    /// </summary>
+    public static double TubeRate = 20.0;
+
+    /// <summary>
+    /// The beat between the gun arriving on its angle and the round leaving, in
+    /// seconds.
+    ///
+    /// <b>The lay is an act and an act has a shape.</b> Without it the round
+    /// leaves on the frame the tube stops, so the two movements - the tube
+    /// rising and the tube recoiling - run into each other and read as one
+    /// twitch; the gun never looks laid, only interrupted. A quarter of a second
+    /// is about what the lay itself takes at <see cref="TubeRate"/>, which is
+    /// the reason for the figure: the beat is the same length as the movement it
+    /// follows, so the pair reads as one deliberate thing with a pause in the
+    /// middle rather than as a stall.
+    ///
+    /// A field rather than a constant, for <see cref="TubeRate"/>'s reason: the
+    /// three numbers of this axis are what the event bench exists to judge, and
+    /// a rebuild per guess is not judging.
+    /// </summary>
+    public static double TubeSettle = 0.25;
+
+    /// <summary>
+    /// The beat between the tube coming home from its recoil and starting back
+    /// down, in seconds.
+    ///
+    /// <b>The recoil is the floor and this is what sits on top of it.</b>
+    /// <see cref="UpdateTube"/> will not move a tube that is out of battery at
+    /// all - a gun coming down while it is still coming home is two movements on
+    /// one part - so the pause after a shot is already the recoil's own length,
+    /// 28 frames, whatever this says. What this buys is the moment after that:
+    /// the gun held on target, which is what makes the return a decision rather
+    /// than a rebound.
+    /// </summary>
+    public static double TubeHold = 0.15;
+
+    /// <summary>
+    /// Walk the tube towards the angle asked of it and draw the nearest pose.
+    ///
+    /// <b>It used to take no time, and that was a decision rather than an
+    /// oversight</b>: there is nothing rendered between two rungs, so the
+    /// argument ran that a tube crawling up an eleven-pose ladder is eleven
+    /// poses of stutter. Watched on a board with levels it is the other way
+    /// round - the lay is three to six pixels of muzzle, and arriving there
+    /// between two frames is a lay nobody can see happen at all. Stepped, the
+    /// same three pixels are a movement, which is what the eye reads.
+    ///
+    /// Lands exactly on the want, for <see cref="Gunnery.Traverse"/>'s reason:
+    /// <see cref="Trained"/> is a gate, and a walk that always stopped a hair
+    /// short would hold the gun closed forever.
+    /// </summary>
+    private void UpdateTube(Vehicle v, double delta)
+    {
+        SeedTube(v);
+        // <b>Out of battery, nothing moves.</b> A tube coming down while it is
+        // still coming home is two movements on one part, and the recoil is the
+        // one the eye is already following. This is also what makes the pause
+        // after a shot derived rather than guessed: 28 frames of it exist
+        // whatever TubeHold says.
+        if (v.Barrel.Live)
+            return;
+        if (v.TubeDwell > 0.0)
+        {
+            v.TubeDwell = Math.Max(0.0, v.TubeDwell - delta);
+            return;
+        }
+        double diff = v.TubeWants - v.TubeDeg;
+        double budget = TubeRate * delta;
+        bool was = Math.Abs(diff) <= Gunnery.LayTolerance;
+        v.TubeDeg = Math.Abs(diff) <= budget
+            ? v.TubeWants : v.TubeDeg + Math.Sign(diff) * budget;
+        // Arrived this frame, which is the only moment the settle can be armed:
+        // asked of the want instead, it would re-arm every frame the gun stood
+        // laid and the shot would never come.
+        if (!was && Math.Abs(v.TubeWants - v.TubeDeg) <= Gunnery.LayTolerance)
+            v.TubeDwell = TubeSettle;
+        int rung = v.Atlas?.RungFor(v.TubeDeg) ?? 0;
+        if (rung == v.Sprite.BarrelRung)
+            return;
+        v.Sprite.BarrelRung = rung;
+        v.Sprite.QueueRedraw();
+    }
+
+    /// <summary>
+    /// The angle this gun would be laid at to reach that cell, and the two
+    /// figures the arc is sized from.
+    ///
+    /// <b>One question with two answers, and the class picks which.</b> A direct
+    /// gun points at what it is shooting - the tube <em>is</em> the line of
+    /// sight, and on a level board that is zero, which is why this was never
+    /// needed until the board grew levels. A mortar points where the bomb has to
+    /// leave, which is nowhere near the target and depends on how far away it
+    /// is. See <see cref="Gunnery.LayDeg"/>.
+    ///
+    /// <b>The range is asked down a lane, because that is the only way a gun
+    /// fires.</b> <see cref="HexField.LaneTo"/> answers -1 for a cell on no lane
+    /// of this hex, and then there is no legal shot to size: the fallback is the
+    /// longest throw, which is what an unlaid mortar would be standing at.
+    ///
+    /// <b>Past its reach the tube is laid as far as it goes and the bench says
+    /// so once.</b> Two levels over one cell is 26.6 degrees - a position the
+    /// rules now refuse (<see cref="Gunnery.Reaches"/>) but the mortar still
+    /// reaches past its own band - and the alternative to a word is a tube
+    /// pointing visibly short of where the round went, with nothing to say why.
+    /// The band, not the cap, and it is asymmetric: a rung is a rotation applied
+    /// to a tube the model already pointed somewhere, so what the mounting
+    /// reaches is that rest plus the ladder.
+    /// </summary>
+    private (double Deg, int Cells, int Levels) Wanted(Vehicle v, Vector2I? onto)
+    {
+        int cells = Gunnery.LobReach;
+        int levels = 0;
+        if (Field is not null && onto is Vector2I at)
+        {
+            (_, int range) = Field.LaneTo(v.Cell, at);
+            if (range > 0)
+                cells = range;
+            levels = Field.LevelAt(at) - Field.LevelAt(v.Cell);
+        }
+        double deg = Gunnery.LayDeg(v.Profile, cells, levels,
+                                    Field?.StepGrade ?? 0.25);
+        if (v.Atlas is not null)
+        {
+            (double low, double high) = v.Atlas.LayBand;
+            if (v.Atlas.ElevRungs > 1
+                && (deg > high + 1e-6 || deg < low - 1e-6)
+                && _capped.Add(v))
+                GD.Print($"lay: {v.Tag} wants {deg:F2}deg at {cells} "
+                         + $"cell(s) and the tube reaches {low:F2}..{high:F2}"
+                         + " - laid at its stop");
+        }
+        return (deg, cells, levels);
+    }
+
+    /// <summary>
+    /// How high over the chord the round about to leave this tube will go, in
+    /// screen pixels - what <see cref="Shell.Apex"/> is handed.
+    ///
+    /// <b>Off the pose that is drawn, not off the angle the rules asked
+    /// for.</b> The two were one call while the lay took no time; now that the
+    /// tube walks, a round sized off the want would leave a tube that has not
+    /// got there yet - the very pair this arithmetic exists to keep together.
+    /// So the trigger reads the tube, and the gate (<see cref="Trained"/>) is
+    /// what makes the two agree on a shot the rules allowed.
+    ///
+    /// <b>Past the cap the round keeps the angle the rules gave it and the tube
+    /// keeps its stop.</b> Snapping the shot to the mounting there would take a
+    /// mortar's bomb and flatten it into a tank shell - the rules' event bent to
+    /// fit the art - so the two are allowed to disagree exactly where the bench
+    /// has already said out loud that they do.
+    ///
+    /// <b>The second leg never asks.</b> A round that bounced or went through
+    /// (<see cref="Carry"/>) leaves flat whoever fired it, and the rules say so
+    /// twice over: a V meets no armour it fails to pass, so a mortar's bomb has
+    /// no ricochet to fly - GDD units.md, "рикошет бывает только от выстрелов
+    /// LT, MT и HT".
+    /// </summary>
+    public float Arc(Vehicle shooter, Vector2I? onto)
     {
         if (Field is null)
             return 0.0f;
-        int cells = Gunnery.LobReach;
-        int levels = 0;
-        if (onto is Vector2I at)
-        {
-            (_, int range) = Field.LaneTo(shooter.Cell, at);
-            if (range > 0)
-                cells = range;
-            levels = Field.LevelAt(at) - Field.LevelAt(shooter.Cell);
-        }
-        double deg = Gunnery.LayDeg(shooter.Profile, cells, levels,
-                                    Field.StepGrade);
-        // What the tube will actually be drawn at, which is what the round has
-        // to leave along. The ladder is the render: there are eleven poses and
-        // nothing between them, so a round sized off the angle that was *asked*
-        // for would leave a tube pointing up to a rung's worth of daylight away
-        // from it - the very pair this method exists to keep together.
+        (double deg, int cells, int levels) = Wanted(shooter, onto);
+        SeedTube(shooter);
         double shown = deg;
-        if (shooter.Atlas is not null)
+        if (shooter.Atlas is not null && shooter.Atlas.ElevRungs > 1)
         {
-            // Past its reach the tube is laid as far as it goes and the bench
-            // says so once. Two levels over one cell is 26.6 degrees, a legal
-            // position with no rendered mounting behind it - the pipeline's own
-            // note - and the alternative to a word is a tube pointing visibly
-            // short of where the round went, with nothing to say why.
-            //
-            // <b>The band, not the cap, and it is asymmetric.</b> A rung is a
-            // rotation applied to a tube that was modelled pointing somewhere
-            // already - see AtlasSet.RestDeg - so what the mounting reaches is
-            // that rest plus the ladder, which straddles nought only by
-            // accident. On the mortar it does not come near it.
             (double low, double high) = shooter.Atlas.LayBand;
-            if (shooter.Atlas.ElevRungs > 1
-                && (deg > high + 1e-6 || deg < low - 1e-6)
-                && _capped.Add(shooter))
-                GD.Print($"lay: {shooter.Tag} wants {deg:F2}deg at {cells} "
-                         + $"cell(s) and the tube reaches {low:F2}..{high:F2}"
-                         + " - laid at its stop");
-            int rung = shooter.Atlas.RungFor(deg);
-            if (rung != shooter.Sprite.BarrelRung)
-            {
-                shooter.Sprite.BarrelRung = rung;
-                shooter.Sprite.QueueRedraw();
-            }
-            // <b>Past the cap the round keeps the angle the rules gave it and
-            // the tube keeps its stop.</b> Snapping the shot to the mounting
-            // there would take a mortar's bomb and flatten it into a tank
-            // shell - the rules' event bent to fit the art - so the two are
-            // allowed to disagree exactly where the bench has already said out
-            // loud that they do.
-            if (shooter.Atlas.ElevRungs > 1
-                && deg <= high + 1e-6 && deg >= low - 1e-6)
-                shown = shooter.Atlas.LayOf(rung);
+            if (deg <= high + 1e-6 && deg >= low - 1e-6)
+                shown = shooter.Atlas.LayOf(shooter.Sprite.BarrelRung);
         }
         return Gunnery.ApexPx(shooter.Profile, shown, cells, levels,
                               Field.StepGrade, Field.Reach, Field.RiseFactor);
@@ -3827,7 +4065,7 @@ public sealed class TankTick
         // round going into the field, and the point is Vehicle.Roof. The
         // solution is still asked for and still able to refuse: an unmeasured
         // hull is one this tick has no idea how to hit, whichever way up.
-        float arc = Lay(shooter, victim.Cell);
+        float arc = Arc(shooter, victim.Cell);
         // <b>The class, not the apex.</b> Every gun now lays above its own line
         // of sight, so an apex says only that the round is bent; what decides
         // that it comes down on a deck with no plate under it is whose gun it
@@ -3937,7 +4175,7 @@ public sealed class TankTick
         // The ordered cell when there is one, and otherwise wherever the walk
         // stopped: both are cells on this gun's own lane, which is what the
         // range has to be measured down - see Lay.
-        float arc = Lay(shooter, onto ?? at);
+        float arc = Arc(shooter, onto ?? at);
         if (onto is Vector2I sent)
         {
             float far = Sent(Field, Origin, from, sent);
@@ -4404,6 +4642,26 @@ public sealed class TankTick
         Func<Vehicle, bool>? who = launch ?? Launch;
         if (who is null || !who(v))
             Loose(v, onto);
+        // And the tube comes down, last of all and after the round has left.
+        //
+        // <b>A gun goes back to its loading angle, and here that is also the
+        // only way the lay is ever watched twice.</b> Held at the angle it
+        // fired at, a tank with a standing order lays once in its life: the
+        // first round walks the tube up and every round after it leaves from a
+        // tube that never moved. Stowed at the trigger, each round is a lay,
+        // a shot and a return - which is what the ladder was rendered for.
+        //
+        // <b>After the launch, not before.</b> Arc reads the rung that is drawn
+        // to size the round's own flight, and a tube stowed first would send the
+        // shell along an angle the picture never showed.
+        //
+        // What keeps it down is Train, which answers rest for as long as the
+        // round is loading; what brings it back up is the same call, the frame
+        // the reload runs out.
+        StowTube(v);
+        // And it is held where it fired for a beat first - see TubeHold. Set
+        // after the stow, because the stow is what the beat is delaying.
+        v.TubeDwell = TubeHold;
     }
 
     /// <summary>The shot runs on screen frames, not seconds. The sheet is a
