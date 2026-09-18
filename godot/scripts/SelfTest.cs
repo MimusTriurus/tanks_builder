@@ -12007,6 +12007,49 @@ public static class SelfTest
                     + "600px chord - and a direct gun at the same range leaves "
                     + $"at {Gunnery.SuperDeg(4):F2}, which is what a throw has "
                     + "to be nothing like");
+                // <b>And a flat round leaves along its tube, which is a
+                // different claim and the one that was wrong.</b> The apex was
+                // sized off the board - cells and levels - while the round flies
+                // from a muzzle that stands down-range and high to a plate that
+                // does not, so the drawn chord is far steeper than the drawn
+                // tube and the two parted company at the muzzle, where the
+                // flash is. Gunnery.BowOnto is the inversion; asserted through
+                // Shell.Heading rather than against its own formula, because
+                // what has to be true is that the round departs along the tube
+                // and not that two expressions match.
+                //
+                // The bench's own numbers: a 259 by 155 chord under a tube drawn
+                // at 21.2 degrees.
+                {
+                    var chord = new Vector2(259.62f, 154.96f);
+                    var bore = new Vector2(144.77f, 56.16f);
+                    float bow = Gunnery.BowOnto(chord, bore);
+                    var bowed = new Shell
+                    {
+                        Shooter = shooter, Target = null,
+                        From = mouth, FromLift = 0.0f,
+                        Ground = mouth + chord, GroundLift = 0.0f,
+                        ImpactLocal = Vector2.Zero, Serial = 0, Face = "",
+                        Scatter = 0.0f, BoreMiss = 0.0f, Rise = 0.0f,
+                        Calibre = 1.0f, Level = 0, Apex = bow,
+                    };
+                    double off = Mathf.RadToDeg(
+                        Math.Atan2(bowed.Heading(0.0f).Y, bowed.Heading(0.0f).X));
+                    double aimed = Mathf.RadToDeg(Math.Atan2(bore.Y, bore.X));
+                    Check("a flat round leaves along the bore it left",
+                        bow > 1.0f && Math.Abs(off - aimed) < 0.01,
+                        $"bore at {aimed:F2} deg, chord at "
+                        + $"{Mathf.RadToDeg(Math.Atan2(chord.Y, chord.X)):F2}, "
+                        + $"round leaves at {off:F2} on a {bow:F1}px bow");
+                    // And the other way round is the straight line: a bore below
+                    // its own chord would need the round to bow downward, which
+                    // is not a round under gravity.
+                    Check("and a bore under its chord bends nothing",
+                        Gunnery.BowOnto(chord, new Vector2(144.77f, 120.0f))
+                            == 0.0f,
+                        "a bore steeper than the line to the target still "
+                        + "fires straight");
+                }
                 // And the second half of what makes it a lob: further to go at
                 // the one speed every gun in the game shares.
                 Check("its path is longer than the chord and its flight longer "
@@ -12213,6 +12256,39 @@ public static class SelfTest
                     + $"{Gunnery.SightDeg(4, 0, grade):F2}, tube "
                     + $"{Gunnery.LayDeg(MovementProfile.Medium, 4, 0, grade):F2} - "
                     + "and up a level the two simply add");
+                // <b>And downhill it points at it and not over it</b>, which is
+                // the one direction where the lift and the drop are the same
+                // size. SuperDeg is calibrated for the eye at flat range -
+                // 4.76 degrees at five cells - and the steepest depression this
+                // board can ask for at that range is 2.86, so added there the
+                // tube came out above the horizon on a shot a level *down*: at
+                // four and five cells its bore passed 33 to 87 screen px over
+                // the hull it was firing at. Asserted as an identity with the
+                // sight rather than as an inequality, because the rule is that
+                // the two are one number, and because an inequality would still
+                // pass with a lift small enough to hide and large enough to
+                // come back.
+                //
+                // Every downhill range the board holds, not one sample: the
+                // failure was range-dependent - right at one cell, wrong at
+                // four - so a single cell count is the shape of check that let
+                // it in.
+                bool downhillFlat = true;
+                for (int cells = 1; cells <= Gunnery.LobReach; cells++)
+                    for (int down = -1; down >= -2; down--)
+                        downhillFlat &= Math.Abs(
+                            Gunnery.LayDeg(MovementProfile.Medium, cells, down,
+                                           grade)
+                            - Gunnery.SightDeg(cells, down, grade)) < 1e-9;
+                Check("and shooting downhill it points at it",
+                    downhillFlat
+                    && Gunnery.ApexPx(MovementProfile.Medium, 4, -1, grade,
+                                      215.0f, 0.866f) == 0.0f,
+                    "four cells one level down: sight "
+                    + $"{Gunnery.SightDeg(4, -1, grade):F2}, tube "
+                    + $"{Gunnery.LayDeg(MovementProfile.Medium, 4, -1, grade):F2}"
+                    + $", arc {Gunnery.ApexPx(MovementProfile.Medium, 4, -1, grade, 215.0f, 0.866f):F1}px"
+                    + " - a direct gun is its own line of sight");
             }
             // Whose round it is. The list was the harness's, so a bench with a
             // tank on it had a gun that only flashed - the whole flight lived in

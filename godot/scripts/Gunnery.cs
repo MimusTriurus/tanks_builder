@@ -653,10 +653,41 @@ public static class Gunnery
     /// Both are "where the tube is", so both are this.
     /// </summary>
     public static double LayDeg(MovementProfile gun, int cells, int levels,
-                                double grade) =>
-        gun.Lobs
-            ? LobDeg(cells)
-            : SightDeg(cells, levels, grade) + SuperDeg(cells);
+                                double grade)
+    {
+        if (gun.Lobs)
+            return LobDeg(cells);
+        double sight = SightDeg(cells, levels, grade);
+        // <b>Downhill the tube is the line of sight and nothing is added to
+        // it.</b> The superelevation below is sized for the eye at flat range -
+        // 4.764 degrees at five cells - while the whole depression this board
+        // can ask for is 2.86 degrees at that range. So on a shot one level down
+        // the two are the same size and the lift wins from three cells out: the
+        // gun was drawn level at three and pointing visibly *above* a target a
+        // level below it at four and five, its bore passing 33 to 87 screen px
+        // over the hull it was about to hit. What reconciled them was the arc,
+        // and the arc is the same arithmetic read the other way - 8 to 22 px of
+        // sag on a chord of eight hundred, which is a straight line to anybody
+        // watching. Two right answers and a wrong picture.
+        //
+        // <b>Clamped rather than rescaled, because the clamp is the rule.</b> A
+        // direct gun points at what it is shooting. A real one still carries a
+        // little lift downhill, but less the steeper the drop, and here "less"
+        // is a fraction of a degree at every range the board holds - smaller
+        // than the gap between two rungs, so it would be snapped away in the
+        // drawing and paid for in a second calibration. Rescaling SuperDeg by
+        // the slant range would also move every flat shot, and the flat shots
+        // are the ones SuperAtReach was measured for.
+        //
+        // Uphill is untouched: there the lift and the sight pull the same way
+        // and the tube points over the target the way a gun does.
+        //
+        // <b>And the arc follows for free.</b> ApexPx is
+        // D(tan lay - tan sight)/4 and the two angles are now one number, so a
+        // downhill shot comes out flat by arithmetic - the same way a level
+        // board always was.
+        return levels < 0 ? sight : sight + SuperDeg(cells);
+    }
 
     /// <summary>
     /// The flattest lift that still reads on this board, in degrees - what a
@@ -762,6 +793,51 @@ public static class Gunnery
                                double grade, float reach, float rise) =>
         ApexPx(gun, LayDeg(gun, cells, levels, grade), cells, levels, grade,
                reach, rise);
+
+    /// <summary>
+    /// The apex that puts a round on the tube it is leaving, in screen pixels
+    /// over its own chord.
+    ///
+    /// <b>Screen pixels both sides, because the pair this reconciles is drawn.</b>
+    /// Everything else here is board arithmetic - cells, levels, a grade - and
+    /// answers what the rules say. This answers a different question: the round
+    /// does not leave from a cell but from the <em>muzzle</em>, which stands
+    /// down-range of its own anchor and well above the datum, and it does not
+    /// arrive at a cell either but at a plate on a hull. So the line it flies is
+    /// steeper than the line between two cells - 30.8 degrees against 22.6 on
+    /// the event bench's two-cell shot - while the tube is laid on the second of
+    /// them, and a tube pointing visibly over its own tracer is the result.
+    ///
+    /// <b>The round bends and the gun does not.</b> Laying the tube on the
+    /// muzzle-to-plate line instead would make the lay a fact about two hulls: a
+    /// heavy shooting a light would depress where a light shooting a heavy would
+    /// not, the angle would leave the ladder the pipeline rendered (13.6 degrees
+    /// wanted where the board asks for 7.1) and <see cref="Reaches"/> would be
+    /// policing a rule it no longer described. What a round does between the
+    /// muzzle and the plate is nobody's rule, so the difference goes there.
+    ///
+    /// <b>And that is the shape gravity draws.</b> A gun stands above what it
+    /// shoots at, so its bore points flatter than the straight line to the
+    /// target and the round falls on to it - apex over the chord, which is
+    /// <see cref="Shell.HeightAt"/>'s parabola exactly. Ten to fourteen pixels
+    /// over a three-hundred pixel chord: nothing in the middle, which is the
+    /// point, and the whole of it at the muzzle, where the flash is.
+    ///
+    /// Nought when the tube is <em>steeper</em> than the chord - a round bowing
+    /// downward is not a round under gravity - and nought when the tube points
+    /// at the camera, where a screen slope says nothing and this cannot be seen
+    /// either way.
+    /// </summary>
+    /// <param name="chord">Muzzle to impact, in screen pixels.</param>
+    /// <param name="along">The drawn bore, in screen pixels - any length.</param>
+    public static float BowOnto(Vector2 chord, Vector2 along)
+    {
+        if (Math.Abs(along.X) < 1.0f || chord.X * along.X <= 0.0f)
+            return 0.0f;
+        // Shell.Heading(0) is chord - (0, 4*apex), which is parallel to the tube
+        // when the two slopes match. This is that, solved for the apex.
+        return Math.Max(0.0f, (chord.Y - chord.X * along.Y / along.X) * 0.25f);
+    }
 
     /// <summary>
     /// The turret swung towards a heading by at most <paramref name="budget"/>

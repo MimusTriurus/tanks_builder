@@ -4035,6 +4035,56 @@ public sealed class TankTick
                               Field.StepGrade, Field.Reach, Field.RiseFactor);
     }
 
+    /// <summary>
+    /// The bow that puts a round on the tube it is leaving, in screen pixels of
+    /// apex over its own chord.
+    ///
+    /// <b>Measured against the drawn tube and the drawn chord, because that is
+    /// the pair anybody looks at.</b> <see cref="Arc"/> sizes the arc off the
+    /// board - cells, levels and the angle the rules asked for - and that pair
+    /// agrees with itself and not with the picture: the round does not leave
+    /// from the cell, it leaves from the <em>muzzle</em>, which on a medium
+    /// stands 112 screen px down-range of its own anchor and some 140 px over
+    /// the datum, and it does not arrive at a cell either but at a plate about
+    /// 50 px over the target's. So the line the round actually flies is far
+    /// steeper than the line between two cells - 30.8 degrees against 22.6 on
+    /// the bench's two-cell shot - while the tube is laid on the second of them.
+    /// A tube visibly pointing over its own tracer, and both halves right about
+    /// the thing they were each measured from.
+    ///
+    /// <b>Fixed by bending the round, not by re-laying the gun.</b> The
+    /// alternative is to lay the tube on the muzzle-to-plate line, and that line
+    /// is a fact about two hulls rather than about the board: a heavy shooting a
+    /// light would depress where a light shooting a heavy would not, the angle
+    /// would leave the ladder the pipeline rendered (13.6 degrees wanted where
+    /// the board asks for 7.1), and <see cref="Gunnery.Reaches"/> would be
+    /// policing a rule it no longer described. What a round does between the
+    /// muzzle and the plate is nobody's rule, so that is where the difference
+    /// goes.
+    ///
+    /// <b>And it is the shape gravity draws anyway.</b> A gun sits above what it
+    /// shoots at, so its bore points <em>flatter</em> than the straight line to
+    /// the target and the round falls on to it: apex over the chord, which is
+    /// exactly <see cref="Shell.HeightAt"/>'s parabola. On the bench's shot that
+    /// is ten pixels over a three-hundred pixel chord - invisible in the middle,
+    /// which is the point, and decisive at the muzzle, where the flash is.
+    ///
+    /// Nought when the tube is <em>steeper</em> than the chord: a round bowing
+    /// downward is not a round under gravity, and the honest picture there is
+    /// the straight one. Nought as well when the tube points at the camera
+    /// (<c>along.X</c> near nought), which is the one heading on which none of
+    /// this can be seen either way.
+    /// </summary>
+    private static float BowOnto(Vehicle shooter, Vector2 from, Vector2 to)
+    {
+        if (shooter.Atlas is null || !shooter.Atlas.HasBore)
+            return 0.0f;
+        Vector2 along = shooter.Atlas.Project(
+            shooter.Atlas.BoreAt(shooter.Sprite.BarrelRung).Dir,
+            shooter.Sprite.TurretFacing);
+        return Gunnery.BowOnto(to - from, along);
+    }
+
     /// <summary>Tanks that have already had their say about an angle their tube
     /// cannot reach, so the line is printed once rather than sixty times a
     /// second.</summary>
@@ -4065,7 +4115,9 @@ public sealed class TankTick
         // round going into the field, and the point is Vehicle.Roof. The
         // solution is still asked for and still able to refuse: an unmeasured
         // hull is one this tick has no idea how to hit, whichever way up.
-        float arc = Arc(shooter, victim.Cell);
+        float arc = shooter.Profile.Lobs
+            ? Arc(shooter, victim.Cell)
+            : BowOnto(shooter, shot.Muzzle, victim.Spot(shot.Impact));
         // <b>The class, not the apex.</b> Every gun now lays above its own line
         // of sight, so an apex says only that the round is bent; what decides
         // that it comes down on a deck with no plate under it is whose gun it
@@ -4193,6 +4245,19 @@ public sealed class TankTick
             }
         }
         float lift = shooter.LiftOf(from);
+        // <b>And it comes down on the hex it was sent to, not at the height it
+        // left.</b> Both ends used to carry the muzzle's own lift, under the
+        // words "a tank gun is level" - true while the board was, and a round
+        // ordered into a hex a level down then flew flat and burst in the air
+        // over it. The walk above stays level and deliberately so: what blocks a
+        // lane is a rule about cells - see Track - and not about where the shell
+        // happens to be as it passes.
+        float landing = Field is not null && at is Vector2I bit
+            ? Field.TopAt(bit) : lift;
+        float bow = shooter.Profile.Lobs
+            ? arc
+            : BowOnto(shooter, from,
+                      from + dir * run + new Vector2(0.0f, lift - landing));
         Send(shooter, new Shell
         {
             Shooter = shooter,
@@ -4206,7 +4271,7 @@ public sealed class TankTick
             // is the one assumption the walk itself is written under - see Track,
             // which blocks the line with a single comparison for exactly this
             // reason.
-            GroundLift = lift,
+            GroundLift = landing,
             From = from,
             FromLift = lift,
             // The armour half, written blank rather than left to default: there is
@@ -4219,7 +4284,7 @@ public sealed class TankTick
             BoreMiss = 0.0f,
             Calibre = Ordnance.At(Calibre),
             Level = 0,
-            Apex = arc,
+            Apex = bow,
         });
     }
 
