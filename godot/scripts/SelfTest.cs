@@ -437,7 +437,47 @@ public static class SelfTest
                 double straight = through.Count > 1
                     ? Apart(through[0], through[1]) : 180.0;
                 PutBack();
+                // And the plates with no axis to turn on to. The front and the
+                // rear spend the round - Gunnery.Deflect's -1 - and the rules do
+                // not stop there: it "уходит вверх". That used to be the absence
+                // of a second leg, so the tracer stopped dead inside the hull it
+                // hit while the fan of spall was already going up off the same
+                // plate. The side is found by asking Deflection rather than by
+                // naming a face, because that is the one statement of the rule.
+                int swallows = -1;
+                for (int i = 0; i < 6 && swallows < 0; i++)
+                    if (mark.Deflection(HexField.EdgeHeadings[i]) < 0)
+                        swallows = i;
+                int cratered = 0;
+                flight.Landed = _ => cratered++;
+                (List<Shell> skyLegs, bool _) = swallows < 0
+                    ? (new List<Shell>(), false)
+                    : Flown(() => play.Ricochet(gun, mark, swallows));
+                flight.Landed = null;
+                Vector2 climb = skyLegs.Count > 1
+                    ? skyLegs[1].To - skyLegs[1].From : Vector2.Zero;
+                PutBack();
                 deck.QueueFree();
+                Check("a round the front or the rear swallowed leaves straight up",
+                    swallows >= 0 && skyLegs.Count == 2 && skyLegs[1].Skyward
+                    && Mathf.Abs(climb.X) < 1e-3f && climb.Y < 0.0f,
+                    swallows < 0
+                        ? $"no plate of {mark.Tag} swallows a round at all - the "
+                          + "front and the rear are what Gunnery.Deflect answers "
+                          + "-1 for, and without one this claim is untested"
+                        : $"{skyLegs.Count} rounds, the second skyward "
+                          + $"{(skyLegs.Count > 1 && skyLegs[1].Skyward)} and climbing "
+                          + $"{climb} - board height is minus y, so straight up is "
+                          + "x of nought and y below it");
+                // And it ends in the air, which is the whole of what the flag is
+                // for: every other round with no target lands and the board makes
+                // a crater and a burst of it, and this one would put them a few
+                // cells above the tank.
+                Check("and it leaves the board rather than landing on it",
+                    swallows < 0 || cratered == 0,
+                    $"the board was told a round landed {cratered} time(s) - see "
+                    + "Shell.Skyward, and TankTick.Strike, which is where the "
+                    + "arrival picture is skipped");
                 // Two rounds out of one trigger, and the second one starts at
                 // the tank the first hit. Measured as a distance rather than as
                 // a cell, because what it is a claim about is where the tracer
@@ -7329,20 +7369,59 @@ public static class SelfTest
         {
             Vehicle mark = vehicles[0];
             string plate = mark.Atlas.HitFaces[0];
+            // <b>The mirror is asserted on a plate that has one</b>, which is a
+            // side and nothing else: the front and the rear swallow the round -
+            // Gunnery.Deflect - and since the picture reads that same sentence
+            // these two checks on HitFaces[0] were asserting the mirror against
+            // the one plate that no longer takes it. See the pair below, which is
+            // what that plate does instead.
+            string turns = mark.Atlas.HitFaces.FirstOrDefault(
+                f => f is "left" or "right") ?? plate;
+            double faces = mark.Sprite.HullFacing + mark.Atlas.HitBearing(turns);
             double outward = mark.Sprite.HullFacing + mark.Atlas.HitBearing(plate);
-            Vector2 square = mark.Graze(plate, 0.0f, 0.0f, outward).Away;
+            Vector2 square = mark.Graze(turns, 0.0f, 0.0f, faces).Away;
             Check("a round arriving square on goes straight back at the shooter",
-                square.DistanceTo(mark.Atlas.GroundDirection(outward)) < 1e-4f,
+                square.DistanceTo(mark.Atlas.GroundDirection(faces)) < 1e-4f,
                 $"{square} against the plate's own outward "
-                + $"{mark.Atlas.GroundDirection(outward)} - the mirror is "
+                + $"{mark.Atlas.GroundDirection(faces)} - the mirror is "
                 + "2*outward - from, and this is the cell of it anybody can check");
-            Vector2 thrown = mark.Graze(plate, 0.0f, 0.0f, outward + 55.0).Away;
+            Vector2 thrown = mark.Graze(turns, 0.0f, 0.0f, faces + 55.0).Away;
             Check("and a glancing one leaves as far the other side of the normal",
                 thrown.DistanceTo(
-                    mark.Atlas.GroundDirection(outward - 55.0)) < 1e-4f,
+                    mark.Atlas.GroundDirection(faces - 55.0)) < 1e-4f,
                 $"arriving 55 degrees off the normal it left along {thrown} rather "
-                + $"than {mark.Atlas.GroundDirection(outward - 55.0)} - a fan that "
+                + $"than {mark.Atlas.GroundDirection(faces - 55.0)} - a fan that "
                 + "does not swing with the shot is a fan that says nothing");
+            // <b>And the plates that have no mirror throw everything straight up,
+            // out of the same method that decides where the round flies.</b> The
+            // rules spend a non-penetrating hit on the glacis and on the rear -
+            // "уходит вверх" - and until this the flight obeyed that while the
+            // picture took the mirror anyway, so a round the rules had sent up the
+            // sky was drawn coming back out of the front plate at the gun. Asserted
+            // against Deflection rather than against a list of face names, because
+            // a second list is the way the two halves start disagreeing again.
+            bool upward = true, agrees = true;
+            foreach (string face in mark.Atlas.HitFaces)
+                for (int step = 0; step < 24; step++)
+                {
+                    double from = mark.Sprite.HullFacing + step * 360.0 / 24.0;
+                    bool swallowed = mark.Deflection(face, from) < 0;
+                    Vector2 went = mark.Graze(face, 0.0f, 0.0f, from).Away;
+                    if (swallowed)
+                        upward &= went == Vehicle.Spent;
+                    else
+                        agrees &= went != Vehicle.Spent;
+                }
+            Check("a plate that swallows the round throws its spall straight up",
+                upward,
+                $"{Vehicle.Spent} is what Gunnery.Deflect's -1 looks like as a "
+                + "picture, and a mirror there draws a spent round coming back "
+                + "out of the armour at the shooter");
+            Check("and a plate that turns it does not",
+                agrees,
+                "the vertical is the swallowed case alone - a side that answered "
+                + "it would be a ricochet with no direction in it, which is the "
+                + "whole of what this effect draws");
             Check("and the impact point is the plate's own, not a second"
                   + " measurement of it",
                 mark.Graze(plate, 0.2f, -0.1f, outward).Plate

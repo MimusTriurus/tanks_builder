@@ -26,6 +26,17 @@ namespace TankSpriteTest;
 /// throws it back at the shooter, which is the whole of why the effect is worth
 /// drawing rather than a puff at the point of contact.
 ///
+/// <b>And on the front and the rear that direction is straight up, because the
+/// rules say the round is spent there.</b> Only a side turns a shot on
+/// (<see cref="Gunnery.Deflect"/>); the glacis and the plate behind the engine
+/// swallow it and it "уходит вверх". So <see cref="Vehicle.Spent"/> comes back
+/// instead of a mirror, and the fan, the dust and the deflected streak all climb
+/// off the plate rather than leaving across the board - one rule, one picture,
+/// where the flight and the picture used to read the same sentence two ways. It
+/// is also the tallest thing this model can produce: straight up the screen
+/// loses nothing to the projection, so the reach stays whole and the cone stays
+/// shut. See <see cref="Bounds"/> and <see cref="Tall"/>.
+///
 /// <b>Specular, and the cone is what pays for that being a simplification.</b> A
 /// real shot does not mirror: it digs in, slides up the slope and leaves closer
 /// to the plate's tangent than a mirror would. The departure is inside the fan's
@@ -107,9 +118,18 @@ public sealed partial class ProcSpall : Node3D
     /// asserts the quad against it at every heading of every plate of every tank
     /// - which is also the only way the impact point's own reach gets measured,
     /// since the fan starts up on the armour rather than at the seat.
+    ///
+    /// <b>The height is the round the front plate swallowed, and it is a third of
+    /// the quad.</b> <see cref="Vehicle.Spent"/> sends that shot straight up the
+    /// screen at full length - no bearing does that, see <see cref="Bounds"/> -
+    /// and the deflected streak alone then climbs <c>bolt_far</c> x 1.15 of the
+    /// reach with the rake on top of it. Measured, the model went from 1.392 of a
+    /// tile up to 1.649 the day the front and the rear stopped taking the mirror,
+    /// so this grew with them. The width did not: the vertical spends its spread
+    /// across and reaches 1.396, which is what the bearings already asked for.
     /// </summary>
     public float Flank = 1.55f;
-    public float Tall = 1.50f;
+    public float Tall = 1.75f;
 
     /// <summary>How far above the contact point the effect is seated, and the
     /// band it fades out over below that - the burst frame's own <c>root</c> pair
@@ -181,23 +201,11 @@ public sealed partial class ProcSpall : Node3D
             up = MathF.Max(up, MathF.Abs(at.Y) + pad);
         }
 
-        // Swept over the reflection's own bearing, a degree at a time, because
-        // that is the one parameter the whole model turns on and the two things
-        // it decides pull against each other: a ricochet going away from the
-        // camera has the shortest reach on screen and the widest cone, and the
-        // furthest anything gets is somewhere in between. Bounded family by
-        // family instead, the two would have been allowed to be at their worst
-        // at once - which is a quad half again too tall for a fan that cannot
-        // reach the top of it.
-        for (int deg = 0; deg <= 90; deg++)
+        // One direction the model can be aimed in, at the worst every family can
+        // do along it. Its own function rather than a loop body because there is
+        // a direction that is not a bearing: see the vertical below.
+        void Along(Vector2 away, float squat)
         {
-            double th = deg * Math.PI / 180.0;
-            // AtlasSet.GroundDirection, flipped into the quad's frame and clamped
-            // at the horizon - Aim's two lines, and the only copy of them.
-            var flat = new Vector2((float)Math.Cos(th),
-                                   (float)(Math.Sin(th) * Squashed));
-            float squat = flat.Length();
-            Vector2 away = squat < 1e-6f ? Vector2.Right : flat / squat;
             var side = new Vector2(-away.Y, away.X);
             float cone = Uniform("shard_cone") * (1.0f + (1.0f - squat) * open);
             // The floor under the reach, which is the shared frame's own - see
@@ -230,6 +238,36 @@ public sealed partial class ProcSpall : Node3D
                   + new Vector2(0.0f, Uniform("grain_seat")
                                       + Uniform("grain_hop") - plate.Y), grainR);
         }
+
+        // Swept over the reflection's own bearing, a degree at a time, because
+        // that is the one parameter the whole model turns on and the two things
+        // it decides pull against each other: a ricochet going away from the
+        // camera has the shortest reach on screen and the widest cone, and the
+        // furthest anything gets is somewhere in between. Bounded family by
+        // family instead, the two would have been allowed to be at their worst
+        // at once - which is a quad half again too tall for a fan that cannot
+        // reach the top of it.
+        for (int deg = 0; deg <= 90; deg++)
+        {
+            double th = deg * Math.PI / 180.0;
+            // AtlasSet.GroundDirection, flipped into the quad's frame and clamped
+            // at the horizon - Aim's two lines, and the only copy of them.
+            var flat = new Vector2((float)Math.Cos(th),
+                                   (float)(Math.Sin(th) * Squashed));
+            float squat = flat.Length();
+            Along(squat < 1e-6f ? Vector2.Right : flat / squat, squat);
+        }
+
+        // <b>And straight up, which is no bearing at all and is the tallest thing
+        // the model can produce.</b> A round the front or the rear plate swallowed
+        // leaves along <see cref="Vehicle.Spent"/> rather than along a mirror, and
+        // the sweep above cannot reach that case: a ground direction is only ever
+        // vertical on screen when it points into the board, where the projection
+        // has taken half its length off (squat 0.5) and cone_open has opened the
+        // fan to make up for it. This one keeps its whole reach and its narrow
+        // cone, so the deflected round alone climbs 2.05 x 1.15 of the fan's reach
+        // and the quad is a third taller than the bearings alone would ask for.
+        Along(new Vector2(0.0f, 1.0f), 1.0f);
 
         // Everything above is an offset from the point of impact, and the quad is
         // measured from the seat.

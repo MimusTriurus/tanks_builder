@@ -427,9 +427,12 @@ public sealed class Playback
             if (axis < 0)
             {
                 // The front or the rear: the round is spent on the plate and
-                // there is no second leg to catch. Said out loud, because a
-                // button that quietly does nothing reads as a broken one.
-                Todo?.Invoke("no bounce off the front or the rear", victim, null);
+                // goes up the sky instead of down an axis - TankTick.Skyward -
+                // so there is a second leg and nothing on the board can be
+                // standing in its way. Said out loud all the same, because this
+                // step is the one that parks a catcher and here it parks none.
+                Todo?.Invoke("the front and the rear send it up - nothing to "
+                             + "catch a round leaving the board", victim, null);
                 return;
             }
             Vector2 dir = Field.Atlas.GroundDirection(axis);

@@ -4052,7 +4052,13 @@ public sealed class TankTick
         {
             // Whatever the board makes of a round that went into it. Unanswered,
             // the shot goes into the field exactly as it did - see Landed.
-            Landed?.Invoke(round);
+            //
+            // <b>Except the one round that never reaches the board</b>: a shot
+            // the front or the rear plate spent leaves upward and its path ends
+            // in the air, so the burst and the crater that every other loose
+            // round earns would be a hole in the sky - see Shell.Skyward.
+            if (!round.Skyward)
+                Landed?.Invoke(round);
             return;
         }
         Land(round.Target, round.Face, round.Scatter, round.Rise, round.Calibre,
@@ -4142,12 +4148,17 @@ public sealed class TankTick
             leaves = hit.Plated(hit.Atlas.FaceFor(onward, hull),
                                 -round.Scatter, round.Rise);
         }
-        // A plate that swallows the round rather than turning it - the front and
-        // the rear, and it is the rules' answer rather than a failure.
-        if (axis < 0)
-            return;
         Vector2 from = hit.Spot(leaves);
         float lift = hit.LiftOf(from);
+        // A plate that swallows the round rather than turning it - the front and
+        // the rear - and the rules do not stop there: the shot "уходит вверх".
+        // So it leaves, straight up out of the plate it hit, and the leg that
+        // used to be missing is the one the picture was drawn for. See Skyward.
+        if (axis < 0)
+        {
+            Skyward(round, from, lift);
+            return;
+        }
         Vector2 dir = Field.Atlas.GroundDirection(axis);
         if (dir.LengthSquared() < 1e-6f)
             return;
@@ -4183,6 +4194,79 @@ public sealed class TankTick
             Level = 0,
         });
     }
+
+    /// <summary>
+    /// The leg a swallowed round flies: straight up the screen, out of the plate
+    /// that spent it, and off the board.
+    ///
+    /// <b>The rules' own sentence drawn rather than assumed.</b> Only a side
+    /// turns a shot on - <see cref="Gunnery.Deflect"/>, whose -1 is the front and
+    /// the rear - and what a spent round does there is go up. Until this the -1
+    /// was the <em>absence</em> of a second leg, so the tracer stopped dead
+    /// inside the hull it hit while <see cref="Vehicle.Spent"/> was already
+    /// sending the fan of spall up off the same plate: the picture said the round
+    /// left and the round did not.
+    ///
+    /// <b>Up the screen in board space, which is where the shell's own path
+    /// lives.</b> <see cref="Shell.PointAt"/> lerps two board points, and this
+    /// board's height is minus y and nothing else - the same convention
+    /// <see cref="Vehicle.LiftOf"/> is quoted in. So the far end is the plate
+    /// with <see cref="SpentRise"/> cells taken off its y, the lift is the
+    /// plate's own at both ends, and there is no apex: a round leaving straight
+    /// up is not on an arc, it is on a line, and the tangent
+    /// (<see cref="Shell.Heading"/>) therefore points the streak up as well.
+    ///
+    /// <b>No walk, because there is nothing along it to walk.</b>
+    /// <see cref="Reach"/> answers what a round crosses <em>on the board</em>;
+    /// this one leaves the board, so no hull, wall or rise can stop it and the
+    /// run is a fixed distance rather than a measured one. Nothing is blocked,
+    /// nobody is hit, and <see cref="Shell.Skyward"/> is what keeps the end of
+    /// the path from being drawn as a landing.
+    /// </summary>
+    private void Skyward(Shell round, Vector2 from, float lift)
+    {
+        float tile = Field?.Atlas is null ? 1.0f : Field.Atlas.HexRect.Size.X;
+        Send(round.Shooter, new Shell
+        {
+            Shooter = round.Shooter,
+            Target = null,
+            Blocked = null,
+            // What keeps the far end from becoming a crater in the sky.
+            Skyward = true,
+            Ammo = round.Ammo,
+            Ground = from - new Vector2(0.0f, SpentRise * tile),
+            // The plate's own at both ends: the climb is in the board point, and
+            // stating it twice would be the round rising and its shadow's datum
+            // rising with it.
+            GroundLift = lift,
+            From = from,
+            FromLift = lift,
+            // The armour half means nothing on this one - see Shell.Target.
+            ImpactLocal = Vector2.Zero,
+            Serial = 0,
+            Face = "",
+            Scatter = 0.0f,
+            Rise = 0.0f,
+            BoreMiss = 0.0f,
+            // The calibre the round left the gun with: it is the same shell.
+            Calibre = round.Calibre,
+            Level = 0,
+        });
+    }
+
+    /// <summary>
+    /// How far up a spent round climbs before the drawing stops, in cells.
+    ///
+    /// <b>Quoted in cells and generous, because what it has to clear is the
+    /// window rather than a distance.</b> A round going up is a round leaving,
+    /// and the only thing the far end decides is where the streak stops being
+    /// drawn - so it has to be past the top of the view at the zoom the board is
+    /// usually watched at. Four cells is about a thousand pixels, which at
+    /// <see cref="Shell.Speed"/> is two thirds of a second of climb: long enough
+    /// to read as a round departing, short enough that the smoke it leaves is
+    /// gone inside the second and a half a hit already takes.
+    /// </summary>
+    public const float SpentRise = 4.0f;
 
     /// <summary>
     /// What a round that flew on does to the next tank, when the rules left the

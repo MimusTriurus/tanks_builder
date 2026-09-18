@@ -506,6 +506,29 @@ public sealed partial class Shell : Node2D
     public Onward Goes { get; init; } = Onward.Stops;
 
     /// <summary>
+    /// Whether this leg is the round leaving the board upward - the front or the
+    /// rear plate having spent it.
+    ///
+    /// <b>The rules' "уходит вверх" as a round in the air rather than as a
+    /// nothing.</b> Only a side turns a shot on
+    /// (<see cref="Gunnery.Deflect"/>); the glacis and the rear plate swallow
+    /// it, and until this that answer was the absence of a second leg - the
+    /// tracer simply stopped inside the hull it hit. What the rules say happens
+    /// is that the shot goes up, so it goes up: <see cref="TankTick.Carry"/>
+    /// sends it straight up the screen out of the plate it hit.
+    ///
+    /// <b>What the flag is for is the arrival, which this one does not have.</b>
+    /// Every other round with no target lands on the board and the board makes
+    /// a crater and a burst of it (<see cref="TankTick.Landed"/>). This one ends
+    /// in the air, and drawn the ordinary way it would put a burst of earth a
+    /// few cells above the tank - so the end of the path is where the drawing
+    /// stops and nothing else. Its own flag rather than "a target of null with
+    /// no ground under it", because the ground is what every other loose round
+    /// has and is not a thing worth inferring.
+    /// </summary>
+    public bool Skyward { get; init; }
+
+    /// <summary>
     /// The outcome waiting for the second leg, or null for "ask the classes".
     ///
     /// Null by default and null is the rules' own answer for a ricochet: the

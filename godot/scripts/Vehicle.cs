@@ -688,17 +688,47 @@ public sealed class Vehicle
     /// <see cref="ProcSpall"/> - so stating it here would be a second statement
     /// of a spread the effect already has.
     ///
+    /// <b>A plate that swallows the round has no mirror, and what it has instead
+    /// is <see cref="Spent"/>.</b> Only a side turns a round on - the rules'
+    /// sentence, stated once in <see cref="Gunnery.Deflect"/>, whose answer for
+    /// the front and the rear is that the shot is spent and "уходит вверх". That
+    /// sentence used to govern only where the round <em>flew</em>
+    /// (<see cref="Deflection"/>, <c>TankTick.Carry</c>) while the picture went
+    /// on taking the mirror, so a round the rules had sent up the sky was drawn
+    /// coming back out of the glacis at the gun that fired it. Asked of the same
+    /// method here, so the two cannot disagree.
+    ///
     /// <c>Away</c> is unnormalised for <see cref="Bore"/>'s reason: it is
     /// <see cref="AtlasSet.GroundDirection"/>, whose length is the share of a
-    /// ground length that survived the projection.
+    /// ground length that survived the projection - and <see cref="Spent"/> is a
+    /// named vertical for the reason <c>TankTick</c>'s overhead round has one:
+    /// straight up the screen loses nothing to the projection, so its length is
+    /// 1 by construction rather than by measurement.
     /// </summary>
     public (Vector2 Plate, Vector2 Away) Graze(string face, float scatter,
                                                float rise, double from)
     {
         double outward = Sprite.HullFacing + Atlas.HitBearing(face);
         return (Plated(face, scatter, rise),
-                Atlas.GroundDirection(Angles.Mod(2.0 * outward - from, 360.0)));
+                Deflection(face, from) < 0
+                    ? Spent
+                    : Atlas.GroundDirection(Angles.Mod(2.0 * outward - from,
+                                                       360.0)));
     }
+
+    /// <summary>Where a round a plate swallowed goes: straight up the screen, at
+    /// full length.
+    ///
+    /// <b>Screen space, because that is the space <see cref="Graze"/> answers
+    /// in</b> - y points down there, so up is negative, and
+    /// <see cref="ProcSpall.Aim"/> flips it into the quad's own frame along with
+    /// every measured direction. Named rather than written at the one place that
+    /// returns it, because the quad has to be able to hold it:
+    /// <see cref="ProcSpall.Bounds"/> sweeps the ground bearings and this
+    /// direction is not one of them - full reach with the cone unopened is the
+    /// tallest thing the model can produce, and it is half again the tallest
+    /// bearing.</summary>
+    public static readonly Vector2 Spent = new(0.0f, -1.0f);
 
     /// <summary>
     /// Where a round burst on this hull, and which way the plate it burst on
