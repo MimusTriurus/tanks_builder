@@ -12232,63 +12232,45 @@ public static class SelfTest
                     + $"{Gunnery.SuperDeg(5):F2} deg at one, three, five cells; "
                     + $"mortar {Gunnery.LobDeg(3):F0}/{Gunnery.LobDeg(5):F0} - "
                     + "one range, two roots, opposite slopes");
-                // And it stays flat: the bow a tank gun draws is pixels against
-                // a mortar's hundreds, which is the whole reason one of them
-                // needs a shadow under it and the other does not.
+                // And the board half of a tank gun's arc is nothing at all,
+                // against a mortar's hundreds of pixels: the flat round is bent
+                // by where its muzzle stands and not by the angle the rules gave
+                // it, which is the difference between the two machines stated in
+                // the one expression they share.
                 float gunBow = Gunnery.ApexPx(MovementProfile.Medium, 5, 0, grade,
                                               215.0f, 0.866f);
                 float bombBow = Gunnery.ApexPx(MovementProfile.Mortar, 5, 0, grade,
                                                215.0f, 0.866f);
                 Check("and its arc is a bow rather than a lob",
-                    gunBow > 1.0f && gunBow < 40.0f && bombBow > 8.0f * gunBow,
+                    gunBow == 0.0f && bombBow > 100.0f,
                     $"{gunBow:F1}px over a five-cell chord against the mortar's "
-                    + $"{bombBow:F0}px - flat as it can be and still be laid");
-                // The tube is laid above the target and not on it, so the two
-                // angles part company; asserting the pair is what stops a later
-                // tidy-up from quietly laying the gun on the sight again.
-                Check("a laid gun points above what it is shooting at",
-                    Gunnery.LayDeg(MovementProfile.Medium, 4, 0, grade)
-                        > Gunnery.SightDeg(4, 0, grade)
-                    && Math.Abs(Gunnery.LayDeg(MovementProfile.Medium, 4, 1, grade)
-                                - (Gunnery.SightDeg(4, 1, grade)
-                                   + Gunnery.SuperDeg(4))) < 1e-9,
-                    $"level ground at four cells: sight "
-                    + $"{Gunnery.SightDeg(4, 0, grade):F2}, tube "
-                    + $"{Gunnery.LayDeg(MovementProfile.Medium, 4, 0, grade):F2} - "
-                    + "and up a level the two simply add");
-                // <b>And downhill it points at it and not over it</b>, which is
-                // the one direction where the lift and the drop are the same
-                // size. SuperDeg is calibrated for the eye at flat range -
-                // 4.76 degrees at five cells - and the steepest depression this
-                // board can ask for at that range is 2.86, so added there the
-                // tube came out above the horizon on a shot a level *down*: at
-                // four and five cells its bore passed 33 to 87 screen px over
-                // the hull it was firing at. Asserted as an identity with the
-                // sight rather than as an inequality, because the rule is that
-                // the two are one number, and because an inequality would still
-                // pass with a lift small enough to hide and large enough to
-                // come back.
+                    + $"{bombBow:F0}px - a direct gun is laid on its own sight, "
+                    + "so the board bends it by nothing and the bore by "
+                    + "everything");
+                // <b>A direct gun points at what it is shooting, at every range
+                // and every level.</b> It used to point above it by SuperDeg, an
+                // authored 4.764 degrees at five cells, and that lifted the tube
+                // a rung or two with the *range* on level ground - a gun visibly
+                // elevating for a target it was looking straight at - and fought
+                // the depression downhill, where the two are the same size and
+                // the lift won from three cells out.
                 //
-                // Every downhill range the board holds, not one sample: the
-                // failure was range-dependent - right at one cell, wrong at
-                // four - so a single cell count is the shape of check that let
-                // it in.
-                bool downhillFlat = true;
+                // Every range and both signs of level, not a sample: the failure
+                // it replaces was range-dependent, right at one cell and wrong at
+                // four, so one cell count is the shape of check that let it in.
+                bool onSight = true;
                 for (int cells = 1; cells <= Gunnery.LobReach; cells++)
-                    for (int down = -1; down >= -2; down--)
-                        downhillFlat &= Math.Abs(
-                            Gunnery.LayDeg(MovementProfile.Medium, cells, down,
+                    for (int levels = -2; levels <= 2; levels++)
+                        onSight &= Math.Abs(
+                            Gunnery.LayDeg(MovementProfile.Medium, cells, levels,
                                            grade)
-                            - Gunnery.SightDeg(cells, down, grade)) < 1e-9;
-                Check("and shooting downhill it points at it",
-                    downhillFlat
-                    && Gunnery.ApexPx(MovementProfile.Medium, 4, -1, grade,
-                                      215.0f, 0.866f) == 0.0f,
-                    "four cells one level down: sight "
-                    + $"{Gunnery.SightDeg(4, -1, grade):F2}, tube "
-                    + $"{Gunnery.LayDeg(MovementProfile.Medium, 4, -1, grade):F2}"
-                    + $", arc {Gunnery.ApexPx(MovementProfile.Medium, 4, -1, grade, 215.0f, 0.866f):F1}px"
-                    + " - a direct gun is its own line of sight");
+                            - Gunnery.SightDeg(cells, levels, grade)) < 1e-9;
+                Check("a laid gun points at what it is shooting at",
+                    onSight,
+                    "level ground at four cells: sight "
+                    + $"{Gunnery.SightDeg(4, 0, grade):F2}, tube "
+                    + $"{Gunnery.LayDeg(MovementProfile.Medium, 4, 0, grade):F2}"
+                    + " - and the same up a level and down one");
             }
             // Whose round it is. The list was the harness's, so a bench with a
             // tank on it had a gun that only flashed - the whole flight lived in

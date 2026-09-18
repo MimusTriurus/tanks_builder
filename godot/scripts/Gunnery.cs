@@ -657,47 +657,54 @@ public static class Gunnery
     {
         if (gun.Lobs)
             return LobDeg(cells);
-        double sight = SightDeg(cells, levels, grade);
-        // <b>Downhill the tube is the line of sight and nothing is added to
-        // it.</b> The superelevation below is sized for the eye at flat range -
-        // 4.764 degrees at five cells - while the whole depression this board
-        // can ask for is 2.86 degrees at that range. So on a shot one level down
-        // the two are the same size and the lift wins from three cells out: the
-        // gun was drawn level at three and pointing visibly *above* a target a
-        // level below it at four and five, its bore passing 33 to 87 screen px
-        // over the hull it was about to hit. What reconciled them was the arc,
-        // and the arc is the same arithmetic read the other way - 8 to 22 px of
-        // sag on a chord of eight hundred, which is a straight line to anybody
-        // watching. Two right answers and a wrong picture.
+        // <b>The tube is the line of sight and nothing is added to it.</b>
+        // <see cref="SuperDeg"/> below is the real superelevation and it is a
+        // fraction of a degree at every range this board holds; what used to be
+        // drawn was SuperAtReach, an authored 4.764 degrees at five cells,
+        // chosen so that the tube was not drawn level and the round not drawn
+        // as a straight line. It bought that at two prices. On the flat it lifted
+        // the tube a rung or two <em>with the range</em>, so a gun firing across
+        // level ground visibly elevated for a target it was looking straight at.
+        // And downhill it fought the depression, which on this board is its own
+        // size - 2.86 degrees at five cells against the lift's 4.76 - and won
+        // from three cells out: the gun came out level at three and pointing
+        // <em>above</em> a target a level below it at four and five, its bore
+        // passing 33 to 87 screen px over the hull it was about to hit.
         //
-        // <b>Clamped rather than rescaled, because the clamp is the rule.</b> A
-        // direct gun points at what it is shooting. A real one still carries a
-        // little lift downhill, but less the steeper the drop, and here "less"
-        // is a fraction of a degree at every range the board holds - smaller
-        // than the gap between two rungs, so it would be snapped away in the
-        // drawing and paid for in a second calibration. Rescaling SuperDeg by
-        // the slant range would also move every flat shot, and the flat shots
-        // are the ones SuperAtReach was measured for.
+        // <b>What it was buying is now bought by the geometry.</b> A gun stands
+        // above what it shoots at, so the line from its muzzle to a plate is
+        // steeper than its own bore whatever the board does, and the round
+        // leaves flat and falls on to it - <see cref="BowOnto"/>, eleven px of
+        // bow over a two-cell chord on level ground. The round has looked thrown
+        // since that landed, and it looks thrown for a reason that is measured
+        // rather than calibrated. So the authored degree goes, and this reduces
+        // to the sentence it always claimed to be: a direct gun points at what
+        // it is shooting.
         //
-        // Uphill is untouched: there the lift and the sight pull the same way
-        // and the tube points over the target the way a gun does.
-        //
-        // <b>And the arc follows for free.</b> ApexPx is
-        // D(tan lay - tan sight)/4 and the two angles are now one number, so a
-        // downhill shot comes out flat by arithmetic - the same way a level
-        // board always was.
-        return levels < 0 ? sight : sight + SuperDeg(cells);
+        // <b>And the arc follows for free.</b> ApexPx is D(tan lay - tan sight)/4
+        // over two angles that are now one number, so the board half of the arc
+        // is nought for every direct shot and the whole of the bow comes from
+        // the bore. One place, and it is the place that can be seen.
+        return SightDeg(cells, levels, grade);
     }
 
     /// <summary>
-    /// The flattest lift that still reads on this board, in degrees - what a
-    /// direct gun stands at for its longest shot.
+    /// The flattest lift that still reads on this board, in degrees.
     ///
-    /// <b>Authored, and the one number here that is.</b> A real tank gun at
-    /// three to five hexes needs a fraction of a degree of superelevation; drawn
-    /// at that, the tube is level and the round is a straight line, which is the
-    /// picture this was written to replace. So the calibration is chosen for the
-    /// eye and then the equation is honest about everything else - which is the
+    /// <b>No longer laid on, and kept because it is the calibration the range
+    /// equation still runs on.</b> <see cref="LayDeg"/> drew this once, on the
+    /// argument that a real tank gun's superelevation at three to five hexes is
+    /// a fraction of a degree and a tube drawn at that is a tube drawn level.
+    /// The argument was sound and the answer was not: an authored 4.764 degrees
+    /// lifted the tube a rung or two with the <em>range</em> on level ground and
+    /// fought the depression downhill, and what it was for - a round that does
+    /// not read as a straight line - now comes out of where the muzzle actually
+    /// is (<see cref="BowOnto"/>). What still reads this is
+    /// <see cref="DirectReach"/>, hence <see cref="SuperDeg"/>, hence the one
+    /// number that says what a flat gun and a mortar are two roots of.
+    ///
+    /// The calibration is chosen for the eye and then the equation is honest
+    /// about everything else - which is the
     /// same bargain the mortar's table makes, in the other direction.
     ///
     /// <b>4.764 rather than a round number, because it is a rung.</b> The tube
@@ -745,6 +752,11 @@ public static class Gunnery
     /// Nought at the muzzle end of the board by rounding rather than by a rule:
     /// at one cell the answer is under a degree, and the nearest thing the tube
     /// was rendered in is level.
+    ///
+    /// <b>Not laid on any more</b> - see <see cref="SuperAtReach"/>. It is what
+    /// a direct gun's lift <em>is</em>, which is the figure the mortar's throw
+    /// is held against, and it is small enough that drawing it was never the
+    /// thing that made a round look thrown.
     /// </summary>
     public static double SuperDeg(int cells) =>
         cells <= 0 ? 0.0

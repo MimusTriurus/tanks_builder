@@ -4118,10 +4118,11 @@ public sealed class TankTick
         float arc = shooter.Profile.Lobs
             ? Arc(shooter, victim.Cell)
             : BowOnto(shooter, shot.Muzzle, victim.Spot(shot.Impact));
-        // <b>The class, not the apex.</b> Every gun now lays above its own line
-        // of sight, so an apex says only that the round is bent; what decides
-        // that it comes down on a deck with no plate under it is whose gun it
-        // is - see Shell.Overhead, which is where that cost is written down.
+        // <b>The class, not the apex.</b> Every gun bends its round now - a flat
+        // one by the height of its own muzzle, see BowOnto - so an apex says
+        // only that the round is bent; what decides that it comes down on a deck
+        // with no plate under it is whose gun it is - see Shell.Overhead, which
+        // is where that cost is written down.
         bool over = shooter.Profile.Lobs;
         Send(shooter, new Shell
         {
