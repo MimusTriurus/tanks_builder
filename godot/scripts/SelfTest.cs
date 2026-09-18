@@ -588,14 +588,13 @@ public static class SelfTest
             // here is the other two, and above all that both take TIME: a ring that
             // arrives in one frame is the same picture as a ring that never moved,
             // and twenty-four rendered bearings exist to show the difference.
-            Vehicle? swung = null, casemate = null;
+            Vehicle? swung = null;
             foreach (Vehicle v in vehicles)
-            {
-                if (swung is null && v.Profile.Turreted)
+                if (v.Profile.Turreted)
+                {
                     swung = v;
-                if (casemate is null && !v.Profile.Turreted)
-                    casemate = v;
-            }
+                    break;
+                }
             if (swung is not null && field.Atlas is not null)
             {
                 const double ringDt = 1.0 / 60.0;
@@ -732,19 +731,31 @@ public static class SelfTest
                 // A casemate takes no ring order at all - its gun is its hull - and
                 // it has to say so on the frame it is asked, or an event waiting for
                 // a swing that will never come hangs the queue behind it.
-                if (casemate is not null)
+                //
+                // Built here rather than looked for on the board: the harness
+                // parks no casemate, so a check that waited for one to turn up
+                // was a check that never ran. Nothing below drives it, so a hull
+                // off the tree with the right class on it is all the claim needs.
+                var boxed = new Vehicle
                 {
-                    double aimed = casemate.Sprite.TurretFacing;
-                    stow.SwingTo(casemate, HexField.EdgeHeadings[0]);
-                    bool refusedLane = !stow.Swinging(casemate);
-                    stow.SwingForward(casemate);
-                    Check("a casemate takes no ring order, so an event behind one "
-                          + "cannot hang",
-                        refusedLane && !stow.Swinging(casemate)
-                        && casemate.Sprite.TurretFacing == aimed,
-                        $"lane refused {refusedLane}, forward refused "
-                        + $"{!stow.Swinging(casemate)}");
-                }
+                    Tag = "TDP",
+                    Atlas = swung.Atlas,
+                    Sprite = new TankSprite { Atlas = swung.Atlas, Turreted = false },
+                    Profile = MovementProfile.For("TDP"),
+                    HomeCell = swung.Cell,
+                };
+                double aimed = boxed.Sprite.TurretFacing;
+                stow.SwingTo(boxed, HexField.EdgeHeadings[0]);
+                bool refusedLane = !stow.Swinging(boxed);
+                stow.SwingForward(boxed);
+                Check("a casemate takes no ring order, so an event behind one "
+                      + "cannot hang",
+                    !boxed.Profile.Turreted && refusedLane
+                    && !stow.Swinging(boxed)
+                    && boxed.Sprite.TurretFacing == aimed,
+                    $"turreted {boxed.Profile.Turreted}, lane refused "
+                    + $"{refusedLane}, forward refused {!stow.Swinging(boxed)}");
+                boxed.Sprite.QueueFree();
             }
         }
 
