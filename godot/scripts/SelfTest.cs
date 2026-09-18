@@ -393,6 +393,16 @@ public static class SelfTest
                     for (int i = 0; i < 600 && play.Busy; i++)
                     {
                         play.Advance(1.0 / 60.0);
+                        // <b>The tick, because the gun is a mechanism now.</b>
+                        // This loop used to be the queue and the shells, which
+                        // was the whole of a shot while laying took no time.
+                        // Since the tube became an axis with a speed the shot
+                        // waits on Trained, Trained reads TubeDeg, and TubeDeg
+                        // only walks in TankTick.Run - so a loop without it hung
+                        // on the lay for ever and the round was never fired.
+                        // Every scene runs this per frame per tank; so does this.
+                        foreach (Vehicle who in vehicles)
+                            flight.Run(who, 1.0 / 60.0);
                         flight.Fly(1.0 / 60.0);
                         foreach (Shell round in gun.Rounds)
                             if (!made.Contains(round))
@@ -3615,13 +3625,21 @@ public static class SelfTest
             // So the downward share is ground rather than height.
             Vector3 laid = over.Basis.X;
 
+            // Two clauses and there used to be three. The third read
+            // `-squash*laid.Z + sin(-fallen)`, which is the second multiplied by
+            // -squash and therefore the same statement twice - except that the
+            // sign made it 2*sin(45) instead of nought, so it could not be
+            // satisfied at any turn but zero. Committed red and never true; the
+            // substance is the clause above it, which is green and measures the
+            // thing itself.
             Check("and a trunk on its side lays its width on the ground, not under it",
                 Math.Abs(laid.Y) < 1e-6f
-                && Math.Abs(laid.Z - Mathf.Sin(fallen) / squashed) < 0.01f
-                && Math.Abs(-squashed * laid.Z + Mathf.Sin(-fallen)) < 0.01f,
+                && Math.Abs(laid.Z - Mathf.Sin(fallen) / squashed) < 0.01f,
                 $"a px of width is {laid.Y:F2} of height and {laid.Z:F2} of "
-                + "ground away - the screen offset of the rotation either way, "
-                + "and only the second is in front of the face it is lying on");
+                + $"ground away, against {Mathf.Sin(fallen) / squashed:F2} - the "
+                + "whole of the turn is in front of the face the trunk is lying "
+                + "on, because anything it put under the foot's row the cell "
+                + "would bury");
 
             Check("and a wood nobody felled is drawn exactly as it was",
                 Stage3D.Trunk(planted.Ground, storey, 0.05f, squashed, risen, 0.0f)
@@ -3661,13 +3679,22 @@ public static class SelfTest
                 .All(p => p.Modulate.A == 1.0f);
             bool scatterGhosted = grove.Standing
                 .Where(p => p.Cell == razed && !p.Tier.Carries && p.Fades)
-                .All(p => p.Modulate.A < Grove.GhostByDefault + 0.05f);
+                // <b>Asked of the grove, not of the constant.</b> This read
+                // Grove.GhostByDefault, which stopped being the default anybody
+                // gets when panel.json took over the project's own values
+                // (ground.ghost, 0.65 against the constant's 0.35) - so the
+                // scatter was ghosting exactly as it should, to 0.65, and being
+                // failed against a band drawn round a number nothing uses. The
+                // claim is that the scatter went to the ghost, whatever the
+                // ghost is set to.
+                .All(p => p.Modulate.A < grove.Ghost + 0.05f);
             Check("a wood a bulldozer is standing in does not ghost, and the scatter still does",
                 woodLit && scatterGhosted,
-                "a tree ghosted on the way in and handed back at full strength "
-                + "to fall is a fade that runs backwards - the trunks stay lit "
-                + "and leave once, the bushes go on getting out of the hull's "
-                + "way");
+                $"trunks at [{string.Join(" ", grove.Standing.Where(p => p.Cell == razed && p.Tier.Carries).Select(p => p.Modulate.A.ToString("F2")))}] "
+                + $"wanted 1.00; scatter at [{string.Join(" ", grove.Standing.Where(p => p.Cell == razed && !p.Tier.Carries && p.Fades).Select(p => p.Modulate.A.ToString("F2")))}] "
+                + $"wanted under {grove.Ghost + 0.05f:F2}, the grove's own ghost "
+                + "- a tree ghosted on the way in and handed back at full strength "
+                + "to fall is a fade that runs backwards");
             // And back, so what follows reads the wood the harness sowed.
             grove.Reveal(new HashSet<Vector2I>(), 10.0);
 
@@ -3814,17 +3841,32 @@ public static class SelfTest
                 + $"up to {mostShown:F2} - a trunk removed on the frame it landed "
                 + "is a wood that blinked");
 
-            int sownBefore = grove.Sown;
+            // <b>Counted per frame, because that is what Gather promises.</b>
+            // This used to want one sowing for the whole cell, on the reading
+            // that a cell's worth of trunks goes out together - and it does not:
+            // every trunk fades on its own clock (the bounce, CrownQuiet), so
+            // five trunks finished on five different frames and the stage was
+            // told five times. Told rightly: a frame on which the wood changed
+            // is a frame the billboards have to be rebuilt on, and Gather cannot
+            // know which trunk is last. What it does promise is that a frame
+            // takes the lot in one bump rather than one per prop, and that is
+            // the measurement - the biggest step Sown makes in any one frame.
+            int sownBefore = grove.Sown, was = grove.Sown, biggest = 0;
             for (int f = 0; f < 360; f++)      // six seconds: the slow half
+            {
                 grove.Blow(1.0 / 60.0);
-            Check("and when it has faded it leaves the board, once, with the scatter still on the cell",
+                biggest = Math.Max(biggest, grove.Sown - was);
+                was = grove.Sown;
+            }
+            Check("and when it has faded it leaves the board, with the scatter still on the cell",
                 grove.Standing.All(p => !p.Going)
                 && grove.Standing.Count(p => p.Cell == razed) == scatterThere
-                && grove.Sown == sownBefore + 1,
+                && grove.Sown > sownBefore && biggest == 1,
                 $"{grove.Standing.Count(p => p.Cell == razed)} props left on "
-                + $"{razed} against {scatterThere}, and the stage was told "
-                + $"{grove.Sown - sownBefore} time(s) - it counts sowings, so "
-                + "one cell's worth going out is one change to the wood");
+                + $"{razed} against {scatterThere}; the stage was told "
+                + $"{grove.Sown - sownBefore} time(s) over the fade, at most "
+                + $"{biggest} in any one frame - it counts sowings, and a frame "
+                + "that drops several trunks is one change to the wood");
 
             // And the board's half, which is what makes it ground rather than a
             // cell that happens to have no trees drawn on it.
@@ -7779,18 +7821,31 @@ public static class SelfTest
             // Behavioural, for the burst theme's reason: what has to be true is
             // that Spall puts the fan in its own pool rather than in one of the
             // other three. Fired on the live stage and put back out afterwards.
+            // <b>Counted as a difference, because the other pools are not this
+            // check's to empty.</b> It used to want the three of them idle,
+            // which is a claim about everything the suite did before this line:
+            // five kicks were still burning from an earlier theme and the fan
+            // was failed for them. What this is about is where the fan went, so
+            // it is the pool that gained one - and the three that gained none.
+            int spallWas = stage.Spalling.Count(x => x.Alive);
+            int boomWas = stage.Booming.Count(x => x.Alive);
+            int kickWas = stage.Kicking.Count(x => x.Alive);
+            int slamWas = stage.Slamming.Count(x => x.Alive);
             stage.Spall(stage.Origin, 0.0f, Vector2.Right, Vector2.Zero, false);
-            bool ownPool = stage.Spalling.Any(x => x.Alive)
-                           && !stage.Booming.Any(x => x.Alive)
-                           && !stage.Kicking.Any(x => x.Alive)
-                           && !stage.Slamming.Any(x => x.Alive);
+            int spallNow = stage.Spalling.Count(x => x.Alive);
+            bool ownPool = spallNow > spallWas
+                           && stage.Booming.Count(x => x.Alive) == boomWas
+                           && stage.Kicking.Count(x => x.Alive) == kickWas
+                           && stage.Slamming.Count(x => x.Alive) == slamWas;
             foreach (ProcSpall x in stage.Spalling)
                 x.Douse();
             Check("and it goes in its own pool, six of them, beside the other"
                   + " three",
                 ownPool && stage.Spalling.Count == Stage3D.Bursts
                 && !ReferenceEquals(stage.Spalling, stage.Kicking),
-                $"{stage.Spalling.Count} of {Stage3D.Bursts} - a shared pool is "
+                $"{stage.Spalling.Count} of {Stage3D.Bursts}; the fan took spall "
+                + $"{spallWas} -> {spallNow} and left boom {boomWas}, kick "
+                + $"{kickWas}, slam {slamWas} where they were - a shared pool is "
                 + "one shell's spall cutting another shell's burst short");
             // And the other half of that split, which is the one a ram needs:
             // a collision draws from a ring of its own, and it draws without the
@@ -7988,14 +8043,41 @@ public static class SelfTest
                 $"{mark.Blown(plate, 0.0f, 0.0f).Out} against the plate's own "
                 + $"outward {normal} - the gases go where the metal is not, which "
                 + "is one direction and not two bearings");
+            // <b>Asked of a plate that turns a round, and asked rather than
+            // named.</b> This ran on HitFaces[0], and since the front and the
+            // rear stopped mirroring - they spend the round and it "уходит
+            // вверх", Gunnery.Deflect's -1 and Vehicle.Spent - that plate
+            // answers the vertical to every bearing, so the comparison was
+            // against a direction the rule no longer produces. Only a side
+            // deflects; which face is a side is the model's to say.
+            string? turns = null;
+            double turnOut = 0.0;
+            foreach (string face in mark.Atlas.HitFaces)
+            {
+                double at = mark.Sprite.HullFacing + mark.Atlas.HitBearing(face);
+                if (mark.Deflection(face, at) < 0)
+                    continue;
+                turns = face;
+                turnOut = at;
+                break;
+            }
+            Vector2 turnNormal = turns is null
+                ? Vector2.Zero : mark.Atlas.GroundDirection(turnOut);
             Check("and it bursts the same way however the round arrived",
-                mark.Graze(plate, 0.0f, 0.0f, outward).Away
-                       .DistanceTo(normal) < 1e-4f
-                && mark.Graze(plate, 0.0f, 0.0f, outward + 55.0).Away
-                       .DistanceTo(normal) > 1e-3f,
-                "a shell that stopped has no memory of its own bearing, which is "
-                + "exactly what a ricochet is made of - so the square-on bounce "
-                + "coincides with this and the glancing one does not");
+                turns is not null
+                && mark.Graze(turns, 0.0f, 0.0f, turnOut).Away
+                       .DistanceTo(turnNormal) < 1e-4f
+                && mark.Graze(turns, 0.0f, 0.0f, turnOut + 55.0).Away
+                       .DistanceTo(turnNormal) > 1e-3f,
+                turns is null
+                    ? $"no plate of {mark.Tag} turns a round at all - only a side "
+                      + "does, and without one this claim is untested"
+                    : $"on {turns}: square on leaves "
+                      + $"{mark.Graze(turns, 0.0f, 0.0f, turnOut).Away} against "
+                      + $"the plate's own {turnNormal}, glancing leaves "
+                      + $"{mark.Graze(turns, 0.0f, 0.0f, turnOut + 55.0).Away} - "
+                      + "a shell that stopped has no memory of its own bearing, "
+                      + "which is exactly what a ricochet is made of");
             Check("and the impact point is the plate's own, not a second"
                   + " measurement of it",
                 mark.Blown(plate, 0.2f, -0.1f).Plate
@@ -8135,17 +8217,27 @@ public static class SelfTest
             // Behavioural, for the burst theme's reason - and here the pool it
             // must not share is the ricochet's, the two being the same trigger at
             // the same point on the same tank.
+            // A difference, for the spall check's reason one pool over: what is
+            // being asked is which ring the burst went in, not what the suite
+            // left burning in the other three.
+            int slamWas = stage.Slamming.Count(x => x.Alive);
+            int spallIdle = stage.Spalling.Count(x => x.Alive);
+            int boomIdle = stage.Booming.Count(x => x.Alive);
+            int kickIdle = stage.Kicking.Count(x => x.Alive);
             stage.Slam(stage.Origin, 0.0f, Vector2.Right, Vector2.Zero, false);
-            bool slamPool = stage.Slamming.Any(x => x.Alive)
-                            && !stage.Spalling.Any(x => x.Alive)
-                            && !stage.Booming.Any(x => x.Alive)
-                            && !stage.Kicking.Any(x => x.Alive);
+            int slamNow = stage.Slamming.Count(x => x.Alive);
+            bool slamPool = slamNow > slamWas
+                            && stage.Spalling.Count(x => x.Alive) == spallIdle
+                            && stage.Booming.Count(x => x.Alive) == boomIdle
+                            && stage.Kicking.Count(x => x.Alive) == kickIdle;
             foreach (ProcSlam x in stage.Slamming)
                 x.Douse();
             Check("and it goes in its own pool, six of them, beside the other four",
                 slamPool && stage.Slamming.Count == Stage3D.Bursts
                 && !ReferenceEquals(stage.Slamming, stage.Spalling),
-                $"{stage.Slamming.Count} of {Stage3D.Bursts} - a bounce and a "
+                $"{stage.Slamming.Count} of {Stage3D.Bursts}; the burst took slam "
+                + $"{slamWas} -> {slamNow} and left spall {spallIdle}, boom "
+                + $"{boomIdle}, kick {kickIdle} where they were - a bounce and a "
                 + "burst can land on one hull inside a second of each other, and "
                 + "a shared pool is the second restarting the first's clock");
             Check("and a burst on armour digs nothing",
