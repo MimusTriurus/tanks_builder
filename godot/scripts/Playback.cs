@@ -234,6 +234,10 @@ public sealed class Playback
             // where the round leaves from, and an unlaid gun is a round that
             // starts beside the tank - TankTick.AimAt.
             double lay = Gunnery.HeadingOf(victim.GroundPoint - shooter.GroundPoint);
+            // And whatever the ring was owed is forgotten with it: a gun put on
+            // a bearing by hand is not a gun coming round, and a stow left over
+            // from an earlier event would walk it off the victim mid-flight.
+            Tick.DropSwing(shooter);
             if (shooter.Profile.Turreted)
                 shooter.Sprite.TurretFacing = lay;
             else
@@ -925,27 +929,34 @@ public sealed class Playback
 
     // --- the turret ----------------------------------------------------------
 
-    /// <summary>Lay the turret on one of the six axes - what a shot or an
-    /// overwatch order does in the rules. A casemate turns nothing: the hull is
-    /// its gun, and the hull is movement.</summary>
+    /// <summary>
+    /// Lay the turret on one of the six axes - what a shot or an ambush order
+    /// does in the rules. A casemate turns nothing: the hull is its gun, and the
+    /// hull is movement.
+    ///
+    /// <b>An order to the ring, and the step waits for it to arrive.</b> Both of
+    /// these wrote the angle and were done in the frame they started, which is a
+    /// statement about where a turret ends up and not about a turret: the ring is
+    /// the one part of a tank whose whole picture is the seconds it spends
+    /// getting there, and the atlas renders twenty-four bearings of it for that
+    /// reason alone. The swing itself belongs to <see cref="TankTick.UpdateTurret"/>
+    /// - one writer on the angle - and what is here is the order and the wait.
+    ///
+    /// A casemate is done on the frame it starts, as before: nothing was armed,
+    /// so nothing is being waited for.
+    /// </summary>
     public void TurretTo(Vehicle tank, int side) =>
         Enqueue($"turret {tank.Tag} to {HexField.EdgeHeadings[Side(side)]}",
-                () =>
-                {
-                    if (tank.Profile.Turreted)
-                        tank.Sprite.TurretFacing =
-                            HexField.EdgeHeadings[Side(side)];
-                    tank.Sprite.QueueRedraw();
-                },
-                _ => true);
+                () => Tick.SwingTo(tank, HexField.EdgeHeadings[Side(side)]),
+                _ => !Tick.Swinging(tank));
 
-    /// <summary>Turret forward - what moving does to it in the rules.</summary>
+    /// <summary>Turret forward - what moving does to it in the rules, shown
+    /// without the move. On the board this needs no button at all: a drive arms
+    /// it every frame it lasts.</summary>
     public void TurretForward(Vehicle tank) =>
-        Now_($"turret {tank.Tag} forward", () =>
-        {
-            tank.Sprite.TurretFacing = tank.Sprite.HullFacing;
-            tank.Sprite.QueueRedraw();
-        });
+        Enqueue($"turret {tank.Tag} forward",
+                () => Tick.SwingForward(tank),
+                _ => !Tick.Swinging(tank));
 
     // --- the field -----------------------------------------------------------
 

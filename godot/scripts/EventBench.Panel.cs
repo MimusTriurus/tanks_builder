@@ -87,6 +87,24 @@ public sealed partial class EventBench
                      () => _face, i => _face = i);
         _panel.Slide("bench.heading", "target hull heading", 0.0, 345.0, 15.0,
                      () => _heading, v => { _heading = v; Face(); }, "°");
+        // The ring on its own, which the row above cannot say: that one points
+        // the whole tank, hull and turret together, because it exists to look at
+        // one picture from several angles. This is the other question - where is
+        // the gun against the hull - and it is what the stow is judged by: turn
+        // the gun off the bow here, then press a drive and watch it come back.
+        // Writing it drops whatever the ring was owed (TankTick.DropSwing), or a
+        // swing still running would take the slider's answer straight back.
+        _panel.Slide("bench.turret", "target turret bearing", 0.0, 345.0, 15.0,
+                     () => Target.Sprite.TurretFacing,
+                     v =>
+                     {
+                         Tick.DropSwing(Target);
+                         Target.Sprite.TurretFacing = Angles.Mod(v, 360.0);
+                         Target.Sprite.QueueRedraw();
+                     }, "°",
+                     () => Target.Profile.Turreted
+                         ? $"{Angles.WrapAngle(Target.Sprite.TurretFacing - Target.Sprite.HullFacing):F0} deg off the bow"
+                         : "a casemate: the gun is the hull");
         _panel.Slide("bench.speed", "playback speed", 0.25, 4.0, 0.25,
                      () => _speed, v => _speed = v, "x");
         _panel.Readout("bench.state", Note);

@@ -885,6 +885,10 @@ public sealed class TankTick
         v.Bob.Update(delta);
         Settle(v);
         UpdateBurn(v, delta);
+        // Before the scan, which it takes the turret away from, and before the
+        // gunnery, which takes the turret away from it - the ring has three
+        // possible drivers and they run in order of who yields to whom.
+        UpdateTurret(v, delta);
         UpdateScan(v, delta);
         Aim?.Invoke(v, delta);
         UpdateShot(v, delta);
@@ -4833,6 +4837,132 @@ public sealed class TankTick
         hit.Advance();
     }
 
+    // --- the ring -----------------------------------------------------------
+
+    /// <summary>
+    /// What is swinging the turret, when neither the gunnery nor a hand is -
+    /// the rules' own two movements of the ring, and nothing else.
+    ///
+    /// GDD units.md gives the turret three sentences and they are all here:
+    /// laying it on one of the six lanes is free and happens when the tank
+    /// fires or goes into ambush (<see cref="Onto"/>); moving brings it
+    /// forward (<see cref="Forward"/>); and between turns it stays where it was
+    /// left (<see cref="None"/>) - which is why "nobody is turning it" is a
+    /// value here rather than the absence of one. Direction on the board is a
+    /// rule in exactly one place, ambush, and a picture everywhere else.
+    /// </summary>
+    public enum Swing
+    {
+        /// <summary>Nobody. The gun keeps its bearing, and keeps it across
+        /// turns.</summary>
+        None,
+
+        /// <summary>On to a fixed bearing: a lane, in the rules.</summary>
+        Onto,
+
+        /// <summary>On to the hull's own heading, wherever the hull turns while
+        /// it comes - so a gun stowing through a corner arrives forward and not
+        /// on the bearing the corner started from.</summary>
+        Forward,
+    }
+
+    /// <summary>Lay the ring on a bearing and leave it coming: what a shot or an
+    /// ambush order does. A casemate is ignored on purpose - its gun is its
+    /// hull, and turning the hull is movement with a price in steps, which is
+    /// not this. See <see cref="UpdateTurret"/>.</summary>
+    public void SwingTo(Vehicle v, double onto)
+    {
+        if (!v.Profile.Turreted)
+            return;
+        v.Ring = Swing.Onto;
+        v.RingOnto = Angles.Mod(onto, 360.0);
+    }
+
+    /// <summary>Stow the gun: bring the ring forward on to the hull. What
+    /// moving does to it, and the one call <see cref="UpdateTurret"/> makes on
+    /// itself.</summary>
+    public void SwingForward(Vehicle v)
+    {
+        if (!v.Profile.Turreted)
+            return;
+        v.Ring = Swing.Forward;
+    }
+
+    /// <summary>Forget whatever the ring was owed: what anybody who puts the
+    /// turret at an angle by hand has to say, or the swing would take the gun
+    /// straight back off them. The bench's shooter is the one caller - it is
+    /// placed, laid and fired in one frame, and a stow left over from an earlier
+    /// drive would walk the gun off the victim while the round was in the air.
+    /// </summary>
+    public void DropSwing(Vehicle v) => v.Ring = Swing.None;
+
+    /// <summary>Whether the ring is still coming round. What an event waits on
+    /// before the next one starts - <c>Playback.TurretTo</c> - and it answers no
+    /// at once for a casemate, so a queue behind one does not hang.</summary>
+    public bool Swinging(Vehicle v) => v.Ring != Swing.None;
+
+    /// <summary>
+    /// The ring, turned by the rules rather than by the gunnery.
+    ///
+    /// <b>Moving arms it every frame, and that is the rule rather than an
+    /// edge.</b> "Сходил - башня смотрит вперёд" is a statement about the end of
+    /// the move, and the hull turns all the way through one: a stow armed once
+    /// at the first frame would aim at the bearing the tank set off on and
+    /// arrive pointing off the corner it drove round. Re-asking every frame
+    /// costs nothing - a ring already forward has a zero-degree swing - and is
+    /// the only version that survives a stabilised turret, where the hull keeps
+    /// opening the gap the whole way.
+    ///
+    /// <b>It finishes what it started after the tank stops</b>, because the
+    /// alternative is a turret parked half way round: the four ways the ring can
+    /// be taken away from it are all somebody else asking for the gun, and a
+    /// drive ending is not one of them. A short hop with a long swing is the
+    /// case that shows the difference.
+    ///
+    /// <b>Four claims beat it, and the last of the four is the A/B switch.</b> A
+    /// target or a mark means the gunnery is laying the gun frame by frame
+    /// (<see cref="Aim"/>), and two writers on one angle is a turret that
+    /// shudders between them; a wreck holds no gun; a hand on the spin keys or
+    /// the mouse is the bench being driven. And a turret asked to hold its world
+    /// heading is a gunner holding it there - the stabiliser that
+    /// <see cref="TankSprite.TurretHoldsHeading"/> is - so the rule applies when
+    /// nobody is, which is the default a tank comes up in and the one the game
+    /// plays on.
+    /// </summary>
+    public void UpdateTurret(Vehicle v, double delta)
+    {
+        if (v.Target is not null || v.Mark is not null || v.Wreck.Out
+            || v.Sprite.TurretHoldsHeading
+            || (v == Driven && TurretHeld?.Invoke(v) == true))
+        {
+            v.Ring = Swing.None;
+            return;
+        }
+        if (v.Moving)
+            SwingForward(v);
+        if (v.Ring == Swing.None)
+            return;
+        // The hull's heading read this frame, not the one the swing was armed
+        // on: see the summary - a stow is on to the hull, and the hull moves.
+        double onto = v.Ring == Swing.Forward ? v.Sprite.HullFacing : v.RingOnto;
+        double was = v.Sprite.TurretFacing;
+        // The ring's own rate, not Gunnery.LayRate: that one answers "the ring
+        // or the whole tank, whichever lays this gun", and nothing but a ring
+        // gets here.
+        double now = Gunnery.Traverse(was, onto,
+                                      Gunnery.TraverseRate(v.Profile) * delta);
+        if (now != was)
+        {
+            v.Sprite.TurretFacing = now;
+            v.Sprite.QueueRedraw();
+        }
+        // Traverse lands exactly on the bearing when it is within reach - the
+        // property the fire gate already depends on - so arrival is an equality
+        // and not a tolerance.
+        if (Math.Abs(Angles.WrapAngle(onto - now)) < 1e-9)
+            v.Ring = Swing.None;
+    }
+
     /// <summary>Suspended while under way, and while anything else is driving
     /// the turret. A locked turret holding its world heading through a
     /// manoeuvre is the feature this harness exists to show; a scan quietly
@@ -4845,7 +4975,12 @@ public sealed class TankTick
         // A tank with a target is laying its gun, and the scan is what it does
         // with nothing to look at - so the target suspends it on that tank only,
         // exactly as the spin and the mouse suspend it on the driven one.
+        // A ring still coming round is the fourth thing that has the turret,
+        // and the one that outlives the reason it was armed: a tank that stops
+        // half way through stowing is no longer moving, so without this the sway
+        // would take the gun over from the stow and leave it pointing anywhere.
         if (!ScanEnabled || v.Moving || v.Target is not null || v.Wreck.Out
+            || Swinging(v)
             || (v == Driven && TurretHeld?.Invoke(v) == true))
         {
             v.Scan.Suspend();

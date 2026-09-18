@@ -599,6 +599,29 @@ public sealed class Vehicle
     /// </summary>
     public Vector2I? Charge;
 
+    /// <summary>
+    /// What is swinging the turret ring, when the gunnery is not - GDD
+    /// units.md, "Башня".
+    ///
+    /// <b>An order rather than a state, and it sits beside the other two for
+    /// that reason.</b> <see cref="Target"/> is "engage that tank",
+    /// <see cref="Mark"/> is "one round into that hex", and this is the third
+    /// thing a gun can be told: point there. The rules give it two sources and
+    /// no others - firing or going into ambush lays it on one of the six lanes,
+    /// and moving brings it forward - so what is held is which of the two is
+    /// owed, and not an animation.
+    ///
+    /// Cleared by arriving, and by anything with a better claim on the ring
+    /// taking it: a target, a hand on the keys, a stabilised turret holding its
+    /// world heading. <see cref="TankTick.UpdateTurret"/> is the only writer.
+    /// </summary>
+    public TankTick.Swing Ring;
+
+    /// <summary>The bearing <see cref="Ring"/> is coming on to, while it is
+    /// <see cref="TankTick.Swing.Onto"/>. Meaningless otherwise, and unread:
+    /// the forward swing follows the hull, which turns under it.</summary>
+    public double RingOnto;
+
     /// <summary>The solution against <see cref="Target"/> or <see cref="Mark"/> as
     /// of this frame.
     ///

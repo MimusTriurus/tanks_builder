@@ -578,6 +578,176 @@ public static class SelfTest
             Math.Abs(WrapAngle(tank.TurretFacing - 0.0)) > 1.0,
             $"turret ended at {tank.TurretFacing:F3}");
 
+        {
+            // --- the ring, turned by the rules --------------------------------
+            //
+            // GDD units.md gives the turret two movements and one memory: moving
+            // brings the gun forward, firing or an ambush lays it on a lane, and
+            // between turns it stays where it was left. The memory is the easy half
+            // - nothing writing the angle is the whole of it - so what is asserted
+            // here is the other two, and above all that both take TIME: a ring that
+            // arrives in one frame is the same picture as a ring that never moved,
+            // and twenty-four rendered bearings exist to show the difference.
+            Vehicle? swung = null, casemate = null;
+            foreach (Vehicle v in vehicles)
+            {
+                if (swung is null && v.Profile.Turreted)
+                    swung = v;
+                if (casemate is null && !v.Profile.Turreted)
+                    casemate = v;
+            }
+            if (swung is not null && field.Atlas is not null)
+            {
+                const double ringDt = 1.0 / 60.0;
+                var home = (swung.Cell, Hull: swung.Sprite.HullFacing,
+                            Turret: swung.Sprite.TurretFacing);
+                bool wasHolding = swung.Sprite.TurretHoldsHeading;
+                Vehicle? wasTarget = swung.Target;
+                var stow = new TankTick
+                {
+                    Field = field, Vehicles = vehicles, Origin = field.Position,
+                };
+                Vector2I began = swung.Cell;
+                int lane = -1;
+                Vector2I onto = began;
+                foreach (int heading in HexField.EdgeHeadings)
+                {
+                    Vector2I step = HexField.Step(began, heading);
+                    if (!field.InBounds(step) || Vehicle.At(vehicles, step) is not null)
+                        continue;
+                    lane = heading;
+                    onto = step;
+                    break;
+                }
+                if (lane >= 0)
+                {
+                    swung.Target = null;
+                    swung.Mark = null;
+                    swung.Sprite.TurretHoldsHeading = false;
+                    swung.Sprite.HullFacing = lane;
+                    swung.Sprite.TurretFacing = Angles.Mod(lane + 90.0, 360.0);
+                    swung.Path = new List<Vector2I> { onto };
+                    swung.PathStep = 0;
+                    double rate = Gunnery.TraverseRate(swung.Profile);
+                    stow.Run(swung, ringDt);
+                    // Measured against the hull rather than against the world, and
+                    // that is the whole of the arithmetic: a riding turret is
+                    // carried round by every pivot the drive makes, so the only
+                    // thing the swing itself does is close this offset, at the rate,
+                    // whatever the hull is doing underneath.
+                    double after = Angles.WrapAngle(swung.Sprite.TurretFacing
+                                                    - swung.Sprite.HullFacing);
+                    Check("a drive arms the stow, and the ring swings at its own rate "
+                          + "rather than snapping",
+                        swung.Ring == TankTick.Swing.Forward
+                        && Math.Abs(after - (90.0 - rate * ringDt)) < 1e-6,
+                        $"ring {swung.Ring}, offset 90 -> {after:F4} against "
+                        + $"{90.0 - rate * ringDt:F4} at {rate:F0} deg/s");
+
+                    int frames = 1;
+                    while (stow.Swinging(swung) && frames < 600)
+                    {
+                        stow.Run(swung, ringDt);
+                        frames++;
+                    }
+                    // The count is the point of the second half: a right angle at
+                    // the class's own traverse is the swing, and it outlives the leg
+                    // that armed it - a short hop finishes stowing after the tank
+                    // has stopped rather than parking the gun half way round.
+                    double owed = Math.Ceiling(90.0 / (rate * ringDt));
+                    Check("and it arrives forward, in the frames the rate owes, "
+                          + "whether or not the tank is still moving",
+                        !stow.Swinging(swung)
+                        && Math.Abs(Angles.WrapAngle(swung.Sprite.TurretFacing
+                                                     - swung.Sprite.HullFacing)) < 1e-9
+                        && Math.Abs(frames - owed) <= 1.0,
+                        $"took {frames} frames against {owed:F0}, ended "
+                        + $"{Angles.WrapAngle(swung.Sprite.TurretFacing - swung.Sprite.HullFacing):F6} "
+                        + $"off the hull, moving {swung.Moving}");
+
+                    // The A/B switch is the one claim on the ring that is a picture
+                    // decision: a gun held on its world heading is a gunner holding
+                    // it there, and the rule is what happens when nobody is.
+                    swung.Sprite.TurretHoldsHeading = true;
+                    swung.Sprite.TurretFacing = Angles.Mod(swung.Sprite.HullFacing + 90.0,
+                                                          360.0);
+                    double stabAt = swung.Sprite.TurretFacing;
+                    swung.Path = new List<Vector2I> { began };
+                    swung.PathStep = 0;
+                    for (int i = 0; i < 20; i++)
+                        stow.Run(swung, ringDt);
+                    Check("a stabilised gun is not stowed by driving - it is being held",
+                        swung.Ring == TankTick.Swing.None
+                        && Math.Abs(Angles.WrapAngle(swung.Sprite.TurretFacing - stabAt))
+                           < 1e-9,
+                        $"ring {swung.Ring}, turret {stabAt:F3} -> "
+                        + $"{swung.Sprite.TurretFacing:F3}");
+                    swung.Sprite.TurretHoldsHeading = false;
+                    stow.CancelOrder(swung);
+                }
+
+                // An order to shoot takes the ring off the rule and gives it to the
+                // gunnery, because two writers on one angle is a turret that
+                // shudders between them.
+                stow.SwingForward(swung);
+                swung.Mark = swung.Cell;
+                double kept = swung.Sprite.TurretFacing;
+                stow.Run(swung, ringDt);
+                Check("an order to fire takes the ring back off the rule",
+                    !stow.Swinging(swung)
+                    && Math.Abs(Angles.WrapAngle(swung.Sprite.TurretFacing - kept)) < 1e-9,
+                    $"ring {swung.Ring}, turret moved "
+                    + $"{Angles.WrapAngle(swung.Sprite.TurretFacing - kept):F6}");
+                swung.Mark = null;
+
+                // And the lane: exactly on it, because the fire gate asks whether
+                // the gun is laid and a swing that stopped a fraction short would
+                // hold the event queue open for ever.
+                int lay = HexField.EdgeHeadings[
+                    (Angles.SideFor(swung.Sprite.TurretFacing) + 2) % 6];
+                stow.SwingTo(swung, lay);
+                int laying = 0;
+                while (stow.Swinging(swung) && laying < 600)
+                {
+                    stow.Run(swung, ringDt);
+                    laying++;
+                }
+                Check("an ambush lays the gun exactly on the lane, and says when it "
+                      + "is there",
+                    !stow.Swinging(swung) && laying > 1
+                    && Math.Abs(Angles.WrapAngle(swung.Sprite.TurretFacing - lay)) < 1e-9
+                    && Gunnery.Laid(swung.Sprite.TurretFacing, lay),
+                    $"{laying} frames on to {lay}, ended {swung.Sprite.TurretFacing:F6}");
+
+                swung.Target = wasTarget;
+                swung.Mark = null;
+                swung.Ring = TankTick.Swing.None;
+                swung.Sprite.TurretHoldsHeading = wasHolding;
+                swung.Cell = home.Cell;
+                swung.Sprite.HullFacing = home.Hull;
+                swung.Sprite.TurretFacing = home.Turret;
+                stow.CancelOrder(swung);
+                stow.Park(swung);
+
+                // A casemate takes no ring order at all - its gun is its hull - and
+                // it has to say so on the frame it is asked, or an event waiting for
+                // a swing that will never come hangs the queue behind it.
+                if (casemate is not null)
+                {
+                    double aimed = casemate.Sprite.TurretFacing;
+                    stow.SwingTo(casemate, HexField.EdgeHeadings[0]);
+                    bool refusedLane = !stow.Swinging(casemate);
+                    stow.SwingForward(casemate);
+                    Check("a casemate takes no ring order, so an event behind one "
+                          + "cannot hang",
+                        refusedLane && !stow.Swinging(casemate)
+                        && casemate.Sprite.TurretFacing == aimed,
+                        $"lane refused {refusedLane}, forward refused "
+                        + $"{!stow.Swinging(casemate)}");
+                }
+            }
+        }
+
         Theme("body pitch");
         var pitch = new BodyPitch();
         const double dt = 1.0 / 60.0;

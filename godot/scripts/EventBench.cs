@@ -114,6 +114,16 @@ public sealed partial class EventBench : SceneRoot
     /// with it: a parked tank has its gun over the bow.</summary>
     private double _heading = 270.0;
 
+    /// <summary>Where the target's turret is pointed, or null for "wherever
+    /// the hull is". A second number rather than part of <see cref="_heading"/>,
+    /// because the two rows ask different questions: that one points the whole
+    /// tank to look at a picture from another angle, this one puts the gun off
+    /// the bow, which is the only starting position from which a stow can be
+    /// seen at all - see TankTick.UpdateTurret. Null so that not saying it
+    /// leaves every existing invocation and every baseline exactly as it was.
+    /// </summary>
+    private double? _turret;
+
     /// <summary>How fast the events play, as a multiplier on the frame.</summary>
     private double _speed = 1.0;
 
@@ -338,6 +348,19 @@ public sealed partial class EventBench : SceneRoot
                                          out double heading):
                     _heading = ((heading % 360.0) + 360.0) % 360.0;
                     _flagged.Add("bench.heading");
+                    i++;
+                    break;
+                // The gun off the bow, for --heading's reason and one more:
+                // the rule that brings it forward has no other flag, so a run
+                // that wants to shoot the stow has to be able to break the
+                // turret away from the hull first.
+                case "--turret" when i + 1 < args.Length
+                                    && double.TryParse(args[i + 1],
+                                        System.Globalization.NumberStyles.Float,
+                                        System.Globalization.CultureInfo.InvariantCulture,
+                                        out double aimed):
+                    _turret = ((aimed % 360.0) + 360.0) % 360.0;
+                    _flagged.Add("bench.turret");
                     i++;
                     break;
                 case "--size" when i + 1 < args.Length
@@ -836,7 +859,10 @@ public sealed partial class EventBench : SceneRoot
             return;
         TankSprite s = Target.Sprite;
         s.HullFacing = _heading;
-        s.TurretFacing = _heading;
+        // The gun follows the hull unless somebody has said otherwise: a tank
+        // standing still has its turret where it was left, and "where it was
+        // left" for a board that has just opened is forward.
+        s.TurretFacing = _turret ?? _heading;
         s.QueueRedraw();
     }
 
