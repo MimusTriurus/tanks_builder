@@ -1377,11 +1377,12 @@ public sealed class Playback
     /// The rules are done with this fire: it burns down and leaves burnt wood.
     ///
     /// <b>Held while it does, and this is the longest hold on the bench.</b> A
-    /// wood put out does not stop - the flame dies over the rest of its curve,
-    /// the trees hand over to charcoal underneath it, and the smoke drifts after
-    /// both. The event is not over until the cell is a stand of burnt trunks,
-    /// because the next event in a queue is allowed to assume the board says what
-    /// the rules say.
+    /// wood put out does not stop - the flame dies over the rest of its curve and
+    /// the smoke drifts after it. The trees under it are charcoal already: the
+    /// crowns went as the cell caught, and what the rules are spending here is
+    /// the fire - see <see cref="Wildfire.Hold"/>. The event is not over until it
+    /// is out, because the next event in a queue is allowed to assume the board
+    /// says what the rules say.
     ///
     /// Refused on a cell that is not holding, so a round tick counted twice is
     /// visible rather than quietly agreed with - see <see cref="Wildfire.Out"/>.
@@ -1397,7 +1398,7 @@ public sealed class Playback
         {
             if (!Fire.Out(cell))
                 Todo?.Invoke("no fire to put out", null, cell);
-        }, Fire.BurnFor * (1.0 - Fire.SwapAt) + Fire.CatchWithin);
+        }, Fire.Dying);
     }
 
     /// <summary>
@@ -1447,9 +1448,7 @@ public sealed class Playback
             spent = held.Count(c => !Fire.Waiting(c));
             if (lit == 0 && spent == 0)
                 Todo?.Invoke("nothing burning to tick", null, null);
-        }, t => t >= (spent > 0
-                      ? Fire.BurnFor * (1.0 - Fire.SwapAt) + Fire.CatchWithin
-                      : 0.0));
+        }, t => t >= (spent > 0 ? Fire.Dying : 0.0));
     }
 
     /// <summary>

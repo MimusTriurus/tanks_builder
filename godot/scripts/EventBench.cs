@@ -245,8 +245,9 @@ public sealed partial class EventBench : SceneRoot
         // and a wood that spread on its own clock would be a second author of
         // the board. Enabled, because Light refuses on a disabled fire; not
         // spreading, because that is the rules' decision - see Wildfire.Spreads.
-        // Ruled, so it does not go out on its own either: it holds at full flame
-        // until a field tick has counted its two rounds (Wildfire.Ruled), and the
+        // Ruled, so it does not go out on its own either: it holds as charcoal at
+        // full flame - the fire burns through the crowns as the cell catches -
+        // until a field tick has counted its two rounds (Wildfire.Hold), and the
         // masonry bars the spread the way the GDD says it does.
         _fire = new Wildfire
         {

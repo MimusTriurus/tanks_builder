@@ -63,10 +63,12 @@ public sealed class Wildfire
     ///
     /// <b>So the clock is not stopped, it is held.</b> Everything up to
     /// <see cref="Ripe"/> plays exactly as it does off this switch - the cell
-    /// catches, the trees stagger in, the flame comes up - and then the age waits
-    /// there until <see cref="Out"/>, after which the rest of the same curve
-    /// runs. Nothing is frozen while it waits: <c>Coat.Flame</c> is an intensity
-    /// and the flicker is <c>Stage3D</c>'s own clock, so a held fire burns.
+    /// catches, the trees stagger in, the flame comes up, the crowns burn away to
+    /// charcoal and the scrub goes with them - and then the age waits there until
+    /// <see cref="Out"/>, after which the rest of the same curve runs: the flame
+    /// falling off a tree the fire has already been through. Nothing is frozen
+    /// while it waits: <c>Coat.Flame</c> is an intensity and the flicker is
+    /// <c>Stage3D</c>'s own clock, so a held fire burns.
     ///
     /// Off is the wood bench and the harness, where a fire lit by hand has
     /// nobody to put it out.
@@ -136,19 +138,40 @@ public sealed class Wildfire
     /// tree - a tree that burns without changing and then changes without burning.
     /// The state is what happens at the end; the picture is what happens during.
     ///
-    /// <b>Inside the flame's plateau, and that is what picks the number.</b> The
-    /// flame is at full strength from 0.18 of the burn to 0.55 of it, so a window
-    /// opening at 0.45 runs under the fire and closes just as it starts to drop -
-    /// and then the charcoal stands in its own flame for the rest of the burn,
-    /// which is the whole of what was asked for. Later than 0.55 and the handover
-    /// happens as the fire dies, which is the frames it exists to hide behind.
+    /// <b>The whole window sits inside the flame's plateau, and it is the
+    /// shutting of it that picks the number.</b> The flame is at full strength
+    /// from <see cref="FlareIn"/> of the burn to <see cref="FadeFrom"/> of it, so
+    /// a window opening at 0.40 shuts at 0.53 - just inside - and the charcoal
+    /// then stands in its own full fire for the rest of the burn.
+    ///
+    /// <b>Judged on where it shuts rather than where it opens</b>, because that
+    /// frame is the one a ruled fire waits on - see <see cref="Hold"/>. Anything
+    /// past <c>FadeFrom - SwapFor/BurnFor</c>, which is 0.417 here, leaves the
+    /// rules holding a wood whose fire has already begun to go out, and a round
+    /// can be as long as the players take over it.
     ///
     /// <b>The char has to reach one here and not at the end</b>, because it
     /// belongs to the outgoing picture: a living tree still half green, cross-faded
     /// into charcoal, is two different trees on screen at once rather than one
     /// turning.
     /// </summary>
-    public float SwapAt = 0.45f;
+    public float SwapAt = 0.40f;
+
+    /// <summary>
+    /// How much of the burn the flame takes to come up, and how far into it it
+    /// stands at full before it starts to go, as shares of it.
+    ///
+    /// <b>Named rather than written into the curve, because they are what every
+    /// other window here is judged against:</b> the handover shuts inside the
+    /// plateau (<see cref="SwapAt"/>), the fuel that is eaten is eaten inside it
+    /// (<see cref="Coat.Spent"/>), and a ruled fire waits on it
+    /// (<see cref="Hold"/>). Three readers taking the same edge off three
+    /// literals is how three numbers drift apart.
+    /// </summary>
+    public const float FlareIn = 0.18f;
+
+    /// <summary>The far end of that plateau - see <see cref="FlareIn"/>.</summary>
+    public const float FadeFrom = 0.55f;
 
     /// <summary>How much later than its cell a tree may catch, in seconds. Read
     /// through a hash of where the tree stands, so it is the same tree every run
@@ -244,11 +267,21 @@ public sealed class Wildfire
     /// business, and a tier that leaves a husk reads
     /// <paramref name="Swap"/> instead.
     ///
-    /// <b>It starts where the swap starts and ends where the burn does</b>, so
-    /// it needs no window of its own: fuel running out and a fire going out are
-    /// one event, and the flame is at zero on the same frame this reaches one.
-    /// Roughly five seconds of the nine at the settings above, which is what
-    /// makes it a thing being consumed rather than an object deleted.</param>
+    /// <b>It is eaten between the flame coming up and the handover shutting</b>,
+    /// so it belongs to the catching and not to the dying - the same move as the
+    /// handover itself, and the same reason. Scrub has no crown to hand over to
+    /// charcoal; being eaten is the whole of what the fire does to it, and a cell
+    /// the rules are holding has to be a cell the fire has already got through.
+    /// Roughly three seconds of the nine at the settings above, which is what
+    /// makes it a thing being consumed rather than an object deleted.
+    ///
+    /// <b>So the flame outlives its fuel, and that is the picture rather than an
+    /// oversight.</b> The quad hangs on the prop's transform and is not faded by
+    /// what is left of it (<c>Stage3D.Kindle</c> against <c>PropNode.Shown</c>),
+    /// so the fire goes on standing where the scrub was, over the ash it made -
+    /// which is what a burning cell with nothing left on it looks like. It was
+    /// the other way round while the fuel ran out with the flame: one event, and
+    /// no frame of fire over bare ground.</param>
     public readonly record struct Coat(float Char, float Flame, float Smoke,
                                       bool Burnt, float Swap = 1.0f,
                                       float Spent = 1.0f)
@@ -297,26 +330,79 @@ public sealed class Wildfire
         return true;
     }
 
+    /// <summary>Where the picture starts handing over, in seconds into one
+    /// tree's own burn - <see cref="SwapAt"/> as a time. A property because the
+    /// curve, the hold and the length of the burning down all measure from it.
+    /// </summary>
+    public float Handing =>
+        Mathf.Max(BurnFor, 1e-4f) * Mathf.Clamp(SwapAt, 0.02f, 1.0f);
+
     /// <summary>
-    /// Where a ruled fire waits: the age at which the last tree on the cell has
-    /// caught and come up to the handover.
+    /// Where one tree is done being changed by its fire, in seconds into its own
+    /// burn: the handover has shut, whatever the fire eats is eaten, and the
+    /// flame is still at full.
     ///
-    /// <b>The hold is <see cref="SwapAt"/> and not a number of its own</b>, and
-    /// that is worth saying plainly because a dial here would drift off it. The
-    /// handover is the frame the tree is fully charred, fully alight, and has not
-    /// yet begun to change shape - which is exactly the picture a wood that the
-    /// rules have not finished with has to hold: black, burning, still standing.
-    /// One frame later it is a trunk turning into charcoal, and by the GDD that
-    /// is what the cell becomes when the fire goes out. So the hold is the
-    /// handover's own doorstep, and there is one number for the two of them.
+    /// <b>This is what a ruled fire holds, and it is the far side of the handover
+    /// rather than its doorstep.</b> A wood the rules have not finished with
+    /// shows charcoal standing in full flame - the fire has got through the crown
+    /// and is still burning - so everything the fire does to the picture belongs
+    /// to the catching, and the only thing left for the rules to spend is the
+    /// flame itself. Held one frame earlier, as it was, the crown never burns
+    /// while the wood is alight: every visible change is packed into the frames
+    /// after the rules let go, so a wood catching fire shows a green tree with
+    /// flames on it and putting it out is what burns it down.
+    ///
+    /// <b>No dial of its own</b>, for the reason there was never one: a number
+    /// here would drift off the picture it exists to hold. Clamped into the burn,
+    /// so a window set longer than the fire cannot put the hold past the end of
+    /// it.
+    /// </summary>
+    public float Hold => Mathf.Min(Handing + Mathf.Max(SwapFor, 0.0f),
+                                   Mathf.Max(BurnFor, 1e-4f));
+
+    /// <summary>
+    /// The age a ruled fire waits at: <see cref="Hold"/> for the tree that reads
+    /// the clock latest.
     ///
     /// <b>The stagger is in it, and that is why this is a property and not the
     /// product.</b> Trees read the cell's age late, by up to
     /// <see cref="CatchWithin"/>; the cell is not ripe until the last of them has
-    /// caught and come up.
+    /// caught and come through.
     /// </summary>
-    public float Ripe => CatchWithin
-                         + Mathf.Max(BurnFor, 1e-4f) * Mathf.Clamp(SwapAt, 0.02f, 1.0f);
+    public float Ripe => CatchWithin + Hold;
+
+    /// <summary>
+    /// How much faster the fire runs once the rules have let it go.
+    ///
+    /// <b>The dying is the only part of the burn the rules pay for, so it is the
+    /// only part with a pace of its own.</b> Everything up to <see cref="Hold"/>
+    /// is a cell catching fire, and that plays at the picture's own speed whoever
+    /// is counting rounds. What is left after it is a flame going out over a tree
+    /// nothing further will happen to - the handover is done, the fuel is gone,
+    /// the ash is down - and at the burn's own rate that is seven seconds of a
+    /// board whose event is already decided, all of which the queue waits through
+    /// (<see cref="Dying"/>).
+    ///
+    /// <b>The stagger is inside it and is halved along with the rest</b>, which
+    /// is the point rather than a side effect: trees going out one after another
+    /// are still eight animations instead of one, and how far apart they are
+    /// belongs to the event they are spread across, not to a constant. The same
+    /// hash still decides the order, so the first to catch is still the first to
+    /// go.
+    ///
+    /// One is a released fire that dies exactly as an unruled one does, which is
+    /// the A/B this number is judged by.
+    /// </summary>
+    public float OutPace = 2.0f;
+
+    /// <summary>How long a released fire takes to burn down, stagger and all -
+    /// the flame falling to nothing from a tree already handed over, at
+    /// <see cref="OutPace"/>. Here rather than at the caller for
+    /// <see cref="Lasts"/>'s reason: the event bench holds its queue open for
+    /// exactly this long, and a second copy of the sum would go stale the first
+    /// time the curve moved.</summary>
+    public float Dying => (Mathf.Max(BurnFor, 1e-4f) - Hold + CatchWithin)
+                          / Mathf.Max(OutPace, 0.01f);
 
     /// <summary>Whether this cell is a ruled fire sitting at <see cref="Ripe"/>,
     /// waiting to be told. Reported for the panel and the self-test - a fire that
@@ -445,7 +531,12 @@ public sealed class Wildfire
             _age[i] = age = Ruled && !_freed[i]
                 ? Mathf.Min(age + step, Ripe)
                 : Mathf.Min(age + step, over + 1.0f);
-            bool flaming = age < BurnFor + CatchWithin;
+            // Where the last tree on the cell stops burning. Two sums rather
+            // than one because a held fire spends its tail at OutPace: read off
+            // the burn alone, a ruled cell was called Burnt while its trees were
+            // still visibly alight.
+            float ends = Ruled ? Ripe + Dying : BurnFor + CatchWithin;
+            bool flaming = age < ends;
             if (flaming)
                 alight++;
             // What the board is told, off the boundary the count above already
@@ -523,29 +614,37 @@ public sealed class Wildfire
             return Green;
         float t = age - (float)stagger * CatchWithin;
         float burn = Mathf.Max(BurnFor, 1e-4f);
-        // Where the picture starts handing over - see SwapAt. Everything about the
-        // char and the swap is measured from here, and only Burnt is measured from
-        // the end of the burn.
-        float handing = burn * Mathf.Clamp(SwapAt, 0.02f, 1.0f);
+        // Where the picture starts handing over and where the fire is done with
+        // it - see SwapAt and Hold. Everything the fire changes about a tree is
+        // measured between these two, and only Burnt is measured from the end of
+        // the burn.
+        float handing = Handing;
+        float hold = Hold;
         if (Ruled)
         {
             // The hold, and it is a tree's own and not the cell's - see Ripe. The
-            // cell's age stops at Ripe, which is where the LAST tree reaches the
-            // handover; clamped there and no further, the first tree would be a
-            // whole CatchWithin past it and half turned to charcoal already.
+            // cell's age stops at Ripe, which is where the LAST tree comes out of
+            // the handover; clamped there and no further, the first tree would be
+            // a whole CatchWithin past it and half burnt down already.
             //
             // And the stagger comes back on the way out, spent on the release
             // rather than lost: held long enough, every tree on the cell is at the
             // same point in its burn, which is true - they have all been alight the
-            // same length of time - and a cell that then hands over in one frame is
+            // same length of time - and a cell that then goes out in one frame is
             // the one animation played eight times this class exists to avoid. The
             // same hash both ways, so the first to catch is the first to go.
+            //
+            // At OutPace, which is why the release is scaled and the stagger is
+            // not: the delay is in the curve's own seconds, so dividing it out is
+            // what spreads the going-out across the shorter event rather than
+            // leaving three seconds of waiting inside three and a half.
             int held = At(cell);
             float since = held >= 0 && held < _freed.Length && !_freed[held]
                 ? 0.0f
                 : Mathf.Max(0.0f, age - Ripe);
-            t = Mathf.Min(t, handing)
-                + Mathf.Max(0.0f, since - (float)stagger * CatchWithin);
+            t = Mathf.Min(t, hold)
+                + Mathf.Max(0.0f, since * Mathf.Max(OutPace, 0.01f)
+                                  - (float)stagger * CatchWithin);
         }
         if (t <= 0.0f)
             return Green;
@@ -559,8 +658,9 @@ public sealed class Wildfire
         float charred = Mathf.Min(1.0f, t / handing);
         float flame = burnt
             ? 0.0f
-            : Mathf.Min(1.0f, t / (0.18f * burn))        // up in a fifth of it
-              * Mathf.Clamp(1.0f - Mathf.Max(0.0f, t / burn - 0.55f) / 0.45f,
+            : Mathf.Min(1.0f, t / (FlareIn * burn))      // up in a fifth of it
+              * Mathf.Clamp(1.0f - Mathf.Max(0.0f, t / burn - FadeFrom)
+                                   / Mathf.Max(1.0f - FadeFrom, 1e-4f),
                             0.0f, 1.0f);                 // and down over the rest
         float smoke = burnt
             ? Mathf.Clamp(1.0f - (t - burn) / Mathf.Max(SmokeFor, 1e-4f),
@@ -578,13 +678,13 @@ public sealed class Wildfire
                      : SwapFor <= 0.0f ? 1.0f
                      : Mathf.Clamp((t - handing) / SwapFor, 0.0f, 1.0f);
         // And how much of the fuel is left, for whatever the fire takes away
-        // rather than hands over - see Coat.Spent. From the same anchor as the
-        // swap, so the instant a trunk begins to turn to charcoal is the instant
-        // the scrub beside it begins to go; to the end of the burn rather than
-        // over a window, so it reaches nothing on the frame the flame does.
-        float spent = t < handing ? 0.0f
-            : Mathf.Clamp((t - handing) / Mathf.Max(burn - handing, 1e-4f),
-                          0.0f, 1.0f);
+        // rather than hands over - see Coat.Spent. Between the flame coming up
+        // and the handover shutting: it is the flame that eats the scrub, so it
+        // does not start before there is one, and it is gone by the frame the
+        // trunks beside it have finished turning - which is the frame a ruled
+        // fire holds on.
+        float eating = Mathf.Max(hold - FlareIn * burn, 1e-4f);
+        float spent = Mathf.Clamp((t - FlareIn * burn) / eating, 0.0f, 1.0f);
         return new Coat(charred, flame, smoke, burnt, swap, spent);
     }
 

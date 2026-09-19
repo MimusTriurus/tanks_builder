@@ -13701,10 +13701,18 @@ public static class SelfTest
             !last.Untouched && last.Char > 0.9f && last.Flame > 0.9f,
             $"char {last.Char:F2} on the tree that reads the clock latest - Ripe "
             + "carries the stagger so the cell is fully alight before it waits");
-        Check("nothing has begun to change shape while it waits",
-            waiting.Swap <= 0.0f && last.Swap <= 0.0f,
-            "the trees become burnt wood when the fire goes out, and the picture "
-            + "has to say so on the same frame the rules do");
+        Check("and the fire has burnt through the crown while it waits",
+            waiting.Swap >= 1.0f && last.Swap >= 1.0f
+            && waiting.Spent >= 1.0f && last.Spent >= 1.0f,
+            $"swap {waiting.Swap:F2}/{last.Swap:F2}, spent {waiting.Spent:F2}/"
+            + $"{last.Spent:F2} - a wood the rules are holding is charcoal in its "
+            + "own fire, not a green tree with flames on it: what the fire does to "
+            + "the picture belongs to the catching, and the rules spend the flame");
+        Check("and it holds at the top of the flame, not on its way down",
+            waiting.Flame >= 0.999f && last.Flame >= 0.999f,
+            $"flame {waiting.Flame:F3} - the handover has to shut inside the "
+            + "plateau (SwapAt against FadeFrom), or the picture held for a round "
+            + "is a fire already going out");
         Check("the board is told a held cell is burning, not burnt",
             field.CoverStateAt(lit) == CoverState.Burning, "");
 
@@ -13732,6 +13740,40 @@ public static class SelfTest
             $"{apart:F5} apart at the worst frame - the catching, the stagger and "
             + "the flame coming up are the picture's, and the rules do not touch "
             + "them");
+
+        // The one part of the burn the rules pay for, and the only one with a
+        // pace of its own: let go, the cell is cold charcoal in Dying seconds,
+        // stagger and all. Walked at the fixed step rather than solved, because
+        // what the event queue waits on is the frame the last tree stops burning
+        // and not an algebraic tail.
+        var paced = new Wildfire
+        {
+            Field = field, Wooded = wooded.Contains, Ruled = true, Spreads = false,
+        };
+        paced.Light(lit);
+        for (int f = 0; f < 3600; f++)
+            paced.Tick(1.0 / 60.0);
+        paced.Out(lit);
+        float went = 0.0f;
+        bool early = false;
+        for (int f = 0; f < 1800 && !paced.Of(lit, 1.0).Burnt; f++)
+        {
+            paced.Tick(1.0 / 60.0);
+            went += 1.0f / 60.0f;
+            early |= field.CoverStateAt(lit) == CoverState.Burnt
+                     && paced.Of(lit, 1.0).Flame > 0.0f;
+        }
+        Check("let go, it is out in the time the queue holds for",
+            paced.Of(lit, 1.0).Burnt && Mathf.Abs(went - paced.Dying) < 0.1f,
+            $"{went:F2}s against Dying {paced.Dying:F2}s - the beat the event "
+            + "waits on is this class's own sum, or the picture and the queue "
+            + "part company the first time either moves");
+        paced.Tick(2.0 / 60.0);
+        Check("and the board calls it burnt on that frame and not before",
+            !early && field.CoverStateAt(lit) == CoverState.Burnt,
+            $"{field.CoverStateAt(lit)}, flame while burnt {early} - read off the "
+            + "burn alone a released cell goes Burnt seconds before its trees "
+            + "stop burning, because the tail is spent at OutPace");
 
         Check("telling it to finish is refused on a fire nobody lit",
             !ruled.Out(bare), "a round tick counted twice would be invisible");
@@ -13837,6 +13879,60 @@ public static class SelfTest
             && flame.Contains("rise * ember_sway_ratio"),
             "written as absolutes they have to be moved by hand with the rise, and "
             + "a fire scaled in one direction stops being the same fire");
+
+        // And the column beside it. The questions are the port's rather than the
+        // shape's: its numbers are ProcSmoke's - engine_fire.SMOKE, the tank's own
+        // column - quoted against the reach instead of the hull, so what has to
+        // hold is that they are still that class's numbers. A port that is only a
+        // port in the comments comes apart the first time either side is tuned,
+        // and nothing else on the board would say the two smokes had parted.
+        string column = Stage3D.SmokingCode;
+        float Dial(string name)
+        {
+            int at = column.IndexOf("uniform float " + name + " =",
+                                    System.StringComparison.Ordinal);
+            if (at < 0)
+                return float.NaN;
+            int from = column.IndexOf('=', at) + 1;
+            int shut = column.IndexOf(';', from);
+            return float.Parse(column.Substring(from, shut - from).Trim(),
+                               System.Globalization.CultureInfo.InvariantCulture);
+        }
+        var stack = new ProcSmoke();
+        float hull = stack.Rise;
+        (string Name, float Wants)[] ported =
+        {
+            ("puff_grow", stack.PuffGrow / hull),
+            ("spread_ratio", stack.Spread / hull),
+            ("puff_power", stack.PuffPower),
+            ("vary", stack.PuffVary),
+            ("stagger", stack.Stagger),
+            ("wobble", stack.Wobble),
+            ("onset", stack.Onset),
+            ("fade", stack.Fade),
+            ("rim_falloff", stack.RimFalloff),
+            ("opacity", stack.Opacity),
+        };
+        string adrift = string.Empty;
+        foreach ((string name, float wants) in ported)
+            if (!(Math.Abs(Dial(name) - wants) < 5e-3))
+                adrift += $"{name} {Dial(name):F3} against {wants:F3}; ";
+        float slows = Dial("gather");
+        stack.Free();
+        Check("the wood's smoke is the tank's column, quoted against its own reach",
+            adrift.Length == 0,
+            adrift + "- the numbers are engine_fire.SMOKE's, and quoted against "
+            + "anything but the reach they are measured with they are a new set of "
+            + "dials wearing the same names");
+        Check("and it slows where the flame gathers, which is what tells them apart",
+            slows < 0.0f && Math.Abs(slows + 1.0f / 1.10f) < 5e-3,
+            $"gather {slows:F3} against -1/Slowing - a column built on a positive "
+            + "one is a flame with soot for a ramp");
+        Check("and its puffs composite over each other rather than summing",
+            column.Contains("smoke_over(") && column.Contains("pow(facing, rim_falloff)"),
+            "the flame's two findings, and they are the picture here as well: a "
+            + "queue of bodies has a scale because each body has an edge, which a "
+            + "band with noise torn out of it never had");
 
         // No stop in the ramp is near white. engine_fire's rule, and it is the one
         // an editing hand breaks: red saturating is not the failure, green and blue
@@ -14298,15 +14394,17 @@ public static class SelfTest
             $"shown {ghosted.Shown:F3} against a reveal of "
             + $"{ghosted.Modulate.A:F2} and {1.0f - ghosted.Spent:F2} left of it");
 
-        // The timing, over a real burn, and it is two statements rather than one
-        // window: the fuel running out and the fire going out are one event, so
-        // there must be no frame with a flame on a prop that has gone and none
-        // with the prop still there after its flame has.
+        // The timing, over a real burn, and it is three statements rather than
+        // one window: what the fire eats, it eats with the flame that is on it,
+        // during the catching and not the dying. So there must be no frame with a
+        // prop going before there is a fire on it, none with anything left of it
+        // once the cell has come up to the hold, and the flame has to go on after
+        // it - the fire outlasts its fuel, standing over the ash it made.
         var clip = new Wildfire { Field = field, Wooded = _ => true };
         clip.Light(Vector2I.Zero);
         var scrub = new PropNode { Consumed = true };
         var snag = new PropNode();
-        bool hovering = false, lingering = false, early = true;
+        bool cold = false, lingering = false, outlasts = false;
         bool wentOut = false, scrubGone = false, snagStands = false;
         for (int f = 0; f < 900; f++)
         {
@@ -14314,12 +14412,13 @@ public static class SelfTest
             Wildfire.Coat coat = clip.Of(Vector2I.Zero, 0.0);
             scrub.Coat = coat;
             snag.Coat = coat;
-            if (scrub.Spent >= 1.0f && coat.Flame > 0.0f)
-                hovering = true;
-            if (coat.Burnt && scrub.Spent < 1.0f)
+            if (scrub.Spent > 0.0f && scrub.Spent < 1.0f && coat.Flame < 0.999f)
+                cold = true;
+            if (clip.AgeAt(Vector2I.Zero) >= clip.Hold + 0.02f
+                && scrub.Spent < 1.0f)
                 lingering = true;
-            if (coat.Char > 0.0f && coat.Char < 1.0f && scrub.Spent > 0.0f)
-                early = false;
+            if (scrub.Spent >= 1.0f && coat.Flame > 0.0f)
+                outlasts = true;
             if (coat.Burnt)
             {
                 wentOut = true;
@@ -14327,14 +14426,14 @@ public static class SelfTest
                 snagStands = snag.Shown >= 0.999f;
             }
         }
-        Check("scrub is gone exactly when its own flame is, and no sooner",
-            wentOut && !hovering && !lingering && early
+        Check("the scrub is eaten by the flame on it, and gone by the hold",
+            wentOut && !cold && !lingering && outlasts
             && scrubGone && snagStands,
-            $"burnt out {wentOut}, flame over nothing {hovering}, left over "
-            + $"after the fire {lingering}, gone before the char finished "
-            + $"{!early}, scrub {scrub.Shown:F2} snag {snag.Shown:F2} - a prop "
-            + "that vanished early leaves its own flame burning over bare "
-            + "ground, because the flame quad hangs on the prop's transform");
+            $"burnt out {wentOut}, going before the flame was up {cold}, still "
+            + $"there at the hold {lingering}, fire over the ash {outlasts}, "
+            + $"scrub {scrub.Shown:F2} snag {snag.Shown:F2} - a cell the rules "
+            + "are holding has to be one the fire has got through, and what it "
+            + "got through the scrub is nothing left of it");
 
         // And all of it end to end on a sown board, which needs a board that has
         // been sown - so it lives in Charring below, called from the one place in

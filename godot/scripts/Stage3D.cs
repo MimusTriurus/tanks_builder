@@ -7681,63 +7681,178 @@ void fragment() {
 ";
 
     /// <summary>
-    /// The smoke over one burning tree: a column standing off the crown, widening
-    /// and thinning as it goes up.
+    /// The smoke over one burning tree: a queue of puffs born behind the flame,
+    /// rising, spreading and thinning out.
+    ///
+    /// <b>Puffs and not a veil, and that is the whole of this shader.</b> What it
+    /// replaced was a soft-edged band with noise torn out of it, which has no
+    /// scale in it at all: nothing in the picture says whether the column is ten
+    /// metres or a hundred, and eight of them on one cell composite into a flat
+    /// slab that greys out the wood standing behind. A queue of bodies has a scale
+    /// because each body has an edge - the flame's own finding, where licks that
+    /// were flat inside and blurred at the sides read as ribbons until they became
+    /// ellipses.
+    ///
+    /// <b>It is <c>engine_fire.SMOKE</c> - the tank's own column - ported the way
+    /// the flame ported the fire.</b> The numbers are <see cref="ProcSmoke"/>'s;
+    /// there they are quoted against the hull's length, here against the column's
+    /// own reach, because that is the only form they port in and reading them as
+    /// fractions of anything else is the mistake both ports have already paid for
+    /// once. So the board has one smoke: a tank's column is these puffs marched
+    /// along a vent's path in 2D, a tree's is the same puffs up a vertical axis in
+    /// a billboard.
+    ///
+    /// <b>The one number that tells a column from a flame is the sign of the
+    /// climb.</b> A flame gathers - elements bunching toward the tip - and smoke
+    /// slows, which is <c>ProcSmoke.Slowing</c> handed to the same path as
+    /// <c>-1/slowing</c>. Same closed form as <c>flame_climb</c>, for a tree's
+    /// reason: the axis is vertical, so the integral closes rather than being
+    /// marched.
     ///
     /// <b>Ordinary alpha and dark, and that is what makes the flame work.</b> The
     /// fire adds light, so what is behind it decides how much of it arrives; on
     /// pale ground almost none does. Black smoke under the flame is what the tank's
     /// burning column is for, in those words, and drawing it the other way round
-    /// would wash out the fire it is supposed to hold up.
+    /// would wash out the fire it is supposed to hold up. So the queue is seated
+    /// inside the flame rather than over the crown: above the roots, which would
+    /// read as a smoke machine, and low enough that the fire has something dark to
+    /// stand on.
     ///
-    /// <b>It starts above the crown, not at the foot.</b> Smoke pouring out of the
-    /// roots is the one arrangement that reads as a smoke machine rather than a
-    /// tree, and the flame already owns the trunk.
+    /// <b>Composited in index order and not sorted</b>, unlike the tank's, and
+    /// that is affordable for one reason: every puff here is the same ink give or
+    /// take <c>tone_vary</c>, so which of two overlapping bodies is in front
+    /// cannot be seen. The tank sorts because its puffs are cut against the hull's
+    /// depth map, and there the order is the depth buffer it does not have.
     /// </summary>
     private const string SmokeShader = @"
 shader_type spatial;
 render_mode unshaded, cull_disabled, depth_draw_never;
 
+// Where the foot of the tree sits down the quad, this tree's own place in the
+// cycle, and the quad in tree heights - the flame's arrangement, and it has to be
+// the flame's or every puff comes out an ellipse: the UV is not square.
 uniform float foot_v = 0.9;
 uniform float seed = 0.0;
 uniform float level = 0.0;
 uniform float time = 0.0;
-// Where the column starts over the tree's own height, and what it is worth at its
-// thickest. It starts low enough to lie behind the flame, because that is what it
-// is for: the fire is additive, so what is behind it decides how much of it
-// arrives, and on pale ground almost none does.
+uniform float tall = 1.85;
+uniform float wideq = 1.85;
+
+// How many bodies the column is. Fewer than the tank's twenty-two, because there
+// each puff is a quad the rasteriser skips and here it is work every fragment
+// does - the flame's note, and this is the first number to cut if a burning
+// forest costs too much.
+uniform int puffs = 22;
+
+// How far the column reaches and where it is born, both in tree heights. The
+// reach is the one size knob; everything below is a ratio to it.
+uniform float rise = 1.15;
+uniform float seat_at = 0.30;
+
+// engine_fire.SMOKE, quoted against that reach. The tank quotes them against its
+// hull - PuffStart 0.40 of a port radius, PuffGrow 0.048 and Spread 0.103 of a
+// hull, against Rise 0.45 of one - so these are those numbers divided through by
+// the reach they are measured with. The port, rather than a new set of dials.
+uniform float puff_seat = 0.107;
+uniform float puff_grow = 0.107;
+uniform float puff_power = 0.65;
+uniform float spread_ratio = 0.229;
+uniform float born_scatter = 0.70;
+uniform float vary = 0.45;
+uniform float stagger = 0.35;
+uniform float wobble = 0.22;
+uniform float alpha = 0.80;
 uniform float onset = 0.10;
-uniform float ink = 0.72;
+uniform float fade = 1.25;
+uniform float rim_falloff = 1.15;
+uniform float opacity = 0.80;
+uniform float tone_vary = 0.08;
+// Negative, and it is the one number that tells this from a flame: smoke slows
+// (ProcSmoke.Slowing 1.10, handed to the path as -1/slowing) where a flame
+// gathers.
+uniform float gather = -0.909;
+// One lap of the queue, and slower than the flame's 0.85: a column drifts where a
+// fire flickers, which is the borrowed pair's two rates.
+uniform float rate = 0.30;
+// A lean with height, on top of the wander - one wind over the board, so a stand
+// of columns agrees instead of eight of them standing plumb.
+uniform float lean = 0.13;
+// Soot, not grey: what comes off a burning tree is dark and slightly warm, and a
+// neutral grey column on this ground reads as fog.
+uniform vec3 ink = vec3(0.24, 0.22, 0.20);
 
 FLAME_NOISE
+
+// Solidity over one puff's life: zero at both ends, or a body appears and
+// vanishes with a step. ProcSmoke's own expression, which is flame_life's.
+float smoke_life(float age) {
+    return (1.0 - exp(-age / max(onset, 1e-4)))
+           * pow(max(1.0 - age, 0.0), fade);
+}
+
+// How far up the reach a puff of this age has got: the integral of exp(g*a)
+// normalised on its end point - flame_climb, with g negative.
+float smoke_climb(float age) {
+    float g = gather;
+    if (abs(g) < 1e-3) { return age; }
+    return (exp(g * age) - 1.0) / (exp(g) - 1.0);
+}
+
+// One puff: an ellipse soft in the middle and thin at its rim, the rim itself
+// roughened so it is not a circle. Premultiplied, like the flame's elements.
+vec4 smoke_puff(vec2 at, vec2 centre, float r, float gain, float tone,
+                float lump) {
+    vec2 d = (at - centre) / max(r, 1e-4);
+    float q = dot(d, d);
+    if (q >= 2.25) { return vec4(0.0); }
+    float wob = 1.0 + wobble * (2.0 * ember_fbm(d * 1.7 + vec2(lump, lump)) - 1.0);
+    q = q / max(wob * wob, 1e-4);
+    if (q >= 1.0) { return vec4(0.0); }
+    float facing = sqrt(1.0 - q);
+    float a = clamp(pow(facing, rim_falloff) * gain * opacity, 0.0, 1.0);
+    return vec4(ink * tone * a, a);
+}
+
+vec4 smoke_over(vec4 acc, vec4 e) {
+    return vec4(e.rgb + (1.0 - e.a) * acc.rgb, e.a + (1.0 - e.a) * acc.a);
+}
 
 void fragment() {
     if (level <= 0.0) {
         ALBEDO = vec3(0.0);
         ALPHA = 0.0;
     } else {
-        float h = (foot_v - UV.y) / max(foot_v, 0.0001);
-        float x = UV.x - 0.5;
-        float t = time + seed * 53.0;
-        // Rising: the field is dragged down the column as time goes on, so the
-        // puffs travel up it.
-        float climb = h * 2.6 - t * 0.75;
-        float drift = 0.11 * sin(6.283 * (h * 0.6 - t * 0.20) + seed * 6.283)
-                      * max(0.0, h - onset);
-        float half_w = mix(0.05, 0.26,
-                           clamp((h - onset) / max(0.85 - onset, 0.0001), 0.0, 1.0));
-        float body = 1.0 - smoothstep(half_w * 0.20, half_w, abs(x - drift));
-        float puff = ember_fbm(vec2((x - drift) * 4.2 + seed * 31.0, climb));
-        float torn = smoothstep(0.26, 0.66, puff + 0.22);
-        // Nothing under the seat, and thinning out at the top rather than ending:
-        // a column with a hard end is a column somebody cut.
-        float band = smoothstep(onset - 0.04, onset + 0.30, h)
-                     * (1.0 - smoothstep(0.55, 1.0, h));
-        float mask = clamp(body * torn * band * level * ink, 0.0, 1.0);
-        // Soot, not grey: what comes off a burning tree is dark and slightly warm,
-        // and a neutral grey column on this ground reads as fog.
-        ALBEDO = mix(vec3(0.07, 0.06, 0.055), vec3(0.19, 0.16, 0.14), puff);
-        ALPHA = mask;
+        vec2 at = vec2((UV.x - 0.5) * wideq, (foot_v - UV.y) * tall);
+        float t = time * rate + seed;
+        vec4 col = vec4(0.0);
+        for (int k = 0; k < puffs; k++) {
+            float fk = float(k);
+            float n = float(puffs);
+            float age = fract((fk + 0.5) / n
+                              + stagger * (2.0 * ember_hash(vec2(fk, 51.0)) - 1.0) / n
+                              + t);
+            float life = smoke_life(age);
+            float up = seat_at + rise * smoke_climb(age);
+            float r = rise * (puff_seat + puff_grow * pow(age, puff_power))
+                      * (1.0 - vary + 2.0 * vary * ember_hash(vec2(fk, 52.0)));
+            // Out of the middle and on across: the wander is the tank's Spread on
+            // age^0.7, and the lean is one wind, growing faster than it.
+            float wander = rise * spread_ratio * pow(age, 0.7)
+                           * ember_hash(vec2(fk, 53.0))
+                           * cos(6.283185 * ember_hash(vec2(fk, 54.0)));
+            float born = r * born_scatter
+                         * (2.0 * ember_hash(vec2(fk, 55.0)) - 1.0);
+            float side = lean * rise * pow(age, 1.2);
+            float tone = 1.0 + tone_vary
+                               * (2.0 * ember_hash(vec2(fk, 56.0)) - 1.0);
+            col = smoke_over(col,
+                             smoke_puff(at, vec2(born + wander + side, up), r,
+                                        alpha * life, tone, fk * 7.0 + seed));
+        }
+        // Premultiplied out of the compositing, so the colour is divided back out
+        // and the coverage handed over as it stands.
+        ALBEDO = col.rgb / max(col.a, 0.0001);
+        ALPHA = clamp(col.a * level, 0.0, 1.0);
     }
 }
 ";
@@ -7967,8 +8082,14 @@ vec4 flame_over(vec4 acc, vec4 e) {
 
     private static readonly Shader Blazing = new() { Code = BlazingCode };
 
-    private static readonly Shader Smoking =
-        new() { Code = SmokeShader.Replace("FLAME_NOISE", EmberNoiseCode) };
+    /// <summary>The forest's column as it is compiled, so the check can ask
+    /// whether its numbers are still the tank's - the flame's arrangement, and
+    /// for the flame's reason: a port that is only a port in the comments comes
+    /// apart the first time either side is tuned.</summary>
+    internal static readonly string SmokingCode =
+        SmokeShader.Replace("FLAME_NOISE", EmberNoiseCode);
+
+    private static readonly Shader Smoking = new() { Code = SmokingCode };
 
     /// <summary>
     /// A borrowed layer on a tree: one column of the strip, picked by phase.
@@ -8616,6 +8737,13 @@ void fragment() {
     {
         var ink = new ShaderMaterial { Shader = Smoking, RenderPriority = StandOrder };
         Pitch(ink, tree, PlumeSpan);
+        // The quad in tree heights, both ways - the flame's arrangement and for
+        // its reason, only more so: a puff is a circle, and a circle drawn in a UV
+        // that is not square is an ellipse.
+        Vector2 size = tree.Size * PlumeSpan;
+        float high = tree.Size.Y <= 0.0f ? 1.0f : tree.Size.Y;
+        ink.SetShaderParameter("tall", size.Y / high);
+        ink.SetShaderParameter("wideq", size.X / high);
         ink.SetShaderParameter("level", 0.0f);
         ink.SetShaderParameter("time", _fireClock);
         return ink;
