@@ -314,9 +314,77 @@ public sealed class TankTick
     /// readout that re-derived the matchup would agree with the shot until
     /// somebody changed the table.
     /// </summary>
-    public int? HitDepth(Vehicle victim) =>
+    public int? HitDepth(Vehicle victim) => HitDepth(victim, Gunnery.Plate.Front);
+
+    /// <summary>The same ceiling against a named plate - what a shell that knows
+    /// where it is about to land asks. <see cref="HitDepth(Vehicle)"/> is this
+    /// one with the glacis filled in, because a dial has no bearing until the
+    /// moment it is spent.</summary>
+    public int? HitDepth(Vehicle victim, Gunnery.Plate plate) =>
         HitGun is MovementProfile gun
-            ? Gunnery.Penetration(gun, victim.Profile) : null;
+            ? Gunnery.Penetration(gun, victim.Profile, plate) : null;
+
+    /// <summary>
+    /// How far one tank stands above another, in whole levels - the shooter's
+    /// level less the target's, so positive is a shot from higher ground.
+    ///
+    /// <b>Nought with no board, and that is the honest answer rather than a
+    /// guard.</b> A tick built without a field (the self test builds several) has
+    /// no levels to be on, so every pair of hulls stands level and the plates are
+    /// the six faces, which is what the armour model did before height existed.
+    /// </summary>
+    public int LevelsOnto(Vehicle shooter, Vehicle victim) =>
+        Field is null ? 0
+            : Field.LevelAt(shooter.Cell) - Field.LevelAt(victim.Cell);
+
+    /// <summary>
+    /// The plate one tank's round meets on another - the face it comes in
+    /// through, or the roof when the shooter stands higher (GDD units.md,
+    /// "Броня": "Крыша старше граней").
+    ///
+    /// <b>One method because the answer is read three times and they must not
+    /// disagree</b>: the trigger settles the round's level with it, the arrival
+    /// asks it whether there can be a ricochet, and the trace prints it. A
+    /// readout that re-derived the plate would agree with the shot right up until
+    /// somebody moved the target.
+    ///
+    /// <b>A mortar meets the roof wherever it stands.</b> Its bomb comes down
+    /// rather than across, so the drop is not what puts it on the deck - see
+    /// <see cref="Shell.Overhead"/>. Nothing turns on it today, the mortar's V
+    /// out-classing every plate in the game including the roof, but the rule is
+    /// the rule and stating it here keeps the one place that decides plates
+    /// deciding all of them.
+    /// </summary>
+    public Gunnery.Plate PlateBetween(Vehicle shooter, Vehicle victim,
+                                      double fromBearing) =>
+        shooter.Profile.Lobs ? Gunnery.Plate.Roof
+            : Gunnery.PlateFor(FaceOf(victim, fromBearing),
+                               LevelsOnto(shooter, victim));
+
+    /// <summary>Which plate of <paramref name="victim"/> a bearing comes in
+    /// through, snapped to a flat side first - <see cref="TakeHit"/>'s own two
+    /// lines, named so the trigger can ask them before the round exists.
+    /// </summary>
+    public static string FaceOf(Vehicle victim, double fromBearing) =>
+        victim.Atlas is AtlasSet atlas
+            ? atlas.FaceFor(HexField.EdgeHeadings[Angles.SideFor(fromBearing)],
+                            victim.Sprite.HullFacing)
+            : "";
+
+    /// <summary>
+    /// How deep one tank's gun gets into another, against the plate this
+    /// particular shot meets - the combat path's one question, asked in one
+    /// place.
+    ///
+    /// <b>Every caller that has two hulls and a bearing wants this and not
+    /// <see cref="Gunnery.Penetration(MovementProfile, MovementProfile)"/></b>,
+    /// which is the glacis by definition and would armour a hull in its front
+    /// plate from all six sides and from above.
+    /// </summary>
+    public int PenetrationBetween(Vehicle shooter, Vehicle victim,
+                                  double fromBearing) =>
+        Gunnery.Penetration(shooter.Profile, victim.Profile,
+                            PlateBetween(shooter, victim, fromBearing));
 
     /// <summary>Whether a round in the air is drawn. The flight is not on a
     /// switch - it is what puts time between the report and the impact - so this
@@ -4124,6 +4192,7 @@ public sealed class TankTick
         // with no plate under it is whose gun it is - see Shell.Overhead, which
         // is where that cost is written down.
         bool over = shooter.Profile.Lobs;
+        Gunnery.Plate plate = PlateBetween(shooter, victim, fromBearing);
         Send(shooter, new Shell
         {
             Shooter = shooter,
@@ -4144,7 +4213,13 @@ public sealed class TankTick
             Rise = over ? 0.0f : shot.Rise,
             Calibre = Ordnance.At(Calibre),
             Ammo = ammo ?? Ammo,
-            Level = level ?? Gunnery.Penetration(shooter.Profile, victim.Profile),
+            Level = level ?? Gunnery.Penetration(shooter.Profile, victim.Profile,
+                                                 plate),
+            // Which plate it is about to meet, settled here for the reason the
+            // calibre and the scatter are: the arrival asks whether this round
+            // could bounce, and a plate re-derived on impact would answer for
+            // wherever the target had got to by then. See PlateBetween.
+            Plate = plate,
             // And what it does after that, which is nothing at all unless the
             // rules said otherwise - see Carry.
             Goes = goes,
@@ -4370,11 +4445,12 @@ public sealed class TankTick
             return;
         }
         Land(round.Target, round.Face, round.Scatter, round.Rise, round.Calibre,
-             round.Level, 1, round.Bearing, round.Ammo,
+             round.Level, 1, round.Bearing, round.Ammo, round.Plate,
              // And which way it came at the armour, which is the one thing about
              // the arrival the round decides: a bomb comes down on the deck and
              // meets no plate at all - see Shell.Overhead, and Land's own
-             // overhead beneath it.
+             // overhead beneath it. The plate beside it is the other half of
+             // that: which of the four it met, settled at the trigger.
              round.Overhead);
         Carry(round);
     }
@@ -4436,6 +4512,16 @@ public sealed class TankTick
             return;
         if (round.Goes == Shell.Onward.Bounces ? round.Level > 0 : round.Level <= 0)
             return;
+        // <b>And a plate that swallowed it has no second leg at all.</b> Only a
+        // flank turns a round on (Gunnery.Ricochets); a glacis and a rear plate
+        // send it up, which Skyward draws below, and a roof sends it into the
+        // ground under the tank - no flight, no fan, nothing to carry. Asked
+        // here rather than left to Deflect because Deflect is handed the face,
+        // and a round that came down from a hill hit a flank face while meeting
+        // the roof.
+        if (round.Goes == Shell.Onward.Bounces
+            && round.Plate == Gunnery.Plate.Roof)
+            return;
         double hull = hit.Sprite.HullFacing;
         int axis;
         Vector2 leaves;
@@ -4474,7 +4560,8 @@ public sealed class TankTick
         if (blocked && at is Vector2I cell
             && Vehicle.At(Vehicles, cell) is Vehicle next
             && Shoot(round.Shooter, next, Angles.Mod(axis + 180.0, 360.0),
-                     round.NextLevel ?? Spent(round, next),
+                     round.NextLevel
+                         ?? Spent(round, next, Angles.Mod(axis + 180.0, 360.0)),
                      leg: new Leg(from, lift, dir)))
             return;
         Send(round.Shooter, new Shell
@@ -4592,10 +4679,11 @@ public sealed class TankTick
     /// nowhere" are different answers and the second one would quietly forbid
     /// a ricochet from ever holing anything.
     /// </summary>
-    private static int? Spent(Shell round, Vehicle next) =>
+    private int? Spent(Shell round, Vehicle next, double fromBearing) =>
         round.Goes == Shell.Onward.Passes
             ? Gunnery.Penetration(Gunnery.PassedMight(round.Shooter.Profile),
-                                  next.Profile)
+                                  next.Profile,
+                                  PlateBetween(round.Shooter, next, fromBearing))
             : null;
 
     /// <summary>Take every round off the board - the reset, and it runs before
@@ -4819,11 +4907,18 @@ public sealed class TankTick
         // one that passed null gets whatever HitBy says, which is either the
         // matchup against this hull or still null. See HitBy on why a manual hit
         // could not show a ricochet before this line existed.
-        level ??= HitDepth(victim);
         // Snapped, not taken as given: a shell arrives from a neighbouring
         // cell, so every angle anything hands in resolves to one of the six
         // sides rather than to itself.
         double from = HexField.EdgeHeadings[Angles.SideFor(fromBearing)];
+        // <b>Which plate, before how deep, because the second depends on the
+        // first.</b> A key-press has no shooter, so it has no drop either: the
+        // plate is the face alone, and the roof belongs to rounds that came from
+        // a cell standing higher - see PlateBetween, which is what a fired shell
+        // asks instead.
+        Gunnery.Plate plate =
+            Gunnery.PlateFor(FaceOf(victim, fromBearing), 0);
+        level ??= HitDepth(victim, plate);
         // Deterministic under --capture and --trace, which fix the time step so
         // two runs can be diffed; a random scatter would put the two hits in
         // different places and the diff would measure that instead.
@@ -4849,7 +4944,7 @@ public sealed class TankTick
         // caller but one wants the dial, and a required parameter would have them
         // all writing the same field out.
         Land(victim, face, scatter, rise, calibre, level, bite, from,
-             ammo ?? Ammo);
+             ammo ?? Ammo, plate);
     }
 
     /// <summary>
@@ -4917,9 +5012,22 @@ public sealed class TankTick
     /// <paramref name="from"/> mean nothing while it is set and are passed
     /// blank, the way <see cref="Loose"/> writes the armour half of a round
     /// going at the ground.</param>
+    /// <param name="plate">Which of the four the round met, already settled -
+    /// <b>required rather than defaulted, and the default is what made it
+    /// so.</b> Front was the safe-looking one to fall back on and it silently
+    /// took the ricochet away from three checks that fire at a plate they never
+    /// named. A caller that does not know which plate it is hitting does not
+    /// know what it is asserting.</param>
+    /// <b>What it is read for:</b> settled
+    /// by the trigger for a fired shell (<see cref="Shell.Plate"/>) and by the
+    /// bearing for a key-press. <b>Read here for one thing only: whether the
+    /// armour could turn the round on.</b> How deep it got is the level carried
+    /// in, which was worked out against this same plate, so the two cannot
+    /// disagree about what was hit.</param>
     public void Land(Vehicle victim, string face, float scatter, float rise,
                       float calibre, int? level, int bite, double from,
-                      Shell.Kind ammo, bool overhead = false)
+                      Shell.Kind ammo, Gunnery.Plate plate,
+                      bool overhead = false)
     {
         TankSprite sprite = victim.Sprite;
         // How deep it goes is the calibre's business - see TankSprite.Damage.
@@ -4986,7 +5094,14 @@ public sealed class TankTick
         // straight up instead of out along a face. So it is one case and not a
         // fourth column in the other two.
         bool burst = !overhead && ammo == Shell.Kind.He && Slam;
-        bool bounced = !overhead && !burst && got <= 0 && Bounce;
+        // <b>And the plate is asked as well as the depth</b>, because the rules
+        // only ever let a flank turn a round on: a glacis or a rear plate that
+        // held spends the shell where it landed, and a roof that held puts it in
+        // the ground under the tank. Which means a shot from higher ground never
+        // draws a ricochet, and that is the rule rather than a side effect - see
+        // Gunnery.Ricochets, the same answer Gunnery.Deflect gives the flight.
+        bool bounced = !overhead && !burst && got <= 0 && Bounce
+                       && Gunnery.Ricochets(plate);
         if (overhead)
         {
             // Nothing else is drawn on this hull, switch or no switch: the
@@ -5007,13 +5122,13 @@ public sealed class TankTick
         }
         else if (burst)
         {
-            (Vector2 plate, Vector2 outward) = victim.Blown(face, scatter, rise);
-            Blasted?.Invoke(victim, plate, outward, victim.Turned(face));
+            (Vector2 struck, Vector2 outward) = victim.Blown(face, scatter, rise);
+            Blasted?.Invoke(victim, struck, outward, victim.Turned(face));
         }
         else if (bounced)
         {
-            (Vector2 plate, Vector2 away) = victim.Graze(face, scatter, rise, from);
-            Bounced?.Invoke(victim, plate, away, victim.Turned(face));
+            (Vector2 struck, Vector2 away) = victim.Graze(face, scatter, rise, from);
+            Bounced?.Invoke(victim, struck, away, victim.Turned(face));
         }
         else
         {

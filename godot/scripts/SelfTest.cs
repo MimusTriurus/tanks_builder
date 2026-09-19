@@ -7663,19 +7663,44 @@ public static class SelfTest
             // ProcSlam instead - see TankTick.Land's fork, where the round's own
             // kind is asked before the plate's. Passed HE these four would assert
             // the ricochet against the one round that cannot produce one.
+            //
+            // <b>Fired at the flank, and that is the check being made honest
+            // rather than being made to pass.</b> These three used to fire at
+            // HitFaces[0] - the glacis - and assert a ricochet off it, which the
+            // rules have never allowed: "непробитие в лоб или в корму снаряд
+            // гасит". It passed because the bounce was decided by the depth
+            // alone, so any plate that held drew a fan. Now the plate is asked as
+            // well (Gunnery.Ricochets), and the round has to arrive somewhere a
+            // round can be turned.
             var fork = new TankTick();
             int bounced = 0;
             fork.Bounced = (_, _, _, _) => bounced++;
             mark.Hit.Reset();
-            fork.Land(mark, plate, 0.0f, 0.0f, 1.0f, 0, 1, outward, Shell.Kind.Ap);
+            fork.Land(mark, turns, 0.0f, 0.0f, 1.0f, 0, 1, faces, Shell.Kind.Ap,
+                      Gunnery.PlateFor(turns, 0));
             bool bounceOnly = bounced == 1 && !mark.Hit.Live;
             mark.Hit.Reset();
-            fork.Land(mark, plate, 0.0f, 0.0f, 1.0f, 2, 1, outward, Shell.Kind.Ap);
+            fork.Land(mark, turns, 0.0f, 0.0f, 1.0f, 2, 1, faces, Shell.Kind.Ap,
+                      Gunnery.PlateFor(turns, 0));
             bool holeOnly = bounced == 1 && mark.Hit.Live;
             fork.Bounce = false;
             mark.Hit.Reset();
-            fork.Land(mark, plate, 0.0f, 0.0f, 1.0f, 0, 1, outward, Shell.Kind.Ap);
+            fork.Land(mark, turns, 0.0f, 0.0f, 1.0f, 0, 1, faces, Shell.Kind.Ap,
+                      Gunnery.PlateFor(turns, 0));
             bool offRestores = bounced == 1 && mark.Hit.Live;
+            // And the other half of the same rule, which nothing asserted before:
+            // the glacis that holds swallows the round instead of turning it.
+            mark.Hit.Reset();
+            fork.Bounce = true;
+            fork.Land(mark, plate, 0.0f, 0.0f, 1.0f, 0, 1, outward, Shell.Kind.Ap,
+                      Gunnery.Plate.Front);
+            bool frontSwallows = bounced == 1 && mark.Hit.Live;
+            // And a round that came down from higher ground, which meets the roof
+            // whichever face it came in through - so it cannot bounce either.
+            mark.Hit.Reset();
+            fork.Land(mark, turns, 0.0f, 0.0f, 1.0f, 0, 1, faces, Shell.Kind.Ap,
+                      Gunnery.PlateFor(turns, 1));
+            bool roofSwallows = bounced == 1 && mark.Hit.Live;
             mark.Hit.Reset();
             mark.Sprite.Repair();
             Check("a round that bounces draws the ricochet and not the rendered"
@@ -7695,6 +7720,15 @@ public static class SelfTest
                 "the built ricochet stands on the board and the rendered pair in "
                 + "the tank's canvas, so this flag is the only A/B this layer can "
                 + "have");
+            Check("a glacis that held swallows the round rather than turning it",
+                frontSwallows,
+                "\"непробитие в лоб или в корму снаряд гасит\" - only a flank "
+                + "turns a round on, and the picture has to say so as well as "
+                + "the flight (Gunnery.Ricochets beside Gunnery.Deflect)");
+            Check("and a shot from higher ground never bounces at all",
+                roofSwallows,
+                "it met the roof whichever face it came in through, and a roof "
+                + "that held puts the round in the ground under the tank");
 
             // <b>And which rounds those are is the class matchup, on the key as
             // well as in a firefight.</b> A fired shell has a class at both ends
@@ -7724,14 +7758,31 @@ public static class SelfTest
             MovementProfile weak = MovementProfile.Light;
             fork.HitBy = Array.IndexOf(MovementProfile.All, weak);
             fork.Bounce = true;
-            if (Gunnery.Penetration(weak, mark.Profile) == 0)
+            // <b>Against a plate this gun cannot beat, and which plate that is
+            // has to be asked now rather than assumed.</b> "Cannot get in" used
+            // to be a fact about two classes; with four zones it is a fact about
+            // a class, a hull and a plate - a light gun is through a light
+            // tank's flank, which is worth nought, and stopped by its glacis.
+            // The old form fired at whatever side the dial happened to open on
+            // and read a penetration as a broken counter.
+            string? held = mark.Atlas.HitFaces.FirstOrDefault(
+                f => Gunnery.Penetration(weak, mark.Profile,
+                                         Gunnery.PlateFor(f, 0)) == 0);
+            bounces &= held is not null;
+            if (held is not null)
                 for (int shot = 0; shot < 4; shot++)
                 {
                     mark.Hit.Reset();
-                    int was = bounced;
-                    fork.TakeHit(mark, fork.HitFrom, 1.0f, null, 1,
-                                 Shell.Kind.Ap);
-                    bounces &= bounced == was + 1 && !mark.Hit.Live;
+                    fork.TakeHit(mark,
+                                 mark.Sprite.HullFacing
+                                     + mark.Atlas.HitBearing(held),
+                                 1.0f, null, 1, Shell.Kind.Ap);
+                    // The claim in its own terms: four rounds and no way in.
+                    // Read off the tally rather than off the ricochet hook,
+                    // because a glacis that holds swallows the round rather
+                    // than turning it - the picture is a different question and
+                    // is asserted where the pictures are.
+                    bounces &= mark.Sprite.Penetrations == 0;
                 }
             fork.HitBy = TankTick.NoShooter;
             mark.Hit.Reset();
@@ -7744,9 +7795,9 @@ public static class SelfTest
                   + " times it lands",
                 bounces,
                 $"a {weak.Tag} gun into a {mark.Profile.Tag} hull is level "
-                + $"{Gunnery.Penetration(weak, mark.Profile)}, and four rounds of "
-                + "it have to be four ricochets - the bite walks a plate deeper "
-                + "on purpose and this must not");
+                + $"{Gunnery.Penetration(weak, mark.Profile)} against the glacis, "
+                + "and four rounds of it have to leave the tally at nought - the "
+                + "bite walks a plate deeper on purpose and this must not");
         }
         // The three windows, in order: the flash is out before the fan, the fan
         // before the dust. Held the same length they are a firework.
@@ -8094,13 +8145,17 @@ public static class SelfTest
             fork.Blasted = (_, _, _, _) => went++;
             fork.Bounced = (_, _, _, _) => off++;
             mark.Hit.Reset();
-            fork.Land(mark, plate, 0.0f, 0.0f, 1.0f, 0, 1, outward, Shell.Kind.He);
+            fork.Land(mark, plate, 0.0f, 0.0f, 1.0f, 0, 1, outward, Shell.Kind.He,
+                      Gunnery.PlateFor(plate, 0));
             bool heldStill = went == 1 && off == 0 && !mark.Hit.Live;
             mark.Hit.Reset();
-            fork.Land(mark, plate, 0.0f, 0.0f, 1.0f, 2, 1, outward, Shell.Kind.He);
+            fork.Land(mark, plate, 0.0f, 0.0f, 1.0f, 2, 1, outward, Shell.Kind.He,
+                      Gunnery.PlateFor(plate, 0));
             bool throughStill = went == 2 && off == 0 && !mark.Hit.Live;
             mark.Hit.Reset();
-            fork.Land(mark, plate, 0.0f, 0.0f, 1.0f, 0, 1, outward, Shell.Kind.Ap);
+            fork.Land(mark, turns ?? plate, 0.0f, 0.0f, 1.0f, 0, 1,
+                      turns is null ? outward : turnOut, Shell.Kind.Ap,
+                      Gunnery.PlateFor(turns ?? plate, 0));
             bool apBounces = went == 2 && off == 1 && !mark.Hit.Live;
             // <b>And what the flag restores is the <em>path</em>, not one
             // picture on it - which is the one place this A/B is not Bounce's
@@ -8113,10 +8168,17 @@ public static class SelfTest
             // was something it never was.
             fork.Slam = false;
             mark.Hit.Reset();
-            fork.Land(mark, plate, 0.0f, 0.0f, 1.0f, 0, 1, outward, Shell.Kind.He);
+            // At the flank, for the reason the ricochet block fires there: the
+            // damage fork this flag hands back ends in a bounce, and only a
+            // flank has ever been allowed to produce one.
+            fork.Land(mark, turns ?? plate, 0.0f, 0.0f, 1.0f, 0, 1,
+                      turns is null ? outward : turnOut, Shell.Kind.He,
+                      Gunnery.PlateFor(turns ?? plate, 0));
             bool offBounces = went == 2 && off == 2 && !mark.Hit.Live;
             mark.Hit.Reset();
-            fork.Land(mark, plate, 0.0f, 0.0f, 1.0f, 2, 1, outward, Shell.Kind.He);
+            fork.Land(mark, turns ?? plate, 0.0f, 0.0f, 1.0f, 2, 1,
+                      turns is null ? outward : turnOut, Shell.Kind.He,
+                      Gunnery.PlateFor(turns ?? plate, 0));
             bool offRestoresHe = offBounces && went == 2 && mark.Hit.Live;
             fork.Slam = true;
             // And the mark, which is written above the fork and so is reached by
@@ -8124,12 +8186,15 @@ public static class SelfTest
             // exists and stays") turning out to need no code at all.
             mark.Sprite.Repair();
             mark.Hit.Reset();
-            fork.Land(mark, plate, 0.0f, 0.0f, 1.0f, 1, 1, outward, Shell.Kind.He);
+            fork.Land(mark, plate, 0.0f, 0.0f, 1.0f, 1, 1, outward, Shell.Kind.He,
+                      Gunnery.PlateFor(plate, 0));
             int heMarks = mark.Sprite.MarksOn(plate).Count;
             mark.Sprite.Repair();
             mark.Hit.Reset();
-            fork.Land(mark, plate, 0.0f, 0.0f, 1.0f, 0, 1, outward, Shell.Kind.Ap);
-            int apMarks = mark.Sprite.MarksOn(plate).Count;
+            fork.Land(mark, turns ?? plate, 0.0f, 0.0f, 1.0f, 0, 1,
+                      turns is null ? outward : turnOut, Shell.Kind.Ap,
+                      Gunnery.PlateFor(turns ?? plate, 0));
+            int apMarks = mark.Sprite.MarksOn(turns ?? plate).Count;
             mark.Hit.Reset();
             mark.Sprite.Repair();
             Check("an HE round that did not get in bursts on the face of the plate",
@@ -11398,6 +11463,117 @@ public static class SelfTest
             $"might runs to {MovementProfile.All.Max(p => p.Might)} and the scar "
             + $"layer has {Gunnery.DeepestLevel + 1} depths, so the cap is doing "
             + "work rather than sitting above the range");
+        // The four plates, written out as the GDD writes them - a grid of
+        // ordinals in class order - for the reason the matchup grid above is
+        // written out: this is a game rule, and the rule it is held against is a
+        // subtraction that could plausibly be off by one in either direction.
+        //
+        // Rows are the plates in Gunnery.Plate's order, columns the classes in
+        // MovementProfile.All's: LTP MTP HTP TDP HMP.
+        int[,] plates =
+        {
+            { 1, 2, 3, 2, 1 },      // front  the mass itself
+            { 0, 1, 2, 1, 0 },      // side   one step down
+            { 0, 0, 1, 0, 0 },      // rear   two, floored at nought
+            { 0, 1, 2, 0, 0 },      // roof   the side's, or the rear's with no turret
+        };
+        var offPlate = new List<string>();
+        foreach (Gunnery.Plate zone in Enum.GetValues<Gunnery.Plate>())
+        for (int c = 0; c < MovementProfile.All.Length; c++)
+        {
+            int got = Gunnery.ArmourAt(MovementProfile.All[c], zone);
+            if (got != plates[(int)zone, c])
+                offPlate.Add($"{MovementProfile.All[c].Tag} {zone} {got} "
+                             + $"not {plates[(int)zone, c]}");
+        }
+        Check("the four armour plates are the GDD's, cell for cell",
+            offPlate.Count == 0
+            && plates.GetLength(0) == Enum.GetValues<Gunnery.Plate>().Length,
+            offPlate.Count > 0
+                ? string.Join(", ", offPlate.Take(6))
+                : $"{plates.GetLength(0)} rows against "
+                  + $"{Enum.GetValues<Gunnery.Plate>().Length} plates");
+        // And the rule the grid is supposed to be a picture of, asserted
+        // separately: the grid would still pass if somebody pasted the numbers
+        // in and deleted the subtraction.
+        Check("and every plate is the mass stepped down rather than a table",
+            MovementProfile.All.All(
+                p => Gunnery.ArmourAt(p, Gunnery.Plate.Front) == p.Mass
+                     && Gunnery.ArmourAt(p, Gunnery.Plate.Side)
+                        == Math.Max(p.Mass - 1, 0)
+                     && Gunnery.ArmourAt(p, Gunnery.Plate.Rear)
+                        == Math.Max(p.Mass - 2, 0)),
+            "front, side, rear is mass, mass-1, mass-2 floored at nought - "
+            + "twenty numbers that are one column and two subtractions");
+        Check("and the roof is the turret: the flank on a turreted hull, the "
+            + "rear on a casemate",
+            MovementProfile.All.All(
+                p => Gunnery.ArmourAt(p, Gunnery.Plate.Roof)
+                     == Gunnery.ArmourAt(p, p.Turreted ? Gunnery.Plate.Side
+                                                       : Gunnery.Plate.Rear))
+            && !td.Turreted && !hm.Turreted && lt.Turreted,
+            string.Join(" ", MovementProfile.All.Select(
+                p => $"{p.Tag} {Gunnery.ArmourAt(p, Gunnery.Plate.Roof)}"
+                     + (p.Turreted ? "t" : "c"))));
+        // What the plates are *for*, which the ordinals alone do not say: height
+        // opens the mirror matchups, and nothing else. A class that cannot hole
+        // its own kind head-on can hole it from a hill, and the two that already
+        // out-class every plate gain nothing at all.
+        Check("height opens the mirror and only the mirror",
+            Gunnery.Penetration(lt, lt, Gunnery.Plate.Front) == 0
+            && Gunnery.Penetration(lt, lt, Gunnery.Plate.Roof) > 0
+            && Gunnery.Penetration(mt, mt, Gunnery.Plate.Front) == 0
+            && Gunnery.Penetration(mt, mt, Gunnery.Plate.Roof) > 0
+            && Gunnery.Penetration(ht, ht, Gunnery.Plate.Front) == 0
+            && Gunnery.Penetration(ht, ht, Gunnery.Plate.Roof) > 0,
+            "the whole of what the fourth plate is for - a hill is the second "
+            + "key to an equal class, the flank being the first");
+        Check("and a hill is not an answer to everything: a light gun still "
+            + "cannot hole a medium or a heavy from one",
+            Gunnery.Penetration(lt, mt, Gunnery.Plate.Roof) == 0
+            && Gunnery.Penetration(lt, ht, Gunnery.Plate.Roof) == 0
+            && Gunnery.Penetration(mt, ht, Gunnery.Plate.Roof) == 0,
+            "a roof level with the rear would hand a might of I four hulls out "
+            + "of five, which is the hill-as-a-verdict this plate was turned "
+            + "down for the first time it was asked for - GDD U-02");
+        Check("and the two whose might beats every plate gain nothing from "
+            + "height",
+            MovementProfile.All.All(
+                p => Gunnery.Penetration(td, p, Gunnery.Plate.Roof)
+                     == Gunnery.Penetration(td, p, Gunnery.Plate.Front)
+                     && Gunnery.Penetration(hm, p, Gunnery.Plate.Roof)
+                        == Gunnery.Penetration(hm, p, Gunnery.Plate.Front)),
+            "a IV and a V are through the glacis already, so the mortar keeps "
+            + "its verb: the roof is not a second HM");
+        // Which face is which plate, and the one line that outranks all of them.
+        Check("the flank is the two side plates and the roof outranks every "
+            + "face",
+            Gunnery.PlateFor("front", 0) == Gunnery.Plate.Front
+            && Gunnery.PlateFor("rear", 0) == Gunnery.Plate.Rear
+            && Gunnery.PlateFor("left", 0) == Gunnery.Plate.Side
+            && Gunnery.PlateFor("right", 0) == Gunnery.Plate.Side
+            && Gunnery.PlateFor("front", 1) == Gunnery.Plate.Roof
+            && Gunnery.PlateFor("rear", 2) == Gunnery.Plate.Roof
+            && Gunnery.PlateFor("left", 1) == Gunnery.Plate.Roof,
+            "\"крыша старше граней\" - a shot from above reads the roof with "
+            + "any bearing at all");
+        Check("and a shot from below or on the level still reads its face",
+            Gunnery.PlateFor("front", -1) == Gunnery.Plate.Front
+            && Gunnery.PlateFor("left", -2) == Gunnery.Plate.Side
+            && Gunnery.PlateFor("rear", 0) == Gunnery.Plate.Rear,
+            "height buys the roof one way only: uphill is an ordinary shot");
+        Check("an unmeasured plate falls to the glacis rather than to the flank",
+            Gunnery.PlateFor("", 0) == Gunnery.Plate.Front
+            && Gunnery.PlateFor("deck", 0) == Gunnery.Plate.Front,
+            "the safe way round for a default - reading an empty face as a "
+            + "flank would undress every atlas that failed to load");
+        Check("only a flank turns a round on, and a shot from above never does",
+            Gunnery.Ricochets(Gunnery.Plate.Side)
+            && !Gunnery.Ricochets(Gunnery.Plate.Front)
+            && !Gunnery.Ricochets(Gunnery.Plate.Rear)
+            && !Gunnery.Ricochets(Gunnery.Plate.Roof),
+            "the same answer Gunnery.Deflect gives the flight, so the fan that "
+            + "is drawn and the round that flies on cannot disagree");
         Check("might runs I..V in class order",
             MovementProfile.All.Select(p => p.Might)
                 .SequenceEqual(new[] { 1, 2, 3, 4, 5 }),

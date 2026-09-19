@@ -529,6 +529,22 @@ public sealed partial class Shell : Node2D
     public bool Skyward { get; init; }
 
     /// <summary>
+    /// Which plate this round is about to meet - GDD units.md, "Броня".
+    ///
+    /// <b>Settled at the trigger and carried, for the reason
+    /// <see cref="Calibre"/> and <see cref="Scatter"/> are.</b> What the armour
+    /// is worth against this shot was decided when it left the muzzle, from
+    /// where the two tanks stood then; re-read on arrival it would answer for
+    /// where the target has got to since, and a round would change what it was
+    /// shot at in mid-air.
+    ///
+    /// <b>Read on arrival for one thing: whether there can be a bounce.</b> The
+    /// depth it reaches is <see cref="Level"/>, already worked out against this
+    /// same plate - see <see cref="TankTick.PlateBetween"/>, which decides both.
+    /// </summary>
+    public Gunnery.Plate Plate { get; init; }
+
+    /// <summary>
     /// The outcome waiting for the second leg, or null for "ask the classes".
     ///
     /// Null by default and null is the rules' own answer for a ricochet: the

@@ -556,8 +556,8 @@ public sealed class Playback
                     }
                     Tick.Fire(shooter, null,
                         v => Tick.Shoot(v, victim, Bearing(v, victim),
-                                        Gunnery.Penetration(v.Profile,
-                                                            victim.Profile)));
+                                        Tick.PenetrationBetween(
+                                            v, victim, Bearing(v, victim))));
                 },
                 _ => shooter.Rounds.All(r => r.Arrived));
     }

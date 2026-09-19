@@ -279,6 +279,104 @@ public static class Gunnery
     }
 
     /// <summary>
+    /// Which plate a round meets - GDD units.md, "Броня".
+    ///
+    /// <b>Four zones and the fourth is not a face.</b> Front, side and rear are
+    /// the six flat sides of the hex sorted by the hull's heading, which is what
+    /// <see cref="AtlasSet.FaceFor"/> already answers in pixels. The roof is a
+    /// level: it is met by a round fired from a cell that stands higher than the
+    /// target's, whichever side that round came in through.
+    /// </summary>
+    public enum Plate { Front, Side, Rear, Roof }
+
+    /// <summary>
+    /// The plate a round meets, from the face it came in through and the drop it
+    /// came down - <paramref name="levels"/> is the shooter's level minus the
+    /// target's, so positive is a shot from above.
+    ///
+    /// <b>The roof outranks the face, and that is the rule rather than a
+    /// shortcut.</b> "Крыша старше граней": a shot from a higher cell reads the
+    /// roof with any bearing at all, so the target's heading stops mattering the
+    /// moment the shooter is above it - which is the whole of what height buys.
+    /// Level or below, the face decides as it always did.
+    ///
+    /// <b>The face names are the atlas's own</b> - front, rear, left, right, in
+    /// <see cref="AtlasSet.HitFaces"/> - because they are already the names the
+    /// scar, the graze and <see cref="Deflect"/> speak. Two of them are one zone:
+    /// the GDD's side is four of the six hex faces, and the render draws it as
+    /// two plates.
+    /// </summary>
+    /// <b>The flank is named and everything else falls to the front</b>, which is
+    /// the safe way round for a default: a hull with no measured plates answers
+    /// the empty string, and reading that as a flank would quietly undress every
+    /// atlas that failed to load.
+    public static Plate PlateFor(string face, int levels) =>
+        levels > 0 ? Plate.Roof
+        : face is "left" or "right" ? Plate.Side
+        : face == "rear" ? Plate.Rear
+        : Plate.Front;
+
+    /// <summary>
+    /// What one plate of one hull is worth, as the ordinal a gun's might has to
+    /// beat - GDD classes.md, "Числа".
+    ///
+    /// <code>
+    ///            LT   MT   HT   TD   HM
+    ///   front     1    2    3    2    1
+    ///   side      0    1    2    1    0
+    ///   rear      0    0    1    0    0
+    ///   roof      0    1    2    0    0
+    /// </code>
+    ///
+    /// <b>Twenty numbers written as one subtraction, for the reason
+    /// <see cref="Penetration"/> is a comparison and not a table</b>: a table
+    /// with no rule in it goes stale the day a sixth class arrives, and this one
+    /// would go stale four times over. Every column above is
+    /// <see cref="MovementProfile.Mass"/> stepped down - front is the mass
+    /// itself, side is one less, rear is two less - and floored at nought,
+    /// because a light tank's rear would otherwise be a negative ordinal rather
+    /// than the GDD's own 0.
+    ///
+    /// <b>The roof is not a fifth step; it is one of the other two, chosen by the
+    /// turret.</b> "У башенного танка крыша равна борту, у казематного - корме":
+    /// a turret is what a roof is made of, and TD and HM have a welded casemate
+    /// where it would be. So it reads <see cref="MovementProfile.Turreted"/> -
+    /// the same field that decides whether the class has a turret layer in
+    /// <c>Sprites/</c> at all - and the GDD's fourth column falls out rather than
+    /// being carried beside it.
+    ///
+    /// <b>Why the roof sits level with the flank and not with the rear.</b> A
+    /// roof thin as the rear would hand a might of I four of the five hulls, and
+    /// the hill would stop being a position and start being an answer - the
+    /// reason the rule was turned down in U-02 the first time it was asked for.
+    /// Climbing a ramp costs about what getting round a flank costs, so the
+    /// plate it beats is the flank's.
+    /// </summary>
+    public static int ArmourAt(MovementProfile hull, Plate plate) =>
+        plate switch
+        {
+            Plate.Front => hull.Mass,
+            Plate.Side => Math.Max(hull.Mass - 1, 0),
+            Plate.Rear => Math.Max(hull.Mass - 2, 0),
+            _ => hull.Turreted ? Math.Max(hull.Mass - 1, 0)
+                               : Math.Max(hull.Mass - 2, 0),
+        };
+
+    /// <summary>
+    /// Whether a plate that held can turn the round on rather than swallow it -
+    /// GDD units.md, "Рикошет".
+    ///
+    /// <b>Only a flank does.</b> A non-penetrating hit on the front or the rear
+    /// is spent where it landed; one on the roof goes into the ground under the
+    /// tank, which is the same answer for the opposite reason and is why a shot
+    /// from above never ricochets at all. <see cref="Deflect"/> says this in
+    /// bearings and this says it in plates: one rule, asked by the flight and by
+    /// the picture, so a round that flies on and a fan that is drawn cannot
+    /// disagree about whether there was a bounce.
+    /// </summary>
+    public static bool Ricochets(Plate plate) => plate == Plate.Side;
+
+    /// <summary>
     /// How deep a round from one class gets into another class's armour, as a
     /// damage level - 0 scorch, 1 gouge, 2 breach.
     ///
@@ -331,8 +429,23 @@ public static class Gunnery
     /// level on the first hit and never goes past it, and the plate keeps the
     /// worst it has taken from anybody.
     /// </summary>
+    /// <b>The front plate, and callers that know better must say so.</b> This
+    /// pair is the matchup as a question about two classes - the table above, and
+    /// what every readout and every self-test assertion asks. A round in flight
+    /// knows which plate it is about to meet and owes the overload below that
+    /// knows it too; asking this one from the combat path would armour every hull
+    /// in its glacis from all six sides.
     public static int Penetration(MovementProfile gun, MovementProfile armour) =>
-        Penetration(gun.Might, armour);
+        Penetration(gun.Might, armour, Plate.Front);
+
+    /// <summary>The same table asked about the plate the round actually meets -
+    /// <see cref="ArmourAt"/> against the gun's might. <b>The combat path's
+    /// overload</b>: everything that resolves a shell at a hull comes through
+    /// here, because the plate is settled by then and the front is only one of
+    /// four answers.</summary>
+    public static int Penetration(MovementProfile gun, MovementProfile armour,
+                                  Plate plate) =>
+        Penetration(gun.Might, armour, plate);
 
     /// <summary>
     /// The same table asked with a might rather than with a gun.
@@ -343,8 +456,20 @@ public static class Gunnery
     /// about is a might against a mass, so this is the rule and the pair above
     /// is the common way of asking it.
     /// </summary>
-    public static int Penetration(int might, MovementProfile armour) =>
-        might > armour.Mass ? Math.Min(might - 1, DeepestLevel) : 0;
+    /// <b>Floored at one as well as capped, and the floor is what the fourth
+    /// plate exposed.</b> The depth is the calibre - a might of I digs one less
+    /// than a might of II - and while every plate in the game was worth at least
+    /// I that arithmetic never met a plate it could beat: a light gun got through
+    /// nothing, so its <c>might - 1</c> of nought was never asked. Zones put
+    /// nought-value plates on the board (a light tank's flank, a mortar's roof),
+    /// and against one of those the old expression said "through" in the
+    /// comparison and "scorch" in the level - which <see cref="TankTick.FateOf"/>
+    /// reads as no penetration at all, so a round that beat the armour left the
+    /// hull running. A hit that gets in gouges at the very least.
+    public static int Penetration(int might, MovementProfile armour,
+                                  Plate plate) =>
+        might > ArmourAt(armour, plate)
+            ? Math.Clamp(might - 1, 1, DeepestLevel) : 0;
 
     /// <summary>
     /// What a round has left after it has gone through something - GDD

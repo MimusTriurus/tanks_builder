@@ -3283,9 +3283,16 @@ public sealed partial class Main : SceneRoot
 		// The plate this lane lands on, how deep this gun can ever get into it,
 		// and how deep it has got - so a light tank stuck at 0/0 on a heavy is
 		// the matchup working rather than the shells missing.
-		string face = v.Target.Atlas.FaceFor(
-			Angles.Mod(v.Solution.Heading + 180.0, 360.0), v.Target.Sprite.HullFacing);
-		int cap = Gunnery.Penetration(v.Profile, v.Target.Profile);
+		double onto = Angles.Mod(v.Solution.Heading + 180.0, 360.0);
+		string face = v.Target.Atlas.FaceFor(onto, v.Target.Sprite.HullFacing);
+		int cap = Tick.PenetrationBetween(v, v.Target, onto);
+		// And which of the four that lane is against, which the face alone stops
+		// saying the moment the shooter is standing on a hill: the scar goes on
+		// the plate the round came in through, the armour answered for the roof.
+		// Printed only when the two part company, so a flat board reads as it
+		// always did.
+		Gunnery.Plate plate = Tick.PlateBetween(v, v.Target, onto);
+		string over = plate == Gunnery.Plate.Roof ? " roof" : "";
 		string flying = Flying();
 		// And how near the end the target is, which the plate cannot say: three
 		// rounds finish it wherever they landed, so a tank whose front plate reads
@@ -3295,7 +3302,7 @@ public sealed partial class Main : SceneRoot
 			? " knocked out"
 			: $" pen {v.Target.Sprite.Penetrations}";
 		return $"{ram}{v.Target.Tag}@{v.Solution.Heading}deg/{v.Solution.Range} {state}"
-			   + $" {face} {v.Target.Sprite.ScarLevel(face)}/{cap}{near}{flying}";
+			   + $" {face}{over} {v.Target.Sprite.ScarLevel(face)}/{cap}{near}{flying}";
 	}
 
 	/// <summary>
@@ -3845,7 +3852,7 @@ public sealed partial class Main : SceneRoot
 	/// </summary>
 	private void TakeHit(Vehicle shooter, Vehicle victim, double fromBearing) =>
 		Tick.TakeHit(victim, fromBearing, Calibre,
-				Gunnery.Penetration(shooter.Profile, victim.Profile), 1);
+				Tick.PenetrationBetween(shooter, victim, fromBearing), 1);
 
 	/// <summary>Where one gun would hole one tank, and what the round would be
 	/// aimed through to get there. Everything the launch settles at the trigger
