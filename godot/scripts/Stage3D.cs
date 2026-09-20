@@ -130,6 +130,7 @@ public sealed partial class Stage3D : Node3D
     private MeshInstance3D _ruts = null!;
     private MeshInstance3D _pond = null!;
     private MeshInstance3D _flank = null!;
+    private MeshInstance3D _glaze = null!;
 
     /// <summary>The belt marks, redrawn as geometry lying on the board. Null
     /// leaves the ground bare, which is how the stage behaved while the ruts were
@@ -295,9 +296,17 @@ public sealed partial class Stage3D : Node3D
         _ruts = new MeshInstance3D { Mesh = new ImmediateMesh() };
         _pond = new MeshInstance3D();
         _flank = new MeshInstance3D();
+        // Over the board and over the tanks - see Glaze. Added last of the board's
+        // own nodes for the same reason its material carries a rung: a transparent
+        // surface is sorted, and the sort is the thing being decided here.
+        // An ImmediateMesh for the ruts' reason: the cut follows the tank's own
+        // frame, so it moves every frame a tank does, and an ArrayMesh rebuilt
+        // through a SurfaceTool at that rate is a mesh allocated every frame.
+        _glaze = new MeshInstance3D { Mesh = new ImmediateMesh() };
         AddChild(_tops);
         AddChild(_sides);
         AddChild(_flank);
+        AddChild(_glaze);
         AddChild(_ruts);
         AddChild(_ring);
         AddChild(_pond);
@@ -342,11 +351,7 @@ public sealed partial class Stage3D : Node3D
         // would rebuild every prism to answer a checkbox - and leaving it in
         // Build alone would leave the ground lit while the wood's shadows had
         // already gone.
-        float lit = CastShadows ? ShadowInk.A : 0.0f;
-        if (_tops.MaterialOverride is ShaderMaterial turf)
-            turf.SetShaderParameter("shade", lit);
-        if (_sides.MaterialOverride is ShaderMaterial flank)
-            flank.SetShaderParameter("shade", lit);
+        Tell("shade", CastShadows ? ShadowInk.A : 0.0f);
         // Outside the rebuild gate on purpose: the swell moves every frame and
         // the board does not, which is exactly the split the gate is there to
         // make. Wrapped rather than left to grow, so a bench left open all
@@ -1362,11 +1367,24 @@ void fragment() {{
         return (kept, cut);
     }
 
+    /// <summary>
+    /// Whether the stage draws this tank over the ground instead of depth-testing
+    /// it against it - see the rule and its measurements in <see cref="Place"/>.
+    ///
+    /// <b>Here rather than at its one use, because the harness prints it.</b> The
+    /// readout beside the lean says "over" or "depth" and is read off a capture to
+    /// judge the picture; spelled a second time there it would be a copy of this
+    /// condition that nothing makes agree with it.
+    /// </summary>
+    public static bool DrawnOver(Vehicle vehicle) =>
+        vehicle.OnSlope;
+
     /// <summary>Every tank's holder and quad, from where it stands this
     /// frame.</summary>
     public void Place(IReadOnlyList<Vehicle> vehicles)
     {
         var centre = new Vector2(PaintSize * 0.5f, PaintSize * 0.5f);
+        _wearing.Clear();
         foreach (Vehicle vehicle in vehicles)
         {
             // <b>Before the stand, because a hull without one still burnt the
@@ -1415,12 +1433,32 @@ void fragment() {{
             stand.Quad.Position = Contact(vehicle);
             // <b>A tank on a slope is drawn over the ground, parked or not</b> - see
             // Vehicle.OnSlope. A slope is where a flat billboard and the geometry
-            // disagree the most: the sprite stands vertically at one point of a face
-            // that is rising through it, so the half of the face in front of that
-            // point is nearer AND higher, and honest depth takes the tank's lower
-            // body. Measured on the rosette, where the case is plain - a tank parked
-            // on the ramp at (11,2) sits behind the hill it climbs, and the hill is
-            // a level up against the ramp's half.
+            // disagree the most: the sprite stands vertically at one point of a
+            // face that is rising through it, so everything drawn below that point
+            // sits at the contact's own depth, and any surface nearer the camera
+            // than the contact takes the tank's lower body - the near half of the
+            // ramp it is on, or the flat cell it is about to drive down onto.
+            //
+            // <b>It was narrowed to "parked on a slope" and put back, and the
+            // measurement is why.</b> OnSlope && !Moving was tried on the strength
+            // of a leg on the events board - LTP driving (7,4) -> (7,6) into the
+            // ravine - where the old condition laid 1549, then 3696, then 5173 px
+            // of hull and track over the ground in front and let go of all of it in
+            // one frame at parking. Narrowed, the leg came back pixel-for-pixel
+            // honest, and honest was the wrong picture: the ground doing the cutting
+            // was the ravine floor at level -1, a level *below* the tank standing on
+            // the ramp above it. The board's own rule says that cannot happen - the
+            // self test asserts "ground below a tank never covers it" over every
+            // cell of every board - so those 5173 px were the stage keeping the
+            // rule, not breaking it, and the narrowed build was reported broken on
+            // the first ramp it was driven down.
+            //
+            // <b>So the depth buffer is not the authority here, and this switch is
+            // not a workaround for it.</b> Occluders knows that a cell below a tank
+            // never hides it; a depth buffer cannot know it, because a billboard has
+            // no thickness and its lower pixels are simply at the contact's depth.
+            // Turning the test off for a tank on a slope is how the stage says the
+            // thing the field already says.
             //
             // <b>A flat leg at one level keeps the test</b>, which is the other half
             // of the same rule and the thing the stage exists to show: a tank
@@ -1428,19 +1466,16 @@ void fragment() {{
             // not "moving", it is "on a slope" - the two coincided on the board's
             // first three ramps and come apart everywhere else.
             //
-            // A tank on a leg that changes levels is drawn over everything -
-            // the user's call, made with the cost on the table. The honest
-            // mid-leg occlusion there is a billboard crossing a volume, and
-            // every version of it bought some stutter: the crown promotion
-            // snapped at parking, the descent wipe still shed a couple of
-            // hundred pixels a frame at cruise. Skipping the depth test for
-            // those legs trades all of that for the one discontinuity that
-            // is left - the tank drops back into honest depth the moment it
-            // parks. Flat legs keep the test: a tank passing behind a ridge
-            // on its own level stays honestly behind it, which is what the
-            // stage exists to show. The split machinery above keeps running;
-            // with the test off it just decides nothing until the tank
-            // stops.
+            // <b>Levelling came out of the condition and nothing moved</b>, which is
+            // the one part of that attempt worth keeping. Every change of level goes
+            // through a ramp and OnSlope asks IsRamp of both ends of the leg, so
+            // Levelling implied it and the || carried no term of its own; the probe
+            // agrees, reading lev=False slope=True through the whole of the leg
+            // above. What the old condition costs is therefore still on the table
+            // and still unpaid: a tank on a leg that changes levels is drawn over
+            // everything, the honest mid-leg occlusion there is a billboard crossing
+            // a volume, the crown promotion snapped at parking, and the descent wipe
+            // shed a couple of hundred pixels a frame at cruise.
             //
             // Swapped rather than switched, because the depth test is a render
             // mode and a render mode is compiled in - see Paint.
@@ -1456,7 +1491,20 @@ void fragment() {{
             // *is* higher than the waterline, so the cut is the honest picture -
             // a hull in a pit behind a bank - and the drowned one hiding behind
             // the near bank is the same honesty. Swimmers keep the test.
-            bool over = vehicle.Levelling || vehicle.OnSlope;
+            // What is standing in front of this tank, asked once and used twice:
+            // the hull is drawn over it, and it is laid back over the hull at half
+            // strength - see Glaze, which is the other half of this line.
+            List<Vector2I> covering =
+                Field.Occluders(vehicle.FlatRow, vehicle.Height, vehicle.Box);
+            // Once per cell however many tanks are behind it: laid twice, a half
+            // over a half is three quarters, and the whole of this is that a half
+            // is a half.
+            // One cell, and the one that is actually standing in front of this
+            // hull - see Nearest.
+            if (Nearest(vehicle, covering) is Vector2I front
+                && !_wearing.Contains(front))
+                _wearing.Add(front);
+            bool over = DrawnOver(vehicle) || covering.Count > 0;
             if (over != stand.Over)
             {
                 stand.Quad.MaterialOverride =
@@ -1874,7 +1922,275 @@ void fragment() {{
         // Vehicle.Rounds - and this is already the pass that puts everything
         // those tanks are on the board.
         Shades(vehicles);
+        Glaze();
     }
+
+    /// <summary>
+    /// The cells standing in front of a tank, laid a second time and see-through.
+    ///
+    /// <b>The tank is already drawn over them, and that is what makes this one
+    /// node instead of a rebuild of the board.</b> On a slope the stage turns the
+    /// depth test off - see <see cref="DrawnOver"/> - so the hull is painted over
+    /// the ground that ought to hide it, which is the complaint. Laying the same
+    /// hexagon again on the rung above the tanks puts the ground back on top of it
+    /// at half strength: the cell reads as a cell, the hull reads through it.
+    ///
+    /// <b>Nothing is taken out of the board, and that is the trick.</b> Where the
+    /// glaze covers no tank it is a cell blended over itself, which comes out as
+    /// the cell at any alpha - so there is no hole to see the void through, no
+    /// seam against the neighbours, and no mesh to rebuild with a cell missing.
+    /// Its material is the board's own, off the same shader source, for exactly
+    /// this reason - see <see cref="Glass"/>.
+    ///
+    /// <b>Which cells is the field's answer, not one worked out here.</b>
+    /// <see cref="HexField.Occluders"/> is what the flat mode has always painted
+    /// from, it is asked with the tank's own row and box - see Vehicle.FlatRow -
+    /// and it already keeps the one rule a depth buffer cannot: ground below a
+    /// tank never covers it, so a pit in front of a tank never wears this.
+    /// </summary>
+    /// <summary>
+    /// Whether these two cells share an edge - the glaze's own reach.
+    ///
+    /// <b>Occluders is asked with the tank's frame, and the frame is square.</b>
+    /// It is centred on the sprite's anchor, about the middle of the hull, so
+    /// half of it hangs below the tracks - a cell and a half of board, drawn
+    /// lower down the screen than the tank stands. A cell that touches the frame
+    /// at all is admitted, so a rise a row or two in front came back as covering
+    /// a tank it is nowhere near, and the glaze went on with it.
+    ///
+    /// <b>Trimming the frame at the tracks was tried and cut too deep.</b> It
+    /// dropped the cell standing straight in front as well - that one's drawn top
+    /// edge falls a few pixels below the tracks, so it grazes the hull rather
+    /// than covering it, and it is the cell anybody pointing at "the hex in front
+    /// of the tank" is pointing at. A bound in pixels cannot tell those two apart
+    /// without a number nobody can argue for.
+    ///
+    /// So the reach is stated in cells instead, which is the sentence the whole
+    /// feature is written in: <b>the hex in front of the tank</b>. A neighbour
+    /// can be in front of a tank; a cell two rows away is in front of something
+    /// else. The flat mode keeps the frame alone and is right to - repainting a
+    /// cell that covers nothing costs it nothing there, which is why the square
+    /// was never wrong for it.
+    /// </summary>
+    private static bool Beside(Vector2I here, Vector2I cell)
+    {
+        foreach (int heading in HexField.EdgeHeadings)
+            if (HexField.Step(here, heading) == cell)
+                return true;
+        return false;
+    }
+
+    /// <summary>
+    /// Which single cell is standing in front of this tank: of the ones Occluders
+    /// admits, the neighbour whose drawn face covers the most of the hull.
+    ///
+    /// <b>One cell rather than the set, because the set was never the question.</b>
+    /// A tank in a pit has three higher neighbours in front of it and all three
+    /// are, strictly, in front - but only one of them is the hexagon anybody means
+    /// by "the hex covering the tank", and glazing the other two changes the
+    /// picture for nothing. What they have in common is the frame Occluders is
+    /// asked with: it is the square the tank's layers are drawn from, wider than
+    /// the hull and half a cell taller, so three hexagons touch it.
+    ///
+    /// <b>Measured rather than guessed at</b>, and that is what makes this a rule
+    /// instead of a heading. The cell's own drawn hexagon is cut to the tank's
+    /// frame - <see cref="Split"/>, four half-planes, the helper the hull's seam
+    /// is cut with - and what is left is measured by the shoelace. Picking the
+    /// neighbour straight ahead instead would have been a guess, and on this
+    /// board a wrong one: that cell's drawn top edge falls a few pixels below the
+    /// tracks, so it grazes the hull, while the two diagonals are the ones the
+    /// depth test actually cuts it with.
+    ///
+    /// Ties do not need breaking: two cells covering the hull equally is a tank
+    /// squarely on the seam between them, and either answer is the same picture.
+    /// </summary>
+    private Vector2I? Nearest(Vehicle vehicle, IReadOnlyList<Vector2I> covering)
+    {
+        Vector2I? best = null;
+        float most = 0.0f;
+        foreach (Vector2I cell in covering)
+        {
+            if (!Beside(vehicle.Cell, cell))
+                continue;
+            float much = Under(cell, vehicle.Box);
+            if (much <= most)
+                continue;
+            most = much;
+            best = cell;
+        }
+        return best;
+    }
+
+    /// <summary>How much of this cell's drawn face falls inside that box, in
+    /// square units of the flat space both are measured in. Nought when they do
+    /// not meet.</summary>
+    private float Under(Vector2I cell, Rect2 box)
+    {
+        // <b>In the field's space, which is the box's, and not the stage's.</b>
+        // The face laid by GlazeFace is a mesh under this node, so its hexagon
+        // carries Origin and is built off FlatAnchor - the sorting row, with the
+        // lift held apart and put back per vertex. What is being measured here is
+        // neither: it is where the cell is *drawn*, against a box measured from a
+        // sprite's drawn position. That is CellCentre, lift and all, with no
+        // Origin on it. Handed the mesh's hexagon instead, the two never met and
+        // the answer was nought for every cell - which is a tank drawn over the
+        // ground with nothing laid back over it.
+        List<Vector2> kept = Hexagon(cell, Field.CellCentre(cell));
+        (kept, _) = Split(kept, p => p.X - box.Position.X);
+        (kept, _) = Split(kept, p => box.End.X - p.X);
+        (kept, _) = Split(kept, p => p.Y - box.Position.Y);
+        (kept, _) = Split(kept, p => box.End.Y - p.Y);
+        if (kept.Count < 3)
+            return 0.0f;
+        float twice = 0.0f;
+        for (int k = 0; k < kept.Count; k++)
+        {
+            Vector2 a = kept[k], b = kept[(k + 1) % kept.Count];
+            twice += a.X * b.Y - b.X * a.Y;
+        }
+        return Mathf.Abs(twice) * 0.5f;
+    }
+
+    /// <summary>The cell's drawn hexagon in flat space, stopped short of its own
+    /// outline. One writer, because the face that is measured has to be the face
+    /// that is laid - see <see cref="GlazeFace"/> and <see cref="Under"/>.
+    /// </summary>
+    private List<Vector2> Hexagon(Vector2I cell, Vector2 hub)
+    {
+        float inset = Field.LevelAt(cell) > 0 || Field.IsRamp(cell)
+            ? RaisedEdge : Edge;
+        Vector3[] corner = Corners();
+        var ring = new List<Vector2>(6);
+        for (int k = 0; k < 6; k++)
+            ring.Add(hub + new Vector2(corner[k].X, corner[k].Z * Squash) * inset);
+        return ring;
+    }
+
+    private void Glaze()
+    {
+        // Framewise rather than a lerp on a stored target, which is the wood's
+        // reason word for word: the same integration the rest of the bench uses,
+        // so a paused frame does not step the fade. Read here rather than handed
+        // down because Place takes no step and the root's process and this node's
+        // are not ordered against each other - a step read a frame late would put
+        // the fade one frame behind the tank that moved it.
+        double delta = FrameClock.FixedStep ?? GetProcessDeltaTime();
+        double k = GlazeTime <= 0.0 ? 1.0 : 1.0 - Math.Exp(-delta / GlazeTime);
+        foreach (Vector2I cell in _wearing)
+            if (!_glazing.ContainsKey(cell))
+                _glazing[cell] = 0.0f;
+        _fading.Clear();
+        foreach ((Vector2I cell, float now) in _glazing)
+        {
+            float want = _wearing.Contains(cell) ? 1.0f : 0.0f;
+            float next = (float)(now + (want - now) * k);
+            // Snapped a percent out rather than a thousandth: a cell at one
+            // percent of the glaze is a cell, and the exponential tail below that
+            // is two dozen frames of a mesh built for nothing.
+            if (Mathf.Abs(next - want) < 0.01f)
+                next = want;
+            if (next > 0.0f)
+                _fading[cell] = next;
+        }
+        _glazing.Clear();
+        foreach ((Vector2I cell, float much) in _fading)
+            _glazing[cell] = much;
+
+        var mesh = (ImmediateMesh)_glaze.Mesh;
+        mesh.ClearSurfaces();
+        if (_glazing.Count == 0)
+            return;
+        Vector3[] corner = Corners();
+        Texture2D? art = GroundArt();
+        var pane = new List<(Vector3 At, Vector2 Uv, Color Ink)>();
+        foreach ((Vector2I cell, float much) in _glazing)
+            GlazeFace(pane, cell, corner, art, much);
+        if (pane.Count == 0)
+            return;
+        mesh.SurfaceBegin(Mesh.PrimitiveType.Triangles);
+        foreach ((Vector3 at, Vector2 uv, Color ink) in pane)
+        {
+            mesh.SurfaceSetColor(ink);
+            mesh.SurfaceSetUV(uv);
+            mesh.SurfaceAddVertex(at);
+        }
+        mesh.SurfaceEnd();
+    }
+
+    /// <summary>
+    /// One cell's face for the glaze: the whole hexagon, stopped short of its own
+    /// outline and at nothing else.
+    ///
+    /// <b>It was cut to the tank's frame for one round and that was wrong.</b>
+    /// The cut was there to keep a bush two cells away from going pale, and what
+    /// it produced was a band of see-through ground under the hull instead of a
+    /// see-through cell - the thing being asked for is the hexagon in front, whole.
+    /// A bush on it paling with it is the cell going see-through, not a defect of
+    /// it.
+    ///
+    /// <b>Stopped at the outline's inner edge</b>, which is the same fraction the
+    /// band's own inner ring is built at - see <see cref="Edge"/>. The band is its
+    /// own mesh with its own material, so a glaze reaching under it would not be
+    /// blending the cell over itself there: it would be laying ground over the
+    /// outline and washing it out.
+    ///
+    /// The lift is affine over a face - a ramp's top is one plane - so a point
+    /// inside the hexagon is fitted from the centre and two corners rather than
+    /// looked up. Nothing needs that while the polygon is the hexagon itself; it
+    /// is what lets the polygon be anything else.
+    /// </summary>
+    private void GlazeFace(List<(Vector3, Vector2, Color)> into, Vector2I cell,
+                           Vector3[] corner, Texture2D? art, float much)
+    {
+        Vector2 hub = Origin + Field.FlatAnchor(cell) + Field.CentreOffset;
+        Vector2 Flat(Vector3 off) => new(off.X, off.Z * Squash);
+        List<Vector2> kept = Hexagon(cell, hub);
+
+        Vector3 top = CellTop(cell);
+        Vector3[] up = CornerLift(cell);
+        Vector3 mid = Vector3.Zero;
+        foreach (Vector3 v in up)
+            mid += v / 6.0f;
+        Vector2 e0 = Flat(corner[0]), e1 = Flat(corner[1]);
+        Vector3 v0 = up[0] - mid, v1 = up[1] - mid;
+        float det = e0.X * e1.Y - e0.Y * e1.X;
+        // How far into the glaze this cell is, carried in the face's own alpha
+        // rather than in the material's: one node draws every glazed cell, and a
+        // uniform would give them all one clock - so a cell coming in would drag
+        // the ones already there back with it.
+        Color ink = CellInk(cell, art);
+        ink.A = much;
+        for (int i = 1; i + 1 < kept.Count; i++)
+        foreach (int k in new[] { 0, i, i + 1 })
+        {
+            Vector2 d = kept[k] - hub;
+            var plan = new Vector3(d.X, 0.0f, d.Y / Mathf.Max(Squash, 1e-4f));
+            Vector3 lift = mid;
+            if (Mathf.Abs(det) > 1e-6f)
+                lift += v0 * ((d.X * e1.Y - d.Y * e1.X) / det)
+                        + v1 * ((e0.X * d.Y - e0.Y * d.X) / det);
+            into.Add((top + plan + lift, GroundUV(plan), ink));
+        }
+    }
+
+    /// <summary><see cref="Glaze"/>'s working set. A field rather than a local so
+    /// the pass that fills it every frame allocates nothing.</summary>
+    private readonly List<Vector2I> _wearing = new();
+
+    /// <summary>How far into the glaze each cell is, nought to one. A cell is in
+    /// here while it is still worth drawing, which outlives the frame it stopped
+    /// standing in front of a tank - that is the fade out.</summary>
+    private readonly Dictionary<Vector2I, float> _glazing = new();
+
+    /// <summary><see cref="_glazing"/>'s next state, because a dictionary may not
+    /// be written while it is walked.</summary>
+    private readonly Dictionary<Vector2I, float> _fading = new();
+
+    /// <summary>How long a cell takes to come into the glaze and to leave it.
+    /// The wood's number, and for the wood's reason: short enough to keep up with
+    /// a tank crossing a cell, long enough not to read as a switch. See
+    /// <c>Grove.FadeTime</c>, which is the same fade on the trees.</summary>
+    public double GlazeTime = 0.18;
 
     private readonly List<ShellShade> _shades = new();
 
@@ -2386,16 +2702,7 @@ void fragment() {{
                 ink = new Color(ink.R * RampShade, ink.G * RampShade,
                                 ink.B * RampShade);
 
-            for (int i = 1; i + 1 < 6; i++)
-            foreach (int k in new[] { 0, i, i + 1 })
-            {
-                tops.SetColor(ink);
-                // The art is keyed to the footprint, not to where the point is
-                // drawn - so a slope wears the same hexagon of ground stretched
-                // over a face that projects taller, which is what a slope does.
-                tops.SetUV(GroundUV(corner[k]));
-                tops.AddVertex(top + corner[k] + up[k]);
-            }
+            TopFace(tops, cell, corner, art, 1.0f);
 
             // A raised cell wears the wider band: its top face is cut from
             // the same dirt as the floor and lit the same - unshaded, on
@@ -2480,6 +2787,8 @@ void fragment() {{
         // No art: the sides never had a texture, and the shader's default-white
         // sampler is what lets one material serve both.
         _sides.MaterialOverride = Turf(null);
+        _glaze.MaterialOverride = Turf(art, glass: true);
+        ((ImmediateMesh)_glaze.Mesh).ClearSurfaces();
         BuildWater(corner);
     }
 
@@ -2746,6 +3055,10 @@ uniform float ash_ink = 0.0;
 // PropFamily.Soot, which has to come out under it - and a bound copied into the
 // thing it bounds is the one that goes stale.
 uniform float ash_keep = 0.55;
+// How much of the glaze's own colour it keeps over what it covers. Read by the
+// glass build of this shader and by nothing else - see Stage3D.Glass, which is
+// this source with one line put in.
+uniform float glaze = 0.5;
 // The map's own corner in world XZ, and one over its extent there.
 uniform vec4 map = vec4(0.0, 0.0, 1.0, 1.0);
 // The lowest ground on the board and how far the relief reaches above it.
@@ -2804,6 +3117,7 @@ void fragment() {
         }
     }
     ALBEDO = lit;
+    // GLAZE
     // ALPHA is deliberately not written. The ground is opaque and the material
     // this replaced said so by leaving transparency off; a spatial shader that
     // writes ALPHA at all is taken for a transparent surface, drops out of the
@@ -2816,11 +3130,112 @@ void fragment() {
 
     private static readonly Shader Soil = new() { Code = SoilShader };
 
+    /// <summary>
+    /// The soil shader with one line put in: the glaze writes ALPHA.
+    ///
+    /// <b>Two shaders off one source, for the reason the tank has two</b> - see
+    /// Paint. Transparency is a render mode and a render mode is compiled in, and
+    /// the paragraph at the foot of SoilShader is what happens if the board's own
+    /// material takes it: the ground leaves the opaque pass and every transparent
+    /// thing standing on it moves, 215227px of it. So the board keeps the opaque
+    /// build and the glaze gets its own.
+    ///
+    /// <b>Off the same source rather than a second shader beside it</b>, because
+    /// the copy has to come out the same colour as the face under it to the pixel.
+    /// Where the glaze covers no tank it blends a cell over itself, which is a
+    /// no-op at any alpha - but only while the two agree about the art, the ramp's
+    /// shade, the sun's march and the ash. A shader written twice would agree
+    /// until one of them was edited.
+    /// </summary>
+    private static readonly Shader Glass = new()
+    {
+        Code = SoilShader
+            // Coplanar with the face it is a copy of, so a depth test here is a
+            // coin toss per fragment and comes back as the cell crawling with
+            // noise. It is sorted by its rung instead - see Turf.
+            .Replace("render_mode unshaded, cull_disabled;",
+                     "render_mode unshaded, cull_disabled, depth_draw_never, "
+                     + "depth_test_disabled;")
+            // <b>The colour is untouched, and that is the whole contract.</b>
+            // A tint here would be a marker and not a glass: the cell would
+            // read as something other than ground wherever it is worn. What
+            // the copy adds is an alpha and nothing else, so where it covers
+            // no hull it is the cell blended over the cell, which is the cell.
+            .Replace("// GLAZE", "ALPHA = glaze * COLOR.a;"),
+    };
+
+    /// <summary>How much of the cell in front of a tank is still the cell. Half:
+    /// the tank has to read through it, and the ground has to stay ground.
+    /// </summary>
+    public const float GlazeInk = 0.5f;
+
     /// <summary>The ground's material, with the map this board baked in it.
     /// Handed the art or nothing; nothing samples white.</summary>
-    private ShaderMaterial Turf(Texture2D? art)
+    /// <summary>
+    /// One cell's top face, into whatever surface is being built.
+    ///
+    /// <b>Its own method because the glaze lays the same hexagon a second
+    /// time</b> - see <see cref="Glaze"/>. A copy that is a shade off the face
+    /// under it stops being invisible where it does not cover a tank, and a
+    /// second spelling of the fan, the art's keying and the ramp's shade is
+    /// exactly how it would get there.
+    /// </summary>
+    /// <summary>What a cell's face is painted: its own ink, darkened for a ramp,
+    /// and stood in for the art when the board has none. Its own method because
+    /// the glaze paints the same cell a second time and a shade off is a patch.
+    /// </summary>
+    private Color CellInk(Vector2I cell, Texture2D? art)
     {
-        var ink = new ShaderMaterial { Shader = Soil };
+        Color ink = Field.InkFor(cell);
+        if (art is null)
+            ink = new Color(SoilInk.R * ink.R, SoilInk.G * ink.G,
+                            SoilInk.B * ink.B);
+        if (Field.IsRamp(cell))
+            ink = new Color(ink.R * RampShade, ink.G * RampShade,
+                            ink.B * RampShade);
+        return ink;
+    }
+
+    private void TopFace(SurfaceTool into, Vector2I cell, Vector3[] corner,
+                         Texture2D? art, float inset)
+    {
+        Vector3 top = CellTop(cell);
+        Vector3[] up = CornerLift(cell);
+        Vector3 mid = Vector3.Zero;
+        foreach (Vector3 v in up)
+            mid += v / 6.0f;
+        Color ink = CellInk(cell, art);
+        for (int i = 1; i + 1 < 6; i++)
+        foreach (int k in new[] { 0, i, i + 1 })
+        {
+            into.SetColor(ink);
+            // The art is keyed to the footprint, not to where the point is
+            // drawn - so a slope wears the same hexagon of ground stretched
+            // over a face that projects taller, which is what a slope does.
+            Vector3 plan = corner[k] * inset;
+            into.SetUV(GroundUV(plan));
+            into.AddVertex(top + plan + mid + (up[k] - mid) * inset);
+        }
+    }
+
+    /// <summary>Hand a uniform to every material the board's faces wear - the
+    /// tops, the sides and the glaze.
+    ///
+    /// <b>Written once because the glaze is the same shader on its own node.</b>
+    /// The whole of <see cref="Glaze"/> is that a cell blended over itself comes
+    /// out as itself, and that holds only while the copy is told everything the
+    /// face under it was told. Pushed to two of the three, the sun moving or a
+    /// wood burning would draw the glazed cells as a patch.</summary>
+    private void Tell(string name, Variant value)
+    {
+        foreach (MeshInstance3D face in new[] { _tops, _sides, _glaze })
+            if (face?.MaterialOverride is ShaderMaterial ink)
+                ink.SetShaderParameter(name, value);
+    }
+
+    private ShaderMaterial Turf(Texture2D? art, bool glass = false)
+    {
+        var ink = new ShaderMaterial { Shader = glass ? Glass : Soil };
         if (art is not null)
             ink.SetShaderParameter("art", art);
         if (_heights is not null)
@@ -2834,6 +3249,11 @@ void fragment() {
             ink.SetShaderParameter("step_run", _mapReach / Marches);
         }
         ink.SetShaderParameter("shade", CastShadows ? ShadowInk.A : 0.0f);
+        if (glass)
+        {
+            ink.SetShaderParameter("glaze", GlazeInk);
+            ink.RenderPriority = GlazeOrder;
+        }
         return ink;
     }
 
@@ -5273,12 +5693,36 @@ void fragment() {{
 
     public const int StandOrder = 1;
 
+    /// <summary>The rung the glaze stands on: over the tanks, which is the whole
+    /// of what it is for - see <see cref="Glaze"/>.</summary>
+    public const int GlazeOrder = StandOrder + 1;
+
     /// <summary>Which of the two rungs a prop is on this frame. One place,
     /// because the rung is set twice - once as the billboard is built and again
     /// every frame as the tanks move - and two copies of it is a board where a
     /// prop is banded in one of them and not the other.</summary>
     public static int RungFor(PropNode tree) =>
         tree.Dressed ? DressOrder : StandOrder;
+
+    /// <summary>
+    /// The rung a prop is drawn on, band and glaze together.
+    ///
+    /// <b>A prop standing on a glazed cell climbs over the glaze</b> rather than
+    /// being washed by it. The glaze is the colour of ground, so laid over a bush
+    /// it is half a bush and half dirt - and that was the only thing by which a
+    /// glazed cell could be told from an untouched one at all, half the pixels
+    /// the whole effect moves. Over it, the bush stays a bush and covers the hull
+    /// honestly: it is standing in front of the tank, which is the same sentence
+    /// the glaze itself is built on.
+    ///
+    /// <b>The band still wins.</b> A prop in the dressing band is under the tank
+    /// because a hull is on its ground, and a cell a hull is standing on is not a
+    /// cell in front of it.
+    /// </summary>
+    private int RungOn(PropNode tree) =>
+        tree.Dressed ? DressOrder
+        : _glazing.ContainsKey(tree.Cell) ? GlazeOrder + 1
+        : StandOrder;
 
     /// <summary>
     /// The belt marks, as strips lying on the board.
@@ -5696,7 +6140,7 @@ void fragment() {{
                 // Which rung, off the same flag the 2D z-index reads. A prop
                 // only sits in the dressing band while a hull is on its ground -
                 // see Grove.Reveal, and DressOrder for what the band is.
-                bark.RenderPriority = RungFor(tree);
+                bark.RenderPriority = RungOn(tree);
             }
         }
         foreach ((PropNode tree, MeshInstance3D seat) in _seating)
@@ -5765,7 +6209,7 @@ void fragment() {{
                 SortingUseAabbCenter = false,
                 // Whichever rung it is on as it is built; the band moves with
                 // the tanks, so the loop above re-states it every frame.
-                MaterialOverride = Bark(tree, RungFor(tree)),
+                MaterialOverride = Bark(tree, RungOn(tree)),
             };
             AddChild(stem);
             _standing[tree] = stem;
@@ -7478,7 +7922,7 @@ void fragment() {{
         bool scalded = _scalds.Count > 0;
         if ((!burnt && !scalded) || Field.Atlas is null)
         {
-            turf.SetShaderParameter("ash_ink", 0.0f);
+            Tell("ash_ink", 0.0f);
             return;
         }
         float circum = Field.Atlas.HexRect.Size.X * 0.5f;
@@ -7535,9 +7979,9 @@ void fragment() {{
             _sootMap = ImageTexture.CreateFromImage(img);
         else
             _sootMap.Update(img);
-        turf.SetShaderParameter("ash", _sootMap);
-        turf.SetShaderParameter("ash_map", _sootAt);
-        turf.SetShaderParameter("ash_ink", AshInk);
+        Tell("ash", _sootMap);
+        Tell("ash_map", _sootAt);
+        Tell("ash_ink", AshInk);
     }
 
     /// <summary>

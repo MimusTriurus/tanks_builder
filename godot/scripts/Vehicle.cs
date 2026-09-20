@@ -328,12 +328,35 @@ public sealed class Vehicle
     public bool WasWading;
 
     /// <summary>True while the current leg takes the tank from one level to
-    /// another - the legs where the stage draws it over everything, because
-    /// every honest depth tried for a billboard crossing a wall bought some
-    /// stutter (see Stage3D.Place). A flat leg keeps honest depth: a tank
-    /// passing behind a ridge on its own level stays behind it. Cleared by
-    /// parking, like <see cref="Travel"/>.</summary>
+    /// another.
+    ///
+    /// <b>Nothing reads it, and that is a measured no-op rather than a loss.</b>
+    /// It used to be the left half of the stage's <c>Levelling || OnSlope</c>, but
+    /// every change of level goes through a ramp and <see cref="OnSlope"/> asks
+    /// IsRamp of both ends of the leg - so this implies that one and the || carried
+    /// no term of its own. See <c>Stage3D.DrawnOver</c>. Kept as the fact it is, and
+    /// it is the one loose end of that change.
+    ///
+    /// Cleared by parking, like <see cref="Travel"/>.</summary>
     public bool Levelling;
+
+    /// <summary>Where the tank stands and how much of the board it covers, in the
+    /// flat space <see cref="HexField.Occluders"/> asks its question in - the row
+    /// with the board's relief taken out, and the frame its layers are drawn from.
+    ///
+    /// <b>On the vehicle because two different things ask it and neither may
+    /// measure it again.</b> <c>TankTick.Depth</c> works both out every frame a
+    /// tank moves and used to hand them straight to <see cref="Cap"/>, which
+    /// exists only in the flat mode - so the stage, which needs the same two
+    /// numbers to know which cell is standing in front of a tank, had nowhere to
+    /// read them and would have had to build the box a second time. Written before
+    /// the cap is asked for, so the 3D board gets them as well.</summary>
+    public float FlatRow;
+
+    /// <summary><see cref="FlatRow"/>'s other half: what the tank covers, for
+    /// <c>TankTick.TankBox</c>'s reasons.</summary>
+    public Rect2 Box;
+
 
     /// <summary>
     /// True while the face under the tank is tilted, or the one it is driving onto
@@ -346,13 +369,17 @@ public sealed class Vehicle
     /// is right to: there is no wall in that leg, which is the thing it was written
     /// about.
     ///
-    /// The stage draws a tank over the ground whenever either is true. A slope is
-    /// where a flat billboard and the geometry disagree the most - the sprite stands
-    /// vertically at one point of a face that is rising through it - and a tank
-    /// parked on a ramp behind something higher lost its lower half to honest depth.
-    /// A flat leg at one level keeps the test, so a tank driving behind a ridge
-    /// still goes behind it. Cleared by parking onto flat ground, like
-    /// <see cref="Travel"/>.</summary>
+    /// <b>With this true the stage draws the tank over the ground, moving or
+    /// parked</b> - see <c>Stage3D.DrawnOver</c>, and the measurement written beside
+    /// it. A slope is where a flat billboard and the geometry disagree the most: the
+    /// sprite stands vertically at one point of a face rising through it, so
+    /// everything below that point is at the contact's own depth and loses to any
+    /// surface nearer the camera - the ramp's own near half, or the flat cell the
+    /// tank is driving down onto, which is ground *below* it and which the board's
+    /// own rule forbids from hiding it. A flat leg at one level keeps the test: a
+    /// tank driving behind a ridge on its own level stays behind it.
+    ///
+    /// Cleared by parking onto flat ground, like <see cref="Travel"/>.</summary>
     public bool OnSlope;
 
     /// <summary>

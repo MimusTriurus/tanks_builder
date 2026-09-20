@@ -1388,11 +1388,15 @@ public sealed class TankTick
         // ever one place the height is subtracted.
         float row = vehicle.GroundPoint.Y - Origin.Y + vehicle.Height;
         vehicle.Sprite.ZIndex = Mathf.RoundToInt(Field.Depth(row, vehicle.Height));
+        // Both halves on the vehicle first, because the 3D stage reads them and
+        // the cap below only exists in the flat mode - see Vehicle.FlatRow.
+        vehicle.FlatRow = row;
+        vehicle.Box = TankBox(vehicle);
         if (vehicle.Cap is null)
             return;
         vehicle.Cap.FlatRow = row;
         vehicle.Cap.Standing = vehicle.Height;
-        vehicle.Cap.Box = TankBox(vehicle);
+        vehicle.Cap.Box = vehicle.Box;
         vehicle.Cap.QueueRedraw();
     }
 

@@ -5684,8 +5684,9 @@ public sealed partial class Main : SceneRoot
 					 // Which of the two ways the stage is drawing it, because the
 					 // grade beside it does not answer that: a tank parked across a
 					 // ramp feels no slope along its heading and is still standing on
-					 // one. See Vehicle.OnSlope.
-					 + (Active.Levelling || Active.OnSlope ? " over" : " depth")
+					 // one. Asked of the stage rather than spelled a second time here:
+					 // see Stage3D.DrawnOver, where the rule and what it costs live.
+					 + (Stage3D.DrawnOver(Active) ? " over" : " depth")
 					 + $"  pitch {_tank.Pitch,8:F5}  shake {_tank.Heave,4:F1}"
 					 + $"  roll {_tank.Roll,8:F5}  trem {_tank.TremblePitch,8:F5}"
 					 + $"/{_tank.TrembleYaw,8:F5}"
