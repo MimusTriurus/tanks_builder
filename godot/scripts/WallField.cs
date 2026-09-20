@@ -331,6 +331,8 @@ public sealed class WallField
             // the same dial: TankTick.Calibre is one field both roots read.
             Stage?.Land(round.Ground, round.GroundLift,
                          Ordnance.At(Tick.Calibre));
+        else if (round.Overhead && hit.Concrete)
+            Roofed(round, hit);
         else
             Breached(round, hit);
         if (_walls.Count > 0)
@@ -423,6 +425,52 @@ public sealed class WallField
     /// round crossing a cell arrives at the middle of the courses rather than at
     /// the coping.
     /// </summary>
+    /// <summary>
+    /// The mortar's bomb coming down on a concrete box: the heavy earth burst,
+    /// seated on the roof.
+    ///
+    /// <b>Not <see cref="Breached"/>, whose every term is a wall's.</b> That
+    /// method asks which side the round crossed and seats a masonry flash on
+    /// the middle of that leaf, halfway up - right for a gun's shell stopped at
+    /// a boundary, and wrong three ways for a bomb that crossed no side: it
+    /// picked a leaf the round never touched, put the flash at mid-wall on a
+    /// shell that arrived from above, and drew the short lime puff of a round
+    /// on brick for the one charge on this board that levels a box. Measured
+    /// on CaponTest as the burst sitting on the left wall and barely showing.
+    ///
+    /// <b>The seat is the round's own landing point, which for a lob is
+    /// honest.</b> A bomb is sent to a cell and comes down on its anchor -
+    /// see <c>TankTick</c>'s lob, where the run is the order's own - so
+    /// <see cref="Shell.Ground"/> is the middle of the box, and the height is
+    /// the ground's plus the box: <c>Pile().Top</c> is the roof while the box
+    /// stands, in the same share-of-a-radius units Breached converts.
+    ///
+    /// <b><see cref="Stage3D.Boom"/> rather than <c>Land</c></b>, because Land
+    /// asks what is under the point - water, wood - and under this point is a
+    /// roof. The might is the calibre's, doubled: the flash for a shell that
+    /// takes the whole box down has to read as the loudest thing on the board,
+    /// and the masonry slam's half-again was already argued for a wall that
+    /// merely loses a section.
+    /// </summary>
+    private void Roofed(Shell round, WallProp prop)
+    {
+        if (Field.Atlas is null || Stage is null)
+            return;
+        float top = prop.Pile().Top * (Field.Atlas.HexRect.Size.X * 0.5f)
+                    * Field.RiseFactor;
+        // <b>Raised as a pair, because the stage's lift is not a height over
+        // the point - it is the rise already folded into the point.</b>
+        // Stage3D.Trunk unfolds it (foot + lift along y, then lift up), so a
+        // bigger lift on the same foot is a point further back on the ground
+        // and higher by the same amount - which on this camera is the ground
+        // again, a hair up-screen. Measured as the column standing on the
+        // floor of the box with the roof still on. Taking the height off the
+        // foot and adding it to the lift leaves the ground point where it was
+        // and raises the seat by the roof.
+        Stage.Boom(round.Ground - new Vector2(0.0f, top), round.GroundLift + top,
+                   Ordnance.At(Tick.Calibre) * 2.0f, dig: false);
+    }
+
     private void Breached(Shell round, WallProp prop)
     {
         if (Field.Atlas is null || Stage is null)
