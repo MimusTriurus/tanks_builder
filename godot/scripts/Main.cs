@@ -834,15 +834,21 @@ public sealed partial class Main : SceneRoot
 			return;
 		foreach (Vector2I cell in _map.Walled())
 		{
-			if (_map.MasonryAt(cell)?.Laying() is not
-					({ } recipe, int bearing))
+			Masonry? said = _map.MasonryAt(cell);
+			// A capon or a wall, and the block beside the picture says which;
+			// the prop is the same class either way - see WallProp.Capon.
+			(CaponKit.Recipe Recipe, int Bearing)? shelter = said?.Sheltering();
+			if (shelter is null && said?.Laying() is not ({ } _, int _))
 				continue;
+			(WallKit.Recipe recipe, int bearing) = shelter is null
+				? said!.Laying()!.Value : (new WallKit.Recipe(), shelter.Value.Bearing);
 			var prop = new WallProp
 			{
 				Field = _field,
 				Stage = _stage,
 				Cell = cell,
 				Recipe = recipe,
+				Capon = shelter?.Recipe,
 				Borrow = null,
 				Channel = _bricks.Count,
 			};
@@ -1847,8 +1853,10 @@ public sealed partial class Main : SceneRoot
 					Tick.Ammo = Shell.Kind.Ap;
 				else if (round.Equals("he", StringComparison.OrdinalIgnoreCase))
 					Tick.Ammo = Shell.Kind.He;
+				else if (round.Equals("cp", StringComparison.OrdinalIgnoreCase))
+					Tick.Ammo = Shell.Kind.Cp;
 				else
-					GD.PushWarning($"--ammo {round} is neither he nor ap");
+					GD.PushWarning($"--ammo {round} is none of he, ap, cp");
 			}
 			else if (userArgs[i] == "--flash" && i + 1 < userArgs.Length)
 				_flashSource = userArgs[i + 1].Equals("sheet",
@@ -4962,9 +4970,11 @@ public sealed partial class Main : SceneRoot
 		// <b>It is also the only way to see a ricochet from the U key now</b>, HE
 		// being the default and a shell that explodes not being a shell that
 		// bounces.
-		ui.Choice("armour.ammo", "loaded  (--ammo)", new[] { "he", "ap" },
+		// The third is the mortar's concrete-piercer; loaded into any other gun
+		// it leaves as HE - see TankTick.Loaded.
+		ui.Choice("armour.ammo", "loaded  (--ammo)", new[] { "he", "ap", "cp" },
 			() => (int)Tick.Ammo,
-			i => Tick.Ammo = (Shell.Kind)Math.Clamp(i, 0, 1));
+			i => Tick.Ammo = (Shell.Kind)Math.Clamp(i, 0, 2));
 		// <b>Whose gun, which is the end a keypress does not have.</b> The
 		// matchup table has decided bounce or penetration since it was written -
 		// and only for a shell one tank fired at another, because that is the only
@@ -5037,7 +5047,7 @@ public sealed partial class Main : SceneRoot
 						   // first of the two questions: HE bursts on the plate whatever
 						   // the depth turns out to be, so the depth alone would say
 						   // "ricochet" over a picture that is not one.
-						   + $"{(Tick.Ammo == Shell.Kind.Ap ? "ap" : "he")}   "
+						   + $"{Tick.Ammo.ToString().ToLowerInvariant()}   "
 						   + (Tick.HitGun is MovementProfile shot
 							  ? $"dealt by {shot.Tag}: "
 								+ (Tick.HitDepth(Active) is 0

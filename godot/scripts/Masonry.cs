@@ -52,6 +52,29 @@ public sealed class Masonry
     public int? Courses;
     public int? Leaves;
 
+    /// <summary>What stands on the cell: brick masonry on some of its edges, or
+    /// the concrete capon on all but one (<see cref="CaponKit"/>). The letter
+    /// on the map says <c>Cover.Walls</c> for both; this is the block beside
+    /// the picture saying which.</summary>
+    public enum Sort { Wall, Capon }
+
+    public Sort Kind = Sort.Wall;
+
+    /// <summary>The heading the capon's slit faces; the gate is opposite. Null
+    /// for a wall, whose facing is <see cref="Run"/>'s to derive.</summary>
+    public int? Facing;
+
+    /// <summary>The capon's recipe and the bearing it faces, or null for
+    /// masonry - <see cref="Laying"/>'s sibling for the other sort.</summary>
+    public (CaponKit.Recipe Recipe, int Bearing)? Sheltering()
+    {
+        if (Kind != Sort.Capon)
+            return null;
+        var recipe = new CaponKit.Recipe();
+        if (Seed is int seed) recipe.Seed = seed;
+        return (recipe, Facing ?? 270);
+    }
+
     /// <summary>The ranges a dial may reach, the panel sliders' own - see
     /// <see cref="WallConfig.Apply"/>, which refuses the same figures out of a
     /// file. Here so that the editor, the file and the bench cannot drift.
@@ -106,7 +129,7 @@ public sealed class Masonry
     public Masonry Copy() => new()
     {
         Edges = Edges, Seed = Seed, Columns = Columns, Courses = Courses,
-        Leaves = Leaves,
+        Leaves = Leaves, Kind = Kind, Facing = Facing,
     };
 
     /// <summary>Whether this says anything a cell carrying the wall letter did
@@ -115,7 +138,7 @@ public sealed class Masonry
     /// says.</summary>
     public bool Plain =>
         Edges == Ring && Seed is null && Columns is null && Courses is null
-        && Leaves is null;
+        && Leaves is null && Kind == Sort.Wall && Facing is null;
 
     // --- the six edges -------------------------------------------------------
 
@@ -277,6 +300,12 @@ public sealed class Masonry
     {
         var parts = new List<string>();
         (int Bearing, int Sides)? run = Run();
+        if (Kind == Sort.Capon)
+        {
+            parts.Add($"a capon, slit facing {Facing ?? 270}");
+            if (Seed is int cs) parts.Add($"seed {cs}");
+            return string.Join(", ", parts);
+        }
         parts.Add(Edges == Ring ? "a closed ring"
             : run is (int bearing, int sides)
                 ? $"{sides} side{(sides == 1 ? "" : "s")} facing {bearing}"

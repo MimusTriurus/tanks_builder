@@ -173,6 +173,9 @@ public sealed partial class WallBench : SceneRoot
 	private float HomeZoom => ZoomAt ?? 2.4f;
 	private int _frame;
 	private bool _fellAtStart;
+
+	/// <summary>Lay the concrete capon instead of the wall - <c>--capon</c>.</summary>
+	private bool _capon;
 	private int _plinth = 1;
 	private Vector2? _leftFrom;
 	private bool _reported;
@@ -373,11 +376,17 @@ public sealed partial class WallBench : SceneRoot
 				{
 					"he" => WallRig.Strike.He,
 					"ap" => WallRig.Strike.Ap,
+					"cp" => WallRig.Strike.Cp,
 					_ => WallRig.Strike.Ram,
 				};
-				if (want is not ("ram" or "he" or "ap"))
-					GD.PushWarning($"--strike {want} is none of ram, he, ap");
+				if (want is not ("ram" or "he" or "ap" or "cp"))
+					GD.PushWarning($"--strike {want} is none of ram, he, ap, cp");
 			}
+			// The concrete capon instead of the brick wall - see CaponKit. The
+			// size dials mean nothing to it; the strike, force, side, turntable
+			// and every A/B toggle mean the same.
+			else if (args[i] == "--capon")
+				_capon = true;
 			else if (args[i] == "--bearing" && i + 1 < args.Length
 					 && float.TryParse(args[i + 1], NumberStyles.Float,
 									   CultureInfo.InvariantCulture, out float from))
@@ -550,6 +559,7 @@ public sealed partial class WallBench : SceneRoot
 				Stage = _stage,
 				Cell = Middle,
 				Recipe = _recipe,
+				Capon = _capon ? new CaponKit.Recipe { Seed = _recipe.Seed } : null,
 				// The board's own tank for the ram to arrive in. This bench has
 				// no Vehicle at all, which is the whole reason the sprite is
 				// borrowed - see WallStack.Tank.
@@ -567,6 +577,8 @@ public sealed partial class WallBench : SceneRoot
 		float radius = _field.Atlas.HexRect.Size.X * 0.5f;
 
 		GD.Print($"wall: seed {_recipe.Seed}, fit {_scale:F4} -> {_plan.Note()}");
+		if (_plan.Concrete)
+			GD.Print("wall: " + CaponKit.Note(_plan));
 		GD.Print($"wall: plot {_field.Plot?.Count ?? 0} cells, "
 				 + $"tris {(_stage?.GroundTriangles().Count ?? 0) / 3}, "
 				 + $"awake {_rig?.Awake ?? -1}");
@@ -609,9 +621,10 @@ public sealed partial class WallBench : SceneRoot
 		_panel.Heading("wall.strike", "strike");
 		_panel.Choice("wall.strike.kind", "what hits it",
 					  new[] { "ram - a tank drives in", "HE - burst on the face",
-							  "AP - a round straight through" },
+							  "AP - a round straight through",
+							  "CP - the mortar's, goes off inside" },
 					  () => (int)_strike,
-					  i => _strike = (WallRig.Strike)Mathf.Clamp(i, 0, 2));
+					  i => _strike = (WallRig.Strike)Mathf.Clamp(i, 0, 3));
 		_panel.Slide("wall.strike.force", "force", 0.0, MostForce, 0.05,
 					 () => _force, v => _force = (float)v, "x",
 					 () => WallRig.Costs(_strike, _force));
@@ -998,6 +1011,7 @@ public sealed partial class WallBench : SceneRoot
 						{
 							WallRig.Strike.Ram => WallRig.Strike.He,
 							WallRig.Strike.He => WallRig.Strike.Ap,
+							WallRig.Strike.Ap => WallRig.Strike.Cp,
 							_ => WallRig.Strike.Ram,
 						};
 						return;

@@ -50,6 +50,16 @@ public sealed partial class WallProp : Node
     /// <c>WallBench.Panel</c>.</summary>
     public WallKit.Recipe Recipe { get; init; } = new();
 
+    /// <summary>Set, and this prop is the concrete capon laid by
+    /// <see cref="CaponKit"/> instead of a brick wall: <see cref="Recipe"/> and
+    /// <see cref="Coverage"/> are then not read, the layout stands on the cell
+    /// boundary at its own numbers and nothing scatters round it. Everything
+    /// after the layout - the stack, the rig, the board's masks - is the wall's,
+    /// which is the point of laying it as a plan.</summary>
+    public CaponKit.Recipe? Capon { get; init; }
+
+    public bool Concrete => Capon is not null;
+
     /// <summary>How much of the side it takes, and how far out it stands - one
     /// number for both, see <see cref="WallKit.Fit"/>.</summary>
     public float Coverage { get; set; } = 0.97f;
@@ -118,9 +128,17 @@ public sealed partial class WallProp : Node
     {
         if (Field.Atlas is null)
             return;
-        _plan = WallKit.Lay(Recipe);
-        _scale = WallKit.Fit(_plan, Coverage);
-        WallKit.Scatter(_plan, Recipe, _scale, Coverage);
+        if (Capon is { } capon)
+        {
+            _plan = CaponKit.Lay(capon);
+            _scale = 1.0f;
+        }
+        else
+        {
+            _plan = WallKit.Lay(Recipe);
+            _scale = WallKit.Fit(_plan, Coverage);
+            WallKit.Scatter(_plan, Recipe, _scale, Coverage);
+        }
 
         _wall?.QueueFree();
         float radius = RadiusPx;
@@ -418,7 +436,8 @@ public sealed partial class WallProp : Node
         float near = float.PositiveInfinity;
         foreach (WallKit.Block block in _plan.Blocks)
         {
-            if (block.Chip || block.Course < 0)
+            // A roof is over the tank and not in its way.
+            if (block.Chip || block.Course < 0 || block.Hull is not null)
                 continue;
             var to = new Vector3(block.Seat.X, 0.0f, block.Seat.Z);
             float far = to.Length();
@@ -459,7 +478,12 @@ public sealed partial class WallProp : Node
     ///
     /// Rubble is not masonry here, for <see cref="Clearance"/>'s reason: the apron
     /// lies on the ground inside the cell and would answer every heading.</summary>
-    public bool Bars(Vector2 flat)
+    /// <param name="crossing">Ask for a tank rather than a round: a piece round
+    /// an opening (<see cref="WallKit.Block.Window"/>) lets a shell out through
+    /// the slit and lets no hull through, so the board's edge mask - which is
+    /// what stops a drive - is measured with this set and a shot leaving the
+    /// cell with it clear.</param>
+    public bool Bars(Vector2 flat, bool crossing = false)
     {
         if (_plan is null || flat.LengthSquared() < 1e-12f)
             return false;
@@ -476,7 +500,9 @@ public sealed partial class WallProp : Node
         for (int i = 0; i < _plan.Blocks.Count; i++)
         {
             WallKit.Block block = _plan.Blocks[i];
-            if (block.Chip || block.Course < 0)
+            if (block.Chip || block.Course < 0 || block.Hull is not null)
+                continue;
+            if (block.Window && !crossing)
                 continue;
             if (_rig is { } rig && !rig.Held(i))
                 continue;
@@ -486,7 +512,18 @@ public sealed partial class WallProp : Node
             // going the other direction.
             if (along <= 0.0f)
                 continue;
-            if ((to - into * along).Length() <= lane)
+            Vector3 aside = to - into * along;
+            // Concrete slabs are half a side long, so a corridor half a brick
+            // wide passes between two of them down the middle of an edge that
+            // is solid wall - measured, a capon's mask came back with two of its
+            // five sides. For those the piece's own reach across the ray is the
+            // test; bricks keep the corridor, which every wall number was read
+            // against.
+            float wide = _plan.Concrete
+                ? Mathf.Abs(block.Turn.X.Dot(aside.Normalized())) * block.Half.X
+                  + Mathf.Abs(block.Turn.Z.Dot(aside.Normalized())) * block.Half.Z
+                : lane;
+            if (aside.Length() <= wide)
                 return true;
         }
         return false;

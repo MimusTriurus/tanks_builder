@@ -245,6 +245,21 @@ public static class WallKit
         /// </summary>
         public int Side;
 
+        /// <summary>The piece's true corners in its own frame about
+        /// <see cref="Seat"/>, when it is not a box - the capon's roof
+        /// triangles (<see cref="CaponKit"/>). Null for every brick. Where it
+        /// is set, <see cref="Half"/> still holds a bounding box about the seat,
+        /// so a reader that only knows boxes is conservative rather than
+        /// wrong; the rig builds a convex hull from it and the stack draws it
+        /// off its own mesh.</summary>
+        public Vector3[]? Hull;
+
+        /// <summary>A piece round an opening rather than across the cell's
+        /// edge - the sill and the lintel of the capon's slit. It stands, it
+        /// falls, it occludes, but a round leaving the middle of the cell is
+        /// not stopped by it: <c>WallProp.Bars</c> looks past it.</summary>
+        public bool Window;
+
         public readonly Transform3D Frame => new(Turn, Seat);
     }
 
@@ -272,6 +287,12 @@ public static class WallKit
         /// rather than hidden: a seed that crowds is a seed with rubble inside
         /// its own wall, and the picture does not show it.</summary>
         public int Crowded;
+
+        /// <summary>Concrete rather than brick: the capon. Drawn grey, and
+        /// broken by one round only - <c>WallRig.Strike.Cp</c>; HE bursts on
+        /// its face and AP marks it. Said on the plan because the rig and the
+        /// stack both read it and neither knows what laid the plan.</summary>
+        public bool Concrete;
 
         public int Bricks
         {
@@ -740,6 +761,13 @@ public static class WallKit
 
     private static Vector3[] Corners(in Block b)
     {
+        if (b.Hull is { } hull)
+        {
+            var pts = new Vector3[hull.Length];
+            for (int i = 0; i < hull.Length; i++)
+                pts[i] = b.Seat + b.Turn * hull[i];
+            return pts;
+        }
         var outp = new Vector3[8];
         int k = 0;
         for (int i = -1; i <= 1; i += 2)

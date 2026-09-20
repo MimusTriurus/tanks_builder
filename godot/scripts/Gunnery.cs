@@ -229,7 +229,11 @@ public static class Gunnery
         Vector2I at = shooter.Cell;
         for (int i = 0; i < lane.Count && blocked is null; i++)
         {
-            if (field.Blocked(at, heading))
+            // Not for the mortar: the bomb comes down on the cell, and a wall on
+            // the last edge - the one the capon stands on - is exactly what it
+            // is sent over. The same exemption as the ground's, one line down,
+            // and for the same sentence of the GDD.
+            if (!lobs && field.Blocked(at, heading))
             {
                 blocked = lane[i];
                 stop = Barrier.Cover;

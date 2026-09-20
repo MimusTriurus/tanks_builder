@@ -212,6 +212,35 @@ public static class MapFile
                     + "second would win silently");
 
             var wall = new Masonry();
+            if (shape.Kind is { } kind)
+            {
+                wall.Kind = kind.ToLowerInvariant() switch
+                {
+                    "wall" => Masonry.Sort.Wall,
+                    "capon" => Masonry.Sort.Capon,
+                    _ => throw new InvalidOperationException(
+                        $"{name}: ({cell.X},{cell.Y}) is a \"{kind}\", and a "
+                        + "walled cell carries a wall or a capon"),
+                };
+            }
+            if (shape.Facing is int facing)
+            {
+                if (!Masonry.Headings.Contains(facing))
+                    throw new InvalidOperationException(
+                        $"{name}: ({cell.X},{cell.Y}) faces {facing}, and a "
+                        + "capon's slit faces an edge: "
+                        + string.Join(", ", Masonry.Headings));
+                if (wall.Kind != Masonry.Sort.Capon)
+                    throw new InvalidOperationException(
+                        $"{name}: ({cell.X},{cell.Y}) has a facing and is not a "
+                        + "capon; a wall's front is its edges'");
+                wall.Facing = facing;
+            }
+            if (shape.Edges is not null && wall.Kind == Masonry.Sort.Capon)
+                throw new InvalidOperationException(
+                    $"{name}: ({cell.X},{cell.Y}) is a capon and lists edges; a "
+                    + "capon stands on every edge but its gate, which its facing "
+                    + "says");
             if (shape.Edges is not null)
             {
                 if (shape.Edges.Length == 0)
@@ -600,6 +629,15 @@ public static class MapFile
     private static string Line(Vector2I cell, Masonry wall)
     {
         var parts = new List<string> { $"\"at\": [{cell.X}, {cell.Y}]" };
+        if (wall.Kind == Masonry.Sort.Capon)
+        {
+            parts.Add("\"kind\": \"capon\"");
+            if (wall.Facing is int facing)
+                parts.Add($"\"facing\": {facing}");
+            if (wall.Seed is int seed)
+                parts.Add($"\"seed\": {seed}");
+            return "{ " + string.Join(", ", parts) + " }";
+        }
         if (wall.Edges != Masonry.Ring)
             parts.Add("\"edges\": [" + string.Join(", ", wall.Standing()) + "]");
         foreach (Masonry.Dial dial in Masonry.Dials)
@@ -630,6 +668,8 @@ public static class MapFile
     private sealed class WallShape
     {
         [JsonPropertyName("at")] public int[]? At { get; set; }
+        [JsonPropertyName("kind")] public string? Kind { get; set; }
+        [JsonPropertyName("facing")] public int? Facing { get; set; }
         [JsonPropertyName("edges")] public int[]? Edges { get; set; }
         [JsonPropertyName("seed")] public int? Seed { get; set; }
         [JsonPropertyName("columns")] public int? Columns { get; set; }

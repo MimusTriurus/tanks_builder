@@ -1438,7 +1438,51 @@ public sealed partial class BoardMap
     /// references: the self test judges them, and a file on disk answering to
     /// one of these names is refused rather than allowed to shadow it.</summary>
     public static IReadOnlyList<string> Compiled { get; } =
-        new[] { "bench", "abbey", "test", "water", "wall" };
+        new[] { "bench", "abbey", "test", "water", "wall", "capon" };
+
+    /// <summary>
+    /// The capon board, named <c>capon</c>: the same flat seven-by-seven as
+    /// <see cref="WallMap"/>, one concrete capon in the middle with its slit
+    /// facing 270, and the tank's home three cells down that lane, in front
+    /// of the slit. <c>CaponTest.tscn</c> stands the mortar on it - the one
+    /// gun whose round breaks the box - so the scenario the prop exists for
+    /// can be driven: come up, put the round in, watch it come apart and go.
+    ///
+    /// <b>The capon is the map's own block and not a bench flag</b>, so the
+    /// harness, the events bench and the editor all read the same cell the
+    /// same way - see <see cref="Masonry.Sheltering"/>. The two spare homes
+    /// are for the harness's reason on the wall board: one vehicle per atlas
+    /// must not stand three on a hex.
+    /// </summary>
+    private static readonly string[] CaponGround =
+    {
+        // 0123456
+        "---.---", // r0
+        "-.....-", // r1
+        ".......", // r2
+        "...W...", // r3   the capon, slit towards 270 (down the board)
+        ".......", // r4
+        ".......", // r5
+        "--...--", // r6   the mortar opens on (3,6), in front of the slit
+    };
+
+    private static readonly Parking[] CaponHomes =
+    {
+        new Vector2I(3, 6), new Vector2I(0, 3), new Vector2I(6, 3),
+    };
+
+    private static BoardMap? _capon;
+
+    public static BoardMap CaponMap => _capon ??= FromGround(
+        "capon", CaponGround, WallRamps, CaponHomes, TerrainSet.Default, true,
+        plinth: 1,
+        walling: new Dictionary<Vector2I, Masonry>
+        {
+            [new Vector2I(3, 3)] = new Masonry
+            {
+                Kind = Masonry.Sort.Capon, Facing = 270,
+            },
+        });
 
     /// <summary>
     /// The board of that name, compiled or off disk.
@@ -1472,6 +1516,7 @@ public sealed partial class BoardMap
             "test" => Test,
             "water" => WaterMap,
             "wall" => WallMap,
+            "capon" => CaponMap,
             "bench" => Bench,
             _ => MapFile.Has(key) ? MapFile.Load(key) : Bench,
         };

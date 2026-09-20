@@ -551,10 +551,15 @@ public sealed partial class EventBench : SceneRoot
             (WallKit.Recipe recipe, int bearing) = _map.MasonryAt(cell).Laying()
                 ?? (new WallKit.Recipe { Sides = TankBench.RingSides },
                     HexField.EdgeHeadings[0]);
+            // Or the concrete capon, if the map's block says so - WallProp.Capon.
+            (CaponKit.Recipe Recipe, int Bearing)? shelter =
+                _map.MasonryAt(cell)?.Sheltering();
+            if (shelter is { } s)
+                bearing = s.Bearing;
             var prop = new WallProp
             {
                 Field = _field, Stage = _stage, Cell = cell,
-                Recipe = recipe, Borrow = null,
+                Recipe = recipe, Capon = shelter?.Recipe, Borrow = null,
                 Channel = _bricks.Walls.Count,
             };
             AddChild(prop);

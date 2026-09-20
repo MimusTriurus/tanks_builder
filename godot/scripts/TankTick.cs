@@ -261,6 +261,21 @@ public sealed class TankTick
     /// </summary>
     public Shell.Kind Ammo = Shell.Kind.He;
 
+    /// <summary>What actually leaves <paramref name="shooter"/>'s gun when
+    /// <see cref="Ammo"/> (or <paramref name="asked"/>) is loaded.
+    ///
+    /// <b>The concrete-piercer is the mortar's and nobody else's.</b> The dial
+    /// is one dial for the whole bench, so a tank gun can be told to load it;
+    /// told, it fires HE - the round it has - rather than a shell the class does
+    /// not carry. Read off <see cref="MovementProfile.Lobs"/>, which is how the
+    /// mortar is identified everywhere: the gun that fires overhead is the gun
+    /// that carries the bomb that breaks concrete.</summary>
+    public Shell.Kind Loaded(Vehicle shooter, Shell.Kind? asked = null)
+    {
+        Shell.Kind kind = asked ?? Ammo;
+        return kind == Shell.Kind.Cp && !shooter.Profile.Lobs ? Shell.Kind.He : kind;
+    }
+
     /// <summary>Which side of the hex the next hand-dealt hit comes from, as an
     /// index into <see cref="HexField.EdgeHeadings"/>.
     ///
@@ -4273,7 +4288,7 @@ public sealed class TankTick
             Scatter = over ? 0.0f : shot.Scatter,
             Rise = over ? 0.0f : shot.Rise,
             Calibre = Ordnance.At(Calibre),
-            Ammo = ammo ?? Ammo,
+            Ammo = Loaded(shooter, ammo),
             Level = level ?? Gunnery.Penetration(shooter.Profile, victim.Profile,
                                                  plate),
             // Which plate it is about to meet, settled here for the reason the
@@ -4402,7 +4417,7 @@ public sealed class TankTick
             // What stopped it, taken from the walk rather than from where it
             // landed - see Shell.Blocked.
             Blocked = blocked ? at : null,
-            Ammo = Ammo,
+            Ammo = Loaded(shooter),
             Ground = from + dir * run,
             // The same height at both ends, because a tank gun is level and that
             // is the one assumption the walk itself is written under - see Track,
@@ -5154,7 +5169,9 @@ public sealed class TankTick
         // turn it - and the burst it makes is the same fireball with its normal
         // straight up instead of out along a face. So it is one case and not a
         // fourth column in the other two.
-        bool burst = !overhead && ammo == Shell.Kind.He && Slam;
+        // HE and the mortar's concrete-piercer both burst on a plate; only AP is
+        // a round that gets in or comes off.
+        bool burst = !overhead && ammo != Shell.Kind.Ap && Slam;
         // <b>And the plate is asked as well as the depth</b>, because the rules
         // only ever let a flank turn a round on: a glacis or a rear plate that
         // held spends the shell where it landed, and a roof that held puts it in

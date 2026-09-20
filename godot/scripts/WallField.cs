@@ -200,7 +200,9 @@ public sealed class WallField
         for (int bit = 0; bit < Masonry.Headings.Length; bit++)
         {
             Vector2I next = HexField.Step(prop.Cell, Masonry.Headings[bit]);
-            if (prop.Bars(Field.FlatAnchor(next) - middle))
+            // The mask is what stops a drive, so it is asked for a hull: the
+            // capon's slit stops a tank and not a round - see WallProp.Bars.
+            if (prop.Bars(Field.FlatAnchor(next) - middle, crossing: true))
                 mask |= 1 << bit;
         }
         _stated[prop.Cell] = (prop.Rig?.Loose ?? 0, prop.Rig?.Broken ?? 0);
@@ -342,8 +344,12 @@ public sealed class WallField
     /// physics cannot disagree about which wall it was.</summary>
     public WallProp? Standing(Shell round)
     {
-        if (round.Blocked is not Vector2I cell)
-            return null;
+        // What stopped it, or - for a round nothing stopped, the mortar's bomb
+        // coming down on the cell it was sent to - where it came down. A gun's
+        // round at a walled cell is always blocked at that cell's edge, so for
+        // it the two are one answer; the bomb is sent over the edge and lands
+        // inside, which is the whole of what the capon is broken by.
+        Vector2I cell = round.Blocked ?? Field.CellAt(round.Ground - Origin);
         foreach (WallProp prop in _walls)
             if (prop.Cell == cell)
                 return prop;
@@ -533,8 +539,12 @@ public sealed class WallField
             // bench has the one tank that fired, and the cell it is on is a fact
             // it already holds.
             bool inside = round.Shooter.Cell == prop.Cell;
-            prop.Fire(round.Ammo == Shell.Kind.Ap
-                          ? WallRig.Strike.Ap : WallRig.Strike.He,
+            prop.Fire(round.Ammo switch
+                      {
+                          Shell.Kind.Ap => WallRig.Strike.Ap,
+                          Shell.Kind.Cp => WallRig.Strike.Cp,
+                          _ => WallRig.Strike.He,
+                      },
                       prop.Into(flight.Normalized()),
                       (float)(round.Calibre * Force), Beam,
                       inside ? 0.0f : float.NegativeInfinity);

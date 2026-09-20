@@ -95,6 +95,14 @@ public sealed partial class WallStack : Node3D
     private MeshInstance3D? _sleeve;
     private MultiMeshInstance3D _shade = null!;
     private MultiMesh _shadeMesh = null!;
+    // The pieces that are not boxes - the capon's roof triangles, one mesh
+    // built off the first hull the plan hands over, since every hull in one
+    // plan is the same triangle turned. Whole and going, like the bricks.
+    private MultiMeshInstance3D? _kites;
+    private MultiMesh? _kiteMesh;
+    private MultiMeshInstance3D? _ghostKites;
+    private MultiMesh? _ghostKiteMesh;
+    private Vector3[]? _kiteHull;
     private float _clock;
     private float _length;
 
@@ -291,9 +299,18 @@ public sealed partial class WallStack : Node3D
     {
         if (_mesh is null)
             return;
-        _mesh.InstanceCount = _plan.Blocks.Count;
-        _ghostMesh!.InstanceCount = _plan.Blocks.Count;
+        int kites = 0;
+        Vector3[]? hull = null;
+        foreach (WallKit.Block b in _plan.Blocks)
+            if (b.Hull is { } h)
+            {
+                kites++;
+                hull ??= h;
+            }
+        _mesh.InstanceCount = _plan.Blocks.Count - kites;
+        _ghostMesh!.InstanceCount = _plan.Blocks.Count - kites;
         _shadeMesh!.InstanceCount = _plan.Blocks.Count;
+        Kites(hull, kites);
         // Colour and custom data are Pose's, every slot of them: which slot a
         // piece sits in is decided by the draw order, so writing them by plan
         // index here would put a brick's tone and size on whichever piece later
@@ -592,7 +609,7 @@ public sealed partial class WallStack : Node3D
             _tone = new Color[n];
             _size = new Color[n];
         }
-        int solid = 0, going = 0;
+        int solid = 0, going = 0, kiteSolid = 0, kiteGoing = 0;
         for (int i = 0; i < n; i++)
         {
             WallKit.Block b = _plan.Blocks[i];
@@ -605,6 +622,34 @@ public sealed partial class WallStack : Node3D
             // the shader normalise its way back to an honest normal.
             Basis box = frame.Basis * Basis.FromScale(b.Half * 2.0f);
             var pose = new Transform3D(box, frame.Origin);
+            if (b.Hull is not null)
+            {
+                // A roof triangle: its mesh is already the piece, so the pose is
+                // the frame alone. Its shadow is still the bounding box - a
+                // union under a stencil forgives a little too much.
+                float have = Rig?.Left(i) ?? 1.0f;
+                _shadeMesh!.SetInstanceTransform(i, Flatten(box, frame.Origin, run));
+                _shadeMesh.SetInstanceColor(i, new Color(1.0f, 1.0f, 1.0f, have));
+                _shadeMesh.SetInstanceCustomData(i, new Color(b.Half.X, b.Half.Y, b.Half.Z, 0.0f));
+                if (_kiteMesh is null || have <= 0.0f)
+                    continue;
+                Color grey = Paint(b);
+                if (have >= 1.0f)
+                {
+                    _kiteMesh.SetInstanceTransform(kiteSolid, frame);
+                    _kiteMesh.SetInstanceColor(kiteSolid, grey);
+                    _kiteMesh.SetInstanceCustomData(kiteSolid, new Color(b.Half.X, b.Half.Y, b.Half.Z, 0.0f));
+                    kiteSolid++;
+                }
+                else
+                {
+                    _ghostKiteMesh!.SetInstanceTransform(kiteGoing, frame);
+                    _ghostKiteMesh.SetInstanceColor(kiteGoing, new Color(grey.R, grey.G, grey.B, have));
+                    _ghostKiteMesh.SetInstanceCustomData(kiteGoing, new Color(b.Half.X, b.Half.Y, b.Half.Z, 0.0f));
+                    kiteGoing++;
+                }
+                continue;
+            }
             // The half extents travel with the instance because the joint band
             // has to be a width in board units and not in UV: a brick is twice as
             // long as it is deep, so a band measured in its own texture space
@@ -653,6 +698,136 @@ public sealed partial class WallStack : Node3D
         // leaves no stale pose behind it in either mesh.
         _mesh.VisibleInstanceCount = solid;
         _ghostMesh!.VisibleInstanceCount = going;
+        if (_kiteMesh is not null)
+        {
+            _kiteMesh.VisibleInstanceCount = kiteSolid;
+            _ghostKiteMesh!.VisibleInstanceCount = kiteGoing;
+        }
+    }
+
+    /// <summary>Stand up, or take down, the meshes for the pieces that are not
+    /// boxes. Built off the plan's own hull rather than a unit shape, because
+    /// there is no unit triangle a non-uniform scale turns into every other
+    /// one without shearing its normals; every hull in one plan is the same
+    /// piece turned, so one mesh is enough.</summary>
+    private void Kites(Vector3[]? hull, int count)
+    {
+        if (hull is null || count == 0)
+        {
+            if (_kiteMesh is not null)
+            {
+                _kiteMesh.VisibleInstanceCount = 0;
+                _ghostKiteMesh!.VisibleInstanceCount = 0;
+            }
+            return;
+        }
+        if (_kiteMesh is null || !ReferenceEquals(_kiteHull, hull))
+        {
+            _kites?.QueueFree();
+            _ghostKites?.QueueFree();
+            _kiteHull = hull;
+            ArrayMesh mesh = Prism(hull);
+            _kiteMesh = new MultiMesh
+            {
+                TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
+                UseColors = true,
+                UseCustomData = true,
+                Mesh = mesh,
+            };
+            _kites = new MultiMeshInstance3D
+            {
+                Multimesh = _kiteMesh,
+                MaterialOverride = Concrete(hull, going: false),
+                SortingUseAabbCenter = true,
+            };
+            AddChild(_kites);
+            _ghostKiteMesh = new MultiMesh
+            {
+                TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
+                UseColors = true,
+                UseCustomData = true,
+                Mesh = mesh,
+            };
+            _ghostKites = new MultiMeshInstance3D
+            {
+                Multimesh = _ghostKiteMesh,
+                MaterialOverride = Concrete(hull, going: true),
+                SortingUseAabbCenter = true,
+            };
+            AddChild(_ghostKites);
+            // Drawn under the hull overlay, like the bricks.
+            if (_hulls is not null)
+                MoveChild(_hulls, GetChildCount() - 1);
+        }
+        _kiteMesh.InstanceCount = count;
+        _ghostKiteMesh!.InstanceCount = count;
+    }
+
+    /// <summary>A triangular prism off six hull corners - bottom three then top
+    /// three, as <see cref="CaponKit.Kite"/> hands them over - with hard normals
+    /// per face for the brick's reason.</summary>
+    private static ArrayMesh Prism(Vector3[] h)
+    {
+        var st = new SurfaceTool();
+        st.Begin(Mesh.PrimitiveType.Triangles);
+        void Tri(Vector3 a, Vector3 b, Vector3 c)
+        {
+            // Clockwise as seen from outside is what Godot calls front facing;
+            // the normal is taken the other way round to match.
+            Vector3 nrm = (c - a).Cross(b - a).Normalized();
+            st.SetNormal(nrm); st.AddVertex(a);
+            st.SetNormal(nrm); st.AddVertex(b);
+            st.SetNormal(nrm); st.AddVertex(c);
+        }
+        void Quad(Vector3 a, Vector3 b, Vector3 c, Vector3 d)
+        {
+            Tri(a, b, c);
+            Tri(a, c, d);
+        }
+        // Bottom, looking up from below: 0 1 2 is counter-clockwise from above,
+        // so from below it is clockwise as it stands.
+        Tri(h[0], h[1], h[2]);
+        // Top, seen from above.
+        Tri(h[3], h[5], h[4]);
+        // Sides, each seen from outside.
+        Quad(h[0], h[3], h[4], h[1]);
+        Quad(h[1], h[4], h[5], h[2]);
+        Quad(h[2], h[5], h[3], h[0]);
+        return st.Commit();
+    }
+
+    /// <summary>The concrete material for the prisms: the brick's own text with
+    /// a seam measured against the triangle's edges instead of a box's, since
+    /// the three edge lines are known once the hull is.</summary>
+    private ShaderMaterial Concrete(Vector3[] h, bool going)
+    {
+        var ink = new ShaderMaterial
+        {
+            Shader = new Shader
+            {
+                Code = !going ? string.Format(KiteShader, "", "")
+                     : Dressed ? string.Format(KiteShader, ", depth_draw_never", "ALPHA = left;")
+                     : string.Format(KiteShader, ", depth_draw_always", "ALPHA = left;"),
+            },
+        };
+        // The three edges of the bottom triangle in the XZ plane, as (nx, nz, d)
+        // with the inside on the negative side.
+        Vector2 c = Vector2.Zero;
+        for (int i = 0; i < 3; i++)
+            c += new Vector2(h[i].X, h[i].Z) / 3.0f;
+        for (int i = 0; i < 3; i++)
+        {
+            var a = new Vector2(h[i].X, h[i].Z);
+            var b = new Vector2(h[(i + 1) % 3].X, h[(i + 1) % 3].Z);
+            Vector2 n = (b - a).Orthogonal().Normalized();
+            if (n.Dot(c - a) > 0.0f)
+                n = -n;
+            ink.SetShaderParameter("e" + i, new Vector3(n.X, n.Y, n.Dot(a)));
+        }
+        ink.SetShaderParameter("halfy", Mathf.Abs(h[3].Y - h[0].Y) * 0.5f);
+        ink.SetShaderParameter("sun", Key);
+        ink.RenderPriority = Stage3D.ShadowOrder;
+        return ink;
     }
 
     /// <summary>Whether a piece is rubble rather than masonry: the apron
@@ -775,8 +950,16 @@ public sealed partial class WallStack : Node3D
     private static readonly Color Pale = new(0.726f, 0.592f, 0.498f);
     private static readonly Color Moss = new(0.273f, 0.346f, 0.146f);
 
-    private static Color Paint(in WallKit.Block b)
+    /// <summary>Concrete, dark to light along the tone. The Blender model's
+    /// ramp (0.21..0.38), lifted a little because this board has no bounce and
+    /// its ambient is written into the shader as 0.55 of the face.</summary>
+    private static readonly Color ConcreteDark = new(0.36f, 0.36f, 0.34f);
+    private static readonly Color ConcreteLight = new(0.60f, 0.59f, 0.56f);
+
+    private Color Paint(in WallKit.Block b)
     {
+        if (_plan is { Concrete: true })
+            return ConcreteDark.Lerp(ConcreteLight, b.Tone);
         // A brick is one of a range, with the occasional pale one. Picked on the
         // CPU and carried per instance, because it never changes and a ramp
         // evaluated per fragment would be the same answer at a cost.
@@ -1113,6 +1296,87 @@ void fragment() {{
     // its weathered face, which is the one thing the procedural material in
     // Blender had to define rather than paint.
     body = mix(body, body * vec3(1.14, 1.10, 1.05), chip * 0.6);
+    ALBEDO = mix(body * 0.13, body, show);
+    {1}
+}}
+";
+
+    /// <summary>The brick's shader for a triangular prism. Same lighting, same
+    /// grain, same going; only the seam differs, because distance to a box's
+    /// edge is <c>0.5 - |local|</c> and distance to a triangle's is three lines
+    /// handed in as uniforms - see <see cref="Concrete"/>.</summary>
+    internal const string KiteShader = @"
+shader_type spatial;
+render_mode unshaded, cull_back{0};
+
+uniform vec3 sun = vec3(-0.33, 0.82, 0.47);
+uniform float joint = 0.0125;
+uniform float radius = 124.0;
+uniform float ambient = 0.55;
+uniform float grain = 0.10;
+// The bottom triangle's edges in the piece's XZ plane: (nx, nz, d), with the
+// inside on the negative side of nx*x + nz*z - d.
+uniform vec3 e0;
+uniform vec3 e1;
+uniform vec3 e2;
+uniform float halfy = 0.06;
+
+varying vec3 tint;
+varying vec3 face;
+varying vec3 axis;
+varying vec3 local;
+varying float left;
+
+float hash13(vec3 p) {{
+    p = fract(p * 0.1031);
+    p += dot(p, p.yzx + 33.33);
+    return fract((p.x + p.y) * p.z);
+}}
+
+float vnoise(vec3 p) {{
+    vec3 i = floor(p), f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    float n = 0.0;
+    for (int k = 0; k < 8; k++) {{
+        vec3 o = vec3(float(k & 1), float((k >> 1) & 1), float((k >> 2) & 1));
+        float w = mix(1.0 - f.x, f.x, o.x) * mix(1.0 - f.y, f.y, o.y)
+                * mix(1.0 - f.z, f.z, o.z);
+        n += w * hash13(i + o);
+    }}
+    return n;
+}}
+
+void vertex() {{
+    tint = COLOR.rgb;
+    local = VERTEX;
+    face = normalize(mat3(MODEL_MATRIX) * NORMAL);
+    axis = NORMAL;
+    left = COLOR.a;
+}}
+
+void fragment() {{
+    if (left <= 0.0)
+        discard;
+    float lam = max(dot(normalize(face), normalize(sun)), 0.0);
+    float lit = ambient + (1.0 - ambient) * lam;
+
+    // Inside distances to the three edges and to the two caps.
+    float d0 = -(e0.x * local.x + e0.y * local.z - e0.z);
+    float d1 = -(e1.x * local.x + e1.y * local.z - e1.z);
+    float d2 = -(e2.x * local.x + e2.y * local.z - e2.z);
+    float cap = halfy - abs(local.y);
+    float lo = min(d0, min(d1, d2));
+    float hi = max(d0, max(d1, d2));
+    float mid = d0 + d1 + d2 - lo - hi;
+    // A cap sees all three edges; a side face lies on its own edge, where the
+    // smallest distance is nought everywhere, so it drops it and takes the
+    // caps and the two other edges.
+    float border = abs(axis.y) > 0.5 ? lo : min(cap, mid);
+    float seam = smoothstep(0.0, joint * 0.35, border);
+
+    float g = vnoise(local * radius * 0.55) - 0.5;
+    float show = max(seam, 1.0 - left);
+    vec3 body = tint * lit * (1.0 + g * grain);
     ALBEDO = mix(body * 0.13, body, show);
     {1}
 }}

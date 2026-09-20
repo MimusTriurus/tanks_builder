@@ -38,7 +38,7 @@ public sealed partial class WallRig : Node3D
     /// shapes and that is the whole difference between them: a ram is a moving
     /// body against the face, HE is a field around a point, AP is a line
     /// through.</summary>
-    public enum Strike { Ram, He, Ap }
+    public enum Strike { Ram, He, Ap, Cp }
 
     /// <summary>How many metres a cell radius is.
     ///
@@ -367,8 +367,20 @@ public sealed partial class WallRig : Node3D
         Strike.He => $"{HeSpeed * force:F1} m/s at the burst over "
                      + $"{HeReach * Mathf.Pow(Mathf.Max(force, 0.0f), 1.0f / 3.0f):F1}"
                      + " bricks",
+        // The concrete-piercer goes off inside: every wall is shoved outward
+        // at once and the roof comes down on what was under it.
+        Strike.Cp => $"{CpSpeed * force:F1} m/s outward on every wall, "
+                     + "the roof let go",
         _ => $"{ApSpeed * force:F1} m/s down a {ApBore * 2.0f:F1} brick bore",
     };
+
+    /// <summary>What the concrete-piercer puts into each wall piece, outward
+    /// along its own face normal, in metres per second at force 1. The Blender
+    /// measurement (<c>hex_capon.rig_break</c>, shot "burst") drove every wall
+    /// out to a median 1.26 radii and left nothing standing; this is the speed
+    /// that reproduces that spread on the board's own solver - a knob to be
+    /// read off the bench's pile line, not a constant of nature.</summary>
+    public const float CpSpeed = 3.2f;
     public int Count => _bodies.Count;
 
     /// <summary>Where the tank is and how big, in the cell's own units, or null
@@ -660,6 +672,15 @@ public sealed partial class WallRig : Node3D
     /// and what a breach does is bring the section down.</summary>
     public static bool Breaching(Strike shot) => shot != Strike.Ap;
 
+    /// <summary>Whether this strike does anything at all to concrete. One
+    /// round and one only: the capon is what the mortar's concrete-piercer is
+    /// for, and HE against it bursts on the face - the picture is
+    /// <c>WallField.Breached</c>'s and the masonry does not move - while AP
+    /// marks it. A ram is a tank against a metre of concrete, and the tank
+    /// loses. Said here beside <see cref="Breaching"/> because it is the same
+    /// kind of sentence: what a shot is, decided by the shot.</summary>
+    public static bool Cracks(Strike shot, bool concrete) => !concrete || shot == Strike.Cp;
+
     /// <summary>Whether a section comes down whole at all. On, and named here
     /// rather than left in the field's initialiser for
     /// <c>Recoil.ShearOnByDefault</c>'s reason.</summary>
@@ -879,10 +900,25 @@ public sealed partial class WallRig : Node3D
                 PhysicsMaterialOverride =
                     new PhysicsMaterial { Friction = 0.8f, Bounce = 0.0f },
             };
-            body.AddChild(new CollisionShape3D
+            if (b.Hull is { } hull)
             {
-                Shape = new BoxShape3D { Size = size },
-            });
+                // Not a box: the true corners, in the rig's metres. The one other
+                // convex hull in here is the ram's prow, and for the same reason -
+                // a frame drawn as the bounding box would be a collider that is
+                // not the piece.
+                var pts = new Vector3[hull.Length];
+                for (int k = 0; k < hull.Length; k++)
+                    pts[k] = hull[k] * MetresPerCell;
+                body.AddChild(new CollisionShape3D
+                {
+                    Shape = new ConvexPolygonShape3D { Points = pts },
+                });
+            }
+            else
+                body.AddChild(new CollisionShape3D
+                {
+                    Shape = new BoxShape3D { Size = size },
+                });
             AddChild(body);
             _bodies.Add(body);
             _lain.Add(0.0f);
@@ -1049,11 +1085,33 @@ public sealed partial class WallRig : Node3D
         float mid = _plan.Top * 0.5f * MetresPerCell;
         float reach = new Vector2(_plan.Size.X, _plan.Size.Z).Length() * MetresPerCell;
 
+        // Concrete takes one round and shrugs off the rest - see Cracks. The
+        // beam is still drawn for the two that do nothing, so the bench shows
+        // where the round arrived and the wall standing behind it.
+        if (!Cracks(shot, _plan.Concrete))
+        {
+            if (shot != Strike.Ram)
+            {
+                (float front, _) = Meets(Vector3.Zero, into, _from);
+                if (front == float.MaxValue)
+                    front = 0.0f;
+                _beam = (-into * reach + Vector3.Up * mid, into * front + Vector3.Up * mid);
+            }
+            return;
+        }
+
         switch (shot)
         {
             case Strike.Ram: Ram(into); break;
             case Strike.He: Burst(into, mid, reach); break;
             case Strike.Ap: Pierce(into, mid, reach); break;
+            // Against brick the concrete-piercer is a heavy shell and nothing
+            // more: it bursts on the face. Going off inside is what it does to
+            // the box it was made for.
+            case Strike.Cp:
+                if (_plan.Concrete) Shatter(into, mid);
+                else Burst(into, mid, reach);
+                break;
         }
         if (!beam)
             _beam = null;
@@ -2138,6 +2196,41 @@ public sealed partial class WallRig : Node3D
         // it so the tally is complete: a section is breached on what the whole
         // burst took from it, not on what the first piece of it took.
         Breach(face, Strike.He);
+    }
+
+    /// <summary>The concrete-piercer: the charge goes off inside and the whole
+    /// box comes apart at once.
+    ///
+    /// <b>Every wall outward, the roof let go, and no section spared</b> - the
+    /// Blender measurement this reproduces (<c>hex_capon.rig_break</c>): six
+    /// pushers from the centre drove every wall out, nothing stood, the roof
+    /// fell inward onto the floor, and the pile lay 0.32 radii high with a
+    /// median spread of 1.26. A box is not a line, and a line-shaped shot
+    /// (<see cref="Burst"/>) takes one face and leaves the rest standing under
+    /// a roof, which is a breach and not the destruction the rules ask for.
+    ///
+    /// Each wall piece is pushed along its own outward normal - the piece's
+    /// +Z, which is how <see cref="CaponKit"/> lays them - with a little of the
+    /// shot's own direction added so the far wall goes further than the near
+    /// one, and a little lift so the slabs clear their own footing before they
+    /// tip. The roof pieces are only thawed: what falls on a tank inside is
+    /// the roof, and it should fall rather than fly.</summary>
+    private void Shatter(Vector3 into, float mid)
+    {
+        _beam = (-into * _plan.Size.Z * MetresPerCell + Vector3.Up * mid,
+                 Vector3.Up * mid);
+        for (int i = 0; i < _bodies.Count; i++)
+        {
+            Thaw(i, spreads: false);
+            if (_plan.Blocks[i].Hull is not null || _plan.Blocks[i].Course < 0)
+                continue;
+            Vector3 outward = _bodies[i].Transform.Basis.Z;
+            outward = new Vector3(outward.X, 0.0f, outward.Z).Normalized();
+            Vector3 dir = (outward * 0.8f + into * 0.2f + Vector3.Up * 0.25f).Normalized();
+            _bodies[i].ApplyImpulse(dir * (CpSpeed * _force * _bodies[i].Mass));
+        }
+        for (int side = 0; side < _stood.Length; side++)
+            _breached.Add(side);
     }
 
     /// <summary>AP straight through: a line, and only what is standing on it.

@@ -736,12 +736,18 @@ public sealed partial class MapEditor : SceneRoot
             if (_edit.MasonryAt(cell)?.Laying() is not
                     ({ } recipe, int bearing))
                 continue;
+            // Or the concrete capon, if the block says so - WallProp.Capon.
+            (CaponKit.Recipe Recipe, int Bearing)? shelter =
+                _edit.MasonryAt(cell)!.Sheltering();
+            if (shelter is { } s)
+                bearing = s.Bearing;
             var prop = new WallProp
             {
                 Field = _field,
                 Stage = _stage,
                 Cell = cell,
                 Recipe = recipe,
+                Capon = shelter?.Recipe,
                 Borrow = null,
                 Channel = _bricks.Count,
             };

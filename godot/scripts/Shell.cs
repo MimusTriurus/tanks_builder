@@ -475,7 +475,7 @@ public sealed partial class Shell : Node2D
     /// is a tank and is therefore not a round at all. Against armour it means
     /// nothing yet, which <see cref="TankTick.Ammo"/> says out loud.
     /// </summary>
-    public enum Kind { He, Ap }
+    public enum Kind { He, Ap, Cp }
 
     /// <summary>Which of the two this one is. Settled at the trigger and carried,
     /// like the calibre beside it: a dial turned while the round is in the air

@@ -22,7 +22,7 @@
 | [docs/board.md](docs/board.md) | `BoardMap`, пять карт, `Abbey`, `--map-report`, пандусы и уровень моря | правишь карту или пишешь новую |
 | [docs/bench.md](docs/bench.md) | `TankTick`, доски `test` и `water`, панель бенча, его флаги | трогаешь `TankBench` или тик танка |
 | [docs/events.md](docs/events.md) | стенд событий: доска `events`, `events.json`, `Fleet`, снимок флагом; чего ещё нет | делаешь эффект под событие правил или кнопку к нему |
-| [docs/wall.md](docs/wall.md) | `Wall.tscn`: `WallKit`/`Fall`/`Stack`/`Bench`, раскладка кладки, физика обвала, тень, `--solved` | как стена построена и как она рушится |
+| [docs/wall.md](docs/wall.md) | `Wall.tscn`: `WallKit`/`Fall`/`Stack`/`Bench`, раскладка кладки, физика обвала, тень, `--solved`; капонир (`CaponKit`, `--capon`, бетонобой) | как стена построена и как она рушится |
 | [docs/wall-bench.md](docs/wall-bench.md) | `WallTankTest`: таран, ворота тарана, HE/AP, секции, тур, `WallProp`, `WallHulls` | танк против стены |
 | [docs/water.md](docs/water.md) | брод, ватерлиния по колонкам, бок пруда, пена и кромка, кильватер, гребень, `Ripples` | всё мокрое |
 | [docs/props.md](docs/props.md) | тени по солнцу, `Grove`, `Wildfire`, `PropFamily`/`PropTier`, полоса убранства, `WoodBench` | деревья, кусты, камни, пожар в лесу |
@@ -55,8 +55,9 @@ dotnet build
 
 Сцены: `res://Main.tscn` — харнесс (ABBEY — он же с `-- --map abbey` либо
 `res://Abbey.tscn`, [docs/board.md](docs/board.md)); `res://TankTest.tscn`,
-`res://WaterTankTest.tscn`, `res://WallTankTest.tscn` — танковый стенд, на воде
-и против стены ([docs/bench.md](docs/bench.md), [docs/wall-bench.md](docs/wall-bench.md));
+`res://WaterTankTest.tscn`, `res://WallTankTest.tscn`, `res://CaponTest.tscn` — танковый
+стенд, на воде, против стены и миномёт против капонира ([docs/bench.md](docs/bench.md),
+[docs/wall-bench.md](docs/wall-bench.md));
 `res://Effects.tscn` — взрыв ([docs/blast.md](docs/blast.md));
 `res://EventsTank.tscn`, `res://EventsField.tscn`, `res://EventsOverlay.tscn` —
 стенд событий: пять танков и все виды клеток, кнопка панели = событие правил
@@ -87,7 +88,7 @@ Godot, запущенный другой сборкой движка, переп
 
 ## Корни сцен и правило между ними
 
-Корней девять: `Main` (харнесс, две сцены), `TankBench` (три), `EventBench`
+Корней девять: `Main` (харнесс, две сцены), `TankBench` (четыре), `EventBench`
 (три), `WoodBench`, `WallBench`, `ReliefBench`, `Relief3D`, `EffectsBench`,
 `MapEditor`. Семь наследуют `SceneRoot`; два рельефных объявлены схематичными.
 

@@ -99,6 +99,19 @@ public sealed partial class TankBench : SceneRoot
     /// from.</summary>
     [Export] public string Map = "test";
 
+    /// <summary>The class the bench opens driving, by tag, or empty for the
+    /// medium. What <c>--tank</c> says from the command line, said by the scene
+    /// instead: <c>CaponTest.tscn</c> is the mortar against the capon, and a
+    /// scene that opened on the wrong gun would be a scene about nothing.
+    /// The flag still wins when both are given. <c>Opens</c> and not
+    /// <c>Tank</c>, which is the driven vehicle.</summary>
+    [Export] public string Opens = "";
+
+    /// <summary>The heading the tanks open on, degrees. 270 is what every
+    /// board's fleet has always opened on; the capon board opens the mortar
+    /// at 90, facing the slit it is there to break.</summary>
+    [Export] public double Heading = 270.0;
+
     private BoardMap _map = null!;
     private HexField _field = null!;
     private TerrainSet? _terrain;
@@ -485,6 +498,74 @@ public sealed partial class TankBench : SceneRoot
     private bool _knockoutAtStart;
     private bool _burnAtStart;
     private bool _ramAtStart;
+
+    /// <summary>The cell <c>--shell</c> named, put on the driven tank as its
+    /// <see cref="Vehicle.Mark"/> once the garage is open.</summary>
+    private Vector2I? _shellAt;
+
+    /// <summary>Order the driven tank to put one round into a cell - the
+    /// harness's <c>OrderShot</c>, said here because the bench had no way to
+    /// aim at a cell: <c>Z</c> fires down the hull and the right button rams.
+    /// A mark on the tank's own cell is no order.</summary>
+    private void ShellAt(Vector2I cell)
+    {
+        if (Tank.Wreck.Out || !_field.InBounds(cell))
+            return;
+        Tank.Mark = cell == Tank.Cell ? null : cell;
+        if (Tank.Mark is not null)
+            Tank.Target = null;
+        Tank.Solution = Gunnery.None;
+    }
+
+    /// <summary>Lay the gun on the standing order and let the tick fire it -
+    /// the harness's <c>UpdateAttack</c>, as far as a bench with one tank and
+    /// no enemies needs it. Hooked into <see cref="TankTick.Aim"/>, which is
+    /// where the tick asks who is aiming at what; unhooked, a
+    /// <see cref="Vehicle.Mark"/> is a note nobody reads, which is what
+    /// <c>--shell</c> was until this existed. A turret traverses, a casemate
+    /// turns the whole hull and only standing still, at the class's lay rate.
+    /// </summary>
+    private void UpdateAttack(Vehicle v, double delta)
+    {
+        if (v.Wreck.Out || (v.Target is null && v.Mark is null))
+        {
+            v.Solution = Gunnery.None;
+            return;
+        }
+        Vector2I at = v.Target?.Cell ?? v.Mark!.Value;
+        v.Solution = Gunnery.Solve(_field, _garage, v, at);
+        int onto = v.Solution.OnLane
+            ? v.Solution.Heading
+            : HexField.EdgeHeadings[Angles.SideFor(Gunnery.HeadingOf(
+                  (v.Target?.GroundPoint ?? (_origin + _field.CellAnchor(at)))
+                  - v.GroundPoint))];
+        double was = v.Sprite.TurretFacing;
+        if (v.Profile.Turreted)
+            v.Sprite.TurretFacing = Gunnery.Traverse(
+                was, onto, Gunnery.LayRate(v.Profile) * delta);
+        else if (!v.Moving)
+        {
+            double swing = Angles.WrapAngle(
+                Gunnery.Traverse(was, onto, Gunnery.LayRate(v.Profile) * delta) - was);
+            v.Sprite.TurnHull(swing);
+        }
+        Tick.Train(v, at);
+        if (v.Sprite.TurretFacing != was)
+            v.Sprite.QueueRedraw();
+
+        // The trigger: standing still, a clear lane, a loaded round, a laid gun
+        // and a trained tube - the harness's five, and one press is one round.
+        if (v.Moving || !v.Solution.Clear || v.ReloadLeft > 0.0
+            || !Gunnery.Laid(v.Sprite.TurretFacing, v.Solution.Heading)
+            || !Tick.Trained(v))
+            return;
+        Tick.Fire(v, v.Mark);
+        v.Mark = null;
+    }
+
+    /// <summary>The ring on the tank's cell is the concrete capon -
+    /// <c>--capon</c>. See <see cref="CaponKit"/>.</summary>
+    private bool _capon;
     private double? _turretAtStart;
 
     /// <summary>How much of the cell the wall takes. The wall bench's dial, and
@@ -539,6 +620,15 @@ public sealed partial class TankBench : SceneRoot
                 case "--drive" when i + 1 < args.Length:
                     if (Spot(args[++i]) is Vector2I leg)
                         _driveTo.Add((leg, false));
+                    break;
+                // One round into a cell, as the harness's right click and
+                // bench-shell order it: the gun is laid and fires on its own
+                // once it has a lane, a standstill and a loaded round. Given
+                // at the start, so a capture can hold the mortar's bomb coming
+                // down on the capon without a hand on the mouse.
+                case "--shell" when i + 1 < args.Length:
+                    if (Spot(args[++i]) is Vector2I mark)
+                        _shellAt = mark;
                     break;
                 // The same leg, driven as a ram - what a right click on the
                 // target hex does. A flag of its own rather than a modifier on
@@ -728,14 +818,18 @@ public sealed partial class TankBench : SceneRoot
                         case "ram": _ramAtStart = true; break;
                         case "he": _tick.Ammo = Shell.Kind.He; _fireAtStart = true; break;
                         case "ap": _tick.Ammo = Shell.Kind.Ap; _fireAtStart = true; break;
+                        case "cp": _tick.Ammo = Shell.Kind.Cp; _fireAtStart = true; break;
                         default:
                             GD.PushWarning($"--strike {args[i]} is none of ram, "
-                                           + "he, ap");
+                                           + "he, ap, cp");
                             break;
                     }
                     break;
                 case "--ram":
                     _ramAtStart = true;
+                    break;
+                case "--capon":
+                    _capon = true;
                     break;
                 // Ram every wall on the board in turn and print what each ram
                 // did to the masonry it was not aimed at - see TankBench.Tour.
@@ -744,9 +838,14 @@ public sealed partial class TankBench : SceneRoot
                     _tour = true;
                     break;
                 case "--ammo" when i + 1 < args.Length:
-                    _tick.Ammo = args[++i] == "ap" ? Shell.Kind.Ap : Shell.Kind.He;
-                    if (args[i] is not ("he" or "ap"))
-                        GD.PushWarning($"--ammo {args[i]} is neither he nor ap");
+                    _tick.Ammo = args[++i] switch
+                    {
+                        "ap" => Shell.Kind.Ap,
+                        "cp" => Shell.Kind.Cp,
+                        _ => Shell.Kind.He,
+                    };
+                    if (args[i] is not ("he" or "ap" or "cp"))
+                        GD.PushWarning($"--ammo {args[i]} is none of he, ap, cp");
                     break;
                 case "--force" when i + 1 < args.Length
                                     && Number(args[i + 1]) is double f:
@@ -1004,6 +1103,8 @@ public sealed partial class TankBench : SceneRoot
             // think about later.
             Vehicle vehicle = Fleet.Crew(this, tag, atlas, _sheet, _map.Homes[0],
                                          (ulong)_garage.Count + 1UL);
+            vehicle.Sprite.HullFacing = Heading;
+            vehicle.Sprite.TurretFacing = Heading;
             _garage.Add(vehicle);
         }
         if (missing.Count > 0)
@@ -1013,6 +1114,19 @@ public sealed partial class TankBench : SceneRoot
         // a tank at the size its atlas actually is. The same tank the grid takes
         // its tile from, one line below.
         _pick = Math.Max(0, _garage.FindIndex(v => v.Tag == "MTP"));
+        if (_startTag is null && Opens is { Length: > 0 })
+            _startTag = Opens.ToUpperInvariant();
+        // Said by the scene is said, the same as by a flag: the panel opens
+        // every row a flag did not name on its own default, and the class
+        // row's default is the medium - measured as a capon scene that
+        // opened on the mortar and drove the medium a frame later.
+        if (Opens is { Length: > 0 })
+            _flagged.Add("tank.pick.class");
+        if (Heading != 270.0)
+        {
+            _flagged.Add("tank.aim.hull");
+            _flagged.Add("tank.aim.turret");
+        }
         if (_startTag is not null)
         {
             int want = _garage.FindIndex(v => v.Tag == _startTag);
@@ -1102,7 +1216,11 @@ public sealed partial class TankBench : SceneRoot
         {
             if (cell != ring)
                 continue;
-            Stand(cell, HexField.EdgeHeadings[_wallSide], _wallCoverage, _brick);
+            // --capon puts the concrete shelter on the tank's cell instead of
+            // the ring, its slit facing the wall side the dial names. The tank
+            // stands inside it, which is what the prop exists for.
+            Stand(cell, HexField.EdgeHeadings[_wallSide], _wallCoverage, _brick,
+                  _capon ? new CaponKit.Recipe() : null);
             break;
         }
         foreach ((Vector2I cell, float bearing, string _, WallKit.Recipe recipe)
@@ -1113,11 +1231,24 @@ public sealed partial class TankBench : SceneRoot
         }
         // Any cell the map marked that no sample named. Stood rather than skipped:
         // a letter on the board with nothing on it is the one failure this whole
-        // arrangement can have, and it looks exactly like open ground.
+        // arrangement can have, and it looks exactly like open ground. Stood as
+        // the map's own block says - a capon where it says capon, a shape where
+        // it gives one - the way the harness stands them; the bare letter is
+        // still the ring facing the dial.
         foreach (Vector2I cell in _map.Walled())
-            if (!_bricks.Stands(cell))
+        {
+            if (_bricks.Stands(cell))
+                continue;
+            Masonry? said = _map.MasonryAt(cell);
+            if (said?.Sheltering() is (CaponKit.Recipe capon, int facing))
+                Stand(cell, facing, _wallCoverage, new WallKit.Recipe(), capon);
+            else if (said?.Laying() is (WallKit.Recipe shape, int bearing)
+                     && !said.Plain)
+                Stand(cell, bearing, _wallCoverage, shape);
+            else
                 Stand(cell, HexField.EdgeHeadings[_wallSide], _wallCoverage,
                       new WallKit.Recipe());
+        }
         if (Walls.Count > 0)
         {
             // What the yard leaves against what stands in it. Both numbers,
@@ -1134,7 +1265,14 @@ public sealed partial class TankBench : SceneRoot
                 : Vector3.Zero;
             float corner = 0.5f * new Vector2(box.X, box.Z).Length();
             GD.Print($"tank bench: {Walls.Count} wall(s), ring on "
-                     + $"({ring.X},{ring.Y}) over {_brick.Sides} sides, "
+                     + $"({Wall!.Cell.X},{Wall.Cell.Y}) over {_brick.Sides} sides, "
+                     // The board's own record of which edges hold, as measured
+                     // off the pieces - WallField.Restate. Printed because the
+                     // recipe's count above is what was asked for and this is
+                     // what stood: a capon asks for six and stands on five. Of
+                     // the first wall's cell, which on the capon board is not
+                     // the home.
+                     + $"mask {Convert.ToString(_field.SidesAt(Wall.Cell), 2).PadLeft(6, '0')}, "
                      + $"{clear:F2}m clear against a {corner:F2}m hull corner, "
                      + "samples "
                      + string.Join(" ", Samples.Select(
@@ -1146,7 +1284,7 @@ public sealed partial class TankBench : SceneRoot
     /// which walls a board has is a list rather than a special case per
     /// wall.</summary>
     private void Stand(Vector2I cell, float bearing, float coverage,
-                       WallKit.Recipe recipe)
+                       WallKit.Recipe recipe, CaponKit.Recipe? capon = null)
     {
         var prop = new WallProp
         {
@@ -1154,6 +1292,7 @@ public sealed partial class TankBench : SceneRoot
             Stage = _stage!,
             Cell = cell,
             Recipe = recipe,
+            Capon = capon,
             Borrow = null,
             // Its own collision bit, because every rig is centred on the world
             // origin: on one bit the ring's rubble and a sample's lie in the
@@ -1377,6 +1516,8 @@ public sealed partial class TankBench : SceneRoot
             // bench where a shot at open ground is the one shot with nothing to
             // show.
             _tick.Landed = _bricks.Landing;
+        // And who is aiming at what, so a cell can be shelled - see UpdateAttack.
+        _tick.Aim = UpdateAttack;
         // And the gun going off over the board, which happens on every shot
         // whether or not anything is hit - see TankTick.Kicked. Answered here as
         // well as on the harness because this bench is where one tank's shot is
@@ -1531,6 +1672,15 @@ public sealed partial class TankBench : SceneRoot
             return;
         delta = FrameClock.FixedStep ?? delta;
 
+        // The order --shell gave waits for the first frame: given with the
+        // other start flags it landed on whichever tank the garage filled
+        // first, and given after the pick it was wiped by the parking that
+        // closes _Ready - measured both ways, as a mortar that never fired.
+        if (_shellAt is Vector2I mark)
+        {
+            ShellAt(mark);
+            _shellAt = null;
+        }
         Tick.Run(Tank, delta);
         // After the tank has moved, for TankTick.Fly's reason.
         Tick.Fly(delta);
@@ -2242,17 +2392,22 @@ public sealed partial class TankBench : SceneRoot
         // a heading is churn with a migration under it.
         _panel.Choice("wall.ammo", "loaded",
                           new[] { "HE - bursts on the face",
-                                  "AP - straight through" },
+                                  "AP - straight through",
+                                  "CP - the mortar's, breaks concrete" },
                           () => (int)_tick.Ammo,
-                          i => _tick.Ammo = (Shell.Kind)Math.Clamp(i, 0, 1));
+                          i => _tick.Ammo = (Shell.Kind)Math.Clamp(i, 0, 2));
             _panel.Slide("wall.force", "force", 0.0, WallBench.MostForce, 0.05,
                          () => _wallForce, v => _wallForce = v, "x",
                          // What one setting buys, in the unit the chosen shot is
                          // measured in - the wall bench's own line, so the two
                          // benches cannot describe one force differently.
                          () => WallRig.Costs(
-                             _tick.Ammo == Shell.Kind.Ap
-                                 ? WallRig.Strike.Ap : WallRig.Strike.He,
+                             _tick.Ammo switch
+                             {
+                                 Shell.Kind.Ap => WallRig.Strike.Ap,
+                                 Shell.Kind.Cp => WallRig.Strike.Cp,
+                                 _ => WallRig.Strike.He,
+                             },
                              (float)(_wallForce * Ordnance.At(_tick.Calibre))));
             _panel.Radio("wall.side",
                          () => $"it stands on side {_wallSide + 1} of 6, "
@@ -2427,7 +2582,13 @@ public sealed partial class TankBench : SceneRoot
                 case MouseButton.Right:
                     // The other button on the same hex is a ram - see Charge.
                     // Standing still is ESC, which is where it already was.
-                    Charge(Pointed());
+                    // With Shift it is the harness's right click instead: one
+                    // round into that cell. A modifier rather than a key, for
+                    // the reason the harness has no free keys left either.
+                    if (mouse.ShiftPressed)
+                        ShellAt(Pointed());
+                    else
+                        Charge(Pointed());
                     return;
                 case MouseButton.WheelUp:
                 case MouseButton.WheelDown:

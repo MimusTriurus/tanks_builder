@@ -15669,9 +15669,123 @@ public static class SelfTest
     /// the numbers it prints - named here rather than half-asserted, because a
     /// check that cannot run is worse than one that is missing.
     /// </summary>
+    /// <summary>
+    /// The concrete capon - <see cref="CaponKit"/> - as far as it can be asserted
+    /// without a frame: the layout, the slit against every gun, the roof over
+    /// the tallest turret, and the board's record of its edges as measured off
+    /// the pieces. How it comes apart is the solver's, and is read off the wall
+    /// bench's printed lines for the wall's reason (see <see cref="Walls"/>).
+    /// </summary>
+    private static void Capon(HexField field, Action<string, bool, string> Check)
+    {
+        Theme("the concrete capon");
+
+        var recipe = new CaponKit.Recipe();
+        WallKit.Plan plan = CaponKit.Lay(recipe);
+        int slabs = 0, roof = 0, windows = 0;
+        foreach (WallKit.Block b in plan.Blocks)
+        {
+            if (b.Hull is not null) roof++; else slabs++;
+            if (b.Window) windows++;
+        }
+        // Four blank sides in bays and courses, the slit side's two jambs in
+        // courses, its sill and lintel, and one roof triangle per side. Counted
+        // from the recipe rather than written down, because the one failure
+        // this has had is a piece dropped in silence - the slit's left jamb came
+        // out with negative width when the lap cut ran past it.
+        int want = 4 * recipe.Bays * recipe.Courses + 2 * recipe.Courses + 2;
+        Check("the capon lays every slab the recipe asks for, and nothing is "
+              + "dropped in silence",
+            slabs == want && roof == CaponKit.Sides && windows == 2,
+            $"{slabs} slabs against {want}, {roof} roof pieces, {windows} slit pieces");
+        Check("and it is concrete, which is what one round and no other breaks",
+            plan.Concrete, "the plan does not say so");
+        // On the cell boundary, not over it: the walls stand on the hexagon's
+        // own edges, which is the decision the recipe's reach of 1.0 records.
+        Check("the walls stand on the cell's edges and nowhere past them",
+            plan.Reach <= 1.0f + 1e-3f && plan.Reach > 0.95f,
+            $"reach {plan.Reach:F4}");
+        // No two slabs share space. The roof triangles are left out because the
+        // test is a box test and their boxes overlap by construction; the slabs
+        // are the pieces the lap joint exists to keep apart.
+        var boxes = new List<WallKit.Block>();
+        foreach (WallKit.Block b in plan.Blocks)
+            if (b.Hull is null)
+                boxes.Add(b);
+        (float overlap, string pair) = WallKit.Worst(boxes);
+        Check("and no two slabs intersect, which is what a lap joint at every "
+              + "corner is for",
+            overlap <= 0.0f, $"worst {overlap:+0.0000} ({pair})");
+        // The slit against the five guns the model was sized to, and the roof
+        // over the tallest turret - both are the same numbers hex_capon.py holds.
+        List<string> fouls = CaponKit.Fouls(recipe);
+        Check("the slit passes every shipped gun at rest",
+            fouls.Count == 0, string.Join(", ", fouls));
+        Check("and the roof clears the tallest turret",
+            recipe.WallHigh > CaponKit.TurretTop,
+            $"underside {recipe.WallHigh:F3} over a turret of {CaponKit.TurretTop:F4}");
+        // What breaks it. Said as a table, because the rule is the table.
+        Check("concrete gives to the concrete-piercer and to nothing else",
+            WallRig.Cracks(WallRig.Strike.Cp, true)
+            && !WallRig.Cracks(WallRig.Strike.He, true)
+            && !WallRig.Cracks(WallRig.Strike.Ap, true)
+            && !WallRig.Cracks(WallRig.Strike.Ram, true)
+            && WallRig.Cracks(WallRig.Strike.He, false),
+            "the table is wrong somewhere");
+
+        if (field.Atlas is null)
+            return;
+        // The board's record of the edges, measured off the pieces the way
+        // WallField.Restate measures it: five sides held for a hull, the gate
+        // open; four held for a round, the slit letting it out. Two questions
+        // asked of one prop, which is the reason Bars takes a second argument.
+        var stage = new Stage3D { Field = field, Origin = Vector2.Zero };
+        var prop = new WallProp
+        {
+            Field = field, Stage = stage, Cell = Vector2I.Zero,
+            Capon = recipe, Solved = true,
+        };
+        try
+        {
+            foreach (int facing in HexField.EdgeHeadings)
+            {
+                prop.Bearing = facing;
+                prop.Build();
+                int hull = 0, shot = 0;
+                Vector2 middle = field.FlatAnchor(prop.Cell);
+                for (int bit = 0; bit < Masonry.Headings.Length; bit++)
+                {
+                    Vector2 way = field.FlatAnchor(
+                        HexField.Step(prop.Cell, Masonry.Headings[bit])) - middle;
+                    if (prop.Bars(way, crossing: true)) hull |= 1 << bit;
+                    if (prop.Bars(way)) shot |= 1 << bit;
+                }
+                int gate = 1 << Masonry.Bit(HexField.Reverse(facing));
+                int slit = 1 << Masonry.Bit(facing);
+                Check($"facing {facing}, a hull is stopped on five sides and the "
+                      + "gate is the one open, opposite the slit",
+                    System.Numerics.BitOperations.PopCount((uint)hull) == 5
+                    && (hull & gate) == 0 && (hull & slit) != 0,
+                    $"hull mask {Convert.ToString(hull, 2).PadLeft(6, '0')}, "
+                    + $"gate bit {Convert.ToString(gate, 2).PadLeft(6, '0')}");
+                Check($"and a round leaving the middle is stopped on four: the "
+                      + "slit lets it out and the gate was never shut",
+                    System.Numerics.BitOperations.PopCount((uint)shot) == 4
+                    && (shot & gate) == 0 && (shot & slit) == 0,
+                    $"shot mask {Convert.ToString(shot, 2).PadLeft(6, '0')}");
+            }
+        }
+        finally
+        {
+            prop.Free();
+            stage.Free();
+        }
+    }
+
     private static void Walls(HexField field, IReadOnlyList<Vehicle>? vehicles,
                               Action<string, bool, string> Check)
     {
+        Capon(field, Check);
         Theme("the wall a tank drives into");
 
         BoardMap map = BoardMap.WallMap;
