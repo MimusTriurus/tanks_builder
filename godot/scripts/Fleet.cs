@@ -151,27 +151,53 @@ public static class Fleet
 
     /// <summary>
     /// The cells the tanks are standing on this frame, for
-    /// <see cref="Grove.Reveal"/>: the patch each hull covers, plus the cell a
-    /// moving one is headed for, so the wood opens for the crossing and not
-    /// after it. <c>Main.Standing</c> carries the argument for each of those
-    /// three terms - the bare row, the reach, the step ahead; this is the same
-    /// set, here because the event bench opened without it and its bushes drew
-    /// over the hulls parked on them (a prop sorts by its foot until Reveal
-    /// bands it under the tank on its cell - see <see cref="Grove.Reveal"/>).
+    /// <see cref="Grove.Reveal"/>: the two cells of the leg, and no others -
+    /// where each hull is and where it is going. The second term is what opens
+    /// the wood for the crossing rather than after it, and it counts from the
+    /// moment the order starts, not from when the hull arrives.
+    ///
+    /// <b>The leg, and not the contact patch, and the difference is a wood
+    /// beside the road that blinks.</b> This stepped <see cref="Footing.Patch"/>
+    /// - six probes a keep-out radius round the contact point. Parked, that
+    /// circle stays inside its own cell with 19px to spare; mid-leg its centre
+    /// sits on the boundary and the rim falls into the cells the tank is merely
+    /// passing between. Measured on the harness, the leg (7,0) to (8,0): the
+    /// probe at sixty degrees reads (8,1) from frame 212 to 237 and drops it at
+    /// 238, so the wood on (8,1) - a cell no tank enters on that drive - ghosts
+    /// from 1.00 to 0.68 and comes back, then does it again on the next leg,
+    /// claimed from the other side. Two pulses per pass, 14 603 px of it on one
+    /// frame, and the dressing band flips with them, instantly and both ways.
+    ///
+    /// <b><see cref="Razing"/> already had this fix and said why.</b> So does
+    /// <c>TankTick.UpdateWood</c>, which keeps the same patch and intersects it
+    /// with the same pair: "a cell the patch grazes but the tick never fells
+    /// would be a wood that stopped ghosting and then went on standing." The
+    /// ghost was the one caller that had not been told.
+    ///
+    /// <b>And a hull-shaped test cannot replace the cell here - measured.</b>
+    /// A box or a band round the contact point was tried, in the ground axes
+    /// and then in the screen's. Parked on (10,1) with a wood on it, this
+    /// board's own props sit 40 to 96 px from the contact point and the
+    /// nearest prop on a neighbouring cell sits at 92: the two populations
+    /// overlap, so no distance from the hull separates them. What it cost when
+    /// tried was both ends at once - bushes on the tank's own cell drawn over
+    /// the hull at full strength, and the whole cell in front of it ghosting.
+    /// The cell is the only thing on this board that answers "the ground this
+    /// tank is on" exactly, which is why it stays the unit and only the set it
+    /// is built from changed.
+    ///
+    /// Here rather than in each root because the event bench opened without it
+    /// and its bushes drew over the hulls parked on them (a prop sorts by its
+    /// foot until Reveal bands it under the tank on its cell - see
+    /// <see cref="Grove.Reveal"/>).
     /// </summary>
-    public static HashSet<Vector2I> Standing(IEnumerable<Vehicle> vehicles,
-                                             HexField field, Grove grove,
-                                             Vector2 origin)
+    public static HashSet<Vector2I> Standing(IEnumerable<Vehicle> vehicles)
     {
         var cells = new HashSet<Vector2I>();
         foreach (Vehicle vehicle in vehicles)
         {
-            foreach (Vector2I cell in Footing.Patch(
-                         field, vehicle.GroundPoint - origin,
-                         field.Bare(vehicle.Ground), grove.KeepOut, grove.Squash))
-                cells.Add(cell);
-            if (vehicle.Moving)
-                cells.Add(vehicle.Path[vehicle.PathStep]);
+            cells.Add(vehicle.Cell);
+            cells.Add(vehicle.Onto);
         }
         return cells;
     }

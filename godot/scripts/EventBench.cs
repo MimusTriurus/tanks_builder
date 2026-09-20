@@ -788,7 +788,7 @@ public sealed partial class EventBench : SceneRoot
         // this bench looked; the hulls shouldering it aside; then the fire's own
         // clock - flames age and go out, spread left to events (Wildfire.Spreads)
         // - the wood reading the fire back on to its trees, and the wind.
-        _grove.Reveal(Fleet.Standing(_vehicles, _field, _grove, _origin), delta,
+        _grove.Reveal(Fleet.Standing(_vehicles), delta,
                       Fleet.Razing(_vehicles),
                       Fleet.Treading(_vehicles, _origin));
         Fleet.Shoulder(_vehicles, _grove, _origin, delta);

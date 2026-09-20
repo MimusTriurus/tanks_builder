@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
@@ -2979,48 +2979,12 @@ public sealed partial class Main : SceneRoot
 		_grove.Plant();
 	}
 
-	/// <summary>
-	/// Every cell a tank is in the way of: where its body is, and where it is
-	/// headed.
-	///
-	/// Two readings, because the wood has to open before the tank arrives and
-	/// close after it has gone, and neither end is the cell its centre is in.
-	///
-	/// <b>Where its body is</b> is the contact patch, not the centre point - so
-	/// a cell stays counted until the tank has entirely left it rather than
-	/// until its middle has. Sampled by asking which cell six points on the
-	/// patch's rim fall in, rather than by measuring a disc against a hexagon:
-	/// the cell arithmetic answers that exactly, slanted edges and all, and an
-	/// outside-distance to a hexagon would be a second description of the same
-	/// shape - the trap <see cref="Grove.EdgeRoom"/> already names from the
-	/// other side.
-	///
-	/// <b>And that patch is stepped in flat space, never on the screen.</b> The
-	/// keep-out is a distance across the ground, while
-	/// <see cref="HexField.CellAt"/> is the picker - which cell is <i>drawn</i> at
-	/// this pixel - and the two stop agreeing the moment the tank is standing a
-	/// level down. Measured, parked in the ford at (6,5): the lift is 64.8px, and
-	/// the probe going straight left carries no vertical offset at all
-	/// (<c>sin(pi) = 0</c>), so it walks the whole 83px along the tank's own drawn
-	/// row - which is exactly the row the bank at (5,5) is drawn on. The picker
-	/// answered (5,5) honestly, being the nearer cell painted there, and the wood
-	/// on the bank opened for a tank that was a level below it and a cell away.
-	/// With the lift put back the same six probes all answer (6,5).
-	///
-	/// The same trap the selection ring and the pond already carry, and the third
-	/// place it has been paid: see <see cref="HexField.Bare"/>, which is what a
-	/// drawn row is turned back into a ground row with.
-	///
-	/// <b>Where it is headed</b> is the step it is on, taken from the order the
-	/// moment it starts rather than when the patch first touches. At rest the
-	/// patch reaches 88 ground px and the neighbour's edge is 107 away, so a
-	/// tank that has just been told to drive into a wood is still 19px short of
-	/// touching it - and a wood that opens 19px late opens after the tank has
-	/// visibly set off, which reads as the trees noticing.
-	/// </summary>
+	/// <summary>Every cell a tank is in the way of, for
+	/// <see cref="Grove.Reveal"/>: the two cells of each leg. What that pair
+	/// is and what the contact patch it replaced cost - see
+	/// <see cref="Fleet.Standing"/>, where the measurement is.</summary>
 	private HashSet<Vector2I> Standing() =>
-		_grove is null ? new HashSet<Vector2I>()
-					   : Fleet.Standing(_vehicles, _field, _grove, _origin);
+		_grove is null ? new HashSet<Vector2I>() : Fleet.Standing(_vehicles);
 
 	/// <summary>The cells whose wood is coming down - see
 	/// <see cref="Fleet.Razing"/>. Beside <see cref="Standing"/> and not
@@ -3403,7 +3367,7 @@ public sealed partial class Main : SceneRoot
 		// no path at all, which is why a click on an occupied cell is read as a
 		// selection before it ever gets here.
 		_path = _field.FindPath(_cell, target, Barred(), masonry: true,
-		                        bulldozer: Active.Profile.Bulldozes);
+								bulldozer: Active.Profile.Bulldozes);
 		_pathStep = 0;
 		// A plain drive is not a ram, and this is the door that says so: the two
 		// are the same order with an intent on one of them, so the intent has to
