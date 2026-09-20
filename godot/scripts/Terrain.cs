@@ -151,7 +151,7 @@ public readonly struct HexFace
         + $" at {Level:+0;-0;0}" + (OnRamp ? $" ramp {Ramp}" : "");
 }
 
-/// <summary>How one foundation behaves. Four plain figures; see
+/// <summary>How one foundation behaves. Five plain figures and two flags; see
 /// <see cref="TerrainRules"/> for who reads them.</summary>
 public sealed class GroundRule
 {
@@ -174,6 +174,26 @@ public sealed class GroundRule
     public float Ride { get; set; } = 1.0f;
 
     public bool Wet { get; set; }
+
+    /// <summary>
+    /// What the floor is worth to the dust the belts raise - see
+    /// <see cref="TrackDust"/>, which is handed this figure and asks nothing
+    /// else about the cell.
+    ///
+    /// <b>Nought is a setting here, and everywhere else in this file it is
+    /// silence.</b> A floor of no speed is a floor nothing crosses and is
+    /// refused as an instruction; a floor of no dust is exactly what water is,
+    /// and saying so is the only way the file can say it. So the range starts at
+    /// zero, and that is where the wet floors are written.
+    ///
+    /// <b>Water is nought here as well as at the waterline.</b> A ford throws
+    /// spray, which the wake and the ripples already draw, and
+    /// <see cref="TrackDust.Lay"/> asks the waterline too - but the two are not
+    /// one question asked twice: the waterline is about a hull and this is about
+    /// a floor, which raises no earth whether or not anything is standing in
+    /// it.
+    /// </summary>
+    public float Dust { get; set; } = 1.0f;
 
     /// <summary>
     /// Whether a tank may drop on to this floor from a level above without a
@@ -257,12 +277,20 @@ public static class TerrainRules
     {
         [Foundation.Void] = new GroundRule { Drive = false },
         [Foundation.Solid] = new GroundRule(),
-        [Foundation.Sand] = new GroundRule { Speed = 0.75f, Ride = 1.15f },
-        [Foundation.Shallow] = new GroundRule { Wet = true },
+        // Sand is the one floor with a figure of its own, and now it has two:
+        // loose ground is slower to cross and it goes up behind the belts.
+        [Foundation.Sand] = new GroundRule
+        {
+            Speed = 0.75f, Ride = 1.15f, Dust = 1.4f,
+        },
+        [Foundation.Shallow] = new GroundRule { Wet = true, Dust = 0.0f },
         // Driven into, and dropped into off the bank: what a tank does once it
         // is in there - swims, or drowns for want of the wading gear - is the
         // tick's business, not the floor's. See docs/swim-plan.md, step 1.
-        [Foundation.Deep] = new GroundRule { Wet = true, Plunge = true },
+        [Foundation.Deep] = new GroundRule
+        {
+            Wet = true, Plunge = true, Dust = 0.0f,
+        },
         [Foundation.Rock] = new GroundRule { Drive = false },
     };
 
@@ -391,6 +419,12 @@ public static class TerrainRules
     /// The cover has no say: the ride is the ground under the tracks.</summary>
     public static float Ride(HexFace face) => Of(face.Ground).Ride;
 
+    /// <summary>What the cell is worth to the dust behind the belts - the ride's
+    /// twin and the cover has no say here either, for the same reason: what goes
+    /// up is the ground under the tracks, and a tank driving through a wood is
+    /// still driving on whatever the wood grows on.</summary>
+    public static float Dust(HexFace face) => Of(face.Ground).Dust;
+
     /// <summary>The cell in one word, for a trace or a panel - or nothing at all
     /// where it costs nothing. Beside the numbers for
     /// <see cref="TankTick.SpeedCapWhy"/>'s reason: a cap and the reason for it
@@ -496,6 +530,11 @@ public static class TerrainRules
             rule.Ride = ride;
         if (entry.Wet is bool wet)
             rule.Wet = wet;
+        // From nought, unlike every other figure here - see GroundRule.Dust: a
+        // floor that raises no dust is a real floor and the file has to be able
+        // to say so.
+        if (entry.Dust is float dust and >= 0.0f and <= 3.0f)
+            rule.Dust = dust;
         if (entry.Plunge is bool plunge)
             rule.Plunge = plunge;
     }
@@ -547,6 +586,7 @@ public static class TerrainRules
         public float? Speed { get; set; }
         public float? Ride { get; set; }
         public bool? Wet { get; set; }
+        public float? Dust { get; set; }
         public bool? Plunge { get; set; }
     }
 

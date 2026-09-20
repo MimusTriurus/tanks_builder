@@ -82,6 +82,30 @@ public sealed partial class ProcKick : Node3D
     /// </summary>
     public float Reach = ReachDefault;
 
+    /// <summary>
+    /// Whether this cloud lies on the ground instead of standing on it.
+    ///
+    /// <b>The answer to the limitation in the class note, and it is a different
+    /// surface rather than a different number.</b> Standing, the quad's bottom
+    /// edge is the contact point and nothing can be drawn below it, so what
+    /// survives of a puff is its upper half and that half's middle sits about
+    /// half a cloud up the screen from the ground it came off. Measured across a
+    /// driving tank's trail: the ruts are two bands 55px apart and the dust was
+    /// one band 68px clear of both of them - further off than the tracks are
+    /// from each other. No amount of settling moves it, because the mass is not
+    /// up there for having climbed.
+    ///
+    /// Lying, the same rectangle is laid in the ground plane through
+    /// <see cref="Stage3D.Footing"/>: the model is untouched, its <c>y</c> stops
+    /// being height and becomes distance away from the camera, and the
+    /// projection foreshortens it the way it foreshortens everything else on the
+    /// ground. <see cref="Aim"/> then has no horizon to clamp at, which is the
+    /// other half of the same limitation going away.
+    ///
+    /// <b>Written before <see cref="Build"/></b>, because it chooses the mesh.
+    /// </summary>
+    public bool Lying;
+
     /// <summary>The three numbers something else has to be able to ask for -
     /// <see cref="SheetBlast.ReachDefault"/>'s arrangement and its reason: the
     /// frame's uniforms are declared at zero on purpose, so the shader text is
@@ -342,8 +366,14 @@ public sealed partial class ProcKick : Node3D
     public void Build(float tile, float squash, float rise)
     {
         _tile = Mathf.Max(tile, 1.0f);
+        _squash = Mathf.Max(squash, 0.0001f);
         (Vector2 foot, Vector2 size) = Quad(tile, Flank, Tall);
-        ArrayMesh shape = Stage3D.Stem(foot, size, rise);
+        // The same rectangle either way - see Lying. What differs is the plane
+        // it is laid in, and Sheet keeps the screen px the ground mapping wants
+        // where Stem divides them by the rise a standing thing needs.
+        ArrayMesh shape = Lying
+            ? Stage3D.Fold(foot, size, Root * _tile, squash, rise)
+            : Stage3D.Stem(foot, size, rise);
 
         _dustInk = Ink(Kicking);
         _glowInk = Ink(Glowing);
@@ -373,6 +403,31 @@ public sealed partial class ProcKick : Node3D
     }
 
     private float _might = 1.0f;
+
+    /// <summary>
+    /// What share of <see cref="Might"/> the cloud is born at, growing to all of
+    /// it by the end of its life. One is a cloud that does not swell, which is
+    /// what a gun's does - a shot is a single event and its own elements carry
+    /// the growth.
+    ///
+    /// <b>A trail is a different picture, and the difference is the whole of
+    /// what a trail looks like.</b> The dust at the belts is a second old and the
+    /// dust at the tail is a second older, so a trail ought to read as a wedge -
+    /// tight and low where it leaves the track, wide and high where it has had
+    /// time. Measured on the diagonal, it did not: the width across the trail was
+    /// 123, 129, 123, 127, 131, 130 px along its length, which is a cigar. The
+    /// model's own growth saturates early (the skirt is at half its spread by a
+    /// quarter of its life), and no dial in it moves that - the exponents are in
+    /// the shader text and belong to the shot it was tuned on.
+    ///
+    /// <b>Scaled about the seat, like <see cref="Might"/></b>, so what grows is
+    /// the cloud and not its place: the foot stays on the rut that made it while
+    /// the top and the sides go out. One number for both, because "wider" and
+    /// "higher" are the same statement about a cloud on a board seen from above.
+    /// </summary>
+    public float Swell = 1.0f;
+
+    private float _swollen = 1.0f;
     private Transform3D _seat = Transform3D.Identity;
 
     /// <summary>Where it stands: the flat point the tank is touching and the lift
@@ -396,11 +451,12 @@ public sealed partial class ProcKick : Node3D
     /// clearance whatever size the cloud is.</summary>
     private void Stand()
     {
-        Transform = _seat.ScaledLocal(Vector3.One * _might);
+        float big = Mathf.Max(_might * _swollen, 0.001f);
+        Transform = _seat.ScaledLocal(Vector3.One * big);
         if (_dust is not null)
-            _dust.Position = _nudge / _might;
+            _dust.Position = _nudge / big;
         if (_glow is not null)
-            _glow.Position = _nudge * 2.0f / _might;
+            _glow.Position = _nudge * 2.0f / big;
     }
 
     /// <summary>
@@ -433,9 +489,16 @@ public sealed partial class ProcKick : Node3D
     /// </summary>
     public void Aim(Vector2 along, Vector2 snout)
     {
+        // A lying quad has no horizon to clamp at and is foreshortened by the
+        // projection already - see Lying. So the throw goes in as the ground
+        // direction it is, with the squash taken back out of the screen vector
+        // it arrived as, and nothing is taken off its length a second time.
         float squat = Mathf.Clamp(along.Length(), 0.0f, 1.0f);
         var quad = new Vector2(along.X, -along.Y);
-        if (quad.Y < 0.0f)
+        // The horizon clamp is the standing quad's and only its: a throw coming
+        // at the camera would land under the contact line, where a quad that
+        // stands draws nothing. A folded one has ground there - see Lying.
+        if (!Lying && quad.Y < 0.0f)
             quad.Y = 0.0f;
         Vector2 blow = quad.LengthSquared() < 1e-8f
             ? Vector2.Right : quad.Normalized();
@@ -469,10 +532,20 @@ public sealed partial class ProcKick : Node3D
     /// </summary>
     private float _tile = 1.0f;
 
+    /// <summary>The camera's squash, kept for <see cref="Aim"/>: a lying quad
+    /// is handed a screen vector and wants the ground one. See
+    /// <see cref="Lying"/>.</summary>
+    private float _squash = 1.0f;
+
     /// <summary>Set it off. Restarts rather than refusing, for
     /// <see cref="SheetBlast.Fire"/>'s reason: the organ that fires it is a key on
     /// a bench.</summary>
-    public void Fire() => _clock = 0.0f;
+    public void Fire()
+    {
+        _clock = 0.0f;
+        _swollen = Mathf.Clamp(Swell, 0.01f, 1.0f);
+        Stand();
+    }
 
     /// <summary>Whether the clock stands still - <see cref="SheetBlast.Hold"/>,
     /// and the main way an event gets looked at.</summary>
@@ -489,6 +562,97 @@ public sealed partial class ProcKick : Node3D
     /// <summary>Put it out with nothing drawn - what a reset wants.</summary>
     public void Douse() => _clock = -1.0f;
 
+    /// <summary>
+    /// Run the whole event in <paramref name="span"/> seconds instead of
+    /// <see cref="LifeDefault"/>.
+    ///
+    /// <b><see cref="Life"/> alone is a pair of scissors, not a clock.</b> The
+    /// families time themselves in seconds off the same <c>time</c> uniform -
+    /// the wash is done at 1.04, the veil is born at 0.22 and still climbing at
+    /// 1.6 - so a shorter life does not make a shorter cloud, it cuts the cloud
+    /// off wherever it had got to. One shot ending a little early is nothing
+    /// anybody sees; a trail of them ending early is a row of clouds vanishing
+    /// at full density, which is the flicker <see cref="TrackDust"/> exists to
+    /// avoid - measured frame by frame, the mass rose for four frames and fell
+    /// off a cliff on the fifth, once per puff laid.
+    ///
+    /// So the model's own clock is compressed with the life: every birth, every
+    /// stagger and every family's length takes the same factor, and what comes
+    /// out is the same event played faster rather than a piece of one. Off
+    /// <see cref="Dial(Part,string)"/>, which reads the shader's own text, so
+    /// the factor is applied to the number the material actually holds and a
+    /// second call does not compound the first.
+    ///
+    /// <b>After <see cref="Build"/>, because it writes to the materials.</b>
+    /// The glow's two families are in here as well, although the one caller
+    /// wears <see cref="Cloud.Ground"/> and has them turned off: a clock that
+    /// was right only for the dress the pool happens to wear is the next
+    /// wardrobe bug - see <see cref="Dress"/>.
+    /// </summary>
+    public void Hasten(float span)
+    {
+        float want = Mathf.Max(span, 0.01f);
+        // <b>Against the model's own end rather than against LifeDefault, and
+        // the difference is a finding.</b> The last veil element is born at 0.22
+        // + 0.26 of stagger and lives 1.15, so the event runs 1.63s against a
+        // clock that stops at 1.60 - the gun has been cutting the last 2% off
+        // its own dust since it was written, which on one shot is the tail
+        // nobody watches. Fitted to the advertised figure instead, a hurried
+        // cloud keeps that overhang in proportion and goes out with mass still
+        // on it, which is the whole thing this method exists to stop.
+        float end = Mathf.Max(
+            LifeDefault,
+            Mathf.Max(
+                Mathf.Max(Dial(Part.Dust, "wash_stagger") + Dial(Part.Dust, "wash_life"),
+                          Dial(Part.Dust, "skirt_stagger") + Dial(Part.Dust, "skirt_life")),
+                Dial(Part.Dust, "veil_born") + Dial(Part.Dust, "veil_stagger")
+                + Dial(Part.Dust, "veil_life")));
+        float scale = want / end;
+        Life = want;
+        foreach (string clock in new[]
+                 {
+                     "wash_life", "wash_stagger",
+                     "skirt_life", "skirt_stagger",
+                     "veil_life", "veil_born", "veil_stagger",
+                 })
+            Dial(Part.Dust, clock, Dial(Part.Dust, clock) * scale);
+        // The glow's two on the same factor. Read before any of them are
+        // written, above, so the scale is the same one for both halves.
+        foreach (string clock in new[]
+                 {
+                     "core_life", "core_stagger",
+                     "ember_life", "ember_born", "ember_stagger",
+                 })
+            Dial(Part.Glow, clock, Dial(Part.Glow, clock) * scale);
+    }
+
+    /// <summary>
+    /// Keep <paramref name="share"/> of what every family climbs.
+    ///
+    /// <b>For a cloud that lies down, the climb is not a climb.</b> The model
+    /// moves its elements in the quad's +y, which standing is height and lying
+    /// is distance away from the camera - see <see cref="Lying"/>. A lying puff
+    /// that kept its rise would creep off the rut that made it in a direction
+    /// nothing in the world is pushing it, and measured, that was most of what
+    /// was left of the offset this whole surface was built to remove.
+    ///
+    /// <b>Which is also why settling a standing one was worth nothing.</b> Tried
+    /// twice on the upright quad and measured both times: at 0.40 it moved the
+    /// trail three pixels and cost the tank driving away from the camera three
+    /// quarters of what it showed. Standing, the mass is up the screen because
+    /// half the cloud is below the contact line and undrawable; lying, there is
+    /// no such half, and the same number does what it says.
+    ///
+    /// <b>After <see cref="Build"/></b> and off <see cref="Dial(Part,string)"/>,
+    /// for <see cref="Hasten"/>'s reasons entire.
+    /// </summary>
+    public void Settle(float share)
+    {
+        float keep = Mathf.Clamp(share, 0.0f, 1.0f);
+        foreach (string rise in new[] { "wash_climb", "skirt_climb", "veil_climb" })
+            Dial(Part.Dust, rise, Dial(Part.Dust, rise) * keep);
+    }
+
     public void Tick(double delta)
     {
         if (_clock >= 0.0f && !Hold)
@@ -496,6 +660,15 @@ public sealed partial class ProcKick : Node3D
             _clock += (float)delta;
             if (_clock > Life)
                 _clock = -1.0f;
+            // Swelling is a transform and not a uniform, so it is written here
+            // rather than beside the clock below - see Swell.
+            if (Swell < 1.0f && _clock >= 0.0f)
+            {
+                _swollen = Mathf.Lerp(Mathf.Clamp(Swell, 0.01f, 1.0f), 1.0f,
+                                      Mathf.Clamp(_clock / Mathf.Max(Life, 1e-3f),
+                                                  0.0f, 1.0f));
+                Stand();
+            }
         }
 
         bool on = _clock >= 0.0f;

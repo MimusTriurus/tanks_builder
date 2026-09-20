@@ -342,6 +342,12 @@ public sealed partial class TankBench : SceneRoot
     private double _recoilLevel = 1.0;
     private bool _shadow = true;
     private bool _ruts = true;
+
+    /// <summary>Whether the belts raise dust while the tank drives - the
+    /// ruts' twin above and on by default for their reason. Pushed on to the
+    /// tick with the rest of the world, because the switch lives there.
+    /// </summary>
+    private bool _dust = true;
     private bool _spinning;
     private double _sizeLevel = 1.0;
     private double _traverse = 1.0;
@@ -408,6 +414,7 @@ public sealed partial class TankBench : SceneRoot
         ["--hit-by"] = new[] { "tank.armour.by" },
         ["--hit-scale"] = new[] { "tank.armour.calibre" },
         ["--no-shadow"] = new[] { "tank.armour.shadow" },
+        ["--no-dust"] = new[] { "tank.ride.dust" },
         ["--strike"] = new[] { "wall.ammo" },
         ["--ammo"] = new[] { "wall.ammo" },
         ["--force"] = new[] { "wall.force" },
@@ -677,6 +684,13 @@ public sealed partial class TankBench : SceneRoot
                     break;
                 case "--no-shadow":
                     _shadow = false;
+                    break;
+                // The dust behind the belts, and the flag rather than only the
+                // panel row for the harness's reason: a capture is evidence, and
+                // taking the same one without it must not need a hand on the
+                // mouse.
+                case "--no-dust":
+                    _dust = false;
                     break;
                 case "--no-ripples":
                     _ripples = false;
@@ -1232,6 +1246,14 @@ public sealed partial class TankBench : SceneRoot
                      v.Spot(v.Bore(v.Sprite.TurretFacing).Tube) - v.GroundPoint,
                      Ordnance.At(_tick.Calibre));
 
+    /// <summary>The dust a belt grinds out from under itself - the harness's
+    /// <c>Dusted</c>, and deliberately the same line for <c>Kicked</c>'s reason.
+    /// This is the board where one tank's drive is looked at closely, so it is
+    /// the one that most needs it: a pivot on the spot is the case the cadence
+    /// exists for, and this is the bench that can be made to do one.</summary>
+    private void Dusted(Vehicle v, Vector2 at, Vector2 away, float might) =>
+        _stage?.Drift(at, v.Ground, away, might);
+
     /// <summary>The spall a bounced round throws off a plate - the harness's
     /// <c>Bounced</c>, and deliberately the same lines rather than a bench
     /// variant of them. This is the board where one tank's hit is looked at
@@ -1361,6 +1383,12 @@ public sealed partial class TankBench : SceneRoot
         // looked at closely, and a bench missing half the effect would be a
         // bench measuring something else.
         _tick.Kicked = Kicked;
+        // And the belts grinding the ground while it drives, which is that same
+        // cloud with no end to it - see TankTick.Dusted.
+        _tick.Dusted = Dusted;
+        // The switch beside the ruts' own, and pushed every frame for the
+        // harness's reason: the panel writes the field, not the tick.
+        _tick.Dust.Enabled = _dust;
         // And a round that bounced off armour, for the same reason again - see
         // TankTick.Bounced.
         _tick.Bounced = Bounced;
@@ -2091,6 +2119,8 @@ public sealed partial class TankBench : SceneRoot
                       on => { _tick.TracksEnabled = on; Tick.UpdateTracks(Tank, (0.0, 0.0), 0.0); });
         _panel.Toggle("tank.ride.ruts", "leave ruts", () => _ruts,
                       on => _ruts = on);
+        _panel.Toggle("tank.ride.dust", "raise dust", () => _dust,
+                      on => _dust = on);
         _panel.Readout("tank.ride.belt", () =>
             $"belt {Tank.Track.Phase:F2}, slip {Tank.Track.Slip:F2}, "
             + $"blur {Tank.Track.Blur:F2}");

@@ -200,6 +200,11 @@ public sealed partial class Main : SceneRoot
 		_tick.Driven = _vehicles.Count > 0 ? Active : null;
 		_tick.ViewZoom = _camera?.Zoom.X ?? 1.0f;
 		_tick.Staged = Staged;
+		// Pushed with the rest and every frame, this method's own rule: the
+		// switch is on the tick, so a panel row that wrote it once would be
+		// overwritten by nothing and a flag read before the first board would
+		// reach a tick that had not been built yet.
+		_tick.Dust.Enabled = _dustEnabled;
 
 		// Where a round's node hangs. The board and never the tank - see
 		// TankTick.Deck.
@@ -226,6 +231,10 @@ public sealed partial class Main : SceneRoot
 		// And the same cloud off a different event: a hull coming down off a
 		// bank - see TankTick.Bumped, which carries why a ram raises none.
 		_tick.Bumped = Bumped;
+		// And that same cloud off the event that never stops while a tank is
+		// driving: the belts grinding the ground - see TankTick.Dusted. Its own
+		// pool on the stage, for the reason Stage3D.Drift gives.
+		_tick.Dusted = Dusted;
 		// And the metal of two hulls meeting, which is the ricochet's fan with no
 		// round in it - see TankTick.Sparked. One call per hull, seated on the
 		// seam between the two.
@@ -313,6 +322,32 @@ public sealed partial class Main : SceneRoot
 	private void Bumped(Vehicle v, Vector2 spot, Vector2 along) =>
 		_stage?.Kick(spot, v.LiftOf(spot), along, Vector2.Zero,
 					 TankTick.RamKick, Stage3D.DressOrder);
+
+	/// <summary>
+	/// A belt grinding the ground it is driving over: the puff it throws -
+	/// <see cref="TankTick.Dusted"/>, whose cadence is <see cref="TrackDust"/>.
+	///
+	/// <b><see cref="Bumped"/> with the size handed over.</b> A landing happens
+	/// once and is one number; a drive goes on happening, and how much goes up
+	/// depends on the pace, the grinding and the floor - all three of which are
+	/// settled where the belts are counted rather than here.
+	///
+	/// <b><see cref="Vehicle.Ground"/> and not <see cref="Vehicle.LiftOf"/>, and
+	/// the difference was half the effect.</b> <c>LiftOf</c> reads a screen offset
+	/// from the contact point as height, which is right for a pixel of the tank's
+	/// own billboard and wrong for a point of ground beside it: the belt nearer the
+	/// camera is *below* the contact row, so its dust was seated below the ground
+	/// and the ground drew over it. One belt of the two raised nothing at all,
+	/// which read as the whole trail sitting a gauge off the tracks - masked
+	/// against the ruts, two rut bands 55px apart and one band of dust. This is the
+	/// height to lay something flat at, and it is the one the ruts already take,
+	/// for the reason written on it.
+	///
+	/// Its own pool on the stage rather than the gun's - see
+	/// <see cref="Stage3D.Drift"/>, which carries why.
+	/// </summary>
+	private void Dusted(Vehicle v, Vector2 at, Vector2 away, float might) =>
+		_stage?.Drift(at, v.Ground, away, might);
 
 	/// <summary>A crown reaching the ground in a wood the heavy drove into: the
 	/// cloud it throws, at its own point and once per trunk - see
@@ -434,6 +469,13 @@ public sealed partial class Main : SceneRoot
 	/// layer is judged by is the one that needs the flag, not the one that needs
 	/// the default.</summary>
 	private bool _rutsEnabled = true;
+
+	/// <summary>Whether the belts raise any dust. The ruts' twin above and on by
+	/// default for the ruts' reason, with one difference worth naming: this is
+	/// read at the first frame rather than at the field, because the switch
+	/// lives on the tick and the tick outlives every board the harness lays.
+	/// </summary>
+	private bool _dustEnabled = true;
 
 	/// <summary>Which ground the board is painted with - a kind's name, or
 	/// mixed. Parked here rather than on the field because --terrain is read
@@ -1862,6 +1904,11 @@ public sealed partial class Main : SceneRoot
 			}
 			else if (userArgs[i] == "--no-ruts")
 				_rutsEnabled = false;
+			// The dust the belts raise, beside the ruts they leave and for the
+			// ruts' reason: the A/B is a capture with it and a capture without,
+			// and a capture that is evidence must not need a hand on the mouse.
+			else if (userArgs[i] == "--no-dust")
+				_dustEnabled = false;
 			// Height on the board. A flag rather than the default, because
 			// everything the bench measures is a pixel difference between two
 			// captures and a hill in the frame is a hill in both halves of every
@@ -4299,6 +4346,7 @@ public sealed partial class Main : SceneRoot
 		["--no-shadow"] = new[] { "effects.shadow" },
 		["--no-tracks"] = new[] { "effects.tracks" },
 		["--no-ruts"] = new[] { "effects.ruts" },
+		["--no-dust"] = new[] { "effects.dust" },
 		["--no-exhaust"] = new[] { "effects.exhaust" },
 		["--exhaust"] = new[] { "effects.exhaust_level" },
 		["--exhaust-ramp"] = new[] { "effects.exhaust_ramp" },
@@ -4575,6 +4623,12 @@ public sealed partial class Main : SceneRoot
 			_marks.Enabled = on;
 			_marks.QueueRedraw();
 		});
+		// No key either, and the same sentence above it: the alphabet is gone.
+		// Beside the ruts because the pair is what a belt leaves - one on the
+		// ground and one in the air - and a bench where they are found in two
+		// different places is one where only the first gets compared.
+		ui.Toggle("effects.dust", "track dust  (--no-dust)",
+			() => _dustEnabled, on => _dustEnabled = on);
 		ui.Readout("effects.ruts_info", () =>
 		{
 			AtlasSet a = _tank.Atlas!;
@@ -6365,6 +6419,11 @@ public sealed partial class Main : SceneRoot
 		// reset could leave a mark behind it.
 		Tick.ClearRounds();
 		_marks?.Clear();
+		// The dust's cadence with the ruts, because it is the same kind of thing
+		// - what one belt has done since it last said so. The clouds themselves
+		// are put out by Quench, one line below: this is the remainder and the
+		// side the next puff would have come off.
+		Tick.Dust.Clear();
 		// Every burst out and every crater filled, with the ruts and for their
 		// reason: a board that comes back shelled is a board that was not reset,
 		// and a burst still in the air would go on throwing earth over ground

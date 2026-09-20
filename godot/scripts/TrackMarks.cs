@@ -578,9 +578,15 @@ public sealed partial class TrackMarks : Node2D
     /// nearer 145px, so the ground under the belt is not rolled over, it is
     /// churned. It saturates almost at once, and that is honest: a tank is
     /// either rolling or it is digging, and there is very little in between.
+    ///
+    /// <b>Shared rather than copied</b> - <see cref="TrackDust"/> reads it too,
+    /// because how wide a rut comes out and how much dust goes up are two
+    /// readings of one fact about the belt. Two transcriptions of this
+    /// arithmetic would part at whichever number nobody put side by side, which
+    /// is <see cref="Plumes"/>' argument.
     /// </summary>
-    private static double Scrub(Vehicle v, (double Left, double Right) travel,
-                                double delta)
+    internal static double Scrub(Vehicle v, (double Left, double Right) travel,
+                                 double delta)
     {
         double arm = v.Atlas.TrackArm * v.Sprite.BodyScale;
         if (arm <= 0.0 || delta <= 0.0)

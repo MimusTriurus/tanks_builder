@@ -70,6 +70,7 @@ public sealed partial class EventBench : SceneRoot
     private WaterArt? _surf;
     private FlashSheet? _sheet;
     private TrackMarks? _marks;
+    private bool _ruts = true;
 
     private readonly Dictionary<string, AtlasSet> _atlases = new();
     private readonly List<Vehicle> _vehicles = new();
@@ -235,6 +236,7 @@ public sealed partial class EventBench : SceneRoot
         AddChild(_field);
 
         _marks = new TrackMarks();
+        _marks.Enabled = _ruts;
         AddChild(_marks);
         _grove = new Grove
         {
@@ -408,6 +410,19 @@ public sealed partial class EventBench : SceneRoot
                 case "--no-amphibious":
                     _tick.Amphibious = false;
                     _flagged.Add("bench.amphibious");
+                    break;
+                // The dust the belts raise, off - the harness's flag spelled its
+                // way, and here for the reason the harness gives: the A/B is a
+                // capture with it against one without, and a capture that is
+                // evidence must not need a hand on the mouse.
+                case "--no-dust":
+                    _tick.Dust.Enabled = false;
+                    break;
+                // And the ruts off, which is the other half of the same A/B:
+                // where the dust is only answerable against where the belts
+                // said they went.
+                case "--no-ruts":
+                    _ruts = false;
                     break;
                 // A dial over every class's draught - see TankTick.DraughtScale.
                 case "--draught" when i + 1 < args.Length
@@ -629,6 +644,14 @@ public sealed partial class EventBench : SceneRoot
         _tick.Bumped = (v, spot, along) => _stage?.Kick(
             spot, v.LiftOf(spot), along, Vector2.Zero,
             TankTick.RamKick, Stage3D.DressOrder);
+        // And the same cloud off the event that goes on for as long as a tank is
+        // driving - the belts grinding the ground under them. See
+        // TankTick.Dusted, and Stage3D.Drift for why it is its own pool. Wired
+        // here as well as on the harness because this is the board where five
+        // tanks drive over every kind of cell at once, which is the one place
+        // the floor's own figure can be judged.
+        _tick.Dusted = (v, at, away, might) => _stage?.Drift(
+            at, v.Ground, away, might);
         // And the metal of that same collision: the ricochet's fan with no round
         // in it, one per hull and seated on the hull - see TankTick.Sparked.
         _tick.Sparked = (v, at, outward, behind, might) => _stage?.Scrape(

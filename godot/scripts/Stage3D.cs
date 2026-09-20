@@ -379,6 +379,10 @@ public sealed partial class Stage3D : Node3D
             blast.Tick(delta);
         foreach (ProcKick kick in _kicking)
             kick.Tick(delta);
+        // And the dust behind the belts, which is the same cloud out of the
+        // other ring - see Drift. A ring that is filled has to be ticked.
+        foreach (ProcKick drift in _drifting)
+            drift.Tick(delta);
         foreach (ProcSlam slam in _slamming)
             slam.Tick(delta);
         foreach (ProcSpall spall in _spalling)
@@ -5902,6 +5906,27 @@ void fragment() {{
     /// </summary>
     public const int Bursts = 6;
 
+    /// <summary>
+    /// How many clouds of the second kind the board keeps - the dust behind the
+    /// belts, <see cref="Drift"/>.
+    ///
+    /// Counted off the cadence rather than picked, and re-counted every time
+    /// the cadence has moved: a puff lives <see cref="TrackDust.Hang"/> - six
+    /// tenths of a second - and a light at top speed lays one every nineteenth
+    /// of one (<see cref="TrackDust.Step"/>), so a tank driving flat out holds
+    /// eleven or twelve. Twenty-six is that tank and another beside it, with a
+    /// slot or two in hand.
+    ///
+    /// <b>And running out shows differently here than it does for a burst.</b>
+    /// A board under heavy fire drops the tail of a burst nobody is watching;
+    /// this ring wraps on to a cloud that is still being looked at, in the
+    /// middle of a trail, and a cloud cut short is exactly the pop the overlap
+    /// exists to get rid of. So the margin is in the pool rather than in the
+    /// life, which would cost every tank a shorter trail to pay for the rare
+    /// frame where three of them drive at once.
+    /// </summary>
+    public const int Drifts = 96;
+
     /// <summary>How much of a mark's radius is spent fading out, for the fire's
     /// ash and for a crater - see <see cref="Splat"/>.</summary>
     private const float FireRim = 0.45f;
@@ -6018,6 +6043,8 @@ void fragment() {{
 
     private readonly List<ProcKick> _kicking = new();
     private int _nextKick;
+    private readonly List<ProcKick> _drifting = new();
+    private int _nextDrift;
 
     /// <summary>What to do to a kick before it goes off - <see cref="Dress"/> for
     /// the burst, and the same argument: the pool is built on the first shot, so a
@@ -6061,23 +6088,144 @@ void fragment() {{
     /// </summary>
     public void Kick(Vector2 spot, float lift, Vector2 along, Vector2 snout,
                      float might = 1.0f, int order = StandOrder,
-                     ProcKick.Cloud cloud = ProcKick.Cloud.Muzzle)
+                     ProcKick.Cloud cloud = ProcKick.Cloud.Muzzle) =>
+        Raise(_kicking, ref _nextKick, Bursts, dressed: true,
+              spot, lift, along, snout, might, order, cloud);
+
+    /// <summary>
+    /// The dust a belt grinds out from under itself while a tank is driving -
+    /// <c>TankTick.Dusted</c>, and the cadence behind it is
+    /// <see cref="TrackDust"/>.
+    ///
+    /// <b>A pool of its own rather than a seventh argument to
+    /// <see cref="Kick"/>, and the starvation is only the first half of why.</b>
+    /// Six clouds are shared by every gun on the board; a tank driving across it
+    /// lays one every third of a second and would hold four of the six on its
+    /// own, so the next shot fired would cut short a puff and the puff after
+    /// that would cut short the shot. That much is arithmetic. The other half is
+    /// <see cref="ProcKick.Might"/>'s own finding said about the wardrobe: the
+    /// ring hands one cloud round, a throw that sets only what it wants inherits
+    /// the rest from whoever had the slot last, and these two throws do not want
+    /// the same numbers. A pool that only ever wears one kind cannot inherit the
+    /// other's.
+    ///
+    /// <b>And the panel's hook is not offered it.</b> <see cref="Fit"/> is the
+    /// bench's dial on the <em>shot's</em> dust - that is what the rows beside it
+    /// read back - so a slider dragged there must not silently resize every puff
+    /// behind every tank on the board.
+    ///
+    /// <b>On <see cref="DressOrder"/>, both rows, and the exception was tried
+    /// and taken out.</b> <c>TankTick.Bumped</c>'s finding is that under the
+    /// middle of a hull dust cannot be seen and over the hull it is a veil, and
+    /// a drive lays two rows of it - so for one commit the row facing the camera
+    /// went on <see cref="StandOrder"/>, the way <see cref="Scrape"/> splits its
+    /// sparks, to keep a diagonal from showing dust off one belt only. What it
+    /// showed instead was dust on the armour, and that is the wrong half of the
+    /// trade: a tank on this board is a billboard, so anything drawn over it
+    /// reads as a fault in the picture rather than as dust passing in front. The
+    /// row that is behind the hull stays behind it, and what makes either of
+    /// them visible is the tank driving off them - see
+    /// <see cref="TrackDust.Trail"/>.
+    /// </summary>
+    /// <param name="spot">The belt's contact patch, in board px.</param>
+    /// <param name="away">Which way the mass leaves, unnormalised - see
+    /// <see cref="TrackDust.Lay"/>, which throws it astern and a little
+    /// outward.</param>
+    public void Drift(Vector2 spot, float lift, Vector2 away, float might) =>
+        Raise(_drifting, ref _nextDrift, Drifts, dressed: false,
+              spot, lift, away, Vector2.Zero, might, DressOrder,
+              // Earth, not propellant: a tank driving is not a tank firing.
+              ProcKick.Cloud.Ground,
+              // And shorter-lived and shorter-thrown than a shot's - see
+              // TrackDust.Hang and TrackDust.Carry, which say how this throw
+              // differs from a gun's without touching what the dust is made of.
+              TrackDust.Hang, TrackDust.Carry, TrackDust.Ink,
+              // And it lies on the board instead of standing on it, which is
+              // what puts it on the rut that made it - ProcKick.Lying, and
+              // TrackDust.Bed for how far in front of the belt it reaches.
+              TrackDust.Bed, TrackDust.Creep, TrackDust.Born,
+              lying: true);
+
+    /// <summary>One cloud out of one of the two rings - see <see cref="Drift"/>
+    /// for why there are two, and <see cref="Emit"/> for the same arrangement
+    /// one effect along.
+    ///
+    /// <b>A ring that is filled has to be ticked</b>, which is a line each in
+    /// <c>_Process</c>: a pool added here without its line there is an effect
+    /// that is fired and never drawn.</summary>
+    private void Raise(List<ProcKick> pool, ref int next, int size, bool dressed,
+                       Vector2 spot, float lift, Vector2 along, Vector2 snout,
+                       float might, int order, ProcKick.Cloud cloud,
+                       float? life = null, float? reach = null,
+                       float? ink = null, float? bed = null,
+                       float? creep = null, float? swell = null,
+                       bool lying = false)
     {
         if (Field.Atlas is null)
             return;
-        while (_kicking.Count < Bursts)
+        while (pool.Count < size)
         {
             var made = new ProcKick();
+            // Before Build, because it chooses the mesh - ProcKick.Lying.
+            made.Lying = lying;
+            // What this ring's clouds are shaped like, written before Build
+            // and not after it: the shape uniforms are set when the material is
+            // made, so a reach written afterwards is a number nothing reads -
+            // and it looks exactly like a reach that was applied. Per ring
+            // rather than per throw for Drift's reason: a pool that only ever
+            // carries one kind of throw is the only one that may state this.
+            if (reach is float far)
+                made.Reach = far;
+            // And how far in front of the seat it reaches - before Build with
+            // the rest of the shape, and for a second reason on top of theirs:
+            // lying, this moves the mesh as well as the uniform. Standing, root
+            // is a hair, because below the contact line and behind the ground
+            // are the same test. See TrackDust.Bed.
+            // How small it is born - a trail is a wedge and a shot is not, see
+            // ProcKick.Swell. Per ring with the rest of the shape.
+            if (swell is float small)
+                made.Swell = small;
+            if (bed is float deep)
+            {
+                made.Root = deep;
+                // And the sheet is twice that deep, so the seat is in the
+                // middle of it. Standing, the quad is all on one side because
+                // there is nothing on the other; lying, there is ordinary
+                // ground both ways and a quad that keeps the standing shape
+                // clips the near half off. Measured: it cost 42px of offset,
+                // which was the whole of what was left.
+                if (lying)
+                    made.Tall = deep * 2.0f;
+            }
             AddChild(made);
             made.Build(Field.Atlas.HexRect.Size.X, Squash, RiseFactor);
-            _kicking.Add(made);
+            // And how long, which is the other way round: it writes to the
+            // materials, so it has to come after they exist - and it is Hasten
+            // rather than Life, because a life on its own cuts the cloud off
+            // where it had got to instead of shortening it. See ProcKick.Hasten.
+            if (life is float span)
+                made.Hasten(span);
+            // And a lying cloud does not climb: its quad's up is the ground
+            // going away from the camera, so a rise there is a drift nothing is
+            // pushing. See ProcKick.Settle and TrackDust.Creep.
+            if (creep is float keep)
+                made.Settle(keep);
+            // And how dense, on the model's own figure rather than on one
+            // written here - Hasten's arrangement and its reason: the shader is
+            // the only honest baseline, and a second copy of a default agrees
+            // with it until the first edit.
+            if (ink is float thick)
+                made.Dial(ProcKick.Part.Dust, "dust_ink",
+                          made.Dial(ProcKick.Part.Dust, "dust_ink") * thick);
+            pool.Add(made);
         }
-        ProcKick kick = _kicking[_nextKick % Bursts];
+        ProcKick kick = pool[next % size];
         // Reset before the hook, multiplied after it - see Burst on why the
         // multiply alone compounds every shot until the cloud fills the screen.
         kick.Might = 1.0f;
-        Fit?.Invoke(kick);
-        _nextKick = (_nextKick + 1) % Bursts;
+        if (dressed)
+            Fit?.Invoke(kick);
+        next = (next + 1) % size;
         kick.Might *= might;
         // Every throw, because the pool hands the same cloud round - see
         // ProcKick.Order.
@@ -6085,6 +6233,11 @@ void fragment() {{
         // After Fit, so a bench panel setting these still lands - Dress writes
         // nothing while the kind has not changed hands.
         kick.Dress(cloud);
+        // And the footing last, because it is the one shape number that cannot
+        // be written at the pool: it is quoted on the board and the quad it has
+        // to be measured in is scaled by this throw's own might. Divided rather
+        // than multiplied for that reason - a band that shrank with the puff is
+        // exactly the fault it is here to fix. See TrackDust.Foot.
         kick.Sit(spot, lift, Squash, RiseFactor);
         // Aimed after it is seated and sized, because Aim writes to the materials
         // and Sit does not touch them - the order is not load-bearing, but the
@@ -6095,8 +6248,12 @@ void fragment() {{
     }
 
     /// <summary>The kicks as they stand, <see cref="Bursting"/>'s twin and
-    /// read-only for its reason.</summary>
+    /// read-only for its reason - and beside it the drives' dust, which is the
+    /// same effect out of the other ring. Two lists rather than one for
+    /// <see cref="Drift"/>'s reason, and they are two different sizes for
+    /// it.</summary>
     public IReadOnlyList<ProcKick> Kicking => _kicking;
+    public IReadOnlyList<ProcKick> Drifting => _drifting;
 
     /// <summary>
     /// A charge going off under a tank - <c>TankTick.Mined</c>.
@@ -7279,6 +7436,16 @@ void fragment() {{
             shard.Douse();
         foreach (ProcWave wave in _waving)
             wave.Douse();
+        // Both rings of dust. The shot's was missing here and it did not show: a
+        // muzzle cloud is 1.6s long and R is pressed between shots, so the one
+        // left standing was one nobody had raised in the last second and a half.
+        // A drive's is another matter - the board can be holding a dozen of them
+        // in a line behind a tank that is about to be put back where it started,
+        // and a trail left hanging is a reset lying about what has happened.
+        foreach (ProcKick kick in _kicking)
+            kick.Douse();
+        foreach (ProcKick drift in _drifting)
+            drift.Douse();
         foreach (ToonBlast toon in _tooning)
             toon.Douse();
         foreach (ProcBall ball in _balling)
@@ -9155,6 +9322,77 @@ void fragment() {
     /// tank's running gear was - which costs nothing, because they are the rows
     /// with nothing in them.
     /// </summary>
+    /// <summary>
+    /// The same rectangle <see cref="Stem"/> stands up, hinged at the seat: the
+    /// half behind the seat stands, the half in front of it lies on the ground.
+    /// For <see cref="ProcKick.Lying"/>.
+    ///
+    /// <b>Both halves, because dust needs both.</b> Standing alone, nothing can
+    /// be drawn below the contact line - so half of every puff went missing and
+    /// what was left had its centre half a cloud up the screen from the rut that
+    /// made it. Lying alone, there is no height at all, and a trail that cannot
+    /// rise reads as a stain on the ground. The fold is the tank's own surface,
+    /// <see cref="Body"/>, one effect along: a screen px above the seat is
+    /// 1/cos(e) of height, a screen px in front of it is 1/sin(e) of ground
+    /// coming at the camera.
+    ///
+    /// <b>Two faces and never one.</b> A single quad spanning the seam would
+    /// interpolate the fold into a ramp - <see cref="Body"/>'s finding, and it
+    /// costs nothing to avoid here.
+    ///
+    /// <b>The v axis runs the same way as <see cref="Stem"/>'s</b>, across both
+    /// faces, so <c>foot_v</c> means the same thing to the shader whichever side
+    /// of the hinge it is painting and a model written for the flat quad works
+    /// here unread.
+    ///
+    /// <b><paramref name="ahead"/> is how much of the rect is in front of the
+    /// seat</b>, in the same screen px - the shader's <c>root</c>, which says
+    /// how much of the model is on the near side. The mesh has to be moved by
+    /// the same amount or the seat lands behind the point it was given.
+    /// </summary>
+    public static ArrayMesh Fold(Vector2 foot, Vector2 size, float ahead,
+                                 float squash, float rise)
+    {
+        float left = -foot.X, right = size.X - foot.X;
+        // The rect over its own screen px, measured up from the seat: ahead is
+        // how much of it is in front of the seat, which is the half that lies.
+        float top = foot.Y - ahead, bottom = -ahead;
+        float span = Mathf.Max(size.Y, 1e-4f);
+        Vector3 lie = Clear(squash, rise);
+
+        var st = new SurfaceTool();
+        st.Begin(Mesh.PrimitiveType.Triangles);
+        // A screen px above the seat is 1/cos(e) of height; a screen px in front
+        // of it is 1/sin(e) of ground coming at the camera. Body's two lines,
+        // and the same hinge.
+        Vector3 At(float x, float y) =>
+            y >= 0.0f ? new Vector3(x, y / rise, 0.0f)
+                      : lie + new Vector3(x, 0.0f, -y / Mathf.Max(squash, 1e-4f));
+        Vector2 Uv(float x, float y) =>
+            new Vector2((x - left) / Mathf.Max(right - left, 1e-4f),
+                        (top - y) / span);
+        void Face(float low, float high)
+        {
+            (float X, float Y)[] corner =
+            {
+                (left, high), (right, high), (right, low), (left, low),
+            };
+            foreach (int c in new[] { 0, 1, 2, 0, 2, 3 })
+            {
+                st.SetNormal(Vector3.Back);
+                st.SetUV(Uv(corner[c].X, corner[c].Y));
+                st.AddVertex(At(corner[c].X, corner[c].Y));
+            }
+        }
+        // Two faces and never one, because the seam is where the surface turns:
+        // a single quad spanning it would interpolate its own fold into a ramp.
+        if (top > 0.0f)
+            Face(0.0f, top);
+        if (bottom < 0.0f)
+            Face(bottom, 0.0f);
+        return st.Commit();
+    }
+
     public static ArrayMesh Stem(Vector2 foot, Vector2 size, float rise)
     {
         float left = -foot.X, right = size.X - foot.X;

@@ -60,6 +60,18 @@ public sealed class TankTick
     /// <summary>The ruts. Null on a bench that does not lay them.</summary>
     public TrackMarks? Marks;
 
+    /// <summary>
+    /// The cadence of the dust behind the belts - see <see cref="TrackDust"/>.
+    ///
+    /// <b>Owned here rather than by the root, and the ruts beside it are not.</b>
+    /// A rut is a node that draws, so it belongs to the scene that shows it; this
+    /// draws nothing at all - it counts belt travel and raises
+    /// <see cref="Dusted"/> - and what it needs is the one number only this
+    /// method has. Same shelf as <see cref="TracksEnabled"/> and the exhaust
+    /// level: a switch about an effect, held where every root gets the same one.
+    /// </summary>
+    public readonly TrackDust Dust = new();
+
     /// <summary>The wood, which answers a shot and a hit by flinching. Null on
     /// a board with no props.</summary>
     public Grove? Wood;
@@ -942,6 +954,11 @@ public sealed class TankTick
         (double Left, double Right) belts = BeltTravel(v, delta);
         UpdateTracks(v, belts, delta);
         Marks?.Lay(v, belts, delta);
+        // And the dust off that same pair, immediately after the rut and never
+        // before it: what the ground remembers and what goes up off it are two
+        // readings of one belt, and a frame in which they disagreed about how
+        // far it went would be one where the cloud stands off the mark.
+        UpdateDust(v, belts, delta);
         UpdateTremble(v, delta);
         UpdateExhaust(v, delta);
         UpdateMines(v);
@@ -1812,6 +1829,46 @@ public sealed class TankTick
     /// hitting the ground at its own point, and a puff the size of a shot's
     /// reads as the shot rather than as the tree.</summary>
     public const float FellKick = 0.45f;
+
+    /// <summary>
+    /// A belt grinding the ground it is driving over: the puff it throws out
+    /// from under itself - see <see cref="TrackDust"/>, which decides where and
+    /// how often, and <see cref="UpdateDust"/>, which is the only caller.
+    ///
+    /// <b><see cref="Bumped"/>'s shape, and deliberately.</b> A landing and a
+    /// drive raise the same cloud out of the same model; what differs is that
+    /// one of them happens once and the other goes on happening, so the size
+    /// travels with the event rather than sitting in a constant beside
+    /// <see cref="RamKick"/>. The point is a board point for
+    /// <see cref="Bumped"/>'s reason - it is a belt's contact patch and not the
+    /// hull's - and the vehicle is still handed over for the two things only it
+    /// knows: how high the ground is under that point, and how big the hull
+    /// standing on it is.
+    /// </summary>
+    public Action<Vehicle, Vector2, Vector2, float>? Dusted;
+
+    /// <summary>
+    /// The dust behind one tank's belts, for the ground it covered this frame.
+    ///
+    /// <b>The floor's figure is read here and not in <see cref="TrackDust"/></b>
+    /// - <see cref="Wake"/>'s division: which cell a tank is standing on is a
+    /// question about the board, and the cadence is asserted on boards that do
+    /// not exist. A tick with no field is ordinary ground, which is what every
+    /// board that says nothing is made of.
+    /// </summary>
+    public void UpdateDust(Vehicle v, (double Left, double Right) travel,
+                           double delta)
+    {
+        // Wired once rather than per frame, and through the hook rather than
+        // handing the hook over: what the cadence raises is this tick's event,
+        // and a root that swaps Dusted between frames must not have to re-wire
+        // anything underneath it.
+        Dust.Puff ??= (car, at, away, might) =>
+            Dusted?.Invoke(car, at, away, might);
+        float ground = Field is null
+            ? 1.0f : TerrainRules.Dust(Field.FaceAt(v.Cell));
+        Dust.Lay(v, travel, delta, ground);
+    }
 
     /// <summary>
     /// The metal of a ram: scale struck off the plate the two hulls met on.

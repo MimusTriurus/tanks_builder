@@ -2783,6 +2783,226 @@ public static class SelfTest
             }
         }
 
+        Theme("track dust: the cloud the belts raise");
+        {
+            // The contract between the cadence and the cloud, which is Wake's
+            // and stated in its words: a fresh puff has to be wider than the gap
+            // to the next one or the trail is a dotted line. Against TWICE the
+            // step, because the rows take it in turns and what one ribbon gets
+            // is a puff every second one - the gap this was first asserted
+            // against was the wrong gap, and a 52px step under a 60px puff still
+            // came out in beats.
+            float tile = field.Atlas?.HexRect.Size.X ?? 248.0f;
+            double spread = TrackDust.Carry * TrackDust.Might * tile;
+            Check("a puff is wider than the gap in its own row",
+                spread > TrackDust.Step * 2.0,
+                $"{spread:F0}px of cloud every {TrackDust.Step * 2.0:F0}px of "
+                + "belt down one side - under one and the trail is a row of "
+                + "separate clouds");
+            Check("a puff is shorter-lived than a shot's dust",
+                TrackDust.Hang < ProcKick.LifeDefault,
+                $"{TrackDust.Hang:F2}s against {ProcKick.LifeDefault:F2}s - at "
+                + "this cadence the gun's clock would be fifteen clouds behind "
+                + "one tank");
+            // And it is a shorter cloud rather than a cut one - see
+            // ProcKick.Hasten. Asserted on the pool the board actually built,
+            // because it is a fact about the wiring rather than about a
+            // constant: a ring given Life alone passes every other check in this
+            // theme and flickers once per puff laid.
+            var puff = new ProcKick();
+            // Built and hurried exactly as Stage3D.Raise does it for this ring.
+            // On its own rather than reaching for the board's, because nothing
+            // has driven in a headless run and the pool is built on the first
+            // puff - a check that only fires when somebody happens to have
+            // driven is a check that reports OK on the run that broke it.
+            puff.Build(tile, 0.5f, 0.5f);
+            puff.Hasten(TrackDust.Hang);
+            float done = puff.Dial(ProcKick.Part.Dust, "veil_life")
+                         + puff.Dial(ProcKick.Part.Dust, "veil_born")
+                         + puff.Dial(ProcKick.Part.Dust, "veil_stagger");
+            Check("a puff is over before its clock is",
+                done <= puff.Life + 1e-3f,
+                $"the veil is still going at {done:F2}s and the clock stops at "
+                + $"{puff.Life:F2}s - a cloud that is still dense when its clock "
+                + "stops does not settle, it vanishes");
+            // Against an untouched one of the same model rather than against a
+            // number written down here: what Hasten scales is whatever the
+            // shader's own text says, so the shader is the only honest baseline.
+            var shot = new ProcKick();
+            shot.Build(tile, 0.5f, 0.5f);
+            Check("hurrying it moves the model and not just the clock",
+                puff.Dial(ProcKick.Part.Dust, "wash_life")
+                < shot.Dial(ProcKick.Part.Dust, "wash_life"),
+                "a life on its own is a pair of scissors - see ProcKick.Hasten");
+            Check("the mass leaves astern and not sideways",
+                Math.Abs(TrackDust.Spread) < 1e-9,
+                $"{TrackDust.Spread:F2} of the throw out to the side - sideways "
+                + "here is the one direction that takes the dust off the rut the "
+                + "belt just wrote");
+            if (stage is not null && stage.Drifting.Count > 0)
+                Check("the board's own puffs are hurried too",
+                    stage.Drifting[0].Life <= TrackDust.Hang + 1e-3f
+                    && stage.Drifting[0].Dial(ProcKick.Part.Dust, "veil_life")
+                       < shot.Dial(ProcKick.Part.Dust, "veil_life"),
+                    "the ring was given a life without the clock that goes with "
+                    + "it");
+            puff.Free();
+            shot.Free();
+            Check("the board keeps more of these than of bursts",
+                Stage3D.Drifts > Stage3D.Bursts,
+                $"{Stage3D.Drifts} against {Stage3D.Bursts} - one tank driving "
+                + "flat out holds four or five, and the guns keep their own");
+
+            // What the floor is worth, which is the one number the cadence does
+            // not work out for itself - see TerrainRules.Dust.
+            Check("water raises no dust",
+                TerrainRules.Of(Foundation.Shallow).Dust == 0.0f
+                && TerrainRules.Of(Foundation.Deep).Dust == 0.0f,
+                "a ford throws spray, and the wake and the ripples draw it");
+            Check("sand raises more of it than ordinary ground",
+                TerrainRules.Of(Foundation.Sand).Dust
+                > TerrainRules.Of(Foundation.Solid).Dust);
+
+            if (vehicles is null || vehicles.Count == 0)
+                Note("  ..    no vehicles to raise any");
+            else
+            {
+                Vehicle car = vehicles[Math.Clamp(active, 0, vehicles.Count - 1)];
+                double arm = car.Atlas.TrackArm * car.Sprite.BodyScale;
+                car.Sprite.HullFacing = 270.0;
+
+                var dustPuffs = new List<(Vector2 At, float Might)>();
+                var dust = new TrackDust();
+                dust.Puff = (_, at, _, might) => dustPuffs.Add((at, might));
+
+                // The headline, and the reason the cadence is taken off the
+                // belts: the hull does not move at all here, so anything keyed
+                // on where it went raises nothing - TrackMarks' finding, and a
+                // pivot is the dustiest thing a tank does.
+                // Three seconds of it, because a pivot is slow ground: at three
+                // degrees a frame a belt one arm out covers under two pixels,
+                // and a second of that is one puff - which would leave the row
+                // it came off unasserted.
+                for (int i = 0; i < 180; i++)
+                    dust.Lay(car, TrackLoop.Split(0.0, 3.0, arm), 1.0 / 60.0, 1.0f);
+                Check("turning on the spot raises dust", dustPuffs.Count > 0,
+                    "the hull stands still, so anything keyed on its own travel "
+                    + "raises none");
+                // Across the gauge rather than against the hull's own point:
+                // every puff carries the same offset astern (TrackDust.Trail),
+                // and that offset is bigger than half a gauge - so measured
+                // from the tank the two rows sit on the same side of it and
+                // only the step from one puff to the next says which belt it
+                // came off.
+                Vector2 dustAcross = car.Atlas.GroundDirection(car.Sprite.HullFacing + 90.0);
+                bool dustSides = dustPuffs.Count > 1;
+                for (int i = 1; i < dustPuffs.Count && dustSides; i++)
+                {
+                    double step = (dustPuffs[i].At - dustPuffs[i - 1].At).Dot(dustAcross);
+                    dustSides = Math.Abs(step) > arm * dustAcross.LengthSquared()
+                                && (i < 2
+                                    || step * (dustPuffs[i - 1].At - dustPuffs[i - 2].At)
+                                           .Dot(dustAcross) < 0.0);
+                }
+                // A puff stays where it was laid, so what has to be true of the
+                // seat is that it is on the belt rather than beside it: the row
+                // was pushed outboard for one commit to part the two ribbons on
+                // a diagonal, and dust that starts a gauge and a half off the
+                // centreline starts where no part of the tank touches - see
+                // TrackDust.Flare.
+                Check("a puff is seated on its own belt",
+                    Math.Abs(TrackDust.Flare - 1.0) < 1e-9,
+                    $"{TrackDust.Flare:F2} of a gauge out - beside the tank is "
+                    + "not under its tracks");
+                // The other half of "out from under the tracks": the contact
+                // patch is a patch, so a puff may stand anywhere across it -
+                // see TrackDust.Scatter.
+                Check("a puff wanders inside its own belt",
+                    TrackDust.Scatter > 0.0 && TrackDust.Scatter <= 1.0,
+                    $"{TrackDust.Scatter:F2} of a half-width - a wander wider "
+                    + "than the belt puts the dust beside the tank, which is "
+                    + "what Flare was set back to one over");
+                // The surface is folded, not flat and not upright: the half in
+                // front of the seat lies on the ground - which is what puts dust
+                // on the rut rather than a gauge above it - and the half behind it
+                // stands, which is the only place height can come from. See
+                // ProcKick.Lying and Stage3D.Fold; TrackDust.Bed is how much of
+                // the quad is on the lying side, and nothing is a quad that only
+                // stands.
+                Check("a puff is folded at its own seat",
+                    TrackDust.Bed > 0.0f && TrackDust.Creep > 0.0f,
+                    $"bed {TrackDust.Bed:F2}, creep {TrackDust.Creep:F2} - "
+                    + "nothing in front of the seat is a quad that only stands, "
+                    + "and there is no drawing below a contact line; no rise "
+                    + "behind it is a quad that only lies, and no height at all");
+                // And a trail is a wedge: tight where it leaves the track, wide
+                // and high where it has had a second - see ProcKick.Swell, which
+                // is the growth the model's own does not give.
+                Check("a puff swells as it ages",
+                    TrackDust.Born > 0.0f && TrackDust.Born < 1.0f,
+                    $"{TrackDust.Born:F2} of its size at birth - born full size, "
+                    + "the trail is the same width from the belt to the tail, "
+                    + "which is a cigar and not a wedge");
+                Check("the rows take it in turns", dustSides,
+                    $"{dustPuffs.Count} puffs, gauge {arm * 2.0:F0}px: both belts "
+                    + "on one frame is one cloud drawn twice, and two puffs a "
+                    + "gauge apart on the same side is a row that never changed");
+
+                // Standing still, and the threshold is the water's - a tank that
+                // stirs the pond it is parked in and raises dust on dry land
+                // would be two answers to one question.
+                var dustIdle = new TrackDust();
+                int idled = 0;
+                dustIdle.Puff = (_, _, _, _) => idled++;
+                for (int i = 0; i < 120; i++)
+                    dustIdle.Lay(car, (0.0, 0.0), 1.0 / 60.0, 1.0f);
+                Check("parked, nothing goes up", idled == 0);
+
+                var dustWet = new TrackDust();
+                int wetted = 0;
+                dustWet.Puff = (_, _, _, _) => wetted++;
+                for (int i = 0; i < 120; i++)
+                    dustWet.Lay(car, (4.0, 4.0), 1.0 / 60.0, 0.0f);
+                Check("a floor worth nothing raises nothing", wetted == 0,
+                    "water is that floor, and it says so in terrain.json");
+
+                var dustQuiet = new TrackDust { Enabled = false };
+                int offed = 0;
+                dustQuiet.Puff = (_, _, _, _) => offed++;
+                for (int i = 0; i < 120; i++)
+                    dustQuiet.Lay(car, (4.0, 4.0), 1.0 / 60.0, 1.0f);
+                Check("switched off, nothing goes up at all", offed == 0);
+
+                // The floor multiplies what goes up rather than gating it, which
+                // is what makes sand a setting rather than a second effect.
+                var dustSandy = new TrackDust();
+                float sandiest = 0.0f;
+                dustSandy.Puff = (_, _, _, might) => sandiest = Math.Max(sandiest, might);
+                var dustPlain = new TrackDust();
+                float plainest = 0.0f;
+                dustPlain.Puff = (_, _, _, might) => plainest = Math.Max(plainest, might);
+                for (int i = 0; i < 120; i++)
+                {
+                    dustSandy.Lay(car, (4.0, 4.0), 1.0 / 60.0, 1.4f);
+                    dustPlain.Lay(car, (4.0, 4.0), 1.0 / 60.0, 1.0f);
+                }
+                Check("the floor scales the puff it raises",
+                    sandiest > plainest && plainest > 0.0f,
+                    $"{sandiest:F3} on sand against {plainest:F3} on soil");
+
+                // And the pace does, which is the other half of the same sum:
+                // the belts', not the hull's.
+                var dustCrawl = new TrackDust();
+                float crawled = 0.0f;
+                dustCrawl.Puff = (_, _, _, might) => crawled = Math.Max(crawled, might);
+                for (int i = 0; i < 600; i++)
+                    dustCrawl.Lay(car, (0.4, 0.4), 1.0 / 60.0, 1.0f);
+                Check("a crawl raises less than a charge",
+                    crawled > 0.0f && crawled < plainest,
+                    $"{crawled:F3} at a crawl against {plainest:F3} at speed");
+            }
+        }
+
         // --- what the cells are made of -----------------------------------
         //
         // Skipped whole when there is no art, the way the sound topic is: the
