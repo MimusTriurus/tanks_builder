@@ -479,7 +479,7 @@ public sealed partial class ProcSlam : Node3D
     /// the filling taken out, which is a stand-in and is named as one. Item 2 of
     /// that list is still unwritten.
     /// </summary>
-    public enum Surface { Armour, Masonry, Pierced }
+    public enum Surface { Armour, Masonry, Pierced, Concrete }
 
     private Surface _face = Surface.Armour;
 
@@ -490,12 +490,17 @@ public sealed partial class ProcSlam : Node3D
     /// </summary>
     private void Wear()
     {
-        float brick = _face is Surface.Masonry or Surface.Pierced ? 1.0f : 0.0f;
+        float brick = _face is Surface.Masonry or Surface.Pierced or Surface.Concrete
+            ? 1.0f : 0.0f;
         float through = _face == Surface.Pierced ? 1.0f : 0.0f;
+        // The roof of a concrete box under a mortar bomb - see roof in both
+        // shaders: masonry's dust and bloom, the fireball at full, less smoke.
+        float roof = _face == Surface.Concrete ? 1.0f : 0.0f;
         foreach (ShaderMaterial? ink in new[] { _dustInk, _fireInk })
         {
             ink?.SetShaderParameter("masonry", brick);
             ink?.SetShaderParameter("pierce", through);
+            ink?.SetShaderParameter("roof", roof);
         }
     }
 
@@ -861,12 +866,20 @@ uniform float along_face = 0.55;
 // see along_face, which is where the difference belongs anyway, because it is the
 // wall's shape that makes a burst on brick look unlike one on steel.
 uniform float stone_dust = 0.92;
+// How much of the masonry dust a roof hit keeps - see roof.
+uniform float roof_dust = 0.40;
 
 // <b>And whether the round went through rather than bursting: 0 or 1, and only
 // meaningful with masonry set - see ProcSlam.Surface.Pierced.</b> A round that
 // pierces puts less of the wall in the air, because it spends itself going through
 // instead of pushing outward.
 uniform float pierce = 0.0;
+// <b>A bomb on the roof of a concrete box</b> - ProcSlam.Surface.Concrete. Masonry
+// in every other number, and this one on top of it: the dust is the box's own
+// grey and there is less of it, because what the user asked to see is the fire.
+// Measured on CaponTest with masonry alone: a pale cloud the size of the box that
+// hung over the flash and read as the event.
+uniform float roof = 0.0;
 uniform float bore_dust = 0.62;
 
 void fragment() {
@@ -976,6 +989,7 @@ void fragment() {
                 ALBEDO = mix(mix(soot_dark, soot_lit, lit),
                              mix(lime_dark, lime_lit, lit), masonry);
                 ALPHA = clamp(mass * dust_ink * mix(1.0, stone_dust, masonry)
+                              * mix(1.0, roof_dust, roof)
                               * mix(1.0, bore_dust, pierce)
                               * level * blast_footing(at), 0.0, 1.0);
             }
@@ -1133,6 +1147,12 @@ uniform float stone_spray = 0.0;
 // at all, and that is not a small number but a nought: an armour-piercing round
 // has no filling, so the only light a wall gives it is none.
 uniform float pierce = 0.0;
+// <b>A bomb on the roof of a concrete box</b> - ProcSlam.Surface.Concrete. Masonry
+// in every other number, and this one on top of it: the dust is the box's own
+// grey and there is less of it, because what the user asked to see is the fire.
+// Measured on CaponTest with masonry alone: a pale cloud the size of the box that
+// hung over the flash and read as the event.
+uniform float roof = 0.0;
 
 void fragment() {
     if (level <= 0.0) {
@@ -1150,7 +1170,9 @@ void fragment() {
             // How much of the FIREBALL this surface feeds - see stone_fire. The
             // core is not in it: that is the shell's own filling and it is the
             // same shell on any surface.
-            float fuel = mix(1.0, stone_fire, masonry) * (1.0 - pierce);
+            // A roof hit keeps the fireball whole - see roof: the surface is
+            // concrete, but the picture asked for is the flash, not the lime.
+            float fuel = mix(mix(1.0, stone_fire, masonry), 1.0, roof) * (1.0 - pierce);
             // What the round itself brings, which only a round with no filling at
             // all is without - see pierce.
             float charge = 1.0 - pierce;

@@ -6410,12 +6410,7 @@ void fragment() {{
     /// digs the same mark: a hole in the ground is a fact about the event, not
     /// about which effect drew it.
     /// </summary>
-    /// <param name="dig">Whether it leaves a crater. False for a burst seated
-    /// on something rather than on the ground - a mortar bomb on a concrete
-    /// roof, see <c>WallField.Roofed</c> - because the pit is a mark on the
-    /// ground at the seat's lift, and a seat lifted onto a roof leaves it
-    /// hanging where the roof was once the roof has gone.</param>
-    public void Boom(Vector2 spot, float lift, float might = 1.0f, bool dig = true)
+    public void Boom(Vector2 spot, float lift, float might = 1.0f)
     {
         if (Field.Atlas is null)
             return;
@@ -6434,8 +6429,7 @@ void fragment() {{
         blast.Might *= might;
         blast.Sit(spot, lift, Squash, RiseFactor);
         blast.Fire();
-        if (dig)
-            Pits?.Dig(spot, lift, Pits.Ink, Pits.Wide * might);
+        Pits?.Dig(spot, lift, Pits.Ink, Pits.Wide * might);
     }
 
     /// <summary>The bursts as they stand, for a bench that shows what one is

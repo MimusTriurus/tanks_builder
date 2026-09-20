@@ -426,31 +426,36 @@ public sealed class WallField
     /// the coping.
     /// </summary>
     /// <summary>
-    /// The mortar's bomb coming down on a concrete box: the heavy earth burst,
-    /// seated on the roof.
+    /// The mortar's bomb coming down on a concrete box: the masonry burst - the
+    /// fireball and its short smoke - seated on the roof, big.
     ///
-    /// <b>Not <see cref="Breached"/>, whose every term is a wall's.</b> That
-    /// method asks which side the round crossed and seats a masonry flash on
-    /// the middle of that leaf, halfway up - right for a gun's shell stopped at
-    /// a boundary, and wrong three ways for a bomb that crossed no side: it
-    /// picked a leaf the round never touched, put the flash at mid-wall on a
-    /// shell that arrived from above, and drew the short lime puff of a round
-    /// on brick for the one charge on this board that levels a box. Measured
-    /// on CaponTest as the burst sitting on the left wall and barely showing.
+    /// <b>Not <see cref="Breached"/>, whose geometry is a wall's.</b> That
+    /// method asks which side the round crossed and seats the flash on the
+    /// middle of that leaf, halfway up - right for a gun's shell stopped at a
+    /// boundary, and wrong for a bomb that crossed no side: it picked a leaf
+    /// the round never touched and put a mid-wall flash on a shell that arrived
+    /// from above. Measured on CaponTest as the burst sitting on the left wall
+    /// and barely showing. The <em>picture</em> is Breached's, though: the
+    /// <see cref="ProcSlam.Surface.Concrete"/> event - masonry's burst with the
+    /// fireball kept whole and less dust, see the shader's <c>roof</c> - because what the
+    /// round hit is a slab of masonry. The earth burst was tried first and
+    /// read as a shell into the ground - a wall of thrown earth rising through
+    /// the roof - which is the one thing a hit on concrete is not.
     ///
     /// <b>The seat is the round's own landing point, which for a lob is
-    /// honest.</b> A bomb is sent to a cell and comes down on its anchor -
-    /// see <c>TankTick</c>'s lob, where the run is the order's own - so
-    /// <see cref="Shell.Ground"/> is the middle of the box, and the height is
-    /// the ground's plus the box: <c>Pile().Top</c> is the roof while the box
-    /// stands, in the same share-of-a-radius units Breached converts.
+    /// honest</b>: a bomb is sent to a cell and comes down on its anchor - see
+    /// <c>TankTick</c>'s lob, where the run is the order's own - so
+    /// <see cref="Shell.Ground"/> is the middle of the box. The impact point is
+    /// the roof: <c>Pile().Top</c> while the box stands, in the same
+    /// share-of-a-radius units Breached converts, handed over as the plate
+    /// offset the way Breached hands over half a wall. And the gases go up,
+    /// not out of a leaf: the outward direction is straight up the screen, at
+    /// most of its length so the fireball climbs rather than squats.
     ///
-    /// <b><see cref="Stage3D.Boom"/> rather than <c>Land</c></b>, because Land
-    /// asks what is under the point - water, wood - and under this point is a
-    /// roof. The might is the calibre's, doubled: the flash for a shell that
-    /// takes the whole box down has to read as the loudest thing on the board,
-    /// and the masonry slam's half-again was already argued for a wall that
-    /// merely loses a section.
+    /// <b>Bigger than a wall's burst</b>, which was already half again the
+    /// calibre for what a wall gives a round to throw: this is the one charge on
+    /// the board that levels a box, and the flash has to read as the loudest
+    /// thing on it.
     /// </summary>
     private void Roofed(Shell round, WallProp prop)
     {
@@ -458,17 +463,14 @@ public sealed class WallField
             return;
         float top = prop.Pile().Top * (Field.Atlas.HexRect.Size.X * 0.5f)
                     * Field.RiseFactor;
-        // <b>Raised as a pair, because the stage's lift is not a height over
-        // the point - it is the rise already folded into the point.</b>
-        // Stage3D.Trunk unfolds it (foot + lift along y, then lift up), so a
-        // bigger lift on the same foot is a point further back on the ground
-        // and higher by the same amount - which on this camera is the ground
-        // again, a hair up-screen. Measured as the column standing on the
-        // floor of the box with the roof still on. Taking the height off the
-        // foot and adding it to the lift leaves the ground point where it was
-        // and raises the seat by the roof.
-        Stage.Boom(round.Ground - new Vector2(0.0f, top), round.GroundLift + top,
-                   Ordnance.At(Tick.Calibre) * 2.0f, dig: false);
+        Stage.Slam(round.Ground, round.GroundLift,
+                   new Vector2(0.0f, -0.9f),
+                   // Screen y grows downward, so up the box is negative - the
+                   // flip ProcSlam.Aim undoes on the way in.
+                   new Vector2(0.0f, -top),
+                   behind: false,
+                   Ordnance.At(Tick.Calibre) * 3.0f,
+                   ProcSlam.Surface.Concrete);
     }
 
     private void Breached(Shell round, WallProp prop)
