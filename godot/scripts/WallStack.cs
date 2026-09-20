@@ -102,6 +102,12 @@ public sealed partial class WallStack : Node3D
     private MultiMesh? _kiteMesh;
     private MultiMeshInstance3D? _ghostKites;
     private MultiMesh? _ghostKiteMesh;
+    /// <summary>The kites' shadow: the prism itself flattened, the way the
+    /// box shadow is the box. A separate mesh because the shade MultiMesh can
+    /// draw nothing but a cube, and a cube's flattening is a rectangle however
+    /// the piece under it is cut - a triangle on the ground threw a square.</summary>
+    private MultiMeshInstance3D? _kiteShade;
+    private MultiMesh? _kiteShadeMesh;
     private Vector3[]? _kiteHull;
     private float _clock;
     private float _length;
@@ -309,7 +315,7 @@ public sealed partial class WallStack : Node3D
             }
         _mesh.InstanceCount = _plan.Blocks.Count - kites;
         _ghostMesh!.InstanceCount = _plan.Blocks.Count - kites;
-        _shadeMesh!.InstanceCount = _plan.Blocks.Count;
+        _shadeMesh!.InstanceCount = _plan.Blocks.Count - kites;
         Kites(hull, kites);
         Dress(_bricks.MaterialOverride);
         Dress(_ghosts.MaterialOverride);
@@ -613,7 +619,7 @@ public sealed partial class WallStack : Node3D
             _tone = new Color[n];
             _size = new Color[n];
         }
-        int solid = 0, going = 0, kiteSolid = 0, kiteGoing = 0;
+        int solid = 0, going = 0, shade = 0, kiteSolid = 0, kiteGoing = 0, kiteShade = 0;
         for (int i = 0; i < n; i++)
         {
             WallKit.Block b = _plan.Blocks[i];
@@ -649,13 +655,18 @@ public sealed partial class WallStack : Node3D
             if (b.Hull is not null)
             {
                 // A roof triangle: its mesh is already the piece, so the pose is
-                // the frame alone. Its shadow is still the bounding box - a
-                // union under a stencil forgives a little too much.
+                // the frame alone, and so is its shadow - the prism run down the
+                // sun, on its own mesh. While it lay on the wall its box shadow
+                // hid inside the union; on the ground alone a triangle threw a
+                // square.
                 float have = Rig?.Left(i) ?? 1.0f;
-                _shadeMesh!.SetInstanceTransform(i, Flatten(box, frame.Origin, run));
-                _shadeMesh.SetInstanceColor(i, new Color(1.0f, 1.0f, 1.0f, have));
-                _shadeMesh.SetInstanceCustomData(i, new Color(b.Half.X, b.Half.Y, b.Half.Z, 0.0f));
-                if (_kiteMesh is null || have <= 0.0f)
+                if (_kiteMesh is null)
+                    continue;
+                _kiteShadeMesh!.SetInstanceTransform(kiteShade, Flatten(frame.Basis, frame.Origin, run));
+                _kiteShadeMesh.SetInstanceColor(kiteShade, new Color(1.0f, 1.0f, 1.0f, have));
+                _kiteShadeMesh.SetInstanceCustomData(kiteShade, new Color(b.Half.X, b.Half.Y, b.Half.Z, 0.0f));
+                kiteShade++;
+                if (have <= 0.0f)
                     continue;
                 Color grey = tone;
                 if (have >= 1.0f)
@@ -685,9 +696,10 @@ public sealed partial class WallStack : Node3D
             // flight has no rig and never goes.
             float left = Rig?.Left(i) ?? 1.0f;
 
-            _shadeMesh!.SetInstanceTransform(i, Flatten(box, frame.Origin, run));
-            _shadeMesh.SetInstanceColor(i, new Color(1.0f, 1.0f, 1.0f, left));
-            _shadeMesh.SetInstanceCustomData(i, size);
+            _shadeMesh!.SetInstanceTransform(shade, Flatten(box, frame.Origin, run));
+            _shadeMesh.SetInstanceColor(shade, new Color(1.0f, 1.0f, 1.0f, left));
+            _shadeMesh.SetInstanceCustomData(shade, size);
+            shade++;
 
             if (left >= 1.0f && !Rubble(b.Course))
             {
@@ -781,6 +793,7 @@ public sealed partial class WallStack : Node3D
             {
                 _kiteMesh.VisibleInstanceCount = 0;
                 _ghostKiteMesh!.VisibleInstanceCount = 0;
+                _kiteShadeMesh!.VisibleInstanceCount = 0;
             }
             return;
         }
@@ -788,6 +801,7 @@ public sealed partial class WallStack : Node3D
         {
             _kites?.QueueFree();
             _ghostKites?.QueueFree();
+            _kiteShade?.QueueFree();
             _kiteHull = hull;
             ArrayMesh mesh = Prism(hull);
             _kiteMesh = new MultiMesh
@@ -818,12 +832,27 @@ public sealed partial class WallStack : Node3D
                 SortingUseAabbCenter = true,
             };
             AddChild(_ghostKites);
+            _kiteShadeMesh = new MultiMesh
+            {
+                TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
+                UseColors = true,
+                UseCustomData = true,
+                Mesh = mesh,
+            };
+            _kiteShade = new MultiMeshInstance3D
+            {
+                Multimesh = _kiteShadeMesh,
+                MaterialOverride = Shade(),
+            };
+            AddChild(_kiteShade);
             // Drawn under the hull overlay, like the bricks.
             if (_hulls is not null)
                 MoveChild(_hulls, GetChildCount() - 1);
         }
         _kiteMesh.InstanceCount = count;
         _ghostKiteMesh!.InstanceCount = count;
+        _kiteShadeMesh!.InstanceCount = count;
+        _kiteShadeMesh.VisibleInstanceCount = -1;
     }
 
     /// <summary>A triangular prism off six hull corners - bottom three then top
