@@ -137,7 +137,8 @@ public static class CaponKit
         float gap = r.Gap;
         int n = 0;
 
-        void Box(int side, float x0, float x1, float y0, float y1, bool window)
+        void Box(int side, float x0, float x1, float y0, float y1, bool window,
+                 float? drawnX0 = null, float? drawnX1 = null)
         {
             if (x1 - x0 <= gap || y1 - y0 <= gap)
                 return;
@@ -146,11 +147,23 @@ public static class CaponKit
                                    (y1 - y0) * 0.5f - gap * 0.5f,
                                    t * 0.5f - gap * 0.5f);
             Vector3 local = new((x0 + x1) * 0.5f, (y0 + y1) * 0.5f, apothem - t * 0.5f);
+            // Drawn to the corner while whole, where the body was cut back for
+            // the lap: the outside then reads as a mitre, the way the Blender
+            // model's single mesh does, and the bodies still do not touch.
+            Vector3? wholeSeat = null, wholeHalf = null;
+            if (drawnX0 is float dx0 || drawnX1 is float dx1)
+            {
+                float a = drawnX0 ?? x0, b2 = drawnX1 ?? x1;
+                wholeHalf = new Vector3((b2 - a) * 0.5f, half.Y, half.Z);
+                wholeSeat = turn * new Vector3((a + b2) * 0.5f, local.Y, local.Z);
+            }
             plan.Blocks.Add(new WallKit.Block
             {
                 Seat = turn * local,
                 Half = half,
                 Turn = turn,
+                WholeSeat = wholeSeat,
+                WholeHalf = wholeHalf,
                 Tone = 0.35f + 0.4f * Roll(r.Seed, n, 71),
                 Moss = 0.0f,
                 Course = Mathf.Clamp((int)(y0 / H * r.Courses), 0, r.Courses - 1),
@@ -174,6 +187,9 @@ public static class CaponKit
             bool cutEnd = k == GateSide || (k + 1) % Sides == SlitSide;
             float xs = -R * 0.5f + (cutStart ? lap : 0.0f);
             float xe = R * 0.5f - (cutEnd ? lap : 0.0f);
+            // The end pieces of a cut side draw out to the corner while whole.
+            float? toStart = cutStart ? -R * 0.5f : null;
+            float? toEnd = cutEnd ? R * 0.5f : null;
             if (k == GateSide)
             {
                 if (r.Lintel <= 0.0f)
@@ -181,7 +197,8 @@ public static class CaponKit
                 float[] u = Splits(r.Bays, r.Seed, 10 + k, r.Jitter);
                 for (int b = 0; b < r.Bays; b++)
                     Box(k, Mathf.Lerp(xs, xe, u[b]), Mathf.Lerp(xs, xe, u[b + 1]),
-                        H - r.Lintel, H, false);
+                        H - r.Lintel, H, false,
+                        b == 0 ? toStart : null, b == r.Bays - 1 ? toEnd : null);
             }
             else if (k == SlitSide)
             {
@@ -202,7 +219,8 @@ public static class CaponKit
                 for (int b = 0; b < r.Bays; b++)
                 for (int c = 0; c < r.Courses; c++)
                     Box(k, Mathf.Lerp(xs, xe, u[b]), Mathf.Lerp(xs, xe, u[b + 1]),
-                        H * zs[c], H * zs[c + 1], false);
+                        H * zs[c], H * zs[c + 1], false,
+                        b == 0 ? toStart : null, b == r.Bays - 1 ? toEnd : null);
             }
         }
 

@@ -260,6 +260,15 @@ public static class WallKit
         /// not stopped by it: <c>WallProp.Bars</c> looks past it.</summary>
         public bool Window;
 
+        /// <summary>How the piece is drawn while it is still part of a whole -
+        /// the capon's slabs, cut back at a corner so two bodies do not share
+        /// space, drawn out to the corner so the outside reads as one mitred
+        /// wall. Null means drawn as it is. <c>WallStack</c> reads it only
+        /// while the rig holds the piece; let go, the piece is its body.
+        /// </summary>
+        public Vector3? WholeSeat;
+        public Vector3? WholeHalf;
+
         public readonly Transform3D Frame => new(Turn, Seat);
     }
 

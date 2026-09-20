@@ -311,6 +311,10 @@ public sealed partial class WallStack : Node3D
         _ghostMesh!.InstanceCount = _plan.Blocks.Count - kites;
         _shadeMesh!.InstanceCount = _plan.Blocks.Count;
         Kites(hull, kites);
+        Dress(_bricks.MaterialOverride);
+        Dress(_ghosts.MaterialOverride);
+        Dress(_kites?.MaterialOverride);
+        Dress(_ghostKites?.MaterialOverride);
         // Colour and custom data are Pose's, every slot of them: which slot a
         // piece sits in is decided by the draw order, so writing them by plan
         // index here would put a brick's tone and size on whichever piece later
@@ -620,7 +624,27 @@ public sealed partial class WallStack : Node3D
             // so one mesh serves every piece. Scaling along a box's own axes
             // leaves its face normals pointing the same way, which is what lets
             // the shader normalise its way back to an honest normal.
-            Basis box = frame.Basis * Basis.FromScale(b.Half * 2.0f);
+            // What the fourth channel says about the piece: 1 a chip, 2 concrete
+            // still held in the box, 0 anything else. Concrete draws no seams
+            // while it stands - a box is one pour, not a stack - and gets them
+            // the moment the rig lets the piece go, which is when it becomes a
+            // piece. See the shader's `seamless`.
+            bool held = Rig is not null ? Rig.Held(i) : _fall is null;
+            bool whole = _plan.Concrete && held;
+            float mark = b.Chip ? 1.0f : whole ? 2.0f : 0.0f;
+            // One pour while it stands: the pieces are drawn a hair larger than
+            // the bodies, so the air the solver needs between them (CaponKit
+            // Gap) does not show as a line, and take one tone rather than each
+            // its own. Both come back the frame the rig lets a piece go, which
+            // is when it becomes a piece - the same frame the seams return.
+            Vector3 half = whole ? (b.WholeHalf ?? b.Half) + Vector3.One * Swell : b.Half;
+            if (whole && b.WholeSeat is Vector3 wholeSeat)
+                frame = new Transform3D(frame.Basis, wholeSeat);
+            Color tone = whole ? Paint(b, 0.5f) : Paint(b);
+            if (whole && b.Hull is not null)
+                frame = new Transform3D(frame.Basis.Scaled(Vector3.One * (1.0f + Swell * 8.0f)),
+                                        frame.Origin);
+            Basis box = frame.Basis * Basis.FromScale(half * 2.0f);
             var pose = new Transform3D(box, frame.Origin);
             if (b.Hull is not null)
             {
@@ -633,19 +657,19 @@ public sealed partial class WallStack : Node3D
                 _shadeMesh.SetInstanceCustomData(i, new Color(b.Half.X, b.Half.Y, b.Half.Z, 0.0f));
                 if (_kiteMesh is null || have <= 0.0f)
                     continue;
-                Color grey = Paint(b);
+                Color grey = tone;
                 if (have >= 1.0f)
                 {
                     _kiteMesh.SetInstanceTransform(kiteSolid, frame);
                     _kiteMesh.SetInstanceColor(kiteSolid, grey);
-                    _kiteMesh.SetInstanceCustomData(kiteSolid, new Color(b.Half.X, b.Half.Y, b.Half.Z, 0.0f));
+                    _kiteMesh.SetInstanceCustomData(kiteSolid, new Color(b.Half.X, b.Half.Y, b.Half.Z, mark));
                     kiteSolid++;
                 }
                 else
                 {
                     _ghostKiteMesh!.SetInstanceTransform(kiteGoing, frame);
                     _ghostKiteMesh.SetInstanceColor(kiteGoing, new Color(grey.R, grey.G, grey.B, have));
-                    _ghostKiteMesh.SetInstanceCustomData(kiteGoing, new Color(b.Half.X, b.Half.Y, b.Half.Z, 0.0f));
+                    _ghostKiteMesh.SetInstanceCustomData(kiteGoing, new Color(b.Half.X, b.Half.Y, b.Half.Z, mark));
                     kiteGoing++;
                 }
                 continue;
@@ -654,14 +678,12 @@ public sealed partial class WallStack : Node3D
             // has to be a width in board units and not in UV: a brick is twice as
             // long as it is deep, so a band measured in its own texture space
             // would be twice as wide down its side as across its end.
-            var size = new Color(b.Half.X, b.Half.Y, b.Half.Z,
-                                 b.Chip ? 1.0f : 0.0f);
+            var size = new Color(half.X, half.Y, half.Z, mark);
             // How much of it is left, read every frame because it is the only
             // thing here that changes while nothing moves - see WallRig.Left. The
             // brick spends it as opacity and its shadow as coverage; a solved
             // flight has no rig and never goes.
             float left = Rig?.Left(i) ?? 1.0f;
-            Color tone = Paint(b);
 
             _shadeMesh!.SetInstanceTransform(i, Flatten(box, frame.Origin, run));
             _shadeMesh.SetInstanceColor(i, new Color(1.0f, 1.0f, 1.0f, left));
@@ -703,6 +725,47 @@ public sealed partial class WallStack : Node3D
             _kiteMesh.VisibleInstanceCount = kiteSolid;
             _ghostKiteMesh!.VisibleInstanceCount = kiteGoing;
         }
+    }
+
+    /// <summary>The concrete's texture, loaded once for every stack. A
+    /// placeholder made by the pipeline - tileable value noise about
+    /// mid-grey - in the place a painted one goes:
+    /// <c>assets/Images/Environment/Solid/concrete.png</c>. Null when the file
+    /// is missing, and the shader then keeps its own grain.</summary>
+    private static ImageTexture? _concreteTex;
+    private static bool _concreteLooked;
+
+    private static ImageTexture? ConcreteTexture()
+    {
+        if (_concreteLooked)
+            return _concreteTex;
+        _concreteLooked = true;
+        string path = AssetRoot.Props + "/Solid/concrete.png";
+        Image? image = Image.LoadFromFile(path);
+        if (image is null)
+        {
+            GD.PushWarning($"wall: no concrete texture at {path} - grain only");
+            return null;
+        }
+        _concreteTex = ImageTexture.CreateFromImage(image);
+        return _concreteTex;
+    }
+
+    /// <summary>Tell a material what the plan is made of: concrete takes the
+    /// texture, triplanar in the piece's own frame so it travels with the
+    /// piece; brick keeps its grain. Asked on every rebuild because the
+    /// materials outlive the plan.</summary>
+    private void Dress(Material? material)
+    {
+        if (material is not ShaderMaterial ink)
+            return;
+        ImageTexture? tex = _plan is { Concrete: true } ? ConcreteTexture() : null;
+        ink.SetShaderParameter("textured", tex is null ? 0.0f : 1.0f);
+        if (tex is not null)
+            ink.SetShaderParameter("concrete_tex", tex);
+        // Cells of texture per cell radius: two tiles across the box reads as
+        // poured concrete at 248px a tile; more is gravel.
+        ink.SetShaderParameter("tex_scale", 1.6f);
     }
 
     /// <summary>Stand up, or take down, the meshes for the pieces that are not
@@ -825,6 +888,7 @@ public sealed partial class WallStack : Node3D
             ink.SetShaderParameter("e" + i, new Vector3(n.X, n.Y, n.Dot(a)));
         }
         ink.SetShaderParameter("halfy", Mathf.Abs(h[3].Y - h[0].Y) * 0.5f);
+        ink.SetShaderParameter("radius", Radius);
         ink.SetShaderParameter("sun", Key);
         ink.RenderPriority = Stage3D.ShadowOrder;
         return ink;
@@ -955,6 +1019,15 @@ public sealed partial class WallStack : Node3D
     /// its ambient is written into the shader as 0.55 of the face.</summary>
     private static readonly Color ConcreteDark = new(0.36f, 0.36f, 0.34f);
     private static readonly Color ConcreteLight = new(0.60f, 0.59f, 0.56f);
+
+    /// <summary>How much a whole concrete piece is drawn past its body, in
+    /// cell radii: half the gap the layout leaves between bodies plus a hair,
+    /// so two neighbours overlap on screen and the air between them is not a
+    /// line. The roof triangles take it as a scale about their centroid.</summary>
+    private const float Swell = 0.004f;
+
+    private Color Paint(in WallKit.Block b, float tone) =>
+        ConcreteDark.Lerp(ConcreteLight, tone);
 
     private Color Paint(in WallKit.Block b)
     {
@@ -1198,6 +1271,11 @@ uniform float radius = 124.0;
 // bounce on this board, so an unlit face is whatever this says and nothing else.
 uniform float ambient = 0.55;
 uniform float grain = 0.10;
+// Concrete: a texture in place of the grain, projected along the piece's own
+// three axes so it travels with the piece - see WallStack.Dress.
+uniform sampler2D concrete_tex : source_color, repeat_enable;
+uniform float textured = 0.0;
+uniform float tex_scale = 1.6;
 
 varying vec3 tint;
 varying vec3 face;
@@ -1205,6 +1283,8 @@ varying vec3 axis;
 varying vec3 local;
 varying vec3 halfsz;
 varying float chip;
+varying float seamless;
+varying vec3 wpos;
 varying float left;
 
 float hash13(vec3 p) {{
@@ -1234,7 +1314,11 @@ void vertex() {{
     tint = COLOR.rgb;
     local = VERTEX;                       // the unit box, -0.5 .. 0.5
     halfsz = INSTANCE_CUSTOM.xyz;
-    chip = INSTANCE_CUSTOM.w;
+    // The fourth channel: 1 a chip, 2 concrete still held in its box.
+    float mark = INSTANCE_CUSTOM.w;
+    chip = step(0.5, mark) * step(mark, 1.5);
+    seamless = step(1.5, mark);
+    wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
     // The brick's own rotation, and nothing else to undo: the node's basis is a
     // uniform scale, so it leaves a direction pointing where it pointed. A
     // non-uniform one would not, and transforming a normal by it - rather than by
@@ -1276,12 +1360,27 @@ void fragment() {{
     vec3 keep = abs(axis) * 9.0;
     float border = min(min(edge.x + keep.x, edge.y + keep.y), edge.z + keep.z);
     // Asymmetric: the line is nearly hard on the outside and feathers inwards,
-    // because a symmetric one at this width reads as a bevel.
-    float seam = smoothstep(0.0, joint * 0.35, border);
+    // because a symmetric one at this width reads as a bevel. Concrete that is
+    // still one pour draws none: the seams are where it will break, and a box
+    // does not show where it will break until it has.
+    float seam = max(smoothstep(0.0, joint * 0.35, border), seamless);
 
     // Grain, in the brick's own space and scaled by the cell so it does not
     // change size when the wall is fitted to a different tile.
     float g = vnoise(local * halfsz * radius * 0.55) - 0.5;
+    // Or the texture, triplanar in the same space: each face takes the
+    // projection along its own normal, and the piece keeps its pattern when
+    // it lands on its side.
+    // In the piece's own frame once it is a piece, so the pattern travels
+    // with it; in the stack's frame while the box is whole, so it runs
+    // unbroken across the pieces - the seam between two slabs is also a seam
+    // in a pattern that restarts on each.
+    vec3 p = mix(local * halfsz * 2.0, wpos / radius, seamless) * tex_scale;
+    vec3 w = abs(axis);
+    w /= (w.x + w.y + w.z);
+    vec3 t = texture(concrete_tex, p.yz).rgb * w.x
+           + texture(concrete_tex, p.xz).rgb * w.y
+           + texture(concrete_tex, p.xy).rgb * w.z;
 
     // <b>The dark line goes with the piece.</b> Alpha thins the body and the seam
     // alike, but a near-black line at a fifth of its opacity is still a line on
@@ -1292,6 +1391,8 @@ void fragment() {{
     float show = max(seam, 1.0 - left);
 
     vec3 body = tint * lit * (1.0 + g * grain);
+    // The texture is about mid-grey, so twice it is a multiplier about one.
+    body = mix(body, tint * lit * t * 2.0, textured);
     // A chip is a broken piece: the inside of a brick is paler and rawer than
     // its weathered face, which is the one thing the procedural material in
     // Blender had to define rather than paint.
@@ -1320,11 +1421,16 @@ uniform vec3 e0;
 uniform vec3 e1;
 uniform vec3 e2;
 uniform float halfy = 0.06;
+uniform sampler2D concrete_tex : source_color, repeat_enable;
+uniform float textured = 0.0;
+uniform float tex_scale = 1.6;
 
 varying vec3 tint;
 varying vec3 face;
 varying vec3 axis;
 varying vec3 local;
+varying float seamless;
+varying vec3 wpos;
 varying float left;
 
 float hash13(vec3 p) {{
@@ -1351,6 +1457,8 @@ void vertex() {{
     local = VERTEX;
     face = normalize(mat3(MODEL_MATRIX) * NORMAL);
     axis = NORMAL;
+    seamless = step(1.5, INSTANCE_CUSTOM.w);
+    wpos = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
     left = COLOR.a;
 }}
 
@@ -1372,11 +1480,18 @@ void fragment() {{
     // smallest distance is nought everywhere, so it drops it and takes the
     // caps and the two other edges.
     float border = abs(axis.y) > 0.5 ? lo : min(cap, mid);
-    float seam = smoothstep(0.0, joint * 0.35, border);
+    float seam = max(smoothstep(0.0, joint * 0.35, border), seamless);
 
     float g = vnoise(local * radius * 0.55) - 0.5;
+    vec3 p = mix(local, wpos / radius, seamless) * tex_scale;
+    vec3 w = abs(axis);
+    w /= (w.x + w.y + w.z);
+    vec3 t = texture(concrete_tex, p.yz).rgb * w.x
+           + texture(concrete_tex, p.xz).rgb * w.y
+           + texture(concrete_tex, p.xy).rgb * w.z;
     float show = max(seam, 1.0 - left);
     vec3 body = tint * lit * (1.0 + g * grain);
+    body = mix(body, tint * lit * t * 2.0, textured);
     ALBEDO = mix(body * 0.13, body, show);
     {1}
 }}
