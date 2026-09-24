@@ -1,0 +1,24 @@
+POSITIVE:
+(monochrome greyscale texture:1.3), neutral grey, achromatic, no color, 
+seamless tileable hand-painted game texture of a wall made of (large precast concrete panels:1.4), 
+(segmented slab wall with visible panel seams:1.3), running bond layout with offset rows, 
+rectangular panels of uneven size, 
+(deep dark recessed joint lines:1.3) separating each panel, light chamfered edges along the joints, 
+round metal anchor bolt holes with rimmed sockets near panel corners, 
+coarse aggregate pebbles with crisp dark outlines and light top facets, 
+vertical drip stains and streaks below the holes, chipped corners, hairline cracks along edges, 
+limited tonal range, 
+flat orthographic top-down view, uniform ambient light, no shadows, no highlights, 
+clean vector-like edges, stylized realism, stylized PBR albedo, 2d texture sheet, crisp detail
+
+NEGATIVE:
+colorful, saturated, vibrant, color grading, teal and orange, color cast, green tint, blue tint,
+monolithic concrete, poured concrete, continuous surface, seamless slab,
+cinder blocks, cmu blocks,
+photograph, photorealistic, depth of field, blur, bokeh,
+perspective, angled view, cast shadow, specular highlight, glossy, reflections, vignette,
+text, watermark, logo, signature,
+low quality, jpeg artifacts
+
+SEED:
+821265445095057
