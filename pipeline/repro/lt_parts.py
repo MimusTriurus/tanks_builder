@@ -196,6 +196,38 @@ def twin_wheel(bm, y, z, r, xc, s, seg=48):
     cyl(bm, (xc - 0.03, y, z), (xc + 0.03, y, z), r * 0.3, TRACK, seg=24)
 
 
+def debris():
+    """What flies off when the tank blows up, for the game variant: a name,
+    the node it comes off, and a box in this frame.  Every piece of that
+    node's mesh whose centre lies in the box goes with it -- the skirt plate,
+    its beam, its rivets and its handle alike -- so the builders stay as they
+    are.  Sides are the tank's own: L is +X."""
+    out = []
+    edges = [-0.5] + list(SEAMS) + [0.5]
+    for s, S in ((1, "L"), (-1, "R")):
+        def sx(a, b):
+            return tuple(sorted((s * a, s * b)))
+        # the skirt panels, each with its beam, rivets and handle; x from just
+        # outside the fender rail (its centre is at 0.346) to past the handles
+        for i, (a, b) in enumerate(zip(edges, edges[1:])):
+            out.append({"name": "Skirt.%s.%d" % (S, i), "parent": "Hull",
+                        "box": (sx(0.349, 0.420), (a + 0.001, b - 0.001), (-0.36, -0.06))})
+        # the front fender plate with the headlamp standing on it
+        out.append({"name": "Fender.%s" % S, "parent": "Hull",
+                    "box": (sx(0.175, 0.334), (-0.49, SEAMS[0] - 0.003), (-0.20, 0.0))})
+        # the tow shackle's ring and pin (the bracket stays)
+        out.append({"name": "Shackle.%s" % S, "parent": "Hull",
+                    "box": (sx(0.09, 0.15), (-0.50, -0.478), (-0.225, -0.160))})
+        # the radiator grille: frame, slats, the dark box under them
+        out.append({"name": "Grille.%s" % S, "parent": "Hull",
+                    "box": (sx(0.015, 0.205), (0.19, 0.45), (-0.02, 0.02))})
+    hx, hy = CUPOLA
+    out.append({"name": "Hatch", "parent": "Turret",       # the cupola's grated lid
+                "box": ((hx - 0.053, hx + 0.053), (hy - 0.053, hy + 0.053),
+                        (ROOF_Z + 0.011, ROOF_Z + 0.040))})
+    return out
+
+
 def wheel_spec():
     """Every wheel that turns: name, axle (y, z), and the radius the belt turns
     it at (the engine spins each one distance / r)."""
@@ -453,6 +485,15 @@ def hull(mats):
                (0.008, 0.198), (0.020, 0.190), (0.020, 0.180)],
           PAINTDK, seg=160, axis="Z", center=(RING_C[0], RING_C[1], 0))
     g.add(bm, bevel=(0.0025, 2, 30))
+    if game():
+        # the game variant loses its turret: what shows then is the ring's
+        # opening, dark, not a painted deck -- and a knocked-out turret tipped
+        # in its ring shows it under the raised side.  2 mm over the deck,
+        # inside the collar, under the ring's foot (z 0.014).
+        bm = new_bm()
+        lathe(bm, [(DECK_Z + 0.002, 0.0), (DECK_Z + 0.002, 0.179)], DARK, seg=96, axis="Z",
+              center=(RING_C[0], RING_C[1], 0), closed=False)
+        g.add(bm)
     return g
 
 

@@ -137,6 +137,15 @@ with `K.game()` true:
   turns it at), `wheels(mats, xc, s)` (a Group per wheel), `running_gear`
   (what does not turn), `belt_spec()` (path, pitch, link builder); `rolls`
   and `belt` for the copy are made of these;
+- `debris()`: what flies off when the tank blows up - a name, the node it
+  comes off (`Hull` or `Turret`) and a box in the original's frame. Every
+  piece of that node whose centre is in the box goes with it (a skirt panel
+  takes its beam, rivets and handle), so the builders stay as they are. Keep
+  boxes clear of pieces that must stay (LT: the fender rail's centre sits
+  3 mm inside the skirt's x range, the hinges sit on the seams). Sides are
+  the tank's own: L is +X;
+- a dark disc over the deck inside the ring, `if game():` - it is what shows
+  when the turret is gone or tipped;
 - round things only through the kit's primitives (`lathe`, `cyl`, `sphere`,
   `bend_bar`, `K.rivets`) so the game variant halves their segments by
   itself; any other count that is geometry (loft sections, slices) goes
@@ -239,11 +248,17 @@ geometry: a toon ramp turns normal-map detail into speckle.
 
 ## 10. Game variant: bake
 
+**One root per call**: the hull with its debris parts takes ~40 s and the
+turret ~25, and the pair ran past the bridge's timeout.
+
 ```python
-K.bake(tank, ("Hull", "Turret"))       # one call
+K.bake(tank, ("Hull",))
 ```
 ```python
-K.bake(tank, ("TrackL", "TrackR"))     # next call
+K.bake(tank, ("Turret",))
+```
+```python
+K.bake(tank, ("TrackL",))      # then ("TrackR",)
 ```
 
 Flat paint: no painted light, no crease or edge ink - the engine's cel ramp
@@ -265,7 +280,32 @@ wheel on its axle), `rotated`, `scaled`, `custom_props`, `no_uvmap`,
 ```python
 K.game_sheet(tank)     # rest from four sides + every joint moved once
 K.game_compare(tank)   # copy left, game right, close up
+K.wreck_sheet(tank)    # knocked out / blowing up / destroyed
 ```
+
+`verify_game` also counts the debris parts (`debris_missing` empty,
+`debris_origin_off_max` 0: each turns about its own centre in flight).
+`wreck_sheet` shows the two deaths the sprite bench has, carried over:
+knocked out (gun dropped 18 deg, turret tipped into its ring by
+wreck_pose's rule, belts slack over the front, the ring's dark opening
+showing under the raised side) and destroyed (the turret thrown back and
+lying on the engine deck, the debris gone; the middle row is a moment of the
+explosion). The thrown turret must rest on the deck - not float, not sink:
+`toss_spec` finds how it lies at each of 12 yaws, and `overhang_ok` must be
+true for all of them.
+
+When the user wants to see the motion (or the rig changed), render the
+previews - one or two clips per call, ~0.17 s a frame:
+
+```python
+K.render_clip(tank, "shot"); K.render_clip(tank, "hits")
+```
+```python
+K.render_clip(tank, "drive"); K.render_clip(tank, "knocked"); K.render_clip(tank, "destroyed")
+```
+
+then make GIFs from `out/repro/<NAME>/anim/<clip>/f*.png` with the system
+Python's Pillow (`py`; Blender's Python has none), captioned, and send them.
 
 `game_sheet` lays the links **from the sidecar's numbers**, the way the engine
 will - a belt that does not sit on its wheels there is a wrong recipe, not a
@@ -281,10 +321,13 @@ K.save(tank)           # the scene copy, now with the game collection
 ```
 
 `export_game` strips the suffix, puts `Tank` at the origin, and reads the
-written file back (`check`): the tree must be `Tank → Body → Hull (Exhaust.N),
-Turret → Mantlet → Barrel → Muzzle` and `Track.L/.R` with every wheel,
-`Running` and one `Link`; `occlusion` and `metal_rough` true on all four
-materials; `total_tris` plus the links' copies equal to `verify_game`'s.
+written file back (`check`): the tree must be `Tank → Body → Hull (Exhaust.N,
+the debris parts), Turret (Hatch) → Mantlet → Barrel → Muzzle` and
+`Track.L/.R` with every wheel, `Running` and one `Link`; `occlusion` and
+`metal_rough` true on all four materials; `total_tris` plus the links' copies
+equal to `verify_game`'s. The sidecar now also carries `wreck` (droop, tip
+quaternion, slack paths), `toss` (throw, lift, spin, slide and the 12
+landings), `debris` (node, parent, size, volume) and `blast`.
 
 The contract the sidecar states, which engine code will lean on:
 
@@ -293,6 +336,8 @@ The contract the sidecar states, which engine code will lean on:
 - negative `rotation.x` raises the gun (Mantlet) and the nose (Body);
   positive `rotation.z` rolls the roof to the tank's right; positive
   `rotation.y` turns the turret left; wheels turn `+distance / r`;
+- a knocked-out turret is `basis = yaw * tip` (the tip in its own frame);
+  a thrown one ends at a `toss.landing` transform, in Body's frame;
 - units are the Blender scene's: one scale for every tank, against the hex,
   is not chosen yet.
 

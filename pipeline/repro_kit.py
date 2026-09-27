@@ -34,6 +34,7 @@ and for the game variant (`build_game`):
     BODY_PIVOT (y, z), EXHAUST [(x, y, z)], GAME_TAG
     wheel_spec() -> [{name, axle (y, z), r}],  wheels(mats, xc, side) -> [.. + group]
     running_gear(mats, xc, side) -> Group,  belt_spec() -> (path, pitch, link_bm)
+    debris() -> [{name, parent 'Hull'|'Turret', box ((x0,x1),(y0,y1),(z0,z1))}]
 
 The gun lays in elevation (the board has levels; `barrel_recoil` renders the
 ladder of angles): `Mantlet` and `Barrel` get their origins on the trunnion,
@@ -1010,8 +1011,8 @@ def check_lay(tank):
 #
 #   Tank                ground, centre line; what the board moves and turns
 #   ├─ Body             the sprung mass: rocks on a hit about the belt tops
-#   │  ├─ Hull          (+ Exhaust.N markers)
-#   │  └─ Turret        origin on the ring axis: yaw
+#   │  ├─ Hull          (+ Exhaust.N markers, + debris parts: Skirt.*, ...)
+#   │  └─ Turret        origin on the ring axis: yaw  (+ debris: Hatch)
 #   │     └─ Mantlet    origin on the trunnion: elevation
 #   │        └─ Barrel  same origin: recoil along the bore (+ Muzzle marker)
 #   └─ Track.L/.R       unsprung: wheels (origin on their axles), the running
@@ -1065,6 +1066,72 @@ def _link_object(tank, mats, link_bm, pitch, parent, coll, name):
     return ob
 
 
+def split_debris(tank, ob, regions, coll):
+    """Cut the pieces of `ob` (connected islands) whose centre falls in each
+    region's box (the original's frame) into a child object of their own,
+    origin at the part's bounding-box centre -- the point the engine throws it
+    about.  Before the bake, so each part keeps its share of the texture."""
+    X = tank.X_OFF
+    me = ob.data
+    bm = bmesh.new()
+    bm.from_mesh(me)
+    bm.faces.ensure_lookup_table()
+    M = ob.matrix_world
+    seen, islands = set(), []
+    for f in bm.faces:
+        if f.index in seen:
+            continue
+        comp, stack = [], [f]
+        seen.add(f.index)
+        while stack:
+            g = stack.pop()
+            comp.append(g.index)
+            for e in g.edges:
+                for h in e.link_faces:
+                    if h.index not in seen:
+                        seen.add(h.index)
+                        stack.append(h)
+        vs = {v for i in comp for v in bm.faces[i].verts}
+        c = M @ (sum((v.co for v in vs), Vector()) / len(vs)) - Vector((X, 0.0, 0.0))
+        islands.append((comp, c))
+    made, taken = [], set()
+    for r in regions:
+        (x0, x1), (y0, y1), (z0, z1) = r["box"]
+        faces = [i for comp, c in islands
+                 if x0 <= c.x <= x1 and y0 <= c.y <= y1 and z0 <= c.z <= z1 for i in comp]
+        if not faces:
+            made.append({"name": r["name"], "islands": 0})
+            continue
+        keep = set(faces)
+        taken |= keep
+        part = bm.copy()               # same element order as bm
+        bmesh.ops.delete(part, geom=[f for i, f in enumerate(part.faces) if i not in keep],
+                         context="FACES")
+        lo = Vector([min(v.co[k] for v in part.verts) for k in range(3)])
+        hi = Vector([max(v.co[k] for v in part.verts) for k in range(3)])
+        centre = (lo + hi) / 2
+        bmesh.ops.translate(part, verts=part.verts, vec=-centre)
+        pme = bpy.data.meshes.new(gnm(tank, r["name"]))
+        part.to_mesh(pme)
+        part.free()
+        for mt in me.materials:
+            pme.materials.append(mt)
+        pob = bpy.data.objects.new(gnm(tank, r["name"]), pme)
+        coll.objects.link(pob)
+        pob.parent = ob
+        pob.location = centre
+        compact_materials(pme)
+        made.append({"name": r["name"], "islands": sum(1 for comp, c in islands
+                                                        if comp[0] in keep)})
+    if taken:
+        bmesh.ops.delete(bm, geom=[bm.faces[i] for i in sorted(taken)], context="FACES")
+        bm.to_mesh(me)
+        compact_materials(me)
+    bm.free()
+    bpy.context.view_layer.update()
+    return made
+
+
 def build_game(tank):
     """The game variant of the copy, textured by `bake(tank, ...)` like the
     copy.  Returns triangle counts and the numbers the sidecar will carry."""
@@ -1099,6 +1166,9 @@ def build_game(tank):
             empty("Exhaust.%d" % i, hull, p)
         tur = tank.turret(mats).build(gnm(tank, "Turret"), body, coll, X,
                                       origin=(tank.RING_C[0], tank.RING_C[1], tank.RING_Z0))
+        regions = tank.debris() if hasattr(tank, "debris") else []
+        parts = (split_debris(tank, hull, [r for r in regions if r["parent"] == "Hull"], coll)
+                 + split_debris(tank, tur, [r for r in regions if r["parent"] == "Turret"], coll))
         piv = trunnion(tank)
         man = tank.mantlet(mats).build(gnm(tank, "Mantlet"), tur, coll, X, origin=piv)
         bar = tank.barrel(mats).build(gnm(tank, "Barrel"), man, coll, X, origin=piv)
@@ -1141,6 +1211,7 @@ def build_game(tank):
     for S, t in tracks.items():
         tris["(%d links %s)" % (t["links"], S)] = tris[gnm(tank, t["link"])] * (t["links"] - 1)
     return {"tris": tris, "total_tris": sum(tris.values()), "budget": GAME_TRIS,
+            "debris": parts,
             "tracks": {S: {k: v for k, v in t.items() if k != "path"} for S, t in tracks.items()},
             "build_s": round(time.time() - t0, 1)}
 
@@ -1229,7 +1300,18 @@ def verify_game(tank):
     tris = sum(_tris(o) for o in meshes)
     tris += sum(_tris(bpy.data.objects[gnm(tank, "Link." + S)]) * (n - 1)
                 for S, n in spec_links.items())
+    # a debris part turns about its origin in flight: it has to be its centre
+    deb, missing = {}, []
+    for n in sorted(_debris_names(tank)):
+        o = bpy.data.objects.get(n)
+        if o is None:
+            missing.append(n)
+            continue
+        co = np.array([v.co[:] for v in o.data.vertices])
+        deb[n] = round(float(np.linalg.norm((co.max(0) + co.min(0)) / 2)), 7)
     return {
+        "debris": len(deb), "debris_missing": missing,
+        "debris_origin_off_max": max(deb.values()) if deb else None,
         "origin_off_max": max(offs.values()),
         "origin_off": {n: v for n, v in offs.items() if v > 1e-6},
         "rotated": [o.name for o in obs if any(abs(v) > 1e-9 for v in o.rotation_euler)],
@@ -1350,16 +1432,17 @@ def _from_gl(v):
     return Vector((v[0], -v[2], v[1]))
 
 
-def place_links(tank, spec, drive=0.0, coll=None):
+def place_links(tank, spec, drive=0.0, coll=None, paths=None):
     """Lay every link round its track the way the sidecar tells the engine to
     (`belt_motion`), from the sidecar's own numbers -- so a picture of this is
-    a check of the recipe, not of the builder.  Linked copies of the one link,
-    in `coll`; returns them."""
+    a check of the recipe, not of the builder.  `paths` swaps in another path
+    per track (the wreck's slack one).  Linked copies of the one link, in
+    `coll`; returns them."""
     out = []
     for S, t in spec["tracks"].items():
         tr = bpy.data.objects[gnm(tank, t["node"])]
         link = bpy.data.objects[gnm(tank, t["link"])]
-        P = np.array([_from_gl(p) for p in t["path"]])
+        P = np.array([_from_gl(p) for p in (paths or {}).get(S, t["path"])])
         seg = np.linalg.norm(np.roll(P, -1, 0) - P, axis=1)
         cum = np.concatenate([[0.0], np.cumsum(seg)])
         L = cum[-1]
@@ -1442,6 +1525,732 @@ def game_sheet(tank, name="game", samples=24):
     return _tile_png(rows, 1, os.path.join(d, name + ".png"))
 
 
+# ------------------------------------------------------ wreck and destruction
+#
+# The sprite bench's two deaths, carried over (wreck_pose.py for the pose,
+# the bench's TurretToss for the throw):
+#   knocked out  the gun falls to its stop, the turret tips into its ring,
+#                the belts go slack over the front -- joints and a second
+#                belt path, no new geometry;
+#   destroyed    the turret is thrown back and comes to rest on the engine
+#                deck; the debris parts fly off.
+# Blender works out what needs the geometry: the tip from how the turret
+# hangs, the slack path, and where the thrown turret actually lies on the
+# deck at each yaw -- resting, not floating and not sunk in.
+
+def _gl_quat(R3):
+    """A Blender rotation (3x3) as a glTF quaternion [x, y, z, w]."""
+    C = Matrix(((1, 0, 0), (0, 0, 1), (0, -1, 0)))
+    q = (C @ R3 @ C.transposed()).to_quaternion()
+    return [round(q.x, 6), round(q.y, 6), round(q.z, 6), round(q.w, 6)]
+
+
+def _wreck_cfg():
+    import sys
+    if REPO not in sys.path:
+        sys.path.insert(0, REPO)
+    import wreck_pose
+    importlib.reload(wreck_pose)
+    return dict(wreck_pose.CONFIG)
+
+
+def _meshes_under(ob, skip=()):
+    return [o for o in [ob] + list(ob.children_recursive)
+            if o.type == "MESH" and o.name not in skip]
+
+
+def _debris_names(tank):
+    return {gnm(tank, r["name"]) for r in (tank.debris() if hasattr(tank, "debris") else [])}
+
+
+def wreck_spec(tank):
+    """The knocked-out pose, by wreck_pose's rules: the gun's droop, the
+    turret's tip (cant from how far it hangs below its pivot against the
+    ring radius, plus the nose-up pitch) and each belt's slack path."""
+    tank = game_tank(tank)
+    cfg = _wreck_cfg()
+    tur = bpy.data.objects[gnm(tank, "Turret")]
+    o = tur.matrix_world.translation
+    co = world_co(tur)
+    hang = max(0.0, float(o.z - co[:, 2].min()))
+    low = co[co[:, 2] < co[:, 2].min() + 0.005]
+    radius = float(np.hypot(low[:, 0] - o.x, low[:, 1] - o.y).max())
+    cant = math.degrees(math.asin(min(0.95, hang / radius + cfg["rim_clear_frac"])))
+    R = _tip_matrix(cant * cfg["cant_sign"], cfg["pitch_deg"])
+    hull = bpy.data.objects[gnm(tank, "Hull")]
+    hc = np.concatenate([world_co(m) for m in _meshes_under(hull)])
+    scale = float((hc.max(0) - hc.min(0)).max())
+    paths = {}
+    for S, t in game_spec(tank)["tracks"].items():
+        P = np.array([_from_gl(p) for p in t["path"]])
+        y = P[:, 1]
+        y0 = float(y.min())                      # the front of the loop (-Y)
+        cut = y0 + float(y.max() - y0) * cfg["slack_reach"]
+        w = np.clip((cut - y) / max(cut - y0, 1e-9), 0.0, 1.0) ** cfg["slack_power"]
+        sgn = 1.0 if S == "L" else -1.0          # outboard: L is on +X
+        d = np.array([sgn * cfg["slack_out"] * scale, 0.0, -cfg["slack_down"] * scale])
+        paths[S] = [_gl(p) for p in P + w[:, None] * d]
+    return {
+        "from": "pipeline/wreck_pose.py CONFIG, the sprite wreck's rules",
+        "gun": {"node": "Mantlet", "droop_deg": cfg["droop_deg"],
+                "set": "rotation.x = +droop: down past the laying limit, to its stop"},
+        "turret": {"node": "Turret", "cant_deg": round(cant, 3), "pitch_deg": cfg["pitch_deg"],
+                   "cant_from": "asin(hang below the pivot %.4f / ring radius %.4f + %.4f)"
+                                % (hang, radius, cfg["rim_clear_frac"]),
+                   "pivot": "the Turret node's origin: the ring centre at its foot",
+                   "tip_quat": _gl_quat(R),
+                   "apply": "basis = yaw * tip -- the tip is in the turret's own frame, "
+                            "after whatever yaw it died at; +cant rolls the gun's left down"},
+        "tracks": {S: {"path": p} for S, p in paths.items()},
+        "belt": "the links are laid round the wreck path instead (same count and pitch)",
+    }
+
+
+def _tip_matrix(cant_deg, pitch_deg):
+    """wreck_pose's tip in the turret's frame (Blender): roll about the
+    length axis, then nose up."""
+    return (Matrix.Rotation(math.radians(cant_deg), 3, "Y")
+            @ Matrix.Rotation(math.radians(-pitch_deg), 3, "X"))
+
+
+def toss_spec(tank, yaws=tuple(range(0, 360, 30)), tilt_max=0.30, tilt_step=0.015):
+    """Where the thrown turret comes to rest on the deck, for each yaw
+    relative to the hull.  The bench's TurretToss throws it back 0.30 of the
+    track's length and lands it on the engine deck; here the hull's top
+    (debris gone) is ray-cast under every point of the turret and gun, and
+    the tilt found that lets it sink lowest while nothing goes under the
+    deck -- a body resting on its lowest supports.  Then checked with the
+    real rotation, and the overhang past the stern measured."""
+    from mathutils.bvhtree import BVHTree
+    tank = game_tank(tank)
+    skip = _debris_names(tank)
+    hull = bpy.data.objects[gnm(tank, "Hull")]
+    body = bpy.data.objects[gnm(tank, "Body")]
+    tur = bpy.data.objects[gnm(tank, "Turret")]
+    bm = bmesh.new()
+    for m in _meshes_under(hull, skip):
+        tmp = bmesh.new()
+        tmp.from_mesh(m.data)
+        tmp.transform(m.matrix_world)
+        me = bpy.data.meshes.new("_toss")
+        tmp.to_mesh(me)
+        tmp.free()
+        bm.from_mesh(me)
+        bpy.data.meshes.remove(me)
+    bvh = BVHTree.FromBMesh(bm)
+    hc = np.array([v.co[:] for v in bm.verts])
+    bm.free()
+    stern = float(hc[:, 1].max())
+    L = float(hc[:, 1].max() - hc[:, 1].min())
+    height = float(hc[:, 2].max() - hc[:, 2].min())
+    Mt = tur.matrix_world
+    o = Mt.translation.copy()
+    Ti = Mt.inverted()
+    gun = [gnm(tank, "Mantlet"), gnm(tank, "Barrel")]
+    rel_all = np.concatenate([np.array([(Ti @ Vector(p))[:] for p in world_co(m)])
+                              for m in _meshes_under(tur, skip)])
+    body_only = np.array([(Ti @ Vector(p))[:] for p in world_co(tur)])
+    rel = rel_all[rel_all[:, 2] < 0.12]           # only the lower part can touch
+    track_len = max(float(np.ptp([_from_gl(p)[1] for p in t["path"]]))
+                    for t in game_spec(tank)["tracks"].values())
+    throw = 0.30 * track_len
+    base = o + Vector((0.0, throw, 0.0))           # back is +Y
+    grid = np.arange(-tilt_max, tilt_max + 1e-9, tilt_step)
+    B, Cc = np.meshgrid(grid, grid)
+    B, Cc = B.ravel(), Cc.ravel()
+
+    def heights(pts):
+        h = np.full(len(pts), np.nan)
+        for i, p in enumerate(pts):
+            hit = bvh.ray_cast(Vector((p[0], p[1], 5.0)), Vector((0, 0, -1)), 20.0)
+            if hit[0] is not None:
+                h[i] = hit[0].z
+        return h
+
+    landings = []
+    for yaw in yaws:
+        Rz = Matrix.Rotation(math.radians(yaw), 3, "Z")
+        r = np.array([(Rz @ Vector(p))[:] for p in rel])
+        xy = r[:, :2] + np.array([base.x, base.y])
+        h = heights(np.c_[xy, np.zeros(len(xy))])
+        ok = ~np.isnan(h)
+        rr, hh = r[ok], h[ok]
+        if len(rr) > 900:                      # the search needs the shape, not every vertex
+            pick = np.linspace(0, len(rr) - 1, 900).astype(int)
+            rr, hh = rr[pick], hh[pick]
+        cx, cy = r[:, 0].mean(), r[:, 1].mean()
+        # z_origin >= h - z - b x - c y for every point; lowest centre wins
+        A = (hh[None, :] - rr[None, :, 2] - B[:, None] * rr[None, :, 0]
+             - Cc[:, None] * rr[None, :, 1]).max(1)
+        k = int(np.argmin(A + B * cx + Cc * cy))
+        b, c = float(B[k]), float(Cc[k])
+        Rt = (Matrix.Rotation(math.asin(c), 3, "X") @ Matrix.Rotation(-math.asin(b), 3, "Y"))
+        R = Rt @ Rz
+        # the real rotation, not the shear: set it down exactly on its lowest point
+        pts = np.array([(R @ Vector(p))[:] for p in rel])
+        hp = heights(np.c_[pts[:, :2] + np.array([base.x, base.y]), np.zeros(len(pts))])
+        okp = ~np.isnan(hp)
+        z = float((hp[okp] - pts[okp, 2]).max())
+        M = Matrix.Translation(Vector((base.x, base.y, z))) @ R.to_4x4()
+        wb = np.array([(M @ Vector(p))[:] for p in body_only])
+        loc = body.matrix_world.inverted() @ M
+        landings.append({
+            "yaw_deg": yaw, "at": _gl(loc.translation), "quat": _gl_quat(loc.to_3x3()),
+            "tilt_deg": round(math.degrees(math.acos(max(-1.0, min(1.0, (R @ Vector((0, 0, 1))).z)))), 2),
+            "supported": round(float(ok.mean()), 3),
+            "overhang": round(float(wb[:, 1].max() - stern), 4),
+            "overhang_ok": bool(wb[:, 1].max() - stern <= 0.12 * L),
+        })
+    return {
+        "from": "the sprite bench's TurretToss: thrown back along the hull, lands on the "
+                "engine deck and slides to rest",
+        "throw": round(throw, 5), "lift": round(1.5 * height, 5),
+        "spin_deg_per_s": 600.0, "flight_s": 1.0,
+        "slide": {"share": 0.18, "spin_deg": 70.0, "s": 0.35},
+        "overhang_max": round(0.12 * L, 5),
+        "landing": landings,
+        "use": "pick the landing nearest the yaw the spin brings it to; `at`/`quat` are "
+               "the Turret node's transform in Body's frame, resting on the deck with the "
+               "debris gone",
+    }
+
+
+def debris_spec(tank):
+    """Every debris part: its node, the node it comes off, where it sits
+    (its origin is its bounding-box centre), its size and volume in scene
+    units -- the engine picks a density -- and the blast centre it flies
+    from (the turret ring's foot, where the ammunition is)."""
+    tank = game_tank(tank)
+    top = bpy.data.objects[gnm(tank, "Tank")]
+    out = []
+    for r in (tank.debris() if hasattr(tank, "debris") else []):
+        ob = bpy.data.objects.get(gnm(tank, r["name"]))
+        if ob is None:
+            continue
+        co = np.array([v.co[:] for v in ob.data.vertices])
+        ext = co.max(0) - co.min(0)
+        bm = bmesh.new()
+        bm.from_mesh(ob.data)
+        vol = abs(bm.calc_volume(signed=False))
+        bm.free()
+        out.append({"node": r["name"], "parent": r["parent"], "at": _gl(ob.matrix_local.translation),
+                    "size": [round(float(ext[0]), 4), round(float(ext[2]), 4), round(float(ext[1]), 4)],
+                    "volume": round(float(vol), 7)})
+    tur = bpy.data.objects[gnm(tank, "Turret")]
+    blast = top.matrix_world.inverted() @ tur.matrix_world.translation
+    return {"parts": out, "blast": {"at": _gl(blast), "frame": "Tank"}}
+
+
+def pose_wreck(tank, wreck=None, toss=None, landing=None, lift=0.0, explode=0.0, yaw=0.0):
+    """Pose the game variant dead, for pictures: knocked out (gun dropped,
+    turret tipped at `yaw`, belts slack), or with `landing` (an index into
+    toss['landing']) the turret thrown onto the deck -- `lift` raises it
+    toward the top of its arc, `explode` pushes the debris out from the blast
+    by that many scene units.  Returns a restore function."""
+    tank = game_tank(tank)
+    coll = bpy.data.collections[coll_name(tank)]
+    rest = {o.name: o.matrix_basis.copy() for o in coll.objects}
+    wreck = wreck or wreck_spec(tank)
+    ob = lambda n: bpy.data.objects[gnm(tank, n)]
+    ob("Mantlet").rotation_euler = (math.radians(wreck["gun"]["droop_deg"]), 0.0, 0.0)
+    tur = ob("Turret")
+    if landing is None:
+        tip = _tip_matrix(wreck["turret"]["cant_deg"], wreck["turret"]["pitch_deg"])
+        R = Matrix.Rotation(math.radians(yaw), 3, "Z") @ tip
+        tur.matrix_basis = Matrix.Translation(tur.matrix_basis.translation) @ R.to_4x4()
+    else:
+        L = toss["landing"][landing]
+        q = L["quat"]
+        C = Matrix(((1, 0, 0), (0, 0, 1), (0, -1, 0)))
+        from mathutils import Quaternion
+        R = C.transposed() @ Quaternion((q[3], q[0], q[1], q[2])).to_matrix() @ C
+        tur.matrix_basis = (Matrix.Translation(_from_gl(L["at"]) + Vector((0, 0, lift)))
+                            @ R.to_4x4())
+    if explode:
+        top = ob("Tank")
+        blast = top.matrix_world @ _from_gl(debris_spec(tank)["blast"]["at"])
+        for r in tank.debris():
+            d = ob(r["name"])
+            w = d.matrix_world.translation.copy()
+            v = w - blast
+            v.z = abs(v.z) + 0.5 * v.length          # out and up
+            v.normalize()
+            axis = v.cross(Vector((0.0, 0.0, 1.0)))
+            axis = axis.normalized() if axis.length > 1e-6 else Vector((1.0, 0.0, 0.0))
+            d.matrix_world = (Matrix.Translation(w + v * explode)
+                              @ Matrix.Rotation(explode * 4.0, 4, axis)
+                              @ d.matrix_world.to_3x3().to_4x4())
+    bpy.context.view_layer.update()
+
+    def restore():
+        for name, m in rest.items():
+            o = bpy.data.objects.get(name)
+            if o:
+                o.matrix_basis = m
+        bpy.context.view_layer.update()
+    return restore
+
+
+def wreck_sheet(tank, name="wreck", samples=24, landing_yaw=150):
+    """Knocked out (turret at 30 deg, gun dropped, belts slack); destroyed
+    mid-air (turret halfway up its arc, debris flying); destroyed at rest
+    (turret on the deck, debris gone)."""
+    tank = game_tank(tank)
+    spec = game_spec(tank)
+    wreck, toss = wreck_spec(tank), toss_spec(tank)
+    k = min(range(len(toss["landing"])),
+            key=lambda i: abs((toss["landing"][i]["yaw_deg"] - landing_yaw + 180) % 360 - 180))
+    X = tank.X_OFF
+    tmp = bpy.data.collections.new("_game_preview")
+    bpy.context.scene.collection.children.link(tmp)
+    protos = [bpy.data.objects[gnm(tank, t["link"])] for t in spec["tracks"].values()]
+    keep = [(o, o.hide_render) for o in protos]
+    debris = [bpy.data.objects[n] for n in _debris_names(tank) if bpy.data.objects.get(n)]
+    dkeep = [(o, o.hide_render) for o in debris]
+    only = lambda o: (o.name.endswith(tank.SFX) and o not in protos) or o.name.startswith("_pvl")
+    d = out_dir(tank)
+    paths = {S: w["path"] for S, w in wreck["tracks"].items()}
+    rows = []
+    try:
+        for o in protos:
+            o.hide_render = True
+        place_links(tank, spec, 0.0, tmp, paths=paths)
+        for label, kw, hide in (("knocked", dict(yaw=30), False),
+                                ("flying", dict(landing=k, lift=toss["lift"] * 0.5, explode=0.25), False),
+                                ("destroyed", dict(landing=k), True)):
+            for o in debris:
+                o.hide_render = hide
+            restore = pose_wreck(tank, wreck, toss, **kw)
+            try:
+                p = shoot(["iso_fl", "iso_rr"], os.path.join(d, "_wreck_%s.png" % label),
+                          (X, 0, 0), only=only, samples=samples)
+            finally:
+                restore()
+            rows.append(_read_png(p))
+    finally:
+        for o in list(tmp.objects):
+            bpy.data.objects.remove(o)
+        bpy.data.collections.remove(tmp)
+        for o, h in keep + dkeep:
+            o.hide_render = h
+    return {"png": _tile_png(rows, 1, os.path.join(d, name + ".png")),
+            "landing": toss["landing"][k], "cant_deg": wreck["turret"]["cant_deg"]}
+
+
+# ----------------------------------------------------------- motion previews
+#
+# Rendered stand-ins for what the engine will do with the game variant's
+# joints, to judge the rig and its numbers before engine code exists.  The
+# springs are the sprite bench's (BodyPitch for driving, Recoil for a kick),
+# the throw is its TurretToss, gravity is the throw's own (lift in its flight
+# time).  A clip is a deterministic timeline of joint states, so it renders
+# in chunks across bridge calls; frames go to out/repro/<NAME>/anim/<clip>/.
+
+KICK = (1150.0, 38.0)     # Recoil: omega 33.9, zeta 0.56 -- a shot, a hit
+SWAY = (480.0, 28.5)      # BodyPitch: omega 21.9, zeta 0.65 -- driving
+CLIP_FPS = 25
+
+
+class Spring:
+    """One spring, semi-implicit Euler in substeps (the bench's integrator)."""
+
+    def __init__(self, stiffness, damping):
+        self.k, self.c, self.x, self.v = stiffness, damping, 0.0, 0.0
+
+    def kick(self, dv):
+        self.v += dv
+
+    def step(self, dt, target=0.0, n=8):
+        h = dt / n
+        for _ in range(n):
+            self.v += (-self.k * (self.x - target) - self.c * self.v) * h
+            self.x += self.v * h
+        return self.x
+
+
+def _recoil_curve(t):
+    """The tube's stroke, 0..1, t seconds after the shot: out in one frame,
+    held a frame, back on an exponential -- the bench's RecoilLoop shape."""
+    if t < 0.0:
+        return 0.0
+    if t < 0.04:
+        return t / 0.04
+    if t < 0.08:
+        return 1.0
+    return math.exp(-(t - 0.08) / 0.12)
+
+
+def _smooth(a, b, t):
+    u = min(1.0, max(0.0, (t - a) / (b - a)))
+    return u * u * (3 - 2 * u)
+
+
+def _state(**kw):
+    s = dict(tank_y=0.0, drive=0.0, pitch=0.0, roll=0.0, heave=0.0, yaw=0.0, tip=0.0,
+             elev=0.0, recoil=0.0, slack=0.0, turret=None, debris=None, tracer=None)
+    s.update(kw)
+    return s
+
+
+def clip_shot(tank, fps=CLIP_FPS):
+    """Two shots: gun forward, then (after the turret slews 90 deg left at the
+    light class's 240 deg/s) over the side.  The tube recoils along its bore,
+    the sprung mass rocks against the gun -- pitch forward, roll sideways."""
+    travel = 0.13 * _tube_length(tank)
+    shots = [(0.15, 0.0), (1.45, 90.0)]
+    p, r = Spring(*KICK), Spring(*KICK)
+    I = 2.3                       # rad/s: a light gun, peak about 2 deg
+    out, n = [], int(2.6 * fps)
+    for i in range(n):
+        t = i / fps
+        yaw = 0.0 if t < 0.95 else min(90.0, (t - 0.95) * 240.0)
+        rec = 0.0
+        for ts, ys in shots:
+            if abs(t - ts) < 0.5 / fps:
+                p.kick(I * math.cos(math.radians(ys)))
+                r.kick(I * math.sin(math.radians(ys)))
+            rec = max(rec, _recoil_curve(t - ts))
+        out.append(_state(yaw=yaw, recoil=rec * travel, pitch=math.degrees(p.step(1 / fps)),
+                          roll=math.degrees(r.step(1 / fps))))
+    return out
+
+
+def clip_hits(tank, fps=CLIP_FPS):
+    """Hits from the front, the right, the rear and the left: the roof goes
+    away from each, and springs back."""
+    hits = [(0.30, "front", (0.0, -0.40, -0.10), (0, -1, 0.25), (2.8, 0.0)),
+            (1.20, "right", (-0.39, 0.02, -0.18), (-1, 0, 0.25), (0.0, -2.8)),
+            (2.10, "rear", (0.0, 0.50, -0.10), (0, 1, 0.25), (-2.8, 0.0)),
+            (3.00, "left", (0.39, 0.02, -0.18), (1, 0, 0.25), (0.0, 2.8))]
+    p, r = Spring(*KICK), Spring(*KICK)
+    out, n = [], int(3.8 * fps)
+    for i in range(n):
+        t = i / fps
+        tracer = None
+        for th, _, at, frm, (dp, dr) in hits:
+            if th - 0.16 <= t < th:
+                u = (th - t) / 0.16
+                tracer = Vector(at) + Vector(frm).normalized() * (1.4 * u)
+            if abs(t - th) < 0.5 / fps:
+                p.kick(dp)
+                r.kick(dr)
+        out.append(_state(pitch=math.degrees(p.step(1 / fps)), roll=math.degrees(r.step(1 / fps)),
+                          tracer=tracer))
+    return out
+
+
+def clip_drive(tank, fps=CLIP_FPS):
+    """Away and stop: the belts run and the wheels turn with the distance, the
+    sprung mass squats on the pull-away and noses down on the stop, and the
+    ground's bumps shake it while it moves."""
+    import random
+    rnd = random.Random(7)
+    vmax, ta, tc = 0.45, 0.55, 1.4          # speed, ramp, cruise (s)
+    p, r = Spring(*SWAY), Spring(*SWAY)
+    s, v, next_bump = 0.0, 0.0, 0.08
+    out, n = [], int(3.4 * fps)
+    for i in range(n):
+        t = i / fps
+        t0 = 0.3
+        if t < t0:
+            a = 0.0
+        elif t < t0 + ta:
+            a = vmax / ta
+        elif t < t0 + ta + tc:
+            a = 0.0
+        elif t < t0 + 2 * ta + tc:
+            a = -vmax / ta
+        else:
+            a = 0.0
+        v = min(vmax, max(0.0, v + a / fps))
+        s += v / fps
+        if s >= next_bump:
+            p.kick(rnd.uniform(-0.35, 0.35))
+            r.kick(rnd.uniform(-0.25, 0.25))
+            next_bump += rnd.uniform(0.06, 0.12)
+        # BodyPitch follows the acceleration: 0.035 rad at full pull, nose up
+        pitch = p.step(1 / fps, target=0.035 * a / (vmax / ta))
+        out.append(_state(tank_y=-s, drive=s, pitch=math.degrees(pitch),
+                          roll=math.degrees(r.step(1 / fps))))
+    return out
+
+
+def clip_knocked(tank, fps=CLIP_FPS, yaw=30.0):
+    """A penetrating hit from the front: the mass rocks back, the turret drops
+    into its ring and tips, the gun falls to its stop, the belts go slack."""
+    wreck = wreck_spec(tank)
+    p = Spring(*KICK)
+    f = Spring(260.0, 18.0)               # the tip settles with a small overshoot
+    out, n, th = [], int(1.8 * fps), 0.25
+    for i in range(n):
+        t = i / fps
+        tracer = None
+        if th - 0.16 <= t < th:
+            tracer = Vector((0.0, -0.40, -0.10)) + Vector((0, -1, 0.25)).normalized() * (1.4 * (th - t) / 0.16)
+        if abs(t - th) < 0.5 / fps:
+            p.kick(3.2)
+        tip = f.step(1 / fps, target=1.0 if t >= th + 0.05 else 0.0)
+        g = min(1.0, max(0.0, (t - th - 0.05) / 0.28)) ** 2
+        out.append(_state(yaw=yaw, tip=tip, elev=-wreck["gun"]["droop_deg"] * g,
+                          slack=_smooth(th + 0.05, th + 0.5, t), tracer=tracer,
+                          pitch=math.degrees(p.step(1 / fps))))
+    return out
+
+
+def clip_destroyed(tank, fps=CLIP_FPS, yaw=30.0):
+    """The ammunition goes: the debris is thrown out from the ring and falls,
+    bouncing, the turret is thrown back in a spinning arc, lands on the engine
+    deck and slides to rest, the hull jolts at the blast and at the landing."""
+    import random
+    rnd = random.Random(3)
+    tank = game_tank(tank)
+    toss, wreck = toss_spec(tank), wreck_spec(tank)
+    g = 8.0 * toss["lift"] / toss["flight_s"] ** 2
+    T, S = toss["flight_s"], toss["slide"]["s"]
+    # the landing the spin brings it to: at least a turn and a half past `yaw`
+    Lk = min(toss["landing"], key=lambda L: abs((L["yaw_deg"] - (yaw + 150)) % 360))
+    body = bpy.data.objects[gnm(tank, "Body")]
+    tur = bpy.data.objects[gnm(tank, "Turret")]
+    q = Lk["quat"]
+    from mathutils import Quaternion
+    C = Matrix(((1, 0, 0), (0, 0, 1), (0, -1, 0)))
+    RL = C.transposed() @ Quaternion((q[3], q[0], q[1], q[2])).to_matrix() @ C
+    tilt = RL @ Matrix.Rotation(-math.radians(Lk["yaw_deg"]), 3, "Z")
+    p0 = tur.matrix_basis.translation.copy()
+    p1 = _from_gl(Lk["at"])
+    y_end = Lk["yaw_deg"] + 360.0 * math.ceil((yaw + 300.0 - Lk["yaw_deg"]) / 360.0)
+    # debris: start where they sit, out and up from the blast
+    top = bpy.data.objects[gnm(tank, "Tank")]
+    blast = top.matrix_world @ _from_gl(debris_spec(tank)["blast"]["at"])
+    ground = top.matrix_world.translation.z
+    parts = []
+    for rr in tank.debris():
+        ob = bpy.data.objects[gnm(tank, rr["name"])]
+        M = ob.matrix_world.copy()
+        d = M.translation - blast
+        d.z = abs(d.z) + 0.6 * d.length
+        d.normalize()
+        axis = Vector((rnd.uniform(-1, 1), rnd.uniform(-1, 1), rnd.uniform(-1, 1))).normalized()
+        co = np.array([v.co[:] for v in ob.data.vertices])
+        parts.append({"name": ob.name, "pos": M.translation.copy(), "R": M.to_3x3(),
+                      "v": d * rnd.uniform(1.0, 1.7), "axis": axis, "w": rnd.uniform(6.0, 14.0),
+                      "half": float((co.max(0) - co.min(0)).min()) / 2, "rest": False})
+    p, hv = Spring(*KICK), Spring(*SWAY)
+    t_blast = 0.12
+    out, n = [], int((t_blast + T + S + 0.9) * fps)
+    dt = 1.0 / fps
+    for i in range(n):
+        t = i / fps
+        if abs(t - t_blast) < 0.5 * dt:
+            p.kick(-2.5)
+            hv.kick(0.35)
+        if abs(t - (t_blast + T)) < 0.5 * dt:
+            p.kick(1.6)                   # the turret lands: stern down
+        deb = None
+        if t >= t_blast:
+            deb = {}
+            for d in parts:
+                if not d["rest"]:
+                    d["v"].z -= g * dt
+                    d["pos"] += d["v"] * dt
+                    d["R"] = Matrix.Rotation(d["w"] * dt, 3, d["axis"]) @ d["R"]
+                    if d["pos"].z < ground + d["half"]:
+                        d["pos"].z = ground + d["half"]
+                        d["v"].z = -0.3 * d["v"].z
+                        d["v"].x *= 0.5
+                        d["v"].y *= 0.5
+                        d["w"] *= 0.5
+                        if abs(d["v"].z) < 0.15:
+                            d["rest"] = True
+                M = d["R"].to_4x4()
+                M.translation = d["pos"]
+                deb[d["name"]] = M
+        Mt = None
+        if t >= t_blast:
+            tau = min(1.0, (t - t_blast) / T)
+            u = min(1.0, max(0.0, (t - t_blast - T) / S))
+            e = 1 - (1 - u) ** 2
+            prog = 0.82 * tau + 0.18 * e
+            pos = p0.lerp(p1, prog)
+            if tau < 1.0:
+                pos.z = p0.z + (p1.z - p0.z) * tau + 4 * toss["lift"] * tau * (1 - tau)
+            yw = yaw + (y_end - 70.0 - yaw) * tau + 70.0 * e
+            w = _smooth(0.75, 1.0, tau)          # it settles into the deck's tilt
+            R = Quaternion().slerp(tilt.to_quaternion(), w).to_matrix() @ Matrix.Rotation(
+                math.radians(yw), 3, "Z")
+            Mt = R.to_4x4()
+            Mt.translation = pos
+        out.append(_state(yaw=yaw, turret=Mt, debris=deb,
+                          elev=-wreck["gun"]["droop_deg"] * _smooth(t_blast, t_blast + 0.6, t),
+                          slack=_smooth(t_blast, t_blast + 0.4, t),
+                          pitch=math.degrees(p.step(dt)), heave=hv.step(dt)))
+    return out
+
+
+CLIPS = {"shot": clip_shot, "hits": clip_hits, "drive": clip_drive,
+         "knocked": clip_knocked, "destroyed": clip_destroyed}
+
+# the cameras: iso three-quarter front-left, and a wider one for the drive
+CLIP_VIEWS = {"near": (Vector((1.25, -1.45, 0.85)), Vector((0.0, -0.05, -0.12)), 40),
+              "wide": (Vector((1.75, -1.35, 1.05)), Vector((0.0, -0.45, -0.18)), 38),
+              # the throw's arc peaks 0.54 over the deck and the debris lands
+              # half a metre out: the whole of both has to be in frame
+              "far": (Vector((2.6, -2.4, 1.55)), Vector((0.0, 0.05, 0.05)), 36)}
+CLIP_VIEW_OF = {"drive": "wide", "destroyed": "far"}
+
+
+def render_clip(tank, name, first=0, count=None, w=560, h=420, samples=12, view=None):
+    """Render frames [first, first+count) of clip `name` into
+    out/repro/<NAME>/anim/<name>/f000.png..., with a ground plane, the links
+    laid each frame from the sidecar (on the slack path as it goes slack),
+    and the scene put back afterwards.  Returns frames rendered and total."""
+    tank = game_tank(tank)
+    states = CLIPS[name](tank)
+    count = len(states) - first if count is None else count
+    spec, wreck = game_spec(tank), wreck_spec(tank)
+    X = tank.X_OFF
+    sc = bpy.context.scene
+    cam = sc.camera
+    d = os.path.join(out_dir(tank), "anim", name)
+    os.makedirs(d, exist_ok=True)
+    coll = bpy.data.collections[coll_name(tank)]
+    rest = {o.name: o.matrix_basis.copy() for o in coll.objects}
+    protos = [bpy.data.objects[gnm(tank, t["link"])] for t in spec["tracks"].values()]
+    tmp = bpy.data.collections.new("_game_preview")
+    sc.collection.children.link(tmp)
+    # ground and tracer
+    gme = bpy.data.meshes.new("_pvl_ground")
+    gb = bmesh.new()
+    bmesh.ops.create_grid(gb, x_segments=1, y_segments=1, size=8.0)
+    gb.to_mesh(gme)
+    gb.free()
+    gmat = bpy.data.materials.new("_pvl_ground")
+    gmat.use_nodes = True
+    gb_ = gmat.node_tree.nodes["Principled BSDF"]
+    gb_.inputs["Base Color"].default_value = (0.10, 0.11, 0.085, 1)
+    gb_.inputs["Roughness"].default_value = 0.95
+    gme.materials.append(gmat)
+    gob = bpy.data.objects.new("_pvl_ground", gme)
+    tmp.objects.link(gob)
+    gob.location = (X, -0.3, tank.GROUND - 0.0005)
+    tme = bpy.data.meshes.new("_pvl_tracer")
+    tb = bmesh.new()
+    bmesh.ops.create_uvsphere(tb, u_segments=12, v_segments=8, radius=0.012)
+    tb.to_mesh(tme)
+    tb.free()
+    tmat = bpy.data.materials.new("_pvl_tracer")
+    tmat.use_nodes = True
+    bs = tmat.node_tree.nodes["Principled BSDF"]
+    bs.inputs["Emission Color"].default_value = (1.0, 0.55, 0.1, 1)
+    bs.inputs["Emission Strength"].default_value = 30.0
+    tme.materials.append(tmat)
+    tob = bpy.data.objects.new("_pvl_tracer", tme)
+    tmp.objects.link(tob)
+    # stage: only the game variant and the preview, preview lights, world grey
+    hidden = {}
+    for o in sc.objects:
+        mine = o.name.endswith(tank.SFX) or o.name.startswith("_pvl")
+        if o.type == "LIGHT" or o.name in FX or (o.type == "MESH" and not mine) or o in protos:
+            hidden[o.name] = o.hide_render
+            o.hide_render = True
+    bg = sc.world.node_tree.nodes["Background"]
+    wkeep = (tuple(bg.inputs[0].default_value), bg.inputs[1].default_value)
+    bg.inputs[0].default_value = (0.42, 0.45, 0.5, 1)
+    bg.inputs[1].default_value = 0.6
+    keep = (cam.location.copy(), cam.rotation_euler.copy(), cam.data.type, cam.data.lens,
+            cam.data.clip_start, sc.render.resolution_x, sc.render.resolution_y,
+            sc.render.filepath, sc.eevee.taa_render_samples, sc.render.film_transparent)
+    lights = []
+    for nme, rot, en in (("_pv_key", (math.radians(50), 0, math.radians(35)), 3.2),
+                         ("_pv_fill", (math.radians(60), 0, math.radians(-140)), 1.0)):
+        ld = bpy.data.lights.new(nme, "SUN")
+        ld.energy = en
+        ld.angle = math.radians(8)
+        lo = bpy.data.objects.new(nme, ld)
+        lo.rotation_euler = rot
+        sc.collection.objects.link(lo)
+        lights.append(lo)
+    loc, tgt, lens = CLIP_VIEWS[view or CLIP_VIEW_OF.get(name, "near")]
+    _aim(cam, loc + Vector((X, 0, 0)), tgt + Vector((X, 0, 0)), lens, False)
+    sc.render.resolution_x, sc.render.resolution_y = w, h
+    sc.eevee.taa_render_samples = samples
+    sc.render.film_transparent = False
+    ob = lambda nm_: bpy.data.objects[gnm(tank, nm_)]
+    base = {S: np.array([_from_gl(p) for p in t["path"]]) for S, t in spec["tracks"].items()}
+    slackp = {S: np.array([_from_gl(p) for p in w_["path"]]) for S, w_ in wreck["tracks"].items()}
+    tip_full = _tip_matrix(wreck["turret"]["cant_deg"], wreck["turret"]["pitch_deg"])
+    from mathutils import Quaternion
+    done = 0
+    try:
+        for i in range(first, min(first + count, len(states))):
+            st = states[i]
+            for o in coll.objects:
+                o.matrix_basis = rest[o.name].copy()
+            topo = ob("Tank")
+            topo.matrix_basis = Matrix.Translation(Vector((0, st["tank_y"], 0))) @ rest[topo.name]
+            bo = ob("Body")
+            bo.matrix_basis = (Matrix.Translation(rest[bo.name].translation + Vector((0, 0, st["heave"])))
+                               @ Matrix.Rotation(-math.radians(st["pitch"]), 4, "X")
+                               @ Matrix.Rotation(-math.radians(st["roll"]), 4, "Y"))
+            tu = ob("Turret")
+            if st["turret"] is not None:
+                tu.matrix_basis = st["turret"]
+            else:
+                # axis-angle, not slerp: the settling spring overshoots past 1
+                ax, ang = tip_full.to_quaternion().to_axis_angle()
+                R = (Matrix.Rotation(math.radians(st["yaw"]), 3, "Z")
+                     @ Matrix.Rotation(ang * st["tip"], 3, ax))
+                tu.matrix_basis = Matrix.Translation(rest[tu.name].translation) @ R.to_4x4()
+            ob("Mantlet").rotation_euler = (-math.radians(st["elev"]), 0, 0)
+            ba = ob("Barrel")
+            ba.matrix_basis = Matrix.Translation(Vector((0, st["recoil"], 0))) @ rest[ba.name]
+            for S, t in spec["tracks"].items():
+                for wh in t["wheels"]:
+                    ob(wh["node"]).rotation_euler = (st["drive"] / wh["r"], 0, 0)
+            bpy.context.view_layer.update()
+            if st["debris"]:
+                for nme, M in st["debris"].items():
+                    bpy.data.objects[nme].matrix_world = M
+            for o in list(tmp.objects):
+                if o.name.startswith("_pvl."):            # last frame's links
+                    bpy.data.objects.remove(o)
+            paths = {S: [_gl(p) for p in base[S] * (1 - st["slack"]) + slackp[S] * st["slack"]]
+                     for S in base}
+            place_links(tank, spec, st["drive"], tmp, paths=paths)
+            if st["tracer"] is not None:
+                tob.hide_render = False
+                tob.location = st["tracer"] + Vector((X, 0, 0))
+            else:
+                tob.hide_render = True
+            sc.render.filepath = os.path.join(d, "f%03d.png" % i)
+            bpy.ops.render.render(write_still=True)
+            done += 1
+    finally:
+        for o in list(tmp.objects):
+            bpy.data.objects.remove(o)
+        bpy.data.collections.remove(tmp)
+        for m in (gme, tme):
+            bpy.data.meshes.remove(m)
+        for m in (gmat, tmat):
+            bpy.data.materials.remove(m)
+        for lo in lights:
+            ld = lo.data
+            bpy.data.objects.remove(lo)
+            bpy.data.lights.remove(ld)
+        for nme, v in hidden.items():
+            if nme in sc.objects:
+                sc.objects[nme].hide_render = v
+        bg.inputs[0].default_value = wkeep[0]
+        bg.inputs[1].default_value = wkeep[1]
+        (cam.location, cam.rotation_euler, cam.data.type, cam.data.lens, cam.data.clip_start,
+         sc.render.resolution_x, sc.render.resolution_y, sc.render.filepath,
+         sc.eevee.taa_render_samples, sc.render.film_transparent) = keep
+        for o in coll.objects:
+            o.matrix_basis = rest[o.name]
+        bpy.context.view_layer.update()
+    return {"clip": name, "rendered": done, "frames": len(states), "dir": d}
+
+
 def _tube_length(tank):
     bar = bpy.data.objects[gnm(tank, "Barrel")]
     co = world_co(bar)
@@ -1461,6 +2270,9 @@ def export_game(tank, out_dir=None):
     top = bpy.data.objects[gnm(tank, "Tank")]
     objs = [top] + list(top.children_recursive)
     spec = game_spec(tank)
+    ds = debris_spec(tank)
+    spec.update(wreck=wreck_spec(tank), toss=toss_spec(tank),
+                debris=ds["parts"], blast=ds["blast"])
     for o in objs:
         base = o.name[:-len(tank.SFX)]
         if bpy.data.objects.get(base) is not None:
@@ -1726,15 +2538,12 @@ def root_objects(tank, key):
     """The meshes baked into one texture: a canonical root's children, or on
     the game variant the same grouping read off its hierarchy."""
     if getattr(tank, "GAME", False):
-        if key == "Hull":
-            names = [gnm(tank, "Hull")]
-        elif key == "Turret":
-            names = [gnm(tank, n) for n in ("Turret", "Mantlet", "Barrel")]
-        else:
-            tr = bpy.data.objects[gnm(tank, "Track." + key[-1])]
-            return sorted((o for o in tr.children_recursive if o.type == "MESH"),
-                          key=lambda o: o.name)
-        return [o for o in (bpy.data.objects.get(n) for n in names) if o]
+        # a node and every mesh under it: the hull with its debris, the turret
+        # with gun and hatch, a track with its wheels
+        top = {"Hull": "Hull", "Turret": "Turret"}.get(key, "Track." + key[-1])
+        ob = bpy.data.objects[gnm(tank, top)]
+        return ([ob] if ob.type == "MESH" else []) + sorted(
+            (o for o in ob.children_recursive if o.type == "MESH"), key=lambda o: o.name)
     _, kids = ROOTS[key]
     return [o for o in (bpy.data.objects.get(nm(tank, k)) for k in kids) if o]
 
