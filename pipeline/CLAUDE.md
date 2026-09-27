@@ -14,7 +14,8 @@ Blender MCP. Скрипты — обычные модули: импортиру�
 ## Раскладка
 
 ```
-pipeline/            34 модуля; docs/ — разбор по подсистемам, по ссылке (см. ниже)
+pipeline/            37 модулей; docs/ — разбор по подсистемам, по ссылке (см. ниже)
+pipeline/repro/      процедурные копии генераторных моделей, модуль на танк (docs/repro.md)
 pipeline/out/        черновой вывод разовых прогонов, не в git
 ../assets/Input3D/   исходные .glb от генератора, по одному на танк
 ../assets/Parts3D/   разобранные модели
@@ -64,6 +65,7 @@ pipeline/out/        черновой вывод разовых прогонов
 |---|---|---|
 | [docs/assets.md](docs/assets.md) | раскладка целиком; чем является то, что отдаёт генератор — суп из оболочек, нет скрытых поверхностей, нет погона | ищешь ассет или режешь модель |
 | [docs/tank-scene.md](docs/tank-scene.md) | каноничная структура танка по частям: имена, родители, трансформы, материалы, ловушка иерархии | авторишь сцену нового танка |
+| [docs/repro.md](docs/repro.md) | копия генераторной модели процедурой: порядок от замеров до запекания текстур, проверки, ловушки | делаешь чистую копию сырой модели |
 | [docs/tools.md](docs/tools.md) | `tank_parts`, `turret_axis`, `sprite_atlas`, `atlas_pack`, `hex_base`, `split_turret`, `track_split`, `track_make`, `track_shape`, `assemble_tank`, `key_on_white`, `water_sheet`, `stamp_ports`, `stamp_bore` — и пять ловушек измерения | чем меряют, режут и рендерят |
 | [docs/effects.md](docs/effects.md) | дульная вспышка, выхлоп, пожар танка и его столб, попадание в броню, след от него | ставишь или правишь эффект на танке |
 | [docs/layers.md](docs/layers.md) | `sprite_height`, `ground_shadow`, `barrel_recoil`, `draw_order`, `wreck_pose`, `track_cycle`/`parts_render`, `turret_ring` | слои, которые двигаются относительно корпуса |
