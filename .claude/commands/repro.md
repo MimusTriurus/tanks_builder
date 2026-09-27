@@ -75,8 +75,8 @@ single-mesh scene has to be split first.
 `K.shoot([...], path, (0, 0, 0), only=lambda o: o.name in <original meshes>)`
 over `iso_fl`, `iso_rr`, `side`, `front`, `rear`, `top` and the close-ups
 (`mantlet`, `front_close`, `track_close`, `rear_close`, `roof`). Look at the
-tone, not only the shape: the paint colour is calibrated in step 6 against
-these renders, never against the texture's median.
+tone, not only the shape - but the copy is painted in the army's colours
+(step 6), so a tone difference from the original is expected, not a defect.
 
 ## 3. Measure off the vertices
 
@@ -92,9 +92,13 @@ these renders, never against the texture's median.
 
 ## 4. Author `pipeline/repro/<name>.py`
 
-Copy the skeleton of `repro/lt_parts.py`: the constants block (`NAME`, `SFX`,
+Copy the skeleton of `repro/lt_parts.py` (flat plates, prisms) or
+`repro/mt_parts.py` (a rounded hull and turret as lofts of plan rings, a belt
+from a measured outline): the constants block (`NAME`, `SFX`,
 `X_OFF`, `PREFIX`, `GROUND`, `RING_C`, `RING_Z0`, `TRACK_X`, `TRUNNION`,
-`PALETTE`), then `hull`, `engine`, `turret`, `mantlet`, `barrel`, `belt`,
+`PALETTE = ARMY_PALETTE`, and `ORIGINAL` when the scene holds two versions of a
+canonical part - the atlas JSONs' `rendered` say which one the sprites used),
+then `hull`, `engine`, `turret`, `mantlet`, `barrel`, `belt`,
 `rolls` and, if the turret has painted seams, `turret_ink`. Numbers in the
 original's frame.
 
@@ -160,8 +164,10 @@ png = K.compare(tank, ["iso_fl", "iso_rr", "side", "front", "top"], "cmp_geo")
 lay = K.lay_sheet(tank)          # the gun close up at +max, 0, -max of the ladder
 ```
 
-Geometry reads fine on the source materials in EEVEE. Iterate on the module
-until the silhouettes and parts match and the lay sheet shows the mantlet
+Geometry reads fine on the source materials in EEVEE. `K.silhouettes(tank)`
+overlays the two masks per view (red: only the original, blue: only the copy)
+with an IoU each - a 2 cm offset invisible on a shrunk sheet shows at once, and
+which part makes it. Iterate on the module until the silhouettes and parts match and the lay sheet shows the mantlet
 turning inside its frame with the tube centred in its collar, **then send both
 pictures to the user and wait for a go before baking**: textures cost a minute
 a round, and a shape change afterwards means baking again. `K.lay(tank, deg)`
@@ -169,10 +175,19 @@ poses the gun by hand; `bake` puts it back to 0 itself.
 
 ## 6. Textures
 
-Calibrate the palette first: render both side by side and read
-`K.window_means(png, {...})` on lit paint and on grey metal of each tank.
-The copy's windows should come out within a few percent of the original's;
-adjust `PALETTE` (sRGB hex as stored), not the lights.
+The paint is the army's, not the original's: `PALETTE = K.ARMY_PALETTE`
+(calibrated once, on LT_PARTS). The generator paints every tank a little
+differently (MT_PARTS_1: 14 deg bluer, greyer, 15 % darker than LT_PARTS),
+and one side's tanks must not look like two paint jobs - so do **not**
+recalibrate to the original. Override a kind in the module only on purpose
+(a kind the army has no entry for is a kit change), and after the bake check
+the result, not the original:
+
+```python
+K.army_check(tank)     # the copy's roof top-down vs K.ARMY_ROOF: ratio ~1.0 per channel
+```
+
+`K.window_means` / `K.paint_band` measure any other render the same way.
 
 ```python
 K.build(tank)                          # bake needs the source materials
@@ -196,7 +211,8 @@ K.verify(tank)
 
 must show: `axis_minus_root` 0, `roundness` 1.0, `warnings` empty, `rotatable`
 true, `ground_copy` equal to `ground_original`, one material per root,
-`no_uvmap`, `custom_props` and `source_left` empty, `engine` back on EEVEE,
+`no_uvmap`, `custom_props`, `source_left` and `floating` (pieces touching
+nothing, like a rivet left over a plate that moved) empty, `engine` back on EEVEE,
 and under `gun`: `origin_off` 0 for mantlet and barrel, `rotation` 0 (the gun
 is saved at rest), `breech_off` 0.
 Then `K.compare(...)` over the full set of views and the close-ups plus

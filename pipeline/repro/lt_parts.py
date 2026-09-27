@@ -14,6 +14,7 @@ import numpy as np
 from mathutils import Matrix, Vector
 
 from repro_kit import (
+    ARMY_PALETTE,
     PAINT, GUN, RUBBER, TRACK, GLASS, DARK, PAINT_T, PAINTDK, RIVET, RIVET_G, RIV,
     Group, new_bm, box, prism, lathe, rounded_rect_profile, cyl, rivets, line,
     bend_bar, hull_solid, offset_path, bent_plate, clip_path_y, clip_polygon,
@@ -28,21 +29,11 @@ GROUND = -0.3844
 RING_C = (0.0, -0.0212)
 TRACK_X = 0.2646
 
-# What the original's *visible* surfaces carry (sRGB as stored): its texture
-# median (#1f3c19) is dragged down by shade the generator baked into hidden
-# shells, and under one light it rendered ~1.5x brighter than that median.
-PALETTE = {
-    PAINT:   dict(base="#2e591f", light="#447726", dark="#1b3a13", ink="#08120a", rough=0.96, metal=0.0),
-    PAINT_T: dict(base="#2e591f", light="#447726", dark="#1b3a13", ink="#08120a", rough=0.96, metal=0.0),
-    PAINTDK: dict(base="#1d3a15", light="#2c5220", dark="#11240d", ink="#07100a", rough=0.96, metal=0.0),
-    RIVET:   dict(base="#3a6a23", light="#4f8a2e", dark="#1b3a13", ink="#08120a", rough=0.96, metal=0.0),
-    GUN:     dict(base="#4a4a4d", light="#737275", dark="#28282a", ink="#0d0d0f", rough=0.58, metal=0.65),
-    RIVET_G: dict(base="#555558", light="#7c7b7e", dark="#28282a", ink="#0d0d0f", rough=0.58, metal=0.65),
-    TRACK:   dict(base="#40435a", light="#646881", dark="#25262f", ink="#0b0b0f", rough=0.95, metal=0.0),
-    RUBBER:  dict(base="#1d1d1f", light="#2e2e31", dark="#121213", ink="#0a0a0b", rough=0.9, metal=0.0),
-    GLASS:   dict(base="#d6d6d2", light="#f4f4ee", dark="#9a9a96", ink="#3a3a3a", rough=0.2, metal=0.0),
-    DARK:    dict(base="#101211", light="#1c1e1d", dark="#0a0b0a", ink="#060606", rough=0.9, metal=0.0),
-}
+# The army's paint (repro_kit.ARMY_PALETTE) was calibrated here, on what the
+# original's *visible* surfaces carry: its texture median (#1f3c19) is dragged
+# down by shade the generator baked into hidden shells, and under one light
+# it rendered ~1.5x brighter than that median.
+PALETTE = ARMY_PALETTE
 
 # ------------------------------------------------------------------- layout
 

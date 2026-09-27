@@ -63,8 +63,8 @@ TMP = "_repro_tmp"
 
 # source materials: one per kind of surface, baked away at the end
 KINDS = ["Paint", "Metal", "Rubber", "Track", "Glass", "Dark", "PaintTurret",
-         "PaintDark", "Rivet", "RivetMetal"]
-PAINT, GUN, RUBBER, TRACK, GLASS, DARK, PAINT_T, PAINTDK, RIVET, RIVET_G = range(10)
+         "PaintDark", "Rivet", "RivetMetal", "GlassTint"]
+PAINT, GUN, RUBBER, TRACK, GLASS, DARK, PAINT_T, PAINTDK, RIVET, RIVET_G, GLASS_T = range(11)
 GREEN = (PAINT, PAINT_T, PAINTDK, RIVET)      # what the grey check samples under
 
 NAMES = {
@@ -86,6 +86,32 @@ TEX = 2048            # per root, like the canon
 UV_MARGIN = 0.004     # of the UV square: ~8 px at 2048 between islands
 BAKE_MARGIN = 16      # px, fills the gaps between islands with their own colour
 RIV = 0.0062          # rivet radius
+
+# One army's paint for every copy (sRGB hex as stored).  Calibrated once, on
+# LT_PARTS: its baked copy renders within 3 deg of hue and 5 % of value of
+# the original under the preview light.  The generator does not paint two
+# tanks alike -- MT_PARTS_1 came out 14 deg bluer, greyer and 15 % darker than
+# LT_PARTS -- and a copy's colour is this table, not the generator's texture,
+# so a shared table is the whole normalisation.  A tank module takes it as
+# `PALETTE = ARMY_PALETTE` and overrides a kind only on purpose.
+ARMY_PALETTE = {
+    PAINT:   dict(base="#2e591f", light="#447726", dark="#1b3a13", ink="#08120a", rough=0.96, metal=0.0),
+    PAINT_T: dict(base="#2e591f", light="#447726", dark="#1b3a13", ink="#08120a", rough=0.96, metal=0.0),
+    PAINTDK: dict(base="#1d3a15", light="#2c5220", dark="#11240d", ink="#07100a", rough=0.96, metal=0.0),
+    RIVET:   dict(base="#3a6a23", light="#4f8a2e", dark="#1b3a13", ink="#08120a", rough=0.96, metal=0.0),
+    GUN:     dict(base="#4a4a4d", light="#737275", dark="#28282a", ink="#0d0d0f", rough=0.58, metal=0.65),
+    RIVET_G: dict(base="#555558", light="#7c7b7e", dark="#28282a", ink="#0d0d0f", rough=0.58, metal=0.65),
+    TRACK:   dict(base="#40435a", light="#646881", dark="#25262f", ink="#0b0b0f", rough=0.95, metal=0.0),
+    RUBBER:  dict(base="#1d1d1f", light="#2e2e31", dark="#121213", ink="#0a0a0b", rough=0.9, metal=0.0),
+    GLASS:   dict(base="#d6d6d2", light="#f4f4ee", dark="#9a9a96", ink="#3a3a3a", rough=0.2, metal=0.0),
+    GLASS_T: dict(base="#2f9c98", light="#63d2c8", dark="#1a5e5c", ink="#0b2a2a", rough=0.2, metal=0.0),
+    DARK:    dict(base="#101211", light="#1c1e1d", dark="#0a0b0a", ink="#060606", rough=0.9, metal=0.0),
+}
+# What the army's paint renders as: the baked LT_PARTS copy's turret roof,
+# top-down (`views` "roof") under `shoot`'s preview light, lit band of the
+# green pixels (`paint_band`), display sRGB 0..1.  Every baked copy's roof
+# should read within a few per cent of it.
+ARMY_ROOF = (0.257, 0.411, 0.174)
 
 # The game variant (`build_game`): the same builders, lighter.  No
 # subdivision, half the segments of every revolved or round primitive, and
@@ -128,6 +154,13 @@ def out_dir(tank):
 
 def nm(tank, key):
     return NAMES[key] + tank.SFX
+
+
+def src(tank, key):
+    """The original's object for a canonical key: the canonical name unless
+    the tank module's `ORIGINAL` says which of two lies there (MT_PARTS_1
+    keeps its rebuilt belts next to the generator's, and renders those)."""
+    return getattr(tank, "ORIGINAL", {}).get(key, NAMES[key])
 
 
 def coll_name(tank):
@@ -238,7 +271,8 @@ def make_source(tank, idx):
     for nd in list(nt.nodes):
         nt.nodes.remove(nd)
     b = NB(nt)
-    pal = tank.PALETTE[idx]
+    # a kind the tank's own table leaves out comes from the army's
+    pal = getattr(tank, "PALETTE", ARMY_PALETTE).get(idx, ARMY_PALETTE[idx])
     C = {k: srgb(v) for k, v in pal.items() if k not in ("rough", "metal")}
     out = b.n.new("ShaderNodeOutputMaterial")
     out.name = "OUT"
@@ -2577,10 +2611,12 @@ def bake(tank, keys=("Hull", "Turret", "TrackL", "TrackR"), size=TEX, samples=12
     return out
 
 
-def check_grey(objs, img_name, green_names):
+def check_grey(objs, img_name, green_names, where=0):
     """Sample the baked base colour under every green face (centroid and
     corners pulled in 25 %) at mip 0, 2 and 3, count grey samples.  Any is a
-    neighbour island bleeding in.  Needs the source materials still on."""
+    neighbour island bleeding in.  Needs the source materials still on.
+    `where` > 0 also lists that many grey faces: world centre, source
+    material, the mip that caught it."""
     im = bpy.data.images[img_name]
     W = im.size[0]
     px = np.empty(W * W * 4, np.float32)
@@ -2606,20 +2642,29 @@ def check_grey(objs, img_name, green_names):
         uv = np.empty(len(me.loops) * 2, np.float32)
         me.uv_layers["UVMap"].data.foreach_get("uv", uv)
         uv = uv.reshape(-1, 2)
-        pts = []
+        pts, owner = [], []
         for f in faces:
             l = uv[pl[f]:pl[f] + pt[f]]
             c = l.mean(0)
             pts.append(c[None])
             pts.append(l * 0.75 + c * 0.25)
+            owner += [f] * (1 + len(l))
         P = np.concatenate(pts)
+        owner = np.array(owner)
         res = {"samples": len(P)}
+        hits = {}
         for lv, img in mips.items():
             n = img.shape[0]
             ij = np.clip((P * n).astype(int), 0, n - 1)
             c = img[ij[:, 1], ij[:, 0]]
             grey = (c.mean(1) > 0.12) & (c[:, 1] < 1.15 * np.maximum(c[:, 0], c[:, 2]))
             res["mip%d" % lv] = int(grey.sum())
+            for f in np.unique(owner[grey]):
+                hits.setdefault(int(f), lv)
+        if where and hits:
+            res["where"] = [{"at": [round(v, 4) for v in ob.matrix_world @ me.polygons[f].center],
+                             "mat": me.materials[mi[f]].name, "mip": lv}
+                            for f, lv in list(hits.items())[:where]]
         out[ob.name] = res
     return out
 
@@ -2772,6 +2817,45 @@ def window_means(png, windows, r=10):
             for k, (x, y) in windows.items()}
 
 
+def paint_band(png, box=None, lo=0.55, hi=0.90):
+    """The lit paint of a render: the green pixels in `box` (x0, y0, x1, y1,
+    top-left origin) between the lo and hi quantiles of luminance -- above
+    the ink and the shade, below the highlights -- as mean display sRGB 0..1
+    and hue (deg), saturation, value.  Big areas, so a rivet or a hatch does
+    not move it; `window_means` for a spot."""
+    import colorsys
+    im = bpy.data.images.load(png, check_existing=False)
+    W, H = im.size
+    px = np.empty(W * H * 4, np.float32)
+    im.pixels.foreach_get(px)
+    bpy.data.images.remove(im)
+    px = px.reshape(H, W, 4)[::-1, :, :3]
+    if box:
+        x0, y0, x1, y1 = box
+        px = px[y0:y1, x0:x1]
+    px = px.reshape(-1, 3)
+    g = px[(px[:, 1] > px[:, 0] * 1.15) & (px[:, 1] > px[:, 2] * 1.25)]
+    if len(g) < 100:
+        return None
+    o = np.argsort(g @ np.array([0.299, 0.587, 0.114]))
+    m = g[o[int(len(o) * lo):int(len(o) * hi)]].mean(0)
+    h, sat, v = colorsys.rgb_to_hsv(*m)
+    return {"rgb": [round(float(c), 3) for c in m], "hue": round(float(h) * 360, 1),
+            "sat": round(float(sat), 3), "val": round(float(v), 3), "pixels": int(len(g))}
+
+
+def army_check(tank, name="army_roof"):
+    """The copy's turret roof top-down against ARMY_ROOF: the colour it bakes
+    to, whatever the original's generator painted."""
+    d = out_dir(tank)
+    p = shoot(["roof"], os.path.join(d, name + ".png"), (tank.X_OFF, 0, 0),
+              only=lambda o: o.name.endswith(tank.SFX), w=640, h=480, cols=1)
+    band = paint_band(p)
+    ref = np.array(ARMY_ROOF)
+    return {"png": p, "copy": band, "army": list(ARMY_ROOF),
+            "ratio": [round(float(c), 3) for c in np.array(band["rgb"]) / ref] if band else None}
+
+
 # ---------------------------------------------------------------- rendering
 
 def views(c):
@@ -2800,6 +2884,9 @@ def views(c):
         "rear_close": (P(-0.55, 1.0, 0.52), P(0, 0.35, 0.02), 45, False),
         "low_fl": (P(0.9, -1.3, -0.13), P(0, -0.1, -0.08), 35, False),
         "base_low": (P(0.55, -0.85, 0.06), P(0.0, -0.02, 0.02), 55, False),
+        # a tank longer than LT_PARTS with its gun: MT_PARTS_1 is 1.0 without it
+        "top_wide": (P(0.0, -0.05, 3.0), {"euler": (0.0, 0.0, 0.0)}, 1.32, True),
+        "side_wide": (P(3.0, -0.05, -0.02), P(0.0, -0.05, -0.02), 1.22, True),
     }
 
 
@@ -2883,8 +2970,8 @@ def compare(tank, names, name, w=760, h=560, samples=24, extra=None):
     """Each view twice, the original left and the copy right, same camera
     relative to each tank's centre.  Returns the PNG path."""
     d = out_dir(tank)
-    orig = set(NAMES[k] for k in ("hull_geo", "engine", "turret_geo", "barrel",
-                                  "l_cat", "l_rolls", "r_cat", "r_rolls"))
+    orig = set(src(tank, k) for k in ("hull_geo", "engine", "turret_geo", "barrel",
+                                      "l_cat", "l_rolls", "r_cat", "r_rolls"))
     a = shoot(names, os.path.join(d, "_cmp_a.png"), (0, 0, 0),
               only=lambda o: o.name in orig, w=w, h=h, cols=1, samples=samples, extra=extra)
     b = shoot(names, os.path.join(d, "_cmp_b.png"), (tank.X_OFF, 0, 0),
@@ -2893,6 +2980,68 @@ def compare(tank, names, name, w=760, h=560, samples=24, extra=None):
     A, B = _read_png(a), _read_png(b)
     C = np.concatenate([A, np.ones((A.shape[0], 6, 3), np.float32), B], axis=1)
     return _write_png(C, os.path.join(d, name + ".png"))
+
+
+def masks(names, centre, only, w=640, h=480, extra=None):
+    """Alpha masks (h, w) of the meshes `only` selects, seen from `views`
+    about `centre` -- the silhouette, no lights needed."""
+    sc = bpy.context.scene
+    cam = sc.camera
+    V = views(centre)
+    V.update(extra or {})
+    keep = (cam.location.copy(), cam.rotation_euler.copy(), cam.data.type, cam.data.lens,
+            cam.data.ortho_scale, cam.data.clip_start, sc.render.resolution_x,
+            sc.render.resolution_y, sc.render.filepath, sc.eevee.taa_render_samples,
+            sc.render.film_transparent)
+    hidden = {}
+    for o in sc.objects:
+        if o.name in FX or (o.type == "MESH" and not only(o)):
+            hidden[o.name] = o.hide_render
+            o.hide_render = True
+    sc.render.resolution_x, sc.render.resolution_y = w, h
+    sc.eevee.taa_render_samples = 1
+    sc.render.film_transparent = True
+    out = {}
+    try:
+        for v in names:
+            _aim(cam, *V[v])
+            p = os.path.join(bpy.app.tempdir or REPO, "_mask_%s.png" % v)
+            sc.render.filepath = p
+            bpy.ops.render.render(write_still=True)
+            im = bpy.data.images.load(p, check_existing=False)
+            px = np.empty(w * h * 4, np.float32)
+            im.pixels.foreach_get(px)
+            bpy.data.images.remove(im)
+            out[v] = px.reshape(h, w, 4)[:, :, 3] > 0.5       # rows bottom-up, as _tile_png wants
+    finally:
+        for n, v in hidden.items():
+            sc.objects[n].hide_render = v
+        (cam.location, cam.rotation_euler, cam.data.type, cam.data.lens, cam.data.ortho_scale,
+         cam.data.clip_start, sc.render.resolution_x, sc.render.resolution_y, sc.render.filepath,
+         sc.eevee.taa_render_samples, sc.render.film_transparent) = keep
+    return out
+
+
+def silhouettes(tank, names=("side_wide", "front", "rear", "top_wide", "iso_fl", "iso_rr"),
+                name="sil", w=640, h=480):
+    """The copy's silhouette over the original's, same camera about each
+    tank's centre: grey both, red only the original, blue only the copy.
+    Returns the PNG and the IoU per view -- where the shape is off, before
+    any texture."""
+    orig = set(src(tank, k) for k in ("hull_geo", "engine", "turret_geo", "barrel",
+                                      "l_cat", "l_rolls", "r_cat", "r_rolls"))
+    a = masks(names, (0, 0, 0), lambda o: o.name in orig, w, h)
+    b = masks(names, (tank.X_OFF, 0, 0), lambda o: o.name.endswith(tank.SFX), w, h)
+    tiles, iou = [], {}
+    for v in names:
+        A, B = a[v], b[v]
+        img = np.ones((h, w, 3), np.float32) * 0.93
+        img[A & B] = (0.55, 0.55, 0.55)
+        img[A & ~B] = (0.85, 0.15, 0.1)
+        img[B & ~A] = (0.1, 0.3, 0.9)
+        tiles.append(img)
+        iou[v] = round(float((A & B).sum()) / max(1, float((A | B).sum())), 4)
+    return _tile_png(tiles, 2, os.path.join(out_dir(tank), name + ".png")), iou
 
 
 def _read_png(p):
@@ -2933,6 +3082,60 @@ def _tile_png(tiles, cols, path, top_down=True):
 
 # ------------------------------------------------------------------- checks
 
+def floating(ob, gap=0.0015, top=12, big=5000):
+    """Pieces of a mesh that touch nothing else in it: connected islands
+    with no face of another island within their bounding radius plus `gap`
+    -- a rivet left in the air when the plate under it moved.  (Not "no
+    vertex in its box": a big flat face has no vertices in the middle.)"""
+    from mathutils.bvhtree import BVHTree
+    me = ob.data
+    n = len(me.vertices)
+    if n == 0 or len(me.polygons) == 0:
+        return []
+    co = np.empty(n * 3, np.float64)
+    me.vertices.foreach_get("co", co)
+    co = co.reshape(-1, 3)
+    ed = np.empty(len(me.edges) * 2, np.int64)
+    me.edges.foreach_get("vertices", ed)
+    ed = ed.reshape(-1, 2)
+    lab = np.arange(n)
+    while True:                        # label propagation to the smallest index
+        m = np.minimum(lab[ed[:, 0]], lab[ed[:, 1]])
+        new = lab.copy()
+        np.minimum.at(new, ed[:, 0], m)
+        np.minimum.at(new, ed[:, 1], m)
+        new = new[new]
+        if np.array_equal(new, lab):
+            break
+        lab = new
+    ids, inv = np.unique(lab, return_inverse=True)
+    if len(ids) < 2:
+        return []
+    lo = np.full((len(ids), 3), np.inf)
+    hi = np.full((len(ids), 3), -np.inf)
+    np.minimum.at(lo, inv, co)
+    np.maximum.at(hi, inv, co)
+    size = np.bincount(inv)
+    ls = np.empty(len(me.polygons), np.int64)
+    me.polygons.foreach_get("loop_start", ls)
+    lv = np.empty(len(me.loops), np.int64)
+    me.loops.foreach_get("vertex_index", lv)
+    face_island = inv[lv[ls]]
+    bvh = BVHTree.FromPolygons([tuple(v) for v in co], [tuple(p.vertices) for p in me.polygons])
+    out = []
+    for k in np.argsort(size):
+        if size[k] > big:              # the big shells hold everything up
+            break
+        c = (lo[k] + hi[k]) / 2
+        r = float(np.linalg.norm(hi[k] - lo[k])) / 2 + gap
+        if not any(face_island[h[2]] != k for h in bvh.find_nearest_range(Vector(c.tolist()), r)):
+            w = ob.matrix_world @ Vector(c.tolist())
+            out.append({"at": [round(v, 4) for v in w], "verts": int(size[k])})
+            if len(out) >= top:
+                break
+    return out
+
+
 def verify(tank):
     """What every copy has to pass before anyone looks at pictures: the ring
     axis measured on the copy (read-only), belts on the original's ground,
@@ -2953,8 +3156,8 @@ def verify(tank):
            "axis_minus_root": [round(axis[0] - tw[0], 5), round(axis[1] - tw[1], 5)],
            "roundness": rep["roundness"], "band": rep["band"], "warnings": rep["warnings"],
            "rotatable": rep["rotatable"].get("free")}
-    ground = min(world_co(bpy.data.objects[NAMES[k]])[:, 2].min() for k in ("l_cat", "r_cat")
-                 if bpy.data.objects.get(NAMES[k]))
+    ground = min(world_co(bpy.data.objects[src(tank, k)])[:, 2].min() for k in ("l_cat", "r_cat")
+                 if bpy.data.objects.get(src(tank, k)))
     belts = min(world_co(bpy.data.objects[nm(tank, k)])[:, 2].min() for k in ("l_cat", "r_cat"))
     out["ground_original"] = round(float(ground), 4)
     out["ground_copy"] = round(float(belts), 4)
@@ -2968,6 +3171,8 @@ def verify(tank):
                           if bpy.data.materials.get(src_name(tank, i))]
     out["engine"] = bpy.context.scene.render.engine
     out["gun"] = check_lay(tank)
+    out["floating"] = {o.name: f for o in coll.objects if o.type == "MESH"
+                       for f in [floating(o)] if f}
     return out
 
 
