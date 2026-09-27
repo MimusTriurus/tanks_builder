@@ -29,6 +29,12 @@ A tank module provides:
     belt(mats, xc) -> (bmesh, stats),  rolls(mats, xc, side) -> Group
     turret_ink(nb, pos, nrm) -> socket   optional: painted seams on the turret
 
+and for the game variant (`build_game`):
+
+    BODY_PIVOT (y, z), EXHAUST [(x, y, z)], GAME_TAG
+    wheel_spec() -> [{name, axle (y, z), r}],  wheels(mats, xc, side) -> [.. + group]
+    running_gear(mats, xc, side) -> Group,  belt_spec() -> (path, pitch, link_bm)
+
 The gun lays in elevation (the board has levels; `barrel_recoil` renders the
 ladder of angles): `Mantlet` and `Barrel` get their origins on the trunnion,
 so `lay(tank, deg)` is `rotation_euler.x` on both, and the barrel's breech
@@ -79,6 +85,27 @@ TEX = 2048            # per root, like the canon
 UV_MARGIN = 0.004     # of the UV square: ~8 px at 2048 between islands
 BAKE_MARGIN = 16      # px, fills the gaps between islands with their own colour
 RIV = 0.0062          # rivet radius
+
+# The game variant (`build_game`): the same builders, lighter.  No
+# subdivision, half the segments of every revolved or round primitive, and
+# rivets as eight-sided domes -- cel shading wants real geometry for them, not
+# a normal map (a toon ramp turns normal-map detail into speckle), and ten
+# tanks on screen can afford it.
+GAME_SFX = ".Game"
+GAME_SEG = 0.5
+GAME_TRIS = 60000     # budget per tank, the LOD Godot starts from
+_MODE = {"game": False}
+
+
+def game():
+    """Is the game variant being built?  Tank modules ask where the two differ
+    beyond what the primitives already do."""
+    return _MODE["game"]
+
+
+def segs(n, lo=6):
+    """A segment count as the current variant builds it."""
+    return n if not _MODE["game"] else max(lo, int(round(n * GAME_SEG)))
 
 
 def load(name):
@@ -218,22 +245,43 @@ def make_source(tank, idx):
     geo = b.n.new("ShaderNodeNewGeometry")
     obj = tc.outputs["Object"]
 
+    # the game variant is flat paint: the engine's cel ramp does the light and
+    # its outline pass the edges, so neither is painted in; broad patches stay
+    # at a third of their strength, the fine brush strokes go
+    flat = _MODE["game"]
+    patch = 0.15 if flat else 0.45
     n1 = b.noise(obj, 3.2, 3.0, 0.5)
-    col = b.mix(C["base"], C["light"], b.rng(n1.outputs["Fac"], 0.52, 0.78, 0.0, 0.45))
-    col = b.mix(col, C["dark"], b.rng(n1.outputs["Fac"], 0.46, 0.22, 0.0, 0.45))
-    mp = b.n.new("ShaderNodeMapping")
-    mp.inputs["Scale"].default_value = (26.0, 26.0, 5.0)
-    b.put(mp.inputs["Vector"], obj)
-    n2 = b.noise(mp.outputs["Vector"], 1.0, 2.0, 0.5)
-    col = b.mix(col, C["light"], b.rng(n2.outputs["Fac"], 0.58, 0.72, 0.0, 0.22))
-    col = b.mix(col, C["dark"], b.rng(n2.outputs["Fac"], 0.42, 0.28, 0.0, 0.22))
+    col = b.mix(C["base"], C["light"], b.rng(n1.outputs["Fac"], 0.52, 0.78, 0.0, patch))
+    col = b.mix(col, C["dark"], b.rng(n1.outputs["Fac"], 0.46, 0.22, 0.0, patch))
+    if not flat:
+        mp = b.n.new("ShaderNodeMapping")
+        mp.inputs["Scale"].default_value = (26.0, 26.0, 5.0)
+        b.put(mp.inputs["Vector"], obj)
+        n2 = b.noise(mp.outputs["Vector"], 1.0, 2.0, 0.5)
+        col = b.mix(col, C["light"], b.rng(n2.outputs["Fac"], 0.58, 0.72, 0.0, 0.22))
+        col = b.mix(col, C["dark"], b.rng(n2.outputs["Fac"], 0.42, 0.28, 0.0, 0.22))
+
+    small = idx == TRACK
+    occl = None
+    if flat:
+        # occlusion is baked for the engine to use or not, in the ORM's R
+        ao = b.n.new("ShaderNodeAmbientOcclusion")
+        ao.samples = 16
+        ao.only_local = True
+        ao.inputs["Distance"].default_value = 0.010 if small else 0.022
+        occl = ao.outputs["AO"]
 
     rim = b.n.new("ShaderNodeAttribute")
     rim.attribute_name = "Ink"
     if idx in (RIVET, RIVET_G):
         col = b.mix(col, C["light"], 0.35)
         col = b.mix(col, C["ink"], b.rng(rim.outputs["Fac"], 0.3, 0.8, smooth=True))
-        return _finish(b, m, col, pal, out)
+        return _finish(b, m, col, pal, out, occl)
+
+    if flat:
+        if idx == PAINT_T and hasattr(tank, "turret_ink"):
+            col = b.mix(col, C["ink"], tank.turret_ink(b, obj, geo.outputs["Normal"]))
+        return _finish(b, m, col, pal, out, occl)
 
     nz = b.n.new("ShaderNodeSeparateXYZ")
     b.put(nz.inputs[0], geo.outputs["Normal"])
@@ -242,7 +290,6 @@ def make_source(tank, idx):
 
     # the belt is small parts packed tight: everything is near a crease or an
     # edge there, so it gets a lighter hand or it goes black
-    small = idx == TRACK
     ao = b.n.new("ShaderNodeAmbientOcclusion")
     ao.samples = 12
     ao.only_local = True
@@ -264,14 +311,21 @@ def make_source(tank, idx):
     return _finish(b, m, col, pal, out)
 
 
-def _finish(b, m, col, pal, out):
-    """Two emission outputs (albedo, roughness/metal) and the bake target."""
+def _finish(b, m, col, pal, out, occl=None):
+    """Two emission outputs (albedo, occlusion/roughness/metal) and the bake
+    target.  R is 0 unless `occl` is given (the game variant)."""
     em_c = b.n.new("ShaderNodeEmission")
     em_c.name = "EM_ALBEDO"
     b.put(em_c.inputs["Color"], col)
     em_d = b.n.new("ShaderNodeEmission")
     em_d.name = "EM_ORM"
     em_d.inputs["Color"].default_value = (0.0, pal["rough"], pal["metal"], 1.0)
+    if occl is not None:
+        cc = b.n.new("ShaderNodeCombineColor")
+        b.put(cc.inputs["Red"], occl)
+        cc.inputs["Green"].default_value = pal["rough"]
+        cc.inputs["Blue"].default_value = pal["metal"]
+        b.l.new(cc.outputs["Color"], em_d.inputs["Color"])
     b.l.new(em_c.outputs[0], out.inputs["Surface"])
     tgt = b.n.new("ShaderNodeTexImage")
     tgt.name = "BAKE_TARGET"
@@ -317,6 +371,7 @@ def prism(bm, poly_yz, x0, x1, mi):
 def lathe(bm, prof, mi_list, seg=48, axis="X", center=(0, 0, 0), closed=True, phase=0.0):
     """Revolve [(a, r)] about an axis through `center`; r ~ 0 makes a pole.
     Stepped profiles: no subdivision afterwards, it melts the steps."""
+    seg = segs(seg, 8)
     cx, cy, cz = center
     rings = []
     for a, r in prof:
@@ -362,7 +417,9 @@ def rounded_rect_profile(a0, a1, r0, r1, rad, n=4):
     return pts
 
 
-def sphere(bm, c, r, mi, scale=(1, 1, 1), rot=None, seg=12, rings=6):
+def sphere(bm, c, r, mi, scale=(1, 1, 1), rot=None, seg=12, rings=6, exact=False):
+    if not exact:
+        seg, rings = segs(seg), segs(rings, 4)
     m = Matrix.Diagonal((r * scale[0], r * scale[1], r * scale[2], 1.0))
     if rot is not None:
         m = rot.to_4x4() @ m
@@ -373,6 +430,7 @@ def sphere(bm, c, r, mi, scale=(1, 1, 1), rot=None, seg=12, rings=6):
 
 
 def cyl(bm, p0, p1, r, mi, seg=24, r1=None, caps=True):
+    seg = segs(seg)
     p0, p1 = Vector(p0), Vector(p1)
     d = p1 - p0
     rot = Vector((0, 0, 1)).rotation_difference(d.normalized()).to_matrix()
@@ -395,15 +453,21 @@ def rivets(bm, pts, nrm, r=RIV, mi=RIVET):
     lay = bm.verts.layers.float.get("Ink") or bm.verts.layers.float.new("Ink")
     axis = Vector(nrm).normalized()
     rot = basis_from_normal(nrm)
+    # The ink is per vertex and fades across faces, so it follows the rings:
+    # the copy's dome has one at 30 deg (h 0.5, full ink) and the dark band is
+    # solid up to it; the game dome's first ring is at 45 deg (h 0.71), where
+    # the copy's ramp gives 0.28 and the band washed out into a gradient --
+    # rivets melted into the plate.  So the game ramp starts higher.
+    s, rg, top = (8, 4, 0.92) if _MODE["game"] else (12, 6, 0.78)
     for p in pts:
         c = Vector(p) - axis * 0.0008
-        vs = sphere(bm, c, r, mi, scale=(1, 1, 0.6), rot=rot, seg=12, rings=6)
+        vs = sphere(bm, c, r, mi, scale=(1, 1, 0.6), rot=rot, seg=s, rings=rg, exact=True)
         below = [v for v in vs if (v.co - c).dot(axis) < -1e-6]
         bmesh.ops.delete(bm, geom=below, context="VERTS")
         for v in vs:
             if v.is_valid:
                 h = (v.co - c).dot(axis) / (r * 0.6)
-                v[lay] = max(0.0, min(1.0, (0.78 - h) / 0.26))
+                v[lay] = max(0.0, min(1.0, (top - h) / 0.26))
 
 
 def line(p0, p1, n):
@@ -413,10 +477,44 @@ def line(p0, p1, n):
 
 
 def bend_bar(bm, pts, r, mi, seg=10):
+    """A bar bent through `pts`.  The copy builds it as cylinders with a ball
+    on every joint; the game variant sweeps one tube (a 25-point shackle ring
+    as balls and cylinders was 8 000 triangles)."""
+    if _MODE["game"]:
+        closed = (Vector(pts[0]) - Vector(pts[-1])).length < 1e-6
+        return tube(bm, pts[:-1] if closed else pts, r, mi, segs(seg), closed)
     for a, b in zip(pts, pts[1:]):
         cyl(bm, a, b, r, mi, seg=seg, caps=False)
     for p in pts:
         sphere(bm, p, r, mi, seg=seg, rings=6)
+
+
+def tube(bm, pts, r, mi, seg=8, closed=False):
+    """A circle swept along a polyline, its frame carried along by parallel
+    transport (no twist), capped when open."""
+    pts = [Vector(p) for p in pts]
+    n = len(pts)
+    rings, u = [], None
+    for i, p in enumerate(pts):
+        a = pts[i - 1] if (i > 0 or closed) else p
+        b = pts[(i + 1) % n] if (i < n - 1 or closed) else p
+        t = (b - a).normalized()
+        u = t.orthogonal().normalized() if u is None else (u - t * u.dot(t)).normalized()
+        w = t.cross(u)
+        rings.append([bm.verts.new(p + (u * math.cos(k * math.tau / seg) +
+                                        w * math.sin(k * math.tau / seg)) * r)
+                      for k in range(seg)])
+    fs = []
+    for i in range(n if closed else n - 1):
+        ra, rb = rings[i], rings[(i + 1) % n]
+        for k in range(seg):
+            fs.append(bm.faces.new((ra[k], ra[(k + 1) % seg], rb[(k + 1) % seg], rb[k])))
+    if not closed:
+        fs.append(bm.faces.new(rings[0][::-1]))
+        fs.append(bm.faces.new(rings[-1]))
+    setmat(fs, mi)
+    bmesh.ops.recalc_face_normals(bm, faces=fs)
+    return fs
 
 
 def hull_solid(bm, pts, mi):
@@ -583,7 +681,11 @@ def tmp_collection():
 
 def evaluate(bm, mats, bevel=None, subsurf=0, smooth=True):
     """bm through an angle-limited Bevel (width, segments, angle) and a
-    Subdivision, back as a new bmesh."""
+    Subdivision, back as a new bmesh.  The game variant never subdivides."""
+    if _MODE["game"]:
+        subsurf = 0
+        if bevel and bevel[0] <= 0.004:      # small parts: one chamfer does
+            bevel = (bevel[0], 1, bevel[2])
     me = bpy.data.meshes.new("_tmp")
     bm.to_mesh(me)
     for m in mats:
@@ -661,6 +763,8 @@ class Group:
         ob.location = loc
         compact_materials(me)
         me.set_sharp_from_angle(angle=math.radians(38))
+        # a child built next reads this one's matrix_world
+        bpy.context.view_layer.update()
         return ob
 
 
@@ -900,6 +1004,533 @@ def check_lay(tank):
     return out
 
 
+# ------------------------------------------------------------- game variant
+#
+# The same builders, lighter (`game()`), under one root an engine drives:
+#
+#   Tank                ground, centre line; what the board moves and turns
+#   ├─ Body             the sprung mass: rocks on a hit about the belt tops
+#   │  ├─ Hull          (+ Exhaust.N markers)
+#   │  └─ Turret        origin on the ring axis: yaw
+#   │     └─ Mantlet    origin on the trunnion: elevation
+#   │        └─ Barrel  same origin: recoil along the bore (+ Muzzle marker)
+#   └─ Track.L/.R       unsprung: wheels (origin on their axles), the running
+#                       gear, and ONE link -- the engine lays copies of it
+#                       round the path in the sidecar JSON
+#
+# Exported as glTF with the suffix stripped (`export_game`), plus the sidecar
+# with what glTF cannot carry: the belt path, link count, wheel radii, the
+# axes and signs of every joint.
+
+def game_tank(tank):
+    """The tank module worn as its game variant: own suffix, collection and
+    datablock prefix, one metre further along +X than the copy."""
+    if not getattr(tank, "GAME", False):
+        tank.COPY_SFX, tank.COPY_X_OFF = tank.SFX, tank.X_OFF
+        tank.SFX, tank.PREFIX, tank.X_OFF = GAME_SFX, tank.PREFIX + "G", tank.X_OFF + 1.0
+        tank.GAME = True
+    return tank
+
+
+def gnm(tank, base):
+    return base + tank.SFX
+
+
+def _gl(v):
+    """Blender (x, y, z) -> glTF/Godot (x, z, -y): Y up, the tank's front
+    (Blender -Y) on +Z, which is Godot's MODEL_FRONT."""
+    return [round(float(v[0]), 6), round(float(v[2]), 6), round(float(-v[1]), 6)]
+
+
+def _link_object(tank, mats, link_bm, pitch, parent, coll, name):
+    """One link, in its own frame: +X across the belt, -Y along the path
+    (Blender), +Z out; its origin on the inner surface mid-link.  In glTF that
+    is +X across, +Y out, +Z along -- right-handed, so the engine's basis for
+    link k is (across, out, direction of the path).  No bevel: the link is drawn
+    ~90 times a side, and at its size the outline pass does what a chamfer
+    would."""
+    ev = evaluate(link_bm(pitch), mats)
+    M = Matrix(((0, 1, 0, 0), (-1, 0, 0, 0), (0, 0, 1, 0), (0, 0, 0, 1)))
+    bmesh.ops.transform(ev, matrix=M, verts=ev.verts)
+    me = bpy.data.meshes.new(name)
+    ev.to_mesh(me)
+    ev.free()
+    for mt in mats:
+        me.materials.append(mt)
+    ob = bpy.data.objects.new(name, me)
+    coll.objects.link(ob)
+    ob.parent = parent
+    compact_materials(me)
+    me.set_sharp_from_angle(angle=math.radians(38))
+    return ob
+
+
+def build_game(tank):
+    """The game variant of the copy, textured by `bake(tank, ...)` like the
+    copy.  Returns triangle counts and the numbers the sidecar will carry."""
+    tank = game_tank(tank)
+    t0 = time.time()
+    coll = clear(tank)
+    if coll is None:
+        coll = bpy.data.collections.new(coll_name(tank))
+        bpy.context.scene.collection.children.link(coll)
+    X = tank.X_OFF
+    _MODE["game"] = True
+    try:
+        mats = [make_source(tank, i) for i in range(len(KINDS))]
+
+        def empty(base, parent, loc, size=0.06):
+            e = bpy.data.objects.new(gnm(tank, base), None)
+            e.empty_display_type = "PLAIN_AXES"
+            e.empty_display_size = size
+            coll.objects.link(e)
+            e.parent = parent
+            e.matrix_world = Matrix.Translation(Vector(loc) + Vector((X, 0.0, 0.0)))
+            bpy.context.view_layer.update()
+            return e
+
+        top = empty("Tank", None, (0.0, 0.0, tank.GROUND), 0.3)
+        by, bz = tank.BODY_PIVOT
+        body = empty("Body", top, (0.0, by, bz), 0.2)
+        g = tank.hull(mats)
+        g.meshes += tank.engine(mats).meshes
+        hull = g.build(gnm(tank, "Hull"), body, coll, X, origin=(0.0, by, bz))
+        for i, p in enumerate(getattr(tank, "EXHAUST", ())):
+            empty("Exhaust.%d" % i, hull, p)
+        tur = tank.turret(mats).build(gnm(tank, "Turret"), body, coll, X,
+                                      origin=(tank.RING_C[0], tank.RING_C[1], tank.RING_Z0))
+        piv = trunnion(tank)
+        man = tank.mantlet(mats).build(gnm(tank, "Mantlet"), tur, coll, X, origin=piv)
+        bar = tank.barrel(mats).build(gnm(tank, "Barrel"), man, coll, X, origin=piv)
+        muzzle_y = float(world_co(bar)[:, 1].min())
+        empty("Muzzle", bar, (0.0, muzzle_y, piv[2]), 0.04)
+
+        tracks = {}
+        # named by the tank's own sides: facing +Z (glTF) with +Y up its left
+        # is +X.  (The canonical scene's `L.*` belt stands on -X: the viewer's
+        # left, looking at the front.)
+        for side, S in ((1, "L"), (-1, "R")):
+            xc = side * tank.TRACK_X
+            tr = empty("Track." + S, top, (xc, 0.0, tank.GROUND), 0.15)
+            wheels = []
+            for w in tank.wheels(mats, xc, side):
+                name = "%s.%s" % (w["name"], S)
+                y, z = w["axle"]
+                w["group"].build(gnm(tank, name), tr, coll, X, origin=(xc, y, z))
+                wheels.append({"node": name, "r": round(w["r"], 6),
+                               "axle": _gl((0.0, y, z - tank.GROUND))})
+            tank.running_gear(mats, xc, side).build(gnm(tank, "Running." + S), tr, coll, X)
+            path, pitch0, link_bm = tank.belt_spec()
+            L = float(np.linalg.norm(np.roll(path, -1, 0) - path, axis=1).sum())
+            n = int(round(L / pitch0))
+            pitch = L / n
+            _link_object(tank, mats, link_bm, pitch, tr, coll, gnm(tank, "Link." + S))
+            dense = resample(path, 4 * n)
+            tracks[S] = {"node": "Track." + S, "link": "Link." + S, "links": n,
+                         "pitch": round(pitch, 6), "length": round(L, 6),
+                         "path": [_gl((0.0, y, z - tank.GROUND)) for y, z in dense],
+                         "wheels": wheels}
+    finally:
+        _MODE["game"] = False
+    c = bpy.data.collections.get(TMP)
+    if c:
+        bpy.data.collections.remove(c)
+    obs = [o for o in coll.objects if o.type == "MESH"]
+    tris = {o.name: _tris(o) for o in obs}
+    # the belt is n links, not one: count it as the engine will draw it
+    for S, t in tracks.items():
+        tris["(%d links %s)" % (t["links"], S)] = tris[gnm(tank, t["link"])] * (t["links"] - 1)
+    return {"tris": tris, "total_tris": sum(tris.values()), "budget": GAME_TRIS,
+            "tracks": {S: {k: v for k, v in t.items() if k != "path"} for S, t in tracks.items()},
+            "build_s": round(time.time() - t0, 1)}
+
+
+def _tris(ob):
+    me = ob.data
+    me.calc_loop_triangles()
+    return len(me.loop_triangles)
+
+
+def game_breakdown(tank, top=15):
+    """Where the game variant's triangles go: every piece the tank module
+    evaluates, summed by the line of the module that added it, heaviest
+    first -- what to cut when `build_game` is over budget.  The running gear
+    is one side's and the link is counted once (the tank has two sides and
+    ~90 links a side).  Builds nothing into the scene."""
+    import inspect
+    tank = game_tank(tank)
+    src = open(tank.__file_path__, encoding="utf-8").read().splitlines()
+    log = {}
+    g = globals()
+    orig = g["evaluate"]
+
+    def ev(bm, mats, bevel=None, subsurf=0, smooth=True):
+        out = orig(bm, mats, bevel, subsurf, smooth)
+        fr = [f for f in inspect.stack() if f.filename == tank.__file_path__]
+        line = fr[0].lineno if fr else -1
+        log[line] = log.get(line, 0) + sum(len(f.verts) - 2 for f in out.faces)
+        return out
+
+    made = []
+    g["evaluate"] = ev
+    _MODE["game"] = True
+    # its own source materials: make_source replaces a material of the same
+    # name, and the variant may be built and not yet baked
+    prefix, tank.PREFIX = tank.PREFIX, tank.PREFIX + "_bd"
+    try:
+        mats = [make_source(tank, i) for i in range(len(KINDS))]
+        for part in ("hull", "engine", "turret", "mantlet", "barrel"):
+            made += getattr(tank, part)(mats).meshes
+        for w in tank.wheels(mats, tank.TRACK_X, 1):
+            made += w["group"].meshes
+        made += tank.running_gear(mats, tank.TRACK_X, 1).meshes
+        path, pitch, link_bm = tank.belt_spec()
+        ev(link_bm(pitch), mats).free()
+    finally:
+        g["evaluate"] = orig
+        _MODE["game"] = False
+        for me in made:
+            bpy.data.meshes.remove(me)
+        c = bpy.data.collections.get(TMP)
+        if c:
+            bpy.data.collections.remove(c)
+        for i in range(len(KINDS)):
+            m = bpy.data.materials.get(src_name(tank, i))
+            if m and m.users == 0:
+                bpy.data.materials.remove(m)
+        tank.PREFIX = prefix
+    rows = sorted(log.items(), key=lambda r: -r[1])
+    return [{"line": ln, "tris": t, "code": src[ln - 1].strip() if 0 < ln <= len(src) else "?"}
+            for ln, t in rows[:top]]
+
+
+def verify_game(tank):
+    """What the game variant has to pass before anyone looks at it: every
+    joint's origin on its axis, nothing rotated, scaled or carrying
+    properties, one baked material per root with a UVMap, no source material
+    left, the scene engine back on EEVEE, and the triangle budget counted the
+    way the engine draws the belt (every link)."""
+    tank = game_tank(tank)
+    X = Vector((tank.X_OFF, 0.0, 0.0))
+    want = {"Tank": (0.0, 0.0, tank.GROUND), "Body": (0.0,) + tuple(tank.BODY_PIVOT),
+            "Turret": (tank.RING_C[0], tank.RING_C[1], tank.RING_Z0),
+            "Mantlet": trunnion(tank), "Barrel": trunnion(tank)}
+    for side, S in ((1, "L"), (-1, "R")):
+        want["Track." + S] = (side * tank.TRACK_X, 0.0, tank.GROUND)
+        for w in tank.wheel_spec():
+            y, z = w["axle"]
+            want["%s.%s" % (w["name"], S)] = (side * tank.TRACK_X, y, z)
+    offs = {n: round((bpy.data.objects[gnm(tank, n)].matrix_world.translation
+                      - (Vector(p) + X)).length, 7) for n, p in want.items()}
+    coll = bpy.data.collections[coll_name(tank)]
+    obs = list(coll.objects)
+    meshes = [o for o in obs if o.type == "MESH"]
+    spec_links = {S: t["links"] for S, t in game_spec(tank)["tracks"].items()}
+    tris = sum(_tris(o) for o in meshes)
+    tris += sum(_tris(bpy.data.objects[gnm(tank, "Link." + S)]) * (n - 1)
+                for S, n in spec_links.items())
+    return {
+        "origin_off_max": max(offs.values()),
+        "origin_off": {n: v for n, v in offs.items() if v > 1e-6},
+        "rotated": [o.name for o in obs if any(abs(v) > 1e-9 for v in o.rotation_euler)],
+        "scaled": [o.name for o in obs if any(abs(v - 1.0) > 1e-9 for v in o.scale)],
+        "custom_props": {o.name: list(o.keys()) for o in obs if o.keys()},
+        "materials": {k: sorted({m.name for o in root_objects(tank, k) for m in o.data.materials})
+                      for k in ("Hull", "Turret", "TrackL", "TrackR")},
+        "no_uvmap": [o.name for o in meshes if "UVMap" not in o.data.uv_layers],
+        "source_left": [src_name(tank, i) for i in range(len(KINDS))
+                        if bpy.data.materials.get(src_name(tank, i))],
+        "engine": bpy.context.scene.render.engine,
+        "tris": tris, "budget": GAME_TRIS, "links": spec_links,
+    }
+
+
+def game_compare(tank, views=("turret_close", "front_close"), name="game_vs_copy",
+                 w=640, h=480, samples=24):
+    """The copy left, the game variant right (links laid from the sidecar),
+    same cameras: what the lightening cost.  Rivet rims, seams and small
+    parts are where it shows."""
+    tank = game_tank(tank)
+    d = out_dir(tank)
+    protos = [bpy.data.objects[gnm(tank, "Link." + S)] for S in ("L", "R")]
+    keep = [(o, o.hide_render) for o in protos]
+    tmp = bpy.data.collections.new("_game_preview")
+    bpy.context.scene.collection.children.link(tmp)
+    try:
+        for o in protos:
+            o.hide_render = True
+        place_links(tank, game_spec(tank), 0.0, tmp)
+        a = shoot(list(views), os.path.join(d, "_gc_a.png"), (tank.COPY_X_OFF, 0, 0),
+                  only=lambda o: o.name.endswith(tank.COPY_SFX), w=w, h=h, cols=1,
+                  samples=samples)
+        b = shoot(list(views), os.path.join(d, "_gc_b.png"), (tank.X_OFF, 0, 0),
+                  only=lambda o: ((o.name.endswith(tank.SFX) and o not in protos)
+                                  or o.name.startswith("_pvl")),
+                  w=w, h=h, cols=1, samples=samples)
+    finally:
+        for o in list(tmp.objects):
+            bpy.data.objects.remove(o)
+        bpy.data.collections.remove(tmp)
+        for o, hr in keep:
+            o.hide_render = hr
+    A, B = _read_png(a), _read_png(b)
+    C = np.concatenate([A, np.ones((A.shape[0], 6, 3), np.float32), B], axis=1)
+    return _write_png(C, os.path.join(d, name + ".png"))
+
+
+def game_spec(tank):
+    """The sidecar: every joint with its node, axis and sign in glTF/Godot
+    terms, the belt path, link and wheel numbers.  Positions are in the
+    parent node's frame, in scene units (the model is not yet scaled to the
+    board: `units` says so)."""
+    tank = game_tank(tank)
+    top = bpy.data.objects[gnm(tank, "Tank")]
+    Mt = top.matrix_world.inverted()
+
+    def local(name):
+        ob = bpy.data.objects[gnm(tank, name)]
+        return _gl(ob.matrix_local.translation)
+
+    tracks = {}
+    for S in ("L", "R"):
+        tr = bpy.data.objects[gnm(tank, "Track." + S)]
+        path, pitch0, _ = tank.belt_spec()
+        L = float(np.linalg.norm(np.roll(path, -1, 0) - path, axis=1).sum())
+        n = int(round(L / pitch0))
+        dense = resample(path, 4 * n)
+        wheels = []
+        for w in tank.wheel_spec():
+            name = "%s.%s" % (w["name"], S)
+            wheels.append({"node": name, "r": round(w["r"], 6), "at": local(name)})
+        tracks[S] = {"node": "Track." + S, "at": local("Track." + S), "link": "Link." + S,
+                     "links": n, "pitch": round(L / n, 6), "length": round(L, 6),
+                     "path": [_gl((0.0, y, z - tank.GROUND)) for y, z in dense],
+                     "wheels": wheels}
+    co = np.concatenate([world_co(o) for o in top.children_recursive if o.type == "MESH"])
+    lo, hi = Mt @ Vector(co.min(0)), Mt @ Vector(co.max(0))
+    ext = [hi[i] - lo[i] for i in range(3)]
+    elev = lay_angles()[1]
+    return {
+        "source": "pipeline/repro_kit.py build_game, tank module repro/%s" % os.path.basename(
+            tank.__file_path__),
+        "frame": "glTF / Godot: +Y up, +Z the tank's front (Godot MODEL_FRONT), +X the "
+                 "tank's left; units of the Blender scene",
+        "units": {"scene_per_metre": None,
+                  "note": "not yet scaled to the board: one scale for every tank, set "
+                          "against the hex, is still to be chosen"},
+        "size": {"width": round(ext[0], 4), "length": round(ext[1], 4),
+                 "height": round(ext[2], 4)},
+        "body": {"node": "Body", "at": local("Body"),
+                 "rock": "rotation.x pitches (negative: nose up), rotation.z rolls "
+                         "(positive: roof toward the tank's right, -X); the pivot is the "
+                         "node's origin, mid-belt, level with the belt tops"},
+        "turret": {"node": "Turret", "at": local("Turret"),
+                   "yaw": "rotation.y, positive turns the gun to the tank's left "
+                          "(counter-clockwise seen from above)"},
+        "gun": {"node": "Mantlet", "at": local("Mantlet"),
+                "elevation": "rotation.x = -elevation: positive elevation raises the muzzle",
+                "limits_deg": [min(elev), max(elev)],
+                # the angles the board asks for (barrel_recoil.ladder); the
+                # mantlet is shaped to turn cleanly anywhere within the limits
+                "ladder_deg": elev},
+        "recoil": {"node": "Barrel", "axis": "position.z, negative is back into the turret",
+                   # barrel_recoil's stroke: 0.13 of the tube's length
+                   "travel": round(0.13 * _tube_length(tank), 6)},
+        "muzzle": {"node": "Muzzle", "points": "+Z"},
+        "exhaust": [{"node": "Exhaust.%d" % i, "points": "+Y"}
+                    for i in range(len(getattr(tank, "EXHAUST", ())))],
+        "tracks": tracks,
+        "belt_motion": "link k lies between path(s) and path(s + pitch), s = k * pitch + "
+                       "distance driven forward (mod length), basis (+X across, outward "
+                       "normal, path direction); wheels turn rotation.x += distance / r",
+    }
+
+
+def _from_gl(v):
+    return Vector((v[0], -v[2], v[1]))
+
+
+def place_links(tank, spec, drive=0.0, coll=None):
+    """Lay every link round its track the way the sidecar tells the engine to
+    (`belt_motion`), from the sidecar's own numbers -- so a picture of this is
+    a check of the recipe, not of the builder.  Linked copies of the one link,
+    in `coll`; returns them."""
+    out = []
+    for S, t in spec["tracks"].items():
+        tr = bpy.data.objects[gnm(tank, t["node"])]
+        link = bpy.data.objects[gnm(tank, t["link"])]
+        P = np.array([_from_gl(p) for p in t["path"]])
+        seg = np.linalg.norm(np.roll(P, -1, 0) - P, axis=1)
+        cum = np.concatenate([[0.0], np.cumsum(seg)])
+        L = cum[-1]
+
+        def at(s):
+            s %= L
+            i = min(int(np.searchsorted(cum, s, side="right")) - 1, len(P) - 1)
+            f = (s - cum[i]) / seg[i]
+            return P[i] + (P[(i + 1) % len(P)] - P[i]) * f
+
+        for k in range(t["links"]):
+            s = k * t["pitch"] + drive
+            p0, p1 = at(s), at(s + t["pitch"])
+            d = (p1 - p0) / np.linalg.norm(p1 - p0)
+            along = Vector(d)
+            out_n = Vector((0.0, d[2], -d[1]))
+            across = Vector((1.0, 0.0, 0.0))
+            M = Matrix((across, -along, out_n)).transposed().to_4x4()
+            M.translation = Vector((p0 + p1) / 2)
+            ob = bpy.data.objects.new("_pvl.%s.%03d" % (S, k), link.data)
+            (coll or bpy.context.scene.collection).objects.link(ob)
+            ob.parent = tr
+            ob.matrix_basis = M
+            out.append(ob)
+    bpy.context.view_layer.update()
+    return out
+
+
+def pose_game(tank, yaw=0.0, elev=0.0, pitch=0.0, roll=0.0, drive=0.0, spec=None):
+    """Pose the game variant through its joints exactly as the sidecar says an
+    engine does (degrees; pitch positive nose up, roll positive roof to the
+    tank's right; drive in scene units forward).  All zero is rest."""
+    ob = lambda n: bpy.data.objects[gnm(tank, n)]
+    ob("Turret").rotation_euler = (0.0, 0.0, math.radians(yaw))
+    ob("Mantlet").rotation_euler = (-math.radians(elev), 0.0, 0.0)
+    # Blender's Y is glTF's -Z, so the front-axis roll changes sign here
+    ob("Body").rotation_euler = (-math.radians(pitch), -math.radians(roll), 0.0)
+    for S, t in (spec or game_spec(tank))["tracks"].items():
+        for w in t["wheels"]:
+            ob(w["node"]).rotation_euler = (drive / w["r"], 0.0, 0.0)
+    bpy.context.view_layer.update()
+
+
+def game_sheet(tank, name="game", samples=24):
+    """The game variant, links laid from the sidecar: at rest from four sides,
+    then posed (turret 35 deg left, gun up 10, nose up 2, roll 2, driven half
+    a link) -- every joint moved once, each about its own origin."""
+    tank = game_tank(tank)
+    spec = game_spec(tank)
+    X = tank.X_OFF
+    tmp = bpy.data.collections.new("_game_preview")
+    bpy.context.scene.collection.children.link(tmp)
+    protos = [bpy.data.objects[gnm(tank, t["link"])] for t in spec["tracks"].values()]
+    keep = [(o, o.hide_render) for o in protos]
+    d = out_dir(tank)
+    only = lambda o: (o.name.endswith(tank.SFX) and o not in protos) or o.name.startswith("_pvl")
+    rows = []
+    try:
+        for o in protos:
+            o.hide_render = True
+        place_links(tank, spec, 0.0, tmp)
+        a = shoot(["iso_fl", "iso_rr", "side", "front"], os.path.join(d, "_game_rest.png"),
+                  (X, 0, 0), only=only, samples=samples)
+        rows.append(_read_png(a))
+        for o in list(tmp.objects):
+            bpy.data.objects.remove(o)
+        pitch = spec["tracks"]["L"]["pitch"]
+        pose_game(tank, yaw=35, elev=10, pitch=2, roll=2, drive=pitch / 2, spec=spec)
+        place_links(tank, spec, pitch / 2, tmp)
+        b = shoot(["iso_fl", "side_l", "track_close", "mantlet"], os.path.join(d, "_game_pose.png"),
+                  (X, 0, 0), only=only, samples=samples)
+        rows.append(_read_png(b))
+    finally:
+        pose_game(tank, spec=spec)
+        for o in list(tmp.objects):
+            bpy.data.objects.remove(o)
+        bpy.data.collections.remove(tmp)
+        for o, h in keep:
+            o.hide_render = h
+    return _tile_png(rows, 1, os.path.join(d, name + ".png"))
+
+
+def _tube_length(tank):
+    bar = bpy.data.objects[gnm(tank, "Barrel")]
+    co = world_co(bar)
+    return float(co[:, 1].max() - co[:, 1].min())
+
+
+def export_game(tank, out_dir=None):
+    """glTF (.glb) of the game variant with the suffix stripped and the Tank at
+    the origin, and the sidecar JSON next to it.  Written from the live
+    Blender: Godot's own .blend import needs a Blender it can start, and the
+    Store build cannot be started (pipeline/CLAUDE.md, 'Окружение')."""
+    import json
+    tank = game_tank(tank)
+    out_dir = out_dir or os.path.join(os.path.dirname(REPO), "Models", tank.GAME_TAG)
+    os.makedirs(out_dir, exist_ok=True)
+    glb = os.path.join(out_dir, "tank.glb")
+    top = bpy.data.objects[gnm(tank, "Tank")]
+    objs = [top] + list(top.children_recursive)
+    spec = game_spec(tank)
+    for o in objs:
+        base = o.name[:-len(tank.SFX)]
+        if bpy.data.objects.get(base) is not None:
+            raise RuntimeError("%r is taken in this scene; the export strips the suffix" % base)
+    keep_m = top.matrix_world.copy()
+    renamed = []
+    try:
+        top.matrix_world = Matrix.Identity(4)
+        for o in objs:
+            renamed.append((o, o.name, o.data.name if o.data else None))
+            o.name = o.name[:-len(tank.SFX)]
+            if o.data is not None:
+                o.data.name = o.name
+        bpy.context.view_layer.update()
+        _select_only(objs)
+        bpy.ops.export_scene.gltf(filepath=glb, export_format="GLB", use_selection=True,
+                                  export_yup=True, export_apply=False, export_animations=False,
+                                  export_cameras=False, export_lights=False, export_extras=False,
+                                  export_materials="EXPORT")
+    finally:
+        for o, name, dname in reversed(renamed):
+            o.name = name
+            if dname is not None:
+                o.data.name = dname
+        top.matrix_world = keep_m
+        bpy.context.view_layer.update()
+    with open(os.path.join(out_dir, "tank.json"), "w", encoding="utf-8") as f:
+        json.dump(spec, f, indent=1, ensure_ascii=False)
+    return {"glb": glb, "mb": round(os.path.getsize(glb) / 1e6, 2),
+            "json": os.path.join(out_dir, "tank.json"), "check": check_glb(glb)}
+
+
+def check_glb(path):
+    """Read the written file back, not the scene: node tree, triangles per
+    mesh, materials and whether occlusion made it in, images."""
+    import json
+    import struct
+    with open(path, "rb") as f:
+        data = f.read()
+    magic, ver, total = struct.unpack_from("<III", data, 0)
+    ln, kind = struct.unpack_from("<II", data, 12)
+    js = json.loads(data[20:20 + ln].decode("utf-8"))
+    nodes = js.get("nodes", [])
+    acc = js.get("accessors", [])
+    tris = {}
+    for mesh in js.get("meshes", []):
+        t = 0
+        for p in mesh["primitives"]:
+            if "indices" in p:
+                t += acc[p["indices"]]["count"] // 3
+        tris[mesh.get("name", "?")] = t
+
+    def tree(i, depth=0):
+        nd = nodes[i]
+        line = ["  " * depth + nd.get("name", "?")]
+        for c in nd.get("children", []):
+            line += tree(c, depth + 1)
+        return line
+
+    roots = js["scenes"][js.get("scene", 0)]["nodes"]
+    return {"magic_ok": magic == 0x46546C67, "version": ver, "bytes": total,
+            "tree": [l for r in roots for l in tree(r)],
+            "mesh_tris": tris, "total_tris": sum(tris.values()),
+            "materials": [{"name": m.get("name"), "occlusion": "occlusionTexture" in m,
+                           "metal_rough": "metallicRoughnessTexture" in m.get(
+                               "pbrMetallicRoughness", {})}
+                          for m in js.get("materials", [])],
+            "images": len(js.get("images", []))}
+
+
 # --------------------------------------------------------------------- bake
 
 def _select_only(objs):
@@ -1011,8 +1642,19 @@ def _set_pass(mat, which):
                  out.inputs["Surface"])
 
 
-def final_material(name, img_c, img_d):
-    """The generator's layout: base colour, and G -> roughness, B -> metallic."""
+def _gltf_output():
+    """The node group the glTF exporter reads occlusion from (by its name and
+    its 'Occlusion' input -- the exporter's own convention)."""
+    g = bpy.data.node_groups.get("glTF Material Output")
+    if g is None:
+        g = bpy.data.node_groups.new("glTF Material Output", "ShaderNodeTree")
+        g.interface.new_socket("Occlusion", in_out="INPUT", socket_type="NodeSocketFloat")
+    return g
+
+
+def final_material(name, img_c, img_d, occlusion=False):
+    """The generator's layout: base colour, and G -> roughness, B -> metallic;
+    with `occlusion`, R -> glTF occlusion too (the game variant's ORM)."""
     m = bpy.data.materials.get(name)
     if m:
         bpy.data.materials.remove(m)
@@ -1033,13 +1675,17 @@ def final_material(name, img_c, img_d):
     nt.links.new(td.outputs["Color"], sep.inputs[0])
     nt.links.new(sep.outputs["Green"], bsdf.inputs["Roughness"])
     nt.links.new(sep.outputs["Blue"], bsdf.inputs["Metallic"])
+    if occlusion:
+        go = n.new("ShaderNodeGroup")
+        go.node_tree = _gltf_output()
+        go.location = (0, -350)
+        nt.links.new(sep.outputs["Red"], go.inputs["Occlusion"])
     return m
 
 
 def bake_root(tank, key, size=TEX, samples=12):
     """Unwrap and bake one root; its objects keep their source materials."""
-    _, kids = ROOTS[key]
-    objs = [o for o in (bpy.data.objects.get(nm(tank, k)) for k in kids) if o]
+    objs = root_objects(tank, key)
     lay(tank, 0.0)                  # the texture belongs to the rest pose
     t0 = time.time()
     unwrap(tank, objs)
@@ -1076,8 +1722,26 @@ def bake_root(tank, key, size=TEX, samples=12):
     return objs, img_c, img_d, round(t_uv, 1), round(time.time() - t0, 1)
 
 
+def root_objects(tank, key):
+    """The meshes baked into one texture: a canonical root's children, or on
+    the game variant the same grouping read off its hierarchy."""
+    if getattr(tank, "GAME", False):
+        if key == "Hull":
+            names = [gnm(tank, "Hull")]
+        elif key == "Turret":
+            names = [gnm(tank, n) for n in ("Turret", "Mantlet", "Barrel")]
+        else:
+            tr = bpy.data.objects[gnm(tank, "Track." + key[-1])]
+            return sorted((o for o in tr.children_recursive if o.type == "MESH"),
+                          key=lambda o: o.name)
+        return [o for o in (bpy.data.objects.get(n) for n in names) if o]
+    _, kids = ROOTS[key]
+    return [o for o in (bpy.data.objects.get(nm(tank, k)) for k in kids) if o]
+
+
 def apply_final(tank, key, objs, img_c, img_d):
-    m = final_material("%s_%s" % (tank.PREFIX, key), img_c, img_d)
+    m = final_material("%s_%s" % (tank.PREFIX, key), img_c, img_d,
+                       occlusion=getattr(tank, "GAME", False))
     for o in objs:
         me = o.data
         me.materials.clear()

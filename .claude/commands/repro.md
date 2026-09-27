@@ -1,22 +1,34 @@
 ---
-description: Rebuild a generator tank as a clean procedural copy next to it - measure, author, compare, gun laid for elevation, bake textures, verify
-argument-hint: [which scene or tank, e.g. "LT_PARTS" or "MT_PARTS_1 as mt_parts" or "continue lt_parts: thicker skirts"]
+description: Rebuild a generator tank as a clean procedural copy next to it, then its game variant for the 3D bench (glTF + sidecar) - measure, author, compare, bake, verify, export
+argument-hint: [which scene or tank, e.g. "LT_PARTS" or "MT_PARTS_1 as mt_parts" or "continue lt_parts: thicker skirts" or "continue lt_parts: game"]
 ---
 
-Make a procedural copy of the generator model that is open in Blender: own
-geometry, own baked textures, the canonical parts structure, standing next to
-the original in the same scene. Report what the pictures show, not what the
-return values say.
+Make a procedural copy of the generator model that is open in Blender, and
+from the same builders its game variant:
+
+- **the copy** (steps 1-8): own geometry, own baked textures, the canonical
+  parts structure, standing next to the original in the same scene. It is the
+  sprite pipeline's input and the game variant's detailed source.
+- **the game variant** (steps 9-12): the model the 3D bench runs - cel
+  shading, up to ten tanks on screen, belts as links (decided 2026-09-27).
+  Lighter, flat paint, one node per joint, exported to
+  `Models/<GAME_TAG>/tank.glb` with a sidecar `tank.json`.
+
+Report what the pictures show, not what the return values say.
 
 Request: $ARGUMENTS
 
 The order, the reasons and the traps are in pipeline/docs/repro.md - read it
-first, every time. This command is the checklist. The shape of each tank is
-authored by hand from measurements (a module in `pipeline/repro/`); everything
-around it is `pipeline/repro_kit.py`. The finished example to copy from is
+first, every time (the game variant: its section "Игровой вариант"). This
+command is the checklist. The shape of each tank is authored by hand from
+measurements (a module in `pipeline/repro/`); everything around it is
+`pipeline/repro_kit.py`. The finished example to copy from is
 `pipeline/repro/lt_parts.py`.
 
-"Continue <name>: ..." means the module exists: skip to step 5 with the change.
+"Continue <name>: ..." means the module exists: skip to step 5 with the change,
+and after the copy passes, rebuild the game variant too (steps 9-12) - it is
+made from the same builders and is stale otherwise. "Continue <name>: game"
+means only the game variant: skip to step 9.
 
 ## 0. The environment
 
@@ -115,6 +127,22 @@ The other rules that already cost a round each (details in docs/repro.md,
 - a skirt's inner face stays outside the belt's outer edge;
 - rivets only through `K.rivets` (open domes, the `Ink` rim).
 
+**Write it for the game variant too** - the same builders run a second time
+with `K.game()` true:
+
+- constants `BODY_PIVOT = (y, z)` (mid-belt, level with the belt tops: the
+  sprung mass rocks there and the fenders barely move against the belts),
+  `EXHAUST` (points on the grilles), `GAME_TAG` (the `Models/` folder);
+- the running gear in parts: `wheel_spec()` (name, axle, the radius the belt
+  turns it at), `wheels(mats, xc, s)` (a Group per wheel), `running_gear`
+  (what does not turn), `belt_spec()` (path, pitch, link builder); `rolls`
+  and `belt` for the copy are made of these;
+- round things only through the kit's primitives (`lathe`, `cyl`, `sphere`,
+  `bend_bar`, `K.rivets`) so the game variant halves their segments by
+  itself; any other count that is geometry (loft sections, slices) goes
+  through `K.segs(n)`, and anything only the copy needs (the ring's 16 slices
+  for `turret_axis`) behind `K.game()`.
+
 ## 5. Build and compare - then stop and show
 
 ```python
@@ -184,3 +212,89 @@ and strip the suffix first - and say so rather than doing it unasked.
 `barrel_recoil` does not know `Mantlet.Geometry` yet: until it does, the
 pipeline draws the mantlet in the turret layer at rest and lays the tube alone
 (about the right axis, thanks to the breech stub). Say so when you report.
+
+## 9. Game variant: build to the budget
+
+Every snippet from here on wears the game variant (own suffix `.Game`,
+collection `<NAME>.Game`, one metre past the copy):
+
+```python
+tank = K.game_tank(K.load("<name>"))
+stats = K.build_game(tank)        # ~2 s; stats["total_tris"] counts every link
+```
+
+`total_tris` must stay under `K.GAME_TRIS` (60 000; LT is 59 682). Over it:
+
+```python
+K.game_breakdown(tank)            # heaviest lines of the module first
+```
+
+(the running gear of one side, the link once). Cut the heaviest line **for
+the game variant only** - under `if game():` in the module, or in the kit's
+game rules - and never touch the copy's numbers. What LT already needed: a
+bent bar swept as one tube instead of balls and cylinders (a shackle ring was
+8 000), one-segment chamfers on small parts, a link without chamfers (it is
+drawn ~90 times a side), wheel discs at 0.8 of the segments. Rivets stay
+geometry: a toon ramp turns normal-map detail into speckle.
+
+## 10. Game variant: bake
+
+```python
+K.bake(tank, ("Hull", "Turret"))       # one call
+```
+```python
+K.bake(tank, ("TrackL", "TrackR"))     # next call
+```
+
+Flat paint: no painted light, no crease or edge ink - the engine's cel ramp
+and outline do those. Seams, rivet rims and broad patches stay, occlusion goes
+to the ORM's R (glTF occlusion). Grey count 0, as for the copy.
+
+## 11. Game variant: verify, then look
+
+```python
+K.verify_game(tank)
+```
+
+must show `origin_off_max` 0 (every joint's origin on its axis: Body on
+`BODY_PIVOT`, Turret on the ring, Mantlet and Barrel on the trunnion, each
+wheel on its axle), `rotated`, `scaled`, `custom_props`, `no_uvmap`,
+`source_left` empty, one material per root, `engine` EEVEE, `tris` under
+`budget`. Then:
+
+```python
+K.game_sheet(tank)     # rest from four sides + every joint moved once
+K.game_compare(tank)   # copy left, game right, close up
+```
+
+`game_sheet` lays the links **from the sidecar's numbers**, the way the engine
+will - a belt that does not sit on its wheels there is a wrong recipe, not a
+wrong builder. On `game_compare` look for what lightening can take away:
+rivet rims (they melted into the plate once, when the coarse dome's first ring
+got too little ink), seams, small parts. Send both.
+
+## 12. Game variant: export and read it back
+
+```python
+K.export_game(tank)    # Models/<GAME_TAG>/tank.glb + tank.json
+K.save(tank)           # the scene copy, now with the game collection
+```
+
+`export_game` strips the suffix, puts `Tank` at the origin, and reads the
+written file back (`check`): the tree must be `Tank → Body → Hull (Exhaust.N),
+Turret → Mantlet → Barrel → Muzzle` and `Track.L/.R` with every wheel,
+`Running` and one `Link`; `occlusion` and `metal_rough` true on all four
+materials; `total_tris` plus the links' copies equal to `verify_game`'s.
+
+The contract the sidecar states, which engine code will lean on:
+
+- glTF frame: +Y up, +Z the tank's front, **+X its left** - `Track.L` is on
+  +X, while the canonical scene's `L.*` stands on -X (named from the viewer);
+- negative `rotation.x` raises the gun (Mantlet) and the nose (Body);
+  positive `rotation.z` rolls the roof to the tank's right; positive
+  `rotation.y` turns the turret left; wheels turn `+distance / r`;
+- units are the Blender scene's: one scale for every tank, against the hex,
+  is not chosen yet.
+
+Do not commit `Models/` without asking: the .glb is ~13 MB and the repo has
+no LFS.

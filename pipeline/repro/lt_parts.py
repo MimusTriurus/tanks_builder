@@ -17,7 +17,7 @@ from repro_kit import (
     PAINT, GUN, RUBBER, TRACK, GLASS, DARK, PAINT_T, PAINTDK, RIVET, RIVET_G, RIV,
     Group, new_bm, box, prism, lathe, rounded_rect_profile, cyl, rivets, line,
     bend_bar, hull_solid, offset_path, bent_plate, clip_path_y, clip_polygon,
-    ring_prism_y, tilt, rr_loop, d_section, loft, belt_path, place_belt,
+    ring_prism_y, tilt, rr_loop, d_section, loft, belt_path, place_belt, game, segs,
 )
 
 NAME = "LT_PARTS"
@@ -92,6 +92,12 @@ SPROCKET = (0.355, -0.232, 0.072)      # teeth stay inside the belt
 ROAD = [(-0.160, -0.300, 0.062), (0.000, -0.300, 0.062), (0.170, -0.300, 0.062),
         (0.305, -0.322, 0.040)]
 RETURN = [(-0.150, -0.196, 0.045), (0.060, -0.196, 0.045)]
+# the game variant: where the sprung mass rocks (y, z) -- mid-belt, level with
+# the belt tops, so the fenders barely move against the belts -- and where
+# the exhaust leaves (the grille centres)
+BODY_PIVOT = ((BELT_C[0][0] + BELT_C[1][0]) / 2, BELT_C[0][1] + BELT_RIN + BELT_T)
+EXHAUST = ((-0.1095, 0.318, -0.001), (0.1095, 0.318, -0.001))
+GAME_TAG = "LTR"                        # Models/LTR/
 
 # turret: a D-plan frustum, flat front, round back
 T_RING = (0.014, 0.035, 0.176)          # z0, z1, r
@@ -161,9 +167,15 @@ def link_mesh(pitch):
     return bm
 
 
-def belt(mats, xc):
+def belt_spec():
+    """The belt's inner surface as a CCW (y, z) path, its pitch, its link."""
     path = belt_path([(BELT_C[0][0], BELT_C[0][1], BELT_RIN), (BELT_C[1][0], BELT_C[1][1], BELT_RIN)])
-    bm, n, pitch, L = place_belt(mats, xc, path, PITCH, link_mesh)
+    return path, PITCH, link_mesh
+
+
+def belt(mats, xc):
+    path, pitch, link = belt_spec()
+    bm, n, pitch, L = place_belt(mats, xc, path, pitch, link)
     return bm, {"links": n, "pitch": round(pitch, 5), "length": round(L, 4)}
 
 
@@ -177,32 +189,62 @@ def disc(bm, y, z, r, xc, w=0.040, seg=48, mi=TRACK):
 
 
 def twin_wheel(bm, y, z, r, xc, s, seg=48):
+    if game():                 # 14 wheels are a third of the game budget
+        seg = int(seg * 0.8)
     for dx in (-0.045, 0.045):
         disc(bm, y, z, r, xc + dx * s, seg=seg)
     cyl(bm, (xc - 0.03, y, z), (xc + 0.03, y, z), r * 0.3, TRACK, seg=24)
 
 
+def wheel_spec():
+    """Every wheel that turns: name, axle (y, z), and the radius the belt turns
+    it at (the engine spins each one distance / r)."""
+    out = [("Idler", IDLER)]
+    out += [("Road.%d" % i, w) for i, w in enumerate(ROAD)]
+    out += [("Roller.%d" % i, w) for i, w in enumerate(RETURN)]
+    out.append(("Sprocket", SPROCKET))
+    return [{"name": n, "axle": (y, z), "r": r} for n, (y, z, r) in out]
+
+
+def wheels(mats, xc, s):
+    """wheel_spec, each with its own Group -- one object per wheel in the game
+    variant, so each can turn about its axle."""
+    out = []
+    for w in wheel_spec():
+        (y, z), r = w["axle"], w["r"]
+        g = Group(mats)
+        bm = new_bm()
+        if w["name"] == "Idler":
+            twin_wheel(bm, y, z, r, xc, s, seg=64)
+        elif w["name"] == "Sprocket":
+            twin_wheel(bm, y, z, r - 0.008, xc, s, seg=64)
+        else:
+            twin_wheel(bm, y, z, r, xc, s)
+        g.add(bm, subsurf=1)
+        if w["name"] == "Sprocket":
+            bm = new_bm()          # teeth, two rings
+            for k in range(12):
+                t = math.tau * k / 12
+                rot = Matrix.Rotation(t, 3, "X")
+                for dx in (-0.045, 0.045):
+                    c = Vector((xc + dx * s, y, z)) + rot @ Vector((0, 0, r - 0.006))
+                    box(bm, c, (0.03, 0.016, 0.02), TRACK, rot=rot)
+            g.add(bm, bevel=(0.002, 2, 40))
+        out.append(dict(w, group=g))
+    return out
+
+
 def rolls(mats, xc, s):
     g = Group(mats)
-    bm = new_bm()
-    y, z, r = IDLER
-    twin_wheel(bm, y, z, r, xc, s, seg=64)
-    for (y, z, r) in ROAD + RETURN:
-        twin_wheel(bm, y, z, r, xc, s)
-    y, z, r = SPROCKET
-    twin_wheel(bm, y, z, r - 0.008, xc, s, seg=64)
-    g.add(bm, subsurf=1)
-    # sprocket teeth, two rings
-    bm = new_bm()
-    y, z, r = SPROCKET
-    for k in range(12):
-        t = math.tau * k / 12
-        rot = Matrix.Rotation(t, 3, "X")
-        for dx in (-0.045, 0.045):
-            c = Vector((xc + dx * s, y, z)) + rot @ Vector((0, 0, r - 0.006))
-            box(bm, c, (0.03, 0.016, 0.02), TRACK, rot=rot)
-    g.add(bm, bevel=(0.002, 2, 40))
-    # suspension: a long beam, bogie arms down to the road wheels, axles
+    for w in wheels(mats, xc, s):
+        g.meshes += w["group"].meshes
+    g.meshes += running_gear(mats, xc, s).meshes
+    return g
+
+
+def running_gear(mats, xc, s):
+    """What does not turn: a long beam, bogie arms down to the road wheels, axles."""
+    g = Group(mats)
     bm = new_bm()
     xin = xc - s * 0.075
     box(bm, (xin, 0.02, -0.235), (0.018, 0.52, 0.022), TRACK)
@@ -468,13 +510,15 @@ def turret(mats):
     # the roundest 3 % slice in the lowest 22 %)
     bm = new_bm()
     z0, z1, r = T_RING
-    wall = [(z, r) for z in np.linspace(z0, z1, 16)]
+    # (the game variant turns about its origin and needs no slices at all)
+    wall = [(z, r) for z in np.linspace(z0, z1, 2 if game() else 16)]
     lathe(bm, wall + [(z1, 0.12), (z0, 0.12)], PAINTDK, seg=192, axis="Z", center=(cx, cy, 0))
     g.add(bm)
 
     # body: loft of D sections, flat roof
     bm = new_bm()
-    loft(bm, [d_section(z, a, yf, yr, 4.2, 2.3, 96) for z, a, yf, yr in T_SECTIONS], PAINT_T)
+    loft(bm, [d_section(z, a, yf, yr, 4.2, 2.3, segs(96, 32)) for z, a, yf, yr in T_SECTIONS],
+         PAINT_T)
     g.add(bm, bevel=(0.006, 2, 40))
 
     # rivets on the walls: both sides of every painted seam, a row along the
