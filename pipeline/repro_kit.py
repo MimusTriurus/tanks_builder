@@ -109,14 +109,23 @@ RIV = 0.0062          # rivet radius
 # LT_PARTS -- and a copy's colour is this table, not the generator's texture,
 # so a shared table is the whole normalisation.  A tank module takes it as
 # `PALETTE = ARMY_PALETTE` and overrides a kind only on purpose.
+#
+# Steel is one colour: the gun, its fittings and the belts (2026-09-27).  The
+# gun was #4a4a4d at metal 0.65 and the belts #40435a at metal 0: under the
+# bench's flat ambient (no sky to reflect) a metal surface keeps a third of
+# its diffuse, so the gun read black next to blue-grey belts -- two colours
+# for one material.  Metal is 0 for the same reason: a cel ramp shades the
+# albedo, and the albedo is the whole colour.  Steel rivets are a step lighter
+# so the dome still reads.
+STEEL = dict(base="#4b4f58", light="#70757f", dark="#2a2c32", ink="#0c0d10", rough=0.62, metal=0.0)
 ARMY_PALETTE = {
     PAINT:   dict(base="#2e591f", light="#447726", dark="#1b3a13", ink="#08120a", rough=0.96, metal=0.0),
     PAINT_T: dict(base="#2e591f", light="#447726", dark="#1b3a13", ink="#08120a", rough=0.96, metal=0.0),
     PAINTDK: dict(base="#1d3a15", light="#2c5220", dark="#11240d", ink="#07100a", rough=0.96, metal=0.0),
     RIVET:   dict(base="#3a6a23", light="#4f8a2e", dark="#1b3a13", ink="#08120a", rough=0.96, metal=0.0),
-    GUN:     dict(base="#4a4a4d", light="#737275", dark="#28282a", ink="#0d0d0f", rough=0.58, metal=0.65),
-    RIVET_G: dict(base="#555558", light="#7c7b7e", dark="#28282a", ink="#0d0d0f", rough=0.58, metal=0.65),
-    TRACK:   dict(base="#40435a", light="#646881", dark="#25262f", ink="#0b0b0f", rough=0.95, metal=0.0),
+    GUN:     STEEL,
+    RIVET_G: dict(STEEL, base="#575b64", light="#7c818b"),
+    TRACK:   STEEL,
     RUBBER:  dict(base="#1d1d1f", light="#2e2e31", dark="#121213", ink="#0a0a0b", rough=0.9, metal=0.0),
     GLASS:   dict(base="#d6d6d2", light="#f4f4ee", dark="#9a9a96", ink="#3a3a3a", rough=0.2, metal=0.0),
     GLASS_T: dict(base="#2f9c98", light="#63d2c8", dark="#1a5e5c", ink="#0b2a2a", rough=0.2, metal=0.0),
