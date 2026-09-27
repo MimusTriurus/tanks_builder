@@ -188,7 +188,7 @@ def make_source(tank, idx):
     normal's z, so it holds when the turret turns), shaded and inked in
     creases (AO of this object only) and inked on hard edges (Bevel node --
     modelled bevels are two 45 deg segments, sharper than the 38 deg the mesh
-    splits normals at, so every chamfer edge is hard), a few painted dents.
+    splits normals at, so every chamfer edge is hard).
     Rivets: a lit dome in a dark ring from the vertex layer `Ink`.
     """
     name = src_name(tank, idx)
@@ -249,18 +249,8 @@ def make_source(tank, idx):
         ink = b.math("MULTIPLY", ink, 0.7)
     if idx == PAINT_T and hasattr(tank, "turret_ink"):
         ink = b.math("MAXIMUM", ink, tank.turret_ink(b, obj, geo.outputs["Normal"]))
-
-    if idx in (PAINT, PAINT_T, PAINTDK, GUN, TRACK):
-        vor = b.n.new("ShaderNodeTexVoronoi")
-        vor.inputs["Scale"].default_value = 38.0
-        vor.feature = "F1"
-        b.put(vor.inputs["Vector"], obj)
-        ring = b.rng(b.math("ABSOLUTE", b.math("SUBTRACT", vor.outputs["Distance"], 0.16)),
-                     0.035, 0.018, smooth=True)
-        csep = b.n.new("ShaderNodeSeparateColor")
-        b.put(csep.inputs[0], vor.outputs["Color"])
-        pick = b.rng(csep.outputs["Red"], 0.9, 0.93)
-        ink = b.math("MAXIMUM", ink, b.math("MULTIPLY", b.math("MULTIPLY", ring, pick), 0.85))
+    # no painted dents: a small inked ring on a riveted plate reads as a
+    # missing rivet, not as a dent
     col = b.mix(col, C["ink"], ink)
     return _finish(b, m, col, pal, out)
 

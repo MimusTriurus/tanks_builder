@@ -480,6 +480,13 @@ def turret(mats):
     def off_front(t, half):
         return abs(math.atan2(math.sin(t + math.pi / 2), math.cos(t + math.pi / 2))) >= half
 
+    def under_frame(p):
+        """Inside the mantlet frame's outline (+8 mm): a dome there is buried."""
+        F = FRAME
+        dx = max(abs(p.x) - (F["ohw"] - F["r_o"]), 0.0)
+        dz = max(abs(p.z - F["cz"]) - (F["ohh"] - F["r_o"]), 0.0)
+        return p.y < RING_C[1] and math.hypot(dx, dz) - F["r_o"] < 0.008
+
     for k in range(12):
         t = math.tau * k / 12
         if not off_front(t, 0.33):
@@ -487,7 +494,8 @@ def turret(mats):
         for z in (0.078, 0.150, 0.222):
             for side in (-1, 1):
                 p, nn = body_point(t + side * 0.065, z)
-                rivets(bm, [p + nn * 0.0004], nn)
+                if not under_frame(p):
+                    rivets(bm, [p + nn * 0.0004], nn)
     for k in range(28):
         t = math.tau * (k + 0.5) / 28
         if off_front(t, 0.55):
@@ -545,9 +553,14 @@ def turret(mats):
     bm = new_bm()
     lathe(bm, rounded_rect_profile(-0.012, 0.0, 0.0, 0.058, 0.004, n=2), GUN, seg=64,
           axis="Y", center=(0, B["y_front"] + 0.002, GUN_Z))
+    g.add(bm, subsurf=1)
+    # the block's rivets lean with its face, or the lower pair sinks 3 mm
+    # into it and the Bevel node inks a ring over the buried dome
+    bm = new_bm()
     for x in (-0.056, 0.056):
         for z in (B["z0"] + 0.016, B["z1"] - 0.016):
             rivets(bm, [(x, B["y_front"] - 0.0004, z)], (0, -1, 0), r=0.0058, mi=RIVET_G)
+    tilt(bm, -4.0, B["y_front"], GUN_Z)
     g.add(bm, subsurf=1)
 
     # cupola: thick ring, grated lid, hinge behind, a latch handle
