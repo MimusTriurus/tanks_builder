@@ -2388,7 +2388,7 @@ public sealed partial class TankBench : SceneRoot
         // TankTick.Ammo, which since ProcSlam decides which of the three impacts
         // a hit on armour draws - so the group it sits in is now narrower than
         // what it does. Left where it is rather than moved: a panel id is what
-        // bench.json and the MCP flag rows are keyed on, and renaming one to fix
+        // bench.json and the flag rows are keyed on, and renaming one to fix
         // a heading is churn with a migration under it.
         _panel.Choice("wall.ammo", "loaded",
                           new[] { "HE - bursts on the face",

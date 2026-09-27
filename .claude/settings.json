@@ -1,5 +1,4 @@
 {
-  "enabledMcpjsonServers": ["godot"],
   "hooks": {
     "PostToolUse": [
       {

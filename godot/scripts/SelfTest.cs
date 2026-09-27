@@ -13071,17 +13071,6 @@ public static class SelfTest
                 && VehicleAudio.TurretSoundOnByDefault,
                 $"tracer {Shell.TracerOnByDefault}, trail {Shell.SmokeOnByDefault},"
                 + $" turret motor {VehicleAudio.TurretSoundOnByDefault}");
-            // The other half of this one is not a constant and cannot be: that no
-            // [mcp] line is printed by the very run this check is inside. If the
-            // connection had opened, it would have opened before SelfTest.Run was
-            // called - StartMcp is the last thing _Ready does, and --selftest quits
-            // from _Ready before reaching it.
-            Check("the bench serves its tools unless asked not to",
-                Main.McpOnByDefault,
-                "named for the reason the three above are. On is safe only because "
-                + "--capture, --trace and --selftest refuse the connection at "
-                + "StartMcp whatever the flag said: a run that answered a tool call "
-                + "between frames is not the run the other half of an A/B came from");
             // The aiming ray - see AimRay. What it draws is a prediction, so
             // the claims are about agreement rather than about pixels: a ray that
             // points somewhere plausible on every frame and is wrong about the one

@@ -28,10 +28,6 @@ window/stretch/mode="canvas_items"
 
 project/assembly_name="TankSpriteTest"
 
-[editor_plugins]
-
-enabled=PackedStringArray("res://addons/godot_mcp/plugin.cfg")
-
 [physics]
 
 3d/physics_engine="Jolt Physics"

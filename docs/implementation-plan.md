@@ -42,9 +42,9 @@ GDD-совместимая, и наведение сделано так, что 
 | Пять классов, `Might` I–V и `Mass` I–III, `Turreted`, порядок LT MT HT TD HM | `MovementProfile.cs` (Godot-free) | числа классов, кроме брони по зонам и шагов |
 | `Gunnery.Penetration` («строго больше»), `RamLevel` («не меньше»), `Solve` (полоса огня по оси: танки, стены по рёбрам, `Screens`) | `Gunnery.cs` | ядро пробития и LoS, без уровней и зон |
 | Сторона попадания: `AtlasSet.FaceFor` даёт плиту front/rear/left/right по пеленгу и курсу | `AtlasSet.cs:625` | вход для зон брони уже есть |
-| Приказы как поля на `Vehicle` (`Path`, `Target`, `Mark`, `Charge`), одна машина исполнения `TankTick`, хуки `Aim`/`Launch`, три согласованных входа (клавиша, панель, MCP) | `Vehicle.cs`, `TankTick.cs`, `Main.cs` | готовый шов для четвёртого входа — контроллера хода |
+| Приказы как поля на `Vehicle` (`Path`, `Target`, `Mark`, `Charge`), одна машина исполнения `TankTick`, хуки `Aim`/`Launch`, два согласованных входа (клавиша, панель) | `Vehicle.cs`, `TankTick.cs`, `Main.cs` | готовый шов для третьего входа — контроллера хода |
 | Картинка всего боевого: выстрел, трассер, попадание, рикошет (`ProcSpall`), разрыв (`ProcSlam`), пробитие (`ProcPierce`), детонация (`ProcRack`), взрыв в грунте (`SheetBlast`), пожар леса (`Wildfire`+`Grove`), обвал стены (`WallRig`), брод и ватерлиния, обломок (`Wreck`) | см. `godot/docs/combat.md`, `blast.md`, `water.md`, `wall.md` | всё, что игрок увидит |
-| Самопроверка `--selftest` с фильтром по темам, MCP `bench-*` | `SelfTest.cs`, `McpBench.cs` | второй контур проверки для сцены боя |
+| Самопроверка `--selftest` с фильтром по темам | `SelfTest.cs` | второй контур проверки для сцены боя |
 
 **Чего в стенде нет (и это надо строить):**
 

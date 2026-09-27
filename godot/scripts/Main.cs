@@ -1602,16 +1602,6 @@ public sealed partial class Main : SceneRoot
 				_propContact = false;
 			else if (userArgs[i] == "--no-sound")
 				_soundEnabled = false;
-			// On, so the shape here is --no-mcp turning it off - and --mcp kept
-			// beside it because it was the flag that switched it on, and a flag
-			// that silently stops existing reads as a flag that stopped working.
-			// Neither reaches --capture, --trace or --selftest: those refuse the
-			// connection at StartMcp whatever was asked for, which is where a
-			// guarantee about evidence belongs. See Main.Mcp.cs.
-			else if (userArgs[i] == "--mcp")
-				_mcpEnabled = true;
-			else if (userArgs[i] == "--no-mcp")
-				_mcpEnabled = false;
 			// Both off by default, so both flags switch *on* - the opposite
 			// shape to --no-tracks and its neighbours, and the same shape as
 			// --pitch and --rumble, which are also off.
@@ -2799,11 +2789,6 @@ public sealed partial class Main : SceneRoot
 			Fire();
 		if (_hitAtStart is not null)
 			TakeHit(_hitAtStart.Value);
-
-		// Last, after every start-up flag has landed. An agent's first call is for
-		// the state, and a connection opened before --drive or --destroy had been
-		// applied would answer about a board still being set up.
-		StartMcp();
 	}
 
 	private string CurrentTag() => Active.Tag;

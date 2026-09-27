@@ -846,14 +846,6 @@ tabs: clicked to Level,      the bar says Level,      the palette says level +1/
   сперва её не заводила, и панель у компилированной карты была пуста при букве
   `W` на клетке.
 
-## MCP: `map-*` рядом с `bench-*`
-
-Семейство инструментов рантайма по образцу восьми `bench-*` (см.
-[docs/mcp.md](mcp.md)): `map-open`, `map-read`, `map-paint`, `map-report`,
-`map-undo`, `map-save`. Смысл тот же, что у `bench-*`: спросить у доски
-что-нибудь, не убивая процесс. Отказ под `--capture`, `--trace` и `--selftest`
-стоит в точке подключения и накрывает их бесплатно.
-
 ## Что в скелете есть и чего нет
 
 **Есть:** кисть по клетке на все три вкладки плюс краска `kinds`, штамп спавна,
@@ -891,7 +883,6 @@ tabs: clicked to Level,      the bar says Level,      the palette says level +1/
 | `MapFile` — JSON, круговой прогон записал→прочитал→те же сетки | **сделано** |
 | `MapEdit` — сетки, команды, кисти; без Godot | **сделано** |
 | `Editor.tscn` / `MapEditor : SceneRoot` | **сделано** |
-| `map-*` в MCP | |
 
 ### Капонир в блоке `walls`: `kind` и `facing`
 
