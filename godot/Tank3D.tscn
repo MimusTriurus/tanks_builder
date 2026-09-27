@@ -1,0 +1,6 @@
+[gd_scene format=3]
+
+[ext_resource type="Script" path="res://scripts/Tank3DBench.cs" id="1_tank3d"]
+
+[node name="Tank3D" type="Node3D"]
+script = ExtResource("1_tank3d")

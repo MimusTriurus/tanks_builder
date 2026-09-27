@@ -30,6 +30,7 @@
 | [docs/combat.md](docs/combat.md) | выстрел, отдача, тряска камеры, пыль (`ProcKick`), попадание, рикошет (`ProcSpall`), разрыв HE (`ProcSlam`), пробитие (`ProcPierce`), отметина, пять классов и рубка без башни, звук, снаряд, трассер, прицельный луч, снаряд в гекс и таран | всё, что стреляет и во что попадает |
 | [docs/ui.md](docs/ui.md) | **управление: пять жестов и все клавиши**, пять танков на поле, контактная тень, кольцо выделения, размер класса, боковая панель, `panel/classes/walls.json` | что нарисовано поверх доски и чем это крутят |
 | [docs/blast.md](docs/blast.md) | `Effects.tscn`/`EffectsBench`, `SheetBlast` (единственный взрыв на доске), `ToonBlast` (рисованный, BotW), `ProcBall` (шар из текста доски), волна `ProcWave`, воронки, чем делать взрывы, какие типы нужны, три референса | делаешь или правишь взрыв |
+| [docs/tank3d.md](docs/tank3d.md) | `Tank3D.tscn`: 3D-танк из `Models/` с эффектами стенда — два хозяина эффектов, правило карточки, земля без глубины, клавиши и `--do` | трогаешь 3D-юнит или переносишь эффект на него |
 | [docs/editor.md](docs/editor.md) | редактор карт: три вкладки, `MapRules`, формат `maps/*.json`, `map-*` | правишь правила карты или сам редактор |
 | [docs/selftest.md](docs/selftest.md) | `--selftest`, фильтр по темам, что именно утверждается | добавляешь проверку или разбираешь падение |
 
@@ -62,7 +63,8 @@ dotnet build
 `res://EventsTank.tscn`, `res://EventsField.tscn`, `res://EventsOverlay.tscn` —
 стенд событий: пять танков и все виды клеток, кнопка панели = событие правил
 ([docs/events.md](docs/events.md)); `res://Wood.tscn`,
-`res://Wall.tscn`, `res://Relief.tscn`, `res://Relief3D.tscn`, `res://Editor.tscn`.
+`res://Wall.tscn`, `res://Relief.tscn`, `res://Relief3D.tscn`, `res://Editor.tscn`;
+`res://Tank3D.tscn` — 3D-танк с эффектами стенда ([docs/tank3d.md](docs/tank3d.md)).
 `--sprites <TAG>` одевает все классы в пиксели одного танка; меняются пиксели, а
 не класс ([docs/architecture.md](docs/architecture.md)).
 
@@ -88,9 +90,10 @@ Godot, запущенный другой сборкой движка, переп
 
 ## Корни сцен и правило между ними
 
-Корней девять: `Main` (харнесс, две сцены), `TankBench` (четыре), `EventBench`
+Корней десять: `Main` (харнесс, две сцены), `TankBench` (четыре), `EventBench`
 (три), `WoodBench`, `WallBench`, `ReliefBench`, `Relief3D`, `EffectsBench`,
-`MapEditor`. Семь наследуют `SceneRoot`; два рельефных объявлены схематичными.
+`MapEditor`, `Tank3DBench`. Семь наследуют `SceneRoot`; два рельефных объявлены
+схематичными, `Tank3DBench` — пилот на Node3D со своими флагами снимка.
 
 **Ни один разделяемый модуль не знает, какая сцена его запустила.** Проверяется
 грепом: кода, обращающегося к `Main.` из чужого файла, ровно одно место —
