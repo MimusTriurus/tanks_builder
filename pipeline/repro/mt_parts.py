@@ -54,7 +54,11 @@ PALETTE = ARMY_PALETTE
 # ------------------------------------------------------------------- layout
 
 BELLY_Z = -0.352
-CORE_X = 0.185            # the hull between the belts
+# the hull between the belts: flush with their inner edge (TRACK_X - BELT_W/2
+# = 0.1735) -- at 0.185 the nose and tail stood 11 mm into the belts and cut
+# their inner links off in the front and rear views; the original keeps
+# everything seen from there inside 0.1745
+CORE_X = 0.173
 DECK_Z = -0.059
 FENDER_X = (0.183, 0.298)
 SKIRT_X = (0.270, 0.300)  # a 30 mm plate, between the belt's runs, inside its arcs
@@ -94,15 +98,28 @@ UPPER_Z = [(-0.145, 1.0), (-0.110, 1.0), (-0.090, 0.62), (-0.075, 0.42), (-0.065
            (DECK_Z, 0.22)]
 
 # the turret's lower bowl, left on the hull by the original's cut: the same
-# plan as the turret's foot, so the two line up at rest
-FOOT = [(0.0, -0.157), (0.100, -0.157), (0.155, -0.140), (0.190, -0.110), (0.205, -0.070),
-        (0.211, -0.030), (0.208, 0.010), (0.190, 0.045), (0.172, 0.080), (0.163, 0.120),
-        (0.152, 0.160), (0.130, 0.190), (0.090, 0.212), (0.0, 0.214)]
+# plan as the turret's foot, so the two line up at rest.  It stands on the
+# deck, inside its edge (half width 0.186 at y -0.03): the original's collar
+# meets the deck at the deck's own width and flares only above it, and a
+# platform wider than the deck read as a ring hanging over the hull's sides
+FOOT = [(0.0, -0.157), (0.095, -0.157), (0.145, -0.142), (0.168, -0.112), (0.179, -0.070),
+        (0.182, -0.030), (0.179, 0.010), (0.168, 0.045), (0.158, 0.080), (0.152, 0.120),
+        (0.144, 0.160), (0.126, 0.190), (0.088, 0.212), (0.0, 0.214)]
 PLATFORM_Z = (DECK_Z - 0.008, -0.028)
+PLATFORM_IN = 0.94                     # the bottom ring's width against the top: a bowl
 
-# the fender's top line: its front slopes down to y -0.35, the lamp stands
-# ahead of it on a bumper box
-FENDER = [(-0.334, -0.158), (-0.328, -0.144), (-0.312, -0.134), (-0.290, -0.128),
+
+def platform_plan(xy, z):
+    """FOOT's plan `xy` at height z of the platform's tapered wall."""
+    t = (z - PLATFORM_Z[0]) / (PLATFORM_Z[1] - PLATFORM_Z[0])
+    return xy * [PLATFORM_IN + (1.0 - PLATFORM_IN) * t, 1.0]
+
+# the fender's top line: one plate from the sprocket to the lamp -- its front
+# bends down and runs on forward as the shelf the lamp stands on (the
+# original's underside: -0.160 at y -0.31, -0.195 from y -0.36 to its edge
+# at -0.385), not a fender ending behind a separate bumper box
+FENDER = [(-0.388, -0.175), (-0.362, -0.175), (-0.350, -0.169), (-0.338, -0.157),
+          (-0.326, -0.144), (-0.312, -0.135), (-0.290, -0.128),
           (-0.240, -0.119), (-0.160, -0.127), (0.000, -0.130), (0.370, -0.126),
           (0.420, -0.134), (0.450, -0.148), (0.474, -0.170), (0.488, -0.200)]
 SKIRT = [(-0.321, -0.355), (-0.323, -0.252), (-0.283, -0.192), (0.330, -0.196),
@@ -110,8 +127,7 @@ SKIRT = [(-0.321, -0.355), (-0.323, -0.252), (-0.283, -0.192), (0.330, -0.196),
 
 REAR_BOX = dict(x=(0.170, 0.276), y=(0.262, 0.404), z=(-0.134, -0.046))
 DRUM = dict(x=0.2387, z=-0.0857, r=0.043, y=(0.105, 0.245))
-LAMP = dict(x=0.225, y=-0.346, z=-0.135)       # lens face at y -0.367
-BUMPER = dict(x=(0.172, 0.290), y=(-0.378, -0.322), z=(-0.200, -0.168))
+LAMP = dict(x=0.225, y=-0.346, z=-0.135)       # lens face at y -0.367, 3 mm over the shelf
 
 # running gear: the belt is a stadium, not a hull of the wheels (the idler
 # stands 4 cm inside its front arc, as on the original)
@@ -160,8 +176,10 @@ BODY = [(0.0, -0.226), (0.140, -0.226), (0.168, -0.222), (0.186, -0.206), (0.195
         (0.201, -0.150), (0.212, -0.080), (0.218, -0.030), (0.215, 0.020), (0.203, 0.080),
         (0.178, 0.160), (0.136, 0.240), (0.113, 0.276), (0.090, 0.285), (0.0, 0.285)]
 T_SECTIONS = [  # z, front y, rear y, max half width
-    (-0.013, -0.187, 0.228, 0.222),
-    (0.000, -0.205, 0.245, 0.224),
+    # the foot is as narrow as the platform: the lowest band flares out of it
+    # instead of stepping out 4 cm at once
+    (-0.013, -0.187, 0.228, 0.208),
+    (0.000, -0.205, 0.245, 0.220),
     (0.012, -0.220, 0.274, 0.223),
     (0.028, -0.226, 0.285, 0.220),
     (0.100, -0.222, 0.273, 0.208),
@@ -432,7 +450,7 @@ def hull(mats):
     # --- the turret platform: the turret's lower bowl, on the deck
     bm = new_bm()
     foot = smooth_loop(FOOT, segs(96, 48))
-    loft(bm, [ring_at(foot * [1.0, 1.0], PLATFORM_Z[0]), ring_at(foot, PLATFORM_Z[1])], PAINT)
+    loft(bm, [ring_at(platform_plan(foot, z), z) for z in PLATFORM_Z], PAINT)
     g.add(bm, bevel=(0.004, 2, 30))
 
     # --- the raised rear deck the grille stands on
@@ -442,8 +460,8 @@ def hull(mats):
     box(bm, (0, (0.245 + y1) / 2, -0.061), (0.36, y1 - 0.245, 0.014), PAINT)
     g.add(bm, bevel=(0.004, 2, 30))
 
-    # --- fenders: one bent plate a side, the mudguard down in front, the end
-    # rounded down behind the sprocket
+    # --- fenders: one bent plate a side, bent down in front into the lamp's
+    # shelf, the end rounded down behind the sprocket
     bm = new_bm()
     for s in (-1, 1):
         x0, x1 = sorted((s * FENDER_X[0], s * FENDER_X[1]))
@@ -554,12 +572,9 @@ def hull(mats):
               GLASS, seg=48, axis="Y", center=c, closed=False)
     g.add(bm, subsurf=1)
     g.add(bmg, subsurf=1)
-    bm = new_bm()                  # the bumper box under each lamp, the lamp's foot
-    U = BUMPER
-    for s in (-1, 1):
-        box(bm, (s * sum(U["x"]) / 2, sum(U["y"]) / 2, sum(U["z"]) / 2),
-            (U["x"][1] - U["x"][0], U["y"][1] - U["y"][0], U["z"][1] - U["z"][0]), PAINT)
-        box(bm, (s * L["x"], L["y"] + 0.012, -0.163), (0.040, 0.026, 0.020), PAINT)
+    bm = new_bm()                  # the lamp's foot, sunk into the fender's shelf
+    for s in (-1, 1):              # (its centre inside the Lamp debris box: it flies with it)
+        box(bm, (s * L["x"], L["y"] - 0.005, -0.167), (0.040, 0.022, 0.020), PAINT)
     g.add(bm, bevel=(0.008, 2, 30))
 
     # --- tow shackles, front and rear
@@ -575,14 +590,17 @@ def hull(mats):
             u.append(Vector((x - 0.011 * math.cos(t), yb + 0.022, -0.251 - 0.011 * math.sin(t))))
         u.append(Vector((x + 0.011, yb + 0.016, -0.216)))
         bend_bar(bm, u, 0.0055, GUN, seg=10)
-        # front: a ring hanging deep off the nose, turned to show from both ways
-        box(bm, (x, -0.372, -0.218), (0.030, 0.026, 0.022), PAINT)
-        cyl(bm, (x - 0.017, -0.384, -0.226), (x + 0.017, -0.384, -0.226), 0.0055, GUN, seg=12)
-        rot = Matrix.Rotation(math.radians(40 if x > 0 else -40), 3, "Z")
-        c = Vector((x, -0.392, -0.268))
-        ring = [c + rot @ Vector((0.0, 0.020 * math.sin(t), 0.022 * math.cos(t)))
+        # front: a clevis on the nose's crest (two cheeks buried in the nose, a
+        # pin across them) and the ring hung on the pin between the cheeks, in
+        # the hull's long plane -- edge-on from the front, round from the side.
+        # The pin is low in the cheeks, the ring round below them, its back 2.5
+        # mm off the nose at the crest (the nose leans back under it)
+        for dx in (-0.012, 0.012):
+            box(bm, (x + dx, -0.3765, -0.233), (0.007, 0.049, 0.042), PAINT)
+        cyl(bm, (x - 0.0165, -0.3935, -0.246), (x + 0.0165, -0.3935, -0.246), 0.0042, GUN, seg=12)
+        ring = [Vector((x, -0.3935 + 0.015 * math.sin(t), -0.2568 + 0.022 * math.cos(t)))
                 for t in np.linspace(0, math.tau, 25)]
-        bend_bar(bm, ring, 0.0055, GUN, seg=10)
+        bend_bar(bm, ring, 0.007, GUN, seg=10)
     g.add(bm, bevel=(0.003, 2, 30), subsurf=1)
 
     # --- rivets
@@ -598,7 +616,7 @@ def hull(mats):
             nn = max(2, int(round((lo_b - ya) / 0.05)) + 1)
             rivets(bm, [(xf, y, -0.341) for y in np.linspace(ya, lo_b, nn)], (s, 0, 0))
         # along the fender's outer edge
-        fy, fz = [p[0] for p in FENDER[2:-3]], [p[1] for p in FENDER[2:-3]]
+        fy, fz = [p[0] for p in FENDER], [p[1] for p in FENDER]
         rivets(bm, [(s * 0.286, y, float(np.interp(y, fy, fz)) + 0.0004)
                     for y in np.linspace(-0.305, 0.36, 13)], (0, 0, 1), r=RIV * 0.9)
         # rear box outer face
@@ -607,12 +625,17 @@ def hull(mats):
     for x in (-0.07, 0.07):
         for z in (-0.180, -0.144):
             rivets(bm, [at(x, z, 0.0124)], nrm)
-    # round the platform's foot
-    foot = smooth_loop(FOOT, 28)
+    # round the platform, near its top: on the tapered wall, normal to it
+    zr = -0.036
+    foot = platform_plan(smooth_loop(FOOT, 28), zr)
+    lean = (1.0 - PLATFORM_IN) / (PLATFORM_Z[1] - PLATFORM_Z[0])
     for k, (x, y) in enumerate(foot):
-        p = Vector((x, y, 0.0))
-        d = Vector((x, y - RING_C[1], 0.0)).normalized()
-        rivets(bm, [Vector((x, y, -0.036)) + d * 0.0004], d, r=RIV * 0.85)
+        tx, ty = foot[(k + 1) % len(foot)] - foot[k - 1]
+        d = Vector((ty, -tx, 0.0)).normalized()
+        if d.dot(Vector((x, y - RING_C[1], 0.0))) < 0:
+            d = -d
+        d = Vector((d.x, d.y, -d.x * x * lean)).normalized()
+        rivets(bm, [Vector((x, y, zr)) + d * 0.0004], d, r=RIV * 0.85)
     g.add(bm, subsurf=1)
 
     if game():
@@ -639,8 +662,14 @@ def engine(mats):
     bm = new_bm()
     p0, p1 = Vector((0, y0, z0)), Vector((0, y1, z1))
     q0, q1 = p0 - nrm * 0.012, p1 - nrm * 0.012
-    # as wide as the hull behind it and 1 cm into the rear boxes, never flush
-    prism(bm, [(p0.y, p0.z), (p1.y, p1.z), (q1.y, q1.z), (q0.y, q0.z)], -0.180, 0.180, PAINT)
+    # 1 cm into the rear boxes at the top, never flush; tapered to 0.170 at
+    # the bottom, where it stands behind the belts' rear arcs (below z -0.157
+    # it is inside their inner edge, 0.1735, and cuts no links off)
+    pts = []
+    for (a, b), w in (((p0, q0), 0.180), ((p1, q1), 0.170)):
+        for p in (a, b):
+            pts += [(-w, p.y, p.z), (w, p.y, p.z)]
+    hull_solid(bm, pts, PAINT)
     g.add(bm, bevel=(0.005, 2, 30))
     bm = new_bm()
     rot = Vector((0, 0, 1)).rotation_difference(nrm).to_matrix()
