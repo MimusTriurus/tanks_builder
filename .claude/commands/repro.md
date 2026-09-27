@@ -102,6 +102,13 @@ then `hull`, `engine`, `turret`, `mantlet`, `barrel`, `belt`,
 `rolls` and, if the turret has painted seams, `turret_ink`. Numbers in the
 original's frame.
 
+**A casemate** (no `Turret.World` in the scene: TD_StuG4, HM_SturmTiger) has
+`casemate(mats)` instead of `turret` and no `RING_C` / `RING_Z0`, plus
+`BLAST` (x, y, z: the fighting compartment the debris flies from); the kit
+does the rest (docs/repro.md, "Каземат"; the example is
+`repro/hm_sturmtiger.py`). A gun that rests raised (a mortar) sets `GUN_EL`
+and is built level from the trunnion, then `tilt`ed up by it.
+
 **The gun lays in elevation** - the board has levels, and `barrel_recoil`
 renders the gun at every angle of `barrel_recoil.ladder()` (0, ±3.6 ... ±14.0
 deg); the bench picks one. So every copy is built for it:
@@ -210,7 +217,8 @@ K.verify(tank)
 ```
 
 must show: `axis_minus_root` 0, `roundness` 1.0, `warnings` empty, `rotatable`
-true, `ground_copy` equal to `ground_original`, one material per root,
+true (a casemate instead: `casemate` = the hull's root, `turret_root` empty),
+`ground_copy` equal to `ground_original`, one material per root,
 `no_uvmap`, `custom_props`, `source_left` and `floating` (pieces touching
 nothing, like a rivet left over a plate that moved) empty, `engine` back on EEVEE,
 and under `gun`: `origin_off` 0 for mantlet and barrel, `rotation` 0 (the gun
@@ -271,10 +279,10 @@ turret ~25, and the pair ran past the bridge's timeout.
 K.bake(tank, ("Hull",))
 ```
 ```python
-K.bake(tank, ("Turret",))
+K.bake(tank, ("Turret",))      # not on a casemate: it has no turret root
 ```
 ```python
-K.bake(tank, ("TrackL",))      # then ("TrackR",)
+K.bake(tank, ("TrackL",))      # then ("TrackR",) -- the pair ran past the timeout too
 ```
 
 Flat paint: no painted light, no crease or edge ink - the engine's cel ramp
