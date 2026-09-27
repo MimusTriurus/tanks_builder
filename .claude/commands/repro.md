@@ -1,5 +1,5 @@
 ---
-description: Rebuild a generator tank as a clean procedural copy next to it - measure, author, compare, bake textures, verify
+description: Rebuild a generator tank as a clean procedural copy next to it - measure, author, compare, gun laid for elevation, bake textures, verify
 argument-hint: [which scene or tank, e.g. "LT_PARTS" or "MT_PARTS_1 as mt_parts" or "continue lt_parts: thicker skirts"]
 ---
 
@@ -47,6 +47,9 @@ tank module's docstring, what the copy must repeat:
 - which belt is left (LT_PARTS: `L.*` on **-X**);
 - the ring axis: a `ring_axis` stamp if the pipeline ran, else the round
   slice of the turret (`K.radial_profile`);
+- the gun: what lays with it in elevation (mantlet, shield, block round the
+  tube) and what stays with the turret (the frame, the face plate), and where
+  the trunnion goes - across X, on the bore, mid-depth in the part that lays;
 - the material layout and image sizes (the copy bakes the same layout);
 - stamps (`ring_*`, `muzzle_*`, `hit_*`, `exhaust_*`) and effect meshes
   (`Burn`, `Flash`, ...) are tool output: the copy does not repeat them.
@@ -78,10 +81,30 @@ these renders, never against the texture's median.
 ## 4. Author `pipeline/repro/<name>.py`
 
 Copy the skeleton of `repro/lt_parts.py`: the constants block (`NAME`, `SFX`,
-`X_OFF`, `PREFIX`, `GROUND`, `RING_C`, `RING_Z0`, `TRACK_X`, `PALETTE`), then
-`hull`, `engine`, `turret`, `barrel`, `belt`, `rolls` and, if the turret has
-painted seams, `turret_ink`. Numbers in the original's frame. The rules that
-already cost a round each (details in docs/repro.md, "Ловушки"):
+`X_OFF`, `PREFIX`, `GROUND`, `RING_C`, `RING_Z0`, `TRACK_X`, `TRUNNION`,
+`PALETTE`), then `hull`, `engine`, `turret`, `mantlet`, `barrel`, `belt`,
+`rolls` and, if the turret has painted seams, `turret_ink`. Numbers in the
+original's frame.
+
+**The gun lays in elevation** - the board has levels, and `barrel_recoil`
+renders the gun at every angle of `barrel_recoil.ladder()` (0, ±3.6 ... ±14.0
+deg); the bench picks one. So every copy is built for it:
+
+- `mantlet` is everything that lays with the gun and does **not** recoil (the
+  block, shield or collar round the tube, its flange and rivets); `barrel` is
+  the tube, which lays and recoils. The frame it turns in stays in `turret`.
+  A block in `barrel` would slide back into the turret on every shot.
+- `TRUNNION = (y, z)`: the axis across X the gun lays about, on the bore.
+  `build` puts both objects' origins on it, so laying is `rotation_euler.x`.
+- the tube's breech end sits **exactly** on the trunnion (a hidden stub inside
+  the mantlet): `barrel_recoil.trunnion()` pivots about the breech end of the
+  tube on the bore, so anything else renders the gun about another axis.
+- the mantlet's top and bottom are arcs about the trunnion that pass just
+  under the frame's inner front edges (lt_parts `mantlet`): the block then
+  turns in place at any angle - no slot opens, nothing pokes through.
+
+The other rules that already cost a round each (details in docs/repro.md,
+"Ловушки"):
 
 - the ring owns the lowest slices of the turret (dense 192-segment wall, the
   body's foot above it), and the hull's collar reaches up to just under the
@@ -97,12 +120,15 @@ already cost a round each (details in docs/repro.md, "Ловушки"):
 ```python
 stats = K.build(tank)                              # ~10 s
 png = K.compare(tank, ["iso_fl", "iso_rr", "side", "front", "top"], "cmp_geo")
+lay = K.lay_sheet(tank)          # the gun close up at +max, 0, -max of the ladder
 ```
 
 Geometry reads fine on the source materials in EEVEE. Iterate on the module
-until the silhouettes and parts match, **then send the comparison to the user
-and wait for a go before baking**: textures cost a minute a round, and a shape
-change afterwards means baking again.
+until the silhouettes and parts match and the lay sheet shows the mantlet
+turning inside its frame with the tube centred in its collar, **then send both
+pictures to the user and wait for a go before baking**: textures cost a minute
+a round, and a shape change afterwards means baking again. `K.lay(tank, deg)`
+poses the gun by hand; `bake` puts it back to 0 itself.
 
 ## 6. Textures
 
@@ -133,9 +159,12 @@ K.verify(tank)
 
 must show: `axis_minus_root` 0, `roundness` 1.0, `warnings` empty, `rotatable`
 true, `ground_copy` equal to `ground_original`, one material per root,
-`no_uvmap`, `custom_props` and `source_left` empty, `engine` back on EEVEE.
-Then `K.compare(...)` over the full set of views and the close-ups, and send it.
-Say plainly what still differs from the original.
+`no_uvmap`, `custom_props` and `source_left` empty, `engine` back on EEVEE,
+and under `gun`: `origin_off` 0 for mantlet and barrel, `rotation` 0 (the gun
+is saved at rest), `breech_off` 0.
+Then `K.compare(...)` over the full set of views and the close-ups plus
+`K.lay_sheet(tank, name="lay_baked")`, and send them. Say plainly what still
+differs from the original.
 
 ## 8. Save without overwriting anything of the user's
 
@@ -151,3 +180,7 @@ The pipeline must **not** run on a scene holding both tanks: `Hull.World.Repro`
 contains `Hull.World`, and `by_hints`, `exhaust_point` and `muzzle_point` match
 by substring or prefix. To send the copy through `/tank`, remove the original
 and strip the suffix first - and say so rather than doing it unasked.
+
+`barrel_recoil` does not know `Mantlet.Geometry` yet: until it does, the
+pipeline draws the mantlet in the turret layer at rest and lays the tube alone
+(about the right axis, thanks to the breech stub). Say so when you report.

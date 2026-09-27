@@ -107,6 +107,10 @@ GUN_Z = 0.153
 FRAME = dict(cz=0.155, ohw=0.125, ohh=0.083, ihw=0.083, ihh=0.066, r_o=0.028, r_i=0.014,
              y_back=-0.180, y_front=-0.249)
 BLOCK = dict(hw=0.074, z0=0.094, z1=0.222, y_back=-0.185, y_front=-0.247)
+# the gun lays about a horizontal axis across the turret through here (y, z):
+# on the bore, mid-depth in the block.  Mantlet and barrel have their origins
+# on it, so laying the gun is rotation_euler.x and nothing else
+TRUNNION = (-0.215, GUN_Z)
 CUPOLA = (-0.050, 0.095)
 ROOF_Z = 0.284
 ROOF_SEAMS = (RING_C[1], -0.106)     # plate seams across the roof (world y), as the original draws
@@ -544,24 +548,7 @@ def turret(mats):
     # its face leans back with the turret's (~6 deg), so it stands out evenly
     tilt(bm, -6.0, F["y_front"], F["cz"])
     g.add(bm, bevel=(0.005, 2, 30))
-    B = BLOCK
-    bm = new_bm()
-    box(bm, (0, (B["y_back"] + B["y_front"]) / 2, (B["z0"] + B["z1"]) / 2),
-        (2 * B["hw"], B["y_back"] - B["y_front"], B["z1"] - B["z0"]), GUN)
-    tilt(bm, -4.0, B["y_front"], GUN_Z)
-    g.add(bm, bevel=(0.011, 2, 30))
-    bm = new_bm()
-    lathe(bm, rounded_rect_profile(-0.012, 0.0, 0.0, 0.058, 0.004, n=2), GUN, seg=64,
-          axis="Y", center=(0, B["y_front"] + 0.002, GUN_Z))
-    g.add(bm, subsurf=1)
-    # the block's rivets lean with its face, or the lower pair sinks 3 mm
-    # into it and the Bevel node inks a ring over the buried dome
-    bm = new_bm()
-    for x in (-0.056, 0.056):
-        for z in (B["z0"] + 0.016, B["z1"] - 0.016):
-            rivets(bm, [(x, B["y_front"] - 0.0004, z)], (0, -1, 0), r=0.0058, mi=RIVET_G)
-    tilt(bm, -4.0, B["y_front"], GUN_Z)
-    g.add(bm, subsurf=1)
+    # the grey block in the frame lays with the gun: `mantlet`
 
     # cupola: thick ring, grated lid, hinge behind, a latch handle
     hx, hy = CUPOLA
@@ -586,13 +573,74 @@ def turret(mats):
     return g
 
 
+def _frame_edge(top):
+    """The frame's inner front edge, top or bottom, after its 6 deg lean:
+    (y, z) of the line the mantlet's arc has to pass under."""
+    F = FRAME
+    s = 1.0 if top else -1.0
+    a = math.radians(6.0)
+    return F["y_front"] + s * F["ihh"] * math.sin(a), F["cz"] + s * F["ihh"] * math.cos(a)
+
+
+def mantlet(mats):
+    """The grey block, its flange and rivets: everything that lays with the
+    gun and does not recoil.  Top and bottom are arcs about the trunnion that
+    pass just under the frame's inner front edges, so at any elevation the
+    block turns in place behind them and no slot opens; the front leans back
+    4 deg like the original's."""
+    g = Group(mats)
+    B = BLOCK
+    ty, tz = TRUNNION
+    lean = math.tan(math.radians(4.0))
+
+    def face_y(z):
+        return B["y_front"] + (z - GUN_Z) * lean
+
+    pts = []
+    for top in (True, False):
+        ey, ez = _frame_edge(top)
+        R = math.hypot(ey - ty, ez - tz) - 0.001
+        s = 1.0 if top else -1.0
+
+        def arc_z(y):
+            return tz + s * math.sqrt(R * R - (y - ty) ** 2)
+
+        y = B["y_front"]
+        for _ in range(20):                      # where the arc meets the face
+            y = face_y(arc_z(y))
+        for yy in np.linspace(y, B["y_back"], 24):
+            for x in (-B["hw"], B["hw"]):
+                pts.append((x, yy, arc_z(yy)))
+    bm = new_bm()
+    hull_solid(bm, pts, GUN)
+    g.add(bm, bevel=(0.011, 2, 30))
+    bm = new_bm()
+    lathe(bm, rounded_rect_profile(-0.012, 0.0, 0.0, 0.058, 0.004, n=2), GUN, seg=64,
+          axis="Y", center=(0, B["y_front"] + 0.002, GUN_Z))
+    g.add(bm, subsurf=1)
+    # the rivets lean with the face, or the lower pair sinks 3 mm into it and
+    # the Bevel node inks a ring over the buried dome
+    bm = new_bm()
+    for x in (-0.056, 0.056):
+        for z in (B["z0"] + 0.016, B["z1"] - 0.016):
+            rivets(bm, [(x, B["y_front"] - 0.0004, z)], (0, -1, 0), r=0.0058, mi=RIVET_G)
+    tilt(bm, -4.0, B["y_front"], GUN_Z)
+    g.add(bm, subsurf=1)
+    return g
+
+
 def barrel(mats):
-    """Collar, sleeve, tube; bored.  The breech end deep in the block, so the
-    recoil layer (0.13 of the length back) never shows it."""
+    """Breech stub, collar, sleeve, tube; bored.  The stub ends exactly on the
+    trunnion, which is where `barrel_recoil.trunnion()` puts the pivot (the
+    breech end of the tube on the bore), so the pipeline lays the gun about
+    the same axis the model was built for.  Deep in the block, so the recoil
+    layer (0.13 of the length back) never shows it."""
     g = Group(mats)
     bm = new_bm()
     y0 = -0.236
-    prof = [(0.0, 0.0), (0.0, 0.050), (-0.052, 0.050), (-0.056, 0.047), (-0.060, 0.0448),
+    tb = TRUNNION[0] - y0
+    prof = [(tb, 0.0), (tb, 0.040), (0.0, 0.040),
+            (0.0, 0.050), (-0.052, 0.050), (-0.056, 0.047), (-0.060, 0.0448),
             (-0.112, 0.0448), (-0.116, 0.041), (-0.121, 0.0295), (-0.2227, 0.0295),
             (-0.2227, 0.0145), (-0.2027, 0.0145), (-0.2027, 0.0)]
     lathe(bm, prof, GUN, seg=64, axis="Y", center=(0, y0, GUN_Z), closed=False)

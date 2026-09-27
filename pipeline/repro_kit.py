@@ -23,13 +23,21 @@ A tank module provides:
     GROUND, RING_C, RING_Z0       its ground z, ring axis (x, y), turret root z
     TRACK_X                       belt centre |x|; the left belt is on -X
     PALETTE                       {material index: dict(base, light, dark, ink, rough, metal)}
+    TRUNNION                      (y, z) of the axis the gun lays about, across X
     hull(mats), engine(mats), turret(mats), barrel(mats)  -> Group
+    mantlet(mats) -> Group        what lays with the gun and does not recoil
     belt(mats, xc) -> (bmesh, stats),  rolls(mats, xc, side) -> Group
     turret_ink(nb, pos, nrm) -> socket   optional: painted seams on the turret
 
+The gun lays in elevation (the board has levels; `barrel_recoil` renders the
+ladder of angles): `Mantlet` and `Barrel` get their origins on the trunnion,
+so `lay(tank, deg)` is `rotation_euler.x` on both, and the barrel's breech
+stub ends on the trunnion so `barrel_recoil.trunnion()` fits the same pivot.
+
     import repro_kit as K
     tank = K.load("lt_parts")
-    K.build(tank); K.bake(tank, ("Hull", "Turret")); K.bake(tank, ("TrackL", "TrackR"))
+    K.build(tank); K.lay_sheet(tank)
+    K.bake(tank, ("Hull", "Turret")); K.bake(tank, ("TrackL", "TrackR"))
     K.compare(tank, ["iso_fl", "side"], "cmp"); K.verify(tank); K.save(tank)
 """
 
@@ -55,12 +63,13 @@ GREEN = (PAINT, PAINT_T, PAINTDK, RIVET)      # what the grey check samples unde
 NAMES = {
     "hull": "Hull.World", "hull_geo": "Hull.Geometry", "engine": "Engine.Geometry",
     "turret": "Turret.World", "turret_geo": "Turret.Geometry", "barrel": "Barrel.Geometry",
+    "mantlet": "Mantlet.Geometry",
     "left": "Track.Left.World", "l_cat": "L.Caterpillar.Geometry", "l_rolls": "L.Rolls.Geometry",
     "right": "Track.Right.World", "r_cat": "R.Caterpillar.Geometry", "r_rolls": "R.Rolls.Geometry",
 }
-ROOTS = {   # bake key -> (root, children)
+ROOTS = {   # bake key -> (root, children); a child the tank does not build is skipped
     "Hull": ("hull", ("hull_geo", "engine")),
-    "Turret": ("turret", ("turret_geo", "barrel")),
+    "Turret": ("turret", ("turret_geo", "mantlet", "barrel")),
     "TrackL": ("left", ("l_cat", "l_rolls")),
     "TrackR": ("right", ("r_cat", "r_rolls")),
 }
@@ -626,14 +635,20 @@ class Group:
         bm.free()
         self.meshes.append(me)
 
-    def build(self, name, parent, coll, x_off=0.0):
+    def build(self, name, parent, coll, x_off=0.0, origin=None):
         """Join the pieces; made in the original's frame, they are shifted by
-        x_off and then taken into the root's frame (loc 0, scale 1 under it)."""
+        x_off and then taken into the root's frame (loc 0, scale 1 under it).
+        `origin` (original's frame) puts the object's origin there instead --
+        the pivot of a part that moves, like the gun on its trunnion."""
         bm = bmesh.new()
         for me in self.meshes:
             bm.from_mesh(me)
             bpy.data.meshes.remove(me)
         m = parent.matrix_world.inverted() @ Matrix.Translation((x_off, 0.0, 0.0))
+        loc = Vector((0.0, 0.0, 0.0))
+        if origin is not None:
+            loc = m @ Vector(origin)
+            m = Matrix.Translation(-loc) @ m
         bmesh.ops.transform(bm, matrix=m, verts=bm.verts)
         me = bpy.data.meshes.new(name)
         bm.to_mesh(me)
@@ -643,6 +658,7 @@ class Group:
         ob = bpy.data.objects.new(name, me)
         coll.objects.link(ob)
         ob.parent = parent
+        ob.location = loc
         compact_materials(me)
         me.set_sharp_from_angle(angle=math.radians(38))
         return ob
@@ -773,10 +789,13 @@ def build(tank):
     left_w = root("left", (-tank.TRACK_X, 0, tank.GROUND))
     right_w = root("right", (tank.TRACK_X, 0, tank.GROUND))
     x = tank.X_OFF
+    pivot = trunnion(tank)
     obs = [tank.hull(mats).build(nm(tank, "hull_geo"), hull_w, coll, x),
            tank.engine(mats).build(nm(tank, "engine"), hull_w, coll, x),
-           tank.turret(mats).build(nm(tank, "turret_geo"), tur_w, coll, x),
-           tank.barrel(mats).build(nm(tank, "barrel"), tur_w, coll, x)]
+           tank.turret(mats).build(nm(tank, "turret_geo"), tur_w, coll, x)]
+    if hasattr(tank, "mantlet"):
+        obs.append(tank.mantlet(mats).build(nm(tank, "mantlet"), tur_w, coll, x, origin=pivot))
+    obs.append(tank.barrel(mats).build(nm(tank, "barrel"), tur_w, coll, x, origin=pivot))
     stats = {}
     for side, rw, cat, rol in ((-1, left_w, "l_cat", "l_rolls"), (1, right_w, "r_cat", "r_rolls")):
         xc = side * tank.TRACK_X
@@ -793,6 +812,92 @@ def build(tank):
     stats["total_verts"] = sum(stats["verts"].values())
     stats["build_s"] = round(time.time() - t0, 1)
     return stats
+
+
+# ----------------------------------------------------------- laying the gun
+
+def trunnion(tank):
+    """The trunnion as a point on the centre line, original's frame."""
+    ty, tz = tank.TRUNNION
+    return (0.0, ty, tz)
+
+
+def lay(tank, deg):
+    """Lay the copy's gun `deg` up (negative: down) about its trunnion; 0 is
+    rest.  Mantlet and barrel carry their origins on the trunnion and their
+    roots are unrotated, so this is rotation_euler.x on both -- the same one
+    number an engine would drive.  Returns the objects it turned."""
+    turned = []
+    for key in ("mantlet", "barrel"):
+        ob = bpy.data.objects.get(nm(tank, key))
+        if ob:
+            ob.rotation_euler = (-math.radians(deg), 0.0, 0.0)
+            turned.append(ob.name)
+    bpy.context.view_layer.update()
+    return turned
+
+
+def lay_angles():
+    """The angles the pipeline renders (`barrel_recoil.ladder()`: facts about
+    the board, not taste), the steepest up and down plus level."""
+    import sys
+    if REPO not in sys.path:
+        sys.path.insert(0, REPO)
+    import barrel_recoil
+    importlib.reload(barrel_recoil)
+    table = barrel_recoil.ladder()[0]
+    top = max(table)
+    return [top, 0.0, -top], table
+
+
+def lay_sheet(tank, degs=None, name="lay", samples=24):
+    """The gun close up, side and three-quarter front, one row per angle
+    (steepest up, level, steepest down by default).  What to look for: the
+    block turns inside its frame without opening a slot or poking through,
+    and the tube stays centred in its collar."""
+    if degs is None:
+        degs = lay_angles()[0]
+    ty, tz = tank.TRUNNION
+    X = tank.X_OFF
+    aim = Vector((X, ty - 0.035, tz))
+    extra = {"gun_side": (aim + Vector((0.75, 0.0, 0.02)), aim, 75, False),
+             "gun_front": (aim + Vector((0.45, -0.70, 0.40)), aim, 75, False)}
+    d = out_dir(tank)
+    rows = []
+    try:
+        for deg in degs:
+            lay(tank, deg)
+            p = os.path.join(d, "_lay_%+.1f.png" % deg)
+            shoot(["gun_side", "gun_front"], p, (X, 0, 0),
+                  only=lambda o: o.name.endswith(tank.SFX), w=560, h=420,
+                  samples=samples, extra=extra)
+            rows.append(_read_png(p))
+    finally:
+        lay(tank, 0.0)
+    return _tile_png(rows, 1, os.path.join(d, name + ".png"))
+
+
+def check_lay(tank):
+    """Numbers behind the picture: both origins on the trunnion, the gun at
+    rest, and the tube's breech end on the trunnion -- `barrel_recoil`
+    pivots about the breech end of the tube on the bore, so anything else
+    lays the rendered gun about a different axis than the model's."""
+    p = Vector(trunnion(tank)) + Vector((tank.X_OFF, 0, 0))
+    out = {"trunnion": [round(v, 4) for v in p]}
+    for key in ("mantlet", "barrel"):
+        ob = bpy.data.objects.get(nm(tank, key))
+        if ob is None:
+            out[key] = None
+            continue
+        out[key] = {"origin_off": round((ob.matrix_world.translation - p).length, 6),
+                    "rotation": [round(v, 6) for v in ob.rotation_euler]}
+    bar = bpy.data.objects.get(nm(tank, "barrel"))
+    if bar:
+        co = world_co(bar)
+        lo, hi = co.min(0), co.max(0)
+        breech = Vector(((lo[0] + hi[0]) / 2, hi[1], (lo[2] + hi[2]) / 2))
+        out["breech_off"] = round((breech - p).length, 6)
+    return out
 
 
 # --------------------------------------------------------------------- bake
@@ -934,7 +1039,8 @@ def final_material(name, img_c, img_d):
 def bake_root(tank, key, size=TEX, samples=12):
     """Unwrap and bake one root; its objects keep their source materials."""
     _, kids = ROOTS[key]
-    objs = [bpy.data.objects[nm(tank, k)] for k in kids]
+    objs = [o for o in (bpy.data.objects.get(nm(tank, k)) for k in kids) if o]
+    lay(tank, 0.0)                  # the texture belongs to the rest pose
     t0 = time.time()
     unwrap(tank, objs)
     t_uv = time.time() - t0
@@ -1358,7 +1464,8 @@ def verify(tank):
     """What every copy has to pass before anyone looks at pictures: the ring
     axis measured on the copy (read-only), belts on the original's ground,
     one baked material per root, UVMap, no custom properties, no source
-    materials left, the scene's engine back on EEVEE."""
+    materials left, the scene's engine back on EEVEE, the gun on its
+    trunnion and at rest (`check_lay`)."""
     import sys
     if REPO not in sys.path:
         sys.path.insert(0, REPO)
@@ -1387,6 +1494,7 @@ def verify(tank):
     out["source_left"] = [src_name(tank, i) for i in range(len(KINDS))
                           if bpy.data.materials.get(src_name(tank, i))]
     out["engine"] = bpy.context.scene.render.engine
+    out["gun"] = check_lay(tank)
     return out
 
 
