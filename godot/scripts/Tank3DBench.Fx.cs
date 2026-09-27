@@ -144,6 +144,10 @@ void fragment() {
                                               MovementProfile.Mortar })
             if (p.Tag == _spriteTag)
                 _profile = p;
+        if (_profile.Turreted != _model.Turreted)
+            GD.Print($"tank3d: {_modelTag} is {(_model.Turreted ? "turreted" : "a casemate")} but "
+                     + $"moves as the {_profile.Tag} class, which is {(_profile.Turreted ? "turreted" : "a casemate")}"
+                     + " - the class comes from --sprites");
         foreach (MeshInstance3D mesh in Meshes(_model))
             for (int s = 0; s < mesh.Mesh.GetSurfaceCount(); s++)
                 if (mesh.Mesh.SurfaceGetMaterial(s) is StandardMaterial3D m
@@ -683,8 +687,10 @@ void fragment() {
         StandAt(_hit!.Quad, struck.Z + Margin);
         // The leak is light round the turret ring, drawn on the sprite under
         // the turret: at the ring's own depth the turret's near half covers it
-        // as the sprite's turret layer did.
-        StandAt(_glow!.Quad, _model.Turret.GlobalPosition.Z + Margin);
+        // as the sprite's turret layer did. A casemate has no ring: the
+        // fighting compartment it would leak from is the sidecar's blast point.
+        Vector3 ring = _model.Turret?.GlobalPosition ?? _model.Tank.ToGlobal(_model.BlastAt);
+        StandAt(_glow!.Quad, ring.Z + Margin);
         // The flash and the fume put the muzzle where the atlas measured it,
         // per 15-degree frame; the model's turret turns smoothly, so their card
         // is shifted by the difference - on screen, which is all it is.

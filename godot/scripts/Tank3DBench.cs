@@ -385,7 +385,12 @@ public sealed partial class Tank3DBench : Node3D
             case "straight": _turnScripted = 0.0f; break;
             default:
                 if (what.StartsWith("turret=", StringComparison.Ordinal))
-                    _model.Yaw = Mathf.DegToRad(F(what[7..], 0));
+                {
+                    if (_model.Turreted)
+                        _model.Yaw = Mathf.DegToRad(F(what[7..], 0));
+                    else
+                        GD.Print($"tank3d: --do {what}: {_modelTag} is a casemate, it has no turret");
+                }
                 else if (what.StartsWith("elev=", StringComparison.Ordinal))
                     _model.Elevation = Mathf.DegToRad(F(what[5..], 0));
                 else if (what.StartsWith("heading=", StringComparison.Ordinal))
@@ -502,16 +507,20 @@ public sealed partial class Tank3DBench : Node3D
         _kickPitch.Kick(2.5f);
         _heave.Kick(0.35f * 0.3f);
 
-        float yawDeg = Mathf.RadToDeg(_model.Yaw);
-        TankModel.Landing land = _model.LandingNear(yawDeg + 150.0f);
-        _tossFrom = _model.TurretRest;
-        _tossTo = land.At;
-        _tossYaw0 = yawDeg;
-        _tossYawEnd = land.YawDeg + 360.0f * Mathf.Ceil((yawDeg + 300.0f - land.YawDeg) / 360.0f);
-        // The landing's rotation with its own yaw taken out, so the spin is
-        // ours and the settle is the deck's tilt alone.
-        _tossTilt = land.Rest * new Quaternion(Vector3.Up, -Mathf.DegToRad(land.YawDeg));
-        _model.TurretOverride = _model.Turret.Transform;
+        // A casemate keeps its casemate: nothing is thrown, only the debris.
+        if (_model.Turret is { } turret)
+        {
+            float yawDeg = Mathf.RadToDeg(_model.Yaw);
+            TankModel.Landing land = _model.LandingNear(yawDeg + 150.0f);
+            _tossFrom = _model.TurretRest;
+            _tossTo = land.At;
+            _tossYaw0 = yawDeg;
+            _tossYawEnd = land.YawDeg + 360.0f * Mathf.Ceil((yawDeg + 300.0f - land.YawDeg) / 360.0f);
+            // The landing's rotation with its own yaw taken out, so the spin is
+            // ours and the settle is the deck's tilt alone.
+            _tossTilt = land.Rest * new Quaternion(Vector3.Up, -Mathf.DegToRad(land.YawDeg));
+            _model.TurretOverride = turret.Transform;
+        }
 
         // Debris out of the hierarchy and into the world, thrown out and up
         // from the blast point.
@@ -596,7 +605,8 @@ public sealed partial class Tank3DBench : Node3D
         float turnIn = (Input.IsKeyPressed(Key.A) ? 1 : 0) - (Input.IsKeyPressed(Key.D) ? 1 : 0) + _turnScripted;
         if (alive)
         {
-            _model.Yaw += yawIn * Mathf.DegToRad(SlewDeg) * dt;
+            if (_model.Turreted)          // a casemate aims with its hull
+                _model.Yaw += yawIn * Mathf.DegToRad(SlewDeg) * dt;
             _model.Elevation = Mathf.Clamp(_model.Elevation + elevIn * Mathf.DegToRad(ElevDeg) * dt,
                                            Mathf.DegToRad(_model.ElevMin), Mathf.DegToRad(_model.ElevMax));
         }
@@ -651,7 +661,8 @@ public sealed partial class Tank3DBench : Node3D
 
         _hud.Text = $"{_modelTag} 3D ({_spriteTag} scale, effects)  {_fate}  {_note}\n"
                     + "Space shot   1-4 ricochet front/right/rear/left   Shift+1-4 pierce   Ctrl+1-4 HE   5 round in the ground\n"
-                    + "J burning   K knocked out   X destroyed   Backspace reset   WASD drive   Q/E turret   R/F gun   -/= zoom   F12 shot";
+                    + "J burning   K knocked out   X destroyed   Backspace reset   WASD drive   "
+                    + (_model.Turreted ? "Q/E turret   " : "") + "R/F gun   -/= zoom   F12 shot";
         Shots();
         _frame++;
     }
@@ -659,7 +670,9 @@ public sealed partial class Tank3DBench : Node3D
     private void AdvanceFate(float dt)
     {
         float t = _sinceFate;
-        if (_fate == Fate.Knocked || _model.TurretOverride is null)
+        // (a destroyed casemate has no toss to own its turret, and still goes
+        // on below: its debris flies)
+        if (_fate == Fate.Knocked || (_model.Turreted && _model.TurretOverride is null))
         {
             // The tip settles with a small overshoot, the gun falls to its stop,
             // the belts sag.
@@ -676,23 +689,26 @@ public sealed partial class Tank3DBench : Node3D
         float grav = 8.0f * _model.TossLift / (flight * flight) * s;
         _model.Droop = Smooth(0.0f, 0.6f, t);
         _model.Slackness = Smooth(0.0f, 0.4f, t);
-        if (t >= flight && t - dt < flight)
+        if (_model.Turreted)
         {
-            _kickPitch.Kick(-1.6f);   // the turret lands on the deck: stern down
-            FxLanded();
-        }
+            if (t >= flight && t - dt < flight)
+            {
+                _kickPitch.Kick(-1.6f);   // the turret lands on the deck: stern down
+                FxLanded();
+            }
 
-        float tau = Mathf.Min(1.0f, t / flight);
-        float u = Mathf.Clamp((t - flight) / slide, 0.0f, 1.0f);
-        float e = 1.0f - (1.0f - u) * (1.0f - u);
-        float prog = (1.0f - _model.SlideShare) * tau + _model.SlideShare * e;
-        Vector3 pos = _tossFrom.Lerp(_tossTo, prog);
-        if (tau < 1.0f)
-            pos.Y = _tossFrom.Y + (_tossTo.Y - _tossFrom.Y) * tau + 4.0f * _model.TossLift * tau * (1.0f - tau);
-        float yaw = _tossYaw0 + (_tossYawEnd - _model.SlideSpin - _tossYaw0) * tau + _model.SlideSpin * e;
-        float w = Smooth(0.75f, 1.0f, tau);
-        Quaternion rot = Quaternion.Identity.Slerp(_tossTilt, w) * new Quaternion(Vector3.Up, Mathf.DegToRad(yaw));
-        _model.TurretOverride = new Transform3D(new Basis(rot), pos);
+            float tau = Mathf.Min(1.0f, t / flight);
+            float u = Mathf.Clamp((t - flight) / slide, 0.0f, 1.0f);
+            float e = 1.0f - (1.0f - u) * (1.0f - u);
+            float prog = (1.0f - _model.SlideShare) * tau + _model.SlideShare * e;
+            Vector3 pos = _tossFrom.Lerp(_tossTo, prog);
+            if (tau < 1.0f)
+                pos.Y = _tossFrom.Y + (_tossTo.Y - _tossFrom.Y) * tau + 4.0f * _model.TossLift * tau * (1.0f - tau);
+            float yaw = _tossYaw0 + (_tossYawEnd - _model.SlideSpin - _tossYaw0) * tau + _model.SlideSpin * e;
+            float w = Smooth(0.75f, 1.0f, tau);
+            Quaternion rot = Quaternion.Identity.Slerp(_tossTilt, w) * new Quaternion(Vector3.Up, Mathf.DegToRad(yaw));
+            _model.TurretOverride = new Transform3D(new Basis(rot), pos);
+        }
 
         foreach (Flying f in _flying)
         {
