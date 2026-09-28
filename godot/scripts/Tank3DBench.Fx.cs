@@ -104,7 +104,21 @@ public sealed partial class Tank3DBench
     private TriangleMesh? _hullHits;
     private MovementProfile _profile = MovementProfile.Light;
 
-    private readonly List<(StandardMaterial3D Mat, Color Albedo)> _paint = new();
+    /// <summary>The model's paint as it was loaded, per material - cel or the
+    /// glTF's own under <c>--pbr</c> - for the wreck's char to dim and a reset
+    /// to put back.</summary>
+    private readonly List<(Material Mat, Color Albedo)> _paint = new();
+
+    private static Color PaintOf(Material m) =>
+        m is ShaderMaterial cel ? Toon.PaintOf(cel) : ((BaseMaterial3D)m).AlbedoColor;
+
+    private static void Repaint(Material m, Color albedo)
+    {
+        if (m is ShaderMaterial cel)
+            Toon.Paint(cel, albedo);
+        else
+            ((BaseMaterial3D)m).AlbedoColor = albedo;
+    }
 
     /// <summary>
     /// Nothing of a card goes under the ground: a vertex below
@@ -354,9 +368,9 @@ void fragment() {
                      + " - the class comes from the model's pair");
         foreach (MeshInstance3D mesh in Meshes(_model))
             for (int s = 0; s < mesh.Mesh.GetSurfaceCount(); s++)
-                if (mesh.Mesh.SurfaceGetMaterial(s) is StandardMaterial3D m
+                if (mesh.Mesh.SurfaceGetMaterial(s) is Material m and (ShaderMaterial or BaseMaterial3D)
                     && !_paint.Exists(x => x.Mat == m))
-                    _paint.Add((m, m.AlbedoColor));
+                    _paint.Add((m, PaintOf(m)));
         if (_model.Hull is MeshInstance3D hull)
             _hullHits = hull.Mesh.GenerateTriangleMesh();
 
@@ -791,7 +805,7 @@ void fragment() {
         _burning = false;
         _shotFrame = -1;
         foreach (var (mat, albedo) in _paint)
-            mat.AlbedoColor = albedo;
+            Repaint(mat, albedo);
         foreach (ProcKick k in _kicks) k.Douse();
         foreach (ProcKick k in _drifts) k.Douse();
         foreach (ProcKick k in _bursts) k.Douse();
@@ -956,7 +970,7 @@ void fragment() {
     {
         var soot = new Color(0.16f, 0.14f, 0.12f);
         foreach (var (mat, albedo) in _paint)
-            mat.AlbedoColor = albedo.Lerp(soot * albedo, Mathf.Clamp(amount, 0.0f, 1.0f) * 0.85f);
+            Repaint(mat, albedo.Lerp(soot * albedo, Mathf.Clamp(amount, 0.0f, 1.0f) * 0.85f));
     }
 
     /// <summary><see cref="TrackDust.Lay"/> on the model's belts: a puff every

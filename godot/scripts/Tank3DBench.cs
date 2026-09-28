@@ -63,6 +63,9 @@ public sealed partial class Tank3DBench : Node3D
     private string _modelTag = "LTR";
     private string _mapName = "test";
     private bool _flat;
+    /// <summary><c>--pbr</c>: the glTF's own materials, no cel shading and no
+    /// ink - the look before <see cref="Toon"/>, to hold against it.</summary>
+    private bool _pbr;
     private float _zoom = 2.5f;
     private float _heading = 215.0f;
     private string? _capturePath;
@@ -276,7 +279,7 @@ public sealed partial class Tank3DBench : Node3D
     private void Mount(string model)
     {
         MovementProfile profile = ClassFor(model);
-        TankModel next = TankModel.Load(model);
+        TankModel next = TankModel.Load(model, toon: !_pbr);
         next.ScaleTo(PixelsFor(next, profile));
         Unmount();
         _modelTag = model;
@@ -710,6 +713,7 @@ void light() {
                 GD.Print($"tank3d: --sprites {args[++i]} ignored - the 3D tank reads no sprite set");
             else if (a == "--map" && more) _mapName = args[++i];
             else if (a == "--flat") _flat = true;
+            else if (a == "--pbr") _pbr = true;
             else if (a == "--zoom" && more) _zoom = F(args[++i], _zoom);
             else if (a == "--heading" && more) _heading = F(args[++i], _heading);
             else if (a == "--capture" && more) _capturePath = args[++i];

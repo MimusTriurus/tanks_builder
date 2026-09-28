@@ -140,9 +140,15 @@ public sealed partial class TankModel : Node3D
 
     public static string ModelDir(string tag) => AssetRoot.Repo + "/Models/" + tag;
 
+    /// <summary>The cel materials <see cref="Toon.Dress"/> put on the model, one
+    /// per glTF material; empty when it was loaded with the glTF's own.</summary>
+    public List<ShaderMaterial> Cel = new();
+
     /// <summary>Load <c>Models/&lt;tag&gt;/</c>, scaled so a model unit is
-    /// <paramref name="pixelsPerUnit"/> world units.</summary>
-    public static TankModel Load(string tag, float pixelsPerUnit = 1.0f)
+    /// <paramref name="pixelsPerUnit"/> world units - cel shaded and inked
+    /// (<see cref="Toon"/>) unless <paramref name="toon"/> is false, which keeps
+    /// the glTF's own materials.</summary>
+    public static TankModel Load(string tag, float pixelsPerUnit = 1.0f, bool toon = true)
     {
         string dir = ModelDir(tag);
         var doc = new GltfDocument();
@@ -152,6 +158,9 @@ public sealed partial class TankModel : Node3D
             throw new InvalidOperationException($"{dir}/tank.glb: {err}");
         Node scene = doc.GenerateScene(state);
         var model = new TankModel { Tag = tag, PixelsPerUnit = pixelsPerUnit, Name = "Model" };
+        // Before Bind: the belt's MultiMesh takes the link's mesh as it stands.
+        if (toon)
+            model.Cel = Toon.Dress(scene);
         model.Scale = Vector3.One * pixelsPerUnit;
         model.AddChild(scene);
         using JsonDocument json = JsonDocument.Parse(File.ReadAllText(dir + "/tank.json"));
