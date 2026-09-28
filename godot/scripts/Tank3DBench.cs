@@ -80,6 +80,7 @@ public sealed partial class Tank3DBench : Node3D
     private TankModel _model = null!;
     private Node3D _rig = null!;
     private Camera3D _camera = null!;
+    private DirectionalLight3D _sun = null!;
     private Label _hud = null!;
     private ControlPanel? _panel;
     private int _frame;
@@ -364,6 +365,32 @@ public sealed partial class Tank3DBench : Node3D
         // Camera2D.Offset's sense: +y moves the view down the screen.
         Vector2 shake = ShakeOffset();
         _camera.Position += _camera.Basis.X * shake.X - _camera.Basis.Y * shake.Y;
+        FrameShadow();
+    }
+
+    /// <summary>How far round the tank, in its own reaches, the sun's shadow
+    /// map has to see: the tank and its shadow on the ground.</summary>
+    private const float ShadowReach = 3.0f;
+
+    /// <summary>
+    /// The sun's map on the slab of depth the tank stands in, not on the whole
+    /// view: the second of two splits runs from the tank's depth less
+    /// <see cref="ShadowReach"/> reaches to the same past it, and the first,
+    /// which nothing here casts into, takes the rest.
+    ///
+    /// <b>This is what the cel ramp needed.</b> Over all 3000 of the view's
+    /// depth a texel came to ~1.5 px of the board, and a side the sun grazes
+    /// shadowed itself in soft diagonal stripes - acne, blurred by the filter -
+    /// which the tone's threshold cut into blots across the skirts.
+    /// </summary>
+    private void FrameShadow()
+    {
+        if (_model is null)
+            return;
+        float depth = (_rig.Position - _camera.Position).Dot(-_camera.Basis.Z);
+        float reach = Reach * ShadowReach;
+        _sun.DirectionalShadowMaxDistance = depth + reach;
+        _sun.DirectionalShadowSplit1 = Mathf.Clamp((depth - reach) / (depth + reach), 0.05f, 0.95f);
     }
 
     private void BuildWorld()
@@ -383,14 +410,20 @@ public sealed partial class Tank3DBench : Node3D
         AddChild(new WorldEnvironment { Environment = env });
         // From over the camera's left shoulder, the side the sprites are lit
         // from, high enough that the shadow stays short and on the ground.
-        var sun = new DirectionalLight3D
+        _sun = new DirectionalLight3D
         {
             RotationDegrees = new Vector3(-52.0f, -35.0f, 0.0f),
             LightEnergy = 1.25f,
             ShadowEnabled = true,
+            DirectionalShadowMode = DirectionalLight3D.ShadowMode.Parallel2Splits,
             DirectionalShadowMaxDistance = 3000.0f,
+            // Twice the default: on the slab FrameShadow fits, a texel is
+            // fine enough that the cel ramp's step cut the turret's sides
+            // into acne stripes along its loft at 2; at 7 the contact shadows
+            // under the turret and the fenders thin away.
+            ShadowNormalBias = 4.0f,
         };
-        AddChild(sun);
+        AddChild(_sun);
     }
 
     /// <summary>

@@ -39,6 +39,10 @@ public static class Toon
     /// ink; from <see cref="InkFull"/> up it takes all of it.</summary>
     public const float InkFrom = 0.035f, InkFull = 0.07f;
 
+    /// <summary>Faces meeting at more than this, degrees, meet at a crease for
+    /// the light (<see cref="Facet"/>); under it they shade as one surface.</summary>
+    public const float CreaseDeg = 35.0f;
+
     /// <summary>
     /// The light as three tones, in the paint's own colour: <c>shade</c> is
     /// what a face turned from the sun keeps (the scene's ambient is off here,
@@ -152,7 +156,7 @@ void fragment() {
                                                            << (int)Mesh.ArrayFormat.FormatCustom0Shift);
         for (int s = 0; s < src.GetSurfaceCount(); s++)
         {
-            Godot.Collections.Array arrays = src.SurfaceGetArrays(s);
+            Godot.Collections.Array arrays = Facet(src.SurfaceGetArrays(s));
             arrays[(int)Mesh.ArrayType.Custom0] = InkNormals(arrays, length);
             dst.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays, null, null, custom);
             Material? mat = src.SurfaceGetMaterial(s);
@@ -189,6 +193,111 @@ void fragment() {
         }
         made[mat] = cel;
         return cel;
+    }
+
+    /// <summary>
+    /// The light's normals, made again from the faces: each corner takes the
+    /// faces round its spot that turn less than <see cref="CreaseDeg"/> from
+    /// its own, weighted by their area, and a vertex whose corners come out
+    /// different is split.
+    ///
+    /// <b>The glTF's normals are smooth across the bevels</b>: over the whole
+    /// of MTR's skirt panels they lean 8-20 deg off the face toward the
+    /// two-segment bevels round them, so a flat plate shades as a slope drawn
+    /// across its triangles. The cel ramp's step turns that into stripes where
+    /// the plate stands near a threshold - diagonal blots across the skirts,
+    /// with or without shadow and occlusion. Made again, a plate is one
+    /// normal and steps as one, and a loft's turret or a tube stays round.
+    ///
+    /// <b>By area, not by angle</b>: a two-segment bevel on a square edge
+    /// turns its first face 22.5 deg off the plate, inside any crease angle
+    /// that keeps a loft round, and weighted by its corner angle a strip a few
+    /// mm wide bent a plate's corner as much as the plate held it. By area the
+    /// strip is what it is beside the plate.
+    /// </summary>
+    private static Godot.Collections.Array Facet(Godot.Collections.Array arrays)
+    {
+        Vector3[] pos = arrays[(int)Mesh.ArrayType.Vertex].AsVector3Array();
+        if (arrays[(int)Mesh.ArrayType.Index].VariantType == Variant.Type.Nil)
+            return arrays;
+        int[] idx = arrays[(int)Mesh.ArrayType.Index].AsInt32Array();
+        int faces = idx.Length / 3;
+        var fn = new Vector3[faces];
+        var area = new float[faces];
+        for (int f = 0; f < faces; f++)
+        {
+            Vector3 a = pos[idx[f * 3]], b = pos[idx[f * 3 + 1]], c = pos[idx[f * 3 + 2]];
+            // Godot's front faces wind clockwise.
+            Vector3 n = (c - a).Cross(b - a);
+            area[f] = n.Length();
+            fn[f] = area[f] > 1e-10f ? n / area[f] : Vector3.Zero;
+        }
+        var bySpot = new Dictionary<(long, long, long), List<int>>();
+        var cornerSpot = new List<int>[idx.Length];
+        for (int k = 0; k < idx.Length; k++)
+        {
+            Vector3 p = pos[idx[k]] * 1.0e4f;
+            var key = ((long)Mathf.Round(p.X), (long)Mathf.Round(p.Y), (long)Mathf.Round(p.Z));
+            if (!bySpot.TryGetValue(key, out List<int>? list))
+                bySpot[key] = list = new List<int>();
+            list.Add(k);
+            cornerSpot[k] = list;
+        }
+        float limit = Mathf.Cos(Mathf.DegToRad(CreaseDeg));
+        var from = new List<int>();
+        var normals = new List<Vector3>();
+        var made = new Dictionary<(int, long, long, long), int>();
+        var index = new int[idx.Length];
+        for (int k = 0; k < idx.Length; k++)
+        {
+            Vector3 own = fn[k / 3];
+            Vector3 sum = Vector3.Zero;
+            foreach (int o in cornerSpot[k])
+                if (fn[o / 3].Dot(own) >= limit)
+                    sum += fn[o / 3] * area[o / 3];
+            Vector3 n = sum.LengthSquared() > 1e-20f ? sum.Normalized()
+                : own != Vector3.Zero ? own : Vector3.Up;
+            var key = (idx[k], (long)Mathf.Round(n.X * 1e4f), (long)Mathf.Round(n.Y * 1e4f), (long)Mathf.Round(n.Z * 1e4f));
+            if (!made.TryGetValue(key, out int v))
+            {
+                v = from.Count;
+                made[key] = v;
+                from.Add(idx[k]);
+                normals.Add(n);
+            }
+            index[k] = v;
+        }
+
+        var result = new Godot.Collections.Array();
+        result.Resize((int)Mesh.ArrayType.Max);
+        int old = pos.Length;
+        for (int a = 0; a < (int)Mesh.ArrayType.Max; a++)
+        {
+            Variant src = arrays[a];
+            if (src.VariantType == Variant.Type.Nil || a == (int)Mesh.ArrayType.Index)
+                continue;
+            result[a] = src.VariantType switch
+            {
+                Variant.Type.PackedVector3Array => Pick(src.AsVector3Array(), from, 1),
+                Variant.Type.PackedVector2Array => Pick(src.AsVector2Array(), from, 1),
+                Variant.Type.PackedColorArray => Pick(src.AsColorArray(), from, 1),
+                Variant.Type.PackedFloat32Array => Pick(src.AsFloat32Array(), from, src.AsFloat32Array().Length / old),
+                Variant.Type.PackedInt32Array => Pick(src.AsInt32Array(), from, src.AsInt32Array().Length / old),
+                Variant.Type.PackedByteArray => Pick(src.AsByteArray(), from, src.AsByteArray().Length / old),
+                _ => src,
+            };
+        }
+        result[(int)Mesh.ArrayType.Normal] = normals.ToArray();
+        result[(int)Mesh.ArrayType.Index] = index;
+        return result;
+    }
+
+    private static T[] Pick<T>(T[] src, List<int> from, int per)
+    {
+        var dst = new T[from.Count * per];
+        for (int i = 0; i < from.Count; i++)
+            System.Array.Copy(src, from[i] * per, dst, i * per, per);
+        return dst;
     }
 
     /// <summary>
