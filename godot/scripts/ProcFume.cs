@@ -207,7 +207,7 @@ public sealed partial class ProcFume : Node2D
     /// with no shot layers at all.</summary>
     private bool Wanted => Tank is { ShotPhase: >= 0 } tank
                            && tank.ActiveSource == FlashSource.Built
-                           && tank.Atlas is { HasBore: true };
+                           && tank.Shape is { HasBore: true };
 
     // --- the model -----------------------------------------------------------
 
@@ -279,7 +279,7 @@ public sealed partial class ProcFume : Node2D
     /// with the turret. Here because the answer is one comparison on a vector
     /// this class already has, not because the picture was waiting on it.
     /// </summary>
-    public static bool OverTurret(AtlasSet atlas, AtlasSet.Port bore,
+    public static bool OverTurret(ITankShape atlas, AtlasSet.Port bore,
                                   double turretFacing)
         => atlas.Project(bore.Dir, turretFacing).Y > 0.0f;
 
@@ -288,7 +288,7 @@ public sealed partial class ProcFume : Node2D
     public override void _Draw()
     {
         Showing = false;
-        if (Tank?.Atlas is not { } atlas || !Wanted || _shader is null)
+        if (Tank?.Shape is not { } atlas || !Wanted || _shader is null)
             return;
         _white ??= MakeWhite();
         // The bore as the tube is standing, not as it was stamped: the
@@ -301,7 +301,7 @@ public sealed partial class ProcFume : Node2D
 
         // Measured, not projected: see the class note on the pivot. Laid by
         // a difference of projections, which that note's error cancels out of.
-        Vector2 muzzle = atlas.Muzzle(turret, Tank.BarrelRung) - atlas.Anchor;
+        Vector2 muzzle = atlas.MuzzleOffset(turret, Tank.BarrelRung);
 
         var puffs = new Godot.Collections.Array();
         var lifts = new Godot.Collections.Array();

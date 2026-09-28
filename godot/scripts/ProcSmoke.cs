@@ -329,7 +329,7 @@ public sealed partial class ProcSmoke : Node2D
     private float Density => Tank is null ? 0.0f
         : Plumed ? Tank.ExhaustDensity : Tank.SmokeDensity;
 
-    private bool Wanted => Running && Tank!.Atlas is { HasPorts: true }
+    private bool Wanted => Running && Tank!.Shape is { HasPorts: true }
                            && Density > 0.002f;
 
     // --- the model -----------------------------------------------------------
@@ -395,7 +395,7 @@ public sealed partial class ProcSmoke : Node2D
     public override void _Draw()
     {
         Showing = false;
-        if (Tank?.Atlas is not { } atlas || !Wanted || _shader is null)
+        if (Tank?.Shape is not { } atlas || !Wanted || _shader is null)
             return;
         _white ??= MakeWhite();
         // The same slot the rendered layer would take, off the same stamped flag.

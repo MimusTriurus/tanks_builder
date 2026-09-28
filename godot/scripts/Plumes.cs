@@ -15,7 +15,7 @@ namespace TankSpriteTest;
 ///
 /// These are Blender's coordinates throughout: the port is stamped in them, so z
 /// is height and the model's own frame is what everything is quoted in. The turn
-/// into pixels happens once, in <see cref="AtlasSet.Project"/>.
+/// into pixels happens once, in <see cref="ITankShape.Project"/>.
 /// </summary>
 public static class Plumes
 {
@@ -130,7 +130,7 @@ public static class Plumes
     /// <summary>Where a world height sits on the height map's own byte scale, in
     /// [0, 1]. Clamped rather than allowed to go negative, which is what an element
     /// under the belts would be.</summary>
-    public static float LiftOf(AtlasSet atlas, float z)
+    public static float LiftOf(ITankShape atlas, float z)
     {
         double span = atlas.HeightHigh - atlas.HeightLow;
         return span <= 0.0 ? 0.0f
@@ -153,7 +153,7 @@ public static class Plumes
     /// relation read the other way: <c>depth = const - Z/sin(e)</c>, so a step of r
     /// toward the eye is a step of <c>r*sin(e)</c> up.
     /// </summary>
-    public static float BulgeOf(AtlasSet atlas, float radius)
+    public static float BulgeOf(ITankShape atlas, float radius)
     {
         double span = atlas.HeightHigh - atlas.HeightLow;
         return span <= 0.0 ? 0.0f
@@ -184,31 +184,22 @@ public static class Plumes
     /// holds out marginally more than the render does. That is the better answer
     /// and not a discrepancy: a belt in front of a flame hides it too.
     /// </summary>
-    public static bool SetDepth(ShaderMaterial shader, AtlasSet atlas, double facing)
+    public static bool SetDepth(ShaderMaterial shader, ITankShape tank, double facing)
     {
-        int frame = atlas.HasHeights && atlas.Has(AtlasSet.HeightName)
-            ? atlas.EffectFrame(AtlasSet.HeightName, 0, facing) : -1;
-        Vector2 size = frame < 0 ? Vector2.Zero
-            : atlas.SizeOf(AtlasSet.HeightName, frame);
-        if (size.X <= 0.0f || size.Y <= 0.0f)
+        if (tank.DepthAt(facing) is not DepthMap map)
         {
             shader.SetShaderParameter("depth_on", false);
             return false;
         }
-        Rect2 region = atlas.Region(AtlasSet.HeightName, frame);
-        Texture2D texture = atlas.Texture(AtlasSet.HeightName);
         shader.SetShaderParameter("depth_on", true);
-        shader.SetShaderParameter("depth_tex", texture);
-        shader.SetShaderParameter("depth_size",
-            new Vector2(texture.GetWidth(), texture.GetHeight()));
+        shader.SetShaderParameter("depth_tex", map.Texture);
+        shader.SetShaderParameter("depth_size", map.Sheet);
         shader.SetShaderParameter("depth_rect",
-            new Vector4(region.Position.X, region.Position.Y, size.X, size.Y));
-        // Its own anchor, not the hull's: the height layer is rendered in a tile of
-        // its own size and the anchor scales with the tile - the trap the effect
-        // layers already pay attention to.
-        shader.SetShaderParameter("depth_shift",
-            atlas.AnchorOf(AtlasSet.HeightName)
-            - atlas.OffsetOf(AtlasSet.HeightName, frame));
+            new Vector4(map.Region.Position.X, map.Region.Position.Y,
+                        map.Region.Size.X, map.Region.Size.Y));
+        // Where the anchor falls in the frame, which is the map's own business -
+        // see ITankShape.DepthAt.
+        shader.SetShaderParameter("depth_shift", map.Shift);
         return true;
     }
 

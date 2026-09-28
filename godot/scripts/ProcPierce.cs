@@ -94,7 +94,7 @@ public sealed partial class ProcPierce : Node2D
     /// answer and this project keeps it in one place.</summary>
     private bool Wanted => Showing
                            && Tank is { HitThrough: true, HitFrame: >= 0 } tank
-                           && tank.ShowHull && tank.Atlas is not null;
+                           && tank.ShowHull && tank.Shape is not null;
 
     public override void _Process(double delta)
     {
@@ -106,19 +106,16 @@ public sealed partial class ProcPierce : Node2D
     public override void _Draw()
     {
         Drawn = false;
-        if (!Wanted || Tank?.Atlas is not AtlasSet atlas)
+        if (!Wanted || Tank?.Shape is not { } shape
+            || shape.MaskAt(Tank.HullFacing) is not Silhouette mask)
             return;
-        int frame = atlas.FrameFor(Tank.HullFacing);
-        Vector2 size = atlas.SizeOf("hull", frame);
-        if (size.X <= 0.0f || size.Y <= 0.0f)
-            return;
+        Vector2 size = mask.Quad.Size;
         // The hull's own quad, to the pixel - TankSprite.DrawLayer's three terms
         // and no fourth: the trimmed frame's offset, the shared anchor and the
-        // heave. Written out rather than shared because what is shared is the
-        // atlas, and a layer that computed this differently would light a hull
-        // that is not where it thinks.
-        var quad = new Rect2(-atlas.Anchor + atlas.OffsetOf("hull", frame)
-                             + new Vector2(0.0f, Tank.Heave), size);
+        // heave. Asked of the shape rather than worked out here because what is
+        // shared is the tank's picture, and a layer that computed this
+        // differently would light a hull that is not where it thinks.
+        var quad = new Rect2(mask.Quad.Position + new Vector2(0.0f, Tank.Heave), size);
         Extent = quad;
         // Where the round went in and where the ring is, both in this quad's own
         // UV so the shader needs neither the anchor nor the trim.
@@ -136,18 +133,15 @@ public sealed partial class ProcPierce : Node2D
         // tank, in two small patches where the expression happened to dip under
         // its own threshold, and every tuning pass moved them without ever
         // making sense of them.
-        Rect2 cut = atlas.Region("hull", frame);
-        Vector2 sheet = atlas.Texture("hull").GetSize();
-        _ink?.SetShaderParameter("uv_at", cut.Position / sheet);
-        _ink?.SetShaderParameter("uv_span", cut.Size / sheet);
+        Vector2 sheet = mask.Texture.GetSize();
+        _ink?.SetShaderParameter("uv_at", mask.Region.Position / sheet);
+        _ink?.SetShaderParameter("uv_span", mask.Region.Size / sheet);
         _ink?.SetShaderParameter("frame", (float)Tank.HitFrame);
         // In hull spans, the way the muzzle smoke is in bore radii: one number
         // for three tanks, and the only reason it can be one number.
-        _ink?.SetShaderParameter("span",
-            atlas.HullSpan > 0 ? atlas.HullSpan : size.X);
+        _ink?.SetShaderParameter("span", shape.HullSpanPx > 0.0f ? shape.HullSpanPx : size.X);
         _ink?.SetShaderParameter("scale", Tank.HitScale);
-        DrawTextureRectRegion(atlas.Texture("hull"), quad,
-                              atlas.Region("hull", frame));
+        DrawTextureRectRegion(mask.Texture, quad, mask.Region);
         Drawn = true;
     }
 

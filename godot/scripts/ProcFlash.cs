@@ -259,7 +259,7 @@ public sealed partial class ProcFlash : Node2D
 
     private bool Wanted => Tank is { ShotPhase: >= 0 } tank
                            && tank.ActiveSource == FlashSource.Built
-                           && tank.Atlas is { HasBore: true };
+                           && tank.Shape is { HasBore: true };
 
     // --- the model -----------------------------------------------------------
 
@@ -277,7 +277,7 @@ public sealed partial class ProcFlash : Node2D
     /// <c>depth_keep</c> at 1 is a smoothstep evaluated at its own midpoint,
     /// which removes half of it wherever the hull reaches its own tallest pixel.
     /// A number that says "above" has to be allowed to say how far.</summary>
-    public static float Above(AtlasSet atlas, float z)
+    public static float Above(ITankShape atlas, float z)
     {
         double span = atlas.HeightHigh - atlas.HeightLow;
         return span <= 0.0 ? 1.0f : (float)((z - atlas.HeightLow) / span);
@@ -352,7 +352,7 @@ public sealed partial class ProcFlash : Node2D
     public override void _Draw()
     {
         Showing = false;
-        if (Tank?.Atlas is not { } atlas || !Wanted || _shader is null)
+        if (Tank?.Shape is not { } atlas || !Wanted || _shader is null)
             return;
         _white ??= MakeWhite();
         // The bore as the tube is standing, not as it was stamped: the
@@ -368,7 +368,7 @@ public sealed partial class ProcFlash : Node2D
         // Measured, not projected - ProcFume's note on the pivot; and moved
         // by the laying, which is a difference of projections and so carries
         // none of what that note is about.
-        Vector2 muzzle = atlas.Muzzle(turret, Tank.BarrelRung) - atlas.Anchor;
+        Vector2 muzzle = atlas.MuzzleOffset(turret, Tank.BarrelRung);
         float upp = (float)atlas.UnitsPerPixel;
 
         float body = bore.Radius * Length * Scale * step.X;

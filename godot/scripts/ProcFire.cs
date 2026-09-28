@@ -152,7 +152,7 @@ public sealed partial class ProcFire : Node2D
     }
 
     private bool Wanted => Tank is { Burning: true, ProceduralFire: true }
-                           && Tank.Atlas is { HasPorts: true }
+                           && Tank.Shape is { HasPorts: true }
                            && Tank.FireDensity > 0.002f;
 
     // --- the model -----------------------------------------------------------
@@ -286,7 +286,7 @@ public sealed partial class ProcFire : Node2D
     public override void _Draw()
     {
         Showing = false;
-        if (Tank?.Atlas is not { } atlas || !Wanted || _shader is null)
+        if (Tank?.Shape is not { } atlas || !Wanted || _shader is null)
             return;
         _white ??= White();
         ZIndex = TankSprite.ZFor(AtlasSet.FireName,

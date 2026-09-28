@@ -7,9 +7,9 @@ using Godot;
 namespace TankSpriteTest;
 
 /// <summary>
-/// <c>Tank3D.tscn</c>: one 3D tank (<see cref="TankModel"/>) on open ground,
-/// with the bench's own effects hung off its joints - the pilot for moving the
-/// board from sprite atlases to 3D units.
+/// <c>Tank3D.tscn</c>: one 3D tank (<see cref="TankModel"/>) on the tank
+/// bench's board, with the bench's own effects hung off its joints - the pilot
+/// for moving the board from sprite atlases to 3D units.
 ///
 /// <b>The space is <see cref="Stage3D"/>'s, on purpose.</b> An orthographic
 /// camera pitched by the elevation the hex tile declares, <c>Size</c> the
@@ -18,6 +18,15 @@ namespace TankSpriteTest;
 /// (<see cref="ProcKick"/>, <see cref="ProcSpall"/>, <see cref="ProcSlam"/>,
 /// <see cref="SheetBlast"/>) were written for exactly that space, so they are
 /// raised here with the numbers the board raises them with, not re-tuned.
+///
+/// <b>And so is the ground: the board is <see cref="Stage3D"/>'s own.</b> A
+/// <see cref="HexField"/> laid from a <see cref="BoardMap"/> (<c>test</c>, the
+/// tank bench's strip, unless <c>--map</c> names another) and handed to a stage
+/// that draws it as prisms - levels, ramps, the pond - in the same world the
+/// model stands in. The tank drives on it: its height and tilt are the face
+/// under it, and <see cref="HexField.Passable"/> stops it at a cliff, deep water
+/// or the edge. <c>--flat</c> puts back the ground this scene had before, the
+/// art laid flat with no depth.
 ///
 /// <b>The motion is the Blender previews' (<c>repro_kit.py</c> clip_*), live.</b>
 /// Same springs - <c>KICK</c> is <see cref="Recoil"/>'s, <c>SWAY</c> is
@@ -52,7 +61,8 @@ public sealed partial class Tank3DBench : Node3D
     // --- flags -----------------------------------------------------------
 
     private string _modelTag = "LTR";
-    private string _spriteTag = "LTP";
+    private string _mapName = "test";
+    private bool _flat;
     private float _zoom = 2.5f;
     private float _heading = 215.0f;
     private string? _capturePath;
@@ -64,28 +74,120 @@ public sealed partial class Tank3DBench : Node3D
 
     // --- scene -----------------------------------------------------------
 
-    private AtlasSet? _atlas;
     private TankModel _model = null!;
     private Node3D _rig = null!;
     private Camera3D _camera = null!;
     private Label _hud = null!;
+    private ControlPanel? _panel;
     private int _frame;
     private string _note = "";
+
+    /// <summary>The board's tile, and so the camera's angle, the effects' size
+    /// and the tanks' scale: the medium's hexagon, as <see cref="TankBench"/>
+    /// takes it - one tile for every tank, so switching the tank does not resize
+    /// the board. The board's, not the tank's: nothing of the tank on it is read
+    /// off a sprite set.</summary>
+    private AtlasSet? _tile;
+
+    // --- the board ---------------------------------------------------------
+
+    private HexField? _field;
+    private Stage3D? _stage;
+
+    /// <summary>The ground's up under the tank, eased toward the face it is on
+    /// so crossing onto a ramp tips the hull rather than snapping it.</summary>
+    private Vector3 _groundUp = Vector3.Up;
 
     /// <summary>Hull heading, degrees about +Y: 0 faces the camera (+Z).</summary>
     private float Heading
     {
         get => _heading;
-        set { _heading = Mathf.PosMod(value, 360.0f); _rig.RotationDegrees = new Vector3(0, _heading, 0); }
+        set { _heading = Mathf.PosMod(value, 360.0f); ApplyRig(); }
     }
 
-    private float Squash => _atlas is { } a && a.HexRect.Size.X > 0
+    private float Squash => _tile is { } a && a.HexRect.Size.X > 0
         ? 2.0f * a.HexRect.Size.Y / (Mathf.Sqrt(3.0f) * a.HexRect.Size.X)
         : 0.5f;
 
     private float RiseFactor => Mathf.Sqrt(Mathf.Max(0.0f, 1.0f - Squash * Squash));
 
-    private float HexWidth => _atlas?.HexRect.Size.X ?? 248.0f;
+    private float HexWidth => _tile?.HexRect.Size.X ?? 248.0f;
+
+    // --- the tanks ---------------------------------------------------------
+
+    /// <summary>
+    /// Which class each model drives as, and what the panel calls it.
+    ///
+    /// <b>Written down, because the sidecar does not say it</b> (see
+    /// docs/tank3d.md). The class gives the tank its speed and its size - no
+    /// sprite set is read for either.
+    /// </summary>
+    private static readonly (string Model, string Class, string Name)[] Pairs =
+    {
+        ("LTR", "LTP", "лёгкий"),
+        ("MTR", "MTP", "средний"),
+        ("HTR", "HTP", "тяжёлый"),
+        ("TDR", "TDP", "ПТ-САУ"),
+        ("HMR", "HMP", "мортира"),
+    };
+
+    private static int PairAt(string model) =>
+        Array.FindIndex(Pairs, p => string.Equals(p.Model, model, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>The pair's class, or the medium's for a model not in the table:
+    /// the medium is the class every other figure is read against.</summary>
+    private static MovementProfile ClassFor(string model)
+    {
+        string want = PairAt(model) is int i and >= 0 ? Pairs[i].Class : "MTP";
+        MovementProfile? medium = null;
+        foreach (MovementProfile p in MovementProfile.All)
+        {
+            if (string.Equals(p.Tag, want, StringComparison.OrdinalIgnoreCase))
+                return p;
+            if (p.Tag == "MTP")
+                medium = p;
+        }
+        return medium ?? MovementProfile.Light;
+    }
+
+    /// <summary>
+    /// How long the medium's hull is against the hex it stands on.
+    ///
+    /// <b>The sprite bench's own proportion, taken once and then left to the
+    /// hex</b>: MTP draws its 0.883-unit hull at 167.7 px a unit, 148 px on a
+    /// 248 px hex - 0.60. Every model's hull is brought to this, then scaled by
+    /// its class's <see cref="MovementProfile.Size"/>, which is how the 2D
+    /// benches size theirs (<see cref="Fleet.Resize"/>): the generator makes
+    /// every tank about one unit long, so its own length says nothing about
+    /// which is the heavy.
+    /// </summary>
+    private const float HullOfHex = 0.60f;
+
+    /// <summary>World px a model unit, for this model in this class.</summary>
+    private float PixelsFor(TankModel model, MovementProfile profile) =>
+        HullOfHex * HexWidth * (float)profile.Size / Mathf.Max(model.HullLength, 1e-3f);
+
+    /// <summary>The models on disk - a folder under <c>Models/</c> with both
+    /// files in it - in the pairs' order, then any others by name.</summary>
+    private static List<string> ModelsOnDisk()
+    {
+        var found = new List<string>();
+        string root = AssetRoot.Repo + "/Models";
+        if (Directory.Exists(root))
+            foreach (string dir in Directory.GetDirectories(root))
+                if (File.Exists(dir + "/tank.glb") && File.Exists(dir + "/tank.json"))
+                    found.Add(Path.GetFileName(dir));
+        found.Sort((a, b) =>
+        {
+            int ia = PairAt(a), ib = PairAt(b);
+            ia = ia < 0 ? int.MaxValue : ia;
+            ib = ib < 0 ? int.MaxValue : ib;
+            return ia != ib ? ia.CompareTo(ib) : string.CompareOrdinal(a, b);
+        });
+        return found;
+    }
+
+    private List<string> _models = new();
 
     // --- motion ----------------------------------------------------------
 
@@ -119,78 +221,140 @@ public sealed partial class Tank3DBench : Node3D
     public override void _Ready()
     {
         ReadFlags();
-        try
-        {
-            _atlas = AtlasSet.Load(AssetRoot.Sprites, _spriteTag);
-        }
-        catch (Exception e)
-        {
-            GD.Print($"tank3d: no {_spriteTag} sprites ({e.Message}) - scale and effects from defaults");
-        }
-        float perUnit = PixelsPerUnit();
+        _models = ModelsOnDisk();
         _rig = new Node3D { Name = "Rig" };
         AddChild(_rig);
-        _model = TankModel.Load(_modelTag, perUnit);
-        _rig.AddChild(_model);
-        Heading = _heading;
+        // The board's tile first: the camera's angle, the board's size and the
+        // effects' pools all come off it, and none of them follows the tank.
+        _tile = LoadTile("MTP");
 
         GetViewport().Msaa3D = Viewport.Msaa.Msaa4X;
-        BuildCamera();
         BuildWorld();
-        BuildGround();
-        BuildEffects();
+        if (!_flat)
+            BuildBoard();
+        // After the board: the stage makes its own camera current as it enters
+        // the tree, and this one has to be current over it.
+        BuildCamera();
+        if (_field is null)
+            BuildGround();
+        Park();
+        Mount(_modelTag);
 
         var layer = new CanvasLayer();
         AddChild(layer);
         _hud = new Label { Position = new Vector2(12, 8), Modulate = new Color(1, 1, 1, 0.85f), Visible = !_noUi };
         layer.AddChild(_hud);
-
-        GD.Print($"tank3d: {_modelTag} at {perUnit:F2} px/unit (from {_spriteTag}), "
-                 + $"squash {Squash:F4} = {Mathf.RadToDeg(Mathf.Asin(Squash)):F2} deg, hex {HexWidth:F0} px");
+        if (!_noUi)
+            BuildPanel(layer);
     }
 
-    /// <summary>The model's units against the board's: the sprite set it copies
-    /// was rendered at <c>units_per_pixel</c>, so the 3D tank stands exactly as
-    /// big as its sprite did.</summary>
-    private float PixelsPerUnit()
+    /// <summary>The board's tile: the hex of a sprite set, the one thing here
+    /// read off one - null if it does not load, which leaves the flat ground and
+    /// a 248 px hex.</summary>
+    private static AtlasSet? LoadTile(string tag)
     {
-        string path = $"{AssetRoot.Sprites}/{_spriteTag}/hull_atlas.json";
         try
         {
-            using var doc = System.Text.Json.JsonDocument.Parse(File.ReadAllText(path));
-            return 1.0f / doc.RootElement.GetProperty("units_per_pixel").GetSingle();
+            return AtlasSet.Load(AssetRoot.Sprites, tag);
         }
         catch (Exception e)
         {
-            GD.Print($"tank3d: {path}: {e.Message} - 160 px/unit");
-            return 160.0f;
+            GD.Print($"tank3d: no {tag} tile ({e.Message}) - flat ground, 248 px hex");
+            return null;
         }
     }
 
+    /// <summary>
+    /// Put a tank on the rig: its model, its class and the effects that read
+    /// it. What happens at start and on every pick from the panel.
+    ///
+    /// <b>The new model is loaded before the old one is taken down</b>, so a
+    /// tank that fails to load leaves the one that was standing there. The rig,
+    /// its place and its heading, the board and the effect pools stay: they are
+    /// the bench's, not the tank's.
+    /// </summary>
+    private void Mount(string model)
+    {
+        MovementProfile profile = ClassFor(model);
+        TankModel next = TankModel.Load(model);
+        next.ScaleTo(PixelsFor(next, profile));
+        Unmount();
+        _modelTag = model;
+        _profile = profile;
+        _model = next;
+        _rig.AddChild(_model);
+        BuildEffects();
+        GD.Print($"tank3d: {_modelTag} class {_profile.Tag} x{_profile.Size:F2}, {_model.PixelsPerUnit:F2} px/unit, "
+                 + $"hull {_model.HullLength:F4} x {_model.HullWidth:F4} = {_model.HullLength * _model.PixelsPerUnit:F0} px, "
+                 + $"bore r {_model.BoreRadius:F4}, squash {Squash:F4} = {Mathf.RadToDeg(Mathf.Asin(Squash)):F2} deg, "
+                 + $"hex {HexWidth:F0} px");
+    }
+
+    /// <summary>Take the tank off the rig: everything <see cref="Mount"/> and
+    /// <see cref="BuildEffects"/> made for it. Reset first, so the debris a
+    /// destroyed tank threw is back in the model that gets freed.</summary>
+    private void Unmount()
+    {
+        if (_model is null)
+            return;
+        ResetTank();
+        FreeEffects();
+        _paint.Clear();
+        _hullHits = null;
+        _hitLocal = Vector3.Zero;
+        _rig.RemoveChild(_model);
+        _model.QueueFree();
+        _model = null!;
+    }
+
+    /// <summary>The panel's pick and <c>--do model=</c>: another tank on the same
+    /// spot, heading unchanged, whole.</summary>
+    private void Pick(string model)
+    {
+        if (string.Equals(model, _modelTag, StringComparison.OrdinalIgnoreCase))
+            return;
+        try
+        {
+            Mount(model);
+        }
+        catch (Exception e)
+        {
+            GD.Print($"tank3d: {model}: {e.Message}");
+            _note = $"{model} did not load";
+        }
+    }
+
+    /// <summary>How far the camera stands back along its view: the stage's own
+    /// number and for its reason - an orthographic depth buffer is linear, and
+    /// at 4000 back the board's rims, lifted two units off the faces, fell into
+    /// its noise (<c>Stage3D.Back</c>).</summary>
+    private const float Back = 1500.0f;
+
     private void BuildCamera()
     {
-        const float back = 4000.0f;
         _camera = new Camera3D
         {
             Projection = Camera3D.ProjectionType.Orthogonal,
             KeepAspect = Camera3D.KeepAspectEnum.Height,
             Near = 1.0f,
-            Far = back * 2.0f,
+            Far = Back * 2.0f,
             RotationDegrees = new Vector3(-Mathf.RadToDeg(Mathf.Asin(Squash)), 0.0f, 0.0f),
+            // Everything but the model's stand-ins, which are the height map's.
+            CullMask = 0xFFFFF & ~GhostLayer,
             Current = true,
         };
         AddChild(_camera);
-        FrameCamera();
+        _camera.MakeCurrent();
     }
 
     /// <summary>Size the camera to the zoom and keep the tank a little below
     /// the middle, so a plume or a thrown turret has sky to go into.</summary>
     private void FrameCamera()
     {
-        const float back = 4000.0f;
+        const float back = Back;
         float height = GetViewport().GetVisibleRect().Size.Y;
         _camera.Size = height / _zoom;
-        Vector3 pivot = new(_rig.Position.X, 0.0f, _rig.Position.Z);
+        Vector3 pivot = _rig.Position;
         // Up the screen by a sixth of the view: screen up is -Z on the ground.
         pivot.Z -= _camera.Size / 6.0f / Squash;
         _camera.Position = pivot + new Vector3(0.0f, back * Squash, back * RiseFactor);
@@ -204,9 +368,11 @@ public sealed partial class Tank3DBench : Node3D
         var env = new Godot.Environment
         {
             BackgroundMode = Godot.Environment.BGMode.Color,
-            // The soil art's mean, lit about as the cells are, so the seams
-            // between their soft rims read as more ground.
-            BackgroundColor = new Color(0.60f, 0.50f, 0.33f),
+            // Flat: the soil art's mean, lit about as the cells are, so the
+            // seams between their soft rims read as more ground. On the board:
+            // the grey the other benches stand their boards on, because past
+            // the rim is off the board, not more of it.
+            BackgroundColor = _flat ? new Color(0.60f, 0.50f, 0.33f) : new Color(0.3f, 0.3f, 0.3f),
             AmbientLightSource = Godot.Environment.AmbientSource.Color,
             AmbientLightColor = new Color(0.62f, 0.64f, 0.70f),
             AmbientLightEnergy = 0.55f,
@@ -225,10 +391,230 @@ public sealed partial class Tank3DBench : Node3D
     }
 
     /// <summary>
-    /// The ground: the board's cells if there is art for them, a plain plane if
-    /// not - never both, because neither may write depth (see
-    /// <see cref="BuildCells"/>) and two opaque layers that do not are drawn in
-    /// whatever order the renderer likes.
+    /// The board, as <see cref="TankBench"/> lays it: the map's kinds, ground,
+    /// cover, relief and water on a <see cref="HexField"/>, and a
+    /// <see cref="Stage3D"/> that draws it. The field draws nothing itself - the
+    /// stage owns the board, as on every bench that has one.
+    ///
+    /// <b>The stage's ground writes depth, and the effect cards are why that
+    /// needed an answer</b>: a card slid back along the view ray passes under
+    /// the ground with its lower half. The cards' shader lifts whatever is below
+    /// the ground back up the same ray (<see cref="CardShader"/>), which is the
+    /// stage's own bend for its sprites (<c>Stage3D.Body</c>) done per vertex.
+    /// </summary>
+    private void BuildBoard()
+    {
+        if (_tile is null)
+        {
+            GD.Print("tank3d: no tile to lay a board with - the flat ground instead");
+            return;
+        }
+        // The events bench's board is compiled apart from the named ones -
+        // ByName would answer "events" with the harness's bench board.
+        BoardMap map = string.Equals(_mapName, "events", StringComparison.OrdinalIgnoreCase)
+            ? BoardMap.Events : BoardMap.ByName(_mapName);
+        TerrainSet terrain = TerrainSet.Load(AssetRoot.Terrains);
+        GD.Print($"tank3d: board {map.Name} {map.Columns}x{map.Rows}, terrain {terrain.Note}");
+        _field = new HexField
+        {
+            Terrain = terrain,
+            Paint = map.Paint,
+            Trees = false,
+            Columns = map.Columns, Rows = map.Rows, Plot = map.Plot,
+        };
+        _field.SetKinds(map.Kinds);
+        _field.SetGround(map.Ground);
+        _field.SetCover(map.Over);
+        _field.SetRelief(map.Levels, map.Ramps);
+        // After the relief - the tank bench's reason: the water's guards are
+        // asked about levels and ramps.
+        _field.SetWater(map.Water);
+        AddChild(_field);
+        _field.Atlas = _tile;
+        _home = map.Homes.Count > 0 ? map.Homes[0] : new Vector2I(map.Columns / 2, map.Rows / 2);
+
+        // What the stage aims its own camera by: it mirrors a 2D camera, and
+        // this scene has none - its camera is its own (BuildCamera), current
+        // over the stage's, which is left idle. In the tree so it is freed with
+        // the scene, disabled so it moves no canvas.
+        var eye = new Camera2D { Enabled = false };
+        AddChild(eye);
+        _stage = new Stage3D
+        {
+            Field = _field, Origin = Vector2.Zero, Eye = eye,
+            Surf = WaterArt.Load(AssetRoot.Water, _tile.HexRect),
+        };
+        AddChild(_stage);
+        _field.ShowField = false;
+        BuildShadows();
+    }
+
+    /// <summary>The cell the tank opens on: the map's first parking.</summary>
+    private Vector2I _home;
+
+    /// <summary>
+    /// Where the model's shadow falls: a skin over the board's top faces that is
+    /// clear where the sun reaches and dark where it does not.
+    ///
+    /// <b>The board is unshaded</b> - its light is painted - so the sun this
+    /// scene lights the model with has nothing to fall on. The skin is the
+    /// board's own tops (<see cref="Stage3D.GroundTriangles"/>, the faces the
+    /// mesh is built from), lifted by the stage's clearance, and it multiplies
+    /// what is under it: by one where the sun reaches, by one less the board's
+    /// shadow ink where it does not (<see cref="ShadeShader"/>).
+    /// </summary>
+    private void BuildShadows()
+    {
+        if (_stage is null)
+            return;
+        List<Vector3> tris = _stage.GroundTriangles();
+        if (tris.Count == 0)
+            return;
+        Vector3 lie = Stage3D.Clear(Squash, RiseFactor);
+        var st = new SurfaceTool();
+        st.Begin(Mesh.PrimitiveType.Triangles);
+        foreach (Vector3 v in tris)
+        {
+            st.SetNormal(Vector3.Up);
+            st.AddVertex(v + lie);
+        }
+        var ink = new ShaderMaterial { Shader = ShadeShader, RenderPriority = Stage3D.ShadowOrder };
+        ink.SetShaderParameter("ink", Stage3D.ShadowInk.A);
+        var skin = new MeshInstance3D
+        {
+            Name = "Shadows",
+            Mesh = st.Commit(),
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            MaterialOverride = ink,
+        };
+        AddChild(skin);
+    }
+
+    /// <summary>
+    /// The skin's shader: white, lit only by the sun's visibility, multiplied
+    /// into the frame. Emission carries the part the sun cannot take away and
+    /// the light the rest, so the product is one in the sun and <c>1 - ink</c>
+    /// in shadow - the board's own ink, as <see cref="Stage3D.ShadowInk"/>
+    /// lays it over the ground under a tree.
+    ///
+    /// <b>Not <c>shadow_to_opacity</c></b>, which is the stock answer and draws
+    /// nothing at all under <c>gl_compatibility</c>: measured, the skin came out
+    /// clear in the model's shadow too.
+    /// </summary>
+    private static readonly Shader ShadeShader = new()
+    {
+        Code = @"
+shader_type spatial;
+render_mode blend_mul, depth_draw_never, cull_disabled, ambient_light_disabled;
+uniform float ink = 0.45;
+void fragment() {
+    ALBEDO = vec3(1.0);
+    EMISSION = vec3(1.0 - ink);
+}
+void light() {
+    DIFFUSE_LIGHT += vec3(ink * ATTENUATION);
+}",
+    };
+
+    // --- standing on the board ----------------------------------------------
+
+    /// <summary>How high the ground stands under a world point, in screen px -
+    /// the board's own unit for it (<see cref="HexField.TopAtPoint"/>); nought
+    /// on the flat ground.</summary>
+    private float LiftAt(Vector3 w) => _field?.TopAtPoint(Board(w)) ?? 0.0f;
+
+    /// <summary>The ground point under a world point.</summary>
+    private Vector3 Foot(Vector3 w) => new(w.X, LiftAt(w) / RiseFactor, w.Z);
+
+    /// <summary>Stand the rig on the home cell's centre, at its height.</summary>
+    private void Park()
+    {
+        if (_field is not null)
+        {
+            Vector2 flat = _field.FlatAnchor(_home) + _field.CentreOffset;
+            _rig.Position = Foot(new Vector3(flat.X, 0.0f, flat.Y / Squash));
+        }
+        Settle(0.0f, snap: true);
+    }
+
+    /// <summary>
+    /// Whether the tank may go from one world point to the next, travelling
+    /// <paramref name="way"/>: the board's own rule for the step between cells
+    /// (<see cref="HexField.Passable"/> - no cliff without a ramp, a ramp only
+    /// along its axis, not off the board), and not into deep water, where the
+    /// bench's sinking is not built. Anywhere on the flat ground.
+    ///
+    /// <b>Asked of the middle and of the leading end.</b> The middle alone let
+    /// the front half of the hull out over the board's edge before it stopped;
+    /// the end asks the same question of the step from the middle's cell to its
+    /// own, which is at most a neighbour - half a hull is shorter than a cell's
+    /// edge.
+    /// </summary>
+    private bool CanDrive(Vector3 from, Vector3 to, Vector3 way)
+    {
+        if (_field is null)
+            return true;
+        float half = _model.Size.Z * 0.5f * _model.PixelsPerUnit;
+        Vector2I a = _field.FlatCellAt(Board(from)), b = _field.FlatCellAt(Board(to));
+        Vector2I end = _field.FlatCellAt(Board(to + way * half));
+        return Step(a, b) && Step(b, end);
+
+        bool Step(Vector2I here, Vector2I there)
+        {
+            if (here == there)
+                return true;
+            if (!_field.InBounds(there) || _field.IsDeep(there))
+                return false;
+            int heading = HexField.HeadingTo(here, there);
+            return heading >= 0 && _field.Passable(here, heading);
+        }
+    }
+
+    /// <summary>
+    /// Put the rig on the ground under it: its height, and its up eased toward
+    /// the face it is on.
+    ///
+    /// <b>One face, the one under the middle</b>, extrapolated under all four
+    /// samples (<see cref="HexField.TopOn"/>): a hull over a cell's rim then
+    /// lies in its own cell's plane rather than bridging to the neighbour's,
+    /// which is the board's rule for anything a cell wide.
+    /// </summary>
+    private void Settle(float dt, bool snap = false)
+    {
+        Vector3 want = Vector3.Up;
+        if (_field is not null)
+        {
+            Vector2 flat = Board(_rig.Position);
+            Vector2I cell = _field.CellUnder(flat);
+            float d = 0.25f * HexWidth;
+            float Y(Vector2 f) => _field.TopOn(cell, f) / RiseFactor;
+            float sx = (Y(flat + new Vector2(d, 0.0f)) - Y(flat - new Vector2(d, 0.0f))) / (2.0f * d);
+            // A world step of d in Z is d times the squash on the flat board.
+            float sz = (Y(flat + new Vector2(0.0f, d * Squash)) - Y(flat - new Vector2(0.0f, d * Squash))) / (2.0f * d);
+            want = new Vector3(-sx, 1.0f, -sz).Normalized();
+            _rig.Position = new Vector3(_rig.Position.X, Y(flat), _rig.Position.Z);
+        }
+        _groundUp = snap ? want : _groundUp.Lerp(want, 1.0f - Mathf.Exp(-10.0f * dt)).Normalized();
+        ApplyRig();
+    }
+
+    /// <summary>The rig's basis: the heading about the ground's up.</summary>
+    private void ApplyRig()
+    {
+        if (_rig is null)
+            return;
+        float h = Mathf.DegToRad(_heading);
+        var ahead = new Vector3(Mathf.Sin(h), 0.0f, Mathf.Cos(h));
+        Vector3 up = _groundUp;
+        Vector3 z = (ahead - up * ahead.Dot(up)).Normalized();
+        _rig.Basis = new Basis(up.Cross(z), up, z);
+    }
+
+    /// <summary>
+    /// The ground with <c>--flat</c>: the board's cells if there is art for
+    /// them, a plain plane if not - never both, because neither may write depth
+    /// (see <see cref="BuildCells"/>) and two opaque layers that do not are drawn
+    /// in whatever order the renderer likes.
     /// </summary>
     private void BuildGround()
     {
@@ -267,11 +653,11 @@ public sealed partial class Tank3DBench : Node3D
     {
         TerrainSet terrain = TerrainSet.Load(AssetRoot.Terrains);
         GD.Print($"tank3d: {terrain.Note}");
-        if (!terrain.Any || _atlas is null)
+        if (!terrain.Any || _tile is null)
             return false;
-        var hexRect = new Rect2I((Vector2I)_atlas.HexRect.Position, (Vector2I)_atlas.HexRect.Size);
+        var hexRect = new Rect2I((Vector2I)_tile.HexRect.Position, (Vector2I)_tile.HexRect.Size);
         float scale = terrain.ScaleTo(hexRect);
-        float w = _atlas.HexRect.Size.X, h = _atlas.HexRect.Size.Y;
+        float w = _tile.HexRect.Size.X, h = _tile.HexRect.Size.Y;
         var mats = new Dictionary<string, StandardMaterial3D>();
         const int reach = 7;
         for (int q = -reach; q <= reach; q++)
@@ -319,8 +705,11 @@ public sealed partial class Tank3DBench : Node3D
         {
             string a = args[i];
             bool more = i + 1 < args.Length;
-            if (a == "--model" && more) _modelTag = args[++i];
-            else if (a == "--sprites" && more) _spriteTag = args[++i];
+            if (a == "--model" && more) _modelTag = args[++i].ToUpperInvariant();
+            else if (a == "--sprites" && more)
+                GD.Print($"tank3d: --sprites {args[++i]} ignored - the 3D tank reads no sprite set");
+            else if (a == "--map" && more) _mapName = args[++i];
+            else if (a == "--flat") _flat = true;
             else if (a == "--zoom" && more) _zoom = F(args[++i], _zoom);
             else if (a == "--heading" && more) _heading = F(args[++i], _heading);
             else if (a == "--capture" && more) _capturePath = args[++i];
@@ -378,6 +767,7 @@ public sealed partial class Tank3DBench : Node3D
             case "knock": KnockOut(); break;
             case "destroy": Destroy(); break;
             case "reset": ResetTank(); break;
+            case "heights": SaveHeights(); break;
             case "drive": _driveScripted = 1.0f; break;
             case "stop": _driveScripted = 0.0f; break;
             case "left": _turnScripted = 1.0f; break;
@@ -395,6 +785,8 @@ public sealed partial class Tank3DBench : Node3D
                     _model.Elevation = Mathf.DegToRad(F(what[5..], 0));
                 else if (what.StartsWith("heading=", StringComparison.Ordinal))
                     Heading = F(what[8..], _heading);
+                else if (what.StartsWith("model=", StringComparison.Ordinal))
+                    Pick(what[6..].ToUpperInvariant());
                 else
                     GD.Print($"tank3d: --do {what}: no such event");
                 break;
@@ -624,9 +1016,20 @@ public sealed partial class Tank3DBench : Node3D
         float a = accel / dt / Accel;
         float turn = Mathf.Clamp(turnIn, -1.0f, 1.0f) * TurnRate * 0.5f;
         Heading += turn * dt;
-        Vector3 forward = _rig.Basis.Z;
-        _rig.Position += forward * _speed * dt;
+        float h = Mathf.DegToRad(_heading);
+        var ahead = new Vector3(Mathf.Sin(h), 0.0f, Mathf.Cos(h));
+        Vector3 next = _rig.Position + ahead * _speed * dt;
         float step = _speed * dt / _model.PixelsPerUnit;
+        if (CanDrive(_rig.Position, next, _speed >= 0.0f ? ahead : -ahead))
+            _rig.Position = next;
+        else
+        {
+            // The board says no - a cliff, deep water, its edge: the tank stops
+            // where it is rather than being steered round it.
+            _speed = 0.0f;
+            step = 0.0f;
+        }
+        Settle(dt);
         _model.Driven += step;
         _model.Skid += Mathf.DegToRad(turn) * dt * _model.Size.X * 0.5f;
         if (Mathf.Abs(_speed) > 1.0f || Mathf.Abs(turnIn) > 0.0f)
@@ -659,10 +1062,12 @@ public sealed partial class Tank3DBench : Node3D
         FxProcess(dt, _speed, a);
         FrameCamera();
 
-        _hud.Text = $"{_modelTag} 3D ({_spriteTag} scale, effects)  {_fate}  {_note}\n"
+        string where = _field is null ? "flat ground"
+            : $"{_mapName} {_field.FlatCellAt(Board(_rig.Position))}";
+        _hud.Text = $"{_modelTag} 3D, class {_profile.Tag}  {where}  {_fate}  {_note}\n"
                     + "Space shot   1-4 ricochet front/right/rear/left   Shift+1-4 pierce   Ctrl+1-4 HE   5 round in the ground\n"
                     + "J burning   K knocked out   X destroyed   Backspace reset   WASD drive   "
-                    + (_model.Turreted ? "Q/E turret   " : "") + "R/F gun   -/= zoom   F12 shot";
+                    + (_model.Turreted ? "Q/E turret   " : "") + "R/F gun   -/= zoom   Tab panel   F12 shot";
         Shots();
         _frame++;
     }
@@ -718,9 +1123,10 @@ public sealed partial class Tank3DBench : Node3D
             Transform3D x = f.Node.GlobalTransform;
             x.Origin += f.V * dt;
             x.Basis = new Basis(f.Axis, f.W * dt) * x.Basis;
-            if (x.Origin.Y < f.Half)
+            float floor = Foot(x.Origin).Y + f.Half;
+            if (x.Origin.Y < floor)
             {
-                x.Origin.Y = f.Half;
+                x.Origin.Y = floor;
                 f.V = new Vector3(f.V.X * 0.5f, -0.3f * f.V.Y, f.V.Z * 0.5f);
                 f.W *= 0.5f;
                 if (Mathf.Abs(f.V.Y) < 0.15f * s)
@@ -771,6 +1177,7 @@ public sealed partial class Tank3DBench : Node3D
             case Key.K: Do("knock"); break;
             case Key.X: Do("destroy"); break;
             case Key.Backspace: Do("reset"); break;
+            case Key.Tab: _panel?.Flip(); break;
             case Key.Minus: _zoom = Mathf.Max(0.5f, _zoom / 1.25f); break;
             case Key.Equal: _zoom = Mathf.Min(8.0f, _zoom * 1.25f); break;
             case Key.F12:
@@ -778,5 +1185,36 @@ public sealed partial class Tank3DBench : Node3D
                 GetViewport().GetTexture().GetImage().SavePng(AssetRoot.Out + "/tank3d.png");
                 break;
         }
+    }
+
+    // --- the panel ---------------------------------------------------------
+
+    /// <summary>
+    /// The side panel, the benches' own <see cref="ControlPanel"/>: for now one
+    /// group - which tank stands on the board.
+    ///
+    /// The list is what is on disk (<see cref="ModelsOnDisk"/>), each named by
+    /// its class; a pick is <see cref="Pick"/>, the same as <c>--do model=</c>.
+    /// No file of captions behind it, as the benches' <c>bench.json</c> is:
+    /// two rows do not need one, and the code's own captions stand.
+    /// </summary>
+    private void BuildPanel(CanvasLayer layer)
+    {
+        _panel = new ControlPanel();
+        _panel.Prepare();
+        _panel.Heading("tank3d.tank", "танк");
+        var labels = new List<string>();
+        foreach (string model in _models)
+            labels.Add(PairAt(model) is int i and >= 0 ? $"{model}  {Pairs[i].Name}" : model);
+        if (labels.Count > 0)
+            _panel.Choice("tank3d.tank.model", "модель", labels,
+                          () => _models.FindIndex(m => string.Equals(m, _modelTag, StringComparison.OrdinalIgnoreCase)),
+                          i => Pick(_models[i]));
+        _panel.Readout("tank3d.tank.note", () =>
+            $"класс {_profile.Tag} x{_profile.Size:F2}, {_model.PixelsPerUnit:F1} px на единицу"
+            + (_model.Turreted ? "" : ", без башни"));
+        _panel.Expand("tank3d.tank", true);
+        layer.AddChild(_panel);
+        _panel.AddHandle();
     }
 }

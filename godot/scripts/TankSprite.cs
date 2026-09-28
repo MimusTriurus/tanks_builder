@@ -44,6 +44,23 @@ public enum FlashSource
 public sealed partial class TankSprite : Node2D
 {
     public AtlasSet? Atlas;
+
+    /// <summary>
+    /// What the built effects read the tank off - ports, bore, projection and
+    /// holdout (<see cref="ITankShape"/>). The atlas, unless something else was
+    /// put here: a 3D tank (<c>Tank3DBench</c>) carries its effects on a sprite
+    /// with no atlas at all and answers these from its model
+    /// (<see cref="ModelShape"/>). Nothing of the sprite's own is drawn then -
+    /// every layer of it is a question to <see cref="Atlas"/>.
+    /// </summary>
+    public ITankShape? Shape
+    {
+        get => _shape ?? Atlas;
+        set => _shape = value;
+    }
+
+    private ITankShape? _shape;
+
     public double HullFacing = 270.0;
 
     /// <summary>
@@ -261,7 +278,7 @@ public sealed partial class TankSprite : Node2D
     /// <summary>Whether the rendered plume should stand down - see
     /// <see cref="SmokeIsProcedural"/> for why the atlas has a say.</summary>
     public bool ExhaustIsProcedural => ProceduralExhaust
-                                       && Atlas is { HasPorts: true };
+                                       && Shape is { HasPorts: true };
 
     public bool ShowExhaust = true;
 
@@ -322,13 +339,13 @@ public sealed partial class TankSprite : Node2D
 
     /// <summary>Whether the rendered flame should stand down - see
     /// <see cref="SmokeIsProcedural"/> for why the atlas has a say.</summary>
-    public bool FireIsProcedural => ProceduralFire && Atlas is { HasPorts: true };
+    public bool FireIsProcedural => ProceduralFire && Shape is { HasPorts: true };
 
     /// <summary>Whether the rendered burn layer should stand down. True only
     /// when something else is actually going to draw a column: a flag flipped on
     /// a set that cannot honour it would take the smoke away rather than change
     /// how it is made.</summary>
-    public bool SmokeIsProcedural => ProceduralSmoke && Atlas is { HasPorts: true };
+    public bool SmokeIsProcedural => ProceduralSmoke && Shape is { HasPorts: true };
 
     /// <summary>Phase of a shell arriving, or -1 between hits. An event like the
     /// shot, so it runs out rather than wrapping - see <see cref="HitLoop"/>.</summary>
@@ -1047,7 +1064,7 @@ public sealed partial class TankSprite : Node2D
 
     /// <summary>Whether this tank can build its shot at all - a stamped bore is
     /// what every length in the flash and its smoke is quoted against.</summary>
-    public bool CanBuild => Atlas?.HasBore == true;
+    public bool CanBuild => Shape?.HasBore == true;
 
     /// <summary>The source actually in use. Rendered falls back to Sheet on a
     /// tank whose scene has no separated barrel; Built falls back on one whose
@@ -1481,7 +1498,11 @@ public sealed partial class TankSprite : Node2D
     internal Transform2D ShearFor(bool turret, bool grounded = false,
                                   bool planted = false)
     {
-        float groundY = Atlas!.GroundOffset.Y;
+        // No atlas, nothing to shear by: a 3D tank's effects ride a sprite that
+        // draws nothing of its own, and its body moves in the model instead.
+        if (Atlas is null)
+            return Transform2D.Identity;
+        float groundY = Atlas.GroundOffset.Y;
         Vector2 ground = TiltFor(turret);
         Vector2 both = ground + MountTiltFor(turret);
         // SternWeight(p) is 0.5 - (cos(h)*p.x - sin(h)*p.y/squash) / length, so the

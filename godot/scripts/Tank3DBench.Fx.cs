@@ -1,14 +1,14 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Text.Json;
 using Godot;
 
 namespace TankSpriteTest;
 
 /// <summary>
 /// The bench's effects on the 3D tank - the same classes, raised with the
-/// arguments <see cref="TankBench"/> and <see cref="Stage3D"/> raise them with.
+/// arguments <see cref="TankBench"/> and <see cref="Stage3D"/> raise them with,
+/// and read off the model: no sprite set is loaded for the tank.
 ///
 /// <b>Two kinds, two hosts.</b>
 /// <list type="bullet">
@@ -18,12 +18,12 @@ namespace TankSpriteTest;
 /// pooled, built once, and ticked here because none of them ticks itself.</item>
 /// <item><b>Node2D effects</b> (<see cref="ProcFire"/>, both
 /// <see cref="ProcSmoke"/>s, <see cref="ProcFume"/>, <see cref="ProcFlash"/>,
-/// <see cref="ProcPierce"/>, the hit burst and dust layers) are children of a
-/// <see cref="TankSprite"/> and read everything off it. So there is one: the
-/// sprite set the model copies, in a render target, with its own pictures made
-/// invisible - the hull by the material, the rest by their flags - and its
-/// clocks driven from the 3D tank. The model <i>is</i> that sprite's geometry,
-/// so ports, bore and depth cut all land on it.</item>
+/// <see cref="ProcPierce"/>) are children of a <see cref="TankSprite"/> and read
+/// everything off it. So there is one, in a render target, with no atlas: it
+/// draws nothing of its own, keeps the clocks, and hands the effects a
+/// <see cref="ModelShape"/> - the model's exhausts, muzzle and bore this frame,
+/// and a height map rendered live off the model (<see cref="BuildHeights"/>).
+/// </item>
 /// </list>
 ///
 /// <b>Where a card stands is the one new rule.</b> An effect card is upright
@@ -31,8 +31,10 @@ namespace TankSpriteTest;
 /// centre would be hidden by its near half - a spray off a front plate turned to
 /// the camera would go behind that plate. Every card is therefore slid along the
 /// view ray, which moves nothing on screen, until its plane is just in front of
-/// what makes the effect: the muzzle, the engine port, the struck plate. The
-/// model's own depth then hides exactly what stands in front of that.
+/// what makes the effect: the muzzle, the turret ring. The model's own depth
+/// then hides exactly what stands in front of that. The fire and the smoke are
+/// the exception - a plane cannot follow a sloped grille - and stand in front
+/// of the whole tank, hidden element by element by the height map instead.
 /// </summary>
 public sealed partial class Tank3DBench
 {
@@ -40,12 +42,13 @@ public sealed partial class Tank3DBench
 
     private readonly List<ProcKick> _kicks = new();
     private readonly List<ProcKick> _drifts = new();
+    private readonly List<ProcKick> _bursts = new();
     private readonly List<ProcSpall> _spalls = new();
     private readonly List<ProcSlam> _slams = new();
     private readonly List<ProcBall> _balls = new();
     private readonly List<SheetBlast> _booms = new();
     private readonly List<PitArt> _pits = new();
-    private int _nextKick, _nextDrift, _nextSpall, _nextSlam, _nextBall, _nextBoom, _nextPit;
+    private int _nextKick, _nextDrift, _nextBurst, _nextSpall, _nextSlam, _nextBall, _nextBoom, _nextPit;
     private const int Pool = 6;
     private const int DriftPool = 48;
 
@@ -55,6 +58,17 @@ public sealed partial class Tank3DBench
 
     /// <summary>World units in front of its source a card stands.</summary>
     private const float Margin = 4.0f;
+
+    /// <summary>
+    /// Phases a lap of the exhaust's and the fire's loops, which is what their
+    /// clocks count in (<see cref="ExhaustLoop"/>, <see cref="BurnLoop"/>).
+    ///
+    /// <b>The sprite sets' own number, and the same in all five</b>: every
+    /// exhaust, fire and burn layer shipped holds twelve. The built plume and
+    /// flame are continuous, so it is a tempo here and not a frame count - the
+    /// loop the render was made on, kept so both kinds of tank breathe alike.
+    /// </summary>
+    private const int LoopPhases = 12;
 
     // --- the sprite that carries the 2D effects ----------------------------
 
@@ -72,7 +86,8 @@ public sealed partial class Tank3DBench
     private const int CardZoom = 2;
 
     private TankSprite? _sprite;
-    private Card? _rear, _front, _hit, _glow;
+    private ModelShape? _shape;
+    private Card? _rear, _front, _glow;
     private readonly List<CanvasItem> _painted = new();
 
     private readonly ExhaustLoop _exhaust = new();
@@ -83,25 +98,46 @@ public sealed partial class Tank3DBench
     private int _shotFrame = -1;
     private bool _burning;
 
-    /// <summary>The struck point in the hull's own frame, so the burst follows
-    /// the hull as it rocks, and whether that plate faces away.</summary>
+    /// <summary>The struck point in the hull's own frame, so the light through
+    /// the hole follows the hull as it rocks.</summary>
     private Vector3 _hitLocal;
-    private bool _hitBehind;
-
-    /// <summary>The sprite's anchor (its <c>spin_pivot</c>) and first engine
-    /// port, in the model's <c>Tank</c> frame.</summary>
-    private Vector3 _anchorTank, _portTank;
     private TriangleMesh? _hullHits;
     private MovementProfile _profile = MovementProfile.Light;
 
     private readonly List<(StandardMaterial3D Mat, Color Albedo)> _paint = new();
+
+    /// <summary>
+    /// Nothing of a card goes under the ground: a vertex below
+    /// <c>ground</c> is slid up its own view ray (<c>toward</c>, the camera's
+    /// way) until it stands on it. The ray is the one direction that moves
+    /// nothing on screen, so the picture is the same picture; what changes is
+    /// only its depth, which the board's depth-written ground would otherwise
+    /// win below the tank's contact - the stage's own bend for its sprites
+    /// (<c>Stage3D.Body</c>), per vertex. The model still hides the lifted part
+    /// wherever it hid the buried one: anything above the ground on a view ray
+    /// is nearer the camera than where that ray meets the ground.
+    /// </summary>
+    private const string Bend = @"
+uniform float ground = -100000.0;
+uniform vec3 toward = vec3(0.0, 0.5, 0.866);
+void vertex() {
+    vec3 w = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+    if (w.y < ground) {
+        w += toward * ((ground - w.y) / toward.y);
+        VERTEX = (inverse(MODEL_MATRIX) * vec4(w, 1.0)).xyz;
+    }
+}";
+
+    /// <summary>Rows the card's quad is cut into for <see cref="Bend"/>, which
+    /// bends at vertices: about nine world units a row.</summary>
+    private const int CardRows = 64;
 
     private static readonly Shader CardShader = new()
     {
         Code = @"
 shader_type spatial;
 render_mode unshaded, blend_premul_alpha, depth_draw_never, cull_disabled;
-uniform sampler2D picture : source_color, filter_linear;
+uniform sampler2D picture : source_color, filter_linear;" + Bend + @"
 void fragment() {
     vec4 c = texture(picture, UV);
     ALBEDO = c.rgb;
@@ -111,43 +147,211 @@ void fragment() {
 
     /// <summary>
     /// The same, adding light and nothing else - for <see cref="ProcPierce"/>,
-    /// which redraws the hull frame additively to use its alpha as a mask. Over
-    /// the sprite's own hull that alpha was already 1; over an empty target it
-    /// is the whole silhouette, and a premultiplied card draws it black.
+    /// which draws the hull's silhouette additively to use its alpha as a mask.
+    /// Over an empty target that alpha is the whole silhouette, and a
+    /// premultiplied card would draw it black.
     /// </summary>
     private static readonly Shader GlowShader = new()
     {
         Code = @"
 shader_type spatial;
 render_mode unshaded, blend_add, depth_draw_never, cull_disabled;
-uniform sampler2D picture : source_color, filter_linear;
+uniform sampler2D picture : source_color, filter_linear;" + Bend + @"
 void fragment() {
     ALBEDO = texture(picture, UV).rgb;
 }",
     };
 
-    /// <summary>What the sprite's own pictures are drawn with instead of its
-    /// char shader: nothing. The hull goes through the sprite's material and so
-    /// do the scars and the tossed turret, so this one line hides all three and
-    /// leaves every effect, each on a material of its own, untouched.</summary>
-    private static readonly Shader Nothing = new()
+    // --- the height map -------------------------------------------------------
+
+    /// <summary>The render layer the model's stand-ins draw on, which the
+    /// scene's camera does not look at and the height map's camera looks at
+    /// alone.</summary>
+    private const uint GhostLayer = 1u << 19;
+
+    /// <summary>
+    /// Texels of the height map a board px: the cards' own, so the map is as
+    /// fine as what reads it.
+    ///
+    /// <b>Finer buys little, and that was measured.</b> The map is read
+    /// nearest - a height blended across a silhouette invents a surface - so
+    /// where the tank ends the cut steps. On a casemate's roof edge at 3.5x
+    /// zoom, going from one texel a px to two changed 329 px of the picture and
+    /// from two to four 119, and the steps left after four are where two left
+    /// them: the cut is made once per <em>card</em> texel, and the card is
+    /// <see cref="CardZoom"/> to a px - under two screen px at 3.5x.
+    /// </summary>
+    private const int HeightZoom = CardZoom;
+
+    private SubViewport? _heights;
+    private Camera3D? _heightEye;
+    private ShaderMaterial? _heightInk;
+    private readonly List<(GeometryInstance3D Ghost, GeometryInstance3D Source, bool OnTurret)> _ghosts = new();
+
+    /// <summary>
+    /// Every surface's height on the byte scale the built layers read
+    /// (<see cref="Plumes.DepthCode"/>): 0 where nothing is, 1..255 over
+    /// <c>low</c>..<c>high</c>. The nearest surface wins in the depth buffer,
+    /// and under this camera nearest is highest - the relation the whole
+    /// holdout stands on - so what is left in a pixel is the height the effects
+    /// ask for.
+    ///
+    /// <b>Written as the value it is.</b> An unshaded colour reaches a target
+    /// under <c>gl_compatibility</c> with no sRGB curve on it - measured: handed
+    /// over decoded, the deck's 78 came back as 19 and the belts' lowest codes
+    /// as nought, which is "no tank".
+    /// </summary>
+    private static readonly Shader HeightShader = new()
     {
-        Code = "shader_type canvas_item;\nvoid fragment() { COLOR = vec4(0.0); }",
+        Code = @"
+shader_type spatial;
+render_mode unshaded, cull_disabled, shadows_disabled, ambient_light_disabled, fog_disabled;
+uniform float low = 0.0;
+uniform float high = 1.0;
+void fragment() {
+    float y = (INV_VIEW_MATRIX * vec4(VERTEX, 1.0)).y;
+    float lift = clamp((y - low) / max(high - low, 1e-4), 0.0, 1.0);
+    float code = (1.0 + 254.0 * lift) / 255.0;
+    ALBEDO = vec3(code);
+}",
     };
+
+    /// <summary>
+    /// The height map, live: stand-ins of the model, drawn by a camera of their
+    /// own into a target the size of a card (<see cref="HeightZoom"/> texels a
+    /// px), centred on the card's anchor, looking down the scene camera's own
+    /// ray.
+    ///
+    /// <b>This is what hides the fire and the smoke, element by element</b>, as
+    /// the atlas's map does on a sprite - not the model's depth against the
+    /// card. A card is one plane, and a plane at the port was cut by the half of
+    /// a sloped grille that leans toward the camera: the flame came out lying
+    /// under the slats. So the rear card stands in front of the whole tank and
+    /// the map decides.
+    ///
+    /// <b>Hull, belts and turret; not the gun, and not a turret that has been
+    /// thrown.</b> The sprite's map is the hull and belts only because its
+    /// turret is a layer the heading sorts over or under the column; here it is
+    /// geometry, and the map is where geometry can hide an element. The gun
+    /// stays out for the atlas's reason - the flash's height is the bore's, and
+    /// the tube's top stands a radius over it, so a gun in the map would cut its
+    /// own flash. A thrown turret lies on the deck over the port, and the board
+    /// draws it under the fire (<see cref="FxProcess"/>).
+    /// </summary>
+    private void BuildHeights()
+    {
+        _heights = new SubViewport
+        {
+            Name = "Heights",
+            Size = new Vector2I(CardSize * HeightZoom, CardSize * HeightZoom),
+            TransparentBg = true,
+            Msaa3D = Viewport.Msaa.Disabled,
+            RenderTargetUpdateMode = SubViewport.UpdateMode.Always,
+            RenderTargetClearMode = SubViewport.ClearMode.Always,
+        };
+        AddChild(_heights);
+        _heightEye = new Camera3D
+        {
+            Projection = Camera3D.ProjectionType.Orthogonal,
+            KeepAspect = Camera3D.KeepAspectEnum.Height,
+            Size = CardSize,
+            Near = 1.0f,
+            Far = Back * 2.0f,
+            CullMask = GhostLayer,
+            RotationDegrees = new Vector3(-Mathf.RadToDeg(Mathf.Asin(Squash)), 0.0f, 0.0f),
+            // Its own, empty: the scene's environment would paint the grey
+            // background into the target and light nothing that matters here.
+            Environment = new Godot.Environment
+            {
+                BackgroundMode = Godot.Environment.BGMode.ClearColor,
+                AmbientLightSource = Godot.Environment.AmbientSource.Disabled,
+            },
+        };
+        _heights.AddChild(_heightEye);
+        _heightEye.MakeCurrent();
+        _heightInk = new ShaderMaterial { Shader = HeightShader };
+        Ghost(_model);
+        _shape!.Map = _heights.GetTexture();
+        _shape.MapSide = CardSize;
+    }
+
+    /// <summary>A stand-in for every mesh under <paramref name="node"/> but the
+    /// gun's, on <see cref="GhostLayer"/>, drawn with the height ink.</summary>
+    private void Ghost(Node node, bool onTurret = false)
+    {
+        if (node == _model.Mantlet)
+            return;
+        onTurret |= node == _model.Turret;
+        GeometryInstance3D? ghost = node switch
+        {
+            MeshInstance3D { Mesh: not null } m => new MeshInstance3D { Mesh = m.Mesh },
+            MultiMeshInstance3D { Multimesh: not null } mm => new MultiMeshInstance3D { Multimesh = mm.Multimesh },
+            _ => null,
+        };
+        if (ghost is not null)
+        {
+            ghost.Layers = GhostLayer;
+            ghost.MaterialOverride = _heightInk;
+            ghost.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
+            AddChild(ghost);
+            _ghosts.Add((ghost, (GeometryInstance3D)node, onTurret));
+        }
+        foreach (Node child in node.GetChildren())
+            Ghost(child, onTurret);
+    }
+
+    /// <summary>The stand-ins onto the model as it stands, the camera onto the
+    /// anchor, and the byte range onto the shape's.</summary>
+    private void SyncHeights(Vector3 anchor)
+    {
+        if (_heightEye is null || _heightInk is null || _shape is null)
+            return;
+        bool thrown = _model.TurretOverride is not null;
+        foreach (var (ghost, source, onTurret) in _ghosts)
+        {
+            bool shown = GodotObject.IsInstanceValid(source) && source.IsVisibleInTree()
+                         && !(onTurret && thrown);
+            ghost.Visible = shown;
+            if (shown)
+                ghost.GlobalTransform = source.GlobalTransform;
+        }
+        _heightEye.Position = anchor + new Vector3(0.0f, Back * Squash, Back * RiseFactor);
+        float ppu = _model.PixelsPerUnit;
+        _heightInk.SetShaderParameter("low", anchor.Y + (float)_shape.HeightLow * ppu);
+        _heightInk.SetShaderParameter("high", anchor.Y + (float)_shape.HeightHigh * ppu);
+    }
+
+    /// <summary>Everything <see cref="BuildHeights"/> made, gone.</summary>
+    private void FreeHeights()
+    {
+        foreach (var (ghost, _, _) in _ghosts)
+            ghost.QueueFree();
+        _ghosts.Clear();
+        _heights?.QueueFree();
+        _heights = null;
+        _heightEye = null;
+    }
+
+    /// <summary>The height map as it stands, to a file - <c>--do heights</c>.
+    /// </summary>
+    private void SaveHeights()
+    {
+        if (_heights is null)
+            return;
+        Directory.CreateDirectory(AssetRoot.Out);
+        string path = AssetRoot.Out + "/tank3d_heights.png";
+        Error err = _heights.GetTexture().GetImage().SavePng(path);
+        GD.Print(err == Error.Ok ? $"heights: {path}" : $"heights to {path} failed: {err}");
+    }
 
     // --- setup ------------------------------------------------------------
 
     private void BuildEffects()
     {
-        foreach (MovementProfile p in new[] { MovementProfile.Light, MovementProfile.Medium,
-                                              MovementProfile.Heavy, MovementProfile.Destroyer,
-                                              MovementProfile.Mortar })
-            if (p.Tag == _spriteTag)
-                _profile = p;
         if (_profile.Turreted != _model.Turreted)
             GD.Print($"tank3d: {_modelTag} is {(_model.Turreted ? "turreted" : "a casemate")} but "
                      + $"moves as the {_profile.Tag} class, which is {(_profile.Turreted ? "turreted" : "a casemate")}"
-                     + " - the class comes from --sprites");
+                     + " - the class comes from the model's pair");
         foreach (MeshInstance3D mesh in Meshes(_model))
             for (int s = 0; s < mesh.Mesh.GetSurfaceCount(); s++)
                 if (mesh.Mesh.SurfaceGetMaterial(s) is StandardMaterial3D m
@@ -156,46 +360,36 @@ void fragment() {
         if (_model.Hull is MeshInstance3D hull)
             _hullHits = hull.Mesh.GenerateTriangleMesh();
 
-        if (_atlas is null)
-        {
-            _note = "no sprite set - no effects";
-            return;
-        }
-        ReadFrame();
-        _exhaust.Phases = _atlas.ExhaustPhases;
+        _shape = new ModelShape(_model, Squash, RiseFactor);
+        BuildHeights();
+        _exhaust.Phases = LoopPhases;
         _exhaust.TopSpeed = _profile.TopSpeed;
-        _burn.Phases = _atlas.BurnPhases;
+        _burn.Phases = LoopPhases;
 
         _rear = MakeCard("Rear");
         _front = MakeCard("Front");
-        _hit = MakeCard("Hit");
         _glow = MakeCard("Glow", GlowShader);
+        // No atlas: nothing of the sprite's own is drawn, every layer of it
+        // being a question to the atlas, and the built effects read the shape.
         _sprite = new TankSprite
         {
-            Atlas = _atlas,
+            Shape = _shape,
             Name = "Effects",
-            ShowTurret = false,
-            ShowTracks = false,
-            ShowShadow = false,
             ProceduralExhaust = true,
             ProceduralSmoke = true,
             ProceduralFire = true,
             Source = FlashSource.Built,
         };
         _rear.Holder.AddChild(_sprite);
-        _sprite.Material = new ShaderMaterial { Shader = Nothing };
         // Out of the sprite and into the card that stands where each one is
         // made. Each still reads the sprite through its Tank field and draws in
         // its own local frame, so a holder at the sprite's place draws it the same.
         foreach (Node child in _sprite.GetChildren())
         {
-            string? layer = child is EffectLayer e ? e.Layer : null;
             Card? to = child switch
             {
                 ProcFume or ProcFlash => _front,
                 ProcPierce => _glow,
-                EffectLayer when layer is "smoke" or "flash" => _front,
-                EffectLayer when layer == AtlasSet.DustName || layer == AtlasSet.BurstName => _hit,
                 _ => null,
             };
             if (to is null)
@@ -204,7 +398,7 @@ void fragment() {
             to.Holder.AddChild(child);
         }
         _painted.Add(_sprite);
-        foreach (Card c in new[] { _rear, _front, _hit, _glow })
+        foreach (Card c in new[] { _rear, _front, _glow })
             foreach (Node n in c.Holder.GetChildren())
                 if (n is CanvasItem item && item != _sprite)
                     _painted.Add(item);
@@ -222,39 +416,6 @@ void fragment() {
             foreach (MeshInstance3D d in Meshes(n))
                 yield return d;
         }
-    }
-
-    /// <summary>
-    /// Where the sprite's anchor and ports are on the model. Both are in the
-    /// Blender frame of the tank the sprites were rendered from (Z up, -Y the
-    /// front); the model is the same geometry exported as glTF with its ground
-    /// at the origin, so a point is <c>(x, z - ground, -y)</c>. The ground is
-    /// read off the sprite itself: the hex under the tank is drawn at the anchor's
-    /// foot, <c>GroundOffset</c> below it at the render's elevation.
-    /// </summary>
-    private void ReadFrame()
-    {
-        Vector3 pivot = Vector3.Zero;
-        try
-        {
-            using var doc = JsonDocument.Parse(File.ReadAllText(
-                $"{AssetRoot.Sprites}/{_spriteTag}/hull_atlas.json"));
-            JsonElement p = doc.RootElement.GetProperty("spin_pivot");
-            pivot = new Vector3(p[0].GetSingle(), p[1].GetSingle(), p[2].GetSingle());
-        }
-        catch (Exception e)
-        {
-            GD.Print($"tank3d: spin_pivot: {e.Message}");
-        }
-        float upp = (float)_atlas!.UnitsPerPixel;
-        float height = _atlas.GroundOffset.Y * upp / Mathf.Cos(Mathf.DegToRad((float)_atlas.Elevation));
-        float ground = pivot.Z - height;
-        _anchorTank = Canon(pivot, ground);
-        _portTank = _atlas.Ports.Count > 0 ? Canon(_atlas.Ports[0].Point, ground)
-                                           : _model.Tank.ToLocal(_model.Exhausts[0].GlobalPosition);
-        GD.Print($"tank3d: sprite anchor {_anchorTank} (ground z {ground:F4}), port {_portTank}");
-
-        Vector3 Canon(Vector3 b, float g) => new(b.X, b.Z - g, -b.Y);
     }
 
     private Card MakeCard(string name, Shader? shader = null)
@@ -277,13 +438,14 @@ void fragment() {
         paint.AddChild(holder);
         var mat = new ShaderMaterial { Shader = shader ?? CardShader, RenderPriority = Stage3D.StandOrder };
         mat.SetShaderParameter("picture", paint.GetTexture());
+        mat.SetShaderParameter("toward", View);
         // Upright, facing +Z like every card on the stage; a target pixel
         // (u, w) lands at (u - half, (half - w) / rise) so it is drawn exactly
         // one board px from its neighbour on screen.
         var quad = new MeshInstance3D
         {
             Name = name + "Card",
-            Mesh = new QuadMesh { Size = new Vector2(CardSize, CardSize / RiseFactor) },
+            Mesh = new QuadMesh { Size = new Vector2(CardSize, CardSize / RiseFactor), SubdivideDepth = CardRows - 1 },
             MaterialOverride = mat,
             SortingUseAabbCenter = false,
             CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
@@ -292,23 +454,70 @@ void fragment() {
         return new Card { Paint = paint, Holder = holder, Quad = quad };
     }
 
+    /// <summary>Everything <see cref="BuildEffects"/> made for this tank, gone.
+    /// </summary>
+    private void FreeEffects()
+    {
+        // The cards go at the end of the frame and still draw in it, while the
+        // model they read is already off the rig: without a shape, an effect
+        // has nothing to draw and asks nothing of the model.
+        if (_sprite is not null)
+            _sprite.Shape = null;
+        foreach (Card? card in new[] { _rear, _front, _glow })
+        {
+            card?.Paint.QueueFree();
+            card?.Quad.QueueFree();
+        }
+        _rear = _front = _glow = null;
+        _sprite = null;
+        _painted.Clear();
+        FreeHeights();
+        _shape = null;
+    }
+
+    /// <summary>Where the cards hang and px (0, 0) is: the middle of the
+    /// model's height over its ground point, riding the rig - the sprite's
+    /// anchor was its ring raised to the middle of its bounds, for the same
+    /// room above and below.</summary>
+    private Vector3 CardAnchor() => _model.Tank.ToGlobal(new Vector3(0.0f, _model.Size.Y * 0.5f, 0.0f));
+
     // --- the board's terms --------------------------------------------------
 
     /// <summary>A ground point (Y = 0) as the harness would pass it: the flat
     /// board's row is world depth times the squash.</summary>
     private Vector2 Board(Vector3 w) => new(w.X, w.Z * Squash);
 
+    /// <summary>
+    /// The ground under a world point as the stage names a spot: where it is
+    /// <em>drawn</em>, its flat row lifted by the ground's height - what every
+    /// effect's <c>Sit</c> and the crater's <c>Show</c> take beside that height
+    /// (<see cref="Stage3D.Trunk"/> and <see cref="Stage3D.Ground"/> add it back).
+    ///
+    /// <b>The flat point in its place put everything on a level in front of
+    /// where it was</b>, by the lift over the squash: on the raised cell the
+    /// belts' dust slid down the cliff and the shot's cloud fell out in front of
+    /// the hull. On the ground floor the lift is nought, and the two agree.
+    /// </summary>
+    private Vector2 Spot(Vector3 w) => Board(w) - new Vector2(0.0f, LiftAt(w));
+
     /// <summary>A world offset as screen px, y down - what the board calls a
     /// snout or a plate.</summary>
     private Vector2 Drawn(Vector3 d) => new(d.X, d.Z * Squash - d.Y * RiseFactor);
 
-    /// <summary>The atlas heading of a world direction on the ground: 0 screen
-    /// right, 90 up the screen (-Z).</summary>
-    private static float HeadingOf(Vector3 d) => Mathf.RadToDeg(Mathf.Atan2(-d.Z, d.X));
-
-    /// <summary><see cref="AtlasSet.GroundDirection"/> of a world direction -
-    /// unnormalised, as every effect that takes one expects.</summary>
-    private Vector2 Along(Vector3 d) => _atlas!.GroundDirection(HeadingOf(d));
+    /// <summary>
+    /// The screen direction of a world direction on the ground - what
+    /// <see cref="AtlasSet.GroundDirection"/> answers for the heading it points
+    /// at, and unnormalised the same way: its length is how much of a ground
+    /// length survives the squash, which every effect that takes one expects.
+    /// </summary>
+    private Vector2 Along(Vector3 d)
+    {
+        var flat = new Vector2(d.X, d.Z);
+        if (flat.LengthSquared() < 1e-12f)
+            return Vector2.Zero;
+        flat = flat.Normalized();
+        return new Vector2(flat.X, flat.Y * Squash);
+    }
 
     private static readonly Vector3 Up = Vector3.Up;
 
@@ -337,11 +546,9 @@ void fragment() {
 
     private void FxShot()
     {
-        if (_atlas is null)
-            return;
         _shotFrame = 0;
         Vector3 muzzle = _model.Muzzle.GlobalPosition;
-        Vector3 foot = new(muzzle.X, 0.0f, muzzle.Z);
+        Vector3 foot = Foot(muzzle);
         Vector3 bore = _model.Muzzle.GlobalBasis.Z;
         ProcKick kick = Next(_kicks, ref _nextKick, Pool, () =>
         {
@@ -357,7 +564,7 @@ void fragment() {
         kick.Dress(ProcKick.Cloud.Muzzle);
         // Seated under the muzzle rather than at the tank's middle - see the
         // class note: the middle is behind the near half of an opaque hull.
-        kick.Sit(Board(foot), 0.0f, Squash, RiseFactor);
+        kick.Sit(Spot(foot), LiftAt(foot), Squash, RiseFactor);
         kick.Aim(Along(new Vector3(bore.X, 0.0f, bore.Z)), Drawn(muzzle - foot));
         kick.Fire();
     }
@@ -391,8 +598,6 @@ void fragment() {
 
     private void FxHit(int side, Vector3 travel, bool pierce)
     {
-        if (_atlas is null)
-            return;
         // A little off the plate's normal, so a glancing round has somewhere to
         // glance to, and a little downward, as a round arriving from range does.
         float skew = side % 2 == 0 ? 25.0f : -25.0f;
@@ -404,12 +609,12 @@ void fragment() {
         Vector3 n = (hull.GlobalBasis * normalLocal).Normalized();
         Vector3 uw = (hull.GlobalBasis * u).Normalized();
         bool behind = n.Z <= 0.0f;
-        Vector3 foot = new(at.X, 0.0f, at.Z);
+        Vector3 foot = Foot(at);
         if (pierce)
         {
             _hitLocal = local;
-            _hitBehind = behind;
             _hitLoop.Strike(Sides[side], 0.0f, 0.0f, 1.0f, true);
+            FxEntry(at, n, foot);
             return;
         }
         Vector3 r = uw - 2.0f * uw.Dot(n) * n;
@@ -424,23 +629,60 @@ void fragment() {
         spall.Blame(ProcSpall.Cause.Round);
         spall.Might *= Might;
         spall.Order = Stage3D.StandOrder;
-        spall.Sit(Board(foot), 0.0f, Squash, RiseFactor, behind);
+        spall.Sit(Spot(foot), LiftAt(foot), Squash, RiseFactor, behind);
         Vector3 flat = new(r.X, 0.0f, r.Z);
         spall.Aim(flat.LengthSquared() < 1e-4f ? Vehicle.Spent : Along(flat), Drawn(at - foot));
         spall.Fire();
     }
 
+    /// <summary>
+    /// The outside of a penetration: a puff of earth-tan dust with a warm core
+    /// on the plate, blown out along its normal.
+    ///
+    /// <b>A stand-in for the rendered pair, and named as one.</b> On a sprite
+    /// that is <c>burst</c> and <c>dust</c> off the atlas - pictures rendered
+    /// with each tank's set, which is exactly what a 3D tank does not load.
+    /// What they draw is <see cref="ProcSlam"/>'s description of them, "a puff
+    /// of earth-tan dust with a warm core, which is a shell going in", and the
+    /// board has that cloud already: <see cref="ProcKick"/> wearing the
+    /// ground's earth with the muzzle's glowing core left in. The inside of
+    /// the same hit is <see cref="ProcPierce"/>, on the glow card.
+    /// </summary>
+    private void FxEntry(Vector3 at, Vector3 n, Vector3 foot)
+    {
+        ProcKick burst = Next(_bursts, ref _nextBurst, Pool, () =>
+        {
+            var made = new ProcKick();
+            AddChild(made);
+            made.Build(HexWidth, Squash, RiseFactor);
+            // Worn once and never again: this ring is only ever this cloud.
+            made.Dress(ProcKick.Cloud.Ground);
+            made.Dial(ProcKick.Part.Glow, "core_gain", ProcKick.CoreGain);
+            made.Dial(ProcKick.Part.Glow, "ember_gain", ProcKick.EmberGain);
+            return made;
+        });
+        burst.Might = 1.0f;
+        burst.Might *= Might * EntryShare;
+        burst.Order = Stage3D.StandOrder;
+        burst.Sit(Spot(foot), LiftAt(foot), Squash, RiseFactor);
+        Vector3 flat = new(n.X, 0.0f, n.Z);
+        burst.Aim(flat.LengthSquared() < 1e-4f ? Vehicle.Spent : Along(flat), Drawn(at - foot));
+        burst.Fire();
+    }
+
+    /// <summary>How big the entry's cloud is against a gun's own - a round
+    /// going in throws less than a charge going off.</summary>
+    private const float EntryShare = 0.6f;
+
     /// <summary>An HE round bursting on a plate - <see cref="ProcSlam"/> on
     /// armour, from the side named.</summary>
     private void FxHe(int side, Vector3 travel)
     {
-        if (_atlas is null)
-            return;
         (Vector3 local, Vector3 normalLocal) = Strike(travel);
         Node3D hull = _model.Hull;
         Vector3 at = hull.ToGlobal(local);
         Vector3 n = (hull.GlobalBasis * normalLocal).Normalized();
-        Vector3 foot = new(at.X, 0.0f, at.Z);
+        Vector3 foot = Foot(at);
         ProcSlam slam = Next(_slams, ref _nextSlam, Pool, () =>
         {
             var made = new ProcSlam();
@@ -453,7 +695,7 @@ void fragment() {
         slam.Face = ProcSlam.Surface.Armour;
         slam.Order = Stage3D.StandOrder;
         slam.Lit = Stage3D.StandOrder;
-        slam.Sit(Board(foot), 0.0f, Squash, RiseFactor, n.Z <= 0.0f);
+        slam.Sit(Spot(foot), LiftAt(foot), Squash, RiseFactor, n.Z <= 0.0f);
         slam.Aim(Along(new Vector3(n.X, 0.0f, n.Z)), Drawn(at - foot));
         slam.Fire();
     }
@@ -462,9 +704,8 @@ void fragment() {
     /// <see cref="Stage3D.Boom"/>, burst and crater.</summary>
     private void FxGround()
     {
-        if (_atlas is null)
-            return;
-        Vector3 spot = _rig.Position + new Vector3(0.55f, 0.0f, 0.45f) * HexWidth;
+        Vector3 spot = Foot(_rig.Position + new Vector3(0.55f, 0.0f, 0.45f) * HexWidth);
+        float lift = LiftAt(spot);
         SheetBlast blast = Next(_booms, ref _nextBoom, Pool, () =>
         {
             var made = new SheetBlast();
@@ -474,7 +715,7 @@ void fragment() {
         });
         blast.Might = 1.0f;
         blast.Might *= Might;
-        blast.Sit(Board(spot), 0.0f, Squash, RiseFactor);
+        blast.Sit(Spot(spot), lift, Squash, RiseFactor);
         blast.Fire();
         var pits = new Craters();
         PitArt pit = Next(_pits, ref _nextPit, Pool, () =>
@@ -484,8 +725,8 @@ void fragment() {
             made.Build(Squash, RiseFactor);
             return made;
         });
-        Vector2 at = Board(spot);
-        pit.Show(at, 0.0f, pits.Wide * Might * HexWidth, pits.Ink,
+        Vector2 at = Spot(spot);
+        pit.Show(at, lift, pits.Wide * Might * HexWidth, pits.Ink,
                  Mathf.Abs(at.X * 0.37f + at.Y * 0.71f) % 64.0f, Squash, RiseFactor);
         _shake.Blast(_profile.ShotShake * 0.6);
     }
@@ -495,7 +736,7 @@ void fragment() {
     /// <see cref="Stage3D.Flash"/>.</summary>
     private void Fireball(float might, bool grounded)
     {
-        Vector3 foot = _rig.Position;
+        Vector3 foot = Foot(_rig.Position);
         ProcBall ball = Next(_balls, ref _nextBall, Pool, () =>
         {
             var made = new ProcBall();
@@ -506,27 +747,25 @@ void fragment() {
         ball.Might = 1.0f;
         ball.Grounded = grounded;
         ball.Might *= might;
-        ball.Sit(Board(foot), 0.0f, Squash, RiseFactor);
-        ball.Aim(new Vector2(0.0f, (float)_atlas!.HeightSpanPx) / Mathf.Max(HexWidth, 1.0f));
+        ball.Sit(Spot(foot), LiftAt(foot), Squash, RiseFactor);
+        // How tall the tank stands on screen, the stage's HeightSpanPx - the
+        // model's own height, drawn.
+        float tall = _model.Size.Y * _model.PixelsPerUnit * RiseFactor;
+        ball.Aim(new Vector2(0.0f, tall) / Mathf.Max(HexWidth, 1.0f));
         ball.Fire();
         // In front of the whole tank, as the board draws it over the sprite.
-        StandAt(ball, _rig.Position.Z + _model.Size.Length() * 0.5f * _model.PixelsPerUnit);
+        StandAt(ball, _rig.Position.Z + Reach);
     }
 
     private void FxKnocked()
     {
-        if (_atlas is null)
-            return;
         _hitLocal = Strike(new Vector3(0, 0, -1)).At;
-        _hitBehind = (_model.Hull.GlobalBasis * Vector3.Back).Z <= 0.0f;
         _wreck.Disable();
         Fireball(TankTick.KnockOutFlash, grounded: false);
     }
 
     private void FxDestroyed(Vector3 blast)
     {
-        if (_atlas is null)
-            return;
         if (!_wreck.Out)
             _wreck.Disable();
         _wreck.Kill(racked: true);
@@ -555,6 +794,7 @@ void fragment() {
             mat.AlbedoColor = albedo;
         foreach (ProcKick k in _kicks) k.Douse();
         foreach (ProcKick k in _drifts) k.Douse();
+        foreach (ProcKick k in _bursts) k.Douse();
         foreach (ProcSpall s in _spalls) s.Douse();
         foreach (ProcSlam s in _slams) s.Douse();
         foreach (ProcBall b in _balls) b.Douse();
@@ -571,18 +811,21 @@ void fragment() {
         _shake.Update(dt);
         foreach (ProcKick k in _kicks) k.Tick(dt);
         foreach (ProcKick k in _drifts) k.Tick(dt);
+        foreach (ProcKick k in _bursts) k.Tick(dt);
         foreach (ProcSpall sp in _spalls) sp.Tick(dt);
         foreach (ProcSlam sl in _slams) sl.Tick(dt);
         foreach (ProcBall b in _balls) b.Tick(dt);
         foreach (SheetBlast b in _booms) b.Tick(dt);
-        if (_sprite is null || _atlas is null)
+        if (_sprite is null || _shape is null)
             return;
 
         TankSprite s = _sprite;
         double hull = TankSprite.Mod(_heading - 90.0, 360.0);
         s.HullFacing = hull;
         s.TurretFacing = TankSprite.Mod(hull + Mathf.RadToDeg(_model.Yaw), 360.0);
-        s.BarrelRung = _atlas.RungFor(Mathf.RadToDeg(_model.Elevation));
+        // The model's gun lays smoothly and the shape hands the bore as it
+        // stands, so there is no ladder to pick a rung off.
+        s.BarrelRung = 0;
 
         // TankTick.UpdateExhaust
         if (_wreck.Out)
@@ -609,8 +852,8 @@ void fragment() {
             s.SmokeDensity = (float)(_wreck.Dead || _burning ? _wreck.Smoke : _wreck.Smoulder);
             Char((float)_wreck.Char);
         }
-        bool lit = (_burning || _wreck.Flare > 0.0) && _atlas.HasBurning;
-        bool smoulder = !lit && _wreck.Disabled && _atlas.HasBurning;
+        bool lit = (_burning || _wreck.Flare > 0.0) && _shape.HasPorts;
+        bool smoulder = !lit && _wreck.Disabled && _shape.HasPorts;
         if (!lit && !smoulder)
         {
             if (s.Burning || s.Smouldering || s.FirePhase >= 0 || s.BurnPhase >= 0)
@@ -654,18 +897,20 @@ void fragment() {
         s.FlashFrame = frame;
         s.ShotPhase = phase;
 
-        // The anchor, and every card slid to its source.
-        Vector3 anchor = _model.Tank.ToGlobal(_anchorTank);
+        // The anchor, the shape read off the model about it, and the height
+        // map rendered for it.
+        Vector3 anchor = CardAnchor();
+        _shape.Update(anchor, s.HullFacing, s.TurretFacing);
+        SyncHeights(anchor);
         Vector3 muzzle = _model.Muzzle.GlobalPosition;
         Vector3 struck = _model.Hull.ToGlobal(_hitLocal);
 
         // TankTick.UpdateHit, with the plate point the model's rather than the
-        // atlas's table.
+        // atlas's table - where the light through the hole is seated.
         int hitPhase = _hitLoop.Phase;
         if (hitPhase >= 0)
         {
             s.HitOffset = Drawn(struck - anchor);
-            s.HitBehind = _hitBehind;
             s.HitScale = _hitLoop.Scale;
             s.HitThrough = _hitLoop.Through;
         }
@@ -673,30 +918,26 @@ void fragment() {
         s.HitPhase = hitPhase;
         _hitLoop.Advance();
 
-        foreach (Card c in new[] { _rear!, _front!, _hit!, _glow! })
+        // The ground under the tank, and the stage's clearance over it, as the
+        // floor no card may go below - see Bend.
+        float floor = _rig.Position.Y + Stage3D.Clear(Squash, RiseFactor).Y;
+        foreach (Card c in new[] { _rear!, _front!, _glow! })
+        {
             c.Quad.Position = anchor;
-        // The fire is the engine deck's, and a turret thrown onto that deck lies
-        // over the port and overhangs the stern: stood behind it, the wreck
-        // would burn out of sight. In front of it instead - the board draws the
-        // tossed turret under the fire too.
-        float port = _model.Tank.ToGlobal(_portTank).Z;
-        if (_model.TurretOverride is not null && _model.Turret is MeshInstance3D turret)
-            port = Mathf.Max(port, Nearest(turret));
-        StandAt(_rear!.Quad, port + Margin);
+            ((ShaderMaterial)c.Quad.MaterialOverride).SetShaderParameter("ground", floor);
+        }
+        // The fire, the column and the plume in front of the whole tank, and the
+        // height map to say which of their elements it stands in front of - see
+        // BuildHeights. In front of a thrown turret too, which the map leaves
+        // out: it lies over the port, and the board draws it under the fire.
+        StandAt(_rear!.Quad, _rig.Position.Z + Reach + Margin);
         StandAt(_front!.Quad, muzzle.Z + Margin);
-        StandAt(_hit!.Quad, struck.Z + Margin);
         // The leak is light round the turret ring, drawn on the sprite under
         // the turret: at the ring's own depth the turret's near half covers it
         // as the sprite's turret layer did. A casemate has no ring: the
         // fighting compartment it would leak from is the sidecar's blast point.
         Vector3 ring = _model.Turret?.GlobalPosition ?? _model.Tank.ToGlobal(_model.BlastAt);
         StandAt(_glow!.Quad, ring.Z + Margin);
-        // The flash and the fume put the muzzle where the atlas measured it,
-        // per 15-degree frame; the model's turret turns smoothly, so their card
-        // is shifted by the difference - on screen, which is all it is.
-        Vector2 measured = _atlas.Muzzle(s.TurretFacing, s.BarrelRung) - _atlas.Anchor;
-        Vector2 miss = Drawn(muzzle - anchor) - measured;
-        _front.Holder.Position = (Vector2.One * CardSize * 0.5f + miss) * CardZoom;
 
         foreach (CanvasItem item in _painted)
             item.QueueRedraw();
@@ -704,16 +945,10 @@ void fragment() {
         Dust(dt, speed);
     }
 
-    /// <summary>The largest world Z of a mesh's box - its nearest point to the
-    /// camera, as depth goes here.</summary>
-    private static float Nearest(MeshInstance3D mesh)
-    {
-        Aabb box = mesh.GetAabb();
-        float z = float.MinValue;
-        for (int i = 0; i < 8; i++)
-            z = Mathf.Max(z, mesh.ToGlobal(box.GetEndpoint(i)).Z);
-        return z;
-    }
+    /// <summary>How far past the rig anything of the tank can stand, world px:
+    /// half its box's diagonal, turret thrown or not - the sidecar's toss lands
+    /// it on the deck (<c>overhang_ok</c>).</summary>
+    private float Reach => _model.Size.Length() * 0.5f * _model.PixelsPerUnit;
 
     /// <summary>The wreck's char on the model: the albedo dimmed toward soot
     /// by the fraction the board's char shader burns the sprite.</summary>
@@ -773,7 +1008,7 @@ void fragment() {
         kick.Might *= might;
         kick.Order = Stage3D.DressOrder;
         kick.Dress(ProcKick.Cloud.Ground);
-        kick.Sit(Board(at), 0.0f, Squash, RiseFactor);
+        kick.Sit(Spot(at), LiftAt(at), Squash, RiseFactor);
         kick.Aim(Along(astern), Vector2.Zero);
         kick.Fire();
     }

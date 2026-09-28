@@ -17,10 +17,15 @@ namespace TankSpriteTest;
 ///
 /// <b>Everything is in the model's own units under a holder scaled into the
 /// board's.</b> The sidecar's numbers (pivots, travel, pitch, paths) are all in
-/// Blender scene units and stay that way inside; the one scale is on this node,
-/// set from the sprite set the model copies (<c>units_per_pixel</c> of its hull
-/// atlas), so one world unit is one screen pixel exactly as on
-/// <see cref="Stage3D"/> and the effects sized in pixels fit it unchanged.
+/// Blender scene units and stay that way inside; the one scale is on this node
+/// (<see cref="ScaleTo"/>, chosen by the scene against its hex), so one world
+/// unit is one screen pixel exactly as on <see cref="Stage3D"/> and the effects
+/// sized in pixels fit it unchanged.
+///
+/// <b>Three facts the sidecar does not state are measured here, off the
+/// meshes</b> - <see cref="HullLength"/>, <see cref="HullWidth"/> and
+/// <see cref="BoreRadius"/>: what the built effects quote their sizes against,
+/// and what the sprite pipeline stamps into an atlas for its tanks.
 ///
 /// Signs are the sidecar's, and they are not guesses - see its <c>frame</c>:
 /// +Y up, +Z the tank's front, +X the tank's left.
@@ -95,6 +100,23 @@ public sealed partial class TankModel : Node3D
     public Quaternion Tip = Quaternion.Identity;
     public Vector3 BlastAt;
     public Vector3 Size;
+
+    /// <summary>The hull's longest and shortest horizontal axis, model units:
+    /// the <c>Hull</c> mesh's own box - hull, engine deck and a casemate's
+    /// fighting compartment, not the belts, the turret or the pieces that fly
+    /// off. The pipeline's <c>exhaust_scale</c> measures the same thing, the
+    /// larger of the hull's two ground axes.</summary>
+    public float HullLength, HullWidth;
+
+    /// <summary>How wide the tube is at its mouth, model units: the widest
+    /// the <c>Barrel</c> mesh gets about the bore over its last
+    /// <see cref="MouthShare"/> - the atlas measures the same thing as the
+    /// barrel layer's width across the bore.</summary>
+    public float BoreRadius;
+
+    /// <summary>How much of the tube, from the mouth back, counts as the mouth.
+    /// </summary>
+    public const float MouthShare = 0.08f;
     public float TossThrow, TossLift, TossSpin, TossFlight, SlideShare, SlideSpin, SlideTime;
 
     // The pose, in the sidecar's terms. Written, then Apply()'d once a frame.
@@ -120,7 +142,7 @@ public sealed partial class TankModel : Node3D
 
     /// <summary>Load <c>Models/&lt;tag&gt;/</c>, scaled so a model unit is
     /// <paramref name="pixelsPerUnit"/> world units.</summary>
-    public static TankModel Load(string tag, float pixelsPerUnit)
+    public static TankModel Load(string tag, float pixelsPerUnit = 1.0f)
     {
         string dir = ModelDir(tag);
         var doc = new GltfDocument();
@@ -259,6 +281,76 @@ public sealed partial class TankModel : Node3D
         }
         BlastAt = V3(j.GetProperty("blast").GetProperty("at"));
         Apply();
+        Measure();
+    }
+
+    /// <summary>A model unit is <paramref name="pixelsPerUnit"/> world units from
+    /// here on.</summary>
+    public void ScaleTo(float pixelsPerUnit)
+    {
+        PixelsPerUnit = pixelsPerUnit;
+        Scale = Vector3.One * pixelsPerUnit;
+    }
+
+    /// <summary>The hull's axes and the bore's radius, off the meshes - at
+    /// rest, straight after <see cref="Bind"/>, in the Hull's and the Barrel's
+    /// own frames, which carry no scale: that sits on this node.</summary>
+    private void Measure()
+    {
+        if (Hull is MeshInstance3D hull && hull.Mesh is not null)
+        {
+            Aabb box = hull.Mesh.GetAabb();
+            HullLength = Mathf.Max(box.Size.X, box.Size.Z);
+            HullWidth = Mathf.Min(box.Size.X, box.Size.Z);
+        }
+        else
+        {
+            HullLength = Size.Z;
+            HullWidth = Size.X;
+        }
+
+        // The bore: the Muzzle node sits on it and points along it, in the
+        // Barrel's frame. Every vertex of the tube is some way back from the
+        // mouth along that axis and some way out from it.
+        Vector3 mouth = Muzzle.Position;
+        Vector3 along = Muzzle.Basis.Z.Normalized();
+        var reach = new List<(float Back, float Out)>();
+        foreach (MeshInstance3D m in MeshesUnder(Barrel))
+        {
+            // Walked up by hand: the model is not in the tree yet, so there is
+            // no global transform to ask for.
+            Transform3D to = Transform3D.Identity;
+            for (Node3D at = m; at != Barrel && at.GetParent() is Node3D up; at = up)
+                to = at.Transform * to;
+            for (int s = 0; s < m.Mesh.GetSurfaceCount(); s++)
+            {
+                var arrays = m.Mesh.SurfaceGetArrays(s);
+                foreach (Vector3 v in arrays[(int)Mesh.ArrayType.Vertex].AsVector3Array())
+                {
+                    Vector3 d = to * v - mouth;
+                    float t = d.Dot(along);
+                    reach.Add((-t, (d - along * t).Length()));
+                }
+            }
+        }
+        float tube = 0.0f;
+        foreach (var (back, _) in reach)
+            tube = Mathf.Max(tube, back);
+        float widest = 0.0f;
+        foreach (var (back, out_) in reach)
+            if (back <= tube * MouthShare)
+                widest = Mathf.Max(widest, out_);
+        BoreRadius = widest;
+    }
+
+    private static IEnumerable<MeshInstance3D> MeshesUnder(Node3D root)
+    {
+        if (root is MeshInstance3D self && self.Mesh is not null)
+            yield return self;
+        foreach (Node n in root.GetChildren())
+            if (n is Node3D child)
+                foreach (MeshInstance3D m in MeshesUnder(child))
+                    yield return m;
     }
 
     private static float[] Lengths(Vector3[] path)

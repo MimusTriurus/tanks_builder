@@ -18,7 +18,7 @@ namespace TankSpriteTest;
 /// job is to look at freshly rendered sprites that matters more than export
 /// portability (Image.LoadFromFile does not work from a packed export).
 /// </summary>
-public sealed class AtlasSet
+public sealed class AtlasSet : ITankShape
 {
     /// <summary>The layers without which there is no tank: the hull and the tile
     /// it stands on. A set missing either fails to load and says so.</summary>
@@ -408,6 +408,50 @@ public sealed class AtlasSet
         float up = world.Z * (float)Math.Cos(Mathf.DegToRad(Elevation));
         return new Vector2(flat.X, flat.Y - up) / (float)UnitsPerPixel;
     }
+
+    // --- the sprite tank's answers to ITankShape --------------------------
+    //
+    // Explicit, so what this class says in its own name stays what it said
+    // before the 3D tank needed the same questions answered another way.
+
+    /// <summary>Measured, not projected - <see cref="Muzzle(double, int)"/>
+    /// off the shared anchor.</summary>
+    Vector2 ITankShape.MuzzleOffset(double facing, int rung) =>
+        Muzzle(facing, rung) - Anchor;
+
+    /// <summary>
+    /// The rendered height map's frame for this heading.
+    ///
+    /// Its own anchor, not the hull's: the height layer is rendered in a tile of
+    /// its own size and the anchor scales with the tile - the trap the effect
+    /// layers already pay attention to.
+    /// </summary>
+    DepthMap? ITankShape.DepthAt(double facing)
+    {
+        int frame = HasHeights && Has(HeightName) ? EffectFrame(HeightName, 0, facing) : -1;
+        Vector2 size = frame < 0 ? Vector2.Zero : SizeOf(HeightName, frame);
+        if (size.X <= 0.0f || size.Y <= 0.0f)
+            return null;
+        Rect2 region = Region(HeightName, frame);
+        Texture2D texture = Texture(HeightName);
+        return new DepthMap(texture, new Rect2(region.Position, size),
+                            new Vector2(texture.GetWidth(), texture.GetHeight()),
+                            AnchorOf(HeightName) - OffsetOf(HeightName, frame));
+    }
+
+    /// <summary>The hull's own trimmed frame at this heading - the quad
+    /// <c>TankSprite.DrawLayer</c> puts it in, less the heave.</summary>
+    Silhouette? ITankShape.MaskAt(double facing)
+    {
+        int frame = FrameFor(facing);
+        Vector2 size = SizeOf("hull", frame);
+        if (size.X <= 0.0f || size.Y <= 0.0f)
+            return null;
+        return new Silhouette(Texture("hull"), Region("hull", frame),
+                              new Rect2(-Anchor + OffsetOf("hull", frame), size));
+    }
+
+    float ITankShape.HullSpanPx => HullSpan;
 
     private readonly Dictionary<string, ImageTexture> _textures = new();
     private readonly Dictionary<string, int> _columns = new();
