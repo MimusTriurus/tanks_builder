@@ -66,6 +66,9 @@ public sealed partial class Tank3DBench : Node3D
     /// <summary><c>--pbr</c>: the glTF's own materials, no cel shading and no
     /// ink - the look before <see cref="Toon"/>, to hold against it.</summary>
     private bool _pbr;
+    /// <summary><c>--fx2d</c>: the sprites' fire and column on the card, as
+    /// before <see cref="CelBurn"/>, to hold against it.</summary>
+    private bool _fx2d;
     private float _zoom = 2.5f;
     private float _heading = 215.0f;
     private string? _capturePath;
@@ -747,6 +750,7 @@ void light() {
             else if (a == "--map" && more) _mapName = args[++i];
             else if (a == "--flat") _flat = true;
             else if (a == "--pbr") _pbr = true;
+            else if (a == "--fx2d") _fx2d = true;
             else if (a == "--zoom" && more) _zoom = F(args[++i], _zoom);
             else if (a == "--heading" && more) _heading = F(args[++i], _heading);
             else if (a == "--capture" && more) _capturePath = args[++i];

@@ -165,6 +165,8 @@ public sealed partial class TankModel : Node3D
         model.AddChild(scene);
         using JsonDocument json = JsonDocument.Parse(File.ReadAllText(dir + "/tank.json"));
         model.Bind(scene, json.RootElement);
+        if (toon && model.Turret is not null)
+            Toon.MarkTurret(model.Turret, model.Cel);
         return model;
     }
 

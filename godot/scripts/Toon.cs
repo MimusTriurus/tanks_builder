@@ -51,50 +51,160 @@ public static class Toon
     /// comes in above <c>edge_lit</c>; <c>soft</c> is how wide each step is.
     /// Shadow is folded into the same cosine, so a cast shadow steps down to
     /// the shade tone as a turned-away face does.
+    ///
+    /// A light that is not the sun (<see cref="CelBurn"/>'s fire) steps the
+    /// same way and also paints its colour on over the paint (<c>glow_paint</c>),
+    /// since through a green albedo an orange light only greens.
+    ///
+    /// Its uniforms and its <c>light()</c>, shared by everything the cel look
+    /// is on: the model (<see cref="CelShader"/>) and the 3D effects beside it
+    /// (<see cref="CelBurn"/>'s smoke), so one sun steps them the same.
     /// </summary>
-    public static readonly Shader CelShader = new()
-    {
-        Code = @"
-shader_type spatial;
-render_mode cull_back, specular_disabled, ambient_light_disabled;
-uniform vec4 albedo : source_color = vec4(1.0);
-uniform sampler2D albedo_tex : source_color, hint_default_white, filter_linear_mipmap_anisotropic;
-uniform sampler2D orm_tex : hint_default_white, filter_linear_mipmap;
-uniform bool has_orm = false;
+    public const string RampCode = @"
 uniform vec3 shade = vec3(0.36, 0.38, 0.44);
-uniform float ao_light = 0.5;
 uniform float edge_dark = 0.12;
 uniform float edge_lit = 0.7;
 uniform float mid = 0.5;
 uniform float soft = 0.035;
 uniform float sun = 1.0;
-void fragment() {
-    vec4 c = texture(albedo_tex, UV) * albedo;
-    float ao = has_orm ? texture(orm_tex, UV).r : 1.0;
-    ALBEDO = c.rgb;
-    EMISSION = c.rgb * shade * ao;
-    AO = ao;
-    AO_LIGHT_AFFECT = ao_light;
-}
+uniform float glow_paint = 0.45;
+// How much of the paint is soot (the fire's scorch): a local light lays no
+// colour of its own on it - painted over, a scorch under its own fire went
+// orange-olive and the dark base the flame stands on was gone while it burned.
+varying float sooted;
 void light() {
     float t = clamp(dot(NORMAL, LIGHT), 0.0, 1.0) * ATTENUATION;
     float v = mid * smoothstep(edge_dark - soft, edge_dark + soft, t);
     v = mix(v, 1.0, smoothstep(edge_lit - soft, edge_lit + soft, t));
     DIFFUSE_LIGHT += v * sun * LIGHT_COLOR / PI;
+    // A local light - a fire - also lays its own colour over the paint, as a
+    // painted glow does: through the albedo alone, orange on green paint
+    // comes back as a little more green.
+    if (!LIGHT_IS_DIRECTIONAL)
+        SPECULAR_LIGHT += v * glow_paint * (1.0 - sooted) * LIGHT_COLOR / PI;
 }
-",
-    };
+";
+
+    /// <summary>The model's surfaces on <see cref="RampCode"/>: the glTF's
+    /// paint and its occlusion (ORM's R).</summary>
+    public static readonly Shader CelShader = new() { Code = CelCode(0) };
+
+    /// <summary><see cref="CelShader"/> marking its pixels
+    /// <see cref="TurretStencil"/> - the turret's, see <see cref="MarkTurret"/>.</summary>
+    public static readonly Shader CelTurretShader = new() { Code = CelCode(TurretStencil) };
+
+    /// <summary>
+    /// The stencil a turret's visible pixels carry, so the fire can be drawn
+    /// over a turret thrown onto the grilles and over nothing else
+    /// (<see cref="CelBurn"/>). Every other surface of the model, and the
+    /// smoke, writes 0: the mark is left only by what is seen at a pixel,
+    /// whichever of them was drawn last.
+    /// </summary>
+    public const int TurretStencil = 7;
+
+    /// <summary>Value noise in three dimensions: the scorch here, the fire and
+    /// the smoke in <see cref="CelBurn"/>.</summary>
+    public const string NoiseCode = @"
+float hash3(vec3 p) {
+    p = fract(p * 0.3183099 + vec3(0.71, 0.113, 0.419));
+    p *= 17.0;
+    return fract(p.x * p.y * p.z * (p.x + p.y + p.z));
+}
+float noise3(vec3 x) {
+    vec3 i = floor(x);
+    vec3 f = fract(x);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(mix(hash3(i), hash3(i + vec3(1, 0, 0)), f.x),
+                   mix(hash3(i + vec3(0, 1, 0)), hash3(i + vec3(1, 1, 0)), f.x), f.y),
+               mix(mix(hash3(i + vec3(0, 0, 1)), hash3(i + vec3(1, 0, 1)), f.x),
+                   mix(hash3(i + vec3(0, 1, 1)), hash3(i + vec3(1, 1, 1)), f.x), f.y), f.z);
+}
+";
+
+    /// <summary>
+    /// The model's paint on the ramp, and the fire's scorch in it
+    /// (<see cref="CelBurn"/> drives the numbers): round each port, within
+    /// <c>scorch_r</c> world px grown by <c>scorch</c>, the paint goes to char,
+    /// its edge torn by a noise and cut hard as the tones are; in its outer
+    /// part, embers - specks of a climbing noise, lit by <c>ember</c>. Measured in the world, so it lies on the deck round the
+    /// grille and on a turret wall standing next to it alike: the flame no
+    /// longer grows out of clean green paint.
+    /// </summary>
+    private static string CelCode(int stencil) => @"
+shader_type spatial;
+render_mode cull_back, specular_disabled, ambient_light_disabled;
+stencil_mode write, compare_always, " + stencil + @";
+uniform vec4 albedo : source_color = vec4(1.0);
+uniform sampler2D albedo_tex : source_color, hint_default_white, filter_linear_mipmap_anisotropic;
+uniform sampler2D orm_tex : hint_default_white, filter_linear_mipmap;
+uniform bool has_orm = false;
+uniform float ao_light = 0.5;
+uniform vec3 scorch_at[4];
+uniform int scorch_n = 0;
+uniform float scorch_r = 20.0;
+uniform float scorch = 0.0;
+uniform float ember = 0.0;
+uniform float scorch_time = 0.0;
+uniform vec3 char_tone : source_color = vec3(0.07, 0.065, 0.06);
+uniform float char_cover = 0.9;
+uniform vec3 ember_tone : source_color = vec3(1.0, 0.36, 0.06);
+varying vec3 world;
+" + NoiseCode + RampCode + @"
+void vertex() {
+    world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+}
+void fragment() {
+    vec4 c = texture(albedo_tex, UV) * albedo;
+    float ao = has_orm ? texture(orm_tex, UV).r : 1.0;
+    vec3 glow = vec3(0.0);
+    sooted = 0.0;
+    if (scorch > 0.0 && scorch_n > 0) {
+        float near = 1e9;
+        for (int i = 0; i < 4; i++) {
+            if (i >= scorch_n) break;
+            near = min(near, distance(world, scorch_at[i]));
+        }
+        float reach = scorch_r * (0.35 + 0.65 * scorch);
+        // Torn at the edge, but not into islands: a coarse noise under a third
+        // of the reach bends it, a fine one small enough to leave no islands
+        // makes it jagged - with the coarse one alone it was a clean oval.
+        float torn = (noise3(world / (scorch_r * 0.45)) - 0.5) * 0.20
+                   + (noise3(world / (scorch_r * 0.10) + vec3(7.3)) - 0.5) * 0.22;
+        float d = near / reach + torn;
+        // The char is a colour of its own laid over the paint, not the paint
+        // darkened: darkened, green went olive-brown and read as camouflage.
+        // One tone only - a grey ring of soot round it read as a stain.
+        float burnt = 1.0 - step(1.0, d);
+        c.rgb = mix(c.rgb, char_tone, char_cover * burnt);
+        sooted = burnt;
+        // Embers in the char round the fire's foot - the middle is under the
+        // flame anyway.
+        float speck = step(0.72, noise3(world / (scorch_r * 0.05) + vec3(0.0, -scorch_time * 1.3, 0.0)));
+        float ring = step(0.40, d) * burnt;
+        glow = ember_tone * speck * ring * ember * 1.3;
+    }
+    ALBEDO = c.rgb;
+    EMISSION = c.rgb * shade * ao + glow;
+    AO = ao;
+    AO_LIGHT_AFFECT = ao_light;
+}
+";
 
     /// <summary>
     /// The shell: back faces only, every vertex moved out in view space along
     /// the smoothed normal and back from the eye by the same, so where it is
     /// not the silhouette it stays under the surface it wraps.
     /// </summary>
-    public static readonly Shader InkShader = new()
-    {
-        Code = @"
+    public static readonly Shader InkShader = new() { Code = InkCode(0) };
+
+    /// <summary><see cref="InkShader"/> with the turret's mark: the fire over
+    /// a thrown turret covers its outline too, not only its paint.</summary>
+    public static readonly Shader InkTurretShader = new() { Code = InkCode(TurretStencil) };
+
+    private static string InkCode(int stencil) => @"
 shader_type spatial;
 render_mode unshaded, cull_front, skip_vertex_transform, shadows_disabled, fog_disabled;
+stencil_mode write, compare_always, " + stencil + @";
 uniform vec4 albedo : source_color = vec4(1.0);
 uniform sampler2D albedo_tex : source_color, hint_default_white, filter_linear_mipmap;
 uniform float width = 1.0;
@@ -113,8 +223,7 @@ void vertex() {
 void fragment() {
     ALBEDO = texture(albedo_tex, UV).rgb * albedo.rgb * dark;
 }
-",
-    };
+";
 
     /// <summary>Dress every mesh under <paramref name="scene"/>: its surfaces
     /// rebuilt with the ink's normal, its materials swapped for cel ones, one
@@ -130,6 +239,52 @@ void fragment() {
         foreach (MeshInstance3D m in meshes)
             m.Mesh = Rebuild(m.Mesh, length, made);
         return new List<ShaderMaterial>(made.Values);
+    }
+
+    /// <summary>
+    /// Put every cel material under <paramref name="turret"/> on the turret's
+    /// shaders - the same numbers, the stencil <see cref="TurretStencil"/> -
+    /// one copy per material, and list the copies with the others.
+    /// </summary>
+    public static void MarkTurret(Node turret, List<ShaderMaterial> cel)
+    {
+        var made = new Dictionary<ShaderMaterial, ShaderMaterial>();
+        var meshes = new List<MeshInstance3D>();
+        Collect(turret, meshes);
+        foreach (MeshInstance3D m in meshes)
+        {
+            if (m.Mesh is not ArrayMesh mesh)
+                continue;
+            for (int s = 0; s < mesh.GetSurfaceCount(); s++)
+            {
+                if (mesh.SurfaceGetMaterial(s) is not ShaderMaterial src || src.Shader != CelShader)
+                    continue;
+                if (!made.TryGetValue(src, out ShaderMaterial? copy))
+                {
+                    copy = Copy(src, CelTurretShader);
+                    if (src.NextPass is ShaderMaterial ink)
+                        copy.NextPass = Copy(ink, InkTurretShader);
+                    made[src] = copy;
+                    cel.Add(copy);
+                }
+                mesh.SurfaceSetMaterial(s, copy);
+            }
+        }
+    }
+
+    private static ShaderMaterial Copy(ShaderMaterial src, Shader to)
+    {
+        var copy = new ShaderMaterial { Shader = to };
+        foreach (Godot.Collections.Dictionary u in to.GetShaderUniformList())
+        {
+            StringName name = u["name"].AsStringName();
+            // Disposed here: a variant holding a texture left to the finalizer
+            // is let go after the renderer has shut down, and the exit prints
+            // the texture as leaked.
+            using Variant value = src.GetShaderParameter(name);
+            copy.SetShaderParameter(name, value);
+        }
+        return copy;
     }
 
     /// <summary>Set the paint of a cel material and of its ink together.</summary>
