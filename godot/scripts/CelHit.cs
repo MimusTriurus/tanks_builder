@@ -25,7 +25,7 @@ namespace TankSpriteTest;
 /// it turns with the turret and lays with the gun, and stays until
 /// <see cref="Reset"/>. A ricochet leaves a gouge - bare steel scraped the way
 /// the round went on, the paint burnt round it; a penetration a hole - black,
-/// a torn rim of bare steel; HE a wide burnt splash pitted with steel. Fresh,
+/// a torn rim of bare steel; HE a round burn with a torn edge, pitted with steel. Fresh,
 /// the bare steel glows and cools in about a second. The newest
 /// <see cref="Toon.MaxMarks"/> a material carries are kept.</item>
 /// <item><b>Impact</b> of a ricochet - a star of light at the plate for four
@@ -48,11 +48,11 @@ public sealed partial class CelHit : Node3D
     /// <summary>What a round leaves: the shader's kinds.</summary>
     public enum Kind { Gouge = 0, Hole = 1, Splash = 2 }
 
-    /// <summary>A mark's radius, hull lengths, by kind.</summary>
-    /// <summary>A mark's radius, hull lengths, by kind. The hole's is the
-    /// biggest: at the gouge's, its black was a pixel or two across and the
-    /// penetration read as nothing.</summary>
-    public float GougeSize = 0.028f, HoleSize = 0.045f, SplashSize = 0.040f;
+    /// <summary>A mark's radius, hull lengths, by kind. A hole's is bigger
+    /// than a gouge's: at the gouge's, its black was a pixel or two across and
+    /// the penetration read as nothing. HE's is the biggest: at 0.04 it was
+    /// five pixels at the turret's foot and gone.</summary>
+    public float GougeSize = 0.028f, HoleSize = 0.045f, SplashSize = 0.065f;
 
     /// <summary>How far off the side's straight line a round may come, deg,
     /// and how steeply it may dip.</summary>

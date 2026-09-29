@@ -201,6 +201,9 @@ void fragment() {
         float ring = step(0.40, d) * burnt;
         glow = ember_tone * speck * ring * ember * 1.3;
     }
+    // The plate's own facing in the world, for the marks: the lighting
+    // normals are per face (Facet), so it is flat across a plate.
+    vec3 face_n = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
     for (int i = 0; i < " + MaxMarks + @"; i++) {
         if (i >= mark_count) break;
         vec3 d = world - mark_at[i].xyz;
@@ -208,8 +211,10 @@ void fragment() {
         if (dot(d, d) > 16.0 * r * r) continue;
         vec3 n = mark_nrm[i].xyz;
         float h = dot(d, n);
-        // This plate only, not the one behind it or across a corner.
-        if (abs(h) > 0.6 * r) continue;
+        // Onto a neighbouring plate turned from this one by up to about 65
+        // degrees, but not round a sharper corner or onto the plate behind:
+        // held to its own plate, a mark by a seam was cut square along it.
+        if (dot(face_n, n) < 0.42 || abs(h) > r) continue;
         vec3 q = d - h * n;
         // The way along the plate the round went on; its length is how much
         // it glanced (1 along the plate, 0 square on).
@@ -247,12 +252,13 @@ void fragment() {
             bare = 0.74 + 0.12 * petals;
             hole = 0.58 - 0.14 * petals;
         } else {
-            // HE on armour: a burnt star of rays, a bare pitted middle.
+            // HE on armour: a round burn with a lumpy, torn edge, a bare
+            // pitted middle. Not a star: its long rays read as a sticker.
             vec3 t1 = normalize(way);
             vec3 t2 = cross(n, t1);
             float ang = atan(dot(q, t2), dot(q, t1));
-            float rays = pow(abs(cos(ang * 3.0 + float(i) * 1.3)), 6.0);
-            e = length(q) / (r * (0.75 + 0.75 * rays)) + torn * 0.8;
+            float lumps = noise3(vec3(cos(ang) * 1.6, sin(ang) * 1.6, float(i) * 2.3)) - 0.5;
+            e = length(q) / r * (1.0 - 0.28 * lumps) + torn * 0.7;
             float pit = step(0.62, noise3(world / (r * 0.18) + vec3(float(i) * 5.1)));
             bare = 0.25 + 0.30 * pit;
         }

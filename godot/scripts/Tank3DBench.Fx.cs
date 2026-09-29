@@ -98,6 +98,7 @@ public sealed partial class Tank3DBench
     private CelExhaust? _celExhaust;
     private CelShot? _celShot;
     private CelHit? _celHit;
+    private CelBlast? _celBlast;
     private readonly List<(Vector3 At, Vector3 Out)> _exhaustPorts = new();
     private readonly List<Vector3> _ports = new();
     private readonly Wreck _wreck = new();
@@ -450,6 +451,9 @@ void fragment() {
             AddChild(_celHit);
             _celHit.Build(_model.HullLength * _model.PixelsPerUnit);
             _celHit.Targets(_model, _model.Cel);
+            _celBlast = new CelBlast { Name = "Blast" };
+            AddChild(_celBlast);
+            _celBlast.Build(_model.HullLength * _model.PixelsPerUnit);
         }
         _painted.Add(_sprite);
         foreach (Card c in new[] { _rear, _front, _glow })
@@ -532,6 +536,8 @@ void fragment() {
         _celShot = null;
         _celHit?.QueueFree();
         _celHit = null;
+        _celBlast?.QueueFree();
+        _celBlast = null;
         _painted.Clear();
         FreeHeights();
         _shape = null;
@@ -762,8 +768,9 @@ void fragment() {
     /// going in throws less than a charge going off.</summary>
     private const float EntryShare = 0.6f;
 
-    /// <summary>An HE round bursting on a plate - <see cref="ProcSlam"/> on
-    /// armour, from the side named.</summary>
+    /// <summary>An HE round bursting on a plate, from the side named -
+    /// <see cref="CelBlast"/> on the model, <see cref="ProcSlam"/> on armour
+    /// with --fx2d.</summary>
     private void FxHe(int side, Vector3 travel)
     {
         (Vector3 local, Vector3 normalLocal) = Strike(travel);
@@ -776,6 +783,11 @@ void fragment() {
             _celHit.Leave(aimed.Part, at, n, aimed.Way, CelHit.Kind.Splash);
         }
         Vector3 foot = Foot(at);
+        if (_celBlast is not null)
+        {
+            _celBlast.Burst(at, n, foot);
+            return;
+        }
         ProcSlam slam = Next(_slams, ref _nextSlam, Pool, () =>
         {
             var made = new ProcSlam();
@@ -893,6 +905,7 @@ void fragment() {
         _celExhaust?.Reset();
         _celShot?.Reset();
         _celHit?.Reset();
+        _celBlast?.Reset();
         _hitNode = null;
         foreach (var (mat, albedo) in _paint)
             Repaint(mat, albedo);
@@ -1021,6 +1034,7 @@ void fragment() {
         }
         _celShot?.Tick(dt, _camera.GlobalBasis);
         _celHit?.Tick(dt, _camera.GlobalBasis);
+        _celBlast?.Tick(dt, _camera.GlobalBasis);
 
         // TankTick.UpdateShot - frames, as the board counts them.
         int frame = _shotFrame < 0 ? -1 : FlashSheet.FrameAt(_shotFrame);
