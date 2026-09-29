@@ -163,6 +163,7 @@ uniform float mark_now = 0.0;
 uniform vec3 steel : source_color = vec3(0.50, 0.52, 0.56);
 uniform vec3 hole_tone : source_color = vec3(0.035, 0.03, 0.028);
 uniform vec3 mark_soot : source_color = vec3(0.17, 0.16, 0.15);
+uniform vec3 hole_wall : source_color = vec3(0.16, 0.15, 0.15);
 varying vec3 world;
 " + NoiseCode + RampCode + @"
 void vertex() {
@@ -217,7 +218,11 @@ void fragment() {
         float kind = mark_dir[i].w;
         float a = dot(q, way);
         float b = length(q - a * way);
-        float heat = exp(-(mark_now - mark_nrm[i].w) / 0.9);
+        float age = mark_now - mark_nrm[i].w;
+        // A hole's rim stays hot longer than a scrape: more metal was torn.
+        float heat = exp(-age / (kind > 0.5 && kind < 1.5 ? 1.5 : 0.9));
+        // Out, not a red that never quite goes: a cooled hole stayed brown.
+        heat *= step(0.08, heat);
         float torn = (noise3(world / (r * 0.45) + vec3(float(i) * 3.7)) - 0.5) * 0.30
                    + (noise3(world / (r * 0.16) + vec3(float(i) * 1.9)) - 0.5) * 0.18;
         float e;
@@ -231,11 +236,16 @@ void fragment() {
             e = length(vec2(aa, b / (r * mix(0.8, 0.55, glance)))) + torn * 0.6;
             bare = 0.62;
         } else if (kind < 1.5) {
-            // A hole: black in the middle, a torn rim of bare steel, the paint
+            // A hole: black in the middle with the far inside wall showing at
+            // its top, a torn rim of bare steel petals bent in, the paint
             // burnt round it.
-            e = length(q) / r + torn * 0.6;
-            bare = 0.66;
-            hole = 0.40;
+            vec3 t1 = normalize(way);
+            vec3 t2 = cross(n, t1);
+            float ang = atan(dot(q, t2), dot(q, t1));
+            float petals = pow(abs(cos(ang * 3.5 + float(i) * 2.1)), 3.0);
+            e = length(q) / r + torn * 0.5;
+            bare = 0.74 + 0.12 * petals;
+            hole = 0.58 - 0.14 * petals;
         } else {
             // HE on armour: a burnt star of rays, a bare pitted middle.
             vec3 t1 = normalize(way);
@@ -254,8 +264,20 @@ void fragment() {
             // Fresh, the scraped metal is hot.
             glow += ember_tone * heat * (kind < 1.5 ? 1.2 : 0.6);
         }
-        if (e < hole)
+        if (e < hole) {
             c.rgb = hole_tone;
+            // The inside wall across from the eye's side: the upper part of
+            // the hole as the plate stands, a band a little lighter.
+            vec3 down = vec3(0.0, -1.0, 0.0) - n * dot(vec3(0.0, -1.0, 0.0), n);
+            float lo = dot(q, normalize(down + vec3(1e-4))) / r;
+            if (e > hole * 0.55 && lo < -hole * 0.25)
+                c.rgb = hole_wall;
+            // Fire inside, flickering and dying down.
+            float fire = exp(-age / 1.0) * (0.6 + 0.4 * sin(mark_now * 23.0 + float(i)));
+            fire *= step(0.06, exp(-age / 1.0));
+            if (e < hole * 0.6)
+                glow += ember_tone * fire * 0.9;
+        }
     }
     ALBEDO = c.rgb;
     EMISSION = c.rgb * shade * ao + glow;

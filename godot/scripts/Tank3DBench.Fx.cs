@@ -689,6 +689,13 @@ void fragment() {
         {
             _hitNode = struck;
             _hitLocal = struck.ToLocal(at);
+            // The model's own: the hole, its star, spall, puff and smoke. The
+            // sprites' entry cloud and glow card stay the 2D tanks'.
+            if (_celHit is not null && struck is MeshInstance3D part)
+            {
+                _celHit.Pierce(part, at, n);
+                return;
+            }
             _hitLoop.Strike(Sides[side], 0.0f, 0.0f, 1.0f, true);
             FxEntry(at, n, foot);
             return;

@@ -28,10 +28,17 @@ namespace TankSpriteTest;
 /// a torn rim of bare steel; HE a wide burnt splash pitted with steel. Fresh,
 /// the bare steel glows and cools in about a second. The newest
 /// <see cref="Toon.MaxMarks"/> a material carries are kept.</item>
-/// <item><b>Impact</b> (a ricochet) - a star of light at the plate for three
-/// frames, with a short light; sparks: streaks thrown off round the way the
-/// round glanced, falling, going from white to orange; a puff of grey
+/// <item><b>Impact</b> of a ricochet - a star of light at the plate for four
+/// frames; sparks: streaks thrown off round the way the round glanced,
+/// falling, going from white to orange; a puff of grey
 /// (<see cref="CelCloud"/>) blown off the plate.</item>
+/// <item><b>Impact</b> of a penetration (<see cref="Pierce"/>) - a bigger,
+/// whiter star for six frames; spall blown back out of the hole round its
+/// normal, slower; a dark puff out of it; and then the <b>wound</b>: a thin
+/// wisp of smoke trickling out of the hole and rising for
+/// <see cref="WispTime"/>, on the part, so it goes with a turning turret.
+/// The sprites' entry cloud and glow card (<see cref="ProcKick"/>,
+/// <see cref="ProcPierce"/>) are not run on the model.</item>
 /// </list>
 ///
 /// All lengths are shares of the hull's length on the board (<see cref="Build"/>).
@@ -42,7 +49,10 @@ public sealed partial class CelHit : Node3D
     public enum Kind { Gouge = 0, Hole = 1, Splash = 2 }
 
     /// <summary>A mark's radius, hull lengths, by kind.</summary>
-    public float GougeSize = 0.028f, HoleSize = 0.026f, SplashSize = 0.040f;
+    /// <summary>A mark's radius, hull lengths, by kind. The hole's is the
+    /// biggest: at the gouge's, its black was a pixel or two across and the
+    /// penetration read as nothing.</summary>
+    public float GougeSize = 0.028f, HoleSize = 0.045f, SplashSize = 0.040f;
 
     /// <summary>How far off the side's straight line a round may come, deg,
     /// and how steeply it may dip.</summary>
@@ -60,8 +70,12 @@ public sealed partial class CelHit : Node3D
     public int Sparks = 22;
     public float SparkLife = 0.38f, SparkSpeed = 2.8f, SparkCone = 40.0f, SparkFall = 3.5f;
 
+    /// <summary>How long a hole goes on smoking, s, how often a wisp puff
+    /// leaves it, s, and how long each lives.</summary>
+    public float WispTime = 4.0f, WispEvery = 0.10f, WispLife = 1.3f;
+
     /// <summary>The puff off the plate: puffs, life, s, reach, hull lengths.</summary>
-    public int PuffCount = 7;
+    public int PuffCount = 9;
     public float PuffLife = 0.8f, PuffReach = 0.16f;
 
     // ------------------------------------------------------------ the machinery
@@ -92,6 +106,13 @@ public sealed partial class CelHit : Node3D
 
     private float _since = -1.0f;
     private Vector3 _at, _n, _glance;
+    /// <summary>The impact running is a penetration's.</summary>
+    private bool _through;
+    private MeshInstance3D? _wispOn;
+    private Vector3 _wispAt, _wispN;
+    private float _wispSince = -1.0f;
+    private int _wisps;
+    private CelCloud? _wisp;
     private MeshInstance3D? _star;
     private ShaderMaterial? _starLook;
     private OmniLight3D? _glow;
@@ -135,6 +156,7 @@ public sealed partial class CelHit : Node3D
         };
         AddChild(_sparkCloud);
         _puff = new CelCloud(this, "Puff", new Color(0.95f, 0.92f, 0.88f), 0.03f * _hull);
+        _wisp = new CelCloud(this, "Wisp", new Color(0.92f, 0.92f, 0.94f), 0.02f * _hull);
     }
 
     /// <summary>The parts of <paramref name="model"/> a round can meet, and the
@@ -271,9 +293,28 @@ public sealed partial class CelHit : Node3D
     public void Ricochet(Vector3 at, Vector3 n, Vector3 glance)
     {
         _since = 0.0f;
+        _through = false;
         _at = at;
         _n = n;
         _glance = glance.Normalized();
+    }
+
+    /// <summary>A penetration of <paramref name="part"/> at
+    /// <paramref name="at"/> on a plate facing <paramref name="n"/>: the star,
+    /// the spall and the dark puff, and the hole left smoking.</summary>
+    public void Pierce(MeshInstance3D part, Vector3 at, Vector3 n)
+    {
+        _since = 0.0f;
+        _through = true;
+        _at = at;
+        _n = n;
+        _glance = n;
+        Transform3D inv = part.GlobalTransform.AffineInverse();
+        _wispOn = part;
+        _wispAt = inv * at;
+        _wispN = (inv.Basis * n).Normalized();
+        _wispSince = 0.0f;
+        _wisps++;
     }
 
     /// <summary>Every mark gone and the impact put out.</summary>
@@ -288,6 +329,8 @@ public sealed partial class CelHit : Node3D
         if (_sparks is not null)
             _sparks.VisibleInstanceCount = 0;
         _puff?.Hide();
+        _wisp?.Hide();
+        _wispSince = -1.0f;
         Upload();
     }
 
@@ -295,11 +338,12 @@ public sealed partial class CelHit : Node3D
     {
         _now += dt;
         Upload();
+        Wisp(dt, eye);
         if (_since < 0.0f || _star is null || _glow is null || _sparks is null || _puff is null)
             return;
         float t = _since;
         _since += dt;
-        if (t > Mathf.Max(SparkLife * 1.3f, PuffLife * 1.3f))
+        if (t > Mathf.Max(SparkLife * 1.3f, PuffLife * 1.6f))
         {
             _since = -1.0f;
             _star.Visible = false;
@@ -360,22 +404,24 @@ public sealed partial class CelHit : Node3D
 
     private void Star(float t, Basis eye)
     {
-        bool on = t < StarTime;
+        float time = _through ? 6.0f / 60.0f : StarTime;
+        bool on = t < time;
         _star!.Visible = on;
         _glow!.Visible = on && GlowEnergy > 0.0f;
         if (!on)
             return;
-        float size = StarSize * _hull;
+        float size = StarSize * _hull * (_through ? 1.6f : 1.0f);
         Vector3 right = eye.X.Normalized(), up = eye.Y.Normalized(), back = eye.Z.Normalized();
         // Off the plate along its normal, so the plate does not cut it in half;
         // a plate turned from the eye still hides it.
         _star.GlobalTransform = new Transform3D(new Basis(right * (2.0f * size), up * (2.0f * size), back),
                                                 _at + _n * (0.05f * _hull));
-        _starLook!.SetShaderParameter("frame", t * 60.0f);
-        _starLook.SetShaderParameter("seed", CelPuff.Hash(_rounds, 17));
+        _starLook!.SetShaderParameter("seed", CelPuff.Hash(_rounds, 17));
+        // A penetration's star holds its white core a frame longer.
+        _starLook.SetShaderParameter("frame", _through ? t * 60.0f * 0.6f : t * 60.0f);
         _glow.GlobalPosition = _at + _n * (0.06f * _hull);
         _glow.OmniRange = GlowReach * _hull;
-        _glow.LightEnergy = GlowEnergy * (1.0f - t / StarTime);
+        _glow.LightEnergy = GlowEnergy * (1.0f - t / time);
     }
 
     private void Spray(float t)
@@ -386,7 +432,8 @@ public sealed partial class CelHit : Node3D
         a1 = a1.Normalized();
         Vector3 a2 = a1.Cross(_glance).Normalized();
         int shown = 0;
-        for (int k = 0; k < Sparks; k++)
+        int count = _through ? Sparks * 2 / 3 : Sparks;
+        for (int k = 0; k < count; k++)
         {
             float h1 = CelPuff.Hash(_rounds * 97 + k, 19), h2 = CelPuff.Hash(_rounds * 97 + k, 23);
             float h3 = CelPuff.Hash(_rounds * 97 + k, 29);
@@ -395,13 +442,14 @@ public sealed partial class CelHit : Node3D
             if (a >= 1.0f)
                 continue;
             // Round the glance, and out of the plate - never into it.
-            float spread = Mathf.DegToRad(SparkCone) * Mathf.Sqrt(h1);
+            // Spall blows back out of a hole, wide round its normal.
+            float spread = Mathf.DegToRad(_through ? 55.0f : SparkCone) * Mathf.Sqrt(h1);
             float ang = h2 * Mathf.Tau;
             Vector3 dir = (_glance * Mathf.Cos(spread)
                            + (a1 * Mathf.Cos(ang) + a2 * Mathf.Sin(ang)) * Mathf.Sin(spread)).Normalized();
             if (dir.Dot(_n) < 0.1f)
                 dir = (dir + _n * (0.1f - dir.Dot(_n) + 0.1f)).Normalized();
-            float speed = SparkSpeed * _hull * (0.55f + 0.9f * h3);
+            float speed = SparkSpeed * _hull * (0.55f + 0.9f * h3) * (_through ? 0.6f : 1.0f);
             Vector3 vel = dir * speed + Vector3.Down * (SparkFall * _hull * t);
             Vector3 at = _at + dir * (speed * t) + Vector3.Down * (0.5f * SparkFall * _hull * t * t);
             // A streak as long as the way it went in a sixtieth, shrinking.
@@ -425,7 +473,13 @@ public sealed partial class CelHit : Node3D
     private void Puff(float t, Basis eye)
     {
         _puff!.Clear();
-        Vector3 out_ = (_n * 0.7f + _glance * 0.5f).Normalized();
+        Vector3 out_ = _through ? _n : (_n * 0.7f + _glance * 0.5f).Normalized();
+        float reach = PuffReach * (_through ? 1.4f : 1.0f);
+        // A penetration's is dark and spreads wide: gathered close, its big
+        // puffs made one black ball.
+        float big = _through ? 1.1f : 1.0f;
+        float wide = _through ? 2.2f : 1.2f;
+        float tone = _through ? 0.34f : 0.48f;
         for (int k = 0; k < PuffCount; k++)
         {
             float h1 = CelPuff.Hash(_rounds * 53 + k, 31), h2 = CelPuff.Hash(_rounds * 53 + k, 37);
@@ -437,14 +491,66 @@ public sealed partial class CelHit : Node3D
             if (side.LengthSquared() < 1e-6f)
                 side = Vector3.Right;
             side = side.Normalized();
-            Vector3 at = _at + (out_ + side * ((h1 - 0.5f) * 1.2f)).Normalized()
-                         * (PuffReach * _hull * (0.4f + 0.6f * h1) * (1.0f - Mathf.Exp(-t / 0.08f)))
+            Vector3 up2 = side.Cross(out_).Normalized();
+            float h3 = CelPuff.Hash(_rounds * 53 + k, 39);
+            Vector3 at = _at + (out_ + side * ((h1 - 0.5f) * wide) + up2 * ((h3 - 0.5f) * wide * 0.7f)).Normalized()
+                         * (reach * _hull * (0.4f + 0.6f * h1) * (1.0f - Mathf.Exp(-t / 0.08f)))
                          + Vector3.Up * (0.05f * _hull * a);
-            float r = _hull * Mathf.Lerp(0.02f, 0.06f, 1.0f - Mathf.Pow(1.0f - a, 2.0f))
+            float r = big * _hull * Mathf.Lerp(0.02f, 0.06f, 1.0f - Mathf.Pow(1.0f - a, 2.0f))
                       * Mathf.SmoothStep(0.0f, 0.5f * StarTime, t);
-            _puff.Add(at, r, 0.48f + 0.1f * h2, h1, Mathf.SmoothStep(0.1f, 1.0f, a), a);
+            _puff.Add(at, r, tone + 0.1f * h2, h1, Mathf.SmoothStep(0.1f, 1.0f, a), a);
         }
         _puff.Draw(eye);
+    }
+
+    /// <summary>The wound: puffs leaving the hole every <see cref="WispEvery"/>
+    /// for <see cref="WispTime"/>, thinner as it goes, each rising off the
+    /// plate and drifting, where the hole is now.</summary>
+    private void Wisp(float dt, Basis eye)
+    {
+        if (_wisp is null)
+            return;
+        if (_wispSince < 0.0f || _wispOn is null || !IsInstanceValid(_wispOn) || !_wispOn.IsVisibleInTree())
+        {
+            _wisp.Hide();
+            return;
+        }
+        float t = _wispSince;
+        _wispSince += dt;
+        if (t > WispTime + WispLife)
+        {
+            _wispSince = -1.0f;
+            _wisp.Hide();
+            return;
+        }
+        Transform3D g = _wispOn.GlobalTransform;
+        Vector3 hole = g * _wispAt;
+        Vector3 n = (g.Basis * _wispN).Normalized();
+        _wisp.Clear();
+        int first = Mathf.Max(0, (int)((t - WispLife) / WispEvery));
+        int last = (int)(Mathf.Min(t, WispTime) / WispEvery);
+        for (int k = first; k <= last; k++)
+        {
+            float born = k * WispEvery;
+            float a = (t - born) / WispLife;
+            if (a < 0.0f || a >= 1.0f)
+                continue;
+            float h1 = CelPuff.Hash(_wisps * 211 + k, 41), h2 = CelPuff.Hash(_wisps * 211 + k, 43);
+            // Weaker as the wound goes on: smaller and fewer.
+            float left = 1.0f - born / WispTime;
+            if (h2 > 0.35f + 0.65f * left)
+                continue;
+            Vector3 at = hole + n * (0.02f * _hull + 0.06f * _hull * Mathf.Sqrt(a))
+                         + Vector3.Up * (0.30f * _hull * a)
+                         + new Vector3(0.10f, 0.0f, -0.04f) * (_hull * a)
+                         + new Vector3(h1 - 0.5f, 0.0f, h2 - 0.5f) * (0.04f * _hull * a);
+            // No smaller than this: under two ink widths the cloud drops a
+            // puff, and at 0.01 hull the young wisp was not drawn at all.
+            float r = _hull * Mathf.Lerp(0.022f, 0.050f, a) * (0.6f + 0.4f * left)
+                      * Mathf.SmoothStep(0.0f, 0.1f, a);
+            _wisp.Add(at, r, 0.40f + 0.08f * h1, h1, Mathf.SmoothStep(0.2f, 1.0f, a), a);
+        }
+        _wisp.Draw(eye);
     }
 
     /// <summary>
