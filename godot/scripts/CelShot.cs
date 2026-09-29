@@ -448,8 +448,9 @@ void fragment() {
     /// The blast wave: a ring on a quad lying on the ground, <c>radius</c>
     /// and <c>width</c> as shares of the quad's half, inked both sides; as it
     /// goes (<c>fade</c>) it thins and a noise round it breaks it into arcs.
+    /// <see cref="CelDeath"/>'s blast wave too.
     /// </summary>
-    private static readonly Shader RingShader = new()
+    internal static readonly Shader RingShader = new()
     {
         Code = @"
 shader_type spatial;

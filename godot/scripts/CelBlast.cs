@@ -363,9 +363,11 @@ public sealed partial class CelBlast : Node3D
     /// its edge into tongues and eats it through.</item>
     /// </list>
     /// Round it for the first frames, the blast wave: a pale ring racing out,
-    /// thinning, breaking into arcs.
+    /// thinning, breaking into arcs (<c>wave_on</c> 0 leaves it out). <c>rays</c>
+    /// scales the detonation's rays. <see cref="CelDeath"/>'s fireballs are
+    /// this field, slowed.
     /// </summary>
-    private static readonly Shader FireShader = new()
+    internal static readonly Shader FireShader = new()
     {
         Code = @"
 shader_type spatial;
@@ -383,6 +385,8 @@ uniform float frame = 0.0;
 uniform float seed = 0.0;
 uniform float size_px = 30.0;
 uniform float ink = 0.03;
+uniform float rays = 1.0;
+uniform float wave_on = 1.0;
 " + Toon.NoiseCode + @"
 float hash1(float x) { return fract(sin(x * 12.9898 + 4.1414) * 43758.5453); }
 void fragment() {
@@ -398,7 +402,7 @@ void fragment() {
         float k = floor(ang / 6.2832 * 7.0 + 0.5);
         float off = abs(ang - k / 7.0 * 6.2832);
         float ray_len = mix(0.60, 1.10, hash1(k + seed * 17.0));
-        float ray_w = 0.16 * (1.0 - d / ray_len);
+        float ray_w = 0.16 * rays * (1.0 - d / ray_len);
         f = max(1.0 - d / 0.42, (ray_w - off * d) * 3.0);
         thick = 0.3 * sqrt(clamp(1.0 - d / 0.42, 0.0, 1.0));
     } else {
@@ -430,7 +434,7 @@ void fragment() {
         }
     } else {
         // The blast wave, the first frames only, under the fire.
-        if (g >= 4.0) discard;
+        if (g >= 4.0 || wave_on < 0.5) discard;
         float rr = mix(0.55, 1.55, 1.0 - exp(-(g + 0.4) / 1.4));
         float d = length(p);
         float a1 = atan(p.y, p.x);

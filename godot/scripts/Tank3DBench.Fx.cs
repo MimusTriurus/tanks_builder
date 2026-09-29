@@ -99,6 +99,7 @@ public sealed partial class Tank3DBench
     private CelShot? _celShot;
     private CelHit? _celHit;
     private CelBlast? _celBlast;
+    private CelDeath? _celDeath;
     private readonly List<(Vector3 At, Vector3 Out)> _exhaustPorts = new();
     private readonly List<Vector3> _ports = new();
     private readonly Wreck _wreck = new();
@@ -454,6 +455,10 @@ void fragment() {
             _celBlast = new CelBlast { Name = "Blast" };
             AddChild(_celBlast);
             _celBlast.Build(_model.HullLength * _model.PixelsPerUnit);
+            _celDeath = new CelDeath { Name = "Death" };
+            AddChild(_celDeath);
+            _celDeath.Build(_model.HullLength * _model.PixelsPerUnit, HexWidth);
+            _celDeath.Ground = w => Foot(w).Y;
         }
         _painted.Add(_sprite);
         foreach (Card c in new[] { _rear, _front, _glow })
@@ -538,6 +543,8 @@ void fragment() {
         _celHit = null;
         _celBlast?.QueueFree();
         _celBlast = null;
+        _celDeath?.QueueFree();
+        _celDeath = null;
         _painted.Clear();
         FreeHeights();
         _shape = null;
@@ -841,6 +848,13 @@ void fragment() {
     /// <see cref="Stage3D.Flash"/>.</summary>
     private void Fireball(float might, bool grounded)
     {
+        // The model's own, out of its ring - see CelDeath.
+        if (_celDeath is not null)
+        {
+            Vector3 at = _model.Tank.ToGlobal(_model.BlastAt);
+            _celDeath.Blow(at, Foot(at), might, grounded);
+            return;
+        }
         Vector3 foot = Foot(_rig.Position);
         ProcBall ball = Next(_balls, ref _nextBall, Pool, () =>
         {
@@ -906,6 +920,7 @@ void fragment() {
         _celShot?.Reset();
         _celHit?.Reset();
         _celBlast?.Reset();
+        _celDeath?.Reset();
         _hitNode = null;
         foreach (var (mat, albedo) in _paint)
             Repaint(mat, albedo);
@@ -1035,6 +1050,7 @@ void fragment() {
         _celShot?.Tick(dt, _camera.GlobalBasis);
         _celHit?.Tick(dt, _camera.GlobalBasis);
         _celBlast?.Tick(dt, _camera.GlobalBasis);
+        _celDeath?.Tick(dt, _camera.GlobalBasis);
 
         // TankTick.UpdateShot - frames, as the board counts them.
         int frame = _shotFrame < 0 ? -1 : FlashSheet.FrameAt(_shotFrame);
