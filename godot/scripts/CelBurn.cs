@@ -50,8 +50,8 @@ public sealed partial class CelBurn : Node3D
     /// <summary>Ports the shader takes; more are dropped.</summary>
     public const int MaxPorts = 4;
     /// <summary>One tongue's life, s: born at the grille, it rises, narrows
-    /// and is cut away.</summary>
-    public float TongueLife = 0.62f;
+    /// and is cut away. The body of each port has none - see the shader.</summary>
+    public float TongueLife = 0.9f;
     /// <summary>A tongue's width and height at birth, hull lengths.</summary>
     public float TongueWidth = 0.23f, TongueHeight = 0.35f;
     /// <summary>How far a tongue rises over its life, hull lengths.</summary>
@@ -110,17 +110,23 @@ public sealed partial class CelBurn : Node3D
     /// <summary>Light smoke of a smouldering wreck, not the burning column.</summary>
     public bool Smoulder;
     /// <summary>
-    /// The turret is thrown and lies on the deck: the fire is drawn over it,
-    /// wherever it is - the board draws the sprites' thrown turret under the
-    /// fire, and cut square by it the flame read as a hole in it. A second
-    /// pass of the flame, with no depth test, where the turret's stencil is
-    /// (<see cref="Toon.TurretStencil"/>).
+    /// The turret against the fire, <b>by grille, not by pixel</b>: a port
+    /// nearer the eye than the turret's ring (<see cref="TurretAt"/>) has its
+    /// tongues drawn over the turret whole, one farther has them hidden by it
+    /// whole. By depth, a tongue's surface went through the turret's wall
+    /// wherever the two stood at one depth - from the side the grilles do -
+    /// and the turret cut the flame with a straight edge. It is the stencil
+    /// the turret's visible pixels carry (<see cref="Toon.TurretStencil"/>):
+    /// the flame's first pass is never drawn on it, the second only there,
+    /// with no depth test and only for the ports in front.
     ///
-    /// <b>Not by depth</b>: pulled toward the eye far enough to clear a turret
-    /// lying on the grilles, the flame's foot came out over the stern and the
-    /// deck in front of it, down to the ground - there is no depth that is in
-    /// front of the turret and behind the hull at once.
+    /// A thrown turret lies on the deck over the grilles (<see cref="OverTurret"/>):
+    /// every port is in front of it, as the board draws the sprites' thrown
+    /// turret under the fire. <b>Not by depth</b> either: pulled toward the eye
+    /// far enough to clear it, the flame's foot came out over the stern down
+    /// to the ground.
     /// </summary>
+    public Vector3? TurretAt;
     public bool OverTurret;
     /// <summary>The model's cel materials: the scorch is painted into them.</summary>
     public IReadOnlyList<ShaderMaterial> Paint = System.Array.Empty<ShaderMaterial>();
@@ -135,8 +141,9 @@ public sealed partial class CelBurn : Node3D
     /// than the whole column turning pale in one frame.</summary>
     private float _toneBefore = -1.0f, _toneNow = -1.0f, _toneAt;
     /// <summary>How far the scorch has grown, 0..1. It grows while the fire
-    /// burns and stays when it is out - a wreck keeps its burn marks - until
-    /// <see cref="Reset"/>.</summary>
+    /// burns and goes with it: as <see cref="Heat"/> falls it shrinks by the
+    /// same share, and is gone when the fire is. Left on a tank the fire had
+    /// left, it read as a stain.</summary>
     private float _scorch;
     private float _scorchClock;
     private float _heat, _smoke;
@@ -213,8 +220,8 @@ public sealed partial class CelBurn : Node3D
         Scorch(System.Array.Empty<Vector3>(), 0.0f);
     }
 
-    /// <summary>The fire and the smoke gone out: their clocks back to nought,
-    /// the scorch left where it is.</summary>
+    /// <summary>The fire and the smoke gone out: their clocks back to nought.
+    /// The scorch is gone with the fire by then.</summary>
     private void Rest()
     {
         _clock = 0.0f;
@@ -247,6 +254,8 @@ public sealed partial class CelBurn : Node3D
             return;
         float fire = ports.Count > 0 ? Mathf.Clamp(Fire, 0.0f, 1.0f) : 0.0f;
         float smoke = ports.Count > 0 ? Mathf.Clamp(Smoke, 0.0f, 1.0f) : 0.0f;
+        float heatBefore = _heat;
+        bool marked = _scorch > 0.0f;
         _heat = Follow(_heat, fire, dt, FireRise, FireFall);
         _smoke = Follow(_smoke, smoke, dt, SmokeRise, SmokeFall);
 
@@ -278,9 +287,14 @@ public sealed partial class CelBurn : Node3D
         _flame.Visible = on && _heat > 0.001f;
         _puffCloud!.Visible = on;
         _glow.Visible = on && _heat > 0.001f;
-        if (_scorch > 0.0f || _heat > 0.001f)
-        {
+        if (_heat < heatBefore)
+            _scorch *= _heat / heatBefore;
+        else
             _scorch = Mathf.Min(1.0f, _scorch + _heat * dt / Mathf.Max(ScorchGrow, 1e-3f));
+        if (_heat <= 0.0f)
+            _scorch = 0.0f;
+        if (marked || _scorch > 0.0f)
+        {
             _scorchClock += dt;
             Scorch(ports, _heat);
         }
@@ -325,6 +339,7 @@ public sealed partial class CelBurn : Node3D
 
     private readonly Vector2[] _portAt = new Vector2[MaxPorts];
     private readonly float[] _portNear = new float[MaxPorts];
+    private readonly float[] _front = new float[MaxPorts];
 
     /// <summary>
     /// The flame's quad: over the ports, facing the eye, its foot a little
@@ -377,8 +392,11 @@ public sealed partial class CelBurn : Node3D
         float across = Mathf.Abs(back.Dot(facing)) > 1e-3f ? back.Dot(facing) : 1e-3f;
         for (int i = 0; i < MaxPorts; i++)
             _portNear[i] = i < n ? (ports[i] - seat).Dot(facing) / across : 0.0f;
-        // Both passes the same numbers: the second is the flame again, over a
-        // thrown turret.
+        for (int i = 0; i < MaxPorts; i++)
+            _front[i] = i < n && (OverTurret || (TurretAt is Vector3 t && (ports[i] - t).Dot(back) > 0.0f))
+                ? 1.0f : 0.0f;
+        // Both passes the same numbers: the second is the flame again, over
+        // the turret, for the ports in front of it.
         var over = (ShaderMaterial)_flameInk!.NextPass;
         foreach (ShaderMaterial m in new[] { _flameInk!, over })
         {
@@ -393,8 +411,8 @@ public sealed partial class CelBurn : Node3D
             m.SetShaderParameter("spread", PortSpread);
             m.SetShaderParameter("port_near", _portNear);
             m.SetShaderParameter("hull", _hull);
+            m.SetShaderParameter("front", _front);
         }
-        over.SetShaderParameter("thrown", OverTurret);
     }
 
     private void Column(Vector3 seat, Basis eye)
@@ -485,6 +503,7 @@ public sealed partial class CelBurn : Node3D
         Code = @"
 shader_type spatial;
 render_mode unshaded, cull_disabled, shadows_disabled, fog_disabled;
+stencil_mode read, compare_not_equal, " + Toon.TurretStencil + @";
 uniform vec3 core : source_color = vec3(1.0, 0.93, 0.55);
 uniform vec3 body : source_color = vec3(1.0, 0.62, 0.16);
 uniform vec3 edge : source_color = vec3(0.90, 0.24, 0.06);
@@ -500,7 +519,8 @@ uniform float rise = 0.2;
 uniform float spread = 0.06;
 uniform float port_near[4];
 uniform float hull = 150.0;
-uniform bool thrown = false;
+uniform float front[4];
+uniform bool only_front = false;
 " + Toon.NoiseCode + @"
 float hash1(float x) { return fract(sin(x * 12.9898 + 4.1414) * 43758.5453); }
 // 1 on a tongue's middle line, 0 at its edge, below 0 outside: a round foot,
@@ -513,48 +533,73 @@ float drop(vec2 q) {
 void fragment() {
     vec2 p = vec2((UV.x - 0.5) * size.x, (1.0 - UV.y) * size.y);
     float f = -1.0;
-    // The winning tongue's port depth and half width, px: the fire's depth.
+    // The fire's depth: the port of the tongue that wins the field, and the
+    // nearest of the ports whose tongues cover the pixel - see below.
     float near = 0.0;
-    float half_px = 0.0;
+    float cover = -1e9;
     for (int i = 0; i < 4; i++) {
         if (i >= count) break;
+        if (only_front && front[i] < 0.5) continue;
         for (int j = 0; j < " + Tongues + @"; j++) {
             float k = float(i * 8 + j);
-            float loop = time / life + (float(j) + hash1(k * 7.1) * 0.5) / " + Tongues + @".0;
-            float a = fract(loop);
-            float lap = floor(loop);
-            float h1 = hash1(k * 13.3 + lap * 1.7);
-            float h2 = hash1(k * 5.9 + lap * 3.1);
-            // The first tongue of a port is its body: bigger, always there;
-            // the others go out as the fire falls.
-            float big = j == 0 ? 1.3 : 0.6 + 0.6 * h1;
-            if (j > 0 && h2 > 0.25 + 0.75 * heat) continue;
-            float grow = smoothstep(0.0, 0.12, a) * pow(1.0 - a, 0.45);
+            float a, h1, h2, s;
+            if (j == 0) {
+                // The body of the port: bigger, always there, and with no life
+                // of its own - it breathes and sways on slow noises. Reborn
+                // every lap as the others are, it changed shape in one frame
+                // and the whole fire jumped with it.
+                float br = noise3(vec3(time * 0.9, k, 5.0));
+                a = 0.22;
+                h1 = 0.20 + 0.40 * br;
+                h2 = noise3(vec3(time * 0.6, k, 9.0));
+                s = 1.1 * (0.85 + 0.20 * br);
+            } else {
+                float loop = time / life + (float(j) + hash1(k * 7.1) * 0.5) / " + Tongues + @".0;
+                a = fract(loop);
+                float lap = floor(loop);
+                h1 = hash1(k * 13.3 + lap * 1.7);
+                h2 = hash1(k * 5.9 + lap * 3.1);
+                // The others go out as the fire falls.
+                if (h2 > 0.25 + 0.75 * heat) continue;
+                // In from nothing and out to nothing: the lap that follows is
+                // another tongue, and seen at any size the change was a jump.
+                s = (0.5 + 0.45 * h1) * smoothstep(0.0, 0.3, a) * (1.0 - smoothstep(0.5, 1.0, a));
+            }
             // From nothing: a fire starting is one small tongue, and the rest
             // join it as it comes up.
-            float s = big * pow(heat, 0.6) * grow;
+            s *= pow(heat, 0.6);
             if (s < 1e-3) continue;
             vec2 base = ports[i] + vec2((h2 - 0.5) * 2.0 * spread * (j == 0 ? 0.3 : 1.0), rise * a * a);
             vec2 q = (p - base) / (tongue * vec2(s, s * (0.8 + 0.5 * h1)));
             // It licks: bent sideways, more the higher up.
-            q.x -= (noise3(vec3(q.y * 1.6 - time * 2.0, k, 0.0)) - 0.5) * 0.8 * q.y * q.y;
+            q.x -= (noise3(vec3(q.y * 1.6 - time * 1.3, k, 0.0)) - 0.5) * 0.8 * q.y * q.y;
             float d = drop(q) - a * 0.3;
-            if (d > f) {
-                f = d;
+            if (d > f)
                 near = port_near[i];
-                half_px = 0.5 * tongue.x * s * hull;
-            }
+            if (d > 0.0)
+                cover = max(cover, port_near[i]);
+            // A smooth union: where two tongues meet the field bridges them,
+            // so one sliding over another does not notch the outline.
+            float m = clamp(0.5 + 0.5 * (d - f) / 0.06, 0.0, 1.0);
+            f = mix(f, d, m) + 0.06 * m * (1.0 - m);
         }
     }
     // A tongue is a body, not a sheet: as near the eye as its own port, and
     // nearer by up to half its width along its middle. As a plane at the
     // ports' middle depth it was cut by whatever stood within that - the
     // turret beside a grille took the tongue off it with a straight edge.
+    // The nearest port that covers the pixel, not the winner's: where the far
+    // grille's tongue outgrew the near one's inside it, the deck in front of
+    // the near grille came through the flame in dark slits. The body's half
+    // width, whichever tongue it is: the winner's own jumped where a small
+    // tongue took over from the body.
+    near = max(near, cover);
+    float half_px = 0.5 * tongue.x * 1.1 * pow(heat, 0.6) * hull;
     float thick = half_px * sqrt(clamp(f, 0.0, 1.0));
     vec4 clip = PROJECTION_MATRIX * vec4(VERTEX.xy, VERTEX.z + near + thick, 1.0);
     DEPTH = clip.z / clip.w * 0.5 + 0.5;
     // One noise climbing through the whole fire, biting the top first.
-    float n = noise3(vec3(p * vec2(9.0, 6.0) - vec2(0.0, time * 4.5), 3.0));
+    float n = noise3(vec3(p * vec2(7.0, 5.0) - vec2(0.0, time * 2.8), 3.0));
     f -= (n - 0.4) * 0.35 * clamp(p.y / tongue.y, 0.0, 1.5);
     if (f < 0.0) discard;
     vec3 c = rim;
@@ -562,24 +607,25 @@ void fragment() {
     if (f > 0.30) c = body;
     if (f > 0.55) c = core;
     ALBEDO = c;
+    // Drawn after everything opaque, for the turret's stencil to be there:
+    // a transparent pass for the order alone.
+    ALPHA = 1.0;
 }
 ",
     };
 
     /// <summary>
-    /// The flame again, over a thrown turret only: no depth test, drawn where
-    /// the turret's stencil is, after everything opaque (it is a transparent
-    /// pass for that order alone - its alpha is one). Off unless
-    /// <c>thrown</c>.
+    /// The flame again, over the turret only: no depth test, drawn where the
+    /// turret's stencil is, the ports in front of it only (<c>front</c>) -
+    /// see <see cref="TurretAt"/>.
     /// </summary>
     private static readonly Shader FlameOverShader = new()
     {
         Code = FlameShader.Code
             .Replace("render_mode unshaded, cull_disabled, shadows_disabled, fog_disabled;",
-                     "render_mode unshaded, cull_disabled, shadows_disabled, fog_disabled, depth_test_disabled;\n"
-                     + "stencil_mode read, compare_equal, " + Toon.TurretStencil + ";")
-            .Replace("    DEPTH = clip.z / clip.w * 0.5 + 0.5;", "    if (!thrown) discard;")
-            .Replace("    ALBEDO = c;\n}", "    ALBEDO = c;\n    ALPHA = 1.0;\n}"),
+                     "render_mode unshaded, cull_disabled, shadows_disabled, fog_disabled, depth_test_disabled;")
+            .Replace("stencil_mode read, compare_not_equal, ", "stencil_mode read, compare_equal, ")
+            .Replace("uniform bool only_front = false;", "uniform bool only_front = true;"),
     };
 
     /// <summary>

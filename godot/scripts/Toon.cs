@@ -164,7 +164,9 @@ void fragment() {
             if (i >= scorch_n) break;
             near = min(near, distance(world, scorch_at[i]));
         }
-        float reach = scorch_r * (0.35 + 0.65 * scorch);
+        // From nothing and back to it: the scorch grows in with the fire and
+        // shrinks away as it goes out.
+        float reach = scorch_r * sqrt(scorch);
         // Torn at the edge, but not into islands: a coarse noise under a third
         // of the reach bends it, a fine one small enough to leave no islands
         // makes it jagged - with the coarse one alone it was a clean oval.

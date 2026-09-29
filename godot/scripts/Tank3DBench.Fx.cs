@@ -927,9 +927,12 @@ void fragment() {
             _ports.Clear();
             foreach (Node3D ex in _model.Exhausts)
                 _ports.Add(ex.GlobalPosition);
-            // A thrown turret lies on the deck over the grilles; the fire is
-            // drawn over it, as the board draws the sprites'.
+            // The turret hides a grille's fire or not, whole, by which of the
+            // two is nearer the eye; a thrown turret lies on the deck over the
+            // grilles and the fire is drawn over it, as the board draws the
+            // sprites'.
             _celBurn.OverTurret = _model.Turret is not null && _model.TurretOverride is not null;
+            _celBurn.TurretAt = _model.Turret?.GlobalPosition;
             _celBurn.Tick(dt, _ports, _camera.GlobalBasis);
             // The sprites' plume would stand over the fire on the card in front
             // of the tank, a grey haze across the flame: while the fire is lit
