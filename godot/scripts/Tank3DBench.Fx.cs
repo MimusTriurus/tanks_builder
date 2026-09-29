@@ -97,6 +97,7 @@ public sealed partial class Tank3DBench
     private CelBurn? _celBurn;
     private CelExhaust? _celExhaust;
     private CelShot? _celShot;
+    private CelHit? _celHit;
     private readonly List<(Vector3 At, Vector3 Out)> _exhaustPorts = new();
     private readonly List<Vector3> _ports = new();
     private readonly Wreck _wreck = new();
@@ -108,6 +109,9 @@ public sealed partial class Tank3DBench
     /// <summary>The struck point in the hull's own frame, so the light through
     /// the hole follows the hull as it rocks.</summary>
     private Vector3 _hitLocal;
+    /// <summary>The part the last penetration went into - <see cref="_hitLocal"/>
+    /// is in its frame; the hull when none is named.</summary>
+    private Node3D? _hitNode;
     private TriangleMesh? _hullHits;
     private MovementProfile _profile = MovementProfile.Light;
 
@@ -442,6 +446,10 @@ void fragment() {
             _celShot = new CelShot { Name = "Shot" };
             AddChild(_celShot);
             _celShot.Build(_model.HullLength * _model.PixelsPerUnit);
+            _celHit = new CelHit { Name = "Hits" };
+            AddChild(_celHit);
+            _celHit.Build(_model.HullLength * _model.PixelsPerUnit);
+            _celHit.Targets(_model, _model.Cel);
         }
         _painted.Add(_sprite);
         foreach (Card c in new[] { _rear, _front, _glow })
@@ -522,6 +530,8 @@ void fragment() {
         _celExhaust = null;
         _celShot?.QueueFree();
         _celShot = null;
+        _celHit?.QueueFree();
+        _celHit = null;
         _painted.Clear();
         FreeHeights();
         _shape = null;
@@ -665,16 +675,30 @@ void fragment() {
         Vector3 at = hull.ToGlobal(local);
         Vector3 n = (hull.GlobalBasis * normalLocal).Normalized();
         Vector3 uw = (hull.GlobalBasis * u).Normalized();
+        Node3D struck = hull;
+        // The model's own: anywhere on its plates the round can see, and a
+        // mark left there - see CelHit.
+        if (_celHit?.Aim((hull.GlobalBasis * travel).Normalized()) is { } aimed)
+        {
+            (struck, at, n, uw) = (aimed.Part, aimed.At, aimed.N, aimed.Way);
+            _celHit.Leave(aimed.Part, at, n, uw, pierce ? CelHit.Kind.Hole : CelHit.Kind.Gouge);
+        }
         bool behind = n.Z <= 0.0f;
         Vector3 foot = Foot(at);
         if (pierce)
         {
-            _hitLocal = local;
+            _hitNode = struck;
+            _hitLocal = struck.ToLocal(at);
             _hitLoop.Strike(Sides[side], 0.0f, 0.0f, 1.0f, true);
             FxEntry(at, n, foot);
             return;
         }
         Vector3 r = uw - 2.0f * uw.Dot(n) * n;
+        if (_celHit is not null)
+        {
+            _celHit.Ricochet(at, n, r);
+            return;
+        }
         ProcSpall spall = Next(_spalls, ref _nextSpall, Pool, () =>
         {
             var made = new ProcSpall();
@@ -739,6 +763,11 @@ void fragment() {
         Node3D hull = _model.Hull;
         Vector3 at = hull.ToGlobal(local);
         Vector3 n = (hull.GlobalBasis * normalLocal).Normalized();
+        if (_celHit?.Aim((hull.GlobalBasis * travel).Normalized()) is { } aimed)
+        {
+            (at, n) = (aimed.At, aimed.N);
+            _celHit.Leave(aimed.Part, at, n, aimed.Way, CelHit.Kind.Splash);
+        }
         Vector3 foot = Foot(at);
         ProcSlam slam = Next(_slams, ref _nextSlam, Pool, () =>
         {
@@ -816,7 +845,13 @@ void fragment() {
 
     private void FxKnocked()
     {
-        _hitLocal = Strike(new Vector3(0, 0, -1)).At;
+        // The knock-out's own penetration has set where it went in already
+        // when the model takes rounds anywhere (CelHit).
+        if (_celHit is null)
+        {
+            _hitLocal = Strike(new Vector3(0, 0, -1)).At;
+            _hitNode = null;
+        }
         _wreck.Disable();
         Fireball(TankTick.KnockOutFlash, grounded: false);
     }
@@ -850,6 +885,8 @@ void fragment() {
         _celBurn?.Reset();
         _celExhaust?.Reset();
         _celShot?.Reset();
+        _celHit?.Reset();
+        _hitNode = null;
         foreach (var (mat, albedo) in _paint)
             Repaint(mat, albedo);
         foreach (ProcKick k in _kicks) k.Douse();
@@ -976,6 +1013,7 @@ void fragment() {
             _celExhaust.Tick(dt, _exhaustPorts, _camera.GlobalBasis);
         }
         _celShot?.Tick(dt, _camera.GlobalBasis);
+        _celHit?.Tick(dt, _camera.GlobalBasis);
 
         // TankTick.UpdateShot - frames, as the board counts them.
         int frame = _shotFrame < 0 ? -1 : FlashSheet.FrameAt(_shotFrame);
@@ -995,7 +1033,7 @@ void fragment() {
         _shape.Update(anchor, s.HullFacing, s.TurretFacing);
         SyncHeights(anchor);
         Vector3 muzzle = _model.Muzzle.GlobalPosition;
-        Vector3 struck = _model.Hull.ToGlobal(_hitLocal);
+        Vector3 struck = (_hitNode is not null && IsInstanceValid(_hitNode) ? _hitNode : _model.Hull).ToGlobal(_hitLocal);
 
         // TankTick.UpdateHit, with the plate point the model's rather than the
         // atlas's table - where the light through the hole is seated.

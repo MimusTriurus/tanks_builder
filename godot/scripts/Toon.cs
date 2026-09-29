@@ -102,6 +102,10 @@ void light() {
     /// </summary>
     public const int TurretStencil = 7;
 
+    /// <summary>Hit marks one cel material carries at once (the shader's
+    /// arrays) - see <see cref="CelHit"/>.</summary>
+    public const int MaxMarks = 16;
+
     /// <summary>Value noise in three dimensions: the scorch here, the fire and
     /// the smoke in <see cref="CelBurn"/>.</summary>
     public const string NoiseCode = @"
@@ -148,6 +152,17 @@ uniform float scorch_time = 0.0;
 uniform vec3 char_tone : source_color = vec3(0.07, 0.065, 0.06);
 uniform float char_cover = 0.9;
 uniform vec3 ember_tone : source_color = vec3(1.0, 0.36, 0.06);
+// Hit marks (CelHit drives them): each is a spot on a plate in the world -
+// its middle and radius, the way a glancing round went on (and the kind:
+// 0 a gouge, 1 a hole, 2 an HE splash), the plate's normal and when it came.
+uniform vec4 mark_at[" + MaxMarks + @"];
+uniform vec4 mark_dir[" + MaxMarks + @"];
+uniform vec4 mark_nrm[" + MaxMarks + @"];
+uniform int mark_count = 0;
+uniform float mark_now = 0.0;
+uniform vec3 steel : source_color = vec3(0.50, 0.52, 0.56);
+uniform vec3 hole_tone : source_color = vec3(0.035, 0.03, 0.028);
+uniform vec3 mark_soot : source_color = vec3(0.17, 0.16, 0.15);
 varying vec3 world;
 " + NoiseCode + RampCode + @"
 void vertex() {
@@ -184,6 +199,63 @@ void fragment() {
         float speck = step(0.72, noise3(world / (scorch_r * 0.05) + vec3(0.0, -scorch_time * 1.3, 0.0)));
         float ring = step(0.40, d) * burnt;
         glow = ember_tone * speck * ring * ember * 1.3;
+    }
+    for (int i = 0; i < " + MaxMarks + @"; i++) {
+        if (i >= mark_count) break;
+        vec3 d = world - mark_at[i].xyz;
+        float r = mark_at[i].w;
+        if (dot(d, d) > 16.0 * r * r) continue;
+        vec3 n = mark_nrm[i].xyz;
+        float h = dot(d, n);
+        // This plate only, not the one behind it or across a corner.
+        if (abs(h) > 0.6 * r) continue;
+        vec3 q = d - h * n;
+        // The way along the plate the round went on; its length is how much
+        // it glanced (1 along the plate, 0 square on).
+        float glance = length(mark_dir[i].xyz);
+        vec3 way = mark_dir[i].xyz / max(glance, 1e-4);
+        float kind = mark_dir[i].w;
+        float a = dot(q, way);
+        float b = length(q - a * way);
+        float heat = exp(-(mark_now - mark_nrm[i].w) / 0.9);
+        float torn = (noise3(world / (r * 0.45) + vec3(float(i) * 3.7)) - 0.5) * 0.30
+                   + (noise3(world / (r * 0.16) + vec3(float(i) * 1.9)) - 0.5) * 0.18;
+        float e;
+        float bare;
+        float hole = -1.0;
+        if (kind < 0.5) {
+            // A gouge: a scrape from the point of impact on the way the round
+            // glanced, short behind it, long ahead.
+            // Square on it is a round dent, glancing a long furrow.
+            float aa = a < 0.0 ? a / (r * mix(0.8, 0.6, glance)) : a / (r * mix(0.8, 2.8, glance));
+            e = length(vec2(aa, b / (r * mix(0.8, 0.55, glance)))) + torn * 0.6;
+            bare = 0.62;
+        } else if (kind < 1.5) {
+            // A hole: black in the middle, a torn rim of bare steel, the paint
+            // burnt round it.
+            e = length(q) / r + torn * 0.6;
+            bare = 0.66;
+            hole = 0.40;
+        } else {
+            // HE on armour: a burnt star of rays, a bare pitted middle.
+            vec3 t1 = normalize(way);
+            vec3 t2 = cross(n, t1);
+            float ang = atan(dot(q, t2), dot(q, t1));
+            float rays = pow(abs(cos(ang * 3.0 + float(i) * 1.3)), 6.0);
+            e = length(q) / (r * (0.75 + 0.75 * rays)) + torn * 0.8;
+            float pit = step(0.62, noise3(world / (r * 0.18) + vec3(float(i) * 5.1)));
+            bare = 0.25 + 0.30 * pit;
+        }
+        if (e >= 1.0) continue;
+        c.rgb = mark_soot;
+        sooted = 1.0;
+        if (e < bare) {
+            c.rgb = steel;
+            // Fresh, the scraped metal is hot.
+            glow += ember_tone * heat * (kind < 1.5 ? 1.2 : 0.6);
+        }
+        if (e < hole)
+            c.rgb = hole_tone;
     }
     ALBEDO = c.rgb;
     EMISSION = c.rgb * shade * ao + glow;
