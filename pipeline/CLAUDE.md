@@ -14,7 +14,7 @@ Blender MCP. Скрипты — обычные модули: импортиру�
 ## Раскладка
 
 ```
-pipeline/            37 модулей; docs/ — разбор по подсистемам, по ссылке (см. ниже)
+pipeline/            38 модулей; docs/ — разбор по подсистемам, по ссылке (см. ниже)
 pipeline/repro/      процедурные копии генераторных моделей, модуль на танк (docs/repro.md)
 pipeline/out/        черновой вывод разовых прогонов, не в git
 ../assets/Input3D/   исходные .glb от генератора, по одному на танк
@@ -71,6 +71,7 @@ pipeline/out/        черновой вывод разовых прогонов
 | [docs/layers.md](docs/layers.md) | `sprite_height`, `ground_shadow`, `barrel_recoil`, `draw_order`, `wreck_pose`, `track_cycle`/`parts_render`, `turret_ring` | слои, которые двигаются относительно корпуса |
 | [docs/pipeline.md](docs/pipeline.md) | `tank_pipeline.run()`, задание `render_set`, что проверяется, листы проверки, почему шагов 24 и что это стоит, память атласов | гоняешь конвейер целиком или считаешь байты |
 | [docs/brick-wall.md](docs/brick-wall.md) | `brick_wall.py`: раскладка кладки, цвет замером, зазор, физика, `fit_to_hex` | кирпичная стена в Blender |
+| [docs/trees.md](docs/trees.md) | `tree_gen.py`: дерево по зерну — шапки, потом ветви к ним; живой и горелый спрайт в одном кадре, основание пары; игровой `.glb` под `Toon`, который горит сам (порог в `TEXCOORD_1`); листы проверки | генерируешь дерево или правишь его вид или горение |
 | [docs/MUZZLE_FLASH.md](docs/MUZZLE_FLASH.md) | вспышка выстрела целиком, от листа до слоя | ставишь выстрел на новый танк |
 | [docs/HEX_TILES.md](docs/HEX_TILES.md) | многоуровневые тайлы земли в Blender | авторишь тайл; как они ездят на стенде — `godot/docs/HEX_TILES_3D.md` |
 
