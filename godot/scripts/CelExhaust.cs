@@ -14,7 +14,7 @@ namespace TankSpriteTest;
 ///
 /// <b>A cloud, not balls.</b> The puffs are not drawn one by one: they are
 /// discs on one quad facing the eye, flowed into one shape by a smooth union
-/// of their distances (<see cref="CloudShader"/>). Drawn as the burning
+/// of their distances (<see cref="CelCloud"/>). Drawn as the burning
 /// column's spheres, each inked on its own, the exhaust was a heap of cartoon
 /// balls.
 ///
@@ -36,8 +36,8 @@ namespace TankSpriteTest;
 public sealed partial class CelExhaust : Node3D
 {
     /// <summary>Puffs in the air at once, at most, over all ports - the
-    /// shader's arrays, so a constant.</summary>
-    public const int Pool = 64;
+    /// cloud's (<see cref="CelCloud.Pool"/>).</summary>
+    public const int Pool = CelCloud.Pool;
 
     /// <summary>Puffs a second from each port, idling and working.</summary>
     public float IdleRate = 4.0f, WorkRate = 13.0f;
@@ -101,34 +101,18 @@ public sealed partial class CelExhaust : Node3D
     private readonly List<Puff> _air = new();
     private readonly List<float> _due = new();
     private readonly List<Vector3> _last = new();
-    private readonly Vector4[] _where = new Vector4[Pool];
-    private readonly Vector4[] _looks = new Vector4[Pool];
     private float _hull = 150.0f;
     private float _clock;
     private float _kick;
     private bool _working;
     private float _restFor = float.MaxValue;
     private int _births;
-    private MeshInstance3D? _cloud;
-    private ShaderMaterial? _look;
+    private CelCloud? _cloud;
 
     public void Build(float hullPx)
     {
         _hull = Mathf.Max(hullPx, 1.0f);
-        _look = new ShaderMaterial { Shader = CloudShader };
-        _look.SetShaderParameter("tint", Tint);
-        _look.SetShaderParameter("blend", Blend * _hull);
-        _look.SetShaderParameter("ink_width", Toon.InkWidth);
-        _look.SetShaderParameter("ink_min_px", Toon.InkMinPx);
-        _cloud = new MeshInstance3D
-        {
-            Name = "Exhaust",
-            Mesh = new QuadMesh { Size = Vector2.One },
-            MaterialOverride = _look,
-            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
-            Visible = false,
-        };
-        AddChild(_cloud);
+        _cloud = new CelCloud(this, "Exhaust", Tint, Blend * _hull);
     }
 
     /// <summary>Everything in the air gone, the clocks back to nought.</summary>
@@ -142,8 +126,7 @@ public sealed partial class CelExhaust : Node3D
         _working = false;
         _restFor = float.MaxValue;
         _births = 0;
-        if (_cloud is not null)
-            _cloud.Visible = false;
+        _cloud?.Hide();
     }
 
     /// <summary>
@@ -154,7 +137,7 @@ public sealed partial class CelExhaust : Node3D
     /// </summary>
     public void Tick(float dt, IReadOnlyList<(Vector3 At, Vector3 Out)> ports, Basis eye)
     {
-        if (_cloud is null || _look is null)
+        if (_cloud is null)
             return;
         _clock += dt;
         // A kick only off a real standstill.
@@ -189,13 +172,7 @@ public sealed partial class CelExhaust : Node3D
         for (int i = 0; i < ports.Count; i++)
             _last[i] = ports[i].At;
         _air.RemoveAll(p => _clock - p.Born >= p.Life);
-        if (_air.Count == 0)
-        {
-            _cloud.Visible = false;
-            return;
-        }
-        Vector3 right = eye.X.Normalized(), up = eye.Y.Normalized(), back = eye.Z.Normalized();
-        Vector3 mid = Vector3.Zero;
+        _cloud.Clear();
         int n = Mathf.Min(_air.Count, Pool);
         for (int i = 0; i < n; i++)
         {
@@ -211,29 +188,9 @@ public sealed partial class CelExhaust : Node3D
                          + Drift * (rise * Mathf.Pow(a, 1.4f))
                          + side * (0.04f * _hull * Mathf.Sqrt(a));
             float r = 0.5f * _hull * Mathf.Lerp(p.From, p.To, gone) * Mathf.SmoothStep(0.0f, 0.08f, a);
-            _where[i] = new Vector4(at.X, at.Y, at.Z, r);
-            _looks[i] = new Vector4(p.Tone, p.Seed, Mathf.SmoothStep(ErodeFrom, 1.0f, a), a);
-            mid += at;
+            _cloud.Add(at, r, p.Tone, p.Seed, Mathf.SmoothStep(ErodeFrom, 1.0f, a), a);
         }
-        mid /= n;
-        // The quad: facing the eye over every puff, its lumps and the ink,
-        // in front of them all (its own depth is not used - the shader writes
-        // the cloud's).
-        float wide = 0.0f, tall = 0.0f, front = 0.0f;
-        for (int i = 0; i < n; i++)
-        {
-            Vector3 at = new(_where[i].X, _where[i].Y, _where[i].Z);
-            float reach = _where[i].W * 1.4f + Blend * _hull + 2.0f;
-            wide = Mathf.Max(wide, Mathf.Abs((at - mid).Dot(right)) + reach);
-            tall = Mathf.Max(tall, Mathf.Abs((at - mid).Dot(up)) + reach);
-            front = Mathf.Max(front, (at - mid).Dot(back) + _where[i].W);
-        }
-        _cloud.GlobalTransform = new Transform3D(
-            new Basis(right * (2.0f * wide), up * (2.0f * tall), back), mid + back * front);
-        _cloud.Visible = true;
-        _look.SetShaderParameter("puffs", _where);
-        _look.SetShaderParameter("looks", _looks);
-        _look.SetShaderParameter("count", n);
+        _cloud.Draw(eye);
     }
 
     /// <summary>A puff at <paramref name="port"/>, with the state of this
@@ -261,87 +218,4 @@ public sealed partial class CelExhaust : Node3D
             Side = h2 * Mathf.Tau,
         });
     }
-
-    /// <summary>
-    /// The cloud: every puff a disc on one quad facing the eye, and the discs
-    /// flowed into one shape - a smooth union of their distances (<c>blend</c>
-    /// px wide), so the exhaust has an outline of its own and one ink line
-    /// round it. Each disc's rim is made lumpy by a noise in its own frame, so
-    /// the lumps go with the puff, and it is eaten as it ages by a noise across
-    /// it. The light is the model's ramp on a normal blended from the puffs'
-    /// spheres with the union's weights, so the sun steps one lit top and one
-    /// shaded foot over the whole cloud; its depth is the blended front of the
-    /// same spheres, so the turret still hides what is behind it.
-    /// </summary>
-    private static readonly Shader CloudShader = new()
-    {
-        Code = @"
-shader_type spatial;
-render_mode cull_disabled, specular_disabled, ambient_light_disabled, shadows_disabled;
-stencil_mode write, compare_always, 0;
-uniform vec4 puffs[" + Pool + @"];
-uniform vec4 looks[" + Pool + @"];
-uniform int count = 0;
-uniform float blend = 6.0;
-uniform vec3 tint : source_color = vec3(0.9, 0.94, 1.0);
-uniform float ink_width = 1.1;
-uniform float ink_min_px = 1.0;
-uniform float ink_dark = 0.4;
-" + Toon.NoiseCode + Toon.RampCode + @"
-void fragment() {
-    vec2 p = VERTEX.xy;
-    float sd = 1e9;
-    float wsum = 0.0;
-    float zsum = 0.0;
-    float tsum = 0.0;
-    vec3 nsum = vec3(0.0);
-    float px = 2.0 / (PROJECTION_MATRIX[1][1] * VIEWPORT_SIZE.y);
-    float ink = max(ink_width, ink_min_px * px);
-    for (int i = 0; i < " + Pool + @"; i++) {
-        if (i >= count) break;
-        vec3 c = (VIEW_MATRIX * vec4(puffs[i].xyz, 1.0)).xyz;
-        float r = max(puffs[i].w, 1e-3);
-        vec4 lk = looks[i];
-        vec2 q = p - c.xy;
-        float len = length(q);
-        vec2 u = q / max(len, 1e-4);
-        // Eaten as it ages, from the rim in, by a noise round it: holes cut
-        // through the middle, each inked, read as cheese.
-        float bite = noise3(vec3(u * 2.2 + lk.y * 31.0, lk.w * 1.2));
-        // A share of what is left, not of the whole puff: bitten by a share of
-        // the whole, a puff nearly gone was ten times wider one way than the
-        // other - a star, inked.
-        float left = r * (1.0 - lk.z) * (1.0 + 0.3 * (bite - 0.5));
-        // Gone, rather than a dot of ink.
-        if (left < 2.0 * ink) continue;
-        // Lumps round the rim, in the puff's own frame so they go with it, and
-        // of what is left of it: of the whole puff, the last of a cloud went
-        // to inked splinters.
-        float bump = noise3(vec3(u * 1.4 + lk.y * 17.0, lk.w * 1.5)) - 0.5;
-        float di = len - left * (1.0 + 0.35 * bump);
-        float h = sqrt(max(0.0, 1.0 - len * len / (r * r)));
-        float w = exp(-clamp(di, -r, 3.0 * blend) / blend);
-        nsum += normalize(vec3(q / r, max(h, 0.2))) * w;
-        zsum += (c.z + r * h) * w;
-        tsum += lk.x * w;
-        wsum += w;
-        float k = clamp(0.5 + 0.5 * (di - sd) / blend, 0.0, 1.0);
-        sd = mix(di, sd, k) - blend * k * (1.0 - k);
-    }
-    if (sd > 0.0 || wsum <= 0.0) discard;
-    float tone = tsum / wsum;
-    vec4 clip = PROJECTION_MATRIX * vec4(p, zsum / wsum, 1.0);
-    DEPTH = clip.z / clip.w * 0.5 + 0.5;
-    vec3 col = vec3(tone) * tint;
-    if (sd > -ink) {
-        ALBEDO = vec3(0.0);
-        EMISSION = col * ink_dark;
-    } else {
-        ALBEDO = col;
-        EMISSION = col * shade;
-        NORMAL = normalize(nsum);
-    }
-}
-",
-    };
 }

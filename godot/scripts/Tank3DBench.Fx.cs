@@ -96,6 +96,7 @@ public sealed partial class Tank3DBench
     /// null under <c>--fx2d</c>, which keeps the sprites' on the card.</summary>
     private CelBurn? _celBurn;
     private CelExhaust? _celExhaust;
+    private CelShot? _celShot;
     private readonly List<(Vector3 At, Vector3 Out)> _exhaustPorts = new();
     private readonly List<Vector3> _ports = new();
     private readonly Wreck _wreck = new();
@@ -419,9 +420,10 @@ void fragment() {
         }
         if (!_fx2d)
         {
-            // The sprites' fire, column and plume stay what they are, for the
-            // 2D tanks; on the model they are hidden, CelBurn draws the first
-            // two and CelExhaust the plume (hidden where it is ticked).
+            // The sprites' fire, column, plume, flash and fume stay what they
+            // are, for the 2D tanks; on the model they are hidden, CelBurn
+            // draws the first two, CelExhaust the plume (hidden where it is
+            // ticked) and CelShot the shot - its muzzle cloud too (FxShot).
             if (_sprite.Blaze is not null)
                 _sprite.Blaze.Visible = false;
             if (_sprite.Column is not null)
@@ -433,6 +435,13 @@ void fragment() {
             _celExhaust = new CelExhaust { Name = "Exhaust" };
             AddChild(_celExhaust);
             _celExhaust.Build(_model.HullLength * _model.PixelsPerUnit);
+            if (_sprite.Flare is not null)
+                _sprite.Flare.Visible = false;
+            if (_sprite.Fume is not null)
+                _sprite.Fume.Visible = false;
+            _celShot = new CelShot { Name = "Shot" };
+            AddChild(_celShot);
+            _celShot.Build(_model.HullLength * _model.PixelsPerUnit);
         }
         _painted.Add(_sprite);
         foreach (Card c in new[] { _rear, _front, _glow })
@@ -511,6 +520,8 @@ void fragment() {
         _celBurn = null;
         _celExhaust?.QueueFree();
         _celExhaust = null;
+        _celShot?.QueueFree();
+        _celShot = null;
         _painted.Clear();
         FreeHeights();
         _shape = null;
@@ -591,6 +602,11 @@ void fragment() {
         Vector3 muzzle = _model.Muzzle.GlobalPosition;
         Vector3 foot = Foot(muzzle);
         Vector3 bore = _model.Muzzle.GlobalBasis.Z;
+        if (_celShot is not null)
+        {
+            _celShot.Fire(muzzle, bore, foot);
+            return;
+        }
         ProcKick kick = Next(_kicks, ref _nextKick, Pool, () =>
         {
             var made = new ProcKick();
@@ -833,6 +849,7 @@ void fragment() {
         _shotFrame = -1;
         _celBurn?.Reset();
         _celExhaust?.Reset();
+        _celShot?.Reset();
         foreach (var (mat, albedo) in _paint)
             Repaint(mat, albedo);
         foreach (ProcKick k in _kicks) k.Douse();
@@ -958,6 +975,7 @@ void fragment() {
                 _exhaustPorts.Add((ex.GlobalPosition, ex.GlobalBasis.Y.Normalized()));
             _celExhaust.Tick(dt, _exhaustPorts, _camera.GlobalBasis);
         }
+        _celShot?.Tick(dt, _camera.GlobalBasis);
 
         // TankTick.UpdateShot - frames, as the board counts them.
         int frame = _shotFrame < 0 ? -1 : FlashSheet.FrameAt(_shotFrame);
