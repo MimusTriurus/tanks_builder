@@ -95,6 +95,8 @@ public sealed partial class Tank3DBench
     /// <summary>The fire and the column in the model's look, in the world -
     /// null under <c>--fx2d</c>, which keeps the sprites' on the card.</summary>
     private CelBurn? _celBurn;
+    private CelExhaust? _celExhaust;
+    private readonly List<(Vector3 At, Vector3 Out)> _exhaustPorts = new();
     private readonly List<Vector3> _ports = new();
     private readonly Wreck _wreck = new();
     private readonly HitLoop _hitLoop = new();
@@ -417,8 +419,9 @@ void fragment() {
         }
         if (!_fx2d)
         {
-            // The sprites' fire and column stay what they are, for the 2D
-            // tanks; on the model they are hidden and CelBurn draws both.
+            // The sprites' fire, column and plume stay what they are, for the
+            // 2D tanks; on the model they are hidden, CelBurn draws the first
+            // two and CelExhaust the plume (hidden where it is ticked).
             if (_sprite.Blaze is not null)
                 _sprite.Blaze.Visible = false;
             if (_sprite.Column is not null)
@@ -427,6 +430,9 @@ void fragment() {
             AddChild(_celBurn);
             _celBurn.Build(_model.HullLength * _model.PixelsPerUnit);
             _celBurn.Paint = _model.Cel;
+            _celExhaust = new CelExhaust { Name = "Exhaust" };
+            AddChild(_celExhaust);
+            _celExhaust.Build(_model.HullLength * _model.PixelsPerUnit);
         }
         _painted.Add(_sprite);
         foreach (Card c in new[] { _rear, _front, _glow })
@@ -503,6 +509,8 @@ void fragment() {
         _sprite = null;
         _celBurn?.QueueFree();
         _celBurn = null;
+        _celExhaust?.QueueFree();
+        _celExhaust = null;
         _painted.Clear();
         FreeHeights();
         _shape = null;
@@ -824,6 +832,7 @@ void fragment() {
         _burning = false;
         _shotFrame = -1;
         _celBurn?.Reset();
+        _celExhaust?.Reset();
         foreach (var (mat, albedo) in _paint)
             Repaint(mat, albedo);
         foreach (ProcKick k in _kicks) k.Douse();
@@ -934,11 +943,20 @@ void fragment() {
             _celBurn.OverTurret = _model.Turret is not null && _model.TurretOverride is not null;
             _celBurn.TurretAt = _model.Turret?.GlobalPosition;
             _celBurn.Tick(dt, _ports, _camera.GlobalBasis);
-            // The sprites' plume would stand over the fire on the card in front
-            // of the tank, a grey haze across the flame: while the fire is lit
-            // it is the fire's, not the exhaust's.
             if (s.Plume is not null)
-                s.Plume.Visible = _celBurn.Heat <= 0.001f;
+                s.Plume.Visible = false;
+        }
+        if (_celExhaust is not null)
+        {
+            // The engine runs until the tank is out; while it burns the fire's
+            // column is the smoke, and the exhaust would stand in the flame.
+            _celExhaust.Running = !_wreck.Out && (_celBurn is null || _celBurn.Heat <= 0.001f);
+            // Pulling, not braking: off the throttle the engine idles.
+            _celExhaust.Working = _exhaust.Response(Mathf.Abs(speed)) > 0.5 && accel * speed >= 0.0f;
+            _exhaustPorts.Clear();
+            foreach (Node3D ex in _model.Exhausts)
+                _exhaustPorts.Add((ex.GlobalPosition, ex.GlobalBasis.Y.Normalized()));
+            _celExhaust.Tick(dt, _exhaustPorts, _camera.GlobalBasis);
         }
 
         // TankTick.UpdateShot - frames, as the board counts them.

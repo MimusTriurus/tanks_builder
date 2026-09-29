@@ -1,0 +1,347 @@
+using System.Collections.Generic;
+using Godot;
+
+namespace TankSpriteTest;
+
+/// <summary>
+/// A running 3D tank's exhaust, in the model's own look: <b>one cloud</b> on
+/// the model's ramp with one ink line round it, made of puffs born at each
+/// <c>Exhaust.N</c> node, going out along its axis (the sidecar's
+/// <c>points</c>, +Y) and up, bent by the wind and eaten away. The sprites'
+/// plume (<see cref="ProcSmoke.Plume"/>) is left as it is for the 2D tanks; on
+/// the model it was a pale haze across the turret, and the 3D bench hides it
+/// and runs this.
+///
+/// <b>A cloud, not balls.</b> The puffs are not drawn one by one: they are
+/// discs on one quad facing the eye, flowed into one shape by a smooth union
+/// of their distances (<see cref="CloudShader"/>). Drawn as the burning
+/// column's spheres, each inked on its own, the exhaust was a heap of cartoon
+/// balls.
+///
+/// <b>Two states, as the sprites' plume has</b> (<see cref="ExhaustLoop.Binary"/>):
+/// idling, a puff every so often, pale and slow; working, puffs close on one
+/// another, bigger, greyer and quicker. Nothing in between - on the sprites
+/// the ramp was tried three times and never read. The step up has a
+/// <b>kick</b>: for <see cref="KickTime"/> the engine taking the load throws a
+/// few dark puffs close together, and they fade into the working grey.
+///
+/// <b>Puffs, not a closed form.</b> Each is born with the state of its moment
+/// - size, speed, grey, life - and keeps it, so a change of state changes the
+/// puffs born after it, not the ones already in the air; and each stays where
+/// it was born, in the world, so a tank driving off leaves its exhaust behind
+/// it. The fixed step makes it repeat to the pixel all the same.
+///
+/// All lengths are shares of the hull's length on the board (<see cref="Build"/>).
+/// </summary>
+public sealed partial class CelExhaust : Node3D
+{
+    /// <summary>Puffs in the air at once, at most, over all ports - the
+    /// shader's arrays, so a constant.</summary>
+    public const int Pool = 64;
+
+    /// <summary>Puffs a second from each port, idling and working.</summary>
+    public float IdleRate = 4.0f, WorkRate = 13.0f;
+    /// <summary>A puff's life, s.</summary>
+    public float IdleLife = 1.3f, WorkLife = 0.9f;
+    /// <summary>A puff's width at birth and at the end, hull lengths.</summary>
+    public float IdleBorn = 0.04f, IdleGrown = 0.13f;
+    public float WorkBorn = 0.06f, WorkGrown = 0.22f;
+    /// <summary>How far a puff goes over its life, hull lengths: out of the
+    /// port along its axis.</summary>
+    public float IdleRise = 0.22f, WorkRise = 0.40f;
+    /// <summary>The puffs' grey, idling and working, and their tint: the sun
+    /// on the ramp lifts a lit top well over its grey - at 0.72 the idle puffs
+    /// were white, cotton wool over the deck.</summary>
+    public float IdleTone = 0.46f, WorkTone = 0.40f;
+    public Color Tint = new(0.90f, 0.94f, 1.0f);
+
+    /// <summary>The kick when the engine takes the load: how long, its puffs a
+    /// second from each port, its grey at the start, and how much bigger its
+    /// puffs are. It fades into the working state over its time.</summary>
+    public float KickTime = 0.5f, KickRate = 20.0f, KickTone = 0.20f, KickSize = 1.3f;
+    /// <summary>How long the engine must have idled before taking the load
+    /// kicks, s: a tank arriving crosses the threshold a few times in a tenth
+    /// of a second, and each crossing was a kick of its own.</summary>
+    public float KickRest = 1.0f;
+
+    /// <summary>Where the wind takes a puff, hull lengths per rise, in the
+    /// world - the burning column's wind (<see cref="CelBurn.Drift"/>).</summary>
+    public Vector3 Drift = new(0.45f, 0.0f, -0.20f);
+    /// <summary>How far apart two puffs still flow into one, hull lengths -
+    /// the smooth union's width.</summary>
+    public float Blend = 0.06f;
+    /// <summary>How long a puff keeps the speed of the tank it left, s: the gas
+    /// comes out moving with the tank and the air stops it. Left standing
+    /// where it was born, a moving tank's exhaust was a row of separate
+    /// blobs strung out behind it.</summary>
+    public float CarryTime = 0.3f;
+    /// <summary>Where a puff is born over its port, hull lengths.</summary>
+    public float Seat = 0.03f;
+    /// <summary>When a puff starts to be eaten, as a share of its life.</summary>
+    public float ErodeFrom = 0.15f;
+
+    // ------------------------------------------------------------ the inputs
+
+    /// <summary>The engine runs: puffs are born. Off, the last ones finish.</summary>
+    public bool Running;
+    /// <summary>The engine works - the tank pulls - rather than idles. Not
+    /// while it brakes: off the throttle a diesel idles, and a tank that had
+    /// stopped still smoked as if driving (the bench gives it no hold either -
+    /// one of 0.35 s, against the arrival's chatter, was the same fault).</summary>
+    public bool Working;
+
+    // ------------------------------------------------------------ the machinery
+
+    private struct Puff
+    {
+        public Vector3 At, Out, Carry;
+        public float Born, Life, From, To, Rise, Tone, Seed, Side;
+    }
+
+    private readonly List<Puff> _air = new();
+    private readonly List<float> _due = new();
+    private readonly List<Vector3> _last = new();
+    private readonly Vector4[] _where = new Vector4[Pool];
+    private readonly Vector4[] _looks = new Vector4[Pool];
+    private float _hull = 150.0f;
+    private float _clock;
+    private float _kick;
+    private bool _working;
+    private float _restFor = float.MaxValue;
+    private int _births;
+    private MeshInstance3D? _cloud;
+    private ShaderMaterial? _look;
+
+    public void Build(float hullPx)
+    {
+        _hull = Mathf.Max(hullPx, 1.0f);
+        _look = new ShaderMaterial { Shader = CloudShader };
+        _look.SetShaderParameter("tint", Tint);
+        _look.SetShaderParameter("blend", Blend * _hull);
+        _look.SetShaderParameter("ink_width", Toon.InkWidth);
+        _look.SetShaderParameter("ink_min_px", Toon.InkMinPx);
+        _cloud = new MeshInstance3D
+        {
+            Name = "Exhaust",
+            Mesh = new QuadMesh { Size = Vector2.One },
+            MaterialOverride = _look,
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            Visible = false,
+        };
+        AddChild(_cloud);
+    }
+
+    /// <summary>Everything in the air gone, the clocks back to nought.</summary>
+    public void Reset()
+    {
+        _air.Clear();
+        _due.Clear();
+        _last.Clear();
+        _clock = 0.0f;
+        _kick = 0.0f;
+        _working = false;
+        _restFor = float.MaxValue;
+        _births = 0;
+        if (_cloud is not null)
+            _cloud.Visible = false;
+    }
+
+    /// <summary>
+    /// A frame: puffs born at <paramref name="ports"/> (where each is and the
+    /// way it points, in the world) as the engine asks, every puff in the air
+    /// put where it is, the dead ones dropped. <paramref name="eye"/> is the
+    /// camera's basis: the cloud's quad faces it.
+    /// </summary>
+    public void Tick(float dt, IReadOnlyList<(Vector3 At, Vector3 Out)> ports, Basis eye)
+    {
+        if (_cloud is null || _look is null)
+            return;
+        _clock += dt;
+        // A kick only off a real standstill.
+        bool working = Working;
+        if (working && !_working && Running && _restFor >= KickRest)
+            _kick = KickTime;
+        _restFor = working ? 0.0f : _restFor + dt;
+        _working = working;
+        _kick = Mathf.Max(0.0f, _kick - dt);
+
+        while (_due.Count < ports.Count)
+            // Out of step with one another from the first puff.
+            _due.Add(CelPuff.Hash(_due.Count, 71));
+        while (_last.Count < ports.Count)
+            _last.Add(ports[_last.Count].At);
+        if (Running)
+        {
+            float kick = KickTime > 0.0f ? _kick / KickTime : 0.0f;
+            float rate = _working ? Mathf.Lerp(WorkRate, KickRate, kick) : IdleRate;
+            for (int i = 0; i < ports.Count; i++)
+            {
+                _due[i] += rate * dt;
+                Vector3 carry = dt > 0.0f ? (ports[i].At - _last[i]) / dt : Vector3.Zero;
+                while (_due[i] >= 1.0f)
+                {
+                    _due[i] -= 1.0f;
+                    Born(ports[i], carry, kick);
+                }
+            }
+        }
+
+        for (int i = 0; i < ports.Count; i++)
+            _last[i] = ports[i].At;
+        _air.RemoveAll(p => _clock - p.Born >= p.Life);
+        if (_air.Count == 0)
+        {
+            _cloud.Visible = false;
+            return;
+        }
+        Vector3 right = eye.X.Normalized(), up = eye.Y.Normalized(), back = eye.Z.Normalized();
+        Vector3 mid = Vector3.Zero;
+        int n = Mathf.Min(_air.Count, Pool);
+        for (int i = 0; i < n; i++)
+        {
+            Puff p = _air[_air.Count - n + i];
+            float a = Mathf.Clamp((_clock - p.Born) / p.Life, 0.0f, 1.0f);
+            // Out fast and slowing, bent by the wind as it goes.
+            float gone = 1.0f - Mathf.Pow(1.0f - a, 2.2f);
+            float rise = p.Rise * _hull;
+            Vector3 side = new(Mathf.Cos(p.Side), 0.0f, Mathf.Sin(p.Side));
+            float age = _clock - p.Born;
+            Vector3 at = p.At + p.Carry * (CarryTime * (1.0f - Mathf.Exp(-age / Mathf.Max(CarryTime, 1e-3f))))
+                         + p.Out * (Seat * _hull + rise * gone)
+                         + Drift * (rise * Mathf.Pow(a, 1.4f))
+                         + side * (0.04f * _hull * Mathf.Sqrt(a));
+            float r = 0.5f * _hull * Mathf.Lerp(p.From, p.To, gone) * Mathf.SmoothStep(0.0f, 0.08f, a);
+            _where[i] = new Vector4(at.X, at.Y, at.Z, r);
+            _looks[i] = new Vector4(p.Tone, p.Seed, Mathf.SmoothStep(ErodeFrom, 1.0f, a), a);
+            mid += at;
+        }
+        mid /= n;
+        // The quad: facing the eye over every puff, its lumps and the ink,
+        // in front of them all (its own depth is not used - the shader writes
+        // the cloud's).
+        float wide = 0.0f, tall = 0.0f, front = 0.0f;
+        for (int i = 0; i < n; i++)
+        {
+            Vector3 at = new(_where[i].X, _where[i].Y, _where[i].Z);
+            float reach = _where[i].W * 1.4f + Blend * _hull + 2.0f;
+            wide = Mathf.Max(wide, Mathf.Abs((at - mid).Dot(right)) + reach);
+            tall = Mathf.Max(tall, Mathf.Abs((at - mid).Dot(up)) + reach);
+            front = Mathf.Max(front, (at - mid).Dot(back) + _where[i].W);
+        }
+        _cloud.GlobalTransform = new Transform3D(
+            new Basis(right * (2.0f * wide), up * (2.0f * tall), back), mid + back * front);
+        _cloud.Visible = true;
+        _look.SetShaderParameter("puffs", _where);
+        _look.SetShaderParameter("looks", _looks);
+        _look.SetShaderParameter("count", n);
+    }
+
+    /// <summary>A puff at <paramref name="port"/>, with the state of this
+    /// moment, moving as the port moves (<paramref name="carry"/>, px/s);
+    /// <paramref name="kick"/> is how much of the kick is left, 0..1.</summary>
+    private void Born((Vector3 At, Vector3 Out) port, Vector3 carry, float kick)
+    {
+        if (_air.Count >= Pool)
+            _air.RemoveAt(0);
+        int k = _births++;
+        float h1 = CelPuff.Hash(k, 11), h2 = CelPuff.Hash(k, 13), h3 = CelPuff.Hash(k, 17);
+        float big = (0.8f + 0.4f * h2) * (_working ? Mathf.Lerp(1.0f, KickSize, kick) : 1.0f);
+        _air.Add(new Puff
+        {
+            At = port.At,
+            Out = port.Out,
+            Carry = carry,
+            Born = _clock,
+            Life = (_working ? WorkLife : IdleLife) * (0.85f + 0.3f * h3),
+            From = (_working ? WorkBorn : IdleBorn) * big,
+            To = (_working ? WorkGrown : IdleGrown) * big,
+            Rise = (_working ? WorkRise : IdleRise) * (0.85f + 0.3f * h1),
+            Tone = _working ? Mathf.Lerp(WorkTone, KickTone, kick) : IdleTone,
+            Seed = h1,
+            Side = h2 * Mathf.Tau,
+        });
+    }
+
+    /// <summary>
+    /// The cloud: every puff a disc on one quad facing the eye, and the discs
+    /// flowed into one shape - a smooth union of their distances (<c>blend</c>
+    /// px wide), so the exhaust has an outline of its own and one ink line
+    /// round it. Each disc's rim is made lumpy by a noise in its own frame, so
+    /// the lumps go with the puff, and it is eaten as it ages by a noise across
+    /// it. The light is the model's ramp on a normal blended from the puffs'
+    /// spheres with the union's weights, so the sun steps one lit top and one
+    /// shaded foot over the whole cloud; its depth is the blended front of the
+    /// same spheres, so the turret still hides what is behind it.
+    /// </summary>
+    private static readonly Shader CloudShader = new()
+    {
+        Code = @"
+shader_type spatial;
+render_mode cull_disabled, specular_disabled, ambient_light_disabled, shadows_disabled;
+stencil_mode write, compare_always, 0;
+uniform vec4 puffs[" + Pool + @"];
+uniform vec4 looks[" + Pool + @"];
+uniform int count = 0;
+uniform float blend = 6.0;
+uniform vec3 tint : source_color = vec3(0.9, 0.94, 1.0);
+uniform float ink_width = 1.1;
+uniform float ink_min_px = 1.0;
+uniform float ink_dark = 0.4;
+" + Toon.NoiseCode + Toon.RampCode + @"
+void fragment() {
+    vec2 p = VERTEX.xy;
+    float sd = 1e9;
+    float wsum = 0.0;
+    float zsum = 0.0;
+    float tsum = 0.0;
+    vec3 nsum = vec3(0.0);
+    float px = 2.0 / (PROJECTION_MATRIX[1][1] * VIEWPORT_SIZE.y);
+    float ink = max(ink_width, ink_min_px * px);
+    for (int i = 0; i < " + Pool + @"; i++) {
+        if (i >= count) break;
+        vec3 c = (VIEW_MATRIX * vec4(puffs[i].xyz, 1.0)).xyz;
+        float r = max(puffs[i].w, 1e-3);
+        vec4 lk = looks[i];
+        vec2 q = p - c.xy;
+        float len = length(q);
+        vec2 u = q / max(len, 1e-4);
+        // Eaten as it ages, from the rim in, by a noise round it: holes cut
+        // through the middle, each inked, read as cheese.
+        float bite = noise3(vec3(u * 2.2 + lk.y * 31.0, lk.w * 1.2));
+        // A share of what is left, not of the whole puff: bitten by a share of
+        // the whole, a puff nearly gone was ten times wider one way than the
+        // other - a star, inked.
+        float left = r * (1.0 - lk.z) * (1.0 + 0.3 * (bite - 0.5));
+        // Gone, rather than a dot of ink.
+        if (left < 2.0 * ink) continue;
+        // Lumps round the rim, in the puff's own frame so they go with it, and
+        // of what is left of it: of the whole puff, the last of a cloud went
+        // to inked splinters.
+        float bump = noise3(vec3(u * 1.4 + lk.y * 17.0, lk.w * 1.5)) - 0.5;
+        float di = len - left * (1.0 + 0.35 * bump);
+        float h = sqrt(max(0.0, 1.0 - len * len / (r * r)));
+        float w = exp(-clamp(di, -r, 3.0 * blend) / blend);
+        nsum += normalize(vec3(q / r, max(h, 0.2))) * w;
+        zsum += (c.z + r * h) * w;
+        tsum += lk.x * w;
+        wsum += w;
+        float k = clamp(0.5 + 0.5 * (di - sd) / blend, 0.0, 1.0);
+        sd = mix(di, sd, k) - blend * k * (1.0 - k);
+    }
+    if (sd > 0.0 || wsum <= 0.0) discard;
+    float tone = tsum / wsum;
+    vec4 clip = PROJECTION_MATRIX * vec4(p, zsum / wsum, 1.0);
+    DEPTH = clip.z / clip.w * 0.5 + 0.5;
+    vec3 col = vec3(tone) * tint;
+    if (sd > -ink) {
+        ALBEDO = vec3(0.0);
+        EMISSION = col * ink_dark;
+    } else {
+        ALBEDO = col;
+        EMISSION = col * shade;
+        NORMAL = normalize(nsum);
+    }
+}
+",
+    };
+}
