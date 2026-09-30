@@ -108,6 +108,8 @@ public sealed partial class CelHit : Node3D
     private Vector3 _at, _n, _glance;
     /// <summary>The impact running is a penetration's.</summary>
     private bool _through;
+    /// <summary>The impact running is two hulls meeting - <see cref="Scrape"/>.</summary>
+    private bool _scrape;
     private MeshInstance3D? _wispOn;
     private Vector3 _wispAt, _wispN;
     private float _wispSince = -1.0f;
@@ -294,8 +296,28 @@ public sealed partial class CelHit : Node3D
     {
         _since = 0.0f;
         _through = false;
+        _scrape = false;
         _at = at;
         _n = n;
+        _glance = glance.Normalized();
+    }
+
+    /// <summary>
+    /// Metal scraped off where two hulls meet - a ram (<c>Tank3DBench.Ram</c>):
+    /// the sparks and the puff of a ricochet at <paramref name="at"/>, thrown
+    /// round <paramref name="glance"/> and out of <paramref name="n"/>, and
+    /// <b>no star</b>. The star is what the round makes of itself on the plate,
+    /// and in a ram there is no round - the sprites' contact fan gave up its
+    /// bloom for the same reason (<c>ProcSpall.Blame(Cause.Contact)</c>).
+    /// </summary>
+    public void Scrape(Vector3 at, Vector3 n, Vector3 glance)
+    {
+        _rounds++;
+        _since = 0.0f;
+        _through = false;
+        _scrape = true;
+        _at = at;
+        _n = n.Normalized();
         _glance = glance.Normalized();
     }
 
@@ -306,6 +328,7 @@ public sealed partial class CelHit : Node3D
     {
         _since = 0.0f;
         _through = true;
+        _scrape = false;
         _at = at;
         _n = n;
         _glance = n;
@@ -405,7 +428,7 @@ public sealed partial class CelHit : Node3D
     private void Star(float t, Basis eye)
     {
         float time = _through ? 6.0f / 60.0f : StarTime;
-        bool on = t < time;
+        bool on = t < time && !_scrape;
         _star!.Visible = on;
         _glow!.Visible = on && GlowEnergy > 0.0f;
         if (!on)

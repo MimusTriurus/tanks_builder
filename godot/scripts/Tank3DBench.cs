@@ -249,6 +249,13 @@ public sealed partial class Tank3DBench : Node3D
             BuildGround();
         Park();
         Mount(_modelTag);
+        if (_otherWanted)
+        {
+            if (_otherCell is Vector2I at)
+                PlaceOther(at, _otherHeading);
+            else
+                LineUp();
+        }
 
         var layer = new CanvasLayer();
         AddChild(layer);
@@ -295,7 +302,7 @@ public sealed partial class Tank3DBench : Node3D
         _rig.AddChild(_model);
         _deckPx = MeasureDeck();
         _beltPaint = null;
-        _foot = MeasureFootprint();
+        _foot = MeasureFootprint(_model, _rig, _modelTag);
         _roofPx = MeasureRoof();
         BuildEffects();
         GD.Print($"tank3d: {_modelTag} class {_profile.Tag} x{_profile.Size:F2}, {_model.PixelsPerUnit:F2} px/unit, "
@@ -369,6 +376,15 @@ public sealed partial class Tank3DBench : Node3D
         float height = GetViewport().GetVisibleRect().Size.Y;
         _camera.Size = height / _zoom;
         Vector3 pivot = _rig.Position;
+        // Both hulls in the picture while a target stands near: toward the
+        // middle between them, eased off with the distance so the rammer stays
+        // on the screen - a switch at one distance was a jump of the view.
+        if (_other is not null)
+        {
+            Vector3 mid = 0.5f * (_rig.Position + _other.Rig.Position);
+            float d = mid.DistanceTo(_rig.Position) / _camera.Size;
+            pivot = pivot.Lerp(mid, 1.0f - Smooth(0.3f, 0.6f, d));
+        }
         // Up the screen by a sixth of the view: screen up is -Z on the ground.
         pivot.Z -= _camera.Size / 6.0f / Squash;
         _camera.Position = pivot + new Vector3(0.0f, back * Squash, back * RiseFactor);
@@ -399,6 +415,9 @@ public sealed partial class Tank3DBench : Node3D
             return;
         float depth = (_rig.Position - _camera.Position).Dot(-_camera.Basis.Z);
         float reach = Reach * ShadowReach;
+        // And the target's, when it stands on the board.
+        if (_other is not null)
+            reach += Mathf.Abs((_other.Rig.Position - _rig.Position).Dot(-_camera.Basis.Z));
         _sun.DirectionalShadowMaxDistance = depth + reach;
         _sun.DirectionalShadowSplit1 = Mathf.Clamp((depth - reach) / (depth + reach), 0.05f, 0.95f);
     }
@@ -774,6 +793,21 @@ void light() {
                 if (qr.Length == 2 && int.TryParse(qr[0], out int q) && int.TryParse(qr[1], out int r))
                     _startCell = new Vector2I(q, r);
             }
+            // The ram's target (Tank3DBench.Ram): its model, and where it stands -
+            // lined up two hexes ahead of the rammer unless a cell is named.
+            else if (a == "--target" && more)
+            {
+                _otherTag = args[++i].ToUpperInvariant();
+                _otherWanted = true;
+            }
+            else if (a == "--target-cell" && more)
+            {
+                string[] qr = args[++i].Split(',');
+                if (qr.Length == 2 && int.TryParse(qr[0], out int q) && int.TryParse(qr[1], out int r))
+                    _otherCell = new Vector2I(q, r);
+                _otherWanted = true;
+            }
+            else if (a == "--target-heading" && more) _otherHeading = F(args[++i], _otherHeading);
             else if (a == "--no-amphibious") _amphibious = false;
             else if (a == "--no-ripples") _ripples.Enabled = false;
             else if (a == "--soft-water") _softWater = true;
@@ -846,6 +880,9 @@ void light() {
             case "left": _turnScripted = 1.0f; break;
             case "right": _turnScripted = -1.0f; break;
             case "straight": _turnScripted = 0.0f; break;
+            case "ram": RamGo(); break;
+            case "target": LineUp(); break;
+            case "untarget": RemoveOther(); break;
             default:
                 if (what.StartsWith("turret=", StringComparison.Ordinal))
                 {
@@ -860,6 +897,8 @@ void light() {
                     Heading = F(what[8..], _heading);
                 else if (what.StartsWith("model=", StringComparison.Ordinal))
                     Pick(what[6..].ToUpperInvariant());
+                else if (what.StartsWith("target=", StringComparison.Ordinal))
+                    PickOther(what[7..].ToUpperInvariant());
                 else
                     GD.Print($"tank3d: --do {what}: no such event");
                 break;
@@ -1036,6 +1075,7 @@ void light() {
         _sinceShot = 99.0f;
         FxReset();
         WaterReset();
+        RamReset();
     }
 
     // --- frame -----------------------------------------------------------
@@ -1087,24 +1127,44 @@ void light() {
         // Afloat nothing is under the tracks: the class's swimming share
         // (MovementProfile.SwimFraction, the board's cap).
         float cap = Swimming ? (float)MovementProfile.SwimFraction : 1.0f;
-        float target = Mathf.Clamp(driveIn, -1.0f, 1.0f) * MaxSpeed * cap;
-        float accel = Mathf.MoveToward(_speed, target, Accel * dt) - _speed;
-        _speed += accel;
-        float a = accel / dt / Accel;
-        float turn = Mathf.Clamp(turnIn, -1.0f, 1.0f) * TurnRate * 0.5f;
-        Heading += turn * dt;
-        float h = Mathf.DegToRad(_heading);
-        var ahead = new Vector3(Mathf.Sin(h), 0.0f, Mathf.Cos(h));
-        Vector3 next = _rig.Position + ahead * _speed * dt;
-        float step = _speed * dt / _model.PixelsPerUnit;
-        if (CanDrive(_rig.Position, next, _speed >= 0.0f ? ahead : -ahead))
-            _rig.Position = next;
+        float target, a, turn, step;
+        if (RamRunning)
+        {
+            // A ram has the hull (Tank3DBench.Ram): pushing, waiting against
+            // the target, backing off - the keys wait for it, as the board's
+            // orders wait for a push.
+            float was = _speed;
+            step = RamDrive(dt);
+            a = (_speed - was) / dt / Accel;
+            target = _speed;
+            turn = 0.0f;
+            turnIn = 0.0f;
+        }
         else
         {
-            // The board says no - a cliff, deep water, its edge: the tank stops
-            // where it is rather than being steered round it.
-            _speed = 0.0f;
-            step = 0.0f;
+            target = Mathf.Clamp(driveIn, -1.0f, 1.0f) * MaxSpeed * cap;
+            float accel = Mathf.MoveToward(_speed, target, Accel * dt) - _speed;
+            _speed += accel;
+            a = accel / dt / Accel;
+            turn = Mathf.Clamp(turnIn, -1.0f, 1.0f) * TurnRate * 0.5f;
+            Heading += turn * dt;
+            float h = Mathf.DegToRad(_heading);
+            var ahead = new Vector3(Mathf.Sin(h), 0.0f, Mathf.Cos(h));
+            Vector3 next = _rig.Position + ahead * _speed * dt;
+            // Another hull in the way: up to it and no further, and the ram if
+            // it was driven into (RamMeets). A turn into it on the spot is undone.
+            if (RamMeets(ref next) && next == _rig.Position && turn != 0.0f)
+                Heading -= turn * dt;
+            step = (next - _rig.Position).Dot(ahead) / _model.PixelsPerUnit;
+            if (CanDrive(_rig.Position, next, _speed >= 0.0f ? ahead : -ahead))
+                _rig.Position = next;
+            else
+            {
+                // The board says no - a cliff, deep water, its edge: the tank stops
+                // where it is rather than being steered round it.
+                _speed = 0.0f;
+                step = 0.0f;
+            }
         }
         Settle(dt);
         _model.Driven += step;
@@ -1138,6 +1198,7 @@ void light() {
         WaterTick(dt);
         _model.Apply();
         FxProcess(dt, _speed, a);
+        RamFrame(dt, _camera.GlobalBasis);
         FrameCamera();
 
         string where = _field is null ? "flat ground"
@@ -1145,9 +1206,11 @@ void light() {
         string fate = Drowning ? "Drowned" : _fate.ToString();
         if (_fate == Fate.Alive && Swimming)
             fate = "Afloat";
-        _hud.Text = $"{_modelTag} 3D, class {_profile.Tag}  {where}  {fate}  {_note}\n"
+        string ram = _other is null ? "" : $"  target {_other.Tag} {_other.Cell}"
+                     + (_ramNote.Length > 0 ? $"  {_ramNote}" : "");
+        _hud.Text = $"{_modelTag} 3D, class {_profile.Tag}  {where}  {fate}  {_note}{ram}\n"
                     + "Space shot   1-4 ricochet front/right/rear/left   Shift+1-4 pierce   Ctrl+1-4 HE   5 round in the ground\n"
-                    + "J burning   K knocked out   X destroyed   Backspace reset   WASD drive   "
+                    + "J burning   K knocked out   X destroyed   T ram   Backspace reset   WASD drive   "
                     + (_model.Turreted ? "Q/E turret   " : "") + "R/F gun   -/= zoom   Tab panel   F12 shot";
         Shots();
         _frame++;
@@ -1265,6 +1328,7 @@ void light() {
             case Key.J: Do(_burning ? "unburn" : "burn"); break;
             case Key.K: Do("knock"); break;
             case Key.X: Do("destroy"); break;
+            case Key.T: Do("ram"); break;
             case Key.Backspace: Do("reset"); break;
             case Key.Tab: _panel?.Flip(); break;
             case Key.Minus: _zoom = Mathf.Max(0.5f, _zoom / 1.25f); break;
@@ -1318,6 +1382,20 @@ void light() {
             $"палуба {_deckPx:F0} px, осадка {_deckPx * _profile.Draught:F0} px"
             + (Drowning ? $", тонет {Sink:P0}" : Swimming ? ", на плаву" : ""));
         _panel.Expand("tank3d.water", true);
+        // The ram (Tank3DBench.Ram): which hull is rammed, where it stands, go.
+        _panel.Heading("tank3d.ram", "таран");
+        if (labels.Count > 0)
+            _panel.Choice("tank3d.ram.target", "цель", labels,
+                          () => _models.FindIndex(m => string.Equals(m, _otherTag, StringComparison.OrdinalIgnoreCase)),
+                          i => PickOther(_models[i]));
+        _panel.Press("tank3d.ram.place", "цель впереди: два гекса прямо, бортом", () => LineUp());
+        _panel.Press("tank3d.ram.go", "таранить  (T)", RamGo);
+        _panel.Press("tank3d.ram.remove", "убрать цель", RemoveOther);
+        _panel.Readout("tank3d.ram.note", () => _other is null
+            ? "цели нет"
+            : $"{_other.Tag}, масса {_other.Profile.Mass} против {_profile.Mass}"
+              + (_ramNote.Length > 0 ? $"\n{_ramNote}" : ""));
+        _panel.Expand("tank3d.ram", true);
         layer.AddChild(_panel);
         _panel.AddHandle();
     }

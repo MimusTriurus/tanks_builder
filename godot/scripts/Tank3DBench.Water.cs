@@ -383,11 +383,12 @@ public sealed partial class Tank3DBench
     /// <summary>
     /// The box round the Hull mesh's vertices and the belts' paths, in the
     /// rig's frame (+Z the way the hull points, +X across) - what the water
-    /// meets. Measured once a model is on the rig.
+    /// meets, and what another hull meets in a ram (Tank3DBench.Ram). Measured
+    /// once a model is on its rig.
     /// </summary>
-    private (float, float, float, float) MeasureFootprint()
+    private static (float, float, float, float) MeasureFootprint(TankModel model, Node3D rig, string tag)
     {
-        Transform3D toRig = _rig.GlobalTransform.AffineInverse();
+        Transform3D toRig = rig.GlobalTransform.AffineInverse();
         var lo = new Vector2(float.MaxValue, float.MaxValue);
         var hi = new Vector2(float.MinValue, float.MinValue);
         void Take(Vector3 p)
@@ -395,24 +396,24 @@ public sealed partial class Tank3DBench
             lo = new Vector2(Mathf.Min(lo.X, p.X), Mathf.Min(lo.Y, p.Z));
             hi = new Vector2(Mathf.Max(hi.X, p.X), Mathf.Max(hi.Y, p.Z));
         }
-        if (_model.Hull is MeshInstance3D hull && hull.Mesh is not null)
+        if (model.Hull is MeshInstance3D hull && hull.Mesh is not null)
         {
             Transform3D x = toRig * hull.GlobalTransform;
             for (int s = 0; s < hull.Mesh.GetSurfaceCount(); s++)
                 foreach (Vector3 v in (Vector3[])hull.Mesh.SurfaceGetArrays(s)[(int)Mesh.ArrayType.Vertex])
                     Take(x * v);
         }
-        foreach (TankModel.Track t in _model.Tracks)
+        foreach (TankModel.Track t in model.Tracks)
         {
             Transform3D x = toRig * t.Node.GlobalTransform;
             foreach (Vector3 p in t.Path)
                 Take(x * p);
         }
         if (lo.X > hi.X)
-            return (0.0f, 0.0f, _model.HullLength * _model.PixelsPerUnit * 0.5f,
-                    _model.Size.X * _model.PixelsPerUnit * 0.5f);
+            return (0.0f, 0.0f, model.HullLength * model.PixelsPerUnit * 0.5f,
+                    model.Size.X * model.PixelsPerUnit * 0.5f);
         Vector2 mid = (lo + hi) * 0.5f, half = (hi - lo) * 0.5f;
-        GD.Print($"tank3d: {_modelTag} footprint {2 * half.Y:F0} x {2 * half.X:F0} px, "
+        GD.Print($"tank3d: {tag} footprint {2 * half.Y:F0} x {2 * half.X:F0} px, "
                  + $"middle {mid.Y:F1} along, {mid.X:F1} across the rig");
         return (mid.Y, mid.X, half.Y, half.X);
     }
