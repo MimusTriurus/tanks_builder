@@ -331,6 +331,18 @@ uniform vec3 mark_soot : source_color = vec3(0.17, 0.16, 0.15);
 uniform vec3 hole_wall : source_color = vec3(0.16, 0.15, 0.15);
 // Leaves burning: the last of a leaf's window glows before it goes (BurnCode).
 uniform bool burn_ember = false;
+// The waterline (Tank3DBench.Water drives it): foam where the water's surface,
+// world height water_y, cuts the armour - water_on is how much of it there is
+// (nought out of the water and gone as the hull drowns), water_pace how fast
+// the hull goes through it, which thickens the foam.
+uniform float water_on = 0.0;
+uniform float water_y = 0.0;
+uniform float water_pace = 0.0;
+uniform float water_band = 3.0;
+uniform float water_push = 3.5;
+uniform float water_wet = 4.0;
+uniform vec3 water_foam : source_color = vec3(0.97, 1.0, 1.0);
+uniform vec3 water_edge : source_color = vec3(0.62, 0.83, 0.87);
 varying vec3 world;
 " + NoiseCode + RampCode + BurnCode + WindCode + FallCode + @"
 void vertex() {
@@ -477,6 +489,28 @@ void fragment() {
             fire *= step(0.06, exp(-age / 1.0));
             if (e < hole * 0.6)
                 glow += ember_tone * fire * 0.9;
+        }
+    }
+    // The waterline: a band of foam at the surface's height on the armour,
+    // wavering with the water and torn along it, white with a pale edge under
+    // it, and the paint a little darker - wet - just over it. Upright plates
+    // only: laid by height, a deck at the water's level went white entire as
+    // the surface passed it. What is under the line the pond's own surface
+    // tints by its depth; this is only the line.
+    if (water_on > 0.001) {
+        float wob = (noise3(vec3(world.xz * 0.09, TIME * 0.7)) - 0.5) * 2.4
+                  + (noise3(vec3(world.xz * 0.27, TIME * 1.7 + 3.0)) - 0.5) * 1.3;
+        float h = world.y - water_y - wob;
+        float upright = 1.0 - smoothstep(0.55, 0.9, abs(face_n.y));
+        float w = (water_band + water_pace * water_push) * upright * water_on;
+        float torn = step(0.26 - 0.16 * water_pace, noise3(vec3(world.xz * 0.13, TIME * 0.45 + 9.0)));
+        float foam = step(0.6, w) * step(-0.45 * w, h) * step(h, w) * torn;
+        float wet = step(0.6, w) * step(w, h) * step(h, w + water_wet * upright) * water_on;
+        c.rgb *= 1.0 - 0.18 * wet;
+        if (foam > 0.5) {
+            c.rgb = h < 0.15 * w ? water_edge : water_foam;
+            glow += c.rgb * 0.45;
+            sooted = 1.0;
         }
     }
     ALBEDO = c.rgb;

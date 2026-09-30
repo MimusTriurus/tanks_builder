@@ -333,7 +333,45 @@ public sealed partial class Tank3DBench
                   halfWide, Mathf.Abs(_speed), _wakePace, wet && Mathf.Abs(_speed) > 2.0f);
         _wake.Bow(middle, way, halfLen, halfWide, wet ? _wakePace : 0.0f, Mathf.Abs(_speed));
         _wake.Tick(dt);
+        Waterline(dt, ahead, halfLen);
     }
+
+    private float _waterOn;
+
+    /// <summary>
+    /// The foam on the armour where the water cuts it - <see cref="Toon"/>'s
+    /// <c>water_*</c>, on every cel material of the model. The surface is the
+    /// highest water under the hull's middle and its two ends, one body of water
+    /// being one surface: a hull nosing into a ford has the line on its bow
+    /// before its middle is wet. There while any of it is under, gone as it
+    /// drowns (the sprite's foam goes by <c>1 - sink</c> too), thicker the
+    /// faster it goes through.
+    /// </summary>
+    private void Waterline(float dt, Vector3 ahead, float halfLen)
+    {
+        if (_field is null || _model.Cel.Count == 0)
+            return;
+        float level = float.NegativeInfinity;
+        foreach (float along in new[] { 0.0f, 0.9f, -0.9f })
+        {
+            Vector2I c = _field.FlatCellAt(Board(_rig.Position + ahead * (halfLen * along)));
+            if (_field.InBounds(c) && _field.IsWater(c))
+                level = Mathf.Max(level, _field.WaterTop(c));
+        }
+        bool wet = level > _rig.Position.Y * RiseFactor + 0.5f;
+        float want = wet ? 1.0f - (DeepHere && _wreck.Out ? Sink : 0.0f) : 0.0f;
+        _waterOn = Mathf.MoveToward(_waterOn, want, dt * 4.0f);
+        if (wet)
+            _waterLevel = level;
+        foreach (ShaderMaterial cel in _model.Cel)
+        {
+            cel.SetShaderParameter("water_on", _waterOn);
+            cel.SetShaderParameter("water_y", _waterLevel / RiseFactor);
+            cel.SetShaderParameter("water_pace", _wakePace);
+        }
+    }
+
+    private float _waterLevel;
 
     /// <summary>What a thrown piece lands on, world Y: the ground, or in deep
     /// water the drawn bed under it - the face there is the level the rules
