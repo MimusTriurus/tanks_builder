@@ -422,6 +422,7 @@ public sealed partial class Stage3D : Node3D
         Markers();
         Soot();
         _deepInk?.SetShaderParameter("foam", Mathf.Max(0.0f, Foam));
+        _deepInk?.SetShaderParameter("cel", CelWater ? 1.0f : 0.0f);
         PushSwell();
     }
 
@@ -4343,6 +4344,13 @@ void fragment() {
     /// up a beach - never anything that decides. See Ripples.</summary>
     public Ripples? Wash;
 
+    /// <summary>Whether the water draws its foam and glints in the 3D models'
+    /// look - stepped into flat tones with hard edges (<c>cel</c> in the surface
+    /// shader) - rather than faded in. Off on every sprite board; the 3D bench
+    /// (<see cref="Tank3DBench"/>) turns it on, so the pond stands beside the
+    /// models' cel splash, wake and ripples in one hand.</summary>
+    public bool CelWater;
+
     /// <summary>How much of the ripple field's own slope goes into the surface
     /// normal.
     ///
@@ -4667,6 +4675,10 @@ uniform float foam = 0.0;
 uniform float foam_cut = {1};
 uniform float foam_rung = {3};
 uniform float foam_reach = 1.0;
+// The model's look (Stage3D.CelWater, Tank3D): foam and glints stepped into
+// flat tones with hard edges rather than faded in.
+uniform float cel = 0.0;
+uniform vec3 cel_rim : source_color = vec3(0.62, 0.83, 0.87);
 uniform vec3 foam_ink : source_color = vec3(1.0, 1.0, 1.0);
 uniform float state[{0}];
 uniform vec2 mark[{0}];
@@ -4837,6 +4849,9 @@ float shoreline(int who, vec2 px, bool hem) {{
     return mix(a, b, fract(f)) - (hem ? 0.0 : hull_dip[who]);
 }}
 
+float cel_cut(float x) {{
+    return clamp(x / max(fwidth(x), 1e-4) + 0.5, 0.0, 1.0);
+}}
 void vertex() {{
     world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }}
@@ -4976,8 +4991,15 @@ void fragment() {{
     // be a wet surface with a dry ring in it.
     vec3 soft = normalize(vec3(-hx * relief * 0.25 - wslope.x, e,
                                -hz * relief * 0.25 - wslope.y));
-    col += vec3(pow(max(dot(n, half_v), 0.0), gloss)) * glint
-         + vec3(pow(max(dot(soft, half_v), 0.0), sheen_gloss)) * sheen;
+    float spark = pow(max(dot(n, half_v), 0.0), gloss) * glint;
+    float wet = pow(max(dot(soft, half_v), 0.0), sheen_gloss) * sheen;
+    // Stepped too under cel: a glint is a flat white fleck with an edge, the
+    // sheen one flat lift of the water where it is, not a gradient.
+    if (cel > 0.5) {{
+        spark = cel_cut(spark - 0.28) * 0.9;
+        wet = cel_cut(wet - 0.045) * 0.05;
+    }}
+    col += vec3(spark + wet);
 
     // Foam where the water meets something, and it is asked twice because the
     // two ways of asking fail in opposite places.
@@ -5153,7 +5175,8 @@ void fragment() {{
                                              abs(back.y - ahead))));
     }}
 
-    float edge = clamp(max(max(lip, bank), max(lv, collar)), 0.0, 1.0) * broken;
+    float edge_raw = clamp(max(max(lip, bank), max(lv, collar)), 0.0, 1.0);
+    float edge = edge_raw * broken;
     // The trail and the crest take the surface's texture only on top, and for
     // one reason: both are water that is being churned through right now, so
     // they hold together as a body. Broken as hard as the shore is, a crest that
@@ -5167,7 +5190,24 @@ void fragment() {{
     // the cut is the water a hull is standing in front of itself.
     float crest = smoothstep(wash_crest, wash_crest + wash_band, wsh);
     float lane = max(max(trail, prow), crest) * mix(broken, 1.0, 0.55);
-    col = mix(col, foam_ink, clamp(max(edge, lane), 0.0, 1.0) * foam);
+    // Under cel the edges are not cut by the shred, only thinned by it: the
+    // shred breaks the foam into patches, which faded in reads as foam on
+    // moving water and stepped hard reads as a line with holes in it - the
+    // waterline round a hull came out dashed. At its middle an edge is near
+    // one, so a floor of 0.55 keeps the line whole over the core's step while
+    // its width still wanders with the shred.
+    float edged = cel > 0.5 ? edge_raw * mix(0.55, 1.0, broken) : edge;
+    float froth = clamp(max(edged, lane), 0.0, 1.0) * foam;
+    // In the model's look (Tank3D sets cel): the same amount of foam stepped
+    // into two flat tones with a hard edge - white where there is most of it,
+    // the pale water round it - rather than faded into the water.
+    if (cel > 0.5) {{
+        float core = cel_cut(froth - 0.34);
+        float rim = cel_cut(froth - 0.12) * (1.0 - core);
+        col = mix(col, cel_rim, rim * 0.85);
+        col = mix(col, foam_ink, core);
+    }} else
+        col = mix(col, foam_ink, froth);
 
     // And the film, spent on what the water <b>adds</b> rather than on ALPHA.
     // Translucency was the obvious way to feather a tip and it is the one thing

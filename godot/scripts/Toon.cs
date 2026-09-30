@@ -503,7 +503,7 @@ void fragment() {
         float h = world.y - water_y - wob;
         float upright = 1.0 - smoothstep(0.55, 0.9, abs(face_n.y));
         float w = (water_band + water_pace * water_push) * upright * water_on;
-        float torn = step(0.26 - 0.16 * water_pace, noise3(vec3(world.xz * 0.13, TIME * 0.45 + 9.0)));
+        float torn = step(0.2 - 0.12 * water_pace, noise3(vec3(world.xz * 0.13, TIME * 0.45 + 9.0)));
         float foam = step(0.6, w) * step(-0.45 * w, h) * step(h, w) * torn;
         float wet = step(0.6, w) * step(w, h) * step(h, w + water_wet * upright) * water_on;
         c.rgb *= 1.0 - 0.18 * wet;

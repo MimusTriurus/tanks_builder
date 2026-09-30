@@ -999,6 +999,7 @@ void fragment() {
         _ruts?.Clear();
         _splash?.Reset();
         _wake?.Clear();
+        _ripples.Settle();
         _beltWas.Clear();
         _hitNode = null;
         foreach (var (mat, albedo) in _paint)

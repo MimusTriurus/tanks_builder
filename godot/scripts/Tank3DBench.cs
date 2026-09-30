@@ -69,6 +69,9 @@ public sealed partial class Tank3DBench : Node3D
     /// <summary><c>--fx2d</c>: the sprites' fire and column on the card, as
     /// before <see cref="CelBurn"/>, to hold against it.</summary>
     private bool _fx2d;
+    /// <summary><c>--soft-water</c>: the board's water as the sprite benches draw
+    /// it - foam and glints faded in rather than stepped (<see cref="Stage3D.CelWater"/>).</summary>
+    private bool _softWater;
     private float _zoom = 2.5f;
     private float _heading = 215.0f;
     private string? _capturePath;
@@ -291,6 +294,7 @@ public sealed partial class Tank3DBench : Node3D
         _model = next;
         _rig.AddChild(_model);
         _deckPx = MeasureDeck();
+        _beltPaint = null;
         _roofPx = MeasureRoof();
         BuildEffects();
         GD.Print($"tank3d: {_modelTag} class {_profile.Tag} x{_profile.Size:F2}, {_model.PixelsPerUnit:F2} px/unit, "
@@ -484,10 +488,18 @@ public sealed partial class Tank3DBench : Node3D
         {
             Field = _field, Origin = Vector2.Zero, Eye = eye,
             Surf = WaterArt.Load(AssetRoot.Water, _tile.HexRect),
+            // The pond as a wave field (Ripples): the stage fits it to the water
+            // and reads it for the surface's normals and foam; the hull, the
+            // splash and the air strike it (Tank3DBench.Water).
+            Wash = _ripples,
+            CelWater = !_softWater,
         };
         AddChild(_stage);
         _field.ShowField = false;
         BuildShadows();
+        _celRipples = new CelRipples { Name = "CelRipples" };
+        AddChild(_celRipples);
+        _celRipples.Build(_field, Squash, RiseFactor, HexWidth * 0.5f);
     }
 
     /// <summary>The cell the tank opens on: the map's first parking.</summary>
@@ -762,6 +774,8 @@ void light() {
                     _startCell = new Vector2I(q, r);
             }
             else if (a == "--no-amphibious") _amphibious = false;
+            else if (a == "--no-ripples") _ripples.Enabled = false;
+            else if (a == "--soft-water") _softWater = true;
             else if (a == "--flat") _flat = true;
             else if (a == "--pbr") _pbr = true;
             else if (a == "--fx2d") _fx2d = true;
@@ -1292,6 +1306,12 @@ void light() {
         _panel.Heading("tank3d.water", "вода");
         _panel.Toggle("tank3d.water.amphibious", "ОПВТ: плывёт, без него тонет",
                       () => _amphibious, v => _amphibious = v);
+        _panel.Toggle("tank3d.water.ripples", "рябь  (--no-ripples)", () => _ripples.Enabled, v =>
+        {
+            _ripples.Enabled = v;
+            if (!v)
+                _ripples.Settle();
+        });
         _panel.Press("tank3d.water.pond", "к пруду: на берег, носом в воду", ToPond);
         _panel.Readout("tank3d.water.note", () =>
             $"палуба {_deckPx:F0} px, осадка {_deckPx * _profile.Draught:F0} px"

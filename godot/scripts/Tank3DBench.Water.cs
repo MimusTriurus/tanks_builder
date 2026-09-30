@@ -232,11 +232,37 @@ public sealed partial class Tank3DBench
             _stage?.Plunge(Board(_rig.Position) - new Vector2(0.0f, top), top, Along(way),
                            halfLen, might, Plunge.Style.Cinematic);
         _buoy.Jolt(TankTick.PlungeKick * share);
+        Rings(way, halfLen, might);
         GD.Print($"tank3d: {_modelTag} into the pond at {cell}: water {top:F1}, bed {_field.BedAt(cell):F1}, "
                  + $"deck {_deckPx:F1} px, draught {_deckPx * _profile.Draught:F1} px, might {might:F2}"
                  + (_amphibious ? "" : " - no wading gear, the engine is drowned"));
         if (!_amphibious)
             Drown();
+    }
+
+    /// <summary>
+    /// The pond's wave field (<see cref="Ripples"/>), handed to the stage as its
+    /// <see cref="Stage3D.Wash"/>: the stage fits it to the water and reads it
+    /// for the surface's normals, glints and foam. Here it is pushed - by the
+    /// hull going through (<see cref="Ripples.Note"/>), by the splash, by the
+    /// air - and stepped once a frame, as the board does it.
+    /// </summary>
+    private readonly Ripples _ripples = new();
+
+    /// <summary>The field drawn in the model's look - see <see cref="CelRipples"/>.</summary>
+    private CelRipples? _celRipples;
+
+    /// <summary>The splash's rings: <see cref="Stage3D.Plunge"/>'s three strikes -
+    /// the nose hardest, the flanks half - so the ring the pond carries to the
+    /// bank is the hull's shape and not a point's.</summary>
+    private void Rings(Vector3 way, float halfLen, float might)
+    {
+        var at = new Vector2(_rig.Position.X, _rig.Position.Z);
+        var along = new Vector2(way.X, way.Z).Normalized();
+        var across = new Vector2(-along.Y, along.X);
+        _ripples.Strike(at + along * halfLen * 0.8f, might * Stage3D.Waves);
+        _ripples.Strike(at + across * halfLen * 0.55f, might * Stage3D.Waves * 0.5f);
+        _ripples.Strike(at - across * halfLen * 0.55f, might * Stage3D.Waves * 0.5f);
     }
 
     /// <summary>The water stops the engine: out with no round in it - no flash,
@@ -275,6 +301,7 @@ public sealed partial class Tank3DBench
             _air = new Bubbles { Name = "Air" };
             AddChild(_air);
             _air.Build(7);
+            _air.Struck = (at, might) => _ripples.Strike(at, might);
         }
         Vector2I cell = CellHere;
         float top = _field.WaterTop(cell);
@@ -333,6 +360,12 @@ public sealed partial class Tank3DBench
                   halfWide, Mathf.Abs(_speed), _wakePace, wet && Mathf.Abs(_speed) > 2.0f);
         _wake.Bow(middle, way, halfLen, halfWide, wet ? _wakePace : 0.0f, Mathf.Abs(_speed));
         _wake.Tick(dt);
+        // The hull shoves the water it goes through - the board's dipole
+        // (Ripples.Note), by the same pace as the wake.
+        if (wet && Mathf.Abs(_speed) > 2.0f)
+            _ripples.Note(new Vector2(middle.X, middle.Z), new Vector2(way.X, way.Z), _wakePace);
+        _ripples.Tick(dt);
+        _celRipples?.Show(_ripples);
         Waterline(dt, ahead, halfLen);
     }
 
@@ -363,15 +396,40 @@ public sealed partial class Tank3DBench
         _waterOn = Mathf.MoveToward(_waterOn, want, dt * 4.0f);
         if (wet)
             _waterLevel = level;
+        // Not on the belts' links: a link is a few px of steel with a gap to the
+        // next, so a band laid across the upper run came out as a dotted line -
+        // the gaps the user found in the waterline. The water's own edge foam
+        // lies along the belt there already.
+        _beltPaint ??= BeltPaint();
         foreach (ShaderMaterial cel in _model.Cel)
         {
-            cel.SetShaderParameter("water_on", _waterOn);
+            cel.SetShaderParameter("water_on", _beltPaint.Contains(cel) ? 0.0f : _waterOn);
             cel.SetShaderParameter("water_y", _waterLevel / RiseFactor);
             cel.SetShaderParameter("water_pace", _wakePace);
         }
     }
 
     private float _waterLevel;
+
+    /// <summary>The cel materials the belts' links are drawn with - kept out of
+    /// the waterline. Made once per model: <see cref="Mount"/> clears it.</summary>
+    private System.Collections.Generic.HashSet<ShaderMaterial>? _beltPaint;
+
+    private System.Collections.Generic.HashSet<ShaderMaterial> BeltPaint()
+    {
+        var paint = new System.Collections.Generic.HashSet<ShaderMaterial>();
+        foreach (TankModel.Track t in _model.Tracks)
+        {
+            if (t.Links.Multimesh?.Mesh is not Mesh link)
+                continue;
+            for (int s = 0; s < link.GetSurfaceCount(); s++)
+                if (link.SurfaceGetMaterial(s) is ShaderMaterial m)
+                    paint.Add(m);
+            if (t.Links.MaterialOverride is ShaderMaterial o)
+                paint.Add(o);
+        }
+        return paint;
+    }
 
     /// <summary>What a thrown piece lands on, world Y: the ground, or in deep
     /// water the drawn bed under it - the face there is the level the rules
