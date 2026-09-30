@@ -151,7 +151,7 @@ public sealed partial class Tree3DBench : Node3D
         if (!_pbr)
             Toon.Dress(scene, KeepsNormals, IsFoliage, TreeStencil);
         if (_mask is not null)
-            Ghost(scene);
+            Ghost(scene, MaskFor(_models.Count));
         var holder = new Node3D { Name = name, Scale = Vector3.One * ppm };
         holder.AddChild(scene);
         AddChild(holder);
@@ -249,34 +249,53 @@ public sealed partial class Tree3DBench : Node3D
 
     private ShaderMaterial? _line;
 
-    /// <summary>A white stand-in for every mesh of the tree, on the mask's layer.</summary>
-    private static void Ghost(Node node)
+    /// <summary>A stand-in for every mesh of the tree, on the mask's layer.</summary>
+    private static void Ghost(Node node, Material mask)
     {
         foreach (Node child in node.GetChildren())
-            Ghost(child);
+            Ghost(child, mask);
         if (node is not MeshInstance3D m || m.Mesh is null)
             return;
         m.AddChild(new MeshInstance3D
         {
             Mesh = m.Mesh,
             Layers = MaskLayer,
-            MaterialOverride = MaskMaterial,
+            MaterialOverride = mask,
             CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
         });
     }
 
-    private static readonly ShaderMaterial MaskMaterial = new()
+    private readonly List<ShaderMaterial> _masks = new();
+
+    /// <summary>The mask of the <paramref name="i"/>-th tree: its number in R
+    /// (1..7 of 8, round again past seven - two trees a number apart are never
+    /// the two that overlap here) and its depth in G, over the slab of depth
+    /// the trees stand in (<see cref="FrameCamera"/>).</summary>
+    private ShaderMaterial MaskFor(int i)
     {
-        Shader = new Shader
-        {
-            Code = @"
+        var m = new ShaderMaterial { Shader = MaskShader };
+        m.SetShaderParameter("id", (i % 7 + 1) / 8.0f);
+        _masks.Add(m);
+        return m;
+    }
+
+    private static readonly Shader MaskShader = new()
+    {
+        Code = @"
 shader_type spatial;
 render_mode unshaded, cull_disabled, shadows_disabled, fog_disabled;
+uniform float id = 1.0;
+uniform float near = 0.0;
+uniform float span = 1.0;
 void fragment() {
-    ALBEDO = vec3(1.0);
+    ALBEDO = vec3(id, clamp((-VERTEX.z - near) / span, 0.0, 1.0), 0.0);
 }",
-        },
     };
+
+    /// <summary>The slab of view depth the mask's G spans, board px either side
+    /// of the board's middle: 8 bits over it are ~5 px of depth, and trees
+    /// that overlap stand tens of px apart.</summary>
+    private const float MaskReach = 600.0f;
 
     private static readonly Shader OutlineShader = new()
     {
@@ -293,12 +312,17 @@ void vertex() {
 }
 void fragment() {
     vec2 px = width / VIEWPORT_SIZE;
-    float empty = 0.0;
+    vec4 me = texture(mask, SCREEN_UV);
+    bool edge = false;
     for (int i = 0; i < 8; i++) {
         float a = float(i) * 0.785398;
-        empty = max(empty, 1.0 - texture(mask, SCREEN_UV + vec2(cos(a), sin(a)) * px).r);
+        vec4 q = texture(mask, SCREEN_UV + vec2(cos(a), sin(a)) * px);
+        // nothing there: the silhouette; another tree, and farther: this
+        // tree's edge over it - so the line is drawn on the front one only
+        edge = edge || q.a < 0.5
+            || (me.a >= 0.5 && abs(q.r - me.r) > 0.03 && q.g > me.g + 0.004);
     }
-    if (empty < 0.5) {
+    if (!edge) {
         discard;
     }
     ALBEDO = texture(screen, SCREEN_UV).rgb * dark;
@@ -469,6 +493,11 @@ void light() {
             _line?.SetShaderParameter("width", Mathf.Max(1.0f, Toon.InkWidth * _zoom));
         }
         float depth = (pivot - _camera.Position).Dot(-_camera.Basis.Z);
+        foreach (ShaderMaterial m in _masks)
+        {
+            m.SetShaderParameter("near", depth - MaskReach);
+            m.SetShaderParameter("span", 2.0f * MaskReach);
+        }
         const float reach = 600.0f;
         _sun.DirectionalShadowMaxDistance = depth + reach;
         _sun.DirectionalShadowSplit1 = Mathf.Clamp((depth - reach) / (depth + reach), 0.05f, 0.95f);
