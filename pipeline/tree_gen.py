@@ -142,19 +142,34 @@ DETAIL = {
     "sprite": {"leaf_size": 0.42, "density": 60.0, "leaf_sides": 16, "puff_subdiv": 3,
                "twig_sides": 6, "twig_step": 0.06, "ink": True, "voxel": 0.02, "wood_tris": 0,
                "twig_depth": 3, "min_up": -1.0, "puff_scale": 1.0},
-    "game":   {"leaf_size": 0.30, "density": 18.0, "leaf_sides": 4, "puff_subdiv": 1,
-               "twig_sides": 4, "twig_step": 0.25, "ink": False, "voxel": 0.03, "wood_tris": 3000,
-               "twig_depth": 2, "min_up": -0.35, "puff_scale": 1.15},
 }
-# Game leaves are 0.30 m and at most 1.25 of that: a leaf's box diagonal is
-# then under 0.04 of the tree's (~10.9 m), where Toon's ink weight is ~0.03.
-# At 0.40 the big ones got half a shell each. What 0.30 leaves uncovered the
-# core now carries: its colour is mid-green, the mass of the puff, and the
-# leaves are the light on it. `min_up` skips faces whose normal points down
-# more than that - under 30 degrees the board never sees a puff's underside.
-# `puff_scale` stands in for the sprite's fringe: 0.42 m leaves tilted tip-out
-# push a puff's outline ~15% past its core, and the game's short flat leaves
-# do not, so without it the model's puffs came out smaller than the sprite's.
+# The game model, by tier (seed 1, docs/trees.md "Детализация модели"). Under
+# 50 trees on a map, so the budget is set by the look, not by a count:
+#   "low"  - 18k tris: a bare icosahedron core (20 faces) read as a stone and
+#            its 0.30 m rhombi as confetti on it; kept as the floor.
+#   "mid"  - 121k: the sprite's core, fewer and smaller leaves; the crown's
+#            mass matches the sprite's on the check sheet.   <- default
+#   "full" - 301k: the sprite's leaves; indistinguishable from "mid" on the
+#            board, 2.5 times its cost.
+# The risk of "mid" and "full" is Toon's ink: it skips pieces under ~0.035 of
+# the model's diagonal (~10.9 m), and their leaves, to 0.45 / 0.52 m, are
+# over it; at 0.40 Toon drew half a shell round each big leaf. Only the board
+# can say whether that still shows. `min_up` skips faces whose normal points
+# down more than that. `puff_scale` stands in for the sprite's fringe where
+# the leaves are too short and flat to push the outline past the core.
+GAME_TIERS = {
+    "low":  {"leaf_size": 0.30, "density": 18.0, "leaf_sides": 4, "puff_subdiv": 1,
+             "twig_sides": 4, "twig_step": 0.25, "ink": False, "voxel": 0.03, "wood_tris": 3000,
+             "twig_depth": 2, "min_up": -0.35, "puff_scale": 1.15},
+    "mid":  {"leaf_size": 0.36, "density": 40.0, "leaf_sides": 8, "puff_subdiv": 3,
+             "twig_sides": 4, "twig_step": 0.25, "ink": False, "voxel": 0.03, "wood_tris": 3000,
+             "twig_depth": 2, "min_up": -1.0, "puff_scale": 1.05},
+    "full": {"leaf_size": 0.42, "density": 60.0, "leaf_sides": 16, "puff_subdiv": 3,
+             "twig_sides": 6, "twig_step": 0.06, "ink": False, "voxel": 0.03, "wood_tris": 3000,
+             "twig_depth": 3, "min_up": -1.0, "puff_scale": 1.0},
+}
+GAME_TIER = "mid"
+DETAIL["game"] = GAME_TIERS[GAME_TIER]
 
 # px of the tree itself, foot to crown, not of the canvas: PropTier draws trees
 # at 1/8 and was tuned on art 1009..1041 tall. Fitting the canvas to 1024
@@ -1498,7 +1513,8 @@ def build(cfg=None):
     """One tree under `<name>.World` at `offset`. Returns its numbers."""
     cfg = {**CONFIG, **(cfg or {})}
     detail = cfg["detail"]
-    cfg = {**DETAIL[detail], **cfg}
+    base = GAME_TIERS[cfg.get("tier", GAME_TIER)] if detail == "game" else DETAIL[detail]
+    cfg = {**base, **cfg}
     burnt = cfg["state"] == "burnt"
     rng = random.Random(cfg["seed"])
     name = tree_name(cfg)
@@ -1507,7 +1523,8 @@ def build(cfg=None):
     mats = materials(detail)
     ng = clump_group(detail, mats)
     leaf = bpy.data.objects.get(LEAVES[detail])
-    if leaf is None:
+    # a leaf of `sides` has 2 * sides faces; one cached from another tier is remade
+    if leaf is None or len(leaf.data.polygons) != 2 * cfg["leaf_sides"]:
         leaf = leaf_mesh(LEAVES[detail], sides=cfg["leaf_sides"],
                          width=0.56 if detail == "sprite" else 0.60, uv=detail == "game")
     if leaf.name not in col.objects:
@@ -2127,7 +2144,7 @@ def make(seed, name=None, out_dir=None, cfg=None, spacing=9.0):
                     "elevation": SPRITE_ELEVATION,
                     "centre": shot["centre"],
                     "feet": {"live": shot["feet"][0], "burnt": shot["feet"][1]}},
-        "model": {"file": "tree.glb", "tris": tris,
+        "model": {"file": "tree.glb", "tris": tris, "tier": base.get("tier", GAME_TIER),
                   "burn": {"uv": "TEXCOORD_1.x", "value": "burn, 0 green .. 1 done",
                            MAT_NAMES["game"]["leaf"]: "gone once burn > x",
                            MAT_NAMES["game"]["core"]: "gone once burn > x",
