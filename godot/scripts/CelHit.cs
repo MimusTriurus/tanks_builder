@@ -25,7 +25,9 @@ namespace TankSpriteTest;
 /// it turns with the turret and lays with the gun, and stays until
 /// <see cref="Reset"/>. A ricochet leaves a gouge - bare steel scraped the way
 /// the round went on, the paint burnt round it; a penetration a hole - black,
-/// a torn rim of bare steel; HE a round burn with a torn edge, pitted with steel. Fresh,
+/// a torn rim of bare steel; HE a round burn with a torn edge, pitted with steel;
+/// a ram (<see cref="Kind.Dent"/>, put by <see cref="Cast"/> where the hulls met)
+/// a dent, drawn by bending the light's normal into a bowl rather than by paint. Fresh,
 /// the bare steel glows and cools in about a second. The newest
 /// <see cref="Toon.MaxMarks"/> a material carries are kept.</item>
 /// <item><b>Impact</b> of a ricochet - a star of light at the plate for four
@@ -46,13 +48,16 @@ namespace TankSpriteTest;
 public sealed partial class CelHit : Node3D
 {
     /// <summary>What a round leaves: the shader's kinds.</summary>
-    public enum Kind { Gouge = 0, Hole = 1, Splash = 2 }
+    public enum Kind { Gouge = 0, Hole = 1, Splash = 2, Dent = 3 }
 
     /// <summary>A mark's radius, hull lengths, by kind. A hole's is bigger
     /// than a gouge's: at the gouge's, its black was a pixel or two across and
     /// the penetration read as nothing. HE's is the biggest: at 0.04 it was
     /// five pixels at the turret's foot and gone.</summary>
     public float GougeSize = 0.028f, HoleSize = 0.045f, SplashSize = 0.065f;
+    /// <summary>A ram's dent (<see cref="Kind.Dent"/>), hull lengths: a hull's
+    /// corner pressed into a plate, a good deal bigger than a round's gouge.</summary>
+    public float DentSize = 0.08f;
 
     /// <summary>How far off the side's straight line a round may come, deg,
     /// and how steeply it may dip.</summary>
@@ -97,6 +102,9 @@ public sealed partial class CelHit : Node3D
     }
 
     private readonly List<Part> _parts = new();
+    /// <summary>The turret, the mantlet and the gun: what stands over the hull
+    /// and never strikes in a ram (<see cref="Leading"/>).</summary>
+    private readonly List<Node3D> _aloft = new();
     private readonly List<Mark> _marks = new();
     private readonly Dictionary<ShaderMaterial, (Vector4[] At, Vector4[] Dir, Vector4[] Nrm)> _upload = new();
     private IReadOnlyList<ShaderMaterial> _paint = System.Array.Empty<ShaderMaterial>();
@@ -167,6 +175,10 @@ public sealed partial class CelHit : Node3D
     {
         _parts.Clear();
         _paint = paint;
+        _aloft.Clear();
+        foreach (Node3D? n in new[] { model.Turret, model.Mantlet, model.Barrel })
+            if (n is not null)
+                _aloft.Add(n);
         var running = new HashSet<Node>();
         foreach (TankModel.Track t in model.Tracks)
             running.Add(t.Node);
@@ -258,10 +270,124 @@ public sealed partial class CelHit : Node3D
         return null;
     }
 
+    /// <summary>
+    /// Where a line from <paramref name="from"/> along <paramref name="way"/>
+    /// (world) first meets a part that takes a mark - the belts and wheels do
+    /// not - with the plate's normal turned toward the line's start. Null when
+    /// it meets nothing, or a running part first. For a mark put where
+    /// something touched, not where a round landed (<see cref="Aim"/>).
+    /// </summary>
+    public (MeshInstance3D Part, Vector3 At, Vector3 N)? Cast(Vector3 from, Vector3 way)
+    {
+        _rounds++;
+        way = way.Normalized();
+        Part? best = null;
+        float bestD = float.MaxValue;
+        Vector3 bestAt = Vector3.Zero, bestN = Vector3.Up;
+        foreach (Part p in _parts)
+        {
+            if (!p.Node.IsVisibleInTree())
+                continue;
+            Transform3D inv = p.Node.GlobalTransform.AffineInverse();
+            var hit = p.Hits.IntersectRay(inv * from, (inv.Basis * way).Normalized());
+            if (hit.Count == 0 || !hit.ContainsKey("position"))
+                continue;
+            Vector3 at = p.Node.GlobalTransform * (Vector3)hit["position"];
+            float d = (at - from).Dot(way);
+            if (d <= 0.0f || d >= bestD)
+                continue;
+            bestD = d;
+            best = p;
+            bestAt = at;
+            bestN = (p.Node.GlobalBasis * (Vector3)hit["normal"]).Normalized();
+        }
+        if (best is null || !best.Takes)
+            return null;
+        if (bestN.Dot(way) > 0.0f)
+            bestN = -bestN;
+        return (best.Node, bestAt, bestN);
+    }
+
+    /// <summary>
+    /// How high the part of the model that stands furthest along
+    /// <paramref name="toward"/> is, world: the mean height of the vertices of
+    /// the parts that take marks within <paramref name="band"/> px of the
+    /// furthest - the hull's and the skirts', not the turret's or the gun's,
+    /// which overhang the other hull rather than strike it. What strikes in a ram - the bow's edge, a side's skirts - and
+    /// so where the dent it presses into the other hull runs. Null with no
+    /// parts.
+    /// </summary>
+    public float? Leading(Vector3 toward, float band)
+    {
+        toward = new Vector3(toward.X, 0.0f, toward.Z).Normalized();
+        var points = new List<Vector3>();
+        foreach (Part p in _parts)
+        {
+            if (!p.Takes || !p.Node.IsVisibleInTree() || p.Node.Mesh is not Mesh mesh
+                || _aloft.Exists(a => a == p.Node || a.IsAncestorOf(p.Node)))
+                continue;
+            Transform3D x = p.Node.GlobalTransform;
+            for (int s = 0; s < mesh.GetSurfaceCount(); s++)
+                foreach (Vector3 v in (Vector3[])mesh.SurfaceGetArrays(s)[(int)Mesh.ArrayType.Vertex])
+                    points.Add(x * v);
+        }
+        if (points.Count == 0)
+            return null;
+        float most = float.MinValue;
+        foreach (Vector3 v in points)
+            most = Mathf.Max(most, v.Dot(toward));
+        float sum = 0.0f;
+        int n = 0;
+        foreach (Vector3 v in points)
+            if (v.Dot(toward) >= most - band)
+            {
+                sum += v.Y;
+                n++;
+            }
+        return sum / n;
+    }
+
+    /// <summary>How long a dent may be against its width - the shader looks for
+    /// a mark's pixels within four radii of its middle.</summary>
+    public const float DentLongest = 3.5f;
+
+    /// <summary>
+    /// A ram's dent on <paramref name="part"/> at <paramref name="at"/>, on a
+    /// plate facing <paramref name="n"/>: a trough along
+    /// <paramref name="axis"/> (world; laid on the plate), reaching
+    /// <paramref name="halfLength"/> px either side of the point - the edge
+    /// that struck it and how much of it touched. Its width is
+    /// <see cref="DentSize"/> times <paramref name="scale"/>; the length rides
+    /// on the mark's way, as a gouge's glance does.
+    /// </summary>
+    public void Dent(MeshInstance3D part, Vector3 at, Vector3 n, Vector3 axis, float halfLength, float scale = 1.0f)
+    {
+        Vector3 on = axis - axis.Dot(n) * n;
+        if (on.LengthSquared() < 1e-6f)
+            on = n.Cross(Vector3.Up);
+        if (on.LengthSquared() < 1e-6f)
+            on = Vector3.Right;
+        Transform3D inv = part.GlobalTransform.AffineInverse();
+        float r = _hull * DentSize * (0.85f + 0.3f * CelPuff.Hash(_rounds, 13)) * scale;
+        float longer = Mathf.Clamp(halfLength / Mathf.Max(r, 1e-3f), 1.0f, DentLongest);
+        _marks.Add(new Mark
+        {
+            Owner = part,
+            At = inv * at,
+            Way = (inv.Basis * on.Normalized()).Normalized() * longer,
+            N = (inv.Basis * n).Normalized(),
+            R = r,
+            Born = _now,
+            Kind = Kind.Dent,
+        });
+        if (_marks.Count > 64)
+            _marks.RemoveAt(0);
+    }
+
     /// <summary>A mark of <paramref name="kind"/> on <paramref name="part"/> at
     /// <paramref name="at"/> (world), on a plate facing <paramref name="n"/>,
     /// the round having come along <paramref name="way"/>.</summary>
-    public void Leave(MeshInstance3D part, Vector3 at, Vector3 n, Vector3 way, Kind kind)
+    public void Leave(MeshInstance3D part, Vector3 at, Vector3 n, Vector3 way, Kind kind, float scale = 1.0f)
     {
         // A gouge runs the way the round glanced, along the plate.
         Vector3 on = way - way.Dot(n) * n;
@@ -271,8 +397,11 @@ public sealed partial class CelHit : Node3D
         if (on.LengthSquared() < 1e-6f)
             on = Vector3.Right;
         Transform3D inv = part.GlobalTransform.AffineInverse();
-        float r = _hull * (kind switch { Kind.Gouge => GougeSize, Kind.Hole => HoleSize, _ => SplashSize })
-                  * (0.85f + 0.3f * CelPuff.Hash(_rounds, 13));
+        float r = _hull * (kind switch
+                  {
+                      Kind.Gouge => GougeSize, Kind.Hole => HoleSize, Kind.Dent => DentSize, _ => SplashSize,
+                  })
+                  * (0.85f + 0.3f * CelPuff.Hash(_rounds, 13)) * scale;
         _marks.Add(new Mark
         {
             Owner = part,

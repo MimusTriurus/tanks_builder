@@ -70,6 +70,8 @@ public sealed partial class Tank3DBench
         public float Slid;
         public Vector3 Way;
         public CelRuts Scuff = null!;
+        /// <summary>Its marks - the dents the rams left (<see cref="Dents"/>).</summary>
+        public CelHit Hits = null!;
         public readonly List<CelRuts.Belt> Belts = new();
 
         public Vector3 Ahead
@@ -177,10 +179,14 @@ public sealed partial class Tank3DBench
             Soil = new Color(0.18f, 0.14f, 0.10f, 0.42f), Wall = new Color(0.12f, 0.09f, 0.07f, 0.55f),
         };
         AddChild(scuff);
+        var hits = new CelHit { Name = "TargetHits" };
+        AddChild(hits);
+        hits.Build(model.HullLength * model.PixelsPerUnit);
+        hits.Targets(model, model.Cel);
         _other = new Other
         {
             Model = model, Rig = rig, Profile = profile, Tag = tag.ToUpperInvariant(),
-            Foot = MeasureFootprint(model, rig, tag.ToUpperInvariant()), Scuff = scuff,
+            Foot = MeasureFootprint(model, rig, tag.ToUpperInvariant()), Scuff = scuff, Hits = hits,
         };
         GD.Print($"tank3d: target {_other.Tag} class {profile.Tag} x{profile.Size:F2}, mass {profile.Mass}");
     }
@@ -191,6 +197,7 @@ public sealed partial class Tank3DBench
             return;
         _other.Rig.QueueFree();
         _other.Scuff.QueueFree();
+        _other.Hits.QueueFree();
         _other = null;
         _ram = RamPhase.None;
     }
@@ -376,6 +383,7 @@ public sealed partial class Tank3DBench
         float hullPx = _model.HullLength * _model.PixelsPerUnit;
         Vector3 seam = Foot(seamFlat) + Vector3.Up * (TankTick.RamSparkHigh * hullPx);
         Fans(seam, way, hullPx * TankTick.RamSparkFor(_profile));
+        Dents(me, them, seam.Y, way, o);
 
         // Each thrown by the speed it changed by, the struck end down and, on a
         // side, the struck side down - the roll the board has not got.
@@ -491,6 +499,127 @@ public sealed partial class Tank3DBench
             Vector3 glance = along * side + Vector3.Up * 0.55f + plate * 0.2f;
             _fans[i]!.Scrape(seam, (along * side + Vector3.Up * 0.3f).Normalized(), glance);
         }
+    }
+
+    /// <summary>
+    /// The dents the meeting leaves, on both hulls - <b>cosmetic</b>: the rules
+    /// say a ram only moves ("повреждений ни один из двух не получает"), so
+    /// nothing is counted and nothing is knocked out; the metal is only shown
+    /// to have met. Sized by the board's own table read the way
+    /// <c>--ram-dents</c> reads it (<see cref="Gunnery.RamLevel"/>, each way
+    /// round): a level of one presses a dent, nought only scrapes the paint - a
+    /// light hull running into a heavy one scratches it. The rammer's class
+    /// sizes both, as it sizes the sparks (<see cref="TankTick.RamSparkFor"/>).
+    ///
+    /// <b>The shape is what struck it</b>: the other hull's face that met this
+    /// one, whose edge presses a trough along itself - as long as the two
+    /// footprints overlap along that edge, which is where they touched. Nose
+    /// on into a side, the rammer's whole bow edge; at an angle a short one,
+    /// nearly a wedge.
+    /// </summary>
+    private void Dents(in Box me, in Box them, float seamY, Vector3 way, Other o)
+    {
+        float scale = TankTick.RamSparkFor(_profile) / TankTick.RamSpark;
+        var flat = new Vector2(way.X, way.Z);
+        // The rammer's face that struck and the target's that was struck.
+        Vector2 mine = Face(me, flat), theirs = Face(them, -flat);
+        // Each runs at the height of what struck it: the part of the other hull
+        // that stands furthest toward it - the rammer's bow edge, the target's
+        // skirts. At the seam's one height (the board's belt line) the trough
+        // lay on a skirt's top edge, its upper wall off on the belt, and the
+        // dent was a pale band with no shade to it.
+        float band = 0.03f * _model.HullLength * _model.PixelsPerUnit;
+        float byMe = _celHit?.Leading(way, band) ?? seamY;
+        float byThem = o.Hits.Leading(-way, band) ?? seamY;
+        // Each dent's plate is asked of the struck hull's own side: the one of
+        // its footprint looking back at the other hull.
+        Press(o.Hits, Touch(me, them, mine, byMe), way, Out(them, -flat),
+              Gunnery.RamLevel(_profile, o.Profile), scale, o.Model.HullLength * o.Model.PixelsPerUnit);
+        Press(_celHit, Touch(me, them, theirs, byThem), -way, Out(me, flat),
+              Gunnery.RamLevel(o.Profile, _profile), scale, _model.HullLength * _model.PixelsPerUnit);
+    }
+
+    /// <summary>The way along the side of a footprint that looks most along
+    /// <paramref name="toward"/> - its edge, flat.</summary>
+    private static Vector2 Face(in Box b, Vector2 toward)
+    {
+        // Endwise, the edge runs across the hull; broadside, along it.
+        return Mathf.Abs(b.A.Dot(toward)) >= Mathf.Abs(b.L.Dot(toward)) ? b.L : b.A;
+    }
+
+    /// <summary>That side's outward normal, world, flat.</summary>
+    private static Vector3 Out(in Box b, Vector2 toward)
+    {
+        Vector2 o = Mathf.Abs(b.A.Dot(toward)) >= Mathf.Abs(b.L.Dot(toward)) ? b.A : b.L;
+        if (o.Dot(toward) < 0.0f)
+            o = -o;
+        return new Vector3(o.X, 0.0f, o.Y);
+    }
+
+    /// <summary>Where the two footprints touch along an edge: the middle of
+    /// their overlap on it (world, at the seam's height) and its half-length.</summary>
+    private static (Vector3 At, float Half, Vector2 Edge) Touch(in Box p, in Box q, Vector2 edge, float y)
+    {
+        (float lo, float hi) Span(in Box b)
+        {
+            float c = b.C.Dot(edge), e = b.HalfLen * Mathf.Abs(b.A.Dot(edge)) + b.HalfWide * Mathf.Abs(b.L.Dot(edge));
+            return (c - e, c + e);
+        }
+        var (plo, phi) = Span(p);
+        var (qlo, qhi) = Span(q);
+        float lo = Mathf.Max(plo, qlo), hi = Mathf.Min(phi, qhi);
+        float mid = 0.5f * (lo + hi);
+        // Across the edge: halfway between the two hulls' middles' lines.
+        var normal = new Vector2(-edge.Y, edge.X);
+        float off = 0.5f * (p.C.Dot(normal) + q.C.Dot(normal));
+        Vector2 at = edge * mid + normal * off;
+        // The seam between the two faces rather than the hulls' middles: the
+        // nearest points of each, across the edge.
+        Vector2 a = Nearest(p, at), b = Nearest(q, at);
+        at = edge * mid + normal * (0.5f * (a.Dot(normal) + b.Dot(normal)));
+        return (new Vector3(at.X, y, at.Y), Mathf.Max(0.5f * (hi - lo), 0.0f), edge);
+    }
+
+    /// <summary>
+    /// One hull's mark: a line from where they touched into it along the ram,
+    /// on the first plate it meets that looks back the way the blow came
+    /// (<paramref name="side"/>, its footprint's struck side) - raised a step at
+    /// a time and moved along the seam while what it meets first is a belt, or
+    /// the end of a skirt panel: a thin plate's end looks along the hull, and a
+    /// trough laid on it went across the side and spilt over every panel of
+    /// that paint. A trough along the striking edge where the table says it
+    /// dents, a scratch of paint where it does not.
+    /// </summary>
+    private static void Press(CelHit? hits, (Vector3 At, float Half, Vector2 Edge) touch, Vector3 way,
+                              Vector3 side, int level, float scale, float hullPx)
+    {
+        if (hits is null)
+            return;
+        var axis = new Vector3(touch.Edge.X, 0.0f, touch.Edge.Y);
+        foreach (float up in new[] { 0.0f, 0.08f, 0.16f, 0.24f })
+            foreach (float along in new[] { 0.0f, 0.3f, -0.3f, 0.6f, -0.6f })
+            {
+                Vector3 from = touch.At + Vector3.Up * (up * hullPx) + axis * (along * touch.Half)
+                               - way * (0.5f * hullPx);
+                if (hits.Cast(from, way) is not { } hit)
+                    continue;
+                // Facing the blow within about fifty degrees, up or down (a
+                // sloped glacis) or round (a skirt canted out).
+                if (hit.N.Dot(side) < 0.64f)
+                    continue;
+                // The plate's slope from the mesh, its bearing from the side:
+                // the mesh's own normal at one point may be a bevel's - LTR's
+                // skirt panels are cut at 45 degrees at their ends - and a
+                // trough laid in a bevel's plane was clipped square across the
+                // side it spilt on to.
+                float rise = Mathf.Clamp(hit.N.Y, -0.95f, 0.95f);
+                Vector3 n = (side * Mathf.Sqrt(1.0f - rise * rise) + Vector3.Up * rise).Normalized();
+                if (level >= 1)
+                    hits.Dent(hit.Part, hit.At, n, axis, touch.Half, scale);
+                else
+                    hits.Leave(hit.Part, hit.At, n, way, CelHit.Kind.Gouge, 0.8f);
+                return;
+            }
     }
 
     /// <summary>The ram over, one way or the other: the script lets go.</summary>
@@ -760,12 +889,16 @@ public sealed partial class Tank3DBench
         foreach (CelHit? fan in _fans)
             fan?.Reset();
         if (_other is not null)
+        {
             _other.Scuff.Clear();
+            _other.Hits.Reset();
+        }
     }
 
     private void RamFrame(float dt, Basis eye)
     {
         OtherTick(dt);
+        _other?.Hits.Tick(dt, eye);
         foreach (CelHit? fan in _fans)
             fan?.Tick(dt, eye);
     }

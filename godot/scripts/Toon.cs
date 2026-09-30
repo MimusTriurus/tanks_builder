@@ -319,7 +319,7 @@ uniform float char_cover = 0.9;
 uniform vec3 ember_tone : source_color = vec3(1.0, 0.36, 0.06);
 // Hit marks (CelHit drives them): each is a spot on a plate in the world -
 // its middle and radius, the way a glancing round went on (and the kind:
-// 0 a gouge, 1 a hole, 2 an HE splash), the plate's normal and when it came.
+// 0 a gouge, 1 a hole, 2 an HE splash, 3 a ram's dent), the plate's normal and when it came.
 uniform vec4 mark_at[" + MaxMarks + @"];
 uniform vec4 mark_dir[" + MaxMarks + @"];
 uniform vec4 mark_nrm[" + MaxMarks + @"];
@@ -329,6 +329,12 @@ uniform vec3 steel : source_color = vec3(0.50, 0.52, 0.56);
 uniform vec3 hole_tone : source_color = vec3(0.035, 0.03, 0.028);
 uniform vec3 mark_soot : source_color = vec3(0.17, 0.16, 0.15);
 uniform vec3 hole_wall : source_color = vec3(0.16, 0.15, 0.15);
+// A dent's bowl: how steeply its sides turn the light (the slope at its
+// steepest is 1.54 of this), and how dark the crease at its rim.
+uniform float dent_depth = 1.0;
+uniform float dent_crease = 0.55;
+// How far the folds along it turn the light.
+uniform float dent_buckle = 0.7;
 // Leaves burning: the last of a leaf's window glows before it goes (BurnCode).
 uniform bool burn_ember = false;
 // The waterline (Tank3DBench.Water drives it): foam where the water's surface,
@@ -410,6 +416,9 @@ void fragment() {
     // The plate's own facing in the world, for the marks: the lighting
     // normals are per face (Facet), so it is flat across a plate.
     vec3 face_n = normalize((INV_VIEW_MATRIX * vec4(NORMAL, 0.0)).xyz);
+    // A dent bends the light's normal (kind 3, below); the others paint.
+    vec3 dent_n = face_n;
+    bool bent = false;
     for (int i = 0; i < " + MaxMarks + @"; i++) {
         if (i >= mark_count) break;
         vec3 d = world - mark_at[i].xyz;
@@ -457,6 +466,52 @@ void fragment() {
             e = length(q) / r + torn * 0.5;
             bare = 0.74 + 0.12 * petals;
             hole = 0.58 - 0.14 * petals;
+        } else if (kind > 2.5) {
+            // A dent - a ram's (CelHit.Kind.Dent): the imprint of what struck
+            // the plate, which is the other hull's edge - a trough along that
+            // edge (the mark's way, laid on the plate) as long as the two hulls
+            // touched (its glance is the length in half-widths), not a round
+            // bowl: a round one is a shell's. Drawn by its light, not its paint:
+            // the normal is tipped toward the trough's line by its slope
+            // ((1 - s^2)^2 off a segment, deepest along it), and the ramp steps
+            // that into a lit wall on the side turned to the sun and a shaded
+            // one across from it; a dark crease on the upper rim, and no soot:
+            // nothing burned.
+            vec3 ax = normalize(way - n * dot(way, n) + vec3(1e-5));
+            vec3 up_on = vec3(0.0, 1.0, 0.0) - n * n.y;
+            vec3 across = cross(n, ax);
+            if (dot(across, up_on) < 0.0)
+                across = -across;
+            float along = dot(q, ax), side = dot(q, across);
+            // The segment inside the rounded ends.
+            float run = r * max(glance - 1.0, 0.0);
+            float over = max(abs(along) - run, 0.0);
+            // Steeper below the line than above it: the edge presses in at the
+            // line, and above it the plate falls away gently toward where the
+            // other hull's glacis leaned.
+            float wide = side < 0.0 ? 0.65 : 1.0;
+            vec2 p = vec2(over, side / wide) / r;
+            float s = length(p);
+            float rr = s * (1.0 + torn * 0.35);
+            if (rr >= 1.0) continue;
+            vec3 outward = s > 1e-3 ? normalize(ax * sign(along) * p.x + across * p.y / wide) : vec3(0.0);
+            float slope = dent_depth * 4.0 * rr * (1.0 - rr * rr) / wide;
+            // Buckled: pressed along its length the plate gathered into folds
+            // across the edge, at uneven steps, which the ramp steps into lumps
+            // of light and shade. A smooth trough read as one dark slot along
+            // the side; folds along it were lost in its shade.
+            float fold = sin(along / r * 2.4 + (noise3(world / (r * 1.3) + vec3(float(i))) - 0.5) * 4.0);
+            float band = 1.0 - smoothstep(0.7, 1.0, rr);
+            dent_n = normalize(n - outward * slope - ax * (dent_buckle * fold * band));
+            bent = true;
+            // No bare steel in the middle: a fleck of it read as a sticker, lit
+            // white on a plate in the sun. The paint gives, it does not come off.
+            // The crease on the upper rim only, where the fold turns from the
+            // sky: round the whole rim it was an outline drawn on the plate.
+            float upper = dot(outward, normalize(up_on + vec3(1e-5)));
+            if (rr > 0.86 && upper > -0.15 + 0.2 * torn)
+                c.rgb *= dent_crease;
+            continue;
         } else {
             // HE on armour: a round burn with a lumpy, torn edge, a bare
             // pitted middle. Not a star: its long rays read as a sticker.
@@ -491,6 +546,8 @@ void fragment() {
                 glow += ember_tone * fire * 0.9;
         }
     }
+    if (bent)
+        NORMAL = normalize((VIEW_MATRIX * vec4(dent_n, 0.0)).xyz);
     // The waterline: a band of foam at the surface's height on the armour,
     // wavering with the water and torn along it, white with a pale edge under
     // it, and the paint a little darker - wet - just over it. Upright plates
