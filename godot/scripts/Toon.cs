@@ -206,7 +206,10 @@ bool burn_gone(float at, vec3 p) {
     /// <c>CUSTOM0</c> and the ink's normal is written over it. Then what went
     /// under the ground is crushed into a mat on it, soft rather than cut:
     /// <c>y' = m ln(1 + e^(y / m))</c>, <c>m = fall_mat * fall_down</c>, never
-    /// under <c>fall_lift</c>. The normal turns with it. <c>fall_on</c> off -
+    /// under <c>fall_lift</c> - but not what stood under the ground from the
+    /// start, the root plate: what goes further under stays under, hidden by
+    /// the ground, and crushed it came up as a mat of earth over the lying
+    /// crown. The normal turns with it. <c>fall_on</c> off -
     /// every tank - nothing here runs. The cel pass, the ink and the crown's
     /// mask (<c>Tree3DBench</c>) all call <c>fall_pose</c>, so the three and the
     /// shadow go over as one.
@@ -228,6 +231,7 @@ vec3 fall_turn(vec3 r, vec3 k, float th) {
 }
 void fall_pose(inout vec3 v, inout vec3 n) {
     if (!fall_on) return;
+    bool under = v.y < 0.0;
     float w = clamp((v.y - fall_y0) / max(fall_h - fall_y0, 1e-3), 0.0, 1.0);
     w *= w;
     vec3 d = normalize(vec3(fall_dir.x, 0.0, fall_dir.y));
@@ -237,7 +241,7 @@ void fall_pose(inout vec3 v, inout vec3 n) {
     v = piv + fall_turn(v - piv, k, th);
     n = fall_turn(n, k, th);
     float m = fall_mat * max(fall_down, 1e-3);
-    if (v.y <= 4.0 * m)
+    if (!under && v.y <= 4.0 * m)
         v.y = max(m * log(1.0 + exp(v.y / m)), fall_lift * min(fall_down * 4.0, 1.0));
 }
 ";

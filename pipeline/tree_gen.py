@@ -247,6 +247,13 @@ INK_WIDTH = {"wood": 0.035, "twig": 0.014}
 GAME_BARK = (0.15, 0.075, 0.03)
 GAME_CHAR = (0.032, 0.028, 0.026)
 GAME_CORE = (0.12, 0.16, 0.034)
+# The root plate's (PLATE): earth darker and greyer than the board's ground, so
+# the torn plate reads against it, and the roots darker than the bark. At 0.075
+# the plate stood up as a black coin: most of it faces away from the sun once it
+# is up, and its shade tone of a dark earth is black. The roots at 0.8 of the
+# bark came out pale tan stubs - the bark is lit 2.2 (`bark_light`).
+GAME_SOIL = (0.15, 0.10, 0.06)
+GAME_ROOT = 0.45
 PALETTE_FROM = 0.30
 # What the board's sun does to them, taken back: every game colour is written
 # times this. Tuned in Blender's toon_preview, the model stood on the Tree3D
@@ -517,7 +524,8 @@ MAT_NAMES = {
     "sprite": {"leaf": "TreeLeafMat", "core": "TreeFoliageCore", "bark": "TreeBarkMat",
                "char": "TreeCharMat", "ink": "TreeOutline", "ink_char": "TreeOutlineChar"},
     "game": {"leaf": "TreeGame.Leaf", "core": "TreeGame.Core", "bark": "TreeGame.Bark",
-             "char": "TreeGame.Char", "twig": "TreeGame.Twig"},
+             "char": "TreeGame.Char", "twig": "TreeGame.Twig",
+             "soil": "TreeGame.Soil", "root": "TreeGame.Root"},
 }
 GROUPS = {"sprite": "TreeClump", "game": "TreeClumpGame"}
 LEAVES = {"sprite": "TreeLeaf", "game": "TreeLeafGame"}
@@ -537,7 +545,10 @@ def materials(detail):
             "char": _flat_mat(names["char"], _board(GAME_CHAR)),
             # the same bark, a material of its own because it is the one that
             # *appears* at its threshold where leaf and core disappear
-            "twig": _flat_mat(names["twig"], _board(GAME_BARK))}
+            "twig": _flat_mat(names["twig"], _board(GAME_BARK)),
+            # the root plate, under the ground until the tree goes over (PLATE)
+            "soil": _flat_mat(names["soil"], _board(GAME_SOIL)),
+            "root": _flat_mat(names["root"], _board(np.array(GAME_BARK) * GAME_ROOT))}
 
 
 def reset():
@@ -1505,6 +1516,137 @@ def _wood_objects(name, S, wood, ink, cfg, col, world, twigs,
     return out
 
 
+# The root plate: what comes up out of the ground with a tree that is knocked
+# over - a slab of earth with the roots through it and clods stuck on them.
+# The game model only, under the ground (the board's ground writes depth, so it
+# is not seen while the tree stands) and turned up with the tree by the fall:
+# its back comes out of the ground as a wall of earth, its front goes further
+# under. In base_radius (0.55 m): radius 2.6 (1.43 m), the slab 1.3 deep at the
+# middle and 0.45 at the rim - at 1.0 and 0.2 it stood up as a coin - the rim
+# torn by `torn`, the underside lumpy by `lumps`. Its own seed stream, so the
+# tree above is the same with it or without.
+PLATE = {"radius": 2.6, "depth": 1.3, "rim": 0.45, "top": -0.03, "torn": 0.22, "sides": 18,
+         "lumps": 0.14, "roots": 9, "sinkers": 3, "clods": 18}
+_PLATE_SALT = 100_151
+
+
+def _bm_tube(bm, pts, radii, sides, mat):
+    """A closed tube along `pts` with `radii`, capped at both ends."""
+    rings = []
+    for i, (c, r) in enumerate(zip(pts, radii)):
+        a = (pts[min(i + 1, len(pts) - 1)] - pts[max(i - 1, 0)]).normalized()
+        u = a.cross(Vector((0, 0, 1)))
+        if u.length < 1e-3:
+            u = a.cross(Vector((1, 0, 0)))
+        u.normalize()
+        v = a.cross(u)
+        rings.append([bm.verts.new(c + (u * math.cos(t) + v * math.sin(t)) * r)
+                      for t in (2 * math.pi * k / sides for k in range(sides))])
+    for r0, r1 in zip(rings, rings[1:]):
+        for k in range(sides):
+            f = bm.faces.new((r0[k], r0[(k + 1) % sides], r1[(k + 1) % sides], r1[k]))
+            f.material_index = mat
+    for ring, flip in ((rings[0], True), (rings[-1], False)):
+        f = bm.faces.new(list(reversed(ring)) if flip else ring)
+        f.material_index = mat
+
+
+def _plate_object(name, cfg, mats, col, world):
+    """The root plate (PLATE) as `<name>.Plate`: soil and roots, two materials."""
+    rng = random.Random(cfg["seed"] * _PLATE_SALT + 7)
+    rb = cfg["base_radius"]
+    R, D, rim_t, top = PLATE["radius"] * rb, PLATE["depth"] * rb, PLATE["rim"] * rb, PLATE["top"]
+    n = PLATE["sides"]
+    rr = [R * (1.0 + PLATE["torn"] * (rng.random() * 2.0 - 1.0)) for _ in range(n)]
+    rr = [(rr[i - 1] + 2.0 * rr[i] + rr[(i + 1) % n]) / 4.0 for i in range(n)]   # torn, not jagged
+    bm = bmesh.new()
+    SOIL, ROOT = 0, 1
+    fr = (0.5, 0.82, 1.0)
+
+    def at(i, f, z):
+        a = 2 * math.pi * i / n
+        return Vector((math.cos(a) * rr[i] * f, math.sin(a) * rr[i] * f, z))
+
+    tc = bm.verts.new((0, 0, top))
+    top_rings = [[bm.verts.new(at(i, f, top - 0.04 * f)) for i in range(n)] for f in fr]
+    # the underside: deepest at the middle, lumpy, meeting the top at the rim's thickness
+    bot_rings = []
+    for f in reversed(fr):
+        depth = rim_t + (D - rim_t) * (1.0 - f * f) ** 0.6
+        bot_rings.append([bm.verts.new(at(i, f, top - depth + rng.uniform(-1.0, 1.0) * PLATE["lumps"] * rb))
+                          for i in range(n)])
+    bc = bm.verts.new((0, 0, top - D))
+
+    def quad_rings(a, b):
+        # wound so the face looks out of the slab: (a_i, a_j, b_j, b_i) with
+        # the rings running counter-clockwise from above faces in - the top
+        # down, the rim inward, the underside up - and the board drew the ink
+        # shell's inside through the rim: a black coin
+        for i in range(n):
+            j = (i + 1) % n
+            bm.faces.new((b[i], b[j], a[j], a[i])).material_index = SOIL
+
+    for i in range(n):
+        bm.faces.new((tc, top_rings[0][i], top_rings[0][(i + 1) % n])).material_index = SOIL
+    for a, b in zip(top_rings, top_rings[1:]):
+        quad_rings(a, b)
+    quad_rings(top_rings[-1], bot_rings[0])               # the rim's torn wall
+    for a, b in zip(bot_rings, bot_rings[1:]):
+        quad_rings(a, b)
+    for i in range(n):
+        bm.faces.new((bc, bot_rings[-1][(i + 1) % n], bot_rings[-1][i])).material_index = SOIL
+
+    # roots through it: out from under the collar, some past the rim (torn off
+    # there), and a few sinkers straight down out of the underside
+    ends = []
+    for k in range(PLATE["roots"]):
+        a = 2 * math.pi * (k + rng.uniform(-0.3, 0.3)) / PLATE["roots"]
+        d = Vector((math.cos(a), math.sin(a), 0.0))
+        L = R * rng.uniform(0.75, 1.25)
+        z1 = top - rng.uniform(0.25, 0.55) * D
+        pts = [Vector((0, 0, -0.10)) + d * 0.15 * rb / 0.55, d * L * 0.45 + Vector((0, 0, z1 * 0.8)),
+               d * L + Vector((0, 0, z1))]
+        r0 = rng.uniform(0.10, 0.15) * rb / 0.55
+        _bm_tube(bm, pts, [r0, r0 * 0.6, r0 * 0.28], 5, ROOT)
+        ends.append((pts, r0))
+    for k in range(PLATE["sinkers"]):
+        a = rng.uniform(0, 2 * math.pi)
+        d = Vector((math.cos(a), math.sin(a), 0.0)) * rng.uniform(0.15, 0.45) * R
+        z0 = top - D * 0.7
+        pts = [d + Vector((0, 0, z0)), d * 1.1 + Vector((0, 0, z0 - 0.35 * D)),
+               d * 1.15 + Vector((0, 0, z0 - rng.uniform(0.6, 0.9) * D))]
+        r0 = rng.uniform(0.05, 0.08) * rb / 0.55
+        _bm_tube(bm, pts, [r0, r0 * 0.7, r0 * 0.3], 5, ROOT)
+        ends.append((pts, r0))
+    # clods stuck on: along the roots where they leave the slab, and on its underside
+    for k in range(PLATE["clods"]):
+        pts, r0 = ends[rng.randrange(len(ends))]
+        t = rng.uniform(0.35, 0.9)
+        c = pts[1].lerp(pts[2], t) if t > 0.5 else pts[0].lerp(pts[1], t * 2)
+        if k % 3 == 0:     # on the underside instead
+            i = rng.randrange(n)
+            f = rng.uniform(0.3, 0.9)
+            depth = rim_t + (D - rim_t) * (1.0 - f * f) ** 0.6
+            c = at(i, f, top - depth)
+        rad = rng.uniform(0.10, 0.22) * rb / 0.55
+        g = bmesh.ops.create_icosphere(bm, subdivisions=1, radius=rad)
+        sq = Vector((rng.uniform(0.8, 1.3), rng.uniform(0.8, 1.3), rng.uniform(0.6, 0.9)))
+        for v in g["verts"]:
+            v.co = Vector((v.co.x * sq.x, v.co.y * sq.y, v.co.z * sq.z)) + c
+        for f_ in {f for v in g["verts"] for f in v.link_faces}:
+            f_.material_index = SOIL
+    me = bpy.data.meshes.new(f"{name}.Plate")
+    bm.to_mesh(me)
+    bm.free()
+    me.materials.append(mats["soil"])
+    me.materials.append(mats["root"])
+    _uv_layers(me)
+    ob = bpy.data.objects.new(f"{name}.Plate", me)
+    col.objects.link(ob)
+    ob.parent = world
+    return ob
+
+
 def _lump(n, R, cfg, seed_vec):
     """A puff's radius along unit direction `n` (before the squash)."""
     # sampled on the unit sphere, so a coarse game puff and a fine sprite puff
@@ -1600,9 +1742,9 @@ def build(cfg=None):
         leaf = leaf_mesh(LEAVES[detail], sides=cfg["leaf_sides"], width=width, uv=detail == "game", rim=rim)
         leaf["width"], leaf["rim"] = width, rim
     if detail == "game":   # the cached materials take this build's bark
-        for k in ("bark", "twig"):
+        for k, f in (("bark", 1.0), ("twig", 1.0), ("root", GAME_ROOT)):
             b = mats[k].node_tree.nodes.get("Principled BSDF")
-            b.inputs["Base Color"].default_value = (*_board(np.array(GAME_BARK) * cfg["bark_light"]), 1.0)
+            b.inputs["Base Color"].default_value = (*_board(np.array(GAME_BARK) * cfg["bark_light"] * f), 1.0)
     if leaf.name not in col.objects:
         col.objects.link(leaf)
     leaf.hide_viewport = leaf.hide_render = True
@@ -1652,6 +1794,8 @@ def build(cfg=None):
                   twig_mat=mats["twig"] if game else None,
                   twig_burn=(lambda owner, ci: _twig_burn(cfg["seed"], owner, ci)) if game else None,
                   twig_inside=inside if game else None)
+    if game:
+        _plate_object(name, cfg, mats, col, world)
     if not burnt:
         ids = {it.name: it.identifier for it in ng.interface.items_tree
                if getattr(it, "in_out", None) == "INPUT"}
@@ -1959,6 +2103,8 @@ class toon_preview:
 
     def _burn(self, N, L, role, colour):
         B = float(self.burn)
+        if role in ("soil", "root"):   # the root plate never burns
+            return colour, None
         if role in ("bark", "char"):
             return _mixc(N, L, colour, GAME_CHAR, B, (-500, 900)), None
         uv = N.new("ShaderNodeUVMap")
@@ -2048,6 +2194,10 @@ def _mesh_shots(name, burns, folder):
     mesh.parent = tmp
     mesh.matrix_world = keep
     mesh.hide_render = False
+    # no ground in these shots, and the sprite beside them has no root plate:
+    # it would hang under the tree (the fall sheets have a ground and keep it)
+    own = mesh.data
+    mesh.data = _without(own, (MAT_NAMES["game"]["soil"], MAT_NAMES["game"]["root"]))
     shots = []
     try:
         for b in burns:
@@ -2056,11 +2206,26 @@ def _mesh_shots(name, burns, folder):
                 sprites([f"{name}.Check"], [shot])
             shots.append(shot)
     finally:
+        shown = mesh.data
+        mesh.data = own
+        bpy.data.meshes.remove(shown)
         mesh.parent = None
         mesh.matrix_world = keep
         mesh.hide_render = True
         bpy.data.objects.remove(tmp, do_unlink=True)
     return shots
+
+
+def _without(me, names):
+    """A copy of `me` without the faces of the materials `names`."""
+    out = me.copy()
+    bm = bmesh.new()
+    bm.from_mesh(out)
+    gone = {i for i, m in enumerate(out.materials) if m and m.name in names}
+    bmesh.ops.delete(bm, geom=[f for f in bm.faces if f.material_index in gone], context="FACES")
+    bm.to_mesh(out)
+    bm.free()
+    return out
 
 
 def game_check(name, path, sprite_png):
@@ -2288,6 +2453,10 @@ def fall_spec(ob, cfg=None):
                            "lift_m * min(4 down, 1)); m = mat_m * down, down = trunk angle / rest angle",
                   "mat_m": FALL["mat"], "lift_m": FALL["lift"]},
         "timber": TIMBER,
+        # the root plate (PLATE): what comes up at the collar's back, and the pit it leaves
+        "plate": {"radius_m": round(PLATE["radius"] * {**CONFIG, **(cfg or {})}["base_radius"], 3),
+                  "depth_m": round(PLATE["depth"] * {**CONFIG, **(cfg or {})}["base_radius"], 3),
+                  "top_m": PLATE["top"]},
     }
 
 
@@ -2430,7 +2599,10 @@ def fall_check(name, path, azimuths=(0.0, 315.0, 270.0, 45.0, 90.0), burn=None, 
             for j, tq in enumerate(ts):
                 s = min(samples, key=lambda x: abs(x[0] - tq))
                 posed = _pose(co0, bend, h, az, s[1], s[2])
-                posed[:, 2] = _crush(posed[:, 2], s[1] / math.radians(lie[az]))
+                # under the ground from the start (the root plate) is not
+                # crushed: what goes further under stays under, hidden
+                up = co0[:, 2] > 0.0
+                posed[up, 2] = _crush(posed[up, 2], s[1] / math.radians(lie[az]))
                 me.vertices.foreach_set("co", posed.ravel())
                 me.update()
                 p = os.path.join(os.path.dirname(path), f"_{name}_fall{int(az):03d}_{j:03d}.png")
@@ -2607,6 +2779,8 @@ def make(seed, name=None, out_dir=None, cfg=None, spacing=9.0):
                            MAT_NAMES["game"]["core"]: "gone once burn > x",
                            MAT_NAMES["game"]["twig"]: "shown once burn > x",
                            MAT_NAMES["game"]["bark"]: "x unused; chars with burn",
+                           MAT_NAMES["game"]["soil"]: "never burns: the root plate, under the ground",
+                           MAT_NAMES["game"]["root"]: "never burns: the root plate, under the ground",
                            "ranges": BURN},
                   "fall": model["fall"]},
     }
