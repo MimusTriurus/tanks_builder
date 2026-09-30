@@ -128,7 +128,43 @@ CONFIG = {
     "fill": 4,               # dark puffs inside the crown, no branch of their own
     "lumps": 0.30,           # noise push on a puff, fraction of its radius
     "squash": 0.85,          # puffs are a little wider than tall
+
+    # the look of the game model's crown under Toon (docs/trees.md, "Вид
+    # кроны"). These are look "A" and the sprite's; the game model takes
+    # `LOOKS[GAME_LOOK]` over them, and over `clumps`..`fill` and its tier's
+    # leaves as well
+    "crown_mix": 0.0,        # leaf/core normal: 0 its puff's ellipsoid .. 1 the crown envelope's
+    "tone_up": 0.62,         # game leaf tone: its puff's top lighter (palette V) ...
+    "tone_rand": 0.22,       # ... and random per leaf
+    "tone_mean": 0.54,       # ... about this mean, before the puff's shade
+    "leaf_rim": True,        # game leaf's dark edge band (palette U >= 0.75): an ink line per leaf
+    "tilt": (0.40, 1.00),    # leaf tipped out of its puff, rad: the serration of the rim
+    "leaf_width": 0.60,      # game leaf, of its length
+    "bark_light": 1.0,       # game bark and twig, times GAME_BARK
 }
+
+# Looks of the game model, held side by side on the Tree3D board (`remodel`,
+# seed 1, docs/trees.md "Вид кроны"):
+#   "A" - the sprite's crown: every puff lit as a ball of its own, leaves toned
+#         apart with a dark edge each, tipped out to a spiked rim. Under Toon
+#         it read as a heap of lit balls in light flecks, hair at the rim.
+#   "B" - light only: the crown lit as one mass (normals mostly the
+#         envelope's), leaves one tone with no edge, the trunk out of its ink.
+#         The rim stays spiked, and at the board's scale B was A.
+#   "C" - B, and fewer, bigger puffs of broad leaves lying flatter: a rim of
+#         scallops, lobes of light and shade, a third fewer triangles.
+#         7-8 puffs were one blob and 0.46 a yellow the sprite is not; 9-10
+#         and 0.38 kept the oak's lobes.   <- the default
+LOOKS = {
+    "A": {},
+    "B": {"crown_mix": 0.65, "tone_up": 0.12, "tone_rand": 0.05, "tone_mean": 0.46,
+          "leaf_rim": False, "bark_light": 2.2},
+    "C": {"crown_mix": 0.65, "tone_up": 0.12, "tone_rand": 0.05, "tone_mean": 0.38,
+          "leaf_rim": False, "bark_light": 2.2,
+          "clumps": (9, 10), "clump_radius": (0.85, 1.10), "fill": 3,
+          "leaf_size": 0.62, "density": 16.0, "leaf_width": 0.95, "tilt": (0.15, 0.50)},
+}
+GAME_LOOK = "C"
 
 # What `detail` changes.
 #
@@ -526,14 +562,15 @@ def reset():
 # the leaf and the scatter group
 # ---------------------------------------------------------------------------
 
-def leaf_mesh(name, sides=16, width=0.56, uv=False):
+def leaf_mesh(name, sides=16, width=0.56, uv=False, rim=True):
     """A pointed leaf in XY, base at the origin, tip at +X, length 1.
 
     Three rings - centre, inner, outer - and `leaf_edge` 0 on the first two, 1
     on the outer: a constant ramp at 0.55 turns the outer band into the dark
     rim, which is the leaf's outline without a second mesh. With `uv`, U runs
     0.35 -> 1.0 across the same band and the palette's rim columns start at
-    0.75. Four sides make the game's rhombus.
+    0.75 - without `rim` U stays 0.35 and the leaf is one tone to its edge.
+    Four sides make the game's rhombus.
     """
     half = sides // 2
     xs = [0.5 - 0.5 * math.cos(math.pi * k / half) for k in range(half + 1)]
@@ -564,7 +601,7 @@ def leaf_mesh(name, sides=16, width=0.56, uv=False):
         lay = me.uv_layers.get("UVMap") or me.uv_layers.new(name="UVMap")
         vi = np.empty(len(me.loops), dtype=np.int32)
         me.loops.foreach_get("vertex_index", vi)
-        u = 0.35 + 0.65 * np.array(edge)[vi]
+        u = 0.35 + (0.65 if rim else 0.0) * np.array(edge)[vi]
         lay.data.foreach_set("uv", np.column_stack([u, np.full_like(u, 0.5)]).ravel())
     me.update()
     ob = bpy.data.objects.get(name) or bpy.data.objects.new(name, me)
@@ -594,19 +631,22 @@ def _named(N, name, dtype, loc):
     return n.outputs["Attribute"]
 
 
-def _tone_uv(N, L, geo, loc):
+def _tone_uv(N, L, geo, loc, gi):
     """Game: bake the leaf's tone into V of `UVMap`, keep U (edge -> rim).
-    tone = 0.62 up + 0.22 random + puff shade + 0.12, the sprite's formula
-    without its light term - Toon lights the model."""
+    tone = Tone Up * up + Tone Rand * random + puff shade + Tone Base - by
+    default 0.62 / 0.22 / 0.12, the sprite's formula without its light term:
+    Toon lights the model."""
     x, y = loc
     up = _named(N, "leaf_up", "FLOAT", (x, y + 200))
     rnd = _named(N, "leaf_rand", "FLOAT", (x, y + 50))
     sh = _named(N, "clump_shade", "FLOAT", (x, y - 100))
-    t1 = _math(N, "MULTIPLY_ADD", (x + 200, y + 150), b=0.62)
+    t1 = _math(N, "MULTIPLY_ADD", (x + 200, y + 150))
     L.new(up, t1.inputs[0])
-    t1.inputs[2].default_value = 0.12
-    t2 = _math(N, "MULTIPLY_ADD", (x + 350, y + 100), b=0.22)
+    L.new(gi.outputs["Tone Up"], t1.inputs[1])
+    L.new(gi.outputs["Tone Base"], t1.inputs[2])
+    t2 = _math(N, "MULTIPLY_ADD", (x + 350, y + 100))
     L.new(rnd, t2.inputs[0])
+    L.new(gi.outputs["Tone Rand"], t2.inputs[1])
     L.new(t1.outputs[0], t2.inputs[2])
     t3 = _math(N, "ADD", (x + 500, y + 50))
     L.new(t2.outputs[0], t3.inputs[0])
@@ -652,8 +692,10 @@ def clump_group(detail, mats):
     what makes the puff's edge serrated rather than a smooth ball."""
     name = GROUPS[detail]
     ng = bpy.data.node_groups.get(name)
-    if ng:
+    if ng and "Tilt Max" in [it.name for it in ng.interface.items_tree]:
         return ng
+    if ng:   # cached from before the look's inputs: its trees go stale with it
+        bpy.data.node_groups.remove(ng)
     ng = bpy.data.node_groups.new(name, "GeometryNodeTree")
     ng.is_modifier = True
     I = ng.interface
@@ -665,6 +707,9 @@ def clump_group(detail, mats):
     I.new_socket("Shade", in_out="INPUT", socket_type="NodeSocketFloat").default_value = 0.0
     I.new_socket("Min Up", in_out="INPUT", socket_type="NodeSocketFloat").default_value = -1.0
     I.new_socket("Core Burn", in_out="INPUT", socket_type="NodeSocketFloat").default_value = 0.9
+    for k, v in (("Tone Up", 0.62), ("Tone Rand", 0.22), ("Tone Base", 0.12),
+                 ("Tilt Min", 0.40), ("Tilt Max", 1.00)):
+        I.new_socket(k, in_out="INPUT", socket_type="NodeSocketFloat").default_value = v
     I.new_socket("Geometry", in_out="OUTPUT", socket_type="NodeSocketGeometry")
     N, L = ng.nodes, ng.links
     gi = N.new("NodeGroupInput")
@@ -698,9 +743,15 @@ def clump_group(detail, mats):
     align.axis = "Z"
     L.new(dist.outputs["Normal"], align.inputs["Vector"])
     spin = _rand_float(N, L, seed, 0.0, 2 * math.pi, 11, (-900, -250))
-    tilt = _rand_float(N, L, seed, 0.40, 1.00, 23, (-900, -450))
+    span_t = _math(N, "SUBTRACT", (-1100, -550))
+    L.new(gi.outputs["Tilt Max"], span_t.inputs[0])
+    L.new(gi.outputs["Tilt Min"], span_t.inputs[1])
+    tilt = _math(N, "MULTIPLY_ADD", (-800, -450))
+    L.new(_rand_float(N, L, seed, 0.0, 1.0, 23, (-950, -450)), tilt.inputs[0])
+    L.new(span_t.outputs[0], tilt.inputs[1])
+    L.new(gi.outputs["Tilt Min"], tilt.inputs[2])
     neg = _math(N, "MULTIPLY", (-700, -450), b=-1.0)
-    L.new(tilt, neg.inputs[0])
+    L.new(tilt.outputs[0], neg.inputs[0])
     comb = N.new("ShaderNodeCombineXYZ")
     comb.location = (-550, -300)
     L.new(neg.outputs[0], comb.inputs["Y"])
@@ -764,7 +815,7 @@ def clump_group(detail, mats):
     leaves = real.outputs[0]
     core = gi.outputs["Geometry"]
     if detail == "game":
-        leaves = _tone_uv(N, L, leaves, (500, 400))
+        leaves = _tone_uv(N, L, leaves, (500, 400), gi)
         # the burn contract: X of `Burn` is when this leaf, or this puff's
         # core, is gone (BURN); one value per leaf, so it cuts whole leaves
         leaves = _store_burn(N, L, leaves, _named(N, "leaf_burn", "FLOAT", (1300, 500)), (1450, 400))
@@ -1526,10 +1577,13 @@ def tree_name(cfg):
 
 def build(cfg=None):
     """One tree under `<name>.World` at `offset`. Returns its numbers."""
-    cfg = {**CONFIG, **(cfg or {})}
+    user = cfg or {}
+    cfg = {**CONFIG, **user}
     detail = cfg["detail"]
-    base = GAME_TIERS[cfg.get("tier", GAME_TIER)] if detail == "game" else DETAIL[detail]
-    cfg = {**base, **cfg}
+    # the game model: its tier's budget, then its look (the sprite has neither)
+    base = ({**GAME_TIERS[cfg.get("tier", GAME_TIER)], **LOOKS[cfg.get("look", GAME_LOOK)]}
+            if detail == "game" else DETAIL[detail])
+    cfg = {**CONFIG, **base, **user}
     burnt = cfg["state"] == "burnt"
     rng = random.Random(cfg["seed"])
     name = tree_name(cfg)
@@ -1538,10 +1592,17 @@ def build(cfg=None):
     mats = materials(detail)
     ng = clump_group(detail, mats)
     leaf = bpy.data.objects.get(LEAVES[detail])
-    # a leaf of `sides` has 2 * sides faces; one cached from another tier is remade
-    if leaf is None or len(leaf.data.polygons) != 2 * cfg["leaf_sides"]:
-        leaf = leaf_mesh(LEAVES[detail], sides=cfg["leaf_sides"],
-                         width=0.56 if detail == "sprite" else 0.60, uv=detail == "game")
+    # a leaf of `sides` has 2 * sides faces; one cached from another tier or look is remade
+    width = 0.56 if detail == "sprite" else cfg["leaf_width"]
+    rim = detail == "sprite" or cfg["leaf_rim"]
+    if (leaf is None or len(leaf.data.polygons) != 2 * cfg["leaf_sides"]
+            or abs(leaf.get("width", 0.0) - width) > 1e-6 or bool(leaf.get("rim", True)) != rim):
+        leaf = leaf_mesh(LEAVES[detail], sides=cfg["leaf_sides"], width=width, uv=detail == "game", rim=rim)
+        leaf["width"], leaf["rim"] = width, rim
+    if detail == "game":   # the cached materials take this build's bark
+        for k in ("bark", "twig"):
+            b = mats[k].node_tree.nodes.get("Principled BSDF")
+            b.inputs["Base Color"].default_value = (*_board(np.array(GAME_BARK) * cfg["bark_light"]), 1.0)
     if leaf.name not in col.objects:
         col.objects.link(leaf)
     leaf.hide_viewport = leaf.hide_render = True
@@ -1554,6 +1615,8 @@ def build(cfg=None):
     # burn thresholds come from their own seeded streams (`_burn_at`), so the
     # shape of the tree does not depend on whether they were drawn
     c, axes, clumps, fills = place_clumps(cfg, rng)
+    # for `bake`'s normals: the crown's envelope, in the World's frame
+    world["crown_c"], world["crown_axes"], world["crown_mix"] = tuple(c), tuple(axes), cfg["crown_mix"]
     S = skeleton(cfg, rng, c, axes, clumps)
     ink = mats.get("ink_char" if burnt else "ink") if cfg["ink"] else None
     game = detail == "game"
@@ -1611,6 +1674,10 @@ def build(cfg=None):
                 getattr(inp, ids["Min Up"]).value = cfg["min_up"]
             if "Core Burn" in ids:
                 getattr(inp, ids["Core Burn"]).value = _burn_at(cfg["seed"], "core", i)
+            base = cfg["tone_mean"] - 0.5 * cfg["tone_up"] - 0.5 * cfg["tone_rand"]
+            for k, v in (("Tone Up", cfg["tone_up"]), ("Tone Rand", cfg["tone_rand"]),
+                         ("Tone Base", base), ("Tilt Min", cfg["tilt"][0]), ("Tilt Max", cfg["tilt"][1])):
+                getattr(inp, ids[k]).value = v
 
     bpy.context.view_layer.update()
     return report(name)
@@ -2089,7 +2156,7 @@ def bake(name):
     _bend_uv(out)
     for m in mats:
         out.materials.append(m)
-    _puff_normals(out)
+    _puff_normals(out, world.get("crown_c"), world.get("crown_axes"), world.get("crown_mix", 0.0))
     if out.validate(clean_customdata=False):
         raise RuntimeError(f"{name}: baked mesh needed repair after its parts were clean")
     ob = bpy.data.objects.new(f"{name}.Mesh", out)
@@ -2411,14 +2478,18 @@ def _grid_sheet(rows, out, gap=12):
     return out
 
 
-def _puff_normals(me):
+def _puff_normals(me, crown_c=None, crown_axes=None, crown_mix=0.0):
     """Leaves and cores take the normal of their puff's ellipsoid at their
     point, not of their own face: `Toon` lights a face by its normal, and by
     the leaf's own plane every leaf turned from the sun went to the shade tone
     on its own - the crown came out in dark and light flecks, where the
     sprite's puff is lit as one ball and a leaf differs only by its tone
     (palette V). Written as custom normals; the board keeps them for these two
-    materials (`Toon.Dress`, `keep`). Everything else keeps its own."""
+    materials (`Toon.Dress`, `keep`). Everything else keeps its own.
+
+    `crown_mix` of the crown envelope's normal blended in: a puff alone is a
+    ball lit on its own, one next to another the same, and the crown read as a
+    heap of lit balls - no underside in shade, no side away from the sun."""
     if "puff_c" not in me.attributes:
         return
     n = len(me.vertices)
@@ -2429,6 +2500,11 @@ def _puff_normals(me):
     d = co.reshape(-1, 3) - c.reshape(-1, 3)
     d[:, 2] /= CONFIG["squash"] ** 2        # the ellipsoid's normal, puffs are squashed in z
     d /= np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-9)
+    if crown_mix > 0.0 and crown_c is not None:
+        e = (co.reshape(-1, 3) - np.array(crown_c)) / np.array(crown_axes) ** 2
+        e /= np.maximum(np.linalg.norm(e, axis=1, keepdims=True), 1e-9)
+        d = (1.0 - crown_mix) * d + crown_mix * e
+        d /= np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-9)
     names = {MAT_NAMES["game"]["leaf"], MAT_NAMES["game"]["core"]}
     on = np.array([m is not None and m.name in names for m in me.materials])
     mi = np.empty(len(me.polygons), dtype=np.int32)
@@ -2525,6 +2601,7 @@ def make(seed, name=None, out_dir=None, cfg=None, spacing=9.0):
                     "centre": shot["centre"],
                     "feet": {"live": shot["feet"][0], "burnt": shot["feet"][1]}},
         "model": {"file": "tree.glb", "tris": tris, "tier": base.get("tier", GAME_TIER),
+                  "look": base.get("look", GAME_LOOK),
                   "burn": {"uv": "TEXCOORD_1.x", "value": "burn, 0 green .. 1 done",
                            MAT_NAMES["game"]["leaf"]: "gone once burn > x",
                            MAT_NAMES["game"]["core"]: "gone once burn > x",
@@ -2537,6 +2614,31 @@ def make(seed, name=None, out_dir=None, cfg=None, spacing=9.0):
         json.dump(spec, f, indent=1, ensure_ascii=False)
     return {"dir": out_dir, "sprites": shot, "model": model,
             "report": {f"{s}/{d}": r for (s, d), r in made.items()}}
+
+
+def remodel(seed, look, name=None, out_dir=None):
+    """Only the game model of `seed` in look `look` (`LOOKS`), to
+    `<out>/<name>_<look>/`: `tree.glb` and a `tree.json` that is the seed's
+    own (`make` first: the board scales the model by its sprite's px_per_m)
+    with this model's tris, look and fall. No sprites, no sheets."""
+    name = name or f"Oak_{seed:03d}"
+    root = out_dir or OUT
+    with open(os.path.join(root, name, "tree.json"), encoding="utf-8") as f:
+        spec = json.load(f)
+    tag = f"{name}_{look}"
+    d = os.path.join(root, tag)
+    os.makedirs(d, exist_ok=True)
+    cfg = {"look": look, "seed": seed, "name": tag, "detail": "game"}
+    g = build(cfg)
+    ob, tris = bake(g["name"])
+    glb = os.path.join(d, "tree.glb")
+    check = export_glb(ob, glb)
+    spec["model"].update({"tris": tris, "look": look, "fall": fall_spec(ob, cfg)})
+    spec.update({"height": g["height"], "width": g["width"], "depth": g["depth"]})
+    with open(os.path.join(d, "tree.json"), "w", encoding="utf-8") as f:
+        json.dump(spec, f, indent=1, ensure_ascii=False)
+    _wipe(g["name"])
+    return {"dir": d, "tris": tris, "check": check, "height": g["height"], "width": g["width"]}
 
 
 if __name__ == "__main__":

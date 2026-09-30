@@ -30,6 +30,7 @@ public sealed partial class Tree3DBench : Node3D
     /// <summary><c>--no-outline</c>: the crowns without their line, to hold
     /// against it.</summary>
     private bool _noOutline;
+    private bool _row;
     private string? _capturePath;
     private int _captureAt = 30;
 
@@ -77,6 +78,16 @@ public sealed partial class Tree3DBench : Node3D
         (new Vector2I(2, 1), Vector2.Zero),
     };
 
+    /// <summary><c>--row</c>: three models in a row across the middle cell, left
+    /// to right, a crown and a little apart - the looks of one seed held side
+    /// by side (<c>tree_gen.remodel</c>).</summary>
+    private static readonly (Vector2I Cell, Vector2 Off)[] Row =
+    {
+        (new Vector2I(2, 1), new Vector2(-125.0f, 0.0f)),
+        (new Vector2I(2, 1), Vector2.Zero),
+        (new Vector2I(2, 1), new Vector2(125.0f, 0.0f)),
+    };
+
     public override void _Ready()
     {
         ReadFlags();
@@ -87,8 +98,9 @@ public sealed partial class Tree3DBench : Node3D
         BuildCamera();
         if (!_pbr && !_noOutline)
             BuildOutline();
-        for (int i = 0; i < Math.Min(_trees.Length, Spots.Length); i++)
-            Stand(_trees[i], Spots[i].Cell, Spots[i].Off);
+        (Vector2I Cell, Vector2 Off)[] spots = _row ? Row : Spots;
+        for (int i = 0; i < Math.Min(_trees.Length, spots.Length); i++)
+            Stand(_trees[i], spots[i].Cell, spots[i].Off);
         FrameCamera();
     }
 
@@ -475,6 +487,7 @@ void light() {
             else if (a == "--zoom" && more) _zoom = F(args[++i], _zoom);
             else if (a == "--pbr") _pbr = true;
             else if (a == "--no-outline") _noOutline = true;
+            else if (a == "--row") _row = true;
             else if (a == "--capture" && more) _capturePath = args[++i];
             else if (a == "--capture-at" && more) _captureAt = (int)F(args[++i], _captureAt);
         }
