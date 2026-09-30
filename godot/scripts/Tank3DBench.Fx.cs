@@ -100,6 +100,12 @@ public sealed partial class Tank3DBench
     private CelHit? _celHit;
     private CelBlast? _celBlast;
     private CelDeath? _celDeath;
+    private CelDust? _celDust;
+    private readonly List<CelDust.Belt> _belts = new();
+    /// <summary>Each belt's run as it stood last frame, model units - the
+    /// belts' own travel, pivots included (<see cref="TankModel.Skid"/>).</summary>
+    private readonly List<float> _beltWas = new();
+    private readonly List<float> _beltRun = new();
     private readonly List<(Vector3 At, Vector3 Out)> _exhaustPorts = new();
     private readonly List<Vector3> _ports = new();
     private readonly Wreck _wreck = new();
@@ -459,6 +465,11 @@ void fragment() {
             AddChild(_celDeath);
             _celDeath.Build(_model.HullLength * _model.PixelsPerUnit, HexWidth);
             _celDeath.Ground = w => Foot(w).Y;
+            // The belts' dust too: the sprites' drift is not laid (Dust).
+            _celDust = new CelDust { Name = "TrackDust" };
+            AddChild(_celDust);
+            _celDust.Build(_model.HullLength * _model.PixelsPerUnit);
+            _beltWas.Clear();
         }
         _painted.Add(_sprite);
         foreach (Card c in new[] { _rear, _front, _glow })
@@ -545,6 +556,8 @@ void fragment() {
         _celBlast = null;
         _celDeath?.QueueFree();
         _celDeath = null;
+        _celDust?.QueueFree();
+        _celDust = null;
         _painted.Clear();
         FreeHeights();
         _shape = null;
@@ -921,6 +934,8 @@ void fragment() {
         _celHit?.Reset();
         _celBlast?.Reset();
         _celDeath?.Reset();
+        _celDust?.Reset();
+        _beltWas.Clear();
         _hitNode = null;
         foreach (var (mat, albedo) in _paint)
             Repaint(mat, albedo);
@@ -1131,6 +1146,11 @@ void fragment() {
     /// track's length astern, blown astern.</summary>
     private void Dust(float dt, float speed)
     {
+        if (_celDust is not null)
+        {
+            CelDustTick(dt);
+            return;
+        }
         if (_wreck.Out || dt <= 0.0f)
             return;
         float moved = Mathf.Abs(speed) * dt;
@@ -1178,6 +1198,54 @@ void fragment() {
         kick.Sit(Spot(at), LiftAt(at), Squash, RiseFactor);
         kick.Aim(Along(astern), Vector2.Zero);
         kick.Fire();
+    }
+
+    /// <summary>
+    /// The belts' dust in the model's look: each belt's run this frame off its
+    /// own travel (<see cref="TankModel.Driven"/> less its share of
+    /// <see cref="TankModel.Skid"/>), so a pivot raises dust as
+    /// <see cref="TrackDust"/> has it; born at the belt's trailing end, on the
+    /// ground there, and none on wet ground.
+    /// </summary>
+    private void CelDustTick(float dt)
+    {
+        _belts.Clear();
+        float ppu = _model.PixelsPerUnit;
+        float length = _model.Size.Z * ppu;
+        Vector3 forward = _rig.GlobalBasis.Z;
+        forward = new Vector3(forward.X, 0.0f, forward.Z).Normalized();
+        var left = new Vector3(forward.Z, 0.0f, -forward.X);
+        while (_beltWas.Count < _model.Tracks.Count)
+            _beltWas.Add(float.NaN);
+        _beltRun.Clear();
+        for (int i = 0; i < _model.Tracks.Count; i++)
+        {
+            float driven = _model.Driven - _model.Tracks[i].Side * _model.Skid;
+            float was = _beltWas[i];
+            _beltWas[i] = driven;
+            // Model units to board px; a jump (a reset, a new model) is no run.
+            float run = float.IsNaN(was) ? 0.0f : (driven - was) * ppu;
+            _beltRun.Add(Mathf.Abs(run) > length ? 0.0f : run);
+        }
+        // Belts running against each other churn the ground rather than roll
+        // over it: TrackMarks.Scrub's 1.5 on a pivot. At a pivot's pace alone
+        // the puffs were small separate lumps - stones, not dust.
+        float churn = _beltRun.Count == 2 && _beltRun[0] * _beltRun[1] < 0.0f ? 1.5f : 1.0f;
+        for (int i = 0; i < _model.Tracks.Count; i++)
+        {
+            TankModel.Track t = _model.Tracks[i];
+            float run = _beltRun[i];
+            float off = (t.Node.GlobalPosition - _rig.GlobalPosition).Dot(left);
+            Vector3 outward = off >= 0.0f ? left : -left;
+            Vector3 astern = run >= 0.0f ? -forward : forward;
+            Vector3 at = Foot(_rig.GlobalPosition + left * off + astern * (length * 0.42f));
+            float pace = dt > 0.0f ? Mathf.Abs(run) / dt : 0.0f;
+            bool dusty = !_wreck.Out && pace >= TrackDust.DriveAbove
+                         && !(_field?.IsWater(_field.FlatCellAt(Board(at))) ?? false);
+            _belts.Add(new CelDust.Belt(at, astern, outward, dusty ? Mathf.Abs(run) : 0.0f,
+                                        churn * pace / (float)_profile.TopSpeed));
+        }
+        _celDust!.Tick(dt, _belts, _camera.GlobalBasis);
     }
 
     /// <summary>The camera's shake, in world units at this zoom.</summary>
