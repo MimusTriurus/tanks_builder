@@ -63,6 +63,12 @@ public sealed partial class Tree3DBench : Node3D
     /// <summary>Where LMB lit a cell, so a meadow lit by hand burns out from
     /// the click.</summary>
     private readonly Dictionary<Vector2I, Vector2> _litAt = new();
+    /// <summary>Where a grass front crossed into a cell from its neighbour -
+    /// the point on their shared edge it got to first - for that cell's own
+    /// front to start from (<see cref="Spread"/>).</summary>
+    private readonly Dictionary<Vector2I, Vector2> _entry = new();
+    /// <summary>Which meadow each cell of grass is, for <see cref="Spread"/>.</summary>
+    private readonly Dictionary<Vector2I, int> _meadowAt = new();
 
     /// <summary><c>--no-grass</c>: the board bare, as it was before the grass.
     /// Otherwise every cell is grass of <see cref="BoardGrass"/>.</summary>
@@ -460,6 +466,7 @@ public sealed partial class Tree3DBench : Node3D
             _burnAt = null;
         }
         _fire.Tick(dt);
+        Spread();
         Scorch();
         Basis eye = _camera.GlobalBasis;
         foreach (TreeFire t in _burning)
@@ -493,6 +500,7 @@ public sealed partial class Tree3DBench : Node3D
     private void Douse()
     {
         _fire?.Douse();
+        _entry.Clear();
         _clock = 0.0f;
         foreach (TreeFire t in _burning)
         {
@@ -594,6 +602,10 @@ public sealed partial class Tree3DBench : Node3D
         };
         AddChild(_grass);
         _grass.Map(span);
+        // The spread is the fronts' from here (Spread): the fire's own clock
+        // would light a neighbour whether or not the flame line had got there.
+        if (_fire is not null)
+            _fire.Spreads = false;
         var lay = new List<(Vector2I Cell, Grass3D.Kind Kind, string? Name)>();
         if (_grassy)
             foreach ((Vector2I cell, Grass3D.Kind kind, string name) in Meadows)
@@ -612,6 +624,7 @@ public sealed partial class Tree3DBench : Node3D
             foreach (TreeFire t in _burning)
                 if (t.Cell == cell)
                     trunks.Add(t.Holder.GlobalPosition);
+            _meadowAt[cell] = _meadowIds.Count;
             _meadowIds.Add(_grass.Lay(kind, mid, r, 101 + i, trunks));
             _meadowCells.Add(cell);
             _meadowFrom.Add(null);
@@ -708,10 +721,76 @@ public sealed partial class Tree3DBench : Node3D
                 }
             }
             if (lit && _meadowFrom[i] is { } from)
-                GD.Print($"tree3d: {cell} lit, front from {from.X:F0},{from.Y:F0}"
+                GD.Print($"tree3d: {cell} lit at {_clock:F2} s, front from {from.X:F0},{from.Y:F0}"
                          + (catches.Count > 0 ? $", trees catch at s: {string.Join(", ", catches)}" : ""));
         }
     }
+
+    /// <summary>
+    /// The fire into the next cell, when the grass is laid (the fire's own
+    /// spread is off, see <see cref="BuildGrass"/>): a wooded neighbour is lit
+    /// the moment this cell's front gets to the edge between them - the first
+    /// of <see cref="EdgeSamples"/> points along it, the grass noise and all
+    /// (<see cref="Grass3D.Arrival"/>) - and its own front starts from that
+    /// point, so the line goes on over the edge instead of coming up anew
+    /// somewhere else. A lit cell with no grass hands the fire on as the fire
+    /// does, on the edge's delay (<see cref="Wildfire.Delay"/>). A neighbour
+    /// with no wood is not lit (<see cref="Wildfire.Light"/> refuses): the grass
+    /// is decoration and carries nothing.
+    /// </summary>
+    private void Spread()
+    {
+        if (_grass is null || _fire is null || _field is null || _fire.Spreads || _tile is null)
+            return;
+        float r = _tile.HexRect.Size.X * 0.5f;
+        for (int q = 0; q < _field.Columns; q++)
+        for (int w = 0; w < _field.Rows; w++)
+        {
+            var cell = new Vector2I(q, w);
+            float age = _fire.AgeAt(cell);
+            if (age < 0.0f)
+                continue;
+            bool grassy = _meadowAt.TryGetValue(cell, out int meadow);
+            int mi = grassy ? _meadowIds[meadow] : -1;
+            // its front is set on the frame it is lit (Scorch): not before
+            if (grassy && _meadowFrom[meadow] is null)
+                continue;
+            Vector3 mid = CellMiddle(cell);
+            foreach (int heading in HexField.EdgeHeadings)
+            {
+                Vector2I next = HexField.Step(cell, heading);
+                if (next == cell || !_field.InBounds(next) || _fire.LitAt(next) || !_wooded.Contains(next))
+                    continue;
+                if (!grassy)
+                {
+                    if (age >= _fire.Delay(cell, next))
+                        _fire.Light(next);
+                    continue;
+                }
+                // the shared edge: across the line between the two middles,
+                // halfway, one side long (a regular hexagon's side is its radius)
+                Vector3 there = CellMiddle(next);
+                var c = new Vector2((mid.X + there.X) * 0.5f, (mid.Z + there.Z) * 0.5f);
+                Vector2 along = new Vector2(there.Z - mid.Z, mid.X - there.X).Normalized();
+                float first = float.MaxValue;
+                Vector2 at = c;
+                for (int k = 0; k < EdgeSamples; k++)
+                {
+                    Vector2 p = c + along * (r * ((float)k / (EdgeSamples - 1) - 0.5f));
+                    float when = _grass.Arrival(mi, p);
+                    if (when < first)
+                    {
+                        first = when;
+                        at = p;
+                    }
+                }
+                if (age >= first && _fire.Light(next))
+                    _entry[next] = at;
+            }
+        }
+    }
+
+    private const int EdgeSamples = 7;
 
     /// <summary>How long after the grass fire gets to a trunk its tree is
     /// alight, s.</summary>
@@ -722,6 +801,8 @@ public sealed partial class Tree3DBench : Node3D
         Vector3 mid = CellMiddle(cell);
         if (_litAt.Remove(cell, out Vector2 click))
             return click;
+        if (_entry.Remove(cell, out Vector2 entry))
+            return entry;
         Vector2I? best = null;
         float most = float.MinValue;
         foreach (int heading in HexField.EdgeHeadings)
