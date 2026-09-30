@@ -1322,13 +1322,17 @@ def tube_mesh(name, part, sides, step, scale=0.85, point=2.5, burn=None):
     return me
 
 
+# glTF writes UV maps as TEXCOORD_n in the order the mesh holds them
+UV_LAYERS = ("UVMap", "Burn", "Bend")
+
+
 def _uv_layers(me):
-    """`UVMap` then `Burn`, in that order, zero where missing: glTF writes them
-    as TEXCOORD_0 and TEXCOORD_1 in the order the mesh holds them, and the
+    """`UVMap`, `Burn`, `Bend`, in that order, zero where missing: glTF writes
+    them as TEXCOORD_0..2 in the order the mesh holds them, and the
     merge in `bake` keeps the order of the first part. Zeroed explicitly: a new
     UV map comes filled with Blender's default unwrap, every face 0..1, and
     the bark went out with burn thresholds all over its range."""
-    for n in ("UVMap", "Burn"):
+    for n in UV_LAYERS:
         if n not in me.uv_layers:
             lay = me.uv_layers.new(name=n)
             lay.data.foreach_set("uv", np.zeros(len(me.loops) * 2, dtype=np.float32))
@@ -1336,12 +1340,12 @@ def _uv_layers(me):
 
 
 def _order_uvs(me):
-    """`UVMap` first, `Burn` second, whatever order the merge left: the merged
+    """`UVMap`, `Burn`, `Bend` in that order, whatever the merge left: the merged
     mesh takes the layer order of whichever part came first, and on one run
     of seed 1 that put `Burn` in TEXCOORD_0 and the leaf's rim U in
     TEXCOORD_1. Rebuilt from their data, then set active and render-active."""
     data = {}
-    for n in ("UVMap", "Burn"):
+    for n in UV_LAYERS:
         lay = me.uv_layers.get(n)
         uv = np.zeros(len(me.loops) * 2, dtype=np.float32)
         if lay is not None:
@@ -1349,7 +1353,7 @@ def _order_uvs(me):
         data[n] = uv
     for lay in list(me.uv_layers):
         me.uv_layers.remove(lay)
-    for n in ("UVMap", "Burn"):
+    for n in UV_LAYERS:
         me.uv_layers.new(name=n).data.foreach_set("uv", data[n])
     me.uv_layers.active = me.uv_layers["UVMap"]
     me.uv_layers["UVMap"].active_render = True
@@ -2005,7 +2009,7 @@ def glb_burn(path):
         for p in mesh["primitives"]:
             row = {"material": js["materials"][p["material"]]["name"] if "material" in p else None,
                    "attributes": sorted(p["attributes"])}
-            for k, key in (("TEXCOORD_0", "uv0_x"), ("TEXCOORD_1", "burn_x")):
+            for k, key in (("TEXCOORD_0", "uv0_x"), ("TEXCOORD_1", "burn_x"), ("TEXCOORD_2", "bend_x")):
                 if k not in p["attributes"]:
                     continue
                 acc = js["accessors"][p["attributes"][k]]
@@ -2054,6 +2058,7 @@ def bake(name):
     bm.to_mesh(out)
     bm.free()
     _order_uvs(out)
+    _bend_uv(out)
     for m in mats:
         out.materials.append(m)
     if out.validate(clean_customdata=False):
@@ -2065,6 +2070,316 @@ def bake(name):
     ob.hide_set(True)   # it stands on its own parts; shown, the viewport drew the tree twice
     out.calc_loop_triangles()
     return ob, len(out.loop_triangles)
+
+
+# ---------------------------------------------------------------------------
+# the fall: what the board needs to knock the model over (docs/trees.md, "Падение")
+# ---------------------------------------------------------------------------
+
+# The trunk goes over rigid about a hinge on the ground, `hinge` of the root
+# collar's radius out from the foot on the side it falls to; the crown bends on
+# top of that by the spring the sprite's already has (Grove.Timber), an extra
+# turn about the same hinge weighted by `Bend`: 0 up to `stiff` of the height,
+# then rising as the square, as a cantilever deflects. Continuous, so wood and
+# puffs stay joined; the leaves stay on - a tree in leaf falls in leaf.
+# A crown is not a prop: it touches first (`touch`, where the dust goes up)
+# and the trunk goes on over, breaking the branches under it, until the trunk
+# itself is on the ground (`rest`, capped at `flat`). What went under is
+# crushed into a mat: y' = m ln(1 + e^(y/m)), m = mat * down, never under
+# `lift` - soft, not y = max(y, 0), which laid the crushed leaves in the
+# ground's own plane to fight it for depth; m follows the fall, so a standing
+# tree is not lifted. Rested on its crown (first vertex, then 1 m of give)
+# seed 1 lay at 52-76 degrees, the trunk propped in the air.
+FALL = {"stiff": 0.30, "hinge": 0.8, "skip": 1.0, "mat": 0.08, "lift": 0.01,
+        "flat": 88.0, "azimuths": 24}
+# Grove.cs's pendulum, and a crown spring of the model's own: the sprite's
+# (whip 0.35, 400 / 6) bent the top by 1 degree, less than the lag it let go
+# of at the landing, so the crown sprang up, not down. This bends it ~4
+# degrees into the ground, then back past, quiet in ~1.2 s (chosen: "B").
+TIMBER = {"gravity": 3.0, "shove": 0.35, "lift": 0.05, "bounce": 0.3, "settle": 0.25,
+          "lag": 0.013, "whip": 0.9, "stiffness": 150.0, "damping": 4.0}
+
+
+def _bend_uv(me):
+    """X of `Bend` per corner: w = ((z - z0) / (H - z0))^2 clamped, z0 = stiff * H."""
+    co = np.empty(len(me.vertices) * 3, dtype=np.float64)
+    me.vertices.foreach_get("co", co)
+    z = co.reshape(-1, 3)[:, 2]
+    H = float(z.max())
+    z0 = FALL["stiff"] * H
+    w = np.clip((z - z0) / (H - z0), 0.0, 1.0) ** 2
+    vi = np.empty(len(me.loops), dtype=np.int32)
+    me.loops.foreach_get("vertex_index", vi)
+    uv = np.zeros((len(me.loops), 2), dtype=np.float32)
+    uv[:, 0] = w[vi]
+    me.uv_layers["Bend"].data.foreach_set("uv", uv.ravel())
+
+
+def _hinge(cfg=None):
+    return FALL["hinge"] * {**CONFIG, **(cfg or {})}["base_radius"]
+
+
+def _parts_by_mat(ob):
+    """Vertex positions of `ob` (its own frame) by material name."""
+    me = ob.data
+    co = np.empty(len(me.vertices) * 3, dtype=np.float64)
+    me.vertices.foreach_get("co", co)
+    co = co.reshape(-1, 3)
+    mi = np.empty(len(me.polygons), dtype=np.int32)
+    me.polygons.foreach_get("material_index", mi)
+    lt = np.empty(len(me.polygons), dtype=np.int32)
+    me.polygons.foreach_get("loop_total", lt)
+    vi = np.empty(len(me.loops), dtype=np.int32)
+    me.loops.foreach_get("vertex_index", vi)
+    per_loop = np.repeat(mi, lt)
+    out = {}
+    for k, m in enumerate(me.materials):
+        if m is not None and (per_loop == k).any():
+            out[m.name] = co[np.unique(vi[per_loop == k])]
+    return out
+
+
+def _ground_at(pts, hinge, azimuth):
+    """Toward `azimuth` (deg, Blender XY from +X, anticlockwise from above):
+    the angle at which the first of `pts` reaches the ground and how far from
+    the foot that is. Exact per vertex: turned by a about the hinge, a point u
+    ahead and z up is at height R cos(a + phi), R = |(u, z)|, phi = atan2(u, z).
+    The root collar and the butt (under `skip` m) are left out: on the fall
+    side they go into the ground at once, and that is the root plate tearing."""
+    a = math.radians(azimuth)
+    d = np.array([math.cos(a), math.sin(a)])
+    p = pts[pts[:, 2] > FALL["skip"]]
+    u = p[:, :2] @ d - hinge
+    R, phi = np.hypot(u, p[:, 2]), np.arctan2(u, p[:, 2])
+    t = np.pi / 2 - phi
+    k = int(np.argmin(t))
+    ang = min(float(t[k]), math.radians(FALL["flat"]))
+    reach = hinge + R[k] * math.sin(ang + phi[k])
+    return round(math.degrees(ang), 1), round(float(reach), 2)
+
+
+def fall_spec(ob, cfg=None):
+    """The fall as `tree.json` carries it: hinge, bend, and the angle the tree
+    lies at for each of `azimuths` directions, in leaf and burnt."""
+    parts = _parts_by_mat(ob)
+    g = MAT_NAMES["game"]
+    live = np.concatenate([parts[n] for n in (g["leaf"], g["core"], g["bark"]) if n in parts])
+    burnt = np.concatenate([parts[n] for n in (g["bark"], g["twig"]) if n in parts])
+    H = float(np.concatenate(list(parts.values()))[:, 2].max())
+    # the trunk, not the limbs: bark under where the crown starts
+    bark = parts[g["bark"]]
+    trunk = bark[bark[:, 2] < {**CONFIG, **(cfg or {})}["crown_base"] * H]
+    h = _hinge(cfg)
+    az = [360.0 * i / FALL["azimuths"] for i in range(FALL["azimuths"])]
+    lv = [_ground_at(live, h, a) for a in az]
+    bt = [_ground_at(burnt, h, a) for a in az]
+    rest = [_ground_at(trunk, h, a)[0] for a in az]
+    return {
+        "hinge_m": round(h, 3),
+        "hinge": "axis on the ground, hinge_m from the foot toward the fall, across it",
+        "azimuth": "deg from +X glTF toward -Z glTF (Blender +Y, away from the board's camera)",
+        "bend": {"uv": "TEXCOORD_2.x", "value": "w = clamp((y - y0) / (H - y0))^2",
+                 "y0_m": round(FALL["stiff"] * H, 3), "H_m": round(H, 3),
+                 "use": "extra turn about the hinge by crown_angle * w, on top of the trunk's"},
+        "lie": {"azimuth_deg": az,
+                "touch": "first vertex on the ground: dust at touch_m from the foot",
+                "rest": "the trunk on the ground (capped at flat_deg): it stops, the crown whips",
+                "flat_deg": FALL["flat"],
+                "live_touch_deg": [x[0] for x in lv], "live_touch_m": [x[1] for x in lv],
+                "burnt_touch_deg": [x[0] for x in bt], "burnt_touch_m": [x[1] for x in bt],
+                "rest_deg": rest},
+        "crush": {"value": "after the turn: y' = y where y > 4 m, else max(m ln(1 + exp(y / m)), "
+                           "lift_m * min(4 down, 1)); m = mat_m * down, down = trunk angle / rest angle",
+                  "mat_m": FALL["mat"], "lift_m": FALL["lift"]},
+        "timber": TIMBER,
+    }
+
+
+def timber(rest_deg, shove=1.0, dt=1.0 / 120, t_max=4.0, T=None):
+    """Grove.Timber on one trunk: (t, trunk angle, crown angle) samples and the
+    landing time. The crown angle is the flinch spring, in radians at w = 1."""
+    T = {**TIMBER, **(T or {})}
+    rest = math.radians(rest_deg)
+    ang, spin = T["lift"], T["shove"] * (0.6 + 0.4 * shove)
+    f = fr = 0.0
+    lying, landed, out, t = False, None, [], 0.0
+    while t < t_max:
+        drag = 0.0
+        if not lying or spin != 0.0:
+            pull = T["gravity"] * math.sin(ang)
+            spin += pull * dt
+            ang += spin * dt
+            if ang >= rest:
+                ang, hit = rest, spin
+                if not lying:
+                    landed = t
+                lying = True
+                fr += T["whip"] * hit
+                spin = 0.0 if abs(hit) < T["settle"] else -hit * T["bounce"]
+            elif ang < 0.0:
+                ang, spin = 0.0, 0.0
+            drag = -T["lag"] * pull
+        fr += (-T["stiffness"] * f - T["damping"] * fr + T["stiffness"] * drag) * dt
+        f += fr * dt
+        out.append((t, ang, f))
+        t += dt
+    return out, landed
+
+
+def _pose(co, bend, hinge, azimuth, trunk, crown):
+    """Vertices turned about the hinge toward `azimuth` by trunk + crown * bend."""
+    a = math.radians(azimuth)
+    d = np.array([math.cos(a), math.sin(a), 0.0])
+    k = np.cross([0.0, 0.0, 1.0], d)
+    piv = d * hinge
+    r = co - piv
+    th = (trunk + crown * bend)[:, None]
+    c, s = np.cos(th), np.sin(th)
+    return piv + r * c + np.cross(k, r) * s + (r @ k)[:, None] * k * (1 - c)
+
+
+def _crush(y, down):
+    """What went under the ground, as a mat on it (FALL "mat", "lift")."""
+    m = FALL["mat"] * max(down, 1e-3)
+    soft = m * np.logaddexp(0.0, y / m)
+    return np.where(y > 4 * m, y, np.maximum(soft, FALL["lift"] * min(down * 4, 1.0)))
+
+
+def _ground(name, size=26.0):
+    """A plain emissive plane at z 0, so the sheet shows where the crown lands."""
+    me = bpy.data.meshes.get(name) or bpy.data.meshes.new(name)
+    me.clear_geometry()
+    s = size / 2
+    me.from_pydata([(-s, -s, 0), (s, -s, 0), (s, s, 0), (-s, s, 0)], [], [(0, 1, 2, 3)])
+    m, N, L = _new_mat(name)
+    e = N.new("ShaderNodeEmission")
+    e.inputs["Color"].default_value = (*_srgb((0.42, 0.40, 0.33)), 1.0)
+    o = N.new("ShaderNodeOutputMaterial")
+    L.new(e.outputs[0], o.inputs["Surface"])
+    me.materials.clear()
+    me.materials.append(m)
+    return bpy.data.objects.get(name) or bpy.data.objects.new(name, me)
+
+
+def fall_check(name, path, azimuths=(0.0, 315.0, 270.0, 45.0, 90.0), burn=None, rise=300, fps=None,
+               crown=None):
+    """The baked `<name>.Mesh` going over, a row per fall direction, each frame
+    through the board's camera over a ground plane: does the crown land on the
+    ground and not in it, does it keep its leaves, does the whip read. `burn`
+    1.0 plays the burnt tree - the same mesh, the contract at its end.
+    With `fps` it renders every frame to 3.5 s instead and leaves them next to
+    `path` for an animation, returning their paths by row, no sheet."""
+    src = bpy.data.objects[f"{name}.Mesh"]
+    w = bpy.data.objects[f"{name}.World"]
+    col = w.users_collection[0]
+    me0 = src.data
+    spec = fall_spec(src)
+    key = "burnt" if burn is not None and burn >= 1.0 else "live"
+    lie = dict(zip(spec["lie"]["azimuth_deg"], spec["lie"]["rest_deg"]))
+    touch = dict(zip(spec["lie"]["azimuth_deg"], spec["lie"][f"{key}_touch_deg"]))
+    h, H = spec["hinge_m"], spec["bend"]["H_m"]
+
+    tmp = bpy.data.objects.new(f"{name}.Fall.World", None)
+    col.objects.link(tmp)
+    tmp.location = w.location
+    me = me0.copy()
+    if key == "burnt":
+        # gone at burn 1 anyway; flattened onto the ground, Blender's
+        # transparent pass showed them as pale patches the board never draws
+        bm = bmesh.new()
+        bm.from_mesh(me)
+        gone = {i for i, m in enumerate(me.materials)
+                if m and m.name in (MAT_NAMES["game"]["leaf"], MAT_NAMES["game"]["core"])}
+        bmesh.ops.delete(bm, geom=[f for f in bm.faces if f.material_index in gone], context="FACES")
+        bm.to_mesh(me)
+        bm.free()
+    co0 = np.empty(len(me.vertices) * 3, dtype=np.float64)
+    me.vertices.foreach_get("co", co0)
+    co0 = co0.reshape(-1, 3)
+    bl = np.empty(len(me.loops) * 2, dtype=np.float32)
+    me.uv_layers["Bend"].data.foreach_get("uv", bl)
+    vi = np.empty(len(me.loops), dtype=np.int32)
+    me.loops.foreach_get("vertex_index", vi)
+    bend = np.zeros(len(me.vertices))
+    bend[vi] = bl[0::2]
+    ob = bpy.data.objects.new(f"{name}.Fall.Mesh", me)
+    col.objects.link(ob)
+    ob.parent = tmp
+    gr = _ground(f"{name}.Fall.Ground")
+    col.objects.link(gr)
+    gr.parent = tmp
+    cam = rig()
+    rot = cam.rotation_euler.to_matrix()
+    up, back = rot.col[1], rot.col[2]
+    # the board's frame: a tree lying toward or away from the camera is
+    # foreshortened by sin(30), across it is not
+    reach = H + 1.0
+    ppm = rise / H
+    sc = bpy.context.scene
+    e = math.radians(SPRITE_ELEVATION)
+    top, bot = max(H * math.cos(e), reach * math.sin(e) + 3.0) + 0.5, -reach * math.sin(e) - 1.0
+    sc.render.resolution_x = int(2 * reach * ppm)
+    sc.render.resolution_y = int((top - bot) * ppm)
+    sc.render.resolution_percentage = 100
+    cam.data.ortho_scale = max(sc.render.resolution_x, sc.render.resolution_y) / ppm
+    cam.location = w.location + up * ((top + bot) / 2) + back * 60.0
+    cam.data.clip_end = 200.0
+    shots, rows = [], []
+    try:
+        for az in azimuths:
+            samples, landed = timber(lie[az], T=crown)
+            ts = ([k / fps for k in range(int(3.5 * fps) + 1)] if fps
+                  else [0.0, 0.8, 1.2, landed, landed + 0.05, landed + 0.12, 3.5])
+            row = []
+            for j, tq in enumerate(ts):
+                s = min(samples, key=lambda x: abs(x[0] - tq))
+                posed = _pose(co0, bend, h, az, s[1], s[2])
+                posed[:, 2] = _crush(posed[:, 2], s[1] / math.radians(lie[az]))
+                me.vertices.foreach_set("co", posed.ravel())
+                me.update()
+                p = os.path.join(os.path.dirname(path), f"_{name}_fall{int(az):03d}_{j:03d}.png")
+                with toon_preview(burn=burn), _Solo([f"{name}.Fall"]):
+                    sc.render.filepath = p
+                    bpy.ops.render.render(write_still=True)
+                row.append(p)
+            shots.append(row)
+            rows.append({"azimuth": az, "touch_deg": touch[az], "rest_deg": lie[az],
+                         "landed_s": round(landed, 2),
+                         "crown_deg": round(math.degrees(max(abs(x[2]) for x in samples)), 1)})
+    finally:
+        bpy.data.objects.remove(ob, do_unlink=True)
+        bpy.data.meshes.remove(me)
+        bpy.data.objects.remove(gr, do_unlink=True)
+        bpy.data.objects.remove(tmp, do_unlink=True)
+    if fps:
+        return {"frames": shots, "rows": rows}
+    _grid_sheet(shots, path)
+    for row in shots:
+        for p in row:
+            os.remove(p)
+    return {"sheet": path, "rows": rows}
+
+
+def _grid_sheet(rows, out, gap=12):
+    """Renders in rows on a pale ground, first row on top."""
+    ims = [[_load_rgba(p) for p in r] for r in rows]
+    h, w = ims[0][0].shape[:2]
+    H = len(ims) * (h + gap) + gap
+    W = len(ims[0]) * (w + gap) + gap
+    sheet = np.ones((H, W, 4), dtype=np.float32)
+    sheet[..., :3] = _srgb((0.85, 0.84, 0.80))
+    for i, r in enumerate(ims[::-1]):      # Blender's pixel rows run bottom-up
+        for j, t in enumerate(r):
+            y, x = gap + i * (h + gap), gap + j * (w + gap)
+            a = t[..., 3:4]
+            sheet[y:y + h, x:x + w, :3] = t[..., :3] * a + sheet[y:y + h, x:x + w, :3] * (1 - a)
+    img = bpy.data.images.new("TreeFallCheck", W, H, alpha=False)
+    img.pixels.foreach_set(sheet.ravel())
+    img.filepath_raw = out
+    img.file_format = "PNG"
+    img.save()
+    bpy.data.images.remove(img)
+    return out
 
 
 def export_glb(ob, path):
@@ -2098,7 +2413,7 @@ def make(seed, name=None, out_dir=None, cfg=None, spacing=9.0):
 
     Writes `<out>/<name>/`: `<name>.png`, `<name>_burnt.png`, `tree.glb`,
     `tree.json`, and the sheets `_check.png`, `_check_game.png`,
-    `_check_burn.png`. One model, not a live and a burnt one: it burns
+    `_check_burn.png`, `_check_fall.png`, `_check_fall_burnt.png`. One model, not a live and a burnt one: it burns
     itself (the burn contract, `toon_preview`). The live sprite tree stands at
     the seed's slot, its burnt twin one `spacing` in front, the model one
     behind.
@@ -2132,7 +2447,10 @@ def make(seed, name=None, out_dir=None, cfg=None, spacing=9.0):
     glb = os.path.join(out_dir, "tree.glb")
     model = {"file": "tree.glb", "tris": tris, "check": export_glb(ob, glb), "burn": glb_burn(glb),
              "sheets": [game_check(gname, os.path.join(out_dir, "_check_game.png"), shot["files"][0]),
-                        burn_check(gname, os.path.join(out_dir, "_check_burn.png"), *shot["files"])]}
+                        burn_check(gname, os.path.join(out_dir, "_check_burn.png"), *shot["files"])],
+             "fall": fall_spec(ob, base)}
+    model["sheets"] += [fall_check(gname, os.path.join(out_dir, "_check_fall.png"))["sheet"],
+                        fall_check(gname, os.path.join(out_dir, "_check_fall_burnt.png"), burn=1.0)["sheet"]]
     g = made[("live", "game")]
     spec = {
         "name": name, "seed": seed, "generator": "pipeline/tree_gen.py",
@@ -2150,7 +2468,8 @@ def make(seed, name=None, out_dir=None, cfg=None, spacing=9.0):
                            MAT_NAMES["game"]["core"]: "gone once burn > x",
                            MAT_NAMES["game"]["twig"]: "shown once burn > x",
                            MAT_NAMES["game"]["bark"]: "x unused; chars with burn",
-                           "ranges": BURN}},
+                           "ranges": BURN},
+                  "fall": model["fall"]},
     }
     with open(os.path.join(out_dir, "tree.json"), "w", encoding="utf-8") as f:
         json.dump(spec, f, indent=1, ensure_ascii=False)
