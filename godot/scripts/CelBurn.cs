@@ -129,6 +129,19 @@ public sealed partial class CelBurn : Node3D
     /// </summary>
     public Vector3? TurretAt;
     public bool OverTurret;
+    /// <summary>
+    /// A fire with no turret to go over - a tree's (<c>Tree3DBench</c>): the
+    /// flame leaves 0 in the stencil where it draws, as the smoke does, and has
+    /// no pass over a turret. What is under it may have marked its pixels for
+    /// a pass of its own - a tree's crown line - and read through the flame,
+    /// that pass drew the leaves' outline behind the fire over it. Set before
+    /// <see cref="Build"/>.
+    /// </summary>
+    public bool Clears;
+    /// <summary>A tongue's foot round rather than drawn to a point: on a tank
+    /// the deck hides it, on a tree it is in the open, in the crown, and the
+    /// pointed foot read as a flame cut off at its base.</summary>
+    public bool RoundFoot;
     /// <summary>The model's cel materials: the scorch is painted into them.</summary>
     public IReadOnlyList<ShaderMaterial> Paint = System.Array.Empty<ShaderMaterial>();
 
@@ -170,11 +183,9 @@ public sealed partial class CelBurn : Node3D
     public void Build(float hullPx)
     {
         _hull = Mathf.Max(hullPx, 1.0f);
-        _flameInk = new ShaderMaterial
-        {
-            Shader = FlameShader,
-            NextPass = new ShaderMaterial { Shader = FlameOverShader },
-        };
+        _flameInk = Clears
+            ? new ShaderMaterial { Shader = FlameClearShader }
+            : new ShaderMaterial { Shader = FlameShader, NextPass = new ShaderMaterial { Shader = FlameOverShader } };
         _flame = new MeshInstance3D
         {
             Name = "Tongues",
@@ -340,6 +351,18 @@ public sealed partial class CelBurn : Node3D
         for (int i = 0; i < n; i++)
             mid += ports[i];
         mid /= n;
+        // The quad's foot under the lowest port and its top over the highest,
+        // as the screen has them: from the ports' middle, the foot of a port
+        // lower than the rest - a tree's, where they stand at different
+        // heights in the crown - went under the quad's edge and was cut flat.
+        float lo = 0.0f, hi = 0.0f;
+        for (int i = 0; i < n; i++)
+        {
+            float y = (ports[i] - mid).Dot(up);
+            lo = Mathf.Min(lo, y);
+            hi = Mathf.Max(hi, y);
+        }
+        mid += up * lo;
         // Under the ports: a tongue's round foot reaches 0.4 of its height
         // below its base, and its height is up to 1.69 of TongueHeight.
         float foot = 0.4f * 1.69f * TongueHeight;
@@ -361,7 +384,7 @@ public sealed partial class CelBurn : Node3D
         // tallest over the rise. A quad any tighter cut the fire off with its
         // own straight edge where a view spread the grilles across the screen.
         float w = 2.0f * (wide + PortSpread + TongueWidth * 1.3f * (0.96f + 0.4f));
-        float h = foot + TongueRise + TongueHeight * 1.69f;
+        float h = foot + (hi - lo) / _hull + TongueRise + TongueHeight * 1.69f;
         // Upright in the world, not in the screen's plane: the screen's plane
         // leans away from the eye, and a flame in it went back into the turret
         // as it rose, which hid it. Stretched by 1/cos so it spans the same
@@ -383,8 +406,9 @@ public sealed partial class CelBurn : Node3D
                 ? 1.0f : 0.0f;
         // Both passes the same numbers: the second is the flame again, over
         // the turret, for the ports in front of it.
-        var over = (ShaderMaterial)_flameInk!.NextPass;
-        foreach (ShaderMaterial m in new[] { _flameInk!, over })
+        ShaderMaterial[] passes = _flameInk!.NextPass is ShaderMaterial over
+            ? new[] { _flameInk!, over } : new[] { _flameInk! };
+        foreach (ShaderMaterial m in passes)
         {
             m.SetShaderParameter("size", new Vector2(w, h));
             m.SetShaderParameter("ports", _portAt);
@@ -398,6 +422,7 @@ public sealed partial class CelBurn : Node3D
             m.SetShaderParameter("port_near", _portNear);
             m.SetShaderParameter("hull", _hull);
             m.SetShaderParameter("front", _front);
+            m.SetShaderParameter("round_foot", RoundFoot);
         }
     }
 
@@ -485,13 +510,19 @@ uniform float port_near[4];
 uniform float hull = 150.0;
 uniform float front[4];
 uniform bool only_front = false;
+uniform bool round_foot = false;
 " + Toon.NoiseCode + @"
 float hash1(float x) { return fract(sin(x * 12.9898 + 4.1414) * 43758.5453); }
 // 1 on a tongue's middle line, 0 at its edge, below 0 outside: a round foot,
 // full sides, a soft point.
 float drop(vec2 q) {
     if (q.y < -0.4 || q.y > 1.0) return -1.0;
-    float half_w = 0.96 * pow(max(1.0 - q.y, 0.0), 0.55) * smoothstep(-0.45, 0.25, q.y);
+    // The foot: drawn in to a point, or round - a quarter circle up from the
+    // bottom (round_foot).
+    float s = clamp((q.y + 0.4) / 0.65, 0.0, 1.0);
+    float in_foot = round_foot ? sqrt(max(1.0 - (1.0 - s) * (1.0 - s), 0.0))
+                               : smoothstep(-0.45, 0.25, q.y);
+    float half_w = 0.96 * pow(max(1.0 - q.y, 0.0), 0.55) * in_foot;
     return 1.0 - abs(q.x) / max(half_w, 1e-3);
 }
 void fragment() {
@@ -590,5 +621,14 @@ void fragment() {
                      "render_mode unshaded, cull_disabled, shadows_disabled, fog_disabled, depth_test_disabled;")
             .Replace("stencil_mode read, compare_not_equal, ", "stencil_mode read, compare_equal, ")
             .Replace("uniform bool only_front = false;", "uniform bool only_front = true;"),
+    };
+
+    /// <summary>The flame of a fire with no turret (<see cref="Clears"/>):
+    /// writing 0 where it draws, as the smoke does.</summary>
+    private static readonly Shader FlameClearShader = new()
+    {
+        Code = FlameShader.Code
+            .Replace("stencil_mode read, compare_not_equal, " + Toon.TurretStencil + ";",
+                     "stencil_mode write, compare_always, 0;"),
     };
 }

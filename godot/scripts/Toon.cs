@@ -69,12 +69,19 @@ uniform float mid = 0.5;
 uniform float soft = 0.035;
 uniform float sun = 1.0;
 uniform float glow_paint = 0.45;
+// Whether the sun's cast shadow steps this surface down. Off for a tree's
+// leaves and cores (Tree3DBench): a crown shadows itself leaf by leaf, and on
+// the ramp's step every leaf's shadow on the leaves under it was a dark
+// triangle - flecks over the lit side, more or fewer as the shadow map's
+// texel fell at the tree's depth. The crown's own normals shade it.
+uniform bool sun_shadow = true;
 // How much of the paint is soot (the fire's scorch): a local light lays no
 // colour of its own on it - painted over, a scorch under its own fire went
 // orange-olive and the dark base the flame stands on was gone while it burned.
 varying float sooted;
 void light() {
-    float t = clamp(dot(NORMAL, LIGHT), 0.0, 1.0) * ATTENUATION;
+    float t = clamp(dot(NORMAL, LIGHT), 0.0, 1.0)
+            * (LIGHT_IS_DIRECTIONAL && !sun_shadow ? 1.0 : ATTENUATION);
     float v = mid * smoothstep(edge_dark - soft, edge_dark + soft, t);
     v = mix(v, 1.0, smoothstep(edge_lit - soft, edge_lit + soft, t));
     DIFFUSE_LIGHT += v * sun * LIGHT_COLOR / PI;
@@ -146,6 +153,48 @@ float noise3(vec3 x) {
 ";
 
     /// <summary>
+    /// A tree model's burn contract (<c>tree_gen.py</c>, <c>tree.json</c>
+    /// <c>model.burn</c>): <c>UV2.x</c> - glTF's <c>TEXCOORD_1</c> - is when each
+    /// piece goes. <c>burn_role</c> 0 is everything that is not a tree (every
+    /// tank): nothing here runs. 1 - leaves and puff cores - is gone once
+    /// <c>burn</c> passes it, and chars on the way over the last
+    /// <c>burn_window</c> of it; 2 - twigs - shows once <c>burn</c> passes it,
+    /// charred; 3 - bark - chars with <c>charred</c>, the paint's own clock
+    /// (<c>Wildfire.Coat.Char</c>), and never goes. Its uniforms and a
+    /// <c>burn_gone()</c> the cel pass, the ink and the crown's mask
+    /// (<c>Tree3DBench</c>) all ask, so the three lose a piece on one frame.
+    ///
+    /// <b>A puff's core is eaten, not charred</b> (<c>burn_eat</c>): its
+    /// threshold comes after its leaves', so for a while it stands bare, and
+    /// charred whole it was a black ball hung in the burnt crown. Over its
+    /// window it is cut away by a noise in the world instead - holes that open
+    /// and grow, their edge glowing - the hard cut the smoke goes by. In the
+    /// world, so the ink and the mask cut the same holes and the line follows
+    /// them in. Needs <see cref="NoiseCode"/> before it.
+    /// </summary>
+    public const string BurnCode = @"
+uniform int burn_role = 0;
+uniform float burn = 0.0;
+uniform float burn_window = 0.12;
+uniform float charred = 0.0;
+uniform bool burn_eat = false;
+uniform float burn_grain = 5.0;
+// How far into its own going a piece is: 0 whole .. 1 gone (role 1).
+float burn_k(float at) {
+    return clamp((burn - at) / max(burn_window, 1e-4) + 1.0, 0.0, 1.0);
+}
+// What the eating has left: under 0 the piece is gone here.
+float burn_left(float at, vec3 p) {
+    return noise3(p / burn_grain) * 0.8 + noise3(p / (burn_grain * 0.35) + vec3(3.1)) * 0.2
+           - burn_k(at);
+}
+bool burn_gone(float at, vec3 p) {
+    return (burn_role == 1 && (burn > at || (burn_eat && burn_left(at, p) < 0.0)))
+        || (burn_role == 2 && burn <= at);
+}
+";
+
+    /// <summary>
     /// The model's paint on the ramp, and the fire's scorch in it
     /// (<see cref="CelBurn"/> drives the numbers): round each port, within
     /// <c>scorch_r</c> world px grown by <c>scorch</c>, the paint goes to char,
@@ -184,17 +233,41 @@ uniform vec3 steel : source_color = vec3(0.50, 0.52, 0.56);
 uniform vec3 hole_tone : source_color = vec3(0.035, 0.03, 0.028);
 uniform vec3 mark_soot : source_color = vec3(0.17, 0.16, 0.15);
 uniform vec3 hole_wall : source_color = vec3(0.16, 0.15, 0.15);
+// Leaves burning: the last of a leaf's window glows before it goes (BurnCode).
+uniform bool burn_ember = false;
 varying vec3 world;
-" + NoiseCode + RampCode + @"
+" + NoiseCode + RampCode + BurnCode + @"
 void vertex() {
     world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
 void fragment() {
+    if (burn_role != 0 && burn_gone(UV2.x, world)) {
+        discard;
+    }
     " + (both ? "if (!FRONT_FACING) { NORMAL = -NORMAL; }" : "") + @"
     vec4 c = texture(albedo_tex, UV) * albedo;
     float ao = has_orm ? texture(orm_tex, UV).r : 1.0;
     vec3 glow = vec3(0.0);
     sooted = 0.0;
+    if (burn_role != 0) {
+        // How far into its own going this piece is: a leaf or a core over its
+        // window, a twig charred from the moment it shows, bark by the clock.
+        float k = burn_role == 1 ? burn_k(UV2.x) : burn_role == 2 ? 1.0 : charred;
+        if (burn_eat) {
+            // Eaten: the core keeps its green, charred only in a band at the
+            // holes' edge and glowing at the very edge of it.
+            float left = burn_left(UV2.x, world);
+            float edge = 1.0 - step(0.10, left);
+            c.rgb = mix(c.rgb, char_tone, char_cover * edge);
+            sooted = edge;
+            glow = ember_tone * (1.0 - step(0.035, left)) * step(0.001, k) * 1.4;
+        } else {
+            c.rgb = mix(c.rgb, char_tone, char_cover * k);
+            sooted = k;
+            if (burn_ember && burn_role == 1)
+                glow = ember_tone * smoothstep(0.55, 0.9, k) * 1.4;
+        }
+    }
     if (scorch > 0.0 && scorch_n > 0) {
         float near = 1e9;
         for (int i = 0; i < 4; i++) {
@@ -333,7 +406,10 @@ uniform sampler2D albedo_tex : source_color, hint_default_white, filter_linear_m
 uniform float width = 1.0;
 uniform float min_px = 1.0;
 uniform float dark = 0.3;
+varying vec3 world;
+" + NoiseCode + BurnCode + @"
 void vertex() {
+    world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
     VERTEX = (MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
     vec3 n = normalize(mat3(MODELVIEW_MATRIX) * CUSTOM0.xyz);
     // One screen px in view units, for an orthographic eye.
@@ -344,6 +420,9 @@ void vertex() {
     NORMAL = n;
 }
 void fragment() {
+    if (burn_role != 0 && burn_gone(UV2.x, world)) {
+        discard;
+    }
     ALBEDO = texture(albedo_tex, UV).rgb * albedo.rgb * dark;
 }
 ";

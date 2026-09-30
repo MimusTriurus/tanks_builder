@@ -15,8 +15,14 @@ namespace TankSpriteTest;
 ///
 /// <b>Tank3D's board, camera, sun and shadow skin, and nothing of its tank</b>:
 /// the tree models are what is being looked at, and Tank3D cannot stand up
-/// without a tank in <c>Models/</c>. Burning and felling the model are not played
-/// yet - it stands as it was baked (docs/props.md, "Tree3D").
+/// without a tank in <c>Models/</c>. Felling the model is not played yet.
+///
+/// <b>The wood burns</b> (docs/props.md, "Tree3D: лесной пожар"): the board's
+/// own <see cref="Wildfire"/> - cells, spread, each tree's stagger and its
+/// <see cref="Wildfire.Coat"/> - with the model burning itself by its burn
+/// contract (<see cref="Toon.BurnCode"/>) and a 3D tank's fire and smoke
+/// (<see cref="CelBurn"/>) in its crown. LMB lights the cell under the cursor,
+/// <c>R</c> puts the wood back.
 /// </summary>
 public sealed partial class Tree3DBench : Node3D
 {
@@ -33,6 +39,17 @@ public sealed partial class Tree3DBench : Node3D
     private bool _row;
     private string? _capturePath;
     private int _captureAt = 30;
+    /// <summary><c>--burn q,r</c>: the cell lit <see cref="LightAfter"/> s in,
+    /// so a capture has a start to count from.</summary>
+    private Vector2I? _burnAt;
+    /// <summary><c>--record dir</c>: every <c>--record-every</c> th frame to
+    /// <c>dir/NNNN.png</c> for <c>--record-for</c> s, then quit - a fire to
+    /// be looked at as a film (with <c>--fixed-fps</c>).</summary>
+    private string? _recordDir;
+    private int _recordEvery = 6;
+    private float _recordFor = 18.0f;
+    private const float LightAfter = 0.5f;
+    private float _clock;
 
     // --- scene -----------------------------------------------------------
 
@@ -102,6 +119,8 @@ public sealed partial class Tree3DBench : Node3D
         for (int i = 0; i < Math.Min(_trees.Length, spots.Length); i++)
             Stand(_trees[i], spots[i].Cell, spots[i].Off);
         FrameCamera();
+        if (_stage is not null && _fire is not null)
+            _stage.Blaze = _fire;
     }
 
     public override void _Process(double delta)
@@ -111,7 +130,14 @@ public sealed partial class Tree3DBench : Node3D
         // left as the stage expects to run.
         _stage?.Place(Array.Empty<Vehicle>());
         FrameCamera();
+        Burn((float)delta);
         _frame++;
+        if (_recordDir is not null && _frame % _recordEvery == 0)
+        {
+            GetViewport().GetTexture().GetImage().SavePng($"{_recordDir}/{_frame / _recordEvery:D4}.png");
+            if (_clock >= _recordFor)
+                GetTree().Quit();
+        }
         if (_capturePath is not null && _frame == _captureAt)
         {
             Error err = GetViewport().GetTexture().GetImage().SavePng(_capturePath);
@@ -148,10 +174,18 @@ public sealed partial class Tree3DBench : Node3D
         JsonElement j = json.RootElement;
         float ppm = j.GetProperty("sprites").GetProperty("px_per_m").GetSingle() / PropDetail;
         ulong t0 = Time.GetTicksMsec();
+        var tree = new TreeFire { Cell = cell };
         if (!_pbr)
+        {
+            var roles = new List<(MeshInstance3D Mesh, int Surface, string Name)>();
+            Surfaces(scene, roles);
             Toon.Dress(scene, KeepsNormals, IsFoliage, TreeStencil);
+            foreach ((MeshInstance3D m, int s, string mat) in roles)
+                if (m.Mesh.SurfaceGetMaterial(s) is ShaderMaterial cel)
+                    Contract(cel, mat, tree.Burn);
+        }
         if (_mask is not null)
-            Ghost(scene, MaskFor(_models.Count));
+            Ghost(scene, MasksFor(_models.Count, tree.Burn));
         var holder = new Node3D { Name = name, Scale = Vector3.One * ppm };
         holder.AddChild(scene);
         AddChild(holder);
@@ -161,10 +195,161 @@ public sealed partial class Tree3DBench : Node3D
             holder.Position = Foot(new Vector3(flat.X, 0.0f, flat.Y / Squash));
         }
         _models.Add(holder);
+        tree.Holder = holder;
+        float h = j.GetProperty("height").GetSingle(), w = j.GetProperty("width").GetSingle();
+        float d = j.GetProperty("depth").GetSingle();
+        foreach (Vector3 p in Seats)
+            tree.Seats.Add(new Vector3(p.X * w, p.Y * h, p.Z * d));
+        Vector2 at = _field is null ? Vector2.Zero : _field.FlatAnchor(cell) + _field.CentreOffset + off;
+        tree.Stagger = (float)Grove.Hash01(Mathf.RoundToInt(at.X), Mathf.RoundToInt(at.Y), StaggerSalt);
+        tree.Fire = new CelBurn { Name = name + "Fire", Clears = true, RoundFoot = true };
+        AddChild(tree.Fire);
+        // A tank's hull lengths, the crown's width here: the tongues, the
+        // column and the light are all shares of it.
+        tree.Fire.Build(w * ppm);
+        _burning.Add(tree);
+        _wooded.Add(cell);
         GD.Print($"tree3d: {name} on {cell} +{off}, {ppm:F2} px/m, "
                  + $"{j.GetProperty("height").GetSingle() * ppm:F0} px tall, "
                  + $"{j.GetProperty("model").GetProperty("tris").GetInt32()} tris, "
                  + $"dressed in {Time.GetTicksMsec() - t0} ms");
+    }
+
+    // --- the fire ------------------------------------------------------------
+
+    /// <summary>One model on fire: its cell, how late it catches, the
+    /// materials its burn goes into, and its flame and smoke.</summary>
+    private sealed class TreeFire
+    {
+        public Node3D Holder = null!;
+        public Vector2I Cell;
+        public float Stagger;
+        public readonly List<ShaderMaterial> Burn = new();
+        public readonly List<Vector3> Seats = new();
+        public CelBurn Fire = null!;
+        public readonly List<Vector3> Ports = new();
+    }
+
+    private readonly List<TreeFire> _burning = new();
+    private readonly HashSet<Vector2I> _wooded = new();
+    private Wildfire? _fire;
+    private const int StaggerSalt = 533_011;
+
+    /// <summary>Where the fire sits in a crown, as shares of the model's width,
+    /// height and depth from its foot (glTF: +Z the front, toward the eye):
+    /// four ports, <see cref="CelBurn.MaxPorts"/>, on the crown's front half
+    /// so the leaves in front hide only the flame's foot - two at the sides,
+    /// one high, one low in the middle.</summary>
+    private static readonly Vector3[] Seats =
+    {
+        new(-0.24f, 0.60f, 0.18f),
+        new(0.22f, 0.66f, 0.14f),
+        new(0.02f, 0.84f, 0.04f),
+        new(0.04f, 0.50f, 0.26f),
+    };
+
+    /// <summary>Every surface under <paramref name="node"/> with the name of
+    /// its glTF material, before <see cref="Toon.Dress"/> swaps them.</summary>
+    private static void Surfaces(Node node, List<(MeshInstance3D, int, string)> into)
+    {
+        foreach (Node child in node.GetChildren())
+            Surfaces(child, into);
+        if (node is not MeshInstance3D m || m.Mesh is null)
+            return;
+        for (int s = 0; s < m.Mesh.GetSurfaceCount(); s++)
+            into.Add((m, s, m.Mesh.SurfaceGetMaterial(s)?.ResourceName ?? ""));
+    }
+
+    /// <summary>The burn contract of <c>tree.json</c> (<c>model.burn</c>) on one
+    /// cel material and its ink: leaves and cores go, twigs show, bark chars.
+    /// The windows are the Blender preview's (<c>tree_gen.BURN_WINDOW</c>).</summary>
+    private static void Contract(ShaderMaterial cel, string mat, List<ShaderMaterial> into)
+    {
+        (int role, float window, bool ember, bool eat) = mat switch
+        {
+            "TreeGame.Leaf" => (1, 0.12f, true, false),
+            "TreeGame.Core" => (1, 0.45f, false, true),
+            "TreeGame.Twig" => (2, 0.0f, false, false),
+            "TreeGame.Bark" => (3, 0.0f, false, false),
+            _ => (0, 0.0f, false, false),
+        };
+        if (role == 0 || into.Contains(cel))
+            return;
+        foreach (ShaderMaterial m in cel.NextPass is ShaderMaterial ink ? new[] { cel, ink } : new[] { cel })
+        {
+            m.SetShaderParameter("burn_role", role);
+            m.SetShaderParameter("burn_window", window);
+            m.SetShaderParameter("burn_eat", eat);
+            into.Add(m);
+        }
+        cel.SetShaderParameter("burn_ember", ember);
+        // The crown shades itself by its normals, not by its shadow on itself
+        // (Toon's sun_shadow): the leaves' shadows on the leaves under them
+        // were dark triangles all over the lit side.
+        if (role == 1)
+            cel.SetShaderParameter("sun_shadow", false);
+    }
+
+    private void Burn(float dt)
+    {
+        _clock += dt;
+        if (_fire is null)
+            return;
+        if (_burnAt is Vector2I lit && _clock >= LightAfter)
+        {
+            _fire.Light(lit);
+            _burnAt = null;
+        }
+        _fire.Tick(dt);
+        Basis eye = _camera.GlobalBasis;
+        foreach (TreeFire t in _burning)
+        {
+            Wildfire.Coat coat = _fire.Of(t.Cell, t.Stagger);
+            // The crown goes with the fuel (Coat.Spent: between the flame
+            // coming up and the sprite's handover shutting), the paint with the
+            // char - the two clocks the sprite's pair has.
+            foreach (ShaderMaterial m in t.Burn)
+            {
+                m.SetShaderParameter("burn", coat.Spent);
+                m.SetShaderParameter("charred", coat.Char);
+            }
+            t.Fire.Fire = coat.Flame;
+            t.Fire.Smoke = coat.Smoke;
+            t.Fire.Smoulder = coat.Burnt;
+            // The flame goes down with the crown: from the crown's front onto
+            // the limbs and the fork as the fuel goes - left where the crown
+            // was, it hung in the air round the bare twigs.
+            float down = coat.Spent * coat.Spent;
+            t.Ports.Clear();
+            foreach (Vector3 p in t.Seats)
+                t.Ports.Add(t.Holder.ToGlobal(p.Lerp(new Vector3(p.X * 0.4f, p.Y * 0.62f, p.Z * 0.3f), down)));
+            t.Fire.Tick(dt, t.Ports, eye);
+        }
+    }
+
+    private void Douse()
+    {
+        _fire?.Douse();
+        _clock = 0.0f;
+        foreach (TreeFire t in _burning)
+            t.Fire.Reset();
+        Burn(0.0f);
+    }
+
+    public override void _UnhandledInput(InputEvent e)
+    {
+        if (e is InputEventKey { Pressed: true, Echo: false, Keycode: Key.R })
+            Douse();
+        else if (e is InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left } b
+                 && _field is not null && _fire is not null)
+        {
+            Vector3 from = _camera.ProjectRayOrigin(b.Position), way = _camera.ProjectRayNormal(b.Position);
+            if (Mathf.Abs(way.Y) < 1e-4f)
+                return;
+            Vector3 g = from + way * (-from.Y / way.Y);
+            Vector2I cell = _field.CellUnder(new Vector2(g.X, g.Z * Squash));
+            GD.Print(_fire.Light(cell) ? $"tree3d: {cell} lit" : $"tree3d: {cell} has nothing to burn");
+        }
     }
 
     /// <summary>Leaves and puff cores keep the normals the file gives them -
@@ -249,20 +434,53 @@ public sealed partial class Tree3DBench : Node3D
 
     private ShaderMaterial? _line;
 
-    /// <summary>A stand-in for every mesh of the tree, on the mask's layer.</summary>
-    private static void Ghost(Node node, Material mask)
+    /// <summary>A stand-in for every mesh of the tree, on the mask's layer, each
+    /// surface on the mask of its burn role - what has burnt away is gone from
+    /// the mask on the frame it goes from the picture.</summary>
+    private static void Ghost(Node node, ShaderMaterial[] masks)
     {
         foreach (Node child in node.GetChildren())
-            Ghost(child, mask);
+            Ghost(child, masks);
         if (node is not MeshInstance3D m || m.Mesh is null)
             return;
-        m.AddChild(new MeshInstance3D
+        var ghost = new MeshInstance3D
         {
             Mesh = m.Mesh,
             Layers = MaskLayer,
-            MaterialOverride = mask,
             CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
-        });
+        };
+        for (int s = 0; s < m.Mesh.GetSurfaceCount(); s++)
+        {
+            int role = 0;
+            if (m.Mesh.SurfaceGetMaterial(s) is ShaderMaterial cel)
+            {
+                role = cel.GetShaderParameter("burn_role").AsInt32();
+                // the eaten core's own: role 1 is the leaves' as well
+                if (role == 1 && cel.GetShaderParameter("burn_eat").AsBool())
+                    role = 4;
+            }
+            ghost.SetSurfaceOverrideMaterial(s, masks[Mathf.Clamp(role, 0, 4)]);
+        }
+        m.AddChild(ghost);
+    }
+
+    /// <summary>The <paramref name="i"/>-th tree's masks, one per burn role and
+    /// one more for the eaten cores (4: role 1, <c>burn_eat</c>), listed with
+    /// the materials its burn goes into. The windows are the cel's: the mask
+    /// cuts the core's holes where the paint does.</summary>
+    private ShaderMaterial[] MasksFor(int i, List<ShaderMaterial> burn)
+    {
+        var masks = new ShaderMaterial[5];
+        for (int k = 0; k < 5; k++)
+        {
+            masks[k] = MaskFor(i);
+            masks[k].SetShaderParameter("burn_role", k == 4 ? 1 : k);
+            masks[k].SetShaderParameter("burn_window", k == 4 ? 0.45f : 0.12f);
+            masks[k].SetShaderParameter("burn_eat", k == 4);
+            if (k != 0)
+                burn.Add(masks[k]);
+        }
+        return masks;
     }
 
     private readonly List<ShaderMaterial> _masks = new();
@@ -287,7 +505,15 @@ render_mode unshaded, cull_disabled, shadows_disabled, fog_disabled;
 uniform float id = 1.0;
 uniform float near = 0.0;
 uniform float span = 1.0;
+varying vec3 world;
+" + Toon.NoiseCode + Toon.BurnCode + @"
+void vertex() {
+    world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+}
 void fragment() {
+    if (burn_role != 0 && burn_gone(UV2.x, world)) {
+        discard;
+    }
     ALBEDO = vec3(id, clamp((-VERTEX.z - near) / span, 0.0, 1.0), 0.0);
 }",
     };
@@ -401,6 +627,7 @@ void fragment() {
         AddChild(_stage);
         _field.ShowField = false;
         BuildShadows();
+        _fire = new Wildfire { Field = _field, Enabled = true, Wooded = _wooded.Contains };
     }
 
     private float LiftAt(Vector3 w) => _field?.TopAtPoint(new Vector2(w.X, w.Z * Squash)) ?? 0.0f;
@@ -517,6 +744,12 @@ void light() {
             else if (a == "--pbr") _pbr = true;
             else if (a == "--no-outline") _noOutline = true;
             else if (a == "--row") _row = true;
+            else if (a == "--record" && more) _recordDir = args[++i];
+            else if (a == "--record-every" && more) _recordEvery = Math.Max(1, (int)F(args[++i], _recordEvery));
+            else if (a == "--record-for" && more) _recordFor = F(args[++i], _recordFor);
+            else if (a == "--burn" && more && args[++i].Split(',') is { Length: 2 } qr
+                     && int.TryParse(qr[0], out int q) && int.TryParse(qr[1], out int r))
+                _burnAt = new Vector2I(q, r);
             else if (a == "--capture" && more) _capturePath = args[++i];
             else if (a == "--capture-at" && more) _captureAt = (int)F(args[++i], _captureAt);
         }
