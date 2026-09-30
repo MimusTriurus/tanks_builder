@@ -38,7 +38,8 @@ public sealed partial class Tree3DBench : Node3D
     // --- flags -----------------------------------------------------------
 
     /// <summary><c>--trees A,B,..</c>: which folders under
-    /// <c>pipeline/out/trees/</c> to stand, in the order of <see cref="Spots"/>.</summary>
+    /// <c>assets/Models/Trees/</c> (<see cref="AssetRoot.Trees"/>) to stand, in
+    /// the order of <see cref="Spots"/>.</summary>
     private string[] _trees = { "Oak_001", "Oak_002", "Oak_003", "Oak_004", "Oak_005", "Oak_006" };
     private float _zoom = 2.2f;
     private bool _pbr;
@@ -260,7 +261,7 @@ public sealed partial class Tree3DBench : Node3D
 
     // --- the trees ---------------------------------------------------------
 
-    private static string TreeDir(string name) => AssetRoot.Repo + "/pipeline/out/trees/" + name;
+    private static string TreeDir(string name) => AssetRoot.Trees + "/" + name;
 
     /// <summary>
     /// One model on the board: <c>tree.glb</c> read from disk (<c>AssetRoot</c>'s

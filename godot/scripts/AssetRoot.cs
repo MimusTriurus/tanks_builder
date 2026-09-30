@@ -38,6 +38,11 @@ internal static class AssetRoot
     /// <summary>What <c>sprite_atlas.py</c> wrote, one folder per tank.</summary>
     internal static readonly string Sprites = Repo + "/Sprites";
 
+    /// <summary>The generator's tree models, one folder a tree:
+    /// <c>tree.glb</c> and its <c>tree.json</c>, published there by
+    /// <c>tree_gen.make</c> (<c>publish</c>) - what <c>Tree3D</c> stands.</summary>
+    internal static readonly string Trees = Repo + "/assets/Models/Trees";
+
     /// <summary>Where <c>stage_sounds.sh</c> puts the audio. Not in this
     /// repository - see the script - so this directory is often simply absent,
     /// and everything downstream of it has to be happy about that.</summary>

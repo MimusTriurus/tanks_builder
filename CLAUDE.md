@@ -8,7 +8,7 @@
 | `pipeline/` | конвейер спрайтов в Blender: из `.glb` от генератора — послойные изометрические атласы | [pipeline/CLAUDE.md](pipeline/CLAUDE.md) |
 | `godot/` | стенд на Godot 4.7 mono (C#): танки едут, стреляют и горят на доске | [godot/CLAUDE.md](godot/CLAUDE.md) |
 | `docs/gdd/` | правила игры (GDD), общие для обоих цехов | [docs/gdd/index.md](docs/gdd/index.md) |
-| `assets/` | исходники: `Input3D/` (.glb), `Parts3D/`, `Scenes/` (.blend, LFS), `Images/`, `Sounds/` (не в git) | [pipeline/docs/assets.md](pipeline/docs/assets.md) |
+| `assets/` | исходники: `Input3D/` (.glb), `Parts3D/`, `Scenes/` (.blend, LFS), `Images/`, `Sounds/` (не в git); `Models/Trees/` — модели деревьев генератора для `Tree3D` | [pipeline/docs/assets.md](pipeline/docs/assets.md) |
 | `Sprites/` | **контракт**: то, что конвейер пишет и стенд читает | ниже |
 
 ## Контракт `Sprites/`

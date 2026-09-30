@@ -80,6 +80,7 @@ import json
 import math
 import os
 import random
+import shutil
 
 import bmesh
 import bpy
@@ -215,6 +216,9 @@ DETAIL["game"] = GAME_TIERS[GAME_TIER]
 SPRITE_RISE = 1024
 SPRITE_ELEVATION = 30.0     # the board's tilt, so sprite and model agree
 OUT = os.path.join(REPO, "out", "trees")
+# Where the game models the bench stands go (`publish`): the model and its
+# sidecar, and nothing else - the sprites and the sheets stay in OUT.
+MODELS = os.path.normpath(os.path.join(REPO, "..", "assets", "Models", "Trees"))
 
 
 # ---------------------------------------------------------------------------
@@ -2731,6 +2735,7 @@ def make(seed, name=None, out_dir=None, cfg=None, spacing=9.0):
     behind.
     """
     name = name or f"Oak_{seed:03d}"
+    out_arg = out_dir
     out_dir = os.path.join(out_dir or OUT, name)
     os.makedirs(out_dir, exist_ok=True)
     for stale in ("tree_burnt.glb", "_check_burnt_game.png", "_check_live_game.png",
@@ -2788,8 +2793,23 @@ def make(seed, name=None, out_dir=None, cfg=None, spacing=9.0):
     }
     with open(os.path.join(out_dir, "tree.json"), "w", encoding="utf-8") as f:
         json.dump(spec, f, indent=1, ensure_ascii=False)
-    return {"dir": out_dir, "sprites": shot, "model": model,
+    # Into assets for the bench, unless this run was written somewhere of its own
+    # (an experiment): that must not replace the tree the board stands.
+    published = publish(name) if out_arg is None else None
+    return {"dir": out_dir, "sprites": shot, "model": model, "published": published,
             "report": {f"{s}/{d}": r for (s, d), r in made.items()}}
+
+
+def publish(name, out_dir=None):
+    """Copy `<out>/<name>/tree.glb` and `tree.json` to `assets/Models/Trees/<name>/`,
+    where `godot/scripts/Tree3DBench.cs` reads them (`AssetRoot.Trees`). `make`
+    does it for every tree it writes to OUT. Returns the folder."""
+    src = os.path.join(out_dir or OUT, name)
+    dst = os.path.join(MODELS, name)
+    os.makedirs(dst, exist_ok=True)
+    for f in ("tree.glb", "tree.json"):
+        shutil.copy2(os.path.join(src, f), os.path.join(dst, f))
+    return dst
 
 
 def remodel(seed, look, name=None, out_dir=None):

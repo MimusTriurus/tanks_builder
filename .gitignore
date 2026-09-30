@@ -65,3 +65,9 @@ Sprites/Obsolete/
 assets/Input3D/
 assets/Parts3D/
 assets/Scenes/
+
+# The one exception: assets/Models/Trees/ - the tree generator's game models
+# (tree.glb + tree.json), which Tree3D stands. Results, not inputs, like Sprites/,
+# and ~6 MB a tree rebuilt only when the generator changes, so the .glb go through
+# LFS (.gitattributes) and the sidecar stays plain text. Clone with git-lfs
+# installed (`git lfs install`), or the models arrive as pointer files.

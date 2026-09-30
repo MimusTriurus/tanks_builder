@@ -1198,8 +1198,9 @@ CatchWithin`, то есть с кривой, которую придержанн
 
 ## Tree3D: модели деревьев генератора на объёмной доске
 
-`res://Tree3D.tscn`, корень `Tree3DBench`. Модели `tree.glb` из
-`pipeline/out/trees/<имя>/` (генератор — [pipeline/docs/trees.md](../../pipeline/docs/trees.md))
+`res://Tree3D.tscn`, корень `Tree3DBench`. Модели `tree.glb` и `tree.json` из
+`assets/Models/Trees/<имя>/` (`AssetRoot.Trees`; туда их кладёт `tree_gen.make`, генератор —
+[pipeline/docs/trees.md](../../pipeline/docs/trees.md))
 на доске `Stage3D` под настоящим `Toon`, и больше ничего: ни рощи, ни кустов, ни камней —
 убранство доски спрайтовое, а смотрят здесь на модели. Доска, камера, солнце и подложка тени — как у Tank3D;
 танка нет, потому что Tank3D без `Models/` не поднимается. Лес на ней **горит** — огнём и
