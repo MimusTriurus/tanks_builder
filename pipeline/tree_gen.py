@@ -173,7 +173,9 @@ GAME_LOOK = "C"
 # `wood_tris`. Twigs are never collapsed: on a tube 0.03 m across Decimate
 # folds the section to a line and the twig comes out in dashes. The game's are
 # four-sided, a twig is 1-2 px on the board, and its burnt crown stops at the
-# second twig level; the third was two thirds of the triangles.
+# first twig level (`mid`): the third was two thirds of the triangles, and the
+# second - side twigs off the branch ends, under a pixel across - stood off the
+# burnt limbs on the board as hairs.
 DETAIL = {
     "sprite": {"leaf_size": 0.42, "density": 60.0, "leaf_sides": 16, "puff_subdiv": 3,
                "twig_sides": 6, "twig_step": 0.06, "ink": True, "voxel": 0.02, "wood_tris": 0,
@@ -199,7 +201,7 @@ GAME_TIERS = {
              "twig_depth": 2, "min_up": -0.35, "puff_scale": 1.15},
     "mid":  {"leaf_size": 0.36, "density": 40.0, "leaf_sides": 8, "puff_subdiv": 3,
              "twig_sides": 4, "twig_step": 0.25, "ink": False, "voxel": 0.03, "wood_tris": 3000,
-             "twig_depth": 2, "min_up": -1.0, "puff_scale": 1.05},
+             "twig_depth": 1, "min_up": -1.0, "puff_scale": 1.05},
     "full": {"leaf_size": 0.42, "density": 60.0, "leaf_sides": 16, "puff_subdiv": 3,
              "twig_sides": 6, "twig_step": 0.06, "ink": False, "voxel": 0.03, "wood_tris": 3000,
              "twig_depth": 3, "min_up": -1.0, "puff_scale": 1.0},
