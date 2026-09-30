@@ -106,6 +106,13 @@ public sealed partial class Tank3DBench
     /// belts' own travel, pivots included (<see cref="TankModel.Skid"/>).</summary>
     private readonly List<float> _beltWas = new();
     private readonly List<float> _beltRun = new();
+    private Vector3 _hullAhead = Vector3.Back, _hullLeft = Vector3.Right;
+    /// <summary>The belts' ruts - the model's, under <c>--fx2d</c> too: the
+    /// sprites' <see cref="TrackMarks"/> needs a <see cref="Vehicle"/>, which
+    /// this scene has not got. The stage's node, like the pools; the reset
+    /// that comes with a new model wipes them as Backspace does.</summary>
+    private CelRuts? _ruts;
+    private readonly List<CelRuts.Belt> _rutBelts = new();
     private readonly List<(Vector3 At, Vector3 Out)> _exhaustPorts = new();
     private readonly List<Vector3> _ports = new();
     private readonly Wreck _wreck = new();
@@ -381,6 +388,20 @@ void fragment() {
 
     private void BuildEffects()
     {
+        // The ruts are the stage's: made once, told the new belts' pitch and
+        // width, and the pens lifted. Unmount's reset has already wiped them.
+        if (_ruts is null)
+        {
+            _ruts = new CelRuts { Name = "Ruts" };
+            AddChild(_ruts);
+        }
+        if (_model.Tracks.Count > 0)
+        {
+            TankModel.Track belt = _model.Tracks[0];
+            _ruts.Build(belt.Pitch * _model.PixelsPerUnit,
+                        belt.Links.Multimesh.Mesh.GetAabb().Size.X * _model.PixelsPerUnit);
+        }
+        _ruts.Lift();
         if (_profile.Turreted != _model.Turreted)
             GD.Print($"tank3d: {_modelTag} is {(_model.Turreted ? "turreted" : "a casemate")} but "
                      + $"moves as the {_profile.Tag} class, which is {(_profile.Turreted ? "turreted" : "a casemate")}"
@@ -935,6 +956,7 @@ void fragment() {
         _celBlast?.Reset();
         _celDeath?.Reset();
         _celDust?.Reset();
+        _ruts?.Clear();
         _beltWas.Clear();
         _hitNode = null;
         foreach (var (mat, albedo) in _paint)
@@ -1124,6 +1146,8 @@ void fragment() {
         foreach (CanvasItem item in _painted)
             item.QueueRedraw();
 
+        BeltRuns();
+        Ruts(dt);
         Dust(dt, speed);
     }
 
@@ -1201,20 +1225,19 @@ void fragment() {
     }
 
     /// <summary>
-    /// The belts' dust in the model's look: each belt's run this frame off its
-    /// own travel (<see cref="TankModel.Driven"/> less its share of
-    /// <see cref="TankModel.Skid"/>), so a pivot raises dust as
-    /// <see cref="TrackDust"/> has it; born at the belt's trailing end, on the
-    /// ground there, and none on wet ground.
+    /// Each belt's run this frame, board px, off its own travel
+    /// (<see cref="TankModel.Driven"/> less its share of
+    /// <see cref="TankModel.Skid"/>, so a pivot runs the belts against each
+    /// other while the hull stays put) - read by the dust and the ruts alike -
+    /// and the hull's flat frame on the ground.
     /// </summary>
-    private void CelDustTick(float dt)
+    private void BeltRuns()
     {
-        _belts.Clear();
         float ppu = _model.PixelsPerUnit;
         float length = _model.Size.Z * ppu;
         Vector3 forward = _rig.GlobalBasis.Z;
-        forward = new Vector3(forward.X, 0.0f, forward.Z).Normalized();
-        var left = new Vector3(forward.Z, 0.0f, -forward.X);
+        _hullAhead = new Vector3(forward.X, 0.0f, forward.Z).Normalized();
+        _hullLeft = new Vector3(_hullAhead.Z, 0.0f, -_hullAhead.X);
         while (_beltWas.Count < _model.Tracks.Count)
             _beltWas.Add(float.NaN);
         _beltRun.Clear();
@@ -1227,6 +1250,64 @@ void fragment() {
             float run = float.IsNaN(was) ? 0.0f : (driven - was) * ppu;
             _beltRun.Add(Mathf.Abs(run) > length ? 0.0f : run);
         }
+    }
+
+    /// <summary>
+    /// The ruts: a stitch per link of each belt's run at the middle of its
+    /// footprint on the ground, the bar across the hull as the belt lay; in a
+    /// ford too (seen through the water), none in deep water, and a tank that
+    /// jumped starts a new run
+    /// (<see cref="CelRuts"/>).
+    /// </summary>
+    private void Ruts(float dt)
+    {
+        if (_ruts is null)
+            return;
+        _rutBelts.Clear();
+        for (int i = 0; i < _model.Tracks.Count; i++)
+        {
+            Vector3 off = _model.Tracks[i].Node.GlobalPosition - _rig.GlobalPosition;
+            Vector3 at = Foot(_rig.GlobalPosition + _hullLeft * off.Dot(_hullLeft)
+                              + _hullAhead * off.Dot(_hullAhead));
+            // A ford takes the mark - the water's surface lies over it, a rung
+            // up - and deep water does not: a hull afloat has no belt on the
+            // bottom. The sprites' layer lifts the pen at any water.
+            Vector2I cell = _field?.FlatCellAt(Board(at)) ?? Vector2I.Zero;
+            bool marks = !(_field?.IsDeep(cell) ?? false);
+            bool wet = _field?.IsWater(cell) ?? false;
+            // In a ford the mark is drawn on the surface, not on the bed: a point
+            // on the bed failed the depth test against it and drew nothing (only
+            // the ramp's, whose floor stands at its own height, showed). Moved
+            // up to the surface along the eye's ray (View), not straight up:
+            // straight up is a step up the screen too, and the rut ran beside
+            // the belts instead of under them (the user showed it). Along the
+            // ray the screen does not move - StandAt's move - and only the depth
+            // changes. Handed apart from the point, so the rut's length and
+            // heading stay the ground's.
+            Vector3 lift = Stage3D.Clear(Squash, RiseFactor);
+            if (wet && _field is not null)
+            {
+                float rise = _field.WaterTop(cell) / RiseFactor - at.Y;
+                if (rise > 0.0f)
+                    lift += View * (rise / View.Y);
+            }
+            _rutBelts.Add(new CelRuts.Belt(at, lift, _hullLeft, _beltRun[i], marks, wet));
+        }
+        _ruts.Tick(dt, _rutBelts);
+    }
+
+    /// <summary>
+    /// The belts' dust in the model's look: each belt's run this frame off its
+    /// own travel (<see cref="TankModel.Driven"/> less its share of
+    /// <see cref="TankModel.Skid"/>), so a pivot raises dust as
+    /// <see cref="TrackDust"/> has it; born at the belt's trailing end, on the
+    /// ground there, and none on wet ground.
+    /// </summary>
+    private void CelDustTick(float dt)
+    {
+        _belts.Clear();
+        float length = _model.Size.Z * _model.PixelsPerUnit;
+        Vector3 forward = _hullAhead, left = _hullLeft;
         // Belts running against each other churn the ground rather than roll
         // over it: TrackMarks.Scrub's 1.5 on a pivot. At a pivot's pace alone
         // the puffs were small separate lumps - stones, not dust.
