@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Godot;
 
@@ -93,6 +94,25 @@ void light() {
     /// <see cref="TurretStencil"/> - the turret's, see <see cref="MarkTurret"/>.</summary>
     public static readonly Shader CelTurretShader = new() { Code = CelCode(TurretStencil) };
 
+    /// <summary><see cref="CelShader"/> for foliage: both sides drawn, and the
+    /// back side lit by the file's normal rather than its flip - a leaf is an
+    /// open sheet whose normal is its puff's (<see cref="Dress"/>).</summary>
+    public static readonly Shader CelLeafShader = new() { Code = CelCode(0, both: true) };
+
+    private static readonly Dictionary<(int, bool), Shader> Marked = new();
+
+    /// <summary>The cel shader that leaves <paramref name="stencil"/> on what it
+    /// draws: 0 is <see cref="CelShader"/> or <see cref="CelLeafShader"/>, any
+    /// other made once and kept.</summary>
+    private static Shader CelMarked(int stencil, bool both)
+    {
+        if (stencil == 0)
+            return both ? CelLeafShader : CelShader;
+        if (!Marked.TryGetValue((stencil, both), out Shader? shader))
+            Marked[(stencil, both)] = shader = new Shader { Code = CelCode(stencil, both) };
+        return shader;
+    }
+
     /// <summary>
     /// The stencil a turret's visible pixels carry, so the fire can be drawn
     /// over a turret thrown onto the grilles and over nothing else
@@ -134,9 +154,9 @@ float noise3(vec3 x) {
     /// grille and on a turret wall standing next to it alike: the flame no
     /// longer grows out of clean green paint.
     /// </summary>
-    private static string CelCode(int stencil) => @"
+    private static string CelCode(int stencil, bool both = false) => @"
 shader_type spatial;
-render_mode cull_back, specular_disabled, ambient_light_disabled;
+render_mode " + (both ? "cull_disabled" : "cull_back") + @", specular_disabled, ambient_light_disabled;
 stencil_mode write, compare_always, " + stencil + @";
 uniform vec4 albedo : source_color = vec4(1.0);
 uniform sampler2D albedo_tex : source_color, hint_default_white, filter_linear_mipmap_anisotropic;
@@ -170,6 +190,7 @@ void vertex() {
     world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
 void fragment() {
+    " + (both ? "if (!FRONT_FACING) { NORMAL = -NORMAL; }" : "") + @"
     vec4 c = texture(albedo_tex, UV) * albedo;
     float ao = has_orm ? texture(orm_tex, UV).r : 1.0;
     vec3 glow = vec3(0.0);
@@ -329,8 +350,26 @@ void fragment() {
 
     /// <summary>Dress every mesh under <paramref name="scene"/>: its surfaces
     /// rebuilt with the ink's normal, its materials swapped for cel ones, one
-    /// per source material. Returns the cel materials.</summary>
-    public static List<ShaderMaterial> Dress(Node scene)
+    /// per source material. Returns the cel materials.
+    ///
+    /// <paramref name="keep"/> names the surfaces whose light normals are the
+    /// file's own and not <see cref="Facet"/>'s: a tree's leaves carry their
+    /// puff's normal (<c>tree_gen._puff_normals</c>), and made again from each
+    /// leaf's plane they lit the crown in flecks. Null - every tank - facets
+    /// everything, as before.
+    ///
+    /// <paramref name="foliage"/> names open sheets - leaves: they keep their
+    /// normals too, are drawn from both sides (<see cref="CelLeafShader"/>) and
+    /// get no ink. The ink is an inside-out hull and needs a closed volume; on
+    /// a sheet turned away from the eye it drew the whole leaf in ink, and half
+    /// a crown's leaves came out as dark blots.
+    ///
+    /// <paramref name="stencil"/> is left on every pixel the model's own
+    /// surfaces draw (not its ink): what a pass that belongs to this kind of
+    /// model alone reads - a tree's crown outline (<c>Tree3DBench</c>). 0, the
+    /// tanks', is what every other surface writes.</summary>
+    public static List<ShaderMaterial> Dress(Node scene, Func<Material, bool>? keep = null,
+                                             Func<Material, bool>? foliage = null, int stencil = 0)
     {
         var made = new Dictionary<Material, ShaderMaterial>();
         var meshes = new List<MeshInstance3D>();
@@ -339,7 +378,7 @@ void fragment() {
         foreach (MeshInstance3D m in meshes)
             length = Mathf.Max(length, m.Mesh.GetAabb().Size.Length());
         foreach (MeshInstance3D m in meshes)
-            m.Mesh = Rebuild(m.Mesh, length, made);
+            m.Mesh = Rebuild(m.Mesh, length, made, keep, foliage, stencil);
         return new List<ShaderMaterial>(made.Values);
     }
 
@@ -406,24 +445,30 @@ void fragment() {
             Collect(child, into);
     }
 
-    private static ArrayMesh Rebuild(Mesh src, float length, Dictionary<Material, ShaderMaterial> made)
+    private static ArrayMesh Rebuild(Mesh src, float length, Dictionary<Material, ShaderMaterial> made,
+                                     Func<Material, bool>? keep, Func<Material, bool>? foliage,
+                                     int stencil)
     {
         var dst = new ArrayMesh();
         const Mesh.ArrayFormat custom = (Mesh.ArrayFormat)((long)Mesh.ArrayCustomFormat.RgbaFloat
                                                            << (int)Mesh.ArrayFormat.FormatCustom0Shift);
         for (int s = 0; s < src.GetSurfaceCount(); s++)
         {
-            Godot.Collections.Array arrays = Facet(src.SurfaceGetArrays(s));
+            Material? mat = src.SurfaceGetMaterial(s);
+            bool leaf = mat is not null && foliage is not null && foliage(mat);
+            Godot.Collections.Array arrays = leaf || (mat is not null && keep is not null && keep(mat))
+                ? src.SurfaceGetArrays(s)
+                : Facet(src.SurfaceGetArrays(s));
             arrays[(int)Mesh.ArrayType.Custom0] = InkNormals(arrays, length);
             dst.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays, null, null, custom);
-            Material? mat = src.SurfaceGetMaterial(s);
             if (mat is not null)
-                dst.SurfaceSetMaterial(s, CelFor(mat, made));
+                dst.SurfaceSetMaterial(s, CelFor(mat, made, leaf, stencil));
         }
         return dst;
     }
 
-    private static ShaderMaterial CelFor(Material mat, Dictionary<Material, ShaderMaterial> made)
+    private static ShaderMaterial CelFor(Material mat, Dictionary<Material, ShaderMaterial> made,
+                                         bool leaf = false, int stencil = 0)
     {
         if (made.TryGetValue(mat, out ShaderMaterial? cel))
             return cel;
@@ -436,7 +481,8 @@ void fragment() {
         ink.SetShaderParameter("width", InkWidth);
         ink.SetShaderParameter("min_px", InkMinPx);
         ink.SetShaderParameter("dark", InkDark);
-        cel = new ShaderMaterial { Shader = CelShader, NextPass = ink };
+        cel = leaf ? new ShaderMaterial { Shader = CelMarked(stencil, true) }
+                   : new ShaderMaterial { Shader = CelMarked(stencil, false), NextPass = ink };
         cel.SetShaderParameter("albedo", albedo);
         if (tex is not null)
         {

@@ -212,6 +212,17 @@ GAME_BARK = (0.15, 0.075, 0.03)
 GAME_CHAR = (0.032, 0.028, 0.026)
 GAME_CORE = (0.12, 0.16, 0.034)
 PALETTE_FROM = 0.30
+# What the board's sun does to them, taken back: every game colour is written
+# times this. Tuned in Blender's toon_preview, the model stood on the Tree3D
+# board 1.6 times brighter than its own sprite in all three channels alike
+# (crown 0.54/0.60/0.29 against 0.33/0.39/0.18, seed 1) - Toon's full sun is
+# brighter than the preview's ramp. The preview divides it back out, so the
+# sheets still compare the model with the sprite as before.
+BOARD_LIGHT = 0.40
+
+
+def _board(c):
+    return tuple(float(x) * BOARD_LIGHT for x in c)
 
 
 def _srgb(c):
@@ -430,8 +441,8 @@ def palette_image(name="TreeLeafPalette", w=8, h=64):
     px = np.ones((h, w, 4))
     for y in range(h):
         t = (y + 0.5) / h
-        px[y, :, :3] = _srgb(_ease(LEAF_PALETTE, PALETTE_FROM + (1 - PALETTE_FROM) * t))
-    px[:, 6:, :3] = _srgb(LEAF_RIM)
+        px[y, :, :3] = _srgb(_board(_ease(LEAF_PALETTE, PALETTE_FROM + (1 - PALETTE_FROM) * t)))
+    px[:, 6:, :3] = _srgb(_board(LEAF_RIM))
     img.pixels.foreach_set(px.astype(np.float32).ravel())
     os.makedirs(OUT, exist_ok=True)
     img.filepath_raw = os.path.join(OUT, name + ".png")
@@ -485,12 +496,12 @@ def materials(detail):
                 "char": _char_sprite_mat(), "ink": _ink_mat(),
                 "ink_char": _ink_mat("TreeOutlineChar", INK_CHAR)}
     return {"leaf": _flat_mat(names["leaf"], (1, 1, 1), palette_image()),
-            "core": _flat_mat(names["core"], GAME_CORE),
-            "bark": _flat_mat(names["bark"], GAME_BARK),
-            "char": _flat_mat(names["char"], GAME_CHAR),
+            "core": _flat_mat(names["core"], _board(GAME_CORE)),
+            "bark": _flat_mat(names["bark"], _board(GAME_BARK)),
+            "char": _flat_mat(names["char"], _board(GAME_CHAR)),
             # the same bark, a material of its own because it is the one that
             # *appears* at its threshold where leaf and core disappear
-            "twig": _flat_mat(names["twig"], GAME_BARK)}
+            "twig": _flat_mat(names["twig"], _board(GAME_BARK))}
 
 
 def reset():
@@ -1929,6 +1940,10 @@ class toon_preview:
             src = b.inputs["Base Color"].links[0].from_socket if b.inputs["Base Color"].links \
                 else tuple(b.inputs["Base Color"].default_value[:3])
             before = set(N)
+            # the board's light was taken out of the colours; the preview's ramp
+            # is the one the sprite was matched under, so it goes back in here
+            k = 1.0 / BOARD_LIGHT
+            src = tuple(x * k for x in src) if isinstance(src, tuple)                 else _multiply(N, L, src, (k, k, k), (-700, 500))
             vis = None
             if self.burn is not None:
                 src, vis = self._burn(N, L, role, src)
@@ -2043,7 +2058,14 @@ def bake(name):
         # it in place; clean it here, where it is ours to see
         me.validate(clean_customdata=False)
         _uv_layers(me)   # the fused wood lost its UVs to Remesh: zero, never read
-        me.transform(inv @ ev.matrix_world)
+        to_world = inv @ ev.matrix_world
+        if ".Clump." in ob.name:
+            # the puff's centre on every point of it, for _puff_normals after
+            # the merge (a custom normal would not survive the bmesh)
+            c = to_world @ Vector((0.0, 0.0, 0.0))
+            a = me.attributes.new("puff_c", "FLOAT_VECTOR", "POINT")
+            a.data.foreach_set("vector", np.tile(np.array(c, dtype=np.float32), len(me.vertices)))
+        me.transform(to_world)
         remap = []
         for m in me.materials:
             if m not in mats:
@@ -2054,6 +2076,12 @@ def bake(name):
         me.polygons.foreach_set("material_index", np.array(remap, dtype=np.int32)[mi])
         bm.from_mesh(me)
         bpy.data.meshes.remove(me)
+    # the last bake's, or the new one comes out ".001" in the file and the scene
+    stale = bpy.data.objects.get(f"{name}.Mesh")
+    if stale is not None:
+        bpy.data.objects.remove(stale, do_unlink=True)
+    if f"{name}.Mesh" in bpy.data.meshes:
+        bpy.data.meshes.remove(bpy.data.meshes[f"{name}.Mesh"])
     out = bpy.data.meshes.new(f"{name}.Mesh")
     bm.to_mesh(out)
     bm.free()
@@ -2061,6 +2089,7 @@ def bake(name):
     _bend_uv(out)
     for m in mats:
         out.materials.append(m)
+    _puff_normals(out)
     if out.validate(clean_customdata=False):
         raise RuntimeError(f"{name}: baked mesh needed repair after its parts were clean")
     ob = bpy.data.objects.new(f"{name}.Mesh", out)
@@ -2380,6 +2409,39 @@ def _grid_sheet(rows, out, gap=12):
     img.save()
     bpy.data.images.remove(img)
     return out
+
+
+def _puff_normals(me):
+    """Leaves and cores take the normal of their puff's ellipsoid at their
+    point, not of their own face: `Toon` lights a face by its normal, and by
+    the leaf's own plane every leaf turned from the sun went to the shade tone
+    on its own - the crown came out in dark and light flecks, where the
+    sprite's puff is lit as one ball and a leaf differs only by its tone
+    (palette V). Written as custom normals; the board keeps them for these two
+    materials (`Toon.Dress`, `keep`). Everything else keeps its own."""
+    if "puff_c" not in me.attributes:
+        return
+    n = len(me.vertices)
+    co = np.empty(n * 3, dtype=np.float64)
+    me.vertices.foreach_get("co", co)
+    c = np.empty(n * 3, dtype=np.float32)
+    me.attributes["puff_c"].data.foreach_get("vector", c)
+    d = co.reshape(-1, 3) - c.reshape(-1, 3)
+    d[:, 2] /= CONFIG["squash"] ** 2        # the ellipsoid's normal, puffs are squashed in z
+    d /= np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-9)
+    names = {MAT_NAMES["game"]["leaf"], MAT_NAMES["game"]["core"]}
+    on = np.array([m is not None and m.name in names for m in me.materials])
+    mi = np.empty(len(me.polygons), dtype=np.int32)
+    me.polygons.foreach_get("material_index", mi)
+    lt = np.empty(len(me.polygons), dtype=np.int32)
+    me.polygons.foreach_get("loop_total", lt)
+    vi = np.empty(len(me.loops), dtype=np.int32)
+    me.loops.foreach_get("vertex_index", vi)
+    puff = np.repeat(on[mi], lt)
+    nl = np.zeros((len(me.loops), 3), dtype=np.float64)   # zero: keep the face's own
+    nl[puff] = d[vi[puff]]
+    me.attributes.remove(me.attributes["puff_c"])
+    me.normals_split_custom_set([tuple(v) for v in nl])
 
 
 def export_glb(ob, path):
