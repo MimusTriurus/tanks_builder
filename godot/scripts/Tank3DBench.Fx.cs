@@ -112,6 +112,13 @@ public sealed partial class Tank3DBench
     /// this scene has not got. The stage's node, like the pools; the reset
     /// that comes with a new model wipes them as Backspace does.</summary>
     private CelRuts? _ruts;
+    /// <summary>The hull going into the pond, in the model's look - null under
+    /// <c>--fx2d</c>, which keeps the board's <see cref="Plunge"/>. The stage's,
+    /// like the ruts: made once.</summary>
+    private CelSplash? _splash;
+    /// <summary>The wake and the bow wave in the water - the model's, under
+    /// <c>--fx2d</c> too (the board's <see cref="Wake"/> needs a <see cref="Vehicle"/>).</summary>
+    private CelWake? _wake;
     private readonly List<CelRuts.Belt> _rutBelts = new();
     private readonly List<(Vector3 At, Vector3 Out)> _exhaustPorts = new();
     private readonly List<Vector3> _ports = new();
@@ -402,6 +409,18 @@ void fragment() {
                         belt.Links.Multimesh.Mesh.GetAabb().Size.X * _model.PixelsPerUnit);
         }
         _ruts.Lift();
+        if (_wake is null)
+        {
+            _wake = new CelWake { Name = "Wake" };
+            AddChild(_wake);
+            _wake.Build(Squash, RiseFactor);
+        }
+        if (_splash is null && !_fx2d)
+        {
+            _splash = new CelSplash { Name = "Splash" };
+            AddChild(_splash);
+            _splash.Build(Squash, RiseFactor);
+        }
         if (_profile.Turreted != _model.Turreted)
             GD.Print($"tank3d: {_modelTag} is {(_model.Turreted ? "turreted" : "a casemate")} but "
                      + $"moves as the {_profile.Tag} class, which is {(_profile.Turreted ? "turreted" : "a casemate")}"
@@ -919,7 +938,16 @@ void fragment() {
             _hitLocal = Strike(new Vector3(0, 0, -1)).At;
             _hitNode = null;
         }
-        _wreck.Disable();
+        // In deep water the engine stops and the tank drowns rather than being
+        // knocked out: no flash out of a deck that is going under, the turret
+        // left on its ring (TankTick.Drowning; the round's own entry is CelHit's).
+        bool deep = DeepHere;
+        _wreck.Disable(seated: deep);
+        if (deep)
+        {
+            _burning = false;
+            return;
+        }
         Fireball(TankTick.KnockOutFlash, grounded: false);
     }
 
@@ -928,8 +956,20 @@ void fragment() {
         if (!_wreck.Out)
             _wreck.Disable();
         _wreck.Kill(racked: true);
-        _burning = true;
-        Fireball(1.0f, grounded: true);
+        // In the pond what comes up is the water it was in, not fire and earth -
+        // Stage3D.Detonate's first question, and its plume at Drowned; the wreck
+        // does not burn, the water has it.
+        if (DeepHere && _stage is not null && _field is not null)
+        {
+            float top = _field.WaterTop(CellHere);
+            _stage.Splash(Board(_rig.Position) - new Vector2(0.0f, top), top, Stage3D.Drowned);
+            _burning = false;
+        }
+        else
+        {
+            _burning = true;
+            Fireball(1.0f, grounded: true);
+        }
         // TankTick.Quake(Death): the class's own gun shake, harder.
         _shake.Fire(new Vector2(0.0f, -1.0f), _profile.ShotShake * 2.15);
         _shake.Blast(_profile.ShotShake * 1.6);
@@ -957,6 +997,8 @@ void fragment() {
         _celDeath?.Reset();
         _celDust?.Reset();
         _ruts?.Clear();
+        _splash?.Reset();
+        _wake?.Clear();
         _beltWas.Clear();
         _hitNode = null;
         foreach (var (mat, albedo) in _paint)
@@ -985,6 +1027,7 @@ void fragment() {
         foreach (ProcSlam sl in _slams) sl.Tick(dt);
         foreach (ProcBall b in _balls) b.Tick(dt);
         foreach (SheetBlast b in _booms) b.Tick(dt);
+        _splash?.Tick(dt, _camera.GlobalBasis);
         if (_sprite is null || _shape is null)
             return;
 
@@ -1021,8 +1064,10 @@ void fragment() {
             s.SmokeDensity = (float)(_wreck.Dead || _burning ? _wreck.Smoke : _wreck.Smoulder);
             Char((float)_wreck.Char);
         }
-        bool lit = (_burning || _wreck.Flare > 0.0) && _shape.HasPorts;
-        bool smoulder = !lit && _wreck.Disabled && _shape.HasPorts;
+        // Nothing flares or smokes off a deck under water - TankTick's own two
+        // exceptions for a drowned hull, asked of the cell.
+        bool lit = (_burning || (_wreck.Flare > 0.0 && !Drowning)) && _shape.HasPorts;
+        bool smoulder = !lit && _wreck.Disabled && _shape.HasPorts && !DeepHere;
         if (!lit && !smoulder)
         {
             if (s.Burning || s.Smouldering || s.FirePhase >= 0 || s.BurnPhase >= 0)

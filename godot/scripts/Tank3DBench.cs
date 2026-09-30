@@ -61,7 +61,7 @@ public sealed partial class Tank3DBench : Node3D
     // --- flags -----------------------------------------------------------
 
     private string _modelTag = "LTR";
-    private string _mapName = "test";
+    private string _mapName = "events";
     private bool _flat;
     /// <summary><c>--pbr</c>: the glTF's own materials, no cel shading and no
     /// ink - the look before <see cref="Toon"/>, to hold against it.</summary>
@@ -290,10 +290,12 @@ public sealed partial class Tank3DBench : Node3D
         _profile = profile;
         _model = next;
         _rig.AddChild(_model);
+        _deckPx = MeasureDeck();
+        _roofPx = MeasureRoof();
         BuildEffects();
         GD.Print($"tank3d: {_modelTag} class {_profile.Tag} x{_profile.Size:F2}, {_model.PixelsPerUnit:F2} px/unit, "
                  + $"hull {_model.HullLength:F4} x {_model.HullWidth:F4} = {_model.HullLength * _model.PixelsPerUnit:F0} px, "
-                 + $"bore r {_model.BoreRadius:F4}, squash {Squash:F4} = {Mathf.RadToDeg(Mathf.Asin(Squash)):F2} deg, "
+                 + $"bore r {_model.BoreRadius:F4}, deck {_deckPx:F1} px, roof {_roofPx:F1} of {_model.Size.Y * _model.PixelsPerUnit * RiseFactor:F1}, squash {Squash:F4} = {Mathf.RadToDeg(Mathf.Asin(Squash)):F2} deg, "
                  + $"hex {HexWidth:F0} px");
     }
 
@@ -470,7 +472,7 @@ public sealed partial class Tank3DBench : Node3D
         _field.SetWater(map.Water);
         AddChild(_field);
         _field.Atlas = _tile;
-        _home = map.Homes.Count > 0 ? map.Homes[0] : new Vector2I(map.Columns / 2, map.Rows / 2);
+        _home = _startCell ?? (map.Homes.Count > 0 ? map.Homes[0] : new Vector2I(map.Columns / 2, map.Rows / 2));
 
         // What the stage aims its own camera by: it mirrors a 2D camera, and
         // this scene has none - its camera is its own (BuildCamera), current
@@ -580,8 +582,8 @@ void light() {
     /// Whether the tank may go from one world point to the next, travelling
     /// <paramref name="way"/>: the board's own rule for the step between cells
     /// (<see cref="HexField.Passable"/> - no cliff without a ramp, a ramp only
-    /// along its axis, not off the board), and not into deep water, where the
-    /// bench's sinking is not built. Anywhere on the flat ground.
+    /// along its axis, not off the board; into deep water off any bank, out of
+    /// it by the ramp alone). Anywhere on the flat ground.
     ///
     /// <b>Asked of the middle and of the leading end.</b> The middle alone let
     /// the front half of the hull out over the board's edge before it stopped;
@@ -602,7 +604,7 @@ void light() {
         {
             if (here == there)
                 return true;
-            if (!_field.InBounds(there) || _field.IsDeep(there))
+            if (!_field.InBounds(there))
                 return false;
             int heading = HexField.HeadingTo(here, there);
             return heading >= 0 && _field.Passable(here, heading);
@@ -617,6 +619,10 @@ void light() {
     /// samples (<see cref="HexField.TopOn"/>): a hull over a cell's rim then
     /// lies in its own cell's plane rather than bridging to the neighbour's,
     /// which is the board's rule for anything a cell wide.
+    ///
+    /// <b>The height is the ride, not always the face</b> - in deep water the
+    /// hull floats, drowns down to the drawn bed and falls in off the bank
+    /// (Tank3DBench.Water); afloat it lies level, whatever the face under it.
     /// </summary>
     private void Settle(float dt, bool snap = false)
     {
@@ -630,8 +636,9 @@ void light() {
             float sx = (Y(flat + new Vector2(d, 0.0f)) - Y(flat - new Vector2(d, 0.0f))) / (2.0f * d);
             // A world step of d in Z is d times the squash on the flat board.
             float sz = (Y(flat + new Vector2(0.0f, d * Squash)) - Y(flat - new Vector2(0.0f, d * Squash))) / (2.0f * d);
-            want = new Vector3(-sx, 1.0f, -sz).Normalized();
-            _rig.Position = new Vector3(_rig.Position.X, Y(flat), _rig.Position.Z);
+            float ride = RideOn(cell, flat, out bool afloat);
+            want = afloat || _falling ? Vector3.Up : new Vector3(-sx, 1.0f, -sz).Normalized();
+            _rig.Position = new Vector3(_rig.Position.X, Ride(cell, ride, afloat, dt, snap), _rig.Position.Z);
         }
         _groundUp = snap ? want : _groundUp.Lerp(want, 1.0f - Mathf.Exp(-10.0f * dt)).Normalized();
         ApplyRig();
@@ -748,6 +755,13 @@ void light() {
             else if (a == "--sprites" && more)
                 GD.Print($"tank3d: --sprites {args[++i]} ignored - the 3D tank reads no sprite set");
             else if (a == "--map" && more) _mapName = args[++i];
+            else if (a == "--cell" && more)
+            {
+                string[] qr = args[++i].Split(',');
+                if (qr.Length == 2 && int.TryParse(qr[0], out int q) && int.TryParse(qr[1], out int r))
+                    _startCell = new Vector2I(q, r);
+            }
+            else if (a == "--no-amphibious") _amphibious = false;
             else if (a == "--flat") _flat = true;
             else if (a == "--pbr") _pbr = true;
             else if (a == "--fx2d") _fx2d = true;
@@ -808,6 +822,9 @@ void light() {
             case "knock": KnockOut(); break;
             case "destroy": Destroy(); break;
             case "reset": ResetTank(); break;
+            case "pond": ToPond(); break;
+            case "amphibious": _amphibious = true; break;
+            case "no-amphibious": _amphibious = false; break;
             case "heights": SaveHeights(); break;
             case "drive": _driveScripted = 1.0f; break;
             case "stop": _driveScripted = 0.0f; break;
@@ -1003,6 +1020,7 @@ void light() {
         _speed = 0;
         _sinceShot = 99.0f;
         FxReset();
+        WaterReset();
     }
 
     // --- frame -----------------------------------------------------------
@@ -1051,7 +1069,10 @@ void light() {
 
         // Drive: a ramp to the preview's speed, the belts and wheels on the
         // distance, the mass squatting on the pull and nosing down on the stop.
-        float target = Mathf.Clamp(driveIn, -1.0f, 1.0f) * MaxSpeed;
+        // Afloat nothing is under the tracks: the class's swimming share
+        // (MovementProfile.SwimFraction, the board's cap).
+        float cap = Swimming ? (float)MovementProfile.SwimFraction : 1.0f;
+        float target = Mathf.Clamp(driveIn, -1.0f, 1.0f) * MaxSpeed * cap;
         float accel = Mathf.MoveToward(_speed, target, Accel * dt) - _speed;
         _speed += accel;
         float a = accel / dt / Accel;
@@ -1099,13 +1120,17 @@ void light() {
             _sinceFate += dt;
             AdvanceFate(dt);
         }
+        WaterTick(dt);
         _model.Apply();
         FxProcess(dt, _speed, a);
         FrameCamera();
 
         string where = _field is null ? "flat ground"
             : $"{_mapName} {_field.FlatCellAt(Board(_rig.Position))}";
-        _hud.Text = $"{_modelTag} 3D, class {_profile.Tag}  {where}  {_fate}  {_note}\n"
+        string fate = Drowning ? "Drowned" : _fate.ToString();
+        if (_fate == Fate.Alive && Swimming)
+            fate = "Afloat";
+        _hud.Text = $"{_modelTag} 3D, class {_profile.Tag}  {where}  {fate}  {_note}\n"
                     + "Space shot   1-4 ricochet front/right/rear/left   Shift+1-4 pierce   Ctrl+1-4 HE   5 round in the ground\n"
                     + "J burning   K knocked out   X destroyed   Backspace reset   WASD drive   "
                     + (_model.Turreted ? "Q/E turret   " : "") + "R/F gun   -/= zoom   Tab panel   F12 shot";
@@ -1120,6 +1145,11 @@ void light() {
         // on below: its debris flies)
         if (_fate == Fate.Knocked || (_model.Turreted && _model.TurretOverride is null))
         {
+            // Drowning breaks nothing, so the pose does not come with it: the
+            // gun, the turret and the belts are as the water found them
+            // (TankTick.Drowning, docs/water.md «Утоплен»).
+            if (Drowning)
+                return;
             // The tip settles with a small overshoot, the gun falls to its stop,
             // the belts sag.
             _model.Cant = _tip.Step(dt, t >= 0.05f ? 1.0f : 0.0f);
@@ -1164,7 +1194,7 @@ void light() {
             Transform3D x = f.Node.GlobalTransform;
             x.Origin += f.V * dt;
             x.Basis = new Basis(f.Axis, f.W * dt) * x.Basis;
-            float floor = Foot(x.Origin).Y + f.Half;
+            float floor = BedUnder(x.Origin) + f.Half;
             if (x.Origin.Y < floor)
             {
                 x.Origin.Y = floor;
@@ -1182,22 +1212,25 @@ void light() {
         bool single = _capturePath is not null && _frame == _captureAt;
         bool seq = _sequenceDir is not null && _frame >= _sequenceFrom && _frame <= _sequenceTo
                    && (_frame - _sequenceFrom) % _sequenceStep == 0;
-        if (!single && !seq)
-            return;
-        Image image = GetViewport().GetTexture().GetImage();
-        if (seq)
+        if (single || seq)
         {
-            Directory.CreateDirectory(_sequenceDir!);
-            image.SavePng($"{_sequenceDir}/f{_frame:D4}.png");
+            Image image = GetViewport().GetTexture().GetImage();
+            if (seq)
+            {
+                Directory.CreateDirectory(_sequenceDir!);
+                image.SavePng($"{_sequenceDir}/f{_frame:D4}.png");
+            }
+            if (single)
+            {
+                Error err = image.SavePng(_capturePath!);
+                GD.Print(err == Error.Ok ? $"capture: {_capturePath}" : $"capture to {_capturePath} failed: {err}");
+            }
         }
-        if (single)
-        {
-            Error err = image.SavePng(_capturePath!);
-            GD.Print(err == Error.Ok ? $"capture: {_capturePath}" : $"capture to {_capturePath} failed: {err}");
-        }
+        // Asked on every frame, not only on a saved one: a sequence whose end
+        // is not on its step saved its last frame short of the end and ran on.
         bool done = (_capturePath is null || _frame >= _captureAt)
                     && (_sequenceDir is null || _frame >= _sequenceTo);
-        if (done)
+        if (done && (_capturePath is not null || _sequenceDir is not null))
             GetTree().Quit();
     }
 
@@ -1255,6 +1288,15 @@ void light() {
             $"класс {_profile.Tag} x{_profile.Size:F2}, {_model.PixelsPerUnit:F1} px на единицу"
             + (_model.Turreted ? "" : ", без башни"));
         _panel.Expand("tank3d.tank", true);
+        // Whether the pond is swum or drowned in - see TankTick.Amphibious.
+        _panel.Heading("tank3d.water", "вода");
+        _panel.Toggle("tank3d.water.amphibious", "ОПВТ: плывёт, без него тонет",
+                      () => _amphibious, v => _amphibious = v);
+        _panel.Press("tank3d.water.pond", "к пруду: на берег, носом в воду", ToPond);
+        _panel.Readout("tank3d.water.note", () =>
+            $"палуба {_deckPx:F0} px, осадка {_deckPx * _profile.Draught:F0} px"
+            + (Drowning ? $", тонет {Sink:P0}" : Swimming ? ", на плаву" : ""));
+        _panel.Expand("tank3d.water", true);
         layer.AddChild(_panel);
         _panel.AddHandle();
     }
