@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Godot;
 
@@ -68,12 +69,19 @@ uniform float mid = 0.5;
 uniform float soft = 0.035;
 uniform float sun = 1.0;
 uniform float glow_paint = 0.45;
+// Whether the sun's cast shadow steps this surface down. Off for a tree's
+// leaves and cores (Tree3DBench): a crown shadows itself leaf by leaf, and on
+// the ramp's step every leaf's shadow on the leaves under it was a dark
+// triangle - flecks over the lit side, more or fewer as the shadow map's
+// texel fell at the tree's depth. The crown's own normals shade it.
+uniform bool sun_shadow = true;
 // How much of the paint is soot (the fire's scorch): a local light lays no
 // colour of its own on it - painted over, a scorch under its own fire went
 // orange-olive and the dark base the flame stands on was gone while it burned.
 varying float sooted;
 void light() {
-    float t = clamp(dot(NORMAL, LIGHT), 0.0, 1.0) * ATTENUATION;
+    float t = clamp(dot(NORMAL, LIGHT), 0.0, 1.0)
+            * (LIGHT_IS_DIRECTIONAL && !sun_shadow ? 1.0 : ATTENUATION);
     float v = mid * smoothstep(edge_dark - soft, edge_dark + soft, t);
     v = mix(v, 1.0, smoothstep(edge_lit - soft, edge_lit + soft, t));
     DIFFUSE_LIGHT += v * sun * LIGHT_COLOR / PI;
@@ -92,6 +100,25 @@ void light() {
     /// <summary><see cref="CelShader"/> marking its pixels
     /// <see cref="TurretStencil"/> - the turret's, see <see cref="MarkTurret"/>.</summary>
     public static readonly Shader CelTurretShader = new() { Code = CelCode(TurretStencil) };
+
+    /// <summary><see cref="CelShader"/> for foliage: both sides drawn, and the
+    /// back side lit by the file's normal rather than its flip - a leaf is an
+    /// open sheet whose normal is its puff's (<see cref="Dress"/>).</summary>
+    public static readonly Shader CelLeafShader = new() { Code = CelCode(0, both: true) };
+
+    private static readonly Dictionary<(int, bool), Shader> Marked = new();
+
+    /// <summary>The cel shader that leaves <paramref name="stencil"/> on what it
+    /// draws: 0 is <see cref="CelShader"/> or <see cref="CelLeafShader"/>, any
+    /// other made once and kept.</summary>
+    private static Shader CelMarked(int stencil, bool both)
+    {
+        if (stencil == 0)
+            return both ? CelLeafShader : CelShader;
+        if (!Marked.TryGetValue((stencil, both), out Shader? shader))
+            Marked[(stencil, both)] = shader = new Shader { Code = CelCode(stencil, both) };
+        return shader;
+    }
 
     /// <summary>
     /// The stencil a turret's visible pixels carry, so the fire can be drawn
@@ -126,6 +153,144 @@ float noise3(vec3 x) {
 ";
 
     /// <summary>
+    /// A tree model's burn contract (<c>tree_gen.py</c>, <c>tree.json</c>
+    /// <c>model.burn</c>): <c>UV2.x</c> - glTF's <c>TEXCOORD_1</c> - is when each
+    /// piece goes. <c>burn_role</c> 0 is everything that is not a tree (every
+    /// tank): nothing here runs. 1 - leaves and puff cores - is gone once
+    /// <c>burn</c> passes it, and chars on the way over the last
+    /// <c>burn_window</c> of it; 2 - twigs - shows once <c>burn</c> passes it,
+    /// charred; 3 - bark - chars with <c>charred</c>, the paint's own clock
+    /// (<c>Wildfire.Coat.Char</c>), and never goes. Its uniforms and a
+    /// <c>burn_gone()</c> the cel pass, the ink and the crown's mask
+    /// (<c>Tree3DBench</c>) all ask, so the three lose a piece on one frame.
+    ///
+    /// <b>A puff's core is eaten, not charred</b> (<c>burn_eat</c>): its
+    /// threshold comes after its leaves', so for a while it stands bare, and
+    /// charred whole it was a black ball hung in the burnt crown. Over its
+    /// window it is cut away by a noise in the world instead - holes that open
+    /// and grow, their edge glowing - the hard cut the smoke goes by. In the
+    /// world, so the ink and the mask cut the same holes and the line follows
+    /// them in. Needs <see cref="NoiseCode"/> before it.
+    /// </summary>
+    public const string BurnCode = @"
+uniform int burn_role = 0;
+uniform float burn = 0.0;
+uniform float burn_window = 0.12;
+uniform float charred = 0.0;
+uniform bool burn_eat = false;
+uniform float burn_grain = 5.0;
+// How far into its own going a piece is: 0 whole .. 1 gone (role 1).
+float burn_k(float at) {
+    return clamp((burn - at) / max(burn_window, 1e-4) + 1.0, 0.0, 1.0);
+}
+// What the eating has left: under 0 the piece is gone here.
+float burn_left(float at, vec3 p) {
+    return noise3(p / burn_grain) * 0.8 + noise3(p / (burn_grain * 0.35) + vec3(3.1)) * 0.2
+           - burn_k(at);
+}
+bool burn_gone(float at, vec3 p) {
+    return (burn_role == 1 && (burn > at || (burn_eat && burn_left(at, p) < 0.0)))
+        || (burn_role == 2 && burn <= at);
+}
+";
+
+    /// <summary>
+    /// A standing tree model in the wind, the step before <see cref="FallCode"/>:
+    /// in the model's metres. The crown leans downwind (<c>wind_dir</c>, the
+    /// model's x, z) by <c>wind_lean</c> of its height at the top, less down
+    /// the tree - <c>w = s^1.5</c>, <c>s</c> from <c>wind_y0</c> to <c>wind_h</c>
+    /// (the fall's bend band), so the trunk's foot stands still. The lean is
+    /// the sprite wood's (<c>Grove</c>: its drift over its height), worked out
+    /// on the CPU per tree and handed in. On top, what a flat picture cannot
+    /// do: <c>wind_billow</c> m of a slow noise, so the puffs move a little
+    /// each its own way, and <c>wind_flutter</c> m of quick flutter, set on the
+    /// leaves alone. All zero - every tank - nothing here runs. The cel pass,
+    /// the ink and the crown's mask call it alike, so the line keeps to the
+    /// crown. Needs <see cref="NoiseCode"/> before it.
+    /// </summary>
+    public const string WindCode = @"
+uniform vec2 wind_dir = vec2(1.0, 0.0);
+uniform float wind_lean = 0.0;
+uniform float wind_billow = 0.0;
+uniform float wind_flutter = 0.0;
+uniform float wind_time = 0.0;
+uniform float wind_y0 = 2.2;
+uniform float wind_h = 7.4;
+void wind_pose(inout vec3 v) {
+    if (wind_lean == 0.0 && wind_billow == 0.0 && wind_flutter == 0.0) return;
+    float s = clamp((v.y - wind_y0) / max(wind_h - wind_y0, 1e-3), 0.0, 1.0);
+    float w = s * sqrt(s);
+    vec3 o = vec3(wind_dir.x, 0.0, wind_dir.y) * wind_lean * wind_h * w;
+    if (wind_billow > 0.0) {
+        // a slow noise through the crown, a few metres long: puffs drift a
+        // little each its own way, a leaf moves as one
+        vec3 q = v * 0.45 + vec3(wind_time * 0.7, wind_time * 0.2, wind_time * 0.35);
+        o += (vec3(noise3(q), noise3(q + vec3(5.2)), noise3(q + vec3(9.7))) - 0.5) * 2.0 * wind_billow * w;
+    }
+    if (wind_flutter > 0.0) {
+        // the leaves only: quick and small, its phase changing a little from
+        // leaf to leaf, not across one
+        float ph = dot(v, vec3(0.9, 0.7, 0.8));
+        o += vec3(sin(wind_time * 7.0 + ph), 0.5 * sin(wind_time * 9.0 + ph * 1.3),
+                  cos(wind_time * 6.0 + ph * 0.7)) * wind_flutter * w;
+    }
+    v += o;
+}
+";
+
+    /// <summary>
+    /// A tree model going over (<c>tree.json</c> <c>model.fall</c>,
+    /// <c>tree_gen.py</c>'s <c>_pose</c> and <c>_crush</c>): in the model's own
+    /// metres, glTF Y up, the foot at the origin. The whole tree turns about a
+    /// hinge on the ground, <c>fall_hinge</c> out toward <c>fall_dir</c> (the
+    /// model's x, z) and across it, by the trunk's angle plus the crown's
+    /// spring weighted by the bend - <c>w = clamp((y - y0) / (H - y0))^2</c>, the
+    /// formula the pipeline writes to <c>TEXCOORD_2</c> and worked out here off
+    /// the vertex's own height, since glTF's third UV comes in as
+    /// <c>CUSTOM0</c> and the ink's normal is written over it. Then what went
+    /// under the ground is crushed into a mat on it, soft rather than cut:
+    /// <c>y' = m ln(1 + e^(y / m))</c>, <c>m = fall_mat * fall_down</c>, never
+    /// under <c>fall_lift</c> - but not what stood under the ground from the
+    /// start, the root plate: what goes further under stays under, hidden by
+    /// the ground, and crushed it came up as a mat of earth over the lying
+    /// crown. The normal turns with it. <c>fall_on</c> off -
+    /// every tank - nothing here runs. The cel pass, the ink and the crown's
+    /// mask (<c>Tree3DBench</c>) all call <c>fall_pose</c>, so the three and the
+    /// shadow go over as one.
+    /// </summary>
+    public const string FallCode = @"
+uniform bool fall_on = false;
+uniform vec2 fall_dir = vec2(1.0, 0.0);
+uniform float fall_hinge = 0.44;
+uniform float fall_trunk = 0.0;
+uniform float fall_crown = 0.0;
+uniform float fall_down = 0.0;
+uniform float fall_y0 = 2.2;
+uniform float fall_h = 7.4;
+uniform float fall_mat = 0.08;
+uniform float fall_lift = 0.01;
+vec3 fall_turn(vec3 r, vec3 k, float th) {
+    float c = cos(th), s = sin(th);
+    return r * c + cross(k, r) * s + k * dot(k, r) * (1.0 - c);
+}
+void fall_pose(inout vec3 v, inout vec3 n) {
+    if (!fall_on) return;
+    bool under = v.y < 0.0;
+    float w = clamp((v.y - fall_y0) / max(fall_h - fall_y0, 1e-3), 0.0, 1.0);
+    w *= w;
+    vec3 d = normalize(vec3(fall_dir.x, 0.0, fall_dir.y));
+    vec3 k = cross(vec3(0.0, 1.0, 0.0), d);
+    vec3 piv = d * fall_hinge;
+    float th = fall_trunk + fall_crown * w;
+    v = piv + fall_turn(v - piv, k, th);
+    n = fall_turn(n, k, th);
+    float m = fall_mat * max(fall_down, 1e-3);
+    if (!under && v.y <= 4.0 * m)
+        v.y = max(m * log(1.0 + exp(v.y / m)), fall_lift * min(fall_down * 4.0, 1.0));
+}
+";
+
+    /// <summary>
     /// The model's paint on the ramp, and the fire's scorch in it
     /// (<see cref="CelBurn"/> drives the numbers): round each port, within
     /// <c>scorch_r</c> world px grown by <c>scorch</c>, the paint goes to char,
@@ -134,9 +299,9 @@ float noise3(vec3 x) {
     /// grille and on a turret wall standing next to it alike: the flame no
     /// longer grows out of clean green paint.
     /// </summary>
-    private static string CelCode(int stencil) => @"
+    private static string CelCode(int stencil, bool both = false) => @"
 shader_type spatial;
-render_mode cull_back, specular_disabled, ambient_light_disabled;
+render_mode " + (both ? "cull_disabled" : "cull_back") + @", specular_disabled, ambient_light_disabled;
 stencil_mode write, compare_always, " + stencil + @";
 uniform vec4 albedo : source_color = vec4(1.0);
 uniform sampler2D albedo_tex : source_color, hint_default_white, filter_linear_mipmap_anisotropic;
@@ -164,16 +329,45 @@ uniform vec3 steel : source_color = vec3(0.50, 0.52, 0.56);
 uniform vec3 hole_tone : source_color = vec3(0.035, 0.03, 0.028);
 uniform vec3 mark_soot : source_color = vec3(0.17, 0.16, 0.15);
 uniform vec3 hole_wall : source_color = vec3(0.16, 0.15, 0.15);
+// Leaves burning: the last of a leaf's window glows before it goes (BurnCode).
+uniform bool burn_ember = false;
 varying vec3 world;
-" + NoiseCode + RampCode + @"
+" + NoiseCode + RampCode + BurnCode + WindCode + FallCode + @"
 void vertex() {
+    vec3 n = NORMAL;
+    wind_pose(VERTEX);
+    fall_pose(VERTEX, n);
+    NORMAL = n;
     world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
 void fragment() {
+    if (burn_role != 0 && burn_gone(UV2.x, world)) {
+        discard;
+    }
+    " + (both ? "if (!FRONT_FACING) { NORMAL = -NORMAL; }" : "") + @"
     vec4 c = texture(albedo_tex, UV) * albedo;
     float ao = has_orm ? texture(orm_tex, UV).r : 1.0;
     vec3 glow = vec3(0.0);
     sooted = 0.0;
+    if (burn_role != 0) {
+        // How far into its own going this piece is: a leaf or a core over its
+        // window, a twig charred from the moment it shows, bark by the clock.
+        float k = burn_role == 1 ? burn_k(UV2.x) : burn_role == 2 ? 1.0 : charred;
+        if (burn_eat) {
+            // Eaten: the core keeps its green, charred only in a band at the
+            // holes' edge and glowing at the very edge of it.
+            float left = burn_left(UV2.x, world);
+            float edge = 1.0 - step(0.10, left);
+            c.rgb = mix(c.rgb, char_tone, char_cover * edge);
+            sooted = edge;
+            glow = ember_tone * (1.0 - step(0.035, left)) * step(0.001, k) * 1.4;
+        } else {
+            c.rgb = mix(c.rgb, char_tone, char_cover * k);
+            sooted = k;
+            if (burn_ember && burn_role == 1)
+                glow = ember_tone * smoothstep(0.55, 0.9, k) * 1.4;
+        }
+    }
     if (scorch > 0.0 && scorch_n > 0) {
         float near = 1e9;
         for (int i = 0; i < 4; i++) {
@@ -312,9 +506,16 @@ uniform sampler2D albedo_tex : source_color, hint_default_white, filter_linear_m
 uniform float width = 1.0;
 uniform float min_px = 1.0;
 uniform float dark = 0.3;
+varying vec3 world;
+" + NoiseCode + BurnCode + WindCode + FallCode + @"
 void vertex() {
-    VERTEX = (MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
-    vec3 n = normalize(mat3(MODELVIEW_MATRIX) * CUSTOM0.xyz);
+    vec3 v = VERTEX;
+    vec3 cn = CUSTOM0.xyz;
+    wind_pose(v);
+    fall_pose(v, cn);
+    world = (MODEL_MATRIX * vec4(v, 1.0)).xyz;
+    VERTEX = (MODELVIEW_MATRIX * vec4(v, 1.0)).xyz;
+    vec3 n = normalize(mat3(MODELVIEW_MATRIX) * cn);
     // One screen px in view units, for an orthographic eye.
     float px = 2.0 / (PROJECTION_MATRIX[1][1] * VIEWPORT_SIZE.y);
     float w = max(width, min_px * px) * CUSTOM0.w;
@@ -323,14 +524,35 @@ void vertex() {
     NORMAL = n;
 }
 void fragment() {
+    if (burn_role != 0 && burn_gone(UV2.x, world)) {
+        discard;
+    }
     ALBEDO = texture(albedo_tex, UV).rgb * albedo.rgb * dark;
 }
 ";
 
     /// <summary>Dress every mesh under <paramref name="scene"/>: its surfaces
     /// rebuilt with the ink's normal, its materials swapped for cel ones, one
-    /// per source material. Returns the cel materials.</summary>
-    public static List<ShaderMaterial> Dress(Node scene)
+    /// per source material. Returns the cel materials.
+    ///
+    /// <paramref name="keep"/> names the surfaces whose light normals are the
+    /// file's own and not <see cref="Facet"/>'s: a tree's leaves carry their
+    /// puff's normal (<c>tree_gen._puff_normals</c>), and made again from each
+    /// leaf's plane they lit the crown in flecks. Null - every tank - facets
+    /// everything, as before.
+    ///
+    /// <paramref name="foliage"/> names open sheets - leaves: they keep their
+    /// normals too, are drawn from both sides (<see cref="CelLeafShader"/>) and
+    /// get no ink. The ink is an inside-out hull and needs a closed volume; on
+    /// a sheet turned away from the eye it drew the whole leaf in ink, and half
+    /// a crown's leaves came out as dark blots.
+    ///
+    /// <paramref name="stencil"/> is left on every pixel the model's own
+    /// surfaces draw (not its ink): what a pass that belongs to this kind of
+    /// model alone reads - a tree's crown outline (<c>Tree3DBench</c>). 0, the
+    /// tanks', is what every other surface writes.</summary>
+    public static List<ShaderMaterial> Dress(Node scene, Func<Material, bool>? keep = null,
+                                             Func<Material, bool>? foliage = null, int stencil = 0)
     {
         var made = new Dictionary<Material, ShaderMaterial>();
         var meshes = new List<MeshInstance3D>();
@@ -339,7 +561,7 @@ void fragment() {
         foreach (MeshInstance3D m in meshes)
             length = Mathf.Max(length, m.Mesh.GetAabb().Size.Length());
         foreach (MeshInstance3D m in meshes)
-            m.Mesh = Rebuild(m.Mesh, length, made);
+            m.Mesh = Rebuild(m.Mesh, length, made, keep, foliage, stencil);
         return new List<ShaderMaterial>(made.Values);
     }
 
@@ -406,24 +628,30 @@ void fragment() {
             Collect(child, into);
     }
 
-    private static ArrayMesh Rebuild(Mesh src, float length, Dictionary<Material, ShaderMaterial> made)
+    private static ArrayMesh Rebuild(Mesh src, float length, Dictionary<Material, ShaderMaterial> made,
+                                     Func<Material, bool>? keep, Func<Material, bool>? foliage,
+                                     int stencil)
     {
         var dst = new ArrayMesh();
         const Mesh.ArrayFormat custom = (Mesh.ArrayFormat)((long)Mesh.ArrayCustomFormat.RgbaFloat
                                                            << (int)Mesh.ArrayFormat.FormatCustom0Shift);
         for (int s = 0; s < src.GetSurfaceCount(); s++)
         {
-            Godot.Collections.Array arrays = Facet(src.SurfaceGetArrays(s));
+            Material? mat = src.SurfaceGetMaterial(s);
+            bool leaf = mat is not null && foliage is not null && foliage(mat);
+            Godot.Collections.Array arrays = leaf || (mat is not null && keep is not null && keep(mat))
+                ? src.SurfaceGetArrays(s)
+                : Facet(src.SurfaceGetArrays(s));
             arrays[(int)Mesh.ArrayType.Custom0] = InkNormals(arrays, length);
             dst.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays, null, null, custom);
-            Material? mat = src.SurfaceGetMaterial(s);
             if (mat is not null)
-                dst.SurfaceSetMaterial(s, CelFor(mat, made));
+                dst.SurfaceSetMaterial(s, CelFor(mat, made, leaf, stencil));
         }
         return dst;
     }
 
-    private static ShaderMaterial CelFor(Material mat, Dictionary<Material, ShaderMaterial> made)
+    private static ShaderMaterial CelFor(Material mat, Dictionary<Material, ShaderMaterial> made,
+                                         bool leaf = false, int stencil = 0)
     {
         if (made.TryGetValue(mat, out ShaderMaterial? cel))
             return cel;
@@ -436,7 +664,8 @@ void fragment() {
         ink.SetShaderParameter("width", InkWidth);
         ink.SetShaderParameter("min_px", InkMinPx);
         ink.SetShaderParameter("dark", InkDark);
-        cel = new ShaderMaterial { Shader = CelShader, NextPass = ink };
+        cel = leaf ? new ShaderMaterial { Shader = CelMarked(stencil, true) }
+                   : new ShaderMaterial { Shader = CelMarked(stencil, false), NextPass = ink };
         cel.SetShaderParameter("albedo", albedo);
         if (tex is not null)
         {

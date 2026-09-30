@@ -1,0 +1,266 @@
+{
+ "name": "Oak_004",
+ "seed": 4,
+ "generator": "pipeline/tree_gen.py",
+ "units": "m",
+ "up": "+Y (glTF)",
+ "front": "+Z (glTF) = -Y Blender",
+ "foot": [
+  0.0,
+  0.0,
+  0.0
+ ],
+ "height": 7.13,
+ "width": 6.84,
+ "depth": 6.73,
+ "sprites": {
+  "live": "Oak_004.png",
+  "burnt": "Oak_004_burnt.png",
+  "size": [
+   956,
+   1074
+  ],
+  "px_per_m": 140.7,
+  "elevation": 30.0,
+  "centre": [
+   489.6,
+   979.7
+  ],
+  "feet": {
+   "live": {
+    "foot": [
+     489.5,
+     1049
+    ],
+    "rise": 1025,
+    "root": 62.5
+   },
+   "burnt": {
+    "foot": [
+     489.5,
+     1049
+    ],
+    "rise": 1021,
+    "root": 62.5
+   }
+  }
+ },
+ "model": {
+  "file": "tree.glb",
+  "tris": 70463,
+  "tier": "mid",
+  "look": "C",
+  "burn": {
+   "uv": "TEXCOORD_1.x",
+   "value": "burn, 0 green .. 1 done",
+   "TreeGame.Leaf": "gone once burn > x",
+   "TreeGame.Core": "gone once burn > x",
+   "TreeGame.Twig": "shown once burn > x",
+   "TreeGame.Bark": "x unused; chars with burn",
+   "TreeGame.Soil": "never burns: the root plate, under the ground",
+   "TreeGame.Root": "never burns: the root plate, under the ground",
+   "ranges": {
+    "leaf_from": 0.05,
+    "core": [
+     0.55,
+     0.9
+    ],
+    "twig_about_core": 0.02
+   }
+  },
+  "fall": {
+   "hinge_m": 0.44,
+   "hinge": "axis on the ground, hinge_m from the foot toward the fall, across it",
+   "azimuth": "deg from +X glTF toward -Z glTF (Blender +Y, away from the board's camera)",
+   "bend": {
+    "uv": "TEXCOORD_2.x",
+    "value": "w = clamp((y - y0) / (H - y0))^2",
+    "y0_m": 2.14,
+    "H_m": 7.135,
+    "use": "extra turn about the hinge by crown_angle * w, on top of the trunk's"
+   },
+   "lie": {
+    "azimuth_deg": [
+     0.0,
+     15.0,
+     30.0,
+     45.0,
+     60.0,
+     75.0,
+     90.0,
+     105.0,
+     120.0,
+     135.0,
+     150.0,
+     165.0,
+     180.0,
+     195.0,
+     210.0,
+     225.0,
+     240.0,
+     255.0,
+     270.0,
+     285.0,
+     300.0,
+     315.0,
+     330.0,
+     345.0
+    ],
+    "touch": "first vertex on the ground: dust at touch_m from the foot",
+    "rest": "the trunk on the ground (capped at flat_deg): it stops, the crown whips",
+    "flat_deg": 88.0,
+    "live_touch_deg": [
+     55.4,
+     58.3,
+     63.5,
+     60.1,
+     57.5,
+     56.4,
+     55.7,
+     53.4,
+     52.5,
+     52.6,
+     54.4,
+     51.3,
+     49.3,
+     49.6,
+     52.2,
+     56.9,
+     55.7,
+     55.6,
+     55.9,
+     55.7,
+     53.4,
+     51.9,
+     51.1,
+     52.7
+    ],
+    "live_touch_m": [
+     4.22,
+     4.15,
+     3.96,
+     5.15,
+     5.27,
+     5.32,
+     4.89,
+     5.02,
+     4.67,
+     4.66,
+     4.12,
+     4.71,
+     4.84,
+     4.82,
+     4.66,
+     4.89,
+     5.03,
+     5.06,
+     4.97,
+     4.62,
+     4.43,
+     4.11,
+     4.15,
+     4.07
+    ],
+    "burnt_touch_deg": [
+     66.0,
+     68.9,
+     71.1,
+     67.5,
+     65.7,
+     64.8,
+     65.2,
+     62.7,
+     60.2,
+     59.8,
+     60.8,
+     58.3,
+     57.9,
+     59.5,
+     62.9,
+     65.0,
+     63.3,
+     63.1,
+     63.0,
+     63.2,
+     61.6,
+     60.1,
+     60.2,
+     62.0
+    ],
+    "burnt_touch_m": [
+     4.03,
+     6.42,
+     5.22,
+     5.34,
+     5.41,
+     6.09,
+     6.07,
+     4.71,
+     4.81,
+     4.83,
+     4.87,
+     4.99,
+     5.01,
+     4.93,
+     4.85,
+     4.97,
+     5.04,
+     4.89,
+     4.89,
+     4.63,
+     4.78,
+     4.85,
+     4.22,
+     4.16
+    ],
+    "rest_deg": [
+     87.5,
+     88.0,
+     88.0,
+     88.0,
+     85.9,
+     83.5,
+     82.3,
+     82.3,
+     83.2,
+     84.8,
+     87.5,
+     88.0,
+     88.0,
+     88.0,
+     88.0,
+     88.0,
+     88.0,
+     88.0,
+     88.0,
+     88.0,
+     87.1,
+     85.6,
+     85.2,
+     85.8
+    ]
+   },
+   "crush": {
+    "value": "after the turn: y' = y where y > 4 m, else max(m ln(1 + exp(y / m)), lift_m * min(4 down, 1)); m = mat_m * down, down = trunk angle / rest angle",
+    "mat_m": 0.08,
+    "lift_m": 0.01
+   },
+   "timber": {
+    "gravity": 3.0,
+    "shove": 0.35,
+    "lift": 0.05,
+    "bounce": 0.3,
+    "settle": 0.25,
+    "lag": 0.013,
+    "whip": 0.9,
+    "stiffness": 150.0,
+    "damping": 4.0
+   },
+   "plate": {
+    "radius_m": 1.43,
+    "depth_m": 0.715,
+    "top_m": -0.03
+   }
+  }
+ }
+}

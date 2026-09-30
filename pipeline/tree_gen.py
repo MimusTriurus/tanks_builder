@@ -80,6 +80,7 @@ import json
 import math
 import os
 import random
+import shutil
 
 import bmesh
 import bpy
@@ -128,7 +129,43 @@ CONFIG = {
     "fill": 4,               # dark puffs inside the crown, no branch of their own
     "lumps": 0.30,           # noise push on a puff, fraction of its radius
     "squash": 0.85,          # puffs are a little wider than tall
+
+    # the look of the game model's crown under Toon (docs/trees.md, "Вид
+    # кроны"). These are look "A" and the sprite's; the game model takes
+    # `LOOKS[GAME_LOOK]` over them, and over `clumps`..`fill` and its tier's
+    # leaves as well
+    "crown_mix": 0.0,        # leaf/core normal: 0 its puff's ellipsoid .. 1 the crown envelope's
+    "tone_up": 0.62,         # game leaf tone: its puff's top lighter (palette V) ...
+    "tone_rand": 0.22,       # ... and random per leaf
+    "tone_mean": 0.54,       # ... about this mean, before the puff's shade
+    "leaf_rim": True,        # game leaf's dark edge band (palette U >= 0.75): an ink line per leaf
+    "tilt": (0.40, 1.00),    # leaf tipped out of its puff, rad: the serration of the rim
+    "leaf_width": 0.60,      # game leaf, of its length
+    "bark_light": 1.0,       # game bark and twig, times GAME_BARK
 }
+
+# Looks of the game model, held side by side on the Tree3D board (`remodel`,
+# seed 1, docs/trees.md "Вид кроны"):
+#   "A" - the sprite's crown: every puff lit as a ball of its own, leaves toned
+#         apart with a dark edge each, tipped out to a spiked rim. Under Toon
+#         it read as a heap of lit balls in light flecks, hair at the rim.
+#   "B" - light only: the crown lit as one mass (normals mostly the
+#         envelope's), leaves one tone with no edge, the trunk out of its ink.
+#         The rim stays spiked, and at the board's scale B was A.
+#   "C" - B, and fewer, bigger puffs of broad leaves lying flatter: a rim of
+#         scallops, lobes of light and shade, a third fewer triangles.
+#         7-8 puffs were one blob and 0.46 a yellow the sprite is not; 9-10
+#         and 0.38 kept the oak's lobes.   <- the default
+LOOKS = {
+    "A": {},
+    "B": {"crown_mix": 0.65, "tone_up": 0.12, "tone_rand": 0.05, "tone_mean": 0.46,
+          "leaf_rim": False, "bark_light": 2.2},
+    "C": {"crown_mix": 0.65, "tone_up": 0.12, "tone_rand": 0.05, "tone_mean": 0.38,
+          "leaf_rim": False, "bark_light": 2.2,
+          "clumps": (9, 10), "clump_radius": (0.85, 1.10), "fill": 3,
+          "leaf_size": 0.62, "density": 16.0, "leaf_width": 0.95, "tilt": (0.15, 0.50)},
+}
+GAME_LOOK = "C"
 
 # What `detail` changes.
 #
@@ -137,7 +174,9 @@ CONFIG = {
 # `wood_tris`. Twigs are never collapsed: on a tube 0.03 m across Decimate
 # folds the section to a line and the twig comes out in dashes. The game's are
 # four-sided, a twig is 1-2 px on the board, and its burnt crown stops at the
-# second twig level; the third was two thirds of the triangles.
+# first twig level (`mid`): the third was two thirds of the triangles, and the
+# second - side twigs off the branch ends, under a pixel across - stood off the
+# burnt limbs on the board as hairs.
 DETAIL = {
     "sprite": {"leaf_size": 0.42, "density": 60.0, "leaf_sides": 16, "puff_subdiv": 3,
                "twig_sides": 6, "twig_step": 0.06, "ink": True, "voxel": 0.02, "wood_tris": 0,
@@ -163,7 +202,7 @@ GAME_TIERS = {
              "twig_depth": 2, "min_up": -0.35, "puff_scale": 1.15},
     "mid":  {"leaf_size": 0.36, "density": 40.0, "leaf_sides": 8, "puff_subdiv": 3,
              "twig_sides": 4, "twig_step": 0.25, "ink": False, "voxel": 0.03, "wood_tris": 3000,
-             "twig_depth": 2, "min_up": -1.0, "puff_scale": 1.05},
+             "twig_depth": 1, "min_up": -1.0, "puff_scale": 1.05},
     "full": {"leaf_size": 0.42, "density": 60.0, "leaf_sides": 16, "puff_subdiv": 3,
              "twig_sides": 6, "twig_step": 0.06, "ink": False, "voxel": 0.03, "wood_tris": 3000,
              "twig_depth": 3, "min_up": -1.0, "puff_scale": 1.0},
@@ -177,6 +216,9 @@ DETAIL["game"] = GAME_TIERS[GAME_TIER]
 SPRITE_RISE = 1024
 SPRITE_ELEVATION = 30.0     # the board's tilt, so sprite and model agree
 OUT = os.path.join(REPO, "out", "trees")
+# Where the game models the bench stands go (`publish`): the model and its
+# sidecar, and nothing else - the sprites and the sheets stay in OUT.
+MODELS = os.path.normpath(os.path.join(REPO, "..", "assets", "Models", "Trees"))
 
 
 # ---------------------------------------------------------------------------
@@ -211,7 +253,25 @@ INK_WIDTH = {"wood": 0.035, "twig": 0.014}
 GAME_BARK = (0.15, 0.075, 0.03)
 GAME_CHAR = (0.032, 0.028, 0.026)
 GAME_CORE = (0.12, 0.16, 0.034)
+# The root plate's (PLATE): earth darker and greyer than the board's ground, so
+# the torn plate reads against it, and the roots darker than the bark. At 0.075
+# the plate stood up as a black coin: most of it faces away from the sun once it
+# is up, and its shade tone of a dark earth is black. The roots at 0.8 of the
+# bark came out pale tan stubs - the bark is lit 2.2 (`bark_light`).
+GAME_SOIL = (0.15, 0.10, 0.06)
+GAME_ROOT = 0.45
 PALETTE_FROM = 0.30
+# What the board's sun does to them, taken back: every game colour is written
+# times this. Tuned in Blender's toon_preview, the model stood on the Tree3D
+# board 1.6 times brighter than its own sprite in all three channels alike
+# (crown 0.54/0.60/0.29 against 0.33/0.39/0.18, seed 1) - Toon's full sun is
+# brighter than the preview's ramp. The preview divides it back out, so the
+# sheets still compare the model with the sprite as before.
+BOARD_LIGHT = 0.40
+
+
+def _board(c):
+    return tuple(float(x) * BOARD_LIGHT for x in c)
 
 
 def _srgb(c):
@@ -430,8 +490,8 @@ def palette_image(name="TreeLeafPalette", w=8, h=64):
     px = np.ones((h, w, 4))
     for y in range(h):
         t = (y + 0.5) / h
-        px[y, :, :3] = _srgb(_ease(LEAF_PALETTE, PALETTE_FROM + (1 - PALETTE_FROM) * t))
-    px[:, 6:, :3] = _srgb(LEAF_RIM)
+        px[y, :, :3] = _srgb(_board(_ease(LEAF_PALETTE, PALETTE_FROM + (1 - PALETTE_FROM) * t)))
+    px[:, 6:, :3] = _srgb(_board(LEAF_RIM))
     img.pixels.foreach_set(px.astype(np.float32).ravel())
     os.makedirs(OUT, exist_ok=True)
     img.filepath_raw = os.path.join(OUT, name + ".png")
@@ -470,7 +530,8 @@ MAT_NAMES = {
     "sprite": {"leaf": "TreeLeafMat", "core": "TreeFoliageCore", "bark": "TreeBarkMat",
                "char": "TreeCharMat", "ink": "TreeOutline", "ink_char": "TreeOutlineChar"},
     "game": {"leaf": "TreeGame.Leaf", "core": "TreeGame.Core", "bark": "TreeGame.Bark",
-             "char": "TreeGame.Char", "twig": "TreeGame.Twig"},
+             "char": "TreeGame.Char", "twig": "TreeGame.Twig",
+             "soil": "TreeGame.Soil", "root": "TreeGame.Root"},
 }
 GROUPS = {"sprite": "TreeClump", "game": "TreeClumpGame"}
 LEAVES = {"sprite": "TreeLeaf", "game": "TreeLeafGame"}
@@ -485,12 +546,15 @@ def materials(detail):
                 "char": _char_sprite_mat(), "ink": _ink_mat(),
                 "ink_char": _ink_mat("TreeOutlineChar", INK_CHAR)}
     return {"leaf": _flat_mat(names["leaf"], (1, 1, 1), palette_image()),
-            "core": _flat_mat(names["core"], GAME_CORE),
-            "bark": _flat_mat(names["bark"], GAME_BARK),
-            "char": _flat_mat(names["char"], GAME_CHAR),
+            "core": _flat_mat(names["core"], _board(GAME_CORE)),
+            "bark": _flat_mat(names["bark"], _board(GAME_BARK)),
+            "char": _flat_mat(names["char"], _board(GAME_CHAR)),
             # the same bark, a material of its own because it is the one that
             # *appears* at its threshold where leaf and core disappear
-            "twig": _flat_mat(names["twig"], GAME_BARK)}
+            "twig": _flat_mat(names["twig"], _board(GAME_BARK)),
+            # the root plate, under the ground until the tree goes over (PLATE)
+            "soil": _flat_mat(names["soil"], _board(GAME_SOIL)),
+            "root": _flat_mat(names["root"], _board(np.array(GAME_BARK) * GAME_ROOT))}
 
 
 def reset():
@@ -515,14 +579,15 @@ def reset():
 # the leaf and the scatter group
 # ---------------------------------------------------------------------------
 
-def leaf_mesh(name, sides=16, width=0.56, uv=False):
+def leaf_mesh(name, sides=16, width=0.56, uv=False, rim=True):
     """A pointed leaf in XY, base at the origin, tip at +X, length 1.
 
     Three rings - centre, inner, outer - and `leaf_edge` 0 on the first two, 1
     on the outer: a constant ramp at 0.55 turns the outer band into the dark
     rim, which is the leaf's outline without a second mesh. With `uv`, U runs
     0.35 -> 1.0 across the same band and the palette's rim columns start at
-    0.75. Four sides make the game's rhombus.
+    0.75 - without `rim` U stays 0.35 and the leaf is one tone to its edge.
+    Four sides make the game's rhombus.
     """
     half = sides // 2
     xs = [0.5 - 0.5 * math.cos(math.pi * k / half) for k in range(half + 1)]
@@ -553,7 +618,7 @@ def leaf_mesh(name, sides=16, width=0.56, uv=False):
         lay = me.uv_layers.get("UVMap") or me.uv_layers.new(name="UVMap")
         vi = np.empty(len(me.loops), dtype=np.int32)
         me.loops.foreach_get("vertex_index", vi)
-        u = 0.35 + 0.65 * np.array(edge)[vi]
+        u = 0.35 + (0.65 if rim else 0.0) * np.array(edge)[vi]
         lay.data.foreach_set("uv", np.column_stack([u, np.full_like(u, 0.5)]).ravel())
     me.update()
     ob = bpy.data.objects.get(name) or bpy.data.objects.new(name, me)
@@ -583,19 +648,22 @@ def _named(N, name, dtype, loc):
     return n.outputs["Attribute"]
 
 
-def _tone_uv(N, L, geo, loc):
+def _tone_uv(N, L, geo, loc, gi):
     """Game: bake the leaf's tone into V of `UVMap`, keep U (edge -> rim).
-    tone = 0.62 up + 0.22 random + puff shade + 0.12, the sprite's formula
-    without its light term - Toon lights the model."""
+    tone = Tone Up * up + Tone Rand * random + puff shade + Tone Base - by
+    default 0.62 / 0.22 / 0.12, the sprite's formula without its light term:
+    Toon lights the model."""
     x, y = loc
     up = _named(N, "leaf_up", "FLOAT", (x, y + 200))
     rnd = _named(N, "leaf_rand", "FLOAT", (x, y + 50))
     sh = _named(N, "clump_shade", "FLOAT", (x, y - 100))
-    t1 = _math(N, "MULTIPLY_ADD", (x + 200, y + 150), b=0.62)
+    t1 = _math(N, "MULTIPLY_ADD", (x + 200, y + 150))
     L.new(up, t1.inputs[0])
-    t1.inputs[2].default_value = 0.12
-    t2 = _math(N, "MULTIPLY_ADD", (x + 350, y + 100), b=0.22)
+    L.new(gi.outputs["Tone Up"], t1.inputs[1])
+    L.new(gi.outputs["Tone Base"], t1.inputs[2])
+    t2 = _math(N, "MULTIPLY_ADD", (x + 350, y + 100))
     L.new(rnd, t2.inputs[0])
+    L.new(gi.outputs["Tone Rand"], t2.inputs[1])
     L.new(t1.outputs[0], t2.inputs[2])
     t3 = _math(N, "ADD", (x + 500, y + 50))
     L.new(t2.outputs[0], t3.inputs[0])
@@ -641,8 +709,10 @@ def clump_group(detail, mats):
     what makes the puff's edge serrated rather than a smooth ball."""
     name = GROUPS[detail]
     ng = bpy.data.node_groups.get(name)
-    if ng:
+    if ng and "Tilt Max" in [it.name for it in ng.interface.items_tree]:
         return ng
+    if ng:   # cached from before the look's inputs: its trees go stale with it
+        bpy.data.node_groups.remove(ng)
     ng = bpy.data.node_groups.new(name, "GeometryNodeTree")
     ng.is_modifier = True
     I = ng.interface
@@ -654,6 +724,9 @@ def clump_group(detail, mats):
     I.new_socket("Shade", in_out="INPUT", socket_type="NodeSocketFloat").default_value = 0.0
     I.new_socket("Min Up", in_out="INPUT", socket_type="NodeSocketFloat").default_value = -1.0
     I.new_socket("Core Burn", in_out="INPUT", socket_type="NodeSocketFloat").default_value = 0.9
+    for k, v in (("Tone Up", 0.62), ("Tone Rand", 0.22), ("Tone Base", 0.12),
+                 ("Tilt Min", 0.40), ("Tilt Max", 1.00)):
+        I.new_socket(k, in_out="INPUT", socket_type="NodeSocketFloat").default_value = v
     I.new_socket("Geometry", in_out="OUTPUT", socket_type="NodeSocketGeometry")
     N, L = ng.nodes, ng.links
     gi = N.new("NodeGroupInput")
@@ -687,9 +760,15 @@ def clump_group(detail, mats):
     align.axis = "Z"
     L.new(dist.outputs["Normal"], align.inputs["Vector"])
     spin = _rand_float(N, L, seed, 0.0, 2 * math.pi, 11, (-900, -250))
-    tilt = _rand_float(N, L, seed, 0.40, 1.00, 23, (-900, -450))
+    span_t = _math(N, "SUBTRACT", (-1100, -550))
+    L.new(gi.outputs["Tilt Max"], span_t.inputs[0])
+    L.new(gi.outputs["Tilt Min"], span_t.inputs[1])
+    tilt = _math(N, "MULTIPLY_ADD", (-800, -450))
+    L.new(_rand_float(N, L, seed, 0.0, 1.0, 23, (-950, -450)), tilt.inputs[0])
+    L.new(span_t.outputs[0], tilt.inputs[1])
+    L.new(gi.outputs["Tilt Min"], tilt.inputs[2])
     neg = _math(N, "MULTIPLY", (-700, -450), b=-1.0)
-    L.new(tilt, neg.inputs[0])
+    L.new(tilt.outputs[0], neg.inputs[0])
     comb = N.new("ShaderNodeCombineXYZ")
     comb.location = (-550, -300)
     L.new(neg.outputs[0], comb.inputs["Y"])
@@ -753,7 +832,7 @@ def clump_group(detail, mats):
     leaves = real.outputs[0]
     core = gi.outputs["Geometry"]
     if detail == "game":
-        leaves = _tone_uv(N, L, leaves, (500, 400))
+        leaves = _tone_uv(N, L, leaves, (500, 400), gi)
         # the burn contract: X of `Burn` is when this leaf, or this puff's
         # core, is gone (BURN); one value per leaf, so it cuts whole leaves
         leaves = _store_burn(N, L, leaves, _named(N, "leaf_burn", "FLOAT", (1300, 500)), (1450, 400))
@@ -1443,6 +1522,137 @@ def _wood_objects(name, S, wood, ink, cfg, col, world, twigs,
     return out
 
 
+# The root plate: what comes up out of the ground with a tree that is knocked
+# over - a slab of earth with the roots through it and clods stuck on them.
+# The game model only, under the ground (the board's ground writes depth, so it
+# is not seen while the tree stands) and turned up with the tree by the fall:
+# its back comes out of the ground as a wall of earth, its front goes further
+# under. In base_radius (0.55 m): radius 2.6 (1.43 m), the slab 1.3 deep at the
+# middle and 0.45 at the rim - at 1.0 and 0.2 it stood up as a coin - the rim
+# torn by `torn`, the underside lumpy by `lumps`. Its own seed stream, so the
+# tree above is the same with it or without.
+PLATE = {"radius": 2.6, "depth": 1.3, "rim": 0.45, "top": -0.03, "torn": 0.22, "sides": 18,
+         "lumps": 0.14, "roots": 9, "sinkers": 3, "clods": 18}
+_PLATE_SALT = 100_151
+
+
+def _bm_tube(bm, pts, radii, sides, mat):
+    """A closed tube along `pts` with `radii`, capped at both ends."""
+    rings = []
+    for i, (c, r) in enumerate(zip(pts, radii)):
+        a = (pts[min(i + 1, len(pts) - 1)] - pts[max(i - 1, 0)]).normalized()
+        u = a.cross(Vector((0, 0, 1)))
+        if u.length < 1e-3:
+            u = a.cross(Vector((1, 0, 0)))
+        u.normalize()
+        v = a.cross(u)
+        rings.append([bm.verts.new(c + (u * math.cos(t) + v * math.sin(t)) * r)
+                      for t in (2 * math.pi * k / sides for k in range(sides))])
+    for r0, r1 in zip(rings, rings[1:]):
+        for k in range(sides):
+            f = bm.faces.new((r0[k], r0[(k + 1) % sides], r1[(k + 1) % sides], r1[k]))
+            f.material_index = mat
+    for ring, flip in ((rings[0], True), (rings[-1], False)):
+        f = bm.faces.new(list(reversed(ring)) if flip else ring)
+        f.material_index = mat
+
+
+def _plate_object(name, cfg, mats, col, world):
+    """The root plate (PLATE) as `<name>.Plate`: soil and roots, two materials."""
+    rng = random.Random(cfg["seed"] * _PLATE_SALT + 7)
+    rb = cfg["base_radius"]
+    R, D, rim_t, top = PLATE["radius"] * rb, PLATE["depth"] * rb, PLATE["rim"] * rb, PLATE["top"]
+    n = PLATE["sides"]
+    rr = [R * (1.0 + PLATE["torn"] * (rng.random() * 2.0 - 1.0)) for _ in range(n)]
+    rr = [(rr[i - 1] + 2.0 * rr[i] + rr[(i + 1) % n]) / 4.0 for i in range(n)]   # torn, not jagged
+    bm = bmesh.new()
+    SOIL, ROOT = 0, 1
+    fr = (0.5, 0.82, 1.0)
+
+    def at(i, f, z):
+        a = 2 * math.pi * i / n
+        return Vector((math.cos(a) * rr[i] * f, math.sin(a) * rr[i] * f, z))
+
+    tc = bm.verts.new((0, 0, top))
+    top_rings = [[bm.verts.new(at(i, f, top - 0.04 * f)) for i in range(n)] for f in fr]
+    # the underside: deepest at the middle, lumpy, meeting the top at the rim's thickness
+    bot_rings = []
+    for f in reversed(fr):
+        depth = rim_t + (D - rim_t) * (1.0 - f * f) ** 0.6
+        bot_rings.append([bm.verts.new(at(i, f, top - depth + rng.uniform(-1.0, 1.0) * PLATE["lumps"] * rb))
+                          for i in range(n)])
+    bc = bm.verts.new((0, 0, top - D))
+
+    def quad_rings(a, b):
+        # wound so the face looks out of the slab: (a_i, a_j, b_j, b_i) with
+        # the rings running counter-clockwise from above faces in - the top
+        # down, the rim inward, the underside up - and the board drew the ink
+        # shell's inside through the rim: a black coin
+        for i in range(n):
+            j = (i + 1) % n
+            bm.faces.new((b[i], b[j], a[j], a[i])).material_index = SOIL
+
+    for i in range(n):
+        bm.faces.new((tc, top_rings[0][i], top_rings[0][(i + 1) % n])).material_index = SOIL
+    for a, b in zip(top_rings, top_rings[1:]):
+        quad_rings(a, b)
+    quad_rings(top_rings[-1], bot_rings[0])               # the rim's torn wall
+    for a, b in zip(bot_rings, bot_rings[1:]):
+        quad_rings(a, b)
+    for i in range(n):
+        bm.faces.new((bc, bot_rings[-1][(i + 1) % n], bot_rings[-1][i])).material_index = SOIL
+
+    # roots through it: out from under the collar, some past the rim (torn off
+    # there), and a few sinkers straight down out of the underside
+    ends = []
+    for k in range(PLATE["roots"]):
+        a = 2 * math.pi * (k + rng.uniform(-0.3, 0.3)) / PLATE["roots"]
+        d = Vector((math.cos(a), math.sin(a), 0.0))
+        L = R * rng.uniform(0.75, 1.25)
+        z1 = top - rng.uniform(0.25, 0.55) * D
+        pts = [Vector((0, 0, -0.10)) + d * 0.15 * rb / 0.55, d * L * 0.45 + Vector((0, 0, z1 * 0.8)),
+               d * L + Vector((0, 0, z1))]
+        r0 = rng.uniform(0.10, 0.15) * rb / 0.55
+        _bm_tube(bm, pts, [r0, r0 * 0.6, r0 * 0.28], 5, ROOT)
+        ends.append((pts, r0))
+    for k in range(PLATE["sinkers"]):
+        a = rng.uniform(0, 2 * math.pi)
+        d = Vector((math.cos(a), math.sin(a), 0.0)) * rng.uniform(0.15, 0.45) * R
+        z0 = top - D * 0.7
+        pts = [d + Vector((0, 0, z0)), d * 1.1 + Vector((0, 0, z0 - 0.35 * D)),
+               d * 1.15 + Vector((0, 0, z0 - rng.uniform(0.6, 0.9) * D))]
+        r0 = rng.uniform(0.05, 0.08) * rb / 0.55
+        _bm_tube(bm, pts, [r0, r0 * 0.7, r0 * 0.3], 5, ROOT)
+        ends.append((pts, r0))
+    # clods stuck on: along the roots where they leave the slab, and on its underside
+    for k in range(PLATE["clods"]):
+        pts, r0 = ends[rng.randrange(len(ends))]
+        t = rng.uniform(0.35, 0.9)
+        c = pts[1].lerp(pts[2], t) if t > 0.5 else pts[0].lerp(pts[1], t * 2)
+        if k % 3 == 0:     # on the underside instead
+            i = rng.randrange(n)
+            f = rng.uniform(0.3, 0.9)
+            depth = rim_t + (D - rim_t) * (1.0 - f * f) ** 0.6
+            c = at(i, f, top - depth)
+        rad = rng.uniform(0.10, 0.22) * rb / 0.55
+        g = bmesh.ops.create_icosphere(bm, subdivisions=1, radius=rad)
+        sq = Vector((rng.uniform(0.8, 1.3), rng.uniform(0.8, 1.3), rng.uniform(0.6, 0.9)))
+        for v in g["verts"]:
+            v.co = Vector((v.co.x * sq.x, v.co.y * sq.y, v.co.z * sq.z)) + c
+        for f_ in {f for v in g["verts"] for f in v.link_faces}:
+            f_.material_index = SOIL
+    me = bpy.data.meshes.new(f"{name}.Plate")
+    bm.to_mesh(me)
+    bm.free()
+    me.materials.append(mats["soil"])
+    me.materials.append(mats["root"])
+    _uv_layers(me)
+    ob = bpy.data.objects.new(f"{name}.Plate", me)
+    col.objects.link(ob)
+    ob.parent = world
+    return ob
+
+
 def _lump(n, R, cfg, seed_vec):
     """A puff's radius along unit direction `n` (before the squash)."""
     # sampled on the unit sphere, so a coarse game puff and a fine sprite puff
@@ -1515,10 +1725,13 @@ def tree_name(cfg):
 
 def build(cfg=None):
     """One tree under `<name>.World` at `offset`. Returns its numbers."""
-    cfg = {**CONFIG, **(cfg or {})}
+    user = cfg or {}
+    cfg = {**CONFIG, **user}
     detail = cfg["detail"]
-    base = GAME_TIERS[cfg.get("tier", GAME_TIER)] if detail == "game" else DETAIL[detail]
-    cfg = {**base, **cfg}
+    # the game model: its tier's budget, then its look (the sprite has neither)
+    base = ({**GAME_TIERS[cfg.get("tier", GAME_TIER)], **LOOKS[cfg.get("look", GAME_LOOK)]}
+            if detail == "game" else DETAIL[detail])
+    cfg = {**CONFIG, **base, **user}
     burnt = cfg["state"] == "burnt"
     rng = random.Random(cfg["seed"])
     name = tree_name(cfg)
@@ -1527,10 +1740,17 @@ def build(cfg=None):
     mats = materials(detail)
     ng = clump_group(detail, mats)
     leaf = bpy.data.objects.get(LEAVES[detail])
-    # a leaf of `sides` has 2 * sides faces; one cached from another tier is remade
-    if leaf is None or len(leaf.data.polygons) != 2 * cfg["leaf_sides"]:
-        leaf = leaf_mesh(LEAVES[detail], sides=cfg["leaf_sides"],
-                         width=0.56 if detail == "sprite" else 0.60, uv=detail == "game")
+    # a leaf of `sides` has 2 * sides faces; one cached from another tier or look is remade
+    width = 0.56 if detail == "sprite" else cfg["leaf_width"]
+    rim = detail == "sprite" or cfg["leaf_rim"]
+    if (leaf is None or len(leaf.data.polygons) != 2 * cfg["leaf_sides"]
+            or abs(leaf.get("width", 0.0) - width) > 1e-6 or bool(leaf.get("rim", True)) != rim):
+        leaf = leaf_mesh(LEAVES[detail], sides=cfg["leaf_sides"], width=width, uv=detail == "game", rim=rim)
+        leaf["width"], leaf["rim"] = width, rim
+    if detail == "game":   # the cached materials take this build's bark
+        for k, f in (("bark", 1.0), ("twig", 1.0), ("root", GAME_ROOT)):
+            b = mats[k].node_tree.nodes.get("Principled BSDF")
+            b.inputs["Base Color"].default_value = (*_board(np.array(GAME_BARK) * cfg["bark_light"] * f), 1.0)
     if leaf.name not in col.objects:
         col.objects.link(leaf)
     leaf.hide_viewport = leaf.hide_render = True
@@ -1543,6 +1763,8 @@ def build(cfg=None):
     # burn thresholds come from their own seeded streams (`_burn_at`), so the
     # shape of the tree does not depend on whether they were drawn
     c, axes, clumps, fills = place_clumps(cfg, rng)
+    # for `bake`'s normals: the crown's envelope, in the World's frame
+    world["crown_c"], world["crown_axes"], world["crown_mix"] = tuple(c), tuple(axes), cfg["crown_mix"]
     S = skeleton(cfg, rng, c, axes, clumps)
     ink = mats.get("ink_char" if burnt else "ink") if cfg["ink"] else None
     game = detail == "game"
@@ -1578,6 +1800,8 @@ def build(cfg=None):
                   twig_mat=mats["twig"] if game else None,
                   twig_burn=(lambda owner, ci: _twig_burn(cfg["seed"], owner, ci)) if game else None,
                   twig_inside=inside if game else None)
+    if game:
+        _plate_object(name, cfg, mats, col, world)
     if not burnt:
         ids = {it.name: it.identifier for it in ng.interface.items_tree
                if getattr(it, "in_out", None) == "INPUT"}
@@ -1600,6 +1824,10 @@ def build(cfg=None):
                 getattr(inp, ids["Min Up"]).value = cfg["min_up"]
             if "Core Burn" in ids:
                 getattr(inp, ids["Core Burn"]).value = _burn_at(cfg["seed"], "core", i)
+            base = cfg["tone_mean"] - 0.5 * cfg["tone_up"] - 0.5 * cfg["tone_rand"]
+            for k, v in (("Tone Up", cfg["tone_up"]), ("Tone Rand", cfg["tone_rand"]),
+                         ("Tone Base", base), ("Tilt Min", cfg["tilt"][0]), ("Tilt Max", cfg["tilt"][1])):
+                getattr(inp, ids[k]).value = v
 
     bpy.context.view_layer.update()
     return report(name)
@@ -1881,6 +2109,8 @@ class toon_preview:
 
     def _burn(self, N, L, role, colour):
         B = float(self.burn)
+        if role in ("soil", "root"):   # the root plate never burns
+            return colour, None
         if role in ("bark", "char"):
             return _mixc(N, L, colour, GAME_CHAR, B, (-500, 900)), None
         uv = N.new("ShaderNodeUVMap")
@@ -1929,6 +2159,10 @@ class toon_preview:
             src = b.inputs["Base Color"].links[0].from_socket if b.inputs["Base Color"].links \
                 else tuple(b.inputs["Base Color"].default_value[:3])
             before = set(N)
+            # the board's light was taken out of the colours; the preview's ramp
+            # is the one the sprite was matched under, so it goes back in here
+            k = 1.0 / BOARD_LIGHT
+            src = tuple(x * k for x in src) if isinstance(src, tuple)                 else _multiply(N, L, src, (k, k, k), (-700, 500))
             vis = None
             if self.burn is not None:
                 src, vis = self._burn(N, L, role, src)
@@ -1966,6 +2200,10 @@ def _mesh_shots(name, burns, folder):
     mesh.parent = tmp
     mesh.matrix_world = keep
     mesh.hide_render = False
+    # no ground in these shots, and the sprite beside them has no root plate:
+    # it would hang under the tree (the fall sheets have a ground and keep it)
+    own = mesh.data
+    mesh.data = _without(own, (MAT_NAMES["game"]["soil"], MAT_NAMES["game"]["root"]))
     shots = []
     try:
         for b in burns:
@@ -1974,11 +2212,26 @@ def _mesh_shots(name, burns, folder):
                 sprites([f"{name}.Check"], [shot])
             shots.append(shot)
     finally:
+        shown = mesh.data
+        mesh.data = own
+        bpy.data.meshes.remove(shown)
         mesh.parent = None
         mesh.matrix_world = keep
         mesh.hide_render = True
         bpy.data.objects.remove(tmp, do_unlink=True)
     return shots
+
+
+def _without(me, names):
+    """A copy of `me` without the faces of the materials `names`."""
+    out = me.copy()
+    bm = bmesh.new()
+    bm.from_mesh(out)
+    gone = {i for i, m in enumerate(out.materials) if m and m.name in names}
+    bmesh.ops.delete(bm, geom=[f for f in bm.faces if f.material_index in gone], context="FACES")
+    bm.to_mesh(out)
+    bm.free()
+    return out
 
 
 def game_check(name, path, sprite_png):
@@ -2043,7 +2296,14 @@ def bake(name):
         # it in place; clean it here, where it is ours to see
         me.validate(clean_customdata=False)
         _uv_layers(me)   # the fused wood lost its UVs to Remesh: zero, never read
-        me.transform(inv @ ev.matrix_world)
+        to_world = inv @ ev.matrix_world
+        if ".Clump." in ob.name:
+            # the puff's centre on every point of it, for _puff_normals after
+            # the merge (a custom normal would not survive the bmesh)
+            c = to_world @ Vector((0.0, 0.0, 0.0))
+            a = me.attributes.new("puff_c", "FLOAT_VECTOR", "POINT")
+            a.data.foreach_set("vector", np.tile(np.array(c, dtype=np.float32), len(me.vertices)))
+        me.transform(to_world)
         remap = []
         for m in me.materials:
             if m not in mats:
@@ -2054,6 +2314,12 @@ def bake(name):
         me.polygons.foreach_set("material_index", np.array(remap, dtype=np.int32)[mi])
         bm.from_mesh(me)
         bpy.data.meshes.remove(me)
+    # the last bake's, or the new one comes out ".001" in the file and the scene
+    stale = bpy.data.objects.get(f"{name}.Mesh")
+    if stale is not None:
+        bpy.data.objects.remove(stale, do_unlink=True)
+    if f"{name}.Mesh" in bpy.data.meshes:
+        bpy.data.meshes.remove(bpy.data.meshes[f"{name}.Mesh"])
     out = bpy.data.meshes.new(f"{name}.Mesh")
     bm.to_mesh(out)
     bm.free()
@@ -2061,6 +2327,7 @@ def bake(name):
     _bend_uv(out)
     for m in mats:
         out.materials.append(m)
+    _puff_normals(out, world.get("crown_c"), world.get("crown_axes"), world.get("crown_mix", 0.0))
     if out.validate(clean_customdata=False):
         raise RuntimeError(f"{name}: baked mesh needed repair after its parts were clean")
     ob = bpy.data.objects.new(f"{name}.Mesh", out)
@@ -2192,6 +2459,10 @@ def fall_spec(ob, cfg=None):
                            "lift_m * min(4 down, 1)); m = mat_m * down, down = trunk angle / rest angle",
                   "mat_m": FALL["mat"], "lift_m": FALL["lift"]},
         "timber": TIMBER,
+        # the root plate (PLATE): what comes up at the collar's back, and the pit it leaves
+        "plate": {"radius_m": round(PLATE["radius"] * {**CONFIG, **(cfg or {})}["base_radius"], 3),
+                  "depth_m": round(PLATE["depth"] * {**CONFIG, **(cfg or {})}["base_radius"], 3),
+                  "top_m": PLATE["top"]},
     }
 
 
@@ -2334,7 +2605,10 @@ def fall_check(name, path, azimuths=(0.0, 315.0, 270.0, 45.0, 90.0), burn=None, 
             for j, tq in enumerate(ts):
                 s = min(samples, key=lambda x: abs(x[0] - tq))
                 posed = _pose(co0, bend, h, az, s[1], s[2])
-                posed[:, 2] = _crush(posed[:, 2], s[1] / math.radians(lie[az]))
+                # under the ground from the start (the root plate) is not
+                # crushed: what goes further under stays under, hidden
+                up = co0[:, 2] > 0.0
+                posed[up, 2] = _crush(posed[up, 2], s[1] / math.radians(lie[az]))
                 me.vertices.foreach_set("co", posed.ravel())
                 me.update()
                 p = os.path.join(os.path.dirname(path), f"_{name}_fall{int(az):03d}_{j:03d}.png")
@@ -2382,6 +2656,48 @@ def _grid_sheet(rows, out, gap=12):
     return out
 
 
+def _puff_normals(me, crown_c=None, crown_axes=None, crown_mix=0.0):
+    """Leaves and cores take the normal of their puff's ellipsoid at their
+    point, not of their own face: `Toon` lights a face by its normal, and by
+    the leaf's own plane every leaf turned from the sun went to the shade tone
+    on its own - the crown came out in dark and light flecks, where the
+    sprite's puff is lit as one ball and a leaf differs only by its tone
+    (palette V). Written as custom normals; the board keeps them for these two
+    materials (`Toon.Dress`, `keep`). Everything else keeps its own.
+
+    `crown_mix` of the crown envelope's normal blended in: a puff alone is a
+    ball lit on its own, one next to another the same, and the crown read as a
+    heap of lit balls - no underside in shade, no side away from the sun."""
+    if "puff_c" not in me.attributes:
+        return
+    n = len(me.vertices)
+    co = np.empty(n * 3, dtype=np.float64)
+    me.vertices.foreach_get("co", co)
+    c = np.empty(n * 3, dtype=np.float32)
+    me.attributes["puff_c"].data.foreach_get("vector", c)
+    d = co.reshape(-1, 3) - c.reshape(-1, 3)
+    d[:, 2] /= CONFIG["squash"] ** 2        # the ellipsoid's normal, puffs are squashed in z
+    d /= np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-9)
+    if crown_mix > 0.0 and crown_c is not None:
+        e = (co.reshape(-1, 3) - np.array(crown_c)) / np.array(crown_axes) ** 2
+        e /= np.maximum(np.linalg.norm(e, axis=1, keepdims=True), 1e-9)
+        d = (1.0 - crown_mix) * d + crown_mix * e
+        d /= np.maximum(np.linalg.norm(d, axis=1, keepdims=True), 1e-9)
+    names = {MAT_NAMES["game"]["leaf"], MAT_NAMES["game"]["core"]}
+    on = np.array([m is not None and m.name in names for m in me.materials])
+    mi = np.empty(len(me.polygons), dtype=np.int32)
+    me.polygons.foreach_get("material_index", mi)
+    lt = np.empty(len(me.polygons), dtype=np.int32)
+    me.polygons.foreach_get("loop_total", lt)
+    vi = np.empty(len(me.loops), dtype=np.int32)
+    me.loops.foreach_get("vertex_index", vi)
+    puff = np.repeat(on[mi], lt)
+    nl = np.zeros((len(me.loops), 3), dtype=np.float64)   # zero: keep the face's own
+    nl[puff] = d[vi[puff]]
+    me.attributes.remove(me.attributes["puff_c"])
+    me.normals_split_custom_set([tuple(v) for v in nl])
+
+
 def export_glb(ob, path):
     """`ob` at the origin, alone, Y up (Blender -Y front -> glTF +Z), as repro_kit does."""
     keep = ob.matrix_world.copy()
@@ -2419,6 +2735,7 @@ def make(seed, name=None, out_dir=None, cfg=None, spacing=9.0):
     behind.
     """
     name = name or f"Oak_{seed:03d}"
+    out_arg = out_dir
     out_dir = os.path.join(out_dir or OUT, name)
     os.makedirs(out_dir, exist_ok=True)
     for stale in ("tree_burnt.glb", "_check_burnt_game.png", "_check_live_game.png",
@@ -2463,18 +2780,61 @@ def make(seed, name=None, out_dir=None, cfg=None, spacing=9.0):
                     "centre": shot["centre"],
                     "feet": {"live": shot["feet"][0], "burnt": shot["feet"][1]}},
         "model": {"file": "tree.glb", "tris": tris, "tier": base.get("tier", GAME_TIER),
+                  "look": base.get("look", GAME_LOOK),
                   "burn": {"uv": "TEXCOORD_1.x", "value": "burn, 0 green .. 1 done",
                            MAT_NAMES["game"]["leaf"]: "gone once burn > x",
                            MAT_NAMES["game"]["core"]: "gone once burn > x",
                            MAT_NAMES["game"]["twig"]: "shown once burn > x",
                            MAT_NAMES["game"]["bark"]: "x unused; chars with burn",
+                           MAT_NAMES["game"]["soil"]: "never burns: the root plate, under the ground",
+                           MAT_NAMES["game"]["root"]: "never burns: the root plate, under the ground",
                            "ranges": BURN},
                   "fall": model["fall"]},
     }
     with open(os.path.join(out_dir, "tree.json"), "w", encoding="utf-8") as f:
         json.dump(spec, f, indent=1, ensure_ascii=False)
-    return {"dir": out_dir, "sprites": shot, "model": model,
+    # Into assets for the bench, unless this run was written somewhere of its own
+    # (an experiment): that must not replace the tree the board stands.
+    published = publish(name) if out_arg is None else None
+    return {"dir": out_dir, "sprites": shot, "model": model, "published": published,
             "report": {f"{s}/{d}": r for (s, d), r in made.items()}}
+
+
+def publish(name, out_dir=None):
+    """Copy `<out>/<name>/tree.glb` and `tree.json` to `assets/Models/Trees/<name>/`,
+    where `godot/scripts/Tree3DBench.cs` reads them (`AssetRoot.Trees`). `make`
+    does it for every tree it writes to OUT. Returns the folder."""
+    src = os.path.join(out_dir or OUT, name)
+    dst = os.path.join(MODELS, name)
+    os.makedirs(dst, exist_ok=True)
+    for f in ("tree.glb", "tree.json"):
+        shutil.copy2(os.path.join(src, f), os.path.join(dst, f))
+    return dst
+
+
+def remodel(seed, look, name=None, out_dir=None):
+    """Only the game model of `seed` in look `look` (`LOOKS`), to
+    `<out>/<name>_<look>/`: `tree.glb` and a `tree.json` that is the seed's
+    own (`make` first: the board scales the model by its sprite's px_per_m)
+    with this model's tris, look and fall. No sprites, no sheets."""
+    name = name or f"Oak_{seed:03d}"
+    root = out_dir or OUT
+    with open(os.path.join(root, name, "tree.json"), encoding="utf-8") as f:
+        spec = json.load(f)
+    tag = f"{name}_{look}"
+    d = os.path.join(root, tag)
+    os.makedirs(d, exist_ok=True)
+    cfg = {"look": look, "seed": seed, "name": tag, "detail": "game"}
+    g = build(cfg)
+    ob, tris = bake(g["name"])
+    glb = os.path.join(d, "tree.glb")
+    check = export_glb(ob, glb)
+    spec["model"].update({"tris": tris, "look": look, "fall": fall_spec(ob, cfg)})
+    spec.update({"height": g["height"], "width": g["width"], "depth": g["depth"]})
+    with open(os.path.join(d, "tree.json"), "w", encoding="utf-8") as f:
+        json.dump(spec, f, indent=1, ensure_ascii=False)
+    _wipe(g["name"])
+    return {"dir": d, "tris": tris, "check": check, "height": g["height"], "width": g["width"]}
 
 
 if __name__ == "__main__":

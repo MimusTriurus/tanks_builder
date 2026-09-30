@@ -64,7 +64,8 @@ dotnet build
 стенд событий: пять танков и все виды клеток, кнопка панели = событие правил
 ([docs/events.md](docs/events.md)); `res://Wood.tscn`,
 `res://Wall.tscn`, `res://Relief.tscn`, `res://Relief3D.tscn`, `res://Editor.tscn`;
-`res://Tank3D.tscn` — 3D-танк с эффектами стенда ([docs/tank3d.md](docs/tank3d.md)).
+`res://Tank3D.tscn` — 3D-танк с эффектами стенда ([docs/tank3d.md](docs/tank3d.md));
+`res://Tree3D.tscn` — модели деревьев генератора на объёмной доске: лесной пожар, падение от тарана и четыре способа травы ([docs/props.md](docs/props.md), «Tree3D»).
 `--sprites <TAG>` одевает все классы в пиксели одного танка; меняются пиксели, а
 не класс ([docs/architecture.md](docs/architecture.md)).
 
@@ -90,10 +91,11 @@ Godot, запущенный другой сборкой движка, переп
 
 ## Корни сцен и правило между ними
 
-Корней десять: `Main` (харнесс, две сцены), `TankBench` (четыре), `EventBench`
+Корней одиннадцать: `Main` (харнесс, две сцены), `TankBench` (четыре), `EventBench`
 (три), `WoodBench`, `WallBench`, `ReliefBench`, `Relief3D`, `EffectsBench`,
-`MapEditor`, `Tank3DBench`. Семь наследуют `SceneRoot`; два рельефных объявлены
-схематичными, `Tank3DBench` — пилот на Node3D со своими флагами снимка.
+`MapEditor`, `Tank3DBench`, `Tree3DBench`. Семь наследуют `SceneRoot`; два рельефных
+объявлены схематичными, `Tank3DBench` и `Tree3DBench` — пилоты на Node3D со своими
+флагами снимка.
 
 **Ни один разделяемый модуль не знает, какая сцена его запустила.** Проверяется
 грепом: кода, обращающегося к `Main.` из чужого файла, ровно одно место —
