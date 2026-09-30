@@ -26,10 +26,12 @@ namespace TankSpriteTest;
 /// depth, so the deck in front hides the fire's foot; the turret hides a
 /// grille's fire whole or not at all (<see cref="TurretAt"/>) - no map
 /// decides it.</item>
-/// <item><b>Puffs</b> - lumpy spheres rising off the fire, on the model's
-/// ramp (<see cref="Toon.RampCode"/>): the sun lights their tops as it lights
-/// the turret, and they are inked as the tank is. They are eaten away by a
-/// hard cut, edges first, the way <see cref="ToonBlast"/>'s clusters go.</item>
+/// <item><b>Smoke</b> - one cloud (<see cref="CelCloud"/>) of puffs rising
+/// off the fire, on the model's ramp (<see cref="Toon.RampCode"/>): the sun
+/// lights one top of the whole column as it lights the turret, and one ink
+/// line goes round it. As spheres, each inked on its own, the column was a
+/// heap of balls. A puff melts from its rim as it ages, and takes its size,
+/// height and grey from the moment it was born (<see cref="Past"/>).</item>
 /// <item><b>The fire's light</b> - an omni light over the ports, flickering:
 /// the ramp steps it into a warm band on the deck, the turret and the smoke's
 /// foot, which is what seats the fire on the tank.</item>
@@ -78,7 +80,7 @@ public sealed partial class CelBurn : Node3D
     // ------------------------------------------------------------ the smoke
 
     /// <summary>Puffs in the column at once.</summary>
-    public int Puffs = 18;
+    public int Puffs = 34;
     /// <summary>One puff's life, s, from the fire to gone.</summary>
     public float PuffLife = 3.2f;
     /// <summary>A puff's width at birth and at the end, hull lengths.</summary>
@@ -93,7 +95,7 @@ public sealed partial class CelBurn : Node3D
     /// flame like a hole in it.</summary>
     public float SmokeSeat = 0.30f;
     /// <summary>When a puff starts to be eaten, as a share of its life.</summary>
-    public float ErodeFrom = 0.35f;
+    public float ErodeFrom = 0.6f;
     /// <summary>The smoke's grey: burning, and smouldering after it.</summary>
     public float SootTone = 0.26f, SmoulderTone = 0.50f;
     /// <summary>
@@ -107,7 +109,11 @@ public sealed partial class CelBurn : Node3D
     /// white balls apart from each other under the dark column, not a cloud -
     /// fewer, smaller, and one step paler than the puff above.
     /// </summary>
-    public float Sparse = 0.65f, Shrink = 0.45f, SmoulderWidth = 0.7f, ToneEase;
+    public float Sparse = 0.0f, Shrink = 0.45f, SmoulderWidth = 0.7f, ToneEase;
+    /// <summary>How far apart two puffs still flow into one, hull lengths, and
+    /// the colour their grey is taken in (<see cref="CelCloud"/>).</summary>
+    public float Blend = 0.03f;
+    public Color Tint = new(0.96f, 0.95f, 1.0f);
 
     // ------------------------------------------------------------ the inputs
 
@@ -184,13 +190,22 @@ public sealed partial class CelBurn : Node3D
     /// </summary>
     private float _smokeFrom, _smokeTo = -1.0f, _gapFrom = 1.0f, _gapTo = 0.0f;
     private bool _births;
+    /// <summary>
+    /// The smoke and the smoulder as they were, sampled on the column's clock
+    /// (<see cref="Remember"/>): a puff takes its size, how many of them drop
+    /// out and how high it goes from the moment it was born, as it takes its
+    /// grey. Read off the smoke of the frame, as the spheres did, every puff in
+    /// the air shrank and a share of them went in one frame as the fire died -
+    /// the one cloud came apart into balls.
+    /// </summary>
+    private const int Samples = 128;
+    private readonly float[] _pastAt = new float[Samples], _pastSmoke = new float[Samples], _pastSmoulder = new float[Samples];
+    private int _pastHead = -1, _pastCount;
     private readonly Vector3[] _scorchAt = new Vector3[MaxPorts];
-    private MultiMesh? _puffs;
+    private CelCloud? _cloud;
     private MeshInstance3D? _flame;
     private ShaderMaterial? _flameInk;
-    private MultiMeshInstance3D? _puffCloud;
     private OmniLight3D? _glow;
-    private readonly List<(float Depth, Transform3D Where, Color Mine)> _order = new();
 
     public void Build(float hullPx)
     {
@@ -207,8 +222,7 @@ public sealed partial class CelBurn : Node3D
         };
         AddChild(_flame);
 
-        (_puffs, _puffCloud, _) = CelPuff.Cloud("Puffs", Puffs);
-        AddChild(_puffCloud);
+        _cloud = new CelCloud(this, "Smoke", Tint, Blend * _hull);
 
         _glow = new OmniLight3D
         {
@@ -241,6 +255,42 @@ public sealed partial class CelBurn : Node3D
         _smokeTo = -1.0f;
         _gapFrom = 1.0f;
         _gapTo = 0.0f;
+        _pastHead = -1;
+        _pastCount = 0;
+    }
+
+    /// <summary>This frame's smoke and smoulder into the past, a sample every
+    /// share of a puff's life that keeps the whole of it.</summary>
+    private void Remember(float smoke, float smoulder)
+    {
+        float step = PuffLife * 1.25f / (Samples - 2);
+        if (_pastCount > 0 && _clock - _pastAt[_pastHead] < step)
+            return;
+        _pastHead = (_pastHead + 1) % Samples;
+        _pastAt[_pastHead] = _clock;
+        _pastSmoke[_pastHead] = smoke;
+        _pastSmoulder[_pastHead] = smoulder;
+        _pastCount = Mathf.Min(_pastCount + 1, Samples);
+    }
+
+    /// <summary>The smoke and the smoulder at <paramref name="born"/>, between
+    /// the samples either side of it: the frame's own after the newest.</summary>
+    private (float Smoke, float Smoulder) Past(float born, float smoke, float smoulder)
+    {
+        float laterAt = _clock, laterSmoke = smoke, laterSmoulder = smoulder;
+        for (int i = 0; i < _pastCount; i++)
+        {
+            int j = (_pastHead - i + Samples) % Samples;
+            if (_pastAt[j] <= born)
+            {
+                float t = laterAt > _pastAt[j] ? (born - _pastAt[j]) / (laterAt - _pastAt[j]) : 0.0f;
+                return (Mathf.Lerp(_pastSmoke[j], laterSmoke, t), Mathf.Lerp(_pastSmoulder[j], laterSmoulder, t));
+            }
+            laterAt = _pastAt[j];
+            laterSmoke = _pastSmoke[j];
+            laterSmoulder = _pastSmoulder[j];
+        }
+        return (laterSmoke, laterSmoulder);
     }
 
     /// <summary>Whether a puff born at <paramref name="born"/> is there: born
@@ -259,7 +309,7 @@ public sealed partial class CelBurn : Node3D
     /// </summary>
     public void Tick(float dt, IReadOnlyList<Vector3> ports, Basis eye)
     {
-        if (_flame is null || _puffs is null || _glow is null)
+        if (_flame is null || _cloud is null || _glow is null)
             return;
         float fire = ports.Count > 0 ? Mathf.Clamp(Fire, 0.0f, 1.0f) : 0.0f;
         float smoke = ports.Count > 0 ? Mathf.Clamp(Smoke, 0.0f, 1.0f) : 0.0f;
@@ -294,7 +344,6 @@ public sealed partial class CelBurn : Node3D
         bool on = _heat > 0.001f || rising;
 
         _flame.Visible = on && _heat > 0.001f;
-        _puffCloud!.Visible = on;
         _glow.Visible = on && _heat > 0.001f;
         if (_heat < heatBefore)
             _scorch *= _heat / heatBefore;
@@ -309,6 +358,7 @@ public sealed partial class CelBurn : Node3D
         }
         if (!on || ports.Count == 0)
         {
+            _cloud.Hide();
             Rest();
             return;
         }
@@ -440,9 +490,9 @@ public sealed partial class CelBurn : Node3D
 
     private void Column(Vector3 seat, Basis eye)
     {
-        if (_puffs!.InstanceCount != Puffs)
-            _puffs.InstanceCount = Puffs;
-        float smoke = _smoke;
+        _cloud!.Clear();
+        float smoulderNow = Smoulder ? 1.0f : 0.0f;
+        Remember(_smoke, smoulderNow);
         float tone = Smoulder ? SmoulderTone : SootTone;
         if (_toneNow < 0.0f)
             _toneBefore = _toneNow = tone;
@@ -452,22 +502,30 @@ public sealed partial class CelBurn : Node3D
             _toneNow = tone;
             _toneAt = _clock;
         }
-        float height = ColumnHeight * _hull * (Smoulder ? 0.75f : 1.0f);
-        float thin = Smoulder ? SmoulderWidth : 1.0f;
-        Vector3 back = eye.Z.Normalized();
         // Out of the fire's top while it burns, off the grille when it does not.
         float seatLift = Mathf.Lerp(0.05f, SmokeSeat, _heat) * _hull;
-        _order.Clear();
-        for (int k = 0; k < Puffs; k++)
+        for (int k = 0; k < Mathf.Min(Puffs, CelCloud.Pool); k++)
         {
-            float loop = _clock / PuffLife + (k + 0.6f * CelPuff.Hash(k, 17)) / Puffs;
+            // Births evenly spaced, a little shaken: shaken by 0.6 of a gap,
+            // two small puffs at the foot came out far enough apart to break
+            // the one cloud there.
+            float loop = _clock / PuffLife + (k + 0.35f * CelPuff.Hash(k, 17)) / Puffs;
             float a = loop - Mathf.Floor(loop);
             int lap = (int)Mathf.Floor(loop);
             float h1 = CelPuff.Hash(k * 97 + lap, 19), h2 = CelPuff.Hash(k * 97 + lap, 23), h3 = CelPuff.Hash(k * 97 + lap, 29);
+            float born = _clock - a * PuffLife;
+            if (!Lived(born))
+                continue;
+            (float smoke, float smoulder) = Past(born, _smoke, smoulderNow);
+            float height = ColumnHeight * _hull * Mathf.Lerp(1.0f, 0.75f, smoulder);
+            float thin = Mathf.Lerp(1.0f, SmoulderWidth, smoulder);
             // Up fast off the fire and slowing, bent by the wind as it climbs.
             float rise = 1.0f - Mathf.Pow(1.0f - a, 2.2f);
             float bend = Mathf.Pow(a, 1.4f);
-            float wob = 0.20f * _hull * Mathf.Sqrt(a);
+            // The sway as wide as the puffs are: the full column's sway under
+            // the thin smoulder's puffs took them apart into two strands.
+            float girth = thin * (1.0f - Shrink + Shrink * smoke);
+            float wob = 0.20f * _hull * Mathf.Sqrt(a) * girth;
             Vector3 at = seat
                          + Vector3.Up * (seatLift + height * rise)
                          + Drift * (height * bend)
@@ -475,21 +533,20 @@ public sealed partial class CelBurn : Node3D
             float pop = Mathf.SmoothStep(0.0f, 0.07f, a);
             // Less smoke: smaller puffs, fewer of them, eaten sooner - but every
             // one still born at the fire. The smoke here is the one that
-            // follows (_smoke), so a column thickens as the fire comes up. Eaten from birth, the thin smoke of a
-            // smouldering wreck lost its foot and hung in the air apart.
-            float d = _hull * Mathf.Lerp(PuffBorn, PuffGrown, a) * (0.75f + 0.5f * h2) * pop * thin
-                      * (1.0f - Shrink + Shrink * smoke);
+            // follows (_smoke) as it was at the puff's birth, so a column
+            // thickens as the fire comes up and thins from the foot as it dies.
+            // Eaten from birth, the thin smoke of a smouldering wreck lost its
+            // foot and hung in the air apart.
+            float d = _hull * Mathf.Lerp(PuffBorn, PuffGrown, a) * (0.6f + 0.8f * h2) * pop * girth;
             float erode = Mathf.SmoothStep(ErodeFrom * (0.55f + 0.45f * smoke), 1.0f, a);
-            float born = _clock - a * PuffLife;
-            if (h3 > 1.0f - Sparse + Sparse * smoke || !Lived(born))
-                d = 0.0f;
-            var basis = Basis.Identity.Scaled(Vector3.One * Mathf.Max(d, 1e-4f));
+            if (h3 > 1.0f - Sparse + Sparse * smoke || d <= 0.0f)
+                continue;
             float mine = ToneEase > 0.0f
                 ? Mathf.Lerp(_toneBefore, _toneNow, Mathf.Clamp((born - _toneAt) / ToneEase, 0.0f, 1.0f))
                 : born < _toneAt ? _toneBefore : _toneNow;
-            _order.Add((at.Dot(back), new Transform3D(basis, at), new Color(h2, a, mine, Mathf.Min(erode, 1.0f))));
+            _cloud.Add(at, 0.5f * d, mine, h2, Mathf.Min(erode, 1.0f), a);
         }
-        CelPuff.Write(_puffs, _order);
+        _cloud.Draw(eye);
     }
 
     // ------------------------------------------------------------ the shaders

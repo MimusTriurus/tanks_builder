@@ -6,10 +6,10 @@ namespace TankSpriteTest;
 /// Smoke, dust or steam in the model's look as <b>one cloud</b>: puffs handed
 /// in as discs, drawn on one quad facing the eye and flowed into one shape by
 /// a smooth union of their distances, with one ink line round it - the
-/// exhaust (<see cref="CelExhaust"/>) and the shot (<see cref="CelShot"/>).
-/// Drawn one by one as the burning column's spheres are
-/// (<see cref="CelPuff"/>), each inked on its own, the same puffs were a heap
-/// of cartoon balls.
+/// burning column (<see cref="CelBurn"/>), the exhaust (<see cref="CelExhaust"/>),
+/// the shot (<see cref="CelShot"/>) and the rest. Drawn one by one as
+/// spheres, each inked on its own, the same puffs were a heap of cartoon
+/// balls.
 ///
 /// A frame is <see cref="Clear"/>, an <see cref="Add"/> a puff, then
 /// <see cref="Draw"/>. The puffs' motion is the owner's; this knows only
@@ -37,6 +37,10 @@ public sealed class CelCloud
         _look.SetShaderParameter("blend", blendPx);
         _look.SetShaderParameter("ink_width", Toon.InkWidth);
         _look.SetShaderParameter("ink_min_px", Toon.InkMinPx);
+        // The ramp's steps sharper than the model's: the cloud's normal turns
+        // slowly across a big puff, and the model's width of step was a soft
+        // band ten pixels wide round every lit patch of a burning column.
+        _look.SetShaderParameter("soft", 0.008f);
         _quad = new MeshInstance3D
         {
             Name = name,
@@ -159,6 +163,11 @@ void fragment() {
         // to inked splinters.
         float bump = noise3(vec3(u * 1.4 + lk.y * 17.0, lk.w * 1.5)) - 0.5;
         float di = len - left * (1.0 + 0.35 * bump);
+        // Round in the middle: the bite and the lumps are noises of the way
+        // round, which has no way at the centre, and the weights below took
+        // their jumps there - a pale star in the middle of a big puff.
+        float plain = r * (1.0 - lk.z);
+        di = mix(len - plain, di, smoothstep(0.2, 0.7, len / max(plain, 1e-3)));
         float h = sqrt(max(0.0, 1.0 - len * len / (r * r)));
         float w = exp(-clamp(di, -r, 3.0 * blend) / blend);
         nsum += normalize(vec3(q / r, max(h, 0.2))) * w;
