@@ -195,6 +195,50 @@ bool burn_gone(float at, vec3 p) {
 ";
 
     /// <summary>
+    /// A standing tree model in the wind, the step before <see cref="FallCode"/>:
+    /// in the model's metres. The crown leans downwind (<c>wind_dir</c>, the
+    /// model's x, z) by <c>wind_lean</c> of its height at the top, less down
+    /// the tree - <c>w = s^1.5</c>, <c>s</c> from <c>wind_y0</c> to <c>wind_h</c>
+    /// (the fall's bend band), so the trunk's foot stands still. The lean is
+    /// the sprite wood's (<c>Grove</c>: its drift over its height), worked out
+    /// on the CPU per tree and handed in. On top, what a flat picture cannot
+    /// do: <c>wind_billow</c> m of a slow noise, so the puffs move a little
+    /// each its own way, and <c>wind_flutter</c> m of quick flutter, set on the
+    /// leaves alone. All zero - every tank - nothing here runs. The cel pass,
+    /// the ink and the crown's mask call it alike, so the line keeps to the
+    /// crown. Needs <see cref="NoiseCode"/> before it.
+    /// </summary>
+    public const string WindCode = @"
+uniform vec2 wind_dir = vec2(1.0, 0.0);
+uniform float wind_lean = 0.0;
+uniform float wind_billow = 0.0;
+uniform float wind_flutter = 0.0;
+uniform float wind_time = 0.0;
+uniform float wind_y0 = 2.2;
+uniform float wind_h = 7.4;
+void wind_pose(inout vec3 v) {
+    if (wind_lean == 0.0 && wind_billow == 0.0 && wind_flutter == 0.0) return;
+    float s = clamp((v.y - wind_y0) / max(wind_h - wind_y0, 1e-3), 0.0, 1.0);
+    float w = s * sqrt(s);
+    vec3 o = vec3(wind_dir.x, 0.0, wind_dir.y) * wind_lean * wind_h * w;
+    if (wind_billow > 0.0) {
+        // a slow noise through the crown, a few metres long: puffs drift a
+        // little each its own way, a leaf moves as one
+        vec3 q = v * 0.45 + vec3(wind_time * 0.7, wind_time * 0.2, wind_time * 0.35);
+        o += (vec3(noise3(q), noise3(q + vec3(5.2)), noise3(q + vec3(9.7))) - 0.5) * 2.0 * wind_billow * w;
+    }
+    if (wind_flutter > 0.0) {
+        // the leaves only: quick and small, its phase changing a little from
+        // leaf to leaf, not across one
+        float ph = dot(v, vec3(0.9, 0.7, 0.8));
+        o += vec3(sin(wind_time * 7.0 + ph), 0.5 * sin(wind_time * 9.0 + ph * 1.3),
+                  cos(wind_time * 6.0 + ph * 0.7)) * wind_flutter * w;
+    }
+    v += o;
+}
+";
+
+    /// <summary>
     /// A tree model going over (<c>tree.json</c> <c>model.fall</c>,
     /// <c>tree_gen.py</c>'s <c>_pose</c> and <c>_crush</c>): in the model's own
     /// metres, glTF Y up, the foot at the origin. The whole tree turns about a
@@ -288,9 +332,10 @@ uniform vec3 hole_wall : source_color = vec3(0.16, 0.15, 0.15);
 // Leaves burning: the last of a leaf's window glows before it goes (BurnCode).
 uniform bool burn_ember = false;
 varying vec3 world;
-" + NoiseCode + RampCode + BurnCode + FallCode + @"
+" + NoiseCode + RampCode + BurnCode + WindCode + FallCode + @"
 void vertex() {
     vec3 n = NORMAL;
+    wind_pose(VERTEX);
     fall_pose(VERTEX, n);
     NORMAL = n;
     world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
@@ -462,10 +507,11 @@ uniform float width = 1.0;
 uniform float min_px = 1.0;
 uniform float dark = 0.3;
 varying vec3 world;
-" + NoiseCode + BurnCode + FallCode + @"
+" + NoiseCode + BurnCode + WindCode + FallCode + @"
 void vertex() {
     vec3 v = VERTEX;
     vec3 cn = CUSTOM0.xyz;
+    wind_pose(v);
     fall_pose(v, cn);
     world = (MODEL_MATRIX * vec4(v, 1.0)).xyz;
     VERTEX = (MODELVIEW_MATRIX * vec4(v, 1.0)).xyz;

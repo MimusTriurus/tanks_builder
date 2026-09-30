@@ -178,6 +178,7 @@ public sealed partial class Tree3DBench : Node3D
         FrameCamera();
         Burn((float)delta);
         Topple((float)delta);
+        Sway((float)delta);
         _frame++;
         if (_recordDir is not null && _frame % _recordEvery == 0)
         {
@@ -229,10 +230,18 @@ public sealed partial class Tree3DBench : Node3D
             Toon.Dress(scene, KeepsNormals, IsFoliage, TreeStencil);
             foreach ((MeshInstance3D m, int s, string mat) in roles)
                 if (m.Mesh.SurfaceGetMaterial(s) is ShaderMaterial cel)
+                {
                     Contract(cel, mat, tree.Burn);
+                    if (mat == "TreeGame.Leaf" && !tree.Leaves.Contains(cel))
+                        tree.Leaves.Add(cel);
+                }
         }
         if (_mask is not null)
-            Ghost(scene, MasksFor(_models.Count, tree.Burn));
+        {
+            ShaderMaterial[] masks = MasksFor(_models.Count, tree.Burn);
+            tree.Leaves.Add(masks[1]);   // role 1 without the eating: the leaves
+            Ghost(scene, masks);
+        }
         var holder = new Node3D
         {
             Name = $"{name}.{_models.Count}", Scale = Vector3.One * ppm,
@@ -264,6 +273,14 @@ public sealed partial class Tree3DBench : Node3D
         // column and the light are all shares of it.
         tree.Fire.Build(w * ppm);
         tree.Fall = FallData.Read(j.GetProperty("model").GetProperty("fall"));
+        // the sprite wood's own hash for a tree's sway (Grove), off where it stands
+        tree.SwayPhase = Mathf.Tau * (float)Grove.Hash01(Mathf.RoundToInt(at.X), Mathf.RoundToInt(at.Y), 901_001);
+        tree.SwayRate = 0.8f + 0.5f * (float)Grove.Hash01(Mathf.RoundToInt(at.X), Mathf.RoundToInt(at.Y), 901_003);
+        foreach (ShaderMaterial m in tree.Burn)
+        {
+            m.SetShaderParameter("wind_y0", tree.Fall.Y0);
+            m.SetShaderParameter("wind_h", tree.Fall.H);
+        }
         tree.Ppm = ppm;
         tree.Height = h;
         tree.Width = w;
@@ -288,6 +305,9 @@ public sealed partial class Tree3DBench : Node3D
         public Vector2I Cell;
         public float Stagger;
         public readonly List<ShaderMaterial> Burn = new();
+        /// <summary>The leaves' cel material and their mask: the flutter.</summary>
+        public readonly List<ShaderMaterial> Leaves = new();
+        public float SwayPhase, SwayRate;
         public readonly List<Vector3> Seats = new();
         public CelBurn Fire = null!;
         public readonly List<Vector3> Ports = new();
@@ -303,6 +323,7 @@ public sealed partial class Tree3DBench : Node3D
         public MeshInstance3D? Pit;
         public ShaderMaterial? PitLook;
         public bool Burnt, Burning;
+        public float Spent;
     }
 
     private readonly List<TreeFire> _burning = new();
@@ -398,6 +419,7 @@ public sealed partial class Tree3DBench : Node3D
             // was, it hung in the air round the bare twigs.
             float down = coat.Spent * coat.Spent;
             t.Burnt = coat.Burnt || coat.Spent >= 1.0f;
+            t.Spent = coat.Spent;
             t.Burning = coat.Flame > 0.01f;
             t.Ports.Clear();
             foreach (Vector3 p in t.Seats)
@@ -435,6 +457,8 @@ public sealed partial class Tree3DBench : Node3D
     {
         if (e is InputEventKey { Pressed: true, Echo: false, Keycode: Key.R })
             Douse();
+        else if (e is InputEventKey { Pressed: true, Echo: false, Keycode: Key.W })
+            GD.Print($"tree3d: wind {((_windOn = !_windOn) ? "on" : "off")}");
         else if (e is InputEventKey { Pressed: true, Echo: false } k
                  && k.Keycode >= Key.Key1 && k.Keycode <= Key.Key8)
         {
@@ -451,6 +475,67 @@ public sealed partial class Tree3DBench : Node3D
             Vector3 g = from + way * (-from.Y / way.Y);
             Vector2I cell = _field.CellUnder(new Vector2(g.X, g.Z * Squash));
             GD.Print(_fire.Light(cell) ? $"tree3d: {cell} lit" : $"tree3d: {cell} has nothing to burn");
+        }
+    }
+
+    // --- the wind ---------------------------------------------------------------
+
+    /// <summary><c>--wind x</c>: how hard, the sprite wood's wind times this (1
+    /// by default, so the models sway with the sprites beside them); 0 still.
+    /// <c>W</c> turns it off and on.</summary>
+    private float _wind = 1.0f;
+    private bool _windOn = true;
+    private float _weather;
+
+    /// <summary>The sprite wood's wind (<c>Grove</c>): a crown drift of
+    /// <see cref="WindDrift"/> px at <see cref="WindHeight"/> px up at full
+    /// gust, a gust wave crossing along x at <see cref="GustRate"/> rad/s,
+    /// <see cref="GustTravel"/> rad a px, and a third of it for a burnt
+    /// trunk. To the screen's right and back, as the sprites lean.</summary>
+    private const float WindDrift = 2.6f, WindHeight = 120.0f, GustRate = 0.55f, GustTravel = 0.0035f;
+    private const float CharredSway = 0.33f;
+    /// <summary>What the model adds on top, m at full gust: the puffs'
+    /// billow, and the leaves' flutter.</summary>
+    private const float Billow = 0.10f, Flutter = 0.035f;
+
+    /// <summary>
+    /// A frame of the wind on every tree: <c>Grove</c>'s lean -
+    /// <c>wind (0.35 + 0.65 gust) sin(phase) / height</c>, the gust one long wave
+    /// along x so neighbours rise a beat apart, the phase each tree's own - into
+    /// <see cref="Toon.WindCode"/>, the billow and the flutter with the gust. It
+    /// goes out as the trunk goes over (1 - down², as the sprite's), and a
+    /// burnt tree keeps a third, eased in with its crown going. The world's
+    /// wind is along x; a turned model gets it in its own frame.
+    /// </summary>
+    private void Sway(float dt)
+    {
+        _weather += dt;
+        float wind = _windOn ? _wind : 0.0f;
+        foreach (TreeFire t in _burning)
+        {
+            Vector3 foot = t.Holder.GlobalPosition;
+            float gust = 0.5f + 0.5f * Mathf.Sin(_weather * GustRate - foot.X * GustTravel);
+            float lean = wind * WindDrift * (0.35f + 0.65f * gust)
+                         * Mathf.Sin(_weather * t.SwayRate + t.SwayPhase) / WindHeight;
+            float still = 1.0f;
+            if (t.Going)
+            {
+                float down = (float)Math.Min(1.0, t.Angle / Math.Max(t.Rest, 1e-6));
+                still = 1.0f - down * down;
+            }
+            float spent = Mathf.Lerp(1.0f, CharredSway, t.Spent);
+            Vector3 own = t.Holder.GlobalBasis.Orthonormalized().Inverse() * Vector3.Right;
+            var dir = new Vector2(own.X, own.Z).Normalized();
+            float billow = wind * Billow * (0.3f + 0.7f * gust) * still * spent;
+            foreach (ShaderMaterial m in t.Burn)
+            {
+                m.SetShaderParameter("wind_dir", dir);
+                m.SetShaderParameter("wind_lean", lean * still * spent);
+                m.SetShaderParameter("wind_billow", billow);
+                m.SetShaderParameter("wind_time", _weather * t.SwayRate);
+            }
+            foreach (ShaderMaterial m in t.Leaves)
+                m.SetShaderParameter("wind_flutter", wind * Flutter * (0.3f + 0.7f * gust) * still);
         }
     }
 
@@ -1192,9 +1277,10 @@ uniform float id = 1.0;
 uniform float near = 0.0;
 uniform float span = 1.0;
 varying vec3 world;
-" + Toon.NoiseCode + Toon.BurnCode + Toon.FallCode + @"
+" + Toon.NoiseCode + Toon.BurnCode + Toon.WindCode + Toon.FallCode + @"
 void vertex() {
     vec3 n = NORMAL;
+    wind_pose(VERTEX);
     fall_pose(VERTEX, n);
     world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
@@ -1432,6 +1518,7 @@ void light() {
             else if (a == "--pbr") _pbr = true;
             else if (a == "--no-outline") _noOutline = true;
             else if (a == "--row") _row = true;
+            else if (a == "--wind" && more) _wind = F(args[++i], _wind);
             else if (a == "--wood" && more) _wood = Math.Max(1, (int)F(args[++i], 7));
             else if (a == "--ram-at" && more) _ramWhen = F(args[++i], _ramWhen);
             else if ((a == "--ram" || a == "--fell") && more)
