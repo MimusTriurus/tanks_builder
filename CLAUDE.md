@@ -10,6 +10,7 @@
 | `docs/gdd/` | правила игры (GDD), общие для обоих цехов | [docs/gdd/index.md](docs/gdd/index.md) |
 | `assets/` | исходники: `Input3D/` (.glb), `Parts3D/`, `Scenes/` (.blend, LFS), `Images/`, `Sounds/` (не в git); `Models/Trees/` — модели деревьев генератора для `Tree3D` | [pipeline/docs/assets.md](pipeline/docs/assets.md) |
 | `Sprites/` | **контракт**: то, что конвейер пишет и стенд читает | ниже |
+| `Models/` | игровые 3D-варианты танков, `<TAG>/{tank.glb,tank.json}`: конвейер пишет (`export_game`), `Tank3D` читает; `.glb` через Git LFS, сайдкар текстом | [pipeline/docs/repro.md](pipeline/docs/repro.md), [godot/docs/tank3d.md](godot/docs/tank3d.md) |
 
 ## Контракт `Sprites/`
 

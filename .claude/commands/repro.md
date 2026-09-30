@@ -365,5 +365,6 @@ The contract the sidecar states, which engine code will lean on:
 - units are the Blender scene's: one scale for every tank, against the hex,
   is not chosen yet.
 
-Do not commit `Models/` without asking: the .glb is ~13 MB and the repo has
-no LFS.
+`Models/` is in git with the .glb through LFS (`.gitattributes`) and the sidecar
+as text: commit a rebaked tank's `tank.glb` and `tank.json` together, and only
+once the variant is final - every commit of a .glb is another ~10 MB for good.

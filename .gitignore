@@ -71,3 +71,9 @@ assets/Scenes/
 # and ~6 MB a tree rebuilt only when the generator changes, so the .glb go through
 # LFS (.gitattributes) and the sidecar stays plain text. Clone with git-lfs
 # installed (`git lfs install`), or the models arrive as pointer files.
+
+# And Models/: the pipeline's game variants of the tanks (tank.glb + tank.json,
+# repro_kit.export_game), which Tank3D stands. Tracked for the same reason as the
+# trees - results the bench cannot run without, ~9-12 MB a tank and rebaked only
+# when a tank changes - so the .glb go through LFS (.gitattributes) and the
+# sidecar stays plain text.

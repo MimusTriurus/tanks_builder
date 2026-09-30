@@ -496,7 +496,7 @@ GIF собирается системным Python с Pillow (в Python Blender'
 | форма и краска одного танка: константы в кадре оригинала (включая `TRUNNION`, у поднятой пушки `GUN_EL`), `PALETTE`, построители `hull`, `engine`, `turret` (у каземата `casemate` и `BLAST`), `mantlet`, `barrel`, `belt`, `rolls`, по желанию `turret_ink` и `ORIGINAL` (какие объекты оригинала сравнивать, если канонических два) | `repro/<name>.py`, примеры — `repro/lt_parts.py` (прямые плиты, призмы), `repro/mt_parts.py` (скруглённый корпус и башня лофтами планов), `repro/ht_v1.py` (коробчатый, ленты внутри короба корпуса, блоки ДЗ, качается коробка маски в неподвижном носу), `repro/hm_sturmtiger.py` (каземат, мортира поднята в покое, крыло одним гнутым листом), `repro/td_stug4.py` (каземат с коробом пушки, пять щитков экрана, концы лент суперэллипсом, звенья по середине толщины, дульный тормоз с окнами — `arc_band`) |
 | порядок по шагам со сниппетами | `.claude/commands/repro.md` (`/repro`) |
 | игровой вариант: `build_game`, `game_breakdown` (куда уходят треугольники), `verify_game`, `game_sheet`, `game_compare` (копия и вариант рядом), `export_game`, `game_spec`, `check_glb`, `pose_game`; гибель: `split_debris`, `wreck_spec`, `toss_spec`, `debris_spec`, `pose_wreck`, `wreck_sheet`; превью движения: `render_clip`, `CLIPS` | `repro_kit.py` |
-| модель для 3D-стенда | `Models/<GAME_TAG>/tank.glb` и `tank.json` |
+| модель для 3D-стенда | `Models/<GAME_TAG>/tank.glb` (в git через LFS) и `tank.json` (текстом) |
 | картинки замеров и сравнений | `out/repro/<NAME>/` (не в git) |
 | сцена с обоими танками | `assets/Scenes/<NAME>_Repro.blend`, пишется копией |
 
