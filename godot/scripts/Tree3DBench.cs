@@ -202,7 +202,12 @@ public sealed partial class Tree3DBench : Node3D
             tree.Seats.Add(new Vector3(p.X * w, p.Y * h, p.Z * d));
         Vector2 at = _field is null ? Vector2.Zero : _field.FlatAnchor(cell) + _field.CentreOffset + off;
         tree.Stagger = (float)Grove.Hash01(Mathf.RoundToInt(at.X), Mathf.RoundToInt(at.Y), StaggerSalt);
-        tree.Fire = new CelBurn { Name = name + "Fire", Clears = true, RoundFoot = true };
+        // Its smoke thins by being eaten, not by coming apart: see CelBurn.Sparse.
+        tree.Fire = new CelBurn
+        {
+            Name = name + "Fire", Clears = true, RoundFoot = true,
+            Sparse = 0.15f, Shrink = 0.15f, SmoulderWidth = 0.95f, ToneEase = 2.5f,
+        };
         AddChild(tree.Fire);
         // A tank's hull lengths, the crown's width here: the tongues, the
         // column and the light are all shares of it.

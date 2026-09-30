@@ -96,6 +96,18 @@ public sealed partial class CelBurn : Node3D
     public float ErodeFrom = 0.35f;
     /// <summary>The smoke's grey: burning, and smouldering after it.</summary>
     public float SootTone = 0.26f, SmoulderTone = 0.50f;
+    /// <summary>
+    /// How the column thins as <see cref="Smoke"/> falls: <see cref="Sparse"/>
+    /// of the puffs drop out and the rest shrink by <see cref="Shrink"/> (both
+    /// at no smoke), a smouldering column is <see cref="SmoulderWidth"/> as
+    /// wide, and the grey goes from soot to smoulder over
+    /// <see cref="ToneEase"/> s of births rather than on one (0, the tank's).
+    /// A tree's smoke (<c>Tree3DBench</c>) thins by being eaten instead: with the
+    /// tank's numbers the pale smoke of a burnt tree came out as a few small
+    /// white balls apart from each other under the dark column, not a cloud -
+    /// fewer, smaller, and one step paler than the puff above.
+    /// </summary>
+    public float Sparse = 0.65f, Shrink = 0.45f, SmoulderWidth = 0.7f, ToneEase;
 
     // ------------------------------------------------------------ the inputs
 
@@ -441,7 +453,7 @@ public sealed partial class CelBurn : Node3D
             _toneAt = _clock;
         }
         float height = ColumnHeight * _hull * (Smoulder ? 0.75f : 1.0f);
-        float thin = Smoulder ? 0.7f : 1.0f;
+        float thin = Smoulder ? SmoulderWidth : 1.0f;
         Vector3 back = eye.Z.Normalized();
         // Out of the fire's top while it burns, off the grille when it does not.
         float seatLift = Mathf.Lerp(0.05f, SmokeSeat, _heat) * _hull;
@@ -466,13 +478,15 @@ public sealed partial class CelBurn : Node3D
             // follows (_smoke), so a column thickens as the fire comes up. Eaten from birth, the thin smoke of a
             // smouldering wreck lost its foot and hung in the air apart.
             float d = _hull * Mathf.Lerp(PuffBorn, PuffGrown, a) * (0.75f + 0.5f * h2) * pop * thin
-                      * (0.55f + 0.45f * smoke);
+                      * (1.0f - Shrink + Shrink * smoke);
             float erode = Mathf.SmoothStep(ErodeFrom * (0.55f + 0.45f * smoke), 1.0f, a);
             float born = _clock - a * PuffLife;
-            if (h3 > 0.35f + 0.65f * smoke || !Lived(born))
+            if (h3 > 1.0f - Sparse + Sparse * smoke || !Lived(born))
                 d = 0.0f;
             var basis = Basis.Identity.Scaled(Vector3.One * Mathf.Max(d, 1e-4f));
-            float mine = born < _toneAt ? _toneBefore : _toneNow;
+            float mine = ToneEase > 0.0f
+                ? Mathf.Lerp(_toneBefore, _toneNow, Mathf.Clamp((born - _toneAt) / ToneEase, 0.0f, 1.0f))
+                : born < _toneAt ? _toneBefore : _toneNow;
             _order.Add((at.Dot(back), new Transform3D(basis, at), new Color(h2, a, mine, Mathf.Min(erode, 1.0f))));
         }
         CelPuff.Write(_puffs, _order);
