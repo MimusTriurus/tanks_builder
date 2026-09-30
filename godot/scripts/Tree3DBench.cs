@@ -55,6 +55,13 @@ public sealed partial class Tree3DBench : Node3D
     /// <c>--trees</c> on all four, so only the grass differs. The view is
     /// drawn back to take the four in (<see cref="MeadowZoom"/>).</summary>
     private bool _grassy;
+    /// <summary>Each meadow's number in <see cref="_grass"/>, and where its
+    /// front starts once it is lit (null before).</summary>
+    private readonly List<int> _meadowIds = new();
+    private readonly List<Vector2?> _meadowFrom = new();
+    /// <summary>Where LMB lit a cell, so a meadow lit by hand burns out from
+    /// the click.</summary>
+    private readonly Dictionary<Vector2I, Vector2> _litAt = new();
     private const float MeadowZoom = 1.85f;
     private bool _zoomed;
     private Grass3D? _grass;
@@ -508,7 +515,13 @@ public sealed partial class Tree3DBench : Node3D
                 return;
             Vector3 g = from + way * (-from.Y / way.Y);
             Vector2I cell = _field.CellUnder(new Vector2(g.X, g.Z * Squash));
-            GD.Print(_fire.Light(cell) ? $"tree3d: {cell} lit" : $"tree3d: {cell} has nothing to burn");
+            if (_fire.Light(cell))
+            {
+                _litAt[cell] = new Vector2(g.X, g.Z);
+                GD.Print($"tree3d: {cell} lit");
+            }
+            else
+                GD.Print($"tree3d: {cell} has nothing to burn");
         }
     }
 
@@ -546,7 +559,8 @@ public sealed partial class Tree3DBench : Node3D
             foreach (TreeFire t in _burning)
                 if (t.Cell == cell)
                     trunks.Add(t.Holder.GlobalPosition);
-            _grass.Lay(kind, mid, r, 101 + i, trunks);
+            _meadowIds.Add(_grass.Lay(kind, mid, r, 101 + i, trunks));
+            _meadowFrom.Add(null);
             AddChild(new Label3D
             {
                 Text = name, FontSize = 40, OutlineSize = 10, PixelSize = 0.25f,
@@ -592,6 +606,58 @@ public sealed partial class Tree3DBench : Node3D
     }
 
     /// <summary>
+    /// The meadows' fire: each cell's clock from the board's fire, and where
+    /// its front starts - fixed on the frame it is lit. Lit from a neighbour,
+    /// at the edge between them, a little out on the neighbour's side (the
+    /// neighbour whose delay it is: the one lit longest past it, as
+    /// <see cref="Wildfire.Tick"/> hands on); lit by hand, the click; by
+    /// <c>--burn</c>, the middle.
+    /// </summary>
+    private void Scorch()
+    {
+        if (_grass is null || _fire is null)
+            return;
+        for (int i = 0; i < _meadowIds.Count; i++)
+        {
+            Vector2I cell = Meadows[i].Cell;
+            float age = _fire.AgeAt(cell);
+            if (age < 0.0f)
+                _meadowFrom[i] = null;
+            else if (_meadowFrom[i] is null)
+                _meadowFrom[i] = FrontFrom(cell);
+            _grass.Burn(_meadowIds[i], age, _meadowFrom[i] ?? Vector2.Zero);
+        }
+    }
+
+    private Vector2 FrontFrom(Vector2I cell)
+    {
+        Vector3 mid = CellMiddle(cell);
+        if (_litAt.Remove(cell, out Vector2 click))
+            return click;
+        Vector2I? best = null;
+        float most = float.MinValue;
+        foreach (int heading in HexField.EdgeHeadings)
+        {
+            Vector2I next = HexField.Step(cell, heading);
+            if (next == cell || _field is null || !_field.InBounds(next) || _fire is null)
+                continue;
+            float past = _fire.AgeAt(next);
+            if (past < 0.0f)
+                continue;
+            past -= _fire.Delay(next, cell);
+            if (past > most)
+            {
+                most = past;
+                best = next;
+            }
+        }
+        if (best is not { } from)
+            return new Vector2(mid.X, mid.Z);
+        Vector3 edge = mid + (CellMiddle(from) - mid) * 0.62f;
+        return new Vector2(edge.X, edge.Z);
+    }
+
+    /// <summary>
     /// What presses the grass this frame: each hull's two tracks, flat, and its
     /// belly between them, less; each tree that has come down, along its trunk
     /// and its crown's width; and the pit its plate tore, cut out.
@@ -601,6 +667,7 @@ public sealed partial class Tree3DBench : Node3D
         if (_grass is null)
             return;
         _grass.Wind = _windOn ? _wind : 0.0f;
+        Scorch();
         foreach (Ram r in _rams)
         {
             var way = new Vector2(r.Way.X, r.Way.Z);

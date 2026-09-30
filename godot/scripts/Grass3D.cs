@@ -35,6 +35,12 @@ namespace TankSpriteTest;
 /// stopped shadowing themselves. The painted hexagon sits under the board's
 /// shadow skin and is darkened by it like the ground.
 ///
+/// <b>It burns as decoration</b> (<see cref="Burn"/>): the scene hands in a
+/// cell's fire clock and where the fire came into it from, and a front runs
+/// over the grass from there - a flame line, char and stubble behind it, embers
+/// going out, a pale smoke off the line. Whether a cell burns is the fire's
+/// (the wood's, <c>Wildfire</c>): grass is not fuel in the rules.
+///
 /// World units are board px; <see cref="Ppm"/> says how many to a metre.
 /// </summary>
 public sealed partial class Grass3D : Node3D
@@ -59,6 +65,20 @@ public sealed partial class Grass3D : Node3D
     /// <summary>How far in from the cell's rim the grass thins out, m.</summary>
     public const float FadeM = 0.8f;
 
+    /// <summary>How fast the fire runs over grass, m/s: across a cell in about
+    /// the three seconds its trees take to catch (<c>Wildfire.CatchWithin</c>),
+    /// so the grass is gone under a crown by the time it is in flame.</summary>
+    public const float FrontM = 4.5f;
+    /// <summary>How long the flame stands at a point once the front is over
+    /// it, s (the shaders' <c>flame_for</c>): the tufts and the lawn flare up
+    /// for this, the painted ground under them glows a line for
+    /// <see cref="FlameLine"/>. At 0.7 on both the front was a flat orange
+    /// band three metres deep.</summary>
+    public const float FlameFor = 0.45f, FlameLine = 0.22f;
+    /// <summary>The smoke off the front: a puff every this many s while the
+    /// line is on the cell, each living <see cref="SmokeLife"/>.</summary>
+    private const float SmokeEvery = 0.05f, SmokeLife = 1.8f;
+
     /// <summary>The press map's cell, board px.</summary>
     private const float Texel = 2.0f;
     /// <summary>Over the ground by this: the pit is at 0.4, the shadow skin at 2.</summary>
@@ -68,6 +88,22 @@ public sealed partial class Grass3D : Node3D
     private const float Relax = 1.0f / 25.0f, Keep = 0.45f;
 
     private readonly List<ShaderMaterial> _inks = new();
+
+    /// <summary>A cell of grass, for its fire: its materials, where it is, and
+    /// its front's smoke.</summary>
+    private sealed class Meadow
+    {
+        public readonly List<ShaderMaterial> Inks = new();
+        public Vector3 Mid;
+        public float Radius, Age = -1.0f, Reach, Due;
+        public Vector2 From;
+        public CelCloud? Smoke;
+        public readonly List<(Vector3 At, float Born, float Seed)> Puffs = new();
+    }
+
+    private readonly List<Meadow> _meadows = new();
+    private Meadow? _laying;
+    private readonly RandomNumberGenerator _rng = new() { Seed = 7_331 };
     private Rect2 _span;
     private int _w, _h;
     private float[] _press = Array.Empty<float>(), _cut = Array.Empty<float>();
@@ -98,10 +134,13 @@ public sealed partial class Grass3D : Node3D
     /// Grass over one cell's top: <paramref name="mid"/> its middle on the
     /// ground, <paramref name="radius"/> its corner radius (flat-topped, the
     /// board's). <paramref name="clear"/> - trunks, px from the middle given -
-    /// keeps the tufts off where something stands.
+    /// keeps the tufts off where something stands. Returns the meadow's
+    /// number, for <see cref="Burn"/>.
     /// </summary>
-    public void Lay(Kind kind, Vector3 mid, float radius, int seed, IEnumerable<Vector3>? clear = null)
+    public int Lay(Kind kind, Vector3 mid, float radius, int seed, IEnumerable<Vector3>? clear = null)
     {
+        _laying = new Meadow { Mid = mid, Radius = radius };
+        _meadows.Add(_laying);
         if (kind is Kind.Painted or Kind.PaintedTufts or Kind.CelTufts)
             AddChild(new MeshInstance3D
             {
@@ -130,6 +169,54 @@ public sealed partial class Grass3D : Node3D
                 MaterialOverride = Ink(kind == Kind.CelTufts ? CelTuftShader : TuftShader, mid, radius, seed),
                 CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
             });
+        _laying = null;
+        return _meadows.Count - 1;
+    }
+
+    /// <summary>
+    /// Meadow <paramref name="meadow"/>'s fire this frame: <paramref name="age"/>
+    /// s since its cell was lit (the fire's clock; below 0 not lit, and the
+    /// grass stands again), and <paramref name="from"/> (x, z) where the front
+    /// starts - the edge the fire came in over, or where it was lit. The front
+    /// is a ring out from there at <see cref="FrontM"/>, broken up by a noise.
+    /// </summary>
+    public void Burn(int meadow, float age, Vector2 from)
+    {
+        if (meadow < 0 || meadow >= _meadows.Count)
+            return;
+        Meadow m = _meadows[meadow];
+        if (age < 0.0f)
+        {
+            if (m.Age >= 0.0f)
+            {
+                m.Puffs.Clear();
+                m.Smoke?.Hide();
+            }
+            m.Age = -1.0f;
+        }
+        else
+        {
+            if (m.Age < 0.0f)
+            {
+                // the far side of the cell from the start: when the line is off it
+                float far = 0.0f;
+                for (int k = 0; k < 6; k++)
+                {
+                    float a = Mathf.Tau * k / 6.0f;
+                    var corner = new Vector2(m.Mid.X + Mathf.Cos(a) * m.Radius, m.Mid.Z + Mathf.Sin(a) * m.Radius);
+                    far = Mathf.Max(far, corner.DistanceTo(from));
+                }
+                m.Reach = far;
+                m.Due = 0.0f;
+            }
+            m.Age = age;
+            m.From = from;
+        }
+        foreach (ShaderMaterial ink in m.Inks)
+        {
+            ink.SetShaderParameter("burn_age", m.Age);
+            ink.SetShaderParameter("burn_from", m.From);
+        }
     }
 
     /// <summary>
@@ -219,6 +306,62 @@ public sealed partial class Grass3D : Node3D
             m.SetShaderParameter("wind", Wind);
             m.SetShaderParameter("wind_way", WindWay.Normalized());
         }
+        foreach (Meadow m in _meadows)
+            Fume(m, dt);
+    }
+
+    /// <summary>
+    /// The smoke off a meadow's front: pale puffs born on the flame line while
+    /// it is on the cell, rising two metres and a half, drifting downwind,
+    /// eaten as they go - one cloud a cell (<see cref="CelCloud"/>), in the
+    /// look of the dust and the tank's smoke. Grass smoke is thin and light;
+    /// the wood's dark column is the trees'.
+    /// </summary>
+    private void Fume(Meadow m, float dt)
+    {
+        float speed = FrontM * Ppm;
+        if (m.Age >= 0.0f && m.Age * speed < m.Reach + FlameFor * speed)
+        {
+            m.Smoke ??= new CelCloud(this, "GrassSmoke", new Color(0.80f, 0.80f, 0.78f), 7.0f);
+            m.Due -= dt;
+            while (m.Due <= 0.0f)
+            {
+                m.Due += SmokeEvery;
+                float ring = Mathf.Max(m.Age * speed - 0.3f * Ppm, 0.0f);
+                for (int tries = 0; tries < 8; tries++)
+                {
+                    float a = _rng.RandfRange(0.0f, Mathf.Tau);
+                    var at = new Vector2(m.From.X + Mathf.Cos(a) * ring, m.From.Y + Mathf.Sin(a) * ring);
+                    if (HexIn(at - new Vector2(m.Mid.X, m.Mid.Z), m.Radius) < FadeM * Ppm)
+                        continue;
+                    m.Puffs.Add((new Vector3(at.X, m.Mid.Y, at.Y), _clock, _rng.Randf() * 13.0f));
+                    break;
+                }
+            }
+        }
+        if (m.Smoke is null)
+            return;
+        m.Smoke.Clear();
+        for (int i = m.Puffs.Count - 1; i >= 0; i--)
+        {
+            (Vector3 at, float born, float seed) = m.Puffs[i];
+            float a = (_clock - born) / SmokeLife;
+            if (a >= 1.0f)
+            {
+                m.Puffs.RemoveAt(i);
+                continue;
+            }
+            var drift = new Vector3(WindWay.X, 0.0f, WindWay.Y) * (1.2f * a * Wind * Ppm);
+            // off the ground at once and up fast: born low and slow, the
+            // puffs lay over the char as grey stones
+            Vector3 up = Vector3.Up * ((0.6f + 4.0f * Mathf.Sqrt(a)) * Ppm);
+            float r = (0.12f + 0.45f * Mathf.Sqrt(a)) * Ppm;
+            m.Smoke.Add(at + up + drift, r, 0.62f - 0.06f * a, seed, Mathf.SmoothStep(0.2f, 1.0f, a), a);
+        }
+        if (m.Puffs.Count == 0)
+            m.Smoke.Hide();
+        else if (GetViewport()?.GetCamera3D() is { } eye)
+            m.Smoke.Draw(eye.GlobalBasis);
     }
 
     private void Each(Vector2 c, float reach, Action<int, Vector2> at)
@@ -263,6 +406,9 @@ public sealed partial class Grass3D : Node3D
         ink.SetShaderParameter("gust_rate", GustRate);
         ink.SetShaderParameter("gust_travel", GustTravel);
         ink.SetShaderParameter("ppm", Ppm);
+        ink.SetShaderParameter("burn_speed", FrontM * Ppm);
+        ink.SetShaderParameter("flame_for", shader == PaintedShader ? FlameLine : FlameFor);
+        _laying?.Inks.Add(ink);
         if (_tex is not null)
         {
             ink.SetShaderParameter("press_tex", _tex);
@@ -447,6 +593,16 @@ uniform vec3 tone_root : source_color = vec3(0.19, 0.26, 0.10);
 uniform vec3 tone_mid : source_color = vec3(0.34, 0.43, 0.17);
 uniform vec3 tone_tip : source_color = vec3(0.55, 0.61, 0.29);
 uniform vec3 tone_dry : source_color = vec3(0.62, 0.60, 0.38);
+// the fire: s since the cell was lit (-1 never), where the front starts, how
+// fast it runs, px/s; and what it leaves
+uniform float burn_age = -1.0;
+uniform vec2 burn_from = vec2(0.0);
+uniform float burn_speed = 76.0;
+uniform vec3 char_tone : source_color = vec3(0.15, 0.13, 0.11);
+uniform vec3 ash_tone : source_color = vec3(0.27, 0.26, 0.24);
+// how long the flame stands at a point, s: the tufts and the lawn flare up as
+// tongues; the painted ground under them only glows a line
+uniform float flame_for = 0.45;
 " + Toon.NoiseCode + @"
 float g_noise(vec2 p) { return noise3(vec3(p, seed)); }
 float g_hash(vec2 p) { return hash3(vec3(p, seed + 3.7)); }
@@ -490,6 +646,47 @@ vec3 grass_bend(vec3 v, float rise, float t, vec2 lean) {
 // the patchiness of a meadow: 0-1, slow
 float grass_patch(vec2 xz) {
     return g_noise(xz * 0.022) * 0.65 + g_noise(xz * 0.07 + 11.0) * 0.35;
+}
+// s since the front passed here; below 0 not yet, -1000 no fire. The ring is
+// broken up by a noise of a few metres, so it arrives as a ragged line
+float burn_tau(vec2 xz) {
+    if (burn_age < 0.0) return -1000.0;
+    float rag = (g_noise(xz * 0.035 + 7.0) - 0.5) * 2.4 * ppm + (g_noise(xz * 0.16 + 2.0) - 0.5) * 0.6 * ppm;
+    return burn_age - max(length(xz - burn_from) + rag, 0.0) / burn_speed;
+}
+// how much of its height the grass keeps: all of it ahead of the front, a
+// flickering flare in the flame, stubble behind it
+float burn_keep(float tau, float phase) {
+    if (tau < 0.0) return 1.0;
+    if (tau < flame_for)
+        return 1.25 + 0.35 * sin(g_time * 19.0 + phase * 6.28) * (1.0 - tau / flame_for);
+    return mix(1.0, 0.22, smoothstep(flame_for, flame_for + 0.8, tau));
+}
+// the fire's paint over the grass's own: .a is 1 where it glows - the flame
+// and the embers, which the sun's shadow does not dim. Steps, not a blend: the
+// flame in three tones as the tank's is, orange at the leading edge, yellow
+// in the middle, red going out; then char, and later ash over it in two low
+// steps, the stubble's tips a shade lighter than its foot
+vec4 burn_paint(vec3 c, float tau, vec2 xz, float t, float flame) {
+    if (tau < -0.6) return vec4(c, 0.0);
+    if (tau < 0.0) return vec4(mix(c, tone_dry, 0.5 * (1.0 + tau / 0.6)), 0.0);
+    if (tau < flame) {
+        float k = tau / flame + (g_noise(xz * 0.3 + vec2(0.0, g_time * 3.0)) - 0.5) * 0.35 - t * 0.25;
+        vec3 fl = k < 0.25 ? vec3(1.0, 0.56, 0.12) : (k < 0.62 ? vec3(1.0, 0.90, 0.50) : vec3(0.82, 0.24, 0.06));
+        return vec4(fl, 1.0);
+    }
+    // embers: a few round specks glowing on behind the line, out one by one
+    float cell = 0.3 * ppm;
+    vec2 id = floor(xz / cell);
+    float h = g_hash(id + 61.0);
+    vec2 in_cell = fract(xz / cell) - 0.5;
+    if (h > 0.955 && length(in_cell) < 0.28 && tau < flame + 0.5 + 2.5 * g_hash(id + 67.0))
+        return vec4(sin(g_time * 6.0 + h * 40.0) > 0.0 ? vec3(1.0, 0.55, 0.12) : vec3(0.85, 0.25, 0.05), 1.0);
+    // one step of paler ash, in patches a couple of metres across: two steps
+    // at a metre read as camouflage
+    float n = g_noise(xz * 0.035 + 5.0);
+    float a = smoothstep(2.0, 8.0, tau) * 0.7 * step(0.52, n);
+    return vec4(mix(char_tone, ash_tone, a) * (0.9 + 0.35 * t), 0.0);
 }
 vec3 grass_tone(float t, float patch, vec2 xz, float pressed, float own) {
     vec3 c = mix(tone_root, tone_mid, smoothstep(0.0, 0.55, t));
@@ -560,7 +757,7 @@ void fragment() {
         float s = fract(dot(xz, vec2(-way.y, way.x)) / (0.18 * ppm) + g_noise(xz * 0.1) * 0.6);
         c = mix(c, c * (s < 0.5 ? 0.84 : 1.07), pr.r);
     }
-    ALBEDO = c;
+    ALBEDO = burn_paint(c, burn_tau(xz), xz, t, flame_for).rgb;
 }",
     };
 
@@ -579,8 +776,9 @@ void vertex() {
     rest = VERTEX;
     vec4 pr = press_at(VERTEX.xz);
     pressed = pr.r;
-    float rise = f * tall * (1.0 - pr.a);
-    vec2 lean = grass_lean(VERTEX.xz, g_noise(VERTEX.xz * 0.05) * 6.28, pr);
+    float keep = burn_keep(burn_tau(VERTEX.xz), g_noise(VERTEX.xz * 0.2));
+    float rise = f * tall * (1.0 - pr.a) * keep;
+    vec2 lean = grass_lean(VERTEX.xz, g_noise(VERTEX.xz * 0.05) * 6.28, pr) * min(keep, 1.0);
     VERTEX = grass_bend(VERTEX, rise, f, lean);
 }
 void fragment() {
@@ -600,13 +798,19 @@ void fragment() {
     h *= 1.0 - 0.7 * pr.r;
     // down to a quarter at the rim: at full height the edge stood up as a slab
     h *= 0.25 + 0.75 * smoothstep(0.5, 1.0, here);
+    // burnt down to stubble; in the flame the layers are stretched instead
+    float tau = burn_tau(xz);
+    h *= min(burn_keep(tau, 0.0), 1.0);
     if (f > 0.0) {
         if (f > h) discard;
         if (length(q) > 0.55 * (1.0 - f / h)) discard;
     }
-    vec3 c = grass_tone(f, patch, xz, pr.r, g_hash(id + 2.0));
-    ALBEDO = c;
-    EMISSION = c * (1.0 - shadow_ink);
+    // the lawn's floor glows a line only, as the painted ground does: a
+    // floor in flame for as long as the blades made the front a carpet
+    vec4 b = burn_paint(grass_tone(f, patch, xz, pr.r, g_hash(id + 2.0)), tau, xz, f,
+                        f > 0.0 ? flame_for : flame_for * 0.5);
+    ALBEDO = b.a > 0.5 ? vec3(0.0) : b.rgb;
+    EMISSION = b.a > 0.5 ? b.rgb : b.rgb * (1.0 - shadow_ink);
 }
 " + LitCode,
     };
@@ -627,22 +831,27 @@ varying float t;
 varying float own;
 varying float pressed;
 varying vec2 root;
+varying float tau;
 void vertex() {
     t = UV.x;
     own = UV.y;
     root = UV2;
     vec4 pr = press_at(root);
     pressed = pr.r;
-    float rise = (VERTEX.y - hex_mid.y) * (1.0 - pr.a);
-    vec2 lean = grass_lean(root, own * 6.28, pr);
+    // a tuft burns as one, at its root
+    tau = burn_tau(root);
+    float keep = burn_keep(tau, own);
+    float rise = (VERTEX.y - hex_mid.y) * (1.0 - pr.a) * keep;
+    vec2 lean = grass_lean(root, own * 6.28, pr) * min(keep, 1.0);
     VERTEX = grass_bend(VERTEX, rise, t, lean);
 }
 void fragment() {
     if (!FRONT_FACING) { NORMAL = -NORMAL; }
     sooted = 0.0;
-    vec3 c = grass_tone(t, grass_patch(root), root, pressed, own) * paint;
-    ALBEDO = c;
-    EMISSION = c * shade;
+    vec4 b = burn_paint(grass_tone(t, grass_patch(root), root, pressed, own), tau, root, t, flame_for);
+    vec3 c = b.rgb * paint;
+    ALBEDO = b.a > 0.5 ? vec3(0.0) : c;
+    EMISSION = b.a > 0.5 ? b.rgb : c * shade;
 }
 ",
     };
@@ -657,20 +866,24 @@ varying float t;
 varying float own;
 varying float pressed;
 varying vec2 root;
+varying float tau;
 void vertex() {
     t = UV.x;
     own = UV.y;
     root = UV2;
     vec4 pr = press_at(root);
     pressed = pr.r;
-    float rise = (VERTEX.y - hex_mid.y) * (1.0 - pr.a);
-    vec2 lean = grass_lean(root, own * 6.28, pr);
+    // a tuft burns as one, at its root
+    tau = burn_tau(root);
+    float keep = burn_keep(tau, own);
+    float rise = (VERTEX.y - hex_mid.y) * (1.0 - pr.a) * keep;
+    vec2 lean = grass_lean(root, own * 6.28, pr) * min(keep, 1.0);
     VERTEX = grass_bend(VERTEX, rise, t, lean);
 }
 void fragment() {
-    vec3 c = grass_tone(t, grass_patch(root), root, pressed, own);
-    ALBEDO = c;
-    EMISSION = c * (1.0 - shadow_ink);
+    vec4 b = burn_paint(grass_tone(t, grass_patch(root), root, pressed, own), tau, root, t, flame_for);
+    ALBEDO = b.a > 0.5 ? vec3(0.0) : b.rgb;
+    EMISSION = b.a > 0.5 ? b.rgb : b.rgb * (1.0 - shadow_ink);
 }
 " + LitCode,
     };
