@@ -95,7 +95,7 @@ public sealed partial class Grass3D : Node3D
     {
         public readonly List<ShaderMaterial> Inks = new();
         public Vector3 Mid;
-        public float Radius, Age = -1.0f, Reach, Due;
+        public float Radius, Age = -1.0f, Reach, Due, Seed, Speed;
         public Vector2 From;
         public CelCloud? Smoke;
         public readonly List<(Vector3 At, float Born, float Seed)> Puffs = new();
@@ -139,7 +139,7 @@ public sealed partial class Grass3D : Node3D
     /// </summary>
     public int Lay(Kind kind, Vector3 mid, float radius, int seed, IEnumerable<Vector3>? clear = null)
     {
-        _laying = new Meadow { Mid = mid, Radius = radius };
+        _laying = new Meadow { Mid = mid, Radius = radius, Seed = (seed % 97) * 1.37f, Speed = FrontM * Ppm };
         _meadows.Add(_laying);
         if (kind is Kind.Painted or Kind.PaintedTufts or Kind.CelTufts)
             AddChild(new MeshInstance3D
@@ -178,9 +178,11 @@ public sealed partial class Grass3D : Node3D
     /// s since its cell was lit (the fire's clock; below 0 not lit, and the
     /// grass stands again), and <paramref name="from"/> (x, z) where the front
     /// starts - the edge the fire came in over, or where it was lit. The front
-    /// is a ring out from there at <see cref="FrontM"/>, broken up by a noise.
+    /// is a ring out from there at <see cref="FrontM"/>, broken up by a noise -
+    /// faster where it has to be off the cell's far corner within
+    /// <paramref name="within"/> s (0: no bound), fixed on the frame it is lit.
     /// </summary>
-    public void Burn(int meadow, float age, Vector2 from)
+    public void Burn(int meadow, float age, Vector2 from, float within = 0.0f)
     {
         if (meadow < 0 || meadow >= _meadows.Count)
             return;
@@ -208,6 +210,7 @@ public sealed partial class Grass3D : Node3D
                 }
                 m.Reach = far;
                 m.Due = 0.0f;
+                m.Speed = Mathf.Max(FrontM * Ppm, within > 0.0f ? far / within : 0.0f);
             }
             m.Age = age;
             m.From = from;
@@ -216,7 +219,46 @@ public sealed partial class Grass3D : Node3D
         {
             ink.SetShaderParameter("burn_age", m.Age);
             ink.SetShaderParameter("burn_from", m.From);
+            ink.SetShaderParameter("burn_speed", m.Speed);
         }
+    }
+
+    /// <summary>
+    /// When meadow <paramref name="meadow"/>'s front reaches
+    /// <paramref name="xz"/>, s after its cell was lit - the shaders'
+    /// <c>burn_tau</c> the other way round, its ragged noise and all, so a
+    /// tree lit by it (the scene's) catches as the flame line gets to its foot.
+    /// Meaningful once <see cref="Burn"/> has been told the cell is lit.
+    /// </summary>
+    public float Arrival(int meadow, Vector2 xz)
+    {
+        if (meadow < 0 || meadow >= _meadows.Count)
+            return 0.0f;
+        Meadow m = _meadows[meadow];
+        float rag = (Noise3(new Vector3(xz.X * 0.035f + 7.0f, xz.Y * 0.035f + 7.0f, m.Seed)) - 0.5f) * 2.4f * Ppm
+                    + (Noise3(new Vector3(xz.X * 0.16f + 2.0f, xz.Y * 0.16f + 2.0f, m.Seed)) - 0.5f) * 0.6f * Ppm;
+        return Mathf.Max(xz.DistanceTo(m.From) + rag, 0.0f) / Mathf.Max(m.Speed, 1e-3f);
+    }
+
+    /// <summary><c>Toon.NoiseCode</c>'s <c>hash3</c> and <c>noise3</c>, on the
+    /// CPU, for <see cref="Arrival"/>.</summary>
+    private static float Hash3(Vector3 p)
+    {
+        static float Fract(float v) => v - Mathf.Floor(v);
+        p = new Vector3(Fract(p.X * 0.3183099f + 0.71f), Fract(p.Y * 0.3183099f + 0.113f),
+                        Fract(p.Z * 0.3183099f + 0.419f)) * 17.0f;
+        return Fract(p.X * p.Y * p.Z * (p.X + p.Y + p.Z));
+    }
+
+    private static float Noise3(Vector3 x)
+    {
+        var i = new Vector3(Mathf.Floor(x.X), Mathf.Floor(x.Y), Mathf.Floor(x.Z));
+        Vector3 f = x - i;
+        f = f * f * (Vector3.One * 3.0f - 2.0f * f);
+        float H(float a, float b, float c) => Hash3(i + new Vector3(a, b, c));
+        return Mathf.Lerp(Mathf.Lerp(Mathf.Lerp(H(0, 0, 0), H(1, 0, 0), f.X), Mathf.Lerp(H(0, 1, 0), H(1, 1, 0), f.X), f.Y),
+                          Mathf.Lerp(Mathf.Lerp(H(0, 0, 1), H(1, 0, 1), f.X), Mathf.Lerp(H(0, 1, 1), H(1, 1, 1), f.X), f.Y),
+                          f.Z);
     }
 
     /// <summary>
@@ -319,7 +361,7 @@ public sealed partial class Grass3D : Node3D
     /// </summary>
     private void Fume(Meadow m, float dt)
     {
-        float speed = FrontM * Ppm;
+        float speed = m.Speed;
         if (m.Age >= 0.0f && m.Age * speed < m.Reach + FlameFor * speed)
         {
             m.Smoke ??= new CelCloud(this, "GrassSmoke", new Color(0.80f, 0.80f, 0.78f), 7.0f);
@@ -401,12 +443,12 @@ public sealed partial class Grass3D : Node3D
         ink.SetShaderParameter("hex_mid", mid + Vector3.Up * Lift);
         ink.SetShaderParameter("hex_r", radius);
         ink.SetShaderParameter("hex_fade", FadeM * Ppm);
-        ink.SetShaderParameter("seed", (seed % 97) * 1.37f);
+        ink.SetShaderParameter("seed", _laying?.Seed ?? (seed % 97) * 1.37f);
         ink.SetShaderParameter("shadow_ink", ShadowInk);
         ink.SetShaderParameter("gust_rate", GustRate);
         ink.SetShaderParameter("gust_travel", GustTravel);
         ink.SetShaderParameter("ppm", Ppm);
-        ink.SetShaderParameter("burn_speed", FrontM * Ppm);
+        ink.SetShaderParameter("burn_speed", _laying?.Speed ?? FrontM * Ppm);
         ink.SetShaderParameter("flame_for", shader == PaintedShader ? FlameLine : FlameFor);
         _laying?.Inks.Add(ink);
         if (_tex is not null)

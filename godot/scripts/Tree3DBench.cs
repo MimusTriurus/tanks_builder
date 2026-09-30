@@ -319,7 +319,7 @@ public sealed partial class Tree3DBench : Node3D
         foreach (Vector3 p in Seats)
             tree.Seats.Add(new Vector3(p.X * w, p.Y * h, p.Z * d));
         Vector2 at = _field is null ? Vector2.Zero : _field.FlatAnchor(cell) + _field.CentreOffset + off;
-        tree.Stagger = (float)Grove.Hash01(Mathf.RoundToInt(at.X), Mathf.RoundToInt(at.Y), StaggerSalt);
+        tree.Stagger = tree.Hashed = (float)Grove.Hash01(Mathf.RoundToInt(at.X), Mathf.RoundToInt(at.Y), StaggerSalt);
         // Its smoke thins by being eaten, not by coming apart: see CelBurn.Sparse.
         tree.Fire = new CelBurn
         {
@@ -362,6 +362,9 @@ public sealed partial class Tree3DBench : Node3D
         public Node3D Holder = null!;
         public Vector2I Cell;
         public float Stagger;
+        /// <summary>The stagger off where it stands, for a cell with no grass
+        /// front to catch from - and to go back to when the wood is put back.</summary>
+        public float Hashed;
         public readonly List<ShaderMaterial> Burn = new();
         /// <summary>The leaves' cel material and their mask: the flutter.</summary>
         public readonly List<ShaderMaterial> Leaves = new();
@@ -457,6 +460,7 @@ public sealed partial class Tree3DBench : Node3D
             _burnAt = null;
         }
         _fire.Tick(dt);
+        Scorch();
         Basis eye = _camera.GlobalBasis;
         foreach (TreeFire t in _burning)
         {
@@ -658,7 +662,10 @@ public sealed partial class Tree3DBench : Node3D
 
     /// <summary>
     /// The meadows' fire: each cell's clock from the board's fire, and where
-    /// its front starts - fixed on the frame it is lit. Lit from a neighbour,
+    /// its front starts - fixed on the frame it is lit, and with it when each
+    /// tree on the cell catches: as the front gets to its foot
+    /// (<see cref="Grass3D.Arrival"/>) instead of the hash of where it stands.
+    /// A cell with no grass keeps the hash. Lit from a neighbour,
     /// at the edge between them, a little out on the neighbour's side (the
     /// neighbour whose delay it is: the one lit longest past it, as
     /// <see cref="Wildfire.Tick"/> hands on); lit by hand, the click; by
@@ -668,17 +675,47 @@ public sealed partial class Tree3DBench : Node3D
     {
         if (_grass is null || _fire is null)
             return;
+        // The front has to be off the far corner by the time the last tree may
+        // catch: the fire holds every tree on a cell to CatchWithin of it
+        // (Wildfire: the cell is Burnt once its last tree is), so a tree the
+        // front reached later would stand in flame on a burnt cell.
+        float within = _fire.CatchWithin - CatchLag;
         for (int i = 0; i < _meadowIds.Count; i++)
         {
             Vector2I cell = _meadowCells[i];
             float age = _fire.AgeAt(cell);
+            bool lit = age >= 0.0f && _meadowFrom[i] is null;
             if (age < 0.0f)
                 _meadowFrom[i] = null;
-            else if (_meadowFrom[i] is null)
+            else if (lit)
                 _meadowFrom[i] = FrontFrom(cell);
-            _grass.Burn(_meadowIds[i], age, _meadowFrom[i] ?? Vector2.Zero);
+            _grass.Burn(_meadowIds[i], age, _meadowFrom[i] ?? Vector2.Zero, within);
+            var catches = new List<string>();
+            foreach (TreeFire t in _burning)
+            {
+                if (t.Cell != cell)
+                    continue;
+                if (age < 0.0f)
+                    t.Stagger = t.Hashed;
+                else if (lit)
+                {
+                    // The tree catches off the grass: when the flame line gets
+                    // to its foot, and a beat later, the crown taking from under.
+                    Vector3 foot = t.Holder.GlobalPosition;
+                    float at = _grass.Arrival(_meadowIds[i], new Vector2(foot.X, foot.Z)) + CatchLag;
+                    t.Stagger = Mathf.Clamp(at / Mathf.Max(_fire.CatchWithin, 1e-3f), 0.0f, 1.0f);
+                    catches.Add($"{t.Holder.Name} {t.Stagger * _fire.CatchWithin:F1}");
+                }
+            }
+            if (lit && _meadowFrom[i] is { } from)
+                GD.Print($"tree3d: {cell} lit, front from {from.X:F0},{from.Y:F0}"
+                         + (catches.Count > 0 ? $", trees catch at s: {string.Join(", ", catches)}" : ""));
         }
     }
+
+    /// <summary>How long after the grass fire gets to a trunk its tree is
+    /// alight, s.</summary>
+    private const float CatchLag = 0.2f;
 
     private Vector2 FrontFrom(Vector2I cell)
     {
@@ -719,7 +756,6 @@ public sealed partial class Tree3DBench : Node3D
         if (_grass is null)
             return;
         _grass.Wind = _windOn ? _wind : 0.0f;
-        Scorch();
         foreach (Ram r in _rams)
         {
             var way = new Vector2(r.Way.X, r.Way.Z);
