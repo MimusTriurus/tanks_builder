@@ -353,9 +353,13 @@ public sealed partial class Tank3DBench
         float h = Mathf.DegToRad(_heading);
         var ahead = new Vector3(Mathf.Sin(h), 0.0f, Mathf.Cos(h));
         Vector3 way = _speed < 0.0f ? -ahead : ahead;
-        float halfLen = _model.HullLength * _model.PixelsPerUnit * 0.5f;
-        float halfWide = _model.Size.X * _model.PixelsPerUnit * 0.5f;
-        var middle = new Vector3(_rig.Position.X, top / RiseFactor, _rig.Position.Z);
+        // The hull and belts' own footprint, not a box about the rig: its middle
+        // stands off the rig's origin, and a bow wave round a box of the hull's
+        // length about the origin lay ahead of the nose with open water between
+        // (the user's picture).
+        float halfLen = _foot.HalfLen, halfWide = _foot.HalfWide;
+        var middle = new Vector3(_rig.Position.X, top / RiseFactor, _rig.Position.Z)
+                     + ahead * _foot.Along + _hullLeft * _foot.Across;
         _wake.Lay(middle + way * (halfLen * 0.85f), middle - way * (halfLen * 0.95f), _hullLeft,
                   halfWide, Mathf.Abs(_speed), _wakePace, wet && Mathf.Abs(_speed) > 2.0f);
         _wake.Bow(middle, way, halfLen, halfWide, wet ? _wakePace : 0.0f, Mathf.Abs(_speed));
@@ -370,6 +374,48 @@ public sealed partial class Tank3DBench
     }
 
     private float _waterOn;
+
+    /// <summary>The hull and belts' footprint on the ground, world px in the
+    /// rig's frame: its middle off the rig's origin along the hull and across
+    /// it, and its two half-lengths - <see cref="MeasureFootprint"/>.</summary>
+    private (float Along, float Across, float HalfLen, float HalfWide) _foot = (0.0f, 0.0f, 70.0f, 45.0f);
+
+    /// <summary>
+    /// The box round the Hull mesh's vertices and the belts' paths, in the
+    /// rig's frame (+Z the way the hull points, +X across) - what the water
+    /// meets. Measured once a model is on the rig.
+    /// </summary>
+    private (float, float, float, float) MeasureFootprint()
+    {
+        Transform3D toRig = _rig.GlobalTransform.AffineInverse();
+        var lo = new Vector2(float.MaxValue, float.MaxValue);
+        var hi = new Vector2(float.MinValue, float.MinValue);
+        void Take(Vector3 p)
+        {
+            lo = new Vector2(Mathf.Min(lo.X, p.X), Mathf.Min(lo.Y, p.Z));
+            hi = new Vector2(Mathf.Max(hi.X, p.X), Mathf.Max(hi.Y, p.Z));
+        }
+        if (_model.Hull is MeshInstance3D hull && hull.Mesh is not null)
+        {
+            Transform3D x = toRig * hull.GlobalTransform;
+            for (int s = 0; s < hull.Mesh.GetSurfaceCount(); s++)
+                foreach (Vector3 v in (Vector3[])hull.Mesh.SurfaceGetArrays(s)[(int)Mesh.ArrayType.Vertex])
+                    Take(x * v);
+        }
+        foreach (TankModel.Track t in _model.Tracks)
+        {
+            Transform3D x = toRig * t.Node.GlobalTransform;
+            foreach (Vector3 p in t.Path)
+                Take(x * p);
+        }
+        if (lo.X > hi.X)
+            return (0.0f, 0.0f, _model.HullLength * _model.PixelsPerUnit * 0.5f,
+                    _model.Size.X * _model.PixelsPerUnit * 0.5f);
+        Vector2 mid = (lo + hi) * 0.5f, half = (hi - lo) * 0.5f;
+        GD.Print($"tank3d: {_modelTag} footprint {2 * half.Y:F0} x {2 * half.X:F0} px, "
+                 + $"middle {mid.Y:F1} along, {mid.X:F1} across the rig");
+        return (mid.Y, mid.X, half.Y, half.X);
+    }
 
     /// <summary>
     /// The foam on the armour where the water cuts it - <see cref="Toon"/>'s

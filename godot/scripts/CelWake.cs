@@ -294,6 +294,10 @@ uniform float half_wide = 45.0;
 uniform float span = 120.0;
 uniform float pace = 1.0;
 uniform float speed = 30.0;
+// How far in from the footprint's rim the solid foam reaches: enough to meet
+// a nose that stands short of the box at the waterline. Deeper it is under
+// the hull anyway - a frame with no limit came out the same.
+uniform float inner = 10.0;
 " + Toon.NoiseCode + @"
 float cut(float x) {
     return clamp(x / max(fwidth(x), 1e-4) + 0.5, 0.0, 1.0);
@@ -303,17 +307,23 @@ void fragment() {
     float corner = min(half_wide, half_len) * 0.5;
     vec2 d = abs(g) - vec2(half_wide, half_len) + corner;
     float dist = length(max(d, 0.0)) + min(max(d.x, d.y), 0.0) - corner;
-    if (dist < -3.0) discard;
+    // (inside the footprint: see below)
     // In the water's frame: the hull goes forward, the foam stays.
     vec2 w = vec2(g.x, g.y + TIME * speed);
     float n = noise3(vec3(w * 0.09, TIME * 0.8)) * 0.6 + noise3(vec3(w * 0.21, TIME * 1.3 + 4.0)) * 0.4;
     float ahead = smoothstep(-0.75 * half_len, half_len * 0.9, g.y);
     float width = pace * (2.0 + 13.0 * ahead * ahead + 8.0 * smoothstep(0.7 * half_len, half_len, g.y))
                 * (0.7 + 0.6 * n);
-    float band = cut(width - dist) * cut(dist + 3.0);
-    float cover = band * cut(n - (0.62 - 0.35 * ahead));
+    // Solid under the leading half (the user's ask): the foam is a patch the
+    // hull stands in, not a ring round a box - inside the footprint it runs
+    // under the hull and the hull hides it, and wherever the real nose falls
+    // short of the box the foam reaches it rather than leaving open water.
+    float inside = cut(-dist) * cut(dist + inner) * smoothstep(0.25 * half_len, 0.6 * half_len, g.y)
+                 * step(0.02, pace);
+    float band = max(cut(width - dist) * cut(dist + 3.0), inside);
+    float cover = band * max(cut(n - (0.62 - 0.35 * ahead)), inside);
     if (cover <= 0.01) discard;
-    float white = cut(width * 0.55 - dist);
+    float white = max(cut(width * 0.55 - dist), inside);
     ALBEDO = mix(edge, foam, white);
     ALPHA = cover * clamp(pace * 1.6, 0.0, 1.0);
 }

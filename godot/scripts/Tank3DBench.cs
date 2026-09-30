@@ -295,6 +295,7 @@ public sealed partial class Tank3DBench : Node3D
         _rig.AddChild(_model);
         _deckPx = MeasureDeck();
         _beltPaint = null;
+        _foot = MeasureFootprint();
         _roofPx = MeasureRoof();
         BuildEffects();
         GD.Print($"tank3d: {_modelTag} class {_profile.Tag} x{_profile.Size:F2}, {_model.PixelsPerUnit:F2} px/unit, "
