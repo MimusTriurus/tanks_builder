@@ -15,7 +15,15 @@ namespace TankSpriteTest;
 ///
 /// <b>Tank3D's board, camera, sun and shadow skin, and nothing of its tank</b>:
 /// the tree models are what is being looked at, and Tank3D cannot stand up
-/// without a tank in <c>Models/</c>. Felling the model is not played yet.
+/// without a tank in <c>Models/</c>.
+///
+/// <b>A rammed tree goes over</b> (docs/props.md, "Tree3D: падение от тарана"):
+/// a stand-in hull drives into it from a side, and it falls away from it on
+/// the sprite's pendulum (<c>Grove.Timber</c>) with the model's own crown spring
+/// and lie from <c>tree.json</c> (<c>model.fall</c>), posed by
+/// <see cref="Toon.FallCode"/>. Keys <c>1</c>-<c>8</c> ram the tree under the
+/// cursor to a compass point of the screen (1 away from the eye, 3 right, 5 at
+/// the eye, 7 left), <c>--ram i:k,..</c> the same at the start.
 ///
 /// <b>The wood burns</b> (docs/props.md, "Tree3D: лесной пожар"): the board's
 /// own <see cref="Wildfire"/> - cells, spread, each tree's stagger and its
@@ -42,6 +50,10 @@ public sealed partial class Tree3DBench : Node3D
     /// <summary><c>--burn q,r</c>: the cell lit <see cref="LightAfter"/> s in,
     /// so a capture has a start to count from.</summary>
     private Vector2I? _burnAt;
+    /// <summary><c>--ram i:k,..</c>: tree <c>i</c> rammed toward compass point
+    /// <c>k</c> (<see cref="Compass"/>) at <c>--ram-at</c> s (<see cref="LightAfter"/>).</summary>
+    private readonly List<(int Tree, int Point)> _ramAt = new();
+    private float _ramWhen = LightAfter;
     /// <summary><c>--record dir</c>: every <c>--record-every</c> th frame to
     /// <c>dir/NNNN.png</c> for <c>--record-for</c> s, then quit - a fire to
     /// be looked at as a film (with <c>--fixed-fps</c>).</summary>
@@ -131,6 +143,7 @@ public sealed partial class Tree3DBench : Node3D
         _stage?.Place(Array.Empty<Vehicle>());
         FrameCamera();
         Burn((float)delta);
+        Topple((float)delta);
         _frame++;
         if (_recordDir is not null && _frame % _recordEvery == 0)
         {
@@ -212,6 +225,13 @@ public sealed partial class Tree3DBench : Node3D
         // A tank's hull lengths, the crown's width here: the tongues, the
         // column and the light are all shares of it.
         tree.Fire.Build(w * ppm);
+        tree.Fall = FallData.Read(j.GetProperty("model").GetProperty("fall"));
+        tree.Ppm = ppm;
+        tree.Height = h;
+        tree.Width = w;
+        // It lies outside the box it stands in: culled by that box, a fallen
+        // crown blinked out at the screen's edge.
+        Margin(holder);
         _burning.Add(tree);
         _wooded.Add(cell);
         GD.Print($"tree3d: {name} on {cell} +{off}, {ppm:F2} px/m, "
@@ -233,6 +253,13 @@ public sealed partial class Tree3DBench : Node3D
         public readonly List<Vector3> Seats = new();
         public CelBurn Fire = null!;
         public readonly List<Vector3> Ports = new();
+        // the fall
+        public FallData Fall = null!;
+        public float Ppm, Height, Width;
+        public bool Going, Lying, Touched;
+        public Vector2 Dir;
+        public double Angle, Spin, Flinch, FlinchRate, Rest, Touch, TouchM;
+        public bool Burnt, Burning;
     }
 
     private readonly List<TreeFire> _burning = new();
@@ -278,14 +305,16 @@ public sealed partial class Tree3DBench : Node3D
             "TreeGame.Bark" => (3, 0.0f, false, false),
             _ => (0, 0.0f, false, false),
         };
-        if (role == 0 || into.Contains(cel))
+        if (into.Contains(cel))
             return;
         foreach (ShaderMaterial m in cel.NextPass is ShaderMaterial ink ? new[] { cel, ink } : new[] { cel })
         {
+            into.Add(m);
+            if (role == 0)
+                continue;
             m.SetShaderParameter("burn_role", role);
             m.SetShaderParameter("burn_window", window);
             m.SetShaderParameter("burn_eat", eat);
-            into.Add(m);
         }
         cel.SetShaderParameter("burn_ember", ember);
         // The crown shades itself by its normals, not by its shadow on itself
@@ -325,9 +354,11 @@ public sealed partial class Tree3DBench : Node3D
             // the limbs and the fork as the fuel goes - left where the crown
             // was, it hung in the air round the bare twigs.
             float down = coat.Spent * coat.Spent;
+            t.Burnt = coat.Burnt || coat.Spent >= 1.0f;
+            t.Burning = coat.Flame > 0.01f;
             t.Ports.Clear();
             foreach (Vector3 p in t.Seats)
-                t.Ports.Add(t.Holder.ToGlobal(p.Lerp(new Vector3(p.X * 0.4f, p.Y * 0.62f, p.Z * 0.3f), down)));
+                t.Ports.Add(t.Holder.ToGlobal(Pose(t, p.Lerp(new Vector3(p.X * 0.4f, p.Y * 0.62f, p.Z * 0.3f), down))));
             t.Fire.Tick(dt, t.Ports, eye);
         }
     }
@@ -337,7 +368,18 @@ public sealed partial class Tree3DBench : Node3D
         _fire?.Douse();
         _clock = 0.0f;
         foreach (TreeFire t in _burning)
+        {
             t.Fire.Reset();
+            t.Going = t.Lying = t.Touched = false;
+            t.Angle = t.Spin = t.Flinch = t.FlinchRate = 0.0;
+            foreach (ShaderMaterial m in t.Burn)
+                m.SetShaderParameter("fall_on", false);
+        }
+        foreach (Ram r in _rams)
+            r.Body.QueueFree();
+        _rams.Clear();
+        _dust.Clear();
+        _cloud?.Hide();
         Burn(0.0f);
     }
 
@@ -345,6 +387,13 @@ public sealed partial class Tree3DBench : Node3D
     {
         if (e is InputEventKey { Pressed: true, Echo: false, Keycode: Key.R })
             Douse();
+        else if (e is InputEventKey { Pressed: true, Echo: false } k
+                 && k.Keycode >= Key.Key1 && k.Keycode <= Key.Key8)
+        {
+            TreeFire? t = Nearest(GetViewport().GetMousePosition());
+            if (t is not null)
+                RamInto(t, (int)(k.Keycode - Key.Key1) + 1);
+        }
         else if (e is InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left } b
                  && _field is not null && _fire is not null)
         {
@@ -355,6 +404,350 @@ public sealed partial class Tree3DBench : Node3D
             Vector2I cell = _field.CellUnder(new Vector2(g.X, g.Z * Squash));
             GD.Print(_fire.Light(cell) ? $"tree3d: {cell} lit" : $"tree3d: {cell} has nothing to burn");
         }
+    }
+
+    // --- the fall -------------------------------------------------------------
+
+    /// <summary>What <c>tree.json</c> says about the model going over
+    /// (<c>model.fall</c>, pipeline/docs/trees.md "Падение модели"), metres.</summary>
+    private sealed class FallData
+    {
+        public float Hinge, Y0, H, Mat, Lift;
+        public float[] Azimuth = Array.Empty<float>(), Rest = Array.Empty<float>();
+        public float[] LiveTouch = Array.Empty<float>(), LiveTouchM = Array.Empty<float>();
+        public float[] BurntTouch = Array.Empty<float>(), BurntTouchM = Array.Empty<float>();
+        public double Gravity, Shove, LiftAngle, Bounce, Settle, Lag, Whip, Stiffness, Damping;
+
+        public static FallData Read(JsonElement f)
+        {
+            JsonElement lie = f.GetProperty("lie"), t = f.GetProperty("timber");
+            float[] A(string k) => System.Linq.Enumerable.ToArray(
+                System.Linq.Enumerable.Select(lie.GetProperty(k).EnumerateArray(), x => x.GetSingle()));
+            return new FallData
+            {
+                Hinge = f.GetProperty("hinge_m").GetSingle(),
+                Y0 = f.GetProperty("bend").GetProperty("y0_m").GetSingle(),
+                H = f.GetProperty("bend").GetProperty("H_m").GetSingle(),
+                Mat = f.GetProperty("crush").GetProperty("mat_m").GetSingle(),
+                Lift = f.GetProperty("crush").GetProperty("lift_m").GetSingle(),
+                Azimuth = A("azimuth_deg"), Rest = A("rest_deg"),
+                LiveTouch = A("live_touch_deg"), LiveTouchM = A("live_touch_m"),
+                BurntTouch = A("burnt_touch_deg"), BurntTouchM = A("burnt_touch_m"),
+                Gravity = t.GetProperty("gravity").GetDouble(), Shove = t.GetProperty("shove").GetDouble(),
+                LiftAngle = t.GetProperty("lift").GetDouble(), Bounce = t.GetProperty("bounce").GetDouble(),
+                Settle = t.GetProperty("settle").GetDouble(), Lag = t.GetProperty("lag").GetDouble(),
+                Whip = t.GetProperty("whip").GetDouble(), Stiffness = t.GetProperty("stiffness").GetDouble(),
+                Damping = t.GetProperty("damping").GetDouble(),
+            };
+        }
+
+        /// <summary>One of the 24 directions' numbers at any azimuth, between
+        /// its two neighbours.</summary>
+        public float At(float[] of, float azimuth)
+        {
+            int n = Azimuth.Length;
+            float step = 360.0f / n;
+            float x = Mathf.PosMod(azimuth, 360.0f) / step;
+            int i = (int)Mathf.Floor(x) % n;
+            return Mathf.Lerp(of[i], of[(i + 1) % n], x - Mathf.Floor(x));
+        }
+    }
+
+    /// <summary>The screen's compass: 1 away from the eye, clockwise to 8 -
+    /// on the ground (world x, z), which the screen squashes in depth.</summary>
+    private static Vector2 Compass(int point) =>
+        Vector2.Up.Rotated(Mathf.DegToRad(45.0f * (Mathf.Clamp(point, 1, 8) - 1)));
+
+    /// <summary>
+    /// Knock <paramref name="t"/> over toward <paramref name="dir"/> (the
+    /// ground's x, z; the model is not turned, so the model's too): the
+    /// pendulum's start, and the lie and touch its direction has in
+    /// <c>tree.json</c>. A burning tree does not go over (GDD, "HT -
+    /// Бульдозер"); a tree already going is left to it.
+    /// </summary>
+    private bool Fell(TreeFire t, Vector2 dir, float shove)
+    {
+        if (t.Going || t.Burning)
+            return false;
+        FallData f = t.Fall;
+        dir = dir.Normalized();
+        // tree.json's azimuth: from +X toward -Z
+        float az = Mathf.RadToDeg(Mathf.Atan2(-dir.Y, dir.X));
+        t.Dir = dir;
+        t.Rest = Mathf.DegToRad(Mathf.Min(f.At(f.Rest, az), 88.0f));
+        t.Touch = Mathf.DegToRad(f.At(t.Burnt ? f.BurntTouch : f.LiveTouch, az));
+        t.TouchM = f.At(t.Burnt ? f.BurntTouchM : f.LiveTouchM, az);
+        t.Going = true;
+        t.Lying = t.Touched = false;
+        t.Angle = f.LiftAngle;
+        t.Spin = f.Shove * (0.6 + 0.4 * Mathf.Clamp(shove, 0.0f, 1.0f));
+        t.Flinch = t.FlinchRate = 0.0;
+        foreach (ShaderMaterial m in t.Burn)
+        {
+            m.SetShaderParameter("fall_on", true);
+            m.SetShaderParameter("fall_dir", dir);
+            m.SetShaderParameter("fall_hinge", f.Hinge);
+            m.SetShaderParameter("fall_y0", f.Y0);
+            m.SetShaderParameter("fall_h", f.H);
+            m.SetShaderParameter("fall_mat", f.Mat);
+            m.SetShaderParameter("fall_lift", f.Lift);
+        }
+        GD.Print($"tree3d: {t.Holder.Name} over to {az:F0} deg, lies at {Mathf.RadToDeg((float)t.Rest):F0}, "
+                 + $"touches at {Mathf.RadToDeg((float)t.Touch):F0}");
+        return true;
+    }
+
+    /// <summary>
+    /// A frame of every falling tree: <c>tree_gen.timber</c>, which is
+    /// <c>Grove.Timber</c> with the model's own crown spring - the trunk a
+    /// pendulum on its root plate, <c>a'' = g sin(a)</c>, stopped at its lie
+    /// and bounced; the crown trailing while it comes over, thrown on past it
+    /// when it stops, and ringing down. In steps of 1/120 s, the pipeline's, so
+    /// the board and the sheets play one fall.
+    /// </summary>
+    private void Topple(float dt)
+    {
+        foreach ((int ti, int point) in _ramAt)
+            if (_clock >= _ramWhen && ti >= 0 && ti < _burning.Count)
+                RamInto(_burning[ti], point);
+        if (_clock >= _ramWhen)
+            _ramAt.Clear();
+        Drive(dt);
+        foreach (TreeFire t in _burning)
+        {
+            if (!t.Going)
+                continue;
+            FallData f = t.Fall;
+            const double step = 1.0 / 120.0;
+            for (double left = dt; left > 1e-9; left -= step)
+            {
+                double h = Math.Min(step, left);
+                double drag = 0.0;
+                if (!t.Lying || t.Spin != 0.0)
+                {
+                    double pull = f.Gravity * Math.Sin(t.Angle);
+                    t.Spin += pull * h;
+                    t.Angle += t.Spin * h;
+                    if (t.Angle >= t.Rest)
+                    {
+                        double hit = t.Spin;
+                        t.Angle = t.Rest;
+                        t.Lying = true;
+                        t.FlinchRate += f.Whip * hit;
+                        t.Spin = Math.Abs(hit) < f.Settle ? 0.0 : -hit * f.Bounce;
+                    }
+                    else if (t.Angle < 0.0)
+                    {
+                        t.Angle = 0.0;
+                        t.Spin = 0.0;
+                    }
+                    drag = -f.Lag * pull;
+                }
+                t.FlinchRate += (-f.Stiffness * t.Flinch - f.Damping * t.FlinchRate + f.Stiffness * drag) * h;
+                t.Flinch += t.FlinchRate * h;
+            }
+            if (!t.Touched && t.Angle >= t.Touch)
+            {
+                t.Touched = true;
+                Dust(t);
+            }
+            float down = (float)Math.Min(1.0, t.Angle / Math.Max(t.Rest, 1e-6));
+            foreach (ShaderMaterial m in t.Burn)
+            {
+                m.SetShaderParameter("fall_trunk", (float)t.Angle);
+                m.SetShaderParameter("fall_crown", (float)t.Flinch);
+                m.SetShaderParameter("fall_down", down);
+            }
+        }
+        Settle(dt);
+    }
+
+    /// <summary><see cref="Toon.FallCode"/>'s pose of a model point, for what
+    /// sits on the tree and is not its mesh - the fire's ports.</summary>
+    private static Vector3 Pose(TreeFire t, Vector3 v)
+    {
+        if (!t.Going)
+            return v;
+        FallData f = t.Fall;
+        float w = Mathf.Clamp((v.Y - f.Y0) / Mathf.Max(f.H - f.Y0, 1e-3f), 0.0f, 1.0f);
+        w *= w;
+        var d = new Vector3(t.Dir.X, 0.0f, t.Dir.Y);
+        Vector3 k = Vector3.Up.Cross(d).Normalized();
+        Vector3 piv = d * f.Hinge;
+        return piv + (v - piv).Rotated(k, (float)(t.Angle + t.Flinch * w));
+    }
+
+    private static void Margin(Node node)
+    {
+        if (node is GeometryInstance3D g)
+            g.ExtraCullMargin = 16384.0f;
+        foreach (Node child in node.GetChildren())
+            Margin(child);
+    }
+
+    // --- the ram: a stand-in hull ---------------------------------------------
+
+    /// <summary>A hull driving into a tree: no tank model on the machine this
+    /// was made on, so a box with a turret on it, on the cel look. It comes
+    /// from <see cref="RamFrom"/> px back, at <see cref="RamSpeed"/>, knocks the
+    /// tree over on contact - glacis to the trunk - and stops
+    /// <see cref="RamPast"/> on: driven on over where the tree stood, it sat on
+    /// the fallen trunk, and the crown alone lying there read as a bush.</summary>
+    private sealed class Ram
+    {
+        public Node3D Body = null!;
+        public TreeFire Target = null!;
+        public Vector3 At, Way;
+        public float Left;
+        public bool Struck;
+    }
+
+    private readonly List<Ram> _rams = new();
+    private const float RamFrom = 240.0f, RamSpeed = 110.0f, RamPast = 12.0f;
+    /// <summary>The stand-in's hull, board px: long, wide, high - a medium
+    /// tank's size on the board, near enough.</summary>
+    private static readonly Vector3 Hull = new(58.0f, 24.0f, 100.0f);
+
+    private void RamInto(TreeFire t, int point)
+    {
+        if (t.Going)
+            return;
+        Vector2 dir = Compass(point);
+        var way = new Vector3(dir.X, 0.0f, dir.Y);
+        Vector3 foot = t.Holder.GlobalPosition;
+        var body = new Node3D { Name = "Ram" };
+        var paint = new StandardMaterial3D { AlbedoColor = new Color(0.36f, 0.40f, 0.24f) };
+        body.AddChild(new MeshInstance3D { Mesh = new BoxMesh { Size = Hull, Material = paint },
+                                           Position = Vector3.Up * (Hull.Y * 0.5f) });
+        body.AddChild(new MeshInstance3D { Mesh = new BoxMesh { Size = new Vector3(40, 14, 42), Material = paint },
+                                           Position = new Vector3(0, Hull.Y + 7.0f, 8.0f) });
+        body.AddChild(new MeshInstance3D { Mesh = new BoxMesh { Size = new Vector3(6, 6, 56), Material = paint },
+                                           Position = new Vector3(0, Hull.Y + 8.0f, -34.0f) });
+        Toon.Dress(body);
+        AddChild(body);
+        var ram = new Ram
+        {
+            Body = body, Target = t, Way = way,
+            At = foot - way * RamFrom,
+            Left = RamFrom,
+        };
+        _rams.Add(ram);
+        Place(ram);
+    }
+
+    private void Place(Ram r)
+    {
+        Vector3 at = Foot(new Vector3(r.At.X, 0.0f, r.At.Z));
+        r.Body.GlobalTransform = new Transform3D(Basis.LookingAt(r.Way, Vector3.Up), at);
+    }
+
+    private void Drive(float dt)
+    {
+        foreach (Ram r in _rams)
+        {
+            if (r.Left <= 0.0f)
+                continue;
+            float go = Mathf.Min(RamSpeed * dt, r.Left);
+            r.At += r.Way * go;
+            r.Left -= go;
+            Place(r);
+            TreeFire t = r.Target;
+            // The glacis at the trunk: half the hull ahead of its middle, and
+            // the collar's radius.
+            float gap = (t.Holder.GlobalPosition - r.At).Dot(r.Way);
+            if (!r.Struck && gap <= Hull.Z * 0.5f + 0.55f * t.Ppm)
+            {
+                r.Struck = true;
+                r.Left = RamPast;
+                if (!Fell(t, new Vector2(r.Way.X, r.Way.Z), RamSpeed / 120.0f))
+                {
+                    // Burning: it stands, and the hull stops at it.
+                    r.Left = 0.0f;
+                    GD.Print($"tree3d: {t.Holder.Name} is burning and does not go over");
+                }
+            }
+        }
+    }
+
+    /// <summary>The tree nearest the cursor on the screen, by its foot.</summary>
+    private TreeFire? Nearest(Vector2 cursor)
+    {
+        TreeFire? best = null;
+        float near = float.MaxValue;
+        foreach (TreeFire t in _burning)
+        {
+            Vector3 mid = t.Holder.GlobalPosition + Vector3.Up * (t.Height * t.Ppm * 0.4f);
+            float d = _camera.UnprojectPosition(mid).DistanceTo(cursor);
+            if (d < near)
+            {
+                near = d;
+                best = t;
+            }
+        }
+        return best;
+    }
+
+    // --- the dust where the crown lands --------------------------------------
+
+    private CelCloud? _cloud;
+    private readonly List<(Vector3 At, Vector3 Along, Vector3 Across, float Reach, float Wide, float Tone, float Age)> _dust = new();
+    private const float DustLife = 1.3f;
+    private const int DustPuffs = 26;
+
+    /// <summary>The ground goes up where the crown comes down, once (the
+    /// sprite's rule, <c>Grove.Thud</c>): a line of puffs from where it first
+    /// touches (<c>touch_m</c>) out to its top, born near to far as the crown
+    /// sweeps down it.</summary>
+    private void Dust(TreeFire t)
+    {
+        _cloud ??= new CelCloud(this, "Dust", new Color(0.80f, 0.68f, 0.50f), 4.0f);
+        var along = new Vector3(t.Dir.X, 0.0f, t.Dir.Y);
+        Vector3 at = t.Holder.GlobalPosition + along * ((float)t.TouchM * t.Ppm);
+        _dust.Add((at, along, Vector3.Up.Cross(along).Normalized(),
+                   Mathf.Max(t.Height - (float)t.TouchM, 1.0f) * t.Ppm, t.Width * t.Ppm,
+                   t.Burnt ? 0.36f : 0.66f, 0.0f));   // a burnt crown throws up ash
+    }
+
+    private void Settle(float dt)
+    {
+        if (_cloud is null)
+            return;
+        _cloud.Clear();
+        for (int i = _dust.Count - 1; i >= 0; i--)
+        {
+            var d = _dust[i];
+            d.Age += dt;
+            _dust[i] = d;
+            if (d.Age > DustLife + 0.5f)
+            {
+                _dust.RemoveAt(i);
+                continue;
+            }
+            for (int k = 0; k < DustPuffs; k++)
+            {
+                float age = d.Age - 0.35f * CelPuff.Hash(k, 47);   // near to far
+                if (age <= 0.0f || age >= DustLife)
+                    continue;
+                float a = age / DustLife;
+                float h1 = CelPuff.Hash(k, 41), h2 = CelPuff.Hash(k, 43);
+                // Many small puffs over the patch the crown came down on, out
+                // to its sides and a little up, eaten early. Laid along it at
+                // their own height they read as flat pale stones; a dozen big
+                // ones flowed into one shape (CelCloud's union) and read as a
+                // pale boulder in front of the crown.
+                float h3 = CelPuff.Hash(k, 47);
+                Vector3 at = d.At + d.Along * (d.Reach * (0.15f + 0.85f * h3))
+                             + d.Across * ((h1 - 0.5f) * d.Wide * (0.9f + 0.6f * a));
+                float r = d.Wide * (0.045f + 0.075f * Mathf.Sqrt(a)) * (0.7f + 0.6f * h2);
+                float up = r * 0.8f + d.Wide * 0.14f * Mathf.Sqrt(a);
+                _cloud.Add(Foot(at) + Vector3.Up * up, r, d.Tone, h2 * 13.0f,
+                           Mathf.SmoothStep(0.10f, 0.85f, a), a);
+            }
+        }
+        if (_dust.Count == 0)
+            _cloud.Hide();
+        else
+            _cloud.Draw(_camera.GlobalBasis);
     }
 
     /// <summary>Leaves and puff cores keep the normals the file gives them -
@@ -482,8 +875,7 @@ public sealed partial class Tree3DBench : Node3D
             masks[k].SetShaderParameter("burn_role", k == 4 ? 1 : k);
             masks[k].SetShaderParameter("burn_window", k == 4 ? 0.45f : 0.12f);
             masks[k].SetShaderParameter("burn_eat", k == 4);
-            if (k != 0)
-                burn.Add(masks[k]);
+            burn.Add(masks[k]);
         }
         return masks;
     }
@@ -511,8 +903,10 @@ uniform float id = 1.0;
 uniform float near = 0.0;
 uniform float span = 1.0;
 varying vec3 world;
-" + Toon.NoiseCode + Toon.BurnCode + @"
+" + Toon.NoiseCode + Toon.BurnCode + Toon.FallCode + @"
 void vertex() {
+    vec3 n = NORMAL;
+    fall_pose(VERTEX, n);
     world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
 void fragment() {
@@ -749,6 +1143,16 @@ void light() {
             else if (a == "--pbr") _pbr = true;
             else if (a == "--no-outline") _noOutline = true;
             else if (a == "--row") _row = true;
+            else if (a == "--ram-at" && more) _ramWhen = F(args[++i], _ramWhen);
+            else if (a == "--ram" && more)
+            {
+                foreach (string pair in args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    if (pair.Split(':') is { Length: 2 } tk && int.TryParse(tk[0], out int ti)
+                        && int.TryParse(tk[1], out int tp))
+                        _ramAt.Add((ti, tp));
+                }
+            }
             else if (a == "--record" && more) _recordDir = args[++i];
             else if (a == "--record-every" && more) _recordEvery = Math.Max(1, (int)F(args[++i], _recordEvery));
             else if (a == "--record-for" && more) _recordFor = F(args[++i], _recordFor);

@@ -195,6 +195,54 @@ bool burn_gone(float at, vec3 p) {
 ";
 
     /// <summary>
+    /// A tree model going over (<c>tree.json</c> <c>model.fall</c>,
+    /// <c>tree_gen.py</c>'s <c>_pose</c> and <c>_crush</c>): in the model's own
+    /// metres, glTF Y up, the foot at the origin. The whole tree turns about a
+    /// hinge on the ground, <c>fall_hinge</c> out toward <c>fall_dir</c> (the
+    /// model's x, z) and across it, by the trunk's angle plus the crown's
+    /// spring weighted by the bend - <c>w = clamp((y - y0) / (H - y0))^2</c>, the
+    /// formula the pipeline writes to <c>TEXCOORD_2</c> and worked out here off
+    /// the vertex's own height, since glTF's third UV comes in as
+    /// <c>CUSTOM0</c> and the ink's normal is written over it. Then what went
+    /// under the ground is crushed into a mat on it, soft rather than cut:
+    /// <c>y' = m ln(1 + e^(y / m))</c>, <c>m = fall_mat * fall_down</c>, never
+    /// under <c>fall_lift</c>. The normal turns with it. <c>fall_on</c> off -
+    /// every tank - nothing here runs. The cel pass, the ink and the crown's
+    /// mask (<c>Tree3DBench</c>) all call <c>fall_pose</c>, so the three and the
+    /// shadow go over as one.
+    /// </summary>
+    public const string FallCode = @"
+uniform bool fall_on = false;
+uniform vec2 fall_dir = vec2(1.0, 0.0);
+uniform float fall_hinge = 0.44;
+uniform float fall_trunk = 0.0;
+uniform float fall_crown = 0.0;
+uniform float fall_down = 0.0;
+uniform float fall_y0 = 2.2;
+uniform float fall_h = 7.4;
+uniform float fall_mat = 0.08;
+uniform float fall_lift = 0.01;
+vec3 fall_turn(vec3 r, vec3 k, float th) {
+    float c = cos(th), s = sin(th);
+    return r * c + cross(k, r) * s + k * dot(k, r) * (1.0 - c);
+}
+void fall_pose(inout vec3 v, inout vec3 n) {
+    if (!fall_on) return;
+    float w = clamp((v.y - fall_y0) / max(fall_h - fall_y0, 1e-3), 0.0, 1.0);
+    w *= w;
+    vec3 d = normalize(vec3(fall_dir.x, 0.0, fall_dir.y));
+    vec3 k = cross(vec3(0.0, 1.0, 0.0), d);
+    vec3 piv = d * fall_hinge;
+    float th = fall_trunk + fall_crown * w;
+    v = piv + fall_turn(v - piv, k, th);
+    n = fall_turn(n, k, th);
+    float m = fall_mat * max(fall_down, 1e-3);
+    if (v.y <= 4.0 * m)
+        v.y = max(m * log(1.0 + exp(v.y / m)), fall_lift * min(fall_down * 4.0, 1.0));
+}
+";
+
+    /// <summary>
     /// The model's paint on the ramp, and the fire's scorch in it
     /// (<see cref="CelBurn"/> drives the numbers): round each port, within
     /// <c>scorch_r</c> world px grown by <c>scorch</c>, the paint goes to char,
@@ -236,8 +284,11 @@ uniform vec3 hole_wall : source_color = vec3(0.16, 0.15, 0.15);
 // Leaves burning: the last of a leaf's window glows before it goes (BurnCode).
 uniform bool burn_ember = false;
 varying vec3 world;
-" + NoiseCode + RampCode + BurnCode + @"
+" + NoiseCode + RampCode + BurnCode + FallCode + @"
 void vertex() {
+    vec3 n = NORMAL;
+    fall_pose(VERTEX, n);
+    NORMAL = n;
     world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
 void fragment() {
@@ -407,11 +458,14 @@ uniform float width = 1.0;
 uniform float min_px = 1.0;
 uniform float dark = 0.3;
 varying vec3 world;
-" + NoiseCode + BurnCode + @"
+" + NoiseCode + BurnCode + FallCode + @"
 void vertex() {
-    world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
-    VERTEX = (MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
-    vec3 n = normalize(mat3(MODELVIEW_MATRIX) * CUSTOM0.xyz);
+    vec3 v = VERTEX;
+    vec3 cn = CUSTOM0.xyz;
+    fall_pose(v, cn);
+    world = (MODEL_MATRIX * vec4(v, 1.0)).xyz;
+    VERTEX = (MODELVIEW_MATRIX * vec4(v, 1.0)).xyz;
+    vec3 n = normalize(mat3(MODELVIEW_MATRIX) * cn);
     // One screen px in view units, for an orthographic eye.
     float px = 2.0 / (PROJECTION_MATRIX[1][1] * VIEWPORT_SIZE.y);
     float w = max(width, min_px * px) * CUSTOM0.w;
