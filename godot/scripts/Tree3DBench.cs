@@ -23,7 +23,8 @@ namespace TankSpriteTest;
 /// and lie from <c>tree.json</c> (<c>model.fall</c>), posed by
 /// <see cref="Toon.FallCode"/>. Keys <c>1</c>-<c>8</c> ram the tree under the
 /// cursor to a compass point of the screen (1 away from the eye, 3 right, 5 at
-/// the eye, 7 left), <c>--ram i:k,..</c> the same at the start.
+/// the eye, 7 left), <c>--ram i:k,..</c> the same at the start; RMB pushes the
+/// tree nearest the click over away from it.
 ///
 /// <b>The wood burns</b> (docs/props.md, "Tree3D: лесной пожар"): the board's
 /// own <see cref="Wildfire"/> - cells, spread, each tree's stagger and its
@@ -62,6 +63,14 @@ public sealed partial class Tree3DBench : Node3D
     /// <summary>Where LMB lit a cell, so a meadow lit by hand burns out from
     /// the click.</summary>
     private readonly Dictionary<Vector2I, Vector2> _litAt = new();
+
+    /// <summary><c>--no-grass</c>: the board bare, as it was before the grass.
+    /// Otherwise every cell is grass of <see cref="BoardGrass"/>.</summary>
+    private bool _bare;
+    /// <summary>The grass the board wears when it is not comparing kinds: the
+    /// tufts on the cel ramp, the models' light (docs/props.md, "Трава").</summary>
+    private const Grass3D.Kind BoardGrass = Grass3D.Kind.CelTufts;
+    private readonly List<Vector2I> _meadowCells = new();
     private const float MeadowZoom = 1.85f;
     private bool _zoomed;
     private Grass3D? _grass;
@@ -91,12 +100,18 @@ public sealed partial class Tree3DBench : Node3D
     /// - what comes out of the ground, with nothing standing on it.</summary>
     private readonly List<(int Tree, int Point)> _fellAt = new();
     private float _ramWhen = LightAfter;
+    /// <summary><c>--rmb x,y</c>: a right click at screen px (x, y) at
+    /// <c>--ram-at</c> - what RMB does, for a capture.</summary>
+    private Vector2? _rmbAt;
     /// <summary><c>--record dir</c>: every <c>--record-every</c> th frame to
     /// <c>dir/NNNN.png</c> for <c>--record-for</c> s, then quit - a fire to
     /// be looked at as a film (with <c>--fixed-fps</c>).</summary>
     private string? _recordDir;
     private int _recordEvery = 6;
     private float _recordFor = 18.0f;
+    /// <summary><c>--record-from s</c>: nothing saved before this, for every
+    /// frame of a short stretch late in a fire.</summary>
+    private float _recordFrom;
     private const float LightAfter = 0.5f;
     private float _clock;
 
@@ -186,7 +201,6 @@ public sealed partial class Tree3DBench : Node3D
         {
             foreach ((Vector2I cell, _, _) in Meadows)
                 Stand(_trees[0], cell, MeadowTree);
-            BuildGrass();
         }
         else if (_wood > 0)
         {
@@ -201,9 +215,15 @@ public sealed partial class Tree3DBench : Node3D
             for (int i = 0; i < Math.Min(_trees.Length, spots.Length); i++)
                 Stand(_trees[i], spots[i].Cell, spots[i].Off);
         }
+        // after the trees: the tufts keep off their trunks
+        if (_grassy || !_bare)
+            BuildGrass();
         FrameCamera();
         if (_stage is not null && _fire is not null)
             _stage.Blaze = _fire;
+        GD.Print("tree3d: LMB lights a cell, RMB pushes the tree nearest it over away from the click, "
+                 + "1-8 ram it to a compass point, " + (_grassy ? "T drives hulls over the grass, " : "")
+                 + "W wind, R puts it all back");
     }
 
     public override void _Process(double delta)
@@ -218,7 +238,7 @@ public sealed partial class Tree3DBench : Node3D
         Sway((float)delta);
         Trample();
         _frame++;
-        if (_recordDir is not null && _frame % _recordEvery == 0)
+        if (_recordDir is not null && _frame % _recordEvery == 0 && _clock >= _recordFrom)
         {
             GetViewport().GetTexture().GetImage().SavePng($"{_recordDir}/{_frame / _recordEvery:D4}.png");
             if (_clock >= _recordFor)
@@ -496,7 +516,7 @@ public sealed partial class Tree3DBench : Node3D
     {
         if (e is InputEventKey { Pressed: true, Echo: false, Keycode: Key.R })
             Douse();
-        else if (e is InputEventKey { Pressed: true, Echo: false, Keycode: Key.T } && _grass is not null)
+        else if (e is InputEventKey { Pressed: true, Echo: false, Keycode: Key.T } && _grassy)
             DriveAcross();
         else if (e is InputEventKey { Pressed: true, Echo: false, Keycode: Key.W })
             GD.Print($"tree3d: wind {((_windOn = !_windOn) ? "on" : "off")}");
@@ -507,13 +527,22 @@ public sealed partial class Tree3DBench : Node3D
             if (t is not null)
                 RamInto(t, (int)(k.Keycode - Key.Key1) + 1);
         }
+        else if (e is InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Right } push)
+        {
+            // Pushed over from where the click is: a hull comes from that side
+            // and the tree falls away from it. On the trunk itself, to the right.
+            TreeFire? t = Nearest(push.Position);
+            if (t is null || GroundAt(push.Position) is not { } at)
+                return;
+            Vector3 foot = t.Holder.GlobalPosition;
+            var dir = new Vector2(foot.X - at.X, foot.Z - at.Z);
+            RamInto(t, dir.Length() < 6.0f ? Vector2.Right : dir);
+        }
         else if (e is InputEventMouseButton { Pressed: true, ButtonIndex: MouseButton.Left } b
                  && _field is not null && _fire is not null)
         {
-            Vector3 from = _camera.ProjectRayOrigin(b.Position), way = _camera.ProjectRayNormal(b.Position);
-            if (Mathf.Abs(way.Y) < 1e-4f)
+            if (GroundAt(b.Position) is not { } g)
                 return;
-            Vector3 g = from + way * (-from.Y / way.Y);
             Vector2I cell = _field.CellUnder(new Vector2(g.X, g.Z * Squash));
             if (_fire.Light(cell))
             {
@@ -525,10 +554,20 @@ public sealed partial class Tree3DBench : Node3D
         }
     }
 
+    /// <summary>Where a screen point lands on the ground plane, if it does.</summary>
+    private Vector3? GroundAt(Vector2 screen)
+    {
+        Vector3 from = _camera.ProjectRayOrigin(screen), way = _camera.ProjectRayNormal(screen);
+        return Mathf.Abs(way.Y) < 1e-4f ? null : from + way * (-from.Y / way.Y);
+    }
+
     // --- the grass ---------------------------------------------------------------
 
-    /// <summary>The three meadows, with the press map over the whole board and
-    /// a label on each cell's near rim.</summary>
+    /// <summary>The grass: with <c>--grass</c> the four kinds side by side
+    /// (<see cref="Meadows"/>), each labelled on its near rim; otherwise
+    /// <see cref="BoardGrass"/> on every cell of the board. The press map over
+    /// the whole board either way. The fire burns it only where there is wood
+    /// (<see cref="Scorch"/>): grass is decoration, not fuel.</summary>
     private void BuildGrass()
     {
         if (_field is null || _tile is null)
@@ -551,24 +590,36 @@ public sealed partial class Tree3DBench : Node3D
         };
         AddChild(_grass);
         _grass.Map(span);
-        for (int i = 0; i < Meadows.Length; i++)
+        var lay = new List<(Vector2I Cell, Grass3D.Kind Kind, string? Name)>();
+        if (_grassy)
+            foreach ((Vector2I cell, Grass3D.Kind kind, string name) in Meadows)
+                lay.Add((cell, kind, name));
+        else
+            for (int q = 0; q < _field.Columns; q++)
+            for (int w = 0; w < _field.Rows; w++)
+                if (_field.InBounds(new Vector2I(q, w)))
+                    lay.Add((new Vector2I(q, w), BoardGrass, null));
+        ulong t0 = Time.GetTicksMsec();
+        for (int i = 0; i < lay.Count; i++)
         {
-            (Vector2I cell, Grass3D.Kind kind, string name) = Meadows[i];
+            (Vector2I cell, Grass3D.Kind kind, string? name) = lay[i];
             Vector3 mid = CellMiddle(cell);
             var trunks = new List<Vector3>();
             foreach (TreeFire t in _burning)
                 if (t.Cell == cell)
                     trunks.Add(t.Holder.GlobalPosition);
             _meadowIds.Add(_grass.Lay(kind, mid, r, 101 + i, trunks));
+            _meadowCells.Add(cell);
             _meadowFrom.Add(null);
-            AddChild(new Label3D
+            if (name is not null)
+                AddChild(new Label3D
             {
                 Text = name, FontSize = 40, OutlineSize = 10, PixelSize = 0.25f,
                 Billboard = BaseMaterial3D.BillboardModeEnum.Enabled, NoDepthTest = true,
                 Position = mid + new Vector3(0.0f, 4.0f, r * 1.05f),
             });
         }
-        GD.Print($"tree3d: grass on {Meadows.Length} cells, r {r:F0} px, press map {span}");
+        GD.Print($"tree3d: grass on {lay.Count} cells in {Time.GetTicksMsec() - t0} ms, r {r:F0} px, press map {span}");
     }
 
     /// <summary>A hull across each meadow, left to right, 30 px in front of its
@@ -619,7 +670,7 @@ public sealed partial class Tree3DBench : Node3D
             return;
         for (int i = 0; i < _meadowIds.Count; i++)
         {
-            Vector2I cell = Meadows[i].Cell;
+            Vector2I cell = _meadowCells[i];
             float age = _fire.AgeAt(cell);
             if (age < 0.0f)
                 _meadowFrom[i] = null;
@@ -659,8 +710,9 @@ public sealed partial class Tree3DBench : Node3D
 
     /// <summary>
     /// What presses the grass this frame: each hull's two tracks, flat, and its
-    /// belly between them, less; each tree that has come down, along its trunk
-    /// and its crown's width; and the pit its plate tore, cut out.
+    /// belly between them, less; and the pit a fallen tree's plate tore, cut
+    /// out. The fallen tree itself presses nothing: the flattened patch along
+    /// its trunk read as a pale mat laid under it, not as grass under a log.
     /// </summary>
     private void Trample()
     {
@@ -681,18 +733,10 @@ public sealed partial class Tree3DBench : Node3D
         {
             if (!t.Going)
                 continue;
-            var fall = new Vector3(t.WorldDir.X, 0.0f, t.WorldDir.Y);
             Vector3 foot = t.Holder.GlobalPosition;
             float plate = t.Fall.Plate > 0.0f ? t.Fall.Plate : 1.4f;
             float grow = Mathf.SmoothStep(0.02f, 0.30f, (float)t.Angle);
             _grass.Cut(foot, plate * t.Ppm * grow * 0.85f, t.WorldDir, t.Fall.Hinge * t.Ppm);
-            if (t.Angle < t.Touch * 0.9)
-                continue;
-            float down = (float)Math.Min(1.0, t.Angle / Math.Max(t.Rest, 1e-6));
-            float tall = t.Height * t.Ppm, low = t.Fall.Y0 * t.Ppm;
-            _grass.Press(foot + fall * (low * 0.5f), t.WorldDir, low, 0.6f * t.Ppm, down);
-            _grass.Press(foot + fall * ((low + tall) * 0.5f), t.WorldDir, tall - low,
-                         0.75f * t.Width * t.Ppm, 0.8f * down);
         }
     }
 
@@ -873,6 +917,14 @@ public sealed partial class Tree3DBench : Node3D
         foreach ((int ti, int point) in _fellAt)
             if (_clock >= _ramWhen && ti >= 0 && ti < _burning.Count)
                 Fell(_burning[ti], Compass(point), 0.6f);
+        if (_rmbAt is { } click && _clock >= _ramWhen)
+        {
+            _rmbAt = null;
+            _UnhandledInput(new InputEventMouseButton
+            {
+                ButtonIndex = MouseButton.Right, Pressed = true, Position = click,
+            });
+        }
         if (_drive && _clock >= _ramWhen)
         {
             _drive = false;
@@ -976,6 +1028,10 @@ public sealed partial class Tree3DBench : Node3D
         /// <summary>Only drives (<see cref="DriveAcross"/>): the lanes pass
         /// the next cell's tree closer than a hull's width.</summary>
         public bool Harmless;
+        /// <summary>The tree it was sent at, off a wood: the only one it
+        /// fells. Coming from 240 px back it crossed the next cell's tree on
+        /// the grass board and felled that one instead.</summary>
+        public TreeFire? Target;
     }
 
     private readonly List<Ram> _rams = new();
@@ -985,12 +1041,16 @@ public sealed partial class Tree3DBench : Node3D
     private static readonly Vector3 Hull = new(58.0f, 24.0f, 100.0f);
 
     /// <summary>A hull at <paramref name="t"/>, or through its cell in a wood.</summary>
-    private void RamInto(TreeFire t, int point)
+    private void RamInto(TreeFire t, int point) => RamInto(t, Compass(point));
+
+    /// <summary>The same, driving along <paramref name="dir"/> (x, z) - the way
+    /// the tree goes over.</summary>
+    private void RamInto(TreeFire t, Vector2 dir)
     {
         if (_wood > 0)
-            RamAt(CellMiddle(t.Cell), point, true);
+            RamAt(CellMiddle(t.Cell), dir, true);
         else if (!t.Going)
-            RamAt(t.Holder.GlobalPosition, point, false);
+            RamAt(t.Holder.GlobalPosition, dir, false, t);
     }
 
     private Vector3 CellMiddle(Vector2I cell)
@@ -1001,9 +1061,9 @@ public sealed partial class Tree3DBench : Node3D
         return Foot(new Vector3(flat.X, 0.0f, flat.Y / Squash));
     }
 
-    private void RamAt(Vector3 foot, int point, bool through)
+    private void RamAt(Vector3 foot, Vector2 dir, bool through, TreeFire? target = null)
     {
-        Vector2 dir = Compass(point);
+        dir = dir.Normalized();
         var way = new Vector3(dir.X, 0.0f, dir.Y);
         var body = new Node3D { Name = "Ram" };
         var paint = new StandardMaterial3D { AlbedoColor = new Color(0.36f, 0.40f, 0.24f) };
@@ -1019,7 +1079,7 @@ public sealed partial class Tree3DBench : Node3D
         float cross = (_tile?.HexRect.Size.X ?? 200.0f) * 0.5f + Hull.Z * 0.5f;
         var ram = new Ram
         {
-            Body = body, Way = way, Through = through,
+            Body = body, Way = way, Through = through, Target = target,
             At = foot - way * RamFrom,
             Left = RamFrom + (through ? cross : 0.0f),
         };
@@ -1055,7 +1115,7 @@ public sealed partial class Tree3DBench : Node3D
             Vector3 across = Vector3.Up.Cross(r.Way).Normalized();
             foreach (TreeFire t in _burning)
             {
-                if (t.Going || r.Left <= 0.0f)
+                if (t.Going || r.Left <= 0.0f || (r.Target is not null && t != r.Target))
                     continue;
                 Vector3 rel = t.Holder.GlobalPosition - r.At;
                 float ahead = rel.Dot(r.Way), side = rel.Dot(across);
@@ -1764,6 +1824,7 @@ void light() {
             else if (a == "--no-outline") _noOutline = true;
             else if (a == "--row") _row = true;
             else if (a == "--grass") _grassy = true;
+            else if (a == "--no-grass") _bare = true;
             else if (a == "--drive") _grassy = _drive = true;
             else if (a == "--wind" && more) _wind = F(args[++i], _wind);
             else if (a == "--wood" && more) _wood = Math.Max(1, (int)F(args[++i], 7));
@@ -1778,9 +1839,12 @@ void light() {
                         into.Add((ti, tp));
                 }
             }
+            else if (a == "--rmb" && more && args[++i].Split(',') is { Length: 2 } xy)
+                _rmbAt = new Vector2(F(xy[0], 0.0f), F(xy[1], 0.0f));
             else if (a == "--record" && more) _recordDir = args[++i];
             else if (a == "--record-every" && more) _recordEvery = Math.Max(1, (int)F(args[++i], _recordEvery));
             else if (a == "--record-for" && more) _recordFor = F(args[++i], _recordFor);
+            else if (a == "--record-from" && more) _recordFrom = F(args[++i], 0.0f);
             else if (a == "--burn" && more && args[++i].Split(',') is { Length: 2 } qr
                      && int.TryParse(qr[0], out int q) && int.TryParse(qr[1], out int r))
                 _burnAt = new Vector2I(q, r);

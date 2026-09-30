@@ -568,11 +568,15 @@ void fragment() {
                 float lap = floor(loop);
                 h1 = hash1(k * 13.3 + lap * 1.7);
                 h2 = hash1(k * 5.9 + lap * 3.1);
-                // The others go out as the fire falls.
-                if (h2 > 0.25 + 0.75 * heat) continue;
+                // The others go out as the fire falls - shrinking to nothing
+                // over a fifth of the heat past their mark, not cut at it: cut,
+                // a tongue at full size mid-lap was gone in one frame, one after
+                // another as a tree's fire died down (and came in the same way).
+                float keep = clamp((0.25 + 0.75 * heat - h2) / 0.15, 0.0, 1.0);
+                if (keep <= 0.0) continue;
                 // In from nothing and out to nothing: the lap that follows is
                 // another tongue, and seen at any size the change was a jump.
-                s = (0.5 + 0.45 * h1) * smoothstep(0.0, 0.3, a) * (1.0 - smoothstep(0.5, 1.0, a));
+                s = (0.5 + 0.45 * h1) * smoothstep(0.0, 0.3, a) * (1.0 - smoothstep(0.5, 1.0, a)) * keep;
             }
             // From nothing: a fire starting is one small tongue, and the rest
             // join it as it comes up.
