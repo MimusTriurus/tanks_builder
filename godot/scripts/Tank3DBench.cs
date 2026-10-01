@@ -824,6 +824,8 @@ void light() {
             else if (a == "--target-heading" && more) _otherHeading = F(args[++i], _otherHeading);
             else if (a == "--no-amphibious") _amphibious = false;
             else if (a == "--no-ripples") _ripples.Enabled = false;
+            else if (a == "--no-tracer") _tracerOn = false;
+            else if (a == "--tracer-smoke") _tracerSmoke = true;
             else if (a == "--soft-water") _softWater = true;
             else if (a == "--flat") _flat = true;
             else if (a == "--pbr") _pbr = true;
@@ -897,6 +899,10 @@ void light() {
             case "right": _turnScripted = -1.0f; break;
             case "straight": _turnScripted = 0.0f; break;
             case "ram": RamGo(); break;
+            case "aim-target":
+                if (_other is not null)
+                    AimCell(OtherCell(_other));
+                break;
             case "target": LineUp(); break;
             case "untarget": RemoveOther(); break;
             default:
@@ -909,6 +915,20 @@ void light() {
                 }
                 else if (what.StartsWith("elev=", StringComparison.Ordinal))
                     _model.Elevation = Mathf.DegToRad(F(what[5..], 0));
+                else if (what.StartsWith("aim-cell=", StringComparison.Ordinal))
+                {
+                    // aim-cell=Q,R: the right button on that hex.
+                    string[] qr = what[9..].Split(',');
+                    if (qr.Length == 2 && int.TryParse(qr[0], out int q) && int.TryParse(qr[1], out int r))
+                        AimCell(new Vector2I(q, r));
+                }
+                else if (what.StartsWith("aim=", StringComparison.Ordinal))
+                {
+                    // aim=X,Y: the right button at that screen point.
+                    string[] xy = what[4..].Split(',');
+                    if (xy.Length == 2)
+                        AimAt(new Vector2(F(xy[0], 0), F(xy[1], 0)));
+                }
                 else if (what.StartsWith("heading=", StringComparison.Ordinal))
                     Heading = F(what[8..], _heading);
                 else if (what.StartsWith("model=", StringComparison.Ordinal))
@@ -938,6 +958,7 @@ void light() {
         _kickPitch.Kick(-impulse * Mathf.Cos(_model.Yaw));
         _kickRoll.Kick(impulse * Mathf.Sin(_model.Yaw));
         FxShot();
+        Launch();
     }
 
     /// <summary>Four sides in the order the previews name them.</summary>
@@ -1127,6 +1148,8 @@ void light() {
         float elevIn = (Input.IsKeyPressed(Key.R) ? 1 : 0) - (Input.IsKeyPressed(Key.F) ? 1 : 0);
         float driveIn = (Input.IsKeyPressed(Key.W) ? 1 : 0) - (Input.IsKeyPressed(Key.S) ? 1 : 0) + _driveScripted;
         float turnIn = (Input.IsKeyPressed(Key.A) ? 1 : 0) - (Input.IsKeyPressed(Key.D) ? 1 : 0) + _turnScripted;
+        // The right button's point: the gun laid on to it and fired.
+        Laying(dt, ref yawIn, ref elevIn, ref turnIn);
         if (alive)
         {
             if (_model.Turreted)          // a casemate aims with its hull
@@ -1218,6 +1241,7 @@ void light() {
         _model.Apply();
         FxProcess(dt, _speed, a);
         RamFrame(dt, _camera.GlobalBasis);
+        ShellsTick(dt);
         FrameCamera();
 
         string where = _field is null ? "flat ground"
@@ -1227,8 +1251,8 @@ void light() {
             fate = "Afloat";
         string ram = _other is null ? "" : $"  target {_other.Tag} {_other.Cell}"
                      + (_ramNote.Length > 0 ? $"  {_ramNote}" : "");
-        _hud.Text = $"{_modelTag} 3D, class {_profile.Tag}  {where}  {fate}  {_note}{ram}\n"
-                    + "Space shot   1-4 ricochet front/right/rear/left   Shift+1-4 pierce   Ctrl+1-4 HE   5 round in the ground\n"
+        _hud.Text = $"{_modelTag} 3D, class {_profile.Tag}  {where}  {fate}  {_note}{ram}{(_aimNote.Length > 0 ? "  " + _aimNote : "")}\n"
+                    + "Space shot   RMB aim and fire   1-4 ricochet front/right/rear/left   Shift+1-4 pierce   Ctrl+1-4 HE   5 round in the ground\n"
                     + "J burning   K knocked out   X destroyed   T ram   Backspace reset   WASD drive   "
                     + (_model.Turreted ? "Q/E turret   " : "") + "R/F gun   -/= zoom   Tab panel   F12 shot";
         Shots();
@@ -1345,6 +1369,11 @@ void light() {
 
     public override void _UnhandledInput(InputEvent @event)
     {
+        if (@event is InputEventMouseButton { ButtonIndex: MouseButton.Right, Pressed: true } click)
+        {
+            AimAt(click.Position);
+            return;
+        }
         if (@event is not InputEventKey { Pressed: true, Echo: false } key)
             return;
         string kind = key.CtrlPressed ? "he-" : key.ShiftPressed ? "pierce-" : "ricochet-";
@@ -1427,6 +1456,11 @@ void light() {
             : $"{_other.Tag}, масса {_other.Profile.Mass} против {_profile.Mass}"
               + (_ramNote.Length > 0 ? $"\n{_ramNote}" : ""));
         _panel.Expand("tank3d.ram", true);
+        // The round in the air (Tank3DBench.Shell): the sprites' two switches.
+        _panel.Heading("tank3d.shell", "снаряд");
+        _panel.Toggle("tank3d.shell.tracer", "трассер  (--no-tracer)", () => _tracerOn, v => _tracerOn = v);
+        _panel.Toggle("tank3d.shell.smoke", "дымный след  (--tracer-smoke)", () => _tracerSmoke, v => _tracerSmoke = v);
+        _panel.Expand("tank3d.shell", true);
         layer.AddChild(_panel);
         _panel.AddHandle();
     }

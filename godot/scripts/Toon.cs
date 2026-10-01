@@ -349,6 +349,14 @@ uniform float water_push = 3.5;
 uniform float water_wet = 4.0;
 uniform vec3 water_foam : source_color = vec3(0.97, 1.0, 1.0);
 uniform vec3 water_edge : source_color = vec3(0.62, 0.83, 0.87);
+// The shot's glint (Tank3DBench, Glint): the plates turned toward the muzzle
+// at flash_at, within flash_reach of it, lit warm for a moment in two flat
+// steps - flash_on 1 at the shot and down to nought, so the lit patch shrinks
+// in on the muzzle as it goes rather than fading.
+uniform float flash_on = 0.0;
+uniform vec3 flash_at = vec3(0.0);
+uniform float flash_reach = 100.0;
+uniform vec3 flash_tone : source_color = vec3(1.0, 0.58, 0.22);
 varying vec3 world;
 " + NoiseCode + RampCode + BurnCode + WindCode + FallCode + @"
 void vertex() {
@@ -569,6 +577,16 @@ void fragment() {
             glow += c.rgb * 0.45;
             sooted = 1.0;
         }
+    }
+    if (flash_on > 0.001) {
+        vec3 to = flash_at - world;
+        float d = length(to);
+        float facing = clamp(dot(face_n, to / max(d, 1e-3)), 0.0, 1.0);
+        float k = flash_on * facing * (1.0 - d / max(flash_reach, 1e-3));
+        float lit = step(0.16, k) * 0.45 + step(0.40, k) * 0.55;
+        // Over the paint and its soot alike: the flash is light, not colour.
+        c.rgb = mix(c.rgb, flash_tone, 0.6 * lit);
+        glow += flash_tone * lit * 0.35;
     }
     ALBEDO = c.rgb;
     EMISSION = c.rgb * shade * ao + glow;

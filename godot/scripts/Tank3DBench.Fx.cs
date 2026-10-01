@@ -676,10 +676,54 @@ void fragment() {
 
     // --- events -------------------------------------------------------------
 
+    /// <summary>
+    /// The shot's glint on the tank's own armour: the plates facing the
+    /// muzzle - the mantlet, the turret's and the hull's front - lit warm for
+    /// <see cref="GlintTime"/> s, in two flat steps of the cel shader
+    /// (<c>flash_*</c> in <see cref="Toon"/>), the patch drawing in to the
+    /// muzzle as it goes. Within <see cref="GlintReach"/> hull lengths of the
+    /// muzzle as it was at the shot. The flash's own light (<see cref="CelShot"/>)
+    /// reaches 0.3 of a hull and the ramp steps everything it touches to one
+    /// tone, so on the plates it was nothing or a yellow front; this is the
+    /// glint the user asked for, held to the faces that could see the flash.
+    /// </summary>
+    private const float GlintTime = 0.12f, GlintReach = 0.95f;
+
+    private float _glintSince = -1.0f;
+    private Vector3 _glintAt;
+
+    /// <summary>The glint, this frame (<see cref="GlintTime"/>): full for the
+    /// flash's first two frames, then down to nought.</summary>
+    private void Glint(float dt)
+    {
+        if (_glintSince < 0.0f)
+            return;
+        _glintSince += dt;
+        float t = _glintSince;
+        float on = t < 2.0f / 60.0f ? 1.0f : Mathf.Clamp(1.0f - (t - 2.0f / 60.0f) / (GlintTime - 2.0f / 60.0f), 0.0f, 1.0f);
+        if (t > GlintTime)
+        {
+            on = 0.0f;
+            _glintSince = -1.0f;
+        }
+        float reach = GlintReach * _model.HullLength * _model.PixelsPerUnit;
+        foreach (ShaderMaterial m in _model.Cel)
+        {
+            m.SetShaderParameter("flash_on", on);
+            m.SetShaderParameter("flash_at", _glintAt);
+            m.SetShaderParameter("flash_reach", reach);
+        }
+    }
+
     private void FxShot()
     {
         _shotFrame = 0;
         Vector3 muzzle = _model.Muzzle.GlobalPosition;
+        if (!_fx2d)
+        {
+            _glintAt = muzzle;
+            _glintSince = 0.0f;
+        }
         Vector3 foot = Foot(muzzle);
         Vector3 bore = _model.Muzzle.GlobalBasis.Z;
         if (_celShot is not null)
@@ -869,11 +913,12 @@ void fragment() {
         slam.Fire();
     }
 
-    /// <summary>A round landing in the ground beside the tank: the board's
+    /// <summary>A round landing in the ground - beside the tank (key 5), or
+    /// where a round in flight came down (<see cref="Lands"/>): the board's
     /// <see cref="Stage3D.Boom"/>, burst and crater.</summary>
-    private void FxGround()
+    private void FxGround(Vector3? where = null)
     {
-        Vector3 spot = Foot(_rig.Position + new Vector3(0.55f, 0.0f, 0.45f) * HexWidth);
+        Vector3 spot = Foot(where ?? _rig.Position + new Vector3(0.55f, 0.0f, 0.45f) * HexWidth);
         float lift = LiftAt(spot);
         SheetBlast blast = Next(_booms, ref _nextBoom, Pool, () =>
         {
@@ -993,9 +1038,15 @@ void fragment() {
         _shake.Reset();
         _burning = false;
         _shotFrame = -1;
+        if (_glintSince >= 0.0f)
+        {
+            _glintSince = GlintTime;
+            Glint(1.0f);
+        }
         _celBurn?.Reset();
         _celExhaust?.Reset();
         _celShot?.Reset();
+        ShellsReset();
         _celHit?.Reset();
         _celBlast?.Reset();
         _celDeath?.Reset();
@@ -1151,6 +1202,7 @@ void fragment() {
             _celExhaust.Tick(dt, _exhaustPorts, _camera.GlobalBasis);
         }
         _celShot?.Tick(dt, _camera.GlobalBasis);
+        Glint(dt);
         _celHit?.Tick(dt, _camera.GlobalBasis);
         _celBlast?.Tick(dt, _camera.GlobalBasis);
         _celDeath?.Tick(dt, _camera.GlobalBasis);
