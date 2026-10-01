@@ -124,4 +124,82 @@ public sealed partial class Tank3DBench
     /// <summary>Off the ground - afloat, falling: the next crater met starts
     /// from where it is, not with a jump from the last.</summary>
     private void PitsLeave() => _pitHas = false;
+
+    // --- the wreck in its own crater ------------------------------------------
+
+    /// <summary>The crater the ammunition going up digs, out to its rim's
+    /// foot, against the hull's length: the size of the tank, so it shows round
+    /// the wreck and on the free cell after it - the crest just short of the
+    /// hull's ends, beyond its sides, the outer slope past its ends.</summary>
+    private const float WreckPit = 0.75f;
+
+    /// <summary>The hop: how long the hull is in the air, s, and how high it
+    /// goes, a share of the model's height.</summary>
+    private const float HopTime = 0.7f, HopRise = 0.35f;
+
+    /// <summary>How far the wreck settles into its crater, a share of the
+    /// model's height, and how long it takes after the landing, s. Shallow on
+    /// purpose: the bowl is a mark on the ground and the ground writes depth,
+    /// so a hull let down into it is cut off by the ground; the near rim,
+    /// higher than this, hides the cut from the board's 30 degrees.</summary>
+    private const float WreckSink = 0.12f, WreckSettle = 0.18f;
+
+    /// <summary>How far it comes to lie over, rad: on one side, a little on
+    /// one end - which, by the cell.</summary>
+    private const float WreckRoll = 0.09f, WreckPitch = 0.035f;
+
+    /// <summary>The wreck has its crater under it: it settles by
+    /// <see cref="WreckLay"/>, not on its belts (<see cref="Pits"/> - a crater
+    /// the size of the hull put its belts' ends on the rim and lifted it).</summary>
+    private bool _wreckPit, _wreckLanded;
+    private float _wreckRoll, _wreckPitch;
+
+    private float WreckPitRadius => WreckPit * _model.HullLength * _model.PixelsPerUnit;
+
+    /// <summary>The crater dug under the hull this frame: how it will lie.</summary>
+    private void WreckDug()
+    {
+        Vector2I cell = CellHere;
+        _wreckPit = true;
+        _wreckLanded = false;
+        _wreckRoll = WreckRoll * (CelPuff.Hash(cell.X * 31 + cell.Y, 511) < 0.5f ? -1.0f : 1.0f)
+                     * (0.8f + 0.4f * CelPuff.Hash(cell.X * 31 + cell.Y, 512));
+        _wreckPitch = WreckPitch * (CelPuff.Hash(cell.X * 31 + cell.Y, 513) * 2.0f - 1.0f);
+        PitsLeave();
+    }
+
+    /// <summary>
+    /// The wreck over its crater this frame: thrown up by the blast and
+    /// falling back (<see cref="HopTime"/>), the landing kicking the springs
+    /// and the camera, then settling <see cref="WreckSink"/> into the bowl and
+    /// lying over by <see cref="_wreckRoll"/>, <see cref="_wreckPitch"/>. The
+    /// lift, world px, to add to the rig's height; <paramref name="want"/>
+    /// tipped by the lie.
+    /// </summary>
+    private float WreckLay(ref Vector3 want)
+    {
+        float t = _sinceFate;
+        float tall = _model.Size.Y * _model.PixelsPerUnit;
+        if (t < HopTime)
+        {
+            float u = t / HopTime;
+            return 4.0f * HopRise * tall * u * (1.0f - u);
+        }
+        if (!_wreckLanded)
+        {
+            _wreckLanded = true;
+            // + pitch is the nose down, + roll the left side up (TankModel):
+            // the hull goes on the way it will lie, and swings back.
+            _kickPitch.Kick(Mathf.Sign(_wreckPitch) * 0.8f);
+            _kickRoll.Kick(Mathf.Sign(_wreckRoll) * 1.4f);
+            _heave.Kick(-0.3f);
+            _shake.Blast(_profile.ShotShake * 0.5);
+        }
+        float k = Mathf.SmoothStep(0.0f, 1.0f, Mathf.Clamp((t - HopTime) / WreckSettle, 0.0f, 1.0f));
+        float h = Mathf.DegToRad(_heading);
+        var ahead = new Vector3(Mathf.Sin(h), 0.0f, Mathf.Cos(h));
+        var left = new Vector3(ahead.Z, 0.0f, -ahead.X);
+        want = (want - ahead * Mathf.Tan(k * _wreckPitch) - left * Mathf.Tan(k * _wreckRoll)).Normalized();
+        return -WreckSink * tall * k;
+    }
 }

@@ -389,7 +389,9 @@ public sealed partial class Tank3DBench : Node3D
         const float back = Back;
         float height = GetViewport().GetVisibleRect().Size.Y;
         _camera.Size = height / _zoom;
-        Vector3 pivot = _rig.Position;
+        // Not up with the wreck's hop, nor down into its crater or the ground
+        // after it (Tank3DBench.Pits, Gone): the board stays where it is.
+        Vector3 pivot = _rig.Position - Vector3.Up * _wreckLift;
         // Both hulls in the picture while a target stands near: toward the
         // middle between them, eased off with the distance so the rammer stays
         // on the screen - a switch at one distance was a jump of the view.
@@ -686,10 +688,17 @@ void light() {
             want = afloat || _falling ? Vector3.Up : new Vector3(-sx, 1.0f, -sz).Normalized();
             float y = Ride(cell, ride, afloat, dt, snap);
             // Over the craters' rims and into their bowls (Tank3DBench.Pits).
-            if (!afloat && !_falling)
+            _wreckLift = 0.0f;
+            if (!afloat && !_falling && _wreckPit)
+                y += _wreckLift = WreckLay(ref want);
+            else if (!afloat && !_falling)
                 y += Pits(dt, ref want, snap);
             else
                 PitsLeave();
+            // The burnt-out wreck into the ground (Gone).
+            if (Gone > 0.0f)
+                _wreckLift -= Gone * GoneDepth;
+            y -= Gone > 0.0f ? Gone * GoneDepth : 0.0f;
             _rig.Position = new Vector3(_rig.Position.X, y, _rig.Position.Z);
         }
         _groundUp = snap ? want : _groundUp.Lerp(want, 1.0f - Mathf.Exp(-10.0f * dt)).Normalized();
@@ -1027,10 +1036,42 @@ void light() {
         public Vector3 Axis;
         public float W;
         public float Half;
+        /// <summary>Its longest side, world px - how far it goes down.</summary>
+        public float Long;
         public bool Rest;
+        /// <summary>Where it came to rest, world Y - what <see cref="Gone"/>
+        /// takes it down from.</summary>
+        public float? Lay;
     }
 
     private readonly List<Flying> _flying = new();
+
+    /// <summary>
+    /// How far the destroyed tank has left the board, 0 there to 1 gone: the
+    /// board's <see cref="Wreck.Presence"/> - one until the fire is out
+    /// (<see cref="Wreck.GoneAt"/>), nought <see cref="Wreck.FadeSeconds"/>
+    /// later. The rule freed the cell on the frame of the blast
+    /// (docs/gdd/states.md, «Уничтожен»: the hulk is a picture, not an
+    /// obstacle); this is the picture catching up. The sprite fades out; the
+    /// model goes down into the ground, hull, turret on its deck and the
+    /// debris round it, eased in and out - a cel model made see-through shows
+    /// its own insides and its ink through itself, and the ground hides what
+    /// has gone under it. The crater the blast dug is left on a free cell.
+    /// </summary>
+    private float Gone => _fate == Fate.Destroyed ? Mathf.SmoothStep(0.0f, 1.0f, 1.0f - (float)_wreck.Presence) : 0.0f;
+
+    /// <summary>How deep the wreck goes, world px: all of it, the turret on its
+    /// deck as well, and a little more.</summary>
+    private float GoneDepth => 1.3f * _model.Size.Y * _model.PixelsPerUnit;
+
+    /// <summary>The destroyed tank's own cell blocks nothing - not a ram's
+    /// shove, not a path (docs/gdd/states.md, «Уничтожен», 2026-09-08).</summary>
+    private bool Blocks => _fate != Fate.Destroyed;
+
+    /// <summary>How far the wreck is off its ground this frame, world px - its
+    /// hop, its settle into the crater, its going under; the camera leaves it
+    /// out.</summary>
+    private float _wreckLift;
     private Vector3 _tossFrom, _tossTo;
     private float _tossYaw0, _tossYawEnd;
     private Quaternion _tossTilt;
@@ -1093,6 +1134,7 @@ void light() {
                 Axis = axis,
                 W = rnd.RandfRange(6.0f, 14.0f),
                 Half = Mathf.Min(piece.Size.X, Mathf.Min(piece.Size.Y, piece.Size.Z)) * 0.5f * s,
+                Long = Mathf.Max(piece.Size.X, Mathf.Max(piece.Size.Y, piece.Size.Z)) * s,
             });
         }
         FxDestroyed(blast);
@@ -1107,7 +1149,10 @@ void light() {
             node.Transform = local;
         }
         _moved.Clear();
+        foreach (Flying f in _flying)
+            f.Node.Visible = true;
         _flying.Clear();
+        _model.Visible = true;
         _model.TurretOverride = null;
         _model.Yaw = 0; _model.Elevation = 0; _model.Recoil = 0;
         _model.Droop = 0; _model.Cant = 0; _model.Slackness = 0;
@@ -1117,6 +1162,7 @@ void light() {
                                      _pitPitch, _pitRoll, _pitHeave })
             s.Reset();
         _fate = Fate.Alive;
+        _wreckPit = _wreckLanded = false;
         _speed = 0;
         _sinceShot = 99.0f;
         FxReset();
@@ -1345,6 +1391,19 @@ void light() {
             }
             f.Node.GlobalTransform = x;
         }
+        // The pieces go into the ground with the hull, each by its own size;
+        // gone, the whole of it is off the board.
+        float gone = Gone;
+        foreach (Flying f in _flying)
+        {
+            if (!f.Rest)
+                continue;
+            f.Lay ??= f.Node.GlobalPosition.Y;
+            Vector3 at = f.Node.GlobalPosition;
+            f.Node.GlobalPosition = new Vector3(at.X, f.Lay.Value - gone * 1.2f * Mathf.Max(f.Long, 1.0f), at.Z);
+            f.Node.Visible = gone < 1.0f;
+        }
+        _model.Visible = gone < 1.0f;
     }
 
     private void Shots()

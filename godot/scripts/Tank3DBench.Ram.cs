@@ -475,7 +475,7 @@ public sealed partial class Tank3DBench
         _shake.Blast(_profile.ShotShake * TankTick.RamRumble);
 
         Vector2I mineCell = _field!.FlatCellAt(Board(at));
-        Ramming.Shove push = Ramming.Of(_field, c => c == mineCell, _profile, o.Profile, o.Cell, heading);
+        Ramming.Shove push = Ramming.Of(_field, c => Blocks && c == mineCell, _profile, o.Profile, o.Cell, heading);
         if (!push.Allowed)
         {
             GD.Print($"ram: frame {_frame}, {_modelTag} does not shove {o.Tag} at {o.Cell} along {heading} - "

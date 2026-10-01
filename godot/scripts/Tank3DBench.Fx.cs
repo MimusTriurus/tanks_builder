@@ -930,6 +930,17 @@ void fragment() {
     /// width of one (<see cref="Craters.Wide"/>, a hex's share).</summary>
     private const float CraterRadius = 1.0f;
 
+    /// <summary>
+    /// The crater a gun of firepower <paramref name="might"/> digs, against
+    /// <see cref="CraterRadius"/>: the GDD's I..V (<see cref="MovementProfile.Might"/>),
+    /// a fifth more a step - LT 0.6, MT 0.8, HT 1.0 (the size it was for
+    /// every class), TD 1.2, HM 1.4. Firepower and not the calibre of the
+    /// tracer or the smoke: those are judged by eye against the gun on the
+    /// model, this is the rule's own measure of how hard the round hits.
+    /// </summary>
+    private static float CraterShare(int might) => 0.6f + 0.2f * (Mathf.Clamp(might, 1, 5) - 1);
+
+
     /// <summary>A round landing in the ground - beside the tank (key 5), or
     /// where a round in flight came down (<see cref="Lands"/>): the board's
     /// <see cref="Stage3D.Boom"/>, burst and crater.</summary>
@@ -941,7 +952,7 @@ void fragment() {
         if (_celBurst is not null)
         {
             _celBurst.Craters.SunWay = _sun.GlobalBasis.Z;
-            _celBurst.Burst(spot, CraterRadius * new Craters().Wide * Might * HexWidth);
+            _celBurst.Burst(spot, CraterRadius * new Craters().Wide * CraterShare(_profile.Might) * HexWidth);
             _shake.Blast(_profile.ShotShake * 0.6);
             return;
         }
@@ -1044,6 +1055,14 @@ void fragment() {
         {
             _burning = true;
             Fireball(1.0f, grounded: true);
+            // The blast digs a crater the size of the tank under it, and the
+            // hull, thrown up, comes down into it (Tank3DBench.Pits, WreckLay).
+            if (_celBurst is not null)
+            {
+                _celBurst.Craters.SunWay = _sun.GlobalBasis.Z;
+                _celBurst.Craters.Dig(Foot(_rig.Position), WreckPitRadius);
+                WreckDug();
+            }
         }
         // TankTick.Quake(Death): the class's own gun shake, harder.
         _shake.Fire(new Vector2(0.0f, -1.0f), _profile.ShotShake * 2.15);
@@ -1196,7 +1215,9 @@ void fragment() {
         {
             // What the sprite's fire and column would draw, handed to the model's.
             _celBurn.Fire = lit ? s.FireDensity : 0.0f;
-            _celBurn.Smoke = lit || smoulder ? s.SmokeDensity : 0.0f;
+            // The column goes with the hull it rises from: nothing smokes out
+            // of a cell the wreck has left.
+            _celBurn.Smoke = lit || smoulder ? s.SmokeDensity * (1.0f - Gone) : 0.0f;
             _celBurn.Smoulder = smoulder;
             _ports.Clear();
             foreach (Node3D ex in _model.Exhausts)
