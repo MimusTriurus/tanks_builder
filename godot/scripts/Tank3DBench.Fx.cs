@@ -99,6 +99,17 @@ public sealed partial class Tank3DBench
     private CelShot? _celShot;
     /// <summary>A round in the ground and in the water, the model's look.</summary>
     private CelBurst? _celBurst;
+    /// <summary>The scorches the burnt-out wrecks leave, none under <c>--fx2d</c>.</summary>
+    private CelScorch? _celScorch;
+
+    /// <summary><c>--scorch</c> and the panel: whether a wreck leaves one -
+    /// off unless asked, by the user's decision.</summary>
+    private bool _scorchOn;
+
+    /// <summary>How far a wreck's scorch reaches, to its body's edge, against
+    /// the hull's length: past its crater's rim (<see cref="WreckPit"/> 0.75),
+    /// or the crater covers it and nothing shows.</summary>
+    private const float ScorchWide = 1.0f;
     private CelSplash? _shellSplash;
     private CelHit? _celHit;
     private CelBlast? _celBlast;
@@ -507,6 +518,9 @@ void fragment() {
             _celBurst = new CelBurst { Name = "Burst" };
             AddChild(_celBurst);
             _celBurst.Build(_model.HullLength * _model.PixelsPerUnit, Squash, RiseFactor, w => Foot(w).Y);
+            _celScorch = new CelScorch { Name = "Scorch" };
+            AddChild(_celScorch);
+            _celScorch.Build(Squash, RiseFactor, w => Foot(w).Y);
             _shellSplash = new CelSplash { Name = "ShellSplash" };
             AddChild(_shellSplash);
             _shellSplash.Build(Squash, RiseFactor);
@@ -605,6 +619,8 @@ void fragment() {
         _celShot = null;
         _celBurst?.QueueFree();
         _celBurst = null;
+        _celScorch?.QueueFree();
+        _celScorch = null;
         _shellSplash?.QueueFree();
         _shellSplash = null;
         _celHit?.QueueFree();
@@ -1063,6 +1079,10 @@ void fragment() {
                 _celBurst.Craters.Dig(Foot(_rig.Position), WreckPitRadius);
                 WreckDug();
             }
+            // Where it burns: the ground scorched under it and round its
+            // crater (CelScorch). Not in a ford - the water is over it.
+            if (_scorchOn && _celScorch is not null && !(_field?.IsWater(CellHere) ?? false))
+                _celScorch.Burn(Foot(_rig.Position), ScorchWide * _model.HullLength * _model.PixelsPerUnit);
         }
         // TankTick.Quake(Death): the class's own gun shake, harder.
         _shake.Fire(new Vector2(0.0f, -1.0f), _profile.ShotShake * 2.15);
@@ -1095,6 +1115,7 @@ void fragment() {
         _celHit?.Reset();
         _celBlast?.Reset();
         _celBurst?.Reset();
+        _celScorch?.Reset();
         _shellSplash?.Reset();
         _celDeath?.Reset();
         _celDust?.Reset();
@@ -1255,6 +1276,7 @@ void fragment() {
         _celHit?.Tick(dt, _camera.GlobalBasis);
         _celBlast?.Tick(dt, _camera.GlobalBasis);
         _celBurst?.Tick(dt, _camera.GlobalBasis);
+        _celScorch?.Tick(dt);
         _shellSplash?.Tick(dt, _camera.GlobalBasis);
         _celDeath?.Tick(dt, _camera.GlobalBasis);
 
