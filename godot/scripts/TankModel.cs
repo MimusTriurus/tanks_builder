@@ -126,6 +126,17 @@ public sealed partial class TankModel : Node3D
     public float Pitch;
     public float Roll;
     public float Heave;
+    /// <summary>The engine's tremble (<see cref="EngineTremble"/>), rad: the
+    /// stern lifted (+) and wagged to the hull's left (+) about the bow's foot
+    /// (<see cref="Bow"/>), the bow itself all but planted - the motor is in
+    /// the back. The belts are not under <see cref="Body"/> and stand; the
+    /// turret is held out of it (<see cref="Apply"/>), the sprites'
+    /// stabiliser.</summary>
+    public float TremblePitch, TrembleYaw;
+    /// <summary>The foot of the hull's bow in <see cref="Body"/>'s frame: the
+    /// Hull mesh's box, its front and bottom - the point the tremble turns
+    /// about.</summary>
+    public Vector3 Bow;
     public float Driven;
     /// <summary>How far a turn on the spot has run the belts against each
     /// other: the right belt forward by this, the left one back - positive
@@ -297,10 +308,29 @@ public sealed partial class TankModel : Node3D
 
     /// <summary>A model unit is <paramref name="pixelsPerUnit"/> world units from
     /// here on.</summary>
+    private static IEnumerable<Vector3> Corners(Aabb b)
+    {
+        for (int i = 0; i < 8; i++)
+            yield return b.Position + new Vector3((i & 1) != 0 ? b.Size.X : 0.0f,
+                                                  (i & 2) != 0 ? b.Size.Y : 0.0f,
+                                                  (i & 4) != 0 ? b.Size.Z : 0.0f);
+    }
+
     public void ScaleTo(float pixelsPerUnit)
     {
         PixelsPerUnit = pixelsPerUnit;
         Scale = Vector3.One * pixelsPerUnit;
+    }
+
+    /// <summary>A node's frame in <see cref="Body"/>'s, by its parents' own
+    /// transforms - the model need not be in the tree. Identity for Body
+    /// itself or for a node not under it.</summary>
+    private Transform3D ToBody(Node3D? n)
+    {
+        Transform3D x = Transform3D.Identity;
+        for (Node3D? at = n; at is not null && at != Body; at = at.GetParent() as Node3D)
+            x = at.Transform * x;
+        return x;
     }
 
     /// <summary>The hull's axes and the bore's radius, off the meshes - at
@@ -313,6 +343,17 @@ public sealed partial class TankModel : Node3D
             Aabb box = hull.Mesh.GetAabb();
             HullLength = Mathf.Max(box.Size.X, box.Size.Z);
             HullWidth = Mathf.Min(box.Size.X, box.Size.Z);
+            // The bow's foot, in Body's frame: front and bottom of the box,
+            // on the middle line.
+            Transform3D x = ToBody(hull);
+            float front = float.MinValue, low = float.MaxValue;
+            foreach (Vector3 c in Corners(box))
+            {
+                Vector3 b = x * c;
+                front = Mathf.Max(front, b.Z);
+                low = Mathf.Min(low, b.Y);
+            }
+            Bow = new Vector3(0.0f, low, front);
         }
         else
         {
@@ -423,8 +464,17 @@ public sealed partial class TankModel : Node3D
     /// <summary>Put every joint where the pose fields say.</summary>
     public void Apply()
     {
-        Body.Position = BodyRest + new Vector3(0.0f, Heave, 0.0f);
-        Body.Rotation = new Vector3(Pitch, 0.0f, Roll);
+        // The tremble about the bow's foot, under the hull's pose: + about X
+        // takes the stern (-Z) up, + about Y takes it to -X, so the wag's
+        // sign is turned.
+        Transform3D shake = Transform3D.Identity;
+        if (TremblePitch != 0.0f || TrembleYaw != 0.0f)
+        {
+            var turn = new Basis(Vector3.Right, TremblePitch) * new Basis(Vector3.Up, -TrembleYaw);
+            shake = new Transform3D(turn, Bow - turn * Bow);
+        }
+        Body.Transform = new Transform3D(Basis.FromEuler(new Vector3(Pitch, 0.0f, Roll)),
+                                         BodyRest + new Vector3(0.0f, Heave, 0.0f)) * shake;
         if (Turret is null)
         {
             // a casemate: the gun is the hull's, nothing turns
@@ -436,6 +486,14 @@ public sealed partial class TankModel : Node3D
             Basis yaw = new(Vector3.Up, Yaw);
             Quaternion tip = Quaternion.Identity.Slerp(Tip, Mathf.Clamp(Cant, 0.0f, 1.0f));
             Turret.Transform = new Transform3D(yaw * new Basis(tip), TurretRest);
+            // Held out of the tremble, in its parent's frame: the hull shakes
+            // under a turret that stays - the sprites' TurretStabilised, and
+            // with it the aerial, which swung twice the hull's travel there.
+            if (shake != Transform3D.Identity)
+            {
+                Transform3D up = ToBody(Turret.GetParent() as Node3D);
+                Turret.Transform = up.AffineInverse() * shake.AffineInverse() * up * Turret.Transform;
+            }
         }
         // Elevation is from the rest pose - a mortar's rest is already raised,
         // in the geometry, not in a node's rotation.

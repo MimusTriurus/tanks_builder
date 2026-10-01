@@ -220,6 +220,20 @@ public sealed partial class Tank3DBench : Node3D
     private float TurnRate => (float)_profile.TurnRate;
     private float _speed;
     private float _nextBump;
+
+    /// <summary>The engine's tremble - the sprites' own clock
+    /// (<see cref="EngineTremble"/>: 11.5 and 7.3 Hz at rest, a share faster
+    /// and harder under load), its stern travel turned into an angle about the
+    /// bow by the hull's length on the board. A standing model was dead still
+    /// with its engine running; the sprites' was not.</summary>
+    private readonly EngineTremble _tremble = new();
+    /// <summary>The engine running, eased: it dies with the tank
+    /// (<c>Wreck.Out</c>) and does not stop dead.</summary>
+    private float _trembleOn = 1.0f;
+    /// <summary>A multiplier over the sprites' stern travel - the panel's
+    /// <c>EngineTremble.Level</c> on the board.</summary>
+    private float _trembleLevel = TrembleLevel;
+    private const float TrembleLevel = 1.0f;
     private float _sinceShot = 99.0f;
     private float _sinceFate;
     private Fate _fate = Fate.Alive;
@@ -815,6 +829,7 @@ void light() {
             else if (a == "--pbr") _pbr = true;
             else if (a == "--fx2d") _fx2d = true;
             else if (a == "--zoom" && more) _zoom = F(args[++i], _zoom);
+            else if (a == "--tremble" && more) _trembleLevel = F(args[++i], _trembleLevel);
             else if (a == "--heading" && more) _heading = F(args[++i], _heading);
             else if (a == "--capture" && more) _capturePath = args[++i];
             else if (a == "--no-ui") _noUi = true;
@@ -1069,6 +1084,8 @@ void light() {
         _model.TurretOverride = null;
         _model.Yaw = 0; _model.Elevation = 0; _model.Recoil = 0;
         _model.Droop = 0; _model.Cant = 0; _model.Slackness = 0;
+        _tremble.Reset();
+        _trembleOn = 1.0f;
         foreach (Spring s in new[] { _kickPitch, _kickRoll, _swayPitch, _swayRoll, _heave, _tip })
             s.Reset();
         _fate = Fate.Alive;
@@ -1187,6 +1204,7 @@ void light() {
         _model.Pitch = _kickPitch.Step(dt) + sway;
         _model.Roll = _kickRoll.Step(dt) + _swayRoll.Step(dt);
         _model.Heave = _heave.Step(dt);
+        Tremble(dt);
 
         _sinceShot += dt;
         _model.Recoil = Stroke(_sinceShot);
@@ -1215,6 +1233,18 @@ void light() {
                     + (_model.Turreted ? "Q/E turret   " : "") + "R/F gun   -/= zoom   Tab panel   F12 shot";
         Shots();
         _frame++;
+    }
+
+    /// <summary>The engine's tremble on the model, this frame.</summary>
+    private void Tremble(float dt)
+    {
+        _trembleOn = Mathf.MoveToward(_trembleOn, _wreck.Out ? 0.0f : 1.0f, dt * 3.0f);
+        _tremble.TopSpeed = _profile.TopSpeed;
+        _tremble.Advance(Mathf.Abs(_speed), dt);
+        float lever = Mathf.Max(_model.HullLength * _model.PixelsPerUnit, 1.0f);
+        float k = (float)EngineTremble.SternLeverPx / lever * _trembleLevel * _trembleOn;
+        _model.TremblePitch = (float)_tremble.Pitch * k;
+        _model.TrembleYaw = (float)_tremble.Yaw * k;
     }
 
     private void AdvanceFate(float dt)
