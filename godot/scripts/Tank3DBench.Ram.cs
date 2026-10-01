@@ -56,8 +56,13 @@ public sealed partial class Tank3DBench
         /// <summary>Where it stands by the rules - the cell a ram asks about.</summary>
         public Vector2I Cell;
         public Vector3 Up = Vector3.Up;
-        public readonly Spring Pitch = new(KickSpring.K, KickSpring.C);
-        public readonly Spring Roll = new(KickSpring.K, KickSpring.C);
+        public readonly Spring Pitch = new(RockSpring.K, RockSpring.C);
+        public readonly Spring Roll = new(RockSpring.K, RockSpring.C);
+        /// <summary>The hull on its suspension, model units, up positive.</summary>
+        public readonly Spring Heave = new(SinkSpring.K, SinkSpring.C);
+        /// <summary>How far it is tipped over a brink, the sine: its trailing
+        /// end still on the bank, its middle gone down past it.</summary>
+        public float Tip;
         /// <summary>The cells' middles it is being moved through, and the next.</summary>
         public readonly List<Vector3> Legs = new();
         public int Leg;
@@ -73,6 +78,16 @@ public sealed partial class Tank3DBench
         /// <summary>Its marks - the dents the rams left (<see cref="Dents"/>).</summary>
         public CelHit Hits = null!;
         public readonly List<CelRuts.Belt> Belts = new();
+        /// <summary>The dust its dragged belts plough up (<see cref="Plough"/>),
+        /// none under <c>--fx2d</c>.</summary>
+        public CelDust? Dust;
+        public readonly List<CelDust.Belt> Ploughs = new();
+        /// <summary>How fast it is being dragged, as a share of
+        /// <see cref="RamLeanAt"/> of its top speed, 0..1.</summary>
+        public float Pace, WasPace;
+        /// <summary>Time to the next tremble of the drag, s, and how many so far.</summary>
+        public float ShudderIn;
+        public int Shudders;
 
         public Vector3 Ahead
         {
@@ -98,6 +113,48 @@ public sealed partial class Tank3DBench
     private float _otherHeading = 180.0f;
     private Other? _other;
     private RamPhase _ram;
+
+    /// <summary>How far the dragged hull leans the way it is shoved, rad, at
+    /// full pace: the belts that lead dig in, and that side and end go down.
+    /// Held while it slides, let go at the stop, and the spring swings it back
+    /// past level - what says it was moved and did not just glide. Only the
+    /// knock at the meeting, a degree for a tenth of a second, and the target
+    /// went across the hex like a cut-out (the user asked for it to react);
+    /// at half this the lean was two px of a side, nothing on the screen.</summary>
+    private const float RamLean = 0.09f;
+    /// <summary>The share of the target's top speed counted as full pace for
+    /// the lean, the tremble and the dust's size: the pair leave at the keep
+    /// of the slower top (<c>_ramCap</c>), never near the top itself.</summary>
+    private const float RamLeanAt = 0.45f;
+    /// <summary>The drag's tremble: a kick on each spring this often, s, and
+    /// this hard at full pace - locked belts grabbing and letting go.</summary>
+    private const float RamShudderEvery = 0.07f, RamShudder = 0.6f;
+    /// <summary>The target's springs: softer and far less damped than the
+    /// hull's kick (<c>KickSpring</c>, 1150/38) - a quarter of a second a
+    /// swing and a few swings to rest. On the kick's spring the hull came
+    /// back from the lean to level in one move, 0.2 of a degree past it, and
+    /// did not rock at all.</summary>
+    private static readonly (float K, float C) RockSpring = (700.0f, 14.0f);
+    /// <summary>The kick when the drag stops: the hull goes on the way it was
+    /// going, past its lean, and swings back.</summary>
+    private const float RamSettle = 1.2f;
+
+    /// <summary>The suspension the hull lands on: a sink and a bounce or two.</summary>
+    private static readonly (float K, float C) SinkSpring = (600.0f, 12.0f);
+    /// <summary>A landing off a bank, at the fall's <see cref="LandAt"/> of
+    /// speed: how far the hull sinks on its suspension, hull lengths; how hard
+    /// the end and side that land first are thrown down, rad/s; and the dust's
+    /// pace (<see cref="CelDust.Belt.Pace"/>) - small, a puff round the hull.
+    /// Before this the only kick was the pitch by the shove's share along the
+    /// hull, nothing for a hull shoved off broadside - the rammed one's way -
+    /// and it came down like a brick.</summary>
+    private const float LandSink = 0.05f, LandTip = 1.4f, LandDust = 0.6f;
+    /// <summary>The fall speed counted as one landing, px/s - off one level.</summary>
+    private const float LandAt = 268.0f;
+    /// <summary>How much higher the landing's dust climbs than a belt's.</summary>
+    private const float LandLift = 3.5f;
+    /// <summary>The steepest the hull tips over a brink, rad.</summary>
+    private const float TipMost = 0.6f;
     /// <summary>The flat side of the hex the ram goes along, world, unit.</summary>
     private Vector3 _ramWay;
     /// <summary>The rammer's place off the target's, held while they are one.</summary>
@@ -150,6 +207,10 @@ public sealed partial class Tank3DBench
         o.Falling = false;
         o.Pitch.Reset();
         o.Roll.Reset();
+        o.Pace = o.WasPace = 0.0f;
+        o.Heave.Reset();
+        o.Tip = 0.0f;
+        o.Dust?.Reset();
         Vector3 at = CellWorld(cell);
         o.Rig.Position = new Vector3(at.X, OtherGround(at, out Vector3 up), at.Z);
         o.Up = up;
@@ -184,10 +245,18 @@ public sealed partial class Tank3DBench
         hits.Build(model.HullLength * model.PixelsPerUnit);
         hits.Targets(model, model.Cel);
         hits.Solids = _solids;
+        CelDust? dust = null;
+        if (!_fx2d)
+        {
+            dust = new CelDust { Name = "TargetDust", Solids = _solids };
+            AddChild(dust);
+            dust.Build(model.HullLength * model.PixelsPerUnit);
+        }
         _other = new Other
         {
             Model = model, Rig = rig, Profile = profile, Tag = tag.ToUpperInvariant(),
             Foot = MeasureFootprint(model, rig, tag.ToUpperInvariant()), Scuff = scuff, Hits = hits,
+            Dust = dust,
         };
         GD.Print($"tank3d: target {_other.Tag} class {profile.Tag} x{profile.Size:F2}, mass {profile.Mass}");
     }
@@ -199,6 +268,7 @@ public sealed partial class Tank3DBench
         _other.Rig.QueueFree();
         _other.Scuff.QueueFree();
         _other.Hits.QueueFree();
+        _other.Dust?.QueueFree();
         _other = null;
         _ram = RamPhase.None;
     }
@@ -751,6 +821,10 @@ public sealed partial class Tank3DBench
         // The ground: followed on a face, fallen to off a bank.
         float ground = OtherGround(o.Rig.Position, out Vector3 up);
         float y = o.Rig.Position.Y;
+        Vector3 way = new(o.Way.X, 0.0f, o.Way.Z);
+        way = way.LengthSquared() > 1e-6f ? way.Normalized() : o.Ahead;
+        float reach = ReachAlong(o, way);
+        o.Tip = 0.0f;
         if (y > ground + 0.5f)
         {
             if (!o.Falling)
@@ -760,21 +834,46 @@ public sealed partial class Tank3DBench
             }
             o.FallV += FallGravity * dt;
             y -= o.FallV * dt;
-            if (y <= ground)
+            // Over the brink: the trailing end still on the bank holds itself
+            // up on its edge while the middle goes down, so the hull turns
+            // about the edge, leading end down, as far as the middle has
+            // dropped below it - and no further than the ground under the
+            // leading end lets it. Off the bank's edge, it is let go. Fallen
+            // level as a whole, it hung half over the drop and then came down
+            // flat, a lift going down.
+            float bank = OtherGround(o.Rig.Position - way * reach, out _);
+            if (bank > y + 0.5f && reach > 1.0f)
+            {
+                float below = OtherGround(o.Rig.Position + way * reach, out _);
+                float tip = Mathf.Min((bank - y) / reach, Mathf.Max(0.0f, (y - below) / reach));
+                o.Tip = Mathf.Clamp(tip, 0.0f, Mathf.Sin(TipMost));
+            }
+            if (y <= ground + 0.5f)
             {
                 y = ground;
                 o.Falling = false;
-                // Landed: the leading end down, the fall's number, and a little
-                // of the view (the board's landing, TankTick.Bumped).
-                o.Pitch.Kick((float)TankTick.RamJolt * 0.6f * o.Ahead.Dot(o.Way));
-                _shake.Fire(new Vector2(0.0f, 1.0f), o.Profile.ShotShake * 0.45);
-                o.Scuff.Lift();
+                Land(o, way, o.FallV / LandAt);
             }
         }
         else
+        {
+            // Within half a px of it is on it: a fall that ended a frame
+            // there, not under, used to come down this way and stay falling,
+            // never landed - no kick, the up held level, every bank since.
+            if (o.Falling)
+            {
+                o.Falling = false;
+                Land(o, way, o.FallV / LandAt);
+            }
             y = ground;
+        }
         o.Rig.Position = new Vector3(o.Rig.Position.X, y, o.Rig.Position.Z);
-        o.Up = o.Up.Lerp(o.Falling ? Vector3.Up : up, 1.0f - Mathf.Exp(-10.0f * dt)).Normalized();
+        // Tipped, the up leans the way it falls: the hull's line along the
+        // way goes down ahead. Held to the brink fast - it is the edge that
+        // holds it - and back to the ground's face as before.
+        Vector3 want = !o.Falling ? up
+                     : (Vector3.Up * Mathf.Sqrt(1.0f - o.Tip * o.Tip) + way * o.Tip).Normalized();
+        o.Up = o.Up.Lerp(want, 1.0f - Mathf.Exp(-(o.Falling ? 30.0f : 10.0f) * dt)).Normalized();
 
         // Into the pond: the plunge, off the hex it went into.
         Vector2I cell = _field?.FlatCellAt(Board(o.Rig.Position)) ?? o.Cell;
@@ -791,8 +890,19 @@ public sealed partial class Tank3DBench
         }
         o.Wet = wet;
 
+        o.WasPace = o.Pace;
+        o.Pace = dt > 0.0f && !o.Falling
+            ? Mathf.Clamp(o.Slid / dt / (RamLeanAt * (float)o.Profile.TopSpeed), 0.0f, 1.0f) : 0.0f;
+        // Stopped dead: the hull goes on, past its lean, and rocks back.
+        if (o.WasPace > 0.0f && o.Pace <= 0.0f && !o.Falling)
+        {
+            Vector3 w = new(o.Way.X, 0.0f, o.Way.Z), l = new(o.Ahead.Z, 0.0f, -o.Ahead.X);
+            o.Pitch.Kick(RamSettle * o.Ahead.Dot(w));
+            o.Roll.Kick(-RamSettle * l.Dot(w));
+        }
         OtherPose(dt);
         Scuff(dt, o);
+        Plough(dt, o);
     }
 
     /// <summary>The target's rig and model as it stands now.</summary>
@@ -804,8 +914,29 @@ public sealed partial class Tank3DBench
         Vector3 up = o.Up;
         Vector3 z = (ahead - up * ahead.Dot(up)).Normalized();
         o.Rig.Basis = new Basis(up.Cross(z), up, z);
-        o.Model.Pitch = o.Pitch.Step(dt);
-        o.Model.Roll = o.Roll.Step(dt);
+        // Leaning the way it goes while it is dragged: + pitch is the nose
+        // down, + roll the left side up (the meeting's kick, Contact, reads
+        // them the same way).
+        var left = new Vector3(ahead.Z, 0.0f, -ahead.X);
+        Vector3 way = new(o.Way.X, 0.0f, o.Way.Z);
+        // Whole while it is dragged at all, gone at the stop: the push brakes
+        // to the hex's middle, and a lean following the pace down went to
+        // level as gently, with nothing to rock back from.
+        float lean = RamLean * Mathf.SmoothStep(0.0f, 0.15f, o.Pace);
+        if (o.Pace > 0.0f)
+        {
+            o.ShudderIn -= dt;
+            if (o.ShudderIn <= 0.0f)
+            {
+                o.ShudderIn += RamShudderEvery;
+                int k = o.Shudders++;
+                o.Pitch.Kick(RamShudder * o.Pace * (2.0f * CelPuff.Hash(k, 83) - 1.0f));
+                o.Roll.Kick(RamShudder * o.Pace * (2.0f * CelPuff.Hash(k, 89) - 1.0f));
+            }
+        }
+        o.Model.Pitch = o.Pitch.Step(dt, lean * ahead.Dot(way));
+        o.Model.Roll = o.Roll.Step(dt, -lean * left.Dot(way));
+        o.Model.Heave = o.Heave.Step(dt);
         o.Model.Apply();
     }
 
@@ -828,6 +959,99 @@ public sealed partial class Tank3DBench
                                          o.Slid, !water && !o.Falling && o.Slid > 0.0f, false));
         }
         o.Scuff.Tick(dt, o.Belts);
+    }
+
+    /// <summary>
+    /// The dust the dragged belts plough up: at the leading edge of each belt,
+    /// the side that goes first, at both its ends and a little past them - a
+    /// belt dragged sideways is a blade its whole length, and the soil it
+    /// pushes spills off its ends. Along the edge alone the dust was under the
+    /// hull or behind the far belt, out of sight, and what was under the hull
+    /// <see cref="CelSolids"/> thinned away. Thrown on the way it goes and out
+    /// past the belt's ends. None on water or in the air.
+    /// </summary>
+    private void Plough(float dt, Other o)
+    {
+        if (o.Dust is null)
+            return;
+        o.Ploughs.Clear();
+        Vector3 way = new(o.Way.X, 0.0f, o.Way.Z);
+        if (way.LengthSquared() < 1e-6f)
+            way = Vector3.Forward;
+        way = way.Normalized();
+        Vector3 ahead = o.Ahead, left = new(ahead.Z, 0.0f, -ahead.X);
+        float ppu = o.Model.PixelsPerUnit;
+        foreach (TankModel.Track t in o.Model.Tracks)
+        {
+            Vector3 off = t.Node.GlobalPosition - o.Rig.GlobalPosition;
+            Vector3 mid = o.Rig.GlobalPosition + left * off.Dot(left) + ahead * off.Dot(ahead);
+            float len = (t.Path.Length > 0 ? PathLength(t) : o.Model.HullLength) * ppu;
+            float wide = t.Links.Multimesh.Mesh.GetAabb().Size.X * ppu;
+            // The belt's edge that leads: half its width out along the way, as
+            // the belt's box has it across and along.
+            Vector3 edge = left * (Mathf.Sign(left.Dot(way)) * 0.5f * wide * Mathf.Abs(left.Dot(way)))
+                           + ahead * (Mathf.Sign(ahead.Dot(way)) * 0.5f * len * Mathf.Abs(ahead.Dot(way)));
+            foreach (float end in new[] { 0.52f, -0.52f })
+            {
+                Vector3 at = Foot(mid + edge + ahead * (end * len));
+                bool wet = _field?.IsWater(_field.FlatCellAt(Board(at))) ?? false;
+                bool dusty = !wet && !o.Falling && o.Slid > 0.0f;
+                o.Ploughs.Add(new CelDust.Belt(at, way, end > 0.0f ? ahead : -ahead,
+                                               dusty ? o.Slid : 0.0f, o.Pace));
+            }
+        }
+        o.Dust.Tick(dt, o.Ploughs, _camera.GlobalBasis);
+    }
+
+    /// <summary>How far the target's footprint reaches from its middle along
+    /// <paramref name="way"/> (flat, unit), px.</summary>
+    private static float ReachAlong(Other o, Vector3 way)
+    {
+        Vector3 left = new(o.Ahead.Z, 0.0f, -o.Ahead.X);
+        return Mathf.Abs(o.Ahead.Dot(way)) * o.Foot.HalfLen + Mathf.Abs(left.Dot(way)) * o.Foot.HalfWide;
+    }
+
+    /// <summary>
+    /// The target down off a bank, at <paramref name="hard"/> of one landing:
+    /// the hull sinks on its suspension and bounces, the end and side that
+    /// came down first are thrown down, the view gets a little of it (the
+    /// board's landing, TankTick.Bumped) and a ring of dust goes out over the
+    /// ground round the hull - none into water.
+    /// </summary>
+    private void Land(Other o, Vector3 way, float hard)
+    {
+        float s = Mathf.Clamp(hard, 0.3f, 1.6f);
+        Vector3 left = new(o.Ahead.Z, 0.0f, -o.Ahead.X);
+        o.Heave.Kick(-LandSink * o.Model.HullLength * Mathf.Sqrt(SinkSpring.K) * s);
+        o.Pitch.Kick(LandTip * s * o.Ahead.Dot(way));
+        o.Roll.Kick(-LandTip * s * left.Dot(way));
+        _shake.Fire(new Vector2(0.0f, 1.0f), o.Profile.ShotShake * 0.45 * s);
+        o.Scuff.Lift();
+        GD.Print($"tank3d: target {o.Tag} lands at {o.FallV:F0} px/s ({hard:F2} of a landing)");
+        if (o.Dust is null || _field is null)
+            return;
+        Vector2I cell = _field.FlatCellAt(Board(o.Rig.Position));
+        if (_field.IsWater(cell))
+            return;
+        // Round the footprint, a little out from it: under the hull,
+        // CelSolids thins a puff away.
+        var spots = new List<CelDust.Belt>();
+        Vector3 mid = o.Rig.Position + o.Ahead * o.Foot.Along + left * o.Foot.Across;
+        float grow = 0.06f * o.Model.HullLength * o.Model.PixelsPerUnit;
+        const int n = 16;
+        for (int i = 0; i < n; i++)
+        {
+            float a = Mathf.Tau * (i + 0.5f * CelPuff.Hash(i, 97)) / n;
+            // A point on the rectangle the way a, and the way out of it there.
+            float ca = Mathf.Cos(a), sa = Mathf.Sin(a);
+            float hl = o.Foot.HalfLen + grow, hw = o.Foot.HalfWide + grow;
+            float k = 1.0f / Mathf.Max(Mathf.Abs(ca) / hl, Mathf.Abs(sa) / hw);
+            Vector3 at = mid + o.Ahead * (ca * k) + left * (sa * k);
+            Vector3 outward = (o.Ahead * ca + left * sa).Normalized();
+            Vector3 along = new(outward.Z, 0.0f, -outward.X);
+            spots.Add(new CelDust.Belt(Foot(at), outward, along, 0.0f, LandDust * s));
+        }
+        o.Dust.Burst(spots, 8, LandLift);
     }
 
     // --- setting it up ----------------------------------------------------------
@@ -893,6 +1117,7 @@ public sealed partial class Tank3DBench
         {
             _other.Scuff.Clear();
             _other.Hits.Reset();
+            _other.Dust?.Reset();
         }
     }
 

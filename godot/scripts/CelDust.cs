@@ -74,6 +74,8 @@ public sealed partial class CelDust : Node3D
     {
         public Vector3 At, Astern, Outward;
         public float Born, Life, Size, Throw, Tone, Seed;
+        /// <summary>Its climb, in <see cref="Rise"/>s.</summary>
+        public float Lift;
     }
 
     private readonly List<List<Puff>> _air = new();
@@ -104,12 +106,7 @@ public sealed partial class CelDust : Node3D
     public void Tick(float dt, IReadOnlyList<Belt> belts, Basis eye)
     {
         _clock += dt;
-        while (_air.Count < belts.Count)
-        {
-            _air.Add(new List<Puff>());
-            _spent.Add(0.0f);
-            _clouds.Add(new CelCloud(this, $"Dust{_clouds.Count}", Tint, Blend * _hull));
-        }
+        Lanes(belts.Count);
 
         float step = Step * _hull;
         for (int i = 0; i < belts.Count; i++)
@@ -150,11 +147,42 @@ public sealed partial class CelDust : Node3D
                 Vector3 at = p.At
                              + p.Astern * (Back * _hull * thrown)
                              + p.Outward * (Out * _hull * thrown)
-                             + Vector3.Up * (0.7f * r + Rise * _hull * a)
+                             + Vector3.Up * (0.7f * r + Rise * _hull * a * p.Lift)
                              + Wind * (_hull * age);
                 cloud.Add(at, r, p.Tone, p.Seed, Mathf.SmoothStep(ErodeFrom, 1.0f, a), a);
             }
             cloud.Draw(eye, Solids);
+        }
+    }
+
+    /// <summary>One puff at each of <paramref name="spots"/> at once, all in
+    /// <paramref name="lane"/>'s cloud so they flow into one - a hull landing
+    /// off a bank, not a belt running. A spot's run is not read; its pace
+    /// sizes and throws its puff as a belt's does, and it climbs
+    /// <paramref name="lift"/> times as high: dust knocked up by a blow jumps,
+    /// and at a belt's climb a hull landing in a pit raised dust the pit's
+    /// near rim hid. The lane is drawn by <see cref="Tick"/> with the rest,
+    /// and should be past the belts'.</summary>
+    public void Burst(IReadOnlyList<Belt> spots, int lane, float lift = 1.0f)
+    {
+        Lanes(lane + 1);
+        List<Puff> air = _air[lane];
+        foreach (Belt b in spots)
+        {
+            Spawn(air, b);
+            Puff p = air[^1];
+            p.Lift = lift;
+            air[^1] = p;
+        }
+    }
+
+    private void Lanes(int n)
+    {
+        while (_air.Count < n)
+        {
+            _air.Add(new List<Puff>());
+            _spent.Add(0.0f);
+            _clouds.Add(new CelCloud(this, $"Dust{_clouds.Count}", Tint, Blend * _hull));
         }
     }
 
@@ -179,6 +207,7 @@ public sealed partial class CelDust : Node3D
             Throw = (0.4f + 0.6f * pace) * (0.7f + 0.6f * h1),
             Tone = Tone * (0.92f + 0.16f * h2),
             Seed = h3,
+            Lift = 1.0f,
         });
     }
 }
