@@ -209,6 +209,19 @@ public sealed partial class CelDeath : Node3D
         _wallLook?.SetShaderParameter("stops", _stops);
     }
 
+    /// <summary>When the fire wave's front gets <paramref name="d"/> px out
+    /// from the blast's foot, s after <see cref="Blow"/> - <see cref="Wave"/>'s
+    /// radius the other way round; infinity past its reach. A blast that is
+    /// not grounded has no wave.</summary>
+    public float WaveArrives(float d)
+    {
+        float from = 0.3f * _hull, reach = WaveReach * _hex;
+        if (d <= from)
+            return 0.02f;
+        float k = (d - from) / Mathf.Max(reach - from, 1e-3f);
+        return k >= 1.0f ? float.PositiveInfinity : 0.02f - WaveStop * Mathf.Log(1.0f - k);
+    }
+
     public void Reset()
     {
         _since = -1.0f;

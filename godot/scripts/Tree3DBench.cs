@@ -261,52 +261,26 @@ public sealed partial class Tree3DBench : Node3D
 
     // --- the trees ---------------------------------------------------------
 
-    private static string TreeDir(string name) => AssetRoot.Trees + "/" + name;
-
     /// <summary>
-    /// One model on the board: <c>tree.glb</c> read from disk (<c>AssetRoot</c>'s
-    /// reason, as <see cref="TankModel"/> reads <c>tank.glb</c>), dressed by
-    /// <see cref="Toon"/>, scaled so it stands as tall on the board as its own
-    /// sprite does - the sidecar's <c>sprites.px_per_m</c> at the eighth the
-    /// board draws tree art at (<see cref="PropTier"/>) - and set down on the
-    /// ground at its foot. glTF's +Z is the tree's front and this camera's too.
+    /// One model on the board (<see cref="TreeModel.Load"/>: read, dressed by
+    /// <see cref="Toon"/>, as tall as its own sprite) set down on the ground at
+    /// its foot, into the crowns' mask, with its fire and its fall.
     /// </summary>
     private void Stand(string name, Vector2I cell, Vector2 off, float yaw = 0.0f)
     {
-        string dir = TreeDir(name);
-        var doc = new GltfDocument();
-        var state = new GltfState();
-        Error err = doc.AppendFromFile(dir + "/tree.glb", state);
-        if (err != Error.Ok)
+        ulong t0 = Time.GetTicksMsec();
+        if (TreeModel.Load(name, _pbr, out string? error) is not { } model)
         {
-            GD.Print($"tree3d: {dir}/tree.glb: {err}");
+            GD.Print($"tree3d: {error}");
             return;
         }
-        Node scene = doc.GenerateScene(state);
-        using JsonDocument json = JsonDocument.Parse(File.ReadAllText(dir + "/tree.json"));
-        JsonElement j = json.RootElement;
-        float ppm = j.GetProperty("sprites").GetProperty("px_per_m").GetSingle() / PropDetail;
-        ulong t0 = Time.GetTicksMsec();
+        Node scene = model.Scene;
+        JsonElement j = model.Json;
+        float ppm = model.Ppm;
         var tree = new TreeFire { Cell = cell };
-        if (!_pbr)
-        {
-            var roles = new List<(MeshInstance3D Mesh, int Surface, string Name)>();
-            Surfaces(scene, roles);
-            Toon.Dress(scene, KeepsNormals, IsFoliage, TreeStencil);
-            foreach ((MeshInstance3D m, int s, string mat) in roles)
-                if (m.Mesh.SurfaceGetMaterial(s) is ShaderMaterial cel)
-                {
-                    Contract(cel, mat, tree.Burn);
-                    if (mat == "TreeGame.Leaf" && !tree.Leaves.Contains(cel))
-                        tree.Leaves.Add(cel);
-                }
-        }
-        if (_mask is not null)
-        {
-            ShaderMaterial[] masks = MasksFor(_models.Count, tree.Burn);
-            tree.Leaves.Add(masks[1]);   // role 1 without the eating: the leaves
-            Ghost(scene, masks);
-        }
+        tree.Burn.AddRange(model.Burn);
+        tree.Leaves.AddRange(model.Leaves);
+        _outline?.Ghost(scene, tree.Burn, tree.Leaves);
         var holder = new Node3D
         {
             Name = $"{name}.{_models.Count}", Scale = Vector3.One * ppm,
@@ -321,26 +295,14 @@ public sealed partial class Tree3DBench : Node3D
         }
         _models.Add(holder);
         tree.Holder = holder;
-        float h = j.GetProperty("height").GetSingle(), w = j.GetProperty("width").GetSingle();
-        float d = j.GetProperty("depth").GetSingle();
-        foreach (Vector3 p in Seats)
+        float h = model.Height, w = model.Width, d = model.Depth;
+        foreach (Vector3 p in TreeModel.Seats)
             tree.Seats.Add(new Vector3(p.X * w, p.Y * h, p.Z * d));
         Vector2 at = _field is null ? Vector2.Zero : _field.FlatAnchor(cell) + _field.CentreOffset + off;
-        tree.Stagger = tree.Hashed = (float)Grove.Hash01(Mathf.RoundToInt(at.X), Mathf.RoundToInt(at.Y), StaggerSalt);
-        // Its smoke thins by being eaten, not by coming apart: see CelBurn.Sparse.
-        tree.Fire = new CelBurn
-        {
-            Name = name + "Fire", Clears = true, RoundFoot = true,
-            Sparse = 0.15f, Shrink = 0.15f, SmoulderWidth = 0.95f, ToneEase = 2.5f,
-        };
-        AddChild(tree.Fire);
-        // A tank's hull lengths, the crown's width here: the tongues, the
-        // column and the light are all shares of it.
-        tree.Fire.Build(w * ppm);
+        tree.Stagger = tree.Hashed = TreeModel.StaggerOf(at);
+        tree.Fire = TreeModel.Fire(this, name, model);
         tree.Fall = FallData.Read(j.GetProperty("model").GetProperty("fall"));
-        // the sprite wood's own hash for a tree's sway (Grove), off where it stands
-        tree.SwayPhase = Mathf.Tau * (float)Grove.Hash01(Mathf.RoundToInt(at.X), Mathf.RoundToInt(at.Y), 901_001);
-        tree.SwayRate = 0.8f + 0.5f * (float)Grove.Hash01(Mathf.RoundToInt(at.X), Mathf.RoundToInt(at.Y), 901_003);
+        (tree.SwayPhase, tree.SwayRate) = TreeModel.SwayOf(at);
         foreach (ShaderMaterial m in tree.Burn)
         {
             m.SetShaderParameter("wind_y0", tree.Fall.Y0);
@@ -349,9 +311,7 @@ public sealed partial class Tree3DBench : Node3D
         tree.Ppm = ppm;
         tree.Height = h;
         tree.Width = w;
-        // It lies outside the box it stands in: culled by that box, a fallen
-        // crown blinked out at the screen's edge.
-        Margin(holder);
+        TreeModel.Margin(holder);
         _burning.Add(tree);
         _wooded.Add(cell);
         GD.Print($"tree3d: {name} on {cell} +{off}, {ppm:F2} px/m, "
@@ -397,64 +357,6 @@ public sealed partial class Tree3DBench : Node3D
     private readonly List<TreeFire> _burning = new();
     private readonly HashSet<Vector2I> _wooded = new();
     private Wildfire? _fire;
-    private const int StaggerSalt = 533_011;
-
-    /// <summary>Where the fire sits in a crown, as shares of the model's width,
-    /// height and depth from its foot (glTF: +Z the front, toward the eye):
-    /// four ports, <see cref="CelBurn.MaxPorts"/>, on the crown's front half
-    /// so the leaves in front hide only the flame's foot - two at the sides,
-    /// one high, one low in the middle.</summary>
-    private static readonly Vector3[] Seats =
-    {
-        new(-0.24f, 0.60f, 0.18f),
-        new(0.22f, 0.66f, 0.14f),
-        new(0.02f, 0.84f, 0.04f),
-        new(0.04f, 0.50f, 0.26f),
-    };
-
-    /// <summary>Every surface under <paramref name="node"/> with the name of
-    /// its glTF material, before <see cref="Toon.Dress"/> swaps them.</summary>
-    private static void Surfaces(Node node, List<(MeshInstance3D, int, string)> into)
-    {
-        foreach (Node child in node.GetChildren())
-            Surfaces(child, into);
-        if (node is not MeshInstance3D m || m.Mesh is null)
-            return;
-        for (int s = 0; s < m.Mesh.GetSurfaceCount(); s++)
-            into.Add((m, s, m.Mesh.SurfaceGetMaterial(s)?.ResourceName ?? ""));
-    }
-
-    /// <summary>The burn contract of <c>tree.json</c> (<c>model.burn</c>) on one
-    /// cel material and its ink: leaves and cores go, twigs show, bark chars.
-    /// The windows are the Blender preview's (<c>tree_gen.BURN_WINDOW</c>).</summary>
-    private static void Contract(ShaderMaterial cel, string mat, List<ShaderMaterial> into)
-    {
-        (int role, float window, bool ember, bool eat) = mat switch
-        {
-            "TreeGame.Leaf" => (1, 0.12f, true, false),
-            "TreeGame.Core" => (1, 0.45f, false, true),
-            "TreeGame.Twig" => (2, 0.0f, false, false),
-            "TreeGame.Bark" => (3, 0.0f, false, false),
-            _ => (0, 0.0f, false, false),
-        };
-        if (into.Contains(cel))
-            return;
-        foreach (ShaderMaterial m in cel.NextPass is ShaderMaterial ink ? new[] { cel, ink } : new[] { cel })
-        {
-            into.Add(m);
-            if (role == 0)
-                continue;
-            m.SetShaderParameter("burn_role", role);
-            m.SetShaderParameter("burn_window", window);
-            m.SetShaderParameter("burn_eat", eat);
-        }
-        cel.SetShaderParameter("burn_ember", ember);
-        // The crown shades itself by its normals, not by its shadow on itself
-        // (Toon's sun_shadow): the leaves' shadows on the leaves under them
-        // were dark triangles all over the lit side.
-        if (role == 1)
-            cel.SetShaderParameter("sun_shadow", false);
-    }
 
     private void Burn(float dt)
     {
@@ -599,7 +501,7 @@ public sealed partial class Tree3DBench : Node3D
         _grass = new Grass3D
         {
             Name = "Grass", Ppm = _burning.Count > 0 ? _burning[0].Ppm : 17.0f,
-            GustRate = GustRate, GustTravel = GustTravel, ShadowInk = Stage3D.ShadowInk.A,
+            GustRate = TreeModel.GustRate, GustTravel = TreeModel.GustTravel, ShadowInk = Stage3D.ShadowInk.A,
         };
         AddChild(_grass);
         _grass.Map(span);
@@ -867,25 +769,10 @@ public sealed partial class Tree3DBench : Node3D
     private bool _windOn = true;
     private float _weather;
 
-    /// <summary>The sprite wood's wind (<c>Grove</c>): a crown drift of
-    /// <see cref="WindDrift"/> px at <see cref="WindHeight"/> px up at full
-    /// gust, a gust wave crossing along x at <see cref="GustRate"/> rad/s,
-    /// <see cref="GustTravel"/> rad a px, and a third of it for a burnt
-    /// trunk. To the screen's right and back, as the sprites lean.</summary>
-    private const float WindDrift = 2.6f, WindHeight = 120.0f, GustRate = 0.55f, GustTravel = 0.0035f;
-    private const float CharredSway = 0.33f;
-    /// <summary>What the model adds on top, m at full gust: the puffs'
-    /// billow, and the leaves' flutter.</summary>
-    private const float Billow = 0.10f, Flutter = 0.035f;
-
     /// <summary>
-    /// A frame of the wind on every tree: <c>Grove</c>'s lean -
-    /// <c>wind (0.35 + 0.65 gust) sin(phase) / height</c>, the gust one long wave
-    /// along x so neighbours rise a beat apart, the phase each tree's own - into
-    /// <see cref="Toon.WindCode"/>, the billow and the flutter with the gust. It
+    /// A frame of the wind on every tree (<see cref="TreeModel.Sway"/>): it
     /// goes out as the trunk goes over (1 - down², as the sprite's), and a
-    /// burnt tree keeps a third, eased in with its crown going. The world's
-    /// wind is along x; a turned model gets it in its own frame.
+    /// burnt tree keeps a third, eased in with its crown going.
     /// </summary>
     private void Sway(float dt)
     {
@@ -893,29 +780,13 @@ public sealed partial class Tree3DBench : Node3D
         float wind = _windOn ? _wind : 0.0f;
         foreach (TreeFire t in _burning)
         {
-            Vector3 foot = t.Holder.GlobalPosition;
-            float gust = 0.5f + 0.5f * Mathf.Sin(_weather * GustRate - foot.X * GustTravel);
-            float lean = wind * WindDrift * (0.35f + 0.65f * gust)
-                         * Mathf.Sin(_weather * t.SwayRate + t.SwayPhase) / WindHeight;
             float still = 1.0f;
             if (t.Going)
             {
                 float down = (float)Math.Min(1.0, t.Angle / Math.Max(t.Rest, 1e-6));
                 still = 1.0f - down * down;
             }
-            float spent = Mathf.Lerp(1.0f, CharredSway, t.Spent);
-            Vector3 own = t.Holder.GlobalBasis.Orthonormalized().Inverse() * Vector3.Right;
-            var dir = new Vector2(own.X, own.Z).Normalized();
-            float billow = wind * Billow * (0.3f + 0.7f * gust) * still * spent;
-            foreach (ShaderMaterial m in t.Burn)
-            {
-                m.SetShaderParameter("wind_dir", dir);
-                m.SetShaderParameter("wind_lean", lean * still * spent);
-                m.SetShaderParameter("wind_billow", billow);
-                m.SetShaderParameter("wind_time", _weather * t.SwayRate);
-            }
-            foreach (ShaderMaterial m in t.Leaves)
-                m.SetShaderParameter("wind_flutter", wind * Flutter * (0.3f + 0.7f * gust) * still);
+            TreeModel.Sway(t.Holder, t.Burn, t.Leaves, _weather, t.SwayPhase, t.SwayRate, wind, still, t.Spent);
         }
     }
 
@@ -1117,14 +988,6 @@ public sealed partial class Tree3DBench : Node3D
         Vector3 k = Vector3.Up.Cross(d).Normalized();
         Vector3 piv = d * f.Hinge;
         return piv + (v - piv).Rotated(k, (float)(t.Angle + t.Flinch * w));
-    }
-
-    private static void Margin(Node node)
-    {
-        if (node is GeometryInstance3D g)
-            g.ExtraCullMargin = 16384.0f;
-        foreach (Node child in node.GetChildren())
-            Margin(child);
     }
 
     // --- the ram: a stand-in hull ---------------------------------------------
@@ -1534,210 +1397,18 @@ void fragment() {
             _cloud.Draw(_camera.GlobalBasis);
     }
 
-    /// <summary>Leaves and puff cores keep the normals the file gives them -
-    /// their puff's, not their own face's (<c>tree_gen._puff_normals</c>).</summary>
-    private static bool KeepsNormals(Material m) => m.ResourceName == "TreeGame.Core";
-
-    /// <summary>Leaves are open sheets: both sides, their puff's normal, no ink
-    /// (<see cref="Toon.Dress"/>).</summary>
-    private static bool IsFoliage(Material m) => m.ResourceName == "TreeGame.Leaf";
-
-    /// <summary>The scale tree art is drawn at on the board (<see cref="PropTier"/>,
-    /// <c>Detail</c> for the trees): the sprites are rendered eight times over.</summary>
-    private const float PropDetail = 8.0f;
-
     // --- the crown's outline -------------------------------------------------
 
-    /// <summary>What the trees' own surfaces leave in the stencil (not their
-    /// ink): the outline is drawn on these pixels and on no others. Not 0
-    /// (everything), not 7 (the turret's), not 1 (the wall's).</summary>
-    private const int TreeStencil = 3;
+    /// <summary>The crowns' line (<see cref="CrownOutline"/>); none under
+    /// <c>--pbr</c> or <c>--no-outline</c>.</summary>
+    private CrownOutline? _outline;
 
-    /// <summary>The layer the trees' stand-ins are on: the mask sees them, the
-    /// main camera does not.</summary>
-    private const uint MaskLayer = 1u << 18;
-
-    private SubViewport? _mask;
-    private Camera3D? _maskEye;
-
-    /// <summary>
-    /// The crown's line, drawn in the frame and not on the mesh.
-    ///
-    /// <b>Why not the ink.</b> Toon's ink is an inside-out hull and needs a
-    /// closed volume; a leaf is an open sheet (<see cref="Toon.Dress"/>,
-    /// <c>foliage</c>), and a shell at the leaves' tips (tried) showed its
-    /// back through the thin leaves at every puff's rim as a broad dark band -
-    /// the rim is where the leaves are seen edge on. <b>Why not the depth.</b>
-    /// gl_compatibility gives a shader no depth texture (<see cref="SheetBlast"/>).
-    ///
-    /// So the trees are drawn a second time, white on nothing, into a mask of
-    /// their own (stand-ins on <see cref="MaskLayer"/>, a camera that follows
-    /// this one), and a pass over the whole frame puts ink on every tree pixel
-    /// (<see cref="TreeStencil"/>) that has empty mask within the line's width:
-    /// the inside of the crown's silhouette, notch for notch. The stencil keeps
-    /// it off whatever stands in front of a tree - a tank, a bush - where the
-    /// mask alone would run the line across it. The colour is the pixel's own
-    /// darkened, Toon's ink rule (<see cref="Toon.InkDark"/>).
-    /// </summary>
     private void BuildOutline()
     {
-        _mask = new SubViewport
-        {
-            Name = "CrownMask",
-            TransparentBg = true,
-            RenderTargetUpdateMode = SubViewport.UpdateMode.Always,
-            Msaa3D = Viewport.Msaa.Disabled,
-            Size = (Vector2I)GetViewport().GetVisibleRect().Size,
-        };
-        AddChild(_mask);
-        _maskEye = new Camera3D
-        {
-            Projection = Camera3D.ProjectionType.Orthogonal,
-            KeepAspect = Camera3D.KeepAspectEnum.Height,
-            CullMask = MaskLayer,
-            Current = true,
-        };
-        _mask.AddChild(_maskEye);
-        _camera.CullMask &= ~MaskLayer;
-
-        var line = new ShaderMaterial { Shader = OutlineShader };
-        line.SetShaderParameter("mask", _mask.GetTexture());
-        line.SetShaderParameter("dark", Toon.InkDark);
-        _camera.AddChild(new MeshInstance3D
-        {
-            Name = "CrownLine",
-            Mesh = new QuadMesh { Size = new Vector2(2.0f, 2.0f) },
-            MaterialOverride = line,
-            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
-            ExtraCullMargin = 16384.0f,
-        });
-        _line = line;
+        _outline = new CrownOutline { Name = "CrownOutline" };
+        AddChild(_outline);
+        _outline.Build(_camera);
     }
-
-    private ShaderMaterial? _line;
-
-    /// <summary>A stand-in for every mesh of the tree, on the mask's layer, each
-    /// surface on the mask of its burn role - what has burnt away is gone from
-    /// the mask on the frame it goes from the picture.</summary>
-    private static void Ghost(Node node, ShaderMaterial[] masks)
-    {
-        foreach (Node child in node.GetChildren())
-            Ghost(child, masks);
-        if (node is not MeshInstance3D m || m.Mesh is null)
-            return;
-        var ghost = new MeshInstance3D
-        {
-            Mesh = m.Mesh,
-            Layers = MaskLayer,
-            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
-        };
-        for (int s = 0; s < m.Mesh.GetSurfaceCount(); s++)
-        {
-            int role = 0;
-            if (m.Mesh.SurfaceGetMaterial(s) is ShaderMaterial cel)
-            {
-                role = cel.GetShaderParameter("burn_role").AsInt32();
-                // the eaten core's own: role 1 is the leaves' as well
-                if (role == 1 && cel.GetShaderParameter("burn_eat").AsBool())
-                    role = 4;
-            }
-            ghost.SetSurfaceOverrideMaterial(s, masks[Mathf.Clamp(role, 0, 4)]);
-        }
-        m.AddChild(ghost);
-    }
-
-    /// <summary>The <paramref name="i"/>-th tree's masks, one per burn role and
-    /// one more for the eaten cores (4: role 1, <c>burn_eat</c>), listed with
-    /// the materials its burn goes into. The windows are the cel's: the mask
-    /// cuts the core's holes where the paint does.</summary>
-    private ShaderMaterial[] MasksFor(int i, List<ShaderMaterial> burn)
-    {
-        var masks = new ShaderMaterial[5];
-        for (int k = 0; k < 5; k++)
-        {
-            masks[k] = MaskFor(i);
-            masks[k].SetShaderParameter("burn_role", k == 4 ? 1 : k);
-            masks[k].SetShaderParameter("burn_window", k == 4 ? 0.45f : 0.12f);
-            masks[k].SetShaderParameter("burn_eat", k == 4);
-            burn.Add(masks[k]);
-        }
-        return masks;
-    }
-
-    private readonly List<ShaderMaterial> _masks = new();
-
-    /// <summary>The mask of the <paramref name="i"/>-th tree: its number in R
-    /// (1..7 of 8, round again past seven - two trees a number apart are never
-    /// the two that overlap here) and its depth in G, over the slab of depth
-    /// the trees stand in (<see cref="FrameCamera"/>).</summary>
-    private ShaderMaterial MaskFor(int i)
-    {
-        var m = new ShaderMaterial { Shader = MaskShader };
-        m.SetShaderParameter("id", (i % 7 + 1) / 8.0f);
-        _masks.Add(m);
-        return m;
-    }
-
-    private static readonly Shader MaskShader = new()
-    {
-        Code = @"
-shader_type spatial;
-render_mode unshaded, cull_disabled, shadows_disabled, fog_disabled;
-uniform float id = 1.0;
-uniform float near = 0.0;
-uniform float span = 1.0;
-varying vec3 world;
-" + Toon.NoiseCode + Toon.BurnCode + Toon.WindCode + Toon.FallCode + @"
-void vertex() {
-    vec3 n = NORMAL;
-    wind_pose(VERTEX);
-    fall_pose(VERTEX, n);
-    world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
-}
-void fragment() {
-    if (burn_role != 0 && burn_gone(UV2.x, world)) {
-        discard;
-    }
-    ALBEDO = vec3(id, clamp((-VERTEX.z - near) / span, 0.0, 1.0), 0.0);
-}",
-    };
-
-    /// <summary>The slab of view depth the mask's G spans, board px either side
-    /// of the board's middle: 8 bits over it are ~5 px of depth, and trees
-    /// that overlap stand tens of px apart.</summary>
-    private const float MaskReach = 600.0f;
-
-    private static readonly Shader OutlineShader = new()
-    {
-        Code = @"
-shader_type spatial;
-render_mode unshaded, cull_disabled, depth_test_disabled, depth_draw_never, shadows_disabled, fog_disabled;
-stencil_mode read, compare_equal, " + TreeStencil + @";
-uniform sampler2D mask : filter_nearest;
-uniform sampler2D screen : hint_screen_texture, filter_nearest;
-uniform float width = 2.0;
-uniform float dark = 0.28;
-void vertex() {
-    POSITION = vec4(VERTEX.xy, 0.0, 1.0);
-}
-void fragment() {
-    vec2 px = width / VIEWPORT_SIZE;
-    vec4 me = texture(mask, SCREEN_UV);
-    bool edge = false;
-    for (int i = 0; i < 8; i++) {
-        float a = float(i) * 0.785398;
-        vec4 q = texture(mask, SCREEN_UV + vec2(cos(a), sin(a)) * px);
-        // nothing there: the silhouette; another tree, and farther: this
-        // tree's edge over it - so the line is drawn on the front one only
-        edge = edge || q.a < 0.5
-            || (me.a >= 0.5 && abs(q.r - me.r) > 0.03 && q.g > me.g + 0.004);
-    }
-    if (!edge) {
-        discard;
-    }
-    ALBEDO = texture(screen, SCREEN_UV).rgb * dark;
-}",
-    };
 
     // --- the board ---------------------------------------------------------
 
@@ -1902,22 +1573,8 @@ void light() {
         }
         pivot.Z -= _camera.Size / 8.0f / Squash;
         _camera.Position = pivot + new Vector3(0.0f, Back * Squash, Back * RiseFactor);
-        if (_mask is not null && _maskEye is not null)
-        {
-            _mask.Size = (Vector2I)GetViewport().GetVisibleRect().Size;
-            _maskEye.GlobalTransform = _camera.GlobalTransform;
-            _maskEye.Size = _camera.Size;
-            _maskEye.Near = _camera.Near;
-            _maskEye.Far = _camera.Far;
-            // Toon's ink width, in board px as the ink is (Toon.InkWidth)
-            _line?.SetShaderParameter("width", Mathf.Max(1.0f, Toon.InkWidth * _zoom));
-        }
         float depth = (pivot - _camera.Position).Dot(-_camera.Basis.Z);
-        foreach (ShaderMaterial m in _masks)
-        {
-            m.SetShaderParameter("near", depth - MaskReach);
-            m.SetShaderParameter("span", 2.0f * MaskReach);
-        }
+        _outline?.Follow(_camera, _zoom, depth);
         const float reach = 600.0f;
         _sun.DirectionalShadowMaxDistance = depth + reach;
         _sun.DirectionalShadowSplit1 = Mathf.Clamp((depth - reach) / (depth + reach), 0.05f, 0.95f);

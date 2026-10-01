@@ -938,6 +938,8 @@ void fragment() {
             _celHit.Leave(aimed.Part, at, n, aimed.Way, CelHit.Kind.Splash);
         }
         Vector3 foot = Foot(at);
+        // The wood feels the shell going off on the plate, as a round in the ground.
+        WoodBlast(foot, 0.12f, 150.0f);
         if (_celBlast is not null)
         {
             _celBlast.Burst(at, n, foot);
@@ -1061,6 +1063,8 @@ void fragment() {
     private void FxGround(Vector3? where = null)
     {
         Vector3 spot = Foot(where ?? _rig.Position + new Vector3(0.55f, 0.0f, 0.45f) * HexWidth);
+        // The wood feels it: a round's push, by the gun's firepower.
+        WoodBlast(spot, 0.14f * CraterShare(_profile.Might), 150.0f * CraterShare(_profile.Might));
         // The model's own (CelBurst): fire, fountain, clods, dust and its
         // crater, the board's size of one.
         if (_celBurst is not null)
@@ -1068,6 +1072,7 @@ void fragment() {
             _celBurst.Craters.SunWay = _sun.GlobalBasis.Z;
             var dig = InCell(spot, CraterRadius * new Craters().Wide * CraterShare(_profile.Might) * HexWidth);
             _celBurst.Burst(spot, dig.Radius, dig.At, dig.Inside);
+            WoodCrater(dig.At, dig.Radius);
             _shake.Blast(_profile.ShotShake * 0.6);
             return;
         }
@@ -1103,6 +1108,9 @@ void fragment() {
     private void Fireball(float might, bool grounded)
     {
         // The model's own, out of its ring - see CelDeath.
+        // The wood feels it: a tank's blast swings the cells round it, the
+        // knock-out's flash (small, not grounded) the trees beside it.
+        WoodBlast(Foot(_rig.Position), 0.32f * might, 300.0f * Mathf.Sqrt(might));
         if (_celDeath is not null)
         {
             Vector3 at = _model.Tank.ToGlobal(_model.BlastAt);
@@ -1189,6 +1197,7 @@ void fragment() {
                 _celBurst.Craters.SunWay = _sun.GlobalBasis.Z;
                 var dig = InCell(Foot(_rig.Position), WreckPitRadius);
                 _celBurst.Craters.Dig(dig.At, dig.Radius, dig.Inside);
+                WoodCrater(dig.At, dig.Radius);
                 WreckDug();
             }
             // Where it burns: the ground scorched under it and round its
@@ -1196,6 +1205,8 @@ void fragment() {
             if (_scorchOn && _celScorch is not null && !(_field?.IsWater(CellHere) ?? false))
                 _celScorch.Burn(Foot(_rig.Position), ScorchWide * _model.HullLength * _model.PixelsPerUnit);
         }
+        // The blast lights the wood under it and round it (GDD, "Уничтожен").
+        WoodIgnite(Foot(_rig.Position), grounded: !DeepHere);
         // TankTick.Quake(Death): the class's own gun shake, harder.
         _shake.Fire(new Vector2(0.0f, -1.0f), _profile.ShotShake * 2.15);
         _shake.Blast(_profile.ShotShake * 1.6);
@@ -1257,6 +1268,7 @@ void fragment() {
         _celHit?.Reset();
         _celBlast?.Reset();
         _celBurst?.Reset();
+        WoodReset();
         _celScorch?.Reset();
         _shellSplash?.Reset();
         _deathSplash?.Reset();

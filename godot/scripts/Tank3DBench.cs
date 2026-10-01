@@ -261,6 +261,7 @@ public sealed partial class Tank3DBench : Node3D
         BuildCamera();
         if (_field is null)
             BuildGround();
+        BuildWood();
         Park();
         Mount(_modelTag);
         if (_otherWanted)
@@ -408,6 +409,7 @@ public sealed partial class Tank3DBench : Node3D
         Vector2 shake = ShakeOffset();
         _camera.Position += _camera.Basis.X * shake.X - _camera.Basis.Y * shake.Y;
         FrameShadow();
+        WoodFollow();
     }
 
     /// <summary>How far round the tank, in its own reaches, the sun's shadow
@@ -842,6 +844,11 @@ void light() {
             else if (a == "--no-tracer") _tracerOn = false;
             else if (a == "--tracer-smoke") _tracerSmoke = true;
             else if (a == "--scorch") _scorchOn = true;
+            else if (a == "--no-grass") _noGrass = true;
+            else if (a == "--no-trees") _noTrees = true;
+            else if (a == "--trees" && more) _treeNames = args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries);
+            else if (a == "--wood" && more) _woodCount = Math.Max(1, (int)F(args[++i], _woodCount));
+            else if (a == "--wind" && more) _wind = F(args[++i], _wind);
             else if (a == "--soft-water") _softWater = true;
             else if (a == "--flat") _flat = true;
             else if (a == "--pbr") _pbr = true;
@@ -1298,6 +1305,7 @@ void light() {
         FxProcess(dt, _speed, a);
         RamFrame(dt, _camera.GlobalBasis);
         ShellsTick(dt);
+        WoodTick(dt);
         FrameCamera();
 
         string where = _field is null ? "flat ground"

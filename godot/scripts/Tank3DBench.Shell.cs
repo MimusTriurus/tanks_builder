@@ -310,7 +310,10 @@ public sealed partial class Tank3DBench
             return;
         o.Hits.Leave(part, at, n, Vector3.Down, CelHit.Kind.Splash);
         if (_celBlast is not null)
+        {
             _celBlast.Burst(at, n, Foot(at));
+            WoodBlast(Foot(at), 0.12f, 150.0f);
+        }
         else
             FxGround(Foot(at));
         // Half a landing's sink: the bomb shoves the roof down on the springs.

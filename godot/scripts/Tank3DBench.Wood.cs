@@ -1,0 +1,484 @@
+using System;
+using System.Collections.Generic;
+using Godot;
+
+namespace TankSpriteTest;
+
+/// <summary>
+/// The board's own wear for the 3D tank (docs/tank3d.md, "Трава и лес"): the
+/// sprite benches' board under it is their art - a soil tile, the wood drawn
+/// by <c>Stage3D.Place</c>, which this scene never calls - so the cells are
+/// dressed here in what <c>Tree3D</c> puts on its board:
+///
+/// <list type="bullet">
+/// <item><b>Grass, the cells' ground</b> (<see cref="Grass3D"/>, the tufts on
+/// the cel ramp, <c>Tree3D</c>'s board grass): on every level cell of plain
+/// ground, bare or wooded - not on sand, water, a ramp, a mine or brick. The
+/// hulls press it flat along their belts and the craters tear it out.</item>
+/// <item><b>The wood</b> - the generator's models (<see cref="TreeModel"/>) on
+/// every wooded cell, <c>Tree3D</c>'s <c>--wood</c> ring, their crowns'
+/// line (<see cref="CrownOutline"/>) and the sprite wood's wind.</item>
+/// <item><b>It burns</b> - the board's <see cref="Wildfire"/> (cells, spread,
+/// each tree's <see cref="Wildfire.Coat"/>), the model burning itself and a
+/// <see cref="CelBurn"/> in its crown, as on <c>Tree3D</c>, and the grass of a
+/// burning wood with it. What lights it is the rules' (GDD states.md,
+/// "Уничтожен"): a tank blowing up lights the wood it stands on, and its
+/// blast the wooded cells round it on its own level - each on the frame the
+/// fire wave (<see cref="CelDeath.WaveArrives"/>) gets to its edge.</item>
+/// <item><b>It feels a blast</b> - a round's or a tank's: the crowns are
+/// thrown back from it and swing back on a spring
+/// (<see cref="WoodBlast"/>), each as the blast gets to it, the leaves
+/// shivering.</item>
+/// </list>
+/// <c>--no-grass</c>, <c>--no-trees</c>; <c>--trees A,B,..</c> which models,
+/// <c>--wood N</c> how many to a cell, <c>--wind x</c> how hard it blows.
+/// </summary>
+public sealed partial class Tank3DBench
+{
+    private bool _noGrass, _noTrees;
+    private string[] _treeNames = { "Oak_001", "Oak_002", "Oak_003", "Oak_004", "Oak_005", "Oak_006" };
+    private int _woodCount = 7;
+    private float _wind = 1.0f, _weather;
+
+    private Grass3D? _grass;
+    private CrownOutline? _crowns;
+    /// <summary>The wood's middle: the crowns' mask holds the depth round it
+    /// (<see cref="CrownOutline.MaskReach"/>), not round the tank, which may
+    /// be a board away.</summary>
+    private Vector3 _woodMiddle;
+
+    private sealed class Planted
+    {
+        public required Node3D Holder;
+        public required TreeModel.Loaded Model;
+        public required Vector2I Cell;
+        public required CelBurn Fire;
+        public float Phase, Rate;
+        /// <summary>When in its cell's fire it catches (<see cref="Wildfire.Of"/>),
+        /// and the hash of where it stands, to go back to.</summary>
+        public float Stagger, Hashed;
+        public readonly List<Vector3> Seats = new();
+        public readonly List<Vector3> Ports = new();
+        /// <summary>The blast's lean on it (world x, z, a share of its height),
+        /// its pace, and the leaves' shiver; the blasts still on their way.</summary>
+        public Vector2 Push, PushV;
+        public float Shiver, Spent;
+        public readonly List<(float Due, Vector2 Kick, float Shiver)> Kicks = new();
+    }
+
+    /// <summary>The wood's fire (<see cref="Wildfire"/>), the cells it may
+    /// take, and a blast's lights on their way out (when, which cell, and the
+    /// point on its edge the fire comes in over).</summary>
+    private Wildfire? _wildfire;
+    private readonly HashSet<Vector2I> _woodedCells = new();
+    private readonly List<(float Due, Vector2I Cell, Vector2 From)> _lights = new();
+    /// <summary>Each burning wood's grass: its meadow, where its front starts
+    /// once the cell is lit, and where a blast or a neighbour sent it in from.</summary>
+    private readonly Dictionary<Vector2I, int> _meadowOf = new();
+    private readonly Dictionary<Vector2I, Vector2> _frontOf = new();
+    private readonly Dictionary<Vector2I, Vector2> _entry = new();
+    private float _woodClock;
+
+    /// <summary>How fast a blast runs out over the board to the trees past
+    /// the fire wave, px/s; the crowns' swing, Hz, and how much of it each
+    /// cycle keeps.</summary>
+    private const float BlastSpeed = 1100.0f, SwayHz = 0.8f, SwayDamp = 0.18f;
+    /// <summary>How long after the grass fire gets to a trunk its tree is
+    /// alight, s (<c>Tree3D</c>'s).</summary>
+    private const float CatchLag = 0.2f;
+
+    private readonly List<Planted> _trees = new();
+
+    /// <summary>A hull's belt, a share of its width - the stand-in hull's 13 px
+    /// of 58 in <c>Tree3D</c>; the belly between them presses it a third.</summary>
+    private const float BeltShare = 0.22f, BellyPress = 0.35f;
+
+    /// <summary>The cell's middle on its ground (world).</summary>
+    private Vector3 CellMiddle(Vector2I cell)
+    {
+        Vector2 flat = _field!.FlatAnchor(cell) + _field.CentreOffset;
+        return Foot(new Vector3(flat.X, 0.0f, flat.Y / Squash));
+    }
+
+    /// <summary>The trees and then the grass round their trunks; after the
+    /// camera, which carries the crowns' line.</summary>
+    private void BuildWood()
+    {
+        if (_field is null || _tile is null)
+            return;
+        if (!_noTrees)
+            Plant();
+        if (!_noGrass)
+            Lawn();
+    }
+
+    /// <summary>
+    /// <see cref="_woodCount"/> models on each wooded cell, <c>Tree3D</c>'s
+    /// <c>--wood</c>: one in the middle, the rest on a ring 60-80 px out (y
+    /// squashed as the screen has it), each turned its own way by a hash of
+    /// where it stands - the crowns overlap as a wood's do.
+    /// </summary>
+    private void Plant()
+    {
+        var wooded = new List<Vector2I>();
+        for (int q = 0; q < _field!.Columns; q++)
+        for (int r = 0; r < _field.Rows; r++)
+        {
+            var cell = new Vector2I(q, r);
+            if (_field.InBounds(cell) && _field.CoverAt(cell) == Cover.Forest)
+                wooded.Add(cell);
+        }
+        if (wooded.Count == 0)
+            return;
+        foreach (Vector2I cell in wooded)
+            _woodedCells.Add(cell);
+        _wildfire = new Wildfire { Field = _field, Enabled = true, Wooded = _woodedCells.Contains };
+        if (_stage is not null)
+            _stage.Blaze = _wildfire;
+        if (!_pbr)
+        {
+            _crowns = new CrownOutline { Name = "CrownOutline" };
+            AddChild(_crowns);
+            _crowns.Build(_camera);
+        }
+        ulong t0 = Time.GetTicksMsec();
+        foreach (Vector2I cell in wooded)
+        {
+            Vector2 flat = _field.FlatAnchor(cell) + _field.CentreOffset;
+            for (int i = 0; i < _woodCount; i++)
+            {
+                Vector2 off = Vector2.Zero;
+                if (i > 0)
+                {
+                    float a = Mathf.Tau * (i - 1) / Mathf.Max(_woodCount - 1, 1) + 0.4f + 0.35f * CelPuff.Hash(i, 613);
+                    float d = 60.0f + 20.0f * CelPuff.Hash(i, 617);
+                    off = new Vector2(Mathf.Cos(a) * d, Mathf.Sin(a) * d * Squash);
+                }
+                Vector2 at = flat + off;
+                int salt = cell.X * 97 + cell.Y * 31 + i;
+                Stand(_treeNames[(salt + i) % _treeNames.Length], new Vector3(at.X, 0.0f, at.Y / Squash),
+                      Mathf.Tau * CelPuff.Hash(salt, 611), at, cell);
+            }
+        }
+        foreach (Vector2I cell in wooded)
+            _woodMiddle += CellMiddle(cell) / wooded.Count;
+        GD.Print($"tank3d: wood on {wooded.Count} cells, {_trees.Count} trees in {Time.GetTicksMsec() - t0} ms");
+    }
+
+    private void Stand(string name, Vector3 where, float yaw, Vector2 flat, Vector2I cell)
+    {
+        if (TreeModel.Load(name, _pbr, out string? error) is not { } model)
+        {
+            GD.Print($"tank3d: {error}");
+            return;
+        }
+        _crowns?.Ghost(model.Scene, model.Burn, model.Leaves);
+        var holder = new Node3D
+        {
+            Name = $"{name}.{_trees.Count}", Scale = Vector3.One * model.Ppm,
+            Rotation = new Vector3(0.0f, yaw, 0.0f),
+        };
+        holder.AddChild(model.Scene);
+        AddChild(holder);
+        holder.Position = Foot(where);
+        TreeModel.Margin(holder);
+        (float phase, float rate) = TreeModel.SwayOf(flat);
+        var tree = new Planted
+        {
+            Holder = holder, Model = model, Cell = cell, Fire = TreeModel.Fire(this, name, model),
+            Phase = phase, Rate = rate,
+        };
+        tree.Stagger = tree.Hashed = TreeModel.StaggerOf(flat);
+        foreach (Vector3 seat in TreeModel.Seats)
+            tree.Seats.Add(new Vector3(seat.X * model.Width, seat.Y * model.Height, seat.Z * model.Depth));
+        _trees.Add(tree);
+    }
+
+    /// <summary>
+    /// The cells' grass: <see cref="Grass3D.Kind.CelTufts"/> on every level
+    /// cell of plain ground with nothing on it but a wood - the tufts keeping
+    /// off the trunks - at the trees' metre, and one press map over the board.
+    /// </summary>
+    private void Lawn()
+    {
+        float r = _tile!.HexRect.Size.X * 0.5f;
+        var span = new Rect2();
+        bool first = true;
+        var lay = new List<Vector2I>();
+        for (int q = 0; q < _field!.Columns; q++)
+        for (int w = 0; w < _field.Rows; w++)
+        {
+            var cell = new Vector2I(q, w);
+            if (!_field.InBounds(cell))
+                continue;
+            Vector3 m = CellMiddle(cell);
+            var box = new Rect2(m.X - r, m.Z - r, 2.0f * r, 2.0f * r);
+            span = first ? box : span.Merge(box);
+            first = false;
+            if (_field.FoundationAt(cell) == Foundation.Solid && !_field.IsRamp(cell) && !_field.IsWater(cell)
+                && _field.CoverAt(cell) is Cover.None or Cover.Forest)
+                lay.Add(cell);
+        }
+        _grass = new Grass3D
+        {
+            Name = "Grass", Ppm = _trees.Count > 0 ? _trees[0].Model.Ppm : 17.0f, Wind = _wind,
+            GustRate = TreeModel.GustRate, GustTravel = TreeModel.GustTravel, ShadowInk = Stage3D.ShadowInk.A,
+        };
+        AddChild(_grass);
+        _grass.Map(span);
+        ulong t0 = Time.GetTicksMsec();
+        for (int i = 0; i < lay.Count; i++)
+        {
+            Vector3 mid = CellMiddle(lay[i]);
+            var trunks = new List<Vector3>();
+            foreach (Planted t in _trees)
+                if (_field.FlatCellAt(Board(t.Holder.Position)) == lay[i])
+                    trunks.Add(t.Holder.Position);
+            int meadow = _grass.Lay(Grass3D.Kind.CelTufts, mid, r, 101 + i, trunks);
+            // grass burns where a wood does, and only there (Tree3D's rule)
+            if (_woodedCells.Contains(lay[i]))
+                _meadowOf[lay[i]] = meadow;
+        }
+        GD.Print($"tank3d: grass on {lay.Count} cells in {Time.GetTicksMsec() - t0} ms");
+    }
+
+    /// <summary>A frame of the wood: the wind on the crowns, and the grass
+    /// pressed under the hulls.</summary>
+    private void WoodTick(float dt)
+    {
+        _weather += dt;
+        _woodClock += dt;
+        WoodFire(dt);
+        float w = Mathf.Tau * SwayHz;
+        foreach (Planted t in _trees)
+        {
+            // The blasts that have got to it, and its crown's spring.
+            for (int k = t.Kicks.Count - 1; k >= 0; k--)
+                if (t.Kicks[k].Due <= _woodClock)
+                {
+                    t.PushV += t.Kicks[k].Kick * w;
+                    t.Shiver = Mathf.Max(t.Shiver, t.Kicks[k].Shiver);
+                    t.Kicks.RemoveAt(k);
+                }
+            t.PushV += (-w * w * t.Push - 2.0f * SwayDamp * w * t.PushV) * dt;
+            t.Push += t.PushV * dt;
+            t.Shiver *= Mathf.Exp(-dt / 0.6f);
+            if (t.Push.LengthSquared() < 1e-10f && t.PushV.LengthSquared() < 1e-10f)
+                t.Push = t.PushV = Vector2.Zero;
+            TreeModel.Sway(t.Holder, t.Model.Burn, t.Model.Leaves, _weather, t.Phase, t.Rate, _wind,
+                           spent: t.Spent, push: t.Push, shiver: t.Shiver < 1e-3f ? 0.0f : t.Shiver);
+        }
+        if (_grass is null)
+            return;
+        // On its belts: not afloat, not in the air, not once it is going under.
+        if (!_falling && !DeepHere && Gone < 0.5f)
+        {
+            float h = Mathf.DegToRad(_heading);
+            var ahead = new Vector3(Mathf.Sin(h), 0.0f, Mathf.Cos(h));
+            Trample(_rig.Position, ahead, _foot);
+        }
+        if (_other is { Falling: false, Wet: false } o)
+            Trample(o.Rig.Position, o.Ahead, o.Foot);
+    }
+
+    /// <summary>A hull's two belts pressing the grass flat, the way it is
+    /// going, and its belly between them less (<see cref="BellyPress"/>).</summary>
+    private void Trample(Vector3 rig, Vector3 ahead, (float Along, float Across, float HalfLen, float HalfWide) foot)
+    {
+        var left = new Vector3(ahead.Z, 0.0f, -ahead.X);
+        Vector3 middle = rig + ahead * foot.Along + left * foot.Across;
+        var way = new Vector2(ahead.X, ahead.Z);
+        float belt = BeltShare * 2.0f * foot.HalfWide;
+        foreach (float side in new[] { -1.0f, 1.0f })
+            _grass!.Press(middle + left * (side * (foot.HalfWide - belt * 0.5f)), way, 2.0f * foot.HalfLen, belt, 1.0f);
+        _grass!.Press(middle, way, 1.8f * foot.HalfLen, 2.0f * (foot.HalfWide - belt), BellyPress);
+    }
+
+    /// <summary>
+    /// A blast at <paramref name="at"/> (world, on the ground) as the wood
+    /// feels it: each crown thrown back from it by <paramref name="might"/>
+    /// of its height at the blast, less by <c>reach² / (reach² + d²)</c> out
+    /// to it, on the frame the blast gets there (<see cref="BlastSpeed"/>),
+    /// and its leaves shivering. A round's (<c>might</c> 0.08-0.2 by the
+    /// gun's firepower, a reach of 90-210 px) stirs the wood of its cell
+    /// and the next; a tank's (0.32 over 300 px) swings the cells round it. The spring keeps
+    /// some three quarters of the kick for its first swing: at half these the
+    /// first swing was 0.05 of the height, 6 px at the top, and did not read;
+    /// over a reach of 90 px a crown a cell off moved 1-3 px.
+    /// </summary>
+    private void WoodBlast(Vector3 at, float might, float reach)
+    {
+        foreach (Planted t in _trees)
+        {
+            Vector3 foot = t.Holder.GlobalPosition;
+            var away = new Vector2(foot.X - at.X, foot.Z - at.Z);
+            float d = away.Length();
+            Vector2 dir = d > 1.0f ? away / d : Vector2.Right;
+            float a = Mathf.Min(might * reach * reach / (reach * reach + d * d), 0.4f);
+            if (a < 0.004f)
+                continue;
+            t.Kicks.Add((_woodClock + d / BlastSpeed, dir * a, a / 0.32f * 3.0f));
+        }
+    }
+
+    /// <summary>
+    /// A tank blowing up at <paramref name="at"/> lights the wood (GDD
+    /// states.md, "Уничтожен"): the cell it stands on, now, and every wooded
+    /// neighbour on its own level - a rise's or a hollow's it does not reach
+    /// - on the frame the fire wave gets to the edge between them, the fire
+    /// coming in over that edge. Afloat there is no fire wave: the
+    /// neighbours a beat after the blast. A burnt wood is not lit again
+    /// (<see cref="Wildfire.Light"/> refuses).
+    /// </summary>
+    private void WoodIgnite(Vector3 at, bool grounded)
+    {
+        if (_wildfire is null || _field is null)
+            return;
+        Vector2I here = _field.FlatCellAt(Board(at));
+        if (_woodedCells.Contains(here))
+            _lights.Add((_woodClock, here, new Vector2(at.X, at.Z)));
+        int level = _field.LevelAt(here);
+        Vector3 mid = CellMiddle(here);
+        foreach (int heading in HexField.EdgeHeadings)
+        {
+            Vector2I next = HexField.Step(here, heading);
+            if (next == here || !_field.InBounds(next) || !_woodedCells.Contains(next) || _field.LevelAt(next) != level)
+                continue;
+            Vector3 edge = 0.5f * (mid + CellMiddle(next));
+            float d = new Vector2(edge.X - at.X, edge.Z - at.Z).Length();
+            float when = grounded && _celDeath is not null ? _celDeath.WaveArrives(d) : float.PositiveInfinity;
+            if (float.IsInfinity(when))
+                when = d / BlastSpeed;
+            _lights.Add((_woodClock + when, next, new Vector2(edge.X, edge.Z)));
+            GD.Print($"tank3d: blast on {here} lights the wood on {next} in {when:F2} s");
+        }
+    }
+
+    /// <summary>
+    /// A frame of the wood's fire: a blast's lights as they fall due, the
+    /// board's fire, the grass of each burning wood - its front from where the
+    /// fire came in, and with it when each tree catches: as the line gets to
+    /// its foot (<see cref="Grass3D.Arrival"/>), as on <c>Tree3D</c> - and each
+    /// tree's coat on its model and its fire.
+    /// </summary>
+    private void WoodFire(float dt)
+    {
+        if (_wildfire is null)
+            return;
+        for (int i = _lights.Count - 1; i >= 0; i--)
+            if (_lights[i].Due <= _woodClock)
+            {
+                (_, Vector2I cell, Vector2 from) = _lights[i];
+                _lights.RemoveAt(i);
+                if (_wildfire.Light(cell))
+                    _entry[cell] = from;
+            }
+        _wildfire.Tick(dt);
+        float within = _wildfire.CatchWithin - CatchLag;
+        foreach ((Vector2I cell, int meadow) in _meadowOf)
+        {
+            float age = _wildfire.AgeAt(cell);
+            bool lit = age >= 0.0f && !_frontOf.ContainsKey(cell);
+            if (age < 0.0f)
+                _frontOf.Remove(cell);
+            else if (lit)
+                _frontOf[cell] = FrontFrom(cell);
+            _grass!.Burn(meadow, age, _frontOf.TryGetValue(cell, out Vector2 f) ? f : Vector2.Zero, within);
+            foreach (Planted t in _trees)
+            {
+                if (t.Cell != cell)
+                    continue;
+                if (age < 0.0f)
+                    t.Stagger = t.Hashed;
+                else if (lit)
+                {
+                    Vector3 foot = t.Holder.GlobalPosition;
+                    float catches = _grass.Arrival(meadow, new Vector2(foot.X, foot.Z)) + CatchLag;
+                    t.Stagger = Mathf.Clamp(catches / Mathf.Max(_wildfire.CatchWithin, 1e-3f), 0.0f, 1.0f);
+                }
+            }
+        }
+        Basis eye = _camera.GlobalBasis;
+        foreach (Planted t in _trees)
+        {
+            Wildfire.Coat coat = _wildfire.Of(t.Cell, t.Stagger);
+            foreach (ShaderMaterial m in t.Model.Burn)
+            {
+                m.SetShaderParameter("burn", coat.Spent);
+                m.SetShaderParameter("charred", coat.Char);
+            }
+            t.Fire.Fire = coat.Flame;
+            t.Fire.Smoke = coat.Smoke;
+            t.Fire.Smoulder = coat.Burnt;
+            t.Spent = coat.Spent;
+            // The flame goes down with the crown, onto the limbs and the fork.
+            float down = coat.Spent * coat.Spent;
+            t.Ports.Clear();
+            foreach (Vector3 p in t.Seats)
+                t.Ports.Add(t.Holder.ToGlobal(p.Lerp(new Vector3(p.X * 0.4f, p.Y * 0.62f, p.Z * 0.3f), down)));
+            t.Fire.Tick(dt, t.Ports, eye);
+        }
+    }
+
+    /// <summary>Where a lit cell's grass front starts: where a blast sent the
+    /// fire in over its edge; else the edge with the neighbour that has burnt
+    /// longest past its delay, a little out on the neighbour's side (the
+    /// fire's own spread, <see cref="Wildfire.Delay"/>); else the middle.</summary>
+    private Vector2 FrontFrom(Vector2I cell)
+    {
+        Vector3 mid = CellMiddle(cell);
+        if (_entry.Remove(cell, out Vector2 entry))
+            return entry;
+        Vector2I? best = null;
+        float most = float.MinValue;
+        foreach (int heading in HexField.EdgeHeadings)
+        {
+            Vector2I next = HexField.Step(cell, heading);
+            if (next == cell || !_field!.InBounds(next))
+                continue;
+            float past = _wildfire!.AgeAt(next);
+            if (past < 0.0f)
+                continue;
+            past -= _wildfire.Delay(next, cell);
+            if (past > most)
+            {
+                most = past;
+                best = next;
+            }
+        }
+        if (best is not { } from)
+            return new Vector2(mid.X, mid.Z);
+        Vector3 edge = mid + (CellMiddle(from) - mid) * 0.62f;
+        return new Vector2(edge.X, edge.Z);
+    }
+
+    /// <summary>A crater tears the grass out over its rim: earth thrown up,
+    /// not a lawn.</summary>
+    private void WoodCrater(Vector3 at, float radius) =>
+        _grass?.Cut(at, radius * CelCrater.FootMost, Vector2.Zero, 0.0f);
+
+    /// <summary>The crowns' mask onto the camera, its depth slab round the wood.</summary>
+    private void WoodFollow()
+    {
+        if (_crowns is null)
+            return;
+        float depth = (_woodMiddle - _camera.Position).Dot(-_camera.Basis.Z);
+        _crowns.Follow(_camera, _zoom, depth);
+    }
+
+    /// <summary>The grass standing again and the wood green, still.</summary>
+    private void WoodReset()
+    {
+        _grass?.Heal();
+        _wildfire?.Douse();
+        _lights.Clear();
+        _entry.Clear();
+        foreach (Planted t in _trees)
+        {
+            t.Fire.Reset();
+            t.Push = t.PushV = Vector2.Zero;
+            t.Shiver = 0.0f;
+            t.Kicks.Clear();
+        }
+    }
+}
