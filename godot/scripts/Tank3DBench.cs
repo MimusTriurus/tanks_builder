@@ -684,7 +684,13 @@ void light() {
             float sz = (Y(flat + new Vector2(0.0f, d * Squash)) - Y(flat - new Vector2(0.0f, d * Squash))) / (2.0f * d);
             float ride = RideOn(cell, flat, out bool afloat);
             want = afloat || _falling ? Vector3.Up : new Vector3(-sx, 1.0f, -sz).Normalized();
-            _rig.Position = new Vector3(_rig.Position.X, Ride(cell, ride, afloat, dt, snap), _rig.Position.Z);
+            float y = Ride(cell, ride, afloat, dt, snap);
+            // Over the craters' rims and into their bowls (Tank3DBench.Pits).
+            if (!afloat && !_falling)
+                y += Pits(dt, ref want, snap);
+            else
+                PitsLeave();
+            _rig.Position = new Vector3(_rig.Position.X, y, _rig.Position.Z);
         }
         _groundUp = snap ? want : _groundUp.Lerp(want, 1.0f - Mathf.Exp(-10.0f * dt)).Normalized();
         ApplyRig();
@@ -1107,7 +1113,8 @@ void light() {
         _model.Droop = 0; _model.Cant = 0; _model.Slackness = 0;
         _tremble.Reset();
         _trembleOn = 1.0f;
-        foreach (Spring s in new[] { _kickPitch, _kickRoll, _swayPitch, _swayRoll, _heave, _tip })
+        foreach (Spring s in new[] { _kickPitch, _kickRoll, _swayPitch, _swayRoll, _heave, _tip,
+                                     _pitPitch, _pitRoll, _pitHeave })
             s.Reset();
         _fate = Fate.Alive;
         _speed = 0;
@@ -1224,9 +1231,9 @@ void light() {
         // BodyPitch follows the acceleration: 0.035 rad at full pull, nose up -
         // negative about +X - when pulling away forward.
         float sway = _swayPitch.Step(dt, -0.035f * a * Mathf.Sign(target == 0 ? _speed : target));
-        _model.Pitch = _kickPitch.Step(dt) + sway;
-        _model.Roll = _kickRoll.Step(dt) + _swayRoll.Step(dt);
-        _model.Heave = _heave.Step(dt);
+        _model.Pitch = _kickPitch.Step(dt) + sway + _pitPitch.Step(dt);
+        _model.Roll = _kickRoll.Step(dt) + _swayRoll.Step(dt) + _pitRoll.Step(dt);
+        _model.Heave = _heave.Step(dt) + _pitHeave.Step(dt) / Mathf.Max(_model.PixelsPerUnit, 1e-3f);
         Tremble(dt);
 
         _sinceShot += dt;

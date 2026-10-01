@@ -29,6 +29,8 @@ namespace TankSpriteTest;
 /// <item><b>Clods</b> - a few lumps of earth lying out past the rim's foot.</item>
 /// <item>It grows in over <see cref="GrowTime"/> s, and stays; the oldest of
 /// <see cref="Kept"/> goes first.</item>
+/// <item><b>The hulls feel it</b> (<see cref="HeightAt"/>) - ratel's
+/// <c>crater_profile</c>: up over the rim, down into the bowl.</item>
 /// </list>
 /// Lengths are shares of the crater's radius to the rim's outer foot.
 /// </summary>
@@ -181,6 +183,50 @@ public sealed partial class CelCrater : Node3D
     {
         foreach (Pit p in _pits)
             p.Node.Visible = false;
+    }
+
+    /// <summary>How deep the bowl is felt, a share of the radius - shallower
+    /// than ratel's 0.22: its bowl is real, this one flat, and a hull let down
+    /// that far went under the board.</summary>
+    public const float BowlDepth = 0.10f;
+
+    /// <summary>
+    /// How far the craters raise or lower the ground at <paramref name="w"/>
+    /// (world), px - each as big as it has grown: <see cref="RimHeight"/> on
+    /// the crest, falling smoothly to nothing at either foot, and a bowl
+    /// <see cref="BowlDepth"/> deep inside the inner one. ratel's
+    /// <c>crater_profile</c>, summed over the craters.
+    /// </summary>
+    public float HeightAt(Vector3 w)
+    {
+        float sum = 0.0f;
+        foreach (Pit p in _pits)
+        {
+            if (!p.Node.Visible)
+                continue;
+            float r = p.Node.Scale.X;
+            if (r < 1e-3f)
+                continue;
+            Vector3 o = p.Node.GlobalPosition;
+            float d = new Vector2(w.X - o.X, w.Z - o.Z).Length() / r;
+            if (d >= RimOut)
+                continue;
+            sum += r * Profile(d);
+        }
+        return sum;
+    }
+
+    /// <summary>The unit crater's height <paramref name="d"/> out from its
+    /// middle (1 the outer foot).</summary>
+    public static float Profile(float d)
+    {
+        if (d >= RimOut)
+            return 0.0f;
+        if (d >= RimTop)
+            return RimHeight * Mathf.SmoothStep(RimOut, RimTop, d);
+        if (d >= RimIn)
+            return RimHeight * Mathf.SmoothStep(RimIn, RimTop, d);
+        return -BowlDepth * (1.0f - d / RimIn * (d / RimIn));
     }
 
     public void Tick(float dt)
