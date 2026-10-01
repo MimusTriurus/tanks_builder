@@ -115,6 +115,32 @@ public sealed partial class CelBurn : Node3D
     public float Blend = 0.03f;
     public Color Tint = new(0.96f, 0.95f, 1.0f);
 
+    // ------------------------------------------------------------ the douse
+
+    /// <summary>
+    /// A fire put out (<see cref="Douse"/>), as the sprites have it
+    /// (<c>Vehicle.DouseSeconds</c>, <c>DouseFlameSeconds</c>): two clocks,
+    /// because the flame goes almost at once and the steam it leaves hangs -
+    /// the flame falls over <see cref="DouseFlame"/> s instead of
+    /// <see cref="FireFall"/>, and for <see cref="DouseTime"/> s the column
+    /// goes on off the grilles as steam, falling from full to nought.
+    ///
+    /// <b>Steam by the puff, not by the column.</b> The sprites' column turns
+    /// white whole (<c>ProcSmoke.SteamInk</c>); here a puff keeps the grey it
+    /// was born with, so the soot already up goes on up dark and the steam
+    /// comes out under it - <see cref="SteamTone"/>, near white, and
+    /// <see cref="SteamSwell"/> bigger at the douse and back to the column's
+    /// size as the steam goes (the sprites' <c>TankTick.SteamSwell</c>). Put
+    /// out with no picture, the fire died over a second and a half as if it
+    /// burnt down, the column thinning from the foot. Every puff born after the
+    /// douse is steam, to the column's end: steam only while its clock ran,
+    /// the last of the smoke falling away after it came out dark at the deck
+    /// under the white. At 0.88 the sun's ramp lifted the steam to flat white
+    /// with no shape to it.
+    /// </summary>
+    public float DouseFlame = 0.35f, DouseTime = 1.15f;
+    public float SteamTone = 0.70f, SteamSwell = 0.9f;
+
     // ------------------------------------------------------------ the inputs
 
     /// <summary>How much fire is asked for, 0..1 - the wreck's blaze. What
@@ -128,6 +154,17 @@ public sealed partial class CelBurn : Node3D
     public float Heat => _heat;
     /// <summary>Light smoke of a smouldering wreck, not the burning column.</summary>
     public bool Smoulder;
+
+    /// <summary>The fire put out, this moment - see <see cref="DouseFlame"/>.
+    /// The owner stops asking for fire; the steam is this one's.</summary>
+    public void Douse() => _dousedAt = _clock;
+
+    /// <summary>How much of the douse's steam is still coming, 1 at the douse,
+    /// 0 once it is over or with none.</summary>
+    public float Steam => SteamAt(_clock);
+
+    private float SteamAt(float t) =>
+        t < _dousedAt ? 0.0f : 1.0f - Mathf.Clamp((t - _dousedAt) / Mathf.Max(DouseTime, 1e-3f), 0.0f, 1.0f);
     /// <summary>
     /// The turret against the fire, <b>by grille, not by pixel</b>: a port
     /// nearer the eye than the turret's ring (<see cref="TurretAt"/>) has its
@@ -167,6 +204,9 @@ public sealed partial class CelBurn : Node3D
 
     private float _hull = 150.0f;
     private float _clock;
+    /// <summary>When the fire was put out, on <see cref="_clock"/>; past every
+    /// clock with none.</summary>
+    private float _dousedAt = float.MaxValue;
     /// <summary>The smoke's grey before the last change of it and when that
     /// was: a puff keeps the grey of the moment it was born, so the black of a
     /// knock-out's flare climbs away above the pale smoulder under it, rather
@@ -248,6 +288,7 @@ public sealed partial class CelBurn : Node3D
     private void Rest()
     {
         _clock = 0.0f;
+        _dousedAt = float.MaxValue;
         _toneBefore = _toneNow = -1.0f;
         _heat = _smoke = 0.0f;
         _births = false;
@@ -312,10 +353,12 @@ public sealed partial class CelBurn : Node3D
         if (_flame is null || _cloud is null || _glow is null)
             return;
         float fire = ports.Count > 0 ? Mathf.Clamp(Fire, 0.0f, 1.0f) : 0.0f;
-        float smoke = ports.Count > 0 ? Mathf.Clamp(Smoke, 0.0f, 1.0f) : 0.0f;
+        float steam = Steam;
+        // The steam is smoke the column goes on giving while it lasts.
+        float smoke = ports.Count > 0 ? Mathf.Clamp(Mathf.Max(Smoke, steam), 0.0f, 1.0f) : 0.0f;
         float heatBefore = _heat;
         bool marked = _scorch > 0.0f;
-        _heat = Follow(_heat, fire, dt, FireRise, FireFall);
+        _heat = Follow(_heat, fire, dt, FireRise, steam > 0.0f ? DouseFlame : FireFall);
         _smoke = Follow(_smoke, smoke, dt, SmokeRise, SmokeFall);
 
         // The column's births: on while the smoke that follows is up, so the
@@ -544,6 +587,13 @@ public sealed partial class CelBurn : Node3D
             float mine = ToneEase > 0.0f
                 ? Mathf.Lerp(_toneBefore, _toneNow, Mathf.Clamp((born - _toneAt) / ToneEase, 0.0f, 1.0f))
                 : born < _toneAt ? _toneBefore : _toneNow;
+            // Born in the steam: white, and bigger the nearer the douse.
+            float steamed = SteamAt(born);
+            if (born >= _dousedAt)
+            {
+                mine = SteamTone;
+                d *= 1.0f + SteamSwell * steamed;
+            }
             _cloud.Add(at, 0.5f * d, mine, h2, Mathf.Min(erode, 1.0f), a);
         }
         _cloud.Draw(eye);

@@ -177,6 +177,10 @@ public sealed partial class Tank3DBench
         if (_burning && _field.IsWater(to))
         {
             _burning = false;
+            // With its steam, but not over deep water: nothing smokes off a
+            // deck under it (TankTick's own exception, asked of the cell).
+            if (!_field.IsDeep(to))
+                _celBurn?.Douse();
             GD.Print($"tank3d: {_modelTag} into the water at {to} - the fire is out");
         }
         if (_field.Drops(from, to))
