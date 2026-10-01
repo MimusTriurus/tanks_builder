@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Godot;
 
 namespace TankSpriteTest;
@@ -31,6 +32,19 @@ namespace TankSpriteTest;
 /// crest over the top of each jet, where the sheet is thinnest and catches the
 /// light. The ink is the water's own teal, dark, not black.
 ///
+/// <b>A round into the water</b> (<see cref="Spout"/>) is the same water in
+/// another shape, the way the jackal port's preview throws one (ratel,
+/// <c>Level3DRocket._splash</c>): a column - a few tall jets straight up in
+/// the middle, a ring of shorter ones round them leaning out, the back half of
+/// the ring a sheet behind the column and the front half one before it; a
+/// crown of drops thrown out and up all round, each a short capsule along the
+/// way it flies, falling back in; and <b>four rings of foam one after
+/// another</b> (<see cref="Rings"/>) - a patch at first, opening into a ring
+/// that slows, thins and is gone as a line, the first going furthest (a later
+/// one going further would cross it), the last the foam where the column
+/// came down. The rings have no ink: the water is left soft, and a dark line
+/// round every ripple drew a target on it (ratel's lesson).
+///
 /// <b>The ring</b> is a flat band on the water in the hull's shape - a rounded
 /// rectangle a margin out from the hull, as the board's waterline is the
 /// hull's silhouette rather than an ellipse round it (docs/water.md) - that
@@ -57,6 +71,13 @@ public sealed partial class CelSplash : Node3D
     /// world px at might one.</summary>
     public const float RingLife = 1.6f, RingReach = 95.0f;
 
+    /// <summary>A round's column (<see cref="Spout"/>): the jets round it and
+    /// in its middle, their up speed, world px/s at might one - the middle
+    /// some 150 px tall at might one, four times a fan - how far out a ring jet leans for
+    /// every px up, and the column's foot, world px across the middle.</summary>
+    public const int SpoutJets = 16, SpoutCore = 5, SpoutDrops = 14;
+    public const float SpoutUp = 470.0f, SpoutOut = 0.16f, SpoutRadius = 11.0f;
+
     /// <summary>The water's colours: lit, the shaded teal (the ramp's shade),
     /// the crest and the ink.</summary>
     public static readonly Color Body = new(0.62f, 0.83f, 0.87f);
@@ -64,7 +85,17 @@ public sealed partial class CelSplash : Node3D
     public static readonly Color Crest = new(0.97f, 1.0f, 1.0f);
     public static readonly Color Ink = new(0.08f, 0.24f, 0.26f);
 
-    private const int Pool = 16;
+    private const int Pool = 28;
+
+    /// <summary>The column's rings: reach, world px at might one, life and
+    /// delay, s - ratel's four, on a column some 150 px tall where theirs is
+    /// two metres.</summary>
+    private static readonly (float Reach, float Life, float Delay)[] Rings =
+    {
+        (210.0f, 1.8f, 0.0f), (158.0f, 1.6f, 0.25f), (105.0f, 1.4f, 0.5f), (60.0f, 0.9f, 1.0f),
+    };
+
+    private readonly List<(MeshInstance3D Quad, ShaderMaterial Look)> _ripples = new();
 
     private sealed class Sheet
     {
@@ -85,6 +116,7 @@ public sealed partial class CelSplash : Node3D
     private Vector3 _along = Vector3.Back, _across = Vector3.Right;
     private float _halfLen = 70.0f, _halfWide = 45.0f;
     private int _seed;
+    private bool _column;
     private float _squash = 0.5f, _rise = 0.86f;
 
     public bool Busy => _clock >= 0.0f;
@@ -129,6 +161,21 @@ public sealed partial class CelSplash : Node3D
             Visible = false,
         };
         AddChild(_ring);
+        foreach (var _ in Rings)
+        {
+            var look = new ShaderMaterial { Shader = RippleShader, RenderPriority = Stage3D.DressOrder };
+            look.SetShaderParameter("foam", Crest);
+            look.SetShaderParameter("wash", Body);
+            var quad = new MeshInstance3D
+            {
+                Name = $"Ripple{_ripples.Count}", Mesh = new PlaneMesh { Size = Vector2.One * 2.0f },
+                MaterialOverride = look, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+                // After the pond, the ring's reason.
+                SortingOffset = -100000.0f, Visible = false,
+            };
+            AddChild(quad);
+            _ripples.Add((quad, look));
+        }
     }
 
     /// <summary>
@@ -152,6 +199,15 @@ public sealed partial class CelSplash : Node3D
         _might = Mathf.Max(might, 0.05f);
         _seed++;
         _clock = 0.0f;
+        _column = false;
+    }
+
+    /// <summary>A round goes into the water at <paramref name="seat"/> (the
+    /// surface, world): the column and a round ring - see the class note.</summary>
+    public void Spout(Vector3 seat, float might = 1.0f)
+    {
+        Fire(seat, Vector3.Back, SpoutRadius, SpoutRadius, might);
+        _column = true;
     }
 
     public void Reset()
@@ -162,11 +218,14 @@ public sealed partial class CelSplash : Node3D
                 s.Quad.Visible = false;
         if (_ring is not null)
             _ring.Visible = false;
+        foreach (var (quad, _) in _ripples)
+            quad.Visible = false;
     }
 
     /// <summary>How long the event is: the latest-born, fastest jet back in the
     /// water, or the ring gone.</summary>
-    private float Length => Mathf.Max(0.2f + 2.0f * FanUp * 1.2f * Mathf.Sqrt(_might) / Gravity, RingLife);
+    private float Length => Mathf.Max(0.2f + 2.0f * (_column ? SpoutUp * 1.3f : FanUp * 1.2f) * Mathf.Sqrt(_might) / Gravity,
+                                      _column ? 1.9f : RingLife);
 
     public void Tick(float dt, Basis eye)
     {
@@ -181,6 +240,15 @@ public sealed partial class CelSplash : Node3D
         float speed = Mathf.Sqrt(_might);
         Sheet bow = _sheets[0], left = _sheets[1], right = _sheets[2];
         bow.N = left.N = right.N = 0;
+        if (_column)
+        {
+            Column(speed, eye);
+            foreach (Sheet s in _sheets)
+                Draw(s, eye);
+            _ring.Visible = false;
+            Ripples(speed);
+            return;
+        }
         // The flanks: jets along each side, the front ones in first - the nose
         // goes over the edge before the tail - and standing highest a little
         // ahead of the middle, where the hull hits hardest.
@@ -264,6 +332,87 @@ public sealed partial class CelSplash : Node3D
         sheet.Tip[sheet.N] = new Vector4(tip.X, tip.Y, tip.Z, r1);
         sheet.Looks[sheet.N] = new Vector4(Hash(k, 12) * 7.0f + _seed * 3.1f, cut, a, 0.0f);
         sheet.N++;
+    }
+
+    /// <summary>The column this frame: the middle's tall jets on one sheet, the
+    /// ring's split between the sheet behind them and the one before.</summary>
+    private void Column(float speed, Basis eye)
+    {
+        Sheet core = _sheets[0], behind = _sheets[1], before = _sheets[2];
+        Vector3 back = eye.Z.Normalized();
+        for (int j = 0; j < SpoutCore; j++)
+        {
+            float h1 = Hash(j, 21), h2 = Hash(j, 22), h3 = Hash(j, 23);
+            float ang = h1 * Mathf.Tau;
+            var lean = new Vector3(Mathf.Cos(ang), 0.0f, Mathf.Sin(ang));
+            float up = SpoutUp * (0.75f + 0.3f * h2) * speed;
+            Jet(core, _seat + lean * (SpoutRadius * 0.45f * h3), lean, up, 0.04f, 0.008f * j, SpoutRadius * 1.25f, 100 + j);
+        }
+        for (int j = 0; j < SpoutJets; j++)
+        {
+            float h1 = Hash(j, 24), h2 = Hash(j, 25), h3 = Hash(j, 26);
+            float ang = (j + 0.6f * h1) / SpoutJets * Mathf.Tau;
+            var outward = new Vector3(Mathf.Cos(ang), 0.0f, Mathf.Sin(ang));
+            float up = SpoutUp * (0.35f + 0.35f * h2) * speed;
+            float born = 0.01f + 0.05f * h3;
+            Sheet sheet = outward.Dot(back) > 0.0f ? before : behind;
+            Jet(sheet, _seat + outward * (SpoutRadius * 1.1f), outward, up, SpoutOut * (0.6f + 0.9f * h1),
+                born, SpoutRadius * 0.9f, 120 + j);
+        }
+        // The crown: drops out and up all round, back into the water.
+        for (int j = 0; j < SpoutDrops; j++)
+        {
+            float h1 = Hash(j, 27), h2 = Hash(j, 28), h3 = Hash(j, 29);
+            float ang = (j + 0.6f * h1) / SpoutDrops * Mathf.Tau;
+            var outward = new Vector3(Mathf.Cos(ang), 0.0f, Mathf.Sin(ang));
+            Vector3 v = outward * ((110.0f + 90.0f * h2) * speed) + Vector3.Up * ((230.0f + 120.0f * h3) * speed);
+            float t = _clock - 0.03f - 0.04f * h1;
+            float life = 2.0f * v.Y / Gravity;
+            if (t <= 0.0f || t >= life)
+                continue;
+            Vector3 vel = v + Vector3.Down * (Gravity * t);
+            Vector3 at = _seat + outward * (SpoutRadius * 1.3f) + v * t + Vector3.Down * (0.5f * Gravity * t * t);
+            // Long along the way it flies: a drop, not a pebble.
+            float r = (2.6f + 1.4f * h2) * (1.0f - 0.4f * t / life);
+            Vector3 tail = at - vel.Normalized() * (r * 2.6f);
+            Sheet sheet = outward.Dot(back) > 0.0f ? before : behind;
+            if (sheet.N >= Pool)
+                continue;
+            sheet.Foot[sheet.N] = new Vector4(tail.X, tail.Y, tail.Z, r * 0.7f);
+            sheet.Tip[sheet.N] = new Vector4(at.X, at.Y, at.Z, r);
+            sheet.Looks[sheet.N] = new Vector4(Hash(j, 30) * 7.0f + _seed * 3.1f, 1.2f, 0.0f, 0.0f);
+            sheet.N++;
+        }
+    }
+
+    /// <summary>The column's four rings this frame (see the class note).</summary>
+    private void Ripples(float speed)
+    {
+        for (int i = 0; i < Rings.Length && i < _ripples.Count; i++)
+        {
+            var (reach0, life, delay) = Rings[i];
+            var (quad, look) = _ripples[i];
+            float k = (_clock - delay) / life;
+            if (k < 0.0f || k > 1.0f)
+            {
+                quad.Visible = false;
+                continue;
+            }
+            float reach = reach0 * speed;
+            // Out fast and slowing; the band from a patch to a line.
+            float radius = Mathf.Lerp(reach * 0.12f, reach, 1.0f - (1.0f - k) * (1.0f - k));
+            float band = reach * Mathf.Lerp(0.14f, 0.012f, k);
+            // A hair over the water, not the board's lift toward the eye: lifted
+            // that far it stood in front of the bank, and the rings ran out
+            // over the dry ground; on the water the bank hides them where the
+            // shore is, as ratel's land does.
+            quad.GlobalTransform = new Transform3D(Basis.Identity.Scaled(new Vector3(radius, 1.0f, radius)),
+                                                   _seat + Vector3.Up * 0.5f);
+            look.SetShaderParameter("inner", Mathf.Clamp(1.0f - band / Mathf.Max(radius, 1e-3f), 0.0f, 1.0f)
+                                             * (i == Rings.Length - 1 ? Mathf.SmoothStep(0.0f, 1.0f, k) : 1.0f));
+            look.SetShaderParameter("seed", _seed * 7.3f + i * 13.1f);
+            quad.Visible = true;
+        }
     }
 
     private Vector3? _hex;
@@ -434,6 +583,39 @@ void fragment() {
         EMISSION = body * shade;
         NORMAL = normalize(nsum);
     }
+}
+",
+    };
+
+    /// <summary>
+    /// A ring of foam on the water (ratel's <c>level3d_ripple.gdshader</c>): a
+    /// square two across about its middle, drawn only between <c>inner</c> and
+    /// 1, its edges wandering by a noise round it as far as a share of its
+    /// width; two flat bands, white foam outside where it breaks and the pale
+    /// water behind. <c>inner</c> 0 is a patch. No ink, no light.
+    /// </summary>
+    private static readonly Shader RippleShader = new()
+    {
+        Code = @"
+shader_type spatial;
+render_mode unshaded, blend_mix, depth_draw_never, cull_disabled, shadows_disabled;
+uniform vec3 foam : source_color = vec3(0.97, 1.0, 1.0);
+uniform vec3 wash : source_color = vec3(0.62, 0.83, 0.87);
+uniform float inner = 0.8;
+uniform float seed = 0.0;
+" + Toon.NoiseCode + @"
+varying vec2 local;
+void vertex() {
+    local = VERTEX.xz;
+}
+void fragment() {
+    float r = length(local);
+    float band = 1.0 - inner;
+    vec2 around = local / max(r, 1e-4);
+    float d = r + (noise3(vec3(around * 2.5, seed)) - 0.5) * band * 0.8;
+    if (d > 1.0 || d < inner) discard;
+    ALBEDO = d > inner + band * 0.45 ? foam : wash;
+    ALPHA = 1.0;
 }
 ",
     };

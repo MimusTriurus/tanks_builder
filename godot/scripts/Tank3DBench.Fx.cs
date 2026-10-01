@@ -97,6 +97,9 @@ public sealed partial class Tank3DBench
     private CelBurn? _celBurn;
     private CelExhaust? _celExhaust;
     private CelShot? _celShot;
+    /// <summary>A round in the ground and in the water, the model's look.</summary>
+    private CelBurst? _celBurst;
+    private CelSplash? _shellSplash;
     private CelHit? _celHit;
     private CelBlast? _celBlast;
     private CelDeath? _celDeath;
@@ -501,6 +504,12 @@ void fragment() {
             _celHit.Build(_model.HullLength * _model.PixelsPerUnit);
             _celHit.Solids = _solids;
             _celHit.Targets(_model, _model.Cel);
+            _celBurst = new CelBurst { Name = "Burst" };
+            AddChild(_celBurst);
+            _celBurst.Build(_model.HullLength * _model.PixelsPerUnit, Squash, RiseFactor, w => Foot(w).Y);
+            _shellSplash = new CelSplash { Name = "ShellSplash" };
+            AddChild(_shellSplash);
+            _shellSplash.Build(Squash, RiseFactor);
             _celBlast = new CelBlast { Name = "Blast" };
             AddChild(_celBlast);
             _celBlast.Build(_model.HullLength * _model.PixelsPerUnit);
@@ -594,6 +603,10 @@ void fragment() {
         _celExhaust = null;
         _celShot?.QueueFree();
         _celShot = null;
+        _celBurst?.QueueFree();
+        _celBurst = null;
+        _shellSplash?.QueueFree();
+        _shellSplash = null;
         _celHit?.QueueFree();
         _celHit = null;
         _celBlast?.QueueFree();
@@ -913,12 +926,25 @@ void fragment() {
         slam.Fire();
     }
 
+    /// <summary>The model's crater, out to its rim's foot, against the board's
+    /// width of one (<see cref="Craters.Wide"/>, a hex's share).</summary>
+    private const float CraterRadius = 1.0f;
+
     /// <summary>A round landing in the ground - beside the tank (key 5), or
     /// where a round in flight came down (<see cref="Lands"/>): the board's
     /// <see cref="Stage3D.Boom"/>, burst and crater.</summary>
     private void FxGround(Vector3? where = null)
     {
         Vector3 spot = Foot(where ?? _rig.Position + new Vector3(0.55f, 0.0f, 0.45f) * HexWidth);
+        // The model's own (CelBurst): fire, fountain, clods, dust and its
+        // crater, the board's size of one.
+        if (_celBurst is not null)
+        {
+            _celBurst.Craters.SunWay = _sun.GlobalBasis.Z;
+            _celBurst.Burst(spot, CraterRadius * new Craters().Wide * Might * HexWidth);
+            _shake.Blast(_profile.ShotShake * 0.6);
+            return;
+        }
         float lift = LiftAt(spot);
         SheetBlast blast = Next(_booms, ref _nextBoom, Pool, () =>
         {
@@ -1049,6 +1075,8 @@ void fragment() {
         ShellsReset();
         _celHit?.Reset();
         _celBlast?.Reset();
+        _celBurst?.Reset();
+        _shellSplash?.Reset();
         _celDeath?.Reset();
         _celDust?.Reset();
         _ruts?.Clear();
@@ -1205,6 +1233,8 @@ void fragment() {
         Glint(dt);
         _celHit?.Tick(dt, _camera.GlobalBasis);
         _celBlast?.Tick(dt, _camera.GlobalBasis);
+        _celBurst?.Tick(dt, _camera.GlobalBasis);
+        _shellSplash?.Tick(dt, _camera.GlobalBasis);
         _celDeath?.Tick(dt, _camera.GlobalBasis);
 
         // TankTick.UpdateShot - frames, as the board counts them.

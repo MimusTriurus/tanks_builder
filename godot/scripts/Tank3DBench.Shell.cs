@@ -79,6 +79,9 @@ public sealed partial class Tank3DBench
     /// board unseen, s, and how long a ricochet flies on.</summary>
     private const float ShellLongest = 2.5f, GlanceLongest = 0.8f;
 
+    /// <summary>A round's column against a hull's plunge, the splash's might.</summary>
+    private const float ShellSplashMight = 0.8f;
+
     /// <summary>How far a step of the throw goes, world units: short enough
     /// that a turret roof is not stepped over.</summary>
     private const float ShellStep = 6.0f;
@@ -323,7 +326,12 @@ public sealed partial class Tank3DBench
         {
             Vector2I cell = _field.FlatCellAt(Board(at));
             float top = _field.WaterTop(cell);
-            _stage.Splash(Board(at) - new Vector2(0.0f, top), top);
+            // The model's own column (CelSplash.Spout); the board's sheet
+            // under --fx2d.
+            if (_shellSplash is not null)
+                _shellSplash.Spout(new Vector3(at.X, top / RiseFactor, at.Z), ShellSplashMight);
+            else
+                _stage.Splash(Board(at) - new Vector2(0.0f, top), top);
             _ripples.Strike(new Vector2(at.X, at.Z), Stage3D.Waves);
             _shake.Blast(_profile.ShotShake * 0.4);
             return;
