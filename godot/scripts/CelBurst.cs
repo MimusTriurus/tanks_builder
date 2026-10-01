@@ -134,14 +134,16 @@ public sealed partial class CelBurst : Node3D
 
     /// <summary>A round bursts in the ground at <paramref name="at"/> (world,
     /// on the ground), and leaves a crater <paramref name="radius"/> out to its
-    /// rim's foot, world px. A burst still running is cut short; its crater
-    /// stays.</summary>
-    public void Burst(Vector3 at, float radius)
+    /// rim's foot, world px - at <paramref name="pit"/> if given, the owner
+    /// having moved it to keep to its cell (<see cref="CelCrater.Dig"/> for
+    /// <paramref name="inside"/>). A burst still running is cut short; its
+    /// crater stays.</summary>
+    public void Burst(Vector3 at, float radius, Vector3? pit = null, System.Func<Vector3, bool>? inside = null)
     {
         _since = 0.0f;
         _bursts++;
         _at = at;
-        Craters.Dig(at, radius);
+        Craters.Dig(pit ?? at, radius, inside);
     }
 
     /// <summary>The burst stopped and every crater off the board.</summary>

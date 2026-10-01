@@ -18,15 +18,25 @@ namespace TankSpriteTest;
 /// Its inner wall is steep - 59 degrees, steeper than the sun is high (52) -
 /// so the half of it with its back to the sun is in shade and the other lit:
 /// the hole's two tones come from the light and are not painted. The outer
-/// slope is gentle and lit all round. Along the crest a black chamfer - the
-/// line the models' sharp edges have - is what draws the ring from above.</item>
+/// slope is gentle and lit all round. Along the crest <b>the models' ink</b>
+/// - what draws the ring from above: a ribbon run out from the crest over the
+/// outer slope, as wide on the screen as a hull's outline
+/// (<see cref="Toon.InkWidth"/> world px, never under
+/// <see cref="Toon.InkMinPx"/>) and the earth's colour times
+/// <see cref="Toon.InkDark"/>, as a hull's is its paint's. The same line
+/// round the outer foot, where the mound stands against the ground - a hull's
+/// outline runs round its belts on the ground as well - but only where the
+/// slope faces the eye: on the far side the crest is the mound's edge and its
+/// line is already there, and a second one beside it drew it double.</item>
 /// <item><b>The bowl</b> - flat, a dark mark inside the rim's foot, the far
 /// wall from the sun a step lighter (the wall the sun sees into) and the floor
 /// a shade darker than the walls - not soot: in soot it read as a black hole
 /// (ratel's lesson). ratel cuts a hole in the ground and puts a real bowl in
 /// it; the board here is <see cref="Stage3D"/>'s, shared with the sprite
 /// benches, and at this camera's 30 degrees the bowl's depth shows little.</item>
-/// <item><b>Clods</b> - a few lumps of earth lying out past the rim's foot.</item>
+/// <item><b>Clods</b> - a few lumps of earth lying out past the rim's foot,
+/// dressed as a model is (<see cref="Toon.Dress"/>): flat faces, the ink
+/// shell round them.</item>
 /// <item>It grows in over <see cref="GrowTime"/> s, and stays; the oldest of
 /// <see cref="Kept"/> goes first.</item>
 /// <item><b>The hulls feel it</b> (<see cref="HeightAt"/>) - ratel's
@@ -37,10 +47,10 @@ namespace TankSpriteTest;
 public sealed partial class CelCrater : Node3D
 {
     public const float RimIn = 0.5f, RimTop = 0.62f, RimOut = 1.0f, RimHeight = 0.2f;
+    /// <summary>How far past <see cref="RimOut"/> the ragged foot reaches at
+    /// most, and the clods - what has to keep to the crater's cell.</summary>
+    public const float FootMost = 1.08f;
     public const int Segments = 11;
-    /// <summary>The crest's chamfer, a share of the radius: the models' ink
-    /// width (<see cref="Toon.InkWidth"/>) on a crater of some 40 px.</summary>
-    public const float RimLine = 0.03f;
     public const float GrowTime = 0.2f;
     public const int Kept = 12;
     /// <summary>Rims made at the start, each its own raggedness; a crater
@@ -48,11 +58,11 @@ public sealed partial class CelCrater : Node3D
     private const int Shapes = 4;
 
     /// <summary>The rim's inner face, scorched; the earth thrown out; the
-    /// chamfer; the clods.</summary>
+    /// clods.</summary>
     /// Darker than the ground they stand for: lit by the sun and the fill,
     /// the ground's own tone came out cream.
     public Color Scorched = new(0.30f, 0.21f, 0.13f), Earth = new(0.44f, 0.34f, 0.22f),
-                 Chamfer = new(0.0f, 0.0f, 0.0f), Clod = new(0.30f, 0.22f, 0.14f);
+                 Clod = new(0.30f, 0.22f, 0.14f);
     /// <summary>The bowl: its wall away from the sun, the wall toward it, the
     /// floor.</summary>
     public Color BowlShade = new(0.22f, 0.16f, 0.10f), BowlLit = new(0.40f, 0.29f, 0.18f),
@@ -75,8 +85,8 @@ public sealed partial class CelCrater : Node3D
     private readonly List<Pit> _pits = new();
     private int _next, _dug;
     private float _squash = 0.5f, _rise = 0.86f;
-    private ShaderMaterial? _scorched, _earth, _chamfer, _clod;
-    private SphereMesh? _lump;
+    private ShaderMaterial? _scorched, _earth, _crest, _foot;
+    private Mesh? _lump;
 
     public void Build(float squash, float rise)
     {
@@ -84,11 +94,27 @@ public sealed partial class CelCrater : Node3D
         _rise = rise;
         _scorched = Cel(Scorched);
         _earth = Cel(Earth);
-        _chamfer = Cel(Chamfer);
-        _clod = Cel(Clod);
+        // A hull's ink: its paint darkened, as wide.
+        _crest = new ShaderMaterial { Shader = CrestShader };
+        _crest.SetShaderParameter("albedo", Earth * Toon.InkDark);
+        _crest.SetShaderParameter("width", Toon.InkWidth);
+        _crest.SetShaderParameter("min_px", Toon.InkMinPx);
+        _foot = (ShaderMaterial)_crest.Duplicate();
+        _foot.SetShaderParameter("facing", true);
         for (int i = 0; i < Shapes; i++)
             _shapes.Add(RimMesh(10 + i));
-        _lump = new SphereMesh { Radius = 1.0f, Height = 1.6f, RadialSegments = 5, Rings = 2 };
+        // Dressed as a model: faceted, on the cel shader, the ink round it.
+        var lump = new MeshInstance3D
+        {
+            Mesh = new SphereMesh
+            {
+                Radius = 1.0f, Height = 1.6f, RadialSegments = 5, Rings = 2,
+                Material = new StandardMaterial3D { AlbedoColor = Clod },
+            },
+        };
+        Toon.Dress(lump);
+        _lump = lump.Mesh;
+        lump.Free();
     }
 
     private static ShaderMaterial Cel(Color albedo)
@@ -99,8 +125,10 @@ public sealed partial class CelCrater : Node3D
     }
 
     /// <summary>A crater at <paramref name="at"/> (on the ground), its rim's
-    /// outer foot <paramref name="radius"/> out, world px.</summary>
-    public void Dig(Vector3 at, float radius)
+    /// outer foot <paramref name="radius"/> out, world px. A clod is left out
+    /// where <paramref name="inside"/> says its world point is off the
+    /// crater's cell.</summary>
+    public void Dig(Vector3 at, float radius, System.Func<Vector3, bool>? inside = null)
     {
         _dug++;
         Pit pit;
@@ -125,8 +153,8 @@ public sealed partial class CelCrater : Node3D
         _next = (_next + 1) % Kept;
         int shape = (int)(CelPuff.Hash(_dug, 301) * Shapes) % Shapes;
         pit.Rim.Mesh = _shapes[shape];
-        for (int s = 0; s < 3; s++)
-            pit.Rim.SetSurfaceOverrideMaterial(s, s == 0 ? _scorched : s == 1 ? _chamfer : _earth);
+        for (int s = 0; s < 4; s++)
+            pit.Rim.SetSurfaceOverrideMaterial(s, s switch { 0 => _scorched, 1 => _crest, 2 => _earth, _ => _foot });
         float turn = CelPuff.Hash(_dug, 307) * Mathf.Tau;
         pit.Node.GlobalTransform = new Transform3D(new Basis(Vector3.Up, turn), at);
         // Over the ground a hair, the ruts' and the shadow's way.
@@ -141,22 +169,23 @@ public sealed partial class CelCrater : Node3D
         pit.BowlLook.SetShaderParameter("lit", BowlLit);
         pit.BowlLook.SetShaderParameter("bottom", BowlFloor);
         pit.BowlLook.SetShaderParameter("seed", CelPuff.Hash(_dug, 311) * 50.0f);
-        Clods(pit);
+        Clods(pit, new Transform3D(new Basis(Vector3.Up, turn).Scaled(Vector3.One * radius), at), inside);
         pit.Radius = radius;
         pit.Age = 0.0f;
         Grow(pit);
         pit.Node.Visible = true;
     }
 
-    /// <summary>Four to six lumps of earth past the foot, sunk a little way.</summary>
-    private void Clods(Pit pit)
+    /// <summary>Four to six lumps of earth past the foot, sunk a little way;
+    /// <paramref name="grown"/> the crater's frame at its full size.</summary>
+    private void Clods(Pit pit, Transform3D grown, System.Func<Vector3, bool>? inside)
     {
         int n = 4 + (int)(CelPuff.Hash(_dug, 313) * 3.0f);
         while (pit.Clods.Count < 6)
         {
             var c = new MeshInstance3D
             {
-                Name = $"Clod{pit.Clods.Count}", Mesh = _lump, MaterialOverride = _clod,
+                Name = $"Clod{pit.Clods.Count}", Mesh = _lump,
                 CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
             };
             pit.Node.AddChild(c);
@@ -173,6 +202,11 @@ public sealed partial class CelCrater : Node3D
             float a = h1 * Mathf.Tau;
             float r = 0.08f + 0.05f * h3;
             var way = new Vector3(Mathf.Cos(a), 0.0f, Mathf.Sin(a)) * (1.05f + 0.4f * h2);
+            if (inside is not null && !inside(grown * (way * (1.0f + r))))
+            {
+                c.Visible = false;
+                continue;
+            }
             c.Transform = new Transform3D(
                 new Basis(new Vector3(h2, h3, h1).Normalized(), h3 * Mathf.Tau).Scaled(new Vector3(r, r * 0.8f, r)),
                 way + Vector3.Up * (r * 0.3f));
@@ -250,34 +284,58 @@ public sealed partial class CelCrater : Node3D
     /// <summary>
     /// A rim, unit radius to its outer foot: rings of <see cref="Segments"/>
     /// points - the inner foot (a regular polygon, the bowl's edge), the
-    /// crest's two edges, the outer foot - joined band by band, each band its
-    /// own surface: the scorched inner face, the chamfer, the earth outside.
-    /// Flat faces, each its own normal. ratel's <c>crater_mesh</c>.
+    /// crest, the outer foot - joined band by band, each band its own surface:
+    /// the scorched inner face, the ink's ribbon along the crest
+    /// (<see cref="Ribbon"/>), the earth outside, the ribbon round the foot. Flat faces, each its own
+    /// normal. ratel's <c>crater_mesh</c>.
+    ///
+    /// The crest's line was a chamfer, a share of the radius as ratel's: on a
+    /// light's crater under a pixel and gone, on a wreck's four times a hull's
+    /// outline beside it.
     /// </summary>
     private static ArrayMesh RimMesh(int seed)
     {
         var rng = new RandomNumberGenerator { Seed = (ulong)seed };
         var foot = new Vector3[Segments];
-        var crestIn = new Vector3[Segments];
-        var crestOut = new Vector3[Segments];
+        var crest = new Vector3[Segments];
         var outer = new Vector3[Segments];
         for (int i = 0; i < Segments; i++)
         {
             float a = Mathf.Tau * (i + rng.RandfRange(-0.3f, 0.3f)) / Segments;
             var way = new Vector3(Mathf.Cos(a), 0.0f, Mathf.Sin(a));
-            float crest = RimTop * rng.RandfRange(0.95f, 1.05f);
-            float height = RimHeight * rng.RandfRange(0.75f, 1.25f);
-            crestIn[i] = way * crest + Vector3.Up * height;
-            crestOut[i] = way * (crest + RimLine) + Vector3.Up * (height - RimLine * 0.3f);
+            crest[i] = way * (RimTop * rng.RandfRange(0.95f, 1.05f))
+                       + Vector3.Up * (RimHeight * rng.RandfRange(0.75f, 1.25f));
             float even = Mathf.Tau * i / Segments;
             foot[i] = new Vector3(Mathf.Cos(even), 0.0f, Mathf.Sin(even)) * RimIn;
-            outer[i] = way * RimOut * rng.RandfRange(0.9f, 1.08f);
+            outer[i] = way * RimOut * rng.RandfRange(0.9f, FootMost);
         }
         var mesh = new ArrayMesh();
-        Band(mesh, foot, crestIn);
-        Band(mesh, crestIn, crestOut);
-        Band(mesh, crestOut, outer);
+        Band(mesh, foot, crest);
+        Ribbon(mesh, crest);
+        Band(mesh, crest, outer);
+        Ribbon(mesh, outer);
         return mesh;
+    }
+
+    /// <summary>The crest's line: a strip of no width, each crest point twice -
+    /// UV.x nought on the crest, one on the edge <see cref="CrestShader"/>
+    /// runs out on the screen.</summary>
+    private static void Ribbon(ArrayMesh mesh, Vector3[] crest)
+    {
+        var st = new SurfaceTool();
+        st.Begin(Mesh.PrimitiveType.Triangles);
+        void At(Vector3 v, float edge)
+        {
+            st.SetUV(new Vector2(edge, 0.0f));
+            st.AddVertex(v);
+        }
+        for (int i = 0; i < Segments; i++)
+        {
+            int j = (i + 1) % Segments;
+            At(crest[i], 0.0f); At(crest[j], 0.0f); At(crest[j], 1.0f);
+            At(crest[i], 0.0f); At(crest[j], 1.0f); At(crest[i], 1.0f);
+        }
+        st.Commit(mesh);
     }
 
     private static void Band(ArrayMesh mesh, Vector3[] a, Vector3[] b)
@@ -309,6 +367,46 @@ public sealed partial class CelCrater : Node3D
             st.AddVertex(v);
         }
     }
+
+    /// <summary>
+    /// The crest's ink (<see cref="Ribbon"/>): its edge run out from the crest
+    /// on the screen, away from the crater's middle - over the outer slope,
+    /// below the crest on the near side and above it on the far - by the
+    /// models' ink width in view units (world px), never under a pixel; the
+    /// <see cref="Toon.InkShader"/>'s sums. Drawn toward the eye by twice
+    /// that: the outer slope just past the crest lies nearly along the eye's
+    /// ray at this camera's 30 degrees and would otherwise cut it.
+    /// <c>facing</c> - the foot's - thins it to nothing where the way out
+    /// turns from the eye: the far side, where the crest is the edge.
+    /// </summary>
+    private static readonly Shader CrestShader = new()
+    {
+        Code = @"
+shader_type spatial;
+render_mode unshaded, cull_disabled, skip_vertex_transform, shadows_disabled, fog_disabled;
+uniform vec3 albedo : source_color;
+uniform float width = 1.0;
+uniform float min_px = 1.0;
+uniform bool facing = false;
+void vertex() {
+    vec3 out_way = vec3(VERTEX.x, 0.0, VERTEX.z);
+    VERTEX = (MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
+    // One screen px in view units, for an orthographic eye.
+    float px = 2.0 / (PROJECTION_MATRIX[1][1] * VIEWPORT_SIZE.y);
+    float w = max(width, min_px * px);
+    vec3 seen = mat3(MODELVIEW_MATRIX) * out_way;
+    vec2 n = seen.xy;
+    if (facing) {
+        w *= smoothstep(-0.3, 0.05, seen.z / max(length(seen), 1e-5));
+    }
+    VERTEX.xy += n / max(length(n), 1e-5) * (w * UV.x);
+    VERTEX.z += 2.0 * w;
+}
+void fragment() {
+    ALBEDO = albedo;
+}
+",
+    };
 
     /// <summary>
     /// The bowl, flat, in its plane's UV (1 the plane's edge, which is the

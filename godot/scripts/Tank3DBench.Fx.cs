@@ -974,6 +974,86 @@ void fragment() {
     /// </summary>
     private static float CraterShare(int might) => 0.6f + 0.2f * (Mathf.Clamp(might, 1, 5) - 1);
 
+    /// <summary>How much of the room from its middle to its cell's nearest
+    /// edge a crater's foot may take at most (<see cref="CelCrater.FootMost"/>
+    /// out): a hair short of the edge, so the line round the foot stays on
+    /// the cell.</summary>
+    private const float CraterRoom = 0.94f;
+
+    /// <summary>How far a crater by a cell's edge shrinks to keep to the cell
+    /// before it is moved in instead - a share of its size.</summary>
+    private const float CraterLeast = 0.6f;
+
+    /// <summary>
+    /// A crater keeps to its cell - the one <paramref name="at"/> is on: no
+    /// bigger than the cell holds round its middle; by an edge it shrinks, to
+    /// <see cref="CraterLeast"/> of itself, and what it still lacks it is
+    /// moved in toward the middle. Where it is dug and how big, and the test
+    /// its clods are kept by.
+    /// </summary>
+    private (Vector3 At, float Radius, System.Func<Vector3, bool>? Inside) InCell(Vector3 at, float radius)
+    {
+        if (_field is null || _tile is null)
+            return (at, radius, null);
+        Vector2I cell = _field.FlatCellAt(Board(at));
+        Vector2 c = _field.FlatAnchor(cell) + _field.CentreOffset;
+        var mid = new Vector2(c.X, c.Y / Squash);
+        Vector2 half = (Vector2)_tile.HexRect.Size * 0.5f;
+        // The board's flat-top hexagon, its rows squashed back into the world.
+        var corner = new Vector2[6];
+        for (int i = 0; i < 6; i++)
+        {
+            Vector2 k = i switch
+            {
+                0 => new(half.X, 0.0f), 1 => new(half.X * 0.5f, half.Y), 2 => new(-half.X * 0.5f, half.Y),
+                3 => new(-half.X, 0.0f), 4 => new(-half.X * 0.5f, -half.Y), _ => new(half.X * 0.5f, -half.Y),
+            };
+            corner[i] = mid + new Vector2(k.X, k.Y / Squash);
+        }
+        float Room(Vector2 p)
+        {
+            float room = float.MaxValue;
+            for (int i = 0; i < 6; i++)
+            {
+                Vector2 a = corner[i], b = corner[(i + 1) % 6];
+                Vector2 n = new Vector2(a.Y - b.Y, b.X - a.X).Normalized();
+                if (n.Dot(mid - a) < 0.0f)
+                    n = -n;
+                room = Mathf.Min(room, n.Dot(p - a));
+            }
+            return room;
+        }
+        float reach = CelCrater.FootMost / CraterRoom;
+        float asked = radius;
+        Vector3 from = at;
+        radius = Mathf.Min(radius, Room(mid) / reach);
+        var spot = new Vector2(at.X, at.Z);
+        float fits = Room(spot) / reach;
+        if (fits < radius)
+        {
+            float want = Mathf.Max(fits, radius * CraterLeast);
+            if (fits < want)
+            {
+                // Room grows toward the middle, where it holds the crater.
+                float lo = 0.0f, hi = 1.0f;
+                for (int k = 0; k < 16; k++)
+                {
+                    float t = 0.5f * (lo + hi);
+                    if (Room(spot.Lerp(mid, t)) / reach >= want)
+                        hi = t;
+                    else
+                        lo = t;
+                }
+                spot = spot.Lerp(mid, hi);
+                at = Foot(new Vector3(spot.X, 0.0f, spot.Y));
+            }
+            radius = want;
+        }
+        GD.Print($"tank3d: crater on {cell}: {asked:F0} -> {radius:F0} px (cell holds {Room(mid) / reach:F0}), "
+                 + $"moved in {new Vector2(at.X - from.X, at.Z - from.Z).Length():F0} px, foot room {Room(new Vector2(at.X, at.Z)) - radius * CelCrater.FootMost:F1} px");
+        return (at, radius, w => Room(new Vector2(w.X, w.Z)) >= 0.0f);
+    }
+
 
     /// <summary>A round landing in the ground - beside the tank (key 5), or
     /// where a round in flight came down (<see cref="Lands"/>): the board's
@@ -986,7 +1066,8 @@ void fragment() {
         if (_celBurst is not null)
         {
             _celBurst.Craters.SunWay = _sun.GlobalBasis.Z;
-            _celBurst.Burst(spot, CraterRadius * new Craters().Wide * CraterShare(_profile.Might) * HexWidth);
+            var dig = InCell(spot, CraterRadius * new Craters().Wide * CraterShare(_profile.Might) * HexWidth);
+            _celBurst.Burst(spot, dig.Radius, dig.At, dig.Inside);
             _shake.Blast(_profile.ShotShake * 0.6);
             return;
         }
@@ -1106,7 +1187,8 @@ void fragment() {
             if (_celBurst is not null)
             {
                 _celBurst.Craters.SunWay = _sun.GlobalBasis.Z;
-                _celBurst.Craters.Dig(Foot(_rig.Position), WreckPitRadius);
+                var dig = InCell(Foot(_rig.Position), WreckPitRadius);
+                _celBurst.Craters.Dig(dig.At, dig.Radius, dig.Inside);
                 WreckDug();
             }
             // Where it burns: the ground scorched under it and round its
