@@ -439,6 +439,12 @@ public sealed partial class CelBurn : Node3D
         }
     }
 
+    /// <summary>Each port's tongues against <see cref="TongueWidth"/> and
+    /// <see cref="TongueHeight"/>, 1 for a grille - the owner's, set before
+    /// <see cref="Tick"/>. A destroyed tank's open ring burns bigger than its
+    /// grilles (Tank3DBench, <c>Openings</c>).</summary>
+    public readonly float[] Sizes = { 1.0f, 1.0f, 1.0f, 1.0f };
+
     private readonly Vector2[] _portAt = new Vector2[MaxPorts];
     private readonly float[] _portNear = new float[MaxPorts];
     private readonly float[] _front = new float[MaxPorts];
@@ -468,9 +474,13 @@ public sealed partial class CelBurn : Node3D
             hi = Mathf.Max(hi, y);
         }
         mid += up * lo;
+        // The biggest port's tongues size the quad.
+        float big = 1.0f;
+        for (int i = 0; i < n; i++)
+            big = Mathf.Max(big, Sizes[i]);
         // Under the ports: a tongue's round foot reaches 0.4 of its height
         // below its base, and its height is up to 1.69 of TongueHeight.
-        float foot = 0.4f * 1.69f * TongueHeight;
+        float foot = 0.4f * 1.69f * TongueHeight * big;
         Vector3 origin = mid - up * (foot * _hull);  // as the screen has it
         float wide = 0.0f;
         for (int i = 0; i < MaxPorts; i++)
@@ -488,8 +498,8 @@ public sealed partial class CelBurn : Node3D
         // 0.96 wide, and the lick bending its tip another 0.4 - and the
         // tallest over the rise. A quad any tighter cut the fire off with its
         // own straight edge where a view spread the grilles across the screen.
-        float w = 2.0f * (wide + PortSpread + TongueWidth * 1.3f * (0.96f + 0.4f));
-        float h = foot + (hi - lo) / _hull + TongueRise + TongueHeight * 1.69f;
+        float w = 2.0f * (wide + PortSpread + TongueWidth * big * 1.3f * (0.96f + 0.4f));
+        float h = foot + (hi - lo) / _hull + TongueRise + TongueHeight * big * 1.69f;
         // Upright in the world, not in the screen's plane: the screen's plane
         // leans away from the eye, and a flame in it went back into the turret
         // as it rose, which hid it. Stretched by 1/cos so it spans the same
@@ -525,6 +535,7 @@ public sealed partial class CelBurn : Node3D
             m.SetShaderParameter("rise", TongueRise);
             m.SetShaderParameter("spread", PortSpread);
             m.SetShaderParameter("port_near", _portNear);
+            m.SetShaderParameter("port_size", Sizes);
             m.SetShaderParameter("hull", _hull);
             m.SetShaderParameter("front", _front);
             m.SetShaderParameter("round_foot", RoundFoot);
@@ -628,6 +639,7 @@ uniform vec2 tongue = vec2(0.24, 0.4);
 uniform float rise = 0.2;
 uniform float spread = 0.06;
 uniform float port_near[4];
+uniform float port_size[4];
 uniform float hull = 150.0;
 uniform float front[4];
 uniform bool only_front = false;
@@ -687,7 +699,7 @@ void fragment() {
             }
             // From nothing: a fire starting is one small tongue, and the rest
             // join it as it comes up.
-            s *= pow(heat, 0.6);
+            s *= pow(heat, 0.6) * port_size[i];
             if (s < 1e-3) continue;
             vec2 base = ports[i] + vec2((h2 - 0.5) * 2.0 * spread * (j == 0 ? 0.3 : 1.0), rise * a * a);
             vec2 q = (p - base) / (tongue * vec2(s, s * (0.8 + 0.5 * h1)));

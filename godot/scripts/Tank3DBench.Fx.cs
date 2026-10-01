@@ -1122,6 +1122,10 @@ void fragment() {
             _ports.Clear();
             foreach (Node3D ex in _model.Exhausts)
                 _ports.Add(ex.GlobalPosition);
+            for (int i = 0; i < CelBurn.MaxPorts; i++)
+                _celBurn.Sizes[i] = 1.0f;
+            if (_fate == Fate.Destroyed)
+                Openings();
             // The turret hides a grille's fire or not, whole, by which of the
             // two is nearer the eye; a thrown turret lies on the deck over the
             // grilles and the fire is drawn over it, as the board draws the
@@ -1211,6 +1215,55 @@ void fragment() {
         BeltRuns();
         Ruts(dt);
         Dust(dt, speed);
+    }
+
+    /// <summary>How much bigger the fire is out of the open ring and out of a
+    /// casemate's hatch than out of a grille.</summary>
+    private const float RingFire = 1.3f, HatchFire = 1.25f;
+
+    /// <summary>
+    /// A destroyed tank's fire where it is open, beside its grilles: the
+    /// turret ring the turret was thrown off - two ports across the screen,
+    /// for the ring is wide - and a casemate's hatch, where the hatch flew
+    /// from. The fighting compartment is what burns; only the grilles burning,
+    /// the wreck with its ring open to the sky had nothing in it.
+    /// <see cref="CelBurn.MaxPorts"/> bound it: the grilles first.
+    /// </summary>
+    private void Openings()
+    {
+        int room = CelBurn.MaxPorts - _ports.Count;
+        if (room <= 0 || _celBurn is null)
+            return;
+        float ppu = _model.PixelsPerUnit;
+        if (_model.Turret is Node3D turret && _model.TurretOverride is not null
+            && turret.GetParent() is Node3D seat)
+        {
+            Vector3 ring = seat.GlobalTransform * _model.TurretRest;
+            float wide = turret is MeshInstance3D m && m.Mesh is not null
+                ? Mathf.Min(m.Mesh.GetAabb().Size.X, m.Mesh.GetAabb().Size.Z) * ppu
+                : 0.3f * _model.HullLength * ppu;
+            Vector3 across = _camera.GlobalBasis.X;
+            across = new Vector3(across.X, 0.0f, across.Z).Normalized();
+            if (room >= 2)
+                foreach (float side in new[] { -1.0f, 1.0f })
+                {
+                    _celBurn.Sizes[_ports.Count] = RingFire;
+                    _ports.Add(ring + across * (side * 0.2f * wide));
+                }
+            else
+            {
+                _celBurn.Sizes[_ports.Count] = RingFire * 1.2f;
+                _ports.Add(ring);
+            }
+            return;
+        }
+        foreach (var (node, parent, local) in _moved)
+            if (node.Name == "Hatch" && parent is Node3D up)
+            {
+                _celBurn.Sizes[_ports.Count] = HatchFire;
+                _ports.Add(up.GlobalTransform * local.Origin);
+                return;
+            }
     }
 
     /// <summary>How far past the rig anything of the tank can stand, world px:
