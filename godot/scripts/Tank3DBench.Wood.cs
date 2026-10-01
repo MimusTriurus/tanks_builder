@@ -25,6 +25,11 @@ namespace TankSpriteTest;
 /// "Уничтожен"): a tank blowing up lights the wood it stands on, and its
 /// blast the wooded cells round it on its own level - each on the frame the
 /// fire wave (<see cref="CelDeath.WaveArrives"/>) gets to its edge.</item>
+/// <item><b>It goes down under a heavy</b> (<see cref="Bulldoze"/>): the
+/// 2D bench's rule (<c>TankTick.UpdateWood</c>, GDD classes.md "Бульдозер
+/// HT") - the cell is ground once the heavy drives in, and each trunk goes
+/// over as the hull gets to it, the way it is going (<see cref="TreeFall"/>,
+/// <c>Tree3D</c>'s fall).</item>
 /// <item><b>It feels a blast</b> - a round's or a tank's: the crowns are
 /// thrown back from it and swing back on a spring
 /// (<see cref="WoodBlast"/>), each as the blast gets to it, the leaves
@@ -53,6 +58,8 @@ public sealed partial class Tank3DBench
         public required TreeModel.Loaded Model;
         public required Vector2I Cell;
         public required CelBurn Fire;
+        public required TreeFall Fall;
+        public bool Burning, Burnt;
         public float Phase, Rate;
         /// <summary>When in its cell's fire it catches (<see cref="Wildfire.Of"/>),
         /// and the hash of where it stands, to go back to.</summary>
@@ -87,6 +94,15 @@ public sealed partial class Tank3DBench
     /// 0.7, most of the way in its first 0.4).</summary>
     private const float SingeWithin = 0.45f;
     private float _woodClock;
+
+    /// <summary>The wooded cells a heavy has made ground (put back by the
+    /// reset), and the dust of the crowns coming down.</summary>
+    private readonly HashSet<Vector2I> _razed = new();
+    private FallDust? _fallDust;
+
+    /// <summary>How far from the heavy's middle the wood goes down, a share of
+    /// the cell's width - the board's <c>Grove.FellReach</c>, 140 of its 248.</summary>
+    private const float FellReach = 0.56f;
 
     /// <summary>How fast a blast runs out over the board to the trees past
     /// the fire wave, px/s; the crowns' swing, Hz, and how much of it each
@@ -195,7 +211,7 @@ public sealed partial class Tank3DBench
         var tree = new Planted
         {
             Holder = holder, Model = model, Cell = cell, Fire = TreeModel.Fire(this, name, model),
-            Phase = phase, Rate = rate,
+            Fall = TreeFall.For(model, holder, model.Burn, this), Phase = phase, Rate = rate,
         };
         tree.Stagger = tree.Hashed = TreeModel.StaggerOf(flat);
         foreach (Vector3 seat in TreeModel.Seats)
@@ -276,9 +292,12 @@ public sealed partial class Tank3DBench
             t.Shiver *= Mathf.Exp(-dt / 0.6f);
             if (t.Push.LengthSquared() < 1e-10f && t.PushV.LengthSquared() < 1e-10f)
                 t.Push = t.PushV = Vector2.Zero;
+            // the wind goes out as the trunk goes over (1 - down², the sprite's)
+            float down = t.Fall.Down;
             TreeModel.Sway(t.Holder, t.Model.Burn, t.Model.Leaves, _weather, t.Phase, t.Rate, _wind,
-                           spent: t.Spent, push: t.Push, shiver: t.Shiver < 1e-3f ? 0.0f : t.Shiver);
+                           1.0f - down * down, t.Spent, t.Push, t.Shiver < 1e-3f ? 0.0f : t.Shiver);
         }
+        Bulldoze(dt);
         if (_grass is null)
             return;
         // On its belts: not afloat, not in the air, not once it is going under.
@@ -303,6 +322,102 @@ public sealed partial class Tank3DBench
         foreach (float side in new[] { -1.0f, 1.0f })
             _grass!.Press(middle + left * (side * (foot.HalfWide - belt * 0.5f)), way, 2.0f * foot.HalfLen, belt, 1.0f);
         _grass!.Press(middle, way, 1.8f * foot.HalfLen, 2.0f * (foot.HalfWide - belt), BellyPress);
+    }
+
+    /// <summary>
+    /// The heavies in the wood this frame - the bench's own and the target -
+    /// and every falling tree's frame: its pose, the dust where its crown
+    /// comes down, and the grass its root plate tears out.
+    /// </summary>
+    private void Bulldoze(float dt)
+    {
+        if (_profile.Bulldozes && _fate == Fate.Alive && !DeepHere && !_falling)
+        {
+            float h = Mathf.DegToRad(_heading);
+            var ahead = new Vector3(Mathf.Sin(h), 0.0f, Mathf.Cos(h));
+            Raze(_rig.Position, _speed < 0.0f ? -ahead : ahead, _speed);
+        }
+        if (_other is { Falling: false, Wet: false } o && o.Profile.Bulldozes)
+            Raze(o.Rig.Position, o.Way, o.Speed);
+        foreach (Planted t in _trees)
+        {
+            if (!t.Fall.Step(dt))
+                continue;
+            _fallDust ??= new FallDust(this);
+            _fallDust.Add(t.Fall, t.Burnt);
+        }
+        _fallDust?.Settle(dt, _camera.GlobalBasis, Foot);
+        if (_grass is null)
+            return;
+        foreach (Planted t in _trees)
+        {
+            if (!t.Fall.Going)
+                continue;
+            TreeFall f = t.Fall;
+            float plate = f.Of.Plate > 0.0f ? f.Of.Plate : 1.4f;
+            float grow = Mathf.SmoothStep(0.02f, 0.30f, (float)f.Angle);
+            _grass.Cut(t.Holder.GlobalPosition, plate * f.Ppm * grow * 0.85f, f.WorldDir, f.Of.Hinge * f.Ppm);
+        }
+    }
+
+    /// <summary>
+    /// A heavy at <paramref name="at"/> going <paramref name="way"/> at
+    /// <paramref name="speed"/> (px/s, signed): the 2D bench's
+    /// <c>TankTick.UpdateWood</c>. The cell under its middle - the nose's
+    /// too spent the cell ahead while the nose only grazed it, and left its
+    /// trees standing on ground; a wood burning there does not go (the rules' "горящий гекс землёй не
+    /// становится" - the fire finishes first), alive or burnt out it does.
+    /// Driving in spends the cell - it is ground from then, and burns no more
+    /// - and standing on a spent one goes on felling: each trunk within
+    /// <see cref="FellReach"/> of the hull goes over as the hull gets to it,
+    /// the way it is going, a trunk off its line some degrees out to its own
+    /// side (<c>Tree3D</c>'s wood: a hull lays the wood both ways).
+    /// </summary>
+    private void Raze(Vector3 at, Vector3 way, float speed)
+    {
+        if (_field is null || way.LengthSquared() < 1e-6f)
+            return;
+        way = way.Normalized();
+        var cells = new HashSet<Vector2I> { _field.FlatCellAt(Board(at)) };
+        float reach = FellReach * HexWidth;
+        var across = new Vector3(way.Z, 0.0f, -way.X);
+        foreach (Vector2I cell in cells)
+        {
+            bool spent = _razed.Contains(cell);
+            if (!spent && !_woodedCells.Contains(cell))
+                continue;
+            bool burning = false;
+            foreach (Planted t in _trees)
+                if (t.Cell == cell && (t.Burning || (_wildfire?.LitAt(cell) ?? false) && !t.Burnt))
+                    burning = true;
+            if (burning)
+                continue;
+            if (!spent)
+            {
+                if (Mathf.Abs(speed) < 1.0f)
+                    continue;
+                // Ground from the drive in: the rules' answer about the hex,
+                // given once; the trees go down as the hull gets to them.
+                _woodedCells.Remove(cell);
+                _razed.Add(cell);
+                GD.Print($"tank3d: the heavy is in the wood on {cell}: it is ground now");
+            }
+            foreach (Planted t in _trees)
+            {
+                if (t.Cell != cell || t.Fall.Going)
+                    continue;
+                Vector3 foot = t.Holder.GlobalPosition;
+                var rel = new Vector3(foot.X - at.X, 0.0f, foot.Z - at.Z);
+                if (rel.Length() >= reach)
+                    continue;
+                // off the hull's line, out to its own side: 6-30 degrees
+                float side = rel.Dot(across);
+                float off = Mathf.DegToRad(6.0f + 24.0f * Mathf.Clamp(Mathf.Abs(side) / reach, 0.0f, 1.0f))
+                            * Mathf.Sign(side == 0.0f ? 1.0f : side);
+                Vector3 over = way.Rotated(Vector3.Up, off);
+                t.Fall.Start(new Vector2(over.X, over.Z), Mathf.Abs(speed) / 120.0f, t.Burnt, "tank3d");
+            }
+        }
     }
 
     /// <summary>
@@ -462,11 +577,13 @@ public sealed partial class Tank3DBench
             t.Fire.Smoke = coat.Smoke;
             t.Fire.Smoulder = coat.Burnt;
             t.Spent = coat.Spent;
+            t.Burning = coat.Flame > 0.01f;
+            t.Burnt = coat.Burnt || coat.Spent >= 1.0f;
             // The flame goes down with the crown, onto the limbs and the fork.
             float down = coat.Spent * coat.Spent;
             t.Ports.Clear();
             foreach (Vector3 p in t.Seats)
-                t.Ports.Add(t.Holder.ToGlobal(p.Lerp(new Vector3(p.X * 0.4f, p.Y * 0.62f, p.Z * 0.3f), down)));
+                t.Ports.Add(t.Holder.ToGlobal(t.Fall.Pose(p.Lerp(new Vector3(p.X * 0.4f, p.Y * 0.62f, p.Z * 0.3f), down))));
             t.Fire.Tick(dt, t.Ports, eye);
         }
     }
@@ -520,6 +637,10 @@ public sealed partial class Tank3DBench
     /// <summary>The grass standing again and the wood green, still.</summary>
     private void WoodReset()
     {
+        foreach (Vector2I cell in _razed)
+            _woodedCells.Add(cell);
+        _razed.Clear();
+        _fallDust?.Clear();
         _grass?.Heal();
         foreach (Vector2I cell in _singed.Keys)
             _grass?.Burn(_lawnOf[cell], -1.0f, Vector2.Zero);
@@ -533,6 +654,7 @@ public sealed partial class Tank3DBench
             t.Push = t.PushV = Vector2.Zero;
             t.Shiver = 0.0f;
             t.Kicks.Clear();
+            t.Fall.Reset();
         }
     }
 }
