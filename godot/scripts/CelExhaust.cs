@@ -35,14 +35,19 @@ namespace TankSpriteTest;
 /// </summary>
 public sealed partial class CelExhaust : Node3D
 {
+    /// <summary>The tanks its puffs may not stand through, or none.</summary>
+    public CelSolids? Solids;
+
     /// <summary>Puffs in the air at once, at most, over all ports - the
     /// cloud's (<see cref="CelCloud.Pool"/>).</summary>
     public const int Pool = CelCloud.Pool;
 
     /// <summary>Puffs a second from each port, idling and working.</summary>
     public float IdleRate = 4.0f, WorkRate = 13.0f;
-    /// <summary>A puff's life, s.</summary>
-    public float IdleLife = 1.3f, WorkLife = 0.9f;
+    /// <summary>A puff's life, s. Working, it is the trail's length over the
+    /// tank's speed - the puffs stand in the world: at 0.9 s a tank on the
+    /// move dragged a tail of its own length (the user showed it).</summary>
+    public float IdleLife = 1.3f, WorkLife = 0.5f;
     /// <summary>A puff's width at birth and at the end, hull lengths.</summary>
     public float IdleBorn = 0.04f, IdleGrown = 0.13f;
     public float WorkBorn = 0.06f, WorkGrown = 0.22f;
@@ -79,6 +84,20 @@ public sealed partial class CelExhaust : Node3D
     public float Seat = 0.03f;
     /// <summary>When a puff starts to be eaten, as a share of its life.</summary>
     public float ErodeFrom = 0.15f;
+    /// <summary>The whole exhaust's size, against the lengths above: its puffs,
+    /// how far they go, their seat and wander all at once, so it shrinks in
+    /// proportion - the user halved it. The puffs come <c>1/Scale</c> times as
+    /// often and the blend keeps its width: halved alone, the puffs no longer
+    /// met and a moving tank left a row of grey pellets.</summary>
+    public float Scale = 0.5f;
+    /// <summary>How far astern of its port a puff is born, hull lengths, along
+    /// <see cref="Astern"/>: the user moved it back off the turret toward the
+    /// stern.</summary>
+    public float Aft = 0.1f;
+
+    /// <summary>Astern along the hull, in the world, unit - set by the owner
+    /// each frame; nought leaves the ports where they are.</summary>
+    public Vector3 Astern;
 
     // ------------------------------------------------------------ the inputs
 
@@ -156,7 +175,7 @@ public sealed partial class CelExhaust : Node3D
         if (Running)
         {
             float kick = KickTime > 0.0f ? _kick / KickTime : 0.0f;
-            float rate = _working ? Mathf.Lerp(WorkRate, KickRate, kick) : IdleRate;
+            float rate = (_working ? Mathf.Lerp(WorkRate, KickRate, kick) : IdleRate) / Mathf.Max(Scale, 0.1f);
             for (int i = 0; i < ports.Count; i++)
             {
                 _due[i] += rate * dt;
@@ -180,17 +199,18 @@ public sealed partial class CelExhaust : Node3D
             float a = Mathf.Clamp((_clock - p.Born) / p.Life, 0.0f, 1.0f);
             // Out fast and slowing, bent by the wind as it goes.
             float gone = 1.0f - Mathf.Pow(1.0f - a, 2.2f);
-            float rise = p.Rise * _hull;
+            float size = Scale * _hull;
+            float rise = p.Rise * size;
             Vector3 side = new(Mathf.Cos(p.Side), 0.0f, Mathf.Sin(p.Side));
             float age = _clock - p.Born;
             Vector3 at = p.At + p.Carry * (CarryTime * (1.0f - Mathf.Exp(-age / Mathf.Max(CarryTime, 1e-3f))))
-                         + p.Out * (Seat * _hull + rise * gone)
+                         + p.Out * (Seat * size + rise * gone)
                          + Drift * (rise * Mathf.Pow(a, 1.4f))
-                         + side * (0.04f * _hull * Mathf.Sqrt(a));
-            float r = 0.5f * _hull * Mathf.Lerp(p.From, p.To, gone) * Mathf.SmoothStep(0.0f, 0.08f, a);
+                         + side * (0.04f * size * Mathf.Sqrt(a));
+            float r = 0.5f * size * Mathf.Lerp(p.From, p.To, gone) * Mathf.SmoothStep(0.0f, 0.08f, a);
             _cloud.Add(at, r, p.Tone, p.Seed, Mathf.SmoothStep(ErodeFrom, 1.0f, a), a);
         }
-        _cloud.Draw(eye);
+        _cloud.Draw(eye, Solids);
     }
 
     /// <summary>A puff at <paramref name="port"/>, with the state of this
@@ -205,7 +225,7 @@ public sealed partial class CelExhaust : Node3D
         float big = (0.8f + 0.4f * h2) * (_working ? Mathf.Lerp(1.0f, KickSize, kick) : 1.0f);
         _air.Add(new Puff
         {
-            At = port.At,
+            At = port.At + Astern * (Aft * _hull),
             Out = port.Out,
             Carry = carry,
             Born = _clock,

@@ -487,6 +487,7 @@ void fragment() {
             _celExhaust = new CelExhaust { Name = "Exhaust" };
             AddChild(_celExhaust);
             _celExhaust.Build(_model.HullLength * _model.PixelsPerUnit);
+            _celExhaust.Solids = _solids;
             if (_sprite.Flare is not null)
                 _sprite.Flare.Visible = false;
             if (_sprite.Fume is not null)
@@ -494,9 +495,11 @@ void fragment() {
             _celShot = new CelShot { Name = "Shot" };
             AddChild(_celShot);
             _celShot.Build(_model.HullLength * _model.PixelsPerUnit);
+            _celShot.Solids = _solids;
             _celHit = new CelHit { Name = "Hits" };
             AddChild(_celHit);
             _celHit.Build(_model.HullLength * _model.PixelsPerUnit);
+            _celHit.Solids = _solids;
             _celHit.Targets(_model, _model.Cel);
             _celBlast = new CelBlast { Name = "Blast" };
             AddChild(_celBlast);
@@ -509,6 +512,7 @@ void fragment() {
             _celDust = new CelDust { Name = "TrackDust" };
             AddChild(_celDust);
             _celDust.Build(_model.HullLength * _model.PixelsPerUnit);
+            _celDust.Solids = _solids;
             _beltWas.Clear();
         }
         _painted.Add(_sprite);
@@ -1018,9 +1022,19 @@ void fragment() {
     private float _dustSpent;
     private int _dustSide, _dustLaid;
 
+    /// <summary>The tanks on the stage as boxes, this frame: what the exhaust,
+    /// the dust, the shot's smoke and the hits' puffs thin away in
+    /// (<see cref="CelSolids"/>). The target's pose is the last frame's - it
+    /// is posed after the effects (RamFrame), a frame nobody sees.</summary>
+    private readonly CelSolids _solids = new();
+
     private void FxProcess(float dt, float speed, float accel)
     {
         _shake.Update(dt);
+        _solids.Clear();
+        _solids.Take(_model);
+        if (_other is not null)
+            _solids.Take(_other.Model);
         foreach (ProcKick k in _kicks) k.Tick(dt);
         foreach (ProcKick k in _drifts) k.Tick(dt);
         foreach (ProcKick k in _bursts) k.Tick(dt);
@@ -1128,6 +1142,8 @@ void fragment() {
             _exhaustPorts.Clear();
             foreach (Node3D ex in _model.Exhausts)
                 _exhaustPorts.Add((ex.GlobalPosition, ex.GlobalBasis.Y.Normalized()));
+            Vector3 ahead = _rig.GlobalBasis.Z;
+            _celExhaust.Astern = -new Vector3(ahead.X, 0.0f, ahead.Z).Normalized();
             _celExhaust.Tick(dt, _exhaustPorts, _camera.GlobalBasis);
         }
         _celShot?.Tick(dt, _camera.GlobalBasis);

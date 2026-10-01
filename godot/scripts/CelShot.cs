@@ -46,6 +46,14 @@ namespace TankSpriteTest;
 /// </summary>
 public sealed partial class CelShot : Node3D
 {
+    /// <summary>The tanks its puffs may not stand through, or none.</summary>
+    public CelSolids? Solids;
+
+    /// <summary>The blast wave and the dust off the ground are drawn - both
+    /// off: the user took them away, leaving the flash, its light and the
+    /// smoke. Kept rather than cut, to be turned back on.</summary>
+    public bool HasRing, HasDust;
+
     // ------------------------------------------------------------ the flash
 
     /// <summary>How long the flash lasts, s - its eight frames at 60 fps.
@@ -196,11 +204,17 @@ public sealed partial class CelShot : Node3D
             return;
         }
         Flash(t, _from, _bore, eye);
-        Ring(t);
+        if (HasRing)
+            Ring(t);
+        else
+            _ring!.Visible = false;
         Smoke(t);
-        Dust(t);
-        _smoke.Draw(eye);
-        _dust.Draw(eye);
+        if (HasDust)
+            Dust(t);
+        else
+            _dust.Clear();
+        _smoke.Draw(eye, Solids);
+        _dust.Draw(eye, Solids);
     }
 
     private void Flash(float t, Vector3 muzzle, Vector3 bore, Basis eye)

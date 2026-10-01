@@ -27,13 +27,18 @@ namespace TankSpriteTest;
 /// </summary>
 public sealed partial class CelDust : Node3D
 {
+    /// <summary>The tanks its puffs may not stand through, or none.</summary>
+    public CelSolids? Solids;
+
     /// <summary>Puffs in the air at once per belt, at most - the cloud's.</summary>
     public const int Pool = CelCloud.Pool;
 
     /// <summary>Belt run between puffs, hull lengths.</summary>
     public float Step = 0.09f;
-    /// <summary>A puff's life, s.</summary>
-    public float Life = 1.7f;
+    /// <summary>A puff's life, s - and so the trail's length over the
+    /// tank's speed, the puffs standing in the world: at 1.7 s the trail ran
+    /// four hull lengths behind a light tank, and the user halved it.</summary>
+    public float Life = 0.85f;
     /// <summary>A puff's width at birth and at the end, hull lengths, at full
     /// pace. At 0.24 the trail was two ropes on the ground: puffs that barely
     /// grew, one behind the other.</summary>
@@ -149,7 +154,7 @@ public sealed partial class CelDust : Node3D
                              + Wind * (_hull * age);
                 cloud.Add(at, r, p.Tone, p.Seed, Mathf.SmoothStep(ErodeFrom, 1.0f, a), a);
             }
-            cloud.Draw(eye);
+            cloud.Draw(eye, Solids);
         }
     }
 

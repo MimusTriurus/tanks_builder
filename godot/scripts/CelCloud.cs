@@ -73,14 +73,18 @@ public sealed class CelCloud
     }
 
     /// <summary>The puffs added since <see cref="Clear"/>, facing
-    /// <paramref name="eye"/> (the camera's basis).</summary>
-    public void Draw(Basis eye)
+    /// <paramref name="eye"/> (the camera's basis), each thinned by
+    /// <paramref name="solids"/> - the tanks it may not stand through.</summary>
+    public void Draw(Basis eye, CelSolids? solids = null)
     {
         if (_n == 0)
         {
             _quad.Visible = false;
             return;
         }
+        if (solids is not null)
+            for (int i = 0; i < _n; i++)
+                _where[i].W *= solids.Thin(new Vector3(_where[i].X, _where[i].Y, _where[i].Z), _where[i].W);
         Vector3 right = eye.X.Normalized(), up = eye.Y.Normalized(), back = eye.Z.Normalized();
         Vector3 mid = Vector3.Zero;
         for (int i = 0; i < _n; i++)

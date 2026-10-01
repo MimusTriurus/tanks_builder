@@ -47,6 +47,9 @@ namespace TankSpriteTest;
 /// </summary>
 public sealed partial class CelHit : Node3D
 {
+    /// <summary>The tanks its puffs may not stand through, or none.</summary>
+    public CelSolids? Solids;
+
     /// <summary>What a round leaves: the shader's kinds.</summary>
     public enum Kind { Gouge = 0, Hole = 1, Splash = 2, Dent = 3 }
 
@@ -652,7 +655,7 @@ public sealed partial class CelHit : Node3D
                       * Mathf.SmoothStep(0.0f, 0.5f * StarTime, t);
             _puff.Add(at, r, tone + 0.1f * h2, h1, Mathf.SmoothStep(0.1f, 1.0f, a), a);
         }
-        _puff.Draw(eye);
+        _puff.Draw(eye, Solids);
     }
 
     /// <summary>The wound: puffs leaving the hole every <see cref="WispEvery"/>
@@ -702,7 +705,7 @@ public sealed partial class CelHit : Node3D
                       * Mathf.SmoothStep(0.0f, 0.1f, a);
             _wisp.Add(at, r, 0.40f + 0.08f * h1, h1, Mathf.SmoothStep(0.2f, 1.0f, a), a);
         }
-        _wisp.Draw(eye);
+        _wisp.Draw(eye, Solids);
     }
 
     /// <summary>

@@ -876,6 +876,7 @@ void light() {
             case "no-amphibious": _amphibious = false; break;
             case "heights": SaveHeights(); break;
             case "drive": _driveScripted = 1.0f; break;
+            case "reverse": _driveScripted = -1.0f; break;
             case "stop": _driveScripted = 0.0f; break;
             case "left": _turnScripted = 1.0f; break;
             case "right": _turnScripted = -1.0f; break;

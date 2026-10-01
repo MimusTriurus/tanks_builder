@@ -183,6 +183,7 @@ public sealed partial class Tank3DBench
         AddChild(hits);
         hits.Build(model.HullLength * model.PixelsPerUnit);
         hits.Targets(model, model.Cel);
+        hits.Solids = _solids;
         _other = new Other
         {
             Model = model, Rig = rig, Profile = profile, Tag = tag.ToUpperInvariant(),
