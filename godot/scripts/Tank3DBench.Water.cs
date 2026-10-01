@@ -58,6 +58,9 @@ public sealed partial class Tank3DBench
     /// knocked-out hull finished off halfway down would bob back up.</summary>
     private float _sinkClock;
     private Bubbles? _air;
+    /// <summary>The model's own air (<see cref="CelBubbles"/>); the board's
+    /// <see cref="_air"/> under <c>--fx2d</c>.</summary>
+    private CelBubbles? _celAir;
     private bool _airTold;
 
     /// <summary>How fast a hull drops off the bank, world px/s². About a real
@@ -298,6 +301,11 @@ public sealed partial class Tank3DBench
         if (_wreck.Out && deep && _burning)
             _burning = false;
         float sink = deep && _wreck.Out ? Sink : 0.0f;
+        if (!_fx2d)
+        {
+            CelAir(sink, dt);
+            return;
+        }
         if (sink <= 0.0f && _air is not { Busy: true })
             return;
         if (_air is null)
@@ -329,6 +337,40 @@ public sealed partial class Tank3DBench
             float roof = _rig.Position.Y * RiseFactor + _roofPx;
             GD.Print($"tank3d: {_modelTag} on the bed at {cell}: roof {roof:F1}, water {top:F1} px "
                      + $"({(roof < top ? "under" : "OUT")} by {Mathf.Abs(top - roof):F1})");
+        }
+    }
+
+    /// <summary>
+    /// The model's air: <see cref="CelBubbles"/> on the surface straight over
+    /// the hull's footprint - on the cell it drowned on.
+    /// </summary>
+    private void CelAir(float sink, float dt)
+    {
+        if (sink <= 0.0f && _celAir is not { Busy: true })
+            return;
+        if (_celAir is null)
+        {
+            _celAir = new CelBubbles { Name = "Air" };
+            AddChild(_celAir);
+            _celAir.Build(7, Squash, RiseFactor);
+            _celAir.Struck = (at, might) => _ripples.Strike(at, might);
+        }
+        Vector2I cell = CellHere;
+        float top = _field!.WaterTop(cell);
+        float h = Mathf.DegToRad(_heading);
+        var ahead = new Vector3(Mathf.Sin(h), 0.0f, Mathf.Cos(h));
+        var left = new Vector3(ahead.Z, 0.0f, -ahead.X);
+        Vector3 middle = _rig.Position + ahead * _foot.Along + left * _foot.Across;
+        _celAir.Sit(new Vector3(middle.X, top / RiseFactor, middle.Z), ahead,
+                    _model.HullLength * _model.PixelsPerUnit * 0.5f, _model.HullWidth * _model.PixelsPerUnit * 0.5f);
+        _celAir.Feed(sink);
+        _celAir.Tick(dt);
+        if (sink >= 1.0f && !_airTold)
+        {
+            _airTold = true;
+            float roof = _rig.Position.Y * RiseFactor + _roofPx;
+            GD.Print($"tank3d: {_modelTag} on the bed at {cell}: roof {roof:F1}, water {top:F1} px "
+                     + $"({(roof < top ? "under" : "OUT")} by {Mathf.Abs(top - roof):F1}), air over {_field.FlatCellAt(Board(middle))}");
         }
     }
 
@@ -501,6 +543,7 @@ public sealed partial class Tank3DBench
         _sinkClock = 0.0f;
         _airTold = false;
         _air?.Feed(0.0f);
+        _celAir?.Reset();
     }
 
     /// <summary>

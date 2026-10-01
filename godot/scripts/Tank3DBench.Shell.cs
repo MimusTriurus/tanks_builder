@@ -290,7 +290,15 @@ public sealed partial class Tank3DBench
         }
         o.Pitch.Kick(k * ahead.Dot(way));
         o.Roll.Kick(-k * left.Dot(way));
+        RockedOther(o, k / 3.2f);
         GD.Print($"tank3d: round on {o.Tag} {face} ({plate}), level {level}: {what}");
+    }
+
+    /// <summary>The target struck in the water: its rings (<see cref="Rocked"/>).</summary>
+    private void RockedOther(Other o, float might)
+    {
+        Vector3 ahead = o.Ahead, left = new(ahead.Z, 0.0f, -ahead.X);
+        Rocked(o.Rig.Position + ahead * o.Foot.Along + left * o.Foot.Across, ahead, o.Foot.HalfLen, o.Foot.HalfWide, might);
     }
 
     /// <summary>The mortar's bomb on the target: no plate to say no
@@ -307,6 +315,7 @@ public sealed partial class Tank3DBench
             FxGround(Foot(at));
         // Half a landing's sink: the bomb shoves the roof down on the springs.
         o.Heave.Kick(-0.5f * LandSink * o.Model.HullLength * Mathf.Sqrt(SinkSpring.K));
+        RockedOther(o, 1.0f);
         o.Pitch.Kick(1.5f * (2.0f * CelPuff.Hash(_shells!.Rounds.Count, 5) - 1.0f));
         o.Roll.Kick(1.5f * (2.0f * CelPuff.Hash(_shells.Rounds.Count, 7) - 1.0f));
         _shake.Blast(_profile.ShotShake * 0.6);

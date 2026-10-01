@@ -111,6 +111,14 @@ public sealed partial class Tank3DBench
     /// or the crater covers it and nothing shows.</summary>
     private const float ScorchWide = 1.0f;
     private CelSplash? _shellSplash;
+    /// <summary>The column a tank going up afloat throws, and the rings a hull
+    /// struck in the water sends out - each its own, so neither cuts the other
+    /// or a round's (<see cref="_shellSplash"/>). None under <c>--fx2d</c>.</summary>
+    private CelSplash? _deathSplash, _rockSplash;
+
+    /// <summary>How wide the column of a tank going up afloat is, against the
+    /// hull's half-width.</summary>
+    private const float DeathSpout = 0.9f;
     private CelHit? _celHit;
     private CelBlast? _celBlast;
     private CelDeath? _celDeath;
@@ -524,6 +532,12 @@ void fragment() {
             _shellSplash = new CelSplash { Name = "ShellSplash" };
             AddChild(_shellSplash);
             _shellSplash.Build(Squash, RiseFactor);
+            _deathSplash = new CelSplash { Name = "DeathSplash" };
+            AddChild(_deathSplash);
+            _deathSplash.Build(Squash, RiseFactor);
+            _rockSplash = new CelSplash { Name = "RockSplash" };
+            AddChild(_rockSplash);
+            _rockSplash.Build(Squash, RiseFactor);
             _celBlast = new CelBlast { Name = "Blast" };
             AddChild(_celBlast);
             _celBlast.Build(_model.HullLength * _model.PixelsPerUnit);
@@ -623,6 +637,10 @@ void fragment() {
         _celScorch = null;
         _shellSplash?.QueueFree();
         _shellSplash = null;
+        _deathSplash?.QueueFree();
+        _deathSplash = null;
+        _rockSplash?.QueueFree();
+        _rockSplash = null;
         _celHit?.QueueFree();
         _celHit = null;
         _celBlast?.QueueFree();
@@ -1064,7 +1082,19 @@ void fragment() {
         if (DeepHere && _stage is not null && _field is not null)
         {
             float top = _field.WaterTop(CellHere);
-            _stage.Splash(Board(_rig.Position) - new Vector2(0.0f, top), top, Stage3D.Drowned);
+            if (_deathSplash is not null)
+            {
+                // The model's own: the knock-out's flash out of the ring - the
+                // ammunition going up, short, no fire left after it - and the
+                // round's column (CelSplash.Spout) as wide as the hull, the
+                // board's Drowned times as hard.
+                Fireball(TankTick.KnockOutFlash, grounded: false);
+                _deathSplash.Spout(new Vector3(_rig.Position.X, top / RiseFactor, _rig.Position.Z), Stage3D.Drowned,
+                                   DeathSpout * _model.HullWidth * _model.PixelsPerUnit * 0.5f);
+                _ripples.Strike(new Vector2(_rig.Position.X, _rig.Position.Z), Stage3D.Waves * Stage3D.Drowned);
+            }
+            else
+                _stage.Splash(Board(_rig.Position) - new Vector2(0.0f, top), top, Stage3D.Drowned);
             _burning = false;
         }
         else
@@ -1087,6 +1117,36 @@ void fragment() {
         // TankTick.Quake(Death): the class's own gun shake, harder.
         _shake.Fire(new Vector2(0.0f, -1.0f), _profile.ShotShake * 2.15);
         _shake.Blast(_profile.ShotShake * 1.6);
+    }
+
+    /// <summary>
+    /// A hull struck in the water rocks, and the water round it tells:
+    /// <see cref="CelSplash.Rock"/>'s two rings in its shape from its
+    /// waterline - <paramref name="middle"/> its footprint's middle (world),
+    /// the half-lengths its footprint's. A ford's as well as the pond's; none
+    /// once the water is over the deck.
+    /// </summary>
+    private void Rocked(Vector3 middle, Vector3 ahead, float halfLen, float halfWide, float might)
+    {
+        if (_rockSplash is null || _field is null)
+            return;
+        Vector2I cell = _field.FlatCellAt(Board(middle));
+        if (!_field.InBounds(cell) || !_field.IsWater(cell))
+            return;
+        _rockSplash.Rock(new Vector3(middle.X, _field.WaterTop(cell) / RiseFactor, middle.Z), ahead,
+                         halfLen, halfWide, might);
+    }
+
+    /// <summary>The bench's own hull struck (<see cref="Rocked"/>), unless it
+    /// is already under.</summary>
+    private void RockedOwn(float might)
+    {
+        if (Sink >= 1.0f)
+            return;
+        float h = Mathf.DegToRad(_heading);
+        var ahead = new Vector3(Mathf.Sin(h), 0.0f, Mathf.Cos(h));
+        var left = new Vector3(ahead.Z, 0.0f, -ahead.X);
+        Rocked(_rig.Position + ahead * _foot.Along + left * _foot.Across, ahead, _foot.HalfLen, _foot.HalfWide, might);
     }
 
     /// <summary>The turret hit the deck: the board's turret quake.</summary>
@@ -1117,6 +1177,8 @@ void fragment() {
         _celBurst?.Reset();
         _celScorch?.Reset();
         _shellSplash?.Reset();
+        _deathSplash?.Reset();
+        _rockSplash?.Reset();
         _celDeath?.Reset();
         _celDust?.Reset();
         _ruts?.Clear();
@@ -1278,6 +1340,8 @@ void fragment() {
         _celBurst?.Tick(dt, _camera.GlobalBasis);
         _celScorch?.Tick(dt);
         _shellSplash?.Tick(dt, _camera.GlobalBasis);
+        _deathSplash?.Tick(dt, _camera.GlobalBasis);
+        _rockSplash?.Tick(dt, _camera.GlobalBasis);
         _celDeath?.Tick(dt, _camera.GlobalBasis);
 
         // TankTick.UpdateShot - frames, as the board counts them.

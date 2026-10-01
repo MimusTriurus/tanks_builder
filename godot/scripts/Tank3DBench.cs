@@ -991,6 +991,7 @@ void light() {
         _kickPitch.Kick(k * travel.Z);
         _kickRoll.Kick(-k * travel.X);
         FxHit(side, travel, pierce);
+        RockedOwn(pierce ? 1.0f : 0.75f);
     }
 
     /// <summary>Which way a round from each side travels, in the hull's frame:
@@ -1013,6 +1014,7 @@ void light() {
         _kickPitch.Kick(3.0f * travel.Z);
         _kickRoll.Kick(-3.0f * travel.X);
         FxHe(side, travel);
+        RockedOwn(1.0f);
     }
 
     /// <summary>Knocked out: a penetration from the front, then the turret sits

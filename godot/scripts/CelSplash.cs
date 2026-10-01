@@ -97,6 +97,11 @@ public sealed partial class CelSplash : Node3D
 
     private readonly List<(MeshInstance3D Quad, ShaderMaterial Look)> _ripples = new();
 
+    /// <summary>The rock's rings (<see cref="Rock"/>): how far the first runs
+    /// out at might one, world px, how long each lives, s, and when the second
+    /// leaves after it and how far, a share of the first.</summary>
+    public const float RockReach = 46.0f, RockLife = 1.1f, RockSecond = 0.28f, RockSecondReach = 0.6f;
+
     private sealed class Sheet
     {
         public MeshInstance3D Quad = null!;
@@ -108,8 +113,12 @@ public sealed partial class CelSplash : Node3D
     }
 
     private readonly Sheet[] _sheets = new Sheet[3];
-    private MeshInstance3D _ring = null!;
-    private ShaderMaterial _ringLook = null!;
+    private MeshInstance3D _ring = null!, _ring2 = null!;
+    private ShaderMaterial _ringLook = null!, _ring2Look = null!;
+    /// <summary>The column's width: <see cref="SpoutRadius"/> for a round, a
+    /// hull's for a tank going up (<see cref="Spout"/>).</summary>
+    private float _radius = SpoutRadius;
+    private bool _rock;
     private float _clock = -1.0f;
     private float _might = 1.0f;
     private Vector3 _seat;
@@ -146,21 +155,8 @@ public sealed partial class CelSplash : Node3D
             AddChild(quad);
             _sheets[i] = new Sheet { Quad = quad, Look = look };
         }
-        _ringLook = new ShaderMaterial { Shader = RingShader, RenderPriority = Stage3D.DressOrder };
-        _ringLook.SetShaderParameter("foam", Crest);
-        _ringLook.SetShaderParameter("edge", Body);
-        _ring = new MeshInstance3D
-        {
-            Name = "Ring",
-            Mesh = new PlaneMesh { Size = Vector2.One },
-            MaterialOverride = _ringLook,
-            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
-            // After the pond, which is transparent and drawn late: the wet
-            // ruts' reason (CelRuts).
-            SortingOffset = -100000.0f,
-            Visible = false,
-        };
-        AddChild(_ring);
+        (_ring, _ringLook) = MakeRing("Ring");
+        (_ring2, _ring2Look) = MakeRing("Ring2");
         foreach (var _ in Rings)
         {
             var look = new ShaderMaterial { Shader = RippleShader, RenderPriority = Stage3D.DressOrder };
@@ -176,6 +172,26 @@ public sealed partial class CelSplash : Node3D
             AddChild(quad);
             _ripples.Add((quad, look));
         }
+    }
+
+    private (MeshInstance3D, ShaderMaterial) MakeRing(string name)
+    {
+        var look = new ShaderMaterial { Shader = RingShader, RenderPriority = Stage3D.DressOrder };
+        look.SetShaderParameter("foam", Crest);
+        look.SetShaderParameter("edge", Body);
+        var ring = new MeshInstance3D
+        {
+            Name = name,
+            Mesh = new PlaneMesh { Size = Vector2.One },
+            MaterialOverride = look,
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            // After the pond, which is transparent and drawn late: the wet
+            // ruts' reason (CelRuts).
+            SortingOffset = -100000.0f,
+            Visible = false,
+        };
+        AddChild(ring);
+        return (ring, look);
     }
 
     /// <summary>
@@ -200,14 +216,34 @@ public sealed partial class CelSplash : Node3D
         _seed++;
         _clock = 0.0f;
         _column = false;
+        _rock = false;
+        _radius = SpoutRadius;
     }
 
     /// <summary>A round goes into the water at <paramref name="seat"/> (the
-    /// surface, world): the column and a round ring - see the class note.</summary>
-    public void Spout(Vector3 seat, float might = 1.0f)
+    /// surface, world): the column and a round ring - see the class note.
+    /// <paramref name="radius"/>, world px, widens the column: a tank's
+    /// ammunition going up under the water throws one as wide as its hull, and
+    /// a round's 11 px column out of the middle of a hull was hidden in it.</summary>
+    public void Spout(Vector3 seat, float might = 1.0f, float radius = SpoutRadius)
     {
         Fire(seat, Vector3.Back, SpoutRadius, SpoutRadius, might);
         _column = true;
+        _radius = Mathf.Max(radius, SpoutRadius);
+    }
+
+    /// <summary>
+    /// A hull in the water is struck and rocks: no water thrown, only two
+    /// rings of foam in its shape running out from its waterline one after the
+    /// other (<see cref="RockReach"/>), the second smaller - the hull's own
+    /// ring (<see cref="Fire"/>), small. <paramref name="seat"/> is the
+    /// surface under its middle; <paramref name="might"/> one for a
+    /// penetration.
+    /// </summary>
+    public void Rock(Vector3 seat, Vector3 ahead, float halfLen, float halfWide, float might)
+    {
+        Fire(seat, ahead, halfLen, halfWide, might);
+        _rock = true;
     }
 
     public void Reset()
@@ -218,14 +254,17 @@ public sealed partial class CelSplash : Node3D
                 s.Quad.Visible = false;
         if (_ring is not null)
             _ring.Visible = false;
+        if (_ring2 is not null)
+            _ring2.Visible = false;
         foreach (var (quad, _) in _ripples)
             quad.Visible = false;
     }
 
     /// <summary>How long the event is: the latest-born, fastest jet back in the
     /// water, or the ring gone.</summary>
-    private float Length => Mathf.Max(0.2f + 2.0f * (_column ? SpoutUp * 1.3f : FanUp * 1.2f) * Mathf.Sqrt(_might) / Gravity,
-                                      _column ? 1.9f : RingLife);
+    private float Length => _rock ? RockSecond + RockLife
+        : Mathf.Max(0.2f + 2.0f * (_column ? SpoutUp * 1.3f : FanUp * 1.2f) * Mathf.Sqrt(_might) / Gravity,
+                    _column ? 1.9f : RingLife);
 
     public void Tick(float dt, Basis eye)
     {
@@ -240,6 +279,15 @@ public sealed partial class CelSplash : Node3D
         float speed = Mathf.Sqrt(_might);
         Sheet bow = _sheets[0], left = _sheets[1], right = _sheets[2];
         bow.N = left.N = right.N = 0;
+        if (_rock)
+        {
+            foreach (Sheet s in _sheets)
+                s.Quad.Visible = false;
+            RingAt(_ring, _ringLook, _clock / RockLife, RockReach * speed);
+            RingAt(_ring2, _ring2Look, (_clock - RockSecond) / RockLife, RockReach * RockSecondReach * speed);
+            return;
+        }
+        _ring2.Visible = false;
         if (_column)
         {
             Column(speed, eye);
@@ -340,13 +388,15 @@ public sealed partial class CelSplash : Node3D
     {
         Sheet core = _sheets[0], behind = _sheets[1], before = _sheets[2];
         Vector3 back = eye.Z.Normalized();
+        // A wider column's jets: placed out to its radius, thicker by its root.
+        float w = SpoutRadius * Mathf.Sqrt(_radius / SpoutRadius);
         for (int j = 0; j < SpoutCore; j++)
         {
             float h1 = Hash(j, 21), h2 = Hash(j, 22), h3 = Hash(j, 23);
             float ang = h1 * Mathf.Tau;
             var lean = new Vector3(Mathf.Cos(ang), 0.0f, Mathf.Sin(ang));
             float up = SpoutUp * (0.75f + 0.3f * h2) * speed;
-            Jet(core, _seat + lean * (SpoutRadius * 0.45f * h3), lean, up, 0.04f, 0.008f * j, SpoutRadius * 1.25f, 100 + j);
+            Jet(core, _seat + lean * (_radius * 0.45f * h3), lean, up, 0.04f, 0.008f * j, w * 1.25f, 100 + j);
         }
         for (int j = 0; j < SpoutJets; j++)
         {
@@ -356,8 +406,8 @@ public sealed partial class CelSplash : Node3D
             float up = SpoutUp * (0.35f + 0.35f * h2) * speed;
             float born = 0.01f + 0.05f * h3;
             Sheet sheet = outward.Dot(back) > 0.0f ? before : behind;
-            Jet(sheet, _seat + outward * (SpoutRadius * 1.1f), outward, up, SpoutOut * (0.6f + 0.9f * h1),
-                born, SpoutRadius * 0.9f, 120 + j);
+            Jet(sheet, _seat + outward * (_radius * 1.1f), outward, up, SpoutOut * (0.6f + 0.9f * h1),
+                born, w * 0.9f, 120 + j);
         }
         // The crown: drops out and up all round, back into the water.
         for (int j = 0; j < SpoutDrops; j++)
@@ -371,7 +421,7 @@ public sealed partial class CelSplash : Node3D
             if (t <= 0.0f || t >= life)
                 continue;
             Vector3 vel = v + Vector3.Down * (Gravity * t);
-            Vector3 at = _seat + outward * (SpoutRadius * 1.3f) + v * t + Vector3.Down * (0.5f * Gravity * t * t);
+            Vector3 at = _seat + outward * (_radius * 1.3f) + v * t + Vector3.Down * (0.5f * Gravity * t * t);
             // Long along the way it flies: a drop, not a pebble.
             float r = (2.6f + 1.4f * h2) * (1.0f - 0.4f * t / life);
             Vector3 tail = at - vel.Normalized() * (r * 2.6f);
@@ -400,7 +450,7 @@ public sealed partial class CelSplash : Node3D
             }
             float reach = reach0 * speed;
             // Out fast and slowing; the band from a patch to a line.
-            float radius = Mathf.Lerp(reach * 0.12f, reach, 1.0f - (1.0f - k) * (1.0f - k));
+            float radius = Mathf.Lerp(reach * 0.12f, reach, 1.0f - (1.0f - k) * (1.0f - k)) + (_radius - SpoutRadius);
             float band = reach * Mathf.Lerp(0.14f, 0.012f, k);
             // A hair over the water, not the board's lift toward the eye: lifted
             // that far it stood in front of the bank, and the rings ran out
@@ -477,22 +527,30 @@ public sealed partial class CelSplash : Node3D
     }
 
     /// <summary>The foam running out over the water in the hull's shape.</summary>
-    private void Ring(float speed)
+    private void Ring(float speed) =>
+        RingAt(_ring, _ringLook, Mathf.Min(_clock / RingLife, 1.0f), RingReach * speed);
+
+    /// <summary>A ring <paramref name="a"/> of its life in (nought to one;
+    /// outside that, hidden), running out to <paramref name="reach"/>.</summary>
+    private void RingAt(MeshInstance3D ring, ShaderMaterial look, float a, float reach)
     {
-        float a = Mathf.Clamp(_clock / RingLife, 0.0f, 1.0f);
-        float reach = RingReach * speed;
+        if (a < 0.0f || a > 1.0f)
+        {
+            ring.Visible = false;
+            return;
+        }
         float span = Mathf.Max(_halfLen, _halfWide) + reach + 20.0f;
-        _ring.GlobalTransform = new Transform3D(
+        ring.GlobalTransform = new Transform3D(
             new Basis(_across * (2.0f * span), Vector3.Up, _along * (2.0f * span)),
             _seat + Stage3D.Clear(_squash, _rise));
-        _ring.Visible = true;
-        _ringLook.SetShaderParameter("half_len", _halfLen);
-        _ringLook.SetShaderParameter("half_wide", _halfWide);
-        _ringLook.SetShaderParameter("span", span);
+        ring.Visible = true;
+        look.SetShaderParameter("half_len", _halfLen);
+        look.SetShaderParameter("half_wide", _halfWide);
+        look.SetShaderParameter("span", span);
         // Out fast, then slowing - a ring spent by the water it pushes.
-        _ringLook.SetShaderParameter("front", 6.0f + reach * (1.0f - (1.0f - a) * (1.0f - a)));
-        _ringLook.SetShaderParameter("age", a);
-        _ringLook.SetShaderParameter("seed", _seed * 1.7f);
+        look.SetShaderParameter("front", 6.0f + reach * (1.0f - (1.0f - a) * (1.0f - a)));
+        look.SetShaderParameter("age", a);
+        look.SetShaderParameter("seed", _seed * 1.7f + (ring == _ring2 ? 4.3f : 0.0f));
     }
 
     private int HashSeed => _seed * 131;
