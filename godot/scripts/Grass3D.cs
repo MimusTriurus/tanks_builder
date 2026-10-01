@@ -95,7 +95,7 @@ public sealed partial class Grass3D : Node3D
     {
         public readonly List<ShaderMaterial> Inks = new();
         public Vector3 Mid;
-        public float Radius, Age = -1.0f, Reach, Due, Seed, Speed;
+        public float Radius, Age = -1.0f, Reach, Due, Seed, Speed, Stop = float.PositiveInfinity;
         public Vector2 From;
         public CelCloud? Smoke;
         public readonly List<(Vector3 At, float Born, float Seed)> Puffs = new();
@@ -181,8 +181,12 @@ public sealed partial class Grass3D : Node3D
     /// is a ring out from there at <see cref="FrontM"/>, broken up by a noise -
     /// faster where it has to be off the cell's far corner within
     /// <paramref name="within"/> s (0: no bound), fixed on the frame it is lit.
+    /// <paramref name="stop"/>, px from <paramref name="from"/>, is as far as it
+    /// goes - on a ragged line, the grass past it untouched: a blast's fire
+    /// wave burning the grass it rolls over and no further (the scene's;
+    /// infinity, a fire that takes the cell). The far corner is then the stop.
     /// </summary>
-    public void Burn(int meadow, float age, Vector2 from, float within = 0.0f)
+    public void Burn(int meadow, float age, Vector2 from, float within = 0.0f, float stop = float.PositiveInfinity)
     {
         if (meadow < 0 || meadow >= _meadows.Count)
             return;
@@ -208,7 +212,9 @@ public sealed partial class Grass3D : Node3D
                     var corner = new Vector2(m.Mid.X + Mathf.Cos(a) * m.Radius, m.Mid.Z + Mathf.Sin(a) * m.Radius);
                     far = Mathf.Max(far, corner.DistanceTo(from));
                 }
-                m.Reach = far;
+                m.Stop = stop;
+                m.Reach = Mathf.Min(far, stop);
+                far = m.Reach;
                 m.Due = 0.0f;
                 m.Speed = Mathf.Max(FrontM * Ppm, within > 0.0f ? far / within : 0.0f);
             }
@@ -220,6 +226,7 @@ public sealed partial class Grass3D : Node3D
             ink.SetShaderParameter("burn_age", m.Age);
             ink.SetShaderParameter("burn_from", m.From);
             ink.SetShaderParameter("burn_speed", m.Speed);
+            ink.SetShaderParameter("burn_reach", float.IsInfinity(m.Stop) ? 1e9f : m.Stop);
         }
     }
 
@@ -640,6 +647,8 @@ uniform vec3 tone_dry : source_color = vec3(0.62, 0.60, 0.38);
 uniform float burn_age = -1.0;
 uniform vec2 burn_from = vec2(0.0);
 uniform float burn_speed = 76.0;
+// as far from burn_from as the front goes, px, on a ragged line: a blast's wave
+uniform float burn_reach = 1e9;
 uniform vec3 char_tone : source_color = vec3(0.15, 0.13, 0.11);
 uniform vec3 ash_tone : source_color = vec3(0.27, 0.26, 0.24);
 // how long the flame stands at a point, s: the tufts and the lawn flare up as
@@ -694,7 +703,10 @@ float grass_patch(vec2 xz) {
 float burn_tau(vec2 xz) {
     if (burn_age < 0.0) return -1000.0;
     float rag = (g_noise(xz * 0.035 + 7.0) - 0.5) * 2.4 * ppm + (g_noise(xz * 0.16 + 2.0) - 0.5) * 0.6 * ppm;
-    return burn_age - max(length(xz - burn_from) + rag, 0.0) / burn_speed;
+    float d = length(xz - burn_from);
+    if (d > burn_reach + ((g_noise(xz * 0.06 + 13.0) - 0.5) * 1.6 + (g_noise(xz * 0.25 + 4.0) - 0.5) * 0.5) * ppm)
+        return -1000.0;
+    return burn_age - max(d + rag, 0.0) / burn_speed;
 }
 // how much of its height the grass keeps: all of it ahead of the front, a
 // flickering flare in the flame, stubble behind it

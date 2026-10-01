@@ -77,6 +77,15 @@ public sealed partial class Tank3DBench
     private readonly Dictionary<Vector2I, int> _meadowOf = new();
     private readonly Dictionary<Vector2I, Vector2> _frontOf = new();
     private readonly Dictionary<Vector2I, Vector2> _entry = new();
+    /// <summary>Every cell's grass, and the bare cells' a blast has burnt off:
+    /// when, from where, how far (<see cref="WoodSinge"/>).</summary>
+    private readonly Dictionary<Vector2I, int> _lawnOf = new();
+    private readonly Dictionary<Vector2I, (float Born, Vector2 From, float Stop)> _singed = new();
+
+    /// <summary>How long the grass's flame line takes to roll out to the fire
+    /// wave's reach, s: about as long as the wave is out (<see cref="CelDeath.WaveLife"/>
+    /// 0.7, most of the way in its first 0.4).</summary>
+    private const float SingeWithin = 0.45f;
     private float _woodClock;
 
     /// <summary>How fast a blast runs out over the board to the trees past
@@ -235,7 +244,9 @@ public sealed partial class Tank3DBench
                 if (_field.FlatCellAt(Board(t.Holder.Position)) == lay[i])
                     trunks.Add(t.Holder.Position);
             int meadow = _grass.Lay(Grass3D.Kind.CelTufts, mid, r, 101 + i, trunks);
-            // grass burns where a wood does, and only there (Tree3D's rule)
+            // grass burns where a wood does (Tree3D's rule), and is burnt
+            // off where a tank's blast rolled over it (WoodSinge)
+            _lawnOf[lay[i]] = meadow;
             if (_woodedCells.Contains(lay[i]))
                 _meadowOf[lay[i]] = meadow;
         }
@@ -328,10 +339,13 @@ public sealed partial class Tank3DBench
     /// - on the frame the fire wave gets to the edge between them, the fire
     /// coming in over that edge. Afloat there is no fire wave: the
     /// neighbours a beat after the blast. A burnt wood is not lit again
-    /// (<see cref="Wildfire.Light"/> refuses).
+    /// (<see cref="Wildfire.Light"/> refuses). On the ground the wave burns
+    /// off the bare cells' grass too (<see cref="WoodSinge"/>).
     /// </summary>
     private void WoodIgnite(Vector3 at, bool grounded)
     {
+        if (grounded)
+            WoodSinge(at);
         if (_wildfire is null || _field is null)
             return;
         Vector2I here = _field.FlatCellAt(Board(at));
@@ -355,6 +369,36 @@ public sealed partial class Tank3DBench
     }
 
     /// <summary>
+    /// A tank's fire wave burns the grass it rolls over - the cell it stands
+    /// on and its neighbours on its own level, out to the wave's reach
+    /// (<see cref="CelDeath.WaveReach"/> of a cell) from the blast and no
+    /// further: a flame line running out with the wave, char, stubble and
+    /// embers, a little smoke. Decoration, not a fire: the cell is not lit,
+    /// burns nothing and hands nothing on - the rules have fire in a wood only
+    /// (GDD field.md, "Вне леса пожара не бывает"); a wooded cell burns as a
+    /// wood does (<see cref="WoodIgnite"/>). Burnt once: a second blast over
+    /// the same grass finds stubble. None afloat - there is no wave.
+    /// </summary>
+    private void WoodSinge(Vector3 at)
+    {
+        if (_grass is null || _field is null || _celDeath is null)
+            return;
+        Vector2I here = _field.FlatCellAt(Board(at));
+        int level = _field.LevelAt(here);
+        float reach = _celDeath.WaveReach * HexWidth;
+        var cells = new List<Vector2I> { here };
+        foreach (int heading in HexField.EdgeHeadings)
+            cells.Add(HexField.Step(here, heading));
+        foreach (Vector2I cell in cells)
+        {
+            if (!_lawnOf.ContainsKey(cell) || _woodedCells.Contains(cell) || _singed.ContainsKey(cell)
+                || _field.LevelAt(cell) != level)
+                continue;
+            _singed[cell] = (_woodClock, new Vector2(at.X, at.Z), reach);
+        }
+    }
+
+    /// <summary>
     /// A frame of the wood's fire: a blast's lights as they fall due, the
     /// board's fire, the grass of each burning wood - its front from where the
     /// fire came in, and with it when each tree catches: as the line gets to
@@ -364,7 +408,12 @@ public sealed partial class Tank3DBench
     private void WoodFire(float dt)
     {
         if (_wildfire is null)
+        {
+            // a board with no wood still has grass for a blast to burn off
+            foreach ((Vector2I cell, (float born, Vector2 from, float stop)) in _singed)
+                _grass?.Burn(_lawnOf[cell], _woodClock - born, from, SingeWithin, stop);
             return;
+        }
         for (int i = _lights.Count - 1; i >= 0; i--)
             if (_lights[i].Due <= _woodClock)
             {
@@ -374,6 +423,8 @@ public sealed partial class Tank3DBench
                     _entry[cell] = from;
             }
         _wildfire.Tick(dt);
+        foreach ((Vector2I cell, (float born, Vector2 from, float stop)) in _singed)
+            _grass?.Burn(_lawnOf[cell], _woodClock - born, from, SingeWithin, stop);
         float within = _wildfire.CatchWithin - CatchLag;
         foreach ((Vector2I cell, int meadow) in _meadowOf)
         {
@@ -470,6 +521,9 @@ public sealed partial class Tank3DBench
     private void WoodReset()
     {
         _grass?.Heal();
+        foreach (Vector2I cell in _singed.Keys)
+            _grass?.Burn(_lawnOf[cell], -1.0f, Vector2.Zero);
+        _singed.Clear();
         _wildfire?.Douse();
         _lights.Clear();
         _entry.Clear();
