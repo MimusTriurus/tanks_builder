@@ -773,6 +773,7 @@ void fragment() {
         }
         Vector3 foot = Foot(muzzle);
         Vector3 bore = _model.Muzzle.GlobalBasis.Z;
+        WoodMuzzle(muzzle, bore, _profile.Might);
         if (_celShot is not null)
         {
             _celShot.Fire(muzzle, bore, foot);

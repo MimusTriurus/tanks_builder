@@ -30,10 +30,14 @@ namespace TankSpriteTest;
 /// HT") - the cell is ground once the heavy drives in, and each trunk goes
 /// over as the hull gets to it, the way it is going (<see cref="TreeFall"/>,
 /// <c>Tree3D</c>'s fall).</item>
+/// <item><b>It gives way to a hull</b> (<see cref="Brush"/>): any other
+/// class pushes through it - the trunks it touches bent off its sides and on
+/// the way it goes, shaking while it moves, swinging back once it is
+/// past.</item>
 /// <item><b>It feels a blast</b> - a round's or a tank's: the crowns are
 /// thrown back from it and swing back on a spring
 /// (<see cref="WoodBlast"/>), each as the blast gets to it, the leaves
-/// shivering.</item>
+/// shivering; and a gun fired in it or by it (<see cref="WoodMuzzle"/>).</item>
 /// </list>
 /// <c>--no-grass</c>, <c>--no-trees</c>; <c>--trees A,B,..</c> which models,
 /// <c>--wood N</c> how many to a cell, <c>--wind x</c> how hard it blows.
@@ -70,6 +74,9 @@ public sealed partial class Tank3DBench
         /// its pace, and the leaves' shiver; the blasts still on their way.</summary>
         public Vector2 Push, PushV;
         public float Shiver, Spent;
+        /// <summary>Where a hull holds it bent this frame (world x, z, a share
+        /// of its height) - the spring's rest; zero once nothing touches it.</summary>
+        public Vector2 Bend;
         public readonly List<(float Due, Vector2 Kick, float Shiver)> Kicks = new();
     }
 
@@ -117,6 +124,15 @@ public sealed partial class Tank3DBench
     /// <summary>A hull's belt, a share of its width - the stand-in hull's 13 px
     /// of 58 in <c>Tree3D</c>; the belly between them presses it a third.</summary>
     private const float BeltShare = 0.22f, BellyPress = 0.35f;
+
+    /// <summary>A hull pushing through the wood (<see cref="Brush"/>): how far
+    /// past its sides the crowns' boughs reach it, a share of the crown's width;
+    /// the lean of a trunk it is on, a share of the height; the leaves' shiver
+    /// while it moves; and its pace (px/s) at which it is all there.</summary>
+    private const float BrushMargin = 0.4f, BrushLean = 0.2f, BrushShiver = 1.6f, BrushPace = 40.0f;
+    /// <summary>The cells a hull is brushing the wood on - the log's, once a
+    /// cell on the way in.</summary>
+    private readonly HashSet<Vector2I> _brushing = new(), _brushed = new();
 
     /// <summary>The cell's middle on its ground (world).</summary>
     private Vector3 CellMiddle(Vector2I cell)
@@ -276,6 +292,14 @@ public sealed partial class Tank3DBench
         _weather += dt;
         _woodClock += dt;
         WoodFire(dt);
+        foreach (Planted t in _trees)
+            t.Bend = Vector2.Zero;
+        _brushed.Clear();
+        if (_fate == Fate.Alive && !DeepHere && !_falling)
+            Brush(BoxOf(_rig.Position, _heading, _foot), _speed, _modelTag);
+        if (_other is { Falling: false, Wet: false } o)
+            Brush(BoxOf(o.Rig.Position, o.Heading, o.Foot), dt > 0.0f ? o.Slid / dt : 0.0f, o.Tag);
+        _brushing.IntersectWith(_brushed);
         float w = Mathf.Tau * SwayHz;
         foreach (Planted t in _trees)
         {
@@ -287,7 +311,7 @@ public sealed partial class Tank3DBench
                     t.Shiver = Mathf.Max(t.Shiver, t.Kicks[k].Shiver);
                     t.Kicks.RemoveAt(k);
                 }
-            t.PushV += (-w * w * t.Push - 2.0f * SwayDamp * w * t.PushV) * dt;
+            t.PushV += (-w * w * (t.Push - t.Bend) - 2.0f * SwayDamp * w * t.PushV) * dt;
             t.Push += t.PushV * dt;
             t.Shiver *= Mathf.Exp(-dt / 0.6f);
             if (t.Push.LengthSquared() < 1e-10f && t.PushV.LengthSquared() < 1e-10f)
@@ -307,8 +331,56 @@ public sealed partial class Tank3DBench
             var ahead = new Vector3(Mathf.Sin(h), 0.0f, Mathf.Cos(h));
             Trample(_rig.Position, ahead, _foot);
         }
-        if (_other is { Falling: false, Wet: false } o)
-            Trample(o.Rig.Position, o.Ahead, o.Foot);
+        if (_other is { Falling: false, Wet: false } t2)
+            Trample(t2.Rig.Position, t2.Ahead, t2.Foot);
+    }
+
+    /// <summary>
+    /// A hull (<paramref name="hull"/>, its footprint) in the wood at
+    /// <paramref name="speed"/> px/s, signed: every standing trunk whose crown
+    /// reaches it - within <see cref="BrushMargin"/> of the crown's width of
+    /// its sides - is held bent, off the side it is on and on the way the hull
+    /// goes; one the hull is over goes mostly the hull's way. Less a trunk at
+    /// the boughs' tips, less a charred one; half held at a standstill, all at
+    /// <see cref="BrushPace"/>, and the leaves shaking with the pace - the hull
+    /// pushing through, which the spring (<see cref="WoodTick"/>) follows and
+    /// rings back from once the hull is past. Any class: a heavy fells the
+    /// wood it drives into (<see cref="Raze"/>), and the trunks it gets to
+    /// before they go - or a cell off - give way as to any other.
+    /// </summary>
+    private void Brush(Box hull, float speed, string tag)
+    {
+        float pace = Mathf.SmoothStep(3.0f, BrushPace, Mathf.Abs(speed));
+        Vector2 way = speed < 0.0f ? -hull.A : hull.A;
+        foreach (Planted t in _trees)
+        {
+            if (t.Fall.Going)
+                continue;
+            Vector3 foot = t.Holder.GlobalPosition;
+            Vector2 d = new Vector2(foot.X, foot.Z) - hull.C;
+            float along = d.Dot(hull.A), side = d.Dot(hull.L);
+            float outLen = Mathf.Max(Mathf.Abs(along) - hull.HalfLen, 0.0f);
+            float outWide = Mathf.Max(Mathf.Abs(side) - hull.HalfWide, 0.0f);
+            float gap = Mathf.Sqrt(outLen * outLen + outWide * outWide);
+            float margin = BrushMargin * t.Model.Width * t.Model.Ppm;
+            if (gap >= margin)
+                continue;
+            float touch = 1.0f - Mathf.SmoothStep(0.0f, margin, gap);
+            // off its side, and the hull's way the more it is over the trunk
+            float over = 1.0f - Mathf.Clamp(outWide / margin, 0.0f, 1.0f);
+            Vector2 off = hull.L * (side < 0.0f ? -1.0f : 1.0f);
+            Vector2 dir = (off * (1.0f - 0.6f * over) + way * (0.4f + 0.6f * over)).Normalized();
+            // the boughs catching on the hull as it goes: a quick shake across
+            float rattle = 0.18f * pace * Mathf.Sin(_woodClock * 11.0f + t.Phase * 5.0f);
+            Vector2 across = new Vector2(dir.Y, -dir.X);
+            float lean = BrushLean * touch * (0.5f + 0.5f * pace) * Mathf.Lerp(1.0f, 0.35f, t.Spent);
+            Vector2 bend = (dir + across * rattle) * lean;
+            if (bend.LengthSquared() > t.Bend.LengthSquared())
+                t.Bend = bend;
+            t.Shiver = Mathf.Max(t.Shiver, BrushShiver * touch * pace);
+            if (pace > 0.05f && _brushed.Add(t.Cell) && _brushing.Add(t.Cell))
+                GD.Print($"tank3d: {tag} pushes through the wood on {t.Cell}");
+        }
     }
 
     /// <summary>A hull's two belts pressing the grass flat, the way it is
@@ -444,6 +516,38 @@ public sealed partial class Tank3DBench
             if (a < 0.004f)
                 continue;
             t.Kicks.Add((_woodClock + d / BlastSpeed, dir * a, a / 0.32f * 3.0f));
+        }
+    }
+
+    /// <summary>
+    /// A gun fired at <paramref name="muzzle"/> along <paramref name="bore"/>
+    /// as the wood feels it (<see cref="WoodBlast"/>'s kick): the muzzle's
+    /// blast throws the crowns off it, hardest down the line of fire and out
+    /// to half as far again there, a third as hard behind the gun - the wood a
+    /// tank fires from heaves round it, and the trees it fires through or past.
+    /// By the gun's firepower, a crater's share (<see cref="CraterShare"/>):
+    /// 0.06-0.14 of the height at the muzzle over 70-170 px.
+    /// </summary>
+    private void WoodMuzzle(Vector3 muzzle, Vector3 bore, int might)
+    {
+        float share = CraterShare(might);
+        float a0 = 0.1f * share, r0 = 120.0f * share;
+        var line = new Vector2(bore.X, bore.Z);
+        float flat = line.Length();
+        foreach (Planted t in _trees)
+        {
+            Vector3 foot = t.Holder.GlobalPosition;
+            var away = new Vector2(foot.X - muzzle.X, foot.Z - muzzle.Z);
+            float d = away.Length();
+            Vector2 dir = d > 1.0f ? away / d : (flat > 0.05f ? line / flat : Vector2.Right);
+            // a mortar's bore stands up: the blast goes all round
+            float ahead = flat > 0.05f ? Mathf.Lerp(0.5f, dir.Dot(line / flat), Mathf.Clamp(flat * 1.5f, 0.0f, 1.0f)) : 0.5f;
+            float front = Mathf.SmoothStep(-0.3f, 0.9f, ahead);
+            float reach = r0 * (0.6f + 0.9f * front);
+            float a = Mathf.Min(a0 * (0.33f + 0.67f * front) * reach * reach / (reach * reach + d * d), 0.3f);
+            if (a < 0.004f)
+                continue;
+            t.Kicks.Add((_woodClock + d / BlastSpeed, dir * a, a / 0.32f * 4.0f));
         }
     }
 
@@ -641,6 +745,7 @@ public sealed partial class Tank3DBench
             _woodedCells.Add(cell);
         _razed.Clear();
         _fallDust?.Clear();
+        _brushing.Clear();
         _grass?.Heal();
         foreach (Vector2I cell in _singed.Keys)
             _grass?.Burn(_lawnOf[cell], -1.0f, Vector2.Zero);
@@ -651,7 +756,7 @@ public sealed partial class Tank3DBench
         foreach (Planted t in _trees)
         {
             t.Fire.Reset();
-            t.Push = t.PushV = Vector2.Zero;
+            t.Push = t.PushV = t.Bend = Vector2.Zero;
             t.Shiver = 0.0f;
             t.Kicks.Clear();
             t.Fall.Reset();
