@@ -42,6 +42,10 @@ internal static class AssetRoot
     /// <c>tree.glb</c> and its <c>tree.json</c>, published there by
     /// <c>tree_gen.make</c> (<c>publish</c>) - what <c>Tree3D</c> stands.</summary>
     internal static readonly string Trees = Repo + "/assets/Models/Trees";
+    /// <summary>The hex bunker: <c>bunker.glb</c> and its <c>bunker.json</c>,
+    /// written by <c>pipeline/bunker_break.py export_game</c> - what Tank3D
+    /// stands on a capon's cell (<see cref="BunkerProp"/>).</summary>
+    internal static readonly string Bunker = Repo + "/assets/Models/Bunker";
 
     /// <summary>Where <c>stage_sounds.sh</c> puts the audio. Not in this
     /// repository - see the script - so this directory is often simply absent,

@@ -66,6 +66,13 @@ public sealed partial class BoardMap
     /// three cells to reach them is three cells of animation in front of every
     /// screenshot.
     ///
+    /// <b>And a concrete capon at <c>(3,1)</c>, by the rise</b> - the map's
+    /// own block (<see cref="Masonry.Sheltering"/>), slit to 270, down the
+    /// board at the camera, so the barrel of a tank put in it shows; the gate
+    /// opens on to <c>(3,0)</c>, which the medium reaches from its parking
+    /// round the rise. The one thing on the board only the mortar's bomb
+    /// breaks.
+    ///
     /// The sand at <c>(1,5)</c>–<c>(2,5)</c> stands in for mud until mud has a
     /// letter; there is no road yet at all - see docs/effects-plan.md.
     /// </summary>
@@ -73,7 +80,7 @@ public sealed partial class BoardMap
     {
         // 0123456789AB
         ".....ff.11..", // r0  a wood at the top middle; the shelf at (8,0),(9,0)
-        ".11..f...Wvv", // r1  a rise top left; brick at (9,1); the pit at (10,1),(11,1)
+        ".11W.f...Wvv", // r1  a rise top left; the capon at (3,1); brick at (9,1); the pit at (10,1),(11,1)
         "............", // r2  ramp on (1,2) climbs north on to (1,1)
         "....m.......", // r3  a mine between the two parkings on this row
         "............", // r4  (7,4) is the ravine's rim: the ramp's high edge
@@ -121,5 +128,9 @@ public sealed partial class BoardMap
     /// sit over the wood's kind and plant nothing.</summary>
     public static BoardMap Events => _events ??= FromGround(
         "events", EventsGround, EventsRamps, EventsHomes, TerrainSet.Mixed, true,
-        plinth: 1);
+        plinth: 1,
+        walling: new System.Collections.Generic.Dictionary<Vector2I, Masonry>
+        {
+            [new Vector2I(3, 1)] = new Masonry { Kind = Masonry.Sort.Capon, Facing = 270 },
+        });
 }

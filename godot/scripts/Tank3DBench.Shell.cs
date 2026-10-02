@@ -227,8 +227,10 @@ public sealed partial class Tank3DBench
         if (strikes && !lob && WallMeets(new Vector3(_rig.Position.X, from.Y, _rig.Position.Z), from) is { } own)
         {
             Vector3 way = v.Normalized();
-            System.Action struck = WallStruck(own.Prop, own.At, way, origin == own.Prop.Cell, lob, passes > 0);
-            if (passes > 0)
+            // A destroyer's pass is for a wall it breaks: concrete spends it.
+            bool pass = passes > 0 && !own.Prop.Concrete;
+            System.Action struck = WallStruck(own.Prop, own.At, way, origin == own.Prop.Cell, lob, pass);
+            if (pass)
             {
                 passes--;
                 through.Add((0.0f, struck));
@@ -242,6 +244,13 @@ public sealed partial class Tank3DBench
             Vector3 next = p + v * h + 0.5f * g * h * h;
             v += g * h;
             Vector3 seg = next - p;
+            // A bomb on a capon's roof - over the tank in it, if one is.
+            if (lob && strikes && CaponRoof(p, next) is { } roof)
+            {
+                path.Add(roof.At);
+                landed = CaponRoofed(roof.Prop, roof.At, seg);
+                break;
+            }
             if (strikes && _other is { } o && o.Hits.Cast(p, seg) is { } hit
                 && (hit.At - p).Length() <= seg.Length() + 0.5f)
             {
@@ -253,9 +262,10 @@ public sealed partial class Tank3DBench
             }
             if (!lob && WallMeets(p, next) is { } wall)
             {
+                bool pass = passes > 0 && !wall.Prop.Concrete;
                 System.Action struck = WallStruck(wall.Prop, wall.At, seg.Normalized(),
-                                                  origin == wall.Prop.Cell, lob, passes > 0);
-                if (passes > 0)
+                                                  origin == wall.Prop.Cell, lob, pass);
+                if (pass)
                 {
                     passes--;
                     through.Add((run + (wall.At - p).Length(), struck));

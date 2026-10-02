@@ -39,16 +39,35 @@ namespace TankSpriteTest;
 /// one pass (GDD classes.md, "TD"). A bomb goes over the walls, and on a
 /// walled hex brings down every wall on its edges; so does a tank's blast
 /// (<see cref="WallsBlown"/>).</item>
+/// <item><b>The concrete capon is masonry that holds</b> (<see cref="WallProp.Concrete"/>,
+/// <see cref="CaponKit"/>; docs/wall.md, "Капонир"): no ram and no heavy goes
+/// through it, a gun's round is spent on it and leaves it standing - the
+/// destroyer's too, its pass is for a wall it breaks - and the slit lets a
+/// round through at its own height, out and in. Only the mortar's bomb on the
+/// roof breaks it (<see cref="WallRig.Strike.Cp"/>, <see cref="CaponRoof"/>).
+/// It is entered by the gate along its axis, and inside the hull keeps to the
+/// axis and does not turn (<see cref="ShelterHolds"/>).</item>
+/// <item><b>On this board the capon is the hex bunker</b> (<see cref="BunkerProp"/>,
+/// <c>assets/Models/Bunker/</c>): the model stands where the capon's prop
+/// stands, the prop's own pieces unseen, and the capon's recipe is made the
+/// model's - roof and slit - so the bomb's roof and the round's slit are the
+/// ones drawn. The bomb on the roof breaks the model too: it falls in on its
+/// own hex, on the tank in it, and crumbles away to its pad.</item>
 /// <item>An edge goes off the board's record when its masonry falls, not when
 /// it is struck (<see cref="WallTick"/>); <c>Backspace</c> lays every wall
 /// again.</item>
 /// </list>
-/// <c>--no-walls</c> leaves the cells bare.
+/// <c>--no-walls</c> leaves the cells bare; <c>--no-bunker</c> draws the capon
+/// as the 2D bench lays it.
 /// </summary>
 public sealed partial class Tank3DBench
 {
     private bool _noWalls;
+    private bool _noBunker;
     private readonly List<WallProp> _walls = new();
+
+    /// <summary>The bunker standing on each capon's cell.</summary>
+    private readonly Dictionary<Vector2I, BunkerProp> _bunkers = new();
     private BoardMap? _wallMap;
 
     /// <summary>What each wall had let go of and broken when the board was last
@@ -106,6 +125,172 @@ public sealed partial class Tank3DBench
 
     private float WallForce => Ordnance.At(1) * (0.8f + 0.1f * (Mathf.Clamp(_profile.Might, 1, 5) - 1));
 
+    /// <summary>The burst a round makes on the capon's concrete - the brick
+    /// one's numbers in grey: concrete dust, no brick in it.</summary>
+    private CelBlast? _concreteBurst;
+
+    /// <summary>The bomb that breaks a capon: the board's HE burst at
+    /// <see cref="CaponBlastSize"/> of its size, its smoke concrete-grey - the
+    /// one charge here that levels a box reads louder than any (docs/wall.md,
+    /// "Картинка удара": the 2D board's is three calibres).</summary>
+    private CelBlast? _caponBlast;
+    private const float CaponBlastSize = 2.2f;
+
+    /// <summary>How far off the capon's axis a hull may come in by its gate,
+    /// degrees.</summary>
+    private const float ShelterSlackDeg = 25.0f;
+
+    /// <summary>How fast the hull is drawn on to the capon's axis inside it,
+    /// per second.</summary>
+    private const float ShelterPull = 6.0f;
+
+    /// <summary>The capon standing on <paramref name="cell"/>: concrete the
+    /// board still holds a side of - after the bomb it holds none.</summary>
+    private WallProp? Capon(Vector2I cell)
+    {
+        if (_field is null)
+            return null;
+        foreach (WallProp prop in _walls)
+            if (prop.Concrete && prop.Cell == cell && _field.SidesAt(cell) != 0)
+                return prop;
+        return null;
+    }
+
+    /// <summary>Whether the side across <paramref name="heading"/> out of
+    /// <paramref name="here"/> is a capon's standing concrete.</summary>
+    private bool ConcreteEdge(Vector2I here, int heading)
+    {
+        Vector2I next = HexField.Step(here, heading);
+        foreach (WallProp prop in _walls)
+            if (prop.Concrete
+                && ((prop.Cell == here && _field!.SideStands(here, heading))
+                    || (prop.Cell == next && _field!.SideStands(next, HexField.Reverse(heading)))))
+                return true;
+        return false;
+    }
+
+    /// <summary>The capon's axis in the world, gate to slit: the slit faces
+    /// the prop's bearing.</summary>
+    private Vector3 ShelterAxis(WallProp prop) => HexWay(prop.Cell, Mathf.RoundToInt(prop.Bearing));
+
+    /// <summary>A step on to a capon's cell is refused unless the hull goes
+    /// in along its axis - the only way it fits (docs/wall.md, "разворота
+    /// внутри нет"); <see cref="CanDrive"/>'s half about the gate.</summary>
+    private bool ShelterRefuses(Vector2I there, Vector3 way)
+    {
+        if (Capon(there) is not { } prop || way.LengthSquared() < 1e-8f)
+            return false;
+        return way.Normalized().Dot(ShelterAxis(prop)) < Mathf.Cos(Mathf.DegToRad(ShelterSlackDeg));
+    }
+
+    /// <summary>
+    /// The hull in a capon: drawn on to its axis - the heading on the nearer
+    /// way along it, the middle on the line gate to slit - and no turn. True
+    /// while it is in, so the keys' turn is dropped.
+    /// </summary>
+    private bool ShelterHolds(float dt)
+    {
+        if (_field is null || _walls.Count == 0)
+            return false;
+        Vector2I here = _field.FlatCellAt(Board(_rig.Position));
+        if (Capon(here) is not { } prop)
+            return false;
+        Vector3 axis = ShelterAxis(prop);
+        float k = 1.0f - Mathf.Exp(-ShelterPull * dt);
+        float want = HeadingOf(axis);
+        if (Mathf.Abs(Mathf.AngleDifference(Mathf.DegToRad(_heading), Mathf.DegToRad(want))) > Mathf.Pi * 0.5f)
+            want += 180.0f;
+        Heading = Mathf.RadToDeg(Mathf.LerpAngle(Mathf.DegToRad(_heading), Mathf.DegToRad(want), k));
+        Vector3 off = _rig.Position - CellWorld(prop.Cell);
+        off.Y = 0.0f;
+        Vector3 aside = off - axis * off.Dot(axis);
+        _rig.Position -= aside * k;
+        return true;
+    }
+
+    /// <summary>
+    /// Whether a bomb's step from <paramref name="p"/> to <paramref name="next"/>
+    /// comes down on a standing capon, and where: on to its roof, or - the
+    /// bomb's fall is shallower than the box is tall a cell out, and it comes
+    /// into the cell under the roof's height - on the side it came in by. The
+    /// box is one target to the bomb either way. Not a bomb from in it.
+    /// </summary>
+    private (WallProp Prop, Vector3 At)? CaponRoof(Vector3 p, Vector3 next)
+    {
+        if (_field is null)
+            return null;
+        Vector2I cell = _field.FlatCellAt(Board(next));
+        if (Capon(cell) is not { Stack: not null } prop)
+            return null;
+        float top = prop.Stack.Anchor.Y + prop.Pile().Top * WallRadius;
+        if (next.Y > top)
+            return null;
+        Vector3 at;
+        if (_field.FlatCellAt(Board(p)) == cell)
+        {
+            if (p.Y <= top)
+                return null;
+            at = p;
+        }
+        else
+        {
+            // The rim, between the two (WallMeets' bisection).
+            float lo = 0.0f, hi = 1.0f;
+            for (int i = 0; i < 10; i++)
+            {
+                float mid = 0.5f * (lo + hi);
+                if (_field.FlatCellAt(Board(p.Lerp(next, mid))) != cell)
+                    lo = mid;
+                else
+                    hi = mid;
+            }
+            at = p.Lerp(next, hi);
+            if (at.Y <= top)
+                return (prop, at);
+        }
+        // Over the rim and down on to the roof.
+        at = at.Lerp(next, Mathf.Clamp((at.Y - top) / Mathf.Max(at.Y - next.Y, 1e-4f), 0.0f, 1.0f));
+        at.Y = top;
+        return (prop, at);
+    }
+
+    /// <summary>
+    /// The mortar's bomb on a capon's roof - the one round that breaks it
+    /// (<see cref="WallRig.Strike.Cp"/>, the rig's <c>Shatter</c>: every slab
+    /// out along its own normal, the roof down on to what was under it, the
+    /// six sections broken). The bomb's burst on the roof with the concrete's
+    /// dust over it; the board takes the sides off as the slabs go
+    /// (<see cref="WallTick"/>).
+    /// </summary>
+    private Action CaponRoofed(WallProp prop, Vector3 at, Vector3 way) => () =>
+    {
+        if (!IsInstanceValid(prop))
+            return;
+        var flat = new Vector2(way.X, way.Z * Squash);
+        prop.Fire(WallRig.Strike.Cp, prop.Into(flat.LengthSquared() > 1e-8f ? flat.Normalized() : Vector2.Down),
+                  WallForce, false, float.NegativeInfinity);
+        if (_bunkers.TryGetValue(prop.Cell, out BunkerProp? bunker))
+            bunker.Break(way, BunkerOccupants(prop.Cell));
+        if (_caponBlast is null)
+        {
+            _caponBlast = new CelBlast
+            {
+                Name = "CaponBlast",
+                SootPuffs = 34, SootLife = 2.2f, SootTint = new Color(0.82f, 0.81f, 0.78f),
+                SootDark = 0.42f, SootGrey = 0.66f,
+                Fragments = 26, FragmentSpeed = 1.8f, FragmentCone = 110.0f,
+                DustTint = new Color(0.74f, 0.74f, 0.72f), DustTone = 0.68f,
+            };
+            AddChild(_caponBlast);
+            _caponBlast.Build(CaponBlastSize * _model.HullLength * _model.PixelsPerUnit);
+        }
+        _caponBlast.Burst(at, Vector3.Up, Foot(at));
+        WallBurst(at, Vector3.Up, concrete: true);
+        _shake.Blast(_profile.ShotShake * 0.8);
+        WoodBlast(Foot(at), 0.12f, 150.0f);
+        GD.Print($"tank3d: the bomb on the capon's roof on {prop.Cell}: the concrete comes down");
+    };
+
     /// <summary>
     /// Whether a round's step from <paramref name="p"/> to
     /// <paramref name="next"/> meets standing masonry: an edge on the way that
@@ -151,6 +336,16 @@ public sealed partial class Tank3DBench
             float top = prop.Stack.Anchor.Y + prop.Pile().Top * WallRadius;
             if (at.Y > top)
                 continue;
+            // The capon's slit: a side the hull is barred by and a round is
+            // not (WallProp.Bars, crossing), between its sill and its lintel.
+            if (prop.Capon is { } capon)
+            {
+                Vector2I other = prop.Cell == from ? to : from;
+                float floor = prop.Stack.Anchor.Y;
+                if (!prop.Bars(_field.FlatAnchor(other) - _field.FlatAnchor(prop.Cell))
+                    && at.Y >= floor + capon.SlitLow * WallRadius && at.Y <= floor + capon.SlitHigh * WallRadius)
+                    continue;
+            }
             return (prop, at);
         }
         return null;
@@ -172,36 +367,42 @@ public sealed partial class Tank3DBench
         if (!IsInstanceValid(prop))
             return;
         var flat = new Vector2(way.X, way.Z * Squash);
-        if (flat.LengthSquared() > 1e-8f)
+        // Concrete takes no gun's round (WallRig.Cracks): nothing to push.
+        if (flat.LengthSquared() > 1e-8f && !prop.Concrete)
             prop.Fire(WallRig.Strike.He, prop.Into(flat.Normalized()), WallForce,
                       false, inside ? 0.0f : float.NegativeInfinity);
-        WallBurst(at, -new Vector3(way.X, 0.0f, way.Z));
+        WallBurst(at, -new Vector3(way.X, 0.0f, way.Z), prop.Concrete);
         _shake.Blast(_profile.ShotShake * 0.35);
         WoodBlast(Foot(at), 0.08f, 110.0f);
-        GD.Print($"tank3d: round on the wall {prop.Cell} {(inside ? "from inside" : "from outside")}"
-                 + (through ? ", through it" : ", spent on it"));
+        GD.Print($"tank3d: round on the {(prop.Concrete ? "capon" : "wall")} {prop.Cell} {(inside ? "from inside" : "from outside")}"
+                 + (through ? ", through it" : prop.Concrete ? ", spent on the concrete" : ", spent on it"));
     };
 
     /// <summary>The brick dust and the flash on a face looking
-    /// <paramref name="n"/> - the masonry's <see cref="CelBlast"/>.</summary>
-    private void WallBurst(Vector3 at, Vector3 n)
+    /// <paramref name="n"/> - the masonry's <see cref="CelBlast"/>; grey for
+    /// <paramref name="concrete"/>.</summary>
+    private void WallBurst(Vector3 at, Vector3 n, bool concrete = false)
     {
-        if (_wallBurst is null)
+        ref CelBlast? burst = ref concrete ? ref _concreteBurst : ref _wallBurst;
+        if (burst is null)
         {
-            _wallBurst = new CelBlast
+            burst = new CelBlast
             {
-                Name = "WallBurst",
+                Name = concrete ? "ConcreteBurst" : "WallBurst",
                 FireSize = 0.13f, FireTime = 5.0f / 60.0f, GlowEnergy = 0.35f,
                 SootPuffs = 30, SootLife = 1.8f, SootReach = 0.36f, SootGrown = 0.13f,
-                SootDark = 0.50f, SootGrey = 0.70f, SootTint = new Color(0.86f, 0.62f, 0.44f),
+                SootDark = 0.50f, SootGrey = 0.70f,
+                SootTint = concrete ? new Color(0.80f, 0.80f, 0.78f) : new Color(0.86f, 0.62f, 0.44f),
                 Fragments = 18, FragmentSpeed = 1.6f, FragmentCone = 80.0f,
-                DustTint = new Color(0.84f, 0.68f, 0.52f), DustTone = 0.68f,
+                DustTint = concrete ? new Color(0.74f, 0.74f, 0.72f) : new Color(0.84f, 0.68f, 0.52f),
+                DustTone = 0.68f,
             };
-            AddChild(_wallBurst);
-            _wallBurst.Build(_model.HullLength * _model.PixelsPerUnit);
+            AddChild(burst);
+            burst.Build(_model.HullLength * _model.PixelsPerUnit);
         }
-        n.Y = 0.25f;
-        _wallBurst.Burst(at, n.Normalized(), Foot(at));
+        if (n.Y < 0.5f)
+            n.Y = 0.25f;
+        burst.Burst(at, n.Normalized(), Foot(at));
     }
 
     /// <summary>
@@ -225,6 +426,9 @@ public sealed partial class Tank3DBench
             Vector2 out_ = (_field.FlatAnchor(next) - middle).Normalized();
             foreach (WallProp prop in _walls)
             {
+                // Concrete only to the bomb on its roof (CaponRoofed).
+                if (prop.Concrete)
+                    continue;
                 if (prop.Cell == cell && _field.SideStands(cell, heading))
                 {
                     prop.Fire(WallRig.Strike.He, prop.Into(out_), force, false, 0.0f);
@@ -290,13 +494,25 @@ public sealed partial class Tank3DBench
         _wallMap = map;
         if (_noWalls || _field is null || _stage is null)
             return;
+        BunkerProp.Sizes? bunker = _noBunker ? null : BunkerProp.ReadSizes();
         foreach (Vector2I cell in map.Walled())
         {
             (WallKit.Recipe recipe, int bearing) = map.MasonryAt(cell).Laying()
                 ?? (new WallKit.Recipe { Sides = TankBench.RingSides }, HexField.EdgeHeadings[0]);
             (CaponKit.Recipe Recipe, int Bearing)? shelter = map.MasonryAt(cell)?.Sheltering();
             if (shelter is { } s)
+            {
                 bearing = s.Bearing;
+                // The rules' box made the model's: the bomb lands on the roof
+                // that is drawn and a round passes the slit that is drawn.
+                if (bunker is { } size)
+                {
+                    s.Recipe.WallHigh = size.RoofUnder;
+                    s.Recipe.RoofThick = size.Height - size.RoofUnder;
+                    s.Recipe.SlitLow = size.SlitLow;
+                    s.Recipe.SlitHigh = size.SlitHigh;
+                }
+            }
             var prop = new WallProp
             {
                 Field = _field, Stage = _stage, Cell = cell,
@@ -312,7 +528,48 @@ public sealed partial class Tank3DBench
             WallRestate(prop, laying: true);
             GD.Print($"tank3d: wall on {cell}, sides {Convert.ToString(_field.SidesAt(cell), 2).PadLeft(6, '0')}, "
                      + $"clear {prop.Clearance():F2} m inside");
+            if (prop.Concrete && bunker is not null)
+                StandBunker(prop);
         }
+    }
+
+    /// <summary>The hex bunker on a capon's cell, where its prop stands and
+    /// turned as it is turned; the prop's own pieces put out of sight.</summary>
+    private void StandBunker(WallProp prop)
+    {
+        if (prop.Stack is not { } stack)
+            return;
+        var bunker = new BunkerProp
+        {
+            Name = $"Bunker{prop.Cell.X}_{prop.Cell.Y}",
+            Radius = WallRadius, Anchor = stack.Anchor, Lay = prop.Lay, Cell = prop.Cell, Pbr = _pbr,
+        };
+        AddChild(bunker);
+        if (!bunker.Build())
+        {
+            GD.PrintErr($"tank3d: bunker on {prop.Cell}: {bunker.Problem}");
+            bunker.QueueFree();
+            return;
+        }
+        stack.Visible = false;
+        _bunkers[prop.Cell] = bunker;
+        GD.Print($"tank3d: bunker on {prop.Cell}, {bunker.Pieces} chunks, slit to {Mathf.RoundToInt(prop.Bearing)}");
+    }
+
+    /// <summary>The tanks standing in the capon on <paramref name="cell"/> -
+    /// this scene's and the ram's target - as the bunker's falling chunks
+    /// should meet them.</summary>
+    private List<BunkerProp.Occupant> BunkerOccupants(Vector2I cell)
+    {
+        var inside = new List<BunkerProp.Occupant>();
+        if (_field is null)
+            return inside;
+        // a wreck is in the way as much as a tank
+        if (_field.FlatCellAt(Board(_rig.Position)) == cell)
+            inside.Add(BunkerProp.Occupy(_model));
+        if (_other is { } o && _field.FlatCellAt(Board(o.Rig.Position)) == cell)
+            inside.Add(BunkerProp.Occupy(o.Model));
+        return inside;
     }
 
     /// <summary>Which of a wall's cell's six edges still carry masonry, onto
@@ -350,9 +607,10 @@ public sealed partial class Tank3DBench
 
     /// <summary>Whether the step across an edge is refused by its masonry -
     /// <see cref="CanDrive"/>'s half about walls; never while the hull is
-    /// breaking them.</summary>
+    /// breaking them, always when it is a capon's concrete.</summary>
     private bool WallStops(Vector2I here, int heading) =>
-        _walls.Count > 0 && !WallSweeping && _field!.Blocked(here, heading);
+        _walls.Count > 0 && _field!.Blocked(here, heading)
+        && (!WallSweeping || ConcreteEdge(here, heading));
 
     /// <summary>The way the hull goes, signed by its speed.</summary>
     private Vector3 WallWay()
@@ -372,7 +630,11 @@ public sealed partial class Tank3DBench
         if (_walls.Count == 0 || _field is null || _stage is null)
             return;
         WallsAheadTick();
+        foreach (BunkerProp bunker in _bunkers.Values)
+            bunker.Tick(dt);
         _wallBurst?.Tick(dt, _camera.GlobalBasis);
+        _concreteBurst?.Tick(dt, _camera.GlobalBasis);
+        _caponBlast?.Tick(dt, _camera.GlobalBasis);
         bool can = _fate == Fate.Alive && !DeepHere && !_falling;
         Vector3 way = WallWay();
         var flatWay = new Vector2(way.X, way.Z * Squash);
@@ -383,7 +645,7 @@ public sealed partial class Tank3DBench
         // The box rides always, order or none (WallField.Ram's reason: a hull
         // that ghosts through the heap its own ram made is the seam).
         WallRebox(can ? WallBoxable(here, nose) : null);
-        bool sweeping = can && WallSweeping;
+        bool sweeping = can && WallSweeping && _wallBoxed is not { Concrete: true };
         if (!sweeping)
             _wallBoxed?.Disarm();
         if (can)
@@ -406,7 +668,7 @@ public sealed partial class Tank3DBench
                     Vector2 dir = _field.FlatAnchor(chain[leg]) - _field.FlatAnchor(chain[leg - 1]);
                     foreach (WallProp prop in _walls)
                     {
-                        if (prop.Cell != chain[leg - 1] && prop.Cell != chain[leg])
+                        if ((prop.Cell != chain[leg - 1] && prop.Cell != chain[leg]) || prop.Concrete)
                             continue;
                         int face = prop.Rammed(foot, dir, Mathf.Abs(_speed), box);
                         if (face >= 0)
@@ -530,7 +792,8 @@ public sealed partial class Tank3DBench
         var ahead = new Vector3(Mathf.Sin(h), 0.0f, Mathf.Cos(h));
         int heading = WallHeadingNear(here, ahead, out float dot);
         bool walled = heading >= 0 && dot >= Mathf.Cos(Mathf.DegToRad(WallAheadDeg))
-                      && _field.InBounds(HexField.Step(here, heading)) && _field.Walled(here, heading);
+                      && _field.InBounds(HexField.Step(here, heading)) && _field.Walled(here, heading)
+                      && !ConcreteEdge(here, heading);
         if (!walled)
         {
             if (!lineUp || !WallLineUp(out here, out heading))
@@ -564,6 +827,8 @@ public sealed partial class Tank3DBench
         foreach (WallProp prop in _walls)
             foreach (int h in HexField.EdgeHeadings)
             {
+                if (prop.Concrete)
+                    break;
                 Vector2I next = HexField.Step(prop.Cell, h);
                 int back = HexField.Reverse(h);
                 if (!_field!.InBounds(next) || _field.IsWater(next) || _field.CoverAt(next) == Cover.Walls
@@ -629,12 +894,20 @@ public sealed partial class Tank3DBench
         _wallNose = null;
         _wallsAhead.Clear();
         _wallBurst?.Reset();
+        _concreteBurst?.Reset();
+        _caponBlast?.Reset();
         _wallBoxed?.Dismount();
         _wallBoxed = null;
         foreach (WallProp prop in _walls)
         {
             prop.Build();
             WallRestate(prop, laying: true);
+            // Build makes the stack again: out of sight again under the bunker
+            if (_bunkers.TryGetValue(prop.Cell, out BunkerProp? bunker) && prop.Stack is { } stack)
+            {
+                stack.Visible = false;
+                bunker.Reset();
+            }
         }
     }
 }

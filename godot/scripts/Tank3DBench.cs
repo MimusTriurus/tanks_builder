@@ -678,8 +678,10 @@ void light() {
             if (!_field.InBounds(there))
                 return false;
             int heading = HexField.HeadingTo(here, there);
-            // the ground, then the masonry on the edge (Tank3DBench.Walls)
-            return heading >= 0 && _field.Passable(here, heading) && !WallStops(here, heading);
+            // the ground, then the masonry on the edge and a capon's gate
+            // (Tank3DBench.Walls)
+            return heading >= 0 && _field.Passable(here, heading) && !WallStops(here, heading)
+                   && !ShelterRefuses(there, way);
         }
     }
 
@@ -867,6 +869,9 @@ void light() {
             else if (a == "--tracer-smoke") _tracerSmoke = true;
             else if (a == "--tracer-soft") _tracerSoft = true;
             else if (a == "--no-walls") _noWalls = true;
+            else if (a == "--no-bunker") _noBunker = true;
+            // the rubble stays where it landed (TankBench's flag, same name)
+            else if (a == "--no-crumble") WallRig.Crumbles = false;
             else if (a == "--no-cel-relief") _flatRelief = true;
             else if (a == "--scorch") _scorchOn = true;
             else if (a == "--no-grass") _noGrass = true;
@@ -1277,6 +1282,9 @@ void light() {
         }
         else
         {
+            // In a capon the hull keeps to its axis and does not turn.
+            if (ShelterHolds(dt))
+                turnIn = 0.0f;
             target = Mathf.Clamp(driveIn, -1.0f, 1.0f) * MaxSpeed * cap;
             float accel = Mathf.MoveToward(_speed, target, Accel * dt) - _speed;
             _speed += accel;
