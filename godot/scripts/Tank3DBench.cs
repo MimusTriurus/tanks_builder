@@ -412,22 +412,27 @@ public sealed partial class Tank3DBench : Node3D
         WoodFollow();
     }
 
-    /// <summary>How far round the tank, in its own reaches, the sun's shadow
-    /// map has to see: the tank and its shadow on the ground.</summary>
-    private const float ShadowReach = 3.0f;
-
     /// <summary>The first split's share of the distance: next to nothing, the
     /// eye's side of the board, which nothing casts into.</summary>
     private const float ShadowNear = 0.05f;
 
     /// <summary>
-    /// The sun's map on the depth up to the tank and <see cref="ShadowReach"/>
-    /// reaches past it, not on the whole view.
+    /// The sun's map on the depth up to the far edge of the picture - where
+    /// the ray through the top of the view meets the ground - not on the whole
+    /// of the camera's 3000.
     ///
     /// <b>This is what the cel ramp needed.</b> Over all 3000 of the view's
     /// depth a texel came to ~1.5 px of the board, and a side the sun grazes
     /// shadowed itself in soft diagonal stripes - acne, blurred by the filter -
     /// which the tone's threshold cut into blots across the skirts.
+    ///
+    /// <b>To the edge of the view, not to the tank.</b> Up to the tank and
+    /// three of its reaches past it, the end of the map was a line across the
+    /// screen a hull or two above the tank that went where the camera went:
+    /// the bunker three rows up had no shadow inside it or on the grass, lost
+    /// it a band at a time as the tank came up, and the trees past it the
+    /// same. The edge of the view is the same depth wherever the camera is,
+    /// so the map stays put on the board.
     ///
     /// <b>One split from near the eye, not a slab round the tank.</b> The
     /// slab was the second of two splits, from the tank's depth less the
@@ -445,12 +450,11 @@ public sealed partial class Tank3DBench : Node3D
     {
         if (_model is null)
             return;
-        float depth = (_rig.Position - _camera.Position).Dot(-_camera.Basis.Z);
-        float reach = Reach * ShadowReach;
-        // And the target's, when it stands on the board.
-        if (_other is not null)
-            reach += Mathf.Abs((_other.Rig.Position - _rig.Position).Dot(-_camera.Basis.Z));
-        _sun.DirectionalShadowMaxDistance = depth + reach;
+        // The ground there is taken a reach under the lower of the tank's and
+        // the board's zero: a pond's floor or a step down ends further off.
+        Vector3 top = _camera.Position + _camera.Basis.Y * (_camera.Size * 0.5f);
+        float ground = Mathf.Min(0.0f, _rig.Position.Y) - Reach;
+        _sun.DirectionalShadowMaxDistance = (top.Y - ground) / _camera.Basis.Z.Y;
         _sun.DirectionalShadowSplit1 = ShadowNear;
     }
 
