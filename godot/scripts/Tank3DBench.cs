@@ -416,16 +416,30 @@ public sealed partial class Tank3DBench : Node3D
     /// map has to see: the tank and its shadow on the ground.</summary>
     private const float ShadowReach = 3.0f;
 
+    /// <summary>The first split's share of the distance: next to nothing, the
+    /// eye's side of the board, which nothing casts into.</summary>
+    private const float ShadowNear = 0.05f;
+
     /// <summary>
-    /// The sun's map on the slab of depth the tank stands in, not on the whole
-    /// view: the second of two splits runs from the tank's depth less
-    /// <see cref="ShadowReach"/> reaches to the same past it, and the first,
-    /// which nothing here casts into, takes the rest.
+    /// The sun's map on the depth up to the tank and <see cref="ShadowReach"/>
+    /// reaches past it, not on the whole view.
     ///
     /// <b>This is what the cel ramp needed.</b> Over all 3000 of the view's
     /// depth a texel came to ~1.5 px of the board, and a side the sun grazes
     /// shadowed itself in soft diagonal stripes - acne, blurred by the filter -
     /// which the tone's threshold cut into blots across the skirts.
+    ///
+    /// <b>One split from near the eye, not a slab round the tank.</b> The
+    /// slab was the second of two splits, from the tank's depth less the
+    /// reach (split 0.57 of the distance at MTR on the events board): under
+    /// <c>gl_compatibility</c> with this orthographic eye it cast nothing at
+    /// all - the board's skin read the sun's visibility as one everywhere,
+    /// next to the hull too, and the grass, the walls and the tank lay on the
+    /// board with no shadow. Measured by the skin's light painted red, the
+    /// shadow blue: none with the slab; with the first split down to 0.05-0.1
+    /// of the same distance, or one split over the view, the hull's shadow is
+    /// there. And no fade: from 0.8 of the distance - the default - it was
+    /// going out just past the tank, which is where its shadow falls.
     /// </summary>
     private void FrameShadow()
     {
@@ -437,7 +451,7 @@ public sealed partial class Tank3DBench : Node3D
         if (_other is not null)
             reach += Mathf.Abs((_other.Rig.Position - _rig.Position).Dot(-_camera.Basis.Z));
         _sun.DirectionalShadowMaxDistance = depth + reach;
-        _sun.DirectionalShadowSplit1 = Mathf.Clamp((depth - reach) / (depth + reach), 0.05f, 0.95f);
+        _sun.DirectionalShadowSplit1 = ShadowNear;
     }
 
     private void BuildWorld()
@@ -469,6 +483,9 @@ public sealed partial class Tank3DBench : Node3D
             // into acne stripes along its loft at 2; at 7 the contact shadows
             // under the turret and the fenders thin away.
             ShadowNormalBias = 4.0f,
+            // out to the edge of the map, not faded from 0.8 of it: the
+            // tank's shadow falls just past the tank (FrameShadow)
+            DirectionalShadowFadeStart = 1.0f,
         };
         AddChild(_sun);
     }
