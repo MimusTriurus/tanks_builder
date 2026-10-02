@@ -31,6 +31,14 @@ namespace TankSpriteTest;
 /// loose is shoved off the way the hull goes.</item>
 /// <item><b>A heavy needs no order</b>: for it a walled edge is a step, and
 /// driving through it breaks the wall (<see cref="MovementProfile.Bulldozes"/>).</item>
+/// <item><b>A round stops on it</b> (<see cref="WallMeets"/>, <see cref="WallStruck"/>):
+/// a gun's round crossing a standing edge below the wall's top is spent on
+/// it and holes it (<see cref="WallRig.Strike.Ap"/>, <see cref="WallField.Struck"/>'s
+/// call), with a burst of brick dust on the face it came in by; a ricochet
+/// too. A destroyer's round goes through the first wall and flies on - its
+/// one pass (GDD classes.md, "TD"). A bomb goes over the walls, and on a
+/// walled hex brings down every wall on its edges; so does a tank's blast
+/// (<see cref="WallsBlown"/>).</item>
 /// <item>An edge goes off the board's record when its masonry falls, not when
 /// it is struck (<see cref="WallTick"/>); <c>Backspace</c> lays every wall
 /// again.</item>
@@ -68,6 +76,214 @@ public sealed partial class Tank3DBench
 
     private float WallRadius => _tile is null ? 1.0f : _tile.HexRect.Size.X * 0.5f;
 
+    /// <summary>The walls a round goes through on its way - a destroyer's one
+    /// pass - struck when it gets to them: the round, how far along its path,
+    /// and what the wall gets.</summary>
+    private readonly List<(CelShell.Round Round, float Along, Action Hit)> _wallsAhead = new();
+
+    /// <summary>The burst a round makes on brick - the plate's HE burst
+    /// (<see cref="CelBlast"/>) in the masonry's colours: a short flash, brick
+    /// dust instead of soot, the dust off the ground the wall's own.</summary>
+    private CelBlast? _wallBurst;
+
+    /// <summary>The one gun whose round goes through what it meets first - the
+    /// destroyer's: no turret, and no lob (GDD classes.md, "TD - Тяжёлый
+    /// снаряд"; the mortar is the other casemate).</summary>
+    private bool ShootsThrough => !_profile.Turreted && !_profile.Lobs;
+
+    /// <summary>How hard a round pushes the masonry: the board's round
+    /// (<see cref="Ordnance"/>, the 2D bench's force at its default) by the
+    /// gun's might, 0.8 for a light's to 1.2 for the mortar's.</summary>
+    /// <summary>A bomb on a walled hex against a round, for each of its
+    /// leaves: at the round's own push all six went a cell and more out over
+    /// the neighbours - a bomb in a ring is six pushes from one point.</summary>
+    private const float BlownShare = 0.55f;
+
+    /// <summary>A tank's blast on each leaf round its hex - its own, not a
+    /// gun's: at a medium's bomb share (0.5) the leaves were let go of and
+    /// stood where they were, the ring still up round the wreck.</summary>
+    private const float TankBlast = 0.85f;
+
+    private float WallForce => Ordnance.At(1) * (0.8f + 0.1f * (Mathf.Clamp(_profile.Might, 1, 5) - 1));
+
+    /// <summary>
+    /// Whether a round's step from <paramref name="p"/> to
+    /// <paramref name="next"/> meets standing masonry: an edge on the way that
+    /// the board still calls walled (<see cref="HexField.Walled"/>, the record
+    /// the bricks write), crossed no higher than the wall's top - a gun laid
+    /// level over a wall lower than its muzzle sends the round over it. Where
+    /// it crosses the rim, and whose wall it is. Not asked for a bomb: it
+    /// comes down from above past everything between (GDD classes.md, "HM").
+    /// </summary>
+    private (WallProp Prop, Vector3 At)? WallMeets(Vector3 p, Vector3 next)
+    {
+        if (_walls.Count == 0 || _field is null)
+            return null;
+        Vector2I a = _field.FlatCellAt(Board(p)), b = _field.FlatCellAt(Board(next));
+        if (a == b)
+            return null;
+        List<Vector2I> chain = HexField.Chain(a, b);
+        for (int leg = 1; leg < chain.Count; leg++)
+        {
+            Vector2I from = chain[leg - 1], to = chain[leg];
+            int heading = HexField.HeadingTo(from, to);
+            if (heading < 0 || !_field.Walled(from, heading))
+                continue;
+            WallProp? prop = null;
+            foreach (WallProp w in _walls)
+                if ((w.Cell == from && _field.SideStands(from, heading))
+                    || (w.Cell == to && _field.SideStands(to, HexField.Reverse(heading))))
+                    prop = w;
+            if (prop?.Stack is null)
+                continue;
+            // The rim, between the two: the first point of the step past the
+            // cell it left.
+            float lo = 0.0f, hi = 1.0f;
+            for (int i = 0; i < 10; i++)
+            {
+                float mid = 0.5f * (lo + hi);
+                if (_field.FlatCellAt(Board(p.Lerp(next, mid))) == from)
+                    lo = mid;
+                else
+                    hi = mid;
+            }
+            Vector3 at = p.Lerp(next, hi);
+            float top = prop.Stack.Anchor.Y + prop.Pile().Top * WallRadius;
+            if (at.Y > top)
+                continue;
+            return (prop, at);
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// What a round does to the wall it met at <paramref name="at"/> going
+    /// <paramref name="way"/>: the solver's burst into the masonry
+    /// (<see cref="WallRig.Strike.He"/>), which brings the section down - the
+    /// rules' "стена разрушена" for every round; the 2D bench's
+    /// <see cref="WallRig.Strike.Ap"/> only holes it and leaves the edge
+    /// standing (<see cref="WallRig.Breaching"/>) - from inside when it was fired from the wall's own cell
+    /// (<see cref="WallField.Struck"/>'s <c>from</c>), and the burst on the
+    /// face it came in by. <paramref name="through"/>: the destroyer's round,
+    /// which flies on.
+    /// </summary>
+    private Action WallStruck(WallProp prop, Vector3 at, Vector3 way, bool inside, bool lob, bool through) => () =>
+    {
+        if (!IsInstanceValid(prop))
+            return;
+        var flat = new Vector2(way.X, way.Z * Squash);
+        if (flat.LengthSquared() > 1e-8f)
+            prop.Fire(WallRig.Strike.He, prop.Into(flat.Normalized()), WallForce,
+                      false, inside ? 0.0f : float.NegativeInfinity);
+        WallBurst(at, -new Vector3(way.X, 0.0f, way.Z));
+        _shake.Blast(_profile.ShotShake * 0.35);
+        WoodBlast(Foot(at), 0.08f, 110.0f);
+        GD.Print($"tank3d: round on the wall {prop.Cell} {(inside ? "from inside" : "from outside")}"
+                 + (through ? ", through it" : ", spent on it"));
+    };
+
+    /// <summary>The brick dust and the flash on a face looking
+    /// <paramref name="n"/> - the masonry's <see cref="CelBlast"/>.</summary>
+    private void WallBurst(Vector3 at, Vector3 n)
+    {
+        if (_wallBurst is null)
+        {
+            _wallBurst = new CelBlast
+            {
+                Name = "WallBurst",
+                FireSize = 0.13f, FireTime = 5.0f / 60.0f, GlowEnergy = 0.35f,
+                SootPuffs = 30, SootLife = 1.8f, SootReach = 0.36f, SootGrown = 0.13f,
+                SootDark = 0.50f, SootGrey = 0.70f, SootTint = new Color(0.86f, 0.62f, 0.44f),
+                Fragments = 18, FragmentSpeed = 1.6f, FragmentCone = 80.0f,
+                DustTint = new Color(0.84f, 0.68f, 0.52f), DustTone = 0.68f,
+            };
+            AddChild(_wallBurst);
+            _wallBurst.Build(_model.HullLength * _model.PixelsPerUnit);
+        }
+        n.Y = 0.25f;
+        _wallBurst.Burst(at, n.Normalized(), Foot(at));
+    }
+
+    /// <summary>
+    /// A blast on the hex under <paramref name="at"/> - a bomb come down on
+    /// it, a tank blown up on it: every standing wall on its edges is brought
+    /// down (GDD classes.md, "стены без танка - сносятся все стены на гранях
+    /// гекса"; states.md, "Уничтожен"). The hex's own walls pushed out from its
+    /// middle, a neighbour's wall on the shared edge pushed in from this side -
+    /// each a bomb's push on that leaf.
+    /// </summary>
+    private void WallsBlown(Vector3 at, string what, float force)
+    {
+        if (_walls.Count == 0 || _field is null)
+            return;
+        Vector2I cell = _field.FlatCellAt(Board(at));
+        Vector2 middle = _field.FlatAnchor(cell);
+        int blown = 0;
+        foreach (int heading in HexField.EdgeHeadings)
+        {
+            Vector2I next = HexField.Step(cell, heading);
+            Vector2 out_ = (_field.FlatAnchor(next) - middle).Normalized();
+            foreach (WallProp prop in _walls)
+            {
+                if (prop.Cell == cell && _field.SideStands(cell, heading))
+                {
+                    prop.Fire(WallRig.Strike.He, prop.Into(out_), force, false, 0.0f);
+                    blown++;
+                }
+                else if (prop.Cell == next && _field.SideStands(next, HexField.Reverse(heading)))
+                {
+                    prop.Fire(WallRig.Strike.He, prop.Into(out_), force, false, float.NegativeInfinity);
+                    blown++;
+                }
+            }
+        }
+        if (blown > 0)
+            GD.Print($"tank3d: {what} on {cell} brings down {blown} wall side(s) round it");
+    }
+
+    /// <summary>The first standing wall on the axis <paramref name="axis"/> out
+    /// of <paramref name="own"/>, within <paramref name="cells"/>: the middle of
+    /// its edge, halfway up the wall - what a gun laid on a hex past it is laid
+    /// on.</summary>
+    private (Vector2I Cell, Vector3 At)? WallOnAxis(Vector2I own, int axis, int cells)
+    {
+        if (_walls.Count == 0 || _field is null || axis < 0)
+            return null;
+        Vector2I here = own;
+        for (int k = 0; k < cells; k++)
+        {
+            Vector2I next = HexField.Step(here, axis);
+            if (_field.Walled(here, axis))
+                foreach (WallProp prop in _walls)
+                {
+                    if ((prop.Cell != here || !_field.SideStands(here, axis))
+                        && (prop.Cell != next || !_field.SideStands(next, HexField.Reverse(axis))))
+                        continue;
+                    if (prop.Stack is null)
+                        continue;
+                    Vector3 rim = 0.5f * (CellWorld(here) + CellWorld(next));
+                    rim.Y = prop.Stack.Anchor.Y + 0.5f * prop.Pile().Top * WallRadius;
+                    return (prop.Cell, rim);
+                }
+            here = next;
+        }
+        return null;
+    }
+
+    /// <summary>The walls the rounds in the air have got to (a destroyer's
+    /// pass), struck on that frame.</summary>
+    private void WallsAheadTick()
+    {
+        for (int i = _wallsAhead.Count - 1; i >= 0; i--)
+        {
+            (CelShell.Round round, float along, Action hit) = _wallsAhead[i];
+            if (round.Flown < along && !round.Arrived)
+                continue;
+            _wallsAhead.RemoveAt(i);
+            hit();
+        }
+    }
+
     /// <summary>A wall on every walled cell of the map, after the stage.</summary>
     private void BuildWalls(BoardMap map)
     {
@@ -86,6 +302,8 @@ public sealed partial class Tank3DBench
                 Field = _field, Stage = _stage, Cell = cell,
                 Recipe = recipe, Capon = shelter?.Recipe, Borrow = null,
                 Channel = _walls.Count,
+                // the model's look on the bricks, as on the tank and the trees
+                Cel = !_pbr,
             };
             AddChild(prop);
             prop.Bearing = bearing;
@@ -153,6 +371,8 @@ public sealed partial class Tank3DBench
     {
         if (_walls.Count == 0 || _field is null || _stage is null)
             return;
+        WallsAheadTick();
+        _wallBurst?.Tick(dt, _camera.GlobalBasis);
         bool can = _fate == Fate.Alive && !DeepHere && !_falling;
         Vector3 way = WallWay();
         var flatWay = new Vector2(way.X, way.Z * Squash);
@@ -407,6 +627,8 @@ public sealed partial class Tank3DBench
     {
         _wallRam = false;
         _wallNose = null;
+        _wallsAhead.Clear();
+        _wallBurst?.Reset();
         _wallBoxed?.Dismount();
         _wallBoxed = null;
         foreach (WallProp prop in _walls)

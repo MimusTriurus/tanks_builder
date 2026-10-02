@@ -213,6 +213,30 @@ public sealed partial class Tank3DBench
         float h = ShellStep / Mathf.Max(v.Length(), 1.0f);
         Vector3 p = from;
         System.Action? landed = null;
+        // The masonry on the way (Tank3DBench.Walls): where the round was fired
+        // from - the tank's own cell for its own shot, a ring's middle being
+        // inside its walls - the one pass a destroyer's round has, and the walls
+        // it went through on the way, struck as the round gets to them.
+        Vector2I? origin = _field is null ? null
+            : _field.FlatCellAt(Board(strikes ? _rig.Position : from));
+        int passes = strikes && ShootsThrough ? 1 : 0;
+        var through = new List<(float Along, System.Action Hit)>();
+        float run = 0.0f;
+        // A tank in a ring whose muzzle is out past its own leaf: the round
+        // crosses it between the hull and the muzzle.
+        if (strikes && !lob && WallMeets(new Vector3(_rig.Position.X, from.Y, _rig.Position.Z), from) is { } own)
+        {
+            Vector3 way = v.Normalized();
+            System.Action struck = WallStruck(own.Prop, own.At, way, origin == own.Prop.Cell, lob, passes > 0);
+            if (passes > 0)
+            {
+                passes--;
+                through.Add((0.0f, struck));
+            }
+            else
+                return _shells!.Fly(new List<Vector3> { own.At - way, own.At }, v.Length(), TracerCal, SmokeCal,
+                                    lob, struck, h);
+        }
         for (float t = 0.0f; t < longest; t += h)
         {
             Vector3 next = p + v * h + 0.5f * g * h * h;
@@ -227,6 +251,22 @@ public sealed partial class Tank3DBench
                              : () => Strike(o, hit.Part, hit.At, hit.N, way);
                 break;
             }
+            if (!lob && WallMeets(p, next) is { } wall)
+            {
+                System.Action struck = WallStruck(wall.Prop, wall.At, seg.Normalized(),
+                                                  origin == wall.Prop.Cell, lob, passes > 0);
+                if (passes > 0)
+                {
+                    passes--;
+                    through.Add((run + (wall.At - p).Length(), struck));
+                }
+                else
+                {
+                    path.Add(wall.At);
+                    landed = struck;
+                    break;
+                }
+            }
             float ground = ShellGround(next, out bool wet);
             if (next.Y <= ground)
             {
@@ -237,15 +277,22 @@ public sealed partial class Tank3DBench
                 at.Y = ShellGround(at, out wet);
                 path.Add(at);
                 bool spent = !strikes;
-                landed = () => Lands(at, wet, spent);
+                // A bomb on a walled hex brings down every wall on its edges
+                // (GDD classes.md, "HM - Навес").
+                landed = lob && !wet ? () => { Lands(at, wet, spent); WallsBlown(at, "the bomb", WallForce * BlownShare); }
+                                     : () => Lands(at, wet, spent);
                 break;
             }
             path.Add(next);
+            run += seg.Length();
             p = next;
             if (!OnBoard(p))
                 break;
         }
-        return _shells!.Fly(path, v.Length(), TracerCal, SmokeCal, lob, landed, h);
+        CelShell.Round round = _shells!.Fly(path, v.Length(), TracerCal, SmokeCal, lob, landed, h);
+        foreach ((float along, System.Action struck) in through)
+            _wallsAhead.Add((round, along, struck));
+        return round;
     }
 
     /// <summary>
@@ -526,6 +573,14 @@ public sealed partial class Tank3DBench
             return;
         }
         Vector3 want = ground;
+        // A standing wall on the axis cuts it (GDD contradictions.md, "Ось
+        // засады обрезается неразрушенной стеной"): a gun's round goes into
+        // the first one, halfway up it; the bomb goes over.
+        if (!_profile.Lobs && WallOnAxis(own, axis, cells) is { } wall)
+        {
+            Aim(wall.At, Foot(wall.At), $"{cell}, axis {axis}: into the wall {wall.Cell}");
+            return;
+        }
         if (tank is not null)
         {
             float tall = tank.Model.Size.Y * tank.Model.PixelsPerUnit;

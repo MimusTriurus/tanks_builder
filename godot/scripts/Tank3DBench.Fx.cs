@@ -1208,6 +1208,10 @@ void fragment() {
         }
         // The blast lights the wood under it and round it (GDD, "Уничтожен").
         WoodIgnite(Foot(_rig.Position), grounded: !DeepHere);
+        // ...and its blast brings down the walls on its hex's edges (GDD
+        // states.md, "Уничтожен"); afloat there is no blast wave.
+        if (!DeepHere)
+            WallsBlown(Foot(_rig.Position), "the blast", TankBlast);
         // TankTick.Quake(Death): the class's own gun shake, harder.
         _shake.Fire(new Vector2(0.0f, -1.0f), _profile.ShotShake * 2.15);
         _shake.Blast(_profile.ShotShake * 1.6);

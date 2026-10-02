@@ -86,6 +86,10 @@ public sealed partial class WallProp : Node
     /// with one wall leaves the default.</summary>
     public int Channel { get; init; }
 
+    /// <summary>The model's look on the bricks - <see cref="WallStack.Cel"/>.
+    /// The 3D tank's scene; every sprite board leaves it off.</summary>
+    public bool Cel { get; init; }
+
     private WallStack? _wall;
     private WallRig? _rig;
     private WallKit.Plan? _plan;
@@ -157,6 +161,7 @@ public sealed partial class WallProp : Node
             Rise = Field.RiseFactor,
             Anchor = Stage3D.World(flat, lift, Field.Squash, Field.RiseFactor),
             Order = Order,
+            Cel = Cel,
         };
         AddChild(_wall);
         _wall.Tank = Borrow;

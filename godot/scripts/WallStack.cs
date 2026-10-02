@@ -81,12 +81,32 @@ public sealed partial class WallStack : Node3D
     /// faces.</summary>
     public double TankFacing = 270.0;
 
+    /// <summary>
+    /// The model's look instead of the board's: the brick's light stepped as
+    /// <see cref="Toon.RampCode"/> steps a tank's (shade, middle, full sun on
+    /// the same <see cref="Key"/> - the 3D bench's sun stands within a few
+    /// degrees of it), its seam the ink's tone rather than near black, and an
+    /// inked outline round every piece (<see cref="InkShader"/>): the
+    /// inverted hull of <see cref="Toon"/>, pushed out along the box's
+    /// corner, <see cref="Toon.InkWidth"/> board px and never under
+    /// <see cref="Toon.InkMinPx"/> on the screen, in the brick's own colour
+    /// darkened by <see cref="Toon.InkDark"/>. A chip takes none - a black dot
+    /// is what a crumb with a shell of its own reads as, the tank's rivets'
+    /// reason - and what is leaving takes its outline with it. Set by the 3D
+    /// tank's scene alone; the sprite boards keep the wall they were judged
+    /// with.
+    /// </summary>
+    public bool Cel { get; init; }
+
     private WallKit.Plan _plan = null!;
     private List<WallFall.Flight>? _fall;
     private MultiMeshInstance3D _bricks = null!;
     private MultiMesh _mesh = null!;
     private MultiMeshInstance3D _ghosts = null!;
     private MultiMesh _ghostMesh = null!;
+    /// <summary>The outlines under <see cref="Cel"/>: the standing pieces' and
+    /// the leaving ones', each on the same multimesh as its bricks.</summary>
+    private MultiMeshInstance3D? _inkBricks, _inkGhosts;
     private MeshInstance3D? _ram;
     private SubViewport? _paint;
     private Node2D? _holder;
@@ -242,6 +262,23 @@ public sealed partial class WallStack : Node3D
             SortingUseAabbCenter = true,
         };
         AddChild(_ghosts);
+
+        if (Cel)
+        {
+            _inkBricks = new MultiMeshInstance3D
+            {
+                Multimesh = _mesh, MaterialOverride = InkMaterial(going: false),
+                CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            };
+            AddChild(_inkBricks);
+            _inkGhosts = new MultiMeshInstance3D
+            {
+                Multimesh = _ghostMesh, MaterialOverride = InkMaterial(going: true),
+                CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+                SortingUseAabbCenter = true,
+            };
+            AddChild(_inkGhosts);
+        }
 
         _shadeMesh = new MultiMesh
         {
@@ -1155,9 +1192,69 @@ public sealed partial class WallStack : Node3D
         ink.SetShaderParameter("sun", Key);
         ink.SetShaderParameter("joint", Joint);
         ink.SetShaderParameter("radius", Radius);
+        ink.SetShaderParameter("cel", Cel ? 1.0f : 0.0f);
+        ink.SetShaderParameter("cel_seam", Toon.InkDark);
         ink.RenderPriority = Order;
         return ink;
     }
+
+    /// <summary>The outline's material (<see cref="Cel"/>): opaque round what
+    /// stands, and round what is leaving blended, fading faster than its
+    /// piece, and drawn before it - the piece blends over its own shell.</summary>
+    private ShaderMaterial InkMaterial(bool going)
+    {
+        var ink = new ShaderMaterial
+        {
+            Shader = new Shader
+            {
+                Code = going ? string.Format(InkShader, ", blend_mix, depth_draw_never", "ALPHA = left * left;")
+                             : string.Format(InkShader, "", ""),
+            },
+        };
+        ink.SetShaderParameter("width", Toon.InkWidth);
+        ink.SetShaderParameter("min_px", Toon.InkMinPx);
+        ink.SetShaderParameter("dark", Toon.InkDark);
+        ink.RenderPriority = going ? Order - 1 : Order;
+        return ink;
+    }
+
+    /// <summary>
+    /// The pieces' outline under <see cref="Cel"/>: <see cref="Toon"/>'s
+    /// inverted hull on the unit box every piece is drawn from - back faces
+    /// only, every corner moved out in view space along its own diagonal and
+    /// back from the eye by the same, so where a piece is not the silhouette
+    /// its shell stays under the faces of the pieces round it, and the seams
+    /// inside a course stay the brick's own line.
+    /// </summary>
+    internal const string InkShader = @"
+shader_type spatial;
+render_mode unshaded, cull_front, skip_vertex_transform, shadows_disabled, fog_disabled{0};
+uniform float width = 1.1;
+uniform float min_px = 1.0;
+uniform float dark = 0.28;
+varying vec3 tint;
+varying float left;
+void vertex() {{
+    tint = COLOR.rgb;
+    left = COLOR.a;
+    float mark = INSTANCE_CUSTOM.w;
+    float chip = step(0.5, mark) * step(mark, 1.5);
+    vec3 corner = sign(VERTEX);
+    VERTEX = (MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
+    vec3 n = normalize(mat3(MODELVIEW_MATRIX) * corner);
+    // One screen px in view units; the matrix's y may be flipped.
+    float px = abs(2.0 / (PROJECTION_MATRIX[1][1] * VIEWPORT_SIZE.y));
+    float w = max(width, min_px * px) * (1.0 - chip);
+    VERTEX.xy += n.xy * w;
+    VERTEX.z -= w;
+}}
+void fragment() {{
+    if (left <= 0.0)
+        discard;
+    ALBEDO = tint * dark;
+    {1}
+}}
+";
 
     /// <summary>How far the shadow floats over the ground, as a fraction of the
     /// cell - a quarter of a pixel. Coplanar with the tile is a coin toss over
@@ -1305,6 +1402,16 @@ uniform float grain = 0.10;
 uniform sampler2D concrete_tex : source_color, repeat_enable;
 uniform float textured = 0.0;
 uniform float tex_scale = 1.6;
+// The model's look (WallStack.Cel): Toon.RampCode's three tones on the same
+// cosine, and the seam at the ink's tone.
+uniform float cel = 0.0;
+uniform vec3 cel_shade = vec3(0.36, 0.38, 0.44);
+uniform float cel_mid = 0.5;
+uniform float cel_edge_dark = 0.12;
+uniform float cel_edge_lit = 0.7;
+uniform float cel_soft = 0.035;
+uniform float cel_sun = 0.72;
+uniform float cel_seam = 0.28;
 
 varying vec3 tint;
 varying vec3 face;
@@ -1376,7 +1483,12 @@ void fragment() {{
         discard;
     // One Lambert term, written rather than lit.
     float lam = max(dot(normalize(face), normalize(sun)), 0.0);
-    float lit = ambient + (1.0 - ambient) * lam;
+    vec3 lit = vec3(ambient + (1.0 - ambient) * lam);
+    if (cel > 0.5) {{
+        float v = cel_mid * smoothstep(cel_edge_dark - cel_soft, cel_edge_dark + cel_soft, lam);
+        v = mix(v, 1.0, smoothstep(cel_edge_lit - cel_soft, cel_edge_lit + cel_soft, lam));
+        lit = cel_shade + v * cel_sun;
+    }}
 
     // The dark line round the face. Measured out from the border in cell units,
     // so it is the same width down a brick's long side as across its end - which
@@ -1419,14 +1531,14 @@ void fragment() {{
     // way round that reads as masonry going rather than as a drawing of it.
     float show = max(seam, 1.0 - left);
 
-    vec3 body = tint * lit * (1.0 + g * grain);
+    vec3 body = tint * lit * (1.0 + g * grain * (1.0 - 0.5 * cel));
     // The texture is about mid-grey, so twice it is a multiplier about one.
     body = mix(body, tint * lit * t * 2.0, textured);
     // A chip is a broken piece: the inside of a brick is paler and rawer than
     // its weathered face, which is the one thing the procedural material in
     // Blender had to define rather than paint.
     body = mix(body, body * vec3(1.14, 1.10, 1.05), chip * 0.6);
-    ALBEDO = mix(body * 0.13, body, show);
+    ALBEDO = mix(body * mix(0.13, cel_seam, cel), body, show);
     {1}
 }}
 ";
