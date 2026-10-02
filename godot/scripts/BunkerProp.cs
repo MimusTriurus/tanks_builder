@@ -33,11 +33,12 @@ namespace TankSpriteTest;
 /// the model's own meshes (not its gun, not its aerial), following the tank,
 /// so the roof comes down on the turret and what lies on the deck goes when
 /// the tank drives off.</item>
-/// <item><b>Then it goes</b>: each chunk, still for <see cref="WallRig.Linger"/>
-/// seconds, is eaten away over <see cref="WallRig.Crumble"/> - the cel pass's
-/// burn (<see cref="Toon.BurnCode"/>, <c>burn_eat</c>) with a pale dust rim
-/// and no embers - and the pad is what stays: four millimetres proud of the
-/// ground, it stops nothing.</item>
+/// <item><b>Then it goes under</b>: the heap lain still - every chunk for
+/// <see cref="WallRig.Linger"/> seconds - goes down into the ground over
+/// <see cref="WallRig.Crumble"/>, in a cloud of its own dust
+/// (<see cref="CelCloud"/>) where the chunks go in, and the pad is what
+/// stays: four millimetres proud of the ground, it stops nothing. Eaten away
+/// where it lay - the cel pass's burn - concrete read as burning.</item>
 /// </list>
 /// </summary>
 public sealed partial class BunkerProp : Node3D
@@ -103,15 +104,17 @@ public sealed partial class BunkerProp : Node3D
         public Node3D? View;
         public Transform3D Rest;
         public RigidBody3D? Body;
-        public readonly List<ShaderMaterial> Burn = new();
-        /// <summary>Each cel copy and the ink pass it carries.</summary>
-        public readonly List<(ShaderMaterial Cel, ShaderMaterial Ink)> Ink = new();
         public float Release;
         public Vector3 V, W;
         public bool Free;
         public float Still;
-        public float Going = -1.0f;
         public bool Gone;
+        /// <summary>Going under: where it lay, the level it goes in at (the
+        /// ground, or the tank it lies on), how wide it is round its middle
+        /// (R), and the way it leans as it goes.</summary>
+        public Transform3D From;
+        public float Cut, Reach;
+        public Vector3 Lean;
     }
 
     public required float Radius { get; init; }
@@ -214,53 +217,15 @@ public sealed partial class BunkerProp : Node3D
             }
             chunk.Rest = chunk.View.Transform;
             chunk.View.Visible = false;
-            if (!Pbr)
-                Fadeable(chunk);
             _chunks.Add(chunk);
         }
+        _dust = new CelCloud(this, "Dust", DustTint, DustBlend * Radius);
         return _problem.Length == 0;
     }
 
     private static Vector3 Vec(JsonElement a) => new(a[0].GetSingle(), a[1].GetSingle(), a[2].GetSingle());
 
     private float C(string key) => _collapse.GetProperty(key).GetSingle();
-
-    /// <summary>Its own copy of every cel material on the chunk, set to be
-    /// eaten (the burn's role 1 with <c>burn_eat</c>, <c>UV2.x</c> nought
-    /// over the whole chunk): <c>burn</c> -1 whole, 0 gone.</summary>
-    private static void Fadeable(Chunk chunk)
-    {
-        foreach (MeshInstance3D m in Meshes(chunk.View!))
-        {
-            if (m.Mesh is null)
-                continue;
-            for (int s = 0; s < m.Mesh.GetSurfaceCount(); s++)
-            {
-                if (m.Mesh.SurfaceGetMaterial(s) is not ShaderMaterial cel)
-                    continue;
-                var copy = (ShaderMaterial)cel.Duplicate(true);
-                if (copy.NextPass is ShaderMaterial ink)
-                    chunk.Ink.Add((copy, ink));
-                foreach (ShaderMaterial pass in copy.NextPass is ShaderMaterial i2
-                             ? new[] { copy, i2 } : new[] { copy })
-                {
-                    pass.SetShaderParameter("burn_role", 1);
-                    pass.SetShaderParameter("burn_eat", true);
-                    pass.SetShaderParameter("burn_window", 1.0f);
-                    pass.SetShaderParameter("burn", -1.0f);
-                    // holes a third of a chunk across, not freckles: at 7 px
-                    // the going chunk read as camouflage, black and white
-                    pass.SetShaderParameter("burn_grain", 18.0f);
-                    // crumbling, not burning: a narrow pale rim, no embers
-                    pass.SetShaderParameter("char_tone", new Color(0.70f, 0.68f, 0.64f));
-                    pass.SetShaderParameter("char_cover", 0.35f);
-                    pass.SetShaderParameter("ember_tone", new Color(0.0f, 0.0f, 0.0f));
-                    chunk.Burn.Add(pass);
-                }
-                m.SetSurfaceOverrideMaterial(s, copy);
-            }
-        }
-    }
 
     private static IEnumerable<MeshInstance3D> Meshes(Node node)
     {
@@ -368,10 +333,9 @@ public sealed partial class BunkerProp : Node3D
             c.Body = body;
             c.Free = false;
             c.Still = 0.0f;
-            c.Going = -1.0f;
             c.Gone = false;
-            SetBurn(c, -1.0f);
         }
+        _sink = -1.0f;
         Pushes(new Basis(Vector3.Up, -Lay) * way.Normalized());
         _merge = MergeAfter;
         foreach (Chunk c in _chunks)
@@ -463,29 +427,16 @@ public sealed partial class BunkerProp : Node3D
         }
     }
 
-    /// <summary>How far into its going the chunk is, -1 whole to 0 gone.
-    /// The outline goes as the eating starts (WallStack's rule: the line leaves
-    /// before the mass). The ink is an inside-out shell and draws its back
-    /// faces, so through a hole in the paint its far wall showed as a black
-    /// spot - eaten by the noise at its own place, not the hole's - and thinned
-    /// to nothing it still did.</summary>
-    private static void SetBurn(Chunk c, float burn)
-    {
-        foreach (ShaderMaterial m in c.Burn)
-            m.SetShaderParameter("burn", burn);
-        bool inked = burn <= -1.0f;
-        foreach ((ShaderMaterial cel, ShaderMaterial ink) in c.Ink)
-            cel.NextPass = inked ? ink : null;
-    }
-
     /// <summary>A frame of the fall: what is due let go, the views on the
-    /// bodies, and the clean-up's clocks.</summary>
-    public void Tick(float dt)
+    /// bodies, the clock of lying still; then the heap going under and its
+    /// dust. <paramref name="eye"/> is the camera's basis.</summary>
+    public void Tick(float dt, Basis eye)
     {
         if (!Broken)
             return;
         _t += dt;
         FollowTanks();
+        int lain = 0;
         foreach (Chunk c in _chunks)
         {
             if (c.Body is null || c.Gone)
@@ -497,34 +448,17 @@ public sealed partial class BunkerProp : Node3D
                 c.Body.LinearVelocity = c.V * K;
                 c.Body.AngularVelocity = c.W / K;
             }
-
+            // going under, the views are the sink's
+            if (_sink >= 0.0f)
+                continue;
             Transform3D b = c.Body.Transform;
             c.View!.Transform = new Transform3D(b.Basis, b.Origin / M);
-            if (!c.Free || !WallRig.Crumbles)
-                continue;
-            if (c.Going < 0.0f)
-            {
-                // time spent still, never reset (WallRig.Left): a chunk on a
-                // tank never sleeps, so the speed is asked, not the flag
-                if (c.Body.LinearVelocity.Length() < WallRig.Still && c.Body.AngularVelocity.Length() < 0.2f)
-                    c.Still += dt;
-                if (c.Still >= WallRig.Linger)
-                    c.Going = 0.0f;
-                continue;
-            }
-            c.Going += dt / WallRig.Crumble;
-            if (Pbr)
-                c.View.Scale = Vector3.One * Mathf.Max(1.0f - c.Going, 0.01f);
-            else
-                SetBurn(c, Mathf.Min(c.Going, 1.0f) - 1.0f);
-            if (c.Going >= 1.0f)
-            {
-                c.Gone = true;
-                c.View.Visible = false;
-                // the body stays, still: what lay on it does not fall for it
-                c.Body.Freeze = true;
-                Gone++;
-            }
+            // time spent still, never reset (WallRig.Left): a chunk on a tank
+            // never sleeps, so the speed is asked, not the flag
+            if (c.Free && c.Body.LinearVelocity.Length() < WallRig.Still && c.Body.AngularVelocity.Length() < 0.2f)
+                c.Still += dt;
+            if (c.Free && c.Still >= WallRig.Linger)
+                lain++;
         }
         if (_merge > 0.0f && _t >= _merge)
         {
@@ -536,11 +470,244 @@ public sealed partial class BunkerProp : Node3D
         }
         if (_t >= SettleAt && _t - dt < SettleAt)
             Report();
+        if (_sink < 0.0f && WallRig.Crumbles && _static.Count > 0 && (lain >= LainShare * _chunks.Count || _t >= SinkBy))
+            SinkFrom();
+        if (_sink >= 0.0f)
+            Sink(dt);
+        DustTick(dt, eye);
         if (Gone == _chunks.Count && _chunks.Count > 0 && _static.Count > 0)
         {
             Clear();
             GD.Print($"bunker {Cell}: gone, the pad stays");
         }
+    }
+
+    // --- going under ------------------------------------------------------
+
+    /// <summary>The share of the chunks that must have lain still for
+    /// <see cref="WallRig.Linger"/> before the heap goes under, and the latest
+    /// it goes all the same, seconds after the bomb. Not every chunk: two
+    /// slabs of the roof crept down the heap at 2-4 cm/s, never slept, and
+    /// held the heap up to the cap; going under stops them where they are.
+    /// </summary>
+    private const float LainShare = 0.9f, SinkBy = 8.0f;
+
+    /// <summary>How long the dust is up before the ground gives, s.</summary>
+    private const float DustLead = 0.3f;
+
+    /// <summary>The depth curve's power: slow at first, then the ground
+    /// gives - at one speed the heap went down like a lift.</summary>
+    private const float SinkEase = 1.6f;
+
+    /// <summary>How far each chunk leans as it goes, radians at the bottom,
+    /// and how far the heap is drawn in to its middle, shares of the way out.</summary>
+    private const float SinkLean = 0.14f, SinkIn = 0.06f;
+
+    /// <summary>The dust where the chunks go in: the first ring round the
+    /// heap, puffs a second after it, a puff's life (s), its radius at birth
+    /// and grown (R), how far it climbs and runs out (R), its grey, tint and
+    /// how far apart two puffs still flow into one (R). The grey is the
+    /// concrete's, warmed by the earth's (<see cref="CelDust"/>).</summary>
+    public int DustRing = 12;
+    public float DustRate = 32.0f, DustLife = 1.5f;
+    public float DustBorn = 0.08f, DustGrown = 0.26f;
+    public float DustRise = 0.10f, DustOut = 0.14f;
+    public float DustTone = 0.56f;
+    public Color DustTint = new(0.84f, 0.80f, 0.74f);
+    public float DustBlend = 0.08f;
+
+    private struct Puff
+    {
+        public Vector3 At, Out;
+        public float Born, Life, Size, Tone, Seed;
+    }
+
+    private CelCloud? _dust;
+    private readonly List<Puff> _puffs = new();
+    private float _sink = -1.0f, _sinkDepth, _owed;
+    private int _births;
+
+    /// <summary>
+    /// The heap goes under from where it lies: the bodies stop (they stay
+    /// put for <see cref="Report"/>), each chunk takes the level it goes in
+    /// at - the ground, or a tank's back if a ray down from its middle meets
+    /// the tank before the floor - and the whole heap one depth curve, so it
+    /// keeps its shape and opens no gaps; a ring of dust goes up round it.
+    /// </summary>
+    private void SinkFrom()
+    {
+        _sink = 0.0f;
+        _owed = 0.0f;
+        _sinkDepth = 0.0f;
+        PhysicsDirectSpaceState3D space = GetWorld3D().DirectSpaceState;
+        var skip = new Godot.Collections.Array<Rid>();
+        foreach (Chunk c in _chunks)
+            if (c.Body is not null)
+                skip.Add(c.Body.GetRid());
+        for (int i = 0; i < _chunks.Count; i++)
+        {
+            Chunk c = _chunks[i];
+            if (c.Gone || c.View is null)
+                continue;
+            if (c.Body is not null)
+                c.Body.Freeze = true;
+            c.From = c.View.Transform;
+            (float lo, float hi, float reach) = Span(c, c.From);
+            Vector3 o = c.From.Origin;
+            Transform3D here = GlobalTransform;
+            var ray = PhysicsRayQueryParameters3D.Create(here * (o * M), here * (new Vector3(o.X, -0.5f, o.Z) * M), Group, skip);
+            Godot.Collections.Dictionary hit = space.IntersectRay(ray);
+            float under = hit.Count > 0 ? (here.AffineInverse() * (Vector3)hit["position"]).Y / M : 0.0f;
+            // on the ground, or on a tank: the floor's top is nought
+            c.Cut = under > 0.05f ? Mathf.Min(under, lo + 0.02f) : 0.0f;
+            c.Reach = reach;
+            float a = Mathf.Tau * CelPuff.Hash(i, 41);
+            c.Lean = new Vector3(Mathf.Cos(a), 0.0f, Mathf.Sin(a)) * (CelPuff.Hash(i, 43) < 0.5f ? -1.0f : 1.0f);
+            _sinkDepth = Mathf.Max(_sinkDepth, hi - c.Cut);
+        }
+        // the lean lifts a corner as it goes: the last of the heap goes deeper
+        _sinkDepth += 0.08f;
+        // the first ring, round the heap's foot, a little apart in time
+        for (int k = 0; k < DustRing; k++)
+        {
+            float a = Mathf.Tau * (k + 0.5f * CelPuff.Hash(k, 47)) / DustRing;
+            var way = new Vector3(Mathf.Cos(a), 0.0f, Mathf.Sin(a));
+            Spawn(way * (0.60f + 0.12f * CelPuff.Hash(k, 53)), way, k * 0.25f / DustRing, 0.9f);
+        }
+        int high = 0;
+        foreach (Chunk c in _chunks)
+            if (c.Cut > 0.0f)
+                high++;
+        GD.Print($"bunker {Cell}: going under at {_t:F1} s, {_sinkDepth:F2} R down over {WallRig.Crumble:F0} s, "
+                 + $"{high} chunk(s) in at a tank's back");
+    }
+
+    /// <summary>The lowest and highest point of a chunk's hull at
+    /// <paramref name="at"/>, and its widest reach round its middle, R.</summary>
+    private static (float Lo, float Hi, float Reach) Span(Chunk c, Transform3D at)
+    {
+        float lo = float.MaxValue, hi = float.MinValue, reach = 0.0f;
+        foreach (Vector3 h in c.Hull)
+        {
+            Vector3 p = at * h;
+            lo = Mathf.Min(lo, p.Y);
+            hi = Mathf.Max(hi, p.Y);
+            reach = Mathf.Max(reach, new Vector2(p.X - at.Origin.X, p.Z - at.Origin.Z).Length());
+        }
+        return (lo, hi, reach);
+    }
+
+    /// <summary>A frame of going under: every chunk down the one curve,
+    /// leaning about its foot and drawn in a little, hidden once its top is
+    /// under its level; dust born where the chunks still go in.</summary>
+    private void Sink(float dt)
+    {
+        _sink += dt;
+        float k = Mathf.Clamp((_sink - DustLead) / WallRig.Crumble, 0.0f, 1.0f);
+        float d = _sinkDepth * Mathf.Pow(k, SinkEase);
+        float f = d / Mathf.Max(_sinkDepth, 1e-4f);
+        var going = new List<Chunk>();
+        foreach (Chunk c in _chunks)
+        {
+            if (c.Gone || c.View is null)
+                continue;
+            Vector3 o = c.From.Origin;
+            var foot = new Vector3(o.X, c.Cut, o.Z);
+            var lean = new Basis(c.Lean, SinkLean * f);
+            var t = new Transform3D(lean * c.From.Basis,
+                                    foot + lean * (o - foot) + Vector3.Down * d - new Vector3(o.X, 0.0f, o.Z) * (SinkIn * f));
+            c.View.Transform = t;
+            (float lo, float hi, float _) = Span(c, t);
+            if (hi < c.Cut - 0.005f || k >= 1.0f)
+            {
+                c.Gone = true;
+                c.View.Visible = false;
+                Gone++;
+            }
+            else if (lo < c.Cut)
+                going.Add(c);
+        }
+        if (going.Count == 0 || k >= 1.0f)
+            return;
+        // after the ring, puffs where the chunks go in - one a frame at most,
+        // the rest carried (CelDust's rule: two born on one frame stand as one)
+        _owed += DustRate * dt;
+        if (_owed < 1.0f)
+            return;
+        _owed = Mathf.Min(_owed - 1.0f, 1.0f);
+        int n = _births;
+        // two in three on the half that faces the eye: the heap hides its
+        // own far foot, and the near one is the cut that shows
+        Vector3 eye = new Basis(Vector3.Up, -Lay) * Vector3.Back;
+        float a = CelPuff.Hash(n, 89) < 0.65f
+            ? Mathf.Atan2(eye.Z, eye.X) + Mathf.Pi * (CelPuff.Hash(n, 61) - 0.5f)
+            : Mathf.Tau * CelPuff.Hash(n, 61);
+        var round = new Vector3(Mathf.Cos(a), 0.0f, Mathf.Sin(a));
+        List<Chunk> high = going.FindAll(c => c.Cut > 0.0f);
+        // Where the eye sees the heap cut: its outer foot on the ground, as far
+        // out that way as a chunk reaches - puffs over the middle of the heap
+        // were white balls on a heap going down untouched round its edge -
+        // and, for what lies on a tank, round each chunk on the tank's back.
+        if (high.Count == 0 || (high.Count < going.Count && CelPuff.Hash(n, 83) >= 0.4f))
+        {
+            float edge = 0.0f;
+            foreach (Chunk c in going)
+                if (c.Cut <= 0.0f)
+                    edge = Mathf.Max(edge, c.View!.Transform.Origin.Dot(round) + 0.8f * c.Reach);
+            Spawn(round * (edge * (0.9f + 0.12f * CelPuff.Hash(n, 67))), round, 0.0f, 1.0f);
+            return;
+        }
+        Chunk on = high[Mathf.Min((int)(CelPuff.Hash(n, 59) * high.Count), high.Count - 1)];
+        Vector3 mid = on.View!.Transform.Origin;
+        Vector3 p = new Vector3(mid.X, on.Cut, mid.Z) + round * (on.Reach * (0.6f + 0.4f * CelPuff.Hash(n, 67)));
+        Spawn(p, round, 0.0f, 1.0f);
+    }
+
+    /// <summary>A puff at <paramref name="at"/> (the bunker's frame, R),
+    /// running out along <paramref name="out_"/>, born <paramref name="late"/>
+    /// seconds from now, <paramref name="size"/> times the usual.</summary>
+    private void Spawn(Vector3 at, Vector3 out_, float late, float size)
+    {
+        if (_puffs.Count >= CelCloud.Pool)
+            _puffs.RemoveAt(0);
+        int k = _births++;
+        float h1 = CelPuff.Hash(k, 71), h2 = CelPuff.Hash(k, 73), h3 = CelPuff.Hash(k, 79);
+        _puffs.Add(new Puff
+        {
+            At = at,
+            Out = out_ * (0.5f + h1),
+            Born = _sink + late,
+            Life = DustLife * (0.8f + 0.4f * h2),
+            Size = size * (0.8f + 0.4f * h3),
+            Tone = DustTone * (0.93f + 0.14f * h2),
+            Seed = h3,
+        });
+    }
+
+    /// <summary>The dust in the air, put where it is - CelDust's puff: grown
+    /// fast and slowing, thrown out and stopped by the air, climbing, sat with
+    /// most of its body over the level it rose from, eaten from a quarter of
+    /// its life.</summary>
+    private void DustTick(float dt, Basis eye)
+    {
+        if (_dust is null || _scene is null)
+            return;
+        _puffs.RemoveAll(p => _sink - p.Born >= p.Life);
+        _dust.Clear();
+        Transform3D world = _scene.GlobalTransform;
+        foreach (Puff p in _puffs)
+        {
+            float age = _sink - p.Born;
+            if (age < 0.0f)
+                continue;
+            float a = Mathf.Clamp(age / p.Life, 0.0f, 1.0f);
+            float grow = 1.0f - Mathf.Pow(1.0f - a, 2.0f);
+            float r = Mathf.Lerp(DustBorn, DustGrown, grow) * p.Size * Mathf.SmoothStep(0.0f, 0.06f, a);
+            Vector3 at = p.At + p.Out * (DustOut * (1.0f - Mathf.Exp(-age / 0.45f)))
+                         + Vector3.Up * (0.7f * r + DustRise * a);
+            _dust.Add(world * at, r * Radius, p.Tone, p.Seed, Mathf.SmoothStep(0.25f, 1.0f, a), a);
+        }
+        _dust.Draw(eye);
     }
 
     /// <summary>When the heap is measured, seconds after the bomb.</summary>
@@ -603,10 +770,12 @@ public sealed partial class BunkerProp : Node3D
             c.View.Visible = false;
             c.Free = false;
             c.Gone = false;
-            c.Going = -1.0f;
             c.Still = 0.0f;
-            SetBurn(c, -1.0f);
         }
+        _sink = -1.0f;
+        _puffs.Clear();
+        _births = 0;
+        _dust?.Hide();
     }
 
     /// <summary>

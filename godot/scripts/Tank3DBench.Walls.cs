@@ -52,7 +52,7 @@ namespace TankSpriteTest;
 /// stands, the prop's own pieces unseen, and the capon's recipe is made the
 /// model's - roof and slit - so the bomb's roof and the round's slit are the
 /// ones drawn. The bomb on the roof breaks the model too: it falls in on its
-/// own hex, on the tank in it, and crumbles away to its pad.</item>
+/// own hex, on the tank in it, and goes under in its own dust to its pad.</item>
 /// <item>An edge goes off the board's record when its masonry falls, not when
 /// it is struck (<see cref="WallTick"/>); <c>Backspace</c> lays every wall
 /// again.</item>
@@ -631,7 +631,7 @@ public sealed partial class Tank3DBench
             return;
         WallsAheadTick();
         foreach (BunkerProp bunker in _bunkers.Values)
-            bunker.Tick(dt);
+            bunker.Tick(dt, _camera.GlobalBasis);
         _wallBurst?.Tick(dt, _camera.GlobalBasis);
         _concreteBurst?.Tick(dt, _camera.GlobalBasis);
         _caponBlast?.Tick(dt, _camera.GlobalBasis);
