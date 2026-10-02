@@ -538,6 +538,7 @@ public sealed partial class Tank3DBench : Node3D
         _celRipples = new CelRipples { Name = "CelRipples" };
         AddChild(_celRipples);
         _celRipples.Build(_field, Squash, RiseFactor, HexWidth * 0.5f);
+        BuildWalls(map);
     }
 
     /// <summary>The cell the tank opens on: the map's first parking.</summary>
@@ -657,7 +658,8 @@ void light() {
             if (!_field.InBounds(there))
                 return false;
             int heading = HexField.HeadingTo(here, there);
-            return heading >= 0 && _field.Passable(here, heading);
+            // the ground, then the masonry on the edge (Tank3DBench.Walls)
+            return heading >= 0 && _field.Passable(here, heading) && !WallStops(here, heading);
         }
     }
 
@@ -844,6 +846,7 @@ void light() {
             else if (a == "--no-tracer") _tracerOn = false;
             else if (a == "--tracer-smoke") _tracerSmoke = true;
             else if (a == "--tracer-soft") _tracerSoft = true;
+            else if (a == "--no-walls") _noWalls = true;
             else if (a == "--scorch") _scorchOn = true;
             else if (a == "--no-grass") _noGrass = true;
             else if (a == "--no-trees") _noTrees = true;
@@ -911,7 +914,7 @@ void light() {
             case "unburn": FxBurn(false); break;
             case "knock": KnockOut(); break;
             case "destroy": Destroy(); break;
-            case "reset": ResetTank(); break;
+            case "reset": ResetTank(); WallReset(); break;
             case "pond": ToPond(); break;
             case "amphibious": _amphibious = true; break;
             case "no-amphibious": _amphibious = false; break;
@@ -922,7 +925,9 @@ void light() {
             case "left": _turnScripted = 1.0f; break;
             case "right": _turnScripted = -1.0f; break;
             case "straight": _turnScripted = 0.0f; break;
-            case "ram": RamGo(); break;
+            // a wall ahead is rammed through; otherwise the target
+            case "ram": if (!WallRamGo(false)) RamGo(); break;
+            case "ram-wall": WallRamGo(true); break;
             case "aim-target":
                 if (_other is not null)
                     AimCell(OtherCell(_other));
@@ -1302,6 +1307,7 @@ void light() {
             AdvanceFate(dt);
         }
         WaterTick(dt);
+        WallTick(dt);
         _model.Apply();
         FxProcess(dt, _speed, a);
         RamFrame(dt, _camera.GlobalBasis);
@@ -1314,8 +1320,9 @@ void light() {
         string fate = Drowning ? "Drowned" : _fate.ToString();
         if (_fate == Fate.Alive && Swimming)
             fate = "Afloat";
-        string ram = _other is null ? "" : $"  target {_other.Tag} {_other.Cell}"
-                     + (_ramNote.Length > 0 ? $"  {_ramNote}" : "");
+        string ram = (_other is null ? "" : $"  target {_other.Tag} {_other.Cell}"
+                      + (_ramNote.Length > 0 ? $"  {_ramNote}" : ""))
+                     + (_wallNote.Length > 0 ? $"  {_wallNote}" : "");
         _hud.Text = $"{_modelTag} 3D, class {_profile.Tag}  {where}  {fate}  {_note}{ram}{(_aimNote.Length > 0 ? "  " + _aimNote : "")}\n"
                     + "Space shot   RMB aim and fire   1-4 ricochet front/right/rear/left   Shift+1-4 pierce   Ctrl+1-4 HE   5 round in the ground\n"
                     + "J burning   K knocked out   X destroyed   T ram   Backspace reset   WASD drive   "
@@ -1534,6 +1541,16 @@ void light() {
             : $"{_other.Tag}, масса {_other.Profile.Mass} против {_profile.Mass}"
               + (_ramNote.Length > 0 ? $"\n{_ramNote}" : ""));
         _panel.Expand("tank3d.ram", true);
+        // The brick walls (Tank3DBench.Walls): the ram through one.
+        if (_walls.Count > 0)
+        {
+            _panel.Heading("tank3d.walls", "стены");
+            _panel.Press("tank3d.walls.ram", "таранить стену  (T носом к стене)", () => WallRamGo(true));
+            _panel.Readout("tank3d.walls.note", () =>
+                (_profile.Bulldozes ? "HT ломает стены ездой" : "стена держит; таран — приказом")
+                + (_wallNote.Length > 0 ? "\n" + _wallNote : ""));
+            _panel.Expand("tank3d.walls", true);
+        }
         // The round in the air (Tank3DBench.Shell): the sprites' two switches.
         _panel.Heading("tank3d.shell", "снаряд");
         _panel.Toggle("tank3d.shell.tracer", "трассер  (--no-tracer)", () => _tracerOn, v => _tracerOn = v);
