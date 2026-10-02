@@ -47,6 +47,9 @@ public sealed partial class Tank3DBench
     /// <summary><c>--no-tracer</c> and <c>--tracer-smoke</c>: the sprites'
     /// two switches, the same defaults.</summary>
     private bool _tracerOn = Shell.TracerOnByDefault, _tracerSmoke = Shell.SmokeOnByDefault;
+    /// <summary><c>--tracer-soft</c>: the tracer's one smooth halo rather than
+    /// its flat bands (<see cref="CelShell.Soft"/>).</summary>
+    private bool _tracerSoft;
 
     /// <summary>
     /// How fast a direct gun's round falls, world units a second squared.
@@ -357,6 +360,7 @@ public sealed partial class Tank3DBench
             return;
         _shells.Tracer = _tracerOn;
         _shells.Smoke = _tracerSmoke;
+        _shells.Soft = _tracerSoft;
         _shells.Tick(dt, _camera.GlobalBasis);
         // The shadow under a bomb over the board, the board's own.
         int used = 0;

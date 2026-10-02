@@ -12,24 +12,32 @@ namespace TankSpriteTest;
 /// only flies along it at <see cref="Shell.Speed"/> and says when it is done.
 ///
 /// <list type="bullet">
-/// <item><b>The tracer</b> - in the model's look rather than the sprites':
-/// one field on a quad facing the eye (<see cref="LanceShader"/>), a capsule
-/// from the tail to the head, <b>round at both ends</b>, the head the fatter
-/// (<see cref="TailWidth"/>), with the model's ink line round it - the same
-/// width on the screen as the hulls' (<see cref="Toon.InkWidth"/>) - and
-/// cut inside into flat bands as the fire is: a near-white core toward the
-/// head, the warm body, the tail's end cooled to red past
-/// <see cref="CoolFrom"/> of its length. The sprites' lance
-/// (<see cref="Shell.Lance"/>: a trapezium pointed at both ends, graded
-/// under an outset hem) was three ribbons here, and its points were the
-/// thing that read as a 2D picture on the model; the user asked for the cel
-/// look and no points. The length and the width are still the sprites'
-/// (<see cref="Shell.StreakSize"/>, <see cref="Shell.BodySize"/> and
-/// <see cref="Shell.Edge"/> on the class's calibre), straight along the
-/// head's tangent as theirs (<see cref="Shell.Heading"/>) - bent along the
+/// <item><b>The tracer</b> - a streak that glows: one field on a quad facing
+/// the eye (<see cref="LanceShader"/>), a thin white-hot core drawn out to a
+/// point at both ends, fullest toward the head (<see cref="Peak"/>), in a
+/// soft halo (<see cref="Hot"/> at the head going to <see cref="Cool"/> at
+/// the tail) that runs on a little past its ends - no ink line round it. The
+/// cel lance before it (an inked capsule cut into flat bands of the fire's
+/// colours) read as a stick, a mortar's as a fat sausage - its calibre 1.35
+/// and its loom at the top as much again, both on the width; the user's
+/// reference is Dust Front's tracer, a needle of light. <b>Its length is
+/// the round's smear</b> - how far it goes in <see cref="Blur"/> at its pace
+/// now (<see cref="Round.Pace"/>), the same for every gun - and not a
+/// length of its own: a mortar's bomb, slow and slowest at the top, drew a
+/// longer streak than a gun's round at twice the pace, longest just where
+/// it all but hangs, and the straight streak stood off its arc as a stick
+/// carried along it. Now it is short and thick going up, near a ball of
+/// light at the top and drawn out again coming down; a direct round, at the
+/// sprites' pace, three quarters of the sprites' streak. Never shorter than
+/// <see cref="Stub"/> of its core's width. <b>The gun's calibre is in the
+/// width</b> (<see cref="CoreHalf"/>, <see cref="GlowHalf"/> and
+/// <see cref="Thick"/> on <see cref="MovementProfile.TracerCalibre"/>, the
+/// gun's row: LT 0.8 to HM 1.75), with the root of the loom - a heavier gun
+/// draws a fatter streak, not a longer one. Straight along the head's
+/// tangent as the sprites' (<see cref="Shell.Heading"/>) - bent along the
 /// path, a mortar's bomb at the top of its arc was a banana. In the world,
-/// with its depth written along it, so a hull in front of the round hides it
-/// and a round going into a plate goes into it.</item>
+/// with its depth written along its line, so a hull in front of the round
+/// hides it and a round going into a plate goes into it.</item>
 /// <item><b>The trail</b> - off by default, as the sprites' is
 /// (<see cref="Shell.SmokeOnByDefault"/>): smoke laid along the path as the
 /// head passes, standing where it was laid and ageing from there - the
@@ -54,22 +62,54 @@ public sealed partial class CelShell : Node3D
     /// <summary>The smoke trail is laid (<see cref="Shell.SmokeOnByDefault"/>).</summary>
     public bool Smoke = Shell.SmokeOnByDefault;
 
-    /// <summary>The tracer's bands: the ink, the core, the body and the
-    /// cooled tail - the fire's colours (<see cref="CelShot"/>'s flash).</summary>
-    public Color Ink = new(0.10f, 0.05f, 0.02f), Core = new(1.0f, 0.97f, 0.80f),
-                 Body = new(1.0f, 0.62f, 0.16f), Cool = new(0.92f, 0.26f, 0.08f);
+    /// <summary>The tracer's colours: the white-hot core, and its halo warm
+    /// at the head and cooling to a rose red down the tail.</summary>
+    public Color Core = new(1.0f, 0.98f, 0.90f), Hot = new(1.0f, 0.74f, 0.38f), Cool = new(1.0f, 0.46f, 0.42f);
 
-    /// <summary>The tail's half width against the head's: thinner, round all
-    /// the same.</summary>
-    public float TailWidth = 0.78f;
+    /// <summary>The banded look's band: fuller than the halo's tones, which
+    /// are thinned over the ground - flat, they read pastel.</summary>
+    public Color BandHot = new(1.0f, 0.60f, 0.16f), BandCool = new(0.97f, 0.30f, 0.24f);
 
-    /// <summary>How far back from the head, as a share of the tracer, the
-    /// body cools to red - an arc about the head, not a cut across.</summary>
-    public float CoolFrom = 0.62f;
+    /// <summary>The core's and the halo's half widths at their fullest, world
+    /// units at a calibre of 1 (a medium's), and how much the halo covers
+    /// there.</summary>
+    public float CoreHalf = 1.6f, GlowHalf = 7.0f, Glow = 0.9f;
 
-    /// <summary>The core: its half width against the fill's, and how far back
-    /// from the head it reaches, as a share of the tracer.</summary>
-    public float CoreWidth = 0.55f, CoreReach = 0.55f;
+    /// <summary>Where the streak is fullest, as a share of it from the tail:
+    /// a short blunt run to the head, a long taper back to the tail.</summary>
+    public float Peak = 0.8f;
+
+    /// <summary>How thick the streak is drawn against <see cref="CoreHalf"/>
+    /// and <see cref="GlowHalf"/>, and how much of the sprites' streak a
+    /// round at their pace (<see cref="Shell.BaseSpeed"/>) draws.</summary>
+    public float Thick = 1.35f, StreakShare = 0.75f;
+
+    /// <summary>How the width goes with the gun's calibre: its power. On the
+    /// calibre alone (1) the five guns' 0.8-1.75 drew streaks a glance could
+    /// not tell apart - the halo is the most of the width, and it was all
+    /// about the same; squared and a little under, LT is 0.67 of a medium's
+    /// and HM 2.7.</summary>
+    public float WidthPower = 1.8f;
+
+    /// <summary>The tracer in flat bands (the cel look, the fire's): a hard
+    /// white core, a flat warm band round it cooling to rose down the tail
+    /// past <see cref="CoolFrom"/>, a faint soft glow outside - rather than
+    /// the one smooth halo of <c>--tracer-soft</c>.</summary>
+    public bool Soft;
+
+    /// <summary>The banded look's warm band, its half width against the
+    /// core's, and how far from the tail, as a share of the band, it is the
+    /// cooled tone.</summary>
+    public float BandHalf = 2.3f, CoolFrom = 0.42f;
+
+    /// <summary>The shortest streak, in core widths at its fullest: under it
+    /// the spindle is a spot of light, not a streak.</summary>
+    public float Stub = 2.6f;
+
+    /// <summary>How long a time the streak smears the round over, s - a
+    /// medium's sprite streak at the sprites' pace, by
+    /// <see cref="StreakShare"/>; the same for every gun.</summary>
+    public float Blur => StreakShare * Shell.StreakSize / Shell.BaseSpeed;
 
     /// <summary>The trail's grey and how much of it covers at birth - the
     /// sprites' (<see cref="Shell"/>'s <c>_Draw</c>, <c>SmokeAlpha</c>).</summary>
@@ -170,6 +210,20 @@ public sealed partial class CelShell : Node3D
 
         /// <summary>The head, now.</summary>
         public Vector3 Head => At(Flown);
+
+        /// <summary>How fast it goes now, world units a second - a throw's
+        /// own pace on its step (slowest at the top of its arc), or
+        /// <see cref="Speed"/>.</summary>
+        public float Pace
+        {
+            get
+            {
+                if (Every <= 0.0f || Points.Length < 2)
+                    return Speed;
+                int k = Mathf.Clamp((int)(Clock / Every), 0, Points.Length - 2);
+                return (Along[k + 1] - Along[k]) / Every;
+            }
+        }
 
         /// <summary>How high it is as a share of its top over the line between
         /// its ends, 0 at both and 1 at the top - what the loom and the shadow
@@ -285,11 +339,15 @@ public sealed partial class CelShell : Node3D
                 // Nothing bright once it has landed - what is left is the smoke.
                 if (r.Arrived || r.Flown <= 0.0f)
                     continue;
-                float cal = r.Calibre * (r.Lofted ? 1.0f + (Shell.Loom - 1.0f) * r.High : 1.0f);
-                // A smear no longer than the path that made it: at point
-                // blank a full streak is a beam from the muzzle to the plate.
-                float len = Mathf.Min(Shell.StreakSize * cal, r.Flown);
-                Lance(used++, r, len, (Shell.BodySize + Shell.Edge) * cal, eye);
+                float loom = r.Lofted ? 1.0f + (Shell.Loom - 1.0f) * r.High : 1.0f;
+                // The gun's calibre and the loom on the width alone, the
+                // length the smear at its pace: a heavier gun is not a faster
+                // round, nor a bomb faster at the top. No longer than the path
+                // that made it: at point blank a full streak is a beam from
+                // the muzzle to the plate.
+                float wide = Thick * Mathf.Pow(r.Calibre, WidthPower) * Mathf.Sqrt(loom);
+                float len = Mathf.Max(r.Pace * Blur, Stub * 2.0f * CoreHalf * wide);
+                Lance(used++, r, Mathf.Min(len, r.Flown), wide, eye);
             }
         for (int i = used; i < _lances.Count; i++)
             _lances[i].Quad.Visible = false;
@@ -302,8 +360,6 @@ public sealed partial class CelShell : Node3D
         while (_lances.Count <= k)
         {
             var look = new ShaderMaterial { Shader = LanceShader };
-            look.SetShaderParameter("ink_width", Toon.InkWidth);
-            look.SetShaderParameter("ink_min_px", Toon.InkMinPx);
             var quad = new MeshInstance3D
             {
                 Name = $"Lance{_lances.Count}", Mesh = new QuadMesh { Size = Vector2.One },
@@ -317,12 +373,13 @@ public sealed partial class CelShell : Node3D
     }
 
     /// <summary>One round's tracer: <paramref name="len"/> back from the head
-    /// along its tangent, <paramref name="half"/> wide at the head, ink
-    /// included - on a quad facing the eye, long along the tracer as the
-    /// screen sees it and in front of both its ends (the shader writes the
-    /// depth).</summary>
-    private void Lance(int k, Round r, float len, float half, Basis eye)
+    /// along its tangent, <paramref name="wide"/> times the medium's width -
+    /// on a quad facing the eye, long along the tracer as the screen sees it,
+    /// the halo's width round it, and in front of both its ends (the shader
+    /// writes the depth).</summary>
+    private void Lance(int k, Round r, float len, float wide, Basis eye)
     {
+        float half = GlowHalf * wide;
         var (quad, look) = LanceAt(k);
         Vector3 back = eye.Z.Normalized();
         Vector3 head = r.Head, way = r.Way(r.Flown);
@@ -331,91 +388,118 @@ public sealed partial class CelShell : Node3D
         Vector3 flat = d - back * d.Dot(back);
         Vector3 x = flat.LengthSquared() > 1e-4f ? flat.Normalized() : eye.X.Normalized();
         Vector3 y = back.Cross(x).Normalized();
-        float margin = half + 2.0f;
+        float margin = 1.3f * half + 2.0f;
         Vector3 mid = 0.5f * (head + tail);
         quad.GlobalTransform = new Transform3D(
             new Basis(x * (flat.Length() + 2.0f * margin), y * (2.0f * margin), back),
             mid + back * (0.5f * Mathf.Abs(d.Dot(back)) + half + 1.0f));
         look.SetShaderParameter("head", head);
         look.SetShaderParameter("tail", tail);
-        look.SetShaderParameter("r_head", half);
-        look.SetShaderParameter("r_tail", half * TailWidth);
-        look.SetShaderParameter("core_width", CoreWidth);
-        look.SetShaderParameter("core_reach", CoreReach);
-        look.SetShaderParameter("cool_from", CoolFrom);
-        look.SetShaderParameter("ink_tone", Ink);
+        look.SetShaderParameter("core_r", CoreHalf * wide);
+        look.SetShaderParameter("glow_r", half);
+        look.SetShaderParameter("glow", Glow);
+        look.SetShaderParameter("peak", Peak);
         look.SetShaderParameter("core_tone", Core);
-        look.SetShaderParameter("body_tone", Body);
+        look.SetShaderParameter("hot_tone", Hot);
         look.SetShaderParameter("cool_tone", Cool);
+        look.SetShaderParameter("bands", !Soft);
+        look.SetShaderParameter("band_r", BandHalf * CoreHalf * wide);
+        look.SetShaderParameter("cool_from", CoolFrom);
+        look.SetShaderParameter("band_hot", BandHot);
+        look.SetShaderParameter("band_cool", BandCool);
         quad.Visible = true;
     }
 
     /// <summary>
-    /// The tracer as one field: a capsule from <c>tail</c> to <c>head</c>,
-    /// its radius running from <c>r_tail</c> to <c>r_head</c>, round at both
-    /// ends; inked inside its edge by the model's line width, at least
-    /// <c>ink_min_px</c> screen px (<see cref="CelCloud"/>'s rule); inside, a
-    /// second, thinner capsule from <c>core_reach</c> back to the head is the
-    /// core, and past <c>cool_from</c> of the length from the head the body
-    /// is the cooled tone. Flat bands, no gradient - the fire's. The depth
-    /// is the capsule's own, front of its round section along the line.
+    /// The tracer as one field, from <c>tail</c> to <c>head</c>: a spindle -
+    /// fullest at <c>peak</c> of the way from the tail, drawn to a point both
+    /// ways, bluntly to the head and long to the tail - whose core is
+    /// white-hot, <c>core_r</c> at the fullest and never under a pixel; round
+    /// it a halo, <c>glow_r</c>, falling off as a bell from its bright run -
+    /// a capsule round at both ends, not the spindle's shape: on a short
+    /// streak that was a fan cut off square at the head - warm at the head
+    /// and cooling to the tail, dimmer down the tail. Premultiplied: the core covers what is
+    /// behind, the halo covers it by <c>cover</c> and lights it by the rest -
+    /// mixed over the grass it went brown, added it would wash out to yellow.
+    /// <b>In bands</b> (<c>bands</c>, the default): the core's edge hard (a
+    /// pixel's smoothing, no more, or it crawls in flight), round it a flat
+    /// band <c>band_r</c> - a capsule along the bright run, thinner to the
+    /// tail - of the warm tone, cut to the cooled one past <c>cool_from</c>
+    /// from its tail, and only outside it the soft glow, fainter: the fire's
+    /// flat tones, still a light - no ink line, which on a light is a solid
+    /// stick. The depth is the line's own, a core's width toward the eye.
     /// </summary>
     public static readonly Shader LanceShader = new()
     {
         Code = @"
 shader_type spatial;
-render_mode unshaded, cull_disabled, shadows_disabled;
+render_mode unshaded, cull_disabled, shadows_disabled, blend_premul_alpha, depth_draw_never;
 uniform vec3 head;
 uniform vec3 tail;
-uniform float r_head = 4.0;
-uniform float r_tail = 2.5;
-uniform float core_width = 0.55;
-uniform float core_reach = 0.55;
-uniform float cool_from = 0.62;
-uniform float ink_width = 1.1;
-uniform float ink_min_px = 1.0;
-uniform vec3 ink_tone : source_color;
+uniform float core_r = 1.25;
+uniform float glow_r = 6.0;
+uniform float glow = 0.85;
+// how much of the halo covers what is behind, and how much it lights it
+uniform float cover = 0.25;
+uniform float peak = 0.8;
 uniform vec3 core_tone : source_color;
-uniform vec3 body_tone : source_color;
+uniform vec3 hot_tone : source_color;
 uniform vec3 cool_tone : source_color;
-// Signed distance to a capsule from a (radius ra) to b (radius rb), and how
-// far along it the nearest point is.
-float capsule(vec2 p, vec2 a, vec2 b, float ra, float rb, out float k) {
-    vec2 ba = b - a;
-    k = clamp(dot(p - a, ba) / max(dot(ba, ba), 1e-6), 0.0, 1.0);
-    return length(p - a - ba * k) - mix(ra, rb, k);
-}
+uniform bool bands = true;
+uniform float band_r = 3.7;
+uniform float cool_from = 0.42;
+uniform vec3 band_hot : source_color;
+uniform vec3 band_cool : source_color;
 void fragment() {
     vec2 p = VERTEX.xy;
     vec3 a = (VIEW_MATRIX * vec4(tail, 1.0)).xyz;
     vec3 b = (VIEW_MATRIX * vec4(head, 1.0)).xyz;
-    float k;
-    float sd = capsule(p, a.xy, b.xy, r_tail, r_head, k);
-    if (sd > 0.0) discard;
-    float px = 2.0 / (PROJECTION_MATRIX[1][1] * VIEWPORT_SIZE.y);
-    float ink = max(ink_width, ink_min_px * px);
-    float len = max(length(b.xy - a.xy), 1e-3);
-    vec3 col;
-    if (sd > -ink) {
-        col = ink_tone;
+    vec2 ba = b.xy - a.xy;
+    float len = max(length(ba), 1e-3);
+    vec2 dir = ba / len;
+    float t = dot(p - a.xy, dir) / len;
+    float q = abs(dot(p - a.xy, vec2(-dir.y, dir.x)));
+    float tc = clamp(t, 0.0, 1.0);
+    // the spindle: blunt to the head, a long taper to the tail
+    float s = tc < peak ? tc / peak : (1.0 - tc) / (1.0 - peak);
+    float prof = tc < peak ? pow(s, 0.75) : pow(s, 0.4);
+    // world units to a pixel; the matrix's y may be flipped
+    float px = abs(2.0 / (PROJECTION_MATRIX[1][1] * VIEWPORT_SIZE.y));
+    float wc = max(core_r * prof, 0.0);
+    float core = bands
+        ? 1.0 - smoothstep(max(wc, 0.5 * px) - 0.5 * px, max(wc, 0.5 * px) + 0.5 * px, q)
+        : 1.0 - smoothstep(max(wc - px, 0.0) * 0.7, max(wc, 0.5 * px) + px, q);
+    core *= bands ? step(0.06, tc) * step(t, 1.0) : smoothstep(0.0, 0.12, tc) * (1.0 - smoothstep(0.985, 1.0, t));
+    // the halo: a bell round the streak's bright run - a capsule, round at
+    // both ends, so a short streak glows as a ball and is not cut off
+    float hc = clamp(t, 0.2, 0.92);
+    float d = length(p - mix(a.xy, b.xy, hc));
+    float halo = exp(-2.4 * d * d / (glow_r * glow_r)) * glow * mix(0.35, 1.0, smoothstep(0.0, peak, tc));
+    vec3 tone = mix(cool_tone, hot_tone, smoothstep(0.15, 0.95, tc));
+    if (bands) {
+        // the warm band: a capsule along the bright run, thinner to the tail
+        vec2 a2 = mix(a.xy, b.xy, 0.08), b2 = mix(a.xy, b.xy, 0.96);
+        vec2 ab = b2 - a2;
+        float kb = clamp(dot(p - a2, ab) / max(dot(ab, ab), 1e-6), 0.0, 1.0);
+        float rb = band_r * mix(0.4, 1.0, smoothstep(0.0, 0.8, kb));
+        float sd = length(p - a2 - ab * kb) - rb;
+        float band = 1.0 - smoothstep(-0.5 * px, 0.5 * px, sd);
+        float cut = (kb - cool_from) * length(ab);
+        vec3 btone = mix(band_cool, band_hot, smoothstep(-0.5 * px, 0.5 * px, cut));
+        halo *= 0.75;
+        if (core + band + halo < 0.004) discard;
+        vec3 under = band * btone + (1.0 - band) * tone * halo;
+        ALBEDO = core_tone * core + under * (1.0 - core);
+        ALPHA = core + (band + (1.0 - band) * cover * halo) * (1.0 - core);
     } else {
-        float kc;
-        vec2 c0 = mix(b.xy, a.xy, core_reach);
-        float fill_h = max(r_head - ink, 0.0), fill_t = max(mix(r_head, r_tail, core_reach) - ink, 0.0);
-        float sc = capsule(p, c0, b.xy, fill_t * core_width, fill_h * core_width, kc);
-        if (sc < 0.0)
-            col = core_tone;
-        else if (length(p - b.xy) > cool_from * (len + r_head))
-            col = cool_tone;
-        else
-            col = body_tone;
+        if (core + halo < 0.004) discard;
+        // premultiplied: the core covers, the halo half covers and half lights
+        ALBEDO = core_tone * core + tone * halo * (1.0 - core);
+        ALPHA = core + cover * halo * (1.0 - core);
     }
-    float r = mix(r_tail, r_head, k);
-    float off = length(p - mix(a.xy, b.xy, k));
-    float z = mix(a.z, b.z, k) + sqrt(max(r * r - off * off, 0.0));
+    float z = mix(a.z, b.z, tc) + core_r;
     vec4 clip = PROJECTION_MATRIX * vec4(p, z, 1.0);
     DEPTH = clip.z / clip.w * 0.5 + 0.5;
-    ALBEDO = col;
 }
 ",
     };

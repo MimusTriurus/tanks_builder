@@ -843,6 +843,7 @@ void light() {
             else if (a == "--no-ripples") _ripples.Enabled = false;
             else if (a == "--no-tracer") _tracerOn = false;
             else if (a == "--tracer-smoke") _tracerSmoke = true;
+            else if (a == "--tracer-soft") _tracerSoft = true;
             else if (a == "--scorch") _scorchOn = true;
             else if (a == "--no-grass") _noGrass = true;
             else if (a == "--no-trees") _noTrees = true;
@@ -1537,6 +1538,7 @@ void light() {
         _panel.Heading("tank3d.shell", "снаряд");
         _panel.Toggle("tank3d.shell.tracer", "трассер  (--no-tracer)", () => _tracerOn, v => _tracerOn = v);
         _panel.Toggle("tank3d.shell.smoke", "дымный след  (--tracer-smoke)", () => _tracerSmoke, v => _tracerSmoke = v);
+        _panel.Toggle("tank3d.shell.soft", "трассер без полос  (--tracer-soft)", () => _tracerSoft, v => _tracerSoft = v);
         _panel.Expand("tank3d.shell", true);
         // The wreck (Tank3DBench.Fx): what it leaves on the ground.
         _panel.Heading("tank3d.wreck", "обломок");
