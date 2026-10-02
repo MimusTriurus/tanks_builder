@@ -548,6 +548,9 @@ public sealed partial class Tank3DBench : Node3D
             // splash and the air strike it (Tank3DBench.Water).
             Wash = _ripples,
             CelWater = !_softWater,
+            // the relief in the models' look: the sides stepped by the sun
+            // (Stage3D.CelRelief)
+            CelRelief = !_pbr && !_flatRelief,
         };
         AddChild(_stage);
         _field.ShowField = false;
@@ -864,6 +867,7 @@ void light() {
             else if (a == "--tracer-smoke") _tracerSmoke = true;
             else if (a == "--tracer-soft") _tracerSoft = true;
             else if (a == "--no-walls") _noWalls = true;
+            else if (a == "--no-cel-relief") _flatRelief = true;
             else if (a == "--scorch") _scorchOn = true;
             else if (a == "--no-grass") _noGrass = true;
             else if (a == "--no-trees") _noTrees = true;
@@ -988,6 +992,10 @@ void light() {
     }
 
     private float _driveScripted, _turnScripted;
+
+    /// <summary><c>--no-cel-relief</c>: the board's prisms as the sprite
+    /// boards draw them (<see cref="Stage3D.CelRelief"/> off).</summary>
+    private bool _flatRelief;
 
     /// <summary>The gun fires: the tube strokes back along its bore and the
     /// sprung mass rocks against it - pitch and roll by where the gun points.

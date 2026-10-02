@@ -1167,7 +1167,7 @@ public sealed partial class WallStack : Node3D
     /// and the opposite sign in Z - so the wall is lit like the tanks that stand
     /// beside it, and casts like the trees.
     /// </summary>
-    private static readonly Vector3 Key =
+    internal static readonly Vector3 Key =
         new Vector3(-0.329f, 0.819f, 0.470f).Normalized();
 
     /// <summary>How wide the dark line round a brick is, as a fraction of the

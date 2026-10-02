@@ -2601,6 +2601,27 @@ void fragment() {{
     /// </summary>
     private const float RampShade = 0.88f;
 
+    /// <summary>The shade a side between corners <paramref name="i"/> and
+    /// <paramref name="i"/>+1 takes under <see cref="CelRelief"/>: the sun's
+    /// cosine on its normal, stepped - full sun from 0.5, the middle tone from
+    /// 0.12, the shade under it: 0.75/0.75/0.82 of the earth and 0.40 of it
+    /// over that in full sun. Lighter than the kladka's (0.36/0.38/0.44 and
+    /// 0.72), because the side's own march (<see cref="SoilShader"/>) already
+    /// darkens a side turned from the sun by <see cref="ShadowInk"/>, and the
+    /// two together at the brick's numbers made it all but black, the ground
+    /// gone out of it. On the events board's sun the
+    /// side at 210 is lit (0.52), the one at 270 to the camera the middle
+    /// (0.47), the one at 330 the shade.</summary>
+    private static Color CelSide(int i)
+    {
+        float a = Mathf.DegToRad(60.0f * i + 30.0f);
+        var n = new Vector3(Mathf.Cos(a), 0.0f, Mathf.Sin(a));
+        float lam = n.Dot(WallStack.Key);
+        float v = lam >= 0.5f ? 1.0f : lam >= 0.12f ? 0.5f : 0.0f;
+        return new Color(Earth.R * (0.75f + 0.40f * v), Earth.G * (0.75f + 0.40f * v),
+                         Earth.B * (0.82f + 0.40f * v));
+    }
+
     private static Color WallInk(int heading)
     {
         float k = heading is 270 or 90 ? 1.0f : 0.74f;
@@ -2753,7 +2774,7 @@ void fragment() {{
                 Vector3 a = top + corner[i] + up[i], b = top + corner[j] + up[j];
                 var af = new Vector3(a.X, floor, a.Z);
                 var bf = new Vector3(b.X, floor, b.Z);
-                Color side = WallInk((330 - 60 * i + 360) % 360);
+                Color side = CelRelief ? CelSide(i) : WallInk((330 - 60 * i + 360) % 360);
                 foreach (Vector3 v in new[] { a, b, bf, a, bf, af })
                 {
                     sides.SetColor(side);
@@ -4350,6 +4371,18 @@ void fragment() {
     /// (<see cref="Tank3DBench"/>) turns it on, so the pond stands beside the
     /// models' cel splash, wake and ripples in one hand.</summary>
     public bool CelWater;
+
+    /// <summary>
+    /// The relief in the 3D models' look (<see cref="Tank3DBench"/> alone; the
+    /// sprite boards keep the board they were judged on): the prisms' sides
+    /// stepped by the sun - the cel ramp's three tones (<see cref="CelSide"/>)
+    /// on the <see cref="WallStack.Key"/> that lights the bricks, so the side
+    /// the sun is on is lit, the one to the camera the middle tone and the one
+    /// turned from it the shade - in place of <see cref="WallInk"/>'s two. An
+    /// ink line along the brinks, the feet and the corners was tried with it
+    /// and taken out: at the board's width it all but did not show.
+    /// </summary>
+    public bool CelRelief;
 
     /// <summary>How much of the ripple field's own slope goes into the surface
     /// normal.
