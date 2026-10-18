@@ -44,3 +44,7 @@
 - `.claude/commands/` — `/tank`, `/sprites` и `/repro` для конвейера; `.claude/hooks/` —
   хук стенда на переписанный `project.godot`. `out/` где угодно — черновой
   вывод, не в git.
+- **Fibery — только `fibery-studio`** (stendhal-syndrome-studio.fibery.io, из
+  `.mcp.json` и `godot/.mcp.json`). Другие подключения Fibery в сессии, например коннектор
+  claude.ai к рабочему пространству wargaming, этот проект не трогает: ни
+  читать, ни писать.
