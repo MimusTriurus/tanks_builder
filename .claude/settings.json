@@ -1,4 +1,5 @@
 {
+  "enabledMcpjsonServers": ["fibery-studio"],
   "hooks": {
     "PostToolUse": [
       {
