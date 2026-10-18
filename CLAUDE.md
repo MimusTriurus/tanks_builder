@@ -9,10 +9,25 @@
 | `godot/` | стенд на Godot 4.7 mono (C#): танки едут, стреляют и горят на доске | [godot/CLAUDE.md](godot/CLAUDE.md) |
 | `docs/gdd/` | правила игры (GDD), общие для обоих цехов | [docs/gdd/index.md](docs/gdd/index.md) |
 | `assets/` | исходники: `Input3D/` (.glb), `Parts3D/`, `Scenes/` (.blend, LFS), `Images/`, `Sounds/` (не в git); `Models/Trees/` — модели деревьев генератора для `Tree3D`; `Models/Bunker/` — бункер для `Tank3D` (`bunker.glb` + `bunker.json`, пишет `pipeline/bunker_break.py`) | [pipeline/docs/assets.md](pipeline/docs/assets.md) |
-| `Sprites/` | **контракт**: то, что конвейер пишет и стенд читает | ниже |
-| `Models/` | игровые 3D-варианты танков, `<TAG>/{tank.glb,tank.json}`: конвейер пишет (`export_game`), `Tank3D` читает; `.glb` через Git LFS, сайдкар текстом | [pipeline/docs/repro.md](pipeline/docs/repro.md), [godot/docs/tank3d.md](godot/docs/tank3d.md) |
+| `Sprites/` | **контракт 2D-линии (устаревшей)**: атласы, которые конвейер пишет и спрайтовые сцены стенда читают | ниже |
+| `Models/` | **контракт 3D-линии (основной)**: игровые 3D-варианты танков, `<TAG>/{tank.glb,tank.json}`: конвейер пишет (`export_game`), `Tank3D` читает; `.glb` через Git LFS, сайдкар текстом | [pipeline/docs/repro.md](pipeline/docs/repro.md), [godot/docs/tank3d.md](godot/docs/tank3d.md) |
+
+## Основная линия — 3D, спрайтовая устарела
+
+Решено 2026-09-27: стенд уходит со спрайтовых атласов на 3D-юниты (cel shading,
+до десяти танков на экране, ленты звеньями). **Основная работа идёт с 3D-танками**:
+сцена `Tank3D.tscn` и модели `Models/<TAG>/`, которые конвейер собирает через
+`/repro` (`build_game` → `export_game`).
+
+**2D-вариант — танк-спрайт из атласов `Sprites/`** (харнесс `Main`, танковые
+стенды `TankTest*`, стенд событий и остальные спрайтовые сцены, а в конвейере
+`/tank` и `/sprites`) — **устаревший**. Он остаётся в репозитории, но новое под
+него не делается; эффект, механика или правка, которые нужны танку, делаются
+на 3D-модели. Если задача не говорит, о какой сцене речь, — речь о 3D.
 
 ## Контракт `Sprites/`
+
+Контракт устаревшей 2D-линии; всё ниже верно, пока спрайтовые сцены живы.
 
 Папка на танк, `Sprites/<TAG>/{hull,turret,hex,...}_atlas.{png,json}`. Живых
 наборов пять: LTP, MTP, HTP, TDP, HMP. `Obsolete/` лежит на диске и не в git.
