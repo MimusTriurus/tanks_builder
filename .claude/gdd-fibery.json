@@ -1,0 +1,16 @@
+{
+  "space": "BoT",
+  "repo": "https://github.com/MimusTriurus/tanks_builder/blob/main",
+  "docs": {
+    "index":          { "view": "cc09ac6c-05b7-4980-a933-7d6d0aa2ef0e", "secret": "eeda0687-67c4-4682-9d6a-84ed00f7cd75", "url": "https://stendhal-syndrome-studio.fibery.io/BoT/48" },
+    "match":          { "view": "c8414a30-adbb-4611-8d3e-e89fb1aaf990", "secret": "a0fb53f8-40a7-44d3-8cc1-1cc3b5782e45", "url": "https://stendhal-syndrome-studio.fibery.io/BoT/49" },
+    "field":          { "view": "68d42dc1-1c95-4045-bf1d-51624eb08bef", "secret": "cea66bad-5b6f-443d-8c5d-5019ad4becdc", "url": "https://stendhal-syndrome-studio.fibery.io/BoT/50" },
+    "units":          { "view": "4357bb01-59ab-4415-8c02-0717248bc646", "secret": "bd371402-8c9b-454c-b284-1c760ba49fef", "url": "https://stendhal-syndrome-studio.fibery.io/BoT/51" },
+    "classes":        { "view": "19cc7a34-3ced-43d3-898c-4f3ad9920f41", "secret": "333e399c-74d9-4a80-81d8-80530e6253ea", "url": "https://stendhal-syndrome-studio.fibery.io/BoT/52" },
+    "states":         { "view": "10781700-81bd-4902-b3c0-979f9ee42130", "secret": "c571e08b-dcd7-4f2f-a26d-0230ab64042d", "url": "https://stendhal-syndrome-studio.fibery.io/BoT/53" },
+    "upgrades":       { "view": "5abf60b5-6968-4c8b-b4d9-bbdb1a5ec1e5", "secret": "ec35353d-afe3-4a8f-9fe1-95b65450cba3", "url": "https://stendhal-syndrome-studio.fibery.io/BoT/54" },
+    "contradictions": { "view": "19cbfd77-decf-4c1d-86b9-d850c0012fa4", "secret": "0bc6d381-3952-443b-812f-035827a02ffc", "url": "https://stendhal-syndrome-studio.fibery.io/BoT/55" },
+    "undefined":      { "view": "c44c5403-3438-43dd-83e8-9a587def49c6", "secret": "9b92616d-845d-4960-9394-9c66874832f0", "url": "https://stendhal-syndrome-studio.fibery.io/BoT/56" },
+    "upgrades-draft": { "view": "ec485c36-baf3-455e-87e6-1edb01dc7fba", "secret": "f0b29ed8-57ae-48a8-bd20-361168d7a24a", "url": "https://stendhal-syndrome-studio.fibery.io/BoT/57" }
+  }
+}

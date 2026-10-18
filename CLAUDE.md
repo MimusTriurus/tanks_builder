@@ -41,10 +41,15 @@
   каждого в своём CLAUDE.md.
 - **Новый раздел пишется в тот док, чей предмет он трогает.** Сюда попадает
   только то, что верно про оба цеха до того, как узнал, что трогаешь.
-- `.claude/commands/` — `/tank`, `/sprites` и `/repro` для конвейера; `.claude/hooks/` —
+- `.claude/commands/` — `/tank`, `/sprites` и `/repro` для конвейера, `/gdd-sync` для GDD; `.claude/hooks/` —
   хук стенда на переписанный `project.godot`. `out/` где угодно — черновой
   вывод, не в git.
 - **Fibery — только `fibery-studio`** (stendhal-syndrome-studio.fibery.io, из
   `.mcp.json` и `godot/.mcp.json`). Другие подключения Fibery в сессии, например коннектор
   claude.ai к рабочему пространству wargaming, этот проект не трогает: ни
   читать, ни писать.
+- **GDD зеркалится в Fibery** — пространство BoT, папка GDD, документ на файл
+  `docs/gdd/*.md`. Источник правды — git: копии перезаписываются целиком
+  командой `/gdd-sync`, правка в Fibery до следующей синхронизации не доживёт.
+  Как она устроена и где карта файл → документ — в
+  [.claude/commands/gdd-sync.md](.claude/commands/gdd-sync.md).
