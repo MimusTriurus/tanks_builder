@@ -123,6 +123,11 @@ public sealed partial class Stage3D : Node3D
     public const int PaintSize = 512;
 
     private Camera3D _camera = null!;
+
+    /// <summary>The stage's own camera, once it is in the tree - what a caller
+    /// that draws through it needs (the trees' outline, <c>CrownOutline</c>).</summary>
+    public Camera3D Camera => _camera;
+
     private MeshInstance3D _tops = null!;
     private MeshInstance3D _sides = null!;
     private MeshInstance3D _ring = null!;

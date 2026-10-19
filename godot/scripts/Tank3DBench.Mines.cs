@@ -38,7 +38,7 @@ public sealed partial class Tank3DBench
     /// <summary>How wide the mine is drawn, a share of the hex width - about
     /// four and a half times life, judged so it reads at board zoom and stays
     /// well inside the shadow of a hull parked on it.</summary>
-    private const float MineWide = 0.14f;
+    private const float MineWide = BoardDress.MineWide;
 
     /// <summary>How hard the charge is against the guns' firepower I..V -
     /// the crater and the burst's size (<see cref="CraterShare"/>): 10 kg of TNT
@@ -78,41 +78,17 @@ public sealed partial class Tank3DBench
         List<Vector2I> due = Mines.Marked(_field);
         if (due.Count == 0)
             return;
-        string glb = AssetRoot.Mine + "/tm62.glb";
-        var doc = new GltfDocument();
-        var state = new GltfState();
-        if (doc.AppendFromFile(glb, state) != Error.Ok)
+        if (BoardDress.Mine(out string? note) is not { } art)
         {
-            GD.Print($"tank3d: no mine model at {glb} - {due.Count} minefield(s) left bare");
+            GD.Print($"tank3d: {note} - {due.Count} minefield(s) left bare");
             return;
         }
-        float across = 0.328f;   // tm62.json's size.diameter, if it is not there
-        try
-        {
-            using JsonDocument side = JsonDocument.Parse(File.ReadAllText(AssetRoot.Mine + "/tm62.json"));
-            across = side.RootElement.GetProperty("size").GetProperty("diameter").GetSingle();
-        }
-        catch (System.Exception e)
-        {
-            GD.Print($"tank3d: tm62.json: {e.Message} - {across} m across");
-        }
-        float scale = MineWide * HexWidth / across;
+        if (note is not null)
+            GD.Print($"tank3d: {note}");
         foreach (Vector2I cell in due)
         {
-            var model = (Node3D)doc.GenerateScene(state);
-            if (!_pbr)
-                Toon.Dress(model);
-            Vector2 flat = _field.FlatAnchor(cell) + _field.CentreOffset + Mines.Offset(cell, _tile.HexRect.Size);
-            Vector3 at = Foot(new Vector3(flat.X, 0.0f, flat.Y / Squash));
-            // Turned by the cell's hash too, so a row of them is not a stamp.
-            float turn = Plumes.Hash01(cell.Y * 1021 + cell.X, 271) * Mathf.Tau;
-            var node = new Node3D
-            {
-                Name = $"Mine_{cell.X}_{cell.Y}",
-                Transform = new Transform3D(new Basis(Vector3.Up, turn).Scaled(Vector3.One * scale), at),
-            };
-            node.AddChild(model);
-            AddChild(node);
+            Node3D node = BoardDress.LayMine(this, art, _field, cell, _tile.HexRect.Size, _pbr, Squash, RiseFactor,
+                                             out Vector3 at);
             _mines.Add(new Laid { Cell = cell, Node = node, At = at });
             GD.Print($"tank3d: mine on {cell} at ({at.X:F0}, {at.Z:F0}), {MineWide * HexWidth:F0} px across");
         }

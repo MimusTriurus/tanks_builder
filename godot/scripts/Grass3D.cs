@@ -105,6 +105,8 @@ public sealed partial class Grass3D : Node3D
         public Vector2 From;
         public CelCloud? Smoke;
         public readonly List<(Vector3 At, float Born, float Seed)> Puffs = new();
+        /// <summary>The meshes it was laid as, for <see cref="TakeUp"/>.</summary>
+        public readonly List<Node> Nodes = new();
     }
 
     private readonly List<Meadow> _meadows = new();
@@ -148,7 +150,7 @@ public sealed partial class Grass3D : Node3D
         _laying = new Meadow { Mid = mid, Radius = radius, Seed = (seed % 97) * 1.37f, Speed = FrontM * Ppm };
         _meadows.Add(_laying);
         if (kind is Kind.Painted or Kind.PaintedTufts or Kind.CelTufts)
-            AddChild(new MeshInstance3D
+            Put(new MeshInstance3D
             {
                 Name = $"Painted{seed}",
                 Mesh = Hexes(mid, radius, 1),
@@ -159,7 +161,7 @@ public sealed partial class Grass3D : Node3D
         {
             ShaderMaterial ink = Ink(ShellShader, mid, radius, seed);
             ink.SetShaderParameter("tall", ShellTallM * Ppm);
-            AddChild(new MeshInstance3D
+            Put(new MeshInstance3D
             {
                 Name = $"Shells{seed}",
                 Mesh = Hexes(mid, radius, ShellCount + 1, 24),
@@ -168,7 +170,7 @@ public sealed partial class Grass3D : Node3D
             });
         }
         if (kind is Kind.PaintedTufts or Kind.CelTufts)
-            AddChild(new MeshInstance3D
+            Put(new MeshInstance3D
             {
                 Name = $"Tufts{seed}",
                 Mesh = Tufts(mid, radius, seed, clear),
@@ -177,6 +179,32 @@ public sealed partial class Grass3D : Node3D
             });
         _laying = null;
         return _meadows.Count - 1;
+    }
+
+    private void Put(MeshInstance3D mesh)
+    {
+        AddChild(mesh);
+        _laying?.Nodes.Add(mesh);
+    }
+
+    /// <summary>
+    /// Meadow <paramref name="meadow"/> taken up: its meshes freed and its
+    /// materials out of the wind's list. Its number stays taken - numbers are
+    /// what callers hold - and answers nothing after. The map editor's: a
+    /// stroke lays again only the cells it moved, where laying the whole board
+    /// again was six seconds on ABBEY.
+    /// </summary>
+    public void TakeUp(int meadow)
+    {
+        if (meadow < 0 || meadow >= _meadows.Count)
+            return;
+        Meadow m = _meadows[meadow];
+        foreach (Node node in m.Nodes)
+            node.QueueFree();
+        m.Nodes.Clear();
+        foreach (ShaderMaterial ink in m.Inks)
+            _inks.Remove(ink);
+        m.Inks.Clear();
     }
 
     /// <summary>

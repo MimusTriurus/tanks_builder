@@ -45,8 +45,8 @@ namespace TankSpriteTest;
 public sealed partial class Tank3DBench
 {
     private bool _noGrass, _noTrees;
-    private string[] _treeNames = { "Oak_001", "Oak_002", "Oak_003", "Oak_004", "Oak_005", "Oak_006" };
-    private int _woodCount = 7;
+    private string[] _treeNames = BoardDress.Oaks;
+    private int _woodCount = BoardDress.WoodCount;
     private float _wind = 1.0f, _weather;
 
     private Grass3D? _grass;
@@ -161,21 +161,13 @@ public sealed partial class Tank3DBench
     }
 
     /// <summary>
-    /// <see cref="_woodCount"/> models on each wooded cell, <c>Tree3D</c>'s
-    /// <c>--wood</c>: one in the middle, the rest on a ring 60-80 px out (y
-    /// squashed as the screen has it), each turned its own way by a hash of
-    /// where it stands - the crowns overlap as a wood's do.
+    /// <see cref="_woodCount"/> models on each wooded cell, laid as
+    /// <see cref="BoardDress.Spots"/> lays them - the editor's board plants the
+    /// same wood - each made a <see cref="Planted"/> with its fire and its fall.
     /// </summary>
     private void Plant()
     {
-        var wooded = new List<Vector2I>();
-        for (int q = 0; q < _field!.Columns; q++)
-        for (int r = 0; r < _field.Rows; r++)
-        {
-            var cell = new Vector2I(q, r);
-            if (_field.InBounds(cell) && _field.CoverAt(cell) == Cover.Forest)
-                wooded.Add(cell);
-        }
+        List<Vector2I> wooded = BoardDress.Wooded(_field!);
         if (wooded.Count == 0)
             return;
         foreach (Vector2I cell in wooded)
@@ -191,85 +183,50 @@ public sealed partial class Tank3DBench
         }
         ulong t0 = Time.GetTicksMsec();
         foreach (Vector2I cell in wooded)
-        {
-            Vector2 flat = _field.FlatAnchor(cell) + _field.CentreOffset;
-            for (int i = 0; i < _woodCount; i++)
-            {
-                Vector2 off = Vector2.Zero;
-                if (i > 0)
-                {
-                    float a = Mathf.Tau * (i - 1) / Mathf.Max(_woodCount - 1, 1) + 0.4f + 0.35f * CelPuff.Hash(i, 613);
-                    float d = 60.0f + 20.0f * CelPuff.Hash(i, 617);
-                    off = new Vector2(Mathf.Cos(a) * d, Mathf.Sin(a) * d * Squash);
-                }
-                Vector2 at = flat + off;
-                int salt = cell.X * 97 + cell.Y * 31 + i;
-                Stand(_treeNames[(salt + i) % _treeNames.Length], new Vector3(at.X, 0.0f, at.Y / Squash),
-                      Mathf.Tau * CelPuff.Hash(salt, 611), at, cell);
-            }
-        }
+            foreach (BoardDress.TreeSpot spot in BoardDress.Spots(_field!, cell, _treeNames, _woodCount, Squash))
+                Stand(spot);
         foreach (Vector2I cell in wooded)
             _woodMiddle += CellMiddle(cell) / wooded.Count;
         GD.Print($"tank3d: wood on {wooded.Count} cells, {_trees.Count} trees in {Time.GetTicksMsec() - t0} ms");
     }
 
-    private void Stand(string name, Vector3 where, float yaw, Vector2 flat, Vector2I cell)
+    private void Stand(BoardDress.TreeSpot spot)
     {
-        if (TreeModel.Load(name, _pbr, out string? error) is not { } model)
+        if (BoardDress.Tree(this, spot, Foot(spot.At), _pbr, _crowns, $"{spot.Name}.{_trees.Count}",
+                            out TreeModel.Loaded? model, out string? error) is not { } holder)
         {
             GD.Print($"tank3d: {error}");
             return;
         }
-        _crowns?.Ghost(model.Scene, model.Burn, model.Leaves);
-        var holder = new Node3D
-        {
-            Name = $"{name}.{_trees.Count}", Scale = Vector3.One * model.Ppm,
-            Rotation = new Vector3(0.0f, yaw, 0.0f),
-        };
-        holder.AddChild(model.Scene);
-        AddChild(holder);
-        holder.Position = Foot(where);
-        TreeModel.Margin(holder);
-        (float phase, float rate) = TreeModel.SwayOf(flat);
+        (float phase, float rate) = TreeModel.SwayOf(spot.Flat);
         var tree = new Planted
         {
-            Holder = holder, Model = model, Cell = cell, Fire = TreeModel.Fire(this, name, model),
-            Fall = TreeFall.For(model, holder, model.Burn, this), Phase = phase, Rate = rate,
+            Holder = holder, Model = model!, Cell = spot.Cell, Fire = TreeModel.Fire(this, spot.Name, model!),
+            Fall = TreeFall.For(model!, holder, model!.Burn, this), Phase = phase, Rate = rate,
         };
-        tree.Stagger = tree.Hashed = TreeModel.StaggerOf(flat);
+        tree.Stagger = tree.Hashed = TreeModel.StaggerOf(spot.Flat);
         foreach (Vector3 seat in TreeModel.Seats)
             tree.Seats.Add(new Vector3(seat.X * model.Width, seat.Y * model.Height, seat.Z * model.Depth));
         _trees.Add(tree);
     }
 
     /// <summary>
-    /// The cells' grass: <see cref="Grass3D.Kind.CelTufts"/> on every level
-    /// cell of plain ground with nothing on it but a wood - the tufts keeping
-    /// off the trunks - at the trees' metre, and one press map over the board.
+    /// The cells' grass: <see cref="Grass3D.Kind.CelTufts"/> on every cell
+    /// <see cref="BoardDress.Lawned"/> grows on - the tufts keeping off the
+    /// trunks - at the trees' metre, and one press map over the board.
     /// </summary>
     private void Lawn()
     {
         float r = _tile!.HexRect.Size.X * 0.5f;
-        var span = new Rect2();
-        bool first = true;
+        Rect2 span = BoardDress.LawnSpan(_field!, r, Squash, RiseFactor);
         var lay = new List<Vector2I>();
         for (int q = 0; q < _field!.Columns; q++)
         for (int w = 0; w < _field.Rows; w++)
-        {
-            var cell = new Vector2I(q, w);
-            if (!_field.InBounds(cell))
-                continue;
-            Vector3 m = CellMiddle(cell);
-            var box = new Rect2(m.X - r, m.Z - r, 2.0f * r, 2.0f * r);
-            span = first ? box : span.Merge(box);
-            first = false;
-            if (_field.FoundationAt(cell) == Foundation.Solid && !_field.IsRamp(cell) && !_field.IsWater(cell)
-                && _field.CoverAt(cell) is Cover.None or Cover.Forest)
-                lay.Add(cell);
-        }
+            if (BoardDress.Lawned(_field, new Vector2I(q, w)))
+                lay.Add(new Vector2I(q, w));
         _grass = new Grass3D
         {
-            Name = "Grass", Ppm = _trees.Count > 0 ? _trees[0].Model.Ppm : 17.0f, Wind = _wind,
+            Name = "Grass", Ppm = _trees.Count > 0 ? _trees[0].Model.Ppm : BoardDress.GrassPpm, Wind = _wind,
             Recover = GrassRecover,
             GustRate = TreeModel.GustRate, GustTravel = TreeModel.GustTravel, ShadowInk = Stage3D.ShadowInk.A,
         };

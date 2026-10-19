@@ -504,33 +504,12 @@ public sealed partial class Tank3DBench
         BunkerProp.Sizes? bunker = _noBunker ? null : BunkerProp.ReadSizes();
         foreach (Vector2I cell in map.Walled())
         {
-            (WallKit.Recipe recipe, int bearing) = map.MasonryAt(cell).Laying()
-                ?? (new WallKit.Recipe { Sides = TankBench.RingSides }, HexField.EdgeHeadings[0]);
-            (CaponKit.Recipe Recipe, int Bearing)? shelter = map.MasonryAt(cell)?.Sheltering();
-            if (shelter is { } s)
-            {
-                bearing = s.Bearing;
-                // The rules' box made the model's: the bomb lands on the roof
-                // that is drawn and a round passes the slit that is drawn.
-                if (bunker is { } size)
-                {
-                    s.Recipe.WallHigh = size.RoofUnder;
-                    s.Recipe.RoofThick = size.Height - size.RoofUnder;
-                    s.Recipe.SlitLow = size.SlitLow;
-                    s.Recipe.SlitHigh = size.SlitHigh;
-                }
-            }
-            var prop = new WallProp
-            {
-                Field = _field, Stage = _stage, Cell = cell,
-                Recipe = recipe, Capon = shelter?.Recipe, Borrow = null,
-                Channel = _walls.Count,
-                // the model's look on the bricks, as on the tank and the trees
-                Cel = !_pbr,
-            };
-            AddChild(prop);
-            prop.Bearing = bearing;
-            prop.Build();
+            // A walled cell with no masonry of its own stands the bench's ring.
+            if (BoardDress.Wall(this, _field, _stage, cell, map.MasonryAt(cell), _walls.Count, cel: !_pbr,
+                                solved: false, bunker,
+                                (new WallKit.Recipe { Sides = TankBench.RingSides }, HexField.EdgeHeadings[0]))
+                    is not { } prop)
+                continue;
             _walls.Add(prop);
             WallRestate(prop, laying: true);
             GD.Print($"tank3d: wall on {cell}, sides {Convert.ToString(_field.SidesAt(cell), 2).PadLeft(6, '0')}, "
@@ -544,21 +523,12 @@ public sealed partial class Tank3DBench
     /// turned as it is turned; the prop's own pieces put out of sight.</summary>
     private void StandBunker(WallProp prop)
     {
-        if (prop.Stack is not { } stack)
-            return;
-        var bunker = new BunkerProp
+        if (BoardDress.Bunker(this, prop, WallRadius, _pbr, out string? problem) is not { } bunker)
         {
-            Name = $"Bunker{prop.Cell.X}_{prop.Cell.Y}",
-            Radius = WallRadius, Anchor = stack.Anchor, Lay = prop.Lay, Cell = prop.Cell, Pbr = _pbr,
-        };
-        AddChild(bunker);
-        if (!bunker.Build())
-        {
-            GD.PrintErr($"tank3d: bunker on {prop.Cell}: {bunker.Problem}");
-            bunker.QueueFree();
+            if (problem is not null)
+                GD.PrintErr($"tank3d: bunker on {prop.Cell}: {problem}");
             return;
         }
-        stack.Visible = false;
         _bunkers[prop.Cell] = bunker;
         GD.Print($"tank3d: bunker on {prop.Cell}, {bunker.Pieces} chunks, slit to {Mathf.RoundToInt(prop.Bearing)}");
     }

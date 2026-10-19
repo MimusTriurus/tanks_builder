@@ -610,37 +610,10 @@ public sealed partial class Tank3DBench : Node3D
 
     private void BuildWorld()
     {
-        var env = new Godot.Environment
-        {
-            BackgroundMode = Godot.Environment.BGMode.Color,
-            // Flat: the soil art's mean, lit about as the cells are, so the
-            // seams between their soft rims read as more ground. On the board:
-            // the grey the other benches stand their boards on, because past
-            // the rim is off the board, not more of it.
-            BackgroundColor = _flat ? new Color(0.60f, 0.50f, 0.33f) : new Color(0.3f, 0.3f, 0.3f),
-            AmbientLightSource = Godot.Environment.AmbientSource.Color,
-            AmbientLightColor = new Color(0.62f, 0.64f, 0.70f),
-            AmbientLightEnergy = 0.55f,
-        };
-        AddChild(new WorldEnvironment { Environment = env });
-        // From over the camera's left shoulder, the side the sprites are lit
-        // from, high enough that the shadow stays short and on the ground.
-        _sun = new DirectionalLight3D
-        {
-            RotationDegrees = new Vector3(-52.0f, -35.0f, 0.0f),
-            LightEnergy = 1.25f,
-            ShadowEnabled = true,
-            DirectionalShadowMode = DirectionalLight3D.ShadowMode.Parallel2Splits,
-            DirectionalShadowMaxDistance = 3000.0f,
-            // Twice the default: on the slab FrameShadow fits, a texel is
-            // fine enough that the cel ramp's step cut the turret's sides
-            // into acne stripes along its loft at 2; at 7 the contact shadows
-            // under the turret and the fenders thin away.
-            ShadowNormalBias = 4.0f,
-            // out to the edge of the map, not faded from 0.8 of it: the
-            // tank's shadow falls just past the tank (FrameShadow)
-            DirectionalShadowFadeStart = 1.0f,
-        };
+        // Flat: the soil art's mean, lit about as the cells are, so the seams
+        // between their soft rims read as more ground (BoardDress.World).
+        AddChild(BoardDress.World(_flat));
+        _sun = BoardDress.Sun();
         AddChild(_sun);
     }
 
@@ -717,69 +690,13 @@ public sealed partial class Tank3DBench : Node3D
     /// <summary>The cell the tank opens on: the map's first parking.</summary>
     private Vector2I _home;
 
-    /// <summary>
-    /// Where the model's shadow falls: a skin over the board's top faces that is
-    /// clear where the sun reaches and dark where it does not.
-    ///
-    /// <b>The board is unshaded</b> - its light is painted - so the sun this
-    /// scene lights the model with has nothing to fall on. The skin is the
-    /// board's own tops (<see cref="Stage3D.GroundTriangles"/>, the faces the
-    /// mesh is built from), lifted by the stage's clearance, and it multiplies
-    /// what is under it: by one where the sun reaches, by one less the board's
-    /// shadow ink where it does not (<see cref="ShadeShader"/>).
-    /// </summary>
+    /// <summary>Where the model's shadow falls - <see cref="BoardDress.Shadows"/>,
+    /// the skin over the board's tops.</summary>
     private void BuildShadows()
     {
-        if (_stage is null)
-            return;
-        List<Vector3> tris = _stage.GroundTriangles();
-        if (tris.Count == 0)
-            return;
-        Vector3 lie = Stage3D.Clear(Squash, RiseFactor);
-        var st = new SurfaceTool();
-        st.Begin(Mesh.PrimitiveType.Triangles);
-        foreach (Vector3 v in tris)
-        {
-            st.SetNormal(Vector3.Up);
-            st.AddVertex(v + lie);
-        }
-        var ink = new ShaderMaterial { Shader = ShadeShader, RenderPriority = Stage3D.ShadowOrder };
-        ink.SetShaderParameter("ink", Stage3D.ShadowInk.A);
-        var skin = new MeshInstance3D
-        {
-            Name = "Shadows",
-            Mesh = st.Commit(),
-            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
-            MaterialOverride = ink,
-        };
-        AddChild(skin);
+        if (_stage is not null && BoardDress.Shadows(_stage, Squash, RiseFactor) is { } skin)
+            AddChild(skin);
     }
-
-    /// <summary>
-    /// The skin's shader: white, lit only by the sun's visibility, multiplied
-    /// into the frame. Emission carries the part the sun cannot take away and
-    /// the light the rest, so the product is one in the sun and <c>1 - ink</c>
-    /// in shadow - the board's own ink, as <see cref="Stage3D.ShadowInk"/>
-    /// lays it over the ground under a tree.
-    ///
-    /// <b>Not <c>shadow_to_opacity</c></b>, which is the stock answer and draws
-    /// nothing at all under <c>gl_compatibility</c>: measured, the skin came out
-    /// clear in the model's shadow too.
-    /// </summary>
-    private static readonly Shader ShadeShader = new()
-    {
-        Code = @"
-shader_type spatial;
-render_mode blend_mul, depth_draw_never, cull_disabled, ambient_light_disabled;
-uniform float ink = 0.45;
-void fragment() {
-    ALBEDO = vec3(1.0);
-    EMISSION = vec3(1.0 - ink);
-}
-void light() {
-    DIFFUSE_LIGHT += vec3(ink * ATTENUATION);
-}",
-    };
 
     // --- standing on the board ----------------------------------------------
 

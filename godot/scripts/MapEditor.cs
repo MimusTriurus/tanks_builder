@@ -289,9 +289,14 @@ public sealed partial class MapEditor : SceneRoot
         _stage = new Stage3D
         {
             Field = _field, Origin = Vector2.Zero, Eye = _camera,
-            Wood = _grove, Blaze = _fire, Surf = _surf, Sea = _sea,
+            // No Wood: the trees are the models MapEditor.Dress stands, as on
+            // the 3D bench; the grove is only asked, never drawn.
+            Blaze = _fire, Surf = _surf, Sea = _sea,
+            // the 3D bench's water and relief (Tank3DBench.BuildBoard)
+            CelWater = true, CelRelief = true,
         };
         AddChild(_stage);
+        Dress();
 
         // Both canvas answers put away, WoodBench's pair and for its reasons: the
         // field's own hexagons would be a canvas item over the whole 3D world,
@@ -338,6 +343,8 @@ public sealed partial class MapEditor : SceneRoot
     public override void _Process(double delta)
     {
         _stage?.Place(Array.Empty<Vehicle>());
+        Redress();
+        CrownsFollow();
         _frame++;
         // The path the author takes, and the one that was broken: type into the
         // spin box and press OK without committing it. Value still says the old
@@ -521,7 +528,10 @@ public sealed partial class MapEditor : SceneRoot
                      + $"{_faults.Count(f => f.Fatal)} fatal fault(s), "
                      + $"said \"{_said}\"");
         }
-        if (CapturePath is not null && _frame >= CaptureAt)
+        // Past the dressing too: the first frame lays every tree and the grass,
+        // and a capture taken in it is the window before anything was drawn -
+        // white, measured (MapEditor.Dress).
+        if (CapturePath is not null && _frame >= CaptureAt && _frame >= _dressedFrame + 3)
         {
             Capture(CapturePath);
             GetTree().Quit();
@@ -673,11 +683,15 @@ public sealed partial class MapEditor : SceneRoot
         }
         _field.QueueRedraw();
         _marks.QueueRedraw();
+        _dressStale = true;
         Bricks();
         Say();
     }
 
     private readonly List<WallProp> _bricks = new();
+
+    /// <summary>The bunker models standing over the capons among them.</summary>
+    private readonly List<BunkerProp> _shelters = new();
 
     /// <summary>What the standing walls were built from, so that a stroke which
     /// touched no masonry does not lay every wall on the board again.</summary>
@@ -724,38 +738,30 @@ public sealed partial class MapEditor : SceneRoot
             return;
         _stood = want;
 
-        foreach (WallProp was in _bricks)
+        foreach (Node3D was in _bricks.Cast<Node3D>().Concat(_shelters))
         {
             RemoveChild(was);
             was.QueueFree();
         }
         _bricks.Clear();
+        _shelters.Clear();
 
+        // The 3D bench's masonry (BoardDress.Wall): the model's line on the
+        // bricks, and a capon as the bunker model stands it.
+        BunkerProp.Sizes? bunker = BunkerProp.ReadSizes();
         foreach (Vector2I cell in walled)
         {
-            if (_edit.MasonryAt(cell)?.Laying() is not
-                    ({ } recipe, int bearing))
+            if (BoardDress.Wall(this, _field, _stage, cell, _edit.MasonryAt(cell), _bricks.Count, cel: true,
+                                solved: true, bunker) is not { } prop)
                 continue;
-            // Or the concrete capon, if the block says so - WallProp.Capon.
-            (CaponKit.Recipe Recipe, int Bearing)? shelter =
-                _edit.MasonryAt(cell)!.Sheltering();
-            if (shelter is { } s)
-                bearing = s.Bearing;
-            var prop = new WallProp
-            {
-                Field = _field,
-                Stage = _stage,
-                Cell = cell,
-                Recipe = recipe,
-                Capon = shelter?.Recipe,
-                Borrow = null,
-                Channel = _bricks.Count,
-            };
-            AddChild(prop);
-            prop.Solved = true;
-            prop.Bearing = bearing;
-            prop.Build();
             _bricks.Add(prop);
+            if (!prop.Concrete || bunker is null)
+                continue;
+            if (BoardDress.Bunker(this, prop, _field.Atlas.HexRect.Size.X * 0.5f, pbr: false,
+                                  out string? problem) is { } shelter)
+                _shelters.Add(shelter);
+            else
+                GD.Print($"editor: bunker on {cell}: {problem}");
         }
     }
 
