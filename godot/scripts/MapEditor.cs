@@ -104,6 +104,9 @@ public sealed partial class MapEditor : SceneRoot
 
     /// <summary><c>--hover Q,R</c>: the pointer put on a cell for a capture.</summary>
     private Vector2I? _hovered;
+
+    /// <summary><c>--turn N</c>: the board turned N hex sides once it is framed.</summary>
+    private int _turnSides;
     private bool _painting;
     private bool _erasing;
 
@@ -180,6 +183,12 @@ public sealed partial class MapEditor : SceneRoot
                     else if (what == "grass") _showGrass = false;
                     else if (what == "walls") _showWalls = false;
                 }
+            else if (args[i] == "--turn" && i + 1 < args.Length
+                     && int.TryParse(args[i + 1], out int sides))
+            {
+                _turnSides = sides;
+                i++;
+            }
             else if (args[i] == "--tab" && i + 1 < args.Length)
                 _tab = args[++i].ToLowerInvariant() switch
                 {
@@ -345,8 +354,13 @@ public sealed partial class MapEditor : SceneRoot
 
         // The marks go over the stage rather than into the field's pass - see
         // Overlay.
-        _marks = new Overlay { Editor = this, ZIndex = 4096 };
-        AddChild(_marks);
+        // On a layer of its own, in screen px: every point is the world's,
+        // projected through the stage's camera (MapEditor.View), so the marks
+        // follow the board when it turns. Under the panels' layer.
+        var marking = new CanvasLayer { Name = "Marks", Layer = 0 };
+        AddChild(marking);
+        _marks = new Overlay { Editor = this };
+        marking.AddChild(_marks);
 
         SettleForProof(CapturePath is not null);
         Ui();
@@ -362,6 +376,11 @@ public sealed partial class MapEditor : SceneRoot
             case "open": Chose(Item.Open); break;
             case "saveas": Chose(Item.SaveAs); break;
             case "sheet": Act(More.Sheet); break;
+        }
+        if (_turnSides != 0)
+        {
+            TurnBy(_turnSides);
+            _yaw = _yawWant;
         }
         if (_hovered is { } hover)
         {
@@ -391,6 +410,7 @@ public sealed partial class MapEditor : SceneRoot
         _stage?.Place(Array.Empty<Vehicle>());
         Redress();
         CrownsFollow();
+        Turn((float)delta);
         _frame++;
         // The path the author takes, and the one that was broken: type into the
         // spin box and press OK without committing it. Value still says the old
@@ -546,6 +566,34 @@ public sealed partial class MapEditor : SceneRoot
             GD.Print($"content: letters {string.Join("", mudAt.Select(c => _edit.LetterAt(c)))}, "
                      + $"bunker laid {laid} {bunkerWhy}, saved {kept}, read back: {back}");
         }
+        // The ray against the marks (MapEditor.View): every cell's top middle,
+        // projected to the screen and picked back, must come back the same cell
+        // - at whatever turn --turn put the board.
+        if (_open == "pick" && _frame == 20)
+        {
+            int cells = 0, wrong = 0, hidden = 0;
+            string first = "";
+            for (int q = 0; q < _field.Columns; q++)
+            for (int r = 0; r < _field.Rows; r++)
+            {
+                var cell = new Vector2I(q, r);
+                if (!_field.InBounds(cell))
+                    continue;
+                cells++;
+                Vector2I back = RayCell(TopOnScreen(cell));
+                // Behind a higher cell in front of it: the ray is right to stop
+                // there - the pointer cannot reach that middle either.
+                if (back != cell && _field.InBounds(back) && _field.TopAt(back) > _field.TopAt(cell))
+                    hidden++;
+                else if (back != cell)
+                {
+                    wrong++;
+                    if (first.Length == 0)
+                        first = $" first ({q},{r}) '{_edit.LetterAt(cell)}'{(_edit.IsRamp(cell) ? " ramp" : "")} -> ({back.X},{back.Y}) '{_edit.LetterAt(back)}'{(_edit.IsRamp(back) ? " ramp" : "")}";
+                }
+            }
+            GD.Print($"pick: turn {_yaw:F2}, {cells} cells, {hidden} behind a higher one, {wrong} picked wrong{first}");
+        }
         if (_open == "unwall" && _frame == 20)
         {
             var cell = new Vector2I(3, 3);
@@ -657,6 +705,8 @@ public sealed partial class MapEditor : SceneRoot
     /// </summary>
     private void Home()
     {
+        // The game's angle again first: the framing below is worked out for it.
+        Unturn();
         Rect2 box = Extent();
         // The band between the panels rather than the whole window, and the
         // camera moved off centre by half the difference - otherwise the board
@@ -943,7 +993,7 @@ public sealed partial class MapEditor : SceneRoot
     /// says both at length.
     /// </summary>
     private Vector2I Pointed() =>
-        _field.CellAt(_field.ToLocal(GetGlobalMousePosition()));
+        RayCell(GetViewport().GetMousePosition());
 
     private IReadOnlyList<Vector2I> Patch() =>
         _edit.Inside(_under) ? _edit.Ring(_under, _radius)
@@ -967,6 +1017,8 @@ public sealed partial class MapEditor : SceneRoot
             if (editor._field.Atlas is null)
                 return;
             Font font = ThemeDB.FallbackFont;
+            // Sizes on the board in its px, brought to the screen's.
+            float z = editor._camera.Zoom.X;
 
             for (int r = 0; r < editor._edit.Rows; r++)
             for (int q = 0; q < editor._edit.Columns; q++)
@@ -974,7 +1026,7 @@ public sealed partial class MapEditor : SceneRoot
                 var cell = new Vector2I(q, r);
                 if (!editor._edit.OnBoard(cell))
                     continue;
-                Vector2 at = editor.Top(cell);
+                Vector2 at = editor.TopOnScreen(cell);
 
                 if (editor._layers.HasFlag(Layers.Levels))
                 {
@@ -994,8 +1046,8 @@ public sealed partial class MapEditor : SceneRoot
                     int heading = editor._field.RampHeading(cell);
                     if (heading >= 0)
                     {
-                        Vector2 to = editor.Top(HexField.Step(cell, heading));
-                        Vector2 dir = (to - at).Normalized() * 22.0f;
+                        Vector2 to = editor.TopOnScreen(HexField.Step(cell, heading));
+                        Vector2 dir = (to - at).Normalized() * 22.0f * z;
                         DrawLine(at - dir * 0.4f, at + dir,
                             new Color(1.0f, 0.95f, 0.6f, 0.9f), 3.0f);
                         DrawCircle(at + dir, 4.0f,
@@ -1011,8 +1063,8 @@ public sealed partial class MapEditor : SceneRoot
                     && editor._sites.TryGetValue(cell, out int up)
                     && !editor._edit.IsRamp(cell))
                 {
-                    Vector2 to = editor.Top(HexField.Step(cell, up));
-                    DrawLine(at, at + (to - at).Normalized() * 16.0f,
+                    Vector2 to = editor.TopOnScreen(HexField.Step(cell, up));
+                    DrawLine(at, at + (to - at).Normalized() * 16.0f * z,
                         new Color(SiteInk, 0.8f), 2.0f);
                 }
 
@@ -1026,13 +1078,13 @@ public sealed partial class MapEditor : SceneRoot
                     foreach (int heading in wall.Standing())
                     {
                         (Vector2 a, Vector2 b) =
-                            editor._field.EdgeEnds(cell, heading);
+                            editor.EdgeOnScreen(cell, heading);
                         DrawLine(a, b, BrickInk, 5.0f);
                     }
                 }
 
                 if (cell == editor._picked)
-                    DrawArc(at, 20.0f, 0.0f, Mathf.Tau, 18,
+                    DrawArc(at, 20.0f * z, 0.0f, Mathf.Tau, 18,
                         new Color(1, 1, 1, 0.75f), 2.0f);
             }
 
@@ -1040,10 +1092,10 @@ public sealed partial class MapEditor : SceneRoot
                 for (int i = 0; i < editor._edit.Homes.Count; i++)
                 {
                     Parking home = editor._edit.Homes[i];
-                    Vector2 at = editor.Top(home.Cell);
-                    DrawArc(at, 26.0f, 0.0f, Mathf.Tau, 24,
+                    Vector2 at = editor.TopOnScreen(home.Cell);
+                    DrawArc(at, 26.0f * z, 0.0f, Mathf.Tau, 24,
                         new Color(0.6f, 1.0f, 0.9f, 0.9f), 2.5f);
-                    DrawString(font, at + new Vector2(-4.0f, -28.0f),
+                    DrawString(font, at + new Vector2(-4.0f, -28.0f * z - 4.0f),
                         (i + 1).ToString(), HorizontalAlignment.Left, -1, 15,
                         new Color(0.6f, 1.0f, 0.9f));
                 }
@@ -1060,7 +1112,7 @@ public sealed partial class MapEditor : SceneRoot
         if (what is InputEventMouseMotion pan
             && (pan.ButtonMask & MouseButtonMask.Middle) != 0)
         {
-            _camera.Position -= pan.Relative / _camera.Zoom;
+            _camera.Position -= Panned(pan.Relative);
             return;
         }
 
@@ -1150,6 +1202,9 @@ public sealed partial class MapEditor : SceneRoot
             case Key.G: _layers ^= Layers.Sites; break;
             case Key.B: _layers ^= Layers.Flood; break;
             case Key.Home: Home(); return;
+            // MapEditor.View: the board turned a hex side either way.
+            case Key.Comma: TurnBy(1); return;
+            case Key.Period: TurnBy(-1); return;
             // MapEditor.Help: the dressing shown or hidden, the sheet, Escape.
             case Key.T: Act(More.Trees); return;
             case Key.M: Act(More.Grass); return;

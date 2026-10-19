@@ -589,8 +589,13 @@ public sealed partial class Grass3D : Node3D
         for (int i = 0; i < clumps.Length; i++)
             clumps[i] = new Vector2(rng.RandfRange(-radius, radius), rng.RandfRange(-radius, radius));
         float fade = FadeM * Ppm;
-        var st = new SurfaceTool();
-        st.Begin(Mesh.PrimitiveType.Triangles);
+        // Plain arrays and one hand-over (Arrays): a SurfaceTool is four calls
+        // into the engine a vertex, and a cell is some fifty thousand of them -
+        // thirty milliseconds a cell, the most of a board's opening.
+        var verts = new List<Vector3>();
+        var normals = new List<Vector3>();
+        var uvs = new List<Vector2>();
+        var roots = new List<Vector2>();
         Vector3 ground = mid + Vector3.Up * Lift;
         int placed = 0;
         for (int n = 0; n < count * 3 && placed < count; n++)
@@ -647,16 +652,33 @@ public sealed partial class Grass3D : Node3D
                 float[] ts = { 0, 0, 0.45f, 0.45f, 1 };
                 foreach (int i in new[] { 0, 1, 2, 1, 3, 2, 2, 3, 4 })
                 {
-                    st.SetUV(new Vector2(ts[i], tone));
-                    st.SetUV2(new Vector2(root.X, root.Z));
+                    uvs.Add(new Vector2(ts[i], tone));
+                    roots.Add(new Vector2(root.X, root.Z));
                     Vector3 dome = (v[i] - under).Normalized();
-                    st.SetNormal(clump is null ? dome : (0.35f * dome + 0.65f * over).Normalized());
-                    st.AddVertex(v[i]);
+                    normals.Add(clump is null ? dome : (0.35f * dome + 0.65f * over).Normalized());
+                    verts.Add(v[i]);
                 }
             }
         }
         GD.Print($"grass3d: {placed} tufts on {area:F0} m2");
-        return st.Commit();
+        return Arrays(verts, normals, uvs, roots);
+    }
+
+    /// <summary>Triangles from plain arrays in one call - what a SurfaceTool
+    /// committed with the same vertices, no index, comes to.</summary>
+    private static ArrayMesh Arrays(List<Vector3> verts, List<Vector3> normals, List<Vector2> uvs, List<Vector2> uv2s)
+    {
+        var mesh = new ArrayMesh();
+        if (verts.Count == 0)
+            return mesh;
+        var arrays = new Godot.Collections.Array();
+        arrays.Resize((int)Mesh.ArrayType.Max);
+        arrays[(int)Mesh.ArrayType.Vertex] = verts.ToArray();
+        arrays[(int)Mesh.ArrayType.Normal] = normals.ToArray();
+        arrays[(int)Mesh.ArrayType.TexUV] = uvs.ToArray();
+        arrays[(int)Mesh.ArrayType.TexUV2] = uv2s.ToArray();
+        mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
+        return mesh;
     }
 
     // --- shaders ---------------------------------------------------------------

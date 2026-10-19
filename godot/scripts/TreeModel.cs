@@ -52,17 +52,29 @@ public static class TreeModel
     public static Loaded? Load(string name, bool pbr, out string? error)
     {
         string dir = Dir(name);
-        var doc = new GltfDocument();
-        var state = new GltfState();
-        Error err = doc.AppendFromFile(dir + "/tree.glb", state);
-        if (err != Error.Ok)
+        // <b>Each species read once, each tree its own meshes.</b> Reading the
+        // glb was most of a tree's 85 ms, and a wood is seven of a few species.
+        // The scenes a state generates share their meshes, and Toon.Dress puts
+        // the cel materials on the mesh - so a tree's burn would be every tree's
+        // of its kind; each mesh is copied before the dressing, which is what
+        // keeps one oak burning while the next stands.
+        if (!Read.TryGetValue(name, out (GltfDocument Doc, GltfState State, JsonElement Json) read))
         {
-            error = $"{dir}/tree.glb: {err}";
-            return null;
+            var doc = new GltfDocument();
+            var state = new GltfState();
+            Error err = doc.AppendFromFile(dir + "/tree.glb", state);
+            if (err != Error.Ok)
+            {
+                error = $"{dir}/tree.glb: {err}";
+                return null;
+            }
+            using JsonDocument file = JsonDocument.Parse(File.ReadAllText(dir + "/tree.json"));
+            read = (doc, state, file.RootElement.Clone());
+            Read[name] = read;
         }
-        Node scene = doc.GenerateScene(state);
-        using JsonDocument json = JsonDocument.Parse(File.ReadAllText(dir + "/tree.json"));
-        JsonElement j = json.RootElement.Clone();
+        Node scene = read.Doc.GenerateScene(read.State);
+        Own(scene);
+        JsonElement j = read.Json;
         var tree = new Loaded
         {
             Scene = scene, Json = j,
@@ -86,6 +98,19 @@ public static class TreeModel
         }
         error = null;
         return tree;
+    }
+
+    /// <summary>The species read so far: the glb parsed and the sidecar.</summary>
+    private static readonly Dictionary<string, (GltfDocument Doc, GltfState State, JsonElement Json)> Read = new();
+
+    /// <summary>Every mesh under <paramref name="node"/> made this scene's own
+    /// - see <see cref="Load"/>.</summary>
+    private static void Own(Node node)
+    {
+        foreach (Node child in node.GetChildren())
+            Own(child);
+        if (node is MeshInstance3D { Mesh: { } mesh } m)
+            m.Mesh = (Mesh)mesh.Duplicate();
     }
 
     /// <summary>Leaves and puff cores keep the normals the file gives them -

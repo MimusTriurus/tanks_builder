@@ -442,8 +442,17 @@ public sealed partial class Stage3D : Node3D
         // detonation's shake, on and measured in the spring, was not on screen.
         Vector3 pivot = World(Eye.Position + Eye.Offset, 0.0f);
         _camera.Position = pivot
-                           + new Vector3(0.0f, Back * Squash, Back * RiseFactor);
+                           + new Vector3(0.0f, Back * Squash, Back * RiseFactor).Rotated(Vector3.Up, Yaw);
+        _camera.Rotation = new Vector3(-Mathf.Asin(Squash), Yaw, 0.0f);
     }
+
+    /// <summary>
+    /// The camera turned about the vertical through the point it looks at,
+    /// radians. Nought everywhere but the map editor, which turns the board a
+    /// hex side at a time (<c>MapEditor.View</c>) - the game's camera does not
+    /// turn, and the sprites' bend (<see cref="Body"/>) assumes it does not.
+    /// </summary>
+    public float Yaw;
 
     // --- the tanks -----------------------------------------------------------
 

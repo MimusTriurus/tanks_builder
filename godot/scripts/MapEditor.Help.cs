@@ -53,6 +53,7 @@ public sealed partial class MapEditor
         new("File", "shift+F5", "run it in the sprite harness"),
         new("View", "L  R  G  B", "levels, ramps, ramp sites, flood"),
         new("View", "T  M  K", "trees, grass, walls - shown or hidden"),
+        new("View", ",  .", "turn the board a hex side either way; Home turns it back"),
         new("View", "F1", "this sheet", "every key"),
     };
 
@@ -309,13 +310,13 @@ public sealed partial class MapEditor
             }
             foreach (int heading in HexField.EdgeHeadings)
             {
-                (Vector2 a, Vector2 b) = _field.EdgeEnds(cell, heading);
+                (Vector2 a, Vector2 b) = EdgeOnScreen(cell, heading);
                 on.DrawLine(a, b, new Color(ink, 0.55f), 2.0f);
                 if (Mathf.Abs(rise) < 0.5f)
                     continue;
-                Vector2 up = new(0.0f, -rise);
-                on.DrawLine(a + up, b + up, ink, 2.5f);
-                on.DrawLine(a, a + up, new Color(ink, 0.45f), 1.5f);
+                (Vector2 ua, Vector2 ub) = EdgeOnScreen(cell, heading, rise);
+                on.DrawLine(ua, ub, ink, 2.5f);
+                on.DrawLine(a, ua, new Color(ink, 0.45f), 1.5f);
             }
         }
         // The bunker brush: which way each capon's slit would face, an arrow
@@ -325,15 +326,15 @@ public sealed partial class MapEditor
             {
                 if (!_field.InBounds(cell))
                     continue;
-                (Vector2 a, Vector2 b) = _field.EdgeEnds(cell, _facing);
-                Vector2 from = Top(cell), to = (a + b) * 0.5f;
+                (Vector2 a, Vector2 b) = EdgeOnScreen(cell, _facing);
+                Vector2 from = TopOnScreen(cell), to = (a + b) * 0.5f;
                 on.DrawLine(from, to, ink, 3.0f);
                 Vector2 back = (from - to).Normalized() * 10.0f;
                 on.DrawLine(to, to + back.Rotated(0.5f), ink, 3.0f);
                 on.DrawLine(to, to + back.Rotated(-0.5f), ink, 3.0f);
             }
         string word = _erasing ? "erase" : Tool().Split(": ").Last();
-        on.DrawString(ThemeDB.FallbackFont, Top(_under) + new Vector2(18.0f, -18.0f), word,
+        on.DrawString(ThemeDB.FallbackFont, TopOnScreen(_under) + new Vector2(18.0f, -18.0f), word,
                       HorizontalAlignment.Left, -1, 15, ink);
     }
 }
