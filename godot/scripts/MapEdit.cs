@@ -264,6 +264,27 @@ public sealed class MapEdit
         _forward.Clear();
     }
 
+    /// <summary>
+    /// End a stroke: the entry <see cref="Begin"/> made is taken off again when
+    /// the stroke changed nothing - a click on a cell already that floor, a drag
+    /// over cells the brush cannot change - so Z takes back the last stroke that
+    /// did something rather than a click nobody saw. Answers whether the entry
+    /// stays.
+    /// </summary>
+    public bool End()
+    {
+        if (_back.Count == 0)
+            return false;
+        Snap was = _back[^1];
+        bool same = was.Ground.SequenceEqual(_ground) && was.Ramps.SequenceEqual(_ramps)
+                    && was.Homes.SequenceEqual(_homes) && was.Walls.Count == _walls.Count
+                    && was.Walls.All(kv => _walls.TryGetValue(kv.Key, out Masonry? now)
+                                           && now.Say() == kv.Value.Say());
+        if (same)
+            _back.RemoveAt(_back.Count - 1);
+        return !same;
+    }
+
     public bool Undo()
     {
         if (_back.Count == 0)

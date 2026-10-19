@@ -51,6 +51,16 @@ public sealed partial class MapEditor
     /// burns on a board being drawn).</summary>
     private readonly Dictionary<string, TreeModel.Loaded> _species = new();
 
+    /// <summary>The species' own scenes, which only their copies ever enter the
+    /// tree: freed here, or every run ends on Godot's leak report.</summary>
+    public override void _ExitTree()
+    {
+        foreach (TreeModel.Loaded model in _species.Values)
+            if (GodotObject.IsInstanceValid(model.Scene))
+                model.Scene.Free();
+        _species.Clear();
+    }
+
     /// <summary>The light and the outline, once, after the stage is in the
     /// tree - the outline draws through the stage's camera.</summary>
     private void Dress()
@@ -127,6 +137,7 @@ public sealed partial class MapEditor
         }
         ulong tSkin = Time.GetTicksMsec() - t0;
         int laid = Lawn(moved, hex.X * 0.5f, squash, rise);
+        Shown();
         GD.Print($"editor: dressed {moved.Count} cell(s) in {Time.GetTicksMsec() - t0} ms "
                  + $"(wood and mines {tWood}, shadows {tSkin - tWood}, grass on {laid} in {Time.GetTicksMsec() - t0 - tSkin})");
     }

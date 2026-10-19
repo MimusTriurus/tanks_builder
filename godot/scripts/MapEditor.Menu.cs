@@ -109,6 +109,7 @@ public sealed partial class MapEditor
         file.AddItem("Run sprites  shift+F5", (int)Item.RunSprites);
         file.IdPressed += id => Chose((Item)id);
         bar.AddChild(file);
+        MoreMenus(bar);
         _bar = bar;
 
         // Beside the bar rather than in it: a MenuBar lays out its PopupMenu
@@ -125,6 +126,9 @@ public sealed partial class MapEditor
             new Color(0, 0, 0, 0.85f));
         _title.AddThemeFontSizeOverride("font_size", 16);
         layer.AddChild(_title);
+        // Past the bar's end, wherever its menus leave it: with four menus on it
+        // a fixed place put the name over View.
+        bar.Resized += () => _title.Position = new Vector2(bar.Position.X + bar.Size.X + 16.0f, 12.0f);
 
         Dialogs();
     }

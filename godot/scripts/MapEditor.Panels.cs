@@ -139,8 +139,8 @@ public sealed partial class MapEditor
 
         var keys = new Label
         {
-            Text = "left paint   right erase\nF fill   H home\nZ undo   Y redo\n"
-                   + "Home recentre",
+            // Off the one table of keys (MapEditor.Help), as the F1 sheet is.
+            Text = Legend(),
         };
         keys.AddThemeFontSizeOverride("font_size", 12);
         box.AddChild(keys);

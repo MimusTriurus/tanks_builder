@@ -96,6 +96,9 @@ public sealed partial class MapEditor : SceneRoot
     private int _home = -1;
 
     private Vector2I _under = new(-1, -1);
+
+    /// <summary><c>--hover Q,R</c>: the pointer put on a cell for a capture.</summary>
+    private Vector2I? _hovered;
     private bool _painting;
     private bool _erasing;
 
@@ -153,6 +156,37 @@ public sealed partial class MapEditor : SceneRoot
                     _picked = new Vector2I(q, r);
                 else
                     GD.PushWarning("--pick wants Q,R, as in --pick 3,2");
+            }
+            // The pointer and the brush from the command line, --pick's reason:
+            // the brush's ghost and the line under the board answer the cell
+            // under the pointer, and a capture run has nobody to move it.
+            else if (args[i] == "--hover" && i + 1 < args.Length)
+            {
+                string[] at = args[++i].Split(',');
+                if (at.Length == 2 && int.TryParse(at[0], out int q)
+                    && int.TryParse(at[1], out int r))
+                    _hovered = new Vector2I(q, r);
+            }
+            // The dressing hidden from the command line - View's T, M, K.
+            else if (args[i] == "--hide" && i + 1 < args.Length)
+                foreach (string what in args[++i].ToLowerInvariant().Split(','))
+                {
+                    if (what == "trees") _showTrees = false;
+                    else if (what == "grass") _showGrass = false;
+                    else if (what == "walls") _showWalls = false;
+                }
+            else if (args[i] == "--tab" && i + 1 < args.Length)
+                _tab = args[++i].ToLowerInvariant() switch
+                {
+                    "cover" => MapEdit.Tab.Cover,
+                    "level" => MapEdit.Tab.Level,
+                    _ => MapEdit.Tab.Foundation,
+                };
+            else if (args[i] == "--radius" && i + 1 < args.Length
+                     && int.TryParse(args[i + 1], out int radius))
+            {
+                _radius = Math.Clamp(radius, 0, 6);
+                i++;
             }
             else if (args[i] == "--layers" && i + 1 < args.Length)
             {
@@ -322,6 +356,13 @@ public sealed partial class MapEditor : SceneRoot
             case "new": Chose(Item.New); break;
             case "open": Chose(Item.Open); break;
             case "saveas": Chose(Item.SaveAs); break;
+            case "sheet": Act(More.Sheet); break;
+        }
+        if (_hovered is { } hover)
+        {
+            _under = hover;
+            _marks.QueueRedraw();
+            Say();
         }
     }
 
@@ -738,7 +779,8 @@ public sealed partial class MapEditor : SceneRoot
             return;
         _stood = want;
 
-        foreach (Node3D was in _bricks.Cast<Node3D>().Concat(_shelters))
+        // A WallProp is a Node, not a Node3D: the two lists go as Nodes.
+        foreach (Node was in _bricks.Cast<Node>().Concat(_shelters))
         {
             RemoveChild(was);
             was.QueueFree();
@@ -763,6 +805,7 @@ public sealed partial class MapEditor : SceneRoot
             else
                 GD.Print($"editor: bunker on {cell}: {problem}");
         }
+        Shown();
     }
 
     /// <summary>
@@ -951,18 +994,20 @@ public sealed partial class MapEditor : SceneRoot
                         new Color(1, 1, 1, 0.75f), 2.0f);
             }
 
-            if (!editor._layers.HasFlag(Layers.Homes))
-                return;
-            for (int i = 0; i < editor._edit.Homes.Count; i++)
-            {
-                Parking home = editor._edit.Homes[i];
-                Vector2 at = editor.Top(home.Cell);
-                DrawArc(at, 26.0f, 0.0f, Mathf.Tau, 24,
-                    new Color(0.6f, 1.0f, 0.9f, 0.9f), 2.5f);
-                DrawString(font, at + new Vector2(-4.0f, -28.0f),
-                    (i + 1).ToString(), HorizontalAlignment.Left, -1, 15,
-                    new Color(0.6f, 1.0f, 0.9f));
-            }
+            if (editor._layers.HasFlag(Layers.Homes))
+                for (int i = 0; i < editor._edit.Homes.Count; i++)
+                {
+                    Parking home = editor._edit.Homes[i];
+                    Vector2 at = editor.Top(home.Cell);
+                    DrawArc(at, 26.0f, 0.0f, Mathf.Tau, 24,
+                        new Color(0.6f, 1.0f, 0.9f, 0.9f), 2.5f);
+                    DrawString(font, at + new Vector2(-4.0f, -28.0f),
+                        (i + 1).ToString(), HorizontalAlignment.Left, -1, 15,
+                        new Color(0.6f, 1.0f, 0.9f));
+                }
+
+            // Last, over everything: what the brush would do (MapEditor.Help).
+            editor.Ghost(this);
         }
     }
 
@@ -986,6 +1031,8 @@ public sealed partial class MapEditor : SceneRoot
             else if (was != _under)
             {
                 _field.QueueRedraw();
+                // the brush's ghost follows the pointer
+                _marks.QueueRedraw();
                 Say();
             }
             return;
@@ -1012,6 +1059,7 @@ public sealed partial class MapEditor : SceneRoot
                 }
                 else
                 {
+                    _edit.End();
                     Settle();
                 }
             }
@@ -1021,7 +1069,10 @@ public sealed partial class MapEditor : SceneRoot
                 if (click.Pressed)
                     Stroke(true);
                 else
+                {
+                    _edit.End();
                     Settle();
+                }
             }
             else if (click.ButtonIndex == MouseButton.Middle
                      && MiddleTapped(click, out Vector2 _))
@@ -1057,6 +1108,15 @@ public sealed partial class MapEditor : SceneRoot
             case Key.G: _layers ^= Layers.Sites; break;
             case Key.B: _layers ^= Layers.Flood; break;
             case Key.Home: Home(); return;
+            // MapEditor.Help: the dressing shown or hidden, the sheet, Escape.
+            case Key.T: Act(More.Trees); return;
+            case Key.M: Act(More.Grass); return;
+            case Key.K: Act(More.Walls); return;
+            case Key.F1: Act(More.Sheet); return;
+            case Key.Escape:
+                if (!Escape())
+                    return;
+                break;
             default: return;
         }
         _field.QueueRedraw();
@@ -1241,6 +1301,7 @@ public sealed partial class MapEditor : SceneRoot
                     + $"{Tool()}   brush {_radius}   {_edit.Depth} undo\n"
                     + (_said.Length > 0 ? _said : "");
         _report.Text = Report();
+        _foot.Text = Under();
         // Last, because the panels read the board this has just described and
         // the right one rebuilds off it - see MapEditor.Panels.
         Refresh();
@@ -1314,6 +1375,7 @@ public sealed partial class MapEditor : SceneRoot
         // between them by Home.
         Tools(layer);
         Inspect(layer);
+        Foot(layer);
 
         _hud = Text(LeftWide + 26.0f, 44.0f, 17);
         layer.AddChild(_hud);
