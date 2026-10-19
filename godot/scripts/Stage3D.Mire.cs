@@ -13,10 +13,11 @@ namespace TankSpriteTest;
 /// cell ends: a disc per cell, its rim torn by the shader's noise, and two mud
 /// cells side by side are one patch.
 ///
-/// <b>Which floor is mud.</b> <see cref="Foundation.Sand"/> - the GDD's
-/// "грязь\песок" is one floor, and the events board's sand is already the
-/// stand-in for mud (<c>BoardMap.Events</c>). Baked once with the faces,
-/// because a floor does not change while the board stands.
+/// <b>Which floor is mud.</b> <see cref="Foundation.Mud"/> - its own floor since
+/// the editor's stage 4 (docs/editor3d-plan.md); sand stood in for it before,
+/// and the events board's mud is where that sand was. Baked with the faces,
+/// so the editor's board, whose faces are built again on a stroke, has it
+/// laid again too.
 /// </summary>
 public sealed partial class Stage3D
 {
@@ -57,7 +58,7 @@ public sealed partial class Stage3D
             Vector3 top = CellTop(cell);
             loX = Mathf.Min(loX, top.X - circum); hiX = Mathf.Max(hiX, top.X + circum);
             loZ = Mathf.Min(loZ, top.Z - circum); hiZ = Mathf.Max(hiZ, top.Z + circum);
-            any |= Field.FoundationAt(cell) == Foundation.Sand;
+            any |= Field.FoundationAt(cell) == Foundation.Mud;
         }
         // The sides are left out on purpose: a wall's face is one line in XZ,
         // so a cliff next to a mud cell would come out mud from top to foot.
@@ -77,7 +78,7 @@ public sealed partial class Stage3D
         for (int r = 0; r < Field.Rows; r++)
         {
             var cell = new Vector2I(q, r);
-            if (Field.InBounds(cell) && Field.FoundationAt(cell) == Foundation.Sand)
+            if (Field.InBounds(cell) && Field.FoundationAt(cell) == Foundation.Mud)
                 mud.Add(cell);
         }
         foreach (Vector2I cell in mud)

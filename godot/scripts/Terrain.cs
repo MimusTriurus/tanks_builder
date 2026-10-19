@@ -47,6 +47,20 @@ public enum Foundation
 
     /// <summary>Off the board.</summary>
     Void,
+
+    /// <summary>
+    /// Mud: the GDD's "грязь" - a floor a tank sinks into and drags through,
+    /// its board painted wet with puddles (<c>Stage3D.Mire</c>), its hull let
+    /// down and slowed on the 3D bench (<c>Tank3DBench.Mire</c>), clods thrown
+    /// instead of dust.
+    ///
+    /// <b>Apart from <see cref="Sand"/> since the editor's stage 4</b>
+    /// (docs/editor3d-plan.md): sand stood in for mud until then, and a floor
+    /// that is two things to two readers is a cell nobody can paint on purpose.
+    /// Last in the enum so no value before it moves. The GDD's stop on entry is
+    /// not ruled yet - neither is it for sand or the wood.
+    /// </summary>
+    Mud,
 }
 
 /// <summary>
@@ -292,6 +306,13 @@ public static class TerrainRules
             Wet = true, Plunge = true, Dust = 0.0f,
         },
         [Foundation.Rock] = new GroundRule { Drive = false },
+        // Mud: slower than sand - the 3D bench's figure, under which the drag
+        // first read on screen (Tank3DBench.Mire) - shakes the hull more, and
+        // raises no dust: what flies off the belts in it is clods (CelClods).
+        [Foundation.Mud] = new GroundRule
+        {
+            Speed = 0.45f, Ride = 1.2f, Dust = 0.0f,
+        },
     };
 
     private static readonly Dictionary<Cover, CoverRule> Overs = new()

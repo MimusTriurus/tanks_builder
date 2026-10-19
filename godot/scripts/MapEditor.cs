@@ -92,6 +92,11 @@ public sealed partial class MapEditor : SceneRoot
     /// the eraser does not mean either of them.</summary>
     private bool _plotOn = true;
     private int _level = 1;
+
+    /// <summary>The Cover tab's bunker brush: walls laid as a concrete capon,
+    /// its slit toward <see cref="_facing"/> - W turns it a side at a time.</summary>
+    private bool _bunker;
+    private int _facing = 270;
     private bool _rampBrush;
     private int _home = -1;
 
@@ -504,6 +509,43 @@ public sealed partial class MapEditor : SceneRoot
         // Taking a wall off takes its bricks off. The risky half of standing
         // props from a map: a stale wall left on the board after the cover was
         // erased looks exactly like the board not having been edited.
+        // Stage 4's two new things through the brushes and back off the disk:
+        // mud on two cells and a bunker facing 150, saved as zz_content, read
+        // again by BoardMap.ByName - the round trip the game makes - and the
+        // file taken away after, so the folder the self test judges is as it was.
+        if (_open == "content" && _frame == 20)
+        {
+            var mudAt = new[] { new Vector2I(3, 4), new Vector2I(4, 4) };
+            var bunkerAt = new Vector2I(5, 3);
+            _edit.Begin();
+            foreach (Vector2I cell in mudAt)
+                _edit.Floor(cell, Foundation.Mud, out string _);
+            _facing = 150;
+            bool laid = Bunker(bunkerAt, out string bunkerWhy);
+            _edit.End();
+            Settle();
+            string was = _edit.Name;
+            _edit.Name = "zz_content";
+            bool kept = Keep();
+            _edit.Name = was;
+            string path = ProjectSettings.GlobalizePath("res://") + "maps/zz_content.json";
+            string back = "not read";
+            try
+            {
+                BoardMap map = BoardMap.ByName("zz_content");
+                Masonry? capon = map.MasonryAt(bunkerAt);
+                back = $"floors {string.Join(",", mudAt.Select(c => map.Ground[c.Y * map.Columns + c.X]))}, "
+                       + $"({bunkerAt.X},{bunkerAt.Y}) {capon?.Kind} facing {capon?.Facing}";
+            }
+            catch (Exception e)
+            {
+                back = e.Message;
+            }
+            if (File.Exists(path))
+                File.Delete(path);
+            GD.Print($"content: letters {string.Join("", mudAt.Select(c => _edit.LetterAt(c)))}, "
+                     + $"bunker laid {laid} {bunkerWhy}, saved {kept}, read back: {back}");
+        }
         if (_open == "unwall" && _frame == 20)
         {
             var cell = new Vector2I(3, 3);
@@ -1174,12 +1216,17 @@ public sealed partial class MapEditor : SceneRoot
                 _plotBrush ? _edit.Plot(cell, _plotOn, out why)
                 : _water ? _edit.Water(cell, true, out why)
                 : _edit.Floor(cell, _floor, out why),
-            MapEdit.Tab.Cover => _edit.Over(cell, _cover, out why),
+            MapEdit.Tab.Cover => _bunker ? Bunker(cell, out why) : _edit.Over(cell, _cover, out why),
             _ => _rampBrush ? _edit.Ramp(cell, true, out why)
                             : _edit.Level(cell, _level, out why),
         };
         return (ok, why);
     }
+
+    /// <summary>The bunker brush on one cell: walls on it, then the walls made a
+    /// capon facing the brush's way (<see cref="MapEdit.Shelter"/>).</summary>
+    private bool Bunker(Vector2I cell, out string why) =>
+        _edit.Over(cell, Cover.Walls, out why) && _edit.Shelter(cell, true, _facing, out why);
 
     private void Fill()
     {
@@ -1312,7 +1359,8 @@ public sealed partial class MapEditor : SceneRoot
         MapEdit.Tab.Foundation =>
             "floor: " + (_plotBrush ? (_plotOn ? "on the board" : "off the board")
                 : _water ? "water" : _floor.ToString().ToLowerInvariant()),
-        MapEdit.Tab.Cover => "cover: " + _cover.ToString().ToLowerInvariant(),
+        MapEdit.Tab.Cover => _bunker ? $"cover: bunker, slit {_facing}"
+                                     : "cover: " + _cover.ToString().ToLowerInvariant(),
         _ => _rampBrush ? "level: ramp" : $"level: {_level}",
     };
 
@@ -1506,6 +1554,14 @@ public sealed partial class MapEditor : SceneRoot
                 break;
             case MapEdit.Tab.Level when first:
                 RampBrush(!_rampBrush);
+                break;
+            // The bunker brush taken up, and pressed again its slit turned a
+            // side clockwise - Masonry.Headings, the six edges.
+            case MapEdit.Tab.Cover when first:
+                if (_bunker)
+                    _facing = Mathf.PosMod(_facing - 60, 360);
+                _bunker = true;
+                _cover = Cover.Walls;
                 break;
         }
     }

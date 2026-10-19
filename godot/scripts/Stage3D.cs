@@ -2339,6 +2339,10 @@ void fragment() {{
                 // Deep water is a different surface height on the same mask, so
                 // it is its own mark for the same reason.
                 .Append(Field.IsDeep(cell) ? 'D' : Field.IsWater(cell) ? '~' : '.')
+                // And mud, which Mire bakes with the faces: a floor painted
+                // mud in the editor moves no level, no water and no colour,
+                // so without it the board was not rebuilt and the mud not laid.
+                .Append(Field.InBounds(cell) && Field.FoundationAt(cell) == Foundation.Mud ? 'u' : '-')
                 .Append(Field.InkFor(cell).ToRgba32()).Append(';');
         }
         // The depth as well, and not only where the water is: it is a slider, and

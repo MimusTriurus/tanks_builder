@@ -687,6 +687,36 @@ public sealed class MapEdit
         return true;
     }
 
+    /// <summary>
+    /// Make a walled cell a concrete capon with its slit toward
+    /// <paramref name="facing"/>, or brick masonry again.
+    ///
+    /// <b>The capon was written by hand until this</b> - <c>kind</c> and
+    /// <c>facing</c> in the file's walls block, nothing in the editor said
+    /// either (docs/editor3d-plan.md, stage 4). The facing is one of the six
+    /// edges, the gate opposite it; a wall's own facing is
+    /// <see cref="Masonry.Run"/>'s to derive, so going back to brick clears it.
+    /// </summary>
+    public bool Shelter(Vector2I cell, bool capon, int facing, out string why)
+    {
+        why = "";
+        if (!_walls.TryGetValue(cell, out Masonry? wall))
+        {
+            why = $"({cell.X},{cell.Y}) carries no wall - lay walls first";
+            return false;
+        }
+        if (capon && !Masonry.Headings.Contains(facing))
+        {
+            why = $"{facing} is not an edge of a flat-topped hex";
+            return false;
+        }
+        wall.Kind = capon ? Masonry.Sort.Capon : Masonry.Sort.Wall;
+        wall.Facing = capon ? facing : null;
+        if (capon)
+            wall.Edges = Masonry.Ring;
+        return true;
+    }
+
     /// <summary>One of the four numbers that are a wall's shape, or null to
     /// take the cell back to silence - see <see cref="Masonry"/>, where null
     /// being silence rather than a default is argued.</summary>

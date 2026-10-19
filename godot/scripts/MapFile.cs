@@ -493,6 +493,7 @@ public static class MapFile
         new Glyph(BoardMap.WallHill, Foundation.Solid, Cover.Walls, 1,
                   wall: true),
         new Glyph(BoardMap.Sand, Foundation.Sand, Cover.None, 0),
+        new Glyph(BoardMap.Mud, Foundation.Mud, Cover.None, 0),
         new Glyph(BoardMap.Trench, Foundation.Solid, Cover.Trench, 0),
         new Glyph(BoardMap.Mine, Foundation.Solid, Cover.Minefield, 0),
     };

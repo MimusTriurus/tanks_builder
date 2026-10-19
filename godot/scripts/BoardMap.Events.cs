@@ -84,7 +84,7 @@ public sealed partial class BoardMap
         "............", // r2  ramp on (1,2) climbs north on to (1,1)
         "....m.......", // r3  a mine between the two parkings on this row
         "............", // r4  (7,4) is the ravine's rim: the ramp's high edge
-        ".ss...vvv.dd", // r5  sand; the ravine's top row, ramp on (7,5); deep pond
+        ".uu...vvv.dd", // r5  mud; the ravine's top row, ramp on (7,5); deep pond
         "......vvv.dd", // r6
         "...ww.......", // r7  a ford
     };

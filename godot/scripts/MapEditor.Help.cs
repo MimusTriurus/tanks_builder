@@ -45,6 +45,7 @@ public sealed partial class MapEditor
         new("Board", "Esc", "close the sheet, then drop the picked cell"),
         new("Foundation", "W", "the brush is water"),
         new("Foundation", "E", "the brush puts a cell on or off the board"),
+        new("Cover", "W", "the bunker brush; again, its slit turns a side"),
         new("Level", "W", "the brush is a ramp - its tilt is worked out from the heights"),
         new("File", "N  O", "new board, open one"),
         new("File", "S  shift+S", "save, save as"),
@@ -257,7 +258,9 @@ public sealed partial class MapEditor
             $"({c.X},{c.Y})  '{g.Letter}'",
             g.Floor.ToString().ToLowerInvariant(),
         };
-        if (g.Over != Cover.None)
+        if (_edit.MasonryAt(c) is { Kind: Masonry.Sort.Capon } capon)
+            parts.Add($"bunker, slit {capon.Facing ?? 270}");
+        else if (g.Over != Cover.None)
             parts.Add(g.Over.ToString().ToLowerInvariant());
         parts.Add($"level {g.Level}");
         if (_edit.IsRamp(c))
@@ -315,6 +318,20 @@ public sealed partial class MapEditor
                 on.DrawLine(a, a + up, new Color(ink, 0.45f), 1.5f);
             }
         }
+        // The bunker brush: which way each capon's slit would face, an arrow
+        // from the cell's middle to the middle of that edge.
+        if (_tab == MapEdit.Tab.Cover && _bunker && !_erasing)
+            foreach (Vector2I cell in Patch())
+            {
+                if (!_field.InBounds(cell))
+                    continue;
+                (Vector2 a, Vector2 b) = _field.EdgeEnds(cell, _facing);
+                Vector2 from = Top(cell), to = (a + b) * 0.5f;
+                on.DrawLine(from, to, ink, 3.0f);
+                Vector2 back = (from - to).Normalized() * 10.0f;
+                on.DrawLine(to, to + back.Rotated(0.5f), ink, 3.0f);
+                on.DrawLine(to, to + back.Rotated(-0.5f), ink, 3.0f);
+            }
         string word = _erasing ? "erase" : Tool().Split(": ").Last();
         on.DrawString(ThemeDB.FallbackFont, Top(_under) + new Vector2(18.0f, -18.0f), word,
                       HorizontalAlignment.Left, -1, 15, ink);

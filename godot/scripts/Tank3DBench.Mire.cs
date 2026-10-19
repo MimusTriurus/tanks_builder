@@ -5,20 +5,21 @@ namespace TankSpriteTest;
 /// <summary>
 /// The tank in mud: it settles into it and it drags.
 ///
-/// <b>Mud is <see cref="Foundation.Sand"/></b>, the floor the board paints as
-/// mud (<c>Stage3D.Mire</c>) - the GDD's "грязь\песок". The rule's own figure
-/// (<c>terrain.json</c>, speed 0.75) caps the leg into the cell and nothing
-/// once the hull is in it, and the free drive not at all, so in the picture
-/// the tank went through mud as through grass. This is the bench's: a drag
-/// for as long as the hull stands in it, both drives, and the hull let down
-/// into it. Both ease by <see cref="_mire"/>, so the tank sinks as it goes in
-/// and climbs out as it leaves rather than stepping at the seam.
+/// <b>Mud is <see cref="Foundation.Mud"/></b>, the floor the board paints as
+/// mud (<c>Stage3D.Mire</c>) - its own since the editor's stage 4; sand stood
+/// in for it before. The rule's figure (<c>terrain.json</c>) caps the leg into
+/// the cell and nothing once the hull is in it, and the free drive not at all,
+/// so in the picture the tank went through mud as through grass. This is the
+/// bench's: a drag for as long as the hull stands in it, both drives, and the
+/// hull let down into it. Both ease by <see cref="_mire"/>, so the tank sinks
+/// as it goes in and climbs out as it leaves rather than stepping at the seam.
 /// </summary>
 public sealed partial class Tank3DBench
 {
-    /// <summary>Top speed in mud, a share of the class's - under the rule's
-    /// 0.75, because at that the slowdown did not read at all.</summary>
-    private const float MireSpeed = 0.45f;
+    /// <summary>Top speed in mud, a share of the class's - the floor's own
+    /// figure now (<c>terrain.json</c>'s mud, 0.45), which is the bench's
+    /// number moved there: at sand's 0.75 the slowdown did not read at all.</summary>
+    private static float MireSpeed => TerrainRules.Of(Foundation.Mud).Speed;
 
     /// <summary>How deep the hull settles, a share of its deck's height
     /// (<see cref="_deckPx"/>): the belts down to about half, and the ground
@@ -36,7 +37,7 @@ public sealed partial class Tank3DBench
 
     private bool OnMire(Vector2I cell) =>
         _field is not null && _field.InBounds(cell)
-        && _field.FoundationAt(cell) == Foundation.Sand
+        && _field.FoundationAt(cell) == Foundation.Mud
         && !_field.IsRamp(cell) && !_field.IsWater(cell);
 
     /// <summary>Ease <see cref="_mire"/> toward the cell under the middle and

@@ -148,6 +148,11 @@ public sealed partial class BoardMap
     /// what makes it the cheapest proof that the floor is its own slot.</summary>
     public const char Sand = 's';
 
+    /// <summary>Mud (<see cref="Foundation.Mud"/>): sand's shape - a floor and
+    /// nothing else, level ground - for the floor the 3D board paints wet and
+    /// the 3D bench sinks a hull into. u for the sound of it; m is the mine.</summary>
+    public const char Mud = 'u';
+
     /// <summary>A trench: cover with no art and no props behind it, which is
     /// exactly why it is here. A cover that is only rules is the test that this
     /// layer is rules rather than a list of things that get drawn.</summary>
@@ -644,6 +649,9 @@ public sealed partial class BoardMap
                     break;
                 case Sand:
                     floor[at] = Foundation.Sand;
+                    break;
+                case Mud:
+                    floor[at] = Foundation.Mud;
                     break;
                 case Trench:
                     over[at] = Cover.Trench;

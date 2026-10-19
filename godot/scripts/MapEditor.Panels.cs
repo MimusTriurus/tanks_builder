@@ -176,6 +176,8 @@ public sealed partial class MapEditor
                         () => Plain() && _floor == Foundation.Solid),
                     ("sand", () => Floor(Foundation.Sand),
                         () => Plain() && _floor == Foundation.Sand),
+                    ("mud", () => Floor(Foundation.Mud),
+                        () => Plain() && _floor == Foundation.Mud),
                     // The height is in the name because the cell it paints is
                     // two levels up and declared unclimbable, and the Level tab
                     // refuses to raise anything that far on purpose - a rock is
@@ -207,10 +209,17 @@ public sealed partial class MapEditor
                         () => _plotBrush && !_plotOn),
                 };
             case MapEdit.Tab.Cover:
-                return Enum.GetValues<Cover>().Select(over =>
+                var covers = Enum.GetValues<Cover>().Select(over =>
                     (over.ToString().ToLowerInvariant(),
-                     (Action)(() => _cover = over),
-                     (Func<bool>)(() => _cover == over))).ToList();
+                     (Action)(() => { _cover = over; _bunker = false; }),
+                     (Func<bool>)(() => _cover == over && !_bunker))).ToList();
+                // The capon, a brush of its own rather than a dial on the
+                // walls: it is walls on the cell and the block saying concrete,
+                // and the author means one thing by it. W turns the slit.
+                covers.Add(($"bunker  slit {_facing}  (W turns)",
+                    () => { _cover = Cover.Walls; _bunker = true; },
+                    () => _bunker));
+                return covers;
             default:
                 var levels = new List<(string, Action, Func<bool>)>();
                 foreach (int level in new[] { 1, 0, -1 })
@@ -387,7 +396,7 @@ public sealed partial class MapEditor
         }
         var floors = new OptionButton();
         Foundation[] laying =
-            { Foundation.Solid, Foundation.Sand, Foundation.Deep, Foundation.Rock };
+            { Foundation.Solid, Foundation.Sand, Foundation.Mud, Foundation.Deep, Foundation.Rock };
         foreach (Foundation floor in laying)
             floors.AddItem(floor.ToString().ToLowerInvariant());
         floors.Selected = Math.Max(0, Array.IndexOf(laying, glyph.Floor));
@@ -462,6 +471,25 @@ public sealed partial class MapEditor
     /// </summary>
     private void Bricks(VBoxContainer into, Masonry wall)
     {
+        // Brick or the concrete capon, and the capon's slit - MapEdit.Shelter.
+        var kind = new OptionButton();
+        kind.AddItem("brick wall");
+        kind.AddItem("bunker (capon)");
+        kind.Selected = wall.Kind == Masonry.Sort.Capon ? 1 : 0;
+        kind.ItemSelected += index => Wrote(() =>
+            _edit.Shelter(_picked, index == 1, wall.Facing ?? _facing, out string why) ? "" : why);
+        into.AddChild(Field("kind", kind));
+        if (wall.Kind == Masonry.Sort.Capon)
+        {
+            var slit = new OptionButton();
+            foreach (int heading in Masonry.Headings)
+                slit.AddItem($"{heading}");
+            slit.Selected = Math.Max(0, Array.IndexOf(Masonry.Headings, wall.Facing ?? 270));
+            slit.ItemSelected += index => Wrote(() =>
+                _edit.Shelter(_picked, true, Masonry.Headings[(int)index], out string why) ? "" : why);
+            into.AddChild(Field("slit faces", slit));
+            return;
+        }
         into.AddChild(Note("edges the wall covers"));
         var grid = new GridContainer { Columns = 3 };
         foreach (int heading in Masonry.Headings)
