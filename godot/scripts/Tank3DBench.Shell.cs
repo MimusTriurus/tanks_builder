@@ -530,7 +530,10 @@ public sealed partial class Tank3DBench
     {
         if (_fate != Fate.Alive)
             return;
-        if (PickAt(screen) is not var (point, onTank))
+        // under the rules a shot is the selected tank's order (Tank3DBench.Select)
+        if (_rules && !_chosen)
+            return;
+        if (PickAt(screen) is not var (point, onTank, _))
             return;
         if (_field is null)
         {
@@ -545,10 +548,10 @@ public sealed partial class Tank3DBench
             AimCell(cell);
     }
 
-    /// <summary>What is under a screen point: the target's plates, or the
-    /// ground on the board - the point, and whether it is on the target. Null
-    /// off the board.</summary>
-    private (Vector3 Point, bool OnTank)? PickAt(Vector2 screen)
+    /// <summary>What is under a screen point: the target's plates, the own
+    /// tank's, or the ground on the board - the point, and whether it is on the
+    /// target or on the own hull. Null off the board.</summary>
+    private (Vector3 Point, bool OnTank, bool OnOwn)? PickAt(Vector2 screen)
     {
         Vector3 from = _camera.ProjectRayOrigin(screen);
         Vector3 way = _camera.ProjectRayNormal(screen).Normalized();
@@ -560,6 +563,14 @@ public sealed partial class Tank3DBench
             at = hit.At;
             best = (hit.At - from).Length();
             onTank = true;
+        }
+        bool onOwn = false;
+        if (_celHit?.Cast(from, way) is { } mine && (mine.At - from).Length() < best)
+        {
+            at = mine.At;
+            best = (mine.At - from).Length();
+            onTank = false;
+            onOwn = true;
         }
         // The ground: walked down the ray to where it goes under, then halved.
         const float step = 4.0f;
@@ -584,12 +595,13 @@ public sealed partial class Tank3DBench
             {
                 at = new Vector3(g.X, ShellGround(g, out _), g.Z);
                 onTank = false;
+                onOwn = false;
             }
             break;
         }
         if (at is not Vector3 point)
             return null;
-        return (point, onTank);
+        return (point, onTank, onOwn);
     }
 
     /// <summary>

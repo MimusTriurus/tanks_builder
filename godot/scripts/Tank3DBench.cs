@@ -267,6 +267,7 @@ public sealed partial class Tank3DBench : Node3D
             BuildGround();
         BuildWood();
         BuildMines();
+        BuildMarks();
         Park();
         Mount(_modelTag);
         if (_otherWanted)
@@ -1049,6 +1050,10 @@ void light() {
             case "free": SetRules(false); break;
             case "charge": if (_other is not null) OrderTo(OtherCell(_other), ram: true); break;
             case "cancel": CancelOrder(); break;
+            case "select": Choose(true); break;
+            case "deselect": Choose(false); break;
+            // the left button where the camera shows the own hull's middle
+            case "click-own": OrderClick(_camera.UnprojectPosition(_rig.Position + Vector3.Up * 0.3f * HexWidth), false); break;
             case "straight": _turnScripted = 0.0f; break;
             // a wall ahead is rammed through; otherwise the target
             case "ram": if (!WallRamGo(false)) RamGo(); break;
@@ -1083,6 +1088,14 @@ void light() {
                         else
                             AimCell(new Vector2I(q, r));
                     }
+                }
+                else if (what.StartsWith("click=", StringComparison.Ordinal))
+                {
+                    // click=Q,R: the left button where the camera shows that hex's
+                    // middle - the mouse's own path, PickAt and all.
+                    string[] qr = what[6..].Split(',');
+                    if (qr.Length == 2 && int.TryParse(qr[0], out int q) && int.TryParse(qr[1], out int r))
+                        OrderClick(_camera.UnprojectPosition(CellWorld(new Vector2I(q, r))), false);
                 }
                 else if (what.StartsWith("go=", StringComparison.Ordinal))
                 {
@@ -1305,6 +1318,7 @@ void light() {
 
     private void ResetTank()
     {
+        _coastTo = null;
         foreach (var (node, parent, local) in _moved)
         {
             node.GetParent().RemoveChild(node);
@@ -1408,6 +1422,13 @@ void light() {
             turn = 0.0f;
             turnIn = 0.0f;
         }
+        else if (_coastTo is not null)
+        {
+            // Knocked out on the move (a mine): the way it had, spent on the
+            // roll to the cell's middle (Tank3DBench.Mines).
+            CoastDrive(dt, out target, out a, out turn, out step);
+            turnIn = 0.0f;
+        }
         else if (_rules && RouteMoving)
         {
             if (!alive)
@@ -1491,6 +1512,7 @@ void light() {
         WallTick(dt);
         _model.Apply();
         FxProcess(dt, _speed, a);
+        MarksTick();
         RamFrame(dt, _camera.GlobalBasis);
         ShellsTick(dt);
         WoodTick(dt);
@@ -1509,7 +1531,7 @@ void light() {
                     + "Space shot   RMB aim and fire   1-4 ricochet front/right/rear/left   Shift+1-4 pierce   Ctrl+1-4 HE   5 round in the ground\n"
                     + "J burning   K knocked out   X destroyed   T ram   Backspace reset   "
                     + (_rules
-                        ? "cells: LMB go   LMB x2 on target ram   W/S cell   A/D 60   Esc cancel   "
+                        ? "cells: LMB own select   LMB go   LMB x2 on target ram   W/S cell   A/D 60   Esc cancel/let go   "
                         : "WASD drive   " + (_model.Turreted ? "Q/E turret   " : ""))
                     + "R/F gun   -/= wheel zoom   Tab panel   F12 shot";
         Shots();
@@ -1655,11 +1677,15 @@ void light() {
         {
             switch (order.Keycode)
             {
-                case Key.W: OrderStep(back: false); return;
-                case Key.S: OrderStep(back: true); return;
-                case Key.A: OrderTurn(left: true); return;
-                case Key.D: OrderTurn(left: false); return;
-                case Key.Escape: CancelOrder(); return;
+                case Key.W: if (_chosen) OrderStep(back: false); return;
+                case Key.S: if (_chosen) OrderStep(back: true); return;
+                case Key.A: if (_chosen) OrderTurn(left: true); return;
+                case Key.D: if (_chosen) OrderTurn(left: false); return;
+                // an order in hand is dropped; with none, the tank is let go
+                case Key.Escape:
+                    if (RouteMoving || _turnGoal is not null || _shotWaiting is not null) CancelOrder();
+                    else Choose(false);
+                    return;
             }
         }
         // The wheel: a notch is a tenth in or out; a touchpad's scroll comes
@@ -1718,7 +1744,8 @@ void light() {
         _panel.Toggle("tank3d.drive.cells", "по клеткам, как в 2D  (выкл. — WASD, --free-drive)",
                       () => _rules, v => SetRules(v));
         _panel.Readout("tank3d.drive.note", () => _rules
-            ? "ЛКМ — ехать, двойной ЛКМ по цели — таран, ПКМ — выстрел\nW/S — клетка вперёд/назад, A/D — 60°, ESC — отмена"
+            ? "ЛКМ по своему — выбрать, ЛКМ — ехать, двойной ЛКМ по цели — таран, ПКМ — выстрел\n"
+              + "W/S — клетка вперёд/назад, A/D — 60°, ESC — отмена, без приказа — снять выбор"
               + (_orderNote.Length > 0 ? "\n" + _orderNote : "")
             : "WASD — езда, Q/E — башня, ПКМ — выстрел");
         _panel.Expand("tank3d.drive", true);

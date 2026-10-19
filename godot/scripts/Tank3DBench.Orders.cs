@@ -343,22 +343,33 @@ public sealed partial class Tank3DBench
         };
     }
 
-    /// <summary>The left button under the rules: the target - a double click
-    /// rams it; the tank's own cell - the order cancelled; anywhere else - go.</summary>
+    /// <summary>The left button under the rules, as the 2D harness reads it:
+    /// the own tank - selected, or, selected already, its order cancelled;
+    /// with nothing selected nothing else is an order; the target - a double
+    /// click rams it; anywhere else - go.</summary>
     private void OrderClick(Vector2 screen, bool twice)
     {
-        if (PickAt(screen) is not var (point, onTank) || _field is null)
+        if (PickAt(screen) is not var (point, onTank, onOwn) || _field is null)
             return;
-        Vector2I cell = onTank && _other is { } t ? OtherCell(t) : _field.FlatCellAt(Board(point));
+        Vector2I cell = onTank && _other is { } t ? OtherCell(t)
+            : onOwn ? CellHere : _field.FlatCellAt(Board(point));
+        if (cell == CellHere)
+        {
+            if (!_chosen)
+                Choose(true);
+            else
+                CancelOrder();
+            return;
+        }
+        if (!_chosen)
+        {
+            _orderNote = "танк не выбран — щёлкни по нему";
+            return;
+        }
         if (_other is { } o && cell == OtherCell(o))
         {
             if (twice)
                 OrderTo(cell, ram: true);
-            return;
-        }
-        if (cell == CellHere)
-        {
-            CancelOrder();
             return;
         }
         OrderTo(cell);

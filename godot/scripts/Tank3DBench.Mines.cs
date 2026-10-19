@@ -146,7 +146,7 @@ public sealed partial class Tank3DBench
                 && UnderHull(mine.At, _rig.Position, ahead, _foot, out float along))
             {
                 Blow(mine);
-                MinedOwn(along);
+                MinedOwn(mine, along);
             }
             else if (_other is { } o && o.Slid > 0.0f
                      && UnderHull(mine.At, o.Rig.Position, o.Ahead, o.Foot, out float alongOther))
@@ -179,8 +179,9 @@ public sealed partial class Tank3DBench
 
     /// <summary>The bench's own tank over the charge: the end over it thrown
     /// up, the hull heaved, and «Подбит» - <see cref="KnockOut"/>'s fate without
-    /// its round in the front.</summary>
-    private void MinedOwn(float along)
+    /// its round in the front. The way it was making is not lost with it: the
+    /// hull rolls on to the middle of the mined cell (<see cref="CoastDrive"/>).</summary>
+    private void MinedOwn(Laid mine, float along)
     {
         // Pitch negative is nose up: a charge under the nose throws the nose up.
         float end = along >= 0.0f ? 1.0f : -1.0f;
@@ -188,7 +189,10 @@ public sealed partial class Tank3DBench
         _heave.Kick(0.15f);
         _fate = Fate.Knocked;
         _sinceFate = 0.0f;
-        _speed = 0.0f;
+        CancelOrder();
+        _coastTo = CellWorld(mine.Cell);
+        // Too slow to carry it there by itself - a creep - it rolls at a crawl.
+        _speed = (_speed < 0.0f ? -1.0f : 1.0f) * Mathf.Max(Mathf.Abs(_speed), 0.2f * MaxSpeed);
         _driveScripted = 0.0f;
         FxKnocked();
         RockedOwn(1.0f);
@@ -207,9 +211,69 @@ public sealed partial class Tank3DBench
         _note = $"{o.Tag} knocked out by a mine";
     }
 
+    /// <summary>
+    /// Where a hull knocked out on the move rolls to: the middle of the cell
+    /// it went up on - the board's place for a tank, which a wreck left on the
+    /// cell's edge was not. Null when nothing is rolling.
+    /// </summary>
+    private Vector3? _coastTo;
+
+    /// <summary>
+    /// One frame of the roll: no drive any more, only the way the hull had,
+    /// spent evenly - the deceleration that stops it exactly on the middle,
+    /// <c>v²/2d</c>, asked again every frame - on a straight line there. The
+    /// hull eases round on to that line at half the turn rate, nose first if
+    /// it was going forward, tail first if backing, so a tank that went up
+    /// off the cell's axis does not slide sideways into place.
+    /// Out: what the frame does with any drive.
+    /// </summary>
+    private void CoastDrive(float dt, out float target, out float a, out float turn, out float step)
+    {
+        target = a = turn = step = 0.0f;
+        if (_coastTo is not Vector3 goal)
+            return;
+        Vector3 pos = _rig.Position;
+        Vector3 to = Flat(goal - pos);
+        float left = to.Length();
+        float back = _speed < 0.0f ? -1.0f : 1.0f;
+        float v = Mathf.Abs(_speed);
+        if (left <= 0.5f || dt <= 0.0f)
+        {
+            _coastTo = null;
+            _speed = 0.0f;
+            GD.Print($"tank3d: rolled to the middle of {CellHere}");
+            return;
+        }
+        float before = Mathf.Abs(_speed);
+        v = Mathf.Max(0.0f, v - v * v / (2.0f * left) * dt);
+        _speed = back * v;
+        a = -Mathf.Clamp((before - v) / (Accel * dt), 0.0f, 1.0f) * back;
+        target = 0.0f;
+        Vector3 way = to / left;
+        if (left > 1.0f)
+        {
+            float diff = (float)Angles.WrapAngle(HeadingOf(way * back) - _heading);
+            float budget = TurnRate * 0.5f * dt;
+            float d = Mathf.Abs(diff) <= budget ? diff : Mathf.Sign(diff) * budget;
+            Heading += d;
+            turn = d / dt;
+        }
+        float move = Mathf.Min(v * dt, left);
+        Vector3 next = pos + way * move;
+        if (!CanDrive(pos, next, way))
+        {
+            _coastTo = null;
+            _speed = 0.0f;
+            return;
+        }
+        _rig.Position = next;
+        step = back * move / _model.PixelsPerUnit;
+    }
+
     /// <summary>Backspace: the mines back on their cells, live.</summary>
     private void MinesReset()
     {
+        _coastTo = null;
         foreach (Laid mine in _mines)
         {
             mine.Spent = false;
