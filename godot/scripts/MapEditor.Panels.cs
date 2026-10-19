@@ -270,8 +270,14 @@ public sealed partial class MapEditor
                 ButtonGroup = group,
                 ButtonPressed = on(),
                 Alignment = HorizontalAlignment.Left,
+                // What the brush lays, small - MapEditor.Icons.
+                Icon = IconFor(_tab, name),
+                ExpandIcon = false,
             };
             button.AddThemeFontSizeOverride("font_size", 14);
+            // The models' icons are rendered larger than the drawn ones; all of
+            // them stand the same width on the panel.
+            button.AddThemeConstantOverride("icon_max_width", IconSide);
             Action chose = pick;
             button.Pressed += () =>
             {
