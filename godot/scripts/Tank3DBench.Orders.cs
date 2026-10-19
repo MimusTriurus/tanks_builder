@@ -221,7 +221,8 @@ public sealed partial class Tank3DBench
                 Heading = HeadingOf(to);
             (float run, float end) = RouteRun(pos);
             float ceiling = Mathf.Sqrt(end * end + 2.0f * Accel * Mathf.Max(run, 0.0f));
-            float allowed = Mathf.Min(RouteCap(_routeFrom, next), ceiling);
+            float allowed = Mathf.Min(Mathf.Min(RouteCap(_routeFrom, next), ceiling),
+                                      MaxSpeed * MireCap);
             _speed = _speed > allowed
                 ? Mathf.Max(allowed, _speed - Accel * dt)
                 : Mathf.Min(_speed + Accel * dt, allowed);

@@ -349,6 +349,20 @@ uniform float water_push = 3.5;
 uniform float water_wet = 4.0;
 uniform vec3 water_foam : source_color = vec3(0.97, 1.0, 1.0);
 uniform vec3 water_edge : source_color = vec3(0.62, 0.83, 0.87);
+// Mud on the armour (Tank3DBench.Mire drives it): a coat up from the hull's
+// foot at world height mud_y, mud_reach high at its full, torn along the top
+// and flecked above it - mud_on how much has been picked up, mud_dry how far it
+// has dried, wet dark to dusty pale. Its noise is in the part's own space
+// (mud_local), so the flecks ride on the plate rather than sliding over it as
+// the hull drives and turns; mud_grain is a fleck's size in world units.
+uniform float mud_on = 0.0;
+uniform float mud_y = 0.0;
+uniform float mud_reach = 10.0;
+uniform float mud_grain = 1.0;
+uniform float mud_dry = 0.0;
+uniform vec3 mud_wet : source_color = vec3(0.36, 0.34, 0.29);
+uniform vec3 mud_dust : source_color = vec3(0.49, 0.47, 0.41);
+varying vec3 mud_local;
 // The shot's glint (Tank3DBench, Glint): the plates turned toward the muzzle
 // at flash_at, within flash_reach of it, lit warm for a moment in two flat
 // steps - flash_on 1 at the shot and down to nought, so the lit patch shrinks
@@ -365,6 +379,7 @@ void vertex() {
     fall_pose(VERTEX, n);
     NORMAL = n;
     world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+    mud_local = VERTEX * length(MODEL_MATRIX[0].xyz);
 }
 void fragment() {
     if (burn_role != 0 && burn_gone(UV2.x, world)) {
@@ -556,6 +571,29 @@ void fragment() {
     }
     if (bent)
         NORMAL = normalize((VIEW_MATRIX * vec4(dent_n, 0.0)).xyz);
+    // Mud: a coat from the foot up, its top torn by a coarse noise and a fine
+    // one, then flecks above it thinning out with height - the belts throw it
+    // up and the plates catch it. Cut hard, one tone, the way the char is: a
+    // soft brown wash read as the paint going dirty-olive, not as mud.
+    if (mud_on > 0.001) {
+        float h = (world.y - mud_y) / max(mud_reach, 1e-3);
+        vec3 p = mud_local / max(mud_grain, 1e-3);
+        float torn = (noise3(p * 0.35) - 0.5) * 0.55 + (noise3(p * 1.3 + vec3(4.1)) - 0.5) * 0.25;
+        // Solid over the lower part of it - the belts and the run boards -
+        // and in blotches above that, fewer the higher: a whole side gone one
+        // brown read as paint, not as mud.
+        float solid = 1.0 - step(mud_on * 0.4, h + torn * 0.5);
+        float k = clamp(h / max(mud_on, 0.05), 0.0, 1.0);
+        float blotch = step(0.30 + 0.45 * k, noise3(p * 0.7 + vec3(2.7)))
+                     * (1.0 - step(mud_on, h + torn));
+        // Flecks: up to twice the coat's height, fewer the higher.
+        float up = clamp((h - mud_on) / max(mud_on, 0.05), 0.0, 1.0);
+        float fleck = step(0.72 + 0.25 * up, noise3(p * 2.2 + vec3(9.3))) * (1.0 - step(1.0, up));
+        float mud = max(max(solid, blotch), fleck);
+        vec3 tone = mix(mud_wet, mud_dust, mud_dry);
+        c.rgb = mix(c.rgb, tone, mud);
+        sooted = max(sooted, mud * mud_dry);
+    }
     // The waterline: a band of foam at the surface's height on the armour,
     // wavering with the water and torn along it, white with a pale edge under
     // it, and the paint a little darker - wet - just over it. Upright plates

@@ -874,6 +874,10 @@ void light() {
                 y += Pits(dt, ref want, snap);
             else
                 PitsLeave();
+            // Down into the mud (Tank3DBench.Mire).
+            float mired = MireSettle(cell, dt, snap);
+            if (!afloat && !_falling)
+                y -= mired;
             // The burnt-out wreck into the ground (Gone).
             if (Gone > 0.0f)
                 _wreckLift -= Gone * GoneDepth;
@@ -1397,6 +1401,7 @@ void light() {
     private void ResetTank()
     {
         _coastTo = null;
+        MudClear();
         foreach (var (node, parent, local) in _moved)
         {
             node.GetParent().RemoveChild(node);
@@ -1486,7 +1491,8 @@ void light() {
         // distance, the mass squatting on the pull and nosing down on the stop.
         // Afloat nothing is under the tracks: the class's swimming share
         // (MovementProfile.SwimFraction, the board's cap).
-        float cap = Swimming ? (float)MovementProfile.SwimFraction : 1.0f;
+        // In mud the drag (Tank3DBench.Mire).
+        float cap = Swimming ? (float)MovementProfile.SwimFraction : MireCap;
         float target, a, turn, step;
         if (RamRunning)
         {

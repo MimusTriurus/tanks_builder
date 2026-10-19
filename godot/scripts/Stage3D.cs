@@ -2810,6 +2810,7 @@ void fragment() {{
         // sampler is what lets one material serve both.
         _sides.MaterialOverride = Turf(null);
         _glaze.MaterialOverride = Turf(art, glass: true);
+        Mire();
         ((ImmediateMesh)_glaze.Mesh).ClearSurfaces();
         BuildWater(corner);
     }
@@ -3077,6 +3078,17 @@ uniform float ash_ink = 0.0;
 // PropFamily.Soot, which has to come out under it - and a bound copied into the
 // thing it bounds is the one that goes stale.
 uniform float ash_keep = 0.55;
+// Where the ground is mud, laid over the board the way the ash is, and how much
+// of it to show. Nothing on a board with no mud on it - see Stage3D.Mire.
+uniform sampler2D mire : filter_linear, hint_default_black;
+uniform vec4 mire_map = vec4(0.0, 0.0, 1.0, 1.0);
+uniform float mire_ink = 0.0;
+// Wet earth, the water standing in the ruts of it, and the sky it gives back.
+uniform vec3 mire_mud = vec3(0.36, 0.27, 0.18);
+uniform vec3 mire_pool = vec3(0.40, 0.44, 0.45);
+uniform vec3 mire_glint = vec3(0.86, 0.90, 0.88);
+// One over the size of a blot of mud and of a puddle, in world units.
+uniform float mire_grain = 0.022;
 // How much of the glaze's own colour it keeps over what it covers. Read by the
 // glass build of this shader and by nothing else - see Stage3D.Glass, which is
 // this source with one line put in.
@@ -3102,6 +3114,26 @@ void vertex() {
     ground = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
 }
 
+// Value noise for the mire's edge and its puddles: the mask is a disc per cell,
+// and a disc is the hexagon it came from with the corners rounded off.
+float mire_hash(vec2 p) {
+    return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+float mire_noise(vec2 p) {
+    vec2 i = floor(p);
+    vec2 f = fract(p);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(mix(mire_hash(i), mire_hash(i + vec2(1.0, 0.0)), f.x),
+               mix(mire_hash(i + vec2(0.0, 1.0)), mire_hash(i + vec2(1.0, 1.0)), f.x),
+               f.y);
+}
+
+float mire_fbm(vec2 p) {
+    return mire_noise(p) * 0.6 + mire_noise(p * 2.13 + 5.7) * 0.3
+         + mire_noise(p * 4.41 + 1.3) * 0.1;
+}
+
 void fragment() {
     vec4 paint = texture(art, UV) * COLOR;
     float blocked = 0.0;
@@ -3121,6 +3153,39 @@ void fragment() {
         }
     }
     vec3 lit = paint.rgb * (1.0 - shade * blocked);
+    if (mire_ink > 0.0) {
+        vec2 mv = (ground.xz - mire_map.xy) * mire_map.zw;
+        if (mv.x >= 0.0 && mv.x <= 1.0 && mv.y >= 0.0 && mv.y <= 1.0) {
+            float wet = texture(mire, mv).r * mire_ink;
+            if (wet > 0.0) {
+                vec2 at = ground.xz * mire_grain;
+                // The edge: the soft disc pushed in and out by the noise, then
+                // cut, so a patch of mud has a shore and not a blur.
+                float tear = mire_fbm(at);
+                float mud = smoothstep(0.47, 0.53, wet + (tear - 0.5) * 0.55);
+                // The ground's own grain carried into the mud, so a cell of
+                // mud still reads as the same board rather than as a decal.
+                float lum = dot(lit, vec3(0.299, 0.587, 0.114));
+                vec3 soaked = mire_mud * (0.35 + 1.3 * lum);
+                // Puddles only where the mud is deep, so the shore stays earth.
+                float p = mire_fbm(at * 1.7 + vec2(31.0, 17.0));
+                float lip = 1.18 - 0.5 * wet;
+                float pool = smoothstep(lip, lip + 0.015, p) * mud;
+                // A darker band of wet earth round each puddle - one cel step.
+                float rim = smoothstep(lip - 0.07, lip - 0.055, p) * mud;
+                soaked *= 1.0 - 0.28 * rim;
+                vec3 water = mire_pool * (1.0 - shade * blocked);
+                // The sky caught in the water: streaks across it, drifting, in
+                // the deeper middle of a puddle and not at its lip.
+                float g = mire_noise(vec2(ground.x * 0.06 + TIME * 0.25,
+                                          ground.z * 0.02));
+                float glint = step(0.62, g) * smoothstep(lip + 0.03, lip + 0.04, p);
+                water = mix(water, mire_glint, glint * 0.8 * (1.0 - shade * blocked));
+                lit = mix(lit, soaked, mud);
+                lit = mix(lit, water, pool);
+            }
+        }
+    }
     if (ash_ink > 0.0) {
         vec2 av = (ground.xz - ash_map.xy) * ash_map.zw;
         if (av.x >= 0.0 && av.x <= 1.0 && av.y >= 0.0 && av.y <= 1.0) {
@@ -6387,14 +6452,25 @@ void fragment() {{
     private void Splat(Vector3 at, float wide, float much, float perX, float perZ,
                        float rim = FireRim)
     {
-        if (_soot is null || much <= 0.0f || wide <= 0.0f)
+        if (_soot is not null)
+            Daub(_soot, _sootWide, _sootTall, _sootAt, at, wide, much, perX, perZ, rim);
+    }
+
+    /// <summary><see cref="Splat"/> into any map laid over the board the way
+    /// the ash map is - the ash and the mire (<see cref="Mire"/>) are two of
+    /// them, and a disc with a soft rim is what both are made of.</summary>
+    private static void Daub(byte[] into, int wideTexels, int tallTexels,
+                             Vector4 frame, Vector3 at, float wide, float much,
+                             float perX, float perZ, float rim)
+    {
+        if (much <= 0.0f || wide <= 0.0f)
             return;
-        float x0f = (at.X - _sootAt.X) * perX, z0f = (at.Z - _sootAt.Y) * perZ;
+        float x0f = (at.X - frame.X) * perX, z0f = (at.Z - frame.Y) * perZ;
         float reachX = wide * perX, reachZ = wide * perZ;
         int x0 = Mathf.Max(0, Mathf.FloorToInt(x0f - reachX));
-        int x1 = Mathf.Min(_sootWide - 1, Mathf.CeilToInt(x0f + reachX));
+        int x1 = Mathf.Min(wideTexels - 1, Mathf.CeilToInt(x0f + reachX));
         int z0 = Mathf.Max(0, Mathf.FloorToInt(z0f - reachZ));
-        int z1 = Mathf.Min(_sootTall - 1, Mathf.CeilToInt(z0f + reachZ));
+        int z1 = Mathf.Min(tallTexels - 1, Mathf.CeilToInt(z0f + reachZ));
         for (int z = z0; z <= z1; z++)
         for (int x = x0; x <= x1; x++)
         {
@@ -6405,9 +6481,9 @@ void fragment() {{
                 continue;
             float fall = Mathf.Clamp((1.0f - d) / Mathf.Max(rim, 0.001f), 0.0f, 1.0f);
             byte want = (byte)Mathf.RoundToInt(255.0f * much * fall);
-            int i = z * _sootWide + x;
-            if (want > _soot[i])
-                _soot[i] = want;
+            int i = z * wideTexels + x;
+            if (want > into[i])
+                into[i] = want;
         }
     }
 
