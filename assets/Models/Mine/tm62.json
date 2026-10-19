@@ -1,0 +1,14 @@
+{
+ "source": "pipeline/mine_tm62.py export_game",
+ "frame": "glTF / Godot: +Y up, metres, the mine's bottom centre at the origin",
+ "units": "m",
+ "size": {
+  "diameter": 0.328,
+  "body": 0.32,
+  "height": 0.128
+ },
+ "nodes": {
+  "body": "TM62_Body",
+  "fuze": "TM62_Fuze"
+ }
+}

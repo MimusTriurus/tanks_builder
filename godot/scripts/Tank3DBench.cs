@@ -262,6 +262,7 @@ public sealed partial class Tank3DBench : Node3D
         if (_field is null)
             BuildGround();
         BuildWood();
+        BuildMines();
         Park();
         Mount(_modelTag);
         if (_otherWanted)
@@ -874,6 +875,7 @@ void light() {
             else if (a == "--tracer-soft") _tracerSoft = true;
             else if (a == "--no-walls") _noWalls = true;
             else if (a == "--no-bunker") _noBunker = true;
+            else if (a == "--no-mines") _noMines = true;
             // the rubble stays where it landed (TankBench's flag, same name)
             else if (a == "--no-crumble") WallRig.Crumbles = false;
             else if (a == "--no-cel-relief") _flatRelief = true;
@@ -944,7 +946,7 @@ void light() {
             case "unburn": FxBurn(false); break;
             case "knock": KnockOut(); break;
             case "destroy": Destroy(); break;
-            case "reset": ResetTank(); WallReset(); break;
+            case "reset": ResetTank(); WallReset(); MinesReset(); break;
             case "pond": ToPond(); break;
             case "amphibious": _amphibious = true; break;
             case "no-amphibious": _amphibious = false; break;
@@ -1314,6 +1316,7 @@ void light() {
             }
         }
         Settle(dt);
+        MinesTick();
         _model.Driven += step;
         _model.Skid += Mathf.DegToRad(turn) * dt * _model.Size.X * 0.5f;
         if (Mathf.Abs(_speed) > 1.0f || Mathf.Abs(turnIn) > 0.0f)

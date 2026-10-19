@@ -46,6 +46,10 @@ internal static class AssetRoot
     /// written by <c>pipeline/bunker_break.py export_game</c> - what Tank3D
     /// stands on a capon's cell (<see cref="BunkerProp"/>).</summary>
     internal static readonly string Bunker = Repo + "/assets/Models/Bunker";
+    /// <summary>The TM-62 mine: <c>tm62.glb</c> and its <c>tm62.json</c>,
+    /// written by <c>pipeline/mine_tm62.py export_game</c> - what Tank3D lays
+    /// on a minefield's cell (<c>Tank3DBench.Mines</c>).</summary>
+    internal static readonly string Mine = Repo + "/assets/Models/Mine";
 
     /// <summary>Where <c>stage_sounds.sh</c> puts the audio. Not in this
     /// repository - see the script - so this directory is often simply absent,
