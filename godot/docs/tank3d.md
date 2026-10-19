@@ -2225,14 +2225,24 @@ back`, и танк стоит на плите.
 пробитие · `Ctrl+1–4` HE по листу · `5` снаряд в землю рядом (`SheetBlast` +
 воронка) · `J` горит · `K` подбит · `X` уничтожен · `T` таран (носом к стене — стены,
 иначе цели: цель впереди, если её нет, и полный ход) · `Backspace` сброс · `WASD`
-езда · `Q/E` башня · `R/F` ствол · `-/=` зум · `TAB` панель · `F12` снимок в
+езда · `Q/E` башня · `R/F` ствол · `-/=` и колесо мыши — зум · `TAB` панель · `F12` снимок в
 `out/tank3d.png`.
 
-`--model LTR`, `--map events` (по умолчанию; `test` — прежняя), `--cell Q,R`, `--tremble 1.0`, `--no-tracer`, `--tracer-smoke`, `--tracer-soft`, `--no-walls`, `--no-bunker`, `--no-crumble`, `--no-mines`, `--no-cel-relief`, `--scorch`, `--no-grass`, `--no-trees`, `--trees A,B,..`, `--wood N`, `--wind x`, `--no-amphibious`, `--no-ripples`, `--soft-water`, `--flat`, `--pbr`, `--fx2d`, `--zoom 2.5`, `--heading 215` (0 — нос к
+**Зум и кадр** (`FrameCamera`, `FitZoom`, `BoardBox`). По умолчанию зум —
+вписывание: вся доска в окне с полем 4 % (`FitMargin`), с поднятыми клетками
+и боками призм; пересчитывается, когда меняется окно. Колесо (×1,1 за
+щелчок, `WheelStep`) и `-/=` (×1,25) снимают вписывание; зум от 0,8 вписывания
+(не больше 0,5) до 8. Кадр идёт за танком, но по каждой оси экрана держится
+внутри доски, а где доска уже кадра — стоит по её середине: на вписывании
+доска неподвижна, на приближении кадр едет за танком до края. `--zoom`
+задаёт зум и вписывание выключает — у старых снимков кадр прежний, кроме
+прижима к краю.
+
+`--model LTR`, `--map events` (по умолчанию; `test` — прежняя), `--cell Q,R`, `--tremble 1.0`, `--no-tracer`, `--tracer-smoke`, `--tracer-soft`, `--no-walls`, `--no-bunker`, `--no-crumble`, `--no-mines`, `--no-cel-relief`, `--scorch`, `--no-grass`, `--no-trees`, `--trees A,B,..`, `--wood N`, `--wind x`, `--no-amphibious`, `--no-ripples`, `--soft-water`, `--flat`, `--pbr`, `--fx2d`, `--zoom 2.5` (без него — вся доска в окне), `--heading 215` (0 — нос к
 камере), `--capture PATH --capture-at N`, `--sequence DIR FROM TO [STEP]` (выходит на кадре TO, даже если он не на шаге),
 `--no-ui`, `--do WHAT@FRAME` (имена: `shot`, `ricochet-*`, `pierce-*`, `he-*`,
 `ground`, `burn`, `unburn`, `knock`, `destroy`, `reset`, `heights`, `drive`, `reverse`,
-`stop`, `left`, `right`, `straight`, `ram-wall`, `turret=DEG`, `elev=DEG`, `heading=DEG`,
+`stop`, `left`, `right`, `straight`, `ram-wall`, `wheel-up`, `wheel-down` (щелчок колеса), `turret=DEG`, `elev=DEG`, `heading=DEG`,
 `model=TAG`, `pond`, `amphibious`, `no-amphibious`, `ram`, `target`, `untarget`,
 `target=TAG`, `aim=X,Y` — ПКМ в этой точке экрана, `aim-cell=Q,R` — ПКМ по
 гексу, `aim-target` — ПКМ по гексу цели тарана); `--target TAG`, `--target-cell Q,R`, `--target-heading DEG` —

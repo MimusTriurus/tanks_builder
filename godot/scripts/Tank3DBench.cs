@@ -73,6 +73,10 @@ public sealed partial class Tank3DBench : Node3D
     /// it - foam and glints faded in rather than stepped (<see cref="Stage3D.CelWater"/>).</summary>
     private bool _softWater;
     private float _zoom = 2.5f;
+    /// <summary>The zoom is the board's fit (<see cref="FitZoom"/>), kept so
+    /// as the window changes, until the wheel, <c>-/=</c> or <c>--zoom</c>
+    /// set one.</summary>
+    private bool _zoomFit = true;
     private float _heading = 215.0f;
     private string? _capturePath;
     private bool _noUi;
@@ -384,12 +388,80 @@ public sealed partial class Tank3DBench : Node3D
         _camera.MakeCurrent();
     }
 
+    /// <summary>A wheel notch's zoom.</summary>
+    private const float WheelStep = 1.1f;
+
+    /// <summary>How far in the zoom goes: two hexes across the window's height.</summary>
+    private const float ZoomMost = 8.0f;
+
+    /// <summary>The board with this much of itself round it, so its rim and
+    /// the prisms' sides are not on the window's edge.</summary>
+    private const float FitMargin = 1.04f;
+
+    /// <summary>The zoom by <paramref name="k"/>, between a little under the
+    /// board's fit and <see cref="ZoomMost"/>; the fit is let go.</summary>
+    private void ZoomBy(float k)
+    {
+        float least = Mathf.Min(0.5f, 0.8f * FitZoom());
+        _zoom = Mathf.Clamp(_zoom * k, least, ZoomMost);
+        _zoomFit = false;
+    }
+
+    /// <summary>
+    /// The board's box in the camera's own plane, world units: x across the
+    /// screen, y down it - <see cref="Board"/> of the ground, less the height a
+    /// raised cell stands at, which is how far up the screen its top is drawn.
+    /// Null on the flat ground. Measured once: the board does not move.
+    /// </summary>
+    private Rect2? BoardBox()
+    {
+        if (_boardBox is not null || _field is null || _tile is null)
+            return _boardBox;
+        Vector2 half = (Vector2)_tile.HexRect.Size * 0.5f;
+        var lo = new Vector2(float.MaxValue, float.MaxValue);
+        var hi = new Vector2(float.MinValue, float.MinValue);
+        for (int r = 0; r < _field.Rows; r++)
+        for (int q = 0; q < _field.Columns; q++)
+        {
+            var cell = new Vector2I(q, r);
+            if (!_field.InBounds(cell))
+                continue;
+            Vector2 c = _field.FlatAnchor(cell) + _field.CentreOffset;
+            float lift = LiftAt(new Vector3(c.X, 0.0f, c.Y / Squash));
+            lo = new Vector2(Mathf.Min(lo.X, c.X - half.X), Mathf.Min(lo.Y, c.Y - half.Y - Mathf.Max(lift, 0.0f)));
+            hi = new Vector2(Mathf.Max(hi.X, c.X + half.X), Mathf.Max(hi.Y, c.Y + half.Y - Mathf.Min(lift, 0.0f)));
+        }
+        if (lo.X > hi.X)
+            return null;
+        _boardBox = new Rect2(lo, hi - lo);
+        return _boardBox;
+    }
+
+    private Rect2? _boardBox;
+
+    /// <summary>The zoom the whole board fits the window at, with
+    /// <see cref="FitMargin"/>; the old default, 2.5, on the flat ground.</summary>
+    private float FitZoom()
+    {
+        if (BoardBox() is not { } box || box.Size.X <= 0.0f || box.Size.Y <= 0.0f)
+            return 2.5f;
+        Vector2 view = GetViewport().GetVisibleRect().Size;
+        return Mathf.Min(view.X / box.Size.X, view.Y / box.Size.Y) / FitMargin;
+    }
+
     /// <summary>Size the camera to the zoom and keep the tank a little below
-    /// the middle, so a plume or a thrown turret has sky to go into.</summary>
+    /// the middle, so a plume or a thrown turret has sky to go into - but no
+    /// further out than the board's edge: along each axis of the screen the
+    /// view is held inside the board, and where the board is narrower than
+    /// the view it stands in the middle of it. At the fit that is the whole
+    /// board, still; zoomed in, it is the tank, until it drives to an edge.</summary>
     private void FrameCamera()
     {
         const float back = Back;
-        float height = GetViewport().GetVisibleRect().Size.Y;
+        Vector2 window = GetViewport().GetVisibleRect().Size;
+        float height = window.Y;
+        if (_zoomFit)
+            _zoom = FitZoom();
         _camera.Size = height / _zoom;
         // Not up with the wreck's hop, nor down into its crater or the ground
         // after it (Tank3DBench.Pits, Gone): the board stays where it is.
@@ -405,6 +477,19 @@ public sealed partial class Tank3DBench : Node3D
         }
         // Up the screen by a sixth of the view: screen up is -Z on the ground.
         pivot.Z -= _camera.Size / 6.0f / Squash;
+        // Held inside the board. The middle of the view in the camera's
+        // plane is the pivot's Board() less its height drawn up the screen.
+        if (BoardBox() is { } box)
+        {
+            var half = new Vector2(_camera.Size * window.X / Mathf.Max(window.Y, 1.0f), _camera.Size) * 0.5f;
+            var at = new Vector2(pivot.X, pivot.Z * Squash - pivot.Y * RiseFactor);
+            float Hold(float c, float lo, float size, float h) =>
+                size <= 2.0f * h ? lo + 0.5f * size : Mathf.Clamp(c, lo + h, lo + size - h);
+            var held = new Vector2(Hold(at.X, box.Position.X, box.Size.X, half.X),
+                                   Hold(at.Y, box.Position.Y, box.Size.Y, half.Y));
+            pivot.X += held.X - at.X;
+            pivot.Z += (held.Y - at.Y) / Squash;
+        }
         _camera.Position = pivot + new Vector3(0.0f, back * Squash, back * RiseFactor);
         // Camera2D.Offset's sense: +y moves the view down the screen.
         Vector2 shake = ShakeOffset();
@@ -889,7 +974,7 @@ void light() {
             else if (a == "--flat") _flat = true;
             else if (a == "--pbr") _pbr = true;
             else if (a == "--fx2d") _fx2d = true;
-            else if (a == "--zoom" && more) _zoom = F(args[++i], _zoom);
+            else if (a == "--zoom" && more) { _zoom = F(args[++i], _zoom); _zoomFit = false; }
             else if (a == "--tremble" && more) _trembleLevel = F(args[++i], _trembleLevel);
             else if (a == "--heading" && more) _heading = F(args[++i], _heading);
             else if (a == "--capture" && more) _capturePath = args[++i];
@@ -964,6 +1049,9 @@ void light() {
                 if (_other is not null)
                     AimCell(OtherCell(_other));
                 break;
+            // a notch of the mouse wheel
+            case "wheel-up": ZoomBy(WheelStep); break;
+            case "wheel-down": ZoomBy(1.0f / WheelStep); break;
             case "target": LineUp(); break;
             case "untarget": RemoveOther(); break;
             default:
@@ -1499,6 +1587,15 @@ void light() {
             AimAt(click.Position);
             return;
         }
+        // The wheel: a notch is a tenth in or out; a touchpad's scroll comes
+        // in fractions (Factor).
+        if (@event is InputEventMouseButton { Pressed: true } wheel
+            && wheel.ButtonIndex is MouseButton.WheelUp or MouseButton.WheelDown)
+        {
+            float notches = wheel.Factor > 0.0f ? wheel.Factor : 1.0f;
+            ZoomBy(Mathf.Pow(WheelStep, wheel.ButtonIndex == MouseButton.WheelUp ? notches : -notches));
+            return;
+        }
         if (@event is not InputEventKey { Pressed: true, Echo: false } key)
             return;
         string kind = key.CtrlPressed ? "he-" : key.ShiftPressed ? "pierce-" : "ricochet-";
@@ -1516,8 +1613,8 @@ void light() {
             case Key.T: Do("ram"); break;
             case Key.Backspace: Do("reset"); break;
             case Key.Tab: _panel?.Flip(); break;
-            case Key.Minus: _zoom = Mathf.Max(0.5f, _zoom / 1.25f); break;
-            case Key.Equal: _zoom = Mathf.Min(8.0f, _zoom * 1.25f); break;
+            case Key.Minus: ZoomBy(1.0f / 1.25f); break;
+            case Key.Equal: ZoomBy(1.25f); break;
             case Key.F12:
                 Directory.CreateDirectory(AssetRoot.Out);
                 GetViewport().GetTexture().GetImage().SavePng(AssetRoot.Out + "/tank3d.png");
