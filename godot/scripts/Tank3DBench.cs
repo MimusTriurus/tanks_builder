@@ -284,6 +284,7 @@ public sealed partial class Tank3DBench : Node3D
         layer.AddChild(_hud);
         if (!_noUi)
             BuildPanel(layer);
+        BuildBack(layer);
     }
 
     /// <summary>The board's tile: the hex of a sprite set, the one thing here
@@ -662,10 +663,9 @@ public sealed partial class Tank3DBench : Node3D
             GD.Print("tank3d: no tile to lay a board with - the flat ground instead");
             return;
         }
-        // The events bench's board is compiled apart from the named ones -
-        // ByName would answer "events" with the harness's bench board.
-        BoardMap map = string.Equals(_mapName, "events", StringComparison.OrdinalIgnoreCase)
-            ? BoardMap.Events : BoardMap.ByName(_mapName);
+        if (MapToPlay() is not BoardMap map)
+            return;
+        TankFromBoard(map);
         TerrainSet terrain = TerrainSet.Load(AssetRoot.Terrains);
         GD.Print($"tank3d: board {map.Name} {map.Columns}x{map.Rows}, terrain {terrain.Note}");
         _field = new HexField
@@ -995,7 +995,7 @@ void light() {
         {
             string a = args[i];
             bool more = i + 1 < args.Length;
-            if (a == "--model" && more) _modelTag = args[++i].ToUpperInvariant();
+            if (a == "--model" && more) { _modelTag = args[++i].ToUpperInvariant(); _modelNamed = true; }
             else if (a == "--sprites" && more)
                 GD.Print($"tank3d: --sprites {args[++i]} ignored - the 3D tank reads no sprite set");
             else if (a == "--map" && more) _mapName = args[++i];
@@ -1048,6 +1048,7 @@ void light() {
             else if (a == "--capture" && more) _capturePath = args[++i];
             else if (a == "--no-ui") _noUi = true;
             else if (a == "--capture-at" && more) _captureAt = (int)F(args[++i], _captureAt);
+            else if (a == "--edit-at" && more) _editAt = (int)F(args[++i], _editAt);
             // --sequence DIR FROM TO [STEP]: every STEP-th frame in between, for
             // looking at motion rather than at one moment of it.
             else if (a == "--sequence" && i + 3 < args.Length)
@@ -1069,6 +1070,7 @@ void light() {
                 _script.Add((parts.Length > 1 ? (int)F(parts[1], 0) : 0, parts[0]));
             }
         }
+        TakeSession();
     }
 
     private static float F(string s, float fallback) =>
@@ -1451,6 +1453,13 @@ void light() {
 
     public override void _Process(double delta)
     {
+        // The way back, before the capture - the harness's order: the picture
+        // that lands on disk is the editor it returned to.
+        if (_editAt >= 0 && _frame == _editAt && _editing)
+        {
+            Edit();
+            return;
+        }
         float dt = (float)Math.Min(delta, 0.1);
         foreach (var (frame, what) in _script)
             if (frame == _frame)
@@ -1807,6 +1816,7 @@ void light() {
             case Key.Home: FollowTank(); break;
             case Key.Minus: ZoomBy(1.0f / 1.25f); break;
             case Key.Equal: ZoomBy(1.25f); break;
+            case Key.F5: Edit(); break;
             case Key.F12:
                 Directory.CreateDirectory(AssetRoot.Out);
                 GetViewport().GetTexture().GetImage().SavePng(AssetRoot.Out + "/tank3d.png");

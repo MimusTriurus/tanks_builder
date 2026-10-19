@@ -110,7 +110,7 @@ dotnet build
 12 × 8 стенда событий, которую `ByName` не знает: на ней есть **глубокий пруд**
 (10,5)–(11,6) с рампой выезда на (11,5), брод, горка, овраг и полка; с
 2026-09-30, до того — `test`, полоса 7 × 4 `TankTest` с горкой, мелким прудом и
-островом, её даёт `--map test`; `--map NAME` — любая из `BoardMap.ByName`; кладки
+островом, её даёт `--map test`; `--map NAME` — любая из `BoardMap.Names` или `events`, незнакомое имя — `REFUSED` и код 1, а не тихий `bench` (`Tank3DBench.Session`); кладки
 сцена не ставит, рощу спрайтов тоже — вместо неё модели, ниже «Трава и лес») на
 `HexField`, отданный `Stage3D`, — призмы уровней, пандусы,
 пруд, как на `TankTest`. Поле само ничего не рисует (`ShowField = false`),
@@ -2416,7 +2416,7 @@ back`, и танк стоит на плите.
 центрировался на нём. Для снимков: `--do wheel-up=X,Y`, `wheel-down=X,Y` (щелчок
 с курсором в точке экрана), `pan=DX,DY` (протяжка средней кнопкой), `follow`.
 
-`--model LTR`, `--map events` (по умолчанию; `test` — прежняя), `--cell Q,R`, `--tremble 1.0`, `--no-tracer`, `--tracer-smoke`, `--tracer-soft`, `--no-walls`, `--no-bunker`, `--no-crumble`, `--no-mines`, `--free-drive`, `--no-cel-relief`, `--scorch`, `--no-grass`, `--no-trees`, `--trees A,B,..`, `--wood N`, `--wind x`, `--no-amphibious`, `--no-ripples`, `--soft-water`, `--flat`, `--pbr`, `--fx2d`, `--zoom 2.5` (без него — вся доска в окне), `--heading 215` (0 — нос к
+`--model LTR`, `--map events` (по умолчанию; `test` — прежняя), `--edit-at N` (Edit на кадре N, только если стенд прислал редактор), `--cell Q,R`, `--tremble 1.0`, `--no-tracer`, `--tracer-smoke`, `--tracer-soft`, `--no-walls`, `--no-bunker`, `--no-crumble`, `--no-mines`, `--free-drive`, `--no-cel-relief`, `--scorch`, `--no-grass`, `--no-trees`, `--trees A,B,..`, `--wood N`, `--wind x`, `--no-amphibious`, `--no-ripples`, `--soft-water`, `--flat`, `--pbr`, `--fx2d`, `--zoom 2.5` (без него — вся доска в окне), `--heading 215` (0 — нос к
 камере), `--capture PATH --capture-at N`, `--sequence DIR FROM TO [STEP]` (выходит на кадре TO, даже если он не на шаге),
 `--no-ui`, `--do WHAT@FRAME` (имена: `shot`, `ricochet-*`, `pierce-*`, `he-*`,
 `ground`, `burn`, `unburn`, `knock`, `destroy`, `reset`, `heights`, `drive`, `reverse`,

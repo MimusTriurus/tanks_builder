@@ -501,8 +501,8 @@ public sealed partial class MapEditor : SceneRoot
         // probe worth having: after it, --capture and --capture-at are read
         // again by Main, so the frame that lands on disk is the harness playing
         // the board the editor just drew.
-        if (_open == "run" && _frame == 20)
-            Play();
+        if (_open is "run" or "run2d" && _frame == 20)
+            Play(sprites: _open == "run2d");
         // And a board the harness would refuse: Run must not change scene, and
         // must say which fault stopped it.
         if (_open == "runbad" && _frame == 20)
@@ -1045,7 +1045,7 @@ public sealed partial class MapEditor : SceneRoot
             case Key.O: Chose(Item.Open); return;
             case Key.S when key.ShiftPressed: Chose(Item.SaveAs); return;
             case Key.S: Keep(); return;
-            case Key.F5: Play(); return;
+            case Key.F5: Play(sprites: key.ShiftPressed); return;
             case Key.L: _layers ^= Layers.Levels; break;
             case Key.R: _layers ^= Layers.Ramps; break;
             case Key.G: _layers ^= Layers.Sites; break;
@@ -1157,8 +1157,14 @@ public sealed partial class MapEditor : SceneRoot
     /// <b>The undo stack does not survive the round trip</b>, and nothing here
     /// pretends otherwise: Edit re-opens the saved board, which is the letters,
     /// the ramps, the masonry and the parkings, and no history.
+    ///
+    /// <b>Into the 3D bench, and the sprite harness only on ask.</b> The 3D line
+    /// is the project's main one (the root CLAUDE.md), so Run plays the board
+    /// on <c>Tank3D.tscn</c>; <paramref name="sprites"/> - shift+F5, File's
+    /// "Run sprites", <c>--menu run2d</c> - is the old way into <c>Main</c>,
+    /// kept while that line lives. Both hand back the same way.
     /// </summary>
-    private void Play()
+    private void Play(bool sprites = false)
     {
         Settle();
         MapRules.Fault fatal =
@@ -1175,8 +1181,8 @@ public sealed partial class MapEditor : SceneRoot
             return;
         Session.Map = _edit.Name;
         Session.Editing = true;
-        GD.Print($"editor: running {_edit.Name} in the harness");
-        GetTree().ChangeSceneToFile("res://Main.tscn");
+        GD.Print($"editor: running {_edit.Name} {(sprites ? "in the harness" : "on the 3D bench")}");
+        GetTree().ChangeSceneToFile(sprites ? "res://Main.tscn" : "res://Tank3D.tscn");
     }
 
     /// <summary>

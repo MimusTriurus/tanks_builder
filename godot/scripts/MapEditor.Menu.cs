@@ -60,6 +60,7 @@ public sealed partial class MapEditor
         Save,
         SaveAs,
         Run,
+        RunSprites,
     }
 
     private void Menu(CanvasLayer layer)
@@ -103,6 +104,9 @@ public sealed partial class MapEditor
         // Under the saves and separated from them, because it is one of them:
         // Run saves first and plays what is on disk - see MapEditor.Play.
         file.AddItem("Run              F5", (int)Item.Run);
+        // The sprite harness, the legacy line's: kept while Main lives, under
+        // the 3D run rather than instead of it.
+        file.AddItem("Run sprites  shift+F5", (int)Item.RunSprites);
         file.IdPressed += id => Chose((Item)id);
         bar.AddChild(file);
         _bar = bar;
@@ -161,6 +165,9 @@ public sealed partial class MapEditor
                 break;
             case Item.Run:
                 Play();
+                break;
+            case Item.RunSprites:
+                Play(sprites: true);
                 break;
             default:
                 _saveName.Text = _edit.Name;
