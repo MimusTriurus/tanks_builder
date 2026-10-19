@@ -40,10 +40,25 @@ namespace TankSpriteTest;
 /// </summary>
 public static class MapFile
 {
-    /// <summary>The format the reader speaks. Written into every file, checked
-    /// on the way in: a file from a later format is refused by name rather than
-    /// read as far as it happens to parse.</summary>
-    public const int Format = 1;
+    /// <summary>
+    /// The format the writer writes. Written into every file, checked on the way
+    /// in: a file from a later format is refused by name rather than read as far
+    /// as it happens to parse.
+    ///
+    /// <b>2 is 1 with mud in the alphabet</b> (<see cref="BoardMap.Mud"/>, the
+    /// editor's stage 4, docs/editor3d-plan.md) - and a capon the editor lays
+    /// rather than one typed into the walls block, which the block could always
+    /// say. Every letter of 1 means in 2 what it meant, so a format-1 file is
+    /// read as written (<see cref="Oldest"/>); what is refused is a file that
+    /// says 1 and carries a letter 1 never had - mislabelled, and a build that
+    /// speaks only 1 would have stopped on that letter with no word about why.
+    /// The point of the bump is that build: it now refuses a file by its number.
+    /// </summary>
+    public const int Format = 2;
+
+    /// <summary>The oldest format still read - the ones between it and
+    /// <see cref="Format"/> are taken up by <see cref="Upgrade"/>.</summary>
+    public const int Oldest = 1;
 
     public const string Extension = ".json";
 
@@ -132,12 +147,13 @@ public static class MapFile
 
         if (file is null)
             throw new InvalidOperationException($"{name}: the file is empty");
-        if (file.Format != Format)
+        if (file.Format < Oldest || file.Format > Format)
             throw new InvalidOperationException(
-                $"{name}: this reader speaks format {Format} and the file says "
-                + $"{file.Format}");
+                $"{name}: this reader speaks formats {Oldest} to {Format} and the "
+                + $"file says {file.Format}");
         if (file.Ground is null || file.Ground.Length == 0)
             throw new InvalidOperationException($"{name}: no ground grid");
+        Upgrade(file, name);
         if (file.Ramps is null)
             throw new InvalidOperationException(
                 $"{name}: no ramp grid - a board with no ramps writes one of "
@@ -173,6 +189,28 @@ public static class MapFile
         return BoardMap.FromGround(name, file.Ground, file.Ramps, homes, paint,
                                    file.Height ?? true, file.Plinth ?? 0,
                                    Walling(file.Walls, name));
+    }
+
+    /// <summary>
+    /// An older file brought to <see cref="Format"/>, a step at a time, in
+    /// place. A step is where a letter changes meaning or a field moves; one
+    /// that changes nothing still checks the file keeps to its own format.
+    /// </summary>
+    private static void Upgrade(Shape file, string name)
+    {
+        if (file.Format == 1)
+        {
+            // 1 -> 2: nothing moves. A 1 that carries mud is not a 1.
+            for (int r = 0; r < file.Ground!.Length; r++)
+            {
+                int q = file.Ground[r]?.IndexOf(BoardMap.Mud) ?? -1;
+                if (q >= 0)
+                    throw new InvalidOperationException(
+                        $"{name}: ({q},{r}) is '{BoardMap.Mud}', mud, which came in "
+                        + "format 2 and the file says 1");
+            }
+            file.Format = 2;
+        }
     }
 
     /// <summary>
@@ -621,7 +659,35 @@ public static class MapFile
         string? folder = Path.GetDirectoryName(path);
         if (folder is { Length: > 0 })
             Directory.CreateDirectory(folder);
-        File.WriteAllText(path, Write(map));
+        // <b>Read back before it replaces anything</b> - ratel's level editor
+        // does the same (Level3DIO.save_path). The text goes to a .part beside
+        // the file, is parsed as any reader would parse it, and must write
+        // itself out again letter for letter; only then does it take the
+        // name. A writer and a reader that drifted apart cost a board somebody
+        // drew, and the .part is where that is found rather than the next open.
+        string text = Write(map);
+        string part = path + ".part";
+        File.WriteAllText(part, text);
+        string? wrong = null;
+        try
+        {
+            BoardMap back = Read(part, map.Name);
+            if (Write(back) != text)
+                wrong = "the file read back does not write the same text";
+            else if (!Ground(back).SequenceEqual(Ground(map)) || !Ramps(back).SequenceEqual(Ramps(map)))
+                wrong = "the file read back is another board";
+        }
+        catch (Exception e)
+        {
+            wrong = e.Message;
+        }
+        if (wrong is not null)
+        {
+            File.Delete(part);
+            throw new InvalidOperationException(
+                $"{map.Name}: not saved - {wrong}; the file on disk is as it was");
+        }
+        File.Move(part, path, overwrite: true);
         return path;
     }
 

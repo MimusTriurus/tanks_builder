@@ -21522,6 +21522,9 @@ public static class SelfTest
                     back.Columns == BoardMap.Abbey.Columns
                     && back.Levels.SequenceEqual(BoardMap.Abbey.Levels),
                     $"{path} came back {back.Columns}x{back.Rows}");
+                // MapFile.Save reads its .part back before it takes the name.
+                Check("a save leaves no .part behind",
+                    !System.IO.File.Exists(path + ".part"), path + ".part");
             }
             catch (Exception e)
             {
@@ -21576,9 +21579,31 @@ public static class SelfTest
                 Refusal(good, "elsewhere").Length > 0,
                 "a map answered to a name it does not carry");
             Check("a format this reader does not speak is refused",
-                Refusal(good.Replace("\"format\": 1", "\"format\": 2"), "test")
+                Refusal(good.Replace($"\"format\": {MapFile.Format}",
+                                     $"\"format\": {MapFile.Format + 1}"), "test")
                     .Length > 0,
                 "a later format was read as far as it happened to parse");
+
+            // Format 2 (the editor's stage 4) is 1 with mud in the alphabet:
+            // a 1 still reads, as the board it always was; a 1 carrying mud is
+            // mislabelled and refused by its number; the same text saying 2
+            // reads, so that refusal is the label's and not the letter's.
+            string first = good.Replace($"\"format\": {MapFile.Format}", "\"format\": 1");
+            Check("a format-1 file still reads, as the same board",
+                Refusal(first, "test").Length == 0
+                && MapFile.Ground(MapFile.Parse(first, "test"))
+                    .SequenceEqual(MapFile.Ground(BoardMap.Test)),
+                Refusal(first, "test"));
+            string row = MapFile.Ground(BoardMap.Test)[0];
+            string muddy = row[..4] + BoardMap.Mud + row[5..];
+            Check("a format-1 file carrying mud is refused by its number",
+                Refusal(first.Replace("\"" + row + "\"", "\"" + muddy + "\""), "test")
+                    .Contains("format 2"),
+                "a 1 with a letter 1 never had was read");
+            Check("and the same mud saying format 2 reads",
+                Refusal(good.Replace("\"" + row + "\"", "\"" + muddy + "\""), "test")
+                    .Length == 0,
+                Refusal(good.Replace("\"" + row + "\"", "\"" + muddy + "\""), "test"));
             Check("a board with no homes is refused",
                 Refusal(good.Replace(
                     "\"homes\": [" + string.Join(", ",
