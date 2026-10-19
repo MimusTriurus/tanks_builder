@@ -1694,7 +1694,8 @@ void fragment() {
                 if (rise > 0.0f)
                     lift += View * (rise / View.Y);
             }
-            _rutBelts.Add(new CelRuts.Belt(at, lift, _hullLeft, _beltRun[i], marks, wet));
+            // In mud a groove, not a print (CelRuts.Deep, Tank3DBench.Mire).
+            _rutBelts.Add(new CelRuts.Belt(at, lift, _hullLeft, _beltRun[i], marks, wet, OnMire(cell)));
         }
         _ruts.Tick(dt, _rutBelts);
     }

@@ -77,14 +77,28 @@ public sealed partial class CelRuts : Node3D
     /// ford up to the surface along the eye's ray - the length, the heading
     /// and the jumps are the ground point's), the way across it (flat, unit -
     /// the hull's left), how far it ran this frame (px), whether the ground
-    /// there takes a mark and whether it is a ford.</summary>
-    public readonly record struct Belt(Vector3 At, Vector3 Lift, Vector3 Across, float Run, bool Marks, bool Wet);
+    /// there takes a mark, whether it is a ford, and whether it is mud - a
+    /// groove cut into it rather than a print on it (<see cref="Deep"/>).</summary>
+    public readonly record struct Belt(Vector3 At, Vector3 Lift, Vector3 Across, float Run, bool Marks, bool Wet,
+                                       bool Deep = false);
+
+    /// <summary>
+    /// A rut in mud is a groove, not a print: the strip is laid
+    /// <see cref="DeepWide"/> wider so the mud the belt pushed aside has room
+    /// to stand at its edges, and the shader draws a profile across it - a
+    /// wet floor, two walls lit or shadowed by the board's sun
+    /// (<see cref="Stage3D.Sun"/>) and a bank along each side - with water
+    /// standing in the floor here and there. Mud keeps it
+    /// <see cref="DeepLife"/> times as long as soil does.
+    /// </summary>
+    public float DeepWide = 1.4f;
+    public float DeepLife = 3.0f;
 
     private struct Stitch
     {
         public Vector3 At, Lift, Across;
         public float Born, Along;
-        public bool Break, Wet;
+        public bool Break, Wet, Deep;
     }
 
     private sealed class Trail
@@ -113,7 +127,12 @@ public sealed partial class CelRuts : Node3D
     /// </summary>
     private readonly MeshInstance3D _wetMesh = new() { Name = "WetRuts", Mesh = new ImmediateMesh() };
     private ShaderMaterial _wetLook = null!;
-    private readonly List<(Vector3 At, Vector2 Uv, float A)> _dry = new(), _wet = new();
+    private readonly List<Vert> _dry = new(), _wet = new();
+
+    /// <summary>A ribbon vertex: the fade as its alpha, how deep a groove it
+    /// is (0 soil, 1 mud) as its red, and the way across it as its normal -
+    /// the shader lights the groove's walls by it.</summary>
+    private readonly record struct Vert(Vector3 At, Vector2 Uv, float A, float Deep, Vector3 Across);
     private float _pitch = 5.0f, _width = 20.0f;
     private float _clock;
 
@@ -165,6 +184,8 @@ public sealed partial class CelRuts : Node3D
             look.SetShaderParameter("bar_reach", 1.0f - BarShort);
             look.SetShaderParameter("soft_from", SoftFrom);
             look.SetShaderParameter("wall_at", WallAt);
+            look.SetShaderParameter("sun", Stage3D.Sun);
+            look.SetShaderParameter("deep_wide", DeepWide);
         }
     }
 
@@ -201,7 +222,7 @@ public sealed partial class CelRuts : Node3D
         {
             List<Stitch> s = t.Stitches;
             int gone = 0;
-            while (gone < s.Count && (_clock - s[gone].Born >= Life || s.Count - gone > Capacity))
+            while (gone < s.Count && (_clock - s[gone].Born >= LifeOf(s[gone]) || s.Count - gone > Capacity))
                 gone++;
             if (gone > 0)
             {
@@ -248,10 +269,13 @@ public sealed partial class CelRuts : Node3D
         t.Stitches.Add(new Stitch
         {
             At = b.At, Lift = b.Lift, Across = b.Across, Born = _clock, Along = t.Along, Break = breaks, Wet = b.Wet,
+            Deep = b.Deep && !b.Wet,
         });
 
+    private float LifeOf(in Stitch s) => s.Deep ? Life * DeepLife : Life;
+
     private float Fade(in Stitch s) =>
-        1.0f - Mathf.SmoothStep(FadeFrom, 1.0f, (_clock - s.Born) / Mathf.Max(Life, 1e-3f));
+        1.0f - Mathf.SmoothStep(FadeFrom, 1.0f, (_clock - s.Born) / Mathf.Max(LifeOf(s), 1e-3f));
 
     private void Draw()
     {
@@ -275,18 +299,19 @@ public sealed partial class CelRuts : Node3D
         Fill((ImmediateMesh)_wetMesh.Mesh, _wet);
     }
 
-    private static void Fill(ImmediateMesh mesh, List<(Vector3 At, Vector2 Uv, float A)> verts)
+    private static void Fill(ImmediateMesh mesh, List<Vert> verts)
     {
         mesh.ClearSurfaces();
         if (verts.Count == 0)
             return;
         mesh.SurfaceBegin(Mesh.PrimitiveType.Triangles);
-        foreach ((Vector3 at, Vector2 uv, float a) in verts)
+        foreach (Vert v in verts)
         {
             // The fade rides as the vertex's alpha.
-            mesh.SurfaceSetColor(new Color(1.0f, 1.0f, 1.0f, a));
-            mesh.SurfaceSetUV(uv);
-            mesh.SurfaceAddVertex(at);
+            mesh.SurfaceSetColor(new Color(v.Deep, 1.0f, 1.0f, v.A));
+            mesh.SurfaceSetNormal(v.Across);
+            mesh.SurfaceSetUV(v.Uv);
+            mesh.SurfaceAddVertex(v.At);
         }
         mesh.SurfaceEnd();
     }
@@ -313,14 +338,24 @@ public sealed partial class CelRuts : Node3D
         for (int i = 0; i + 1 < n; i++)
         {
             Stitch a = s[start + i], b = s[start + i + 1];
-            List<(Vector3, Vector2, float)> into = a.Wet || b.Wet ? _wet : _dry;
+            List<Vert> into = a.Wet || b.Wet ? _wet : _dry;
             float fa = Fade(a) * (a.Wet ? WetShare : 1.0f), fb = Fade(b) * (b.Wet ? WetShare : 1.0f);
-            into.Add((a.At + a.Lift - side[i], new Vector2(a.Along, -1.0f), fa));
-            into.Add((a.At + a.Lift + side[i], new Vector2(a.Along, 1.0f), fa));
-            into.Add((b.At + b.Lift + side[i + 1], new Vector2(b.Along, 1.0f), fb));
-            into.Add((a.At + a.Lift - side[i], new Vector2(a.Along, -1.0f), fa));
-            into.Add((b.At + b.Lift + side[i + 1], new Vector2(b.Along, 1.0f), fb));
-            into.Add((b.At + b.Lift - side[i + 1], new Vector2(b.Along, -1.0f), fb));
+            // A groove is laid wider and says so in its UV: across runs past
+            // one into the banks, which only the deep look draws.
+            float wa = a.Deep ? DeepWide : 1.0f, wb = b.Deep ? DeepWide : 1.0f;
+            float da = a.Deep ? 1.0f : 0.0f, db = b.Deep ? 1.0f : 0.0f;
+            Vector3 sa = side[i] * wa, sb = side[i + 1] * wb;
+            Vector3 na = side[i].Normalized(), nb = side[i + 1].Normalized();
+            var a0 = new Vert(a.At + a.Lift - sa, new Vector2(a.Along, -wa), fa, da, na);
+            var a1 = new Vert(a.At + a.Lift + sa, new Vector2(a.Along, wa), fa, da, na);
+            var b0 = new Vert(b.At + b.Lift - sb, new Vector2(b.Along, -wb), fb, db, nb);
+            var b1 = new Vert(b.At + b.Lift + sb, new Vector2(b.Along, wb), fb, db, nb);
+            into.Add(a0);
+            into.Add(a1);
+            into.Add(b1);
+            into.Add(a0);
+            into.Add(b1);
+            into.Add(b0);
         }
     }
 
@@ -355,6 +390,61 @@ uniform float bar_soft = 0.45;
 uniform float bar_reach = 0.9;
 uniform float soft_from = 0.55;
 uniform float wall_at = 0.8;
+// The groove in mud (COLOR.r): its floor, its walls in shadow and in the sun,
+// its banks, and water standing in it - see CelRuts.Deep. Opaque-ish where
+// the print is a stain: a cut has to cover the ground to read as one.
+uniform vec3 sun = vec3(0.0, 1.0, 0.0);
+uniform vec4 deep_floor : source_color = vec4(0.17, 0.13, 0.09, 0.75);
+uniform vec4 deep_wall : source_color = vec4(0.22, 0.17, 0.12, 0.60);
+uniform vec4 deep_shade : source_color = vec4(0.10, 0.08, 0.06, 0.80);
+uniform vec4 deep_lit : source_color = vec4(0.50, 0.41, 0.30, 0.70);
+uniform vec4 deep_bank : source_color = vec4(0.33, 0.26, 0.18, 0.50);
+uniform vec4 deep_pool : source_color = vec4(0.40, 0.44, 0.45, 0.90);
+uniform float deep_wide = 1.4;
+varying vec3 across;
+
+void vertex() {
+    across = NORMAL;
+}
+
+float rut_hash(float x) {
+    return fract(sin(x * 127.1) * 43758.5453);
+}
+
+float rut_noise(float x) {
+    float i = floor(x);
+    float f = fract(x);
+    f = f * f * (3.0 - 2.0 * f);
+    return mix(rut_hash(i), rut_hash(i + 1.0), f);
+}
+
+// The groove across it: floor to 0.55, wall up to the bank's crest at 1.1,
+// the bank's back down to deep_wide. Each face is one tone by how it faces
+// the sun - cel steps, not a gradient.
+vec4 groove(float u, float sv, float on_bar, vec3 side) {
+    float s = sign(sv);
+    // The edges waver along the rut: ruler-straight, the walls and banks read
+    // as rails laid in the mud.
+    float a = abs(sv) + (rut_noise(u * 0.09 + s * 7.0) - 0.5) * 0.22;
+    vec3 up = vec3(0.0, 1.0, 0.0);
+    if (a < 0.55) {
+        vec4 c = mix(deep_floor, deep_shade, on_bar * 0.6);
+        // Water in the floor: now and then, narrowing to its ends, so each
+        // puddle is a blob in the groove - a band of the floor's full width
+        // cut square read as a sleeper.
+        float n = rut_noise(u * 0.022 + 3.0) * 0.7 + rut_noise(u * 0.07 + 11.0) * 0.3;
+        float pool = step(0.66 + a * 0.45, n);
+        return mix(c, deep_pool, pool);
+    }
+    vec3 n = a < 1.1 ? normalize(up * 0.7 - s * side) : normalize(up * 0.9 + s * side);
+    float l = dot(n, sun);
+    vec4 base = a < 1.1 ? deep_wall : deep_bank;
+    vec4 c = l > 0.74 ? deep_lit : l < 0.36 ? deep_shade : base;
+    // The bank dies into the ground at its outer edge.
+    c.a *= 1.0 - smoothstep(deep_wide - 0.15, deep_wide, a);
+    return c;
+}
+
 void fragment() {
     float u = UV.x;
     float v = abs(UV.y);
@@ -374,8 +464,13 @@ void fragment() {
     on_bar *= smoothstep(0.35, 0.85, fade);
     vec4 c = mix(soil, bar, on_bar);
     c = mix(c, wall, in_wall);
+    c.a *= max(body, in_wall);
+    if (COLOR.r > 0.001) {
+        vec4 g = groove(u, UV.y, on_bar, normalize(across));
+        c = mix(c, g, COLOR.r);
+    }
     ALBEDO = c.rgb;
-    ALPHA = c.a * fade * max(body, in_wall);
+    ALPHA = c.a * fade;
 }
 ",
     };
