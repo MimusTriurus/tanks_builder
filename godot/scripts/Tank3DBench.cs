@@ -270,6 +270,7 @@ public sealed partial class Tank3DBench : Node3D
         BuildMarks();
         Park();
         Mount(_modelTag);
+        BuildParked();
         if (_otherWanted)
         {
             if (_otherCell is Vector2I at)
@@ -639,6 +640,7 @@ public sealed partial class Tank3DBench : Node3D
         if (MapToPlay() is not BoardMap map)
             return;
         TankFromBoard(map);
+        _parkings = map.Parked;
         TerrainSet terrain = TerrainSet.Load(AssetRoot.Terrains);
         GD.Print($"tank3d: board {map.Name} {map.Columns}x{map.Rows}, terrain {terrain.Note}");
         _field = new HexField
@@ -966,6 +968,7 @@ public sealed partial class Tank3DBench : Node3D
             else if (a == "--no-ui") _noUi = true;
             else if (a == "--capture-at" && more) _captureAt = (int)F(args[++i], _captureAt);
             else if (a == "--edit-at" && more) _editAt = (int)F(args[++i], _editAt);
+            else if (a == "--parked") _parkedWanted = true;
             // --sequence DIR FROM TO [STEP]: every STEP-th frame in between, for
             // looking at motion rather than at one moment of it.
             else if (a == "--sequence" && i + 3 < args.Length)
@@ -1097,6 +1100,16 @@ public sealed partial class Tank3DBench : Node3D
                     string[] qr = what[6..].Split(',');
                     if (qr.Length == 2 && int.TryParse(qr[0], out int q) && int.TryParse(qr[1], out int r))
                         OrderClick(_camera.UnprojectPosition(CellWorld(new Vector2I(q, r))), false);
+                }
+                else if (what.StartsWith("take=", StringComparison.Ordinal))
+                {
+                    // take=Q,R: the click on the tank standing on that hex,
+                    // through the same screen test the pointer gets.
+                    string[] qr = what[5..].Split(',');
+                    if (qr.Length == 2 && int.TryParse(qr[0], out int q) && int.TryParse(qr[1], out int r)
+                        && _parked.Find(p => p.Cell == new Vector2I(q, r)) is { } standing)
+                        OrderClick(_camera.UnprojectPosition(standing.Rig.Position
+                            + Vector3.Up * (standing.Model.Size.Y * standing.Model.PixelsPerUnit * 0.4f)), false);
                 }
                 else if (what.StartsWith("go=", StringComparison.Ordinal))
                 {

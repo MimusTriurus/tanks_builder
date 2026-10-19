@@ -87,6 +87,8 @@ public sealed partial class Tank3DBench
         var barred = new HashSet<Vector2I>();
         if (_other is { } o && !ram)
             barred.Add(OtherCell(o));
+        // the standing tanks are in the way too (Tank3DBench.Parked)
+        barred.UnionWith(ParkedCells);
         List<Vector2I> path = _field.FindPath(here, cell, barred, masonry: true, bulldozer: _profile.Bulldozes);
         _turnGoal = null;
         if (path.Count == 0)
@@ -350,6 +352,13 @@ public sealed partial class Tank3DBench
     /// click rams it; anywhere else - go.</summary>
     private void OrderClick(Vector2 screen, bool twice)
     {
+        // A standing tank under the pointer is taken rather than driven at
+        // (Tank3DBench.Parked).
+        if (ParkedAt(screen) is { } standing)
+        {
+            TakeOver(standing);
+            return;
+        }
         if (PickAt(screen) is not var (point, onTank, onOwn) || _field is null)
             return;
         Vector2I cell = onTank && _other is { } t ? OtherCell(t)

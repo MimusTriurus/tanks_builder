@@ -85,7 +85,7 @@ public sealed partial class Tank3DBench
     /// a tank.</summary>
     private void TankFromBoard(BoardMap map)
     {
-        if (!_handed || _modelNamed || _startCell is not null || map.Parked.Count == 0
+        if (!(_handed || _parkedWanted) || _modelNamed || _startCell is not null || map.Parked.Count == 0
             || map.Parked[0].Class is not { Length: > 0 } wanted)
             return;
         int i = Array.FindIndex(Pairs, p => string.Equals(p.Class, wanted, StringComparison.OrdinalIgnoreCase));
