@@ -400,12 +400,57 @@ public sealed partial class Tank3DBench : Node3D
     private const float FitMargin = 1.04f;
 
     /// <summary>The zoom by <paramref name="k"/>, between a little under the
-    /// board's fit and <see cref="ZoomMost"/>; the fit is let go.</summary>
-    private void ZoomBy(float k)
+    /// board's fit and <see cref="ZoomMost"/>; the fit is let go.
+    ///
+    /// <b>About the cursor, as strategy games do it</b>, when one is given (the
+    /// wheel): the ground under it stays under it - the view's middle moves
+    /// toward the cursor zooming in and away from it zooming out, by the share
+    /// the size changed. The camera is orthographic and its plane is the
+    /// board's, so this is exact: a point <c>s</c> pixels off the middle is
+    /// <c>s·Size/H</c> off it in the plane, before and after. The view comes
+    /// loose from the tank for it (<see cref="_viewAt"/>). Without a cursor
+    /// (the keys) it zooms about the middle and leaves the follow alone.</summary>
+    private void ZoomBy(float k, Vector2? cursor = null)
     {
         float least = Mathf.Min(0.5f, 0.8f * FitZoom());
+        float was = _zoom;
         _zoom = Mathf.Clamp(_zoom * k, least, ZoomMost);
         _zoomFit = false;
+        if (cursor is not Vector2 c)
+            return;
+        Vector2 window = GetViewport().GetVisibleRect().Size;
+        Vector2 off = c - 0.5f * window;
+        Vector2 at = _viewAt ?? _viewNow;
+        // the plane point under the cursor, kept: at + off·(H/was)/H = at' + off·(H/zoom)/H
+        _viewAt = at + off * (1.0f / was - 1.0f / _zoom);
+    }
+
+    /// <summary>
+    /// Where the view's middle stands in the camera's plane (x across, y down
+    /// the screen, <see cref="BoardBox"/>'s units) once the player has moved
+    /// it - the middle button's drag (<see cref="PanBy"/>) or the wheel about
+    /// the cursor - or null while it follows the tank. <c>Home</c> lets go.
+    /// </summary>
+    private Vector2? _viewAt;
+
+    /// <summary>The view's middle as last framed, held inside the board -
+    /// what a drag or the wheel starts from while the view still follows.</summary>
+    private Vector2 _viewNow;
+
+    /// <summary>The middle button held: the board dragged with the mouse by
+    /// <paramref name="screen"/> pixels - the ground under the cursor stays
+    /// under it.</summary>
+    private void PanBy(Vector2 screen)
+    {
+        float h = Mathf.Max(GetViewport().GetVisibleRect().Size.Y, 1.0f);
+        _viewAt = (_viewAt ?? _viewNow) - screen * (_camera.Size / h);
+    }
+
+    /// <summary>Back to following the tank.</summary>
+    private void FollowTank()
+    {
+        _viewAt = null;
+        GD.Print("tank3d: camera follows the tank");
     }
 
     /// <summary>
@@ -467,10 +512,11 @@ public sealed partial class Tank3DBench : Node3D
         // Not up with the wreck's hop, nor down into its crater or the ground
         // after it (Tank3DBench.Pits, Gone): the board stays where it is.
         Vector3 pivot = _rig.Position - Vector3.Up * _wreckLift;
+        bool loose = _viewAt is not null;
         // Both hulls in the picture while a target stands near: toward the
         // middle between them, eased off with the distance so the rammer stays
         // on the screen - a switch at one distance was a jump of the view.
-        if (_other is not null)
+        if (_other is not null && !loose)
         {
             Vector3 mid = 0.5f * (_rig.Position + _other.Rig.Position);
             float d = mid.DistanceTo(_rig.Position) / _camera.Size;
@@ -478,19 +524,35 @@ public sealed partial class Tank3DBench : Node3D
         }
         // Up the screen by a sixth of the view: screen up is -Z on the ground.
         pivot.Z -= _camera.Size / 6.0f / Squash;
+        // Moved by the player: the plane point itself, on the ground's zero.
+        if (_viewAt is Vector2 view)
+            pivot = new Vector3(view.X, 0.0f, view.Y / Squash);
         // Held inside the board. The middle of the view in the camera's
         // plane is the pivot's Board() less its height drawn up the screen.
         if (BoardBox() is { } box)
         {
             var half = new Vector2(_camera.Size * window.X / Mathf.Max(window.Y, 1.0f), _camera.Size) * 0.5f;
             var at = new Vector2(pivot.X, pivot.Z * Squash - pivot.Y * RiseFactor);
+            // Following, the view is kept inside the board; moved by the
+            // player, only its middle is - as strategy games hold the camera's
+            // focus over the map. Held by its edges, a view at the fit, where
+            // the board is smaller than the view both ways, had nowhere to go
+            // and the middle button's drag did nothing.
             float Hold(float c, float lo, float size, float h) =>
-                size <= 2.0f * h ? lo + 0.5f * size : Mathf.Clamp(c, lo + h, lo + size - h);
+                loose ? Mathf.Clamp(c, lo, lo + size)
+                : size <= 2.0f * h ? lo + 0.5f * size : Mathf.Clamp(c, lo + h, lo + size - h);
             var held = new Vector2(Hold(at.X, box.Position.X, box.Size.X, half.X),
                                    Hold(at.Y, box.Position.Y, box.Size.Y, half.Y));
             pivot.X += held.X - at.X;
             pivot.Z += (held.Y - at.Y) / Squash;
+            // A drag past the edge is not stored past it, or the way back
+            // would first have to undo the overshoot.
+            if (loose)
+                _viewAt = held;
+            _viewNow = held;
         }
+        else
+            _viewNow = new Vector2(pivot.X, pivot.Z * Squash - pivot.Y * RiseFactor);
         _camera.Position = pivot + new Vector3(0.0f, back * Squash, back * RiseFactor);
         // Camera2D.Offset's sense: +y moves the view down the screen.
         Vector2 shake = ShakeOffset();
@@ -1064,6 +1126,7 @@ void light() {
                 break;
             // a notch of the mouse wheel
             case "wheel-up": ZoomBy(WheelStep); break;
+            case "follow": FollowTank(); break;
             case "wheel-down": ZoomBy(1.0f / WheelStep); break;
             case "target": LineUp(); break;
             case "untarget": RemoveOther(); break;
@@ -1088,6 +1151,21 @@ void light() {
                         else
                             AimCell(new Vector2I(q, r));
                     }
+                }
+                else if (what.StartsWith("pan=", StringComparison.Ordinal))
+                {
+                    // pan=DX,DY: the middle button dragged that many pixels.
+                    string[] xy = what[4..].Split(',');
+                    if (xy.Length == 2)
+                        PanBy(new Vector2(F(xy[0], 0), F(xy[1], 0)));
+                }
+                else if (what.StartsWith("wheel-up=", StringComparison.Ordinal) || what.StartsWith("wheel-down=", StringComparison.Ordinal))
+                {
+                    // wheel-up=X,Y: a notch of the wheel with the cursor at that screen point.
+                    bool up = what.StartsWith("wheel-up=", StringComparison.Ordinal);
+                    string[] xy = what[(up ? 9 : 11)..].Split(',');
+                    if (xy.Length == 2)
+                        ZoomBy(up ? WheelStep : 1.0f / WheelStep, new Vector2(F(xy[0], 0), F(xy[1], 0)));
                 }
                 else if (what.StartsWith("click=", StringComparison.Ordinal))
                 {
@@ -1533,7 +1611,7 @@ void light() {
                     + (_rules
                         ? "cells: LMB own select   LMB go   LMB x2 on target ram   W/S cell   A/D 60   Esc cancel/let go   "
                         : "WASD drive   " + (_model.Turreted ? "Q/E turret   " : ""))
-                    + "R/F gun   -/= wheel zoom   Tab panel   F12 shot";
+                    + "R/F gun   -/= wheel zoom to cursor   MMB drag pan   Home follow tank   Tab panel   F12 shot";
         Shots();
         _frame++;
     }
@@ -1688,13 +1766,19 @@ void light() {
                     return;
             }
         }
+        // The middle button held: the board dragged under the mouse.
+        if (@event is InputEventMouseMotion drag && (drag.ButtonMask & MouseButtonMask.Middle) != 0)
+        {
+            PanBy(drag.Relative);
+            return;
+        }
         // The wheel: a notch is a tenth in or out; a touchpad's scroll comes
         // in fractions (Factor).
         if (@event is InputEventMouseButton { Pressed: true } wheel
             && wheel.ButtonIndex is MouseButton.WheelUp or MouseButton.WheelDown)
         {
             float notches = wheel.Factor > 0.0f ? wheel.Factor : 1.0f;
-            ZoomBy(Mathf.Pow(WheelStep, wheel.ButtonIndex == MouseButton.WheelUp ? notches : -notches));
+            ZoomBy(Mathf.Pow(WheelStep, wheel.ButtonIndex == MouseButton.WheelUp ? notches : -notches), wheel.Position);
             return;
         }
         if (@event is not InputEventKey { Pressed: true, Echo: false } key)
@@ -1714,6 +1798,7 @@ void light() {
             case Key.T: Do("ram"); break;
             case Key.Backspace: Do("reset"); break;
             case Key.Tab: _panel?.Flip(); break;
+            case Key.Home: FollowTank(); break;
             case Key.Minus: ZoomBy(1.0f / 1.25f); break;
             case Key.Equal: ZoomBy(1.25f); break;
             case Key.F12:
