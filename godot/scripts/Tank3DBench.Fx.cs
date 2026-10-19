@@ -124,6 +124,9 @@ public sealed partial class Tank3DBench
     private CelDeath? _celDeath;
     private CelDust? _celDust;
     private readonly List<CelDust.Belt> _belts = new();
+    /// <summary>In mud the belts throw clods instead of dust (CelClods).</summary>
+    private CelClods? _clods;
+    private readonly List<CelClods.Belt> _clodBelts = new();
     /// <summary>Each belt's run as it stood last frame, model units - the
     /// belts' own travel, pivots included (<see cref="TankModel.Skid"/>).</summary>
     private readonly List<float> _beltWas = new();
@@ -550,6 +553,12 @@ void fragment() {
             AddChild(_celDust);
             _celDust.Build(_model.HullLength * _model.PixelsPerUnit);
             _celDust.Solids = _solids;
+            _clods = new CelClods
+            {
+                Name = "Clods", Ground = w => Foot(w).Y, Lift = Stage3D.Clear(Squash, RiseFactor),
+            };
+            AddChild(_clods);
+            _clods.Build(_model.HullLength * _model.PixelsPerUnit);
             _beltWas.Clear();
         }
         _painted.Add(_sprite);
@@ -649,6 +658,8 @@ void fragment() {
         _celDeath = null;
         _celDust?.QueueFree();
         _celDust = null;
+        _clods?.QueueFree();
+        _clods = null;
         _painted.Clear();
         FreeHeights();
         _shape = null;
@@ -1280,6 +1291,7 @@ void fragment() {
         _rockSplash?.Reset();
         _celDeath?.Reset();
         _celDust?.Reset();
+        _clods?.Reset();
         _ruts?.Clear();
         _splash?.Reset();
         _wake?.Clear();
@@ -1710,6 +1722,7 @@ void fragment() {
     private void CelDustTick(float dt)
     {
         _belts.Clear();
+        _clodBelts.Clear();
         float length = _model.Size.Z * _model.PixelsPerUnit;
         Vector3 forward = _hullAhead, left = _hullLeft;
         // Belts running against each other churn the ground rather than roll
@@ -1725,12 +1738,18 @@ void fragment() {
             Vector3 astern = run >= 0.0f ? -forward : forward;
             Vector3 at = Foot(_rig.GlobalPosition + left * off + astern * (length * 0.42f));
             float pace = dt > 0.0f ? Mathf.Abs(run) / dt : 0.0f;
-            bool dusty = !_wreck.Out && pace >= TrackDust.DriveAbove
-                         && !(_field?.IsWater(_field.FlatCellAt(Board(at))) ?? false);
+            Vector2I cell = _field?.FlatCellAt(Board(at)) ?? Vector2I.Zero;
+            bool moving = !_wreck.Out && pace >= TrackDust.DriveAbove;
+            // Mud throws clods and raises no dust (CelClods).
+            bool mud = OnMire(cell);
+            bool dusty = moving && !mud && !(_field?.IsWater(cell) ?? false);
             _belts.Add(new CelDust.Belt(at, astern, outward, dusty ? Mathf.Abs(run) : 0.0f,
                                         churn * pace / (float)_profile.TopSpeed));
+            _clodBelts.Add(new CelClods.Belt(at, astern, outward,
+                                             moving && mud ? churn * pace / (MaxSpeed * MireSpeed) : 0.0f));
         }
         _celDust!.Tick(dt, _belts, _camera.GlobalBasis);
+        _clods?.Tick(dt, _clodBelts);
     }
 
     /// <summary>The camera's shake, in world units at this zoom.</summary>
