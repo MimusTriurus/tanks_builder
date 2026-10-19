@@ -125,6 +125,13 @@ public sealed partial class Tank3DBench
     /// of 58 in <c>Tree3D</c>; the belly between them presses it a third.</summary>
     private const float BeltShare = 0.22f, BellyPress = 0.35f;
 
+    /// <summary>How fast a hull's lane grows out once the grass is half up
+    /// (<see cref="Grass3D.Recover"/>): about 14 s from flat to half
+    /// (<c>Grass3D.Relax</c>), 18 s more to standing - half a minute, twice
+    /// the ruts' <see cref="CelRuts.Life"/>, because grass straightens slower
+    /// than the soil's mark fades from sight.</summary>
+    private const float GrassRecover = 1.0f / 40.0f;
+
     /// <summary>A hull pushing through the wood (<see cref="Brush"/>): how far
     /// past its sides the crowns' boughs reach it, a share of the crown's width;
     /// the lean of a trunk it is on, a share of the height; the leaves' shiver
@@ -263,6 +270,7 @@ public sealed partial class Tank3DBench
         _grass = new Grass3D
         {
             Name = "Grass", Ppm = _trees.Count > 0 ? _trees[0].Model.Ppm : 17.0f, Wind = _wind,
+            Recover = GrassRecover,
             GustRate = TreeModel.GustRate, GustTravel = TreeModel.GustTravel, ShadowInk = Stage3D.ShadowInk.A,
         };
         AddChild(_grass);

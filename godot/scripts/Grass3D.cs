@@ -84,8 +84,14 @@ public sealed partial class Grass3D : Node3D
     /// <summary>Over the ground by this: the pit is at 0.4, the shadow skin at 2.</summary>
     private const float Lift = 1.0f;
     /// <summary>Pressed grass comes back up at this much a second, as far as
-    /// <see cref="Keep"/>: a hull's lane stays in it.</summary>
+    /// <see cref="Keep"/>: a hull's lane stays in it, unless
+    /// <see cref="Recover"/> lets it grow out.</summary>
     private const float Relax = 1.0f / 25.0f, Keep = 0.45f;
+
+    /// <summary>And on from <see cref="Keep"/> to standing at this much a
+    /// second - the lane grown out. Nought keeps the lane for good, which is
+    /// <c>Tree3D</c>'s board; <c>Tank3D</c> lets it go.</summary>
+    public float Recover;
 
     private readonly List<ShaderMaterial> _inks = new();
 
@@ -340,6 +346,11 @@ public sealed partial class Grass3D : Node3D
                 if (_press[i] > Keep)
                 {
                     _press[i] = Mathf.Max(Keep, _press[i] - Relax * dt);
+                    _relaxing = _dirty = true;
+                }
+                else if (Recover > 0.0f && _press[i] > 0.0f)
+                {
+                    _press[i] = Mathf.Max(0.0f, _press[i] - Recover * dt);
                     _relaxing = _dirty = true;
                 }
         }
