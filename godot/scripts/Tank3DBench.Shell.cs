@@ -220,6 +220,11 @@ public sealed partial class Tank3DBench
         Vector2I? origin = _field is null ? null
             : _field.FlatCellAt(Board(strikes ? _rig.Position : from));
         int passes = strikes && ShootsThrough ? 1 : 0;
+        // What the round has left: the gun's, one less after the pass (GDD
+        // classes.md, "после прохода огневая мощь снаряда −1").
+        int might = _profile.Might;
+        // The target it went through, not met again on the way out of it.
+        bool pastTank = false;
         var through = new List<(float Along, System.Action Hit)>();
         float run = 0.0f;
         // A tank in a ring whose muzzle is out past its own leaf: the round
@@ -233,6 +238,7 @@ public sealed partial class Tank3DBench
             if (pass)
             {
                 passes--;
+                might = Gunnery.PassedMight(_profile);
                 through.Add((0.0f, struck));
             }
             else
@@ -251,14 +257,28 @@ public sealed partial class Tank3DBench
                 landed = CaponRoofed(roof.Prop, roof.At, seg);
                 break;
             }
-            if (strikes && _other is { } o && o.Hits.Cast(p, seg) is { } hit
+            if (strikes && !pastTank && _other is { } o && o.Hits.Cast(p, seg) is { } hit
                 && (hit.At - p).Length() <= seg.Length() + 0.5f)
             {
-                path.Add(hit.At);
                 Vector3 way = seg.Normalized();
-                landed = lob ? () => Bursts(o, hit.Part, hit.At, hit.N)
-                             : () => Strike(o, hit.Part, hit.At, hit.N, way);
-                break;
+                int with = might;
+                // A destroyer's round goes through the tank it holes - its pass
+                // - and on with one less (GDD classes.md, "Тяжёлый снаряд TD").
+                // A plate that holds it spends it, pass or no pass.
+                if (!lob && passes > 0 && LevelOn(o, way, with, out _, out _) > 0)
+                {
+                    passes--;
+                    might = Gunnery.PassedMight(_profile);
+                    pastTank = true;
+                    through.Add((run + (hit.At - p).Length(), () => Strike(o, hit.Part, hit.At, hit.N, way, with, passing: true)));
+                }
+                else
+                {
+                    path.Add(hit.At);
+                    landed = lob ? () => Bursts(o, hit.Part, hit.At, hit.N)
+                                 : () => Strike(o, hit.Part, hit.At, hit.N, way, with);
+                    break;
+                }
             }
             if (!lob && WallMeets(p, next) is { } wall)
             {
@@ -268,6 +288,7 @@ public sealed partial class Tank3DBench
                 if (pass)
                 {
                     passes--;
+                    might = Gunnery.PassedMight(_profile);
                     through.Add((run + (wall.At - p).Length(), struck));
                 }
                 else
@@ -311,19 +332,33 @@ public sealed partial class Tank3DBench
     /// round each, the flanks the rest (the GDD's side is four of the six hex
     /// faces); the rest is the rules'.
     /// </summary>
-    private void Strike(Other o, MeshInstance3D part, Vector3 at, Vector3 n, Vector3 way)
+    /// <summary>The face a round travelling <paramref name="way"/> comes in
+    /// through, its plate, and how deep a round of <paramref name="might"/>
+    /// gets into it (<see cref="Gunnery.Penetration(int, MovementProfile, Gunnery.Plate)"/>);
+    /// nought holds.</summary>
+    private static int LevelOn(Other o, Vector3 way, int might, out string face, out Gunnery.Plate plate)
+    {
+        Vector3 ahead = o.Ahead, left = new(ahead.Z, 0.0f, -ahead.X);
+        Vector3 from = -new Vector3(way.X, 0.0f, way.Z);
+        float bearing = Mathf.RadToDeg(Mathf.Atan2(from.Dot(left), from.Dot(ahead)));
+        face = Mathf.Abs(bearing) <= 30.0f ? "front"
+             : Mathf.Abs(bearing) >= 150.0f ? "rear"
+             : bearing > 0.0f ? "left" : "right";
+        plate = Gunnery.PlateFor(face, 0);
+        return Gunnery.Penetration(might, o.Profile, plate);
+    }
+
+    /// <summary>The round of <paramref name="might"/> on the target's plate;
+    /// <paramref name="passing"/> - a destroyer's going through it, the hull
+    /// holed and the round flown on.</summary>
+    private void Strike(Other o, MeshInstance3D part, Vector3 at, Vector3 n, Vector3 way, int might,
+                        bool passing = false)
     {
         // Taken off the board, or swapped for another, while the round flew.
         if (!ReferenceEquals(o, _other) || !IsInstanceValid(part))
             return;
         Vector3 ahead = o.Ahead, left = new(ahead.Z, 0.0f, -ahead.X);
-        Vector3 from = -new Vector3(way.X, 0.0f, way.Z);
-        float bearing = Mathf.RadToDeg(Mathf.Atan2(from.Dot(left), from.Dot(ahead)));
-        string face = Mathf.Abs(bearing) <= 30.0f ? "front"
-                    : Mathf.Abs(bearing) >= 150.0f ? "rear"
-                    : bearing > 0.0f ? "left" : "right";
-        Gunnery.Plate plate = Gunnery.PlateFor(face, 0);
-        int level = Gunnery.Penetration(_profile, o.Profile, plate);
+        int level = LevelOn(o, way, might, out string face, out Gunnery.Plate plate);
         Vector3 glance = way - 2.0f * way.Dot(n) * n;
         float k;
         string what;
@@ -332,7 +367,7 @@ public sealed partial class Tank3DBench
             o.Hits.Leave(part, at, n, way, CelHit.Kind.Hole);
             o.Hits.Pierce(part, at, n);
             k = 3.2f;
-            what = "pierced";
+            what = passing ? "pierced, the round goes on" : "pierced";
         }
         else
         {
@@ -351,7 +386,7 @@ public sealed partial class Tank3DBench
         o.Pitch.Kick(k * ahead.Dot(way));
         o.Roll.Kick(-k * left.Dot(way));
         RockedOther(o, k / 3.2f);
-        GD.Print($"tank3d: round on {o.Tag} {face} ({plate}), level {level}: {what}");
+        GD.Print($"tank3d: round on {o.Tag} {face} ({plate}), might {might}, level {level}: {what}");
     }
 
     /// <summary>The target struck in the water: its rings (<see cref="Rocked"/>).</summary>
@@ -585,8 +620,9 @@ public sealed partial class Tank3DBench
         Vector3 want = ground;
         // A standing wall on the axis cuts it (GDD contradictions.md, "Ось
         // засады обрезается неразрушенной стеной"): a gun's round goes into
-        // the first one, halfway up it; the bomb goes over.
-        if (!_profile.Lobs && WallOnAxis(own, axis, cells) is { } wall)
+        // the first one, halfway up it; the bomb goes over. A destroyer's goes
+        // through the first brick one (its pass) and is laid past it.
+        if (!_profile.Lobs && WallOnAxis(own, axis, cells, passOne: ShootsThrough) is { } wall)
         {
             Aim(wall.At, Foot(wall.At), $"{cell}, axis {axis}: into the wall {wall.Cell}");
             return;

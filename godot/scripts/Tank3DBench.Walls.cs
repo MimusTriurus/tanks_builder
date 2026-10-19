@@ -448,8 +448,10 @@ public sealed partial class Tank3DBench
     /// <summary>The first standing wall on the axis <paramref name="axis"/> out
     /// of <paramref name="own"/>, within <paramref name="cells"/>: the middle of
     /// its edge, halfway up the wall - what a gun laid on a hex past it is laid
-    /// on.</summary>
-    private (Vector2I Cell, Vector3 At)? WallOnAxis(Vector2I own, int axis, int cells)
+    /// on. <paramref name="passOne"/> - a destroyer's: the first brick wall is
+    /// its pass and does not stop the laying, the one after it does (concrete
+    /// is never a pass).</summary>
+    private (Vector2I Cell, Vector3 At)? WallOnAxis(Vector2I own, int axis, int cells, bool passOne = false)
     {
         if (_walls.Count == 0 || _field is null || axis < 0)
             return null;
@@ -465,6 +467,11 @@ public sealed partial class Tank3DBench
                         continue;
                     if (prop.Stack is null)
                         continue;
+                    if (passOne && !prop.Concrete)
+                    {
+                        passOne = false;
+                        break;
+                    }
                     Vector3 rim = 0.5f * (CellWorld(here) + CellWorld(next));
                     rim.Y = prop.Stack.Anchor.Y + 0.5f * prop.Pile().Top * WallRadius;
                     return (prop.Cell, rim);
