@@ -530,6 +530,26 @@ public sealed partial class Tank3DBench
     {
         if (_fate != Fate.Alive)
             return;
+        if (PickAt(screen) is not var (point, onTank))
+            return;
+        if (_field is null)
+        {
+            // No board, no cells: the point itself.
+            Aim(point, point, "");
+            return;
+        }
+        Vector2I cell = onTank && _other is { } t ? OtherCell(t) : _field.FlatCellAt(Board(point));
+        if (_rules)
+            ShotOrder(cell);
+        else
+            AimCell(cell);
+    }
+
+    /// <summary>What is under a screen point: the target's plates, or the
+    /// ground on the board - the point, and whether it is on the target. Null
+    /// off the board.</summary>
+    private (Vector3 Point, bool OnTank)? PickAt(Vector2 screen)
+    {
         Vector3 from = _camera.ProjectRayOrigin(screen);
         Vector3 way = _camera.ProjectRayNormal(screen).Normalized();
         Vector3? at = null;
@@ -568,15 +588,8 @@ public sealed partial class Tank3DBench
             break;
         }
         if (at is not Vector3 point)
-            return;
-        if (_field is null)
-        {
-            // No board, no cells: the point itself.
-            Aim(point, point, "");
-            return;
-        }
-        Vector2I cell = onTank && _other is { } t ? OtherCell(t) : _field.FlatCellAt(Board(point));
-        AimCell(cell);
+            return null;
+        return (point, onTank);
     }
 
     /// <summary>
@@ -607,6 +620,10 @@ public sealed partial class Tank3DBench
             why = $"миномёт бьёт на {Gunnery.LobShortest}–{Gunnery.LobReach} клетки, до цели {cells}";
         else if (!_profile.Lobs && tank is not null && cells < DirectNearest)
             why = "по танку вплотную нельзя: нужен пустой гекс между";
+        // Under the rules the 2D gate as well: the wood, the smoke, the rise or
+        // a hull on the lane (Tank3DBench.Orders, LaneShut).
+        else if (_rules)
+            why = LaneShut(own, cell);
         Vector3 mid = CellWorld(cell);
         Vector3 ground = new(mid.X, ShellGround(mid, out _), mid.Z);
         if (why.Length > 0)

@@ -189,14 +189,27 @@ public static class Gunnery
     /// shot, and both buttons read a click on yourself as "stop".
     /// </summary>
     public static Shot Solve(HexField field, IReadOnlyList<Vehicle> vehicles,
-                             Vehicle shooter, Vector2I onto)
+                             Vehicle shooter, Vector2I onto) =>
+        Solve(field, shooter.Cell, onto, shooter.Profile.Lobs,
+              cell => Vehicle.At(vehicles, cell) is not null);
+
+    /// <summary>
+    /// The same solution asked of cells alone: the shooter's cell, whether it
+    /// lobs, and which cells have a hull on them - what a board without sprites
+    /// (<c>Tank3DBench</c>) can say. <paramref name="masonry"/> false leaves the
+    /// walls on the edges to whoever flies the round: on the 3D board a wall
+    /// takes the shot and falls, and the destroyer's goes through it, so a wall
+    /// there is a thing to shoot rather than a refusal.
+    /// </summary>
+    public static Shot Solve(HexField field, Vector2I from, Vector2I onto, bool lobs,
+                             Func<Vector2I, bool> occupied, bool masonry = true)
     {
-        if (onto == shooter.Cell)
+        if (onto == from)
             return None;
-        (int heading, int range) = field.LaneTo(shooter.Cell, onto);
+        (int heading, int range) = field.LaneTo(from, onto);
         if (heading < 0)
             return None;
-        List<Vector2I> lane = field.Lane(shooter.Cell, heading, range);
+        List<Vector2I> lane = field.Lane(from, heading, range);
         Vector2I? blocked = null;
         Barrier stop = Barrier.None;
         // <b>The board's half of the rules is asked of guns and not of the
@@ -213,7 +226,6 @@ public static class Gunnery
         // halves of one exemption in two places is worth knowing about; folding
         // the second one in here is a change to what the mortar may be ordered to
         // do, not to what the ground does.
-        bool lobs = shooter.Profile.Lobs;
         // Cover beside the tanks and in the same walk, because from the round's
         // point of view they are one question: something is standing in the way
         // and the shell stops there. Which of the two it was is carried out
@@ -226,14 +238,14 @@ public static class Gunnery
         // board it is actually inside would otherwise be the one wall it could
         // not hit. The same sentence WallProp.Bars is written under, said here
         // about a board that may have no props on it at all.
-        Vector2I at = shooter.Cell;
+        Vector2I at = from;
         for (int i = 0; i < lane.Count && blocked is null; i++)
         {
             // Not for the mortar: the bomb comes down on the cell, and a wall on
             // the last edge - the one the capon stands on - is exactly what it
             // is sent over. The same exemption as the ground's, one line down,
             // and for the same sentence of the GDD.
-            if (!lobs && field.Blocked(at, heading))
+            if (!lobs && masonry && field.Blocked(at, heading))
             {
                 blocked = lane[i];
                 stop = Barrier.Cover;
@@ -251,13 +263,13 @@ public static class Gunnery
             // flat is out of this shot because of where it is standing, and
             // "move it or shoot it first" would be advice about a tank that
             // cannot be shot either.
-            if (!lobs && Overtops(field, lane[i], shooter.Cell, onto))
+            if (!lobs && Overtops(field, lane[i], from, onto))
             {
                 blocked = lane[i];
                 stop = Barrier.Ground;
                 break;
             }
-            bool tank = Vehicle.At(vehicles, lane[i]) is not null;
+            bool tank = occupied(lane[i]);
             if (!tank && !field.Screened(lane[i]))
                 continue;
             blocked = lane[i];
@@ -270,7 +282,7 @@ public static class Gunnery
         // Reported at the target's own cell, because that is where the round
         // stops - against the face under it.
         if (blocked is null && !lobs
-            && !Reaches(field.LevelAt(onto) - field.LevelAt(shooter.Cell), range))
+            && !Reaches(field.LevelAt(onto) - field.LevelAt(from), range))
         {
             blocked = onto;
             stop = Barrier.Ground;

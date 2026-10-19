@@ -961,6 +961,7 @@ void light() {
             else if (a == "--no-walls") _noWalls = true;
             else if (a == "--no-bunker") _noBunker = true;
             else if (a == "--no-mines") _noMines = true;
+            else if (a == "--free-drive") _rules = false;
             // the rubble stays where it landed (TankBench's flag, same name)
             else if (a == "--no-crumble") WallRig.Crumbles = false;
             else if (a == "--no-cel-relief") _flatRelief = true;
@@ -1031,16 +1032,23 @@ void light() {
             case "unburn": FxBurn(false); break;
             case "knock": KnockOut(); break;
             case "destroy": Destroy(); break;
-            case "reset": ResetTank(); WallReset(); MinesReset(); break;
+            case "reset": ResetTank(); WallReset(); MinesReset(); CancelOrder(); break;
             case "pond": ToPond(); break;
             case "amphibious": _amphibious = true; break;
             case "no-amphibious": _amphibious = false; break;
             case "heights": SaveHeights(); break;
-            case "drive": _driveScripted = 1.0f; break;
-            case "reverse": _driveScripted = -1.0f; break;
+            // The free drive's script: it switches to the free mode, so a
+            // sequence written for the keys still drives as it did.
+            case "drive": SetRules(false, " (--do drive)"); _driveScripted = 1.0f; break;
+            case "reverse": SetRules(false, " (--do reverse)"); _driveScripted = -1.0f; break;
             case "stop": _driveScripted = 0.0f; break;
-            case "left": _turnScripted = 1.0f; break;
-            case "right": _turnScripted = -1.0f; break;
+            case "left": SetRules(false, " (--do left)"); _turnScripted = 1.0f; break;
+            case "right": SetRules(false, " (--do right)"); _turnScripted = -1.0f; break;
+            // The cells' orders (Tank3DBench.Orders).
+            case "cells": SetRules(true); break;
+            case "free": SetRules(false); break;
+            case "charge": if (_other is not null) OrderTo(OtherCell(_other), ram: true); break;
+            case "cancel": CancelOrder(); break;
             case "straight": _turnScripted = 0.0f; break;
             // a wall ahead is rammed through; otherwise the target
             case "ram": if (!WallRamGo(false)) RamGo(); break;
@@ -1069,7 +1077,22 @@ void light() {
                     // aim-cell=Q,R: the right button on that hex.
                     string[] qr = what[9..].Split(',');
                     if (qr.Length == 2 && int.TryParse(qr[0], out int q) && int.TryParse(qr[1], out int r))
-                        AimCell(new Vector2I(q, r));
+                    {
+                        if (_rules)
+                            ShotOrder(new Vector2I(q, r));
+                        else
+                            AimCell(new Vector2I(q, r));
+                    }
+                }
+                else if (what.StartsWith("go=", StringComparison.Ordinal))
+                {
+                    // go=Q,R: the left button on that hex, under the rules.
+                    string[] qr = what[3..].Split(',');
+                    if (qr.Length == 2 && int.TryParse(qr[0], out int q) && int.TryParse(qr[1], out int r))
+                    {
+                        SetRules(true, " (--do go)");
+                        OrderTo(new Vector2I(q, r));
+                    }
                 }
                 else if (what.StartsWith("aim=", StringComparison.Ordinal))
                 {
@@ -1341,8 +1364,19 @@ void light() {
         float elevIn = (Input.IsKeyPressed(Key.R) ? 1 : 0) - (Input.IsKeyPressed(Key.F) ? 1 : 0);
         float driveIn = (Input.IsKeyPressed(Key.W) ? 1 : 0) - (Input.IsKeyPressed(Key.S) ? 1 : 0) + _driveScripted;
         float turnIn = (Input.IsKeyPressed(Key.A) ? 1 : 0) - (Input.IsKeyPressed(Key.D) ? 1 : 0) + _turnScripted;
-        // The right button's point: the gun laid on to it and fired.
-        Laying(dt, ref yawIn, ref elevIn, ref turnIn);
+        if (_rules)
+        {
+            // By cells (Tank3DBench.Orders): the keys are orders, not a throttle,
+            // and the turret is the rules'. A/D's turn on the spot is steered here.
+            // The T key's ram still drives through _driveScripted.
+            yawIn = 0.0f;
+            driveIn = _driveScripted;
+            turnIn = TurnGoalIn(dt);
+        }
+        // The right button's point: the gun laid on to it and fired - under the
+        // rules not while the route is being driven.
+        if (!(_rules && RouteMoving))
+            Laying(dt, ref yawIn, ref elevIn, ref turnIn);
         if (alive)
         {
             if (_model.Turreted)          // a casemate aims with its hull
@@ -1373,6 +1407,23 @@ void light() {
             target = _speed;
             turn = 0.0f;
             turnIn = 0.0f;
+        }
+        else if (_rules && RouteMoving)
+        {
+            if (!alive)
+            {
+                CancelOrder();
+                _speed = 0.0f;
+                target = a = turn = step = 0.0f;
+            }
+            else
+            {
+                RouteDrive(dt, out target, out a, out turn, out step);
+                // The route's turn is in degrees a second; the frame below wants
+                // it as the free drive's, which is half the turn rate per unit.
+                turnIn = turn != 0.0f ? 1.0f : 0.0f;
+                turn = Mathf.Clamp(turn, -TurnRate, TurnRate);
+            }
         }
         else
         {
@@ -1425,6 +1476,8 @@ void light() {
         _model.Roll = _kickRoll.Step(dt) + _swayRoll.Step(dt) + _pitRoll.Step(dt);
         _model.Heave = _heave.Step(dt) + _pitHeave.Step(dt) / Mathf.Max(_model.PixelsPerUnit, 1e-3f);
         Tremble(dt);
+        if (_rules)
+            TurretByRules(dt);
 
         _sinceShot += dt;
         _model.Recoil = Stroke(_sinceShot);
@@ -1451,10 +1504,14 @@ void light() {
         string ram = (_other is null ? "" : $"  target {_other.Tag} {_other.Cell}"
                       + (_ramNote.Length > 0 ? $"  {_ramNote}" : ""))
                      + (_wallNote.Length > 0 ? $"  {_wallNote}" : "");
-        _hud.Text = $"{_modelTag} 3D, class {_profile.Tag}  {where}  {fate}  {_note}{ram}{(_aimNote.Length > 0 ? "  " + _aimNote : "")}\n"
+        string order = _rules && _orderNote.Length > 0 ? $"  {_orderNote}" : "";
+        _hud.Text = $"{_modelTag} 3D, class {_profile.Tag}  {where}  {fate}  {_note}{ram}{order}{(_aimNote.Length > 0 ? "  " + _aimNote : "")}\n"
                     + "Space shot   RMB aim and fire   1-4 ricochet front/right/rear/left   Shift+1-4 pierce   Ctrl+1-4 HE   5 round in the ground\n"
-                    + "J burning   K knocked out   X destroyed   T ram   Backspace reset   WASD drive   "
-                    + (_model.Turreted ? "Q/E turret   " : "") + "R/F gun   -/= zoom   Tab panel   F12 shot";
+                    + "J burning   K knocked out   X destroyed   T ram   Backspace reset   "
+                    + (_rules
+                        ? "cells: LMB go   LMB x2 on target ram   W/S cell   A/D 60   Esc cancel   "
+                        : "WASD drive   " + (_model.Turreted ? "Q/E turret   " : ""))
+                    + "R/F gun   -/= wheel zoom   Tab panel   F12 shot";
         Shots();
         _frame++;
     }
@@ -1587,6 +1644,24 @@ void light() {
             AimAt(click.Position);
             return;
         }
+        // The left button - an order, under the rules (Tank3DBench.Orders); a
+        // double click on the target is the ram.
+        if (_rules && @event is InputEventMouseButton { ButtonIndex: MouseButton.Left, Pressed: true } left)
+        {
+            OrderClick(left.Position, left.DoubleClick);
+            return;
+        }
+        if (_rules && @event is InputEventKey { Pressed: true, Echo: false } order)
+        {
+            switch (order.Keycode)
+            {
+                case Key.W: OrderStep(back: false); return;
+                case Key.S: OrderStep(back: true); return;
+                case Key.A: OrderTurn(left: true); return;
+                case Key.D: OrderTurn(left: false); return;
+                case Key.Escape: CancelOrder(); return;
+            }
+        }
         // The wheel: a notch is a tenth in or out; a touchpad's scroll comes
         // in fractions (Factor).
         if (@event is InputEventMouseButton { Pressed: true } wheel
@@ -1637,6 +1712,16 @@ void light() {
     {
         _panel = new ControlPanel();
         _panel.Prepare();
+        // How the tank is driven (Tank3DBench.Orders): the 2D harness's orders
+        // on cells, or the keys.
+        _panel.Heading("tank3d.drive", "движение");
+        _panel.Toggle("tank3d.drive.cells", "по клеткам, как в 2D  (выкл. — WASD, --free-drive)",
+                      () => _rules, v => SetRules(v));
+        _panel.Readout("tank3d.drive.note", () => _rules
+            ? "ЛКМ — ехать, двойной ЛКМ по цели — таран, ПКМ — выстрел\nW/S — клетка вперёд/назад, A/D — 60°, ESC — отмена"
+              + (_orderNote.Length > 0 ? "\n" + _orderNote : "")
+            : "WASD — езда, Q/E — башня, ПКМ — выстрел");
+        _panel.Expand("tank3d.drive", true);
         _panel.Heading("tank3d.tank", "танк");
         var labels = new List<string>();
         foreach (string model in _models)
