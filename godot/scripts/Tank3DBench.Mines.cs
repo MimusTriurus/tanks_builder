@@ -56,6 +56,9 @@ public sealed partial class Tank3DBench
         /// <summary>Where it lies, world - its bottom centre on the ground.</summary>
         public required Vector3 At;
         public bool Spent;
+        /// <summary>Laid again under a hull (<see cref="MinesReset"/>): not armed
+        /// until that hull has left it.</summary>
+        public bool Asleep;
     }
 
     private readonly List<Laid> _mines = new();
@@ -140,6 +143,16 @@ public sealed partial class Tank3DBench
         {
             if (mine.Spent)
                 continue;
+            if (mine.Asleep)
+            {
+                // Armed the frame no hull is over it any more.
+                bool under = UnderHull(mine.At, _rig.Position, ahead, _foot, out _)
+                             || (_other is { } hull && UnderHull(mine.At, hull.Rig.Position, hull.Ahead, hull.Foot, out _));
+                if (under)
+                    continue;
+                mine.Asleep = false;
+                GD.Print($"tank3d: mine on {mine.Cell} armed");
+            }
             // Only a hull that is moving finds it: a mine is laid on a free
             // cell, so one standing on it has been put there (a reset, a pick).
             if (_fate == Fate.Alive && (Mathf.Abs(_speed) > 0.5f || RamRunning)
@@ -274,9 +287,16 @@ public sealed partial class Tank3DBench
     private void MinesReset()
     {
         _coastTo = null;
+        float h = Mathf.DegToRad(_heading);
+        var ahead = new Vector3(Mathf.Sin(h), 0.0f, Mathf.Cos(h));
         foreach (Laid mine in _mines)
         {
             mine.Spent = false;
+            // Put back under a hull standing on it - a tank that went up on it
+            // and was reset where it stood: the next start must not set it off
+            // (a mine is laid on a free cell, GDD field.md).
+            mine.Asleep = UnderHull(mine.At, _rig.Position, ahead, _foot, out _)
+                          || (_other is { } o && UnderHull(mine.At, o.Rig.Position, o.Ahead, o.Foot, out _));
             mine.Node.Visible = true;
             _field?.SetCoverState(mine.Cell, CoverState.Intact);
         }
