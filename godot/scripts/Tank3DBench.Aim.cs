@@ -583,8 +583,10 @@ public sealed partial class Tank3DBench
         Vector2 over = _camera.UnprojectPosition(_other!.Rig.Position + _other.Up * (_other.Model.Size.Y * _other.Model.PixelsPerUnit * 1.2f));
         // kept under the HUD's three lines
         over.Y = Mathf.Max(over.Y, 100.0f + size * 2.0f);
-        Color letters = shot.Pierces ? Colors.White : new Color(0.12f, 0.12f, 0.12f);
-        Pill(ink, font, over + new Vector2(0, -size), shot.Says, shot.Ink, letters, size);
+        // The outcome is the line's colour and its course - no words over the
+        // target for it; only why there is no shot, which nothing else says.
+        if (!shot.Fires)
+            Pill(ink, font, over + new Vector2(0, -size), shot.Says, shot.Ink, new Color(0.12f, 0.12f, 0.12f), size);
         int semi = _judgedNote.IndexOf("; после хода", System.StringComparison.Ordinal);
         if (semi >= 0)
             Pill(ink, font, over + new Vector2(0, size * 0.8f), _judgedNote[(semi + 2)..], new Color(0.92f, 0.95f, 0.98f),
