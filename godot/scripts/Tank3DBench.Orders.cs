@@ -88,11 +88,8 @@ public sealed partial class Tank3DBench
         if (_field is null || _fate != Fate.Alive || RamRunning)
             return;
         Vector2I here = CellHere;
-        var barred = new HashSet<Vector2I>();
-        if (_other is { } o && !ram)
-            barred.Add(OtherCell(o));
-        // the standing tanks are in the way too (Tank3DBench.Parked)
-        barred.UnionWith(ParkedCells);
+        // the target and the standing tanks (Tank3DBench.Parked)
+        HashSet<Vector2I> barred = Barred(ram);
         _turnGoal = null;
         _routeBack = false;
         if (ram)
@@ -115,7 +112,12 @@ public sealed partial class Tank3DBench
         // what each cell costs, where the move has to end.
         Steps.Reach reach = Steps.Plan(_field, new Steps.Pose(here, HullSide()),
                                        Steps.Mover.Of(_profile, _amphibious, barred));
-        if (reach.RouteTo(cell) is not { } route)
+        // The way shown on the board, if it is to this cell (Tab's pick among
+        // equal ways, Tank3DBench.Course) - else the straightest.
+        Steps.Route? shown = ShownWay(cell);
+        if (shown is not null && shown.Legs[0].At != reach.Start)
+            shown = null;
+        if ((shown ?? reach.RouteTo(cell)) is not { } route)
         {
             bool anyWay = _field.FindPath(here, cell, barred, masonry: true, bulldozer: _profile.Bulldozes).Count > 0;
             _orderNote = cell == here ? "" : anyWay ? $"до {cell} не хватает шагов ({reach.Budget})" : $"к {cell} пути нет";

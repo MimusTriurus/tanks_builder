@@ -283,6 +283,8 @@ public sealed partial class Tank3DBench : Node3D
         AddChild(layer);
         _hud = new Label { Position = new Vector2(12, 8), Modulate = new Color(1, 1, 1, 0.85f), Visible = !_noUi };
         layer.AddChild(_hud);
+        // under the panel, which is drawn after it
+        BuildCourse(layer);
         if (!_noUi)
             BuildPanel(layer);
         BuildBack(layer);
@@ -924,6 +926,13 @@ public sealed partial class Tank3DBench : Node3D
             else if (a == "--sprites" && more)
                 GD.Print($"tank3d: --sprites {args[++i]} ignored - the 3D tank reads no sprite set");
             else if (a == "--map" && more) _mapName = args[++i];
+            // the pointer held on a cell, for a capture of the way to it (Tank3DBench.Course)
+            else if (a == "--hover" && more)
+            {
+                string[] qr = args[++i].Split(',');
+                if (qr.Length == 2 && int.TryParse(qr[0], out int q) && int.TryParse(qr[1], out int r))
+                    _hoverFixed = new Vector2I(q, r);
+            }
             else if (a == "--cell" && more)
             {
                 string[] qr = args[++i].Split(',');
@@ -1039,6 +1048,8 @@ public sealed partial class Tank3DBench : Node3D
             case "free": SetRules(false); break;
             case "charge": if (_other is not null) OrderTo(OtherCell(_other), ram: true); break;
             case "cancel": CancelOrder(); break;
+            case "way": NextWay(); break;
+            case "forks": Forks(); break;
             case "select": Choose(true); break;
             case "deselect": Choose(false); break;
             // the left button where the camera shows the own hull's middle
@@ -1537,6 +1548,7 @@ public sealed partial class Tank3DBench : Node3D
         _model.Apply();
         FxProcess(dt, _speed, a);
         MarksTick();
+        CourseTick();
         RamFrame(dt, _camera.GlobalBasis);
         ShellsTick(dt);
         WoodTick(dt);
@@ -1550,7 +1562,8 @@ public sealed partial class Tank3DBench : Node3D
         string ram = (_other is null ? "" : $"  target {_other.Tag} {_other.Cell}"
                       + (_ramNote.Length > 0 ? $"  {_ramNote}" : ""))
                      + (_wallNote.Length > 0 ? $"  {_wallNote}" : "");
-        string order = _rules && _orderNote.Length > 0 ? $"  {_orderNote}" : "";
+        string order = (_rules && _orderNote.Length > 0 ? $"  {_orderNote}" : "")
+                       + (_courseNote.Length > 0 ? $"  {_courseNote}" : "");
         _hud.Text = $"{_modelTag} 3D, class {_profile.Tag}  {where}  {fate}  {_note}{ram}{order}{(_aimNote.Length > 0 ? "  " + _aimNote : "")}\n"
                     + "Space shot   RMB aim and fire   1-4 ricochet front/right/rear/left   Shift+1-4 pierce   Ctrl+1-4 HE   5 round in the ground\n"
                     + "J burning   K knocked out   X destroyed   T ram   Backspace reset   "
@@ -1743,7 +1756,8 @@ public sealed partial class Tank3DBench : Node3D
             case Key.X: Do("destroy"); break;
             case Key.T: Do("ram"); break;
             case Key.Backspace: Do("reset"); break;
-            case Key.Tab: _panel?.Flip(); break;
+            // the next way of the same cost while there is one; the panel otherwise
+            case Key.Tab: if (!NextWay()) _panel?.Flip(); break;
             case Key.Home: FollowTank(); break;
             case Key.Minus: ZoomBy(1.0f / 1.25f); break;
             case Key.Equal: ZoomBy(1.25f); break;

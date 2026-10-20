@@ -11097,16 +11097,21 @@ public static class SelfTest
                 toSide is not null && openReach.TurnTo(toSide, 90) == 1 && openReach.TurnTo(toSide, 150) == 2
                 && openReach.TurnTo(toSide, 210) is null,
                 toSide is null ? "no route" : $"to 90 {openReach.TurnTo(toSide, 90)}, to 210 {openReach.TurnTo(toSide, 210)}");
-            // A turn costing a step leaves most cells one cheapest way; the plain
-            // case of two is the about-turn - three sides left or three right -
-            // to the cell two behind (the step back is one cell only).
+            // A turn costing a step leaves most cells one cheapest way. The
+            // about-turn to the cell two behind is still one way - left or right
+            // round, the hull drives the same cells - and a tank in the way
+            // straight ahead makes two: round it on either side.
             Steps.Reach aboutReach = Steps.Plan(open, new Steps.Pose(new Vector2I(3, 1), 90),
                                                 new Steps.Mover { Speed = 5 });
             List<Steps.Route> about = aboutReach.RoutesTo(new Vector2I(3, 3));
-            Check("a cell with two ways of the same cost gives both: the about-turn either way",
-                about.Count == 2 && about.All(w => w.Spent == 5 && w.Turns == 3)
-                && about[0].ToString() != about[1].ToString(),
-                about.Count == 0 ? "no route" : string.Join(" | ", about));
+            Steps.Reach roundReach = Steps.Plan(open, new Steps.Pose(up, 90),
+                new Steps.Mover { Speed = 6, Barred = new HashSet<Vector2I> { new(3, 3) } });
+            List<Steps.Route> round = roundReach.RoutesTo(new Vector2I(3, 2));
+            Check("ways that drive other cells at the same cost are all given; a swing either way is one",
+                about.Count == 1 && about[0].Spent == 5
+                && round.Count >= 2 && round.All(w => w.Spent == round[0].Spent)
+                && round.Select(w => string.Join(" ", w.Cells())).Distinct().Count() == round.Count,
+                $"about-turn: {string.Join(" | ", about)}; round (3,3): {string.Join(" | ", round)}");
 
             HexField sand = Keep(StepBoard(".......", ".......", "...s...", "...s...", "......."));
             Steps.Reach sandReach = Steps.Plan(sand, new Steps.Pose(up, 90), stMt);

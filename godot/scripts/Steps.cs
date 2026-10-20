@@ -155,8 +155,10 @@ public static class Steps
         /// <summary>
         /// Every way of the fewest steps to <paramref name="cell"/>, up to
         /// <paramref name="most"/>, straightest first (fewest turns, then
-        /// forward before back). Two ways count as one only when they drive the
-        /// same cells, turn the same way and end facing the same side.
+        /// forward before back). Two ways count as one when they drive the same
+        /// cells and end facing the same side: which way the hull swings on the
+        /// spot changes nothing on the board, so an about-turn left and one
+        /// right are not a choice to offer.
         /// </summary>
         public List<Route> RoutesTo(Vector2I cell, int most = 8)
         {
@@ -186,7 +188,8 @@ public static class Steps
                 if (before.Count == 0)
                 {
                     Route route = Build(chain);
-                    if (seen.Add(route.ToString()))
+                    string drives = string.Join(" ", route.Cells()) + $" {route.End.Heading} {route.Back}";
+                    if (seen.Add(drives))
                         routes.Add(route);
                     return;
                 }
