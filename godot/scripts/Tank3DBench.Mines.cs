@@ -62,8 +62,6 @@ public sealed partial class Tank3DBench
     }
 
     private readonly List<Laid> _mines = new();
-    /// <summary><c>--no-mines</c>: the minefields stay ground.</summary>
-    private bool _noMines;
 
     /// <summary>
     /// Lay a mine on every minefield the board has (<see cref="Mines.Marked"/>).
@@ -73,7 +71,7 @@ public sealed partial class Tank3DBench
     /// </summary>
     private void BuildMines()
     {
-        if (_field is null || _tile is null || _noMines)
+        if (_field is null || _tile is null || !_show.Mines)
             return;
         List<Vector2I> due = Mines.Marked(_field);
         if (due.Count == 0)

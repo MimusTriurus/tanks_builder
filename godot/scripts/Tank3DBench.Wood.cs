@@ -44,7 +44,6 @@ namespace TankSpriteTest;
 /// </summary>
 public sealed partial class Tank3DBench
 {
-    private bool _noGrass, _noTrees;
     private string[] _treeNames = BoardDress.Oaks;
     private int _woodCount = BoardDress.WoodCount;
     private float _wind = 1.0f, _weather;
@@ -154,9 +153,9 @@ public sealed partial class Tank3DBench
     {
         if (_field is null || _tile is null)
             return;
-        if (!_noTrees)
+        if (_show.Trees)
             Plant();
-        if (!_noGrass)
+        if (_show.Grass)
             Lawn();
     }
 

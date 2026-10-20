@@ -661,7 +661,7 @@ overlay: the report is (250, 106), (520, 420) on filter Ignore, ... reached the 
 - Esc закрывает по слоям;
 - клик, ничего не поменявший, не оставляет записи в отмене (`MapEdit.End`).
 
-Пункты меню, как и в File, лишь подписывают клавишу, а слушает её только switch в `_UnhandledInput` — довод выше, в разделе про `MenuBar`. Флаги для снимков: `--hover Q,R`, `--tab foundation|cover|level`, `--radius N`, `--hide trees,grass,walls`, `--menu sheet`. Цифры и что осталось — [editor3d-plan.md](editor3d-plan.md), этап 3.
+Пункты меню, как и в File, лишь подписывают клавишу, а слушает её только switch в `_UnhandledInput` — довод выше, в разделе про `MenuBar`. Флаги для снимков: `--hover Q,R`, `--tab foundation|cover|level`, `--radius N`, `--hide trees,grass,walls,bunker,mines` (те же слова, что `--no-*` стенда, `BoardDress.Show`), `--menu sheet`. Цифры и что осталось — [editor3d-plan.md](editor3d-plan.md), этап 3.
 
 ### Run и Edit: доска уезжает в харнесс и возвращается
 

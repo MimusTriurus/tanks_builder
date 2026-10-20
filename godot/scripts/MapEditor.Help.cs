@@ -58,8 +58,9 @@ public sealed partial class MapEditor
     };
 
     /// <summary>What of the dressing is shown - hidden to see the ground under
-    /// a wood, never removed.</summary>
-    private bool _showTrees = true, _showGrass = true, _showWalls = true;
+    /// a wood, never removed. The bench's switches: there an unshown layer is
+    /// never built, here it is built and hidden, so View brings it back.</summary>
+    private readonly BoardDress.Show _show = new();
 
     private PanelContainer? _sheet;
     private Label _foot = null!;
@@ -68,7 +69,7 @@ public sealed partial class MapEditor
     {
         Undo = 100, Redo, Fill, PlaceHome, Recentre,
         Levels, Ramps, Sites, Flood, Homes, Faults,
-        Trees, Grass, Walls,
+        Trees, Grass, Walls, Bunkers, Mines,
         Sheet,
     }
 
@@ -97,6 +98,9 @@ public sealed partial class MapEditor
         view.AddCheckItem("Trees             T", (int)More.Trees);
         view.AddCheckItem("Grass             M", (int)More.Grass);
         view.AddCheckItem("Walls             K", (int)More.Walls);
+        // No keys: none is free (ui.md), and these two are looked at seldom.
+        view.AddCheckItem("Bunkers", (int)More.Bunkers);
+        view.AddCheckItem("Mines", (int)More.Mines);
         view.AddSeparator();
         view.AddItem("Recentre       Home", (int)More.Recentre);
         // Ticked off the state as the menu opens, so a key pressed since is
@@ -108,7 +112,8 @@ public sealed partial class MapEditor
                          (More.Levels, _layers.HasFlag(Layers.Levels)), (More.Ramps, _layers.HasFlag(Layers.Ramps)),
                          (More.Sites, _layers.HasFlag(Layers.Sites)), (More.Flood, _layers.HasFlag(Layers.Flood)),
                          (More.Homes, _layers.HasFlag(Layers.Homes)), (More.Faults, _layers.HasFlag(Layers.Faults)),
-                         (More.Trees, _showTrees), (More.Grass, _showGrass), (More.Walls, _showWalls),
+                         (More.Trees, _show.Trees), (More.Grass, _show.Grass), (More.Walls, _show.Walls),
+                         (More.Bunkers, _show.Bunkers), (More.Mines, _show.Mines),
                      })
                 view.SetItemChecked(view.GetItemIndex((int)item), on);
         };
@@ -138,9 +143,11 @@ public sealed partial class MapEditor
             case More.Flood: _layers ^= Layers.Flood; break;
             case More.Homes: _layers ^= Layers.Homes; break;
             case More.Faults: _layers ^= Layers.Faults; break;
-            case More.Trees: _showTrees = !_showTrees; Shown(); break;
-            case More.Grass: _showGrass = !_showGrass; Shown(); break;
-            case More.Walls: _showWalls = !_showWalls; Shown(); break;
+            case More.Trees: _show.Trees = !_show.Trees; Shown(); break;
+            case More.Grass: _show.Grass = !_show.Grass; Shown(); break;
+            case More.Walls: _show.Walls = !_show.Walls; Shown(); break;
+            case More.Bunkers: _show.Bunkers = !_show.Bunkers; Shown(); break;
+            case More.Mines: _show.Mines = !_show.Mines; Shown(); break;
             case More.Sheet: Sheet(_sheet is null); return;
         }
         _field.QueueRedraw();
@@ -154,18 +161,19 @@ public sealed partial class MapEditor
     {
         foreach (List<(Node3D Holder, Vector3 At)> wood in _woodOn.Values)
             foreach ((Node3D holder, Vector3 _) in wood)
-                holder.Visible = _showTrees;
+                holder.Visible = _show.Trees;
         foreach (Node3D mine in _mineOn.Values)
-            mine.Visible = _showTrees;
+            mine.Visible = _show.Mines;
         if (_lawn is not null)
-            _lawn.Visible = _showGrass;
+            _lawn.Visible = _show.Grass;
         // A prop is a Node; what shows is its stack - and a capon's stack stays
-        // hidden under its bunker (BoardDress.Bunker).
+        // hidden under its bunker (BoardDress.Bunker). Bunkers off is the bench's
+        // --no-bunker: the capon as its masonry.
         foreach (WallProp prop in _bricks)
             if (prop.Stack is { } stack)
-                stack.Visible = _showWalls && _shelters.All(b => b.Cell != prop.Cell);
+                stack.Visible = _show.Walls && (!_show.Bunkers || _shelters.All(b => b.Cell != prop.Cell));
         foreach (BunkerProp bunker in _shelters)
-            bunker.Visible = _showWalls;
+            bunker.Visible = _show.Walls && _show.Bunkers;
     }
 
     // --- the sheet -------------------------------------------------------------

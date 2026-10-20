@@ -175,14 +175,10 @@ public sealed partial class MapEditor : SceneRoot
                     && int.TryParse(at[1], out int r))
                     _hovered = new Vector2I(q, r);
             }
-            // The dressing hidden from the command line - View's T, M, K.
-            else if (args[i] == "--hide" && i + 1 < args.Length)
-                foreach (string what in args[++i].ToLowerInvariant().Split(','))
-                {
-                    if (what == "trees") _showTrees = false;
-                    else if (what == "grass") _showGrass = false;
-                    else if (what == "walls") _showWalls = false;
-                }
+            // The dressing hidden from the command line - View's T, M, K -
+            // the bench's flags word for word (BoardDress.Show).
+            else if (_show.Read(args, ref i))
+                continue;
             else if (args[i] == "--turn" && i + 1 < args.Length
                      && int.TryParse(args[i + 1], out int sides))
             {

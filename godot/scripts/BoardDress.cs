@@ -28,6 +28,52 @@ namespace TankSpriteTest;
 /// </summary>
 public static class BoardDress
 {
+    // --- what is shown --------------------------------------------------------
+
+    /// <summary>
+    /// Which of the dressing a scene shows. One set of switches and one reading
+    /// of the command line for both callers: the bench leaves an unshown layer
+    /// unbuilt, the editor builds it hidden so the View menu can bring it back -
+    /// each its own way, off the same answer.
+    ///
+    /// <c>--no-trees</c>, <c>--no-grass</c>, <c>--no-walls</c>, <c>--no-bunker</c>,
+    /// <c>--no-mines</c> one at a time, or <c>--hide trees,grass,walls,bunker,mines</c>
+    /// at once. <see cref="Bunkers"/> off is a capon laid as its masonry, not no
+    /// capon: the rule still stands on the cell.
+    /// </summary>
+    public sealed class Show
+    {
+        public bool Trees = true, Grass = true, Walls = true, Bunkers = true, Mines = true;
+
+        /// <summary>Takes the flag at <paramref name="i"/> if it is one of these,
+        /// stepping past its value; false leaves it to the caller.</summary>
+        public bool Read(string[] args, ref int i)
+        {
+            string a = args[i];
+            if (a.StartsWith("--no-", StringComparison.Ordinal) && Hide(a[5..]))
+                return true;
+            if (a != "--hide" || i + 1 >= args.Length)
+                return false;
+            foreach (string what in args[++i].ToLowerInvariant().Split(',', StringSplitOptions.RemoveEmptyEntries))
+                if (!Hide(what))
+                    GD.PushWarning($"--hide: no layer '{what}' (trees, grass, walls, bunker, mines)");
+            return true;
+        }
+
+        private bool Hide(string what)
+        {
+            switch (what)
+            {
+                case "trees": Trees = false; return true;
+                case "grass": Grass = false; return true;
+                case "walls": Walls = false; return true;
+                case "bunker": case "bunkers": Bunkers = false; return true;
+                case "mines": Mines = false; return true;
+                default: return false;
+            }
+        }
+    }
+
     // --- light ---------------------------------------------------------------
 
     /// <summary>The world the models are lit in: a flat background and an

@@ -62,8 +62,6 @@ namespace TankSpriteTest;
 /// </summary>
 public sealed partial class Tank3DBench
 {
-    private bool _noWalls;
-    private bool _noBunker;
     private readonly List<WallProp> _walls = new();
 
     /// <summary>The bunker standing on each capon's cell.</summary>
@@ -499,9 +497,9 @@ public sealed partial class Tank3DBench
     private void BuildWalls(BoardMap map)
     {
         _wallMap = map;
-        if (_noWalls || _field is null || _stage is null)
+        if (!_show.Walls || _field is null || _stage is null)
             return;
-        BunkerProp.Sizes? bunker = _noBunker ? null : BunkerProp.ReadSizes();
+        BunkerProp.Sizes? bunker = !_show.Bunkers ? null : BunkerProp.ReadSizes();
         foreach (Vector2I cell in map.Walled())
         {
             // A walled cell with no masonry of its own stands the bench's ring.

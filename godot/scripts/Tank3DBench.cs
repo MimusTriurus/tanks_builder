@@ -907,11 +907,17 @@ public sealed partial class Tank3DBench : Node3D
 
     // --- flags -----------------------------------------------------------
 
+    /// <summary>Which of the dressing is built - the editor's switches, read
+    /// the same way (<see cref="BoardDress.Show"/>).</summary>
+    private readonly BoardDress.Show _show = new();
+
     private void ReadFlags()
     {
         string[] args = OS.GetCmdlineUserArgs();
         for (int i = 0; i < args.Length; i++)
         {
+            if (_show.Read(args, ref i))
+                continue;
             string a = args[i];
             bool more = i + 1 < args.Length;
             if (a == "--model" && more) { _modelTag = args[++i].ToUpperInvariant(); _modelNamed = true; }
@@ -944,16 +950,11 @@ public sealed partial class Tank3DBench : Node3D
             else if (a == "--no-tracer") _tracerOn = false;
             else if (a == "--tracer-smoke") _tracerSmoke = true;
             else if (a == "--tracer-soft") _tracerSoft = true;
-            else if (a == "--no-walls") _noWalls = true;
-            else if (a == "--no-bunker") _noBunker = true;
-            else if (a == "--no-mines") _noMines = true;
             else if (a == "--free-drive") _rules = false;
             // the rubble stays where it landed (TankBench's flag, same name)
             else if (a == "--no-crumble") WallRig.Crumbles = false;
             else if (a == "--no-cel-relief") _flatRelief = true;
             else if (a == "--scorch") _scorchOn = true;
-            else if (a == "--no-grass") _noGrass = true;
-            else if (a == "--no-trees") _noTrees = true;
             else if (a == "--trees" && more) _treeNames = args[++i].Split(',', StringSplitOptions.RemoveEmptyEntries);
             else if (a == "--wood" && more) _woodCount = Math.Max(1, (int)F(args[++i], _woodCount));
             else if (a == "--wind" && more) _wind = F(args[++i], _wind);
