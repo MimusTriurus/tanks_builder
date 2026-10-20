@@ -792,6 +792,7 @@ public sealed partial class MapEditor : SceneRoot
         string?[] kinds = Kinds(draft);
         _field.SetKinds(kinds);
         _field.Paint = _edit.Paint ?? MapFile.PaintFor(_edit.Ground());
+        Covered();
 
         // The wood is sown again only when the cells it grows on moved.
         // Grove.Plant walks every cell and rolls a species per prop, which is
@@ -920,6 +921,37 @@ public sealed partial class MapEditor : SceneRoot
         }
         return rows;
     }
+
+    /// <summary>
+    /// The cover the letters say, handed to the field as the bench hands it
+    /// (<see cref="HexField.SetCover"/>) - and only when it changed.
+    ///
+    /// <b>Not left to the kinds, and that was the bug.</b> A board painted one
+    /// kind (<c>"paint": "soil"</c>, which every board saved from here carries)
+    /// answers that kind on every cell, so a wood drawn on it was never Forest
+    /// to <see cref="HexField.CoverAt"/>, and a minefield or a trench never had
+    /// any way to be anything: the editor dressed none of them while the bench,
+    /// reading the same file, planted the wood and laid the mine. ABBEY hid it -
+    /// its paint is a mix, where the kinds still speak.
+    ///
+    /// Only on a change because <see cref="HexField.CoverStamp"/> is what the
+    /// stage's mine markers redraw on, and setting the cover seals every walled
+    /// cell again before the props write their real sides.
+    /// </summary>
+    private void Covered()
+    {
+        var cover = new Cover[_edit.Columns * _edit.Rows];
+        for (int r = 0; r < _edit.Rows; r++)
+        for (int q = 0; q < _edit.Columns; q++)
+            cover[r * _edit.Columns + q] = _edit.GlyphAt(new Vector2I(q, r)).Over;
+        string said = $"{_edit.Columns}x{_edit.Rows}:" + string.Concat(cover.Select(c => (char)('a' + (int)c)));
+        if (said == _coveredAs)
+            return;
+        _coveredAs = said;
+        _field.SetCover(cover);
+    }
+
+    private string? _coveredAs;
 
     /// <summary>What each cell is painted as, off its own letter. The same two
     /// statements <see cref="BoardMap.FromGround"/> makes - a wood is forest, a
