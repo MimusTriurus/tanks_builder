@@ -1437,6 +1437,8 @@ public sealed partial class Tank3DBench : Node3D
             // The T key's ram still drives through _driveScripted.
             // The turret comes onto the target under the pointer (Tank3DBench.Aim).
             yawIn = TrackIn(dt);
+            if (elevIn == 0.0f)
+                elevIn = LobTrackIn(dt);
             driveIn = _driveScripted;
             turnIn = TurnGoalIn(dt);
         }

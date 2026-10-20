@@ -191,6 +191,7 @@ void fragment() {
         _ghostRig.Rotation = new Vector3(0.0f, Mathf.DegToRad(HeadingFor(cell, side)), 0.0f);
         // the turret ahead, until a target under the pointer turns it (Tank3DBench.Aim)
         _ghost!.Yaw = 0.0f;
+        _ghost.Elevation = 0.0f;
         _ghost.Apply();
         _ghostFill.SetShaderParameter("alpha", firm ? GhostFirm : GhostFaint);
         _ghostInk.SetShaderParameter("alpha", firm ? 1.0f : 0.7f);

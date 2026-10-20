@@ -373,6 +373,35 @@ public sealed partial class Tank3DBench
                 return;
         }
         _ghostRig!.Rotation = new Vector3(0.0f, Mathf.Atan2(want.X, want.Z), 0.0f);
+        // a mortar's tube at the angle it will be laid at - at once, a picture
+        if (_profile.Lobs && _ghost is { } ghost)
+        {
+            ghost.Elevation = Mathf.Clamp(ghost.Elevation + LobOff(ghost, _ghostRig.GlobalPosition, Centre(o)),
+                                          Mathf.DegToRad(ghost.ElevMin), Mathf.DegToRad(ghost.ElevMax));
+            ghost.Apply();
+        }
+    }
+
+    /// <summary>How far <paramref name="tube"/> is off the angle the right
+    /// button lays a mortar at for <paramref name="at"/>, rad - the range's
+    /// angle (<see cref="LobLay"/>), the one the bomb flies by.</summary>
+    private float LobOff(TankModel tube, Vector3 rig, Vector3 at)
+    {
+        float pitch = Mathf.Asin(Mathf.Clamp(tube.Muzzle.GlobalBasis.Z.Normalized().Y, -1.0f, 1.0f));
+        float cells = new Vector2(at.X - rig.X, at.Z - rig.Z).Length() / Mathf.Max(CellStep, 1.0f);
+        return LobLay(cells, pitch, tube) - pitch;
+    }
+
+    /// <summary>The mortar's own tube on to the angle for the target under the
+    /// pointer, at the elevation's rate, as <see cref="TrackIn"/> brings a
+    /// turret round: standing, nothing being laid, judged from here and no
+    /// ghost standing in for the hull.</summary>
+    private float LobTrackIn(float dt)
+    {
+        if (!_profile.Lobs || _judged is not { } shot || _other is not { } o || _aim is not null || RouteMoving
+            || _fate != Fate.Alive || dt <= 0.0f || shot.From != CellHere || GhostOn(CellHere) is not null)
+            return 0.0f;
+        return Mathf.Clamp(LobOff(_model, _rig.GlobalPosition, Centre(o)) / (Mathf.DegToRad(ElevDeg) * dt), -1.0f, 1.0f);
     }
 
     private static Vector3 Centre(Other o) =>
@@ -451,7 +480,9 @@ public sealed partial class Tank3DBench
     /// </summary>
     private bool OnTarget(Judged shot) =>
         shot.From != CellHere || GhostOn(shot.From) is not null || _other is not { } o
-        || Mathf.Abs(BoreOff(_model, _rig, Centre(o))) <= CasemateOff;
+        || (Mathf.Abs(BoreOff(_model, _rig, Centre(o))) <= CasemateOff
+            // and a mortar's tube at its angle for the range (LobTrackIn)
+            && (!_profile.Lobs || Mathf.Abs(LobOff(_model, _rig.GlobalPosition, Centre(o))) <= CasemateOff));
 
     /// <summary>Beads a hex, how many hexes a second they run, how fast the
     /// light goes along them.</summary>
@@ -540,14 +571,7 @@ public sealed partial class Tank3DBench
         mm.VisibleInstanceCount = 0;
         if (_judged is not { } shot || !_fireAxis || shot.Axis < 0 || !OnTarget(shot))
             return;
-        var path = new List<Vector3>();
-        int steps = shot.Lob ? 32 : 1;
-        float rise = shot.Lob ? shot.Tip.DistanceTo(shot.End) * 0.35f : 0.0f;
-        for (int k = 0; k <= steps; k++)
-        {
-            float u = k / (float)steps;
-            path.Add(shot.Tip.Lerp(shot.End, u) + Vector3.Up * (4.0f * rise * u * (1.0f - u)));
-        }
+        var path = shot.Lob && LobPath(shot) is { } arc ? arc : new List<Vector3> { shot.Tip, shot.End };
         float first = 0.0f;
         for (int k = 0; k + 1 < path.Count; k++)
             first += path[k].DistanceTo(path[k + 1]);
@@ -643,6 +667,39 @@ void fragment() {
             CustomAabb = new Aabb(new Vector3(-1e5f, -1e5f, -1e5f), new Vector3(2e5f, 2e5f, 2e5f)),
         };
         AddChild(_beads);
+    }
+
+    /// <summary>
+    /// The bomb's own flight: out of the tube along its bore - the tube the
+    /// shot leaves from, laid for the range (<see cref="LobTrackIn"/>, the
+    /// ghost's at once) - at the charge that brings it down on the roof
+    /// (<see cref="Charge"/>), under <see cref="LobFall"/>: the curve
+    /// <see cref="Launch"/> throws. Before this it was a parabola drawn over
+    /// the chord, a third of it high, that left the muzzle at no angle the
+    /// tube had. None when no tube stands there or it cannot carry the bomb.
+    /// </summary>
+    private List<Vector3>? LobPath(Judged shot)
+    {
+        TankModel? tube = GhostOn(shot.From) ?? (shot.From == CellHere ? _model : null);
+        if (tube is null)
+            return null;
+        Vector3 bore = tube.Muzzle.GlobalBasis.Z.Normalized();
+        if (Charge(shot.Tip, bore, shot.End, LobFall) is not float v)
+            return null;
+        float flat = new Vector2(bore.X, bore.Z).Length();
+        float run = new Vector2(shot.End.X - shot.Tip.X, shot.End.Z - shot.Tip.Z).Length();
+        if (flat < 1e-4f || v < 1e-3f)
+            return null;
+        float time = run / (v * flat);
+        const int steps = 32;
+        var path = new List<Vector3>(steps + 1);
+        Vector3 At(float t) => shot.Tip + bore * (v * t) + Vector3.Down * (0.5f * LobFall * t * t);
+        // the bore within a degree or two of the target: the miss spread along
+        // the curve, so it lands on the roof
+        Vector3 miss = shot.End - At(time);
+        for (int k = 0; k <= steps; k++)
+            path.Add(At(time * k / steps) + miss * (k / (float)steps));
+        return path;
     }
 
     private static Vector3 Along3(List<Vector3> path, float s)

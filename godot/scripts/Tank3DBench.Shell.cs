@@ -147,10 +147,12 @@ public sealed partial class Tank3DBench
     /// says the range, and the charge (<see cref="Charge"/>) puts the bomb on
     /// the hex whatever the ground does there.
     /// </summary>
-    private float LobLay(float cells, float pitch)
+    private float LobLay(float cells, float pitch, TankModel? tube = null)
     {
-        float lo = pitch - _model.Elevation + Mathf.DegToRad(_model.ElevMin + LobSpare);
-        float hi = pitch - _model.Elevation + Mathf.DegToRad(_model.ElevMax - LobSpare);
+        // the tank's own tube, or the ghost's (the HUD's preview, Tank3DBench.Aim)
+        tube ??= _model;
+        float lo = pitch - tube.Elevation + Mathf.DegToRad(tube.ElevMin + LobSpare);
+        float hi = pitch - tube.Elevation + Mathf.DegToRad(tube.ElevMax - LobSpare);
         float k = Mathf.Clamp((cells - Gunnery.LobShortest) / (float)(Gunnery.LobReach - Gunnery.LobShortest), 0.0f, 1.0f);
         return Mathf.Lerp(lo, hi, k);
     }
