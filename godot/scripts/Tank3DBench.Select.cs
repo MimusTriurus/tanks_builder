@@ -4,10 +4,11 @@ using Godot;
 namespace TankSpriteTest;
 
 /// <summary>
-/// Which tank the orders are for, marked the 2D board's way: a band round the
-/// rim of the cell it stands on (<see cref="SelectionRing"/>,
-/// <c>Stage3D.Band</c>) - cyan on the own tank while it is selected, red on
-/// the target, violet on the cell an order is driving to.
+/// Which tank the orders are for. The 2D board's bands round the rim of a cell
+/// (<see cref="SelectionRing"/>, <c>Stage3D.Band</c>) - cyan on the own tank,
+/// red on the target, violet on the order's cell - are no longer drawn since
+/// HUD stage 4: the outline on the model (<c>Tank3DBench.Aim</c>) and the
+/// ghost (<c>Tank3DBench.Ghost</c>) say it. The drawing below stays.
 ///
 /// <b>The ground and not the model</b>, for <see cref="SelectionRing"/>'s
 /// reason: an outline round the hull is drawn in the channel the bench judges,
@@ -79,21 +80,12 @@ public sealed partial class Tank3DBench
         AddChild(_marks);
     }
 
-    /// <summary>What is marked, outermost first: the order's cell, the own
-    /// tank, the target - the widest statement first, as the relief board
-    /// nests them (<c>Stage3D.Marked</c>).</summary>
-    private List<(Vector3 At, Color Ink)> Marked()
-    {
-        var want = new List<(Vector3, Color)>();
-        // the order's cell - only where no ghost stands on it (Tank3DBench.Aim)
-        if (_rules && _chosen && _route is { Count: > 0 } route && _ghostRig is not { Visible: true })
-            want.Add((CellWorld(route[^1]), SelectionRing.Chosen));
-        if (_chosen)
-            want.Add((_rig.Position, SelectionRing.Friendly));
-        if (_other is { } o)
-            want.Add((o.Rig.Position, SelectionRing.Hostile));
-        return want;
-    }
+    /// <summary>What is marked: nothing any more. The own tank's band, the
+    /// order's cell's and the target's went with HUD stage 4 - the outline on
+    /// the model says which tank is selected and which is aimed at, the ghost
+    /// where the order goes (Tank3DBench.Aim, Tank3DBench.Ghost). The bands
+    /// stay drawable for whatever needs a mark on a cell next.</summary>
+    private List<(Vector3 At, Color Ink)> Marked() => new();
 
     /// <summary>Every frame: the bands rebuilt where the tanks are now.</summary>
     private void MarksTick()

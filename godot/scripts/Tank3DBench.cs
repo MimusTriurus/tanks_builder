@@ -278,6 +278,9 @@ public sealed partial class Tank3DBench : Node3D
             else
                 LineUp();
         }
+        // a target to aim at from the start (Tank3DBench.Aim); --no-target none
+        else if (_targetDefault)
+            StandTarget();
 
         var layer = new CanvasLayer();
         AddChild(layer);
@@ -955,6 +958,8 @@ public sealed partial class Tank3DBench : Node3D
                 _otherWanted = true;
             }
             else if (a == "--target-heading" && more) _otherHeading = F(args[++i], _otherHeading);
+            else if (a == "--no-target") _targetDefault = false;
+            else if (a == "--no-fire-axis") _fireAxis = false;
             else if (a == "--no-amphibious") _amphibious = false;
             else if (a == "--no-ripples") _ripples.Enabled = false;
             else if (a == "--no-tracer") _tracerOn = false;
@@ -1429,7 +1434,8 @@ public sealed partial class Tank3DBench : Node3D
             // By cells (Tank3DBench.Orders): the keys are orders, not a throttle,
             // and the turret is the rules'. A/D's turn on the spot is steered here.
             // The T key's ram still drives through _driveScripted.
-            yawIn = 0.0f;
+            // The turret comes onto the target under the pointer (Tank3DBench.Aim).
+            yawIn = TrackIn(dt);
             driveIn = _driveScripted;
             turnIn = TurnGoalIn(dt);
         }
@@ -1809,6 +1815,8 @@ public sealed partial class Tank3DBench : Node3D
         _panel.Heading("tank3d.drive", "движение");
         _panel.Toggle("tank3d.drive.cells", "по клеткам, как в 2D  (выкл. — WASD, --free-drive)",
                       () => _rules, v => SetRules(v));
+        // the line of fire, beads from the muzzle to the hull (Tank3DBench.Aim)
+        _panel.Toggle("tank3d.drive.axis", "линия огня  (--no-fire-axis)", () => _fireAxis, v => _fireAxis = v);
         _panel.Readout("tank3d.drive.note", () => _rules
             ? "ЛКМ по своему — выбрать, ЛКМ — ехать, двойной ЛКМ по цели — таран, ПКМ — выстрел\n"
               + "W/S — клетка вперёд/назад, A/D — 60°, ESC — отмена, без приказа — снять выбор"
