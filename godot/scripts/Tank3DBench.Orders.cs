@@ -76,14 +76,16 @@ public sealed partial class Tank3DBench
         _route = null;
         _routeRams = false;
         _routeBack = false;
+        _routeFace = null;
         _shotWaiting = null;
         _turnGoal = null;
         _orderNote = "";
+        Unlock();
     }
 
     /// <summary>An order to go to <paramref name="cell"/> - or, with
     /// <paramref name="ram"/>, into the target standing on it.</summary>
-    private void OrderTo(Vector2I cell, bool ram = false)
+    private void OrderTo(Vector2I cell, bool ram = false, int? face = null)
     {
         if (_field is null || _fate != Fate.Alive || RamRunning)
             return;
@@ -125,10 +127,15 @@ public sealed partial class Tank3DBench
             return;
         }
         _routeBack = route.Back;
+        // The rose's side, turned to on arrival out of the same budget
+        // (Tank3DBench.Ghost) - only if the budget has it.
+        int turn = face is int f ? reach.TurnTo(route, f) ?? 0 : 0;
+        _routeFace = turn > 0 ? face : null;
         string risk = route.Risk == Steps.Risk.None ? "" : $", {route.Risk}";
         Drive(route.Cells(), ram: false,
-              $"к {cell}: {route.Spent} из {reach.Budget} шагов{(route.Back ? ", назад" : "")}{risk}");
-        GD.Print($"tank3d: move {here} -> {cell}: {route} of {reach.Budget}{risk}"
+              $"к {cell}: {route.Spent + turn} из {reach.Budget} шагов{(route.Back ? ", назад" : "")}"
+              + $"{(turn > 0 ? $", разворот {turn}" : "")}{risk}");
+        GD.Print($"tank3d: move {here} -> {cell}: {route}{(turn > 0 ? $" then t{face} (+{turn})" : "")} of {reach.Budget}{risk}"
                  + $" ({reach.RoutesTo(cell).Count} way(s) of that cost)");
     }
 
@@ -350,6 +357,12 @@ public sealed partial class Tank3DBench
                 _speed = 0.0f;
                 _orderNote = "";
                 GD.Print($"tank3d: arrived at {next}, heading {_heading:F0}, off the middle {left - move:F1} px");
+                // the rose's turn, on the spot
+                if (_routeFace is int face)
+                {
+                    _turnGoal = HeadingFor(next, face);
+                    _routeFace = null;
+                }
                 ShotOnArrival();
             }
         }
@@ -435,6 +448,12 @@ public sealed partial class Tank3DBench
             TakeOver(standing);
             return;
         }
+        // a disc of the rose round the fixed cell (Tank3DBench.Ghost)
+        if (RoseAt(screen) is int side)
+        {
+            FaceTo(side);
+            return;
+        }
         if (PickAt(screen) is not var (point, onTank, onOwn) || _field is null)
             return;
         Vector2I cell = onTank && _other is { } t ? OtherCell(t)
@@ -456,6 +475,17 @@ public sealed partial class Tank3DBench
         {
             if (twice)
                 OrderTo(cell, ram: true);
+            return;
+        }
+        // A cell in reach takes two clicks: the first fixes it and shows the
+        // ghost and the rose, the second on it orders the move
+        // (Tank3DBench.Ghost). Out of reach the order says why not.
+        if (CourseShown && _reach is { } reach && reach.Reaches(cell))
+        {
+            if (_lockCell == cell)
+                Confirm();
+            else
+                Lock(cell);
             return;
         }
         OrderTo(cell);

@@ -96,7 +96,7 @@ public sealed partial class Tank3DBench
     /// <summary>The way the click on <paramref name="cell"/> orders: the one
     /// shown, if it is to that cell.</summary>
     private Steps.Route? ShownWay(Vector2I cell) =>
-        _hoverCell == cell && _ways.Count > 0 ? _ways[_wayIx % _ways.Count] : null;
+        (_lockCell ?? _hoverCell) == cell && _ways.Count > 0 ? _ways[_wayIx % _ways.Count] : null;
 
     /// <summary>Tab: the next way of the same cost. False when there is no
     /// other, and Tab is the panel's.</summary>
@@ -105,6 +105,9 @@ public sealed partial class Tank3DBench
         if (!CourseShown || _ways.Count < 2)
             return false;
         _wayIx = (_wayIx + 1) % _ways.Count;
+        // a fixed cell's ghost faces where the new way arrives
+        if (_lockCell is not null)
+            _lockFace = _ways[_wayIx].End.Heading;
         GD.Print($"tank3d: way {_wayIx + 1} of {_ways.Count} to {_hoverCell}: {_ways[_wayIx]}");
         return true;
     }
@@ -135,6 +138,8 @@ public sealed partial class Tank3DBench
         {
             _hoverCell = null;
             _ways.Clear();
+            Unlock();
+            GhostTick(null);
             _courseInk?.QueueRedraw();
             return;
         }
@@ -148,8 +153,22 @@ public sealed partial class Tank3DBench
             _reachKey = key;
             _reach = Steps.Plan(_field!, new Steps.Pose(here, side), Steps.Mover.Of(_profile, _amphibious, barred));
         }
+        // A fixed cell holds the way shown until it is ordered or let go - or
+        // falls out of reach, when the board moved under it.
+        if (_lockCell is Vector2I locked && !_reach!.Reaches(locked))
+            Unlock();
+        if (_lockCell is Vector2I held)
+        {
+            if (fresh || _hoverCell != held)
+            {
+                _hoverCell = held;
+                _ways = _reach!.RoutesTo(held);
+                if (_lockFace is int f && _ways.Count > 0 && _reach.TurnTo(_ways[_wayIx % _ways.Count], f) is null)
+                    _lockFace = _ways[_wayIx % _ways.Count].End.Heading;
+            }
+        }
         Vector2 mouse = GetViewport().GetMousePosition();
-        if (fresh || mouse != _hoverMouse)
+        if (_lockCell is null && (fresh || mouse != _hoverMouse))
         {
             _hoverMouse = mouse;
             Vector2I? cell = _hoverFixed;
@@ -170,11 +189,19 @@ public sealed partial class Tank3DBench
             Ribbon(mesh, _ways[_wayIx % _ways.Count]);
         mesh.SurfaceEnd();
 
-        if (_ways.Count > 0)
+        Steps.Route? shown = _ways.Count > 0 ? _ways[_wayIx % _ways.Count] : null;
+        GhostTick(shown);
+        if (shown is not null)
         {
-            Steps.Route way = _ways[_wayIx % _ways.Count];
-            _courseNote = $"путь {way.Spent} из {_reach!.Budget}"
-                          + (_ways.Count > 1 ? $", Tab — другой ({_wayIx % _ways.Count + 1}/{_ways.Count})" : "");
+            string tab = _ways.Count > 1 ? $", Tab — другой ({_wayIx % _ways.Count + 1}/{_ways.Count})" : "";
+            if (_lockCell is not null)
+            {
+                int turn = _reach!.TurnTo(shown, GhostFace(shown)) ?? 0;
+                _courseNote = $"выбрано: {shown.Spent}{(turn > 0 ? $"+{turn}" : "")} из {_reach.Budget}{tab};"
+                              + " разворот — роза/A/D/колесо, Enter — ехать, Esc — отмена";
+            }
+            else
+                _courseNote = $"путь {shown.Spent} из {_reach!.Budget}{tab}; щелчок — выбрать клетку";
         }
         else
             _courseNote = $"{_reach!.Budget} шагов, клеток в досягаемости {_reach.Cells.Count}";
@@ -330,6 +357,9 @@ public sealed partial class Tank3DBench
         {
             (Vector2I cell, int spent, int turns) = stops[i];
             Vector2 at = Screen(cell);
+            // the last disc steps back along the ribbon, off the ghost standing there
+            if (i > 0 && i == stops.Count - 1 && _ghost is not null)
+                at = at.Lerp(Screen(stops[i - 1].Cell), 0.38f);
             if (i > 0)
             {
                 bool sand = _field!.FoundationAt(cell) == Foundation.Sand;
@@ -348,7 +378,11 @@ public sealed partial class Tank3DBench
         Vector2 end = Screen(way.End.Cell);
         if (risk is not null)
             Pill(ink, font, end + new Vector2(0, -hex * 0.48f), risk, new Color(0.94f, 0.58f, 0.58f), new Color(0.31f, 0.07f, 0.07f), size);
-        // where the hull will point
+        DrawRose(ink, font, size);
+        // Where the hull will point: the ghost says it (Tank3DBench.Ghost); the
+        // arrowhead only stands in when its model did not load.
+        if (_ghost is not null)
+            return;
         Vector2 nose = (_camera.UnprojectPosition(OnTop(way.End.Cell, CellFlat(way.End.Cell)
                         + (CellFlat(HexField.Step(way.End.Cell, way.End.Heading)) - CellFlat(way.End.Cell)) * 0.5f)) - end).Normalized();
         Vector2 tip = end + nose * hex * 0.62f, flank = nose.Orthogonal() * r * 0.8f;

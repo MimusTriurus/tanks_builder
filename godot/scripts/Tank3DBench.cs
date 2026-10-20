@@ -1050,6 +1050,8 @@ public sealed partial class Tank3DBench : Node3D
             case "cancel": CancelOrder(); break;
             case "way": NextWay(); break;
             case "forks": Forks(); break;
+            case "confirm": Confirm(); break;
+            case "unlock": Unlock(); break;
             case "select": Choose(true); break;
             case "deselect": Choose(false); break;
             // the left button where the camera shows the own hull's middle
@@ -1123,6 +1125,15 @@ public sealed partial class Tank3DBench : Node3D
                         OrderClick(_camera.UnprojectPosition(standing.Rig.Position
                             + Vector3.Up * (standing.Model.Size.Y * standing.Model.PixelsPerUnit * 0.4f)), false);
                 }
+                // lock=Q,R: the first click on a cell in reach; face=S: the rose's disc
+                else if (what.StartsWith("lock=", StringComparison.Ordinal))
+                {
+                    string[] qr = what[5..].Split(',');
+                    if (qr.Length == 2 && int.TryParse(qr[0], out int q) && int.TryParse(qr[1], out int r))
+                        Lock(new Vector2I(q, r));
+                }
+                else if (what.StartsWith("face=", StringComparison.Ordinal))
+                    FaceTo((int)F(what[5..], 90));
                 else if (what.StartsWith("go=", StringComparison.Ordinal))
                 {
                     // go=Q,R: the left button on that hex, under the rules.
@@ -1568,7 +1579,7 @@ public sealed partial class Tank3DBench : Node3D
                     + "Space shot   RMB aim and fire   1-4 ricochet front/right/rear/left   Shift+1-4 pierce   Ctrl+1-4 HE   5 round in the ground\n"
                     + "J burning   K knocked out   X destroyed   T ram   Backspace reset   "
                     + (_rules
-                        ? "cells: LMB own select   LMB go   LMB x2 on target ram   W/S cell   A/D 60   Esc cancel/let go   "
+                        ? "cells: LMB own select   LMB cell, again go (Enter)   Tab other way   A/D or wheel turn the ghost   LMB x2 on target ram   W/S cell   A/D 60   Esc cancel/let go   "
                         : "WASD drive   " + (_model.Turreted ? "Q/E turret   " : ""))
                     + "R/F gun   -/= wheel zoom to cursor   MMB drag pan   Home follow tank   Tab panel   F12 shot";
         Shots();
@@ -1716,11 +1727,15 @@ public sealed partial class Tank3DBench : Node3D
             {
                 case Key.W: if (_chosen) OrderStep(back: false); return;
                 case Key.S: if (_chosen) OrderStep(back: true); return;
-                case Key.A: if (_chosen) OrderTurn(left: true); return;
-                case Key.D: if (_chosen) OrderTurn(left: false); return;
-                // an order in hand is dropped; with none, the tank is let go
+                // with a cell fixed, A/D turn its ghost (Tank3DBench.Ghost)
+                case Key.A: if (_lockCell is not null) FaceStep(left: true); else if (_chosen) OrderTurn(left: true); return;
+                case Key.D: if (_lockCell is not null) FaceStep(left: false); else if (_chosen) OrderTurn(left: false); return;
+                case Key.Enter or Key.KpEnter: Confirm(); return;
+                // the fixed cell let go; an order in hand dropped; with none,
+                // the tank let go
                 case Key.Escape:
-                    if (RouteMoving || _turnGoal is not null || _shotWaiting is not null) CancelOrder();
+                    if (_lockCell is not null) Unlock();
+                    else if (RouteMoving || _turnGoal is not null || _shotWaiting is not null) CancelOrder();
                     else Choose(false);
                     return;
             }
@@ -1736,6 +1751,9 @@ public sealed partial class Tank3DBench : Node3D
         if (@event is InputEventMouseButton { Pressed: true } wheel
             && wheel.ButtonIndex is MouseButton.WheelUp or MouseButton.WheelDown)
         {
+            // over a fixed cell the wheel turns its ghost (Tank3DBench.Ghost)
+            if (WheelTurns(wheel.Position, wheel.ButtonIndex == MouseButton.WheelUp))
+                return;
             float notches = wheel.Factor > 0.0f ? wheel.Factor : 1.0f;
             ZoomBy(Mathf.Pow(WheelStep, wheel.ButtonIndex == MouseButton.WheelUp ? notches : -notches), wheel.Position);
             return;
