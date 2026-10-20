@@ -130,6 +130,7 @@ public sealed partial class Tank3DBench
             bool driving = RouteMoving && !_routeRams && _route is { Count: > 0 };
             Vector2I from = driving ? _route![^1]
                 : _lockCell is Vector2I fixedAt && !_profile.FreeOrder ? fixedAt : CellHere;
+            CasemateGhost(from, o);
             _judged = Judge(from, o);
             GhostTrack(_judged, o);
             _judgedNote = $"цель {o.Tag} {_judged.Cell}{(from != CellHere ? $" из {from}" : "")}: {_judged.Says}";
@@ -252,10 +253,10 @@ public sealed partial class Tank3DBench
     /// the model, and a casemate's barrel points where the hull does.</summary>
     private Vector3 MuzzleAt(Vector2I from)
     {
-        if (from == CellHere)
-            return OverMiddle(_model, _rig);
         if (GhostOn(from) is { } ghost)
             return OverMiddle(ghost, _ghostRig!);
+        if (from == CellHere)
+            return OverMiddle(_model, _rig);
         return CellMiddle(from) + Vector3.Up * (0.7f * _model.Size.Y * _model.PixelsPerUnit);
     }
 
@@ -263,8 +264,9 @@ public sealed partial class Tank3DBench
     /// <summary>The muzzle's tip where the shot is fired from: the beads on the
     /// ground start under it.</summary>
     private Vector3 TipAt(Vector2I from) =>
-        from == CellHere ? _model.Muzzle.GlobalPosition
-        : GhostOn(from) is { } ghost ? ghost.Muzzle.GlobalPosition
+        // the ghost first: on the own cell it is a casemate turned on the target
+        GhostOn(from) is { } ghost ? ghost.Muzzle.GlobalPosition
+        : from == CellHere ? _model.Muzzle.GlobalPosition
         : CellMiddle(from);
 
     private TankModel? GhostOn(Vector2I cell) =>
@@ -311,6 +313,43 @@ public sealed partial class Tank3DBench
             return;
         ghost.Yaw += BoreOff(ghost, _ghostRig!, Centre(o));
         ghost.Apply();
+    }
+
+    /// <summary>How far off the target a casemate's hull may point before the
+    /// ghost stands in for it, rad.</summary>
+    private const float CasemateOff = 0.035f;
+
+    /// <summary>
+    /// A casemate's gun points where its hull does, and the hull is not turned
+    /// for a look - that is a step - so a line of fire out of its muzzle left
+    /// at the hull's angle. Instead the shot is shown from the hull as it will
+    /// fire: the ghost, turned on the target (the right button's laying turns
+    /// the hull the same way). On the cell the shot is judged from - the
+    /// ghost already standing on the fixed cell or the drive's end, or, from
+    /// where the tank stands, one over it while the hull points off
+    /// the target by more than <see cref="CasemateOff"/>, as firm as a fixed
+    /// cell's - inside the hull a faint one did not read. Runs before
+    /// <see cref="Judge"/>, which takes the muzzle off the ghost.
+    /// </summary>
+    private void CasemateGhost(Vector2I from, Other o)
+    {
+        // and only for a shot the rules allow: turned for one that will not
+        // be fired, the ghost said there would be one
+        if (_model.Turreted || _field is null || ShotWhy(from, OtherCell(o), out _, out _, out _).Length > 0)
+            return;
+        Vector3 want = Centre(o) - CellMiddle(from);
+        want.Y = 0.0f;
+        if (want.LengthSquared() < 1.0f)
+            return;
+        if (GhostOn(from) is null)
+        {
+            if (from != CellHere || Mathf.Abs(BoreOff(_model, _rig, Centre(o))) < CasemateOff)
+                return;
+            GhostAt(from, HullSide(), true);
+            if (_ghostRig is null)
+                return;
+        }
+        _ghostRig!.Rotation = new Vector3(0.0f, Mathf.Atan2(want.X, want.Z), 0.0f);
     }
 
     private static Vector3 Centre(Other o) =>
