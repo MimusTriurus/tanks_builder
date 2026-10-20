@@ -621,21 +621,8 @@ public sealed partial class Tank3DBench
         if (_field is null || _fate != Fate.Alive || !_field.InBounds(cell))
             return;
         Vector2I own = CellHere;
-        var (axis, cells) = AxisTo(own, cell);
         Other? tank = _other is { } o && OtherCell(o) == cell ? o : null;
-        string why = "";
-        if (cells <= 0)
-            why = "по своему гексу не стреляют";
-        else if (axis < 0)
-            why = "гекс не на оси огня";
-        else if (_profile.Lobs && (cells < Gunnery.LobShortest || cells > Gunnery.LobReach))
-            why = $"миномёт бьёт на {Gunnery.LobShortest}–{Gunnery.LobReach} клетки, до цели {cells}";
-        else if (!_profile.Lobs && tank is not null && cells < DirectNearest)
-            why = "по танку вплотную нельзя: нужен пустой гекс между";
-        // Under the rules the 2D gate as well: the wood, the smoke, the rise or
-        // a hull on the lane (Tank3DBench.Orders, LaneShut).
-        else if (_rules)
-            why = LaneShut(own, cell);
+        string why = ShotWhy(own, cell, out int axis, out int cells, out _);
         Vector3 mid = CellWorld(cell);
         Vector3 ground = new(mid.X, ShellGround(mid, out _), mid.Z);
         if (why.Length > 0)
@@ -665,6 +652,28 @@ public sealed partial class Tank3DBench
                 want = tank.Rig.Position + tank.Up * (0.45f * tall);
         }
         Aim(want, ground, $"{cell}, axis {axis}, {cells} cells");
+    }
+
+    /// <summary>Why a shot from <paramref name="own"/> at <paramref name="cell"/>
+    /// is not the rules', or empty - the right button's gate and the HUD's
+    /// preview of it (Tank3DBench.Aim), one reading. <paramref name="stop"/> is
+    /// the cell that shuts the lane, when that is the reason.</summary>
+    private string ShotWhy(Vector2I own, Vector2I cell, out int axis, out int cells, out Vector2I? stop)
+    {
+        (axis, cells) = AxisTo(own, cell);
+        stop = null;
+        bool tank = _other is { } o && OtherCell(o) == cell;
+        if (cells <= 0)
+            return "по своему гексу не стреляют";
+        if (axis < 0)
+            return "гекс не на оси огня";
+        if (_profile.Lobs && (cells < Gunnery.LobShortest || cells > Gunnery.LobReach))
+            return $"миномёт бьёт на {Gunnery.LobShortest}–{Gunnery.LobReach} клетки, до цели {cells}";
+        if (!_profile.Lobs && tank && cells < DirectNearest)
+            return "по танку вплотную нельзя: нужен пустой гекс между";
+        // Under the rules the 2D gate as well: the wood, the smoke, the rise or
+        // a hull on the lane (Tank3DBench.Orders, LaneShut).
+        return _rules ? LaneShut(own, cell, out stop) : "";
     }
 
     /// <summary>A gun's nearest tank target, cells: one empty hex between.</summary>

@@ -77,6 +77,7 @@ public sealed partial class Tank3DBench
         _routeRams = false;
         _routeBack = false;
         _routeFace = null;
+        _routeGoal = null;
         _shotWaiting = null;
         _turnGoal = null;
         _orderNote = "";
@@ -94,6 +95,7 @@ public sealed partial class Tank3DBench
         HashSet<Vector2I> barred = Barred(ram);
         _turnGoal = null;
         _routeBack = false;
+        _routeGoal = null;
         if (ram)
         {
             // The ram is an action (GDD classes.md, «Таран»), not a move: its run
@@ -131,6 +133,7 @@ public sealed partial class Tank3DBench
         // (Tank3DBench.Ghost) - only if the budget has it.
         int turn = face is int f ? reach.TurnTo(route, f) ?? 0 : 0;
         _routeFace = turn > 0 ? face : null;
+        _routeGoal = (cell, _routeFace ?? route.End.Heading);
         string risk = route.Risk == Steps.Risk.None ? "" : $", {route.Risk}";
         Drive(route.Cells(), ram: false,
               $"к {cell}: {route.Spent + turn} из {reach.Budget} шагов{(route.Back ? ", назад" : "")}"
@@ -199,6 +202,7 @@ public sealed partial class Tank3DBench
         if (_fate != Fate.Alive)
             return;
         _route = null;
+        _routeGoal = null;
         float from = _turnGoal ?? Mathf.Round(_heading / 60.0f) * 60.0f;
         _turnGoal = from + (left ? 60.0f : -60.0f);
     }
@@ -399,6 +403,11 @@ public sealed partial class Tank3DBench
     /// for the stop; standing, it is laid now.</summary>
     private void ShotOrder(Vector2I cell)
     {
+        // With a cell fixed the shot is fired from it: the move is ordered and
+        // the shot waits for the stop. LT fires first and keeps the cell
+        // (classes.md, «Свободный порядок LT»; Tank3DBench.Aim).
+        if (_lockCell is not null && !_profile.FreeOrder)
+            Confirm();
         if (RouteMoving)
         {
             _shotWaiting = cell;
@@ -419,14 +428,16 @@ public sealed partial class Tank3DBench
     /// <summary>The 2D gate on a direct shot (<c>Gunnery.Solve</c>): why the
     /// lane to <paramref name="cell"/> is shut, or empty. The walls are left to
     /// the round: on this board it hits them.</summary>
-    private string LaneShut(Vector2I own, Vector2I cell)
+    private string LaneShut(Vector2I own, Vector2I cell, out Vector2I? stop)
     {
+        stop = null;
         if (_field is null)
             return "";
         Shot shot = Gunnery.Solve(_field, own, cell, _profile.Lobs,
                                   c => _other is { } o && OtherCell(o) == c, masonry: false);
         if (shot.Clear || shot.BlockedAt is not Vector2I at)
             return "";
+        stop = at;
         return shot.Stop switch
         {
             Barrier.Tank => $"на линии огня танк {at}",

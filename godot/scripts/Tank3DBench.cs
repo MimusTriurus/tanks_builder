@@ -285,6 +285,7 @@ public sealed partial class Tank3DBench : Node3D
         layer.AddChild(_hud);
         // under the panel, which is drawn after it
         BuildCourse(layer);
+        BuildAim(layer);
         if (!_noUi)
             BuildPanel(layer);
         BuildBack(layer);
@@ -1560,6 +1561,7 @@ public sealed partial class Tank3DBench : Node3D
         FxProcess(dt, _speed, a);
         MarksTick();
         CourseTick();
+        AimTick();
         RamFrame(dt, _camera.GlobalBasis);
         ShellsTick(dt);
         WoodTick(dt);
@@ -1575,8 +1577,8 @@ public sealed partial class Tank3DBench : Node3D
                      + (_wallNote.Length > 0 ? $"  {_wallNote}" : "");
         string order = (_rules && _orderNote.Length > 0 ? $"  {_orderNote}" : "")
                        + (_courseNote.Length > 0 ? $"  {_courseNote}" : "");
-        _hud.Text = $"{_modelTag} 3D, class {_profile.Tag}  {where}  {fate}  {_note}{ram}{order}{(_aimNote.Length > 0 ? "  " + _aimNote : "")}\n"
-                    + "Space shot   RMB aim and fire   1-4 ricochet front/right/rear/left   Shift+1-4 pierce   Ctrl+1-4 HE   5 round in the ground\n"
+        _hud.Text = $"{_modelTag} 3D, class {_profile.Tag}  {where}  {fate}  {_note}{ram}{order}{(_aimNote.Length > 0 ? "  " + _aimNote : "")}{(_judgedNote.Length > 0 ? "  " + _judgedNote : "")}\n"
+                    + "Space shot   RMB aim and fire (cell fixed: go, then fire)   1-4 ricochet front/right/rear/left   Shift+1-4 pierce   Ctrl+1-4 HE   5 round in the ground\n"
                     + "J burning   K knocked out   X destroyed   T ram   Backspace reset   "
                     + (_rules
                         ? "cells: LMB own select   LMB cell, again go (Enter)   Tab other way   A/D or wheel turn the ghost   LMB x2 on target ram   W/S cell   A/D 60   Esc cancel/let go   "

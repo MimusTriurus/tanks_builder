@@ -298,6 +298,14 @@ public sealed class MovementProfile
 	public bool Lobs => Might >= 5;
 
 	/// <summary>
+	/// LT's verb, «Свободный порядок» (classes.md): the one class that may act
+	/// before it moves - shoot and drive off - where every other drives first.
+	/// Read off <see cref="Might"/> for <see cref="Lobs"/>'s reason: a I is the
+	/// light gun's and nothing else carries one.
+	/// </summary>
+	public bool FreeOrder => Might <= 1;
+
+	/// <summary>
 	/// Whether the gun sits in a ring or in the hull.
 	///
 	/// <b>False is most of what a destroyer and a mortar are.</b> Both carry the

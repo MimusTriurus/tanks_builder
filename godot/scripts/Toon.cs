@@ -767,6 +767,157 @@ void fragment() {
 
     public static Color PaintOf(ShaderMaterial cel) => cel.GetShaderParameter("albedo").AsColor();
 
+    /// <summary>
+    /// A coloured rim round a dressed model - the HUD's selection and hover
+    /// (docs/hud3d-plan.md, stage 4): one more inverted hull after each ink
+    /// pass, wider than the ink by <c>px</c> screen pixels. Screen pixels and
+    /// not board ones: it says something about the HUD, not about the model,
+    /// and has to read the same at any zoom. <c>px</c> 0 draws nothing.
+    ///
+    /// <b>Drawn over everything but the model, by the stencil</b>, and not by
+    /// depth. Every piece of the model has a shell of its own, and at the
+    /// ink's depth the rim of a grille or a fender lay on the deck beside it in
+    /// colour; pushed back past the hull it went under the board, because the
+    /// eye looks nearly straight down and the ground behind a turret's edge is
+    /// hardly deeper than the turret. So <see cref="HaloMaskShader"/> leaves
+    /// <see cref="HaloStencil"/> on every pixel of the model's silhouette
+    /// (<see cref="HaloTurretMaskShader"/> <see cref="TurretStencil"/> on the
+    /// turret's), and the rim is drawn after the board with no depth test
+    /// wherever the stencil is below both - round the silhouette, over the
+    /// grass at its foot, and over a wood's crowns as a thin line where the
+    /// tank stands under them.
+    ///
+    /// <b>The screen pixel is taken with <c>abs</c></b>: on this bench
+    /// <c>PROJECTION_MATRIX[1][1]</c> is negative, and without it <c>px</c>
+    /// narrowed the shell instead of widening it - the ink's own
+    /// <c>min_px</c> (<see cref="InkShader"/>) has never worked for that
+    /// reason, and is left as it looks.
+    /// </summary>
+    public static readonly Shader HaloShader = new()
+    {
+        Code = @"
+shader_type spatial;
+render_mode unshaded, cull_front, blend_mix, depth_test_disabled, depth_draw_never, skip_vertex_transform, shadows_disabled, fog_disabled;
+stencil_mode read, compare_greater, " + TurretStencil + @";
+uniform vec4 tint : source_color = vec4(0.3, 0.85, 1.0, 1.0);
+uniform float width = 1.0;
+uniform float min_px = 1.0;
+uniform float px = 0.0;
+void vertex() {
+    VERTEX = (MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
+    vec3 n = normalize(mat3(MODELVIEW_MATRIX) * CUSTOM0.xyz);
+    float one = 2.0 / abs(PROJECTION_MATRIX[1][1] * VIEWPORT_SIZE.y);
+    float w = (max(width, min_px * one) + px * one) * CUSTOM0.w;
+    VERTEX.xy += n.xy * w;
+}
+void fragment() {
+    if (px <= 0.0) {
+        discard;
+    }
+    ALBEDO = tint.rgb;
+    ALPHA = 1.0;
+}
+",
+    };
+
+    /// <summary>What the model's own pixels carry while it wears a rim: above
+    /// <see cref="TurretStencil"/>, so one comparison tells the rim both apart
+    /// from the board.</summary>
+    public const int HaloStencil = 9;
+
+    /// <summary>The model's ink shells once more, drawing nothing but the
+    /// stencil, with no depth test: the whole silhouette, ink lines and all,
+    /// hidden parts too. The surfaces alone left the ink of a fender or a
+    /// grille unmarked, and the rim came through along it inside the hull; a
+    /// mark only where the model is seen filled a turret under the crowns of a
+    /// wood with the rim's colour.</summary>
+    public static readonly Shader HaloMaskShader = new() { Code = MaskCode(HaloStencil) };
+
+    /// <summary><see cref="HaloMaskShader"/> for the turret: its mark stays
+    /// <see cref="TurretStencil"/>, which the fire reads (<see cref="CelBurn"/>).</summary>
+    public static readonly Shader HaloTurretMaskShader = new() { Code = MaskCode(TurretStencil) };
+
+    private static string MaskCode(int stencil) => @"
+shader_type spatial;
+render_mode unshaded, cull_front, blend_mix, depth_test_disabled, depth_draw_never, skip_vertex_transform, shadows_disabled, fog_disabled;
+stencil_mode write, compare_always, " + stencil + @";
+uniform float width = 1.0;
+uniform float min_px = 1.0;
+uniform float px = 0.0;
+void vertex() {
+    VERTEX = (MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
+    vec3 n = normalize(mat3(MODELVIEW_MATRIX) * CUSTOM0.xyz);
+    float one = 2.0 / abs(PROJECTION_MATRIX[1][1] * VIEWPORT_SIZE.y);
+    VERTEX.xy += n.xy * max(width, min_px * one) * CUSTOM0.w;
+}
+void fragment() {
+    if (px <= 0.0) {
+        discard;
+    }
+    ALBEDO = vec3(0.0);
+    ALPHA = 0.0;
+}
+";
+
+    /// <summary>A model's rim: the masks and the line, shown and hidden
+    /// together.</summary>
+    public sealed class Rim
+    {
+        public required ShaderMaterial Mask, TurretMask, Line;
+
+        public void Set(float px, Color tint)
+        {
+            Mask.SetShaderParameter("px", px);
+            TurretMask.SetShaderParameter("px", px);
+            Line.SetShaderParameter("px", px);
+            Line.SetShaderParameter("tint", tint);
+        }
+    }
+
+    /// <summary>The rim hung after every ink pass under
+    /// <paramref name="model"/>, its belts' links included; null when the
+    /// model wears no ink (<c>--pbr</c>).</summary>
+    public static Rim? Halo(Node model)
+    {
+        // after everything see-through on the board: the marks, the ghost
+        var line = new ShaderMaterial { Shader = HaloShader, RenderPriority = 101 };
+        line.SetShaderParameter("width", InkWidth);
+        line.SetShaderParameter("min_px", InkMinPx);
+        ShaderMaterial MaskOf(Shader shader)
+        {
+            var m = new ShaderMaterial { Shader = shader, RenderPriority = 100, NextPass = line };
+            m.SetShaderParameter("width", InkWidth);
+            m.SetShaderParameter("min_px", InkMinPx);
+            return m;
+        }
+        ShaderMaterial mask = MaskOf(HaloMaskShader), turret = MaskOf(HaloTurretMaskShader);
+        var seen = new HashSet<ShaderMaterial>();
+        void Hang(Material? mat)
+        {
+            if (mat is not ShaderMaterial cel || cel.NextPass is not ShaderMaterial ink || !seen.Add(ink))
+                return;
+            ink.NextPass = ink.Shader == InkTurretShader ? turret : mask;
+        }
+        void Walk(Node node)
+        {
+            Mesh? mesh = node switch
+            {
+                MeshInstance3D m => m.Mesh,
+                MultiMeshInstance3D mm => mm.Multimesh?.Mesh,
+                _ => null,
+            };
+            if (mesh is not null)
+                for (int s = 0; s < mesh.GetSurfaceCount(); s++)
+                    Hang(mesh.SurfaceGetMaterial(s));
+            if (node is GeometryInstance3D g)
+                Hang(g.MaterialOverride);
+            foreach (Node child in node.GetChildren())
+                Walk(child);
+        }
+        Walk(model);
+        return seen.Count > 0 ? new Rim { Mask = mask, TurretMask = turret, Line = line } : null;
+    }
+
     private static void Collect(Node node, List<MeshInstance3D> into)
     {
         if (node is MeshInstance3D m && m.Mesh is not null)

@@ -85,7 +85,8 @@ public sealed partial class Tank3DBench
     private List<(Vector3 At, Color Ink)> Marked()
     {
         var want = new List<(Vector3, Color)>();
-        if (_rules && _chosen && _route is { Count: > 0 } route)
+        // the order's cell - only where no ghost stands on it (Tank3DBench.Aim)
+        if (_rules && _chosen && _route is { Count: > 0 } route && _ghostRig is not { Visible: true })
             want.Add((CellWorld(route[^1]), SelectionRing.Chosen));
         if (_chosen)
             want.Add((_rig.Position, SelectionRing.Friendly));

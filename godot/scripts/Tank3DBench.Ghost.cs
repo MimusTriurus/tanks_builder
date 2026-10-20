@@ -46,6 +46,10 @@ public sealed partial class Tank3DBench
     private int? _lockFace;
     /// <summary>The order's turn on arrival: a side, set by the rose.</summary>
     private int? _routeFace;
+    /// <summary>Where the move ordered ends and the side the hull will face
+    /// there: the ghost stands on it for the whole drive (stage 4, in place of
+    /// the order's band).</summary>
+    private (Vector2I Cell, int Side)? _routeGoal;
 
     private static readonly Shader GhostFillShader = new()
     {
@@ -76,7 +80,7 @@ uniform float alpha = 0.9;
 void vertex() {
     VERTEX = (MODELVIEW_MATRIX * vec4(VERTEX, 1.0)).xyz;
     vec3 n = normalize(mat3(MODELVIEW_MATRIX) * CUSTOM0.xyz);
-    float px = 2.0 / (PROJECTION_MATRIX[1][1] * VIEWPORT_SIZE.y);
+    float px = 2.0 / abs(PROJECTION_MATRIX[1][1] * VIEWPORT_SIZE.y);
     float w = max(width, min_px * px) * CUSTOM0.w;
     VERTEX.xy += n.xy * w;
     VERTEX.z -= w;
@@ -157,19 +161,34 @@ void fragment() {
     /// way's end, or put away.</summary>
     private void GhostTick(Steps.Route? way)
     {
-        if (way is null)
+        if (way is not null)
         {
-            if (_ghostRig is not null)
-                _ghostRig.Visible = false;
+            GhostAt(way.End.Cell, GhostFace(way), _lockCell == way.End.Cell);
             return;
         }
+        // An order in hand: the ghost waits where it ends until the hull is
+        // there and turned.
+        bool driving = _rules && _fate == Fate.Alive && (RouteMoving || _turnGoal is not null);
+        if (!driving)
+            _routeGoal = null;
+        // ...and gives way as the hull comes onto it, not to sit inside it
+        if (_routeGoal is var (goal, side) && !_routeRams
+            && (_rig.Position - CellMiddle(goal)).Slide(Vector3.Up).Length() > 0.6f * CellStep)
+        {
+            GhostAt(goal, side, true);
+            return;
+        }
+        if (_ghostRig is not null)
+            _ghostRig.Visible = false;
+    }
+
+    private void GhostAt(Vector2I cell, int side, bool firm)
+    {
         GhostFor(_modelTag);
         if (_ghostRig is null || _ghostFill is null || _ghostInk is null)
             return;
-        Vector2I cell = way.End.Cell;
         _ghostRig.Position = CellMiddle(cell);
-        _ghostRig.Rotation = new Vector3(0.0f, Mathf.DegToRad(HeadingFor(cell, GhostFace(way))), 0.0f);
-        bool firm = _lockCell == cell;
+        _ghostRig.Rotation = new Vector3(0.0f, Mathf.DegToRad(HeadingFor(cell, side)), 0.0f);
         _ghostFill.SetShaderParameter("alpha", firm ? GhostFirm : GhostFaint);
         _ghostInk.SetShaderParameter("alpha", firm ? 1.0f : 0.7f);
         _ghostRig.Visible = true;
