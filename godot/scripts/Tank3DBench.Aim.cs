@@ -69,8 +69,14 @@ public sealed partial class Tank3DBench
         public bool Pierces => Fires && Level > 0;
         public bool Glances => Fires && Level == 0 && Gunnery.Ricochets(Plate);
 
-        /// <summary>Where a ricochet goes on to (<see cref="GlanceLeg"/>).</summary>
-        public Leg? Bounce { get; init; }
+        /// <summary>Where the round goes on to past the target: off its flank
+        /// (<see cref="GlanceLeg"/>) or, a destroyer's, through it
+        /// (<see cref="PassLeg"/>).</summary>
+        public Leg? Onward { get; init; }
+
+        /// <summary>A destroyer's pass spent on a brick wall short of the
+        /// target: where the line crosses it.</summary>
+        public Vector3? Breach { get; init; }
 
         public Color Ink => !Fires ? AimOff : Pierces ? AimPierce : Glances ? AimGlance : AimHeld;
 
@@ -81,9 +87,9 @@ public sealed partial class Tank3DBench
                 if (!Fires)
                     return Why;
                 string what = Pierces ? $"пробьёт ({Level})" : Glances ? "рикошет" : "не пробьёт";
-                if (Glances && Bounce is { } leg)
-                    what += $" → {leg.Says}";
-                return $"{FaceWord(Face)} · {what}";
+                if (Onward is { } leg)
+                    what += leg.Through ? $" → насквозь: {leg.Says}" : $" → {leg.Says}";
+                return $"{(Breach is null ? "" : "сквозь стену → ")}{FaceWord(Face)} · {what}";
             }
         }
     }
@@ -107,6 +113,7 @@ public sealed partial class Tank3DBench
             },
         };
         AddChild(_aimMesh);
+        BuildBeads();
         _aimInk = new Control { Name = "AimInk", MouseFilter = Control.MouseFilterEnum.Ignore };
         _aimInk.SetAnchorsPreset(Control.LayoutPreset.FullRect);
         _aimInk.Draw += DrawAim;
@@ -142,6 +149,7 @@ public sealed partial class Tank3DBench
             if (_aimMesh?.Mesh is ImmediateMesh plate)
                 AimGround(plate, _judged);
         }
+        BeadsTick();
         _aimInk?.QueueRedraw();
     }
 
@@ -211,6 +219,17 @@ public sealed partial class Tank3DBench
         Vector3 muzzle = MuzzleAt(from);
         float tall = o.Model.Size.Y * o.Model.PixelsPerUnit;
         Vector3 end = o.Rig.Position + o.Up * (0.45f * tall);
+        // A destroyer's pass (classes.md, «Тяжёлый снаряд TD»): a brick wall
+        // first on the axis takes it - the round goes on with one less - and
+        // then the target cannot; WallOnAxis(passOne) finds the wall after.
+        int might = _profile.Might;
+        Vector3? breach = null;
+        if (why.Length == 0 && !_profile.Lobs && ShootsThrough
+            && WallOnAxis(from, axis, cells) is { Prop.Concrete: false } first)
+        {
+            breach = first.At;
+            might = Gunnery.PassedMight(_profile);
+        }
         if (why.Length == 0 && !_profile.Lobs && WallOnAxis(from, axis, cells, passOne: ShootsThrough) is { } wall)
         {
             why = $"снаряд уйдёт в стену {wall.Cell}";
@@ -233,16 +252,20 @@ public sealed partial class Tank3DBench
         }
         else
         {
-            level = LevelOn(o, end - muzzle, _profile.Might, out face, out plate);
+            level = LevelOn(o, end - muzzle, might, out face, out plate);
             // the plate itself, where the round from the muzzle meets it
             Vector3 tip = TipAt(from);
             if (why.Length == 0 && o.Hits.Cast(tip, (end - tip).Normalized()) is { } hit)
                 end = hit.At;
         }
         var judged = new Judged(from, cell, muzzle, end, axis, face, plate, level, why, _profile.Lobs, cells, stop, TipAt(from));
-        // held by a flank: where it goes on to - the round's own leg (Strike)
+        judged = judged with { Breach = breach };
+        // where it goes on to past the target - the round's own leg (Strike):
+        // held by a flank, or a destroyer's with its pass still in hand
         if (judged.Glances && !judged.Lob)
-            judged = judged with { Bounce = GlanceLeg(o, end, end - judged.Tip, _profile.Might) };
+            judged = judged with { Onward = GlanceLeg(o, end, end - judged.Tip, might) };
+        else if (judged.Pierces && !judged.Lob && ShootsThrough && breach is null)
+            judged = judged with { Onward = PassLeg(o, end, end - judged.Tip, Gunnery.PassedMight(_profile)) };
         return judged;
     }
 
@@ -406,9 +429,29 @@ public sealed partial class Tank3DBench
     /// before it and turned down: a solid arrow (read as part of the model),
     /// a dash over the board, beads on the ground along the axis (the shot
     /// did not read as a flight). Off with <c>--no-fire-axis</c> or the panel:
-    /// then only the reticle, the plate and the label.
+    /// then only the plate.
+    ///
+    /// <b>Only once the gun is on the target</b> (<see cref="OnTarget"/>): while
+    /// the turret is still coming round the line would leave the muzzle at an
+    /// angle and swing with it.
     /// </summary>
     private bool _fireAxis = true;
+
+    /// <summary><c>--reticle</c> or the panel: the ring round the point the
+    /// round meets, and a smaller one on a second target. Off by default - the
+    /// line's colour and course say it (2026-10-20).</summary>
+    private bool _reticle;
+
+    /// <summary>
+    /// Whether the gun the shot leaves from points at the target: the ghost's
+    /// is turned at once (<see cref="GhostTrack"/>, <see cref="CasemateGhost"/>);
+    /// the tank's own, judged from where it stands, once its turret - or a
+    /// casemate's hull, turned by the right button's laying - is within
+    /// <see cref="CasemateOff"/> of it.
+    /// </summary>
+    private bool OnTarget(Judged shot) =>
+        shot.From != CellHere || GhostOn(shot.From) is not null || _other is not { } o
+        || Mathf.Abs(BoreOff(_model, _rig, Centre(o))) <= CasemateOff;
 
     /// <summary>Beads a hex, how many hexes a second they run, how fast the
     /// light goes along them.</summary>
@@ -439,9 +482,9 @@ public sealed partial class Tank3DBench
             {
                 PlateEdge(mesh, cell, HexField.Reverse(shot.Axis), shot.Ink, corner);
                 // the ricochet's: the edge it leaves by, and the plate it meets
-                if (shot.Bounce is { } leg)
+                if (shot.Onward is { } leg)
                 {
-                    PlateEdge(mesh, cell, leg.Axis, AimGlance, corner);
+                    PlateEdge(mesh, cell, leg.Axis, leg.Lead, corner);
                     if (leg.Ends == LegEnd.Tank)
                         PlateEdge(mesh, leg.Cell, HexField.Reverse(leg.Axis), leg.Ink, corner);
                 }
@@ -463,7 +506,7 @@ public sealed partial class Tank3DBench
     }
 
     /// <summary>The hex that shuts the lane, tinted on the ground; the beads
-    /// themselves are in the air (<see cref="DrawBeads"/>).</summary>
+    /// themselves are in the air (<see cref="BeadsTick"/>).</summary>
     private void ShutHex(ImmediateMesh mesh, Judged shot, Vector2[] corner)
     {
         if (shot.Stop is not Vector2I shut)
@@ -482,9 +525,21 @@ public sealed partial class Tank3DBench
     /// muzzle and going at the hull, in the outcome's colour. Spaced in the
     /// world, sized on the screen, so a long shot has more beads and not
     /// bigger ones.
+    ///
+    /// <b>In the scene, not over it</b> (<see cref="BeadShader"/>): each bead a
+    /// disc facing the camera, tested against the depth, so a round that goes
+    /// through a hull or a wall goes into it and comes out the far side - the
+    /// part inside and behind it hidden by the model itself. Drawn on the
+    /// screen's canvas, as first, it lay over the hull it went through. The
+    /// crowns hide it as well: the line goes through the wood.
     /// </summary>
-    private void DrawBeads(Control ink, Judged shot, float hex)
+    private void BeadsTick()
     {
+        if (_beads?.Multimesh is not { } mm)
+            return;
+        mm.VisibleInstanceCount = 0;
+        if (_judged is not { } shot || !_fireAxis || shot.Axis < 0 || !OnTarget(shot))
+            return;
         var path = new List<Vector3>();
         int steps = shot.Lob ? 32 : 1;
         float rise = shot.Lob ? shot.Tip.DistanceTo(shot.End) * 0.35f : 0.0f;
@@ -498,7 +553,7 @@ public sealed partial class Tank3DBench
             first += path[k].DistanceTo(path[k + 1]);
         // a ricochet: on from the plate down its axis, in its own colour
         // (Tank3DBench.Glance)
-        Leg? leg = _fireAxis && shot.Fires ? shot.Bounce : null;
+        Leg? leg = _fireAxis && shot.Fires ? shot.Onward : null;
         if (leg is not null)
             path.Add(leg.End);
         float total = first + (leg is null ? 0.0f : leg.From.DistanceTo(leg.End));
@@ -507,22 +562,87 @@ public sealed partial class Tank3DBench
             return;
         float t = (float)(Time.GetTicksMsec() / 1000.0);
         float run = Mathf.PosMod(t * BeadRun * CellStep, gap);
-        float r = Mathf.Clamp(hex * 0.045f, 2.5f, 6.0f);
+        float r = Mathf.Clamp(HexScreen() * 0.045f, 2.5f, 6.0f);
+        // screen px a world unit: the camera is orthographic, one figure
+        Vector3 basisX = _camera.GlobalBasis.X.Normalized();
+        float px = (_camera.UnprojectPosition(shot.End + basisX) - _camera.UnprojectPosition(shot.End)).Length();
+        if (px < 1e-4f)
+            return;
+        Basis facing = _camera.GlobalBasis.Orthonormalized();
         Color c = shot.Fires ? shot.Ink : AimOff;
         // the first bead a little out of the bore, the last on the plate - or
         // a leg off the board dying away over its last two hexes
         float start = gap * 0.3f;
         float tail = leg is { Fades: true } ? CellStep * 2.0f : gap;
-        for (float s = start + run; s <= total; s += gap)
+        int n = 0;
+        for (float s = start + run; s <= total && n < BeadsMost; s += gap)
         {
             float wave = 0.5f + 0.5f * Mathf.Sin(t * BeadWave - s / gap * 0.9f);
             float edge = Mathf.Clamp((s - start) / gap, 0.0f, 1.0f) * Mathf.Clamp((total - s) / tail + 0.3f, 0.0f, 1.0f);
             Color bead = leg is not null && s > first ? leg.Ink : c;
-            Vector2 p = _camera.UnprojectPosition(Along3(path, s));
             float size = r * (0.8f + 0.35f * wave) * (0.4f + 0.6f * edge);
-            ink.DrawCircle(p, size + 1.6f, new Color(0.0f, 0.0f, 0.0f, 0.5f * edge));
-            ink.DrawCircle(p, size, new Color(bead.Lerp(Colors.White, 0.45f * wave), (0.55f + 0.45f * wave) * edge));
+            // the disc with its dark ring, 1.6 px past the colour
+            float outer = (size + 1.6f) / px;
+            mm.SetInstanceTransform(n, new Transform3D(facing.Scaled(Vector3.One * outer), Along3(path, s)));
+            mm.SetInstanceColor(n, new Color(bead.Lerp(Colors.White, 0.45f * wave), (0.55f + 0.45f * wave) * edge));
+            mm.SetInstanceCustomData(n, new Color(size / (size + 1.6f), 0.5f * edge, 0.0f, 0.0f));
+            n++;
         }
+        mm.VisibleInstanceCount = n;
+    }
+
+    /// <summary>The most beads drawn at once.</summary>
+    private const int BeadsMost = 600;
+
+    private MultiMeshInstance3D? _beads;
+
+    /// <summary>
+    /// A bead: a camera-facing disc in the instance's colour, ringed in dark -
+    /// <c>INSTANCE_CUSTOM.x</c> is where the colour ends across the radius,
+    /// <c>.y</c> the ring's alpha. Unshaded, blended, tested against the depth
+    /// and not writing it: the hull in front hides it, it hides nothing.
+    /// </summary>
+    private static readonly Shader BeadShader = new()
+    {
+        Code = @"
+shader_type spatial;
+render_mode unshaded, blend_mix, depth_draw_never, cull_disabled, shadows_disabled, fog_disabled;
+varying vec2 ring;
+void vertex() {
+    ring = INSTANCE_CUSTOM.xy;
+}
+void fragment() {
+    float d = length(UV - vec2(0.5)) * 2.0;
+    float w = fwidth(d);
+    float disc = 1.0 - smoothstep(1.0 - w, 1.0, d);
+    float core = 1.0 - smoothstep(ring.x - w, ring.x, d);
+    ALBEDO = mix(vec3(0.0), COLOR.rgb, core);
+    ALPHA = disc * mix(ring.y, COLOR.a, core);
+}
+",
+    };
+
+    private void BuildBeads()
+    {
+        var mm = new MultiMesh
+        {
+            TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
+            UseColors = true,
+            UseCustomData = true,
+            Mesh = new QuadMesh { Size = new Vector2(2.0f, 2.0f) },
+        };
+        mm.InstanceCount = BeadsMost;
+        mm.VisibleInstanceCount = 0;
+        _beads = new MultiMeshInstance3D
+        {
+            Name = "AimBeads",
+            Multimesh = mm,
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+            MaterialOverride = new ShaderMaterial { Shader = BeadShader },
+            // the beads move every frame; nothing of them is culled
+            CustomAabb = new Aabb(new Vector3(-1e5f, -1e5f, -1e5f), new Vector3(2e5f, 2e5f, 2e5f)),
+        };
+        AddChild(_beads);
     }
 
     private static Vector3 Along3(List<Vector3> path, float s)
@@ -560,15 +680,20 @@ public sealed partial class Tank3DBench
         float hex = HexScreen();
         int size = Mathf.RoundToInt(Mathf.Clamp(hex * 0.16f, 9.0f, 16.0f) * 1.15f);
         Vector2 end = _camera.UnprojectPosition(shot.End);
-        if (_fireAxis && shot.Axis >= 0)
-            DrawBeads(ink, shot, hex);
         float r = size * 0.55f;
         if (shot.Fires)
         {
-            Reticle(ink, end, Mathf.Max(size * 1.2f, hex * 0.32f), shot.Ink);
-            // the ricochet's own target, smaller: the second hit
-            if (shot.Bounce is { Ends: LegEnd.Tank } leg)
-                Reticle(ink, _camera.UnprojectPosition(leg.End), Mathf.Max(size * 0.9f, hex * 0.22f), leg.Ink);
+            if (_reticle)
+            {
+                Reticle(ink, end, Mathf.Max(size * 1.2f, hex * 0.32f), shot.Ink);
+                // the second target past this one, smaller: a ricochet's or a pass's
+                if (shot.Onward is { Ends: LegEnd.Tank } leg)
+                    Reticle(ink, _camera.UnprojectPosition(leg.End), Mathf.Max(size * 0.9f, hex * 0.22f), leg.Ink);
+            }
+            // a destroyer's pass spent on a wall short of the target - part of
+            // the line, shown with it
+            if (shot.Breach is Vector3 wall && _fireAxis && OnTarget(shot))
+                Burst(ink, _camera.UnprojectPosition(wall), Mathf.Max(size * 0.8f, hex * 0.18f), AimPierce);
         }
         else if (shot.Axis >= 0)
         {
@@ -591,6 +716,22 @@ public sealed partial class Tank3DBench
         if (semi >= 0)
             Pill(ink, font, over + new Vector2(0, size * 0.8f), _judgedNote[(semi + 2)..], new Color(0.92f, 0.95f, 0.98f),
                  new Color(0.05f, 0.27f, 0.49f), size);
+    }
+
+    /// <summary>A wall broken through: eight rays out of a small ring, in
+    /// <paramref name="c"/> on a dark one.</summary>
+    private static void Burst(Control ink, Vector2 at, float r, Color c)
+    {
+        var dark = new Color(0.0f, 0.0f, 0.0f, 0.5f);
+        foreach ((Color col, float w) in new[] { (dark, 5.0f), (c, 2.5f) })
+        {
+            ink.DrawArc(at, r * 0.35f, 0.0f, Mathf.Tau, 20, col, w, true);
+            for (int i = 0; i < 8; i++)
+            {
+                Vector2 d = Vector2.Right.Rotated(Mathf.Tau * i / 8.0f);
+                ink.DrawLine(at + d * (r * 0.55f), at + d * (i % 2 == 0 ? r : r * 0.8f), col, w, true);
+            }
+        }
     }
 
     /// <summary>A ring with four ticks pointing in, in the outcome's colour on

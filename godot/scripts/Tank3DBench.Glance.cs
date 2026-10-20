@@ -5,11 +5,16 @@ using Godot;
 namespace TankSpriteTest;
 
 /// <summary>
-/// The ricochet's second leg (GDD units.md, «Рикошет»): a round held by a
-/// flank leaves along one of the six axes and flies on to the first thing on
-/// it. One reading for the HUD's line of fire (<c>Tank3DBench.Aim</c>) and
-/// for the round itself (<c>Tank3DBench.Shell</c>, <c>Strike</c>), so the
-/// line drawn before the shot is the way the round goes after it.
+/// The round's second leg past the target: a ricochet (GDD units.md,
+/// «Рикошет») - held by a flank, it leaves along one of the six axes - or a
+/// destroyer's pass (classes.md, «Тяжёлый снаряд TD»; <see cref="PassLeg"/>)
+/// - it holed the target with its pass in hand and goes straight on with one
+/// less might. Either flies on to the first thing on its axis
+/// (<see cref="Walk"/>). One reading for the HUD's line of fire
+/// (<c>Tank3DBench.Aim</c>) and for the round itself (<c>Tank3DBench.Shell</c>,
+/// <c>Strike</c>), so the line drawn before the shot is the way the round
+/// goes after it. A pass is spent either way: the next wall stops it, brick
+/// or concrete, and a wall passed short of the target leaves no leg past it.
 ///
 /// <list type="bullet">
 /// <item><b>The axis is the rules' and not the mesh's.</b> The side plate is a
@@ -50,13 +55,20 @@ public sealed partial class Tank3DBench
         public Gunnery.Plate Plate { get; init; }
         public int Level { get; init; }
         public bool Smoke { get; init; }
+        /// <summary>A destroyer's round gone through the target
+        /// (<see cref="PassLeg"/>), not one turned off a flank.</summary>
+        public bool Through { get; init; }
 
         public bool Pierces => Ends == LegEnd.Tank && Level > 0;
 
         /// <summary>It goes on past where the line stops - off the board.</summary>
         public bool Fades => Ends == LegEnd.Edge;
 
-        public Color Ink => Ends != LegEnd.Tank ? AimGlance : Pierces ? AimPierce : AimHeld;
+        /// <summary>The leg's colour short of a tank: how it left the target -
+        /// through it, or off its flank.</summary>
+        public Color Lead => Through ? AimPierce : AimGlance;
+
+        public Color Ink => Ends != LegEnd.Tank ? Lead : Pierces ? AimPierce : AimHeld;
 
         public string Says => Ends switch
         {
@@ -100,16 +112,36 @@ public sealed partial class Tank3DBench
         // a flank by the axes: the way in neither along the hull nor against it
         if (!HexField.EdgeHeadings.Contains(axis) || arrives == hull || arrives == HexField.Reverse(hull))
             return null;
+        return Walk(cell, axis, at, might);
+    }
+
+    /// <summary>
+    /// Where a destroyer's round that holed <paramref name="o"/> at
+    /// <paramref name="at"/>, travelling <paramref name="way"/>, goes on to
+    /// with <paramref name="might"/> left (GDD classes.md, «Тяжёлый снаряд TD»):
+    /// straight on along the axis it came by - its one pass spent, so whatever
+    /// it meets next stops it, a brick wall too.
+    /// </summary>
+    private Leg? PassLeg(Other o, Vector3 at, Vector3 way, int might)
+    {
+        if (_field is null)
+            return null;
+        Vector2I cell = OtherCell(o);
+        return Walk(cell, Nearest(cell, way), at, might) with { Through = true };
+    }
+
+    /// <summary>The leg's walk out of <paramref name="cell"/> along
+    /// <paramref name="axis"/> from <paramref name="start"/> - the plate it
+    /// left, at its height - to the first thing on it.</summary>
+    private Leg Walk(Vector2I cell, int axis, Vector3 start, int might)
+    {
         Vector3 dir = HexWay(cell, axis);
-        // The leg leaves at the plate's height, along the axis through the
-        // target's cell.
-        Vector3 start = at;
         Vector3 Cross(Vector2I a, Vector2I b)
         {
             Vector3 rim = 0.5f * (CellWorld(a) + CellWorld(b));
             return start + dir * Mathf.Max(dir.Dot(rim - start), 0.0f);
         }
-        int level0 = _field.LevelAt(cell);
+        int level0 = _field!.LevelAt(cell);
         Vector2I here = cell;
         for (int k = 0; k < LegLongest; k++)
         {
@@ -198,7 +230,8 @@ public sealed partial class Tank3DBench
     {
         ShellsBuild();
         Vector3 dir = (leg.End - leg.From).Normalized();
-        float speed = Shell.Speed * GlanceSpeed;
+        // a ricochet has given the plate most of itself; a pass goes on at speed
+        float speed = Shell.Speed * (leg.Through ? 1.0f : GlanceSpeed);
         System.Action? landed = leg.Ends switch
         {
             LegEnd.Wall when leg.Wall is { } prop => WallStruck(prop, leg.End, dir, inside: false, lob: false, through: false),
@@ -234,7 +267,7 @@ public sealed partial class Tank3DBench
             hits.Leave(part, leg.End, leg.N, way, CelHit.Kind.Gouge, 0.8f);
             hits.Ricochet(leg.End, leg.N, way - 2.0f * way.Dot(leg.N) * leg.N);
         }
-        GD.Print($"tank3d: ricochet on {p.Tag} {leg.Face} ({leg.Plate}), might {leg.Might}, level {leg.Level}: "
+        GD.Print($"tank3d: {(leg.Through ? "pass" : "ricochet")} on {p.Tag} {leg.Face} ({leg.Plate}), might {leg.Might}, level {leg.Level}: "
                  + (leg.Pierces ? "pierced" : "held, spent"));
     }
 }

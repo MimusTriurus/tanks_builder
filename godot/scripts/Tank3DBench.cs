@@ -960,6 +960,7 @@ public sealed partial class Tank3DBench : Node3D
             else if (a == "--target-heading" && more) _otherHeading = F(args[++i], _otherHeading);
             else if (a == "--no-target") _targetDefault = false;
             else if (a == "--no-fire-axis") _fireAxis = false;
+            else if (a == "--reticle") _reticle = true;
             else if (a == "--no-amphibious") _amphibious = false;
             else if (a == "--no-ripples") _ripples.Enabled = false;
             else if (a == "--no-tracer") _tracerOn = false;
@@ -1817,6 +1818,7 @@ public sealed partial class Tank3DBench : Node3D
                       () => _rules, v => SetRules(v));
         // the line of fire, beads from the muzzle to the hull (Tank3DBench.Aim)
         _panel.Toggle("tank3d.drive.axis", "линия огня  (--no-fire-axis)", () => _fireAxis, v => _fireAxis = v);
+        _panel.Toggle("tank3d.drive.reticle", "прицельный круг  (--reticle)", () => _reticle, v => _reticle = v);
         _panel.Readout("tank3d.drive.note", () => _rules
             ? "ЛКМ по своему — выбрать, ЛКМ — ехать, двойной ЛКМ по цели — таран, ПКМ — выстрел\n"
               + "W/S — клетка вперёд/назад, A/D — 60°, ESC — отмена, без приказа — снять выбор"

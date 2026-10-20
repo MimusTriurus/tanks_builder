@@ -223,8 +223,6 @@ public sealed partial class Tank3DBench
         // What the round has left: the gun's, one less after the pass (GDD
         // classes.md, "после прохода огневая мощь снаряда −1").
         int might = _profile.Might;
-        // The target it went through, not met again on the way out of it.
-        bool pastTank = false;
         var through = new List<(float Along, System.Action Hit)>();
         float run = 0.0f;
         // A tank in a ring whose muzzle is out past its own leaf: the round
@@ -257,28 +255,21 @@ public sealed partial class Tank3DBench
                 landed = CaponRoofed(roof.Prop, roof.At, seg);
                 break;
             }
-            if (strikes && !pastTank && _other is { } o && o.Hits.Cast(p, seg) is { } hit
+            if (strikes && _other is { } o && o.Hits.Cast(p, seg) is { } hit
                 && (hit.At - p).Length() <= seg.Length() + 0.5f)
             {
                 Vector3 way = seg.Normalized();
                 int with = might;
                 // A destroyer's round goes through the tank it holes - its pass
-                // - and on with one less (GDD classes.md, "Тяжёлый снаряд TD").
-                // A plate that holds it spends it, pass or no pass.
-                if (!lob && passes > 0 && LevelOn(o, way, with, out _, out _) > 0)
-                {
-                    passes--;
-                    might = Gunnery.PassedMight(_profile);
-                    pastTank = true;
-                    through.Add((run + (hit.At - p).Length(), () => Strike(o, hit.Part, hit.At, hit.N, way, with, passing: true)));
-                }
-                else
-                {
-                    path.Add(hit.At);
-                    landed = lob ? () => Bursts(o, hit.Part, hit.At, hit.N)
-                                 : () => Strike(o, hit.Part, hit.At, hit.N, way, with);
-                    break;
-                }
+                // - and on with one less (GDD classes.md, "Тяжёлый снаряд TD"),
+                // down the axis to what stops it: Strike flies that leg
+                // (PassLeg), the one the HUD drew. A plate that holds it spends
+                // it, pass or no pass.
+                bool pass = !lob && passes > 0 && LevelOn(o, way, with, out _, out _) > 0;
+                path.Add(hit.At);
+                landed = lob ? () => Bursts(o, hit.Part, hit.At, hit.N)
+                             : () => Strike(o, hit.Part, hit.At, hit.N, way, with, passing: pass);
+                break;
             }
             if (!lob && WallMeets(p, next) is { } wall)
             {
@@ -373,7 +364,12 @@ public sealed partial class Tank3DBench
             o.Hits.Leave(part, at, n, way, CelHit.Kind.Hole);
             o.Hits.Pierce(part, at, n);
             k = 3.2f;
-            what = passing ? "pierced, the round goes on" : "pierced";
+            what = "pierced";
+            if (passing && PassLeg(o, at, way, Gunnery.PassedMight(_profile)) is { } leg)
+            {
+                FlyLeg(leg);
+                what = $"pierced, the round goes on along {leg.Axis}, {leg.Log}";
+            }
         }
         else
         {
