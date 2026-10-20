@@ -274,6 +274,14 @@ public sealed class MovementProfile
 	public bool Bulldozes => Mass >= 3;
 
 	/// <summary>
+	/// Steps a turn - the GDD's speed (classes.md, «Скорость, шагов»: LT 5,
+	/// MT 4, HT 3, TD 4, HM 3), the budget the steps module spends. Not
+	/// <see cref="TopSpeed"/>, which is how fast the model drives a step on the
+	/// bench and says nothing about how many it has.
+	/// </summary>
+	public int Steps { get; init; } = 4;
+
+	/// <summary>
 	/// Whether its rounds go over what is in the way instead of through it -
 	/// the GDD's "HM — Навес" (classes.md): the mortar's bomb "приходит сверху,
 	/// на любой уровень, минуя всё, что стоит между стрелком и гексом".
@@ -481,7 +489,7 @@ public sealed class MovementProfile
 	/// limiter in the whole set.</summary>
 	public static readonly MovementProfile Light = new()
 	{
-		Tag = "LTP", TopSpeed = 310.0, Accel = 620.0, TurnRate = 260.0,
+		Tag = "LTP", Steps = 5, TopSpeed = 310.0, Accel = 620.0, TurnRate = 260.0,
 		Size = 0.85, TurretRate = 240.0, ReloadTime = 2.2,
 		Might = 1, Mass = 1,
 		ShotShake = 3.0, TracerCalibre = 0.80, SmokeCalibre = 0.70,
@@ -489,7 +497,7 @@ public sealed class MovementProfile
 
 	public static readonly MovementProfile Medium = new()
 	{
-		Tag = "MTP", TopSpeed = 240.0, Accel = 420.0, TurnRate = 200.0,
+		Tag = "MTP", Steps = 4, TopSpeed = 240.0, Accel = 420.0, TurnRate = 200.0,
 		Size = 1.00, TurretRate = 175.0, ReloadTime = 3.2,
 		Might = 2, Mass = 2,
 		ShotShake = 4.5, TracerCalibre = 1.00, SmokeCalibre = 1.00,
@@ -497,7 +505,7 @@ public sealed class MovementProfile
 
 	public static readonly MovementProfile Heavy = new()
 	{
-		Tag = "HTP", TopSpeed = 175.0, Accel = 260.0, TurnRate = 140.0,
+		Tag = "HTP", Steps = 3, TopSpeed = 175.0, Accel = 260.0, TurnRate = 140.0,
 		Size = 1.10, TurretRate = 120.0, ReloadTime = 4.8,
 		Might = 3, Mass = 3,
 		ShotShake = 7.0, TracerCalibre = 1.35, SmokeCalibre = 1.45,
@@ -536,7 +544,7 @@ public sealed class MovementProfile
 	/// </summary>
 	public static readonly MovementProfile Destroyer = new()
 	{
-		Tag = "TDP", TopSpeed = 240.0, Accel = 420.0, TurnRate = 200.0,
+		Tag = "TDP", Steps = 4, TopSpeed = 240.0, Accel = 420.0, TurnRate = 200.0,
 		Size = 1.15, TurretRate = 0.0, ReloadTime = 5.0,
 		Might = 4, Mass = 2, Turreted = false, Draught = 0.7,
 		ShotShake = 8.5, TracerCalibre = 1.55, SmokeCalibre = 1.70,
@@ -570,7 +578,7 @@ public sealed class MovementProfile
 	/// </summary>
 	public static readonly MovementProfile Mortar = new()
 	{
-		Tag = "HMP", TopSpeed = 175.0, Accel = 330.0, TurnRate = 230.0,
+		Tag = "HMP", Steps = 3, TopSpeed = 175.0, Accel = 330.0, TurnRate = 230.0,
 		Size = 1.05, TurretRate = 0.0, ReloadTime = 6.5,
 		Might = 5, Mass = 1, Turreted = false, Draught = 0.7,
 		ShotShake = 10.0, TracerCalibre = 1.75, SmokeCalibre = 2.05,

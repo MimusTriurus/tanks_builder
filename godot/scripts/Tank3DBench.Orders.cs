@@ -49,6 +49,9 @@ public sealed partial class Tank3DBench
     private Vector2I _routeFrom;
     /// <summary>The order ends in the target: the last leg is not braked for.</summary>
     private bool _routeRams;
+    /// <summary>The order is the step back: the hull keeps its heading and the
+    /// tank drives astern (Steps, «назад на 1»).</summary>
+    private bool _routeBack;
     /// <summary>A shot given on the move: laid and fired from where it stops.</summary>
     private Vector2I? _shotWaiting;
     /// <summary>A turn on the spot ordered by A/D: the heading it ends at.</summary>
@@ -72,6 +75,7 @@ public sealed partial class Tank3DBench
     {
         _route = null;
         _routeRams = false;
+        _routeBack = false;
         _shotWaiting = null;
         _turnGoal = null;
         _orderNote = "";
@@ -89,20 +93,71 @@ public sealed partial class Tank3DBench
             barred.Add(OtherCell(o));
         // the standing tanks are in the way too (Tank3DBench.Parked)
         barred.UnionWith(ParkedCells);
-        List<Vector2I> path = _field.FindPath(here, cell, barred, masonry: true, bulldozer: _profile.Bulldozes);
         _turnGoal = null;
-        if (path.Count == 0)
+        _routeBack = false;
+        if (ram)
         {
-            _orderNote = cell == here ? "" : $"к {cell} пути нет";
-            GD.Print($"tank3d: no route {here} -> {cell}");
+            // The ram is an action (GDD classes.md, «Таран»), not a move: its run
+            // keeps the board's plain way into the target's cell.
+            List<Vector2I> path = _field.FindPath(here, cell, barred, masonry: true, bulldozer: _profile.Bulldozes);
+            if (path.Count == 0)
+            {
+                _orderNote = $"к {cell} пути нет";
+                GD.Print($"tank3d: no route {here} -> {cell}");
+                return;
+            }
+            Drive(path, ram: true, $"таран {OtherCell(_other!)}");
+            GD.Print($"tank3d: route {here} -> {cell} (ram): {string.Join(" ", path)}");
             return;
         }
+
+        // A move by the steps (Steps, docs/hud3d-plan.md): the class's budget,
+        // what each cell costs, where the move has to end.
+        Steps.Reach reach = Steps.Plan(_field, new Steps.Pose(here, HullSide()),
+                                       Steps.Mover.Of(_profile, _amphibious, barred));
+        if (reach.RouteTo(cell) is not { } route)
+        {
+            bool anyWay = _field.FindPath(here, cell, barred, masonry: true, bulldozer: _profile.Bulldozes).Count > 0;
+            _orderNote = cell == here ? "" : anyWay ? $"до {cell} не хватает шагов ({reach.Budget})" : $"к {cell} пути нет";
+            GD.Print($"tank3d: no move {here} -> {cell}: {(anyWay ? $"over the budget of {reach.Budget}" : "no way")}");
+            return;
+        }
+        _routeBack = route.Back;
+        string risk = route.Risk == Steps.Risk.None ? "" : $", {route.Risk}";
+        Drive(route.Cells(), ram: false,
+              $"к {cell}: {route.Spent} из {reach.Budget} шагов{(route.Back ? ", назад" : "")}{risk}");
+        GD.Print($"tank3d: move {here} -> {cell}: {route} of {reach.Budget}{risk}"
+                 + $" ({reach.RoutesTo(cell).Count} way(s) of that cost)");
+    }
+
+    private void Drive(List<Vector2I> path, bool ram, string note)
+    {
         _route = path;
         _routeStep = 0;
-        _routeFrom = here;
+        _routeFrom = CellHere;
         _routeRams = ram;
-        _orderNote = ram ? $"таран {OtherCell(_other!)}" : $"к {cell}, {path.Count} кл.";
-        GD.Print($"tank3d: route {here} -> {cell}{(ram ? " (ram)" : "")}: {string.Join(" ", path)}");
+        _orderNote = note;
+    }
+
+    /// <summary>The flat side the hull points at - the nearest of the six to
+    /// its heading (OrderStep's reading).</summary>
+    private int HullSide()
+    {
+        Vector2I here = CellHere;
+        float h = Mathf.DegToRad(_heading);
+        var way = new Vector3(Mathf.Sin(h), 0.0f, Mathf.Cos(h));
+        int best = HexField.EdgeHeadings[0];
+        float dot = -2.0f;
+        foreach (int side in HexField.EdgeHeadings)
+        {
+            float d = HexWay(here, side).Dot(way);
+            if (d > dot)
+            {
+                dot = d;
+                best = side;
+            }
+        }
+        return best;
     }
 
     /// <summary>W/S: one cell along the hull or against it - the nearest of the
@@ -191,6 +246,24 @@ public sealed partial class Tank3DBench
     /// </summary>
     private void RouteDrive(float dt, out float target, out float a, out float turn, out float step)
     {
+        // Astern the leg is driven as ahead with the hull pointing the other way:
+        // the speed is a magnitude inside and signed outside, as the keys' S
+        // signs it.
+        bool back = _routeBack;
+        if (back)
+            _speed = -_speed;
+        RouteLeg(dt, back, out target, out a, out turn, out step);
+        if (back)
+        {
+            _speed = -_speed;
+            target = -target;
+            step = -step;
+            a = -a;
+        }
+    }
+
+    private void RouteLeg(float dt, bool back, out float target, out float a, out float turn, out float step)
+    {
         target = a = turn = step = 0.0f;
         if (_route is null || _field is null)
             return;
@@ -199,7 +272,7 @@ public sealed partial class Tank3DBench
         Vector3 goal = CellWorld(next);
         Vector3 to = Flat(goal - pos);
         float left = to.Length();
-        float legHeading = HeadingOf(Flat(goal - CellWorld(_routeFrom)));
+        float legHeading = HeadingOf((back ? -1.0f : 1.0f) * Flat(goal - CellWorld(_routeFrom)));
         float diff = (float)Angles.WrapAngle(legHeading - _heading);
         float before = _speed;
         if (Mathf.Abs(diff) > 0.5f && left > 1.0f)
@@ -220,7 +293,7 @@ public sealed partial class Tank3DBench
             // On the leg: the heading the way to the cell's middle, the speed
             // under the ceiling it can still stop (or crawl) from.
             if (left > 1.0f)
-                Heading = HeadingOf(to);
+                Heading = HeadingOf(back ? -to : to);
             (float run, float end) = RouteRun(pos);
             float ceiling = Mathf.Sqrt(end * end + 2.0f * Accel * Mathf.Max(run, 0.0f));
             float allowed = Mathf.Min(Mathf.Min(RouteCap(_routeFrom, next), ceiling),
@@ -271,6 +344,7 @@ public sealed partial class Tank3DBench
             {
                 _route = null;
                 _routeRams = false;
+                _routeBack = false;
                 _speed = 0.0f;
                 _orderNote = "";
                 GD.Print($"tank3d: arrived at {next}, heading {_heading:F0}, off the middle {left - move:F1} px");

@@ -11039,6 +11039,156 @@ public static class SelfTest
                     : read);
         }
 
+        Theme("steps: a turn's driving by the GDD's steps (Steps)");
+        {
+            // A small board from letters: '.' ground, 's' sand, 'u' mud, 'f' a
+            // wood, 'b' a burning wood, 'm' a mine, 'd' deep water.
+            HexField StepBoard(params string[] rows)
+            {
+                var b = new HexField { Columns = rows[0].Length, Rows = rows.Length };
+                var ground = new Foundation[b.Columns * b.Rows];
+                var cover = new Cover[b.Columns * b.Rows];
+                for (int r = 0; r < b.Rows; r++)
+                for (int q = 0; q < b.Columns; q++)
+                {
+                    int at = r * b.Columns + q;
+                    char c = rows[r][q];
+                    ground[at] = c switch
+                    {
+                        's' => Foundation.Sand, 'u' => Foundation.Mud, 'd' => Foundation.Deep,
+                        _ => Foundation.Solid,
+                    };
+                    cover[at] = c switch
+                    {
+                        'f' or 'b' => Cover.Forest, 'm' => Cover.Minefield, _ => Cover.None,
+                    };
+                }
+                b.SetGround(ground);
+                b.SetCover(cover);
+                for (int r = 0; r < b.Rows; r++)
+                for (int q = 0; q < b.Columns; q++)
+                    if (rows[r][q] == 'b')
+                        b.SetCoverState(new Vector2I(q, r), CoverState.Burning);
+                return b;
+            }
+            var stMt = new Steps.Mover { Speed = 4 };
+            var up = new Vector2I(3, 4);
+            var boards = new List<HexField>();
+            HexField Keep(HexField b) { boards.Add(b); return b; }
+
+            HexField open = Keep(StepBoard(".......", ".......", ".......", ".......", "......."));
+            Steps.Reach openReach = Steps.Plan(open, new Steps.Pose(up, 90), stMt);
+            Check("four steps take a medium four cells straight on and no further",
+                openReach.Cells.GetValueOrDefault(new Vector2I(3, 0), -1) == 4
+                && openReach.Left(new Vector2I(3, 0)) == 0,
+                $"(3,0) costs {openReach.Cells.GetValueOrDefault(new Vector2I(3, 0), -1)}");
+            Vector2I side = HexField.Step(up, 30);
+            Steps.Route? toSide = openReach.RouteTo(side);
+            Check("a cell off the nose costs the turn and the step, and is entered facing it",
+                toSide is { Spent: 2, Turns: 1 } && toSide.End.Heading == 30,
+                toSide?.ToString() ?? "no route");
+            Steps.Reach backReach = Steps.Plan(open, new Steps.Pose(new Vector2I(3, 2), 90), stMt);
+            Steps.Route? back = backReach.RouteTo(new Vector2I(3, 3));
+            Check("the cell behind is the step back, one step, and nothing may follow it",
+                back is { Back: true, Spent: 1, Final: true } && backReach.TurnTo(back, 30) is null
+                && back.End.Heading == 90,
+                back?.ToString() ?? "no route");
+            Check("a turn at the end costs a step per side and stops at the budget",
+                toSide is not null && openReach.TurnTo(toSide, 90) == 1 && openReach.TurnTo(toSide, 150) == 2
+                && openReach.TurnTo(toSide, 210) is null,
+                toSide is null ? "no route" : $"to 90 {openReach.TurnTo(toSide, 90)}, to 210 {openReach.TurnTo(toSide, 210)}");
+            // A turn costing a step leaves most cells one cheapest way; the plain
+            // case of two is the about-turn - three sides left or three right -
+            // to the cell two behind (the step back is one cell only).
+            Steps.Reach aboutReach = Steps.Plan(open, new Steps.Pose(new Vector2I(3, 1), 90),
+                                                new Steps.Mover { Speed = 5 });
+            List<Steps.Route> about = aboutReach.RoutesTo(new Vector2I(3, 3));
+            Check("a cell with two ways of the same cost gives both: the about-turn either way",
+                about.Count == 2 && about.All(w => w.Spent == 5 && w.Turns == 3)
+                && about[0].ToString() != about[1].ToString(),
+                about.Count == 0 ? "no route" : string.Join(" | ", about));
+
+            HexField sand = Keep(StepBoard(".......", ".......", "...s...", "...s...", "......."));
+            Steps.Reach sandReach = Steps.Plan(sand, new Steps.Pose(up, 90), stMt);
+            Steps.Route? intoSand = sandReach.RoutesTo(new Vector2I(3, 3)).FirstOrDefault(w => w.Turns == 0);
+            Check("a cell of sand costs two steps to enter and does not stop the tank",
+                intoSand is { Spent: 2, Final: false }
+                && sandReach.RoutesTo(new Vector2I(3, 2)).Any(w => w.Turns == 0 && w.Spent == 4),
+                intoSand?.ToString() ?? "no route");
+            Steps.Reach heavyOnSand = Steps.Plan(sand, new Steps.Pose(up, 90), new Steps.Mover { Speed = 3 });
+            Check("two cells of sand straight on are beyond a heavy's three steps",
+                !heavyOnSand.RoutesTo(new Vector2I(3, 2)).Any(w => w.Turns == 0),
+                string.Join(" | ", heavyOnSand.RoutesTo(new Vector2I(3, 2))));
+
+            foreach ((char letter, string what) in new[] { ('u', "mud"), ('f', "a wood") })
+            {
+                HexField stop = Keep(StepBoard(".......", ".......", ".......", $"...{letter}...", "......."));
+                Steps.Reach stopReach = Steps.Plan(stop, new Steps.Pose(up, 90), stMt);
+                Steps.Route? into = stopReach.RouteTo(new Vector2I(3, 3));
+                bool through = stopReach.Cells.Keys.SelectMany(c => stopReach.RoutesTo(c))
+                    .Any(w => w.Cells().IndexOf(new Vector2I(3, 3)) is >= 0 and var i && i < w.Cells().Count - 1);
+                Check($"{what} ends the move on entry: no turn after it, no way through it",
+                    into is { Spent: 1, Final: true } && stopReach.TurnTo(into, 30) is null && !through,
+                    $"{into}, through {through}");
+                Steps.Reach fromStop = Steps.Plan(stop, new Steps.Pose(new Vector2I(3, 3), 90), stMt);
+                Check($"a turn begun in {what} has one step",
+                    fromStop.Budget == 1 && fromStop.Cells.Count == 2,
+                    $"budget {fromStop.Budget}, cells {string.Join(" ", fromStop.Cells.Keys)}");
+            }
+
+            HexField mined = Keep(StepBoard(".......", ".......", ".......", "...m...", "......."));
+            Steps.Route? onMine = Steps.Plan(mined, new Steps.Pose(up, 90), stMt).RouteTo(new Vector2I(3, 3));
+            Steps.Reach trawled = Steps.Plan(mined, new Steps.Pose(up, 90), new Steps.Mover { Speed = 4, Trawl = true });
+            Check("a mine ends the move and says so; a trawl driven forward goes over it",
+                onMine is { Final: true } && onMine.Risk.HasFlag(Steps.Risk.Mine)
+                && trawled.RoutesTo(new Vector2I(3, 2)).Any(w => w.Turns == 0 && w.Spent == 2),
+                $"{onMine} {onMine?.Risk}");
+
+            HexField burning = Keep(StepBoard(".......", ".......", ".......", "...b...", "......."));
+            Steps.Route? intoFire = Steps.Plan(burning, new Steps.Pose(up, 90), stMt).RouteTo(new Vector2I(3, 3));
+            Check("a burning wood is a fire on the way",
+                intoFire is not null && intoFire.Risk.HasFlag(Steps.Risk.Fire), $"{intoFire} {intoFire?.Risk}");
+
+            HexField deep = Keep(StepBoard(".......", ".......", ".......", "...d...", "......."));
+            Steps.Route? drowned = Steps.Plan(deep, new Steps.Pose(up, 90), stMt).RouteTo(new Vector2I(3, 3));
+            Steps.Route? swum = Steps.Plan(deep, new Steps.Pose(up, 90), new Steps.Mover { Speed = 4, Amphibious = true })
+                .RouteTo(new Vector2I(3, 3));
+            Check("deep water drowns a tank without the snorkel and ends its move, and is swum with it",
+                drowned is { Final: true } && drowned.Risk.HasFlag(Steps.Risk.Drown)
+                && swum is { Final: false } && !swum.Risk.HasFlag(Steps.Risk.Drown),
+                $"{drowned} {drowned?.Risk}; {swum} {swum?.Risk}");
+
+            Steps.Reach barred = Steps.Plan(open, new Steps.Pose(up, 90),
+                new Steps.Mover { Speed = 4, Barred = new HashSet<Vector2I> { new(3, 3) } });
+            Check("a cell another tank stands on is never entered",
+                !barred.Reaches(new Vector2I(3, 3))
+                && barred.Cells.Keys.All(c => barred.RoutesTo(c).All(w => !w.Cells().Contains(new Vector2I(3, 3)))),
+                string.Join(" | ", barred.RoutesTo(new Vector2I(3, 2))));
+
+            HexField ramped = Keep(StepBoard(".....", ".....", ".....", "....."));
+            var rampLevels = new int[5 * 4];
+            rampLevels[0 * 5 + 2] = 1;
+            var rampFlags = new bool[5 * 4];
+            rampFlags[1 * 5 + 2] = true;
+            ramped.SetRelief(rampLevels, rampFlags);
+            var foot = new Vector2I(2, 2);
+            Steps.Reach rampTwo = Steps.Plan(ramped, new Steps.Pose(foot, 90), new Steps.Mover { Speed = 2 });
+            Steps.Reach rampOne = Steps.Plan(ramped, new Steps.Pose(foot, 90), new Steps.Mover { Speed = 1 });
+            Check("a ramp is crossed in one turn, two steps, and never stopped on",
+                ramped.IsRamp(new Vector2I(2, 1)) && !rampTwo.Reaches(new Vector2I(2, 1))
+                && rampTwo.Cells.GetValueOrDefault(new Vector2I(2, 0), -1) == 2
+                && !rampOne.Reaches(new Vector2I(2, 1)) && !rampOne.Reaches(new Vector2I(2, 0)),
+                $"ramp {ramped.IsRamp(new Vector2I(2, 1))}, top costs {rampTwo.Cells.GetValueOrDefault(new Vector2I(2, 0), -1)}");
+
+            string speeds = string.Join(" ", MovementProfile.All.Select(p => $"{p.Tag} {p.Steps}"));
+            Check("every class has its GDD speed in steps (classes.md: LT 5, MT 4, HT 3, TD 4, HM 3)",
+                MovementProfile.Light.Steps == 5 && MovementProfile.Medium.Steps == 4
+                && MovementProfile.Heavy.Steps == 3 && MovementProfile.Destroyer.Steps == 4
+                && MovementProfile.Mortar.Steps == 3, speeds);
+            foreach (HexField b in boards)
+                b.Free();
+        }
+
         Theme("gunnery: the gun fires down a flat side and nowhere else");
 
         // A lane is a ray of Steps, so the two have to agree by construction -
