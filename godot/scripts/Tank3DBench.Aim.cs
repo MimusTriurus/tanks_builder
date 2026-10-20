@@ -18,7 +18,9 @@ namespace TankSpriteTest;
 /// drive.</item>
 /// <item><b>The line of fire</b> - with the pointer on the target: from the
 /// muzzle along the axis to the hull, the mortar's as an arc; cut short with a
-/// cross where the lane is shut, dashed and grey off the axis.</item>
+/// cross where the lane is shut, dashed and grey off the axis. A ricochet goes
+/// on from the flank down the rules' axis to what stops it
+/// (<c>Tank3DBench.Glance</c>), in the outcome's colour there.</item>
 /// <item><b>The plate</b> - the edge of the target's hex the round comes in
 /// through, in the outcome's colour, and a label over the target: лоб, борт,
 /// корма or крыша, and пробьёт, рикошет or не пробьёт - off the same
@@ -67,6 +69,9 @@ public sealed partial class Tank3DBench
         public bool Pierces => Fires && Level > 0;
         public bool Glances => Fires && Level == 0 && Gunnery.Ricochets(Plate);
 
+        /// <summary>Where a ricochet goes on to (<see cref="GlanceLeg"/>).</summary>
+        public Leg? Bounce { get; init; }
+
         public Color Ink => !Fires ? AimOff : Pierces ? AimPierce : Glances ? AimGlance : AimHeld;
 
         public string Says
@@ -75,15 +80,10 @@ public sealed partial class Tank3DBench
             {
                 if (!Fires)
                     return Why;
-                string face = Face switch
-                {
-                    "front" => "лоб",
-                    "rear" => "корма",
-                    "roof" => "крыша",
-                    _ => "борт",
-                };
                 string what = Pierces ? $"пробьёт ({Level})" : Glances ? "рикошет" : "не пробьёт";
-                return $"{face} · {what}";
+                if (Glances && Bounce is { } leg)
+                    what += $" → {leg.Says}";
+                return $"{FaceWord(Face)} · {what}";
             }
         }
     }
@@ -238,7 +238,11 @@ public sealed partial class Tank3DBench
             if (why.Length == 0 && o.Hits.Cast(tip, (end - tip).Normalized()) is { } hit)
                 end = hit.At;
         }
-        return new Judged(from, cell, muzzle, end, axis, face, plate, level, why, _profile.Lobs, cells, stop, TipAt(from));
+        var judged = new Judged(from, cell, muzzle, end, axis, face, plate, level, why, _profile.Lobs, cells, stop, TipAt(from));
+        // held by a flank: where it goes on to - the round's own leg (Strike)
+        if (judged.Glances && !judged.Lob)
+            judged = judged with { Bounce = GlanceLeg(o, end, end - judged.Tip, _profile.Might) };
+        return judged;
     }
 
     /// <summary>Where the line of fire starts from <paramref name="from"/>: over
@@ -394,13 +398,29 @@ public sealed partial class Tank3DBench
             }
             else
             {
-                int e = EdgeOf(cell, HexField.Reverse(shot.Axis), corner);
-                Vector2 a = corner[e], b = corner[(e + 1) % 6];
-                Quad(mesh, SelectionRing.Under, cell, mid + a * 1.03f, mid + b * 1.03f, mid + b * 0.76f, mid + a * 0.76f);
-                Quad(mesh, shot.Ink, cell, mid + a * 0.99f, mid + b * 0.99f, mid + b * 0.80f, mid + a * 0.80f);
+                PlateEdge(mesh, cell, HexField.Reverse(shot.Axis), shot.Ink, corner);
+                // the ricochet's: the edge it leaves by, and the plate it meets
+                if (shot.Bounce is { } leg)
+                {
+                    PlateEdge(mesh, cell, leg.Axis, AimGlance, corner);
+                    if (leg.Ends == LegEnd.Tank)
+                        PlateEdge(mesh, leg.Cell, HexField.Reverse(leg.Axis), leg.Ink, corner);
+                }
             }
         }
         mesh.SurfaceEnd();
+    }
+
+    /// <summary>The edge of <paramref name="cell"/> toward
+    /// <paramref name="side"/>, a band in <paramref name="tint"/> on a dark
+    /// one: where a round comes in or leaves.</summary>
+    private void PlateEdge(ImmediateMesh mesh, Vector2I cell, int side, Color tint, Vector2[] corner)
+    {
+        Vector2 mid = CellFlat(cell);
+        int e = EdgeOf(cell, side, corner);
+        Vector2 a = corner[e], b = corner[(e + 1) % 6];
+        Quad(mesh, SelectionRing.Under, cell, mid + a * 1.03f, mid + b * 1.03f, mid + b * 0.76f, mid + a * 0.76f);
+        Quad(mesh, tint, cell, mid + a * 0.99f, mid + b * 0.99f, mid + b * 0.80f, mid + a * 0.80f);
     }
 
     /// <summary>The hex that shuts the lane, tinted on the ground; the beads
@@ -434,9 +454,15 @@ public sealed partial class Tank3DBench
             float u = k / (float)steps;
             path.Add(shot.Tip.Lerp(shot.End, u) + Vector3.Up * (4.0f * rise * u * (1.0f - u)));
         }
-        float total = 0.0f;
+        float first = 0.0f;
         for (int k = 0; k + 1 < path.Count; k++)
-            total += path[k].DistanceTo(path[k + 1]);
+            first += path[k].DistanceTo(path[k + 1]);
+        // a ricochet: on from the plate down its axis, in its own colour
+        // (Tank3DBench.Glance)
+        Leg? leg = _fireAxis && shot.Fires ? shot.Bounce : null;
+        if (leg is not null)
+            path.Add(leg.End);
+        float total = first + (leg is null ? 0.0f : leg.From.DistanceTo(leg.End));
         float gap = CellStep / BeadsAHex;
         if (total <= gap * 0.5f)
             return;
@@ -444,16 +470,19 @@ public sealed partial class Tank3DBench
         float run = Mathf.PosMod(t * BeadRun * CellStep, gap);
         float r = Mathf.Clamp(hex * 0.045f, 2.5f, 6.0f);
         Color c = shot.Fires ? shot.Ink : AimOff;
-        // the first bead a little out of the bore, the last on the plate
+        // the first bead a little out of the bore, the last on the plate - or
+        // a leg off the board dying away over its last two hexes
         float start = gap * 0.3f;
+        float tail = leg is { Fades: true } ? CellStep * 2.0f : gap;
         for (float s = start + run; s <= total; s += gap)
         {
             float wave = 0.5f + 0.5f * Mathf.Sin(t * BeadWave - s / gap * 0.9f);
-            float edge = Mathf.Clamp((s - start) / gap, 0.0f, 1.0f) * Mathf.Clamp((total - s) / gap + 0.3f, 0.0f, 1.0f);
+            float edge = Mathf.Clamp((s - start) / gap, 0.0f, 1.0f) * Mathf.Clamp((total - s) / tail + 0.3f, 0.0f, 1.0f);
+            Color bead = leg is not null && s > first ? leg.Ink : c;
             Vector2 p = _camera.UnprojectPosition(Along3(path, s));
             float size = r * (0.8f + 0.35f * wave) * (0.4f + 0.6f * edge);
             ink.DrawCircle(p, size + 1.6f, new Color(0.0f, 0.0f, 0.0f, 0.5f * edge));
-            ink.DrawCircle(p, size, new Color(c.Lerp(Colors.White, 0.45f * wave), (0.55f + 0.45f * wave) * edge));
+            ink.DrawCircle(p, size, new Color(bead.Lerp(Colors.White, 0.45f * wave), (0.55f + 0.45f * wave) * edge));
         }
     }
 
@@ -496,7 +525,12 @@ public sealed partial class Tank3DBench
             DrawBeads(ink, shot, hex);
         float r = size * 0.55f;
         if (shot.Fires)
+        {
             Reticle(ink, end, Mathf.Max(size * 1.2f, hex * 0.32f), shot.Ink);
+            // the ricochet's own target, smaller: the second hit
+            if (shot.Bounce is { Ends: LegEnd.Tank } leg)
+                Reticle(ink, _camera.UnprojectPosition(leg.End), Mathf.Max(size * 0.9f, hex * 0.22f), leg.Ink);
+        }
         else if (shot.Axis >= 0)
         {
             // the lane shut: a cross where the round would stop

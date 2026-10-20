@@ -336,16 +336,22 @@ public sealed partial class Tank3DBench
     /// through, its plate, and how deep a round of <paramref name="might"/>
     /// gets into it (<see cref="Gunnery.Penetration(int, MovementProfile, Gunnery.Plate)"/>);
     /// nought holds.</summary>
-    private static int LevelOn(Other o, Vector3 way, int might, out string face, out Gunnery.Plate plate)
+    private static int LevelOn(Other o, Vector3 way, int might, out string face, out Gunnery.Plate plate) =>
+        LevelOn(o.Ahead, o.Profile, way, might, out face, out plate);
+
+    /// <summary>The same for any hull looking <paramref name="ahead"/> - a
+    /// standing one the ricochet meets (<see cref="GlanceLeg"/>).</summary>
+    private static int LevelOn(Vector3 ahead, MovementProfile profile, Vector3 way, int might, out string face,
+                               out Gunnery.Plate plate)
     {
-        Vector3 ahead = o.Ahead, left = new(ahead.Z, 0.0f, -ahead.X);
+        Vector3 left = new(ahead.Z, 0.0f, -ahead.X);
         Vector3 from = -new Vector3(way.X, 0.0f, way.Z);
         float bearing = Mathf.RadToDeg(Mathf.Atan2(from.Dot(left), from.Dot(ahead)));
         face = Mathf.Abs(bearing) <= 30.0f ? "front"
              : Mathf.Abs(bearing) >= 150.0f ? "rear"
              : bearing > 0.0f ? "left" : "right";
         plate = Gunnery.PlateFor(face, 0);
-        return Gunnery.Penetration(might, o.Profile, plate);
+        return Gunnery.Penetration(might, profile, plate);
     }
 
     /// <summary>The round of <paramref name="might"/> on the target's plate;
@@ -377,10 +383,19 @@ public sealed partial class Tank3DBench
             what = "held";
             if (Gunnery.Ricochets(plate))
             {
-                // Off the flank and on: what is left of it, along the glance.
-                Throw(at + glance * 2.0f, glance.Normalized() * Shell.Speed * GlanceSpeed, ShellFall,
-                      GlanceLongest, false, false);
-                what = "ricochet";
+                // Off the flank and on, down the rules' axis to the first thing
+                // on it (GlanceLeg) - the HUD's line of fire drew the same leg.
+                if (GlanceLeg(o, at, way, might) is { } leg)
+                {
+                    FlyLeg(leg);
+                    what = $"ricochet along {leg.Axis}, {leg.Log}";
+                }
+                else
+                {
+                    Throw(at + glance * 2.0f, glance.Normalized() * Shell.Speed * GlanceSpeed, ShellFall,
+                          GlanceLongest, false, false);
+                    what = "ricochet";
+                }
             }
         }
         o.Pitch.Kick(k * ahead.Dot(way));

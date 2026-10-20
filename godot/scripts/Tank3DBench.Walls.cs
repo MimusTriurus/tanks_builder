@@ -449,7 +449,7 @@ public sealed partial class Tank3DBench
     /// on. <paramref name="passOne"/> - a destroyer's: the first brick wall is
     /// its pass and does not stop the laying, the one after it does (concrete
     /// is never a pass).</summary>
-    private (Vector2I Cell, Vector3 At)? WallOnAxis(Vector2I own, int axis, int cells, bool passOne = false)
+    private (Vector2I Cell, Vector3 At, WallProp Prop)? WallOnAxis(Vector2I own, int axis, int cells, bool passOne = false)
     {
         if (_walls.Count == 0 || _field is null || axis < 0)
             return null;
@@ -472,7 +472,7 @@ public sealed partial class Tank3DBench
                     }
                     Vector3 rim = 0.5f * (CellWorld(here) + CellWorld(next));
                     rim.Y = prop.Stack.Anchor.Y + 0.5f * prop.Pile().Top * WallRadius;
-                    return (prop.Cell, rim);
+                    return (prop.Cell, rim, prop);
                 }
             here = next;
         }
