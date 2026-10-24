@@ -164,14 +164,19 @@ public sealed partial class TankModel : Node3D
         string dir = ModelDir(tag);
         var doc = new GltfDocument();
         var state = new GltfState();
-        Error err = doc.AppendFromFile(dir + "/tank.glb", state);
+        Error err;
+        using (Prof.Measure("model.glb"))
+            err = doc.AppendFromFile(dir + "/tank.glb", state);
         if (err != Error.Ok)
             throw new InvalidOperationException($"{dir}/tank.glb: {err}");
-        Node scene = doc.GenerateScene(state);
+        Node scene;
+        using (Prof.Measure("model.scene"))
+            scene = doc.GenerateScene(state);
         var model = new TankModel { Tag = tag, PixelsPerUnit = pixelsPerUnit, Name = "Model" };
         // Before Bind: the belt's MultiMesh takes the link's mesh as it stands.
         if (toon)
-            model.Cel = Toon.Dress(scene);
+            using (Prof.Measure("model.toon"))
+                model.Cel = Toon.Dress(scene);
         model.Scale = Vector3.One * pixelsPerUnit;
         model.AddChild(scene);
         using JsonDocument json = JsonDocument.Parse(File.ReadAllText(dir + "/tank.json"));

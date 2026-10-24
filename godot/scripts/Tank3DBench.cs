@@ -324,19 +324,26 @@ public sealed partial class Tank3DBench : Node3D
     private void Mount(string model)
     {
         MovementProfile profile = ClassFor(model);
-        TankModel next = TankModel.Load(model, toon: !_pbr);
+        TankModel next;
+        using (Prof.Measure("mount.load"))
+            next = TankModel.Load(model, toon: !_pbr);
         next.ScaleTo(PixelsFor(next, profile));
-        Unmount();
+        using (Prof.Measure("mount.unmount"))
+            Unmount();
         _modelTag = model;
         _profile = profile;
         _model = next;
         SidePaint(_model, _side);
         _rig.AddChild(_model);
-        _deckPx = MeasureDeck();
-        _beltPaint = null;
-        _foot = MeasureFootprint(_model, _rig, _modelTag);
-        _roofPx = MeasureRoof();
-        BuildEffects();
+        using (Prof.Measure("mount.measure"))
+        {
+            _deckPx = MeasureDeck();
+            _beltPaint = null;
+            _foot = MeasureFootprint(_model, _rig, _modelTag);
+            _roofPx = MeasureRoof();
+        }
+        using (Prof.Measure("mount.effects"))
+            BuildEffects();
         GD.Print($"tank3d: {_modelTag} class {_profile.Tag} x{_profile.Size:F2}, {_model.PixelsPerUnit:F2} px/unit, "
                  + $"hull {_model.HullLength:F4} x {_model.HullWidth:F4} = {_model.HullLength * _model.PixelsPerUnit:F0} px, "
                  + $"bore r {_model.BoreRadius:F4}, deck {_deckPx:F1} px, roof {_roofPx:F1} of {_model.Size.Y * _model.PixelsPerUnit * RiseFactor:F1}, squash {Squash:F4} = {Mathf.RadToDeg(Mathf.Asin(Squash)):F2} deg, "

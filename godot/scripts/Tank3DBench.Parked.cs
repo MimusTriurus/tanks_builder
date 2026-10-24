@@ -192,9 +192,12 @@ public sealed partial class Tank3DBench
         Heading = next.Heading;
         _model.Yaw = next.Yaw;
         _model.Elevation = next.Elevation;
-        Park();
-        Stand(was, wasCell, wasHeading, wasSide, wasYaw, wasElevation);
-        Choose(true);
+        using (Prof.Measure("takeover.park"))
+            Park();
+        using (Prof.Measure("takeover.stand"))
+            Stand(was, wasCell, wasHeading, wasSide, wasYaw, wasElevation);
+        using (Prof.Measure("takeover.choose"))
+            Choose(true);
         _orderNote = $"ведёшь {next.Tag}";
         GD.Print($"tank3d: took {next.Tag} on {next.Cell}; {was} parks on {wasCell}");
     }
