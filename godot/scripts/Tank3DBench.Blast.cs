@@ -115,6 +115,23 @@ public sealed partial class Tank3DBench
         }
     }
 
+    /// <summary><c>--do ignite=Q,R</c>: the unit fighting on that hex set
+    /// alight as a blast would - for the stress run (BOT-6), not a move of
+    /// the game.</summary>
+    private void IgniteAt(Vector2I cell)
+    {
+        if (!Match)
+            return;
+        if (CellHere == cell && _fate == Fate.Alive)
+            Ignite(_side, _modelTag, cell);
+        else if (_other is { Unit: true, Fate: Fate.Alive } o && OtherCell(o) == cell)
+            Ignite(o.Side, o.Tag, cell);
+        else if (_parked.Find(p => p.Cell == cell && p.Fate == Fate.Alive) is { } p)
+            Ignite(p.Side, p.Tag, cell);
+        else
+            Log.Print($"tank3d: --do ignite={cell.X},{cell.Y}: no unit fighting there");
+    }
+
     /// <summary>A unit set alight.</summary>
     private void Ignite(Side side, string tag, Vector2I cell)
     {
