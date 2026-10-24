@@ -1,0 +1,26 @@
+#!/bin/sh
+# On a pipeline branch, feat/BOT-N-... or fix/BOT-N-..., starts the commit
+# message with "BOT-N: " unless it already does (docs/workflow.md). Other
+# branches, and merges, squashes and amends, are left alone.
+msg_file=$1
+source=$2
+
+case "$source" in
+	merge|squash|commit) exit 0 ;;
+esac
+
+branch=$(git symbolic-ref --quiet --short HEAD) || exit 0
+n=$(printf '%s\n' "$branch" | sed -nE 's#^(feat|fix)/BOT-([0-9]+)-.*#\2#p')
+[ -n "$n" ] || exit 0
+
+first=$(sed -n '/^#/d; p; q' "$msg_file")
+case "$first" in
+	"Merge "*|"Revert "*|"fixup! "*|"squash! "*|"amend! "*) exit 0 ;;
+esac
+# Any card's number already there is left for commit-msg to judge.
+printf '%s\n' "$first" | grep -qE '^BOT-[0-9]+:' && exit 0
+
+# The first line that is not a comment gets the prefix; an empty message
+# (the editor's) gets it on a line of its own for the subject to follow.
+awk -v p="BOT-$n: " 'done || /^#/ { print; next } { print p $0; done = 1 }
+	END { if (!done) print p }' "$msg_file" > "$msg_file.bot" && mv "$msg_file.bot" "$msg_file"

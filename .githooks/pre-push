@@ -1,0 +1,38 @@
+#!/bin/sh
+# Before a pipeline branch, feat/BOT-N-... or fix/BOT-N-..., is pushed:
+# every commit of it that neither a remote branch nor local main has yet
+# starts with "BOT-N: " (docs/workflow.md) -- commits made with
+# --no-verify, or by a client without the hooks, included. Main's own
+# commits are let through: here main is often ahead of origin. Merge
+# commits are let through.
+#
+# Then Git LFS's own pre-push: core.hooksPath turns .git/hooks off, and
+# without it the .glb under Models/ would be pushed as pointers with no
+# objects behind them.
+zero=0000000000000000000000000000000000000000
+status=0
+refs=$(cat)
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+	[ -n "$local_ref" ] || continue
+	case "$local_sha" in *[!0]*) ;; *) continue ;; esac   # a branch deleted
+	branch=${remote_ref#refs/heads/}
+	n=$(printf '%s\n' "$branch" | sed -nE 's#^(feat|fix)/BOT-([0-9]+)-.*#\2#p')
+	[ -n "$n" ] || continue
+	# What no remote and not main has: not what the branch had before nor
+	# what it has from main.
+	bad=$(git rev-list --no-merges --format='%h %s' "$local_sha" --not --remotes refs/heads/main | sed '/^commit /d' \
+		| grep -vE -e "^[0-9a-f]+ BOT-$n: " -e '^[0-9a-f]+ (Revert |fixup! |squash! |amend! )')
+	if [ -n "$bad" ]; then
+		echo "pre-push: on $branch every commit must start with \"BOT-$n: \"; these do not:" >&2
+		printf '%s\n' "$bad" | sed 's/^/  /' >&2
+		echo "  (git rebase -i, reword them; or push with --no-verify if this is on purpose)" >&2
+		status=1
+	fi
+done <<REFS
+$refs
+REFS
+[ $status -eq 0 ] || exit $status
+
+command -v git-lfs >/dev/null 2>&1 || { echo "pre-push: git-lfs is not on PATH, and the repository needs it (Models/**/*.glb)" >&2; exit 2; }
+printf '%s\n' "$refs" | git lfs pre-push "$@"

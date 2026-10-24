@@ -56,9 +56,17 @@
   каждого в своём CLAUDE.md.
 - **Новый раздел пишется в тот док, чей предмет он трогает.** Сюда попадает
   только то, что верно про оба цеха до того, как узнал, что трогаешь.
-- `.claude/commands/` — `/tank`, `/sprites` и `/repro` для конвейера, `/gdd-sync` для GDD; `.claude/hooks/` —
-  хук стенда на переписанный `project.godot`. `out/` где угодно — черновой
-  вывод, не в git.
+- `.claude/commands/` — `/tank`, `/sprites` и `/repro` для конвейера, `/gdd-sync` для GDD, `/task` для
+  пайплайна задач; `.claude/hooks/` — хук стенда на переписанный
+  `project.godot`. `out/` где угодно — черновой вывод, не в git.
+- **По умолчанию коммит идёт прямо в `main`.** Только когда пользователь
+  просит пайплайн, изменение становится карточкой `BoT/Work Item` (`BOT-N`).
+  Она доходит до `main` через ветку `feat/` или `fix/BOT-N-slug` и pull
+  request. На такой ветке каждый коммит начинается с `BOT-N: `; это
+  проверяют хуки в `.githooks/`, и они же зовут хуки Git LFS. Включаются хуки
+  один раз на клон: `git config core.hooksPath .githooks`. Шаги, поля
+  карточки и шаблон — в [docs/workflow.md](docs/workflow.md), ведёт их
+  команда `/task`.
 - **Fibery — только `fibery-studio`** (stendhal-syndrome-studio.fibery.io, из
   `.mcp.json` и `godot/.mcp.json`). Другие подключения Fibery в сессии, например коннектор
   claude.ai к рабочему пространству wargaming, этот проект не трогает: ни

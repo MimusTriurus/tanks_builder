@@ -1,0 +1,4 @@
+#!/bin/sh
+# Git LFS's own hook: core.hooksPath = .githooks turns .git/hooks off.
+command -v git-lfs >/dev/null 2>&1 || { echo "post-merge: git-lfs is not on PATH, and the repository needs it (Models/**/*.glb)" >&2; exit 2; }
+git lfs post-merge "$@"

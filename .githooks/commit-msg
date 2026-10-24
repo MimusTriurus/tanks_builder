@@ -1,0 +1,19 @@
+#!/bin/sh
+# On a pipeline branch, feat/BOT-N-... or fix/BOT-N-..., refuses a commit
+# whose subject does not start with that branch's "BOT-N: "
+# (docs/workflow.md). prepare-commit-msg adds it; this catches a message
+# edited past it, or a number that is not the branch's.
+msg_file=$1
+
+branch=$(git symbolic-ref --quiet --short HEAD) || exit 0
+n=$(printf '%s\n' "$branch" | sed -nE 's#^(feat|fix)/BOT-([0-9]+)-.*#\2#p')
+[ -n "$n" ] || exit 0
+
+subject=$(sed -n '/^#/d; /^[[:space:]]*$/d; p; q' "$msg_file")
+case "$subject" in
+	"BOT-$n: "?*|"Merge "*|"Revert "*|"fixup! "*|"squash! "*|"amend! "*) exit 0 ;;
+esac
+
+echo "commit-msg: on $branch the subject must start with \"BOT-$n: \"" >&2
+echo "  got: $subject" >&2
+exit 1
