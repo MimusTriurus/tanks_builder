@@ -375,6 +375,7 @@ public sealed partial class Grass3D : Node3D
         _clock += dt;
         if (_relaxing)
         {
+            using var measure = Prof.Measure("grass.relax");
             _relaxing = false;
             for (int i = 0; i < _press.Length; i++)
                 if (_press[i] > Keep)
@@ -390,18 +391,21 @@ public sealed partial class Grass3D : Node3D
         }
         if (_dirty)
         {
+            using var measure = Prof.Measure("grass.upload");
             Upload();
             if (_image is not null)
                 _tex?.Update(_image);
         }
-        foreach (ShaderMaterial m in _inks)
-        {
-            m.SetShaderParameter("g_time", _clock);
-            m.SetShaderParameter("wind", Wind);
-            m.SetShaderParameter("wind_way", WindWay.Normalized());
-        }
-        foreach (Meadow m in _meadows)
-            Fume(m, dt);
+        using (Prof.Measure("grass.inks"))
+            foreach (ShaderMaterial m in _inks)
+            {
+                m.SetShaderParameter("g_time", _clock);
+                m.SetShaderParameter("wind", Wind);
+                m.SetShaderParameter("wind_way", WindWay.Normalized());
+            }
+        using (Prof.Measure("grass.fume"))
+            foreach (Meadow m in _meadows)
+                Fume(m, dt);
     }
 
     /// <summary>
