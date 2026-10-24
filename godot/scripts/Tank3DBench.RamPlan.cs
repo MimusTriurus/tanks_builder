@@ -116,7 +116,7 @@ public sealed partial class Tank3DBench
         bool beside = SideTo(CellHere, target) is not null;
         if (!beside && !_ramMode)
             return null;
-        string key = $"{_reachKey}|{target}|{o.Heading:F0}|{o.Fate}|{CellHere}|{HullSide()}|{_drove}|{_modelTag}|{_ramMode}";
+        string key = $"{_reachVersion}|{target}|{o.Heading:F0}|{o.Fate}|{CellHere}|{HullSide()}|{_drove}|{_modelTag}|{_ramMode}";
         if (key != _ramKey)
         {
             _ramKey = key;

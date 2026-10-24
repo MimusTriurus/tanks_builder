@@ -66,7 +66,7 @@ public sealed partial class Tank3DBench
             ReleasePost();
             return;
         }
-        string key = $"{_reachKey}|{cell}|{target.Heading:F0}|{target.Fate}|{_modelTag}";
+        string key = $"{_reachVersion}|{cell}|{target.Heading:F0}|{target.Fate}|{_modelTag}";
         if (key != _postKey)
         {
             _postKey = key;
