@@ -1068,6 +1068,7 @@ public sealed partial class Tank3DBench : Node3D
             case "cancel": CancelOrder(); break;
             // the end of turn's button (Tank3DBench.Match)
             case "pass": EndTurn(); break;
+            case "restart": if (Match) Restart(); break;
             case "way": NextWay(); break;
             case "forks": Forks(); break;
             case "confirm": Confirm(); break;
@@ -1435,7 +1436,7 @@ public sealed partial class Tank3DBench : Node3D
         }
         float dt = (float)Math.Min(delta, 0.1);
         foreach (var (frame, what) in _script)
-            if (frame == _frame)
+            if (frame == _frame && !_restarted)
                 Do(what);
 
         bool alive = _fate == Fate.Alive;
@@ -1789,10 +1790,15 @@ public sealed partial class Tank3DBench : Node3D
             return;
         string kind = key.CtrlPressed ? "he-" : key.ShiftPressed ? "pierce-" : "ricochet-";
         // A match plays by the rules: the bench's keys that fire, strike, burn,
-        // knock out or reset the tank on the rig past them are off.
+        // knock out or reset the tank on the rig past them are off - Backspace
+        // restarts the whole match instead (Tank3DBench.Match).
         if (Match && key.Keycode is Key.Space or Key.Key1 or Key.Key2 or Key.Key3 or Key.Key4 or Key.Key5
                 or Key.J or Key.K or Key.X or Key.T or Key.Backspace)
+        {
+            if (key.Keycode == Key.Backspace)
+                Restart();
             return;
+        }
         switch (key.Keycode)
         {
             case Key.Space: Do("shot"); break;

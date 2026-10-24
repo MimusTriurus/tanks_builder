@@ -300,6 +300,25 @@ public sealed partial class Tank3DBench
         Banner("Ничья: ходить некому", Colors.White, stay: true);
     }
 
+    /// <summary>Set once a restart has happened in this process: the launch's
+    /// <c>--do</c> script is spent, so the new level does not replay it.</summary>
+    private static bool _restarted;
+
+    /// <summary>Backspace in a match: the level from scratch - the scene is
+    /// reloaded whole, so nothing of the old match survives but the board's name
+    /// and the way back to the editor, handed over as Run hands them.</summary>
+    private void Restart()
+    {
+        GD.Print($"tank3d: match: restart on {_mapName}");
+        if (_handed)
+            Session.Map = _mapName;
+        Session.Editing = _editing;
+        _restarted = true;
+        // deferred: the reload takes the scene out of the tree at once, and the
+        // rest of this frame's _Process would run on a node outside it
+        Callable.From(() => GetTree().ReloadCurrentScene()).CallDeferred();
+    }
+
     /// <summary>The side's first standing unit able to act, in the roster's order.</summary>
     private Parked? FirstReady(Side side) =>
         _parked.Where(p => p.Side == side && p.Fate == Fate.Alive)
@@ -590,5 +609,5 @@ public sealed partial class Tank3DBench
         + (_matchNote.Length > 0 ? $" · {_matchNote}" : "") + "\n"
         + Roll() + "\n"
         + "ЛКМ по своему — взять танк   ЛКМ по клетке — фиксация, ещё раз или Enter — ехать   A/D, колесо — разворот призрака   Tab — другой путь\n"
-        + "ПКМ по врагу — огонь (не достать отсюда — ехать и стрелять)   Ctrl+Enter — конец хода   Esc — отмена   колесо — зум   Home — камера";
+        + "ПКМ по врагу — огонь (не достать отсюда — ехать и стрелять)   Ctrl+Enter — конец хода   Backspace — заново   Esc — отмена   колесо — зум   Home — камера";
 }
