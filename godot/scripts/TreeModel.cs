@@ -200,14 +200,25 @@ public static class TreeModel
         return fire;
     }
 
-    /// <summary>A model lies outside the box it stands in once it is down:
-    /// culled by that box, a fallen crown blinked out at the screen's edge.</summary>
-    public static void Margin(Node node)
+    /// <summary>The cull box's margin of a standing tree, model metres: the
+    /// wind's lean and a blast's throw move the crown a metre or two.</summary>
+    public const float StandMargin = 2.0f;
+
+    /// <summary>
+    /// A model lies outside the box it stands in once it is down: culled by
+    /// that box, a fallen crown blinked out at the screen's edge. So a falling
+    /// tree (<see cref="TreeFall.Start"/>) is never culled - and only a falling
+    /// one (BOT-5): with that margin from the planting, every tree stood in
+    /// every shadow split and every cull, 10 of the stress run's 23.5 M
+    /// primitives. Standing (<paramref name="down"/> false) it has
+    /// <see cref="StandMargin"/>.
+    /// </summary>
+    public static void Margin(Node node, bool down = false)
     {
         if (node is GeometryInstance3D g)
-            g.ExtraCullMargin = 16384.0f;
+            g.ExtraCullMargin = down ? 16384.0f : StandMargin;
         foreach (Node child in node.GetChildren())
-            Margin(child);
+            Margin(child, down);
     }
 
     // --- the wind -------------------------------------------------------------
@@ -232,51 +243,77 @@ public static class TreeModel
         return (Mathf.Tau * (float)Grove.Hash01(x, y, 901_001), 0.8f + 0.5f * (float)Grove.Hash01(x, y, 901_003));
     }
 
-    /// <summary>
-    /// A frame of the wind on one tree: <c>Grove</c>'s lean -
-    /// <c>wind (0.35 + 0.65 gust) sin(phase) / height</c>, the gust one long wave
-    /// along x so neighbours rise a beat apart, the phase each tree's own - into
-    /// <see cref="Toon.WindCode"/>, the billow and the flutter with the gust.
-    /// <paramref name="still"/> takes it out as the trunk goes over,
-    /// <paramref name="spent"/> its crown gone to the fire (a burnt tree keeps
-    /// <see cref="CharredSway"/>). The world's wind is along x; a turned model
-    /// gets it in its own frame.
-    /// </summary>
-    /// <paramref name="push"/> is a lean on top, world x and z as a share of
-    /// the tree's height - a blast's (the scene's spring) - and
-    /// <paramref name="shiver"/> more billow and flutter with it.
-    public static void Sway(Node3D holder, IEnumerable<ShaderMaterial> burn, IEnumerable<ShaderMaterial> leaves,
-                            float weather, float phase, float rate, float wind, float still = 1.0f, float spent = 0.0f,
-                            Vector2 push = default, float shiver = 0.0f)
+    /// <summary>A frame's clock and wind for every tree in the scene: one
+    /// clock and one wind to a scene, as the grass's.</summary>
+    public static void Weather(float weather, float wind)
     {
-        Vector3 foot = holder.GlobalPosition;
-        float gust = 0.5f + 0.5f * Mathf.Sin(weather * GustRate - foot.X * GustTravel);
-        float lean = wind * WindDrift * (0.35f + 0.65f * gust) * Mathf.Sin(weather * rate + phase) / WindHeight;
-        float keep = Mathf.Lerp(1.0f, CharredSway, spent);
+        RenderingServer.GlobalShaderParameterSet(Toon.WeatherName, weather);
+        RenderingServer.GlobalShaderParameterSet(Toon.TreeWindName, wind);
+    }
+
+    /// <summary>
+    /// A tree into the wind, once, as it is planted: <c>Grove</c>'s lean -
+    /// <c>wind (0.35 + 0.65 gust) sin(weather rate + phase) / height</c>, the
+    /// gust one long wave along x so neighbours rise a beat apart, the phase
+    /// and rate each tree's own (<see cref="SwayOf"/>) - is worked out in
+    /// <see cref="Toon.WindCode"/> off what is set here: the phase, the rate,
+    /// the foot's world x, and the world's wind (along x) in the model's own
+    /// frame. The leaves (<paramref name="leaves"/>) flutter as well.
+    /// </summary>
+    public static void Wind(Node3D holder, IEnumerable<ShaderMaterial> burn, IEnumerable<ShaderMaterial> leaves,
+                            float phase, float rate)
+    {
         Vector3 own = holder.GlobalBasis.Orthonormalized().Inverse() * Vector3.Right;
         var dir = new Vector2(own.X, own.Z).Normalized();
-        float billow = wind * Billow * (0.3f + 0.7f * gust) * still * keep + Billow * shiver * still;
-        float leaning = lean * still * keep;
-        if (push != Vector2.Zero)
-        {
-            // The wind's lean and the push added as two leans in the model's
-            // own frame - the shader has one way and one size.
-            Vector3 p = holder.GlobalBasis.Orthonormalized().Inverse() * new Vector3(push.X, 0.0f, push.Y);
-            Vector2 sum = dir * leaning + new Vector2(p.X, p.Z) * still;
-            leaning = sum.Length();
-            if (leaning > 1e-6f)
-                dir = sum / leaning;
-        }
         foreach (ShaderMaterial m in burn)
         {
+            m.Param("wind_rate", rate);
+            m.Param("wind_phase", phase);
+            m.Param("wind_foot", holder.GlobalPosition.X);
             m.Param("wind_dir", dir);
-            m.Param("wind_lean", leaning);
-            m.Param("wind_billow", billow);
-            m.Param("wind_time", weather * rate);
         }
         foreach (ShaderMaterial m in leaves)
-            m.Param("wind_flutter", shiver == 0.0f ? wind * Flutter * (0.3f + 0.7f * gust) * still
-                                                                : (wind * (0.3f + 0.7f * gust) + shiver) * Flutter * still);
+            m.Param("wind_leaf", true);
+    }
+
+    /// <summary>What <see cref="Sway"/> last wrote to a tree: it writes again
+    /// only what changed.</summary>
+    public sealed class Swayed
+    {
+        public float Still = 1.0f, Keep = 1.0f, Shiver;
+        public Vector2 Push;
+    }
+
+    /// <summary>
+    /// A frame of what moves one tree beyond the wind (<see cref="Wind"/>):
+    /// <paramref name="still"/> takes the wind out as the trunk goes over,
+    /// <paramref name="spent"/> its crown gone to the fire (a burnt tree keeps
+    /// <see cref="CharredSway"/>), <paramref name="push"/> a lean on top -
+    /// world x and z as a share of the tree's height, a blast's (the scene's
+    /// spring) - and <paramref name="shiver"/> more billow and flutter with it.
+    /// Written only when it differs from <paramref name="last"/>: a tree at
+    /// rest costs nothing a frame.
+    /// </summary>
+    public static void Sway(Node3D holder, IEnumerable<ShaderMaterial> burn, Swayed last,
+                            float still = 1.0f, float spent = 0.0f, Vector2 push = default, float shiver = 0.0f)
+    {
+        float keep = Mathf.Lerp(1.0f, CharredSway, spent);
+        Vector2 own = Vector2.Zero;
+        if (push != Vector2.Zero)
+        {
+            Vector3 p = holder.GlobalBasis.Orthonormalized().Inverse() * new Vector3(push.X, 0.0f, push.Y);
+            own = new Vector2(p.X, p.Z);
+        }
+        if (still == last.Still && keep == last.Keep && shiver == last.Shiver && own == last.Push)
+            return;
+        (last.Still, last.Keep, last.Shiver, last.Push) = (still, keep, shiver, own);
+        foreach (ShaderMaterial m in burn)
+        {
+            m.Param("wind_still", still);
+            m.Param("wind_keep", keep);
+            m.Param("wind_shiver", shiver);
+            m.Param("wind_push", own);
+        }
     }
 }
 

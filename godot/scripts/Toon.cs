@@ -93,6 +93,20 @@ void light() {
 }
 ";
 
+    /// <summary>The wind's global uniforms (<see cref="WindCode"/>), there before
+    /// the shaders below are made - statics start in the order they are
+    /// written. Once a process, as <c>Grass3D</c>'s.</summary>
+    private static readonly bool WindGlobals = AddWindGlobals();
+
+    public static readonly StringName WeatherName = "tree_weather", TreeWindName = "tree_wind";
+
+    private static bool AddWindGlobals()
+    {
+        RenderingServer.GlobalShaderParameterAdd("tree_weather", RenderingServer.GlobalShaderParameterType.Float, 0.0f);
+        RenderingServer.GlobalShaderParameterAdd("tree_wind", RenderingServer.GlobalShaderParameterType.Float, 0.0f);
+        return true;
+    }
+
     /// <summary>The model's surfaces on <see cref="RampCode"/>: the glTF's
     /// paint and its occlusion (ORM's R).</summary>
     public static readonly Shader CelShader = new() { Code = CelCode(0) };
@@ -207,20 +221,49 @@ bool burn_gone(float at, vec3 p) {
     /// leaves alone. All zero - every tank - nothing here runs. The cel pass,
     /// the ink and the crown's mask call it alike, so the line keeps to the
     /// crown. Needs <see cref="NoiseCode"/> before it.
+    ///
+    /// <b>Worked out here, not on the CPU (BOT-5).</b> The lean, the gust
+    /// wave and the billow were <see cref="TreeModel.Sway"/>'s, written into
+    /// every material of every tree every frame - 1.1 ms of the stress run's
+    /// wood and 0.6 of its render CPU. The clock and the wind are global
+    /// (<c>tree_weather</c>, <c>tree_wind</c>, <see cref="TreeModel.Weather"/>);
+    /// a tree's own - its phase and rate, its foot's x for the gust, the world's
+    /// wind in its frame (<see cref="TreeModel.Wind"/>) - are set once, and what
+    /// changes - <c>wind_still</c> as it goes over, <c>wind_keep</c> as its
+    /// crown burns, a blast's <c>wind_push</c> and <c>wind_shiver</c> - only
+    /// when it does. The numbers are <see cref="TreeModel"/>'s <c>GustRate</c>,
+    /// <c>GustTravel</c>, <c>WindDrift</c>, <c>WindHeight</c>, <c>Billow</c>
+    /// and <c>Flutter</c>; <c>wind_rate</c> nought - every tank - nothing runs.
     /// </summary>
     public const string WindCode = @"
+global uniform float tree_weather;
+global uniform float tree_wind;
+uniform float wind_rate = 0.0;
+uniform float wind_phase = 0.0;
+uniform float wind_foot = 0.0;
 uniform vec2 wind_dir = vec2(1.0, 0.0);
-uniform float wind_lean = 0.0;
-uniform float wind_billow = 0.0;
-uniform float wind_flutter = 0.0;
-uniform float wind_time = 0.0;
+uniform bool wind_leaf = false;
+uniform float wind_still = 1.0;
+uniform float wind_keep = 1.0;
+uniform vec2 wind_push = vec2(0.0);
+uniform float wind_shiver = 0.0;
 uniform float wind_y0 = 2.2;
 uniform float wind_h = 7.4;
 void wind_pose(inout vec3 v) {
-    if (wind_lean == 0.0 && wind_billow == 0.0 && wind_flutter == 0.0) return;
+    if (wind_rate == 0.0) return;
+    // Grove's lean: the gust one long wave along x, the phase the tree's own
+    float gust = 0.5 + 0.5 * sin(tree_weather * 0.55 - wind_foot * 0.0035);
+    float lean = tree_wind * 2.6 * (0.35 + 0.65 * gust) * sin(tree_weather * wind_rate + wind_phase) / 120.0;
+    float wind_billow = tree_wind * 0.10 * (0.3 + 0.7 * gust) * wind_still * wind_keep + 0.10 * wind_shiver * wind_still;
+    float wind_flutter = wind_leaf ? (tree_wind * (0.3 + 0.7 * gust) + wind_shiver) * 0.035 * wind_still : 0.0;
+    float wind_time = tree_weather * wind_rate;
+    // the wind's lean and a blast's push, two leans in the model's frame
+    vec2 sum = wind_dir * lean * wind_still * wind_keep + wind_push * wind_still;
+    float wind_lean = length(sum);
+    vec2 way = wind_lean > 1e-6 ? sum / wind_lean : wind_dir;
     float s = clamp((v.y - wind_y0) / max(wind_h - wind_y0, 1e-3), 0.0, 1.0);
     float w = s * sqrt(s);
-    vec3 o = vec3(wind_dir.x, 0.0, wind_dir.y) * wind_lean * wind_h * w;
+    vec3 o = vec3(way.x, 0.0, way.y) * wind_lean * wind_h * w;
     if (wind_billow > 0.0) {
         // a slow noise through the crown, a few metres long: puffs drift a
         // little each its own way, a leaf moves as one
