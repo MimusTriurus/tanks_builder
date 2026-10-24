@@ -105,13 +105,21 @@ public sealed partial class Tank3DBench
         TankModel model;
         try
         {
-            model = TankModel.Load(tag, toon: !_pbr);
+            model = TankModel.Load(tag, toon: !_pbr, bare: Bare);
         }
         catch (Exception e)
         {
             GD.Print($"tank3d: parked {tag} on {cell}: {e.Message}");
             return;
         }
+        Stand(model, tag, cell, heading, side, yaw, elevation);
+    }
+
+    /// <summary>A model already loaded, standing: the rig's, handed back by a
+    /// hand-over (<see cref="TakeOver"/>).</summary>
+    private void Stand(TankModel model, string tag, Vector2I cell, float heading, Side side,
+                       float yaw, float elevation)
+    {
         model.ScaleTo(PixelsFor(model, ClassFor(tag)));
         SidePaint(model, side);
         var rig = new Node3D { Name = $"Parked_{tag}_{cell.X}_{cell.Y}" };
@@ -172,19 +180,34 @@ public sealed partial class Tank3DBench
         // the turret and the gun stay where the last shot left them, both ways
         float wasYaw = _model.Yaw, wasElevation = _model.Elevation;
         _parked.Remove(next);
-        next.Rig.QueueFree();
         _side = next.Side;
-        try
+        // The models change hands: the standing one goes on to the rig and the
+        // rig's on to a parking, both wiped as loaded - the rig's state does
+        // not travel, as it did not when each was loaded again. Loading them
+        // was the hand-over's half a second (docs/perf.md, BOT-2). The glTF's
+        // own materials (--pbr) have no snapshot to wipe to, so they load.
+        TankModel? kept = null;
+        if (!_pbr)
         {
-            Mount(next.Tag);
+            ForgetParked(next.Model);
+            next.Rig.RemoveChild(next.Model);
+            next.Model.Wipe();
+            kept = Unmount(keep: true);
+            Mount(next.Model, next.Tag);
         }
-        catch (Exception e)
-        {
-            GD.Print($"tank3d: {next.Tag}: {e.Message}");
-            _side = wasSide;
-            Stand(next.Tag, next.Cell, next.Heading, next.Side, next.Yaw, next.Elevation);
-            return;
-        }
+        next.Rig.QueueFree();
+        if (_pbr)
+            try
+            {
+                Mount(next.Tag);
+            }
+            catch (Exception e)
+            {
+                GD.Print($"tank3d: {next.Tag}: {e.Message}");
+                _side = wasSide;
+                Stand(next.Tag, next.Cell, next.Heading, next.Side, next.Yaw, next.Elevation);
+                return;
+            }
         // the ram is the unit's own to switch on (Tank3DBench.RamPlan)
         _ramMode = false;
         CancelOrder();
@@ -195,11 +218,30 @@ public sealed partial class Tank3DBench
         using (Prof.Measure("takeover.park"))
             Park();
         using (Prof.Measure("takeover.stand"))
-            Stand(was, wasCell, wasHeading, wasSide, wasYaw, wasElevation);
+            if (kept is not null)
+                Stand(kept, was, wasCell, wasHeading, wasSide, wasYaw, wasElevation);
+            else
+                Stand(was, wasCell, wasHeading, wasSide, wasYaw, wasElevation);
         using (Prof.Measure("takeover.choose"))
             Choose(true);
         _orderNote = $"ведёшь {next.Tag}";
         GD.Print($"tank3d: took {next.Tag} on {next.Cell}; {was} parks on {wasCell}");
+    }
+
+    /// <summary>What the bench keeps against a standing model - its marks
+    /// (<c>_parkedHits</c>), its pyre - let go as it leaves its parking. They
+    /// used to go when the model was freed (<c>IsInstanceValid</c>); a model
+    /// that changes hands lives on.</summary>
+    private void ForgetParked(TankModel model)
+    {
+        if (_parkedHits.Remove(model, out CelHit? hits))
+            hits.QueueFree();
+        for (int i = _pyres.Count - 1; i >= 0; i--)
+            if (_pyres[i].Model == model)
+            {
+                _pyres[i].Burn.QueueFree();
+                _pyres.RemoveAt(i);
+            }
     }
 
     /// <summary>The cells a route keeps off - the standing tanks', a destroyed

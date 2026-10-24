@@ -159,7 +159,13 @@ public sealed partial class TankModel : Node3D
     /// <paramref name="pixelsPerUnit"/> world units - cel shaded and inked
     /// (<see cref="Toon"/>) unless <paramref name="toon"/> is false, which keeps
     /// the glTF's own materials.</summary>
-    public static TankModel Load(string tag, float pixelsPerUnit = 1.0f, bool toon = true)
+    /// <param name="bare">When given, a copy of the dressed scene as it is
+    /// before <see cref="Bind"/> - nothing posed, nothing painted - kept as a
+    /// child of it named by the tag, the first time, for <see cref="Copy"/>.
+    /// The caller's node, hidden: in the tree, so the copies are not orphans
+    /// (the perf count's leaks) and go with the scene.</param>
+    public static TankModel Load(string tag, float pixelsPerUnit = 1.0f, bool toon = true,
+                                 Node? bare = null)
     {
         string dir = ModelDir(tag);
         var doc = new GltfDocument();
@@ -177,13 +183,72 @@ public sealed partial class TankModel : Node3D
         if (toon)
             using (Prof.Measure("model.toon"))
                 model.Cel = Toon.Dress(scene);
+        if (toon && bare is not null && bare.GetNodeOrNull(tag) is null)
+        {
+            Node kept = scene.Duplicate();
+            kept.Name = tag;
+            bare.AddChild(kept);
+        }
         model.Scale = Vector3.One * pixelsPerUnit;
         model.AddChild(scene);
         using JsonDocument json = JsonDocument.Parse(File.ReadAllText(dir + "/tank.json"));
         model.Bind(scene, json.RootElement);
         if (toon && model.Turret is not null)
             Toon.MarkTurret(model.Turret, model.Cel);
+        model.Snapshot();
         return model;
+    }
+
+    /// <summary>
+    /// A model of <paramref name="tag"/> out of <paramref name="bare"/>, the
+    /// scene a <see cref="Load"/> kept, without reading the glTF again - a
+    /// ghost's, which is all one fill (<c>MaterialOverride</c>): its meshes and
+    /// their materials are the loaded model's own, shared, so it has no
+    /// <see cref="Cel"/> of its own and nothing may paint it. Null when no load
+    /// has kept the tag.
+    /// </summary>
+    public static TankModel? Copy(string tag, Node bare)
+    {
+        if (bare.GetNodeOrNull(tag) is not { } kept)
+            return null;
+        Node scene = kept.Duplicate();
+        var model = new TankModel { Tag = tag, PixelsPerUnit = 1.0f, Name = "Model" };
+        model.AddChild(scene);
+        using JsonDocument json = JsonDocument.Parse(File.ReadAllText(ModelDir(tag) + "/tank.json"));
+        model.Bind(scene, json.RootElement);
+        return model;
+    }
+
+    /// <summary>Every cel uniform as loaded, for <see cref="Wipe"/>.</summary>
+    private readonly List<(ShaderMaterial Mat, StringName Name, Variant Value)> _clean = new();
+
+    private void Snapshot()
+    {
+        _clean.Clear();
+        foreach (ShaderMaterial cel in Cel)
+            for (Material? m = cel; m is ShaderMaterial s; m = s.NextPass)
+                foreach (Godot.Collections.Dictionary u in s.Shader.GetShaderUniformList())
+                {
+                    StringName name = u["name"].AsStringName();
+                    _clean.Add((s, name, s.GetShaderParameter(name)));
+                }
+    }
+
+    /// <summary>
+    /// The model as <see cref="Load"/> gave it: every cel uniform back - the
+    /// marks, the char, the scorch, the side's paint, the halo - and the pose
+    /// at rest. What lets a model change hands between the rig and a parking
+    /// instead of being loaded again, and still come over whole.
+    /// </summary>
+    public void Wipe()
+    {
+        foreach (var (mat, name, value) in _clean)
+            mat.SetShaderParameter(name, value);
+        Yaw = Elevation = Recoil = Pitch = Roll = Heave = 0.0f;
+        TremblePitch = TrembleYaw = Driven = Skid = Slackness = Droop = Cant = 0.0f;
+        TurretOverride = null;
+        Visible = true;
+        Apply();
     }
 
     /// <summary>A node the glTF named, with Godot's renaming undone: a node name
