@@ -109,7 +109,7 @@ public sealed partial class PerfOverlay : Control
         // the bench's sections, heaviest first
         y += Line;
         DrawString(font, new Vector2(x0 + Pad, y - 3),
-                   $"bench {bench?.Avg ?? 0:F2} ms   (avg / max of {Prof.Window})", HorizontalAlignment.Left, -1, 13, Dim);
+                   $"bench {bench?.Avg ?? 0:F2} ms   (avg / max of {Prof.Window}, KB/frame)", HorizontalAlignment.Left, -1, 13, Dim);
         foreach (Prof.Section sec in heavy)
         {
             y += Line;
@@ -117,6 +117,9 @@ public sealed partial class PerfOverlay : Control
             DrawString(font, new Vector2(x0 + Pad, y - 3), sec.Name, HorizontalAlignment.Left, -1, 13, c);
             DrawString(font, new Vector2(x0 + Pad + 170, y - 3), $"{sec.Avg:F2}  /  {sec.Max:F2}",
                        HorizontalAlignment.Left, -1, 13, c);
+            // what it allocates: amber from 1 KB a frame, a GC pause in the making
+            DrawString(font, new Vector2(x0 + Pad + 290, y - 3), $"{sec.AllocAvg / 1024.0:F1} KB",
+                       HorizontalAlignment.Left, -1, 13, sec.AllocAvg > 1024.0 ? Warn : Dim);
         }
     }
 
