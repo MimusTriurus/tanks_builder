@@ -222,6 +222,7 @@ void fragment() {
     {
         _lockCell = null;
         _lockFace = null;
+        _postLock = false;
     }
 
     /// <summary>The second click, or Enter: the order on the fixed cell, the
@@ -280,7 +281,8 @@ void fragment() {
     /// <summary>The disc of the rose under <paramref name="screen"/>, if any.</summary>
     private int? RoseAt(Vector2 screen)
     {
-        if (_lockCell is not Vector2I cell || _ways.Count == 0)
+        // a firing post has no rose: its side is the one it fires from (Tank3DBench.Post)
+        if (_lockCell is not Vector2I cell || _ways.Count == 0 || _postLock)
             return null;
         float r = RoseDisc();
         foreach ((int side, Vector2 at) in Rose(cell))
@@ -303,7 +305,7 @@ void fragment() {
     /// zooms.</summary>
     private bool WheelTurns(Vector2 screen, bool up)
     {
-        if (_lockCell is not Vector2I cell || Screen(cell).DistanceTo(screen) > HexScreen() * 1.4f)
+        if (_lockCell is not Vector2I cell || _postLock || Screen(cell).DistanceTo(screen) > HexScreen() * 1.4f)
             return false;
         FaceStep(up);
         return true;
@@ -311,7 +313,7 @@ void fragment() {
 
     private void DrawRose(Control ink, Font font, int size)
     {
-        if (_lockCell is not Vector2I cell || _reach is null || _ways.Count == 0)
+        if (_lockCell is not Vector2I cell || _reach is null || _ways.Count == 0 || _postLock)
             return;
         Steps.Route way = _ways[_wayIx % _ways.Count];
         float r = RoseDisc();

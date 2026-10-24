@@ -194,7 +194,12 @@ public sealed partial class Tank3DBench
         if (shown is not null)
         {
             string tab = _ways.Count > 1 ? $", Tab — другой ({_wayIx % _ways.Count + 1}/{_ways.Count})" : "";
-            if (_lockCell is not null)
+            if (_postLock)
+            {
+                int turn = _reach!.TurnTo(shown, GhostFace(shown)) ?? 0;
+                _courseNote = $"огонь после хода: {shown.Spent}{(turn > 0 ? $"+{turn}" : "")} из {_reach.Budget}{tab}";
+            }
+            else if (_lockCell is not null)
             {
                 int turn = _reach!.TurnTo(shown, GhostFace(shown)) ?? 0;
                 _courseNote = $"выбрано: {shown.Spent}{(turn > 0 ? $"+{turn}" : "")} из {_reach.Budget}{tab};"

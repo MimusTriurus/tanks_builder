@@ -427,7 +427,9 @@ public sealed partial class Tank3DBench
         // With a cell fixed the shot is fired from it: the move is ordered and
         // the shot waits for the stop. LT fires first and keeps the cell
         // (classes.md, «Свободный порядок LT»; Tank3DBench.Aim).
-        if (_lockCell is not null && !_profile.FreeOrder)
+        // A firing post the bench fixed is LT's too: it cannot fire from here
+        // (Tank3DBench.Post).
+        if (_lockCell is not null && (!_profile.FreeOrder || _postLock))
             Confirm();
         if (RouteMoving)
         {

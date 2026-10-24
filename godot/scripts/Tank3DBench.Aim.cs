@@ -132,16 +132,20 @@ public sealed partial class Tank3DBench
         _judgedNote = "";
         if (_aimMesh?.Mesh is ImmediateMesh mesh)
             mesh.ClearSurfaces();
+        // out of reach from here: a post of the move fixed for it (Tank3DBench.Post)
+        PostTick();
         if (_rules && _chosen && _fate == Fate.Alive && _overTarget && _other is { } o && _field is not null && !RamRunning)
         {
             bool driving = RouteMoving && !_routeRams && _route is { Count: > 0 };
             Vector2I from = driving ? _route![^1]
-                : _lockCell is Vector2I fixedAt && !_profile.FreeOrder ? fixedAt : CellHere;
+                : _lockCell is Vector2I fixedAt && (!_profile.FreeOrder || _postLock) ? fixedAt : CellHere;
             CasemateGhost(from, o);
             _judged = Judge(from, o);
             GhostTrack(_judged, o);
-            _judgedNote = $"цель {o.Tag} {_judged.Cell}{(from != CellHere ? $" из {from}" : "")}: {_judged.Says}";
-            if (_lockCell is Vector2I after && _profile.FreeOrder && !driving)
+            _judgedNote = $"цель {o.Tag} {_judged.Cell}{(from != CellHere ? $" из {from}" : "")}: {_judged.Says}"
+                          + (_postLock && !driving ? "; ПКМ — ехать и стрелять" : "")
+                          + (_postNone ? "; ни с одной клетки хода" : "");
+            if (_lockCell is Vector2I after && _profile.FreeOrder && !driving && !_postLock)
             {
                 Judged then = Judge(after, o);
                 _judgedNote += $"; после хода из {after}: {then.Says}";
@@ -742,7 +746,9 @@ void fragment() {
     /// colour, or a cross where the lane is shut, and the label.</summary>
     private void DrawAim()
     {
-        if (_aimInk is not { } ink || _judged is not { } shot)
+        // the target can go between the judging and the drawing: a match's
+        // turn hands it back to standing in that frame (Tank3DBench.Match)
+        if (_aimInk is not { } ink || _judged is not { } shot || _other is null)
             return;
         Font font = ThemeDB.FallbackFont;
         float hex = HexScreen();

@@ -84,7 +84,7 @@ public sealed partial class Tank3DBench
     /// <summary><c>--map</c> was given: the match plays it, not its own board.</summary>
     private bool _mapNamed;
 
-    private Label? _banner, _roll;
+    private Label? _banner;
     private float _bannerLeft;
 
     private static string SideName(Side s) => s == Side.Green ? "зелёные" : "коричневые";
@@ -519,27 +519,13 @@ public sealed partial class Tank3DBench
         _banner.AddThemeColorOverride("font_outline_color", new Color(0, 0, 0, 0.85f));
         layer.AddChild(_banner);
 
-        _roll = new Label
-        {
-            AnchorLeft = 1.0f, AnchorRight = 1.0f,
-            OffsetLeft = -300.0f, OffsetRight = -56.0f, OffsetTop = 225.0f,
-            MouseFilter = Control.MouseFilterEnum.Ignore,
-        };
-        _roll.AddThemeFontSizeOverride("font_size", 15);
-        _roll.AddThemeConstantOverride("outline_size", 5);
-        _roll.AddThemeColorOverride("font_outline_color", new Color(0, 0, 0, 0.8f));
-        // on a plate: the 10 x 10 board runs under it
-        var plate = new StyleBoxFlat { BgColor = new Color(0.05f, 0.06f, 0.05f, 0.6f) };
-        plate.SetCornerRadiusAll(6);
-        plate.SetContentMarginAll(8);
-        _roll.AddThemeStyleboxOverride("normal", plate);
-        layer.AddChild(_roll);
-
+        // Top right, by the panel's tab, over the short second line of the
+        // HUD: on the board's side it stood on the cells a ghost goes to.
         var pass = new Button
         {
             Text = "Конец хода   Ctrl+Enter",
             AnchorLeft = 1.0f, AnchorRight = 1.0f,
-            OffsetLeft = -300.0f, OffsetRight = -56.0f, OffsetTop = 555.0f, OffsetBottom = 591.0f,
+            OffsetLeft = -290.0f, OffsetRight = -56.0f, OffsetTop = 40.0f, OffsetBottom = 72.0f,
             FocusMode = Control.FocusModeEnum.None,
         };
         pass.AddThemeFontSizeOverride("font_size", 16);
@@ -562,7 +548,7 @@ public sealed partial class Tank3DBench
         _banner.Modulate = Colors.White;
     }
 
-    /// <summary>Both sides, unit by unit, with the one on the rig marked.</summary>
+    /// <summary>The banner's text and colour, once the label is there.</summary>
     private void RollTick()
     {
         if (_banner is not null && _banner.Text != _bannerText)
@@ -570,25 +556,26 @@ public sealed partial class Tank3DBench
             _banner.Text = _bannerText;
             _banner.AddThemeColorOverride("font_color", _bannerInk);
         }
-        if (_roll is null)
-            return;
+    }
+
+    /// <summary>
+    /// Both sides on one line of the HUD, unit by unit: ▶ the one on the rig,
+    /// ◐ knocked out, ✕ destroyed. A plate of its own on the board's side stood
+    /// on the right column's cells - the ghost of a firing post went under it.
+    /// </summary>
+    private string Roll()
+    {
         var all = Units().ToList();
         var text = new System.Text.StringBuilder();
         foreach (Side s in new[] { Side.Green, Side.Brown })
         {
-            text.Append(s == _turn && !MatchOver ? "» " : "  ").Append(SideName(s).ToUpperInvariant()).Append('\n');
+            text.Append(s == Side.Green ? "" : "   ·   ")
+                .Append(s == _turn && !MatchOver ? "» " : "").Append(SideName(s)).Append(':');
             foreach (var u in all.Where(u => u.Side == s).OrderBy(u => Array.IndexOf(Roster, u.Tag)))
-            {
-                string state = u.Fate switch
-                {
-                    Fate.Alive => "в строю",
-                    Fate.Knocked => "подбит",
-                    _ => "уничтожен",
-                };
-                text.Append(u.Riding ? "   ▶ " : "     ").Append(u.Tag).Append("  ").Append(state).Append('\n');
-            }
+                text.Append(' ').Append(u.Riding ? "▶" : "").Append(u.Tag[..2])
+                    .Append(u.Fate switch { Fate.Alive => "", Fate.Knocked => "◐", _ => "✕" });
         }
-        _roll.Text = text.ToString();
+        return text.Append("      ◐ подбит  ✕ уничтожен").ToString();
     }
 
     /// <summary>The HUD's lines in a match: where the turn stands and how to
@@ -601,6 +588,7 @@ public sealed partial class Tank3DBench
               + $"выстрел {(_fired ? "сделан" : "есть")}"
               + (_passIn is float t ? $" · передача хода через {Mathf.Max(t, 0.0f):F1} с" : ""))
         + (_matchNote.Length > 0 ? $" · {_matchNote}" : "") + "\n"
+        + Roll() + "\n"
         + "ЛКМ по своему — взять танк   ЛКМ по клетке — фиксация, ещё раз или Enter — ехать   A/D, колесо — разворот призрака   Tab — другой путь\n"
-        + "ПКМ по врагу — огонь   Ctrl+Enter — конец хода   Esc — отмена   колесо — зум   Home — камера   F12 — снимок";
+        + "ПКМ по врагу — огонь (не достать отсюда — ехать и стрелять)   Ctrl+Enter — конец хода   Esc — отмена   колесо — зум   Home — камера";
 }
