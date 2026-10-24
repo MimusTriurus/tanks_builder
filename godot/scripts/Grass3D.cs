@@ -88,6 +88,12 @@ public sealed partial class Grass3D : Node3D
     /// <see cref="Recover"/> lets it grow out.</summary>
     private const float Relax = 1.0f / 25.0f, Keep = 0.45f;
 
+    /// <summary>The grass comes back up in steps of this many s, not every
+    /// frame: at <see cref="Relax"/> a step is a quarter of the texture's
+    /// byte, and every frame it was the whole board's map into the texture
+    /// sixty times a second - 22 ms of a 33 ms frame (docs/perf.md).</summary>
+    private const float RelaxEvery = 0.1f;
+
     /// <summary>And on from <see cref="Keep"/> to standing at this much a
     /// second - the lane grown out. Nought keeps the lane for good, which is
     /// <c>Tree3D</c>'s board; <c>Tank3D</c> lets it go.</summary>
@@ -119,8 +125,16 @@ public sealed partial class Grass3D : Node3D
     private byte[] _bytes = Array.Empty<byte>();
     private Image? _image;
     private ImageTexture? _tex;
-    private bool _dirty, _relaxing;
-    private float _clock;
+    private bool _relaxing;
+    private float _clock, _relaxFor;
+    /// <summary>Texels: where the grass is still coming up, what changed
+    /// since the texture was last filled, and all that was pressed or torn
+    /// since the last <see cref="Heal"/>. No area, none.</summary>
+    private Rect2I _rising, _changed, _touched;
+    /// <summary>A changed patch is filled in blocks of this many texels a side,
+    /// out of a buffer kept for its size.</summary>
+    private const int Block = 32;
+    private readonly Dictionary<int, byte[]> _patches = new();
 
     /// <summary>The ground the press map covers, x and z.</summary>
     public void Map(Rect2 xz)
@@ -133,7 +147,7 @@ public sealed partial class Grass3D : Node3D
         _way = new Vector2[_w * _h];
         _bytes = new byte[_w * _h * 4];
         _image = Image.CreateEmpty(_w, _h, false, Image.Format.Rgba8);
-        _dirty = true;
+        _changed = new Rect2I(0, 0, _w, _h);
         Upload();
         _tex = ImageTexture.CreateFromImage(_image);
     }
@@ -317,7 +331,8 @@ public sealed partial class Grass3D : Node3D
         Vector2 dir = along.Normalized(), perp = new(-dir.Y, dir.X);
         float reach = 0.5f * Mathf.Sqrt(length * length + width * width);
         var c = new Vector2(at.X, at.Z);
-        Each(c, reach, (i, rel) =>
+        bool any = false;
+        Rect2I box = Each(c, reach, (i, rel) =>
         {
             float a = Mathf.Abs(rel.Dot(dir)), b = Mathf.Abs(rel.Dot(perp));
             float e = Mathf.Min(length * 0.5f - a, width * 0.5f - b);
@@ -328,9 +343,20 @@ public sealed partial class Grass3D : Node3D
                 return;
             _way[i] = _press[i] < 0.05f ? dir : _way[i].Lerp(dir, v).Normalized();
             _press[i] = v;
-            _dirty = _relaxing = true;
+            any = true;
         });
+        if (!any)
+            return;
+        _changed = Grow(_changed, box);
+        _rising = Grow(_rising, box);
+        _touched = Grow(_touched, box);
+        _relaxing = true;
     }
+
+    /// <summary><paramref name="r"/> and <paramref name="by"/> together, an
+    /// empty one taking nothing.</summary>
+    private static Rect2I Grow(Rect2I r, Rect2I by) =>
+        !by.HasArea() ? r : !r.HasArea() ? by : r.Merge(by);
 
     /// <summary>
     /// Grass torn out: a disc of <paramref name="radius"/> round
@@ -343,7 +369,8 @@ public sealed partial class Grass3D : Node3D
         if (_cut.Length == 0 || radius <= 0.0f)
             return;
         Vector2 dir = way.LengthSquared() > 1e-8f ? way.Normalized() : Vector2.Zero;
-        Each(new Vector2(at.X, at.Z), radius, (i, rel) =>
+        bool any = false;
+        Rect2I box = Each(new Vector2(at.X, at.Z), radius, (i, rel) =>
         {
             if (rel.Dot(dir) > before)
                 return;
@@ -351,8 +378,12 @@ public sealed partial class Grass3D : Node3D
             if (v <= _cut[i])
                 return;
             _cut[i] = v;
-            _dirty = true;
+            any = true;
         });
+        if (!any)
+            return;
+        _changed = Grow(_changed, box);
+        _touched = Grow(_touched, box);
     }
 
     /// <summary>All of it standing again.</summary>
@@ -360,7 +391,11 @@ public sealed partial class Grass3D : Node3D
     {
         Array.Clear(_press);
         Array.Clear(_cut);
-        _dirty = true;
+        // only what was ever touched: the bench heals on every turn's
+        // reset, and the whole board's map was 25 ms of it
+        _changed = Grow(_changed, _touched);
+        _touched = _rising = new Rect2I();
+        _relaxing = false;
     }
 
     public override void _Process(double delta)
@@ -373,36 +408,27 @@ public sealed partial class Grass3D : Node3D
     {
         float dt = (float)delta;
         _clock += dt;
-        if (_relaxing)
+        _relaxFor = _relaxing ? _relaxFor + dt : 0.0f;
+        if (_relaxFor >= RelaxEvery)
         {
             using var measure = Prof.Measure("grass.relax");
-            _relaxing = false;
-            for (int i = 0; i < _press.Length; i++)
-                if (_press[i] > Keep)
-                {
-                    _press[i] = Mathf.Max(Keep, _press[i] - Relax * dt);
-                    _relaxing = _dirty = true;
-                }
-                else if (Recover > 0.0f && _press[i] > 0.0f)
-                {
-                    _press[i] = Mathf.Max(0.0f, _press[i] - Recover * dt);
-                    _relaxing = _dirty = true;
-                }
+            Rise(_relaxFor);
+            _relaxFor = 0.0f;
         }
-        if (_dirty)
+        if (_changed.HasArea())
         {
-            using var measure = Prof.Measure("grass.upload");
-            Upload();
-            if (_image is not null)
-                _tex?.Update(_image);
+            using (Prof.Measure("grass.upload"))
+                Upload();
+            using (Prof.Measure("grass.texture"))
+                if (_image is not null)
+                    _tex?.Update(_image);
         }
         using (Prof.Measure("grass.inks"))
-            foreach (ShaderMaterial m in _inks)
-            {
-                m.SetShaderParameter("g_time", _clock);
-                m.SetShaderParameter("wind", Wind);
-                m.SetShaderParameter("wind_way", WindWay.Normalized());
-            }
+        {
+            RenderingServer.GlobalShaderParameterSet(TimeName, _clock);
+            RenderingServer.GlobalShaderParameterSet(WindName, Wind);
+            RenderingServer.GlobalShaderParameterSet(WayName, WindWay.Normalized());
+        }
         using (Prof.Measure("grass.fume"))
             foreach (Meadow m in _meadows)
                 Fume(m, dt);
@@ -462,7 +488,9 @@ public sealed partial class Grass3D : Node3D
             m.Smoke.Draw(eye.GlobalBasis);
     }
 
-    private void Each(Vector2 c, float reach, Action<int, Vector2> at)
+    /// <summary>Every texel within <paramref name="reach"/> of
+    /// <paramref name="c"/>; returns the texels it went over.</summary>
+    private Rect2I Each(Vector2 c, float reach, Action<int, Vector2> at)
     {
         int x0 = Math.Max(0, (int)((c.X - reach - _span.Position.X) / Texel));
         int x1 = Math.Min(_w - 1, (int)((c.X + reach - _span.Position.X) / Texel));
@@ -474,23 +502,78 @@ public sealed partial class Grass3D : Node3D
             var p = new Vector2(_span.Position.X + (x + 0.5f) * Texel, _span.Position.Y + (y + 0.5f) * Texel);
             at(y * _w + x, p - c);
         }
+        return x1 < x0 || y1 < y0 ? new Rect2I() : new Rect2I(x0, y0, x1 - x0 + 1, y1 - y0 + 1);
+    }
+
+    /// <summary>
+    /// The pressed grass up a step of <paramref name="dt"/> s, over
+    /// <see cref="_rising"/> only - the rest of the board is standing or held
+    /// at <see cref="Keep"/> - which then closes in on what is still rising.
+    /// </summary>
+    private void Rise(float dt)
+    {
+        int x0 = int.MaxValue, y0 = int.MaxValue, x1 = -1, y1 = -1;
+        Rect2I r = _rising;
+        for (int y = r.Position.Y; y < r.End.Y; y++)
+        for (int x = r.Position.X; x < r.End.X; x++)
+        {
+            int i = y * _w + x;
+            float p = _press[i];
+            if (p > Keep)
+                p = Mathf.Max(Keep, p - Relax * dt);
+            else if (Recover > 0.0f && p > 0.0f)
+                p = Mathf.Max(0.0f, p - Recover * dt);
+            else
+                continue;
+            _press[i] = p;
+            if (p > Keep || (Recover > 0.0f && p > 0.0f))
+            {
+                x0 = Math.Min(x0, x);
+                y0 = Math.Min(y0, y);
+                x1 = Math.Max(x1, x);
+                y1 = Math.Max(y1, y);
+            }
+        }
+        _changed = Grow(_changed, _rising);
+        _rising = x1 < 0 ? new Rect2I() : new Rect2I(x0, y0, x1 - x0 + 1, y1 - y0 + 1);
+        _relaxing = _rising.HasArea();
     }
 
     /// <summary>The map into its texture: r pressed, g b the way it lies
-    /// (0.5 is none), a torn out.</summary>
+    /// (0.5 is none), a torn out. Only <see cref="_changed"/> is packed; the
+    /// whole map goes to the image only when the whole of it changed.</summary>
     private void Upload()
     {
-        _dirty = false;
-        if (_image is null)
+        Rect2I r = _changed;
+        _changed = new Rect2I();
+        if (_image is null || !r.HasArea())
             return;
-        for (int i = 0; i < _press.Length; i++)
+        // the patch's sides rounded up to a block, so its buffers come back
+        // (an image takes a buffer of its exact size): a new one each fill
+        // was 50 KB a frame of garbage
+        int bw = Math.Min(_w, (r.Size.X + Block - 1) / Block * Block);
+        int bh = Math.Min(_h, (r.Size.Y + Block - 1) / Block * Block);
+        r = new Rect2I(Math.Min(r.Position.X, _w - bw), Math.Min(r.Position.Y, _h - bh), bw, bh);
+        bool whole = r.Size.X == _w && r.Size.Y == _h;
+        int length = r.Size.X * r.Size.Y * 4;
+        if (!whole && !_patches.TryGetValue(length, out byte[]? patch))
+            _patches[length] = patch = new byte[length];
+        byte[] bytes = whole ? _bytes : _patches[length];
+        int o = 0;
+        for (int y = r.Position.Y; y < r.End.Y; y++)
+        for (int x = r.Position.X; x < r.End.X; x++, o += 4)
         {
-            _bytes[4 * i] = (byte)(Mathf.Clamp(_press[i], 0.0f, 1.0f) * 255.0f);
-            _bytes[4 * i + 1] = (byte)Mathf.Clamp(128.0f + 127.0f * _way[i].X, 0.0f, 255.0f);
-            _bytes[4 * i + 2] = (byte)Mathf.Clamp(128.0f + 127.0f * _way[i].Y, 0.0f, 255.0f);
-            _bytes[4 * i + 3] = (byte)(Mathf.Clamp(_cut[i], 0.0f, 1.0f) * 255.0f);
+            int i = y * _w + x;
+            bytes[o] = (byte)(Mathf.Clamp(_press[i], 0.0f, 1.0f) * 255.0f);
+            bytes[o + 1] = (byte)Mathf.Clamp(128.0f + 127.0f * _way[i].X, 0.0f, 255.0f);
+            bytes[o + 2] = (byte)Mathf.Clamp(128.0f + 127.0f * _way[i].Y, 0.0f, 255.0f);
+            bytes[o + 3] = (byte)(Mathf.Clamp(_cut[i], 0.0f, 1.0f) * 255.0f);
         }
-        _image.SetData(_w, _h, false, Image.Format.Rgba8, _bytes);
+        if (whole)
+            _image.SetData(_w, _h, false, Image.Format.Rgba8, bytes);
+        else
+            _image.BlitRect(Image.CreateFromData(r.Size.X, r.Size.Y, false, Image.Format.Rgba8, bytes),
+                            new Rect2I(Vector2I.Zero, r.Size), r.Position);
     }
 
     private ShaderMaterial Ink(Shader shader, Vector3 mid, float radius, int seed)
@@ -693,6 +776,23 @@ public sealed partial class Grass3D : Node3D
 
     // --- shaders ---------------------------------------------------------------
 
+    private static readonly StringName TimeName = "grass_time", WindName = "grass_wind", WayName = "grass_wind_way";
+
+    /// <summary>The shaders' global uniforms, there before the shaders below
+    /// are made (statics start in the order they are written): one clock and
+    /// one wind to a scene, so two grasses with their own wind in one scene
+    /// would blow alike. Once a process: the list of what is there is the
+    /// editor's only.</summary>
+    private static readonly bool Globals = AddGlobals();
+
+    private static bool AddGlobals()
+    {
+        RenderingServer.GlobalShaderParameterAdd(TimeName, RenderingServer.GlobalShaderParameterType.Float, 0.0f);
+        RenderingServer.GlobalShaderParameterAdd(WindName, RenderingServer.GlobalShaderParameterType.Float, 1.0f);
+        RenderingServer.GlobalShaderParameterAdd(WayName, RenderingServer.GlobalShaderParameterType.Vec2, Vector2.Right);
+        return true;
+    }
+
     /// <summary>What every grass shader shares: the cell, the palette, the
     /// press map, the wind and the tone of a blade by how far up it is.</summary>
     private const string GrassCode = @"
@@ -703,11 +803,16 @@ uniform float seed = 0.0;
 uniform float ppm = 17.0;
 uniform sampler2D press_tex : filter_linear, hint_default_black;
 uniform vec4 press_map = vec4(0.0, 0.0, 1.0, 1.0);
-uniform vec2 wind_way = vec2(1.0, 0.0);
-uniform float wind = 1.0;
+// the clock and the wind are the scene's, one set a frame for every cell
+// (Globals): a set on each of two hundred materials was half a millisecond
+global uniform float grass_time;
+global uniform float grass_wind;
+global uniform vec2 grass_wind_way;
+#define g_time grass_time
+#define wind grass_wind
+#define wind_way grass_wind_way
 uniform float gust_rate = 0.55;
 uniform float gust_travel = 0.0035;
-uniform float g_time = 0.0;
 uniform float shadow_ink = 0.45;
 uniform vec3 tone_root : source_color = vec3(0.19, 0.26, 0.10);
 uniform vec3 tone_mid : source_color = vec3(0.34, 0.43, 0.17);
