@@ -20,10 +20,12 @@ namespace TankSpriteTest;
 /// <item><c>summary.json</c> - avg, p50, p95, p99, max of each past the
 /// warm-up (<see cref="PerfWarm"/>), the sections the same, and the worst
 /// frames with the section that cost most in each;</item>
-/// <item><c>compare.txt</c> - against <c>DIR/baseline.json</c>, when there is
-/// one: a line a figure, the ones worse by more than
-/// <see cref="PerfWorse"/> marked. <c>--perf-baseline</c> makes this run the
-/// baseline. The process exits 1 when anything got worse.</item>
+/// <item><c>compare.txt</c> - against a baseline, when there is one: a line a
+/// figure, the ones worse by more than <see cref="PerfWorse"/> marked. The
+/// baseline is <c>--perf-against FILE</c>, else <c>DIR/baseline.json</c>,
+/// else the scenario's own in git (<c>perf/NAME.json</c>, BOT-6).
+/// <c>--perf-baseline</c> makes this run <c>DIR/baseline.json</c>. The
+/// process exits 1 when anything got worse.</item>
 /// </list>
 ///
 /// <b>Run it with <c>--fixed-fps 60</c>.</b> The script is in frames and the
@@ -45,25 +47,50 @@ public sealed partial class Tank3DBench
     /// (<see cref="PerfFloor"/>), is a regression.</summary>
     private const double PerfWorse = 0.10;
 
-    /// <summary>The runs a baseline is kept for: the <c>--do</c> script and
-    /// the frames.</summary>
-    private static readonly Dictionary<string, (int Frames, string[] Script)> PerfScenarios = new()
+    /// <summary>The runs a baseline is kept for: the frames, the board (null:
+    /// the match's own), the cell the pointer is held on (<c>--hover</c>: the
+    /// mouse over the window moves the way and the ghosts, BOT-1) and the
+    /// <c>--do</c> script. Each one's baseline is <c>perf/NAME.json</c>
+    /// (<see cref="PerfBaseFile"/>).</summary>
+    private static readonly Dictionary<string, (int Frames, string? Map, Vector2I Hover, string[] Script)> PerfScenarios = new()
     {
         // drill10: the HM kills the TD in the heap - the blast, three set
         // alight, the burn-out chain at the end of brown's turn, J; ricochet
         // and the water left out
-        ["blast"] = (1500, new[]
+        ["blast"] = (1500, null, new Vector2I(5, 5), new[]
         {
             "take=6,7@40", "aim-cell=6,3@100", "pass@560", "take=6,7@620", "aim-cell=6,3@660",
             "pass@1100", "take=7,2@1160", "douse@1200",
         }),
+        // stress10 (drill10's homes, a wood and a pond added): all green and
+        // three brown set alight, then blast's opening - the HM's round knocks
+        // the TD in the burning heap and hands the turn over; brown passes,
+        // and its burning go up one by one, the TD's blast among them; green's
+        // LT drives into the wood, green passes, and its five go up
+        ["stress"] = (1600, "stress10", new Vector2I(5, 5), new[]
+        {
+            "ignite=1,7@20", "ignite=3,4@22", "ignite=7,2@24", "ignite=8,7@26", "ignite=6,7@28",
+            "ignite=3,2@30", "ignite=6,2@32", "ignite=5,3@34",
+            "take=6,7@40", "aim-cell=6,3@100", "pass@560", "take=1,7@620", "go=3,7@660",
+            "pass@1100",
+        }),
     };
+
+    /// <summary>The baselines kept in git: <c>res://perf/NAME.json</c>, a
+    /// run's <c>summary.json</c> copied there by hand (docs/perf.md).</summary>
+    private static string PerfBaseFile(string scenario) =>
+        ProjectSettings.GlobalizePath($"res://perf/{scenario}.json");
 
     private string? _perfDir;
     private int _perfTo = -1;
     private bool _perfBaseline;
     private bool _perfOverlay;
     private string _perfScenario = "";
+    /// <summary><c>--perf-against FILE</c>: the baseline, before
+    /// <c>DIR/baseline.json</c> and the scenario's own.</summary>
+    private string? _perfAgainst;
+    /// <summary>The scenario's pointer cell, when no <c>--hover</c> was given.</summary>
+    private Vector2I? _perfHover;
     private PerfOverlay? _perfView;
 
     /// <summary>Its flags; true when <paramref name="i"/>'s was one.</summary>
@@ -93,11 +120,16 @@ public sealed partial class Tank3DBench
                 }
                 if (_perfTo < 0)
                     _perfTo = sc.Frames;
+                // the flags' own --map and --hover win, wherever they stand
+                if (sc.Map is not null && !_mapNamed)
+                    (_mapName, _mapNamed) = (sc.Map, true);
+                _perfHover = sc.Hover;
             }
             else
                 GD.PrintErr($"perf: no scenario '{_perfScenario}' - there are {string.Join(", ", PerfScenarios.Keys)}");
             return true;
         }
+        if (a == "--perf-against" && more) { _perfAgainst = args[++i]; return true; }
         if (a == "--perf-baseline") { _perfBaseline = true; return true; }
         if (a == "--perf-overlay") { _perfOverlay = true; return true; }
         return false;
@@ -112,6 +144,7 @@ public sealed partial class Tank3DBench
         layer.AddChild(_perfView);
         if (_perfDir is null)
             return;
+        _hoverFixed ??= _perfHover;
         if (_perfTo < 0)
             _perfTo = Math.Max(600, _script.Count > 0 ? _script.Max(s => s.Frame) + 300 : 0);
         DisplayServer.WindowSetVsyncMode(DisplayServer.VSyncMode.Disabled);
@@ -244,8 +277,15 @@ public sealed partial class Tank3DBench
 
         int worseCount = 0;
         string basePath = Path.Combine(dir, "baseline.json");
-        if (File.Exists(basePath))
-            worseCount = Compare(basePath, summary, Path.Combine(dir, "compare.txt"));
+        // against: the file named, the directory's own, the scenario's in git
+        string? against = _perfAgainst
+            ?? (File.Exists(basePath) ? basePath
+                : _perfScenario != "" && File.Exists(PerfBaseFile(_perfScenario)) ? PerfBaseFile(_perfScenario)
+                : null);
+        if (against is not null && !File.Exists(against))
+            GD.PrintErr($"perf: --perf-against {against}: no such file");
+        else if (against is not null)
+            worseCount = Compare(against, summary, Path.Combine(dir, "compare.txt"));
         if (_perfBaseline)
         {
             File.WriteAllText(basePath, json);
@@ -327,6 +367,7 @@ public sealed partial class Tank3DBench
         if (old is not JsonObject was)
             return 0;
         var sb = new StringBuilder();
+        sb.AppendLine($"against {basePath}");
         sb.AppendLine($"baseline {was["when"]} ({was["frames"]} frames)  vs  now {now["when"]} ({now["frames"]} frames)");
         foreach (string k in new[] { "scene", "map", "script", "frames", "fixed_fps", "window" })
             if (was[k]?.ToJsonString() != now[k]?.ToJsonString())

@@ -1222,6 +1222,13 @@ public sealed partial class Tank3DBench : Node3D
                         OrderClick(_camera.UnprojectPosition(standing.Rig.Position
                             + Vector3.Up * (standing.Model.Size.Y * standing.Model.PixelsPerUnit * 0.4f)), false);
                 }
+                // ignite=Q,R: the unit on that hex set alight (Tank3DBench.Blast)
+                else if (what.StartsWith("ignite=", StringComparison.Ordinal))
+                {
+                    string[] qr = what[7..].Split(',');
+                    if (qr.Length == 2 && int.TryParse(qr[0], out int q) && int.TryParse(qr[1], out int r))
+                        IgniteAt(new Vector2I(q, r));
+                }
                 // lock=Q,R: the first click on a cell in reach; face=S: the rose's disc
                 else if (what.StartsWith("lock=", StringComparison.Ordinal))
                 {
