@@ -107,6 +107,9 @@ public sealed partial class Tank3DBench
     /// <summary>A unit set alight.</summary>
     private void Ignite(Side side, string tag, Vector2I cell)
     {
+        // a hull in water catches and goes out at once (GDD states.md «Уничтожен»)
+        if (_field is not null && _field.IsWater(cell))
+            return;
         if (Burning(side, tag) || ModelOf(side, tag) is not { } model)
             return;
         var burn = new CelBurn { Name = $"Blaze_{side}_{tag}" };

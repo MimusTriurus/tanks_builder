@@ -496,7 +496,11 @@ public sealed partial class Tank3DBench
             model.Droop = 1.0f;
             model.Slackness = 1.0f;
             model.Apply();
-            Kindle(model);
+            // in the pond it does not burn - it goes under (GDD states.md «Утоплен»)
+            if (_field is not null && _field.IsDeep(cell))
+                Founder(model, cell);
+            else
+                Kindle(model);
             // knocked out, it burns no more as a unit: the pyre is its fire now
             Quench(side, tag, steam: false);
             Boom(at, (float)TankTick.KnockOutFlash, grounded: false);
@@ -522,6 +526,7 @@ public sealed partial class Tank3DBench
             TankModel.Landing land = model.LandingNear(Mathf.RadToDeg(model.Yaw) + 150.0f);
             model.TurretOverride = new Transform3D(new Basis(land.Rest), land.At);
         }
+        Founder(model, cell);
         model.Droop = 1.0f;
         model.Slackness = 1.0f;
         model.Apply();

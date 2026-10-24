@@ -133,6 +133,7 @@ public sealed partial class Tank3DBench
             _fallV = 0.0f;
             _cellWas = cell;
             _ride = target;
+            _climbing = false;
             _buoy.Reset();
             _wading = Wading(cell);
             return target;
@@ -155,6 +156,9 @@ public sealed partial class Tank3DBench
                 Landed(cell, -_fallV);
             }
         }
+        // out of the pond on to the bank: up over a moment (Tank3DBench.Afloat)
+        else if (_climbing)
+            _ride = Climb(target, dt);
         else
             _ride = target;
         // Down the ramp into the pond: the tracks take it in, two fifths of a
@@ -186,6 +190,7 @@ public sealed partial class Tank3DBench
                 _celBurn?.Douse();
             GD.Print($"tank3d: {_modelTag} into the water at {to} - the fire is out");
         }
+        ClimbOut(from, to);
         if (_field.Drops(from, to))
         {
             _falling = true;
@@ -555,11 +560,13 @@ public sealed partial class Tank3DBench
     /// weighs in as the sprite's did not; the median still lands on the deck
     /// while the engine deck and the sponsons are the larger share.
     /// </summary>
-    private float MeasureDeck()
+    private float MeasureDeck() => MeasureDeck(_model);
+
+    private float MeasureDeck(TankModel model)
     {
-        if (_model.Hull is not MeshInstance3D hull || hull.Mesh is null)
-            return _model.Size.Y * 0.5f * _model.PixelsPerUnit * RiseFactor;
-        Transform3D toTank = _model.Tank.GlobalTransform.AffineInverse() * hull.GlobalTransform;
+        if (model.Hull is not MeshInstance3D hull || hull.Mesh is null)
+            return model.Size.Y * 0.5f * model.PixelsPerUnit * RiseFactor;
+        Transform3D toTank = model.Tank.GlobalTransform.AffineInverse() * hull.GlobalTransform;
         var roofs = new System.Collections.Generic.List<(float Y, float Area)>();
         float total = 0.0f;
         for (int s = 0; s < hull.Mesh.GetSurfaceCount(); s++)
@@ -583,7 +590,7 @@ public sealed partial class Tank3DBench
             }
         }
         if (roofs.Count == 0)
-            return _model.Size.Y * 0.5f * _model.PixelsPerUnit * RiseFactor;
+            return model.Size.Y * 0.5f * model.PixelsPerUnit * RiseFactor;
         roofs.Sort((p, q) => p.Y.CompareTo(q.Y));
         // Up-facing faces at the bottom are the belly: only those in the upper
         // half of the hull count as roofs.
@@ -605,7 +612,7 @@ public sealed partial class Tank3DBench
                 break;
             }
         }
-        return median * _model.PixelsPerUnit * RiseFactor;
+        return median * model.PixelsPerUnit * RiseFactor;
     }
 
     /// <summary>

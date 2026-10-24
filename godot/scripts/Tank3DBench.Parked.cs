@@ -121,6 +121,9 @@ public sealed partial class Tank3DBench
         model.Elevation = elevation;
         model.Apply();
         rig.Position = CellMiddle(cell);
+        // in the pond, afloat (Tank3DBench.Afloat)
+        if (AfloatY(cell, model, ClassFor(tag)) is float afloat)
+            rig.Position = new Vector3(rig.Position.X, afloat, rig.Position.Z);
         rig.Rotation = new Vector3(0.0f, Mathf.DegToRad(heading), 0.0f);
         _parked.Add(new Parked
         {

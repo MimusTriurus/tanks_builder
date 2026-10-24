@@ -835,6 +835,14 @@ public sealed partial class Tank3DBench
 
         // The ground: followed on a face, fallen to off a bank.
         float ground = OtherGround(o.Rig.Position, out Vector3 up);
+        // afloat with the gear, as the rig is; knocked out, down to the bed
+        // (Tank3DBench.Afloat)
+        if (o.Fate == Fate.Alive && _field is not null
+            && AfloatY(_field.CellUnder(Board(o.Rig.Position)), o.Model, o.Profile) is float afloat)
+        {
+            ground = afloat;
+            up = Vector3.Up;
+        }
         float y = o.Rig.Position.Y;
         Vector3 way = new(o.Way.X, 0.0f, o.Way.Z);
         way = way.LengthSquared() > 1e-6f ? way.Normalized() : o.Ahead;
