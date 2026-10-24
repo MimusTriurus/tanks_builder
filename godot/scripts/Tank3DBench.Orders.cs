@@ -69,7 +69,7 @@ public sealed partial class Tank3DBench
             return;
         _rules = on;
         CancelOrder();
-        GD.Print($"tank3d: movement {(on ? "by cells (2D)" : "free (WASD)")}{why}");
+        Log.Print($"tank3d: movement {(on ? "by cells (2D)" : "free (WASD)")}{why}");
     }
 
     private void CancelOrder()
@@ -117,11 +117,11 @@ public sealed partial class Tank3DBench
             if (path.Count == 0)
             {
                 _orderNote = $"к {cell} пути нет";
-                GD.Print($"tank3d: no route {here} -> {cell}");
+                Log.Print($"tank3d: no route {here} -> {cell}");
                 return;
             }
             Drive(path, ram: true, $"таран {OtherCell(_other!)}");
-            GD.Print($"tank3d: route {here} -> {cell} (ram): {string.Join(" ", path)}");
+            Log.Print($"tank3d: route {here} -> {cell} (ram): {string.Join(" ", path)}");
             return;
         }
 
@@ -138,7 +138,7 @@ public sealed partial class Tank3DBench
         {
             bool anyWay = _field.FindPath(here, cell, barred, masonry: true, bulldozer: _profile.Bulldozes).Count > 0;
             _orderNote = cell == here ? "" : anyWay ? $"до {cell} не хватает шагов ({reach.Budget})" : $"к {cell} пути нет";
-            GD.Print($"tank3d: no move {here} -> {cell}: {(anyWay ? $"over the budget of {reach.Budget}" : "no way")}");
+            Log.Print($"tank3d: no move {here} -> {cell}: {(anyWay ? $"over the budget of {reach.Budget}" : "no way")}");
             return;
         }
         _routeBack = route.Back;
@@ -151,7 +151,7 @@ public sealed partial class Tank3DBench
         Drive(route.Cells(), ram: false,
               $"к {cell}: {route.Spent + turn} из {reach.Budget} шагов{(route.Back ? ", назад" : "")}"
               + $"{(turn > 0 ? $", разворот {turn}" : "")}{risk}");
-        GD.Print($"tank3d: move {here} -> {cell}: {route}{(turn > 0 ? $" then t{face} (+{turn})" : "")} of {reach.Budget}{risk}"
+        Log.Print($"tank3d: move {here} -> {cell}: {route}{(turn > 0 ? $" then t{face} (+{turn})" : "")} of {reach.Budget}{risk}"
                  + $" ({reach.RoutesTo(cell).Count} way(s) of that cost)");
     }
 
@@ -382,7 +382,7 @@ public sealed partial class Tank3DBench
                 _routeBack = false;
                 _speed = 0.0f;
                 _orderNote = "";
-                GD.Print($"tank3d: arrived at {next}, heading {_heading:F0}, off the middle {left - move:F1} px");
+                Log.Print($"tank3d: arrived at {next}, heading {_heading:F0}, off the middle {left - move:F1} px");
                 // the rose's turn, on the spot
                 if (_routeFace is int face)
                 {

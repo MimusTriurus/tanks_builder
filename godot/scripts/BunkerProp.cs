@@ -341,7 +341,7 @@ public sealed partial class BunkerProp : Node3D
         foreach (Chunk c in _chunks)
             if (c.Kind == "wall")
                 _merge = Mathf.Max(_merge, c.Release * K + MergeAfter);
-        GD.Print($"bunker {Cell}: broken - {_chunks.Count} chunks, {occupants.Count} tank(s) inside");
+        Log.Print($"bunker {Cell}: broken - {_chunks.Count} chunks, {occupants.Count} tank(s) inside");
     }
 
     /// <summary>When each chunk goes and how: the pipeline's collapse
@@ -478,7 +478,7 @@ public sealed partial class BunkerProp : Node3D
         if (Gone == _chunks.Count && _chunks.Count > 0 && _static.Count > 0)
         {
             Clear();
-            GD.Print($"bunker {Cell}: gone, the pad stays");
+            Log.Print($"bunker {Cell}: gone, the pad stays");
         }
     }
 
@@ -578,7 +578,7 @@ public sealed partial class BunkerProp : Node3D
         foreach (Chunk c in _chunks)
             if (c.Cut > 0.0f)
                 high++;
-        GD.Print($"bunker {Cell}: going under at {_t:F1} s, {_sinkDepth:F2} R down over {WallRig.Crumble:F0} s, "
+        Log.Print($"bunker {Cell}: going under at {_t:F1} s, {_sinkDepth:F2} R down over {WallRig.Crumble:F0} s, "
                  + $"{high} chunk(s) in at a tank's back");
     }
 
@@ -736,7 +736,7 @@ public sealed partial class BunkerProp : Node3D
             if (out_ > 0.0f)
                 off++;
         }
-        GD.Print($"bunker {Cell}: at {SettleAt:F0} s {moved} of {_chunks.Count} chunks moved, "
+        Log.Print($"bunker {Cell}: at {SettleAt:F0} s {moved} of {_chunks.Count} chunks moved, "
                  + $"down {drop / Mathf.Max(_chunks.Count, 1):F2} R on average, heap top {top:F2} R, "
                  + $"{off} off the hex (worst {worst:+0.00;-0.00} R past its side)");
     }

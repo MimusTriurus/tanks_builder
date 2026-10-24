@@ -78,7 +78,7 @@ public sealed partial class Tank3DBench
             used.Add(tag);
             Stand(tag, home.Cell, _heading);
         }
-        GD.Print($"tank3d: {_parked.Count} tank(s) standing on the other parkings: "
+        Log.Print($"tank3d: {_parked.Count} tank(s) standing on the other parkings: "
                  + string.Join(", ", _parked.Select(p => $"{p.Tag} {p.Cell}")));
     }
 
@@ -109,7 +109,7 @@ public sealed partial class Tank3DBench
         }
         catch (Exception e)
         {
-            GD.Print($"tank3d: parked {tag} on {cell}: {e.Message}");
+            Log.Print($"tank3d: parked {tag} on {cell}: {e.Message}");
             return;
         }
         Stand(model, tag, cell, heading, side, yaw, elevation);
@@ -213,7 +213,7 @@ public sealed partial class Tank3DBench
             }
             catch (Exception e)
             {
-                GD.Print($"tank3d: {next.Tag}: {e.Message}");
+                Log.Print($"tank3d: {next.Tag}: {e.Message}");
                 _side = wasSide;
                 Stand(next.Tag, next.Cell, next.Heading, next.Side, next.Yaw, next.Elevation);
                 return;

@@ -188,7 +188,7 @@ public sealed partial class Tank3DBench
             // deck under it (TankTick's own exception, asked of the cell).
             if (!_field.IsDeep(to))
                 _celBurn?.Douse();
-            GD.Print($"tank3d: {_modelTag} into the water at {to} - the fire is out");
+            Log.Print($"tank3d: {_modelTag} into the water at {to} - the fire is out");
         }
         ClimbOut(from, to);
         if (_field.Drops(from, to))
@@ -245,7 +245,7 @@ public sealed partial class Tank3DBench
                            halfLen, might, Plunge.Style.Cinematic);
         _buoy.Jolt(TankTick.PlungeKick * share);
         Rings(way, halfLen, might);
-        GD.Print($"tank3d: {_modelTag} into the pond at {cell}: water {top:F1}, bed {_field.BedAt(cell):F1}, "
+        Log.Print($"tank3d: {_modelTag} into the pond at {cell}: water {top:F1}, bed {_field.BedAt(cell):F1}, "
                  + $"deck {_deckPx:F1} px, draught {_deckPx * _profile.Draught:F1} px, might {might:F2}"
                  + (_amphibious ? "" : " - no wading gear, the engine is drowned"));
         if (!_amphibious)
@@ -340,7 +340,7 @@ public sealed partial class Tank3DBench
         {
             _airTold = true;
             float roof = _rig.Position.Y * RiseFactor + _roofPx;
-            GD.Print($"tank3d: {_modelTag} on the bed at {cell}: roof {roof:F1}, water {top:F1} px "
+            Log.Print($"tank3d: {_modelTag} on the bed at {cell}: roof {roof:F1}, water {top:F1} px "
                      + $"({(roof < top ? "under" : "OUT")} by {Mathf.Abs(top - roof):F1})");
         }
     }
@@ -374,7 +374,7 @@ public sealed partial class Tank3DBench
         {
             _airTold = true;
             float roof = _rig.Position.Y * RiseFactor + _roofPx;
-            GD.Print($"tank3d: {_modelTag} on the bed at {cell}: roof {roof:F1}, water {top:F1} px "
+            Log.Print($"tank3d: {_modelTag} on the bed at {cell}: roof {roof:F1}, water {top:F1} px "
                      + $"({(roof < top ? "under" : "OUT")} by {Mathf.Abs(top - roof):F1}), air over {_field.FlatCellAt(Board(middle))}");
         }
     }
@@ -464,7 +464,7 @@ public sealed partial class Tank3DBench
             return (0.0f, 0.0f, model.HullLength * model.PixelsPerUnit * 0.5f,
                     model.Size.X * model.PixelsPerUnit * 0.5f);
         Vector2 mid = (lo + hi) * 0.5f, half = (hi - lo) * 0.5f;
-        GD.Print($"tank3d: {tag} footprint {2 * half.Y:F0} x {2 * half.X:F0} px, "
+        Log.Print($"tank3d: {tag} footprint {2 * half.Y:F0} x {2 * half.X:F0} px, "
                  + $"middle {mid.Y:F1} along, {mid.X:F1} across the rig");
         return (mid.Y, mid.X, half.Y, half.X);
     }

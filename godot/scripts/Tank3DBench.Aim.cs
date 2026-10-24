@@ -469,7 +469,7 @@ public sealed partial class Tank3DBench
                     || (clear && ShotWhy(here, c, out _, out _, out _).Length > 0))
                     continue;
                 PlaceOther(c, HeadingFor(c, side) + 90.0f);
-                GD.Print($"tank3d: target {_otherTag} stands on {c}, {cells} out along {side}");
+                Log.Print($"tank3d: target {_otherTag} stands on {c}, {cells} out along {side}");
                 return;
             }
     }

@@ -115,7 +115,7 @@ void fragment() {
         }
         catch (Exception e)
         {
-            GD.Print($"tank3d: ghost of {tag}: {e.Message} - the arrowhead stands in");
+            Log.Print($"tank3d: ghost of {tag}: {e.Message} - the arrowhead stands in");
             return;
         }
         _ghostFill ??= new ShaderMaterial { Shader = GhostFillShader, RenderPriority = Stage3D.RingOrder + 1 };
@@ -241,7 +241,7 @@ void fragment() {
             _ways = _reach.RoutesTo(cell);
         }
         _lockFace = _ways.Count > 0 ? _ways[_wayIx % _ways.Count].End.Heading : null;
-        GD.Print($"tank3d: fixed {cell}: {(_ways.Count > 0 ? _ways[_wayIx % _ways.Count].ToString() : "no way")}");
+        Log.Print($"tank3d: fixed {cell}: {(_ways.Count > 0 ? _ways[_wayIx % _ways.Count].ToString() : "no way")}");
     }
 
     private void Unlock()

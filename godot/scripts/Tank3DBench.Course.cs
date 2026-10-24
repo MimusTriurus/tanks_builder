@@ -127,7 +127,7 @@ public sealed partial class Tank3DBench
         // a fixed cell's ghost faces where the new way arrives
         if (_lockCell is not null)
             _lockFace = _ways[_wayIx].End.Heading;
-        GD.Print($"tank3d: way {_wayIx + 1} of {_ways.Count} to {_hoverCell}: {_ways[_wayIx]}");
+        Log.Print($"tank3d: way {_wayIx + 1} of {_ways.Count} to {_hoverCell}: {_ways[_wayIx]}");
         return true;
     }
 
@@ -137,11 +137,11 @@ public sealed partial class Tank3DBench
     {
         if (_reach is null)
         {
-            GD.Print("tank3d: forks: no reach (the tank is not selected and standing)");
+            Log.Print("tank3d: forks: no reach (the tank is not selected and standing)");
             return;
         }
         var forks = _reach.Cells.Keys.Select(c => (c, _reach.RoutesTo(c))).Where(f => f.Item2.Count > 1).ToList();
-        GD.Print($"tank3d: forks from {_reach.Start.Cell} facing {_reach.Start.Heading}, budget {_reach.Budget}: "
+        Log.Print($"tank3d: forks from {_reach.Start.Cell} facing {_reach.Start.Heading}, budget {_reach.Budget}: "
                  + (forks.Count == 0 ? "none" : string.Join("; ", forks.Select(f => $"{f.c} x{f.Item2.Count}"))));
     }
 
