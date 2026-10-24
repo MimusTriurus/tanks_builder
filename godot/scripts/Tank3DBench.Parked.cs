@@ -160,6 +160,8 @@ public sealed partial class Tank3DBench
     {
         if (_field is null || RamRunning)
             return;
+        // the next unit's model loaded: the hand-over's hitch, if there is one
+        using var measure = Prof.Measure("takeover");
         // In a match the target goes back to standing first: the swap resets
         // the rig, and the reset wipes the target's marks.
         DropTarget();

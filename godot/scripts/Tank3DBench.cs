@@ -293,6 +293,7 @@ public sealed partial class Tank3DBench : Node3D
             BuildPanel(layer);
         BuildBack(layer);
         BuildMatchUi(layer);
+        BuildPerf(layer);
     }
 
     /// <summary>The board's tile: the hex of a sprite set, the one thing here
@@ -930,7 +931,7 @@ public sealed partial class Tank3DBench : Node3D
         string[] args = OS.GetCmdlineUserArgs();
         for (int i = 0; i < args.Length; i++)
         {
-            if (_show.Read(args, ref i))
+            if (_show.Read(args, ref i) || ReadPerfFlag(args, ref i))
                 continue;
             string a = args[i];
             bool more = i + 1 < args.Length;
@@ -1432,6 +1433,8 @@ public sealed partial class Tank3DBench : Node3D
 
     public override void _Process(double delta)
     {
+        // the frame before closed (Prof), before anything of this one is measured
+        PerfTick(delta);
         // The way back, before the capture - the harness's order: the picture
         // that lands on disk is the editor it returned to.
         if (_editAt >= 0 && _frame == _editAt && _editing)
@@ -1440,9 +1443,12 @@ public sealed partial class Tank3DBench : Node3D
             return;
         }
         float dt = (float)Math.Min(delta, 0.1);
-        foreach (var (frame, what) in _script)
-            if (frame == _frame && !_restarted)
-                Do(what);
+        Prof.Scope bench = Prof.Measure("bench");
+        using (Prof.Measure("script"))
+            foreach (var (frame, what) in _script)
+                if (frame == _frame && !_restarted)
+                    Do(what);
+        Prof.Scope drive = Prof.Measure("drive");
 
         bool alive = _fate == Fate.Alive;
         float yawIn = (Input.IsKeyPressed(Key.Q) ? 1 : 0) - (Input.IsKeyPressed(Key.E) ? 1 : 0);
@@ -1583,18 +1589,33 @@ public sealed partial class Tank3DBench : Node3D
             _sinceFate += dt;
             AdvanceFate(dt);
         }
-        WaterTick(dt);
-        WallTick(dt);
-        _model.Apply();
-        FxProcess(dt, _speed, a);
-        MarksTick();
-        CourseTick();
-        AimTick();
-        RamFrame(dt, _camera.GlobalBasis);
-        ShellsTick(dt);
-        WoodTick(dt);
-        MatchTick(dt);
-        FrameCamera();
+        drive.Dispose();
+        using (Prof.Measure("water"))
+            WaterTick(dt);
+        using (Prof.Measure("wall"))
+            WallTick(dt);
+        using (Prof.Measure("model"))
+            _model.Apply();
+        using (Prof.Measure("fx"))
+        {
+            FxProcess(dt, _speed, a);
+            MarksTick();
+        }
+        using (Prof.Measure("course"))
+            CourseTick();
+        using (Prof.Measure("aim"))
+            AimTick();
+        using (Prof.Measure("ram"))
+            RamFrame(dt, _camera.GlobalBasis);
+        using (Prof.Measure("shells"))
+            ShellsTick(dt);
+        using (Prof.Measure("wood"))
+            WoodTick(dt);
+        using (Prof.Measure("match"))
+            MatchTick(dt);
+        using (Prof.Measure("camera"))
+            FrameCamera();
+        Prof.Scope hud = Prof.Measure("hud");
 
         string where = _field is null ? "flat ground"
             : $"{_mapName} {_field.FlatCellAt(Board(_rig.Position))}";
@@ -1613,7 +1634,9 @@ public sealed partial class Tank3DBench : Node3D
                     + (_rules
                         ? "cells: LMB own select   LMB cell, again go (Enter)   Tab other way   A/D or wheel turn the ghost   LMB x2 on target ram   W/S cell   A/D 60   Esc cancel/let go   "
                         : "WASD drive   " + (_model.Turreted ? "Q/E turret   " : ""))
-                    + "R/F gun   -/= wheel zoom to cursor   MMB drag pan   Home follow tank   Tab panel   F12 shot";
+                    + "R/F gun   -/= wheel zoom to cursor   MMB drag pan   Home follow tank   Tab panel   F3 perf   F12 shot";
+        hud.Dispose();
+        bench.Dispose();
         Shots();
         _frame++;
     }
@@ -1735,7 +1758,8 @@ public sealed partial class Tank3DBench : Node3D
         // is not on its step saved its last frame short of the end and ran on.
         bool done = (_capturePath is null || _frame >= _captureAt)
                     && (_sequenceDir is null || _frame >= _sequenceTo);
-        if (done && (_capturePath is not null || _sequenceDir is not null))
+        // a --perf run ends itself (PerfTick), its pictures taken on the way
+        if (done && _perfDir is null && (_capturePath is not null || _sequenceDir is not null))
             GetTree().Quit();
     }
 
@@ -1829,6 +1853,8 @@ public sealed partial class Tank3DBench : Node3D
             case Key.Minus: ZoomBy(1.0f / 1.25f); break;
             case Key.Equal: ZoomBy(1.25f); break;
             case Key.F5: Edit(); break;
+            // the frame's cost (PerfOverlay)
+            case Key.F3: TogglePerf(); break;
             case Key.F12:
                 Directory.CreateDirectory(AssetRoot.Out);
                 GetViewport().GetTexture().GetImage().SavePng(AssetRoot.Out + "/tank3d.png");

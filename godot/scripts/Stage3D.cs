@@ -338,6 +338,12 @@ public sealed partial class Stage3D : Node3D
 
     public override void _Process(double delta)
     {
+        using (Prof.Measure("stage"))
+            StageTick(delta);
+    }
+
+    private void StageTick(double delta)
+    {
         // The bench's step when it has pinned one. This node is a sibling of
         // Main, not a child of its process, so a pin kept local over there left
         // the pond running on the wall clock through every capture ever taken -

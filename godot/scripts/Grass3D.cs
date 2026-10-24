@@ -365,6 +365,12 @@ public sealed partial class Grass3D : Node3D
 
     public override void _Process(double delta)
     {
+        using (Prof.Measure("grass"))
+            Sway(delta);
+    }
+
+    private void Sway(double delta)
+    {
         float dt = (float)delta;
         _clock += dt;
         if (_relaxing)

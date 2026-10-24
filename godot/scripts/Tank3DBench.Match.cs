@@ -370,8 +370,10 @@ public sealed partial class Tank3DBench
         foreach ((TankModel model, CelHit hits) in _parkedHits)
             if (IsInstanceValid(model) && IsInstanceValid(hits) && !ReferenceEquals(hits, _other?.Hits))
                 hits.Tick(dt, _camera.GlobalBasis);
-        PyreTick(dt);
-        BlastTick(dt);
+        using (Prof.Measure("match.pyre"))
+            PyreTick(dt);
+        using (Prof.Measure("match.blast"))
+            BlastTick(dt);
         RamWaitTick();
         if (_banner is not null && _bannerLeft > 0.0f)
         {
