@@ -172,7 +172,8 @@ public sealed partial class Tank3DBench
         using var measure = Prof.Measure("takeover");
         // In a match the target goes back to standing first: the swap resets
         // the rig, and the reset wipes the target's marks.
-        DropTarget();
+        using (Prof.Measure("takeover.drop"))
+            DropTarget();
         string was = _modelTag;
         Vector2I wasCell = CellHere;
         float wasHeading = _heading;
@@ -189,10 +190,15 @@ public sealed partial class Tank3DBench
         TankModel? kept = null;
         if (!_pbr)
         {
-            ForgetParked(next.Model);
-            next.Rig.RemoveChild(next.Model);
-            next.Model.Wipe();
-            kept = Unmount(keep: true);
+            using (Prof.Measure("takeover.forget"))
+            {
+                ForgetParked(next.Model);
+                next.Rig.RemoveChild(next.Model);
+            }
+            using (Prof.Measure("takeover.wipe"))
+                next.Model.Wipe();
+            using (Prof.Measure("takeover.unmount"))
+                kept = Unmount(keep: true);
             Mount(next.Model, next.Tag);
         }
         next.Rig.QueueFree();

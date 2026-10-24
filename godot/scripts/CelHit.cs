@@ -111,6 +111,8 @@ public sealed partial class CelHit : Node3D
     private readonly List<Mark> _marks = new();
     private readonly Dictionary<ShaderMaterial, (Vector4[] At, Vector4[] Dir, Vector4[] Nrm)> _upload = new();
     private IReadOnlyList<ShaderMaterial> _paint = System.Array.Empty<ShaderMaterial>();
+    /// <summary>The materials last told they wear no marks.</summary>
+    private readonly HashSet<ShaderMaterial> _sentNone = new();
     private float _hull = 150.0f;
     private float _now;
     private int _rounds;
@@ -517,8 +519,11 @@ public sealed partial class CelHit : Node3D
     /// parts that wear it.</summary>
     private void Upload()
     {
-        foreach (ShaderMaterial m in _paint)
+        // by index: a foreach over IReadOnlyList boxes its enumerator, and
+        // this runs every frame for every standing unit (BOT-3)
+        for (int p = 0; p < _paint.Count; p++)
         {
+            ShaderMaterial m = _paint[p];
             if (!_upload.TryGetValue(m, out var arrays))
             {
                 arrays = (new Vector4[Toon.MaxMarks], new Vector4[Toon.MaxMarks], new Vector4[Toon.MaxMarks]);
@@ -539,9 +544,16 @@ public sealed partial class CelHit : Node3D
                 arrays.Nrm[n] = new Vector4(nrm.X, nrm.Y, nrm.Z, k.Born);
                 n++;
             }
+            // no marks, and none said last time: nothing to tell it
+            if (n == 0 && _sentNone.Contains(m))
+                continue;
             m.Param("mark_count", n);
             if (n == 0)
+            {
+                _sentNone.Add(m);
                 continue;
+            }
+            _sentNone.Remove(m);
             m.Param("mark_at", arrays.At);
             m.Param("mark_dir", arrays.Dir);
             m.Param("mark_nrm", arrays.Nrm);

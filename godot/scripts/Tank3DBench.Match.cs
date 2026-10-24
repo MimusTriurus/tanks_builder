@@ -720,6 +720,40 @@ public sealed partial class Tank3DBench
         return text.Append("      ▲ горит  ◐ подбит  ✕ уничтожен").ToString();
     }
 
+    /// <summary>What <see cref="MatchHud"/> and <see cref="Roll"/> read, into
+    /// the HUD's stamp (<c>HudStamp</c>): the turn, and every unit's fate and
+    /// fire - walked here without <see cref="Units"/>' iterator.</summary>
+    private void MatchHudStamp(ref HashCode h)
+    {
+        h.Add(MatchOver);
+        h.Add(_drawn);
+        h.Add(_won);
+        h.Add(_round);
+        h.Add(_turn);
+        h.Add(_drove);
+        h.Add(_fired);
+        h.Add(_side);
+        // the countdown as it is printed, to a tenth
+        h.Add(_passIn is float t ? Mathf.RoundToInt(Mathf.Max(t, 0.0f) * 10.0f) : -1);
+        h.Add(_matchNote);
+        h.Add(_fate);
+        h.Add(Burning(_side, _modelTag));
+        foreach (Parked p in _parked)
+        {
+            h.Add(p.Tag);
+            h.Add(p.Side);
+            h.Add(p.Fate);
+            h.Add(Burning(p.Side, p.Tag));
+        }
+        if (_other is { Unit: true } o)
+        {
+            h.Add(o.Tag);
+            h.Add(o.Side);
+            h.Add(o.Fate);
+            h.Add(Burning(o.Side, o.Tag));
+        }
+    }
+
     /// <summary>The HUD's lines in a match: where the turn stands and how to
     /// play it.</summary>
     private string MatchHud(string status) =>

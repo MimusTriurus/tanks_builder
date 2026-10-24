@@ -1659,7 +1659,55 @@ public sealed partial class Tank3DBench : Node3D
         using (Prof.Measure("camera"))
             FrameCamera();
         Prof.Scope hud = Prof.Measure("hud");
+        // Rebuilt only when what it says changed: built every frame it was
+        // 6 KB a frame of strings for a text that stood still (BOT-3).
+        int stamp = HudStamp();
+        if (stamp != _hudStamp)
+        {
+            _hudStamp = stamp;
+            HudText();
+        }
+        hud.Dispose();
+        bench.Dispose();
+        Shots();
+        _frame++;
+    }
 
+    private int? _hudStamp;
+
+    /// <summary>Everything <see cref="HudText"/> reads, hashed - the strings by
+    /// their content, which allocates nothing.</summary>
+    private int HudStamp()
+    {
+        var h = new HashCode();
+        h.Add(_modelTag);
+        h.Add(_profile.Tag);
+        h.Add(_field is null);
+        h.Add(_mapName);
+        if (_field is not null)
+            h.Add(_field.FlatCellAt(Board(_rig.Position)));
+        h.Add(Drowning);
+        h.Add(_fate);
+        h.Add(Swimming);
+        h.Add(_note);
+        h.Add(_other?.Tag);
+        h.Add(_other?.Cell);
+        h.Add(_ramNote);
+        h.Add(_wallNote);
+        h.Add(_rules);
+        h.Add(_orderNote);
+        h.Add(_courseNote);
+        h.Add(_aimNote);
+        h.Add(_judgedNote);
+        h.Add(Match);
+        h.Add(_model.Turreted);
+        if (Match)
+            MatchHudStamp(ref h);
+        return h.ToHashCode();
+    }
+
+    private void HudText()
+    {
         string where = _field is null ? "flat ground"
             : $"{_mapName} {_field.FlatCellAt(Board(_rig.Position))}";
         string fate = Drowning ? "Drowned" : _fate.ToString();
@@ -1678,10 +1726,6 @@ public sealed partial class Tank3DBench : Node3D
                         ? "cells: LMB own select   LMB cell, again go (Enter)   Tab other way   A/D or wheel turn the ghost   LMB x2 on target ram   W/S cell   A/D 60   Esc cancel/let go   "
                         : "WASD drive   " + (_model.Turreted ? "Q/E turret   " : ""))
                     + "R/F gun   -/= wheel zoom to cursor   MMB drag pan   Home follow tank   Tab panel   F3 perf   F12 shot";
-        hud.Dispose();
-        bench.Dispose();
-        Shots();
-        _frame++;
     }
 
     /// <summary>The engine's tremble on the model, this frame.</summary>

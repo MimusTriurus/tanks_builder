@@ -407,8 +407,9 @@ public sealed partial class CelBurn : Node3D
         }
         _clock += dt;
         Vector3 mid = Vector3.Zero;
-        foreach (Vector3 p in ports)
-            mid += p;
+        // by index: a foreach over IReadOnlyList boxes its enumerator, every frame
+        for (int i = 0; i < ports.Count; i++)
+            mid += ports[i];
         mid /= ports.Count;
         Tongue(ports, eye);
         Column(mid, eye);
@@ -428,8 +429,9 @@ public sealed partial class CelBurn : Node3D
         int n = Mathf.Min(ports.Count, MaxPorts);
         for (int i = 0; i < MaxPorts; i++)
             _scorchAt[i] = i < n ? ports[i] : Vector3.Zero;
-        foreach (ShaderMaterial m in Paint)
+        for (int k = 0; k < Paint.Count; k++)
         {
+            ShaderMaterial m = Paint[k];
             m.Param("scorch_at", _scorchAt);
             m.Param("scorch_n", n);
             m.Param("scorch_r", ScorchReach * _hull);
@@ -521,9 +523,12 @@ public sealed partial class CelBurn : Node3D
                 ? 1.0f : 0.0f;
         // Both passes the same numbers: the second is the flame again, over
         // the turret, for the ports in front of it.
-        ShaderMaterial[] passes = _flameInk!.NextPass is ShaderMaterial over
-            ? new[] { _flameInk!, over } : new[] { _flameInk! };
-        foreach (ShaderMaterial m in passes)
+        // each named, not an array of the two made every frame
+        Pass(_flameInk!);
+        if (_flameInk!.NextPass is ShaderMaterial over)
+            Pass(over);
+
+        void Pass(ShaderMaterial m)
         {
             m.Param("size", new Vector2(w, h));
             m.Param("ports", _portAt);

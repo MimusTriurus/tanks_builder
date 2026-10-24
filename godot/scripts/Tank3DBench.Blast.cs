@@ -59,7 +59,15 @@ public sealed partial class Tank3DBench
     private readonly List<(CelDeath Death, float Age)> _blastBalls = new();
     private float _deathAge = 99.0f;
 
-    private bool Burning(Side side, string tag) => _blazes.Exists(b => !b.Out && b.Side == side && b.Tag == tag);
+    // Loops, not Exists/Find with a lambda: both are asked every frame, per
+    // unit, and a lambda over side and tag is a closure each call (BOT-3).
+    private bool Burning(Side side, string tag)
+    {
+        foreach (Blaze b in _blazes)
+            if (!b.Out && b.Side == side && b.Tag == tag)
+                return true;
+        return false;
+    }
 
     /// <summary>The model the unit wears now: on the rig, standing or the target.</summary>
     private TankModel? ModelOf(Side side, string tag)
@@ -68,7 +76,10 @@ public sealed partial class Tank3DBench
             return _model;
         if (_other is { Unit: true } o && o.Side == side && o.Tag == tag)
             return o.Model;
-        return _parked.Find(p => p.Side == side && p.Tag == tag)?.Model;
+        foreach (Parked p in _parked)
+            if (p.Side == side && p.Tag == tag)
+                return p.Model;
+        return null;
     }
 
     // --- the blast ---------------------------------------------------------------

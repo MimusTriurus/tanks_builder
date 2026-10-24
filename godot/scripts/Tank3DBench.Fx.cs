@@ -1491,7 +1491,12 @@ void fragment() {
         // The ground under the tank, and the stage's clearance over it, as the
         // floor no card may go below - see Bend.
         float floor = _rig.Position.Y + Stage3D.Clear(Squash, RiseFactor).Y;
-        foreach (Card c in new[] { _rear!, _front!, _glow! })
+        // each named, not a new array of the three every frame
+        Ground(_rear!);
+        Ground(_front!);
+        Ground(_glow!);
+
+        void Ground(Card c)
         {
             c.Quad.Position = anchor;
             ((ShaderMaterial)c.Quad.MaterialOverride).Param("ground", floor);
