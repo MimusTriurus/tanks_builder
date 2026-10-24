@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Godot;
 
 namespace TankSpriteTest;
@@ -487,7 +488,9 @@ public sealed partial class Tank3DBench
         _shake.Blast(_profile.ShotShake * TankTick.RamRumble);
 
         Vector2I mineCell = _field!.FlatCellAt(Board(at));
-        Ramming.Shove push = Ramming.Of(_field, c => Blocks && c == mineCell, _profile, o.Profile, o.Cell, heading);
+        // in a match the standing units stand behind it too (Tank3DBench.Match)
+        Ramming.Shove push = Ramming.Of(_field, c => (Blocks && c == mineCell) || (Match && ParkedCells.Contains(c)),
+                                        _profile, o.Profile, o.Cell, heading);
         if (!push.Allowed)
         {
             GD.Print($"ram: frame {_frame}, {_modelTag} does not shove {o.Tag} at {o.Cell} along {heading} - "

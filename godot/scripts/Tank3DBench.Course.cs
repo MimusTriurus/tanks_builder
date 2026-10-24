@@ -197,7 +197,7 @@ public sealed partial class Tank3DBench
             if (_postLock)
             {
                 int turn = _reach!.TurnTo(shown, GhostFace(shown)) ?? 0;
-                _courseNote = $"огонь после хода: {shown.Spent}{(turn > 0 ? $"+{turn}" : "")} из {_reach.Budget}{tab}";
+                _courseNote = $"{(_ramLock ? "таран" : "огонь")} после хода: {shown.Spent}{(turn > 0 ? $"+{turn}" : "")} из {_reach.Budget}{tab}";
             }
             else if (_lockCell is not null)
             {

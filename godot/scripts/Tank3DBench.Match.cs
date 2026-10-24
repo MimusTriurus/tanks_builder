@@ -167,7 +167,7 @@ public sealed partial class Tank3DBench
     /// the spot, the gun laying, a round in the air.</summary>
     private bool MatchBusy =>
         RouteMoving || _turnGoal is not null || _aim is not null || _shotWaiting is not null
-        || (_shells?.Rounds.Count ?? 0) > 0 || RamRunning;
+        || (_shells?.Rounds.Count ?? 0) > 0 || RamRunning || _ramWaiting is not null;
 
     private bool MatchOver => _won is not null || _drawn;
 
@@ -274,6 +274,7 @@ public sealed partial class Tank3DBench
     private void PassTurn()
     {
         _passIn = null;
+        _ramMode = false;
         _matchNote = "";
         CancelOrder();
         DropTarget();
@@ -358,6 +359,7 @@ public sealed partial class Tank3DBench
             if (IsInstanceValid(model) && IsInstanceValid(hits) && !ReferenceEquals(hits, _other?.Hits))
                 hits.Tick(dt, _camera.GlobalBasis);
         PyreTick(dt);
+        RamWaitTick();
         if (_banner is not null && _bannerLeft > 0.0f)
         {
             _bannerLeft -= dt;
@@ -694,6 +696,6 @@ public sealed partial class Tank3DBench
               + (_passIn is float t ? $" · передача хода через {Mathf.Max(t, 0.0f):F1} с" : ""))
         + (_matchNote.Length > 0 ? $" · {_matchNote}" : "") + "\n"
         + Roll() + "\n"
-        + "ЛКМ по своему — взять танк   ЛКМ по клетке — фиксация, ещё раз или Enter — ехать   A/D, колесо — разворот призрака   Tab — другой путь\n"
+        + "ЛКМ по своему — взять танк   ЛКМ по клетке — фиксация, ещё раз или Enter — ехать   A/D, колесо — разворот призрака   Tab — таран\n"
         + "ПКМ по врагу — огонь (не достать отсюда — ехать и стрелять)   Ctrl+Enter — конец хода   Backspace — заново   Esc — отмена   колесо — зум   Home — камера";
 }

@@ -82,6 +82,7 @@ public sealed partial class Tank3DBench
         _shotWaiting = null;
         _turnGoal = null;
         _orderNote = "";
+        RamCancel();
         Unlock();
     }
 

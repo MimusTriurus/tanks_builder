@@ -64,6 +64,9 @@ public sealed class CameraShake
     /// ceiling <see cref="EngineTremble"/> ran into from the other side.</summary>
     public double Stiffness = 2500.0;
 
+    /// <summary>The longest step of the spring, s - see <see cref="Update"/>.</summary>
+    private const double MaxStep = 1.0 / 60.0;
+
     /// <summary>A quarter of critical. Under-damped on purpose: a shot wants a
     /// snap and a couple of clear rebounds, where the drive ramp wants to settle
     /// without ringing at all.</summary>
@@ -193,11 +196,22 @@ public sealed class CameraShake
         _rate += along * (float)(pixels * Level / peak);
     }
 
+    /// <summary>
+    /// The spring a frame on - in steps of at most <see cref="MaxStep"/>. The
+    /// explicit step is stable only under 2/sqrt(Stiffness), 0.04 s at the
+    /// default: a long frame (a hitch, a first shader compile) took it in one
+    /// step, the spring rang up twenty-fold a frame and the camera left the
+    /// board for good. At 60 fps it is one step, as it always was.
+    /// </summary>
     public void Update(double delta)
     {
-        _rate += (-(float)Stiffness * _offset - (float)Damping * _rate)
-                 * (float)delta;
-        _offset += _rate * (float)delta;
+        int steps = Math.Max(1, (int)Math.Ceiling(delta / MaxStep - 1e-6));
+        float dt = (float)(delta / steps);
+        for (int i = 0; i < steps; i++)
+        {
+            _rate += (-(float)Stiffness * _offset - (float)Damping * _rate) * dt;
+            _offset += _rate * dt;
+        }
         if (Rumbling)
             _rumbleAge += delta;
     }

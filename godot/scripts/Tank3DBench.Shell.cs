@@ -564,7 +564,11 @@ public sealed partial class Tank3DBench
         }
         Vector2I cell = onTank && _other is { } t ? OtherCell(t) : _field.FlatCellAt(Board(point));
         if (_rules)
-            ShotOrder(cell);
+        {
+            // the ram, when its preview is up (Tank3DBench.RamPlan)
+            if (!RamOrder(cell))
+                ShotOrder(cell);
+        }
         else
             AimCell(cell);
     }

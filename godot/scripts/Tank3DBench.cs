@@ -1068,6 +1068,7 @@ public sealed partial class Tank3DBench : Node3D
             case "cancel": CancelOrder(); break;
             // the end of turn's button (Tank3DBench.Match)
             case "pass": EndTurn(); break;
+            case "ram-mode": RamToggle(); break;
             case "restart": if (Match) Restart(); break;
             case "way": NextWay(); break;
             case "forks": Forks(); break;
@@ -1108,7 +1109,10 @@ public sealed partial class Tank3DBench : Node3D
                     if (qr.Length == 2 && int.TryParse(qr[0], out int q) && int.TryParse(qr[1], out int r))
                     {
                         if (_rules)
-                            ShotOrder(new Vector2I(q, r));
+                        {
+                            if (!RamOrder(new Vector2I(q, r)))
+                                ShotOrder(new Vector2I(q, r));
+                        }
                         else
                             AimCell(new Vector2I(q, r));
                     }
@@ -1762,8 +1766,10 @@ public sealed partial class Tank3DBench : Node3D
                 // the fixed cell let go; an order in hand dropped; with none,
                 // the tank let go
                 case Key.Escape:
-                    if (_lockCell is not null) Unlock();
-                    else if (RouteMoving || _turnGoal is not null || _shotWaiting is not null) CancelOrder();
+                    // the ram (Tank3DBench.RamPlan) off first
+                    if (_ramMode && _ramWaiting is null) RamToggle();
+                    else if (_lockCell is not null && !_ramLock) Unlock();
+                    else if (RouteMoving || _turnGoal is not null || _shotWaiting is not null || _ramWaiting is not null) CancelOrder();
                     else Choose(false);
                     return;
             }
@@ -1813,7 +1819,8 @@ public sealed partial class Tank3DBench : Node3D
             case Key.T: Do("ram"); break;
             case Key.Backspace: Do("reset"); break;
             // the next way of the same cost while there is one; the panel otherwise
-            case Key.Tab: if (!NextWay()) _panel?.Flip(); break;
+            // in a match: the ram on or off (Tank3DBench.RamPlan)
+            case Key.Tab: if (Match) RamToggle(); else if (!NextWay()) _panel?.Flip(); break;
             case Key.Home: FollowTank(); break;
             case Key.Minus: ZoomBy(1.0f / 1.25f); break;
             case Key.Equal: ZoomBy(1.25f); break;

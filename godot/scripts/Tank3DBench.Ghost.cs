@@ -116,30 +116,39 @@ void fragment() {
             GD.Print($"tank3d: ghost of {tag}: {e.Message} - the arrowhead stands in");
             return;
         }
-        model.ScaleTo(PixelsFor(model, ClassFor(tag)));
         _ghostFill ??= new ShaderMaterial { Shader = GhostFillShader, RenderPriority = Stage3D.RingOrder + 1 };
         _ghostInk ??= new ShaderMaterial { Shader = GhostInkShader, RenderPriority = Stage3D.RingOrder + 2 };
         _ghostFill.SetShaderParameter("tint", SelectionRing.Friendly);
         _ghostFill.NextPass = _ghostInk;
+        _ghostRig = DressGhost(model, tag, _ghostFill, "Ghost");
+        _ghost = model;
+    }
+
+    /// <summary>A loaded model as a ghost: sized for its class, every surface
+    /// in <paramref name="fill"/> (its ink the next pass), no shadow, on a rig
+    /// of its own that starts hidden.</summary>
+    private Node3D DressGhost(TankModel model, string tag, ShaderMaterial fill, string name)
+    {
+        model.ScaleTo(PixelsFor(model, ClassFor(tag)));
         var meshes = new List<MeshInstance3D>();
         Meshes(model, meshes);
         foreach (MeshInstance3D m in meshes)
         {
-            m.MaterialOverride = _ghostFill;
+            m.MaterialOverride = fill;
             m.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
         }
         // the belts' links are a MultiMesh: the same dress
         foreach (Node n in model.FindChildren("*", "MultiMeshInstance3D", true, false))
             if (n is MultiMeshInstance3D mm)
             {
-                mm.MaterialOverride = _ghostFill;
+                mm.MaterialOverride = fill;
                 mm.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
             }
-        _ghostRig = new Node3D { Name = "Ghost", Visible = false };
-        AddChild(_ghostRig);
-        _ghostRig.AddChild(model);
+        var rig = new Node3D { Name = name, Visible = false };
+        AddChild(rig);
+        rig.AddChild(model);
         model.Apply();
-        _ghost = model;
+        return rig;
     }
 
     private static void Meshes(Node node, List<MeshInstance3D> into)

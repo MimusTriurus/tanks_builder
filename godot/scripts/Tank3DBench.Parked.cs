@@ -180,6 +180,8 @@ public sealed partial class Tank3DBench
             Stand(next.Tag, next.Cell, next.Heading, next.Side, next.Yaw, next.Elevation);
             return;
         }
+        // the ram is the unit's own to switch on (Tank3DBench.RamPlan)
+        _ramMode = false;
         CancelOrder();
         _home = next.Cell;
         Heading = next.Heading;

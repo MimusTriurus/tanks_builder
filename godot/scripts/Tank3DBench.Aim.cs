@@ -132,9 +132,12 @@ public sealed partial class Tank3DBench
         _judgedNote = "";
         if (_aimMesh?.Mesh is ImmediateMesh mesh)
             mesh.ClearSurfaces();
+        // the ram, when the pointer offers it, before the shot (Tank3DBench.RamPlan);
         // out of reach from here: a post of the move fixed for it (Tank3DBench.Post)
-        PostTick();
-        if (_rules && _chosen && _fate == Fate.Alive && _overTarget && _other is { } o && _field is not null && !RamRunning
+        bool ram = RamTick();
+        if (!ram)
+            PostTick();
+        if (!ram && _rules && _chosen && _fate == Fate.Alive && _overTarget && _other is { } o && _field is not null && !RamRunning
             && !MatchShotSpent)
         {
             bool driving = RouteMoving && !_routeRams && _route is { Count: > 0 };
@@ -752,6 +755,8 @@ void fragment() {
     {
         // the target can go between the judging and the drawing: a match's
         // turn hands it back to standing in that frame (Tank3DBench.Match)
+        if (_aimInk is { } ramInk)
+            DrawRam(ramInk);
         if (_aimInk is not { } ink || _judged is not { } shot || _other is null)
             return;
         Font font = ThemeDB.FallbackFont;
