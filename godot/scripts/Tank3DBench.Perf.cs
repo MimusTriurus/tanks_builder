@@ -76,8 +76,9 @@ public sealed partial class Tank3DBench
         }),
     };
 
-    /// <summary>The baselines kept in git: <c>res://perf/NAME.json</c>, a
-    /// run's <c>summary.json</c> copied there by hand (docs/perf.md).</summary>
+    /// <summary>The baselines kept in git: <c>res://perf/NAME.json</c>, five
+    /// runs made one by <c>--perf-merge</c> (<see cref="PerfMerge"/>,
+    /// docs/perf.md).</summary>
     private static string PerfBaseFile(string scenario) =>
         ProjectSettings.GlobalizePath($"res://perf/{scenario}.json");
 
@@ -91,6 +92,10 @@ public sealed partial class Tank3DBench
     private string? _perfAgainst;
     /// <summary>The scenario's pointer cell, when no <c>--hover</c> was given.</summary>
     private Vector2I? _perfHover;
+    /// <summary><c>--perf-merge OUT DIR...</c>: the baseline to write, and the
+    /// runs it is made of.</summary>
+    private string? _perfMerge;
+    private readonly List<string> _perfMergeRuns = new();
     private PerfOverlay? _perfView;
 
     /// <summary>Its flags; true when <paramref name="i"/>'s was one.</summary>
@@ -130,6 +135,14 @@ public sealed partial class Tank3DBench
             return true;
         }
         if (a == "--perf-against" && more) { _perfAgainst = args[++i]; return true; }
+        // --perf-merge OUT DIR DIR...: the runs' summaries made one baseline
+        if (a == "--perf-merge" && more)
+        {
+            _perfMerge = args[++i];
+            while (i + 1 < args.Length && !args[i + 1].StartsWith("--", StringComparison.Ordinal))
+                _perfMergeRuns.Add(args[++i]);
+            return true;
+        }
         if (a == "--perf-baseline") { _perfBaseline = true; return true; }
         if (a == "--perf-overlay") { _perfOverlay = true; return true; }
         return false;
@@ -142,6 +155,11 @@ public sealed partial class Tank3DBench
         Prof.Watch(GetViewport());
         _perfView = new PerfOverlay { Name = "Perf", Visible = _perfOverlay };
         layer.AddChild(_perfView);
+        if (_perfMerge is not null)
+        {
+            GetTree().Quit(PerfMerge(_perfMerge, _perfMergeRuns) ? 0 : 1);
+            return;
+        }
         if (_perfDir is null)
             return;
         _hoverFixed ??= _perfHover;
@@ -341,6 +359,80 @@ public sealed partial class Tank3DBench
     private static double Get(JsonObject o, string key, string stat) =>
         o[key] is JsonObject s && s[stat] is JsonNode n ? n.GetValue<double>() : 0.0;
 
+    // --- a baseline of several runs ---------------------------------------------------
+
+    /// <summary>The figures past one run's say (BOT-6): six runs of the same
+    /// code spread 13 % in the frame's avg, 17-26 % in its p99, up to 60 % in
+    /// the render CPU's p99, so one run is no baseline. The baseline is the
+    /// runs' summaries made one: every figure their median, and beside it, under
+    /// <c>spread</c>, the same figure's max - min - the noise
+    /// <see cref="Compare"/> lets pass. The rest (what was played, the worst
+    /// frames) is the first run's; runs of another scene, board, script,
+    /// window or GPU are refused.</summary>
+    private static bool PerfMerge(string outPath, List<string> dirs)
+    {
+        var runs = new List<JsonObject>();
+        foreach (string d in dirs)
+        {
+            string path = Directory.Exists(d) ? Path.Combine(d, "summary.json") : d;
+            if (File.Exists(path) && JsonNode.Parse(File.ReadAllText(path)) is JsonObject o)
+                runs.Add(o);
+            else
+                GD.PrintErr($"perf: merge: {path} does not read");
+        }
+        if (runs.Count < 2 || runs.Count != dirs.Count)
+        {
+            GD.PrintErr($"perf: merge: {runs.Count} runs read of {dirs.Count} - two at least, and every one");
+            return false;
+        }
+        foreach (string k in new[] { "scene", "map", "script", "frames", "fixed_fps", "window", "gpu" })
+            if (runs.Any(r => r[k]?.ToJsonString() != runs[0][k]?.ToJsonString()))
+            {
+                GD.PrintErr($"perf: merge: the runs differ in {k} - not one baseline");
+                return false;
+            }
+        var merged = (JsonObject)runs[0].DeepClone();
+        var spread = new JsonObject();
+        foreach (string part in new[] { "metrics", "sections", "section_alloc_kb" })
+        {
+            var median = new JsonObject();
+            var noise = new JsonObject();
+            foreach (var (key, node) in runs[0][part]!.AsObject())
+            {
+                if (node is JsonObject stats)
+                {
+                    var m = new JsonObject();
+                    var s = new JsonObject();
+                    foreach (var (stat, _) in stats)
+                    {
+                        List<double> v = runs.Select(r => r[part]?[key]?[stat]?.GetValue<double>() ?? 0.0).ToList();
+                        (m[stat], s[stat]) = MedianSpread(v);
+                    }
+                    (median[key], noise[key]) = (m, s);
+                }
+                else
+                {
+                    List<double> v = runs.Select(r => r[part]?[key]?.GetValue<double>() ?? 0.0).ToList();
+                    (median[key], noise[key]) = MedianSpread(v);
+                }
+            }
+            (merged[part], spread[part]) = (median, noise);
+        }
+        merged["runs"] = runs.Count;
+        merged["spread"] = spread;
+        Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(outPath))!);
+        File.WriteAllText(outPath, merged.ToJsonString(new JsonSerializerOptions { WriteIndented = true }));
+        Log.Print($"perf: merge: {runs.Count} runs - {outPath}");
+        return true;
+    }
+
+    private static (JsonNode, JsonNode) MedianSpread(List<double> v)
+    {
+        v.Sort();
+        double median = v.Count % 2 == 1 ? v[v.Count / 2] : (v[v.Count / 2 - 1] + v[v.Count / 2]) / 2.0;
+        return (Math.Round(median, 4), Math.Round(v[^1] - v[0], 4));
+    }
+
     // --- against the baseline ------------------------------------------------------
 
     /// <summary>Below this a difference is noise, whatever its share: ms for
@@ -374,19 +466,31 @@ public sealed partial class Tank3DBench
                 sb.AppendLine($"!! another {k} - baseline: {was[k]}, now: {now[k]}");
         if (was["gpu"]?.ToString() != now["gpu"]?.ToString())
             sb.AppendLine($"!! another GPU - baseline: {was["gpu"]}, now: {now["gpu"]}");
+        // a baseline of several runs (PerfMerge) carries each figure's spread
+        JsonObject? spread = was["spread"] as JsonObject;
+        if (spread is not null)
+            sb.AppendLine($"baseline of {was["runs"]} runs: a figure is worse past its spread among them (±)");
         sb.AppendLine();
         int worse = 0;
 
-        void Row(string name, double a, double b)
+        // Worse: past the floor, past the runs' spread, and - but for a tail
+        // (p99, max) against a baseline that knows its spread - by more than
+        // PerfWorse. A tail is a handful of frames, whose noise the spread
+        // measures and a share does not.
+        void Row(string name, string part, string key, string stat, double a, double b)
         {
+            double s = spread?[part]?[key]?[stat]?.GetValue<double>() ?? 0.0;
+            bool byShare = spread is null || stat is not ("p99" or "max");
             double d = b - a;
             double rel = a > 1e-9 ? d / a : (b > 1e-9 ? 1.0 : 0.0);
-            bool bad = d > PerfFloor(name) && rel > PerfWorse;
-            bool good = -d > PerfFloor(name) && -rel > PerfWorse;
+            double past = Math.Max(PerfFloor(name), s);
+            bool bad = d > past && (!byShare || rel > PerfWorse);
+            bool good = -d > past && (!byShare || -rel > PerfWorse);
             if (bad)
                 worse++;
-            sb.AppendLine(string.Format(CultureInfo.InvariantCulture, "{0} {1,-34} {2,12:F2} -> {3,12:F2}  {4,7:+0;-0;0}%",
-                                        bad ? "▲" : good ? "▼" : " ", name, a, b, rel * 100.0));
+            sb.AppendLine(string.Format(CultureInfo.InvariantCulture, "{0} {1,-34} {2,12:F2} -> {3,12:F2}  {4,7:+0;-0;0}%{5}",
+                                        bad ? "▲" : good ? "▼" : " ", name, a, b, rel * 100.0,
+                                        spread is null ? "" : string.Format(CultureInfo.InvariantCulture, "  ±{0:F2}", s)));
         }
 
         string[] stats = { "avg", "p95", "p99", "max" };
@@ -398,14 +502,14 @@ public sealed partial class Tank3DBench
                 foreach (string st in key is "frame_ms" or "gpu_ms" or "render_cpu_ms" ? stats
                                       : key == "alloc_bytes" ? new[] { "avg", "p50", "max" } : new[] { "avg", "max" })
                     if (wm[key] is JsonObject)
-                        Row($"{key} {st}", Get(wm, key, st), Get(nm, key, st));
+                        Row($"{key} {st}", "metrics", key, st, Get(wm, key, st), Get(nm, key, st));
             }
         if (was["sections"] is JsonObject ws && now["sections"] is JsonObject ns)
         {
             foreach (var (key, _) in ns)
                 if (ws[key] is JsonObject)
                     foreach (string st in new[] { "avg", "p99" })
-                        Row($"section {key} {st}", Get(ws, key, st), Get(ns, key, st));
+                        Row($"section {key} {st}", "sections", key, st, Get(ws, key, st), Get(ns, key, st));
                 else
                     sb.AppendLine(string.Format(CultureInfo.InvariantCulture, "+ section {0,-26} new: avg {1:F2}, p99 {2:F2}",
                                                 key, Get(ns, key, "avg"), Get(ns, key, "p99")));
@@ -419,7 +523,7 @@ public sealed partial class Tank3DBench
             foreach (var (key, _) in nk)
                 if (wk[key] is JsonObject && Math.Max(Get(wk, key, "avg"), Get(nk, key, "avg")) >= 0.1)
                     foreach (string st in new[] { "avg", "p50" })
-                        Row($"kb {key} {st}", Get(wk, key, st), Get(nk, key, st));
+                        Row($"kb {key} {st}", "section_alloc_kb", key, st, Get(wk, key, st), Get(nk, key, st));
         sb.AppendLine();
         sb.AppendLine(worse == 0 ? "nothing worse than the baseline" : $"{worse} worse than the baseline (▲)");
         string text = sb.ToString();
