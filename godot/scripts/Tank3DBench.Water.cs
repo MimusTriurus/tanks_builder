@@ -564,8 +564,6 @@ public sealed partial class Tank3DBench
     /// weighs in as the sprite's did not; the median still lands on the deck
     /// while the engine deck and the sponsons are the larger share.
     /// </summary>
-    private float MeasureDeck() => MeasureDeck(_model);
-
     private float MeasureDeck(TankModel model)
     {
         if (model.Hull is not MeshInstance3D hull || hull.Mesh is null)
@@ -627,12 +625,12 @@ public sealed partial class Tank3DBench
     /// all but <see cref="RoofSpare"/> of the model's up-facing area lies: an
     /// aerial's tip and a rivet's head are no area at all.
     /// </summary>
-    private float MeasureRoof()
+    private float MeasureRoof(TankModel model)
     {
-        Transform3D toTank = _model.Tank.GlobalTransform.AffineInverse();
+        Transform3D toTank = model.Tank.GlobalTransform.AffineInverse();
         var roofs = new System.Collections.Generic.List<(float Y, float Area)>();
         float total = 0.0f;
-        foreach (MeshInstance3D mesh in Meshes(_model))
+        foreach (MeshInstance3D mesh in Meshes(model))
         {
             if (mesh is { Visible: false } || mesh.Mesh is not ArrayMesh)
                 continue;
@@ -659,16 +657,16 @@ public sealed partial class Tank3DBench
             }
         }
         if (roofs.Count == 0)
-            return _model.Size.Y * _model.PixelsPerUnit * RiseFactor;
+            return model.Size.Y * model.PixelsPerUnit * RiseFactor;
         roofs.Sort((p, q) => q.Y.CompareTo(p.Y));
         float above = 0.0f;
         foreach (var r in roofs)
         {
             above += r.Area;
             if (above >= total * RoofSpare)
-                return r.Y * _model.PixelsPerUnit * RiseFactor;
+                return r.Y * model.PixelsPerUnit * RiseFactor;
         }
-        return roofs[^1].Y * _model.PixelsPerUnit * RiseFactor;
+        return roofs[^1].Y * model.PixelsPerUnit * RiseFactor;
     }
 
     /// <summary>The share of up-facing area let stand over the roof.</summary>

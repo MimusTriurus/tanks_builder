@@ -266,10 +266,14 @@ public sealed partial class Tank3DBench
             AddChild(dust);
             dust.Build(model.HullLength * model.PixelsPerUnit);
         }
+        // the hull and the belts, the turret not: the tag's footprint whatever
+        // the turret's turn, measured as the match stood it up (MeasureRig)
+        string upper = tag.ToUpperInvariant();
         return new Other
         {
-            Model = model, Rig = rig, Profile = profile, Tag = tag.ToUpperInvariant(),
-            Foot = MeasureFootprint(model, rig, tag.ToUpperInvariant()), Scuff = scuff, Hits = hits,
+            Model = model, Rig = rig, Profile = profile, Tag = upper,
+            Foot = _measured.TryGetValue(upper, out RigMeasures known) ? known.Foot : MeasureFootprint(model, rig, upper),
+            Scuff = scuff, Hits = hits,
             Dust = dust,
         };
     }

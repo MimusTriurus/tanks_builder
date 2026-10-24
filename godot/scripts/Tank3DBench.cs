@@ -362,19 +362,44 @@ public sealed partial class Tank3DBench : Node3D
         _model = next;
         SidePaint(_model, _side);
         _rig.AddChild(_model);
+        _beltPaint = null;
+        RigMeasures known;
         using (Prof.Measure("mount.measure"))
-        {
-            _deckPx = MeasureDeck();
-            _beltPaint = null;
-            _foot = MeasureFootprint(_model, _rig, _modelTag);
-            _roofPx = MeasureRoof();
-        }
+            known = MeasureRig(_model, _rig, model);
+        (_deckPx, _foot, _roofPx) = (known.Deck, known.Foot, known.Roof);
         using (Prof.Measure("mount.effects"))
             BuildEffects();
-        GD.Print($"tank3d: {_modelTag} class {_profile.Tag} x{_profile.Size:F2}, {_model.PixelsPerUnit:F2} px/unit, "
-                 + $"hull {_model.HullLength:F4} x {_model.HullWidth:F4} = {_model.HullLength * _model.PixelsPerUnit:F0} px, "
-                 + $"bore r {_model.BoreRadius:F4}, deck {_deckPx:F1} px, roof {_roofPx:F1} of {_model.Size.Y * _model.PixelsPerUnit * RiseFactor:F1}, squash {Squash:F4} = {Mathf.RadToDeg(Mathf.Asin(Squash)):F2} deg, "
+    }
+
+    /// <summary>What <see cref="Mount"/> measures off a model on the rig: the
+    /// deck and the roof, lift px, and the footprint.</summary>
+    private readonly record struct RigMeasures(
+        float Deck, (float Along, float Across, float HalfLen, float HalfWide) Foot, float Roof);
+
+    /// <summary>
+    /// <see cref="RigMeasures"/> per tag, taken once: the same tank measures the
+    /// same on every hand-over, and the measures walk every vertex of it - 8-16 ms,
+    /// the mesh read back from the GPU. A match takes them as it stands its tanks
+    /// up (<see cref="Stand"/>), so no hand-over measures or prints: a print in a
+    /// frame costs up to 100 ms (docs/perf.md, BOT-7).
+    /// </summary>
+    private readonly Dictionary<string, RigMeasures> _measured = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The tag's <see cref="RigMeasures"/>, off <paramref name="model"/>
+    /// standing on <paramref name="rig"/> unturned the first time - with the
+    /// tank's line and its footprint printed then - and kept after.</summary>
+    private RigMeasures MeasureRig(TankModel model, Node3D rig, string tag)
+    {
+        if (_measured.TryGetValue(tag, out RigMeasures known))
+            return known;
+        known = new RigMeasures(MeasureDeck(model), MeasureFootprint(model, rig, tag), MeasureRoof(model));
+        _measured[tag] = known;
+        MovementProfile profile = ClassFor(tag);
+        GD.Print($"tank3d: {tag} class {profile.Tag} x{profile.Size:F2}, {model.PixelsPerUnit:F2} px/unit, "
+                 + $"hull {model.HullLength:F4} x {model.HullWidth:F4} = {model.HullLength * model.PixelsPerUnit:F0} px, "
+                 + $"bore r {model.BoreRadius:F4}, deck {known.Deck:F1} px, roof {known.Roof:F1} of {model.Size.Y * model.PixelsPerUnit * RiseFactor:F1}, squash {Squash:F4} = {Mathf.RadToDeg(Mathf.Asin(Squash)):F2} deg, "
                  + $"hex {HexWidth:F0} px");
+        return known;
     }
 
     /// <summary>Take the tank off the rig: everything <see cref="Mount"/> and
