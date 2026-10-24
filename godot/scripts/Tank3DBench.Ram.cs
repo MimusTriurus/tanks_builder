@@ -88,6 +88,11 @@ public sealed partial class Tank3DBench
         /// <summary>Time to the next tremble of the drag, s, and how many so far.</summary>
         public float ShudderIn;
         public int Shudders;
+        /// <summary>A match's unit lifted into the target (Tank3DBench.Match):
+        /// its side and its fate, and that it goes back to standing.</summary>
+        public bool Unit;
+        public Side Side;
+        public Fate Fate = Fate.Alive;
 
         public Vector3 Ahead
         {
@@ -231,6 +236,19 @@ public sealed partial class Tank3DBench
         AddChild(rig);
         rig.AddChild(model);
         model.Apply();
+        var hits = new CelHit { Name = "TargetHits" };
+        AddChild(hits);
+        hits.Build(model.HullLength * model.PixelsPerUnit);
+        hits.Targets(model, model.Cel);
+        hits.Solids = _solids;
+        _other = WrapOther(model, rig, profile, tag, hits);
+        GD.Print($"tank3d: target {_other.Tag} class {profile.Tag} x{profile.Size:F2}, mass {profile.Mass}");
+    }
+
+    /// <summary>The target round a model standing on its rig, with its marks:
+    /// the drag's scuff and dust made for it.</summary>
+    private Other WrapOther(TankModel model, Node3D rig, MovementProfile profile, string tag, CelHit hits)
+    {
         var scuff = new CelRuts
         {
             Name = "Scuff",
@@ -240,11 +258,6 @@ public sealed partial class Tank3DBench
             Soil = new Color(0.18f, 0.14f, 0.10f, 0.42f), Wall = new Color(0.12f, 0.09f, 0.07f, 0.55f),
         };
         AddChild(scuff);
-        var hits = new CelHit { Name = "TargetHits" };
-        AddChild(hits);
-        hits.Build(model.HullLength * model.PixelsPerUnit);
-        hits.Targets(model, model.Cel);
-        hits.Solids = _solids;
         CelDust? dust = null;
         if (!_fx2d)
         {
@@ -252,13 +265,12 @@ public sealed partial class Tank3DBench
             AddChild(dust);
             dust.Build(model.HullLength * model.PixelsPerUnit);
         }
-        _other = new Other
+        return new Other
         {
             Model = model, Rig = rig, Profile = profile, Tag = tag.ToUpperInvariant(),
             Foot = MeasureFootprint(model, rig, tag.ToUpperInvariant()), Scuff = scuff, Hits = hits,
             Dust = dust,
         };
-        GD.Print($"tank3d: target {_other.Tag} class {profile.Tag} x{profile.Size:F2}, mass {profile.Mass}");
     }
 
     private void FreeOther()

@@ -83,7 +83,7 @@ public sealed partial class Tank3DBench
     private HashSet<Vector2I> Barred(bool ram = false)
     {
         var barred = new HashSet<Vector2I>();
-        if (_other is { } o && !ram)
+        if (_other is { } o && !ram && o.Fate != Fate.Destroyed)
             barred.Add(OtherCell(o));
         barred.UnionWith(ParkedCells);
         return barred;
@@ -91,7 +91,7 @@ public sealed partial class Tank3DBench
 
     private bool CourseShown =>
         _course is not null && _field is not null && _tile is not null && _rules && _chosen
-        && _fate == Fate.Alive && !RouteMoving && _turnGoal is null && !RamRunning;
+        && _fate == Fate.Alive && !RouteMoving && _turnGoal is null && !RamRunning && MatchMayMove;
 
     /// <summary>The way the click on <paramref name="cell"/> orders: the one
     /// shown, if it is to that cell.</summary>

@@ -163,6 +163,12 @@ public sealed partial class Tank3DBench
         _overParked = null;
         if (_hoverFixed is Vector2I held)
         {
+            // an enemy standing there is the target now (Tank3DBench.Match)
+            if (_parked.Find(p => p.Cell == held) is { } fixedOn && MatchAims(fixedOn))
+            {
+                _overTarget = true;
+                return;
+            }
             _overTarget = _other is { } t && OtherCell(t) == held;
             _overOwn = held == CellHere;
             _overParked = _parked.Find(p => p.Cell == held);
@@ -171,7 +177,10 @@ public sealed partial class Tank3DBench
         Vector2 mouse = GetViewport().GetMousePosition();
         if (ParkedAt(mouse) is { } standing)
         {
-            _overParked = standing;
+            if (MatchAims(standing))
+                _overTarget = true;
+            else
+                _overParked = standing;
             return;
         }
         if (PickAt(mouse) is not var (point, onTank, onOwn))
@@ -189,8 +198,10 @@ public sealed partial class Tank3DBench
         SetHalo(_model, !alive ? 0.0f : _chosen ? HaloChosen : _overOwn ? HaloHover : 0.0f, SelectionRing.Friendly);
         if (_other is { } o)
             SetHalo(o.Model, _overTarget ? HaloHover : 0.0f, SelectionRing.Hostile);
+        // in a match, the other side's in its colour (Tank3DBench.Match)
         foreach (Parked p in _parked)
-            SetHalo(p.Model, ReferenceEquals(p, _overParked) ? HaloHover : 0.0f, SelectionRing.Friendly);
+            SetHalo(p.Model, ReferenceEquals(p, _overParked) && p.Fate != Fate.Destroyed ? HaloHover : 0.0f,
+                    Match && p.Side != _side ? SelectionRing.Hostile : SelectionRing.Friendly);
     }
 
     /// <summary>The rim on <paramref name="model"/>, hung on first need.</summary>

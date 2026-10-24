@@ -105,6 +105,7 @@ public sealed partial class Tank3DBench
     /// <summary>The round of the shot just fired.</summary>
     private void Launch()
     {
+        MatchFired();
         ShellsBuild();
         Vector3 muzzle = _model.Muzzle.GlobalPosition;
         Vector3 bore = _model.Muzzle.GlobalBasis.Z.Normalized();
@@ -328,9 +329,13 @@ public sealed partial class Tank3DBench
     /// <summary>The face a round travelling <paramref name="way"/> comes in
     /// through, its plate, and how deep a round of <paramref name="might"/>
     /// gets into it (<see cref="Gunnery.Penetration(int, MovementProfile, Gunnery.Plate)"/>);
-    /// nought holds.</summary>
-    private static int LevelOn(Other o, Vector3 way, int might, out string face, out Gunnery.Plate plate) =>
-        LevelOn(o.Ahead, o.Profile, way, might, out face, out plate);
+    /// nought holds. A knocked-out unit's armour no longer counts: any round
+    /// sets it off (docs/gdd/states.md, «Уничтожен»; Tank3DBench.Match).</summary>
+    private static int LevelOn(Other o, Vector3 way, int might, out string face, out Gunnery.Plate plate)
+    {
+        int level = LevelOn(o.Ahead, o.Profile, way, might, out face, out plate);
+        return o.Fate == Fate.Knocked ? Mathf.Max(level, 1) : level;
+    }
 
     /// <summary>The same for any hull looking <paramref name="ahead"/> - a
     /// standing one the ricochet meets (<see cref="GlanceLeg"/>).</summary>
@@ -400,6 +405,7 @@ public sealed partial class Tank3DBench
         o.Roll.Kick(-k * left.Dot(way));
         RockedOther(o, k / 3.2f);
         GD.Print($"tank3d: round on {o.Tag} {face} ({plate}), might {might}, level {level}: {what}");
+        UnitStruck(o, level > 0);
     }
 
     /// <summary>The target struck in the water: its rings (<see cref="Rocked"/>).</summary>
@@ -431,6 +437,8 @@ public sealed partial class Tank3DBench
         o.Roll.Kick(1.5f * (2.0f * CelPuff.Hash(_shells.Rounds.Count, 7) - 1.0f));
         _shake.Blast(_profile.ShotShake * 0.6);
         GD.Print($"tank3d: bomb on {o.Tag} at {o.Rig.ToLocal(at).Y:F0} up the hull");
+        // the bomb's might is over every roof (units.md, «Броня»)
+        UnitStruck(o, true);
     }
 
     /// <summary>A round into the ground: the board's burst and crater, or in
@@ -633,6 +641,8 @@ public sealed partial class Tank3DBench
     {
         if (_field is null || _fate != Fate.Alive || !_field.InBounds(cell))
             return;
+        // an enemy standing there is the target now (Tank3DBench.Match)
+        TargetOn(cell);
         Vector2I own = CellHere;
         Other? tank = _other is { } o && OtherCell(o) == cell ? o : null;
         string why = ShotWhy(own, cell, out int axis, out int cells, out _);
@@ -676,6 +686,9 @@ public sealed partial class Tank3DBench
         (axis, cells) = AxisTo(own, cell);
         stop = null;
         bool tank = _other is { } o && OtherCell(o) == cell;
+        // whose turn, and what the unit has done in it (Tank3DBench.Match)
+        if (MatchShotWhy(cell) is { Length: > 0 } turn)
+            return turn;
         if (cells <= 0)
             return "по своему гексу не стреляют";
         if (axis < 0)

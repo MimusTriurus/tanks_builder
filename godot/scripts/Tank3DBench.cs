@@ -292,6 +292,7 @@ public sealed partial class Tank3DBench : Node3D
         if (!_noUi)
             BuildPanel(layer);
         BuildBack(layer);
+        BuildMatchUi(layer);
     }
 
     /// <summary>The board's tile: the hex of a sprite set, the one thing here
@@ -328,6 +329,7 @@ public sealed partial class Tank3DBench : Node3D
         _modelTag = model;
         _profile = profile;
         _model = next;
+        SidePaint(_model, _side);
         _rig.AddChild(_model);
         _deckPx = MeasureDeck();
         _beltPaint = null;
@@ -363,6 +365,12 @@ public sealed partial class Tank3DBench : Node3D
     {
         if (string.Equals(model, _modelTag, StringComparison.OrdinalIgnoreCase))
             return;
+        // a match's unit is what it is: another one is taken by a click on it
+        if (Match)
+        {
+            _note = "в партии танк берут щелчком по нему";
+            return;
+        }
         try
         {
             Mount(model);
@@ -929,7 +937,9 @@ public sealed partial class Tank3DBench : Node3D
             if (a == "--model" && more) { _modelTag = args[++i].ToUpperInvariant(); _modelNamed = true; }
             else if (a == "--sprites" && more)
                 GD.Print($"tank3d: --sprites {args[++i]} ignored - the 3D tank reads no sprite set");
-            else if (a == "--map" && more) _mapName = args[++i];
+            else if (a == "--map" && more) { _mapName = args[++i]; _mapNamed = true; }
+            // the bench as a game, two sides of five (Tank3DBench.Match; Match3D.tscn sets it)
+            else if (a == "--match") Match = true;
             // the pointer held on a cell, for a capture of the way to it (Tank3DBench.Course)
             else if (a == "--hover" && more)
             {
@@ -1008,6 +1018,7 @@ public sealed partial class Tank3DBench : Node3D
             }
         }
         TakeSession();
+        MatchSetup();
     }
 
     private static float F(string s, float fallback) =>
@@ -1055,6 +1066,8 @@ public sealed partial class Tank3DBench : Node3D
             case "free": SetRules(false); break;
             case "charge": if (_other is not null) OrderTo(OtherCell(_other), ram: true); break;
             case "cancel": CancelOrder(); break;
+            // the end of turn's button (Tank3DBench.Match)
+            case "pass": EndTurn(); break;
             case "way": NextWay(); break;
             case "forks": Forks(); break;
             case "confirm": Confirm(); break;
@@ -1574,6 +1587,7 @@ public sealed partial class Tank3DBench : Node3D
         RamFrame(dt, _camera.GlobalBasis);
         ShellsTick(dt);
         WoodTick(dt);
+        MatchTick(dt);
         FrameCamera();
 
         string where = _field is null ? "flat ground"
@@ -1586,7 +1600,8 @@ public sealed partial class Tank3DBench : Node3D
                      + (_wallNote.Length > 0 ? $"  {_wallNote}" : "");
         string order = (_rules && _orderNote.Length > 0 ? $"  {_orderNote}" : "")
                        + (_courseNote.Length > 0 ? $"  {_courseNote}" : "");
-        _hud.Text = $"{_modelTag} 3D, class {_profile.Tag}  {where}  {fate}  {_note}{ram}{order}{(_aimNote.Length > 0 ? "  " + _aimNote : "")}{(_judgedNote.Length > 0 ? "  " + _judgedNote : "")}\n"
+        string status = $"{_modelTag} 3D, class {_profile.Tag}  {where}  {fate}  {_note}{ram}{order}{(_aimNote.Length > 0 ? "  " + _aimNote : "")}{(_judgedNote.Length > 0 ? "  " + _judgedNote : "")}";
+        _hud.Text = Match ? MatchHud(status) : status + "\n"
                     + "Space shot   RMB aim and fire (cell fixed: go, then fire)   1-4 ricochet front/right/rear/left   Shift+1-4 pierce   Ctrl+1-4 HE   5 round in the ground\n"
                     + "J burning   K knocked out   X destroyed   T ram   Backspace reset   "
                     + (_rules
@@ -1741,7 +1756,8 @@ public sealed partial class Tank3DBench : Node3D
                 // with a cell fixed, A/D turn its ghost (Tank3DBench.Ghost)
                 case Key.A: if (_lockCell is not null) FaceStep(left: true); else if (_chosen) OrderTurn(left: true); return;
                 case Key.D: if (_lockCell is not null) FaceStep(left: false); else if (_chosen) OrderTurn(left: false); return;
-                case Key.Enter or Key.KpEnter: Confirm(); return;
+                // Ctrl+Enter in a match: the turn handed over (Tank3DBench.Match)
+                case Key.Enter or Key.KpEnter: if (Match && order.CtrlPressed) EndTurn(); else Confirm(); return;
                 // the fixed cell let go; an order in hand dropped; with none,
                 // the tank let go
                 case Key.Escape:
@@ -1772,6 +1788,11 @@ public sealed partial class Tank3DBench : Node3D
         if (@event is not InputEventKey { Pressed: true, Echo: false } key)
             return;
         string kind = key.CtrlPressed ? "he-" : key.ShiftPressed ? "pierce-" : "ricochet-";
+        // A match plays by the rules: the bench's keys that fire, strike, burn,
+        // knock out or reset the tank on the rig past them are off.
+        if (Match && key.Keycode is Key.Space or Key.Key1 or Key.Key2 or Key.Key3 or Key.Key4 or Key.Key5
+                or Key.J or Key.K or Key.X or Key.T or Key.Backspace)
+            return;
         switch (key.Keycode)
         {
             case Key.Space: Do("shot"); break;

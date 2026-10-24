@@ -156,10 +156,13 @@ public sealed partial class Tank3DBench
             if (_field.Screened(next))
                 return new Leg(axis, start, Cross(here, next), LegEnd.Wood, next, might)
                     { Smoke = _field.CoverAt(next) != Cover.Forest };
-            if (_parked.Find(p => p.Cell == next) is { } standing)
+            if (_parked.Find(p => p.Cell == next && p.Fate != Fate.Destroyed) is { } standing)
             {
                 int level = LevelOn(AheadOf(standing.Heading), ClassFor(standing.Tag), dir, might,
                                     out string face, out Gunnery.Plate plate);
+                // a knocked-out one goes up whatever its armour (Tank3DBench.Match)
+                if (standing.Fate == Fate.Knocked)
+                    level = Mathf.Max(level, 1);
                 Vector3 end = standing.Rig.Position + Vector3.Up * (0.45f * standing.Model.Size.Y * standing.Model.PixelsPerUnit);
                 MeshInstance3D? part = null;
                 Vector3 n = -dir;
@@ -269,5 +272,7 @@ public sealed partial class Tank3DBench
         }
         GD.Print($"tank3d: {(leg.Through ? "pass" : "ricochet")} on {p.Tag} {leg.Face} ({leg.Plate}), might {leg.Might}, level {leg.Level}: "
                  + (leg.Pierces ? "pierced" : "held, spent"));
+        // a match's unit has a fate (Tank3DBench.Match)
+        UnitStruck(p, leg.Pierces);
     }
 }

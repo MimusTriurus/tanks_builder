@@ -371,6 +371,12 @@ uniform float flash_on = 0.0;
 uniform vec3 flash_at = vec3(0.0);
 uniform float flash_reach = 100.0;
 uniform vec3 flash_tone : source_color = vec3(1.0, 0.58, 0.22);
+// The side's paint (Tank3DBench.Match): the army's green taken to brown at
+// its own lightness. Only the green: a texel is paint by how far its green
+// stands over its red and blue, so the steel, the rubber and the marks -
+// grey already - keep their own.
+uniform float side_brown = 0.0;
+uniform vec3 side_tone : source_color = vec3(0.58, 0.38, 0.20);
 varying vec3 world;
 " + NoiseCode + RampCode + BurnCode + WindCode + FallCode + @"
 void vertex() {
@@ -387,6 +393,12 @@ void fragment() {
     }
     " + (both ? "if (!FRONT_FACING) { NORMAL = -NORMAL; }" : "") + @"
     vec4 c = texture(albedo_tex, UV) * albedo;
+    if (side_brown > 0.0) {
+        float lum = dot(c.rgb, vec3(0.299, 0.587, 0.114));
+        float tone = dot(side_tone, vec3(0.299, 0.587, 0.114));
+        float paint = smoothstep(0.02, 0.08, c.g - max(c.r, c.b));
+        c.rgb = mix(c.rgb, min(side_tone * lum / tone, vec3(1.0)), side_brown * paint);
+    }
     float ao = has_orm ? texture(orm_tex, UV).r : 1.0;
     vec3 glow = vec3(0.0);
     sooted = 0.0;

@@ -41,6 +41,9 @@ public sealed partial class Tank3DBench
         public required string Tag;
         public required Vector2I Cell;
         public float Heading;
+        /// <summary>Its side and its fate in a match (Tank3DBench.Match).</summary>
+        public Side Side;
+        public Fate Fate = Fate.Alive;
     }
 
     private readonly List<Parked> _parked = new();
@@ -58,6 +61,11 @@ public sealed partial class Tank3DBench
     {
         if (!ParkedOn || _field is null || _parkings.Count < 2)
             return;
+        if (Match)
+        {
+            BuildSides();
+            return;
+        }
         var used = new List<string> { _modelTag };
         foreach (Parking home in _parkings.Skip(1))
         {
@@ -86,8 +94,9 @@ public sealed partial class Tank3DBench
     }
 
     /// <summary>A standing tank of <paramref name="tag"/> on a cell, facing
-    /// <paramref name="heading"/>, upright on its cell's ground.</summary>
-    private void Stand(string tag, Vector2I cell, float heading)
+    /// <paramref name="heading"/>, upright on its cell's ground - in a match,
+    /// of <paramref name="side"/> and in its paint.</summary>
+    private void Stand(string tag, Vector2I cell, float heading, Side side = Side.Green)
     {
         TankModel model;
         try
@@ -100,13 +109,14 @@ public sealed partial class Tank3DBench
             return;
         }
         model.ScaleTo(PixelsFor(model, ClassFor(tag)));
+        SidePaint(model, side);
         var rig = new Node3D { Name = $"Parked_{tag}_{cell.X}_{cell.Y}" };
         AddChild(rig);
         rig.AddChild(model);
         model.Apply();
         rig.Position = CellMiddle(cell);
         rig.Rotation = new Vector3(0.0f, Mathf.DegToRad(heading), 0.0f);
-        _parked.Add(new Parked { Model = model, Rig = rig, Tag = tag.ToUpperInvariant(), Cell = cell, Heading = heading });
+        _parked.Add(new Parked { Model = model, Rig = rig, Tag = tag.ToUpperInvariant(), Cell = cell, Heading = heading, Side = side });
     }
 
     /// <summary>The standing tank under a click, by where it is drawn: within
@@ -137,11 +147,16 @@ public sealed partial class Tank3DBench
     {
         if (_field is null || RamRunning)
             return;
+        // In a match the target goes back to standing first: the swap resets
+        // the rig, and the reset wipes the target's marks.
+        DropTarget();
         string was = _modelTag;
         Vector2I wasCell = CellHere;
         float wasHeading = _heading;
+        Side wasSide = _side;
         _parked.Remove(next);
         next.Rig.QueueFree();
+        _side = next.Side;
         try
         {
             Mount(next.Tag);
@@ -149,19 +164,21 @@ public sealed partial class Tank3DBench
         catch (Exception e)
         {
             GD.Print($"tank3d: {next.Tag}: {e.Message}");
-            Stand(next.Tag, next.Cell, next.Heading);
+            _side = wasSide;
+            Stand(next.Tag, next.Cell, next.Heading, next.Side);
             return;
         }
         CancelOrder();
         _home = next.Cell;
         Heading = next.Heading;
         Park();
-        Stand(was, wasCell, wasHeading);
+        Stand(was, wasCell, wasHeading, wasSide);
         Choose(true);
         _orderNote = $"ведёшь {next.Tag}";
         GD.Print($"tank3d: took {next.Tag} on {next.Cell}; {was} parks on {wasCell}");
     }
 
-    /// <summary>The cells a route keeps off - the standing tanks'.</summary>
-    private IEnumerable<Vector2I> ParkedCells => _parked.Select(p => p.Cell);
+    /// <summary>The cells a route keeps off - the standing tanks', a destroyed
+    /// one's not (docs/gdd/states.md, «Уничтожен»).</summary>
+    private IEnumerable<Vector2I> ParkedCells => _parked.Where(p => p.Fate != Fate.Destroyed).Select(p => p.Cell);
 }

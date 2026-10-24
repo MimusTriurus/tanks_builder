@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Linq;
 using Godot;
 
 namespace TankSpriteTest;
@@ -90,6 +91,17 @@ public sealed partial class Tank3DBench
     {
         if (_field is null || _fate != Fate.Alive || RamRunning)
             return;
+        // a match's turn: one move, by the side whose turn it is (Tank3DBench.Match)
+        if (MatchMoveWhy() is { Length: > 0 } no)
+        {
+            _orderNote = no;
+            return;
+        }
+        if (Match && ram)
+        {
+            _orderNote = "таран в партии ещё не сделан";
+            return;
+        }
         Vector2I here = CellHere;
         // the target and the standing tanks (Tank3DBench.Parked)
         HashSet<Vector2I> barred = Barred(ram);
@@ -149,6 +161,8 @@ public sealed partial class Tank3DBench
         _routeFrom = CellHere;
         _routeRams = ram;
         _orderNote = note;
+        if (!ram)
+            MatchMoved();
     }
 
     /// <summary>The flat side the hull points at - the nearest of the six to
@@ -201,6 +215,13 @@ public sealed partial class Tank3DBench
     {
         if (_fate != Fate.Alive)
             return;
+        // in a match a turn on the spot is the turn's move (Tank3DBench.Match)
+        if (MatchMoveWhy() is { Length: > 0 } no)
+        {
+            _orderNote = no;
+            return;
+        }
+        MatchMoved();
         _route = null;
         _routeGoal = null;
         float from = _turnGoal ?? Mathf.Round(_heading / 60.0f) * 60.0f;
@@ -433,8 +454,11 @@ public sealed partial class Tank3DBench
         stop = null;
         if (_field is null)
             return "";
+        // In a match every unit still on the board stands in the lane, a
+        // destroyed one does not (Tank3DBench.Match).
         Shot shot = Gunnery.Solve(_field, own, cell, _profile.Lobs,
-                                  c => _other is { } o && OtherCell(o) == c, masonry: false);
+                                  c => (_other is { } o && o.Fate != Fate.Destroyed && OtherCell(o) == c)
+                                       || (Match && ParkedCells.Contains(c)), masonry: false);
         if (shot.Clear || shot.BlockedAt is not Vector2I at)
             return "";
         stop = at;
@@ -456,7 +480,9 @@ public sealed partial class Tank3DBench
         // (Tank3DBench.Parked).
         if (ParkedAt(screen) is { } standing)
         {
-            TakeOver(standing);
+            // in a match, only one of the side whose turn it is (Tank3DBench.Match)
+            if (MatchTakes(standing))
+                TakeOver(standing);
             return;
         }
         // a disc of the rose round the fixed cell (Tank3DBench.Ghost)
@@ -484,7 +510,7 @@ public sealed partial class Tank3DBench
         }
         if (_other is { } o && cell == OtherCell(o))
         {
-            if (twice)
+            if (twice && !Match)
                 OrderTo(cell, ram: true);
             return;
         }
