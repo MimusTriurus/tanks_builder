@@ -64,6 +64,7 @@ public sealed partial class Tank3DBench
         public required TreeFall Fall;
         public bool Burning, Burnt;
         public float Phase, Rate;
+        public readonly TreeModel.Swayed Swayed = new();
         /// <summary>When in its cell's fire it catches (<see cref="Wildfire.Of"/>),
         /// and the hash of where it stands, to go back to.</summary>
         public float Stagger, Hashed;
@@ -204,6 +205,7 @@ public sealed partial class Tank3DBench
             Fall = TreeFall.For(model!, holder, model!.Burn, this), Phase = phase, Rate = rate,
         };
         tree.Stagger = tree.Hashed = TreeModel.StaggerOf(spot.Flat);
+        TreeModel.Wind(holder, model.Burn, model.Leaves, phase, rate);
         foreach (Vector3 seat in TreeModel.Seats)
             tree.Seats.Add(new Vector3(seat.X * model.Width, seat.Y * model.Height, seat.Z * model.Depth));
         _trees.Add(tree);
@@ -255,6 +257,7 @@ public sealed partial class Tank3DBench
     {
         _weather += dt;
         _woodClock += dt;
+        TreeModel.Weather(_weather, _wind);
         WoodFire(dt);
         foreach (Planted t in _trees)
             t.Bend = Vector2.Zero;
@@ -282,7 +285,7 @@ public sealed partial class Tank3DBench
                 t.Push = t.PushV = Vector2.Zero;
             // the wind goes out as the trunk goes over (1 - down², the sprite's)
             float down = t.Fall.Down;
-            TreeModel.Sway(t.Holder, t.Model.Burn, t.Model.Leaves, _weather, t.Phase, t.Rate, _wind,
+            TreeModel.Sway(t.Holder, t.Model.Burn, t.Swayed,
                            1.0f - down * down, t.Spent, t.Push, t.Shiver < 1e-3f ? 0.0f : t.Shiver);
         }
         Bulldoze(dt);

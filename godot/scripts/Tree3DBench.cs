@@ -303,6 +303,7 @@ public sealed partial class Tree3DBench : Node3D
         tree.Fire = TreeModel.Fire(this, name, model);
         tree.Fall = TreeFall.For(model, holder, tree.Burn, this);
         (tree.SwayPhase, tree.SwayRate) = TreeModel.SwayOf(at);
+        TreeModel.Wind(holder, tree.Burn, tree.Leaves, tree.SwayPhase, tree.SwayRate);
         tree.Ppm = ppm;
         tree.Height = h;
         tree.Width = w;
@@ -331,6 +332,7 @@ public sealed partial class Tree3DBench : Node3D
         /// <summary>The leaves' cel material and their mask: the flutter.</summary>
         public readonly List<ShaderMaterial> Leaves = new();
         public float SwayPhase, SwayRate;
+        public readonly TreeModel.Swayed Swayed = new();
         public readonly List<Vector3> Seats = new();
         public CelBurn Fire = null!;
         public readonly List<Vector3> Ports = new();
@@ -756,6 +758,7 @@ public sealed partial class Tree3DBench : Node3D
     {
         _weather += dt;
         float wind = _windOn ? _wind : 0.0f;
+        TreeModel.Weather(_weather, wind);
         foreach (TreeFire t in _burning)
         {
             float still = 1.0f;
@@ -764,7 +767,7 @@ public sealed partial class Tree3DBench : Node3D
                 float down = t.Fall.Down;
                 still = 1.0f - down * down;
             }
-            TreeModel.Sway(t.Holder, t.Burn, t.Leaves, _weather, t.SwayPhase, t.SwayRate, wind, still, t.Spent);
+            TreeModel.Sway(t.Holder, t.Burn, t.Swayed, still, t.Spent);
         }
     }
 
