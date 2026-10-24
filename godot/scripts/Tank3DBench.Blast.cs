@@ -111,7 +111,7 @@ public sealed partial class Tank3DBench
         else if (fate == Fate.Knocked && !_chain.Exists(c => c.Cell == cell))
         {
             _chain.Add((cell, ChainBeat, false));
-            GD.Print($"tank3d: match: the blast reaches {SideName(side)} {tag} on {cell}, knocked - it goes up next");
+            Log.Print($"tank3d: match: the blast reaches {SideName(side)} {tag} on {cell}, knocked - it goes up next");
         }
     }
 
@@ -128,7 +128,7 @@ public sealed partial class Tank3DBench
         burn.Build(model.HullLength * model.PixelsPerUnit);
         _blazes.Add(new Blaze { Side = side, Tag = tag, Burn = burn, Since = _turnNo });
         _matchNote = $"{SideName(side)} {tag} горит";
-        GD.Print($"tank3d: match: {SideName(side)} {tag} on {cell} catches fire (turn {_turnNo})");
+        Log.Print($"tank3d: match: {SideName(side)} {tag} on {cell} catches fire (turn {_turnNo})");
     }
 
     /// <summary>A unit's fire gone: put out (the steam), or the unit knocked
@@ -182,7 +182,7 @@ public sealed partial class Tank3DBench
             if (at is not Vector2I cell)
             {
                 // still on the rig: nobody of the other side was there to take it
-                GD.Print($"tank3d: match: {SideName(side)} {b.Tag} burns on the rig - left alight");
+                Log.Print($"tank3d: match: {SideName(side)} {b.Tag} burns on the rig - left alight");
                 continue;
             }
             // one after another, as the chain goes: in one frame they were one blast
@@ -201,7 +201,7 @@ public sealed partial class Tank3DBench
             p.Fate = Explode(p.Model, p.Tag, cell, p.Side);
         else
             return;
-        GD.Print($"tank3d: match: the unit on {cell} burnt out at the end of its side's turn");
+        Log.Print($"tank3d: match: the unit on {cell} burnt out at the end of its side's turn");
         MatchCheckEnd();
     }
 
@@ -227,7 +227,7 @@ public sealed partial class Tank3DBench
         _ramMode = false;
         Unlock();
         _orderNote = $"{_modelTag} потушен";
-        GD.Print($"tank3d: match: {SideName(_side)} {_modelTag} puts its fire out");
+        Log.Print($"tank3d: match: {SideName(_side)} {_modelTag} puts its fire out");
     }
 
     // --- the frame -------------------------------------------------------------------

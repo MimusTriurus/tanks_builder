@@ -197,7 +197,7 @@ public sealed partial class Tank3DBench
             }
             catch (Exception e)
             {
-                GD.Print($"tank3d: target {_otherTag}: {e.Message}");
+                Log.Print($"tank3d: target {_otherTag}: {e.Message}");
                 _ramNote = $"цель {_otherTag} не загрузилась";
                 return;
             }
@@ -243,7 +243,7 @@ public sealed partial class Tank3DBench
         hits.Targets(model, model.Cel);
         hits.Solids = _solids;
         _other = WrapOther(model, rig, profile, tag, hits);
-        GD.Print($"tank3d: target {_other.Tag} class {profile.Tag} x{profile.Size:F2}, mass {profile.Mass}");
+        Log.Print($"tank3d: target {_other.Tag} class {profile.Tag} x{profile.Size:F2}, mass {profile.Mass}");
     }
 
     /// <summary>The target round a model standing on its rig, with its marks:
@@ -497,7 +497,7 @@ public sealed partial class Tank3DBench
                                         _profile, o.Profile, o.Cell, heading);
         if (!push.Allowed)
         {
-            GD.Print($"ram: frame {_frame}, {_modelTag} does not shove {o.Tag} at {o.Cell} along {heading} - "
+            Log.Print($"ram: frame {_frame}, {_modelTag} does not shove {o.Tag} at {o.Cell} along {heading} - "
                      + Ramming.Because(push.Why));
             _ramNote = $"отказ: {Ramming.Because(push.Why)}";
             _speed = 0.0f;
@@ -513,7 +513,7 @@ public sealed partial class Tank3DBench
             Vector3 middle = CellWorld(o.Cell);
             _ramPark = at + axis * (middle - at).Dot(axis);
         }
-        GD.Print($"ram: frame {_frame}, {_modelTag} shoves {o.Tag} {o.Cell} -> {string.Join(" -> ", push.Legs)} along {heading}, "
+        Log.Print($"ram: frame {_frame}, {_modelTag} shoves {o.Tag} {o.Cell} -> {string.Join(" -> ", push.Legs)} along {heading}, "
                  + $"keep {keep:F2}, at {Mathf.Abs(_speed):F0} px/s");
         _ramNote = $"{_modelTag} сдвинул {o.Tag}: {o.Cell} → {push.Legs[^1]}";
         o.Legs.Clear();
@@ -913,7 +913,7 @@ public sealed partial class Tank3DBench
                           o.Foot.HalfLen, o.Foot.HalfWide, 0.7f + 0.25f * Math.Max(0, o.Profile.Mass - 1),
                           new Vector3(mid.X, top / RiseFactor, mid.Z), HexWidth * 0.5f);
             _ripples.Strike(new Vector2(o.Rig.Position.X, o.Rig.Position.Z), Stage3D.Waves);
-            GD.Print($"tank3d: target {o.Tag} thrown into the pond at {cell}");
+            Log.Print($"tank3d: target {o.Tag} thrown into the pond at {cell}");
         }
         o.Wet = wet;
 
@@ -1054,7 +1054,7 @@ public sealed partial class Tank3DBench
         o.Roll.Kick(-LandTip * s * left.Dot(way));
         _shake.Fire(new Vector2(0.0f, 1.0f), o.Profile.ShotShake * 0.45 * s);
         o.Scuff.Lift();
-        GD.Print($"tank3d: target {o.Tag} lands at {o.FallV:F0} px/s ({hard:F2} of a landing)");
+        Log.Print($"tank3d: target {o.Tag} lands at {o.FallV:F0} px/s ({hard:F2} of a landing)");
         if (o.Dust is null || _field is null)
             return;
         Vector2I cell = _field.FlatCellAt(Board(o.Rig.Position));

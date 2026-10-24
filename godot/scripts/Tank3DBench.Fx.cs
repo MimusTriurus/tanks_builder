@@ -413,7 +413,7 @@ void fragment() {
         Directory.CreateDirectory(AssetRoot.Out);
         string path = AssetRoot.Out + "/tank3d_heights.png";
         Error err = _heights.GetTexture().GetImage().SavePng(path);
-        GD.Print(err == Error.Ok ? $"heights: {path}" : $"heights to {path} failed: {err}");
+        Log.Print(err == Error.Ok ? $"heights: {path}" : $"heights to {path} failed: {err}");
     }
 
     // --- setup ------------------------------------------------------------
@@ -447,7 +447,7 @@ void fragment() {
             _splash.Build(Squash, RiseFactor);
         }
         if (_profile.Turreted != _model.Turreted)
-            GD.Print($"tank3d: {_modelTag} is {(_model.Turreted ? "turreted" : "a casemate")} but "
+            Log.Print($"tank3d: {_modelTag} is {(_model.Turreted ? "turreted" : "a casemate")} but "
                      + $"moves as the {_profile.Tag} class, which is {(_profile.Turreted ? "turreted" : "a casemate")}"
                      + " - the class comes from the model's pair");
         foreach (MeshInstance3D mesh in Meshes(_model))
@@ -1063,7 +1063,7 @@ void fragment() {
             }
             radius = want;
         }
-        GD.Print($"tank3d: crater on {cell}: {asked:F0} -> {radius:F0} px (cell holds {Room(mid) / reach:F0}), "
+        Log.Print($"tank3d: crater on {cell}: {asked:F0} -> {radius:F0} px (cell holds {Room(mid) / reach:F0}), "
                  + $"moved in {new Vector2(at.X - from.X, at.Z - from.Z).Length():F0} px, foot room {Room(new Vector2(at.X, at.Z)) - radius * CelCrater.FootMost:F1} px");
         return (at, radius, w => Room(new Vector2(w.X, w.Z)) >= 0.0f);
     }

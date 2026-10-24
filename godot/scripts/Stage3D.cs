@@ -1622,7 +1622,7 @@ void fragment() {{
                 if (sink >= 1.0f && !stand.AirTold)
                 {
                     stand.AirTold = true;
-                    GD.Print($"stage: air off {vehicle.Tag} settled: crest "
+                    Log.Print($"stage: air off {vehicle.Tag} settled: crest "
                              + $"{atlas.HullCrestPx:F0}px x{scale:F2}, ground row "
                              + $"{vehicle.GroundPoint.Y:F0}, cell row "
                              + $"{Origin.Y + Field.CellCentre(wet).Y:F0}, seat row {deck:F0}");
@@ -7606,7 +7606,7 @@ void fragment() {{
         }
         Plunge spray = _plunging[_nextPlunge % Bursts];
         _nextPlunge = (_nextPlunge + 1) % Bursts;
-        GD.Print($"stage: plunge at ({spot.X:F0},{spot.Y:F0}) heading "
+        Log.Print($"stage: plunge at ({spot.X:F0},{spot.Y:F0}) heading "
                  + $"({heading.X:F2},{heading.Y:F2}) half {halfLen:F0}px might "
                  + $"{might:F2} {look}");
         spray.Look = look;
@@ -9187,7 +9187,7 @@ void fragment() {
             }
         }
         _upright = best;
-        GD.Print($"wood: tank fire borrowed at heading {best:F0} deg, lean {least:F1}px");
+        Log.Print($"wood: tank fire borrowed at heading {best:F0} deg, lean {least:F1}px");
         return best;
     }
 
@@ -9354,7 +9354,7 @@ void fragment() {
             stride / (float)strip.GetWidth(), pad / (float)strip.GetWidth(),
             used.Size.X / (float)strip.GetWidth());
         _loans[layer] = loan;
-        GD.Print($"wood: {layer} on loan, crop {used.Size.X}x{used.Size.Y} x{phases} "
+        Log.Print($"wood: {layer} on loan, crop {used.Size.X}x{used.Size.Y} x{phases} "
                  + $"phases, body {loan.Body:F0}px seated {used.Size.Y - 1 - sits}px "
                  + $"off its bottom, foot {across:F0}px across");
         return loan;

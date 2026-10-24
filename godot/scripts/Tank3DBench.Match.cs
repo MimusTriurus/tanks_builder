@@ -105,7 +105,7 @@ public sealed partial class Tank3DBench
         _modelTag = Roster[0];
         _modelNamed = true;
         _side = Side.Green;
-        GD.Print($"tank3d: match on {_mapName}, {Roster.Length} a side");
+        Log.Print($"tank3d: match on {_mapName}, {Roster.Length} a side");
     }
 
     // --- the sides -------------------------------------------------------------
@@ -119,7 +119,7 @@ public sealed partial class Tank3DBench
             return;
         int n = Roster.Length;
         if (_parkings.Count < 2 * n)
-            GD.Print($"tank3d: match: the board has {_parkings.Count} homes for {2 * n} units - the rest stay out");
+            Log.Print($"tank3d: match: the board has {_parkings.Count} homes for {2 * n} units - the rest stay out");
         for (int i = 0; i < _parkings.Count && i < 2 * n; i++)
         {
             Vector2I cell = _parkings[i].Cell;
@@ -132,7 +132,7 @@ public sealed partial class Tank3DBench
             if (_field.InBounds(cell))
                 Stand(Roster[i % n], cell, SideHeading(cell, side), side);
         }
-        GD.Print($"tank3d: match: green {_modelTag} {CellHere} on the rig; standing "
+        Log.Print($"tank3d: match: green {_modelTag} {CellHere} on the rig; standing "
                  + string.Join(", ", _parked.Select(p => $"{SideName(p.Side)} {p.Tag} {p.Cell}")));
         Banner($"Раунд 1 · ходят {SideName(_turn)}", SideInk(_turn));
     }
@@ -220,7 +220,7 @@ public sealed partial class Tank3DBench
         if (!Match || _drove)
             return;
         _drove = true;
-        GD.Print($"tank3d: match: {SideName(_side)} {_modelTag} moves");
+        Log.Print($"tank3d: match: {SideName(_side)} {_modelTag} moves");
     }
 
     /// <summary>The gun fired: the action of the turn.</summary>
@@ -230,7 +230,7 @@ public sealed partial class Tank3DBench
             return;
         _fired = true;
         Unlock();
-        GD.Print($"tank3d: match: {SideName(_side)} {_modelTag} fires");
+        Log.Print($"tank3d: match: {SideName(_side)} {_modelTag} fires");
     }
 
     /// <summary>Whether a click on a standing unit takes it: one of the side
@@ -264,7 +264,7 @@ public sealed partial class Tank3DBench
             _matchNote = "дождись конца приказа";
             return;
         }
-        GD.Print($"tank3d: match: {SideName(_turn)} end the turn"
+        Log.Print($"tank3d: match: {SideName(_turn)} end the turn"
                  + (_side == _turn && !_drove && !_fired ? " - a pass" : ""));
         PassTurn();
     }
@@ -302,7 +302,7 @@ public sealed partial class Tank3DBench
             {
                 TakeOver(next);
                 Banner($"Раунд {_round} · ходят {SideName(_turn)}", SideInk(_turn));
-                GD.Print($"tank3d: match: round {_round}, {SideName(_turn)} to move, {_modelTag} on {CellHere}");
+                Log.Print($"tank3d: match: round {_round}, {SideName(_turn)} to move, {_modelTag} on {CellHere}");
                 return;
             }
             if (_side == _turn && _fate == Fate.Alive)
@@ -310,7 +310,7 @@ public sealed partial class Tank3DBench
                 Banner($"Раунд {_round} · ходят {SideName(_turn)}", SideInk(_turn));
                 return;
             }
-            GD.Print($"tank3d: match: {SideName(_turn)} have nothing able to act - a pass");
+            Log.Print($"tank3d: match: {SideName(_turn)} have nothing able to act - a pass");
             _matchNote = $"у {SideName(_turn)} ходить некому — пас";
         }
         _drawn = true;
@@ -326,7 +326,7 @@ public sealed partial class Tank3DBench
     /// and the way back to the editor, handed over as Run hands them.</summary>
     private void Restart()
     {
-        GD.Print($"tank3d: match: restart on {_mapName}");
+        Log.Print($"tank3d: match: restart on {_mapName}");
         if (_handed)
             Session.Map = _mapName;
         Session.Editing = _editing;
@@ -355,7 +355,7 @@ public sealed partial class Tank3DBench
             _won = Across(s);
             _passIn = null;
             Banner($"Победа: {SideName(_won.Value)} · раунд {_round}", SideInk(_won.Value), stay: true);
-            GD.Print($"tank3d: match: {SideName(s)} destroyed to the last - {SideName(_won.Value)} win in round {_round}");
+            Log.Print($"tank3d: match: {SideName(s)} destroyed to the last - {SideName(_won.Value)} win in round {_round}");
             return true;
         }
         return false;
@@ -507,7 +507,7 @@ public sealed partial class Tank3DBench
             Quench(side, tag, steam: false);
             Boom(at, (float)TankTick.KnockOutFlash, grounded: false);
             _matchNote = $"{SideName(side)} {tag} подбит";
-            GD.Print($"tank3d: match: {SideName(side)} {tag} on {cell} knocked out");
+            Log.Print($"tank3d: match: {SideName(side)} {tag} on {cell} knocked out");
             return Fate.Knocked;
         }
         return Explode(model, tag, cell, side);
@@ -538,7 +538,7 @@ public sealed partial class Tank3DBench
         Boom(at, 1.0f, grounded: true);
         _shake.Blast(_profile.ShotShake * 0.6);
         _matchNote = $"{SideName(side)} {tag} уничтожен";
-        GD.Print($"tank3d: match: {SideName(side)} {tag} on {cell} destroyed");
+        Log.Print($"tank3d: match: {SideName(side)} {tag} on {cell} destroyed");
         Blast(cell);
         return Fate.Destroyed;
     }

@@ -186,7 +186,7 @@ public sealed partial class Tank3DBench
                 Stand(spot);
         foreach (Vector2I cell in wooded)
             _woodMiddle += CellMiddle(cell) / wooded.Count;
-        GD.Print($"tank3d: wood on {wooded.Count} cells, {_trees.Count} trees in {Time.GetTicksMsec() - t0} ms");
+        Log.Print($"tank3d: wood on {wooded.Count} cells, {_trees.Count} trees in {Time.GetTicksMsec() - t0} ms");
     }
 
     private void Stand(BoardDress.TreeSpot spot)
@@ -194,7 +194,7 @@ public sealed partial class Tank3DBench
         if (BoardDress.Tree(this, spot, Foot(spot.At), _pbr, _crowns, $"{spot.Name}.{_trees.Count}",
                             out TreeModel.Loaded? model, out string? error) is not { } holder)
         {
-            GD.Print($"tank3d: {error}");
+            Log.Print($"tank3d: {error}");
             return;
         }
         (float phase, float rate) = TreeModel.SwayOf(spot.Flat);
@@ -246,7 +246,7 @@ public sealed partial class Tank3DBench
             if (_woodedCells.Contains(lay[i]))
                 _meadowOf[lay[i]] = meadow;
         }
-        GD.Print($"tank3d: grass on {lay.Count} cells in {Time.GetTicksMsec() - t0} ms");
+        Log.Print($"tank3d: grass on {lay.Count} cells in {Time.GetTicksMsec() - t0} ms");
     }
 
     /// <summary>A frame of the wood: the wind on the crowns, and the grass
@@ -343,7 +343,7 @@ public sealed partial class Tank3DBench
                 t.Bend = bend;
             t.Shiver = Mathf.Max(t.Shiver, BrushShiver * touch * pace);
             if (pace > 0.05f && _brushed.Add(t.Cell) && _brushing.Add(t.Cell))
-                GD.Print($"tank3d: {tag} pushes through the wood on {t.Cell}");
+                Log.Print($"tank3d: {tag} pushes through the wood on {t.Cell}");
         }
     }
 
@@ -436,7 +436,7 @@ public sealed partial class Tank3DBench
                 // given once; the trees go down as the hull gets to them.
                 _woodedCells.Remove(cell);
                 _razed.Add(cell);
-                GD.Print($"tank3d: the heavy is in the wood on {cell}: it is ground now");
+                Log.Print($"tank3d: the heavy is in the wood on {cell}: it is ground now");
             }
             foreach (Planted t in _trees)
             {
@@ -547,7 +547,7 @@ public sealed partial class Tank3DBench
             if (float.IsInfinity(when))
                 when = d / BlastSpeed;
             _lights.Add((_woodClock + when, next, new Vector2(edge.X, edge.Z)));
-            GD.Print($"tank3d: blast on {here} lights the wood on {next} in {when:F2} s");
+            Log.Print($"tank3d: blast on {here} lights the wood on {next} in {when:F2} s");
         }
     }
 

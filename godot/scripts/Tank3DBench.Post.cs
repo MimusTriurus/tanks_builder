@@ -71,7 +71,7 @@ public sealed partial class Tank3DBench
         {
             _postKey = key;
             _post = FindPost(target, cell);
-            GD.Print(_post is { } found
+            Log.Print(_post is { } found
                 ? $"tank3d: post for {target.Tag} {cell}: {found.Cell} facing {found.Face}, {found.Steps} of {_reach!.Budget} steps, {found.Shot.Says}"
                 : $"tank3d: post for {target.Tag} {cell}: none in reach");
         }

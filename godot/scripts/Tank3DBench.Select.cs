@@ -56,7 +56,7 @@ public sealed partial class Tank3DBench
         if (!on)
             CancelOrder();
         _orderNote = "";
-        GD.Print($"tank3d: own tank {(on ? "selected" : "let go")}");
+        Log.Print($"tank3d: own tank {(on ? "selected" : "let go")}");
     }
 
     private void BuildMarks()

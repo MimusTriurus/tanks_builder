@@ -307,7 +307,7 @@ public sealed partial class Tank3DBench : Node3D
         }
         catch (Exception e)
         {
-            GD.Print($"tank3d: no {tag} tile ({e.Message}) - flat ground, 248 px hex");
+            Log.Print($"tank3d: no {tag} tile ({e.Message}) - flat ground, 248 px hex");
             return null;
         }
     }
@@ -346,6 +346,8 @@ public sealed partial class Tank3DBench : Node3D
     {
         _bareNode?.Free();
         _bareNode = null;
+        // a quit leaves the tree: the run's last lines out before the process goes
+        Log.Drain();
     }
 
     /// <summary>A model already loaded on the rig - the one a hand-over takes
@@ -395,7 +397,7 @@ public sealed partial class Tank3DBench : Node3D
         known = new RigMeasures(MeasureDeck(model), MeasureFootprint(model, rig, tag), MeasureRoof(model));
         _measured[tag] = known;
         MovementProfile profile = ClassFor(tag);
-        GD.Print($"tank3d: {tag} class {profile.Tag} x{profile.Size:F2}, {model.PixelsPerUnit:F2} px/unit, "
+        Log.Print($"tank3d: {tag} class {profile.Tag} x{profile.Size:F2}, {model.PixelsPerUnit:F2} px/unit, "
                  + $"hull {model.HullLength:F4} x {model.HullWidth:F4} = {model.HullLength * model.PixelsPerUnit:F0} px, "
                  + $"bore r {model.BoreRadius:F4}, deck {known.Deck:F1} px, roof {known.Roof:F1} of {model.Size.Y * model.PixelsPerUnit * RiseFactor:F1}, squash {Squash:F4} = {Mathf.RadToDeg(Mathf.Asin(Squash)):F2} deg, "
                  + $"hex {HexWidth:F0} px");
@@ -446,7 +448,7 @@ public sealed partial class Tank3DBench : Node3D
         }
         catch (Exception e)
         {
-            GD.Print($"tank3d: {model}: {e.Message}");
+            Log.Print($"tank3d: {model}: {e.Message}");
             _note = $"{model} did not load";
         }
     }
@@ -535,7 +537,7 @@ public sealed partial class Tank3DBench : Node3D
     private void FollowTank()
     {
         _viewAt = null;
-        GD.Print("tank3d: camera follows the tank");
+        Log.Print("tank3d: camera follows the tank");
     }
 
     /// <summary>
@@ -717,7 +719,7 @@ public sealed partial class Tank3DBench : Node3D
     {
         if (_tile is null)
         {
-            GD.Print("tank3d: no tile to lay a board with - the flat ground instead");
+            Log.Print("tank3d: no tile to lay a board with - the flat ground instead");
             return;
         }
         if (MapToPlay() is not BoardMap map)
@@ -725,7 +727,7 @@ public sealed partial class Tank3DBench : Node3D
         TankFromBoard(map);
         _parkings = map.Parked;
         TerrainSet terrain = TerrainSet.Load(AssetRoot.Terrains);
-        GD.Print($"tank3d: board {map.Name} {map.Columns}x{map.Rows}, terrain {terrain.Note}");
+        Log.Print($"tank3d: board {map.Name} {map.Columns}x{map.Rows}, terrain {terrain.Note}");
         _field = new HexField
         {
             Terrain = terrain,
@@ -944,7 +946,7 @@ public sealed partial class Tank3DBench : Node3D
     private bool BuildCells()
     {
         TerrainSet terrain = TerrainSet.Load(AssetRoot.Terrains);
-        GD.Print($"tank3d: {terrain.Note}");
+        Log.Print($"tank3d: {terrain.Note}");
         if (!terrain.Any || _tile is null)
             return false;
         var hexRect = new Rect2I((Vector2I)_tile.HexRect.Position, (Vector2I)_tile.HexRect.Size);
@@ -1005,7 +1007,7 @@ public sealed partial class Tank3DBench : Node3D
             bool more = i + 1 < args.Length;
             if (a == "--model" && more) { _modelTag = args[++i].ToUpperInvariant(); _modelNamed = true; }
             else if (a == "--sprites" && more)
-                GD.Print($"tank3d: --sprites {args[++i]} ignored - the 3D tank reads no sprite set");
+                Log.Print($"tank3d: --sprites {args[++i]} ignored - the 3D tank reads no sprite set");
             else if (a == "--map" && more) { _mapName = args[++i]; _mapNamed = true; }
             // the bench as a game, two sides of five (Tank3DBench.Match; Match3D.tscn sets it)
             else if (a == "--match") Match = true;
@@ -1168,7 +1170,7 @@ public sealed partial class Tank3DBench : Node3D
                     if (_model.Turreted)
                         _model.Yaw = Mathf.DegToRad(F(what[7..], 0));
                     else
-                        GD.Print($"tank3d: --do {what}: {_modelTag} is a casemate, it has no turret");
+                        Log.Print($"tank3d: --do {what}: {_modelTag} is a casemate, it has no turret");
                 }
                 else if (what.StartsWith("elev=", StringComparison.Ordinal))
                     _model.Elevation = Mathf.DegToRad(F(what[5..], 0));
@@ -1253,7 +1255,7 @@ public sealed partial class Tank3DBench : Node3D
                 else if (what.StartsWith("target=", StringComparison.Ordinal))
                     PickOther(what[7..].ToUpperInvariant());
                 else
-                    GD.Print($"tank3d: --do {what}: no such event");
+                    Log.Print($"tank3d: --do {what}: no such event");
                 break;
         }
     }
@@ -1863,7 +1865,7 @@ public sealed partial class Tank3DBench : Node3D
             if (single)
             {
                 Error err = image.SavePng(_capturePath!);
-                GD.Print(err == Error.Ok ? $"capture: {_capturePath}" : $"capture to {_capturePath} failed: {err}");
+                Log.Print(err == Error.Ok ? $"capture: {_capturePath}" : $"capture to {_capturePath} failed: {err}");
             }
         }
         // Asked on every frame, not only on a saved one: a sequence whose end

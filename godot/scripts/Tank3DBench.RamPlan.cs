@@ -121,7 +121,7 @@ public sealed partial class Tank3DBench
         {
             _ramKey = key;
             _ramFound = FindRam(o, target);
-            GD.Print(_ramFound is { } found
+            Log.Print(_ramFound is { } found
                 ? $"tank3d: ram {o.Tag} {target}: from {found.From} along {found.Side}, {found.Steps} steps"
                   + (found.Allowed ? $", shoved to {found.Push.Legs[^1]}" : $" - refused: {found.Why}")
                 : $"tank3d: ram {o.Tag} {target}: no way to it");
@@ -248,7 +248,7 @@ public sealed partial class Tank3DBench
         // target's hex, so the move is spent with it
         _fired = _drove = true;
         _orderNote = $"таран {cell}";
-        GD.Print($"tank3d: match: {SideName(_side)} {_modelTag} rams {cell} from {plan.From} along {plan.Side}");
+        Log.Print($"tank3d: match: {SideName(_side)} {_modelTag} rams {cell} from {plan.From} along {plan.Side}");
         return true;
     }
 
@@ -264,7 +264,7 @@ public sealed partial class Tank3DBench
             || CellHere != plan.From)
         {
             _orderNote = "таран сорвался";
-            GD.Print($"tank3d: match: the ram on {plan.Target} fell through");
+            Log.Print($"tank3d: match: the ram on {plan.Target} fell through");
             return;
         }
         Drive(new List<Vector2I> { CellHere, plan.Target }, ram: true, $"таран {plan.Target}");
@@ -308,7 +308,7 @@ public sealed partial class Tank3DBench
         }
         catch (Exception e)
         {
-            GD.Print($"tank3d: ram ghost of {tag}: {e.Message}");
+            Log.Print($"tank3d: ram ghost of {tag}: {e.Message}");
             return null;
         }
         var ink = new ShaderMaterial { Shader = GhostInkShader, RenderPriority = Stage3D.RingOrder + 2 };

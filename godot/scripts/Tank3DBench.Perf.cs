@@ -128,7 +128,7 @@ public sealed partial class Tank3DBench
             s.AllocTrace.Clear();
             s.Trace.Capacity = s.AllocTrace.Capacity = Prof.Capacity;
         }
-        GD.Print($"perf: recording {_perfTo} frames to {_perfDir}");
+        Log.Print($"perf: recording {_perfTo} frames to {_perfDir}");
     }
 
     private double? _perfStep;
@@ -163,7 +163,7 @@ public sealed partial class Tank3DBench
     {
         string dir = _perfDir!;
         if (!PerfFixed)
-            GD.Print("perf: no --fixed-fps - the script's frames drift with the frame rate, and two runs play different games");
+            Log.Print("perf: no --fixed-fps - the script's frames drift with the frame rate, and two runs play different games");
         Directory.CreateDirectory(dir);
         List<Prof.Sample> all = Prof.Samples.Where(s => s.Frame >= 0).ToList();
         List<Prof.Section> sections = Prof.Sections.ToList();
@@ -238,7 +238,7 @@ public sealed partial class Tank3DBench
         string path = Path.Combine(dir, "summary.json");
         File.WriteAllText(path, json);
         JsonObject m = metrics;
-        GD.Print($"perf: {run.Count} frames - frame avg {Get(m, "frame_ms", "avg"):F2} ms, p99 {Get(m, "frame_ms", "p99"):F2}, "
+        Log.Print($"perf: {run.Count} frames - frame avg {Get(m, "frame_ms", "avg"):F2} ms, p99 {Get(m, "frame_ms", "p99"):F2}, "
                  + $"max {Get(m, "frame_ms", "max"):F2}; GPU avg {Get(m, "gpu_ms", "avg"):F2}; "
                  + $"alloc {Get(m, "alloc_bytes", "avg") / 1024.0:F1} KB/frame, GC0 {m["gc0"]} - {path}");
 
@@ -249,7 +249,7 @@ public sealed partial class Tank3DBench
         if (_perfBaseline)
         {
             File.WriteAllText(basePath, json);
-            GD.Print($"perf: this run is the baseline now - {basePath}");
+            Log.Print($"perf: this run is the baseline now - {basePath}");
         }
         return worseCount;
     }
@@ -383,7 +383,7 @@ public sealed partial class Tank3DBench
         sb.AppendLine(worse == 0 ? "nothing worse than the baseline" : $"{worse} worse than the baseline (▲)");
         string text = sb.ToString();
         File.WriteAllText(outPath, text);
-        GD.Print(text);
+        Log.Print(text);
         return worse;
     }
 }

@@ -75,7 +75,7 @@ public sealed partial class Tank3DBench
 
     private BoardMap? Refuse(string why)
     {
-        GD.Print($"tank3d: map {_mapName}: REFUSED {why}");
+        Log.Print($"tank3d: map {_mapName}: REFUSED {why}");
         GetTree().Quit(1);
         return null;
     }
@@ -91,11 +91,11 @@ public sealed partial class Tank3DBench
         int i = Array.FindIndex(Pairs, p => string.Equals(p.Class, wanted, StringComparison.OrdinalIgnoreCase));
         if (i < 0)
         {
-            GD.Print($"tank3d: the board's first parking wants {wanted}, which no model plays - {_modelTag}");
+            Log.Print($"tank3d: the board's first parking wants {wanted}, which no model plays - {_modelTag}");
             return;
         }
         _modelTag = Pairs[i].Model;
-        GD.Print($"tank3d: the board's first parking wants {wanted} - {_modelTag}");
+        Log.Print($"tank3d: the board's first parking wants {wanted} - {_modelTag}");
     }
 
     /// <summary>The way back, a button beside the hud - only when the editor
@@ -124,7 +124,7 @@ public sealed partial class Tank3DBench
         _editing = false;
         Session.Map = _mapName;
         Session.Editing = false;
-        GD.Print($"tank3d: back to the editor on {_mapName}");
+        Log.Print($"tank3d: back to the editor on {_mapName}");
         GetTree().ChangeSceneToFile("res://Editor.tscn");
     }
 }

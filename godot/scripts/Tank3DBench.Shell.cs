@@ -404,7 +404,7 @@ public sealed partial class Tank3DBench
         o.Pitch.Kick(k * ahead.Dot(way));
         o.Roll.Kick(-k * left.Dot(way));
         RockedOther(o, k / 3.2f);
-        GD.Print($"tank3d: round on {o.Tag} {face} ({plate}), might {might}, level {level}: {what}");
+        Log.Print($"tank3d: round on {o.Tag} {face} ({plate}), might {might}, level {level}: {what}");
         UnitStruck(o, level > 0);
     }
 
@@ -436,7 +436,7 @@ public sealed partial class Tank3DBench
         o.Pitch.Kick(1.5f * (2.0f * CelPuff.Hash(_shells!.Rounds.Count, 5) - 1.0f));
         o.Roll.Kick(1.5f * (2.0f * CelPuff.Hash(_shells.Rounds.Count, 7) - 1.0f));
         _shake.Blast(_profile.ShotShake * 0.6);
-        GD.Print($"tank3d: bomb on {o.Tag} at {o.Rig.ToLocal(at).Y:F0} up the hull");
+        Log.Print($"tank3d: bomb on {o.Tag} at {o.Rig.ToLocal(at).Y:F0} up the hull");
         // the bomb's might is over every roof (units.md, «Броня»)
         UnitStruck(o, true);
     }
@@ -445,7 +445,7 @@ public sealed partial class Tank3DBench
     /// deep water its splash and a ring; a spent ricochet only goes in.</summary>
     private void Lands(Vector3 at, bool wet, bool spent)
     {
-        GD.Print($"tank3d: round into the {(wet ? "water" : "ground")} at "
+        Log.Print($"tank3d: round into the {(wet ? "water" : "ground")} at "
                  + $"{_field?.FlatCellAt(Board(at)).ToString() ?? "-"}, {at.DistanceTo(_rig.Position) / Mathf.Max(CellStep, 1.0f):F1} cells out"
                  + (spent ? ", spent" : ""));
         if (spent)
@@ -657,7 +657,7 @@ public sealed partial class Tank3DBench
             _aim = null;
             _aimNote = why;
             MarkAt(ground, refused: true);
-            GD.Print($"tank3d: no shot at {cell}: {why}");
+            Log.Print($"tank3d: no shot at {cell}: {why}");
             return;
         }
         Vector3 want = ground;
@@ -741,7 +741,7 @@ public sealed partial class Tank3DBench
         _aimRound = null;
         _aimNote = "";
         MarkAt(mark);
-        GD.Print($"tank3d: aim at {what} {want}, {want.DistanceTo(_rig.Position) / Mathf.Max(CellStep, 1.0f):F1} cells");
+        Log.Print($"tank3d: aim at {what} {want}, {want.DistanceTo(_rig.Position) / Mathf.Max(CellStep, 1.0f):F1} cells");
     }
 
     /// <summary>The gun on to <see cref="_aim"/>, by the same inputs the keys
@@ -796,7 +796,7 @@ public sealed partial class Tank3DBench
         if (_profile.Lobs)
             _chargeFor = at;
         string charge = _profile.Lobs && Charge(muzzle, bore, at, fall) is float v ? $", charge {v:F0}/s" : "";
-        GD.Print($"tank3d: laid at {Mathf.RadToDeg(pitch):F1} deg (wants {(lay is float l ? Mathf.RadToDeg(l).ToString("F1") : "beyond reach")}){charge}"
+        Log.Print($"tank3d: laid at {Mathf.RadToDeg(pitch):F1} deg (wants {(lay is float l ? Mathf.RadToDeg(l).ToString("F1") : "beyond reach")}){charge}"
                  + (_aimNote.Length > 0 ? $": {_aimNote}" : ""));
         Shoot();
     }

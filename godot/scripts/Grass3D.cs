@@ -753,7 +753,7 @@ public sealed partial class Grass3D : Node3D
                 }
             }
         }
-        GD.Print($"grass3d: {placed} tufts on {area:F0} m2");
+        Log.Print($"grass3d: {placed} tufts on {area:F0} m2");
         return Arrays(verts, normals, uvs, roots);
     }
 

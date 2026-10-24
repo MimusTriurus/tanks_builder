@@ -270,7 +270,7 @@ public sealed partial class Tank3DBench
             hits.Leave(part, leg.End, leg.N, way, CelHit.Kind.Gouge, 0.8f);
             hits.Ricochet(leg.End, leg.N, way - 2.0f * way.Dot(leg.N) * leg.N);
         }
-        GD.Print($"tank3d: {(leg.Through ? "pass" : "ricochet")} on {p.Tag} {leg.Face} ({leg.Plate}), might {leg.Might}, level {leg.Level}: "
+        Log.Print($"tank3d: {(leg.Through ? "pass" : "ricochet")} on {p.Tag} {leg.Face} ({leg.Plate}), might {leg.Might}, level {leg.Level}: "
                  + (leg.Pierces ? "pierced" : "held, spent"));
         // a match's unit has a fate (Tank3DBench.Match)
         UnitStruck(p, leg.Pierces);
