@@ -184,7 +184,9 @@ public sealed partial class Stage3D : Node3D
 
     private bool _showEdges = true;
     private readonly Dictionary<Vehicle, Stand> _stands = new();
-    private string _built = "";
+    /// <summary>The <see cref="Signature"/> the board was last built at; null
+    /// before the first build.</summary>
+    private ulong? _built;
 
     /// <summary>One tank's render target, the holder that keeps its position
     /// honest, and the quad that carries the result into the world.</summary>
@@ -2327,56 +2329,63 @@ void fragment() {{
     /// <summary>What the board is wearing, so it is rebuilt when that changes
     /// and not otherwise. The colours rather than the lists, because the colour
     /// is what the mesh carries and two different lists that paint the same
-    /// board are the same board.</summary>
-    private string Signature()
+    /// board are the same board.
+    ///
+    /// <b>A 64-bit hash (FNV-1a), not a string.</b> It was a string of every
+    /// cell, built every frame: 7 KB a frame of the 54 the bench allocated
+    /// (BOT-3). The same terms go in, in the same order; floats by their bits,
+    /// so a slider moved by less than the old three decimals now rebuilds too.</summary>
+    private ulong Signature()
     {
-        var note = new System.Text.StringBuilder();
-        note.Append(Field.Columns).Append('x').Append(Field.Rows)
-            .Append('@').Append(Field.Lift.ToString("F3"))
-            // Which pond, because the material is chosen inside BuildWater and
-            // nowhere else: left out, the panel's own switch for it would move
-            // a field nothing ever reads again, which is a control that does
-            // nothing and says nothing.
-            .Append(Deep ? "|deep" : "|strip");
+        ulong h = 14695981039346656037UL;
+        void Mix(long v) => h = (h ^ (ulong)v) * 1099511628211UL;
+        void Real(double v) => Mix(BitConverter.DoubleToInt64Bits(v));
+        Mix(Field.Columns);
+        Mix(Field.Rows);
+        Real(Field.Lift);
+        // Which pond, because the material is chosen inside BuildWater and
+        // nowhere else: left out, the panel's own switch for it would move
+        // a field nothing ever reads again, which is a control that does
+        // nothing and says nothing.
+        Mix(Deep ? 1 : 0);
         for (int q = 0; q < Field.Columns; q++)
         for (int r = 0; r < Field.Rows; r++)
         {
             var cell = new Vector2I(q, r);
+            Mix(Field.LevelAt(cell));
             // The ramp's heading too, and it has to be said: a cell that starts
             // tilting without changing level or colour is a board that is not
             // rebuilt, which reads as the ramp not having been modelled.
-            note.Append(Field.LevelAt(cell)).Append('/')
-                .Append(Field.RampHeading(cell))
-                // And whether it is under water, for the ramp heading's reason: a
-                // cell that floods without changing level or colour is a board
-                // that was not rebuilt, which reads as the water not having been
-                // put on the map.
-                // Deep water is a different surface height on the same mask, so
-                // it is its own mark for the same reason.
-                .Append(Field.IsDeep(cell) ? 'D' : Field.IsWater(cell) ? '~' : '.')
-                // And mud, which Mire bakes with the faces: a floor painted
-                // mud in the editor moves no level, no water and no colour,
-                // so without it the board was not rebuilt and the mud not laid.
-                .Append(Field.InBounds(cell) && Field.FoundationAt(cell) == Foundation.Mud ? 'u' : '-')
-                .Append(Field.InkFor(cell).ToRgba32()).Append(';');
+            Mix(Field.RampHeading(cell));
+            // And whether it is under water, for the ramp heading's reason: a
+            // cell that floods without changing level or colour is a board
+            // that was not rebuilt, which reads as the water not having been
+            // put on the map. Deep water is a different surface height on the
+            // same mask, so it is its own mark for the same reason.
+            Mix(Field.IsDeep(cell) ? 2 : Field.IsWater(cell) ? 1 : 0);
+            // And mud, which Mire bakes with the faces: a floor painted
+            // mud in the editor moves no level, no water and no colour,
+            // so without it the board was not rebuilt and the mud not laid.
+            Mix(Field.InBounds(cell) && Field.FoundationAt(cell) == Foundation.Mud ? 1 : 0);
+            Mix(Field.InkFor(cell).ToRgba32());
         }
         // The depth as well, and not only where the water is: it is a slider, and
         // moving it moves the surface without moving a single cell of the mask.
-        note.Append('@').Append(Field.WaterRise.ToString("F3"));
+        Real(Field.WaterRise);
         // And the deep water's own two: how far under the bank its surface stands
         // and how far under its level its bed is drawn. Both are sliders, both
         // move mesh - the surface and the flank, the plate and the walls - and
         // neither moves a cell of the mask.
-        note.Append('@').Append(Field.DeepRise.ToString("F3"))
-            .Append('v').Append(Field.DeepBed.ToString("F3"));
+        Real(Field.DeepRise);
+        Real(Field.DeepBed);
         // And whether it is painted, because that swaps the surface's material
         // and the mesh's UVs at once - a toggle that only changed the shader
         // would leave the drawn pond wearing no texture coordinates at all.
-        note.Append(Surf is { Any: true } ? '#' : '=');
+        Mix(Surf is { Any: true } ? 1 : 0);
         // Nothing about the ring: it is cut fresh every frame about the tank it
         // marks, so neither whether there is one nor where it stands is anything
         // the board has to be rebuilt for.
-        return note.ToString();
+        return h;
     }
 
     /// <summary>The hexagon's corners about a cell centre, in the ground plane:
@@ -2689,7 +2698,7 @@ void fragment() {{
     /// </summary>
     private void Standing()
     {
-        string want = Signature();
+        ulong want = Signature();
         if (want != _built)
         {
             Build();
@@ -3339,9 +3348,14 @@ void fragment() {
     /// wood burning would draw the glazed cells as a patch.</summary>
     private void Tell(string name, Variant value)
     {
-        foreach (MeshInstance3D face in new[] { _tops, _sides, _glaze })
-            if (face?.MaterialOverride is ShaderMaterial ink)
-                ink.SetShaderParameter(name, value);
+        // three named, not an array of them: Tell runs every frame
+        StringName key = ShaderParams.Name(name);
+        if (_tops?.MaterialOverride is ShaderMaterial tops)
+            tops.SetShaderParameter(key, value);
+        if (_sides?.MaterialOverride is ShaderMaterial sides)
+            sides.SetShaderParameter(key, value);
+        if (_glaze?.MaterialOverride is ShaderMaterial glaze)
+            glaze.SetShaderParameter(key, value);
     }
 
     private ShaderMaterial Turf(Texture2D? art, bool glass = false)
@@ -4373,17 +4387,27 @@ void fragment() {
     /// not on a change, because it is a decay: the states are always moving, and
     /// the mesh they belong to is deliberately built only when the board does.
     /// </summary>
+    private readonly float[] _swellState = new float[MaxWaterCells], _swellSpan = new float[MaxWaterCells];
+    private readonly Vector2[] _swellMark = new Vector2[MaxWaterCells];
+    private readonly Vector2[] _wakeSpot = new Vector2[Wake.Max];
+    private readonly float[] _wakeAge = new float[Wake.Max];
+
     private void PushSwell()
     {
         ShaderMaterial? ink = _deepInk ?? _swellInk;
         if (ink is null)
             return;
         int n = Mathf.Min(Field.WaterCells.Count, MaxWaterCells);
-        var state = new float[MaxWaterCells];
-        var span = new float[MaxWaterCells];
-        var mark = new Vector2[MaxWaterCells];
-        for (int i = 0; i < MaxWaterCells; i++)
+        // the same arrays every frame, every slot written: new ones were 3 KB a
+        // frame of garbage (BOT-3)
+        float[] state = _swellState, span = _swellSpan;
+        Vector2[] mark = _swellMark;
+        for (int i = n; i < MaxWaterCells; i++)
+        {
+            state[i] = 0.0f;
             span[i] = 1.0f;
+            mark[i] = Vector2.Zero;
+        }
         for (int i = 0; i < n; i++)
         {
             state[i] = Sea?.State.Length > i ? Sea.State[i] : 0.0f;
@@ -4410,12 +4434,15 @@ void fragment() {
         // Through the same mapping the surface's own vertices went through, for
         // the mark's reason: the shader compares these against world.xz, and the
         // trail lives in the tanks' space until it gets here.
-        var spot = new Vector2[Wake.Max];
-        var age = new float[Wake.Max];
+        Vector2[] spot = _wakeSpot;
+        float[] age = _wakeAge;
         // Past its life is the empty slot, so there is no second way of saying
         // dead that could disagree with the first.
         for (int i = 0; i < Wake.Max; i++)
+        {
+            spot[i] = Vector2.Zero;
             age[i] = 2.0f;
+        }
         int live = Mathf.Min(Trail?.Count ?? 0, Wake.Max);
         for (int i = 0; i < live; i++)
         {
@@ -4434,7 +4461,7 @@ void fragment() {
         if (Wash is { Wide: > 0, Sheet: not null })
         {
             _deepInk.Param("wash", Wash.Sheet);
-            _deepInk.SetShaderParameter(
+            _deepInk.Param(
                 "wash_box", new Vector4(Wash.Box.Position.X, Wash.Box.Position.Y,
                                         Wash.Box.Size.X, Wash.Box.Size.Y));
             _deepInk.Param("wash_step", Wash.Cell);
