@@ -539,13 +539,13 @@ public sealed partial class CelHit : Node3D
                 arrays.Nrm[n] = new Vector4(nrm.X, nrm.Y, nrm.Z, k.Born);
                 n++;
             }
-            m.SetShaderParameter("mark_count", n);
+            m.Param("mark_count", n);
             if (n == 0)
                 continue;
-            m.SetShaderParameter("mark_at", arrays.At);
-            m.SetShaderParameter("mark_dir", arrays.Dir);
-            m.SetShaderParameter("mark_nrm", arrays.Nrm);
-            m.SetShaderParameter("mark_now", _now);
+            m.Param("mark_at", arrays.At);
+            m.Param("mark_dir", arrays.Dir);
+            m.Param("mark_nrm", arrays.Nrm);
+            m.Param("mark_now", _now);
         }
     }
 
@@ -571,9 +571,9 @@ public sealed partial class CelHit : Node3D
         // a plate turned from the eye still hides it.
         _star.GlobalTransform = new Transform3D(new Basis(right * (2.0f * size), up * (2.0f * size), back),
                                                 _at + _n * (0.05f * _hull));
-        _starLook!.SetShaderParameter("seed", CelPuff.Hash(_rounds, 17));
+        _starLook!.Param("seed", CelPuff.Hash(_rounds, 17));
         // A penetration's star holds its white core a frame longer.
-        _starLook.SetShaderParameter("frame", _through ? t * 60.0f * 0.6f : t * 60.0f);
+        _starLook.Param("frame", _through ? t * 60.0f * 0.6f : t * 60.0f);
         _glow.GlobalPosition = _at + _n * (0.06f * _hull);
         _glow.OmniRange = GlowReach * _hull;
         _glow.LightEnergy = GlowEnergy * (1.0f - t / time);

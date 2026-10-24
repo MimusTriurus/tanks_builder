@@ -818,7 +818,7 @@ public sealed partial class Tank3DBench
             AddChild(_aimMark);
         }
         float wide = 0.32f * HexWidth;
-        ((ShaderMaterial)_aimMark.MaterialOverride).SetShaderParameter("refused", refused);
+        ((ShaderMaterial)_aimMark.MaterialOverride).Param("refused", refused);
         _markRefused = refused ? 0.6f : 0.0f;
         _aimMark.GlobalTransform = new Transform3D(Basis.Identity.Scaled(new Vector3(wide, 1.0f, wide)),
                                                    new Vector3(at.X, Foot(at).Y + 1.0f, at.Z));

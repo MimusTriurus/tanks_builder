@@ -59,9 +59,9 @@ public sealed partial class CelBubbles : Node3D
         _squash = squash;
         _rise = rise;
         var look = new ShaderMaterial { Shader = PopShader, RenderPriority = Stage3D.DressOrder };
-        look.SetShaderParameter("foam", CelSplash.Crest);
-        look.SetShaderParameter("wash", CelSplash.Body);
-        look.SetShaderParameter("ink", CelSplash.Ink);
+        look.Param("foam", CelSplash.Crest);
+        look.Param("wash", CelSplash.Body);
+        look.Param("ink", CelSplash.Ink);
         _many = new MultiMesh
         {
             Mesh = new PlaneMesh { Size = Vector2.One * 2.0f },

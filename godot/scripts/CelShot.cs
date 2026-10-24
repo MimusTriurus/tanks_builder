@@ -145,8 +145,8 @@ public sealed partial class CelShot : Node3D
         };
         AddChild(_glow);
         _ringLook = new ShaderMaterial { Shader = RingShader };
-        _ringLook.SetShaderParameter("tone", RingColor);
-        _ringLook.SetShaderParameter("ink_tone", RingColor * 0.45f);
+        _ringLook.Param("tone", RingColor);
+        _ringLook.Param("ink_tone", RingColor * 0.45f);
         _ring = new MeshInstance3D
         {
             Name = "Ring",
@@ -239,13 +239,13 @@ public sealed partial class CelShot : Node3D
             // the flash was drawn over the tube too, and with the gun pointed
             // away the neck ran through the barrel's end.
             muzzle);
-        _flashLook!.SetShaderParameter("dir", dir);
-        _flashLook.SetShaderParameter("along", Mathf.Clamp(along, 0.0f, 1.0f));
-        _flashLook.SetShaderParameter("frame", t * 60.0f);
-        _flashLook.SetShaderParameter("size_px", size);
+        _flashLook!.Param("dir", dir);
+        _flashLook.Param("along", Mathf.Clamp(along, 0.0f, 1.0f));
+        _flashLook.Param("frame", t * 60.0f);
+        _flashLook.Param("size_px", size);
         // The bore's depth per unit of length: toward the eye positive.
-        _flashLook.SetShaderParameter("bore_z", bore.Dot(back));
-        _flashLook.SetShaderParameter("seed", CelPuff.Hash(_shots, 5));
+        _flashLook.Param("bore_z", bore.Dot(back));
+        _flashLook.Param("seed", CelPuff.Hash(_shots, 5));
 
         _glow.GlobalPosition = muzzle + bore * (0.12f * _hull);
         _glow.OmniRange = GlowReach * _hull;
@@ -269,11 +269,11 @@ public sealed partial class CelShot : Node3D
         Vector3 mid = _foot + _flat * (r * RingAhead) + Vector3.Up * 0.6f;
         _ring.GlobalTransform = new Transform3D(
             new Basis(new Vector3(2.0f * half, 0.0f, 0.0f), new Vector3(0.0f, 0.0f, -2.0f * half), Vector3.Up), mid);
-        _ringLook!.SetShaderParameter("radius", r / half);
-        _ringLook.SetShaderParameter("width", RingWidth * reach / half);
-        _ringLook.SetShaderParameter("ink", Toon.InkWidth / half);
-        _ringLook.SetShaderParameter("fade", f);
-        _ringLook.SetShaderParameter("seed", CelPuff.Hash(_shots, 7));
+        _ringLook!.Param("radius", r / half);
+        _ringLook.Param("width", RingWidth * reach / half);
+        _ringLook.Param("ink", Toon.InkWidth / half);
+        _ringLook.Param("fade", f);
+        _ringLook.Param("seed", CelPuff.Hash(_shots, 7));
     }
 
     private void Smoke(float t)

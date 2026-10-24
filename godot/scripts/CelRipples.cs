@@ -60,8 +60,8 @@ public sealed partial class CelRipples : Node3D
                 cells++;
             }
         _look = new ShaderMaterial { Shader = RipplesShader, RenderPriority = Stage3D.DressOrder };
-        _look.SetShaderParameter("light", CelSplash.Crest);
-        _look.SetShaderParameter("dark", new Color(0.05f, 0.20f, 0.20f));
+        _look.Param("light", CelSplash.Crest);
+        _look.Param("dark", new Color(0.05f, 0.20f, 0.20f));
         _skin = new MeshInstance3D
         {
             Name = "Ripples",
@@ -85,12 +85,12 @@ public sealed partial class CelRipples : Node3D
         _skin.Visible = on;
         if (!on)
             return;
-        _look.SetShaderParameter("wash", field.Sheet);
-        _look.SetShaderParameter("wash_box", new Vector4(field.Box.Position.X, field.Box.Position.Y,
+        _look.Param("wash", field.Sheet);
+        _look.Param("wash_box", new Vector4(field.Box.Position.X, field.Box.Position.Y,
                                                          field.Box.Size.X, field.Box.Size.Y));
-        _look.SetShaderParameter("crest", Crest);
-        _look.SetShaderParameter("crest_top", CrestTop);
-        _look.SetShaderParameter("trough", Trough);
+        _look.Param("crest", Crest);
+        _look.Param("crest_top", CrestTop);
+        _look.Param("trough", Trough);
     }
 
     /// <summary>

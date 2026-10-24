@@ -638,8 +638,8 @@ public sealed partial class Tank3DBench
             Wildfire.Coat coat = _wildfire.Of(t.Cell, t.Stagger);
             foreach (ShaderMaterial m in t.Model.Burn)
             {
-                m.SetShaderParameter("burn", coat.Spent);
-                m.SetShaderParameter("charred", coat.Char);
+                m.Param("burn", coat.Spent);
+                m.Param("charred", coat.Char);
             }
             t.Fire.Fire = coat.Flame;
             t.Fire.Smoke = coat.Smoke;

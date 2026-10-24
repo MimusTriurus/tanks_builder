@@ -33,14 +33,14 @@ public sealed class CelCloud
     {
         _blend = blendPx;
         _look = new ShaderMaterial { Shader = Shader };
-        _look.SetShaderParameter("tint", tint);
-        _look.SetShaderParameter("blend", blendPx);
-        _look.SetShaderParameter("ink_width", Toon.InkWidth);
-        _look.SetShaderParameter("ink_min_px", Toon.InkMinPx);
+        _look.Param("tint", tint);
+        _look.Param("blend", blendPx);
+        _look.Param("ink_width", Toon.InkWidth);
+        _look.Param("ink_min_px", Toon.InkMinPx);
         // The ramp's steps sharper than the model's: the cloud's normal turns
         // slowly across a big puff, and the model's width of step was a soft
         // band ten pixels wide round every lit patch of a burning column.
-        _look.SetShaderParameter("soft", 0.008f);
+        _look.Param("soft", 0.008f);
         _quad = new MeshInstance3D
         {
             Name = name,
@@ -105,9 +105,9 @@ public sealed class CelCloud
         _quad.GlobalTransform = new Transform3D(
             new Basis(right * (2.0f * wide), up * (2.0f * tall), back), mid + back * front);
         _quad.Visible = true;
-        _look.SetShaderParameter("puffs", _where);
-        _look.SetShaderParameter("looks", _looks);
-        _look.SetShaderParameter("count", _n);
+        _look.Param("puffs", _where);
+        _look.Param("looks", _looks);
+        _look.Param("count", _n);
     }
 
     /// <summary>

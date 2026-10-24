@@ -367,8 +367,8 @@ public sealed partial class Tree3DBench : Node3D
             // char - the two clocks the sprite's pair has.
             foreach (ShaderMaterial m in t.Burn)
             {
-                m.SetShaderParameter("burn", coat.Spent);
-                m.SetShaderParameter("charred", coat.Char);
+                m.Param("burn", coat.Spent);
+                m.Param("charred", coat.Char);
             }
             t.Fire.Fire = coat.Flame;
             t.Fire.Smoke = coat.Smoke;
@@ -1091,7 +1091,7 @@ public sealed partial class Tree3DBench : Node3D
             st.AddVertex(v + lie);
         }
         var ink = new ShaderMaterial { Shader = ShadeShader, RenderPriority = Stage3D.ShadowOrder };
-        ink.SetShaderParameter("ink", Stage3D.ShadowInk.A);
+        ink.Param("ink", Stage3D.ShadowInk.A);
         AddChild(new MeshInstance3D
         {
             Name = "Shadows",

@@ -150,10 +150,10 @@ public sealed partial class ToonBlast : Node3D
         _tile = tile;
         _riseFactor = Mathf.Max(rise, 0.0001f);
         _ink = new ShaderMaterial { Shader = Puffing, RenderPriority = Stage3D.StandOrder };
-        _ink.SetShaderParameter("shade_tex", Art("puff_shade.png", ref _shade));
-        _ink.SetShaderParameter("lit_tex", Art("puff_lit.png", ref _lit));
-        _ink.SetShaderParameter("mask_tex", Art("puff_mask.png", ref _mask));
-        _ink.SetShaderParameter("time", 0.0f);
+        _ink.Param("shade_tex", Art("puff_shade.png", ref _shade));
+        _ink.Param("lit_tex", Art("puff_lit.png", ref _lit));
+        _ink.Param("mask_tex", Art("puff_mask.png", ref _mask));
+        _ink.Param("time", 0.0f);
         _many = new MultiMesh
         {
             Mesh = new QuadMesh { Size = Vector2.One },
@@ -196,7 +196,7 @@ public sealed partial class ToonBlast : Node3D
             _cloud.Visible = on;
         if (!on)
             return;
-        _ink?.SetShaderParameter("time", _clock);
+        _ink?.Param("time", _clock);
         Dress();
     }
 

@@ -175,17 +175,17 @@ public sealed partial class CelRuts : Node3D
             if (look is null)
                 continue;
             bool wet = look == _wetLook;
-            look.SetShaderParameter("soil", wet ? WetSoil : Soil);
-            look.SetShaderParameter("wall", wet ? WetWall : Wall);
-            look.SetShaderParameter("bar", wet ? WetBar : Bar);
-            look.SetShaderParameter("pitch", step);
-            look.SetShaderParameter("bar_half", Mathf.Max(0.75f, 0.5f * BarShare * step));
-            look.SetShaderParameter("bar_soft", BarSoft);
-            look.SetShaderParameter("bar_reach", 1.0f - BarShort);
-            look.SetShaderParameter("soft_from", SoftFrom);
-            look.SetShaderParameter("wall_at", WallAt);
-            look.SetShaderParameter("sun", Stage3D.Sun);
-            look.SetShaderParameter("deep_wide", DeepWide);
+            look.Param("soil", wet ? WetSoil : Soil);
+            look.Param("wall", wet ? WetWall : Wall);
+            look.Param("bar", wet ? WetBar : Bar);
+            look.Param("pitch", step);
+            look.Param("bar_half", Mathf.Max(0.75f, 0.5f * BarShare * step));
+            look.Param("bar_soft", BarSoft);
+            look.Param("bar_reach", 1.0f - BarShort);
+            look.Param("soft_from", SoftFrom);
+            look.Param("wall_at", WallAt);
+            look.Param("sun", Stage3D.Sun);
+            look.Param("deep_wide", DeepWide);
         }
     }
 

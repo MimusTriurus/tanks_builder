@@ -153,16 +153,16 @@ public static class TreeModel
             into.Add(m);
             if (role == 0)
                 continue;
-            m.SetShaderParameter("burn_role", role);
-            m.SetShaderParameter("burn_window", window);
-            m.SetShaderParameter("burn_eat", eat);
+            m.Param("burn_role", role);
+            m.Param("burn_window", window);
+            m.Param("burn_eat", eat);
         }
-        cel.SetShaderParameter("burn_ember", ember);
+        cel.Param("burn_ember", ember);
         // The crown shades itself by its normals, not by its shadow on itself
         // (Toon's sun_shadow): the leaves' shadows on the leaves under them
         // were dark triangles all over the lit side.
         if (role == 1)
-            cel.SetShaderParameter("sun_shadow", false);
+            cel.Param("sun_shadow", false);
     }
 
     /// <summary>Where the fire sits in a crown, as shares of the model's width,
@@ -269,13 +269,13 @@ public static class TreeModel
         }
         foreach (ShaderMaterial m in burn)
         {
-            m.SetShaderParameter("wind_dir", dir);
-            m.SetShaderParameter("wind_lean", leaning);
-            m.SetShaderParameter("wind_billow", billow);
-            m.SetShaderParameter("wind_time", weather * rate);
+            m.Param("wind_dir", dir);
+            m.Param("wind_lean", leaning);
+            m.Param("wind_billow", billow);
+            m.Param("wind_time", weather * rate);
         }
         foreach (ShaderMaterial m in leaves)
-            m.SetShaderParameter("wind_flutter", shiver == 0.0f ? wind * Flutter * (0.3f + 0.7f * gust) * still
+            m.Param("wind_flutter", shiver == 0.0f ? wind * Flutter * (0.3f + 0.7f * gust) * still
                                                                 : (wind * (0.3f + 0.7f * gust) + shiver) * Flutter * still);
     }
 }
@@ -344,8 +344,8 @@ public sealed partial class CrownOutline : Node
         camera.CullMask &= ~MaskLayer;
 
         _line = new ShaderMaterial { Shader = OutlineShader };
-        _line.SetShaderParameter("mask", _mask.GetTexture());
-        _line.SetShaderParameter("dark", Toon.InkDark);
+        _line.Param("mask", _mask.GetTexture());
+        _line.Param("dark", Toon.InkDark);
         camera.AddChild(new MeshInstance3D
         {
             Name = "CrownLine",
@@ -370,9 +370,9 @@ public sealed partial class CrownOutline : Node
         for (int k = 0; k < 5; k++)
         {
             masks[k] = MaskFor(_count);
-            masks[k].SetShaderParameter("burn_role", k == 4 ? 1 : k);
-            masks[k].SetShaderParameter("burn_window", k == 4 ? 0.45f : 0.12f);
-            masks[k].SetShaderParameter("burn_eat", k == 4);
+            masks[k].Param("burn_role", k == 4 ? 1 : k);
+            masks[k].Param("burn_window", k == 4 ? 0.45f : 0.12f);
+            masks[k].Param("burn_eat", k == 4);
             burn.Add(masks[k]);
         }
         leaves.Add(masks[1]);   // role 1 without the eating: the leaves
@@ -397,9 +397,9 @@ public sealed partial class CrownOutline : Node
             int role = 0;
             if (m.Mesh.SurfaceGetMaterial(s) is ShaderMaterial cel)
             {
-                role = cel.GetShaderParameter("burn_role").AsInt32();
+                role = cel.Param("burn_role").AsInt32();
                 // the eaten core's own: role 1 is the leaves' as well
-                if (role == 1 && cel.GetShaderParameter("burn_eat").AsBool())
+                if (role == 1 && cel.Param("burn_eat").AsBool())
                     role = 4;
             }
             ghost.SetSurfaceOverrideMaterial(s, masks[Mathf.Clamp(role, 0, 4)]);
@@ -414,7 +414,7 @@ public sealed partial class CrownOutline : Node
     private ShaderMaterial MaskFor(int i)
     {
         var m = new ShaderMaterial { Shader = MaskShader };
-        m.SetShaderParameter("id", (i % 7 + 1) / 8.0f);
+        m.Param("id", (i % 7 + 1) / 8.0f);
         _masks.Add(m);
         return m;
     }
@@ -429,11 +429,11 @@ public sealed partial class CrownOutline : Node
         _eye.Size = camera.Size;
         _eye.Near = camera.Near;
         _eye.Far = camera.Far;
-        _line.SetShaderParameter("width", Mathf.Max(1.0f, Toon.InkWidth * zoom));
+        _line.Param("width", Mathf.Max(1.0f, Toon.InkWidth * zoom));
         foreach (ShaderMaterial m in _masks)
         {
-            m.SetShaderParameter("near", depth - MaskReach);
-            m.SetShaderParameter("span", 2.0f * MaskReach);
+            m.Param("near", depth - MaskReach);
+            m.Param("span", 2.0f * MaskReach);
         }
     }
 

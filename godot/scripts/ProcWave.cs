@@ -172,13 +172,13 @@ public sealed partial class ProcWave : Node3D
             for (int shell = 0; shell < LickShells; shell++)
             {
                 ShaderMaterial ink = Ink(Licking, Stage3D.StandOrder);
-                ink.SetShaderParameter("arc_mid", mid);
-                ink.SetShaderParameter("shell", (float)shell);
-                ink.SetShaderParameter("ring_scale", shell == 0 ? 1.0f : InnerShell);
+                ink.Param("arc_mid", mid);
+                ink.Param("shell", (float)shell);
+                ink.Param("ring_scale", shell == 0 ? 1.0f : InnerShell);
                 _walls.Add(new Wall(Slab(arc, ink), ink, mid, Kind.Lick, shell));
             }
             ShaderMaterial smoke = Ink(Smoking, Stage3D.StandOrder);
-            smoke.SetShaderParameter("arc_mid", mid);
+            smoke.Param("arc_mid", mid);
             _walls.Add(new Wall(Slab(arc, smoke), smoke, mid, Kind.Smoke, 0));
         }
         _nudge = Stage3D.Clear(squash, rise);
@@ -188,13 +188,13 @@ public sealed partial class ProcWave : Node3D
     private ShaderMaterial Ink(Shader how, int order)
     {
         var ink = new ShaderMaterial { Shader = how, RenderPriority = order };
-        ink.SetShaderParameter("time", 0.0f);
-        ink.SetShaderParameter("level", 1.0f);
-        ink.SetShaderParameter("half", Half);
-        ink.SetShaderParameter("radius_px", _radius);
-        ink.SetShaderParameter("mask_a", Vector3.One);
-        ink.SetShaderParameter("mask_b", Vector3.One);
-        ink.SetShaderParameter("sun", Stage3D.Sun);
+        ink.Param("time", 0.0f);
+        ink.Param("level", 1.0f);
+        ink.Param("half", Half);
+        ink.Param("radius_px", _radius);
+        ink.Param("mask_a", Vector3.One);
+        ink.Param("mask_b", Vector3.One);
+        ink.Param("sun", Stage3D.Sun);
         return ink;
     }
 
@@ -338,8 +338,8 @@ public sealed partial class ProcWave : Node3D
         var b = new Vector3(At(3), At(4), At(5));
         foreach (ShaderMaterial ink in Inks())
         {
-            ink.SetShaderParameter("mask_a", a);
-            ink.SetShaderParameter("mask_b", b);
+            ink.Param("mask_a", a);
+            ink.Param("mask_b", b);
         }
     }
 
@@ -383,7 +383,7 @@ public sealed partial class ProcWave : Node3D
         if (!on)
             return;
         foreach (ShaderMaterial ink in Inks())
-            ink.SetShaderParameter("time", _clock);
+            ink.Param("time", _clock);
         Place();
     }
 

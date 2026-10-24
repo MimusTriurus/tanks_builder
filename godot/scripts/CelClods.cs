@@ -87,11 +87,11 @@ public sealed partial class CelClods : Node3D
     {
         _rng.Seed = 7331;
         var look = new ShaderMaterial { Shader = ClodShader };
-        look.SetShaderParameter("body", Body);
-        look.SetShaderParameter("lit", Lit);
-        look.SetShaderParameter("ink", Ink);
-        look.SetShaderParameter("ink_width", Toon.InkWidth);
-        look.SetShaderParameter("ink_min_px", Toon.InkMinPx);
+        look.Param("body", Body);
+        look.Param("lit", Lit);
+        look.Param("ink", Ink);
+        look.Param("ink_width", Toon.InkWidth);
+        look.Param("ink_min_px", Toon.InkMinPx);
         var multi = new MultiMesh
         {
             TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,

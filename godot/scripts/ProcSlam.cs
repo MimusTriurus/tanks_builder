@@ -498,9 +498,9 @@ public sealed partial class ProcSlam : Node3D
         float roof = _face == Surface.Concrete ? 1.0f : 0.0f;
         foreach (ShaderMaterial? ink in new[] { _dustInk, _fireInk })
         {
-            ink?.SetShaderParameter("masonry", brick);
-            ink?.SetShaderParameter("pierce", through);
-            ink?.SetShaderParameter("roof", roof);
+            ink?.Param("masonry", brick);
+            ink?.Param("pierce", through);
+            ink?.Param("roof", roof);
         }
     }
 
@@ -541,8 +541,8 @@ public sealed partial class ProcSlam : Node3D
         var hit = new Vector2(plate.X, -plate.Y) / Mathf.Max(_tile, 1.0f);
         foreach (ShaderMaterial? ink in new[] { _dustInk, _fireInk })
         {
-            ink?.SetShaderParameter("away", faced);
-            ink?.SetShaderParameter("squat", squat);
+            ink?.Param("away", faced);
+            ink?.Param("squat", squat);
         }
         Away = faced;
         Squat = squat;
@@ -557,8 +557,8 @@ public sealed partial class ProcSlam : Node3D
     private void Place()
     {
         Vector2 hit = Plate / Mathf.Max(_might, 0.01f);
-        _dustInk?.SetShaderParameter("plate", hit);
-        _fireInk?.SetShaderParameter("plate", hit);
+        _dustInk?.Param("plate", hit);
+        _fireInk?.Param("plate", hit);
     }
 
     /// <summary>Which way the plate faces and how much of the throw survived the
@@ -621,8 +621,8 @@ public sealed partial class ProcSlam : Node3D
         if (!on)
             return;
 
-        _dustInk?.SetShaderParameter("time", _clock);
-        _fireInk?.SetShaderParameter("time", _clock);
+        _dustInk?.Param("time", _clock);
+        _fireInk?.Param("time", _clock);
     }
 
     /// <summary>One number of one of the two shaders, live - read out of the
@@ -696,18 +696,18 @@ public sealed partial class ProcSlam : Node3D
     private ShaderMaterial Ink(Shader how, bool dust)
     {
         var ink = new ShaderMaterial { Shader = how, RenderPriority = Stage3D.StandOrder };
-        ink.SetShaderParameter("foot_v", 1.0f);
-        ink.SetShaderParameter("tall", Tall);
-        ink.SetShaderParameter("wideq", Flank * 2.0f);
-        ink.SetShaderParameter("root", Root);
-        ink.SetShaderParameter("floor_fade", Fade);
-        ink.SetShaderParameter("reach", Reach);
-        ink.SetShaderParameter("level", 1.0f);
-        ink.SetShaderParameter("time", 0.0f);
-        ink.SetShaderParameter("sun", Stage3D.Sun);
-        ink.SetShaderParameter("away", Vector2.Right);
-        ink.SetShaderParameter("squat", 1.0f);
-        ink.SetShaderParameter("plate", Vector2.Zero);
+        ink.Param("foot_v", 1.0f);
+        ink.Param("tall", Tall);
+        ink.Param("wideq", Flank * 2.0f);
+        ink.Param("root", Root);
+        ink.Param("floor_fade", Fade);
+        ink.Param("reach", Reach);
+        ink.Param("level", 1.0f);
+        ink.Param("time", 0.0f);
+        ink.Param("sun", Stage3D.Sun);
+        ink.Param("away", Vector2.Right);
+        ink.Param("squat", 1.0f);
+        ink.Param("plate", Vector2.Zero);
         if (!dust)
             return ink;
         // <b>Nearer the burst's own helping of the shared banding than the
@@ -717,8 +717,8 @@ public sealed partial class ProcSlam : Node3D
         // wherever any two overlap, so it takes half of what the shared text says;
         // this is sixteen elements making one volume, which is the thing the shared
         // 0.55 was tuned on.
-        ink.SetShaderParameter("dust_band", 0.46f);
-        ink.SetShaderParameter("dust_tear", 0.58f);
+        ink.Param("dust_band", 0.46f);
+        ink.Param("dust_tear", 0.58f);
         // <b>And it hides more of the tank than either of them.</b> What comes off
         // a plate under a ricochet is grams of paint and has to show the armour
         // through it; a shell bursting on the same plate puts its own filling into
@@ -726,7 +726,7 @@ public sealed partial class ProcSlam : Node3D
         // the round was a firework. Still short of the shared 0.72 by a hair,
         // because this stands against the hull rather than against the ground, and
         // the hull is what it is standing on.
-        ink.SetShaderParameter("dust_ink", 0.70f);
+        ink.Param("dust_ink", 0.70f);
         return ink;
     }
 

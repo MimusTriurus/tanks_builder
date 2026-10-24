@@ -250,7 +250,7 @@ public sealed partial class Plunge : Node3D
     private void Raise(Half half, int rung, float squash, float rise)
     {
         var ink = new ShaderMaterial { Shader = Spraying, RenderPriority = rung };
-        ink.SetShaderParameter("disc", DropArt ??= Disc());
+        ink.Param("disc", DropArt ??= Disc());
         half.Many = new MultiMesh
         {
             Mesh = new QuadMesh { Size = Vector2.One },

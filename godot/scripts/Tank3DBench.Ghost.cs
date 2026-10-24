@@ -120,7 +120,7 @@ void fragment() {
         }
         _ghostFill ??= new ShaderMaterial { Shader = GhostFillShader, RenderPriority = Stage3D.RingOrder + 1 };
         _ghostInk ??= new ShaderMaterial { Shader = GhostInkShader, RenderPriority = Stage3D.RingOrder + 2 };
-        _ghostFill.SetShaderParameter("tint", SelectionRing.Friendly);
+        _ghostFill.Param("tint", SelectionRing.Friendly);
         _ghostFill.NextPass = _ghostInk;
         _ghostRig = DressGhost(model, tag, _ghostFill, "Ghost");
         _ghost = model;
@@ -204,8 +204,8 @@ void fragment() {
         _ghost.Elevation = 0.0f;
         _ghost.Apply();
         float clear = GhostClear(_ghostRig.Position);
-        _ghostFill.SetShaderParameter("alpha", (firm ? GhostFirm : GhostFaint) * clear);
-        _ghostInk.SetShaderParameter("alpha", (firm ? 1.0f : 0.7f) * clear);
+        _ghostFill.Param("alpha", (firm ? GhostFirm : GhostFaint) * clear);
+        _ghostInk.Param("alpha", (firm ? 1.0f : 0.7f) * clear);
         _ghostRig.Visible = clear > 0.01f;
     }
 

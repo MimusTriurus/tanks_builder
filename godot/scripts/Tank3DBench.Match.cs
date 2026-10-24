@@ -148,7 +148,7 @@ public sealed partial class Tank3DBench
         if (!Match)
             return;
         foreach (ShaderMaterial m in model.Cel)
-            m.SetShaderParameter("side_brown", side == Side.Brown ? 1.0f : 0.0f);
+            m.Param("side_brown", side == Side.Brown ? 1.0f : 0.0f);
     }
 
     /// <summary>Every unit on the board, the rig's first.</summary>
@@ -608,7 +608,7 @@ public sealed partial class Tank3DBench
                 // the time the fire is out
                 float k = Mathf.Clamp(p.Clock / (PyreBurn + p.Burn.FireFall), 0.0f, 1.0f);
                 foreach (ShaderMaterial mat in m.Cel)
-                    mat.SetShaderParameter("char_cover", PyreCover * k);
+                    mat.Param("char_cover", PyreCover * k);
                 if (k >= 1.0f)
                     p.Charred = true;
             }
@@ -628,12 +628,12 @@ public sealed partial class Tank3DBench
         var spots = new[] { at, at, at, at };
         foreach (ShaderMaterial m in model.Cel)
         {
-            m.SetShaderParameter("scorch_at", spots);
-            m.SetShaderParameter("scorch_n", 1);
-            m.SetShaderParameter("scorch_r", reach);
-            m.SetShaderParameter("scorch", 1.0f);
-            m.SetShaderParameter("ember", 0.0f);
-            m.SetShaderParameter("char_cover", cover);
+            m.Param("scorch_at", spots);
+            m.Param("scorch_n", 1);
+            m.Param("scorch_r", reach);
+            m.Param("scorch", 1.0f);
+            m.Param("ember", 0.0f);
+            m.Param("char_cover", cover);
         }
     }
 

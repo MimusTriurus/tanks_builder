@@ -137,13 +137,13 @@ public sealed partial class CelSplash : Node3D
         for (int i = 0; i < 3; i++)
         {
             var look = new ShaderMaterial { Shader = SheetShader };
-            look.SetShaderParameter("blend", 6.0f);
-            look.SetShaderParameter("ink_width", Toon.InkWidth);
-            look.SetShaderParameter("ink_min_px", Toon.InkMinPx);
-            look.SetShaderParameter("body", Body);
-            look.SetShaderParameter("shade", new Vector3(Shade.R, Shade.G, Shade.B));
-            look.SetShaderParameter("crest", Crest);
-            look.SetShaderParameter("ink", Ink);
+            look.Param("blend", 6.0f);
+            look.Param("ink_width", Toon.InkWidth);
+            look.Param("ink_min_px", Toon.InkMinPx);
+            look.Param("body", Body);
+            look.Param("shade", new Vector3(Shade.R, Shade.G, Shade.B));
+            look.Param("crest", Crest);
+            look.Param("ink", Ink);
             var quad = new MeshInstance3D
             {
                 Name = $"Sheet{i}",
@@ -160,8 +160,8 @@ public sealed partial class CelSplash : Node3D
         foreach (var _ in Rings)
         {
             var look = new ShaderMaterial { Shader = RippleShader, RenderPriority = Stage3D.DressOrder };
-            look.SetShaderParameter("foam", Crest);
-            look.SetShaderParameter("wash", Body);
+            look.Param("foam", Crest);
+            look.Param("wash", Body);
             var quad = new MeshInstance3D
             {
                 Name = $"Ripple{_ripples.Count}", Mesh = new PlaneMesh { Size = Vector2.One * 2.0f },
@@ -177,8 +177,8 @@ public sealed partial class CelSplash : Node3D
     private (MeshInstance3D, ShaderMaterial) MakeRing(string name)
     {
         var look = new ShaderMaterial { Shader = RingShader, RenderPriority = Stage3D.DressOrder };
-        look.SetShaderParameter("foam", Crest);
-        look.SetShaderParameter("edge", Body);
+        look.Param("foam", Crest);
+        look.Param("edge", Body);
         var ring = new MeshInstance3D
         {
             Name = name,
@@ -458,9 +458,9 @@ public sealed partial class CelSplash : Node3D
             // shore is, as ratel's land does.
             quad.GlobalTransform = new Transform3D(Basis.Identity.Scaled(new Vector3(radius, 1.0f, radius)),
                                                    _seat + Vector3.Up * 0.5f);
-            look.SetShaderParameter("inner", Mathf.Clamp(1.0f - band / Mathf.Max(radius, 1e-3f), 0.0f, 1.0f)
+            look.Param("inner", Mathf.Clamp(1.0f - band / Mathf.Max(radius, 1e-3f), 0.0f, 1.0f)
                                              * (i == Rings.Length - 1 ? Mathf.SmoothStep(0.0f, 1.0f, k) : 1.0f));
-            look.SetShaderParameter("seed", _seed * 7.3f + i * 13.1f);
+            look.Param("seed", _seed * 7.3f + i * 13.1f);
             quad.Visible = true;
         }
     }
@@ -520,10 +520,10 @@ public sealed partial class CelSplash : Node3D
         s.Quad.GlobalTransform = new Transform3D(
             new Basis(right * (2.0f * wide), up * (2.0f * tall), back), mid + back * front);
         s.Quad.Visible = true;
-        s.Look.SetShaderParameter("feet", s.Foot);
-        s.Look.SetShaderParameter("tips", s.Tip);
-        s.Look.SetShaderParameter("looks", s.Looks);
-        s.Look.SetShaderParameter("count", s.N);
+        s.Look.Param("feet", s.Foot);
+        s.Look.Param("tips", s.Tip);
+        s.Look.Param("looks", s.Looks);
+        s.Look.Param("count", s.N);
     }
 
     /// <summary>The foam running out over the water in the hull's shape.</summary>
@@ -544,13 +544,13 @@ public sealed partial class CelSplash : Node3D
             new Basis(_across * (2.0f * span), Vector3.Up, _along * (2.0f * span)),
             _seat + Stage3D.Clear(_squash, _rise));
         ring.Visible = true;
-        look.SetShaderParameter("half_len", _halfLen);
-        look.SetShaderParameter("half_wide", _halfWide);
-        look.SetShaderParameter("span", span);
+        look.Param("half_len", _halfLen);
+        look.Param("half_wide", _halfWide);
+        look.Param("span", span);
         // Out fast, then slowing - a ring spent by the water it pushes.
-        look.SetShaderParameter("front", 6.0f + reach * (1.0f - (1.0f - a) * (1.0f - a)));
-        look.SetShaderParameter("age", a);
-        look.SetShaderParameter("seed", _seed * 1.7f + (ring == _ring2 ? 4.3f : 0.0f));
+        look.Param("front", 6.0f + reach * (1.0f - (1.0f - a) * (1.0f - a)));
+        look.Param("age", a);
+        look.Param("seed", _seed * 1.7f + (ring == _ring2 ? 4.3f : 0.0f));
     }
 
     private int HashSeed => _seed * 131;

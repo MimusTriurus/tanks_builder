@@ -501,9 +501,9 @@ public sealed partial class Tank3DBench
         _beltPaint ??= BeltPaint();
         foreach (ShaderMaterial cel in _model.Cel)
         {
-            cel.SetShaderParameter("water_on", _beltPaint.Contains(cel) ? 0.0f : _waterOn);
-            cel.SetShaderParameter("water_y", _waterLevel / RiseFactor);
-            cel.SetShaderParameter("water_pace", _wakePace);
+            cel.Param("water_on", _beltPaint.Contains(cel) ? 0.0f : _waterOn);
+            cel.Param("water_y", _waterLevel / RiseFactor);
+            cel.Param("water_pace", _wakePace);
         }
     }
 

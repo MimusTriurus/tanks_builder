@@ -139,7 +139,7 @@ public static class BoardDress
             st.AddVertex(v + lie);
         }
         var ink = new ShaderMaterial { Shader = ShadeShader, RenderPriority = Stage3D.ShadowOrder };
-        ink.SetShaderParameter("ink", Stage3D.ShadowInk.A);
+        ink.Param("ink", Stage3D.ShadowInk.A);
         return new MeshInstance3D
         {
             Name = "Shadows",

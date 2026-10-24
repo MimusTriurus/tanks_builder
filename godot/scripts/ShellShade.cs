@@ -81,7 +81,7 @@ public sealed partial class ShellShade : Node3D
     public void Build(float squash, float rise)
     {
         _ink = new ShaderMaterial { Shader = Blot, RenderPriority = Rung };
-        _ink.SetShaderParameter("core", Core);
+        _ink.Param("core", Core);
         _plane = new PlaneMesh { Size = Vector2.One };
         _patch = new MeshInstance3D
         {
@@ -112,7 +112,7 @@ public sealed partial class ShellShade : Node3D
         float wide = WideAt(high);
         _plane.Size = new Vector2(2.0f * wide, 2.0f * wide);
         Position = Stage3D.Ground(spot, lift, squash, rise);
-        _ink.SetShaderParameter("ink", InkAt(high));
+        _ink.Param("ink", InkAt(high));
         _patch.Visible = true;
     }
 
@@ -143,7 +143,7 @@ public sealed partial class ShellShade : Node3D
 
     /// <summary>How much ink it is standing at - the same again.</summary>
     public float Ink =>
-        (float)(_ink?.GetShaderParameter("ink").AsSingle() ?? 0.0f);
+        (float)(_ink?.Param("ink").AsSingle() ?? 0.0f);
 
     private static readonly Shader Blot = new() { Code = BlotCode };
 

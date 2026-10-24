@@ -389,8 +389,8 @@ void fragment() {
         }
         _heightEye.Position = anchor + new Vector3(0.0f, Back * Squash, Back * RiseFactor);
         float ppu = _model.PixelsPerUnit;
-        _heightInk.SetShaderParameter("low", anchor.Y + (float)_shape.HeightLow * ppu);
-        _heightInk.SetShaderParameter("high", anchor.Y + (float)_shape.HeightHigh * ppu);
+        _heightInk.Param("low", anchor.Y + (float)_shape.HeightLow * ppu);
+        _heightInk.Param("high", anchor.Y + (float)_shape.HeightHigh * ppu);
     }
 
     /// <summary>Everything <see cref="BuildHeights"/> made, gone.</summary>
@@ -601,8 +601,8 @@ void fragment() {
         };
         paint.AddChild(holder);
         var mat = new ShaderMaterial { Shader = shader ?? CardShader, RenderPriority = Stage3D.StandOrder };
-        mat.SetShaderParameter("picture", paint.GetTexture());
-        mat.SetShaderParameter("toward", View);
+        mat.Param("picture", paint.GetTexture());
+        mat.Param("toward", View);
         // Upright, facing +Z like every card on the stage; a target pixel
         // (u, w) lands at (u - half, (half - w) / rise) so it is drawn exactly
         // one board px from its neighbour on screen.
@@ -767,9 +767,9 @@ void fragment() {
         float reach = GlintReach * _model.HullLength * _model.PixelsPerUnit;
         foreach (ShaderMaterial m in _model.Cel)
         {
-            m.SetShaderParameter("flash_on", on);
-            m.SetShaderParameter("flash_at", _glintAt);
-            m.SetShaderParameter("flash_reach", reach);
+            m.Param("flash_on", on);
+            m.Param("flash_at", _glintAt);
+            m.Param("flash_reach", reach);
         }
     }
 
@@ -1494,7 +1494,7 @@ void fragment() {
         foreach (Card c in new[] { _rear!, _front!, _glow! })
         {
             c.Quad.Position = anchor;
-            ((ShaderMaterial)c.Quad.MaterialOverride).SetShaderParameter("ground", floor);
+            ((ShaderMaterial)c.Quad.MaterialOverride).Param("ground", floor);
         }
         // The fire, the column and the plume in front of the whole tank, and the
         // height map to say which of their elements it stands in front of - see

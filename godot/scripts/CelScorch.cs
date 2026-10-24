@@ -84,9 +84,9 @@ public sealed partial class CelScorch : Node3D
         if (_marks.Count < Kept)
         {
             var look = new ShaderMaterial { Shader = ScorchShader, RenderPriority = Stage3D.RutOrder - 1 };
-            look.SetShaderParameter("soot", Soot);
-            look.SetShaderParameter("burnt", Char);
-            look.SetShaderParameter("singe", Singe);
+            look.Param("soot", Soot);
+            look.Param("burnt", Char);
+            look.Param("singe", Singe);
             var node = new MeshInstance3D
             {
                 Name = $"Scorch{_marks.Count}", MaterialOverride = look,
@@ -102,8 +102,8 @@ public sealed partial class CelScorch : Node3D
         float reach = radius * 1.25f;
         mark.Node.Mesh = Sheet(at, reach);
         mark.Node.GlobalPosition = at;
-        mark.Look.SetShaderParameter("seed", CelPuff.Hash(_burnt, 401) * 17.0f);
-        mark.Look.SetShaderParameter("turn", CelPuff.Hash(_burnt, 402) * Mathf.Tau);
+        mark.Look.Param("seed", CelPuff.Hash(_burnt, 401) * 17.0f);
+        mark.Look.Param("turn", CelPuff.Hash(_burnt, 402) * Mathf.Tau);
         mark.Age = 0.0f;
         mark.Node.Visible = true;
         Apply(mark);
@@ -130,8 +130,8 @@ public sealed partial class CelScorch : Node3D
     {
         float g = Mathf.Clamp(m.Age / GrowTime, 0.0f, 1.0f);
         float d = Mathf.Clamp(m.Age / DarkTime, 0.0f, 1.0f);
-        m.Look.SetShaderParameter("grow", Mathf.Lerp(FirstReach, 1.0f, 1.0f - (1.0f - g) * (1.0f - g)));
-        m.Look.SetShaderParameter("ink", Mathf.Lerp(FirstInk, 1.0f, Mathf.SmoothStep(0.0f, 1.0f, d)));
+        m.Look.Param("grow", Mathf.Lerp(FirstReach, 1.0f, 1.0f - (1.0f - g) * (1.0f - g)));
+        m.Look.Param("ink", Mathf.Lerp(FirstInk, 1.0f, Mathf.SmoothStep(0.0f, 1.0f, d)));
     }
 
     /// <summary>The sheet, <paramref name="reach"/> out each way from

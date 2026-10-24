@@ -444,38 +444,38 @@ public sealed partial class ProcScreen : Node3D
             Shader = SheetBlast.Puffing,
             RenderPriority = Stage3D.StandOrder,
         };
-        _ink.SetShaderParameter("sheet",
+        _ink.Param("sheet",
             SheetBlast.Art("puff_sheet.png", ref SheetBlast.SheetArt));
-        _ink.SetShaderParameter("bulge",
+        _ink.Param("bulge",
             SheetBlast.Art("puff_bulge.png", ref SheetBlast.BulgeArt));
-        _ink.SetShaderParameter("dent",
+        _ink.Param("dent",
             SheetBlast.Art("puff_dent.png", ref SheetBlast.DentArt));
-        _ink.SetShaderParameter("smoke_ramp", SheetBlast.Ramp(ScreenStops, 256));
-        _ink.SetShaderParameter("flame_ramp",
+        _ink.Param("smoke_ramp", SheetBlast.Ramp(ScreenStops, 256));
+        _ink.Param("flame_ramp",
             SheetBlast.Ramp(SheetBlast.FlameStops, 256));
-        _ink.SetShaderParameter("flame_fade",
+        _ink.Param("flame_fade",
             SheetBlast.Ramp(SheetBlast.FadeStops, 64));
-        _ink.SetShaderParameter("sun", Stage3D.Sun);
-        _ink.SetShaderParameter("seat_y", 0.0f);
+        _ink.Param("sun", Stage3D.Sun);
+        _ink.Param("seat_y", 0.0f);
         // The screen's own three, against the burst's. A grenade's flash is small,
         // brief and low; the cloud over it is pale all the way up rather than dark
         // at the core, because it never was earth.
-        _ink.SetShaderParameter("flame_gain", FlashDefault);
-        _ink.SetShaderParameter("flame_out", FlashOutDefault);
-        _ink.SetShaderParameter("pale", 0.16f);
+        _ink.Param("flame_gain", FlashDefault);
+        _ink.Param("flame_out", FlashOutDefault);
+        _ink.Param("pale", 0.16f);
         // <b>And it has to reach the cloud, which took a picture to notice.</b>
         // The burst keeps its fire in the bottom 46 world units because a shell's
         // fireball sits on the ground under a column of earth. This cloud's heart
         // is ninety units up, so every puff of it was above the cut and the flash
         // was not merely dim - it was not drawn at all.
-        _ink.SetShaderParameter("flame_low", FlashReach);
+        _ink.Param("flame_low", FlashReach);
         // <b>And it stays white.</b> The burst walks its flame lookup a long way
         // along the ramp with age, because a shell's fireball goes white, yellow,
         // red and out. A smoke round has no fire in it at all - what is bright is
         // the ejection charge, and that is white for the fifth of a second it
         // lasts. Left at the burst's 0.42 the walk reached the ramp's red stop
         // inside the flash and the grenade read as a small fire in the cell.
-        _ink.SetShaderParameter("flame_shift", 0.10f);
+        _ink.Param("flame_shift", 0.10f);
         // <b>And the sheet is crossfaded, where the burst leaves it stepped.</b>
         // This is the one dial SheetBlast measured, found worth nothing, and kept
         // anyway "for a shorter sheet, or one drawn bigger" - and a smoke screen
@@ -486,7 +486,7 @@ public sealed partial class ProcScreen : Node3D
         // second, and a flipbook at eight frames a second does not look like slow
         // smoke - it looks like the game has dropped frames. Crossfaded, the
         // playhead can run as slowly as the picture wants and never step.
-        _ink.SetShaderParameter("frame_blend", BlendDefault);
+        _ink.Param("frame_blend", BlendDefault);
 
         _many = new MultiMesh
         {
@@ -518,7 +518,7 @@ public sealed partial class ProcScreen : Node3D
         Transform = _seat;
         if (_cloud is not null)
             _cloud.Position = _nudge;
-        _ink?.SetShaderParameter("seat_y", Transform.Origin.Y);
+        _ink?.Param("seat_y", Transform.Origin.Y);
     }
 
     private static float Hash(int k, int salt) =>

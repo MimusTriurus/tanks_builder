@@ -218,19 +218,19 @@ public sealed partial class ProcBall : Node3D
             Shader = ProcBlast.Ringing,
             RenderPriority = Stage3D.StandOrder,
         };
-        _ringInk.SetShaderParameter("level", 1.0f);
-        _ringInk.SetShaderParameter("time", 0.0f);
-        _ringInk.SetShaderParameter("ring_gain", 0.36f);
-        _ringInk.SetShaderParameter("ring_life", 0.55f);
+        _ringInk.Param("level", 1.0f);
+        _ringInk.Param("time", 0.0f);
+        _ringInk.Param("ring_gain", 0.36f);
+        _ringInk.Param("ring_life", 0.55f);
         // <b>The disc is the flash reaching the neighbours' ground</b>, and it is
         // the one part of the fire this camera lets on to the near cells: the
         // upright quad stops at the ground line, so a ball that reaches the cell
         // in front of the wreck can only be shown lighting it. Wide and slow for
         // that reason - a ring plane's disc is a lamp under a shell for 0.11s;
         // this one is a fireball standing on the cell for half a second.
-        _ringInk.SetShaderParameter("disc_gain", 0.90f);
-        _ringInk.SetShaderParameter("disc_wide", 0.70f);
-        _ringInk.SetShaderParameter("disc_life", 0.45f);
+        _ringInk.Param("disc_gain", 0.90f);
+        _ringInk.Param("disc_wide", 0.70f);
+        _ringInk.Param("disc_life", 0.45f);
         _ring = new MeshInstance3D
         {
             Mesh = new PlaneMesh
@@ -258,7 +258,7 @@ public sealed partial class ProcBall : Node3D
         // plane over the tanks would be a sheet laid on them.
         _carpetInk = Ink(Carpeting, dust: true);
         _carpetInk.RenderPriority = Stage3D.RingOrder;
-        _carpetInk.SetShaderParameter("carpet", DustReach);
+        _carpetInk.Param("carpet", DustReach);
         _carpet = new MeshInstance3D
         {
             Mesh = new PlaneMesh
@@ -346,8 +346,8 @@ public sealed partial class ProcBall : Node3D
         if (float.IsNaN(Heart.X))
             return;
         Vector2 at = Placed;
-        _dustInk?.SetShaderParameter("heart", at);
-        _fireInk?.SetShaderParameter("heart", at);
+        _dustInk?.Param("heart", at);
+        _fireInk?.Param("heart", at);
     }
 
     /// <summary>Set it off. Restarts rather than refusing -
@@ -405,10 +405,10 @@ public sealed partial class ProcBall : Node3D
         if (!on)
             return;
 
-        _dustInk?.SetShaderParameter("time", _clock);
-        _fireInk?.SetShaderParameter("time", _clock);
-        _ringInk?.SetShaderParameter("time", _clock);
-        _carpetInk?.SetShaderParameter("time", _clock);
+        _dustInk?.Param("time", _clock);
+        _fireInk?.Param("time", _clock);
+        _ringInk?.Param("time", _clock);
+        _carpetInk?.Param("time", _clock);
     }
 
     /// <summary>One number of one of the three shaders, live -
@@ -487,24 +487,24 @@ public sealed partial class ProcBall : Node3D
             Shader = how,
             RenderPriority = Stage3D.StandOrder,
         };
-        ink.SetShaderParameter("foot_v", 1.0f);
-        ink.SetShaderParameter("tall", Tall);
-        ink.SetShaderParameter("wideq", Flank * 2.0f);
-        ink.SetShaderParameter("root", Root);
-        ink.SetShaderParameter("floor_fade", Fade);
-        ink.SetShaderParameter("reach", Reach);
-        ink.SetShaderParameter("level", 1.0f);
-        ink.SetShaderParameter("time", 0.0f);
-        ink.SetShaderParameter("sun", Stage3D.Sun);
+        ink.Param("foot_v", 1.0f);
+        ink.Param("tall", Tall);
+        ink.Param("wideq", Flank * 2.0f);
+        ink.Param("root", Root);
+        ink.Param("floor_fade", Fade);
+        ink.Param("reach", Reach);
+        ink.Param("level", 1.0f);
+        ink.Param("time", 0.0f);
+        ink.Param("sun", Stage3D.Sun);
         if (!dust)
             return ink;
         // The shared banding at the burst's own helping - this is the biggest
         // mass on the board, and the shared 0.55 was tuned on a mass.
-        ink.SetShaderParameter("dust_band", 0.50f);
-        ink.SetShaderParameter("dust_tear", 0.56f);
+        ink.Param("dust_band", 0.50f);
+        ink.Param("dust_tear", 0.56f);
         // Hides the wreck outright, the rack's reason: this is the tank coming
         // apart, and a head you can read the hatches through says it did not.
-        ink.SetShaderParameter("dust_ink", 0.80f);
+        ink.Param("dust_ink", 0.80f);
         return ink;
     }
 
