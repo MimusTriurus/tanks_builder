@@ -323,20 +323,54 @@ public sealed partial class Tank3DBench : Node3D
     /// </summary>
     private void Mount(string model)
     {
+        TankModel next;
+        using (Prof.Measure("mount.load"))
+            next = TankModel.Load(model, toon: !_pbr, bare: Bare);
+        Mount(next, model);
+    }
+
+    /// <summary>
+    /// The scenes <see cref="TankModel.Load"/> kept per tag, dressed and
+    /// unposed: the ghosts are copied out of them (<see cref="TankModel.Copy"/>)
+    /// instead of reading the glTF again on every hand-over.
+    ///
+    /// <b>Out of the tree</b>, freed with the bench: under it, hidden, the
+    /// bench's own walks over its nodes found them - the rig's measures and the
+    /// blast went from 10 to 100 ms. So the perf run counts them as orphans, a
+    /// constant ~230 a match, and a leak is a count that grows past that.
+    /// </summary>
+    private Node Bare => _bareNode ??= new Node { Name = "BareModels" };
+    private Node? _bareNode;
+
+    public override void _ExitTree()
+    {
+        _bareNode?.Free();
+        _bareNode = null;
+    }
+
+    /// <summary>A model already loaded on the rig - the one a hand-over takes
+    /// off its parking (<see cref="TakeOver"/>). Whatever the rig had is
+    /// freed; <see cref="Unmount"/> with <c>keep</c> first to have it back.</summary>
+    private void Mount(TankModel next, string model)
+    {
         MovementProfile profile = ClassFor(model);
-        TankModel next = TankModel.Load(model, toon: !_pbr);
         next.ScaleTo(PixelsFor(next, profile));
-        Unmount();
+        using (Prof.Measure("mount.unmount"))
+            Unmount();
         _modelTag = model;
         _profile = profile;
         _model = next;
         SidePaint(_model, _side);
         _rig.AddChild(_model);
-        _deckPx = MeasureDeck();
-        _beltPaint = null;
-        _foot = MeasureFootprint(_model, _rig, _modelTag);
-        _roofPx = MeasureRoof();
-        BuildEffects();
+        using (Prof.Measure("mount.measure"))
+        {
+            _deckPx = MeasureDeck();
+            _beltPaint = null;
+            _foot = MeasureFootprint(_model, _rig, _modelTag);
+            _roofPx = MeasureRoof();
+        }
+        using (Prof.Measure("mount.effects"))
+            BuildEffects();
         GD.Print($"tank3d: {_modelTag} class {_profile.Tag} x{_profile.Size:F2}, {_model.PixelsPerUnit:F2} px/unit, "
                  + $"hull {_model.HullLength:F4} x {_model.HullWidth:F4} = {_model.HullLength * _model.PixelsPerUnit:F0} px, "
                  + $"bore r {_model.BoreRadius:F4}, deck {_deckPx:F1} px, roof {_roofPx:F1} of {_model.Size.Y * _model.PixelsPerUnit * RiseFactor:F1}, squash {Squash:F4} = {Mathf.RadToDeg(Mathf.Asin(Squash)):F2} deg, "
@@ -346,18 +380,27 @@ public sealed partial class Tank3DBench : Node3D
     /// <summary>Take the tank off the rig: everything <see cref="Mount"/> and
     /// <see cref="BuildEffects"/> made for it. Reset first, so the debris a
     /// destroyed tank threw is back in the model that gets freed.</summary>
-    private void Unmount()
+    /// <param name="keep">Hand the model back, wiped as loaded
+    /// (<see cref="TankModel.Wipe"/>), instead of freeing it.</param>
+    private TankModel? Unmount(bool keep = false)
     {
         if (_model is null)
-            return;
+            return null;
         ResetTank();
         FreeEffects();
         _paint.Clear();
         _hullHits = null;
         _hitLocal = Vector3.Zero;
-        _rig.RemoveChild(_model);
-        _model.QueueFree();
+        TankModel was = _model;
+        _rig.RemoveChild(was);
         _model = null!;
+        if (keep)
+        {
+            was.Wipe();
+            return was;
+        }
+        was.QueueFree();
+        return null;
     }
 
     /// <summary>The panel's pick and <c>--do model=</c>: another tank on the same

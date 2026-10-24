@@ -108,8 +108,10 @@ void fragment() {
         TankModel model;
         try
         {
-            // cel dressed: the ink's normal rides on the surfaces (Toon.Dress)
-            model = TankModel.Load(tag, toon: true);
+            // cel dressed: the ink's normal rides on the surfaces (Toon.Dress);
+            // a copy of the scene a load kept, when there is one - the glTF
+            // read again was the hand-over's other third (docs/perf.md, BOT-2)
+            model = TankModel.Copy(tag, Bare) ?? TankModel.Load(tag, toon: true, bare: Bare);
         }
         catch (Exception e)
         {

@@ -304,7 +304,7 @@ public sealed partial class Tank3DBench
         TankModel model;
         try
         {
-            model = TankModel.Load(tag, toon: true);
+            model = TankModel.Copy(tag, Bare) ?? TankModel.Load(tag, toon: true, bare: Bare);
         }
         catch (Exception e)
         {
