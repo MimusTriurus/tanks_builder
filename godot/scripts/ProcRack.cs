@@ -269,15 +269,15 @@ public sealed partial class ProcRack : Node3D
             Shader = ProcBlast.Ringing,
             RenderPriority = Stage3D.StandOrder,
         };
-        _ringInk.SetShaderParameter("level", 1.0f);
-        _ringInk.SetShaderParameter("time", 0.0f);
+        _ringInk.Param("level", 1.0f);
+        _ringInk.Param("time", 0.0f);
         // <b>Dimmer than the ground burst's, which is already dimmed once.</b>
         // A round in the ground lights the cell it went off on; a rack lights the
         // inside of a hull, and what reaches the ground is what got past the
         // running gear. Read at ProcBlast's own gain the ring came out saying the
         // cell had been hit rather than the tank on it.
-        _ringInk.SetShaderParameter("ring_gain", 0.30f);
-        _ringInk.SetShaderParameter("disc_gain", 0.62f);
+        _ringInk.Param("ring_gain", 0.30f);
+        _ringInk.Param("disc_gain", 0.62f);
         _ring = new MeshInstance3D
         {
             Mesh = new PlaneMesh
@@ -405,8 +405,8 @@ public sealed partial class ProcRack : Node3D
     private void Place()
     {
         Vector2 at = Placed;
-        _dustInk?.SetShaderParameter("deck", at);
-        _fireInk?.SetShaderParameter("deck", at);
+        _dustInk?.Param("deck", at);
+        _fireInk?.Param("deck", at);
     }
 
     /// <summary>Set it off. Restarts rather than refusing, for
@@ -449,9 +449,9 @@ public sealed partial class ProcRack : Node3D
         if (!on)
             return;
 
-        _dustInk?.SetShaderParameter("time", _clock);
-        _fireInk?.SetShaderParameter("time", _clock);
-        _ringInk?.SetShaderParameter("time", _clock);
+        _dustInk?.Param("time", _clock);
+        _fireInk?.Param("time", _clock);
+        _ringInk?.Param("time", _clock);
     }
 
     /// <summary>One number of one of the three shaders, live - read out of the
@@ -523,16 +523,16 @@ public sealed partial class ProcRack : Node3D
             Shader = how,
             RenderPriority = Stage3D.StandOrder,
         };
-        ink.SetShaderParameter("foot_v", 1.0f);
-        ink.SetShaderParameter("tall", Tall);
-        ink.SetShaderParameter("wideq", Flank * 2.0f);
-        ink.SetShaderParameter("root", Root);
-        ink.SetShaderParameter("floor_fade", Fade);
-        ink.SetShaderParameter("reach", Reach);
-        ink.SetShaderParameter("level", 1.0f);
-        ink.SetShaderParameter("time", 0.0f);
-        ink.SetShaderParameter("sun", Stage3D.Sun);
-        ink.SetShaderParameter("deck", Vector2.Zero);
+        ink.Param("foot_v", 1.0f);
+        ink.Param("tall", Tall);
+        ink.Param("wideq", Flank * 2.0f);
+        ink.Param("root", Root);
+        ink.Param("floor_fade", Fade);
+        ink.Param("reach", Reach);
+        ink.Param("level", 1.0f);
+        ink.Param("time", 0.0f);
+        ink.Param("sun", Stage3D.Sun);
+        ink.Param("deck", Vector2.Zero);
         if (!dust)
             return ink;
         // <b>The burst's own helping of the shared banding rather than the
@@ -540,14 +540,14 @@ public sealed partial class ProcRack : Node3D
         // fourteen elements making one volume is what the shared 0.55 was tuned
         // on, and a ricochet's handful that saturates wherever two overlap is
         // what takes half.
-        ink.SetShaderParameter("dust_band", 0.50f);
-        ink.SetShaderParameter("dust_tear", 0.56f);
+        ink.Param("dust_band", 0.50f);
+        ink.Param("dust_tear", 0.56f);
         // <b>And it hides the tank outright, which none of the other three
         // do.</b> The others draw something happening to a tank that is still
         // there to be seen; this one is the tank coming apart, and a head of soot
         // you can read the turret's hatches through says the ammunition did not
         // really go off.
-        ink.SetShaderParameter("dust_ink", 0.78f);
+        ink.Param("dust_ink", 0.78f);
         return ink;
     }
 

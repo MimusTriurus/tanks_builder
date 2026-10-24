@@ -188,18 +188,18 @@ public static class Plumes
     {
         if (tank.DepthAt(facing) is not DepthMap map)
         {
-            shader.SetShaderParameter("depth_on", false);
+            shader.Param("depth_on", false);
             return false;
         }
-        shader.SetShaderParameter("depth_on", true);
-        shader.SetShaderParameter("depth_tex", map.Texture);
-        shader.SetShaderParameter("depth_size", map.Sheet);
-        shader.SetShaderParameter("depth_rect",
+        shader.Param("depth_on", true);
+        shader.Param("depth_tex", map.Texture);
+        shader.Param("depth_size", map.Sheet);
+        shader.Param("depth_rect",
             new Vector4(map.Region.Position.X, map.Region.Position.Y,
                         map.Region.Size.X, map.Region.Size.Y));
         // Where the anchor falls in the frame, which is the map's own business -
         // see ITankShape.DepthAt.
-        shader.SetShaderParameter("depth_shift", map.Shift);
+        shader.Param("depth_shift", map.Shift);
         return true;
     }
 

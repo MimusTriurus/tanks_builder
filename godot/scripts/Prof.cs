@@ -45,6 +45,15 @@ public static class Prof
         internal readonly double[] Ring = new double[Window];
         /// <summary>Every frame's, while <see cref="Recording"/>.</summary>
         public readonly List<double> Trace = new();
+        /// <summary>Bytes the main thread allocated inside: this frame so far,
+        /// the frame just closed, its average over <see cref="Window"/> and
+        /// every frame's while <see cref="Recording"/>. Which section a GC
+        /// pause is owed to (BOT-3): the frame's own count says only that it is.</summary>
+        internal long AllocNow;
+        public long AllocLast;
+        public double AllocAvg;
+        internal readonly long[] AllocRing = new long[Window];
+        public readonly List<long> AllocTrace = new();
     }
 
     /// <summary>One closed frame.</summary>
@@ -83,6 +92,9 @@ public static class Prof
     /// <see cref="Section.Trace"/>).</summary>
     public static bool Recording;
     public static readonly List<Sample> Samples = new();
+    /// <summary>Frames a recording will hold: a section's lists are made this
+    /// big when it comes in, so none grows mid-run.</summary>
+    public static int Capacity;
 
     private static long _lastTick;
     private static long _allocAt = -1;
@@ -93,15 +105,20 @@ public static class Prof
     {
         private readonly Section _section;
         private readonly long _from;
+        private readonly long _bytes;
 
         internal Scope(Section section)
         {
             _section = section;
             _from = Stopwatch.GetTimestamp();
+            _bytes = GC.GetAllocatedBytesForCurrentThread();
         }
 
-        public void Dispose() =>
+        public void Dispose()
+        {
             _section.Now += (Stopwatch.GetTimestamp() - _from) * 1000.0 / Stopwatch.Frequency;
+            _section.AllocNow += GC.GetAllocatedBytesForCurrentThread() - _bytes;
+        }
     }
 
     public static Scope Measure(string name) => new(Get(name));
@@ -115,8 +132,14 @@ public static class Prof
         Sections.Add(s);
         // a section that comes in late in a recording: nought for the frames before it
         if (Recording)
+        {
+            s.Trace.Capacity = s.AllocTrace.Capacity = Math.Max(Capacity, Samples.Count);
             for (int i = 0; i < Samples.Count; i++)
+            {
                 s.Trace.Add(0.0);
+                s.AllocTrace.Add(0);
+            }
+        }
         string id = "bench/" + name;
         // statics outlive a scene reload (Backspace), and the monitors with them
         if (!Performance.HasCustomMonitor(id))
@@ -190,8 +213,18 @@ public static class Prof
             }
             sec.Avg = sum / n;
             sec.Max = max;
+            sec.AllocLast = sec.AllocNow;
+            sec.AllocNow = 0;
+            sec.AllocRing[slot] = sec.AllocLast;
+            long bytes = 0;
+            for (int i = 0; i < n; i++)
+                bytes += sec.AllocRing[i];
+            sec.AllocAvg = (double)bytes / n;
             if (Recording)
+            {
                 sec.Trace.Add(sec.Last);
+                sec.AllocTrace.Add(sec.AllocLast);
+            }
         }
         if (Recording)
             Samples.Add(s);

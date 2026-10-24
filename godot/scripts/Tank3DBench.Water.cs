@@ -478,12 +478,16 @@ public sealed partial class Tank3DBench
     /// drowns (the sprite's foam goes by <c>1 - sink</c> too), thicker the
     /// faster it goes through.
     /// </summary>
+    /// <summary>Where along the hull the water's level is sampled: the middle,
+    /// near the bow and near the stern, as shares of half its length.</summary>
+    private static readonly float[] Alongs = { 0.0f, 0.9f, -0.9f };
+
     private void Waterline(float dt, Vector3 ahead, float halfLen)
     {
         if (_field is null || _model.Cel.Count == 0)
             return;
         float level = float.NegativeInfinity;
-        foreach (float along in new[] { 0.0f, 0.9f, -0.9f })
+        foreach (float along in Alongs)
         {
             Vector2I c = _field.FlatCellAt(Board(_rig.Position + ahead * (halfLen * along)));
             if (_field.InBounds(c) && _field.IsWater(c))
@@ -501,9 +505,9 @@ public sealed partial class Tank3DBench
         _beltPaint ??= BeltPaint();
         foreach (ShaderMaterial cel in _model.Cel)
         {
-            cel.SetShaderParameter("water_on", _beltPaint.Contains(cel) ? 0.0f : _waterOn);
-            cel.SetShaderParameter("water_y", _waterLevel / RiseFactor);
-            cel.SetShaderParameter("water_pace", _wakePace);
+            cel.Param("water_on", _beltPaint.Contains(cel) ? 0.0f : _waterOn);
+            cel.Param("water_y", _waterLevel / RiseFactor);
+            cel.Param("water_pace", _wakePace);
         }
     }
 

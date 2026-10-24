@@ -96,11 +96,11 @@ public sealed partial class CelCrater : Node3D
         _earth = Cel(Earth);
         // A hull's ink: its paint darkened, as wide.
         _crest = new ShaderMaterial { Shader = CrestShader };
-        _crest.SetShaderParameter("albedo", Earth * Toon.InkDark);
-        _crest.SetShaderParameter("width", Toon.InkWidth);
-        _crest.SetShaderParameter("min_px", Toon.InkMinPx);
+        _crest.Param("albedo", Earth * Toon.InkDark);
+        _crest.Param("width", Toon.InkWidth);
+        _crest.Param("min_px", Toon.InkMinPx);
         _foot = (ShaderMaterial)_crest.Duplicate();
-        _foot.SetShaderParameter("facing", true);
+        _foot.Param("facing", true);
         for (int i = 0; i < Shapes; i++)
             _shapes.Add(RimMesh(10 + i));
         // Dressed as a model: faceted, on the cel shader, the ink round it.
@@ -120,7 +120,7 @@ public sealed partial class CelCrater : Node3D
     private static ShaderMaterial Cel(Color albedo)
     {
         var m = new ShaderMaterial { Shader = Toon.CelShader };
-        m.SetShaderParameter("albedo", albedo);
+        m.Param("albedo", albedo);
         return m;
     }
 
@@ -164,11 +164,11 @@ public sealed partial class CelCrater : Node3D
         sun = sun.LengthSquared() > 1e-6f ? sun.Normalized() : Vector3.Forward;
         // Into the crater's own frame, which is turned.
         Vector3 local = new Basis(Vector3.Up, -turn) * sun;
-        pit.BowlLook.SetShaderParameter("sun", new Vector2(local.X, local.Z));
-        pit.BowlLook.SetShaderParameter("shade", BowlShade);
-        pit.BowlLook.SetShaderParameter("lit", BowlLit);
-        pit.BowlLook.SetShaderParameter("bottom", BowlFloor);
-        pit.BowlLook.SetShaderParameter("seed", CelPuff.Hash(_dug, 311) * 50.0f);
+        pit.BowlLook.Param("sun", new Vector2(local.X, local.Z));
+        pit.BowlLook.Param("shade", BowlShade);
+        pit.BowlLook.Param("lit", BowlLit);
+        pit.BowlLook.Param("bottom", BowlFloor);
+        pit.BowlLook.Param("seed", CelPuff.Hash(_dug, 311) * 50.0f);
         Clods(pit, new Transform3D(new Basis(Vector3.Up, turn).Scaled(Vector3.One * radius), at), inside);
         pit.Radius = radius;
         pit.Age = 0.0f;

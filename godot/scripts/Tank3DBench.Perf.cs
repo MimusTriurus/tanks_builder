@@ -118,9 +118,16 @@ public sealed partial class Tank3DBench
         Engine.MaxFps = 0;
         Prof.Recording = true;
         Prof.Samples.Clear();
-        Prof.Samples.Capacity = _perfTo + 2;
+        // sized up front: a list doubling mid-run is the recording's own
+        // allocation in the frame it lands on
+        Prof.Capacity = _perfTo + 2;
+        Prof.Samples.Capacity = Prof.Capacity;
         foreach (Prof.Section s in Prof.Sections)
+        {
             s.Trace.Clear();
+            s.AllocTrace.Clear();
+            s.Trace.Capacity = s.AllocTrace.Capacity = Prof.Capacity;
+        }
         GD.Print($"perf: recording {_perfTo} frames to {_perfDir}");
     }
 
@@ -180,8 +187,13 @@ public sealed partial class Tank3DBench
             ["video_mb"] = run.Count > 0 ? Math.Round(run.Max(s => s.VideoMb), 1) : 0,
         };
         var secs = new JsonObject();
+        // and what each allocated, KB a frame: whose bytes the GC pauses are
+        var secsKb = new JsonObject();
         foreach (Prof.Section sec in sections)
+        {
             secs[sec.Name] = Stats(sec.Trace.Skip(offset + from).Take(run.Count));
+            secsKb[sec.Name] = Stats(sec.AllocTrace.Skip(offset + from).Take(run.Count).Select(b => b / 1024.0));
+        }
         // the worst frames, and which section had them
         var worst = new JsonArray();
         foreach ((Prof.Sample s, int i) in run.Select((s, i) => (s, i)).OrderByDescending(p => p.s.FrameMs).Take(8))
@@ -219,6 +231,7 @@ public sealed partial class Tank3DBench
             ["warm_up"] = from,
             ["metrics"] = metrics,
             ["sections"] = secs,
+            ["section_alloc_kb"] = secsKb,
             ["worst"] = worst,
         };
         string json = summary.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
@@ -247,6 +260,9 @@ public sealed partial class Tank3DBench
         sb.Append("frame,frame_ms,render_cpu_ms,gpu_ms,draw_calls,primitives,objects,nodes,orphans,alloc_bytes,gc0");
         foreach (Prof.Section s in sections)
             sb.Append(',').Append(s.Name);
+        // then each section's bytes, the same order
+        foreach (Prof.Section s in sections)
+            sb.Append(",kb:").Append(s.Name);
         sb.Append('\n');
         var ci = CultureInfo.InvariantCulture;
         for (int i = 0; i < rows.Count; i++)
@@ -257,6 +273,11 @@ public sealed partial class Tank3DBench
             {
                 int at = offset + i;
                 sb.Append(',').Append((at < s.Trace.Count ? s.Trace[at] : 0.0).ToString("F3", ci));
+            }
+            foreach (Prof.Section s in sections)
+            {
+                int at = offset + i;
+                sb.Append(',').Append((at < s.AllocTrace.Count ? s.AllocTrace[at] / 1024.0 : 0.0).ToString("F2", ci));
             }
             sb.Append('\n');
         }
@@ -333,7 +354,8 @@ public sealed partial class Tank3DBench
             {
                 if (node is not JsonObject)
                     continue;
-                foreach (string st in key is "frame_ms" or "gpu_ms" or "render_cpu_ms" ? stats : new[] { "avg", "max" })
+                foreach (string st in key is "frame_ms" or "gpu_ms" or "render_cpu_ms" ? stats
+                                      : key == "alloc_bytes" ? new[] { "avg", "p50", "max" } : new[] { "avg", "max" })
                     if (wm[key] is JsonObject)
                         Row($"{key} {st}", Get(wm, key, st), Get(nm, key, st));
             }
@@ -350,6 +372,13 @@ public sealed partial class Tank3DBench
                 if (ns[key] is null)
                     sb.AppendLine($"- section {key} not measured now");
         }
+        // a section's KB a frame, where either run has some (a floor of 2 KB,
+        // the counts'): a baseline from before the count has none to compare
+        if (was["section_alloc_kb"] is JsonObject wk && now["section_alloc_kb"] is JsonObject nk)
+            foreach (var (key, _) in nk)
+                if (wk[key] is JsonObject && Math.Max(Get(wk, key, "avg"), Get(nk, key, "avg")) >= 0.1)
+                    foreach (string st in new[] { "avg", "p50" })
+                        Row($"kb {key} {st}", Get(wk, key, st), Get(nk, key, st));
         sb.AppendLine();
         sb.AppendLine(worse == 0 ? "nothing worse than the baseline" : $"{worse} worse than the baseline (▲)");
         string text = sb.ToString();

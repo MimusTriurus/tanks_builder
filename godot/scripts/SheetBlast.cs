@@ -432,14 +432,14 @@ public sealed partial class SheetBlast : Node3D
         _rise = Mathf.Max(rise, 0.0001f);
 
         _ink = new ShaderMaterial { Shader = Puffing, RenderPriority = Stage3D.StandOrder };
-        _ink.SetShaderParameter("sheet", Art("puff_sheet.png", ref SheetArt));
-        _ink.SetShaderParameter("bulge", Art("puff_bulge.png", ref BulgeArt));
-        _ink.SetShaderParameter("dent", Art("puff_dent.png", ref DentArt));
-        _ink.SetShaderParameter("smoke_ramp", Ramp(Smokes(Wet, Leaf), 256));
-        _ink.SetShaderParameter("flame_ramp", Ramp(FlameStops, 256));
-        _ink.SetShaderParameter("flame_fade", Ramp(FadeStops, 64));
-        _ink.SetShaderParameter("sun", Stage3D.Sun);
-        _ink.SetShaderParameter("seat_y", 0.0f);
+        _ink.Param("sheet", Art("puff_sheet.png", ref SheetArt));
+        _ink.Param("bulge", Art("puff_bulge.png", ref BulgeArt));
+        _ink.Param("dent", Art("puff_dent.png", ref DentArt));
+        _ink.Param("smoke_ramp", Ramp(Smokes(Wet, Leaf), 256));
+        _ink.Param("flame_ramp", Ramp(FlameStops, 256));
+        _ink.Param("flame_fade", Ramp(FadeStops, 64));
+        _ink.Param("sun", Stage3D.Sun);
+        _ink.Param("seat_y", 0.0f);
         // <b>And a wood burst's flash has to be let up to where the wood burst
         // is.</b> flame_low's own note calls it "how far above the seat the fire
         // survives", and for a burst seated a tenth of a tile off the ground that
@@ -460,15 +460,15 @@ public sealed partial class SheetBlast : Node3D
         // one turns the other. The smoke screen paid for this lesson once already -
         // see ProcScreen.FlashReach.
         if (Leaf)
-            _ink.SetShaderParameter("flame_low",
+            _ink.Param("flame_low",
                 ProcBlast.Uniform(Code, "flame_low")
                 + (TimberSeat + TimberReach) * _tile);
 
         _fog = new ShaderMaterial { Shader = Hazing, RenderPriority = Stage3D.StandOrder - 1 };
-        _fog.SetShaderParameter("sheet", Art("puff_sheet.png", ref SheetArt));
-        _fog.SetShaderParameter("bulge", Art("puff_bulge.png", ref BulgeArt));
-        _fog.SetShaderParameter("dent", Art("puff_dent.png", ref DentArt));
-        _fog.SetShaderParameter("seat_y", 0.0f);
+        _fog.Param("sheet", Art("puff_sheet.png", ref SheetArt));
+        _fog.Param("bulge", Art("puff_bulge.png", ref BulgeArt));
+        _fog.Param("dent", Art("puff_dent.png", ref DentArt));
+        _fog.Param("seat_y", 0.0f);
 
         _many = new MultiMesh
         {
@@ -550,8 +550,8 @@ public sealed partial class SheetBlast : Node3D
     private void Stand()
     {
         Transform = _seat.ScaledLocal(Vector3.One * _might);
-        _ink?.SetShaderParameter("seat_y", Transform.Origin.Y);
-        _fog?.SetShaderParameter("seat_y", Transform.Origin.Y);
+        _ink?.Param("seat_y", Transform.Origin.Y);
+        _fog?.Param("seat_y", Transform.Origin.Y);
         // The depth nudge is a fact about this camera's depth buffer, not about how
         // big the burst is, so it is divided back out - see Stage3D.Clear on why
         // two units is the number and why less than one stopped working.
@@ -581,8 +581,8 @@ public sealed partial class SheetBlast : Node3D
         if (!on)
             return;
         // The event's own clock, which the flame is keyed to - see flame_out.
-        _ink?.SetShaderParameter("time", _clock);
-        _fog?.SetShaderParameter("time", _clock);
+        _ink?.Param("time", _clock);
+        _fog?.Param("time", _clock);
         Dress();
     }
 

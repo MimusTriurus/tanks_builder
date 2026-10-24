@@ -213,12 +213,12 @@ public sealed partial class CelBlast : Node3D
         // The quad is 3.2 radii across: the ring gets out to 1.55.
         _fire.GlobalTransform = new Transform3D(
             new Basis(right * (3.2f * size), up * (3.2f * size), back), _at + _n * (push * size));
-        _fireLook!.SetShaderParameter("dir", dir);
-        _fireLook.SetShaderParameter("along", Mathf.Clamp(along, 0.0f, 1.0f));
-        _fireLook.SetShaderParameter("frame", g);
-        _fireLook.SetShaderParameter("size_px", size);
-        _fireLook.SetShaderParameter("seed", CelPuff.Hash(_bursts, 67));
-        _fireLook.SetShaderParameter("ink", Toon.InkWidth / size);
+        _fireLook!.Param("dir", dir);
+        _fireLook.Param("along", Mathf.Clamp(along, 0.0f, 1.0f));
+        _fireLook.Param("frame", g);
+        _fireLook.Param("size_px", size);
+        _fireLook.Param("seed", CelPuff.Hash(_bursts, 67));
+        _fireLook.Param("ink", Toon.InkWidth / size);
         _glow.GlobalPosition = _at + _n * (0.10f * _hull);
         _glow.OmniRange = GlowReach * _hull;
         _glow.LightEnergy = GlowEnergy * (g < 1.0f ? 1.0f : 0.7f * (1.0f - f));

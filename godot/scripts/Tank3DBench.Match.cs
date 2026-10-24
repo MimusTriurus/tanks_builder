@@ -148,7 +148,7 @@ public sealed partial class Tank3DBench
         if (!Match)
             return;
         foreach (ShaderMaterial m in model.Cel)
-            m.SetShaderParameter("side_brown", side == Side.Brown ? 1.0f : 0.0f);
+            m.Param("side_brown", side == Side.Brown ? 1.0f : 0.0f);
     }
 
     /// <summary>Every unit on the board, the rig's first.</summary>
@@ -608,7 +608,7 @@ public sealed partial class Tank3DBench
                 // the time the fire is out
                 float k = Mathf.Clamp(p.Clock / (PyreBurn + p.Burn.FireFall), 0.0f, 1.0f);
                 foreach (ShaderMaterial mat in m.Cel)
-                    mat.SetShaderParameter("char_cover", PyreCover * k);
+                    mat.Param("char_cover", PyreCover * k);
                 if (k >= 1.0f)
                     p.Charred = true;
             }
@@ -628,12 +628,12 @@ public sealed partial class Tank3DBench
         var spots = new[] { at, at, at, at };
         foreach (ShaderMaterial m in model.Cel)
         {
-            m.SetShaderParameter("scorch_at", spots);
-            m.SetShaderParameter("scorch_n", 1);
-            m.SetShaderParameter("scorch_r", reach);
-            m.SetShaderParameter("scorch", 1.0f);
-            m.SetShaderParameter("ember", 0.0f);
-            m.SetShaderParameter("char_cover", cover);
+            m.Param("scorch_at", spots);
+            m.Param("scorch_n", 1);
+            m.Param("scorch_r", reach);
+            m.Param("scorch", 1.0f);
+            m.Param("ember", 0.0f);
+            m.Param("char_cover", cover);
         }
     }
 
@@ -718,6 +718,40 @@ public sealed partial class Tank3DBench
                     .Append(u.Fate == Fate.Alive && Burning(u.Side, u.Tag) ? "▲" : "");
         }
         return text.Append("      ▲ горит  ◐ подбит  ✕ уничтожен").ToString();
+    }
+
+    /// <summary>What <see cref="MatchHud"/> and <see cref="Roll"/> read, into
+    /// the HUD's stamp (<c>HudStamp</c>): the turn, and every unit's fate and
+    /// fire - walked here without <see cref="Units"/>' iterator.</summary>
+    private void MatchHudStamp(ref HashCode h)
+    {
+        h.Add(MatchOver);
+        h.Add(_drawn);
+        h.Add(_won);
+        h.Add(_round);
+        h.Add(_turn);
+        h.Add(_drove);
+        h.Add(_fired);
+        h.Add(_side);
+        // the countdown as it is printed, to a tenth
+        h.Add(_passIn is float t ? Mathf.RoundToInt(Mathf.Max(t, 0.0f) * 10.0f) : -1);
+        h.Add(_matchNote);
+        h.Add(_fate);
+        h.Add(Burning(_side, _modelTag));
+        foreach (Parked p in _parked)
+        {
+            h.Add(p.Tag);
+            h.Add(p.Side);
+            h.Add(p.Fate);
+            h.Add(Burning(p.Side, p.Tag));
+        }
+        if (_other is { Unit: true } o)
+        {
+            h.Add(o.Tag);
+            h.Add(o.Side);
+            h.Add(o.Fate);
+            h.Add(Burning(o.Side, o.Tag));
+        }
     }
 
     /// <summary>The HUD's lines in a match: where the turn stands and how to

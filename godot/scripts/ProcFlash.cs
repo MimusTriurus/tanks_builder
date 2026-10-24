@@ -438,33 +438,33 @@ public sealed partial class ProcFlash : Node2D
             GD.Print(Note);
         }
 
-        _shader.SetShaderParameter("shells", shells);
-        _shader.SetShaderParameter("shell_count", shells.Count);
-        _shader.SetShaderParameter("licks", licks);
-        _shader.SetShaderParameter("fits", fits);
-        _shader.SetShaderParameter("lick_count", licks.Count);
-        _shader.SetShaderParameter("root", rootPx);
-        _shader.SetShaderParameter("axis", axis);
-        _shader.SetShaderParameter("origin", quad.Position);
-        _shader.SetShaderParameter("span", quad.Size);
-        _shader.SetShaderParameter("profile",
+        _shader.Param("shells", shells);
+        _shader.Param("shell_count", shells.Count);
+        _shader.Param("licks", licks);
+        _shader.Param("fits", fits);
+        _shader.Param("lick_count", licks.Count);
+        _shader.Param("root", rootPx);
+        _shader.Param("axis", axis);
+        _shader.Param("origin", quad.Position);
+        _shader.Param("span", quad.Size);
+        _shader.Param("profile",
             new Vector3(Profile.X, Profile.Y, ProfilePeak(Profile)));
-        _shader.SetShaderParameter("petal", Petal);
-        _shader.SetShaderParameter("twist", Twist);
-        _shader.SetShaderParameter("seed", (float)Seed);
-        _shader.SetShaderParameter("hot", new Vector3(Hot.R, Hot.G, Hot.B));
-        _shader.SetShaderParameter("cool", new Vector3(Cool.R, Cool.G, Cool.B));
-        _shader.SetShaderParameter("rim_falloff", RimFalloff);
-        _shader.SetShaderParameter("opacity", Opacity);
+        _shader.Param("petal", Petal);
+        _shader.Param("twist", Twist);
+        _shader.Param("seed", (float)Seed);
+        _shader.Param("hot", new Vector3(Hot.R, Hot.G, Hot.B));
+        _shader.Param("cool", new Vector3(Cool.R, Cool.G, Cool.B));
+        _shader.Param("rim_falloff", RimFalloff);
+        _shader.Param("opacity", Opacity);
         // Deliberately not Plumes.LiftOf: that clamps to 1, and depth_keep at
         // exactly 1 is a smoothstep sitting on its own midpoint - it takes half
         // the flash away over whichever hull pixel is the map's tallest. The
         // muzzle really is above the ceiling, so it is said as the number it is.
-        _shader.SetShaderParameter("lift", Above(atlas, bore.Point.Z));
+        _shader.Param("lift", Above(atlas, bore.Point.Z));
         var stops = new Godot.Collections.Array();
         foreach (Vector2 stop in Stops)
             stops.Add(stop);
-        _shader.SetShaderParameter("stops", stops);
+        _shader.Param("stops", stops);
         Plumes.SetDepth(_shader, atlas, Tank.HullFacing);
 
         DrawSetTransformMatrix(Tank.ShearFor(true));

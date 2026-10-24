@@ -773,11 +773,11 @@ void fragment() {
     /// <summary>Set the paint of a cel material and of its ink together.</summary>
     public static void Paint(ShaderMaterial cel, Color albedo)
     {
-        cel.SetShaderParameter("albedo", albedo);
-        (cel.NextPass as ShaderMaterial)?.SetShaderParameter("albedo", albedo);
+        cel.Param("albedo", albedo);
+        (cel.NextPass as ShaderMaterial)?.Param("albedo", albedo);
     }
 
-    public static Color PaintOf(ShaderMaterial cel) => cel.GetShaderParameter("albedo").AsColor();
+    public static Color PaintOf(ShaderMaterial cel) => cel.Param("albedo").AsColor();
 
     /// <summary>
     /// A coloured rim round a dressed model - the HUD's selection and hover
@@ -879,10 +879,10 @@ void fragment() {
 
         public void Set(float px, Color tint)
         {
-            Mask.SetShaderParameter("px", px);
-            TurretMask.SetShaderParameter("px", px);
-            Line.SetShaderParameter("px", px);
-            Line.SetShaderParameter("tint", tint);
+            Mask.Param("px", px);
+            TurretMask.Param("px", px);
+            Line.Param("px", px);
+            Line.Param("tint", tint);
         }
     }
 
@@ -893,13 +893,13 @@ void fragment() {
     {
         // after everything see-through on the board: the marks, the ghost
         var line = new ShaderMaterial { Shader = HaloShader, RenderPriority = 101 };
-        line.SetShaderParameter("width", InkWidth);
-        line.SetShaderParameter("min_px", InkMinPx);
+        line.Param("width", InkWidth);
+        line.Param("min_px", InkMinPx);
         ShaderMaterial MaskOf(Shader shader)
         {
             var m = new ShaderMaterial { Shader = shader, RenderPriority = 100, NextPass = line };
-            m.SetShaderParameter("width", InkWidth);
-            m.SetShaderParameter("min_px", InkMinPx);
+            m.Param("width", InkWidth);
+            m.Param("min_px", InkMinPx);
             return m;
         }
         ShaderMaterial mask = MaskOf(HaloMaskShader), turret = MaskOf(HaloTurretMaskShader);
@@ -970,22 +970,22 @@ void fragment() {
         Texture2D? tex = std?.AlbedoTexture;
         Texture2D? orm = std?.AOTexture;
         var ink = new ShaderMaterial { Shader = InkShader };
-        ink.SetShaderParameter("albedo", albedo);
-        ink.SetShaderParameter("width", InkWidth);
-        ink.SetShaderParameter("min_px", InkMinPx);
-        ink.SetShaderParameter("dark", InkDark);
+        ink.Param("albedo", albedo);
+        ink.Param("width", InkWidth);
+        ink.Param("min_px", InkMinPx);
+        ink.Param("dark", InkDark);
         cel = leaf ? new ShaderMaterial { Shader = CelMarked(stencil, true) }
                    : new ShaderMaterial { Shader = CelMarked(stencil, false), NextPass = ink };
-        cel.SetShaderParameter("albedo", albedo);
+        cel.Param("albedo", albedo);
         if (tex is not null)
         {
-            cel.SetShaderParameter("albedo_tex", tex);
-            ink.SetShaderParameter("albedo_tex", tex);
+            cel.Param("albedo_tex", tex);
+            ink.Param("albedo_tex", tex);
         }
         if (orm is not null && std!.AOEnabled)
         {
-            cel.SetShaderParameter("orm_tex", orm);
-            cel.SetShaderParameter("has_orm", true);
+            cel.Param("orm_tex", orm);
+            cel.Param("has_orm", true);
         }
         made[mat] = cel;
         return cel;

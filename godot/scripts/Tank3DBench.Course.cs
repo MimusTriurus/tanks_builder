@@ -43,7 +43,6 @@ public sealed partial class Tank3DBench
     private MeshInstance3D? _course;
     private Control? _courseInk;
     private Steps.Reach? _reach;
-    private string _reachKey = "";
     private Vector2I? _hoverCell;
     /// <summary><c>--hover Q,R</c>: the pointer held on a cell.</summary>
     private Vector2I? _hoverFixed;
@@ -83,11 +82,31 @@ public sealed partial class Tank3DBench
     private HashSet<Vector2I> Barred(bool ram = false)
     {
         var barred = new HashSet<Vector2I>();
-        if (_other is { } o && !ram && o.Fate != Fate.Destroyed)
-            barred.Add(OtherCell(o));
-        barred.UnionWith(ParkedCells);
+        FillBarred(barred, ram);
         return barred;
     }
+
+    /// <summary><see cref="Barred"/> into a set the caller keeps - the
+    /// course's, every frame, with no set and no LINQ made for it.</summary>
+    private void FillBarred(HashSet<Vector2I> into, bool ram = false)
+    {
+        into.Clear();
+        if (_other is { } o && !ram && o.Fate != Fate.Destroyed)
+            into.Add(OtherCell(o));
+        foreach (Parked p in _parked)
+            if (p.Fate != Fate.Destroyed)
+                into.Add(p.Cell);
+    }
+
+    /// <summary>What the reach was searched for - the tank's cell and side
+    /// and the cells barred - to tell a frame that needs a new search;
+    /// <see cref="_reachVersion"/> counts the searches, for the keys that
+    /// build on it (<c>Post</c>, <c>RamPlan</c>).</summary>
+    private Vector2I _reachHere = new(int.MinValue, int.MinValue);
+    private int _reachSide = int.MinValue;
+    private HashSet<Vector2I> _reachBarred = new();
+    private readonly HashSet<Vector2I> _barredNow = new();
+    private int _reachVersion;
 
     private bool CourseShown =>
         _course is not null && _field is not null && _tile is not null && _rules && _chosen
@@ -145,13 +164,16 @@ public sealed partial class Tank3DBench
         }
         Vector2I here = CellHere;
         int side = HullSide();
-        HashSet<Vector2I> barred = Barred();
-        string key = $"{here} {side} {string.Join(";", barred.OrderBy(c => c.X).ThenBy(c => c.Y))}";
-        bool fresh = key != _reachKey;
+        FillBarred(_barredNow);
+        bool fresh = here != _reachHere || side != _reachSide || !_barredNow.SetEquals(_reachBarred);
         if (fresh)
         {
-            _reachKey = key;
-            _reach = Steps.Plan(_field!, new Steps.Pose(here, side), Steps.Mover.Of(_profile, _amphibious, barred));
+            _reachHere = here;
+            _reachSide = side;
+            // a set of its own: the search keeps it
+            _reachBarred = new HashSet<Vector2I>(_barredNow);
+            _reachVersion++;
+            _reach = Steps.Plan(_field!, new Steps.Pose(here, side), Steps.Mover.Of(_profile, _amphibious, _reachBarred));
         }
         // A fixed cell holds the way shown until it is ordered or let go - or
         // falls out of reach, when the board moved under it.
@@ -258,11 +280,14 @@ public sealed partial class Tank3DBench
 
     private void Tri(ImmediateMesh mesh, Color ink, Vector2I cell, Vector2 a, Vector2 b, Vector2 c)
     {
-        foreach (Vector2 v in new[] { a, b, c })
-        {
-            mesh.SurfaceSetColor(ink);
-            mesh.SurfaceAddVertex(OnTop(cell, v));
-        }
+        // three calls, not a loop over new[] { a, b, c }: a few hundred
+        // triangles a frame, 10 KB of arrays (BOT-3)
+        mesh.SurfaceSetColor(ink);
+        mesh.SurfaceAddVertex(OnTop(cell, a));
+        mesh.SurfaceSetColor(ink);
+        mesh.SurfaceAddVertex(OnTop(cell, b));
+        mesh.SurfaceSetColor(ink);
+        mesh.SurfaceAddVertex(OnTop(cell, c));
     }
 
     private void Quad(ImmediateMesh mesh, Color ink, Vector2I cell, Vector2 a, Vector2 b, Vector2 c, Vector2 d)

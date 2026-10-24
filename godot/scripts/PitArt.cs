@@ -79,8 +79,8 @@ public sealed partial class PitArt : Node3D
     public void Build(float squash, float rise)
     {
         _ink = new ShaderMaterial { Shader = Etching, RenderPriority = Rung };
-        _ink.SetShaderParameter("sun", Stage3D.Sun);
-        _ink.SetShaderParameter("cast", Stage3D.SunCast);
+        _ink.Param("sun", Stage3D.Sun);
+        _ink.Param("cast", Stage3D.SunCast);
         _plane = new PlaneMesh { Size = Vector2.One };
         _decal = new MeshInstance3D
         {
@@ -114,12 +114,12 @@ public sealed partial class PitArt : Node3D
             return;
         _plane.Size = new Vector2(2.0f * wide, 2.0f * wide);
         Position = Stage3D.Ground(spot, lift, squash, rise);
-        _ink.SetShaderParameter("ink", ink);
-        _ink.SetShaderParameter("seed", seed);
+        _ink.Param("ink", ink);
+        _ink.Param("seed", seed);
         // How many screen px the plane is, so the speckle and the stones can be a
         // size on screen rather than a share of a crater - a big crater is not a
         // small one with bigger gravel in it.
-        _ink.SetShaderParameter("span", 2.0f * wide);
+        _ink.Param("span", 2.0f * wide);
         _decal.Visible = true;
     }
 

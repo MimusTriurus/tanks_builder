@@ -754,7 +754,7 @@ public sealed partial class TankSprite : Node2D
             if (want == _charAt)
                 return;
             _charAt = want;
-            _char?.SetShaderParameter("burn", want);
+            _char?.Param("burn", want);
             QueueRedraw();
         }
     }
@@ -1573,7 +1573,7 @@ public sealed partial class TankSprite : Node2D
         // EffectLayer.Armour. Everything else keeps its own, which is what stops
         // the additive layers being darkened along with the paint.
         _char = new ShaderMaterial { Shader = CharShader };
-        _char.SetShaderParameter("burn", 0.0);
+        _char.Param("burn", 0.0);
         Material = _char;
 
         // Children draw after the parent and in order, so adding them in

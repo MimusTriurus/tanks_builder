@@ -98,8 +98,8 @@ public sealed class TreeFall
         };
         foreach (ShaderMaterial m in burn)
         {
-            m.SetShaderParameter("wind_y0", fall.Of.Y0);
-            m.SetShaderParameter("wind_h", fall.Of.H);
+            m.Param("wind_y0", fall.Of.Y0);
+            m.Param("wind_h", fall.Of.H);
         }
         return fall;
     }
@@ -132,13 +132,13 @@ public sealed class TreeFall
         Flinch = FlinchRate = 0.0;
         foreach (ShaderMaterial m in Burn)
         {
-            m.SetShaderParameter("fall_on", true);
-            m.SetShaderParameter("fall_dir", dir);
-            m.SetShaderParameter("fall_hinge", f.Hinge);
-            m.SetShaderParameter("fall_y0", f.Y0);
-            m.SetShaderParameter("fall_h", f.H);
-            m.SetShaderParameter("fall_mat", f.Mat);
-            m.SetShaderParameter("fall_lift", f.Lift);
+            m.Param("fall_on", true);
+            m.Param("fall_dir", dir);
+            m.Param("fall_hinge", f.Hinge);
+            m.Param("fall_y0", f.Y0);
+            m.Param("fall_h", f.H);
+            m.Param("fall_mat", f.Mat);
+            m.Param("fall_lift", f.Lift);
         }
         Tear();
         GD.Print($"{log}: {Holder.Name} over to {az:F0} deg, lies at {Mathf.RadToDeg((float)Rest):F0}, "
@@ -195,9 +195,9 @@ public sealed class TreeFall
         float down = Down;
         foreach (ShaderMaterial m in Burn)
         {
-            m.SetShaderParameter("fall_trunk", (float)Angle);
-            m.SetShaderParameter("fall_crown", (float)Flinch);
-            m.SetShaderParameter("fall_down", down);
+            m.Param("fall_trunk", (float)Angle);
+            m.Param("fall_crown", (float)Flinch);
+            m.Param("fall_down", down);
         }
         return touched;
     }
@@ -213,7 +213,7 @@ public sealed class TreeFall
         _pit = null;
         Angle = Spin = Flinch = FlinchRate = 0.0;
         foreach (ShaderMaterial m in Burn)
-            m.SetShaderParameter("fall_on", false);
+            m.Param("fall_on", false);
     }
 
     /// <summary><see cref="Toon.FallCode"/>'s pose of a model point, for what
@@ -326,7 +326,7 @@ public sealed class TreeFall
             _clods.Add(c);
         }
         _pitLook = new ShaderMaterial { Shader = PitShader };
-        _pitLook.SetShaderParameter("seed", (salt & 1023) * 0.37f);
+        _pitLook.Param("seed", (salt & 1023) * 0.37f);
         _pit = new MeshInstance3D
         {
             Name = "Pit",
@@ -339,13 +339,13 @@ public sealed class TreeFall
             Scale = Vector3.One * (plate * Ppm),
             Rotation = new Vector3(0.0f, Mathf.Atan2(fall.X, fall.Z), 0.0f),
         };
-        _pitLook.SetShaderParameter("cut", Of.Hinge / plate);
+        _pitLook.Param("cut", Of.Hinge / plate);
         Parent.AddChild(_pit);
     }
 
     private void Throw(float dt)
     {
-        _pitLook?.SetShaderParameter("grow", Mathf.SmoothStep(0.02f, 0.30f, (float)Angle));
+        _pitLook?.Param("grow", Mathf.SmoothStep(0.02f, 0.30f, (float)Angle));
         float ground = Holder.GlobalPosition.Y;
         foreach (Clod c in _clods)
         {

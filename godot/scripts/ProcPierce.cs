@@ -121,9 +121,9 @@ public sealed partial class ProcPierce : Node2D
         // UV so the shader needs neither the anchor nor the trim.
         Vector2 wound = (Tank.HitOffset - quad.Position) / size;
         Vector2 ring = -quad.Position / size;
-        _ink?.SetShaderParameter("wound", wound);
-        _ink?.SetShaderParameter("ring", ring);
-        _ink?.SetShaderParameter("quad", size);
+        _ink?.Param("wound", wound);
+        _ink?.Param("ring", ring);
+        _ink?.Param("quad", size);
         // <b>And where this frame sits in the atlas, because UV is the
         // TEXTURE's coordinate and not the quad's.</b> A canvas item drawn with
         // DrawTextureRectRegion gets UV over the region inside the whole sheet -
@@ -134,13 +134,13 @@ public sealed partial class ProcPierce : Node2D
         // its own threshold, and every tuning pass moved them without ever
         // making sense of them.
         Vector2 sheet = mask.Texture.GetSize();
-        _ink?.SetShaderParameter("uv_at", mask.Region.Position / sheet);
-        _ink?.SetShaderParameter("uv_span", mask.Region.Size / sheet);
-        _ink?.SetShaderParameter("frame", (float)Tank.HitFrame);
+        _ink?.Param("uv_at", mask.Region.Position / sheet);
+        _ink?.Param("uv_span", mask.Region.Size / sheet);
+        _ink?.Param("frame", (float)Tank.HitFrame);
         // In hull spans, the way the muzzle smoke is in bore radii: one number
         // for three tanks, and the only reason it can be one number.
-        _ink?.SetShaderParameter("span", shape.HullSpanPx > 0.0f ? shape.HullSpanPx : size.X);
-        _ink?.SetShaderParameter("scale", Tank.HitScale);
+        _ink?.Param("span", shape.HullSpanPx > 0.0f ? shape.HullSpanPx : size.X);
+        _ink?.Param("scale", Tank.HitScale);
         DrawTextureRectRegion(mask.Texture, quad, mask.Region);
         Drawn = true;
     }

@@ -507,9 +507,9 @@ public sealed partial class ProcKick : Node3D
         var muzzle = new Vector2(snout.X, -snout.Y) / Mathf.Max(_tile, 1.0f);
         foreach (ShaderMaterial? ink in new[] { _dustInk, _glowInk })
         {
-            ink?.SetShaderParameter("blow", blow);
-            ink?.SetShaderParameter("squat", squat);
-            ink?.SetShaderParameter("snout", muzzle);
+            ink?.Param("blow", blow);
+            ink?.Param("squat", squat);
+            ink?.Param("snout", muzzle);
         }
         Blow = blow;
         Squat = squat;
@@ -679,8 +679,8 @@ public sealed partial class ProcKick : Node3D
         if (!on)
             return;
 
-        _dustInk?.SetShaderParameter("time", _clock);
-        _glowInk?.SetShaderParameter("time", _clock);
+        _dustInk?.Param("time", _clock);
+        _glowInk?.Param("time", _clock);
     }
 
     /// <summary>One number of one of the two shaders, live - read out of the
@@ -756,19 +756,19 @@ public sealed partial class ProcKick : Node3D
     private ShaderMaterial Ink(Shader how)
     {
         var ink = new ShaderMaterial { Shader = how, RenderPriority = Stage3D.StandOrder };
-        ink.SetShaderParameter("foot_v", 1.0f);
-        ink.SetShaderParameter("tall", Tall);
-        ink.SetShaderParameter("wideq", Flank * 2.0f);
-        ink.SetShaderParameter("root", Root);
-        ink.SetShaderParameter("floor_fade", Fade);
-        ink.SetShaderParameter("reach", Reach);
-        ink.SetShaderParameter("level", 1.0f);
-        ink.SetShaderParameter("time", 0.0f);
-        ink.SetShaderParameter("sun", Stage3D.Sun);
-        ink.SetShaderParameter("blow", Vector2.Right);
-        ink.SetShaderParameter("squat", 1.0f);
-        ink.SetShaderParameter("back", Back);
-        ink.SetShaderParameter("snout", Vector2.Zero);
+        ink.Param("foot_v", 1.0f);
+        ink.Param("tall", Tall);
+        ink.Param("wideq", Flank * 2.0f);
+        ink.Param("root", Root);
+        ink.Param("floor_fade", Fade);
+        ink.Param("reach", Reach);
+        ink.Param("level", 1.0f);
+        ink.Param("time", 0.0f);
+        ink.Param("sun", Stage3D.Sun);
+        ink.Param("blow", Vector2.Right);
+        ink.Param("squat", 1.0f);
+        ink.Param("back", Back);
+        ink.Param("snout", Vector2.Zero);
         // <b>Half the burst's helping of the shared banding, and the reason is
         // the same one that made it half in the first place.</b> The steps read
         // as shading on a mass in transition and as *slabs* on one that
@@ -780,14 +780,14 @@ public sealed partial class ProcKick : Node3D
         //
         // Written here rather than changed in the shared text, because the shared
         // number is right for the effect it was tuned on.
-        ink.SetShaderParameter("dust_band", 0.28f);
+        ink.Param("dust_band", 0.28f);
         // <b>Torn harder than the burst, for the same reason the banding is taken
         // less.</b> Fifty-odd elements spread over two cells overlap into
         // saturation almost everywhere, and a saturated field with a soft edge is
         // a smear - which is what the settled dust came out as, in those words.
         // The burst's cone is deep and narrow and gets its structure from the
         // elements' own arrangement; a sheet has to get it from the field.
-        ink.SetShaderParameter("dust_tear", 0.55f);
+        ink.Param("dust_tear", 0.55f);
         return ink;
     }
 

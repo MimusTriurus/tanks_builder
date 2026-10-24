@@ -107,7 +107,7 @@ public sealed partial class Bubbles : Node3D
     {
         _dice.Seed = seed;
         var ink = new ShaderMaterial { Shader = Popping, RenderPriority = Stage3D.StandOrder + 1 };
-        ink.SetShaderParameter("ring", RingArt ??= Ring());
+        ink.Param("ring", RingArt ??= Ring());
         _many = new MultiMesh
         {
             Mesh = new QuadMesh { Size = Vector2.One },

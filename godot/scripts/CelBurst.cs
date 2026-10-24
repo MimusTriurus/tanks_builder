@@ -205,12 +205,12 @@ public sealed partial class CelBurst : Node3D
         float push = Mathf.Lerp(0.25f, 0.75f, Mathf.SmoothStep(0.0f, 4.0f, g));
         _fire.GlobalTransform = new Transform3D(
             new Basis(right * (3.2f * size), up * (3.2f * size), back), _at + Vector3.Up * (push * size));
-        _fireLook!.SetShaderParameter("dir", dir);
-        _fireLook.SetShaderParameter("along", Mathf.Clamp(along, 0.0f, 1.0f));
-        _fireLook.SetShaderParameter("frame", g);
-        _fireLook.SetShaderParameter("size_px", size);
-        _fireLook.SetShaderParameter("seed", CelPuff.Hash(_bursts, 167));
-        _fireLook.SetShaderParameter("ink", Toon.InkWidth / size);
+        _fireLook!.Param("dir", dir);
+        _fireLook.Param("along", Mathf.Clamp(along, 0.0f, 1.0f));
+        _fireLook.Param("frame", g);
+        _fireLook.Param("size_px", size);
+        _fireLook.Param("seed", CelPuff.Hash(_bursts, 167));
+        _fireLook.Param("ink", Toon.InkWidth / size);
         _glow.GlobalPosition = _at + Vector3.Up * (0.12f * _hull);
         _glow.OmniRange = GlowReach * _hull;
         _glow.LightEnergy = GlowEnergy * (g < 1.0f ? 1.0f : 0.7f * (1.0f - f));

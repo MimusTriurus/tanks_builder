@@ -184,7 +184,9 @@ public sealed partial class Stage3D : Node3D
 
     private bool _showEdges = true;
     private readonly Dictionary<Vehicle, Stand> _stands = new();
-    private string _built = "";
+    /// <summary>The <see cref="Signature"/> the board was last built at; null
+    /// before the first build.</summary>
+    private ulong? _built;
 
     /// <summary>One tank's render target, the holder that keeps its position
     /// honest, and the quad that carries the result into the world.</summary>
@@ -369,21 +371,21 @@ public sealed partial class Stage3D : Node3D
         // afternoon keeps the same precision in the fraction as one just started.
         if (SwellPeriod > 0.0f)
             _swell = Mathf.PosMod(_swell + (float)delta / SwellPeriod, 1.0f);
-        _swellInk?.SetShaderParameter("phase", _swell);
-        _swellInk?.SetShaderParameter("blend", SwellBlend ? 1.0f : 0.0f);
-        _swellInk?.SetShaderParameter("foam", Mathf.Max(0.0f, Foam));
+        _swellInk?.Param("phase", _swell);
+        _swellInk?.Param("blend", SwellBlend ? 1.0f : 0.0f);
+        _swellInk?.Param("foam", Mathf.Max(0.0f, Foam));
         // Wrapped at a turn for the swell phase's reason: a bench left open all
         // afternoon keeps the same precision in it as one just started. A turn
         // is the true period here - the drift is a sine of this angle.
         _foamClock = Mathf.PosMod(_foamClock + (float)delta * FoamDrift,
                                   Mathf.Tau);
-        _swellInk?.SetShaderParameter("foam_time", _foamClock);
+        _swellInk?.Param("foam_time", _foamClock);
         // The computed pond's own clock, on the bench's step for the same
         // reason. Not wrapped at a turn - the surface is a drifting noise field
         // rather than a sine, so it has no period to wrap at; kept small by the
         // hour instead, which is all the precision it needs.
         _deepClock = Mathf.PosMod(_deepClock + (float)delta, 3600.0f);
-        _deepInk?.SetShaderParameter("time", _deepClock);
+        _deepInk?.Param("time", _deepClock);
         // The wood's fire, on the bench's step for the pond's reason: a flame
         // running on wall-clock time makes every screenshot of a burning wood a
         // different picture, and every A/B across one measures the difference.
@@ -432,8 +434,8 @@ public sealed partial class Stage3D : Node3D
         Etchings();
         Markers();
         Soot();
-        _deepInk?.SetShaderParameter("foam", Mathf.Max(0.0f, Foam));
-        _deepInk?.SetShaderParameter("cel", CelWater ? 1.0f : 0.0f);
+        _deepInk?.Param("foam", Mathf.Max(0.0f, Foam));
+        _deepInk?.Param("cel", CelWater ? 1.0f : 0.0f);
         PushSwell();
     }
 
@@ -1041,7 +1043,7 @@ void fragment() {{
         // against them by depth. Said rather than left at the default, because
         // the rung below it now has a tier on it.
         ink.RenderPriority = StandOrder;
-        ink.SetShaderParameter("picture", picture);
+        ink.Param("picture", picture);
         // Nothing about the water is set here, and the tint used to be: it was
         // one constant and looked like it never changed. It does now - the art
         // carries its own average, and the toggle swaps between that and the flat
@@ -1634,33 +1636,33 @@ void fragment() {{
                 stand.Air.Feed(sink);
             }
             Color tint = WaterTintAt(wet);
-            ink.SetShaderParameter("pond", tint);
-            ink.SetShaderParameter("sink", sink);
+            ink.Param("pond", tint);
+            ink.Param("sink", sink);
             // And how much of that colour the armour takes, which is the second
             // thing the drowning says with one number: at the surface the
             // water's own tint, and by the bottom of it Fathom - a hull under
             // water is behind water, and the size alone was read off the
             // snapshot as a small tank standing on the pond rather than a tank
             // in it.
-            ink.SetShaderParameter("murk", Mathf.Lerp(tint.A, Fathom, sink));
+            ink.Param("murk", Mathf.Lerp(tint.A, Fathom, sink));
             // What is under the water is read through it - refract in the
             // shader. Deep water only: a ford is two or three rows of water
             // over the tracks and its picture is the bench's pixel-pinned
             // invariant; and the effect wants depth to grow into anyway.
             bool refracting = Refraction > 0.0f && vehicle.Wading && Field.IsDeep(wet);
-            ink.SetShaderParameter("refract", new Godot.Vector4(
+            ink.Param("refract", new Godot.Vector4(
                 refracting ? Refraction : 0.0f, RefractDepth, RefractPush, RefractSqueeze));
-            ink.SetShaderParameter("refract_pace", RefractPace);
+            ink.Param("refract_pace", RefractPace);
             if (refracting && Wash is { Enabled: true, Sheet: not null })
             {
-                ink.SetShaderParameter("wash", Wash.Sheet);
-                ink.SetShaderParameter("wash_box", new Godot.Vector4(
+                ink.Param("wash", Wash.Sheet);
+                ink.Param("wash_box", new Godot.Vector4(
                     Wash.Box.Position.X, Wash.Box.Position.Y,
                     Wash.Box.Size.X, Wash.Box.Size.Y));
-                ink.SetShaderParameter("refract_wash", RefractWash);
+                ink.Param("refract_wash", RefractWash);
             }
             else
-                ink.SetShaderParameter("refract_wash", 0.0f);
+                ink.Param("refract_wash", 0.0f);
             // Which table, and what it still owes: both of the height map's
             // are already the waterline and are handed nought to lift them by,
             // the groundline's is where the tank meets the bottom and is handed
@@ -1683,10 +1685,10 @@ void fragment() {{
             float small = Mathf.Max(stand.Small, 1e-4f);
             float dip = lift / Mathf.Max(scale * small, 1e-4f);
             Texture2D? table = !vehicle.Wading ? null : atlas.Waterline(dip);
-            ink.SetShaderParameter("shore", table ?? atlas.Groundline);
-            ink.SetShaderParameter("shore_map", new Godot.Vector4(
+            ink.Param("shore", table ?? atlas.Groundline);
+            ink.Param("shore_map", new Godot.Vector4(
                 atlas.Anchor.X, atlas.Anchor.Y, scale, PaintSize));
-            ink.SetShaderParameter("shore_cut", new Godot.Vector4(
+            ink.Param("shore_cut", new Godot.Vector4(
                 !vehicle.Wading ? -1.0f : table is not null ? 0.0f : lift / small,
                 (table ?? atlas.Groundline) is null ? -1.0f
                     : (atlas.FrameFor(vehicle.Sprite.HullFacing) + 0.5f)
@@ -1696,18 +1698,18 @@ void fragment() {{
             // The fallback for a column with no answer, or -1 where there is
             // none to be had: with the height map, no answer means the water
             // never reaches that column - see the uniform's own note.
-            ink.SetShaderParameter("shore_flat",
+            ink.Param("shore_flat",
                                    table is not null ? -1.0f : lift / small);
             // And how far that water stands over the deck, in the same rows,
             // which is the turret's whole question - see the uniform. Nought
             // without a height map, which is a set with no deck to count from:
             // its turret is held dry to the foot as it always was.
-            ink.SetShaderParameter("turret_over",
+            ink.Param("turret_over",
                 atlas.DeckHeightPx > 0.0
                     ? Mathf.Max(0.0f, dip - (float)atlas.DeckHeightPx) : 0.0f);
             // And how high that turret's roof stands over the deck - see the
             // uniform - or huge where the set cannot say, so the foot holds.
-            ink.SetShaderParameter("turret_rise",
+            ink.Param("turret_rise",
                 atlas.TurretRisePx > 0.0 && atlas.DeckHeightPx > 0.0
                     ? (float)Math.Max(0.0, atlas.TurretRisePx - atlas.DeckHeightPx)
                     : 1e9f);
@@ -1715,8 +1717,8 @@ void fragment() {{
             // pointing - see the uniform. Set beside the table rather than with
             // the material, for the table's own reason: the row moves whenever
             // the turret does.
-            ink.SetShaderParameter("turret_foot", atlas.TurretFoot);
-            ink.SetShaderParameter("turret_row",
+            ink.Param("turret_foot", atlas.TurretFoot);
+            ink.Param("turret_row",
                 atlas.TurretFoot is null || atlas.Count <= 0 ? -1.0f
                     : (atlas.FrameFor(vehicle.Sprite.TurretFacing) + 0.5f)
                       / atlas.Count);
@@ -1733,13 +1735,13 @@ void fragment() {{
                 : -1;
             Rect2 tube = shown < 0 ? new Rect2()
                 : atlas.Region(AtlasSet.BarrelName, shown);
-            ink.SetShaderParameter("gun_layer",
+            ink.Param("gun_layer",
                 shown < 0 ? null : atlas.Texture(AtlasSet.BarrelName));
-            ink.SetShaderParameter("gun_box", shown < 0
+            ink.Param("gun_box", shown < 0
                 ? new Godot.Vector4(0.0f, 0.0f, -1.0f, -1.0f)
                 : new Godot.Vector4(tube.Position.X, tube.Position.Y,
                                     tube.Size.X, tube.Size.Y));
-            ink.SetShaderParameter("gun_off", shown < 0 ? Vector2.Zero
+            ink.Param("gun_off", shown < 0 ? Vector2.Zero
                 : atlas.OffsetOf(AtlasSet.BarrelName, shown));
             // The water's own foam colour and level, so this line and the pond's
             // are one dial: a tank still wearing a white collar in water that
@@ -1749,10 +1751,10 @@ void fragment() {{
             // the end of a sink the armour is under all of it. The water's own
             // half goes with it - see the rows below, which fade to the
             // refusal shoreline() already reads.
-            ink.SetShaderParameter("foam_lap", new Godot.Vector4(
+            ink.Param("foam_lap", new Godot.Vector4(
                 FoamInk.R, FoamInk.G, FoamInk.B,
                 vehicle.Wading ? Mathf.Max(0.0f, Foam) * (1.0f - sink) : 0.0f));
-            ink.SetShaderParameter("lap_band", LapBand);
+            ink.Param("lap_band", LapBand);
             // <b>The surface's clock and not the strip's.</b> This half of the
             // line is displaced and torn by the same two fields the water's half
             // is, and a field is only the same field if it is read at the same
@@ -1760,21 +1762,21 @@ void fragment() {{
             // collar an inch away to another, which is the parting this whole
             // arrangement exists to prevent. _foamClock stays what it was for -
             // the sheet water, which has no computed surface to agree with.
-            ink.SetShaderParameter("lap_time", _deepClock);
+            ink.Param("lap_time", _deepClock);
             // What the sprite needs to put a fragment of its own armour back in
             // the world, so that its half of the waterline crumples to the same
             // field as the water's half beside it. The sprite's position and not
             // GroundPoint, for the reason the collar takes the same: the contact
             // patch is the anchor already moved by the offset these rows are
             // counted from.
-            ink.SetShaderParameter("lap_world", new Godot.Vector4(
+            ink.Param("lap_world", new Godot.Vector4(
                 vehicle.Sprite.Position.X, vehicle.Sprite.Position.Y,
                 Squash, RiseFactor));
             // The water plane's own height in world units - the third equation,
             // and the only reason a billboard fragment can be placed at all.
-            ink.SetShaderParameter("lap_plane", vehicle.Wading
+            ink.Param("lap_plane", vehicle.Wading
                 ? Field.WaterTop(wet) / RiseFactor : 0.0f);
-            ink.SetShaderParameter("lap_crumple", new Godot.Vector4(
+            ink.Param("lap_crumple", new Godot.Vector4(
                 EdgeCrumple.X, EdgeCrumple.Y, Swell2D.X, Swell2D.Y));
         }
         // And the waterline round each hull that is in the water. Gathered here
@@ -1914,16 +1916,16 @@ void fragment() {{
                 }
                 worn++;
             }
-            _deepInk.SetShaderParameter("hull_at", at);
-            _deepInk.SetShaderParameter("hull_pivot", pivot);
-            _deepInk.SetShaderParameter("hull_size", size);
-            _deepInk.SetShaderParameter("hull_line", line);
-            _deepInk.SetShaderParameter("hull_hem", hem);
-            _deepInk.SetShaderParameter("hull_dip", dip);
-            _deepInk.SetShaderParameter("hull_band", HullBand);
-            _deepInk.SetShaderParameter("hull_run", run);
-            _deepInk.SetShaderParameter("hull_push", push);
-            _deepInk.SetShaderParameter("bow_on", Bows ? 1.0f : 0.0f);
+            _deepInk.Param("hull_at", at);
+            _deepInk.Param("hull_pivot", pivot);
+            _deepInk.Param("hull_size", size);
+            _deepInk.Param("hull_line", line);
+            _deepInk.Param("hull_hem", hem);
+            _deepInk.Param("hull_dip", dip);
+            _deepInk.Param("hull_band", HullBand);
+            _deepInk.Param("hull_run", run);
+            _deepInk.Param("hull_push", push);
+            _deepInk.Param("bow_on", Bows ? 1.0f : 0.0f);
         }
         // The mark goes where the tank touches the ground, every frame, for the
         // reason the 2D ring follows the contact patch: a tank spends most of an
@@ -2327,56 +2329,63 @@ void fragment() {{
     /// <summary>What the board is wearing, so it is rebuilt when that changes
     /// and not otherwise. The colours rather than the lists, because the colour
     /// is what the mesh carries and two different lists that paint the same
-    /// board are the same board.</summary>
-    private string Signature()
+    /// board are the same board.
+    ///
+    /// <b>A 64-bit hash (FNV-1a), not a string.</b> It was a string of every
+    /// cell, built every frame: 7 KB a frame of the 54 the bench allocated
+    /// (BOT-3). The same terms go in, in the same order; floats by their bits,
+    /// so a slider moved by less than the old three decimals now rebuilds too.</summary>
+    private ulong Signature()
     {
-        var note = new System.Text.StringBuilder();
-        note.Append(Field.Columns).Append('x').Append(Field.Rows)
-            .Append('@').Append(Field.Lift.ToString("F3"))
-            // Which pond, because the material is chosen inside BuildWater and
-            // nowhere else: left out, the panel's own switch for it would move
-            // a field nothing ever reads again, which is a control that does
-            // nothing and says nothing.
-            .Append(Deep ? "|deep" : "|strip");
+        ulong h = 14695981039346656037UL;
+        void Mix(long v) => h = (h ^ (ulong)v) * 1099511628211UL;
+        void Real(double v) => Mix(BitConverter.DoubleToInt64Bits(v));
+        Mix(Field.Columns);
+        Mix(Field.Rows);
+        Real(Field.Lift);
+        // Which pond, because the material is chosen inside BuildWater and
+        // nowhere else: left out, the panel's own switch for it would move
+        // a field nothing ever reads again, which is a control that does
+        // nothing and says nothing.
+        Mix(Deep ? 1 : 0);
         for (int q = 0; q < Field.Columns; q++)
         for (int r = 0; r < Field.Rows; r++)
         {
             var cell = new Vector2I(q, r);
+            Mix(Field.LevelAt(cell));
             // The ramp's heading too, and it has to be said: a cell that starts
             // tilting without changing level or colour is a board that is not
             // rebuilt, which reads as the ramp not having been modelled.
-            note.Append(Field.LevelAt(cell)).Append('/')
-                .Append(Field.RampHeading(cell))
-                // And whether it is under water, for the ramp heading's reason: a
-                // cell that floods without changing level or colour is a board
-                // that was not rebuilt, which reads as the water not having been
-                // put on the map.
-                // Deep water is a different surface height on the same mask, so
-                // it is its own mark for the same reason.
-                .Append(Field.IsDeep(cell) ? 'D' : Field.IsWater(cell) ? '~' : '.')
-                // And mud, which Mire bakes with the faces: a floor painted
-                // mud in the editor moves no level, no water and no colour,
-                // so without it the board was not rebuilt and the mud not laid.
-                .Append(Field.InBounds(cell) && Field.FoundationAt(cell) == Foundation.Mud ? 'u' : '-')
-                .Append(Field.InkFor(cell).ToRgba32()).Append(';');
+            Mix(Field.RampHeading(cell));
+            // And whether it is under water, for the ramp heading's reason: a
+            // cell that floods without changing level or colour is a board
+            // that was not rebuilt, which reads as the water not having been
+            // put on the map. Deep water is a different surface height on the
+            // same mask, so it is its own mark for the same reason.
+            Mix(Field.IsDeep(cell) ? 2 : Field.IsWater(cell) ? 1 : 0);
+            // And mud, which Mire bakes with the faces: a floor painted
+            // mud in the editor moves no level, no water and no colour,
+            // so without it the board was not rebuilt and the mud not laid.
+            Mix(Field.InBounds(cell) && Field.FoundationAt(cell) == Foundation.Mud ? 1 : 0);
+            Mix(Field.InkFor(cell).ToRgba32());
         }
         // The depth as well, and not only where the water is: it is a slider, and
         // moving it moves the surface without moving a single cell of the mask.
-        note.Append('@').Append(Field.WaterRise.ToString("F3"));
+        Real(Field.WaterRise);
         // And the deep water's own two: how far under the bank its surface stands
         // and how far under its level its bed is drawn. Both are sliders, both
         // move mesh - the surface and the flank, the plate and the walls - and
         // neither moves a cell of the mask.
-        note.Append('@').Append(Field.DeepRise.ToString("F3"))
-            .Append('v').Append(Field.DeepBed.ToString("F3"));
+        Real(Field.DeepRise);
+        Real(Field.DeepBed);
         // And whether it is painted, because that swaps the surface's material
         // and the mesh's UVs at once - a toggle that only changed the shader
         // would leave the drawn pond wearing no texture coordinates at all.
-        note.Append(Surf is { Any: true } ? '#' : '=');
+        Mix(Surf is { Any: true } ? 1 : 0);
         // Nothing about the ring: it is cut fresh every frame about the tank it
         // marks, so neither whether there is one nor where it stands is anything
         // the board has to be rebuilt for.
-        return note.ToString();
+        return h;
     }
 
     /// <summary>The hexagon's corners about a cell centre, in the ground plane:
@@ -2689,7 +2698,7 @@ void fragment() {{
     /// </summary>
     private void Standing()
     {
-        string want = Signature();
+        ulong want = Signature();
         if (want != _built)
         {
             Build();
@@ -3339,30 +3348,35 @@ void fragment() {
     /// wood burning would draw the glazed cells as a patch.</summary>
     private void Tell(string name, Variant value)
     {
-        foreach (MeshInstance3D face in new[] { _tops, _sides, _glaze })
-            if (face?.MaterialOverride is ShaderMaterial ink)
-                ink.SetShaderParameter(name, value);
+        // three named, not an array of them: Tell runs every frame
+        StringName key = ShaderParams.Name(name);
+        if (_tops?.MaterialOverride is ShaderMaterial tops)
+            tops.SetShaderParameter(key, value);
+        if (_sides?.MaterialOverride is ShaderMaterial sides)
+            sides.SetShaderParameter(key, value);
+        if (_glaze?.MaterialOverride is ShaderMaterial glaze)
+            glaze.SetShaderParameter(key, value);
     }
 
     private ShaderMaterial Turf(Texture2D? art, bool glass = false)
     {
         var ink = new ShaderMaterial { Shader = glass ? Glass : Soil };
         if (art is not null)
-            ink.SetShaderParameter("art", art);
+            ink.Param("art", art);
         if (_heights is not null)
         {
-            ink.SetShaderParameter("height", _heights);
-            ink.SetShaderParameter("map", _mapAt);
-            ink.SetShaderParameter("span", _mapSpan);
-            ink.SetShaderParameter("sun", Sun);
-            ink.SetShaderParameter("soft", Penumbra);
-            ink.SetShaderParameter("steps", Marches);
-            ink.SetShaderParameter("step_run", _mapReach / Marches);
+            ink.Param("height", _heights);
+            ink.Param("map", _mapAt);
+            ink.Param("span", _mapSpan);
+            ink.Param("sun", Sun);
+            ink.Param("soft", Penumbra);
+            ink.Param("steps", Marches);
+            ink.Param("step_run", _mapReach / Marches);
         }
-        ink.SetShaderParameter("shade", CastShadows ? ShadowInk.A : 0.0f);
+        ink.Param("shade", CastShadows ? ShadowInk.A : 0.0f);
         if (glass)
         {
-            ink.SetShaderParameter("glaze", GlazeInk);
+            ink.Param("glaze", GlazeInk);
             ink.RenderPriority = GlazeOrder;
         }
         return ink;
@@ -3584,14 +3598,14 @@ void fragment() {
         // what Build is gated on changing.
         if (_deepInk is not null)
         {
-            _deepInk.SetShaderParameter("hub", hub);
-            _deepInk.SetShaderParameter("rim_mask", mask);
-            _deepInk.SetShaderParameter("sink", sink);
-            _deepInk.SetShaderParameter("rim_n", normal);
-            _deepInk.SetShaderParameter("rim_d", stand);
-            _deepInk.SetShaderParameter("rim_span", inradius);
-            _deepInk.SetShaderParameter("squash", Squash);
-            _deepInk.SetShaderParameter("rise", RiseFactor);
+            _deepInk.Param("hub", hub);
+            _deepInk.Param("rim_mask", mask);
+            _deepInk.Param("sink", sink);
+            _deepInk.Param("rim_n", normal);
+            _deepInk.Param("rim_d", stand);
+            _deepInk.Param("rim_span", inradius);
+            _deepInk.Param("squash", Squash);
+            _deepInk.Param("rise", RiseFactor);
         }
     }
 
@@ -4325,22 +4339,22 @@ void fragment() {
             },
             RenderPriority = WaterOrder,
         };
-        _deepInk.SetShaderParameter("sun", Sun);
-        _deepInk.SetShaderParameter("wake_seed", Wake.Seed);
-        _deepInk.SetShaderParameter("wake_spread", Wake.Spread);
-        _deepInk.SetShaderParameter("bow_swell", BowSwell);
-        _deepInk.SetShaderParameter("bands", (float)WaterArt.Bands);
+        _deepInk.Param("sun", Sun);
+        _deepInk.Param("wake_seed", Wake.Seed);
+        _deepInk.Param("wake_spread", Wake.Spread);
+        _deepInk.Param("bow_swell", BowSwell);
+        _deepInk.Param("bands", (float)WaterArt.Bands);
         // Named here as well as defaulted in the shader, because the sprite is
         // handed the same two numbers from the same constants: a default living
         // only in the GLSL would be one of the pair set from C# and the other
         // not, which is how the two halves of this line would part again.
-        _deepInk.SetShaderParameter("edge_crumple", EdgeCrumple);
-        _deepInk.SetShaderParameter("beach", Beach);
-        _deepInk.SetShaderParameter("shore", ShoreDepth);
-        _deepInk.SetShaderParameter("lap_wave", LapWave);
-        _deepInk.SetShaderParameter("lap_edge", LapEdge);
-        _deepInk.SetShaderParameter("wave_scale", Swell2D.X);
-        _deepInk.SetShaderParameter("wave_speed", Swell2D.Y);
+        _deepInk.Param("edge_crumple", EdgeCrumple);
+        _deepInk.Param("beach", Beach);
+        _deepInk.Param("shore", ShoreDepth);
+        _deepInk.Param("lap_wave", LapWave);
+        _deepInk.Param("lap_edge", LapEdge);
+        _deepInk.Param("wave_scale", Swell2D.X);
+        _deepInk.Param("wave_speed", Swell2D.Y);
         return _deepInk;
     }
 
@@ -4362,10 +4376,10 @@ void fragment() {
             },
             RenderPriority = WaterOrder,
         };
-        _swellInk.SetShaderParameter("surf", Surf!.Texture);
-        _swellInk.SetShaderParameter("frames", (float)Surf!.Loop);
-        _swellInk.SetShaderParameter("bands", (float)WaterArt.Bands);
-        _swellInk.SetShaderParameter("tint", WaterTint);
+        _swellInk.Param("surf", Surf!.Texture);
+        _swellInk.Param("frames", (float)Surf!.Loop);
+        _swellInk.Param("bands", (float)WaterArt.Bands);
+        _swellInk.Param("tint", WaterTint);
         return _swellInk;
     }
 
@@ -4373,17 +4387,27 @@ void fragment() {
     /// not on a change, because it is a decay: the states are always moving, and
     /// the mesh they belong to is deliberately built only when the board does.
     /// </summary>
+    private readonly float[] _swellState = new float[MaxWaterCells], _swellSpan = new float[MaxWaterCells];
+    private readonly Vector2[] _swellMark = new Vector2[MaxWaterCells];
+    private readonly Vector2[] _wakeSpot = new Vector2[Wake.Max];
+    private readonly float[] _wakeAge = new float[Wake.Max];
+
     private void PushSwell()
     {
         ShaderMaterial? ink = _deepInk ?? _swellInk;
         if (ink is null)
             return;
         int n = Mathf.Min(Field.WaterCells.Count, MaxWaterCells);
-        var state = new float[MaxWaterCells];
-        var span = new float[MaxWaterCells];
-        var mark = new Vector2[MaxWaterCells];
-        for (int i = 0; i < MaxWaterCells; i++)
+        // the same arrays every frame, every slot written: new ones were 3 KB a
+        // frame of garbage (BOT-3)
+        float[] state = _swellState, span = _swellSpan;
+        Vector2[] mark = _swellMark;
+        for (int i = n; i < MaxWaterCells; i++)
+        {
+            state[i] = 0.0f;
             span[i] = 1.0f;
+            mark[i] = Vector2.Zero;
+        }
         for (int i = 0; i < n; i++)
         {
             state[i] = Sea?.State.Length > i ? Sea.State[i] : 0.0f;
@@ -4399,23 +4423,26 @@ void fragment() {
             Vector3 w = Ground(at, rest);
             mark[i] = new Vector2(w.X, w.Z);
         }
-        ink.SetShaderParameter("state", state);
-        ink.SetShaderParameter("mark", mark);
-        ink.SetShaderParameter("foam_reach", _pondReach);
+        ink.Param("state", state);
+        ink.Param("mark", mark);
+        ink.Param("foam_reach", _pondReach);
         // Only the drawn strip has a loop to run part of; the computed surface
         // has no frames at all, so a span means nothing to it.
-        _swellInk?.SetShaderParameter("span", span);
+        _swellInk?.Param("span", span);
         if (_deepInk is null)
             return;
         // Through the same mapping the surface's own vertices went through, for
         // the mark's reason: the shader compares these against world.xz, and the
         // trail lives in the tanks' space until it gets here.
-        var spot = new Vector2[Wake.Max];
-        var age = new float[Wake.Max];
+        Vector2[] spot = _wakeSpot;
+        float[] age = _wakeAge;
         // Past its life is the empty slot, so there is no second way of saying
         // dead that could disagree with the first.
         for (int i = 0; i < Wake.Max; i++)
+        {
+            spot[i] = Vector2.Zero;
             age[i] = 2.0f;
+        }
         int live = Mathf.Min(Trail?.Count ?? 0, Wake.Max);
         for (int i = 0; i < live; i++)
         {
@@ -4423,8 +4450,8 @@ void fragment() {
             spot[i] = new Vector2(w.X, w.Z);
             age[i] = Trail.Age[i];
         }
-        _deepInk.SetShaderParameter("wake_at", spot);
-        _deepInk.SetShaderParameter("wake_age", age);
+        _deepInk.Param("wake_at", spot);
+        _deepInk.Param("wake_age", age);
         // And the ripple field, which is one texture and its box rather than an
         // array of anything: what it holds is a surface, so the shader looks it up
         // where the fragment is instead of being told about every source that made
@@ -4433,19 +4460,19 @@ void fragment() {
         // three readers of it are no-ops.
         if (Wash is { Wide: > 0, Sheet: not null })
         {
-            _deepInk.SetShaderParameter("wash", Wash.Sheet);
-            _deepInk.SetShaderParameter(
+            _deepInk.Param("wash", Wash.Sheet);
+            _deepInk.Param(
                 "wash_box", new Vector4(Wash.Box.Position.X, Wash.Box.Position.Y,
                                         Wash.Box.Size.X, Wash.Box.Size.Y));
-            _deepInk.SetShaderParameter("wash_step", Wash.Cell);
-            _deepInk.SetShaderParameter("wash_relief", WashRelief);
-            _deepInk.SetShaderParameter("wash_crest", WashCrest);
-            _deepInk.SetShaderParameter("wash_band", WashBand);
-            _deepInk.SetShaderParameter("wash_on", Wash.Enabled ? 1.0f : 0.0f);
+            _deepInk.Param("wash_step", Wash.Cell);
+            _deepInk.Param("wash_relief", WashRelief);
+            _deepInk.Param("wash_crest", WashCrest);
+            _deepInk.Param("wash_band", WashBand);
+            _deepInk.Param("wash_on", Wash.Enabled ? 1.0f : 0.0f);
         }
         else
         {
-            _deepInk.SetShaderParameter("wash_on", 0.0f);
+            _deepInk.Param("wash_on", 0.0f);
         }
     }
 
@@ -6294,11 +6321,11 @@ void fragment() {{
             // the product and not one of the factors.
             if (stem.MaterialOverride is ShaderMaterial bark)
             {
-                bark.SetShaderParameter("fade", tree.Shown);
-                bark.SetShaderParameter("scorch", tree.Scorch);
+                bark.Param("fade", tree.Shown);
+                bark.Param("scorch", tree.Scorch);
                 // How far between its two pictures it is. The one thing about the
                 // pair that moves, which is why the maps beside it are set once.
-                bark.SetShaderParameter("swap", tree.Swap);
+                bark.Param("swap", tree.Swap);
                 // Which rung, off the same flag the 2D z-index reads. A prop
                 // only sits in the dressing band while a hull is on its ground -
                 // see Grove.Reveal, and DressOrder for what the band is.
@@ -6321,16 +6348,16 @@ void fragment() {{
             // ground the patch is allowed to paint moves with it.
             if (seat.MaterialOverride is ShaderMaterial sole)
             {
-                sole.SetShaderParameter("ink", SeatInk.A * tree.Shown);
-                sole.SetShaderParameter("clip", CastShadows ? 1.0f : 0.0f);
+                sole.Param("ink", SeatInk.A * tree.Shown);
+                sole.Param("clip", CastShadows ? 1.0f : 0.0f);
                 // The same number the cast and the crown get, and it has to be:
                 // what this keeps off is what the cast is laying down this frame.
-                sole.SetShaderParameter("swap", tree.Swap);
+                sole.Param("swap", tree.Swap);
                 // Times what height is left, exactly as the cast is scaled -
                 // see Stage3D.Cast and PropNode.Squat. The patch keeps clear
                 // what the cast is laying down, and a trunk on the ground lays
                 // down almost nothing.
-                sole.SetShaderParameter("run", new Godot.Vector2(
+                sole.Param("run", new Godot.Vector2(
                     (tree.Lean * RiseFactor
                      + SunCast.X * (float)tree.Tier.Stands) * tree.Squat,
                     SunCast.Y * (float)tree.Tier.Stands * tree.Squat));
@@ -6351,8 +6378,8 @@ void fragment() {{
             // crown.
             if (cast.MaterialOverride is ShaderMaterial ink)
             {
-                ink.SetShaderParameter("ink", ShadowInk.A * tree.Shown);
-                ink.SetShaderParameter("swap", tree.Swap);
+                ink.Param("ink", ShadowInk.A * tree.Shown);
+                ink.Param("swap", tree.Swap);
             }
         }
     }
@@ -6381,23 +6408,23 @@ void fragment() {{
             // on the ground is what goes under.
             _sole ??= Sole();
             ShaderMaterial blot = Blot();
-            blot.SetShaderParameter("art", tree.Art);
-            blot.SetShaderParameter("foot", tree.Foot);
-            blot.SetShaderParameter("span", tree.Size);
+            blot.Param("art", tree.Art);
+            blot.Param("foot", tree.Foot);
+            blot.Param("span", tree.Size);
             // The pair of rectangles is a fact about the kind, so it goes in once
             // and only the handover moves - the crown's own arrangement.
             if (tree.BurntArt is not null)
-                blot.SetShaderParameter("burnt", tree.BurntArt);
-            blot.SetShaderParameter("burnt_foot", tree.BurntFoot);
-            blot.SetShaderParameter("burnt_span",
+                blot.Param("burnt", tree.BurntArt);
+            blot.Param("burnt_foot", tree.BurntFoot);
+            blot.Param("burnt_span",
                 tree.BurntArt is null ? tree.Size : tree.BurntSize);
-            blot.SetShaderParameter("swap", 0.0f);
-            blot.SetShaderParameter("firm", Firm);
-            blot.SetShaderParameter("pixels", tree.Pixels);
-            blot.SetShaderParameter("rise", RiseFactor);
-            blot.SetShaderParameter("radius",
+            blot.Param("swap", 0.0f);
+            blot.Param("firm", Firm);
+            blot.Param("pixels", tree.Pixels);
+            blot.Param("rise", RiseFactor);
+            blot.Param("radius",
                 Seating(tree.Root, tree.Rise, tree.Spread));
-            blot.SetShaderParameter("core", SeatCore);
+            blot.Param("core", SeatCore);
             var seat = new MeshInstance3D
             {
                 Mesh = _sole,
@@ -9402,18 +9429,18 @@ void fragment() {
         fire.Visible = coat.Flame > 0.0f;
         if (smoke.MaterialOverride is ShaderMaterial fumes)
         {
-            fumes.SetShaderParameter("time", _fireClock);
-            fumes.SetShaderParameter("level", coat.Smoke);
+            fumes.Param("time", _fireClock);
+            fumes.Param("level", coat.Smoke);
             if (lent)
-                fumes.SetShaderParameter("phase", Turn(tree, column!, SmokeRate));
+                fumes.Param("phase", Turn(tree, column!, SmokeRate));
         }
 
         if (fire.MaterialOverride is ShaderMaterial flames)
         {
-            flames.SetShaderParameter("time", _fireClock);
-            flames.SetShaderParameter("level", coat.Flame);
+            flames.Param("time", _fireClock);
+            flames.Param("level", coat.Flame);
             if (lent)
-                flames.SetShaderParameter("phase", Turn(tree, blaze!, FireRate));
+                flames.Param("phase", Turn(tree, blaze!, FireRate));
         }
     }
 
@@ -9438,8 +9465,8 @@ void fragment() {
     {
         Vector2 size = tree.Size * span;
         Vector2 foot = tree.Foot * span;
-        ink.SetShaderParameter("foot_v", size.Y <= 0.0f ? 0.9f : foot.Y / size.Y);
-        ink.SetShaderParameter("seed",
+        ink.Param("foot_v", size.Y <= 0.0f ? 0.9f : foot.Y / size.Y);
+        ink.Param("seed",
                                (float)Grove.Hash01(tree.Seed, tree.Species, 733_003));
     }
 
@@ -9463,12 +9490,12 @@ void fragment() {
     private static ShaderMaterial Loaned(Borrowed loan, Shader how)
     {
         var ink = new ShaderMaterial { Shader = how, RenderPriority = StandOrder };
-        ink.SetShaderParameter("art", loan.Strip);
-        ink.SetShaderParameter("stride", loan.Stride);
-        ink.SetShaderParameter("pad", loan.Pad);
-        ink.SetShaderParameter("span", loan.Width);
-        ink.SetShaderParameter("phase", 0.0f);
-        ink.SetShaderParameter("level", 0.0f);
+        ink.Param("art", loan.Strip);
+        ink.Param("stride", loan.Stride);
+        ink.Param("pad", loan.Pad);
+        ink.Param("span", loan.Width);
+        ink.Param("phase", 0.0f);
+        ink.Param("level", 0.0f);
         return ink;
     }
 
@@ -9504,16 +9531,16 @@ void fragment() {
         // its own measurements rather than derived from a span, because the quad is
         // no longer the tree's own rectangle: it is sized by the fire, and a shader
         // that assumed otherwise would put the whole fire a fifth of a tree low.
-        ink.SetShaderParameter("foot_v", size.Y <= 0.0f ? 0.9f : foot.Y / size.Y);
-        ink.SetShaderParameter("tall", size.Y / high);
-        ink.SetShaderParameter("wideq", size.X / high);
-        ink.SetShaderParameter("root", FlameRise * PyreRoot);
-        ink.SetShaderParameter("floor_fade", FlameRise * PyreFade);
-        ink.SetShaderParameter("rise", FlameRise);
-        ink.SetShaderParameter("seed",
+        ink.Param("foot_v", size.Y <= 0.0f ? 0.9f : foot.Y / size.Y);
+        ink.Param("tall", size.Y / high);
+        ink.Param("wideq", size.X / high);
+        ink.Param("root", FlameRise * PyreRoot);
+        ink.Param("floor_fade", FlameRise * PyreFade);
+        ink.Param("rise", FlameRise);
+        ink.Param("seed",
                                (float)Grove.Hash01(tree.Seed, tree.Species, 733_003));
-        ink.SetShaderParameter("level", 0.0f);
-        ink.SetShaderParameter("time", _fireClock);
+        ink.Param("level", 0.0f);
+        ink.Param("time", _fireClock);
         return ink;
     }
 
@@ -9526,10 +9553,10 @@ void fragment() {
         // that is not square is an ellipse.
         Vector2 size = tree.Size * PlumeSpan;
         float high = tree.Size.Y <= 0.0f ? 1.0f : tree.Size.Y;
-        ink.SetShaderParameter("tall", size.Y / high);
-        ink.SetShaderParameter("wideq", size.X / high);
-        ink.SetShaderParameter("level", 0.0f);
-        ink.SetShaderParameter("time", _fireClock);
+        ink.Param("tall", size.Y / high);
+        ink.Param("wideq", size.X / high);
+        ink.Param("level", 0.0f);
+        ink.Param("time", _fireClock);
         return ink;
     }
 
@@ -10195,16 +10222,16 @@ void fragment() {
             RenderPriority = ShadowOrder,
         };
         (_, _, Godot.Vector4 live, Godot.Vector4 dead) = Union(tree);
-        ink.SetShaderParameter("art", tree.Art);
+        ink.Param("art", tree.Art);
         if (tree.BurntArt is not null)
-            ink.SetShaderParameter("burnt", tree.BurntArt);
-        ink.SetShaderParameter("art_map", live);
-        ink.SetShaderParameter("burnt_map", dead);
-        ink.SetShaderParameter("swap", 0.0f);
-        ink.SetShaderParameter("ink", 0.0f);
-        ink.SetShaderParameter("tint",
+            ink.Param("burnt", tree.BurntArt);
+        ink.Param("art_map", live);
+        ink.Param("burnt_map", dead);
+        ink.Param("swap", 0.0f);
+        ink.Param("ink", 0.0f);
+        ink.Param("tint",
             new Vector3(ShadowInk.R, ShadowInk.G, ShadowInk.B));
-        ink.SetShaderParameter("firm", Firm);
+        ink.Param("firm", Firm);
         return ink;
     }
 
@@ -10240,20 +10267,20 @@ void fragment() {
     {
         var ink = new ShaderMaterial { Shader = Timber, RenderPriority = order };
         (_, _, Godot.Vector4 live, Godot.Vector4 dead) = Union(tree);
-        ink.SetShaderParameter("art", tree.Art);
+        ink.Param("art", tree.Art);
         // The pair of rectangles is a fact about the kind, so it is set here and
         // never again; only how far between them the tree is moves. A kind with
         // no burnt picture leaves that sampler at its transparent default, which
         // with swap pinned at zero is never read.
         if (tree.BurntArt is not null)
-            ink.SetShaderParameter("burnt", tree.BurntArt);
-        ink.SetShaderParameter("art_map", live);
-        ink.SetShaderParameter("burnt_map", dead);
-        ink.SetShaderParameter("swap", 0.0f);
-        ink.SetShaderParameter("fade", 1.0f);
-        ink.SetShaderParameter("scorch", 0.0f);
-        ink.SetShaderParameter("coal", Coal);
-        ink.SetShaderParameter("firm", Firm);
+            ink.Param("burnt", tree.BurntArt);
+        ink.Param("art_map", live);
+        ink.Param("burnt_map", dead);
+        ink.Param("swap", 0.0f);
+        ink.Param("fade", 1.0f);
+        ink.Param("scorch", 0.0f);
+        ink.Param("coal", Coal);
+        ink.Param("firm", Firm);
         return ink;
     }
 

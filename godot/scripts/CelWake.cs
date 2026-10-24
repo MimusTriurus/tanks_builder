@@ -65,8 +65,8 @@ public sealed partial class CelWake : Node3D
         _arms = Strip("Arms", 0.0f);
         _wash = Strip("Wash", 1.0f);
         _bowLook = new ShaderMaterial { Shader = BowShader, RenderPriority = Stage3D.DressOrder };
-        _bowLook.SetShaderParameter("foam", CelSplash.Crest);
-        _bowLook.SetShaderParameter("edge", CelSplash.Body);
+        _bowLook.Param("foam", CelSplash.Crest);
+        _bowLook.Param("edge", CelSplash.Body);
         _bow = new MeshInstance3D
         {
             Name = "BowWave",
@@ -82,9 +82,9 @@ public sealed partial class CelWake : Node3D
     private MeshInstance3D Strip(string name, float mode)
     {
         var look = new ShaderMaterial { Shader = TrailShader, RenderPriority = Stage3D.DressOrder };
-        look.SetShaderParameter("foam", CelSplash.Crest);
-        look.SetShaderParameter("edge", CelSplash.Body);
-        look.SetShaderParameter("mode", mode);
+        look.Param("foam", CelSplash.Crest);
+        look.Param("edge", CelSplash.Body);
+        look.Param("mode", mode);
         var mesh = new MeshInstance3D
         {
             Name = name,
@@ -153,11 +153,11 @@ public sealed partial class CelWake : Node3D
             new Basis(across * (2.0f * span), Vector3.Up, along * (2.0f * span)),
             middle + Stage3D.Clear(_squash, _rise));
         _bow.Visible = true;
-        _bowLook.SetShaderParameter("half_len", halfLen);
-        _bowLook.SetShaderParameter("half_wide", halfWide);
-        _bowLook.SetShaderParameter("span", span);
-        _bowLook.SetShaderParameter("pace", Mathf.Clamp(pace, 0.0f, 1.0f));
-        _bowLook.SetShaderParameter("speed", speed);
+        _bowLook.Param("half_len", halfLen);
+        _bowLook.Param("half_wide", halfWide);
+        _bowLook.Param("span", span);
+        _bowLook.Param("pace", Mathf.Clamp(pace, 0.0f, 1.0f));
+        _bowLook.Param("speed", speed);
     }
 
     public void Tick(float dt)

@@ -407,8 +407,9 @@ public sealed partial class CelBurn : Node3D
         }
         _clock += dt;
         Vector3 mid = Vector3.Zero;
-        foreach (Vector3 p in ports)
-            mid += p;
+        // by index: a foreach over IReadOnlyList boxes its enumerator, every frame
+        for (int i = 0; i < ports.Count; i++)
+            mid += ports[i];
         mid /= ports.Count;
         Tongue(ports, eye);
         Column(mid, eye);
@@ -428,14 +429,15 @@ public sealed partial class CelBurn : Node3D
         int n = Mathf.Min(ports.Count, MaxPorts);
         for (int i = 0; i < MaxPorts; i++)
             _scorchAt[i] = i < n ? ports[i] : Vector3.Zero;
-        foreach (ShaderMaterial m in Paint)
+        for (int k = 0; k < Paint.Count; k++)
         {
-            m.SetShaderParameter("scorch_at", _scorchAt);
-            m.SetShaderParameter("scorch_n", n);
-            m.SetShaderParameter("scorch_r", ScorchReach * _hull);
-            m.SetShaderParameter("scorch", _scorch);
-            m.SetShaderParameter("ember", ember);
-            m.SetShaderParameter("scorch_time", _scorchClock);
+            ShaderMaterial m = Paint[k];
+            m.Param("scorch_at", _scorchAt);
+            m.Param("scorch_n", n);
+            m.Param("scorch_r", ScorchReach * _hull);
+            m.Param("scorch", _scorch);
+            m.Param("ember", ember);
+            m.Param("scorch_time", _scorchClock);
         }
     }
 
@@ -521,24 +523,27 @@ public sealed partial class CelBurn : Node3D
                 ? 1.0f : 0.0f;
         // Both passes the same numbers: the second is the flame again, over
         // the turret, for the ports in front of it.
-        ShaderMaterial[] passes = _flameInk!.NextPass is ShaderMaterial over
-            ? new[] { _flameInk!, over } : new[] { _flameInk! };
-        foreach (ShaderMaterial m in passes)
+        // each named, not an array of the two made every frame
+        Pass(_flameInk!);
+        if (_flameInk!.NextPass is ShaderMaterial over)
+            Pass(over);
+
+        void Pass(ShaderMaterial m)
         {
-            m.SetShaderParameter("size", new Vector2(w, h));
-            m.SetShaderParameter("ports", _portAt);
-            m.SetShaderParameter("count", n);
-            m.SetShaderParameter("time", _clock);
-            m.SetShaderParameter("heat", _heat);
-            m.SetShaderParameter("life", TongueLife);
-            m.SetShaderParameter("tongue", new Vector2(TongueWidth, TongueHeight));
-            m.SetShaderParameter("rise", TongueRise);
-            m.SetShaderParameter("spread", PortSpread);
-            m.SetShaderParameter("port_near", _portNear);
-            m.SetShaderParameter("port_size", Sizes);
-            m.SetShaderParameter("hull", _hull);
-            m.SetShaderParameter("front", _front);
-            m.SetShaderParameter("round_foot", RoundFoot);
+            m.Param("size", new Vector2(w, h));
+            m.Param("ports", _portAt);
+            m.Param("count", n);
+            m.Param("time", _clock);
+            m.Param("heat", _heat);
+            m.Param("life", TongueLife);
+            m.Param("tongue", new Vector2(TongueWidth, TongueHeight));
+            m.Param("rise", TongueRise);
+            m.Param("spread", PortSpread);
+            m.Param("port_near", _portNear);
+            m.Param("port_size", Sizes);
+            m.Param("hull", _hull);
+            m.Param("front", _front);
+            m.Param("round_foot", RoundFoot);
         }
     }
 

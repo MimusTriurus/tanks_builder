@@ -174,7 +174,7 @@ public sealed partial class Grass3D : Node3D
         if (kind == Kind.Shells)
         {
             ShaderMaterial ink = Ink(ShellShader, mid, radius, seed);
-            ink.SetShaderParameter("tall", ShellTallM * Ppm);
+            ink.Param("tall", ShellTallM * Ppm);
             Put(new MeshInstance3D
             {
                 Name = $"Shells{seed}",
@@ -271,10 +271,10 @@ public sealed partial class Grass3D : Node3D
         }
         foreach (ShaderMaterial ink in m.Inks)
         {
-            ink.SetShaderParameter("burn_age", m.Age);
-            ink.SetShaderParameter("burn_from", m.From);
-            ink.SetShaderParameter("burn_speed", m.Speed);
-            ink.SetShaderParameter("burn_reach", float.IsInfinity(m.Stop) ? 1e9f : m.Stop);
+            ink.Param("burn_age", m.Age);
+            ink.Param("burn_from", m.From);
+            ink.Param("burn_speed", m.Speed);
+            ink.Param("burn_reach", float.IsInfinity(m.Stop) ? 1e9f : m.Stop);
         }
     }
 
@@ -579,21 +579,21 @@ public sealed partial class Grass3D : Node3D
     private ShaderMaterial Ink(Shader shader, Vector3 mid, float radius, int seed)
     {
         var ink = new ShaderMaterial { Shader = shader };
-        ink.SetShaderParameter("hex_mid", mid + Vector3.Up * Lift);
-        ink.SetShaderParameter("hex_r", radius);
-        ink.SetShaderParameter("hex_fade", FadeM * Ppm);
-        ink.SetShaderParameter("seed", _laying?.Seed ?? (seed % 97) * 1.37f);
-        ink.SetShaderParameter("shadow_ink", ShadowInk);
-        ink.SetShaderParameter("gust_rate", GustRate);
-        ink.SetShaderParameter("gust_travel", GustTravel);
-        ink.SetShaderParameter("ppm", Ppm);
-        ink.SetShaderParameter("burn_speed", _laying?.Speed ?? FrontM * Ppm);
-        ink.SetShaderParameter("flame_for", shader == PaintedShader ? FlameLine : FlameFor);
+        ink.Param("hex_mid", mid + Vector3.Up * Lift);
+        ink.Param("hex_r", radius);
+        ink.Param("hex_fade", FadeM * Ppm);
+        ink.Param("seed", _laying?.Seed ?? (seed % 97) * 1.37f);
+        ink.Param("shadow_ink", ShadowInk);
+        ink.Param("gust_rate", GustRate);
+        ink.Param("gust_travel", GustTravel);
+        ink.Param("ppm", Ppm);
+        ink.Param("burn_speed", _laying?.Speed ?? FrontM * Ppm);
+        ink.Param("flame_for", shader == PaintedShader ? FlameLine : FlameFor);
         _laying?.Inks.Add(ink);
         if (_tex is not null)
         {
-            ink.SetShaderParameter("press_tex", _tex);
-            ink.SetShaderParameter("press_map", new Vector4(_span.Position.X, _span.Position.Y,
+            ink.Param("press_tex", _tex);
+            ink.Param("press_map", new Vector4(_span.Position.X, _span.Position.Y,
                                                             1.0f / _span.Size.X, 1.0f / _span.Size.Y));
         }
         _inks.Add(ink);

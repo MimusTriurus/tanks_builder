@@ -105,13 +105,13 @@ public sealed partial class Tank3DBench
         float deck = _deckPx / RiseFactor;
         foreach (ShaderMaterial cel in _model.Cel)
         {
-            cel.SetShaderParameter("mud_on", _mudCoat);
+            cel.Param("mud_on", _mudCoat);
             // The foot is the rig's height, which is the sunk one in mud - the
             // coat starts at the belts' bottom wherever the ground is.
-            cel.SetShaderParameter("mud_y", _rig.Position.Y);
-            cel.SetShaderParameter("mud_reach", MudReach * deck + sunk);
-            cel.SetShaderParameter("mud_grain", MudGrain * deck);
-            cel.SetShaderParameter("mud_dry", _mudDry);
+            cel.Param("mud_y", _rig.Position.Y);
+            cel.Param("mud_reach", MudReach * deck + sunk);
+            cel.Param("mud_grain", MudGrain * deck);
+            cel.Param("mud_dry", _mudDry);
         }
     }
 
@@ -120,7 +120,7 @@ public sealed partial class Tank3DBench
         _mudCoat = 0.0f;
         _mudDry = 0.0f;
         foreach (ShaderMaterial cel in _model.Cel)
-            cel.SetShaderParameter("mud_on", 0.0f);
+            cel.Param("mud_on", 0.0f);
     }
 
     /// <summary>The share of top speed the mud leaves, 1 out of it.</summary>

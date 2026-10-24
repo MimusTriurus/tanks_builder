@@ -116,7 +116,7 @@ public sealed partial class Tank3DBench
         bool beside = SideTo(CellHere, target) is not null;
         if (!beside && !_ramMode)
             return null;
-        string key = $"{_reachKey}|{target}|{o.Heading:F0}|{o.Fate}|{CellHere}|{HullSide()}|{_drove}|{_modelTag}|{_ramMode}";
+        string key = $"{_reachVersion}|{target}|{o.Heading:F0}|{o.Fate}|{CellHere}|{HullSide()}|{_drove}|{_modelTag}|{_ramMode}";
         if (key != _ramKey)
         {
             _ramKey = key;
@@ -325,10 +325,10 @@ public sealed partial class Tank3DBench
         g.Model.Yaw = yaw;
         g.Model.Elevation = 0.0f;
         g.Model.Apply();
-        g.Fill.SetShaderParameter("tint", tint);
-        g.Fill.SetShaderParameter("alpha", (firm ? GhostFirm : GhostFaint) * clear);
-        g.Ink.SetShaderParameter("ink", tint.Darkened(0.7f));
-        g.Ink.SetShaderParameter("alpha", clear);
+        g.Fill.Param("tint", tint);
+        g.Fill.Param("alpha", (firm ? GhostFirm : GhostFaint) * clear);
+        g.Ink.Param("ink", tint.Darkened(0.7f));
+        g.Ink.Param("alpha", clear);
         g.Rig.Visible = clear > 0.01f;
     }
 

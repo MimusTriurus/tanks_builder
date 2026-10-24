@@ -243,17 +243,24 @@ public sealed partial class HexField : Node2D
         float middle = TopAt(cell);
         if (!IsRamp(cell))
             return middle;
-        float[] top = TopCorners(cell);
-        Vector2[] corner = Corners();
+        // the first two corners only - TopCorners' and Corners' - and no array
+        // of either: this runs per vertex of the course and the marks (BOT-3)
+        float floor = LevelAt(cell) * Lift;
+        int high = EdgeIndex(RampHeading(cell));
+        float top0 = floor + Lift * RampCorner[((0 - high) % 6 + 6) % 6];
+        float top1 = floor + Lift * RampCorner[((1 - high) % 6 + 6) % 6];
+        float w = Atlas.HexRect.Size.X * 0.5f, h = Atlas.HexRect.Size.Y * 0.5f;
+        var c0 = new Vector2(w, 0.0f);
+        var c1 = new Vector2(w * 0.5f, h);
         Vector2 d = flat - (FlatAnchor(cell) + CentreOffset);
         // d in the basis of the first two corner offsets; the pair spans the
         // plane because no two corners of a hexagon are colinear with its centre.
-        float det = corner[0].X * corner[1].Y - corner[0].Y * corner[1].X;
+        float det = c0.X * c1.Y - c0.Y * c1.X;
         if (Mathf.Abs(det) < 1e-6f)
             return middle;
-        float a = (d.X * corner[1].Y - d.Y * corner[1].X) / det;
-        float b = (corner[0].X * d.Y - corner[0].Y * d.X) / det;
-        return middle + a * (top[0] - middle) + b * (top[1] - middle);
+        float a = (d.X * c1.Y - d.Y * c1.X) / det;
+        float b = (c0.X * d.Y - c0.Y * d.X) / det;
+        return middle + a * (top0 - middle) + b * (top1 - middle);
     }
 
     /// <summary>Which cell a point of the ground lies on, the point given in flat

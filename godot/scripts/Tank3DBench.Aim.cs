@@ -200,9 +200,16 @@ public sealed partial class Tank3DBench
             || (!onOwn && _other is { } o && _field is not null && _field.FlatCellAt(Board(point)) == OtherCell(o));
     }
 
+    private readonly List<TankModel> _haloGone = new();
+
     private void HaloTick()
     {
-        foreach (TankModel gone in _halos.Keys.Where(m => !IsInstanceValid(m)).ToList())
+        // into a list kept for it, not Where().ToList(): every frame (BOT-3)
+        _haloGone.Clear();
+        foreach (TankModel m in _halos.Keys)
+            if (!IsInstanceValid(m))
+                _haloGone.Add(m);
+        foreach (TankModel gone in _haloGone)
             _halos.Remove(gone);
         bool alive = _fate == Fate.Alive;
         SetHalo(_model, !alive ? 0.0f : _chosen ? HaloChosen : _overOwn ? HaloHover : 0.0f, SelectionRing.Friendly);

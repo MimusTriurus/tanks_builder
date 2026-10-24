@@ -546,9 +546,9 @@ public sealed partial class ProcSpall : Node3D
         var hit = new Vector2(plate.X, -plate.Y) / Mathf.Max(_tile, 1.0f);
         foreach (ShaderMaterial? ink in new[] { _dustInk, _glowInk })
         {
-            ink?.SetShaderParameter("away", gone);
-            ink?.SetShaderParameter("squat", squat);
-            ink?.SetShaderParameter("plate", hit);
+            ink?.Param("away", gone);
+            ink?.Param("squat", squat);
+            ink?.Param("plate", hit);
         }
         Away = gone;
         Squat = squat;
@@ -608,8 +608,8 @@ public sealed partial class ProcSpall : Node3D
         if (!on)
             return;
 
-        _dustInk?.SetShaderParameter("time", _clock);
-        _glowInk?.SetShaderParameter("time", _clock);
+        _dustInk?.Param("time", _clock);
+        _glowInk?.Param("time", _clock);
     }
 
     /// <summary>One number of one of the two shaders, live - read out of the
@@ -683,18 +683,18 @@ public sealed partial class ProcSpall : Node3D
     private ShaderMaterial Ink(Shader how)
     {
         var ink = new ShaderMaterial { Shader = how, RenderPriority = Stage3D.StandOrder };
-        ink.SetShaderParameter("foot_v", 1.0f);
-        ink.SetShaderParameter("tall", Tall);
-        ink.SetShaderParameter("wideq", Flank * 2.0f);
-        ink.SetShaderParameter("root", Root);
-        ink.SetShaderParameter("floor_fade", Fade);
-        ink.SetShaderParameter("reach", Reach);
-        ink.SetShaderParameter("level", 1.0f);
-        ink.SetShaderParameter("time", 0.0f);
-        ink.SetShaderParameter("sun", Stage3D.Sun);
-        ink.SetShaderParameter("away", Vector2.Right);
-        ink.SetShaderParameter("squat", 1.0f);
-        ink.SetShaderParameter("plate", Vector2.Zero);
+        ink.Param("foot_v", 1.0f);
+        ink.Param("tall", Tall);
+        ink.Param("wideq", Flank * 2.0f);
+        ink.Param("root", Root);
+        ink.Param("floor_fade", Fade);
+        ink.Param("reach", Reach);
+        ink.Param("level", 1.0f);
+        ink.Param("time", 0.0f);
+        ink.Param("sun", Stage3D.Sun);
+        ink.Param("away", Vector2.Right);
+        ink.Param("squat", 1.0f);
+        ink.Param("plate", Vector2.Zero);
         // <b>The kick's helping of the shared banding and tearing, and for its
         // reasons at a smaller size still.</b> The steps read as shading on a
         // mass in transition and as slabs on one that saturates; this is a
@@ -702,13 +702,13 @@ public sealed partial class ProcSpall : Node3D
         // they overlap at all. Written on the material rather than in the shared
         // text, because the shared numbers are right for the effect they were
         // tuned on - the burst's dense cone a cell across.
-        ink.SetShaderParameter("dust_band", 0.28f);
-        ink.SetShaderParameter("dust_tear", 0.52f);
+        ink.Param("dust_band", 0.28f);
+        ink.Param("dust_tear", 0.52f);
         // <b>And less opaque than either, which is this effect's own.</b> What is
         // knocked off a plate is grams of paint and dirt: it has to show the
         // armour through it, or a ricochet reads as a smoke grenade going off on
         // the hull. The shared 0.72 is a shell's worth of earth.
-        ink.SetShaderParameter("dust_ink", 0.62f);
+        ink.Param("dust_ink", 0.62f);
         return ink;
     }
 

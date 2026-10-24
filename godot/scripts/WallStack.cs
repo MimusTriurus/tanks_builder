@@ -809,12 +809,12 @@ public sealed partial class WallStack : Node3D
         if (material is not ShaderMaterial ink)
             return;
         ImageTexture? tex = _plan is { Concrete: true } ? ConcreteTexture() : null;
-        ink.SetShaderParameter("textured", tex is null ? 0.0f : 1.0f);
+        ink.Param("textured", tex is null ? 0.0f : 1.0f);
         if (tex is not null)
-            ink.SetShaderParameter("concrete_tex", tex);
+            ink.Param("concrete_tex", tex);
         // Cells of texture per cell radius: two tiles across the box reads as
         // poured concrete at 248px a tile; more is gravel.
-        ink.SetShaderParameter("tex_scale", 1.6f);
+        ink.Param("tex_scale", 1.6f);
     }
 
     /// <summary>Stand up, or take down, the meshes for the pieces that are not
@@ -951,11 +951,11 @@ public sealed partial class WallStack : Node3D
             Vector2 n = (b - a).Orthogonal().Normalized();
             if (n.Dot(c - a) > 0.0f)
                 n = -n;
-            ink.SetShaderParameter("e" + i, new Vector3(n.X, n.Y, n.Dot(a)));
+            ink.Param("e" + i, new Vector3(n.X, n.Y, n.Dot(a)));
         }
-        ink.SetShaderParameter("halfy", Mathf.Abs(h[3].Y - h[0].Y) * 0.5f);
-        ink.SetShaderParameter("radius", Radius);
-        ink.SetShaderParameter("sun", Key);
+        ink.Param("halfy", Mathf.Abs(h[3].Y - h[0].Y) * 0.5f);
+        ink.Param("radius", Radius);
+        ink.Param("sun", Key);
         ink.RenderPriority = Stage3D.ShadowOrder;
         return ink;
     }
@@ -1189,11 +1189,11 @@ public sealed partial class WallStack : Node3D
                      : Dressed ? GhostCode : SolidCode,
             },
         };
-        ink.SetShaderParameter("sun", Key);
-        ink.SetShaderParameter("joint", Joint);
-        ink.SetShaderParameter("radius", Radius);
-        ink.SetShaderParameter("cel", Cel ? 1.0f : 0.0f);
-        ink.SetShaderParameter("cel_seam", Toon.InkDark);
+        ink.Param("sun", Key);
+        ink.Param("joint", Joint);
+        ink.Param("radius", Radius);
+        ink.Param("cel", Cel ? 1.0f : 0.0f);
+        ink.Param("cel_seam", Toon.InkDark);
         ink.RenderPriority = Order;
         return ink;
     }
@@ -1211,9 +1211,9 @@ public sealed partial class WallStack : Node3D
                              : string.Format(InkShader, "", ""),
             },
         };
-        ink.SetShaderParameter("width", Toon.InkWidth);
-        ink.SetShaderParameter("min_px", Toon.InkMinPx);
-        ink.SetShaderParameter("dark", Toon.InkDark);
+        ink.Param("width", Toon.InkWidth);
+        ink.Param("min_px", Toon.InkMinPx);
+        ink.Param("dark", Toon.InkDark);
         ink.RenderPriority = going ? Order - 1 : Order;
         return ink;
     }
@@ -1306,7 +1306,7 @@ void fragment() {{
         // settles against it by distance is a shadow that flickers as a piece
         // rolls past its own.
         ink.RenderPriority = Stage3D.ShadowOrder;
-        ink.SetShaderParameter("ink", Stage3D.ShadowInk.A);
+        ink.Param("ink", Stage3D.ShadowInk.A);
         return ink;
     }
 

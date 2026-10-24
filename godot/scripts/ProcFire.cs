@@ -359,15 +359,15 @@ public sealed partial class ProcFire : Node2D
             GD.Print(Note);
         }
 
-        _shader.SetShaderParameter("parts", body);
-        _shader.SetShaderParameter("lies", flow);
-        _shader.SetShaderParameter("lift", lifts);
-        _shader.SetShaderParameter("count", body.Count);
-        _shader.SetShaderParameter("sparks_from",
+        _shader.Param("parts", body);
+        _shader.Param("lies", flow);
+        _shader.Param("lift", lifts);
+        _shader.Param("count", body.Count);
+        _shader.Param("sparks_from",
             sparksFrom == int.MaxValue ? body.Count : sparksFrom);
-        _shader.SetShaderParameter("origin", quad.Position);
-        _shader.SetShaderParameter("span", quad.Size);
-        _shader.SetShaderParameter("level", Tank.FireDensity * Brightness);
+        _shader.Param("origin", quad.Position);
+        _shader.Param("span", quad.Size);
+        _shader.Param("level", Tank.FireDensity * Brightness);
         Plumes.SetDepth(_shader, atlas, Tank.HullFacing);
 
         DrawSetTransformMatrix(Tank.ShearFor(false));

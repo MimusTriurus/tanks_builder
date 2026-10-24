@@ -393,20 +393,20 @@ public sealed partial class CelShell : Node3D
         quad.GlobalTransform = new Transform3D(
             new Basis(x * (flat.Length() + 2.0f * margin), y * (2.0f * margin), back),
             mid + back * (0.5f * Mathf.Abs(d.Dot(back)) + half + 1.0f));
-        look.SetShaderParameter("head", head);
-        look.SetShaderParameter("tail", tail);
-        look.SetShaderParameter("core_r", CoreHalf * wide);
-        look.SetShaderParameter("glow_r", half);
-        look.SetShaderParameter("glow", Glow);
-        look.SetShaderParameter("peak", Peak);
-        look.SetShaderParameter("core_tone", Core);
-        look.SetShaderParameter("hot_tone", Hot);
-        look.SetShaderParameter("cool_tone", Cool);
-        look.SetShaderParameter("bands", !Soft);
-        look.SetShaderParameter("band_r", BandHalf * CoreHalf * wide);
-        look.SetShaderParameter("cool_from", CoolFrom);
-        look.SetShaderParameter("band_hot", BandHot);
-        look.SetShaderParameter("band_cool", BandCool);
+        look.Param("head", head);
+        look.Param("tail", tail);
+        look.Param("core_r", CoreHalf * wide);
+        look.Param("glow_r", half);
+        look.Param("glow", Glow);
+        look.Param("peak", Peak);
+        look.Param("core_tone", Core);
+        look.Param("hot_tone", Hot);
+        look.Param("cool_tone", Cool);
+        look.Param("bands", !Soft);
+        look.Param("band_r", BandHalf * CoreHalf * wide);
+        look.Param("cool_from", CoolFrom);
+        look.Param("band_hot", BandHot);
+        look.Param("band_cool", BandCool);
         quad.Visible = true;
     }
 

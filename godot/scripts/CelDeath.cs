@@ -135,8 +135,8 @@ public sealed partial class CelDeath : Node3D
         _hull = Mathf.Max(hullPx, 1.0f);
         _hex = Mathf.Max(hexPx, 1.0f);
         _wallLook = new ShaderMaterial { Shader = WallShader };
-        _wallLook.SetShaderParameter("lump_px", 0.20f * _hull);
-        _wallLook.SetShaderParameter("ink_px", Toon.InkWidth);
+        _wallLook.Param("lump_px", 0.20f * _hull);
+        _wallLook.Param("ink_px", Toon.InkWidth);
         _wall = new MeshInstance3D
         {
             Name = "Wave", Mesh = new QuadMesh { Size = Vector2.One }, MaterialOverride = _wallLook,
@@ -146,8 +146,8 @@ public sealed partial class CelDeath : Node3D
         for (int i = 0; i < Balls.Length; i++)
         {
             _fireLooks[i] = new ShaderMaterial { Shader = CelBlast.FireShader };
-            _fireLooks[i].SetShaderParameter("wave_on", 0.0f);
-            _fireLooks[i].SetShaderParameter("rays", 0.45f);
+            _fireLooks[i].Param("wave_on", 0.0f);
+            _fireLooks[i].Param("rays", 0.45f);
             _fires[i] = new MeshInstance3D
             {
                 Name = $"Fire{i}", Mesh = new QuadMesh { Size = Vector2.One }, MaterialOverride = _fireLooks[i],
@@ -162,8 +162,8 @@ public sealed partial class CelDeath : Node3D
         };
         AddChild(_glow);
         _ringLook = new ShaderMaterial { Shader = CelShot.RingShader };
-        _ringLook.SetShaderParameter("tone", RingColor);
-        _ringLook.SetShaderParameter("ink_tone", RingColor * 0.45f);
+        _ringLook.Param("tone", RingColor);
+        _ringLook.Param("ink_tone", RingColor * 0.45f);
         _ring = new MeshInstance3D
         {
             Name = "Ring", Mesh = new QuadMesh { Size = Vector2.One }, MaterialOverride = _ringLook,
@@ -206,7 +206,7 @@ public sealed partial class CelDeath : Node3D
         _might = Mathf.Clamp(might, 0.05f, 1.0f);
         _grounded = grounded;
         Walls();
-        _wallLook?.SetShaderParameter("stops", _stops);
+        _wallLook?.Param("stops", _stops);
     }
 
     /// <summary>When the fire wave's front gets <paramref name="d"/> px out
@@ -291,8 +291,8 @@ public sealed partial class CelDeath : Node3D
             float size = b.R * Scale * _hull * (_grounded ? 1.35f : 1.0f);
             _fires[i].GlobalTransform = new Transform3D(new Basis(right * (3.2f * size), up * (3.2f * size), back), mid);
             ShaderMaterial m = _fireLooks[i];
-            m.SetShaderParameter("dir", Vector2.Up);
-            m.SetShaderParameter("along", 0.0f);
+            m.Param("dir", Vector2.Up);
+            m.Param("along", 0.0f);
             // The field's eight frames over this ball's life - but the
             // detonation, its frame 0, only the first ball's and only two
             // frames long: slowed with the rest it was a small star for four
@@ -308,10 +308,10 @@ public sealed partial class CelDeath : Node3D
                 _fires[i].Visible = false;
                 continue;
             }
-            m.SetShaderParameter("frame", g);
-            m.SetShaderParameter("size_px", size);
-            m.SetShaderParameter("seed", CelPuff.Hash(_blasts * 7 + i, 113));
-            m.SetShaderParameter("ink", Toon.InkWidth / size);
+            m.Param("frame", g);
+            m.Param("size_px", size);
+            m.Param("seed", CelPuff.Hash(_blasts * 7 + i, 113));
+            m.Param("ink", Toon.InkWidth / size);
         }
     }
 
@@ -335,12 +335,12 @@ public sealed partial class CelDeath : Node3D
         float half = radius + thick * 4.0f;
         _wall.GlobalTransform = new Transform3D(new Basis(right * (2.0f * half), up * (2.0f * half), back),
                                                 _foot + Vector3.Up * thick);
-        _wallLook!.SetShaderParameter("centre", _foot);
-        _wallLook.SetShaderParameter("radius", radius);
-        _wallLook.SetShaderParameter("thick", thick);
-        _wallLook.SetShaderParameter("cool", Mathf.SmoothStep(0.12f, WaveLife, tt));
-        _wallLook.SetShaderParameter("time_s", tt);
-        _wallLook.SetShaderParameter("seed", CelPuff.Hash(_blasts, 197));
+        _wallLook!.Param("centre", _foot);
+        _wallLook.Param("radius", radius);
+        _wallLook.Param("thick", thick);
+        _wallLook.Param("cool", Mathf.SmoothStep(0.12f, WaveLife, tt));
+        _wallLook.Param("time_s", tt);
+        _wallLook.Param("seed", CelPuff.Hash(_blasts, 197));
     }
 
     /// <summary>
@@ -409,11 +409,11 @@ public sealed partial class CelDeath : Node3D
         _ring.GlobalTransform = new Transform3D(
             new Basis(new Vector3(2.0f * half, 0.0f, 0.0f), new Vector3(0.0f, 0.0f, -2.0f * half), Vector3.Up),
             _foot + Vector3.Up * 0.6f);
-        _ringLook!.SetShaderParameter("radius", r / half);
-        _ringLook.SetShaderParameter("width", RingWidth * reach / half);
-        _ringLook.SetShaderParameter("ink", Toon.InkWidth / half);
-        _ringLook.SetShaderParameter("fade", f);
-        _ringLook.SetShaderParameter("seed", CelPuff.Hash(_blasts, 127));
+        _ringLook!.Param("radius", r / half);
+        _ringLook.Param("width", RingWidth * reach / half);
+        _ringLook.Param("ink", Toon.InkWidth / half);
+        _ringLook.Param("fade", f);
+        _ringLook.Param("seed", CelPuff.Hash(_blasts, 127));
     }
 
     private void Fly(float t)

@@ -340,14 +340,14 @@ public sealed partial class ProcFume : Node2D
             GD.Print(Note);
         }
 
-        _shader.SetShaderParameter("puffs", puffs);
-        _shader.SetShaderParameter("lift", lifts);
-        _shader.SetShaderParameter("count", puffs.Count);
-        _shader.SetShaderParameter("origin", quad.Position);
-        _shader.SetShaderParameter("span", quad.Size);
-        _shader.SetShaderParameter("ink", new Vector3(Ink.R, Ink.G, Ink.B));
-        _shader.SetShaderParameter("rim_falloff", RimFalloff);
-        _shader.SetShaderParameter("opacity", Opacity);
+        _shader.Param("puffs", puffs);
+        _shader.Param("lift", lifts);
+        _shader.Param("count", puffs.Count);
+        _shader.Param("origin", quad.Position);
+        _shader.Param("span", quad.Size);
+        _shader.Param("ink", new Vector3(Ink.R, Ink.G, Ink.B));
+        _shader.Param("rim_falloff", RimFalloff);
+        _shader.Param("opacity", Opacity);
         // The hull's map at the hull's own heading, while this draws at the
         // turret's. That split is the point: it is what the rendered layer
         // cannot do, having baked one hull bearing into its alpha.
