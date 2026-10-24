@@ -75,7 +75,7 @@ dotnet build
 ([docs/events.md](docs/events.md)); `res://Wood.tscn`,
 `res://Wall.tscn`, `res://Relief.tscn`, `res://Relief3D.tscn`, `res://Editor.tscn`;
 `res://Tank3D.tscn` — 3D-танк с эффектами стенда ([docs/tank3d.md](docs/tank3d.md));
-`res://Match3D.tscn` — партия на нём: две стороны по пять (зелёные и коричневые) на доске 10 × 10, ход, огонь, смена хода ([docs/tank3d.md](docs/tank3d.md), «Партия»);
+`res://Match3D.tscn` — партия на нём: две стороны по пять (зелёные и коричневые) на доске 10 × 10, по умолчанию учебная расстановка `drill10` (рикошет, взрыв в кучке), ход, огонь, смена хода ([docs/tank3d.md](docs/tank3d.md), «Партия»);
 `res://Tree3D.tscn` — модели деревьев генератора на объёмной доске: лесной пожар, падение от тарана и четыре способа травы ([docs/props.md](docs/props.md), «Tree3D»).
 `--sprites <TAG>` одевает все классы в пиксели одного танка; меняются пиксели, а
 не класс ([docs/architecture.md](docs/architecture.md)).

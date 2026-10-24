@@ -9,7 +9,7 @@ namespace TankSpriteTest;
 /// The bench as a game: two sides of five on a flat 10 x 10 board, turn about, by the
 /// GDD's turn (docs/gdd/match.md, «Ход и раунд», «Структура хода»).
 /// <c>res://Match3D.tscn</c> (its root's <see cref="Match"/>), or
-/// <c>--match</c> on <c>Tank3D.tscn</c>; the board is <c>maps/field10.json</c>
+/// <c>--match</c> on <c>Tank3D.tscn</c>; the board is <c>maps/drill10.json</c> (the drill; <c>--map field10</c> for two plain lines)
 /// unless <c>--map</c> names another.
 ///
 /// <b>One rig still.</b> The bench's own tank is its fields, and a tank per
@@ -60,7 +60,7 @@ public sealed partial class Tank3DBench
     private static readonly string[] Roster = { "LTR", "MTR", "HTR", "TDR", "HMR" };
 
     /// <summary>The match's board when <c>--map</c> named none.</summary>
-    private const string MatchMap = "field10";
+    private const string MatchMap = "drill10";
 
     /// <summary>How long the turn waits after its last action before it
     /// passes, s: the round's hit and the blast are seen by the side that
