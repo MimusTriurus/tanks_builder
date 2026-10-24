@@ -44,6 +44,9 @@ public sealed partial class Tank3DBench
         /// <summary>Its side and its fate in a match (Tank3DBench.Match).</summary>
         public Side Side;
         public Fate Fate = Fate.Alive;
+        /// <summary>The turret and the gun as the unit left them, radians: a
+        /// unit handed back after its shot keeps them laid where they were.</summary>
+        public float Yaw, Elevation;
     }
 
     private readonly List<Parked> _parked = new();
@@ -96,7 +99,8 @@ public sealed partial class Tank3DBench
     /// <summary>A standing tank of <paramref name="tag"/> on a cell, facing
     /// <paramref name="heading"/>, upright on its cell's ground - in a match,
     /// of <paramref name="side"/> and in its paint.</summary>
-    private void Stand(string tag, Vector2I cell, float heading, Side side = Side.Green)
+    private void Stand(string tag, Vector2I cell, float heading, Side side = Side.Green,
+                       float yaw = 0.0f, float elevation = 0.0f)
     {
         TankModel model;
         try
@@ -113,10 +117,16 @@ public sealed partial class Tank3DBench
         var rig = new Node3D { Name = $"Parked_{tag}_{cell.X}_{cell.Y}" };
         AddChild(rig);
         rig.AddChild(model);
+        model.Yaw = yaw;
+        model.Elevation = elevation;
         model.Apply();
         rig.Position = CellMiddle(cell);
         rig.Rotation = new Vector3(0.0f, Mathf.DegToRad(heading), 0.0f);
-        _parked.Add(new Parked { Model = model, Rig = rig, Tag = tag.ToUpperInvariant(), Cell = cell, Heading = heading, Side = side });
+        _parked.Add(new Parked
+        {
+            Model = model, Rig = rig, Tag = tag.ToUpperInvariant(), Cell = cell, Heading = heading, Side = side,
+            Yaw = yaw, Elevation = elevation,
+        });
     }
 
     /// <summary>The standing tank under a click, by where it is drawn: within
@@ -154,6 +164,8 @@ public sealed partial class Tank3DBench
         Vector2I wasCell = CellHere;
         float wasHeading = _heading;
         Side wasSide = _side;
+        // the turret and the gun stay where the last shot left them, both ways
+        float wasYaw = _model.Yaw, wasElevation = _model.Elevation;
         _parked.Remove(next);
         next.Rig.QueueFree();
         _side = next.Side;
@@ -165,14 +177,16 @@ public sealed partial class Tank3DBench
         {
             GD.Print($"tank3d: {next.Tag}: {e.Message}");
             _side = wasSide;
-            Stand(next.Tag, next.Cell, next.Heading, next.Side);
+            Stand(next.Tag, next.Cell, next.Heading, next.Side, next.Yaw, next.Elevation);
             return;
         }
         CancelOrder();
         _home = next.Cell;
         Heading = next.Heading;
+        _model.Yaw = next.Yaw;
+        _model.Elevation = next.Elevation;
         Park();
-        Stand(was, wasCell, wasHeading, wasSide);
+        Stand(was, wasCell, wasHeading, wasSide, wasYaw, wasElevation);
         Choose(true);
         _orderNote = $"ведёшь {next.Tag}";
         GD.Print($"tank3d: took {next.Tag} on {next.Cell}; {was} parks on {wasCell}");

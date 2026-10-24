@@ -432,7 +432,7 @@ public sealed partial class Tank3DBench
         _parked.Add(new Parked
         {
             Model = o.Model, Rig = o.Rig, Tag = o.Tag, Cell = OtherCell(o), Heading = o.Heading,
-            Side = o.Side, Fate = o.Fate,
+            Side = o.Side, Fate = o.Fate, Yaw = o.Model.Yaw, Elevation = o.Model.Elevation,
         });
         _other = null;
         _otherCell = null;
