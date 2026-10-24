@@ -353,6 +353,7 @@ public sealed partial class Tank3DBench
         foreach ((TankModel model, CelHit hits) in _parkedHits)
             if (IsInstanceValid(model) && IsInstanceValid(hits) && !ReferenceEquals(hits, _other?.Hits))
                 hits.Tick(dt, _camera.GlobalBasis);
+        PyreTick(dt);
         if (_banner is not null && _bannerLeft > 0.0f)
         {
             _bannerLeft -= dt;
@@ -476,7 +477,7 @@ public sealed partial class Tank3DBench
             model.Droop = 1.0f;
             model.Slackness = 1.0f;
             model.Apply();
-            Char(model, at, 0.45f * hull);
+            Kindle(model);
             _celDeath?.Blow(at, Foot(at), (float)TankTick.KnockOutFlash, grounded: false);
             _matchNote = $"{SideName(side)} {tag} подбит";
             GD.Print($"tank3d: match: {SideName(side)} {tag} on {cell} knocked out");
@@ -492,6 +493,8 @@ public sealed partial class Tank3DBench
         model.Droop = 1.0f;
         model.Slackness = 1.0f;
         model.Apply();
+        if (_pyres.Find(p => p.Model == model) is { } pyre)
+            pyre.Charred = true;
         Char(model, at, 1.6f * hull);
         _celDeath?.Blow(at, Foot(at), 1.0f, grounded: true);
         _shake.Blast(_profile.ShotShake * 0.6);
@@ -500,9 +503,87 @@ public sealed partial class Tank3DBench
         return Fate.Destroyed;
     }
 
+    /// <summary>How long a knocked unit burns at full, s; then the fire falls
+    /// over <see cref="CelBurn.FireFall"/>.</summary>
+    private const float PyreBurn = 4.0f;
+    /// <summary>How much of the paint the char covers at its end - the
+    /// shader's own <c>char_cover</c>: the whole tank greys evenly from 0 to
+    /// this, rather than a grey patch spreading from the turret.</summary>
+    private const float PyreCover = 0.9f;
+
+    /// <summary>A knocked unit's short fire: it burns out, and the char grows
+    /// from the turret over the whole tank as it does.</summary>
+    private sealed class Pyre
+    {
+        public TankModel Model = null!;
+        public CelBurn Burn = null!;
+        public float Clock;
+        /// <summary>Destroyed meanwhile: the char is full, the pyre lays no more.</summary>
+        public bool Charred;
+    }
+
+    private readonly List<Pyre> _pyres = new();
+    private readonly List<Vector3> _pyrePorts = new();
+
+    /// <summary>The fire lit on a unit just knocked out.</summary>
+    private void Kindle(TankModel model)
+    {
+        // the burn's own scorch is left out (no Paint): it grows with the
+        // heat and goes when the fire does, and this char stays
+        var burn = new CelBurn { Name = "Pyre" };
+        AddChild(burn);
+        burn.Build(model.HullLength * model.PixelsPerUnit);
+        _pyres.Add(new Pyre { Model = model, Burn = burn });
+        Char(model, model.Tank.ToGlobal(model.BlastAt), 1.6f * model.HullLength * model.PixelsPerUnit, 0.0f);
+    }
+
+    /// <summary>Each pyre a frame on: the fire up, then out; the char spread.</summary>
+    private void PyreTick(float dt)
+    {
+        for (int i = _pyres.Count - 1; i >= 0; i--)
+        {
+            Pyre p = _pyres[i];
+            if (!IsInstanceValid(p.Model))
+            {
+                p.Burn.QueueFree();
+                _pyres.RemoveAt(i);
+                continue;
+            }
+            p.Clock += dt;
+            TankModel m = p.Model;
+            bool lit = p.Clock < PyreBurn;
+            p.Burn.Fire = lit ? 1.0f : 0.0f;
+            p.Burn.Smoke = lit ? 1.0f : 0.0f;
+            _pyrePorts.Clear();
+            foreach (Node3D ex in m.Exhausts)
+                _pyrePorts.Add(ex.GlobalPosition);
+            if (_pyrePorts.Count == 0)
+                _pyrePorts.Add(m.Tank.ToGlobal(m.BlastAt));
+            p.Burn.TurretAt = m.Turret?.GlobalPosition;
+            p.Burn.OverTurret = m.Turret is not null && m.TurretOverride is not null;
+            p.Burn.Tick(dt, _pyrePorts, _camera.GlobalBasis);
+            if (!p.Charred)
+            {
+                // the tank greys evenly while it burns and is grey whole by
+                // the time the fire is out
+                float k = Mathf.Clamp(p.Clock / (PyreBurn + p.Burn.FireFall), 0.0f, 1.0f);
+                foreach (ShaderMaterial mat in m.Cel)
+                    mat.SetShaderParameter("char_cover", PyreCover * k);
+                if (k >= 1.0f)
+                    p.Charred = true;
+            }
+            // gone once the fire is out and the last smoke has risen away
+            if (p.Charred && !lit && p.Clock > PyreBurn + p.Burn.FireFall + p.Burn.PuffLife + 1.0f)
+            {
+                p.Burn.QueueFree();
+                _pyres.RemoveAt(i);
+            }
+        }
+    }
+
     /// <summary>The char of the cel shader's scorch, laid once and left: round
     /// <paramref name="at"/>, <paramref name="reach"/> world px.</summary>
-    private static void Char(TankModel model, Vector3 at, float reach)
+    private static void Char(TankModel model, Vector3 at, float reach, float cover = PyreCover)
     {
         var spots = new[] { at, at, at, at };
         foreach (ShaderMaterial m in model.Cel)
@@ -512,6 +593,7 @@ public sealed partial class Tank3DBench
             m.SetShaderParameter("scorch_r", reach);
             m.SetShaderParameter("scorch", 1.0f);
             m.SetShaderParameter("ember", 0.0f);
+            m.SetShaderParameter("char_cover", cover);
         }
     }
 
