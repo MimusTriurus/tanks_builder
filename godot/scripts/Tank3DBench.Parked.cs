@@ -133,6 +133,10 @@ public sealed partial class Tank3DBench
         if (AfloatY(cell, model, ClassFor(tag)) is float afloat)
             rig.Position = new Vector3(rig.Position.X, afloat, rig.Position.Z);
         rig.Rotation = new Vector3(0.0f, Mathf.DegToRad(heading), 0.0f);
+        // measured as it is stood up, unturned, so a hand-over to it measures
+        // nothing (Tank3DBench.MeasureRig)
+        if (yaw == 0.0f && elevation == 0.0f)
+            MeasureRig(model, rig, tag);
         _parked.Add(new Parked
         {
             Model = model, Rig = rig, Tag = tag.ToUpperInvariant(), Cell = cell, Heading = heading, Side = side,
@@ -230,8 +234,8 @@ public sealed partial class Tank3DBench
                 Stand(was, wasCell, wasHeading, wasSide, wasYaw, wasElevation);
         using (Prof.Measure("takeover.choose"))
             Choose(true);
+        // No log line: a print in a frame costs up to 100 ms (docs/perf.md, BOT-7).
         _orderNote = $"ведёшь {next.Tag}";
-        GD.Print($"tank3d: took {next.Tag} on {next.Cell}; {was} parks on {wasCell}");
     }
 
     /// <summary>What the bench keeps against a standing model - its marks
