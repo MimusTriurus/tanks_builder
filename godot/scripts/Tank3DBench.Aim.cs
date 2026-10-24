@@ -139,9 +139,11 @@ public sealed partial class Tank3DBench
             bool driving = RouteMoving && !_routeRams && _route is { Count: > 0 };
             Vector2I from = driving ? _route![^1]
                 : _lockCell is Vector2I fixedAt && (!_profile.FreeOrder || _postLock) ? fixedAt : CellHere;
+            // the ghost's gun on the target first: Judge takes the tip of its
+            // barrel, and the ghost is stood afresh each frame turret ahead
             CasemateGhost(from, o);
+            GhostTrack(from, o);
             _judged = Judge(from, o);
-            GhostTrack(_judged, o);
             _judgedNote = $"цель {o.Tag} {_judged.Cell}{(from != CellHere ? $" из {from}" : "")}: {_judged.Says}"
                           + (_postLock && !driving ? "; ПКМ — ехать и стрелять" : "")
                           + (_postNone ? "; ни с одной клетки хода" : "");
@@ -344,10 +346,11 @@ public sealed partial class Tank3DBench
     }
 
     /// <summary>The ghost's turret straight onto the target when the shot is
-    /// judged from the ghost's cell - a picture, so at once.</summary>
-    private void GhostTrack(Judged shot, Other o)
+    /// judged from the ghost's cell - a picture, so at once. Before the shot is
+    /// judged: its line starts at the tip of this barrel.</summary>
+    private void GhostTrack(Vector2I from, Other o)
     {
-        if (GhostOn(shot.From) is not { Turreted: true } ghost)
+        if (GhostOn(from) is not { Turreted: true } ghost)
             return;
         ghost.Yaw += BoreOff(ghost, _ghostRig!, Centre(o));
         ghost.Apply();
