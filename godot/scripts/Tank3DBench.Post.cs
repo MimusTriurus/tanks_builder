@@ -49,7 +49,7 @@ public sealed partial class Tank3DBench
     private void PostTick()
     {
         _postNone = false;
-        bool asks = _rules && _chosen && _fate == Fate.Alive && _overTarget && !RamRunning
+        bool asks = _rules && _chosen && _fate == Fate.Alive && _overTarget && !RamRunning && !MatchShotSpent
                     && _other is { } o && o.Fate != Fate.Destroyed
                     && CourseShown && _reach is not null && (_lockCell is null || _postLock);
         if (!asks)

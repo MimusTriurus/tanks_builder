@@ -191,6 +191,10 @@ public sealed partial class Tank3DBench
 
     private bool MatchMayMove => MatchMoveWhy().Length == 0;
 
+    /// <summary>The shot of this turn is spent - fired, or the turn going over:
+    /// no line of fire nor firing post is drawn for a shot there is not.</summary>
+    private bool MatchShotSpent => Match && (_fired || _passIn is not null || MatchOver);
+
     /// <summary>Why the unit on the rig may not fire at <paramref name="cell"/>
     /// now, or empty - ahead of the rules' own gate (<see cref="ShotWhy"/>).</summary>
     private string MatchShotWhy(Vector2I cell)
