@@ -317,18 +317,19 @@ public sealed partial class Tank3DBench
         return slot;
     }
 
-    private static void Pose(RamGhost g, Vector3 at, float heading, float yaw, Color tint, bool firm)
+    private void Pose(RamGhost g, Vector3 at, float heading, float yaw, Color tint, bool firm)
     {
+        float clear = GhostClear(at);
         g.Rig.Position = at;
         g.Rig.Rotation = new Vector3(0.0f, Mathf.DegToRad(heading), 0.0f);
         g.Model.Yaw = yaw;
         g.Model.Elevation = 0.0f;
         g.Model.Apply();
         g.Fill.SetShaderParameter("tint", tint);
-        g.Fill.SetShaderParameter("alpha", firm ? GhostFirm : GhostFaint);
+        g.Fill.SetShaderParameter("alpha", (firm ? GhostFirm : GhostFaint) * clear);
         g.Ink.SetShaderParameter("ink", tint.Darkened(0.7f));
-        g.Ink.SetShaderParameter("alpha", 1.0f);
-        g.Rig.Visible = true;
+        g.Ink.SetShaderParameter("alpha", clear);
+        g.Rig.Visible = clear > 0.01f;
     }
 
     private void ShowRam(RamPlan plan)

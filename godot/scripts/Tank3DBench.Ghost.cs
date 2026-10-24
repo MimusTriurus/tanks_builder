@@ -180,9 +180,8 @@ void fragment() {
         bool driving = _rules && _fate == Fate.Alive && (RouteMoving || _turnGoal is not null);
         if (!driving)
             _routeGoal = null;
-        // ...and gives way as the hull comes onto it, not to sit inside it
-        if (_routeGoal is var (goal, side) && !_routeRams
-            && (_rig.Position - CellMiddle(goal)).Slide(Vector3.Up).Length() > 0.6f * CellStep)
+        // ...and fades as the hull comes onto it, not to sit inside it (GhostClear)
+        if (_routeGoal is var (goal, side) && !_routeRams)
         {
             GhostAt(goal, side, true);
             return;
@@ -202,9 +201,25 @@ void fragment() {
         _ghost!.Yaw = 0.0f;
         _ghost.Elevation = 0.0f;
         _ghost.Apply();
-        _ghostFill.SetShaderParameter("alpha", firm ? GhostFirm : GhostFaint);
-        _ghostInk.SetShaderParameter("alpha", firm ? 1.0f : 0.7f);
-        _ghostRig.Visible = true;
+        float clear = GhostClear(_ghostRig.Position);
+        _ghostFill.SetShaderParameter("alpha", (firm ? GhostFirm : GhostFaint) * clear);
+        _ghostInk.SetShaderParameter("alpha", (firm ? 1.0f : 0.7f) * clear);
+        _ghostRig.Visible = clear > 0.01f;
+    }
+
+    /// <summary>How much of a ghost at <paramref name="at"/> to draw, 0..1:
+    /// all of it most of a cell off every real hull, none on
+    /// one. Drawn whole, a ghost met by its tank as it arrived, or played
+    /// into a standing one by the ram's preview, was a hull through a hull.
+    /// </summary>
+    private float GhostClear(Vector3 at)
+    {
+        float near = Flat(at - _rig.Position).Length();
+        if (_other is { } o)
+            near = Mathf.Min(near, Flat(at - o.Rig.Position).Length());
+        foreach (Parked p in _parked)
+            near = Mathf.Min(near, Flat(at - p.Rig.Position).Length());
+        return Mathf.SmoothStep(0.25f, 0.85f, near / CellStep);
     }
 
     // --- the two clicks -----------------------------------------------------
