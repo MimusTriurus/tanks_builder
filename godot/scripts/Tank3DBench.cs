@@ -1069,6 +1069,7 @@ public sealed partial class Tank3DBench : Node3D
             // the end of turn's button (Tank3DBench.Match)
             case "pass": EndTurn(); break;
             case "ram-mode": RamToggle(); break;
+            case "douse": Douse(); break;
             case "restart": if (Match) Restart(); break;
             case "way": NextWay(); break;
             case "forks": Forks(); break;
@@ -1803,6 +1804,9 @@ public sealed partial class Tank3DBench : Node3D
         {
             if (key.Keycode == Key.Backspace)
                 Restart();
+            // J, the bench's fire, puts the unit's fire out (Tank3DBench.Blast)
+            else if (key.Keycode == Key.J)
+                Douse();
             return;
         }
         switch (key.Keycode)

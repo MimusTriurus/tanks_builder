@@ -167,7 +167,7 @@ public sealed partial class Tank3DBench
     /// the spot, the gun laying, a round in the air.</summary>
     private bool MatchBusy =>
         RouteMoving || _turnGoal is not null || _aim is not null || _shotWaiting is not null
-        || (_shells?.Rounds.Count ?? 0) > 0 || RamRunning || _ramWaiting is not null;
+        || (_shells?.Rounds.Count ?? 0) > 0 || RamRunning || _ramWaiting is not null || _chain.Count > 0;
 
     private bool MatchOver => _won is not null || _drawn;
 
@@ -269,9 +269,21 @@ public sealed partial class Tank3DBench
         PassTurn();
     }
 
+    /// <summary>To the other side, and the side that ended its turn checked for
+    /// fires left burning (Tank3DBench.Blast) - after the hand-over, so a unit
+    /// that burns out stands, as every other, rather than rides.</summary>
+    private void PassTurn()
+    {
+        Side ending = _turn;
+        int turn = _turnNo++;
+        HandOver();
+        if (!MatchOver)
+            BurnOut(ending, turn);
+    }
+
     /// <summary>To the other side: its first unit able to act on the rig. A
     /// side with none passes on.</summary>
-    private void PassTurn()
+    private void HandOver()
     {
         _passIn = null;
         _ramMode = false;
@@ -359,6 +371,7 @@ public sealed partial class Tank3DBench
             if (IsInstanceValid(model) && IsInstanceValid(hits) && !ReferenceEquals(hits, _other?.Hits))
                 hits.Tick(dt, _camera.GlobalBasis);
         PyreTick(dt);
+        BlastTick(dt);
         RamWaitTick();
         if (_banner is not null && _bannerLeft > 0.0f)
         {
@@ -484,11 +497,24 @@ public sealed partial class Tank3DBench
             model.Slackness = 1.0f;
             model.Apply();
             Kindle(model);
-            _celDeath?.Blow(at, Foot(at), (float)TankTick.KnockOutFlash, grounded: false);
+            // knocked out, it burns no more as a unit: the pyre is its fire now
+            Quench(side, tag, steam: false);
+            Boom(at, (float)TankTick.KnockOutFlash, grounded: false);
             _matchNote = $"{SideName(side)} {tag} подбит";
             GD.Print($"tank3d: match: {SideName(side)} {tag} on {cell} knocked out");
             return Fate.Knocked;
         }
+        return Explode(model, tag, cell, side);
+    }
+
+    /// <summary>Destroyed - always a blast (GDD states.md, «Уничтожен»), whether
+    /// a round found a knocked hull or a fire was left to burn: the picture,
+    /// then the six hexes round it (<see cref="Blast"/>).</summary>
+    private Fate Explode(TankModel model, string tag, Vector2I cell, Side side)
+    {
+        Vector3 at = model.Tank.ToGlobal(model.BlastAt);
+        float hull = model.HullLength * model.PixelsPerUnit;
+        Quench(side, tag, steam: false);
         // The ammunition: the turret off on to the deck where the sidecar lays
         // it, the hull charred over.
         if (model.Turret is not null)
@@ -502,10 +528,11 @@ public sealed partial class Tank3DBench
         if (_pyres.Find(p => p.Model == model) is { } pyre)
             pyre.Charred = true;
         Char(model, at, 1.6f * hull);
-        _celDeath?.Blow(at, Foot(at), 1.0f, grounded: true);
+        Boom(at, 1.0f, grounded: true);
         _shake.Blast(_profile.ShotShake * 0.6);
         _matchNote = $"{SideName(side)} {tag} уничтожен";
         GD.Print($"tank3d: match: {SideName(side)} {tag} on {cell} destroyed");
+        Blast(cell);
         return Fate.Destroyed;
     }
 
@@ -680,9 +707,10 @@ public sealed partial class Tank3DBench
                 .Append(s == _turn && !MatchOver ? "» " : "").Append(SideName(s)).Append(':');
             foreach (var u in all.Where(u => u.Side == s).OrderBy(u => Array.IndexOf(Roster, u.Tag)))
                 text.Append(' ').Append(u.Riding ? "▶" : "").Append(u.Tag[..2])
-                    .Append(u.Fate switch { Fate.Alive => "", Fate.Knocked => "◐", _ => "✕" });
+                    .Append(u.Fate switch { Fate.Alive => "", Fate.Knocked => "◐", _ => "✕" })
+                    .Append(u.Fate == Fate.Alive && Burning(u.Side, u.Tag) ? "▲" : "");
         }
-        return text.Append("      ◐ подбит  ✕ уничтожен").ToString();
+        return text.Append("      ▲ горит  ◐ подбит  ✕ уничтожен").ToString();
     }
 
     /// <summary>The HUD's lines in a match: where the turn stands and how to
@@ -693,9 +721,10 @@ public sealed partial class Tank3DBench
             ? (_drawn ? "Ничья" : $"Победа: {SideName(_won!.Value)}") + $" · раунд {_round}"
             : $"Раунд {_round} · ходят {SideName(_turn)} · {_modelTag}: ход {(_drove ? "сделан" : "есть")}, "
               + $"выстрел {(_fired ? "сделан" : "есть")}"
+              + (Burning(_side, _modelTag) ? $" · {_modelTag} горит: J — тушить, иначе сгорит в конце хода" : "")
               + (_passIn is float t ? $" · передача хода через {Mathf.Max(t, 0.0f):F1} с" : ""))
         + (_matchNote.Length > 0 ? $" · {_matchNote}" : "") + "\n"
         + Roll() + "\n"
         + "ЛКМ по своему — взять танк   ЛКМ по клетке — фиксация, ещё раз или Enter — ехать   A/D, колесо — разворот призрака   Tab — таран\n"
-        + "ПКМ по врагу — огонь (не достать отсюда — ехать и стрелять)   Ctrl+Enter — конец хода   Backspace — заново   Esc — отмена   колесо — зум   Home — камера";
+        + "ПКМ по врагу — огонь (не достать отсюда — ехать и стрелять)   J — тушить   Ctrl+Enter — конец хода   Backspace — заново   Esc — отмена   колесо — зум   Home — камера";
 }
