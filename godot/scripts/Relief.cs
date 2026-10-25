@@ -212,6 +212,11 @@ public sealed class Relief
                 Vector2 off = new Vector2(warpX.GetNoise2D(x, z), warpZ.GetNoise2D(x, z) * Squash) * (Warp * r);
                 Vector2I wc = field.FlatCellAt(flat + off);
                 Vector2I from = field.InBounds(wc) ? wc : field.InBounds(field.ClampCell(wc)) ? field.ClampCell(wc) : edge;
+                // The warp moves a shore only inward: a dry cell never reads a
+                // water neighbour's height, so no water is laid on a cell the
+                // rules call dry (the user's catch: a pond ran on to its bank).
+                if (field.IsWater(from) && !field.IsWater(edge))
+                    from = edge;
                 // Water a shoal under its surface for the blur, the bed cut
                 // after it (Carve): blurred down a whole level to a deep bed,
                 // a bank a level up came out under the surface and the pond
