@@ -596,9 +596,12 @@ public sealed partial class HexField : Node2D
     {
         if (!InBounds(cell))
             return false;
-        int at = cell.Y * Columns + cell.X;
-        return (_water is not null && _water[at])
-               || (_ground is not null
+        // Lengths asked too: the editor resizes the board and then sets its
+        // layers one at a time, and SetWater re-reads the floor of the board
+        // before - a smaller one ran off the end of it on every Open.
+        int at = cell.Y * Columns + cell.X, n = Columns * Rows;
+        return (_water is not null && _water.Length == n && _water[at])
+               || (_ground is not null && _ground.Length == n
                    && (_ground[at] == Foundation.Shallow
                        || _ground[at] == Foundation.Deep));
     }
