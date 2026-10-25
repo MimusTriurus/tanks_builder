@@ -131,6 +131,7 @@ public sealed class TreeFall
         Spin = f.Shove * (0.6 + 0.4 * Mathf.Clamp(shove, 0.0f, 1.0f));
         Flinch = FlinchRate = 0.0;
         TreeModel.Margin(Holder, down: true);
+        TreeModel.Plate(Holder, true);
         foreach (ShaderMaterial m in Burn)
         {
             m.Param("fall_on", true);
@@ -214,6 +215,7 @@ public sealed class TreeFall
         _pit = null;
         Angle = Spin = Flinch = FlinchRate = 0.0;
         TreeModel.Margin(Holder);
+        TreeModel.Plate(Holder, false);
         foreach (ShaderMaterial m in Burn)
             m.Param("fall_on", false);
     }
