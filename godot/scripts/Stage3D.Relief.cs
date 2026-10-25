@@ -48,6 +48,47 @@ public sealed partial class Stage3D
 
     private bool _showBrow;
 
+    /// <summary>The lawn photograph on the flats instead of the painted
+    /// patches (<see cref="AssetRoot.Ground"/>, <c>grass_basecolor.jpg</c>).
+    /// On by default when the file is there; the panel switches it.</summary>
+    public bool ShowLawn
+    {
+        get => _showLawn;
+        set
+        {
+            _showLawn = value;
+            if (Relief is not null && _tops?.MaterialOverride is ShaderMaterial tops)
+                tops.Param("lawn_on", value && Lawn() is not null ? 1.0f : 0.0f);
+        }
+    }
+
+    private bool _showLawn = true;
+
+    /// <summary>A tile of the lawn photograph, in circumradii.</summary>
+    private const float LawnTile = 1.4f;
+
+    private static ImageTexture? _lawn;
+    private static bool _lawnRead;
+
+    /// <summary>The lawn photograph, read once, with its mipmaps; null when
+    /// it is not on disk.</summary>
+    internal static ImageTexture? Lawn()
+    {
+        if (_lawnRead)
+            return _lawn;
+        _lawnRead = true;
+        string path = AssetRoot.Ground + "/grass_basecolor.jpg";
+        if (!System.IO.File.Exists(path))
+            return null;
+        Image img = Image.LoadFromFile(path);
+        if (img is null || img.IsEmpty())
+            return null;
+        img.GenerateMipmaps();
+        _lawn = ImageTexture.CreateFromImage(img);
+        Log.Print($"stage3d: lawn {path} {img.GetWidth()}x{img.GetHeight()}");
+        return _lawn;
+    }
+
     /// <summary>The grid's ink: the rim bands' own (<see cref="EdgeInk"/>), a
     /// little heavier, because a line has none of a band's width to carry it.</summary>
     private static readonly Color GridInk = new(0.05f, 0.04f, 0.03f, 0.42f);
@@ -160,6 +201,14 @@ public sealed partial class Stage3D
         ink.Param("level_world", Field.Lift / RiseFactor);
         ink.Param("level_base", f.LevelBase);
         ink.Param("brow_on", ShowBrow ? 1.0f : 0.0f);
+        if (Lawn() is { } lawn)
+        {
+            ink.Param("lawn_tex", lawn);
+            // a tile about two thirds of a hex: the photograph is a couple of
+            // metres of turf, a hex some seven
+            ink.Param("lawn_tile", 1.0f / (r * LawnTile));
+        }
+        ink.Param("lawn_on", ShowLawn && Lawn() is not null ? 1.0f : 0.0f);
         ink.Param("art_tile", 1.0f / (r * ArtTile));
         if (Field.Terrain is { Any: true } terrain && terrain.Plate.Size.X > 0)
         {
@@ -353,6 +402,12 @@ uniform vec3 sand_ink : source_color = vec3(0.86, 0.76, 0.55);
 uniform vec3 rock_ink : source_color = vec3(0.58, 0.56, 0.54);
 uniform vec3 wood_ink : source_color = vec3(0.30, 0.38, 0.20);
 uniform vec3 bed_ink : source_color = vec3(0.30, 0.27, 0.20);
+// The lawn photograph (AssetRoot.Ground), one tile per this many world units,
+// and how bright: on when it is on disk and switched on
+uniform sampler2D lawn_tex : source_color, filter_linear_mipmap, repeat_enable, hint_default_white;
+uniform float lawn_on = 0.0;
+uniform float lawn_tile = 0.01;
+uniform float lawn_gain = 1.0;
 // Grass3D's own tones, mid and tip
 uniform vec3 grass_ink : source_color = vec3(0.34, 0.43, 0.17);
 uniform vec3 grass_tip : source_color = vec3(0.55, 0.61, 0.29);
@@ -425,11 +480,20 @@ vec4 cell_ink(vec2 cr) {
     float patch_ = mire_fbm(ground.xz * 0.018 + vec2(7.0, 3.0));
     // none on a terrace's slope: grass on the flats, earth on the banks
     // (the tufts keep off them too, Tank3DBench.GrassSlope)
-    float lawn = (1.0 - bare) * (1.0 - COLOR.a)
-                 * smoothstep(0.30, 0.42, patch_ + 0.25)
-                 * (1.0 - smoothstep(0.2, 0.32, bank));
+    float flat_ = (1.0 - bare) * (1.0 - COLOR.a) * (1.0 - smoothstep(0.2, 0.32, bank));
+    float lawn = flat_ * smoothstep(0.30, 0.42, patch_ + 0.25);
     vec3 turf = mix(grass_ink, grass_tip, smoothstep(0.35, 0.75, mire_fbm(ground.xz * 0.05)));
-    soil = mix(soil, turf * (0.75 + 0.5 * grain), lawn);
+    if (lawn_on > 0.5) {
+        // the photograph (AssetRoot.Ground) over every flat, not in patches:
+        // two scales, the second turned, mixed by a noise, so its tile does
+        // not repeat across a board
+        vec2 q = ground.xz * lawn_tile;
+        vec2 q2 = mat2(vec2(0.8, 0.6), vec2(-0.6, 0.8)) * ground.xz * lawn_tile * 0.37 + vec2(0.31, 0.17);
+        vec3 photo = mix(texture(lawn_tex, q).rgb, texture(lawn_tex, q2).rgb,
+                         smoothstep(0.35, 0.65, mire_fbm(ground.xz * 0.008)));
+        soil = mix(soil, photo * lawn_gain, flat_ * smoothstep(0.0, 0.12, patch_ + 0.25));
+    } else
+        soil = mix(soil, turf * (0.75 + 0.5 * grain), lawn);
     soil = mix(soil, bed_ink * (0.6 + 0.6 * grain), COLOR.a);
     vec3 hexc = hex_at(ground.xz);
     vec4 cink = cell_ink(hexc.xy);
