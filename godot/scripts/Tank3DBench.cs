@@ -66,6 +66,9 @@ public sealed partial class Tank3DBench : Node3D
     /// <summary><c>--relief</c>: the board as one smooth ground (BOT-11,
     /// <see cref="Relief"/>) - for now its fields, to <c>out/relief/</c>.</summary>
     private bool _reliefOn;
+    /// <summary><c>--brow</c>: the relief's brow lines on from the start
+    /// (off by default, the user's call; the panel switches them).</summary>
+    private bool _browOn;
     private Relief? _relief;
     /// <summary><c>--pbr</c>: the glTF's own materials, no cel shading and no
     /// ink - the look before <see cref="Toon"/>, to hold against it.</summary>
@@ -778,6 +781,7 @@ public sealed partial class Tank3DBench : Node3D
             CelRelief = !_pbr && !_flatRelief,
             // --relief: one smooth ground for the prisms (BOT-11)
             Relief = _relief,
+            ShowBrow = _browOn,
         };
         AddChild(_stage);
         _field.ShowField = false;
@@ -1088,6 +1092,7 @@ public sealed partial class Tank3DBench : Node3D
             else if (a == "--soft-water") _softWater = true;
             else if (a == "--flat") _flat = true;
             else if (a == "--relief") _reliefOn = true;
+            else if (a == "--brow") _browOn = true;
             else if (a == "--pbr") _pbr = true;
             else if (a == "--fx2d") _fx2d = true;
             else if (a == "--zoom" && more) { _zoom = F(args[++i], _zoom); _zoomFit = false; }
@@ -2061,6 +2066,16 @@ public sealed partial class Tank3DBench : Node3D
             $"класс {_profile.Tag} x{_profile.Size:F2}, {_model.PixelsPerUnit:F1} px на единицу"
             + (_model.Turreted ? "" : ", без башни"));
         _panel.Expand("tank3d.tank", true);
+        // The relief's lines (Stage3D.Relief): the brow off by default
+        if (_stage?.Relief is not null)
+        {
+            _panel.Heading("tank3d.relief", "рельеф");
+            _panel.Toggle("tank3d.relief.brow", "бровка уступов  (--brow)",
+                          () => _stage.ShowBrow, v => _stage.ShowBrow = v);
+            _panel.Toggle("tank3d.relief.grid", "гекс-сетка  (Shift+G)",
+                          () => _stage.ShowEdges, v => _stage.ShowEdges = v);
+            _panel.Expand("tank3d.relief", true);
+        }
         // Whether the pond is swum or drowned in - see TankTick.Amphibious.
         _panel.Heading("tank3d.water", "вода");
         _panel.Toggle("tank3d.water.amphibious", "ОПВТ: плывёт, без него тонет",

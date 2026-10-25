@@ -32,6 +32,22 @@ public sealed partial class Stage3D
     /// rebuild only repaints the cells (<see cref="Build"/>).</summary>
     private Relief? _reliefBuilt;
 
+    /// <summary>The brow line at each terrace's rim. Off by default (the
+    /// user's call, 2026-10-25): the terraces' bare banks say the levels, and
+    /// the line is there to switch on (<c>--brow</c>, the panel).</summary>
+    public bool ShowBrow
+    {
+        get => _showBrow;
+        set
+        {
+            _showBrow = value;
+            if (Relief is not null && _tops?.MaterialOverride is ShaderMaterial tops)
+                tops.Param("brow_on", value ? 1.0f : 0.0f);
+        }
+    }
+
+    private bool _showBrow;
+
     /// <summary>The grid's ink: the rim bands' own (<see cref="EdgeInk"/>), a
     /// little heavier, because a line has none of a band's width to carry it.</summary>
     private static readonly Color GridInk = new(0.05f, 0.04f, 0.03f, 0.42f);
@@ -143,6 +159,7 @@ public sealed partial class Stage3D
         // the brow line's levels, in world Y
         ink.Param("level_world", Field.Lift / RiseFactor);
         ink.Param("level_base", f.LevelBase);
+        ink.Param("brow_on", ShowBrow ? 1.0f : 0.0f);
         ink.Param("art_tile", 1.0f / (r * ArtTile));
         if (Field.Terrain is { Any: true } terrain && terrain.Plate.Size.X > 0)
         {

@@ -36,12 +36,12 @@ public sealed class Relief
     /// <c>COAST_BLUR</c> is 0.45, and ours was 0.3-0.45 at first; there a
     /// height is scenery, here a level is a rule, and blurred that wide no
     /// hill read as one.</summary>
-    public const float Terrace = 0.12f;
+    public const float Terrace = 0.09f;
 
     /// <summary>How far the height is read off its point, in circumradii, so
     /// a terrace's edge wanders off the cell's side and the plateaus are not
     /// a honeycomb.</summary>
-    public const float Warp = 0.22f;
+    public const float Warp = 0.14f;
 
     /// <summary>The blur of the kinds' shares, in circumradii (hex_map's
     /// <c>KIND_BLUR</c>).</summary>
@@ -49,7 +49,7 @@ public sealed class Relief
 
     /// <summary>The raster step, in circumradii: about 15 px on the bench's
     /// tile, 16 points across a hex.</summary>
-    public const float Step = 0.125f;
+    public const float Step = 0.0833f;
 
     /// <summary>Ground past the board's edge on every side, in circumradii -
     /// hex_map's <c>MARGIN</c>, smaller: our board is the whole of the scene.</summary>
