@@ -156,7 +156,9 @@ public sealed partial class Tank3DBench
             return;
         if (_show.Trees)
             Plant();
-        if (_show.Grass)
+        // the lawn is a flat hexagon a cell; the relief paints its grass
+        // itself until the tufts follow the ground (BOT-11)
+        if (_show.Grass && _relief is null)
             Lawn();
     }
 

@@ -770,6 +770,8 @@ public sealed partial class Tank3DBench : Node3D
             // the relief in the models' look: the sides stepped by the sun
             // (Stage3D.CelRelief)
             CelRelief = !_pbr && !_flatRelief,
+            // --relief: one smooth ground for the prisms (BOT-11)
+            Relief = _relief,
         };
         AddChild(_stage);
         _field.ShowField = false;
@@ -1992,6 +1994,10 @@ public sealed partial class Tank3DBench : Node3D
             // in a match: the ram on or off (Tank3DBench.RamPlan)
             case Key.Tab: if (Match) RamToggle(); else if (!NextWay()) _panel?.Flip(); break;
             case Key.Home: FollowTank(); break;
+            // the relief's hex grid on and off (Stage3D.Relief); no free single key left
+            case Key.G when key.ShiftPressed && _stage?.Relief is not null:
+                _stage.ShowEdges = !_stage.ShowEdges;
+                break;
             case Key.Minus: ZoomBy(1.0f / 1.25f); break;
             case Key.Equal: ZoomBy(1.25f); break;
             case Key.F5: Edit(); break;

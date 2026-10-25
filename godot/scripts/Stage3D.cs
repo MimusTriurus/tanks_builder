@@ -113,6 +113,9 @@ public sealed partial class Stage3D : Node3D
         {
             _showEdges = value;
             _edges.Visible = value && ShowBoard;
+            // the relief draws them in its shader (Stage3D.Relief)
+            if (Relief is not null && _tops?.MaterialOverride is ShaderMaterial tops)
+                tops.Param("hex_on", value ? 1.0f : 0.0f);
         }
     }
 
@@ -2091,6 +2094,10 @@ void fragment() {{
 
     private void Glaze()
     {
+        // the glaze is a prism's top laid again over a hull; the relief has
+        // no prisms to lay (Stage3D.Relief)
+        if (Relief is not null)
+            return;
         // Framewise rather than a lerp on a stored target, which is the wood's
         // reason word for word: the same integration the rest of the bench uses,
         // so a paused frame does not step the fade. Read here rather than handed
@@ -2348,6 +2355,7 @@ void fragment() {{
         // a field nothing ever reads again, which is a control that does
         // nothing and says nothing.
         Mix(Deep ? 1 : 0);
+        Mix(Relief is null ? 0 : 1);
         for (int q = 0; q < Field.Columns; q++)
         for (int r = 0; r < Field.Rows; r++)
         {
@@ -2418,6 +2426,8 @@ void fragment() {{
     /// answers it by letting the brick fall to whatever top is under it.</summary>
     public List<Vector3> GroundTriangles()
     {
+        if (Relief is not null && Field.Atlas is not null)
+            return ReliefTriangles(Relief);
         var outp = new List<Vector3>();
         if (Field.Atlas is null)
             return outp;
@@ -2721,6 +2731,25 @@ void fragment() {{
                 lowest = Mathf.Min(lowest, Field.BedAt(new Vector2I(q, r)));
         float floor = World(Vector2.Zero, lowest).Y;
         Vector3[] corner = Corners();
+
+        // One smooth ground instead of the prisms (Stage3D.Relief); the mud
+        // and the water are laid on it as on them.
+        if (Relief is not null)
+        {
+            // A route or an aim repaints cells and nothing else, and on the
+            // relief the paint is a texture: the mesh stays.
+            if (_reliefBuilt == Relief && _tops.MaterialOverride is ShaderMaterial built)
+            {
+                built.Param("cells", CellsTexture());
+                return;
+            }
+            _reliefBuilt = Relief;
+            BuildRelief(Relief, GroundArt());
+            Mire();
+            ((ImmediateMesh)_glaze.Mesh).ClearSurfaces();
+            BuildWater(corner);
+            return;
+        }
 
         var tops = new SurfaceTool();
         var sides = new SurfaceTool();
@@ -3358,9 +3387,9 @@ void fragment() {
             glaze.SetShaderParameter(key, value);
     }
 
-    private ShaderMaterial Turf(Texture2D? art, bool glass = false)
+    private ShaderMaterial Turf(Texture2D? art, bool glass = false, Shader? soil = null)
     {
-        var ink = new ShaderMaterial { Shader = glass ? Glass : Soil };
+        var ink = new ShaderMaterial { Shader = soil ?? (glass ? Glass : Soil) };
         if (art is not null)
             ink.Param("art", art);
         if (_heights is not null)
