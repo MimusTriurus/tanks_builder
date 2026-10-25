@@ -76,6 +76,11 @@ public static class MapRules
         public bool[] Cliffs = Array.Empty<bool>();
 
         public IReadOnlySet<Vector2I>? Plot;
+
+        /// <summary>The sea round a moated board (<see cref="BoardMap.Sea"/>):
+        /// <see cref="StepFaults"/> does not ask it against the land's water.</summary>
+        public IReadOnlySet<Vector2I>? Sea;
+
         public IReadOnlyList<Vector2I> Homes = Array.Empty<Vector2I>();
 
         /// <summary>What the walled cells carry, for <see cref="WallFaults"/>.
@@ -146,6 +151,7 @@ public static class MapRules
             Ground = map.Ground,
             Cliffs = map.Cliffs,
             Plot = map.Plot,
+            Sea = map.Sea,
             Homes = map.Homes,
             Walling = map.Walling,
         };
@@ -390,6 +396,10 @@ public static class MapRules
             {
                 Vector2I next = HexField.Step(cell, heading);
                 if (!draft.IsWater(next))
+                    continue;
+                // the sea round a moated board meets a river with a step
+                // (BoardMap.Moated)
+                if (draft.Sea is { } sea && sea.Contains(cell) != sea.Contains(next))
                     continue;
                 // The same sentence about depth: a ford beside deep water on one
                 // level is two surfaces a fraction of a level apart, and a step in

@@ -162,7 +162,7 @@ public sealed partial class Tank3DBench
         }
         if (_perfDir is null)
             return;
-        _hoverFixed ??= _perfHover;
+        _hoverFixed ??= _perfHover + _moat;
         if (_perfTo < 0)
             _perfTo = Math.Max(600, _script.Count > 0 ? _script.Max(s => s.Frame) + 300 : 0);
         DisplayServer.WindowSetVsyncMode(DisplayServer.VSyncMode.Disabled);

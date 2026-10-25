@@ -419,6 +419,7 @@ public sealed partial class HexField : Node2D
         Ground = _ground ?? new Foundation[Columns * Rows],
         Cliffs = new bool[Columns * Rows],
         Plot = _plot,
+        Sea = Sea,
     };
 
     /// <summary>The derived headings read back as the flags they came from, for
@@ -532,6 +533,11 @@ public sealed partial class HexField : Node2D
     /// it did. A departure from the GDD (field.md, "Рампа"), kept to the flag.
     /// </summary>
     public bool Slopes;
+
+    /// <summary>The sea round the board (<see cref="BoardMap.Moated"/>), or
+    /// null: deep water the one-surface guard does not ask about its
+    /// neighbours. Set before <see cref="SetWater"/>.</summary>
+    public IReadOnlySet<Vector2I>? Sea;
 
     public int LevelAt(Vector2I cell) =>
         _levels is null || !InBounds(cell) ? 0 : _levels[cell.Y * Columns + cell.X];

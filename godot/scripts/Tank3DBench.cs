@@ -765,6 +765,20 @@ public sealed partial class Tank3DBench : Node3D
         }
         if (MapToPlay() is not BoardMap map)
             return;
+        // --relief: the board in a sea of deep water cells, at least one hex
+        // between the land and the frame for a rammed tank to go into
+        // (BoardMap.Moated); the cells the flags name are the map's, moved
+        if (_reliefOn)
+        {
+            map = map.Moated();
+            _moat = map.Shift;
+            if (_startCell is Vector2I start)
+                _startCell = start + _moat;
+            if (_hoverFixed is Vector2I hover)
+                _hoverFixed = hover + _moat;
+            if (_otherCell is Vector2I other)
+                _otherCell = other + _moat;
+        }
         TankFromBoard(map);
         _parkings = map.Parked;
         TerrainSet terrain = TerrainSet.Load(AssetRoot.Terrains);
@@ -775,6 +789,7 @@ public sealed partial class Tank3DBench : Node3D
             Paint = map.Paint,
             Trees = false,
             Columns = map.Columns, Rows = map.Rows, Plot = map.Plot,
+            Sea = map.Sea,
         };
         _field.SetKinds(map.Kinds);
         _field.SetGround(map.Ground);
@@ -830,6 +845,14 @@ public sealed partial class Tank3DBench : Node3D
 
     /// <summary>The cell the tank opens on: the map's first parking.</summary>
     private Vector2I _home;
+
+    /// <summary>How far the map's cells moved on the board (the sea of
+    /// <c>--relief</c>, <see cref="BoardMap.Moated"/>): a cell a flag or a
+    /// <c>--do</c> names is the map's, and this is added to it.</summary>
+    private Vector2I _moat;
+
+    /// <summary>A cell a flag or a <c>--do</c> names, on the board.</summary>
+    private Vector2I MapCell(int q, int r) => new Vector2I(q, r) + _moat;
 
     /// <summary>The board's smooth fields (<c>--relief</c>), and their
     /// pictures, looked at before anything stands on them.</summary>
@@ -1256,11 +1279,11 @@ public sealed partial class Tank3DBench : Node3D
                     {
                         if (_rules)
                         {
-                            if (!RamOrder(new Vector2I(q, r)))
-                                ShotOrder(new Vector2I(q, r));
+                            if (!RamOrder(MapCell(q, r)))
+                                ShotOrder(MapCell(q, r));
                         }
                         else
-                            AimCell(new Vector2I(q, r));
+                            AimCell(MapCell(q, r));
                     }
                 }
                 else if (what.StartsWith("pan=", StringComparison.Ordinal))
@@ -1284,7 +1307,7 @@ public sealed partial class Tank3DBench : Node3D
                     // middle - the mouse's own path, PickAt and all.
                     string[] qr = what[6..].Split(',');
                     if (qr.Length == 2 && int.TryParse(qr[0], out int q) && int.TryParse(qr[1], out int r))
-                        OrderClick(_camera.UnprojectPosition(CellWorld(new Vector2I(q, r))), false);
+                        OrderClick(_camera.UnprojectPosition(CellWorld(MapCell(q, r))), false);
                 }
                 else if (what.StartsWith("take=", StringComparison.Ordinal))
                 {
@@ -1292,7 +1315,7 @@ public sealed partial class Tank3DBench : Node3D
                     // through the same screen test the pointer gets.
                     string[] qr = what[5..].Split(',');
                     if (qr.Length == 2 && int.TryParse(qr[0], out int q) && int.TryParse(qr[1], out int r)
-                        && _parked.Find(p => p.Cell == new Vector2I(q, r)) is { } standing)
+                        && _parked.Find(p => p.Cell == MapCell(q, r)) is { } standing)
                         OrderClick(_camera.UnprojectPosition(standing.Rig.Position
                             + Vector3.Up * (standing.Model.Size.Y * standing.Model.PixelsPerUnit * 0.4f)), false);
                 }
@@ -1301,14 +1324,14 @@ public sealed partial class Tank3DBench : Node3D
                 {
                     string[] qr = what[7..].Split(',');
                     if (qr.Length == 2 && int.TryParse(qr[0], out int q) && int.TryParse(qr[1], out int r))
-                        IgniteAt(new Vector2I(q, r));
+                        IgniteAt(MapCell(q, r));
                 }
                 // lock=Q,R: the first click on a cell in reach; face=S: the rose's disc
                 else if (what.StartsWith("lock=", StringComparison.Ordinal))
                 {
                     string[] qr = what[5..].Split(',');
                     if (qr.Length == 2 && int.TryParse(qr[0], out int q) && int.TryParse(qr[1], out int r))
-                        Lock(new Vector2I(q, r));
+                        Lock(MapCell(q, r));
                 }
                 else if (what.StartsWith("face=", StringComparison.Ordinal))
                     FaceTo((int)F(what[5..], 90));
@@ -1319,7 +1342,7 @@ public sealed partial class Tank3DBench : Node3D
                     if (qr.Length == 2 && int.TryParse(qr[0], out int q) && int.TryParse(qr[1], out int r))
                     {
                         SetRules(true, " (--do go)");
-                        OrderTo(new Vector2I(q, r));
+                        OrderTo(MapCell(q, r));
                     }
                 }
                 else if (what.StartsWith("aim=", StringComparison.Ordinal))

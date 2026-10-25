@@ -62,7 +62,7 @@ public sealed class Relief
 
     /// <summary>The sea between the outermost hexes and the frame, in
     /// circumradii: room for an edge cell's bank to come down to the bed.</summary>
-    public const float Rim = 0.3f;
+    public const float Rim = 0.1f;
 
     /// <summary>
     /// The board's rectangle in world x, z (the raster's frame, without the
@@ -171,6 +171,8 @@ public sealed class Relief
         for (int q = 0; q < field.Columns; q++)
             for (int row = 0; row < field.Rows; row++)
             {
+                if (!field.InBounds(new Vector2I(q, row)))
+                    continue;
                 Vector2 c = field.FlatAnchor(q, row) + field.CentreOffset;
                 lo = Mathf.Min(lo, c.X); hi = Mathf.Max(hi, c.X);
                 top = Mathf.Min(top, c.Y / squash); bottom = Mathf.Max(bottom, c.Y / squash);
@@ -416,7 +418,9 @@ public sealed class Relief
                 most = count;
             }
         _seaLevel = shore - 1;
-        SeaTop = Mathf.Min(_seaLevel * lift + field.DeepRise, wetTop);
+        // a shore all water - the moat's ring (BoardMap.Moated) - is the sea itself
+        SeaTop = dryCount.Count == 0 && wetTop < float.MaxValue ? wetTop
+                 : Mathf.Min(_seaLevel * lift + field.DeepRise, wetTop);
         SeaDepth = field.DeepRise + (float)field.DeepBed * lift;
     }
 
@@ -456,11 +460,18 @@ public sealed class Relief
             float best = float.NaN;
             float depth = 0.0f;
             Vector2I from = c;
-            if (field.IsWater(c))
+            // a water cell keeps its own surface: the sea's ring meets a
+            // river with a step (BoardMap.Moated), and a ford beside it is
+            // no deeper for that
+            bool own = field.IsWater(c);
+            if (own)
                 best = field.WaterTop(c);
-            for (int h = 30; h < 360; h += 60)
+            for (int h = 30; h < 360 && !own; h += 60)
             {
                 Vector2I o = HexField.Step(c, h);
+                // nor is a dry cell lower than the sea flooded by it
+                if (field.Sea is { } sea && sea.Contains(o) && field.TopAt(c) < field.WaterTop(o))
+                    continue;
                 if (!field.InBounds(o))
                 {
                     // the sea past the plot's edge - but not over a dry
