@@ -254,6 +254,7 @@ public sealed class Relief
                 raw[p] = field.IsWater(from) ? field.WaterTop(from) - Shoal * lift : field.TopAt(from);
                 rawLevel[p] = field.LevelAt(from);
             }
+        Weir(field, raw, dry, r);
         StampLevels(field, rawLevel, r);
 
         // Terraces (BOT-11, the user's call): a cell's top flat at its own
@@ -375,6 +376,64 @@ public sealed class Relief
             float cut = Mathf.SmoothStep(0.5f, 0.97f, wet) * Mathf.Min(1.0f, under / (0.25f * shoal));
             Height[p] -= Mathf.Max(0.0f, Depth[p] - shoal) * cut;
         }
+    }
+
+    /// <summary>How wide the weir between a pond and the lower sea is, in
+    /// circumradii, on the sea's side of their border (<see cref="Weir"/>).</summary>
+    public const float WeirWide = 0.16f;
+
+    /// <summary>
+    /// A bank of ground along the border where a pond or a ford meets the sea
+    /// standing lower (<see cref="BoardMap.Moated"/>): the sea's ring keeps
+    /// one level, under every shore, so the land's water at the edge is
+    /// higher. Without it the two sheets met on the hexes' side with nothing
+    /// between them, and the higher one ended in the raster's stairs. A thin
+    /// strip of the sea's cell, dry and a little over the pond: the pond's
+    /// shore comes out round, the sea's under it.
+    /// </summary>
+    private void Weir(HexField field, float[] raw, bool[] dry, float r)
+    {
+        if (field.Sea is not { } sea)
+            return;
+        int reach = Math.Max(1, Mathf.RoundToInt(WeirWide * r / Cell));
+        float lip = 0.12f * field.Lift;
+        var top = new float[raw.Length];
+        Array.Fill(top, float.NaN);
+        for (int p = 0; p < raw.Length; p++)
+        {
+            Vector2I c = Owner[p];
+            if (c.X < 0 || sea.Contains(c) || !field.IsWater(c) || field.WaterTop(c) <= SeaTop + 1e-3f)
+                continue;
+            top[p] = field.WaterTop(c);
+        }
+        for (int j = 0; j < Ny; j++)
+            for (int i = 0; i < Nx; i++)
+            {
+                int p = j * Nx + i;
+                Vector2I c = Owner[p];
+                if (c.X >= 0 && !sea.Contains(c))
+                    continue;
+                float best = float.NaN;
+                for (int dj = -reach; dj <= reach; dj++)
+                {
+                    int jj = j + dj;
+                    if (jj < 0 || jj >= Ny)
+                        continue;
+                    for (int di = -reach; di <= reach; di++)
+                    {
+                        int ii = i + di;
+                        if (ii < 0 || ii >= Nx || di * di + dj * dj > reach * reach)
+                            continue;
+                        float t = top[jj * Nx + ii];
+                        if (!float.IsNaN(t) && (float.IsNaN(best) || t > best))
+                            best = t;
+                    }
+                }
+                if (float.IsNaN(best))
+                    continue;
+                raw[p] = best + lip;
+                dry[p] = true;
+            }
     }
 
     /// <summary>Whether a cell touches the sea: a neighbour off the plot.</summary>

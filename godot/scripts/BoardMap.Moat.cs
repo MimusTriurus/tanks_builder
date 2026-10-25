@@ -82,22 +82,30 @@ public sealed partial class BoardMap
             over[to] = Over[from];
         }
 
-        // the sea's level: a level under the commonest dry level on its shore
-        var count = new Dictionary<int, int>();
+        // The sea's level: under every dry cell on its shore and no higher
+        // than the water that runs into it. The commonest shore level was the
+        // first try, and a pit on the edge one level under it (events' (10,1))
+        // stood below the sea's surface: the sheet ran into it, a dry cell by
+        // the rules, as a stair-cut edge and a line of foam with no water. A
+        // ford stands its depth over its level and deep water most of a
+        // level, so a ford wants the sea a level under it, deep water at it.
+        int level = int.MaxValue;
         foreach (Vector2I cell in plot)
         {
-            if (sea.Contains(cell) || water[cell.Y * columns + cell.X])
+            if (sea.Contains(cell))
                 continue;
             if (!HexField.EdgeHeadings.Any(h => sea.Contains(HexField.Step(cell, h))))
                 continue;
-            int l = levels[cell.Y * columns + cell.X];
-            count[l] = count.GetValueOrDefault(l) + 1;
+            int at = cell.Y * columns + cell.X;
+            bool deep = water[at] && ground[at] == Foundation.Deep;
+            level = Math.Min(level, deep ? levels[at] : levels[at] - 1);
         }
-        int shore = count.Count == 0 ? Plinth : count.OrderByDescending(kv => kv.Value).ThenBy(kv => kv.Key).First().Key;
+        if (level == int.MaxValue)
+            level = Plinth - 1;
         foreach (Vector2I cell in sea)
         {
             int at = cell.Y * columns + cell.X;
-            levels[at] = shore - 1;
+            levels[at] = level;
             water[at] = true;
             ground[at] = Foundation.Deep;
         }
