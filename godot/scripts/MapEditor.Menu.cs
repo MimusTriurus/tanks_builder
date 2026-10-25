@@ -156,11 +156,11 @@ public sealed partial class MapEditor
                 Guarded(() =>
                 {
                     _openList.Clear();
-                    foreach (string name in BoardMap.Names)
-                        _openList.AddItem(
-                            BoardMap.Compiled.Contains(
-                                name, StringComparer.OrdinalIgnoreCase)
-                                ? name + "   (built in)" : name);
+                    // Files only: a compiled board is a reference the editor cannot
+                    // save back under its name (MapFile.Save), so listing it only
+                    // led to "Not saved". --map still opens one, for Save As.
+                    foreach (string name in MapFile.Names())
+                        _openList.AddItem(name);
                     _openDialog.PopupCentered();
                 });
                 break;
