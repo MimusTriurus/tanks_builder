@@ -342,7 +342,7 @@ public sealed partial class Tank3DBench
         Vector2 flat = Board(w);
         Vector2I cell = _field.CellUnder(flat);
         if (_field.IsDeep(cell) && _field.RampHeading(cell) < 0)
-            return _field.BedAt(cell) / RiseFactor;
+            return BedPx(cell, flat) / RiseFactor;
         float d = 0.25f * HexWidth;
         float Y(Vector2 f) => _field.TopOn(cell, f) / RiseFactor;
         float sx = (Y(flat + new Vector2(d, 0.0f)) - Y(flat - new Vector2(d, 0.0f))) / (2.0f * d);

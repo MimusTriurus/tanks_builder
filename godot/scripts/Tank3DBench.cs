@@ -797,6 +797,10 @@ public sealed partial class Tank3DBench : Node3D
         if (_relief is null)
             return;
         string path = _relief.SavePictures(_field!, AssetRoot.Out + "/relief", name);
+        // from here on the tank, its effects and what stands on the board
+        // stand on the drawn ground (HexField.Surface); the relief itself was
+        // read off the prisms before this
+        _field!.Surface = _relief.HeightAt;
         Log.Print($"tank3d: relief {_relief.Nx}x{_relief.Ny} points, step {_relief.Cell:0.0} px, "
                   + $"{_relief.Seconds * 1000:0} ms; {path}");
     }

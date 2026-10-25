@@ -112,7 +112,7 @@ public sealed partial class Tank3DBench
         if (!_field.IsDeep(cell))
             return face / RiseFactor;
         bool ramp = _field.RampHeading(cell) >= 0;
-        float bed = ramp ? face : _field.BedAt(cell);
+        float bed = ramp ? face : BedPx(cell, flat);
         float top = _field.WaterTop(cell);
         float swim = top - _deckPx * (float)_profile.Draught;
         float up = Mathf.Max(bed, swim);
@@ -542,9 +542,19 @@ public sealed partial class Tank3DBench
             return Foot(w).Y;
         Vector2I cell = _field.FlatCellAt(Board(w));
         return _field.InBounds(cell) && _field.IsDeep(cell) && _field.RampHeading(cell) < 0
-            ? _field.BedAt(cell) / RiseFactor
+            ? BedPx(cell, Board(w)) / RiseFactor
             : Foot(w).Y;
     }
+
+    /// <summary>The drawn bed under deep water, lift px: the cell's own
+    /// (<see cref="HexField.BedAt"/>) on the prisms; on the relief the ground
+    /// at the point - its bed is cut there, shelving to the shore, and a
+    /// hull on the shelf stands on the shelf (BOT-11). The cell's middle when
+    /// no point is named.</summary>
+    private float BedPx(Vector2I cell, Vector2? flat = null) =>
+        _field!.Surface is not null
+            ? _field.TopAtPoint(flat ?? _field.FlatAnchor(cell) + _field.CentreOffset)
+            : _field.BedAt(cell);
 
     /// <summary>The hull's own water goes with a reset: afloat again, or dry.</summary>
     private void WaterReset()

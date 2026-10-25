@@ -221,7 +221,24 @@ public sealed partial class HexField : Node2D
     /// same number and the result is continuous either way.
     /// </summary>
     public float TopAtPoint(Vector2 flat) =>
-        Atlas is null ? 0.0f : TopOn(CellUnder(flat), flat);
+        Atlas is null ? 0.0f : Surface?.Invoke(flat) ?? TopOn(CellUnder(flat), flat);
+
+    /// <summary>
+    /// The ground's height at a flat-space point when the board is drawn as
+    /// something other than its prisms - the relief's one smooth ground
+    /// (BOT-11, <c>--relief</c>, <see cref="Relief.HeightAt"/>). Set, it
+    /// answers <see cref="TopAtPoint"/> and <see cref="TopOn"/> for every
+    /// point, the named cell or not: what a tank, a rut, a crater or a tree
+    /// stands on is the ground that is drawn, and a second description of
+    /// it disagrees exactly where it is hardest to see.
+    ///
+    /// <b>The rules do not read it.</b> <see cref="TopAt"/>,
+    /// <see cref="TopCorners"/>, <see cref="LevelAt"/>, <see cref="WaterTop"/>
+    /// and <see cref="BedAt"/> stay the cells' own, so pathing, the line of fire
+    /// and the water's surface are what they were; and the relief itself is
+    /// built off <see cref="TopOn"/> before this is set.
+    /// </summary>
+    public Func<Vector2, float>? Surface;
 
     /// <summary>The same plane read for a <b>named</b> cell, which is how anything
     /// that has to keep its shape asks.
@@ -240,6 +257,8 @@ public sealed partial class HexField : Node2D
     {
         if (Atlas is null)
             return 0.0f;
+        if (Surface is not null)
+            return Surface(flat);
         float middle = TopAt(cell);
         if (!IsRamp(cell))
             return middle;

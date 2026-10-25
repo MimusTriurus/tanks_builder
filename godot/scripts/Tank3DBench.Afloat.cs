@@ -40,7 +40,7 @@ public sealed partial class Tank3DBench
         if (!_decks.TryGetValue(model, out float deck))
             _decks[model] = deck = MeasureDeck(model);
         float swim = _field.WaterTop(cell) - deck * (float)profile.Draught;
-        return Mathf.Max(_field.BedAt(cell), swim) / RiseFactor;
+        return Mathf.Max(BedPx(cell), swim) / RiseFactor;
     }
 
     /// <summary>A knocked-out hull standing in the pond goes down to the bed.</summary>
@@ -53,7 +53,7 @@ public sealed partial class Tank3DBench
         // taken down here
         if (_other is { } o && ReferenceEquals(o.Model, model))
             return;
-        float bed = _field.BedAt(cell) / RiseFactor;
+        float bed = BedPx(cell) / RiseFactor;
         CreateTween().TweenProperty(rig, "position:y", bed, (float)TankTick.SinkSeconds)
                      .SetTrans(Tween.TransitionType.Sine).SetEase(Tween.EaseType.InOut);
     }
