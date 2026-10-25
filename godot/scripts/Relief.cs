@@ -59,8 +59,14 @@ public sealed class Relief
     /// <summary>The plain's slow swell, in levels (hex_level's <c>SWELL</c>).</summary>
     public const float Swell = 0.08f;
 
-    /// <summary>A rock's crest, in levels over its blurred height.</summary>
-    public const float Crag = 0.35f;
+    /// <summary>A rock's crags, in levels over and under its top.</summary>
+    public const float Crag = 0.6f;
+
+    /// <summary>The rock's own blur, in circumradii: a rock is impassable
+    /// (<see cref="Foundation.Rock"/>), and blurred as wide as the ground it
+    /// came out a gentle grey mound that read as a hill to drive up. Tight,
+    /// its edge is a wall.</summary>
+    public const float CliffSigma = 0.16f;
 
     /// <summary>How far under its surface the water stands in the height that
     /// is blurred, in levels; the real bed is cut after (<see cref="Carve"/>).</summary>
@@ -89,6 +95,9 @@ public sealed class Relief
     /// <summary>How far under the surface the water's bed is, at the middle of
     /// the cell whose surface a point took, lift px.</summary>
     public readonly float[] Depth;
+    /// <summary>The rock's share blurred tight (<see cref="CliffSigma"/>):
+    /// past a half is rock, and the wall stands where it crosses.</summary>
+    public readonly float[] Cliff;
 
     public float Seconds { get; private set; }
 
@@ -102,6 +111,7 @@ public sealed class Relief
         Hex = new Vector2I[n];
         Owner = new Vector2I[n];
         Depth = new float[n];
+        Cliff = new float[n];
         Share = new float[Enum.GetValues<Kind>().Length][];
         for (int k = 0; k < Share.Length; k++)
             Share[k] = new float[n];
@@ -209,7 +219,41 @@ public sealed class Relief
             NoiseType = FastNoiseLite.NoiseTypeEnum.Perlin,
             Frequency = 1.0f / (r * 0.35f),
         };
-        float[] water = Share[(int)Kind.Water], rock = Share[(int)Kind.Rock];
+        // The rock stood up again out of the blur: its own mask blurred tight,
+        // and the rock's top laid over the soft ground where that mask is
+        // past a half - a wall a few points wide, not a mound.
+        var rockMask = mask[(int)Kind.Rock];
+        var rockTop = new float[n];
+        for (int p = 0; p < n; p++)
+            rockTop[p] = raw[p] * rockMask[p];
+        Array.Copy(rockMask, Cliff, n);
+        Blur(Cliff, Nx, Ny, CliffSigma * r / Cell);
+        Blur(rockTop, Nx, Ny, CliffSigma * r / Cell);
+        var tear = new FastNoiseLite
+        {
+            Seed = seed + 2,
+            NoiseType = FastNoiseLite.NoiseTypeEnum.Perlin,
+            Frequency = 1.0f / (r * 0.6f),
+        };
+        // the top's height read before the edge moves, so a wall pushed out
+        // still stands at the rock's own top
+        for (int p = 0; p < n; p++)
+            if (Cliff[p] > 0.01f)
+                rockTop[p] /= Cliff[p];
+        for (int j = 0; j < Ny; j++)
+            for (int i = 0; i < Nx; i++)
+            {
+                // the edge torn, in and out by half a hex: a tight blur
+                // keeps the cells' hexagons, and a rock is no hexagon
+                int p = j * Nx + i;
+                float c = Cliff[p];
+                if (c <= 0.01f || c >= 0.99f)
+                    continue;
+                float x = X0 + i * Cell, z = Z0 + j * Cell;
+                Cliff[p] = Mathf.Clamp(c + 0.6f * tear.GetNoise2D(x, z), 0.0f, 1.0f);
+            }
+
+        float[] water = Share[(int)Kind.Water];
         for (int j = 0; j < Ny; j++)
             for (int i = 0; i < Nx; i++)
             {
@@ -218,8 +262,13 @@ public sealed class Relief
                 float dry = 1.0f - Mathf.SmoothStep(0.0f, 0.5f, water[p]);
                 float swell = noise.GetNoise2D(x, z) * 0.6f + grain.GetNoise2D(x, z) * 0.4f;
                 Height[p] += lift * Swell * swell * dry;
-                float crag = Mathf.SmoothStep(0.2f, 0.7f, rock[p]);
-                Height[p] += lift * Crag * crag * (0.5f + 0.5f * grain.GetNoise2D(x * 1.7f, z * 1.7f));
+                if (Cliff[p] <= 0.01f)
+                    continue;
+                // ridged noise for the crags: sharp crests, broad hollows
+                float ridge = 1.0f - Mathf.Abs(grain.GetNoise2D(x * 1.7f, z * 1.7f));
+                float top = rockTop[p] + lift * Crag * (ridge * ridge - 0.3f);
+                float wall = Mathf.SmoothStep(0.3f, 0.55f, Cliff[p]);
+                Height[p] = Mathf.Lerp(Height[p], Mathf.Max(Height[p], top), wall);
             }
 
         FillWater(field);

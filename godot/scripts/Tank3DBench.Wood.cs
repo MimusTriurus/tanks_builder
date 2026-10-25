@@ -237,7 +237,9 @@ public sealed partial class Tank3DBench
             _grass.Ground = w =>
             {
                 Vector2 flat = Board(w);
+                // none under water, and none on the rock or up its wall
                 return relief.Sample(relief.Shore, flat.X, flat.Y / Squash) < 0.0f
+                       || relief.Sample(relief.Cliff, flat.X, flat.Y / Squash) > 0.12f
                     ? null : relief.HeightAt(flat) / RiseFactor;
             };
         AddChild(_grass);

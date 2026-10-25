@@ -48,7 +48,7 @@ public sealed partial class Stage3D
         var normal = new Vector3[n];
         var paint = new Color[n];
         var index = new int[(nx - 1) * (ny - 1) * 6];
-        float[] sand = f.Share[(int)Relief.Kind.Sand], rock = f.Share[(int)Relief.Kind.Rock],
+        float[] sand = f.Share[(int)Relief.Kind.Sand],
                 forest = f.Share[(int)Relief.Kind.Forest];
         for (int j = 0; j < ny; j++)
             for (int i = 0; i < nx; i++)
@@ -64,7 +64,7 @@ public sealed partial class Stage3D
                 // what the ground is, for the shader: sand, rock, wood, and how
                 // far under the water it lies (the bed darker than the bank)
                 float under = Mathf.Clamp(-f.Shore[p] / (f.Cell * 4.0f), 0.0f, 1.0f);
-                paint[p] = new Color(sand[p], rock[p], forest[p], under);
+                paint[p] = new Color(sand[p], f.Cliff[p], forest[p], under);
             }
         int t = 0;
         for (int j = 0; j + 1 < ny; j++)
@@ -378,7 +378,8 @@ vec4 cell_ink(vec2 cr) {
     float grain = dot(soil, vec3(0.299, 0.587, 0.114));
     // the kinds, each its own colour carrying the art's grain
     soil = mix(soil, sand_ink * (0.6 + 0.6 * grain), smoothstep(0.25, 0.6, COLOR.r));
-    soil = mix(soil, rock_ink * (0.55 + 0.7 * grain), smoothstep(0.25, 0.6, COLOR.g));
+    // rock: the tight share (Relief.Cliff), cut where the wall stands
+    soil = mix(soil, rock_ink * (0.55 + 0.7 * grain), smoothstep(0.38, 0.5, COLOR.g));
     soil = mix(soil, wood_ink * (0.6 + 0.6 * grain), 0.6 * smoothstep(0.3, 0.7, COLOR.b));
     // grass over the rest, in patches, the earth through it on steep banks
     // (the cells' painted lawn, Grass3D, is a hexagon a cell - off on the relief)
@@ -396,6 +397,10 @@ vec4 cell_ink(vec2 cr) {
     float d = dot(normalize(ground_n), sun_dir);
     float flat_d = sun_dir.y;
     float step_ = d > flat_d - 0.08 ? 1.0 : d > flat_d - 0.3 ? 0.86 : 0.72;
+    // a wall - a rock's face - one step darker still, so a cliff reads as
+    // one and not as the far side of a hill
+    if (length(normalize(ground_n).xz) > 0.8)
+        step_ = min(step_, 0.56);
     vec4 paint = vec4(soil * step_ * mix(vec3(1.0), cink.rgb, cink.a), 1.0);";
 
     private const string ReliefGrid = @"    {
@@ -404,7 +409,9 @@ vec4 cell_ink(vec2 cr) {
         float lw = max(hex_w, hex_px * px);
         float aa = max(fwidth(hexc.z), 1e-4);
         float line = (1.0 - smoothstep(lw, lw + aa, hexc.z)) * hex_on * cink.a
-                     * (1.0 - smoothstep(0.45, 0.7, hl));
+                     * (1.0 - smoothstep(0.45, 0.7, hl))
+                     // none on the rock: it is no cell anything stands on
+                     * (1.0 - smoothstep(0.4, 0.55, COLOR.g));
         lit = mix(lit, hex_color, line * hex_opacity);
     }
     ALBEDO = lit;";
