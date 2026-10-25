@@ -135,6 +135,8 @@ public sealed partial class Stage3D
         ink.Param("cells", CellsTexture());
         ink.Param("cells_size", new Vector2I(Field.Columns, Field.Rows));
         ink.Param("sun_dir", Sun.Normalized());
+        // the brow line's levels, in world Y
+        ink.Param("level_world", Field.Lift / RiseFactor);
         ink.Param("art_tile", 1.0f / (r * ArtTile));
         if (Field.Terrain is { Any: true } terrain && terrain.Plate.Size.X > 0)
         {
@@ -339,6 +341,14 @@ uniform vec3 hex_color : source_color = vec3(0.05, 0.04, 0.03);
 uniform float hex_opacity = 0.42;
 uniform float hex_w = 1.2;
 uniform float hex_px = 1.0;
+// The brow line: one level in world units, how far under a level's top the
+// line runs (in levels), its width in pixels, ink and weight.
+uniform float level_world = 54.0;
+uniform float brow_below = 0.15;
+uniform float brow_px = 1.3;
+uniform vec3 brow_ink : source_color = vec3(0.10, 0.08, 0.06);
+uniform float brow_opacity = 0.85;
+uniform float brow_on = 1.0;
 // A texel a cell: its ink (a route, an aim) and whether it is board.
 uniform sampler2D cells : filter_nearest, hint_default_white;
 uniform ivec2 cells_size = ivec2(1);
@@ -413,6 +423,15 @@ vec4 cell_ink(vec2 cr) {
                      // none on the rock: it is no cell anything stands on
                      * (1.0 - smoothstep(0.4, 0.55, COLOR.g));
         lit = mix(lit, hex_color, line * hex_opacity);
+        // The brow: an ink line just under every level's top, where the
+        // ground crosses it - the upper rim of each terrace's slope. Off the
+        // water and the rock (its crags would draw squiggles).
+        float t = ground.y / max(level_world, 1e-3) + brow_below;
+        float off = abs(fract(t + 0.5) - 0.5);
+        float bw = brow_px * fwidth(t);
+        float brow = (1.0 - smoothstep(bw, bw + fwidth(t), off)) * brow_on
+                     * (1.0 - COLOR.a) * (1.0 - smoothstep(0.35, 0.5, COLOR.g));
+        lit = mix(lit, brow_ink, brow * brow_opacity);
     }
     ALBEDO = lit;";
 }

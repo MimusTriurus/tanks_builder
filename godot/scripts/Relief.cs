@@ -18,14 +18,12 @@ namespace TankSpriteTest;
 /// point is <c>(x, z)</c> of <c>Stage3D.World</c>: <c>x = flat.X</c>,
 /// <c>z = flat.Y / squash</c>, so one sigma is one distance on the ground.
 ///
-/// <b>The height is the prisms' own surface, blurred.</b> <see cref="HexField.TopOn"/>
-/// of the cell under each point - a ramp a tilted plane, flat deep water its
-/// drawn bed (<see cref="HexField.BedAt"/>) - then a Gaussian of
-/// <see cref="Sigma"/> circumradii. A ramp is already a slope a hex long and
-/// stays a gentle one; a level step with no ramp is a wall and becomes a steep
-/// bank about <c>4 sigma</c> wide. So a climb and a cliff still read apart with
-/// no honeycomb drawn. Heights are in the board's unit, screen px of lift off
-/// the datum, the same number <see cref="HexField.TopAtPoint"/> answers.
+/// <b>The height is terraces.</b> Each cell's own level (<see cref="HexField.TopAt"/>),
+/// read a little off the point (<see cref="Warp"/>) so the edges wander off
+/// the cells' sides, then a tight Gaussian (<see cref="Terrace"/>): a cell's
+/// top flat at its level, the slope a band at its edge. Heights are in the
+/// board's unit, screen px of lift off the datum, the same number
+/// <see cref="HexField.TopAtPoint"/> answers.
 ///
 /// <b>The rules do not read this.</b> Levels, ramps, passability and the line
 /// of fire stay the hexes'; this is the surface a tank and its effects stand
@@ -33,16 +31,17 @@ namespace TankSpriteTest;
 /// </summary>
 public sealed class Relief
 {
-    /// <summary>The blur of the height, in circumradii (hex_map's
-    /// <c>COAST_BLUR</c> is 0.45, its <c>KIND_BLUR</c> 0.35; ours is a little
-    /// tighter, because a level here is a rule and wants to stay legible).</summary>
-    public const float Sigma = 0.3f;
+    /// <summary>The blur of the height, in circumradii: a terrace's slope,
+    /// about four of these wide - a quarter of a hex. hex_map's
+    /// <c>COAST_BLUR</c> is 0.45, and ours was 0.3-0.45 at first; there a
+    /// height is scenery, here a level is a rule, and blurred that wide no
+    /// hill read as one.</summary>
+    public const float Terrace = 0.12f;
 
-    /// <summary>The blur where the levels are joined by slopes
-    /// (<see cref="HexField.Slopes"/>): no ramp is left to stand for the way
-    /// up, so every bank is one - about a hex wide, gentle enough to read as
-    /// driven over, not a cliff with its edge rounded.</summary>
-    public const float SlopeSigma = 0.45f;
+    /// <summary>How far the height is read off its point, in circumradii, so
+    /// a terrace's edge wanders off the cell's side and the plateaus are not
+    /// a honeycomb.</summary>
+    public const float Warp = 0.22f;
 
     /// <summary>The blur of the kinds' shares, in circumradii (hex_map's
     /// <c>KIND_BLUR</c>).</summary>
@@ -57,7 +56,7 @@ public sealed class Relief
     public const float Margin = 1.5f;
 
     /// <summary>The plain's slow swell, in levels (hex_level's <c>SWELL</c>).</summary>
-    public const float Swell = 0.08f;
+    public const float Swell = 0.04f;
 
     /// <summary>A rock's crags, in levels over and under its top.</summary>
     public const float Crag = 0.6f;
@@ -164,9 +163,12 @@ public sealed class Relief
             floor = 0.0f;
 
         var raw = new float[n];
+        var rockRaw = new float[n];
         var mask = new float[Share.Length][];
         for (int k = 0; k < mask.Length; k++)
             mask[k] = new float[n];
+        var warpX = new FastNoiseLite { Seed = seed + 3, NoiseType = FastNoiseLite.NoiseTypeEnum.Perlin, Frequency = 1.0f / (r * 0.7f) };
+        var warpZ = new FastNoiseLite { Seed = seed + 4, NoiseType = FastNoiseLite.NoiseTypeEnum.Perlin, Frequency = 1.0f / (r * 0.7f) };
         for (int j = 0; j < Ny; j++)
             for (int i = 0; i < Nx; i++)
             {
@@ -187,16 +189,28 @@ public sealed class Relief
                     mask[(int)Kind.Plain][p] = 1.0f;
                     continue;
                 }
+                mask[(int)KindOf(field, edge)][p] = 1.0f;
+                if (field.FoundationAt(edge) == Foundation.Rock)
+                    rockRaw[p] = field.TopAt(edge);
+                // The height is read a little off the point (Warp): a terrace
+                // cut to the cells' own sides is a honeycomb of plateaus. The
+                // rules and the grid keep the true hex (Hex, Owner).
+                float x = X0 + i * Cell, z = Z0 + j * Cell;
+                Vector2 off = new Vector2(warpX.GetNoise2D(x, z), warpZ.GetNoise2D(x, z) * Squash) * (Warp * r);
+                Vector2I wc = field.FlatCellAt(flat + off);
+                Vector2I from = field.InBounds(wc) ? wc : field.InBounds(field.ClampCell(wc)) ? field.ClampCell(wc) : edge;
                 // Water a shoal under its surface for the blur, the bed cut
                 // after it (Carve): blurred down a whole level to a deep bed,
                 // a bank a level up came out under the surface and the pond
                 // spilt over it.
-                raw[p] = field.IsWater(edge) ? field.WaterTop(edge) - Shoal * lift
-                       : on ? field.TopOn(c, flat) : field.TopAt(edge);
-                mask[(int)KindOf(field, edge)][p] = 1.0f;
+                raw[p] = field.IsWater(from) ? field.WaterTop(from) - Shoal * lift : field.TopAt(from);
             }
 
-        float sig = (field.Slopes ? SlopeSigma : Sigma) * r / Cell;
+        // Terraces (BOT-11, the user's call): a cell's top flat at its own
+        // level, the slope gathered into a band at its edge. Blurred as wide
+        // as the reference's, a level - a rule here, unlike there - read as a
+        // swell.
+        float sig = Terrace * r / Cell;
         Array.Copy(raw, Height, n);
         Blur(Height, Nx, Ny, sig);
         for (int k = 0; k < Share.Length; k++)
@@ -223,9 +237,7 @@ public sealed class Relief
         // and the rock's top laid over the soft ground where that mask is
         // past a half - a wall a few points wide, not a mound.
         var rockMask = mask[(int)Kind.Rock];
-        var rockTop = new float[n];
-        for (int p = 0; p < n; p++)
-            rockTop[p] = raw[p] * rockMask[p];
+        var rockTop = rockRaw;
         Array.Copy(rockMask, Cliff, n);
         Blur(Cliff, Nx, Ny, CliffSigma * r / Cell);
         Blur(rockTop, Nx, Ny, CliffSigma * r / Cell);
