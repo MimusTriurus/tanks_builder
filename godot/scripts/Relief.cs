@@ -95,7 +95,7 @@ public sealed class Relief
     /// the cell whose surface a point took, lift px.</summary>
     public readonly float[] Depth;
     /// <summary>The rock's share blurred tight (<see cref="CliffSigma"/>):
-    /// past a half is rock, and the wall stands where it crosses.</summary>
+    /// past a half is rock, and the wall stands inside that, 0.5-0.72, so a rock keeps to its own cells.</summary>
     public readonly float[] Cliff;
     /// <summary>Which levels have ground near each point, a bit a level over
     /// <see cref="LevelBase"/> (<see cref="StampLevels"/>).</summary>
@@ -174,6 +174,7 @@ public sealed class Relief
         var raw = new float[n];
         var rockRaw = new float[n];
         var rawLevel = new int[n];
+        var dry = new bool[n];
         // off the plot: the lowland's level
         int floorLevel = Mathf.RoundToInt(floor / Mathf.Max(lift, 1e-3f));
         Array.Fill(rawLevel, floorLevel);
@@ -199,6 +200,7 @@ public sealed class Relief
                 if (Owner[p].X < 0)
                 {
                     raw[p] = floor;
+                    dry[p] = true;
                     mask[(int)Kind.Plain][p] = 1.0f;
                     continue;
                 }
@@ -217,6 +219,11 @@ public sealed class Relief
                 // rules call dry (the user's catch: a pond ran on to its bank).
                 if (field.IsWater(from) && !field.IsWater(edge))
                     from = edge;
+                // and a terrace's edge only into its own cells: no point reads
+                // a higher neighbour, so a hill never stands on a lower hex
+                else if (!field.IsWater(edge) && field.LevelAt(from) > field.LevelAt(edge))
+                    from = edge;
+                dry[p] = !field.IsWater(edge);
                 // Water a shoal under its surface for the blur, the bed cut
                 // after it (Carve): blurred down a whole level to a deep bed,
                 // a bank a level up came out under the surface and the pond
@@ -231,6 +238,7 @@ public sealed class Relief
         // as the reference's, a level - a rule here, unlike there - read as a
         // swell.
         float sig = Terrace * r / Cell;
+        Inset(raw, dry, Mathf.Max(1, Mathf.RoundToInt(2.0f * sig)));
         Array.Copy(raw, Height, n);
         Blur(Height, Nx, Ny, sig);
         for (int k = 0; k < Share.Length; k++)
@@ -275,14 +283,14 @@ public sealed class Relief
         for (int j = 0; j < Ny; j++)
             for (int i = 0; i < Nx; i++)
             {
-                // the edge torn, in and out by half a hex: a tight blur
+                // the edge torn inward only, by up to half a hex: a tight blur
                 // keeps the cells' hexagons, and a rock is no hexagon
                 int p = j * Nx + i;
                 float c = Cliff[p];
                 if (c <= 0.01f || c >= 0.99f)
                     continue;
                 float x = X0 + i * Cell, z = Z0 + j * Cell;
-                Cliff[p] = Mathf.Clamp(c + 0.6f * tear.GetNoise2D(x, z), 0.0f, 1.0f);
+                Cliff[p] = Mathf.Clamp(c - 0.6f * Mathf.Abs(tear.GetNoise2D(x, z)), 0.0f, 1.0f);
             }
 
         float[] water = Share[(int)Kind.Water];
@@ -291,15 +299,15 @@ public sealed class Relief
             {
                 int p = j * Nx + i;
                 float x = X0 + i * Cell, z = Z0 + j * Cell;
-                float dry = 1.0f - Mathf.SmoothStep(0.0f, 0.5f, water[p]);
+                float land = 1.0f - Mathf.SmoothStep(0.0f, 0.5f, water[p]);
                 float swell = noise.GetNoise2D(x, z) * 0.6f + grain.GetNoise2D(x, z) * 0.4f;
-                Height[p] += lift * Swell * swell * dry;
+                Height[p] += lift * Swell * swell * land;
                 if (Cliff[p] <= 0.01f)
                     continue;
                 // ridged noise for the crags: sharp crests, broad hollows
                 float ridge = 1.0f - Mathf.Abs(grain.GetNoise2D(x * 1.7f, z * 1.7f));
                 float top = rockTop[p] + lift * Crag * (ridge * ridge - 0.3f);
-                float wall = Mathf.SmoothStep(0.3f, 0.55f, Cliff[p]);
+                float wall = Mathf.SmoothStep(0.5f, 0.72f, Cliff[p]);
                 Height[p] = Mathf.Lerp(Height[p], Mathf.Max(Height[p], top), wall);
             }
 
@@ -379,6 +387,55 @@ public sealed class Relief
         var toDry = Distance(invert, Nx, Ny);
         for (int p = 0; p < n; p++)
             Shore[p] = (toWet[p] - toDry[p]) * Cell;
+    }
+
+    /// <summary>
+    /// Every step moved inside the cell it belongs to, before the blur spreads
+    /// it: a blur lays a slope half on each side of a hex's side, and the lower
+    /// half lay on the neighbour - a hill on a hex the rules call low (the
+    /// user's catch, after the same of the water).
+    ///
+    /// Within <paramref name="reach"/> points (the blur's two sigma): a dry
+    /// point takes the lowest dry height round it, so a higher level gives way
+    /// and its slope comes out inside its own cells; a water point takes the
+    /// highest dry height round it if there is one, so the water gives way and
+    /// the bank's slope comes out inside the water's cells.
+    /// </summary>
+    private void Inset(float[] raw, bool[] dry, int reach)
+    {
+        int n = raw.Length;
+        var outp = new float[n];
+        for (int j = 0; j < Ny; j++)
+            for (int i = 0; i < Nx; i++)
+            {
+                int p = j * Nx + i;
+                float best = raw[p];
+                bool found = false;
+                for (int dj = -reach; dj <= reach; dj++)
+                {
+                    int jj = j + dj;
+                    if (jj < 0 || jj >= Ny)
+                        continue;
+                    for (int di = -reach; di <= reach; di++)
+                    {
+                        int ii = i + di;
+                        if (ii < 0 || ii >= Nx || di * di + dj * dj > reach * reach)
+                            continue;
+                        int o = jj * Nx + ii;
+                        if (!dry[o])
+                            continue;
+                        if (dry[p])
+                            best = Mathf.Min(best, raw[o]);
+                        else if (!found || raw[o] > best)
+                        {
+                            best = raw[o];
+                            found = true;
+                        }
+                    }
+                }
+                outp[p] = best;
+            }
+        Array.Copy(outp, raw, n);
     }
 
     /// <summary>

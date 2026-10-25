@@ -399,7 +399,7 @@ vec4 cell_ink(vec2 cr) {
     // the kinds, each its own colour carrying the art's grain
     soil = mix(soil, sand_ink * (0.6 + 0.6 * grain), smoothstep(0.25, 0.6, COLOR.r));
     // rock: the tight share (Relief.Cliff), cut where the wall stands
-    soil = mix(soil, rock_ink * (0.55 + 0.7 * grain), smoothstep(0.38, 0.5, COLOR.g));
+    soil = mix(soil, rock_ink * (0.55 + 0.7 * grain), smoothstep(0.5, 0.62, COLOR.g));
     soil = mix(soil, wood_ink * (0.6 + 0.6 * grain), 0.6 * smoothstep(0.3, 0.7, COLOR.b));
     // grass over the rest, in patches, the earth through it on steep banks
     // (the cells' painted lawn, Grass3D, is a hexagon a cell - off on the relief)
@@ -434,7 +434,7 @@ vec4 cell_ink(vec2 cr) {
         float line = (1.0 - smoothstep(lw, lw + aa, hexc.z)) * hex_on * cink.a
                      * (1.0 - smoothstep(0.45, 0.7, hl))
                      // none on the rock: it is no cell anything stands on
-                     * (1.0 - smoothstep(0.4, 0.55, COLOR.g));
+                     * (1.0 - smoothstep(0.5, 0.65, COLOR.g));
         lit = mix(lit, hex_color, line * hex_opacity);
         // The brow: an ink line just under every level's top, where the
         // ground crosses it - the upper rim of each terrace's slope. Off the
@@ -447,7 +447,7 @@ vec4 cell_ink(vec2 cr) {
         int bit = int(round(t)) - level_base;
         float near = bit >= 0 && bit < 24 ? float((ground_levels >> bit) & 1) : 0.0;
         // and off the rock to the foot of its wall (the wall stands where
-        // Relief.Cliff crosses 0.3-0.55), and off anything as steep as a
+        // Relief.Cliff crosses 0.5-0.72), and off anything as steep as a
         // wall: a neighbour's brow ran on across the rock's face
         float brow = (1.0 - smoothstep(bw, bw + fwidth(t), off)) * brow_on * near
                      * (1.0 - COLOR.a) * (1.0 - smoothstep(0.1, 0.22, COLOR.g))
