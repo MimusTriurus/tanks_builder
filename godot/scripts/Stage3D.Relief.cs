@@ -443,8 +443,12 @@ vec4 cell_ink(vec2 cr) {
         // middle of a slope two levels tall (Relief.StampLevels)
         int bit = int(round(t)) - level_base;
         float near = bit >= 0 && bit < 24 ? float((ground_levels >> bit) & 1) : 0.0;
+        // and off the rock to the foot of its wall (the wall stands where
+        // Relief.Cliff crosses 0.3-0.55), and off anything as steep as a
+        // wall: a neighbour's brow ran on across the rock's face
         float brow = (1.0 - smoothstep(bw, bw + fwidth(t), off)) * brow_on * near
-                     * (1.0 - COLOR.a) * (1.0 - smoothstep(0.35, 0.5, COLOR.g));
+                     * (1.0 - COLOR.a) * (1.0 - smoothstep(0.1, 0.22, COLOR.g))
+                     * (1.0 - smoothstep(0.82, 0.9, length(normalize(ground_n).xz)));
         lit = mix(lit, brow_ink, brow * brow_opacity);
     }
     ALBEDO = lit;";
