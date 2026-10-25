@@ -742,7 +742,11 @@ public sealed partial class Tank3DBench : Node3D
         _field.SetKinds(map.Kinds);
         _field.SetGround(map.Ground);
         _field.SetCover(map.Over);
-        _field.SetRelief(map.Levels, map.Ramps);
+        // --relief joins the levels by slopes: no ramps, a level up or down
+        // is one step from any side (HexField.Slopes; BOT-11, a departure
+        // from the GDD's ramp kept to the flag)
+        _field.SetRelief(map.Levels, _reliefOn ? null : map.Ramps);
+        _field.Slopes = _reliefOn;
         // After the relief - the tank bench's reason: the water's guards are
         // asked about levels and ramps.
         _field.SetWater(map.Water);

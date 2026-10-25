@@ -38,6 +38,12 @@ public sealed class Relief
     /// tighter, because a level here is a rule and wants to stay legible).</summary>
     public const float Sigma = 0.3f;
 
+    /// <summary>The blur where the levels are joined by slopes
+    /// (<see cref="HexField.Slopes"/>): no ramp is left to stand for the way
+    /// up, so every bank is one - about a hex wide, gentle enough to read as
+    /// driven over, not a cliff with its edge rounded.</summary>
+    public const float SlopeSigma = 0.45f;
+
     /// <summary>The blur of the kinds' shares, in circumradii (hex_map's
     /// <c>KIND_BLUR</c>).</summary>
     public const float KindSigma = 0.35f;
@@ -162,7 +168,7 @@ public sealed class Relief
                 mask[(int)KindOf(field, c)][p] = 1.0f;
             }
 
-        float sig = Sigma * r / Cell;
+        float sig = (field.Slopes ? SlopeSigma : Sigma) * r / Cell;
         Array.Copy(raw, Height, n);
         Blur(Height, Nx, Ny, sig);
         for (int k = 0; k < Share.Length; k++)

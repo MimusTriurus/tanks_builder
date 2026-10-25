@@ -495,8 +495,24 @@ public sealed partial class HexField : Node2D
     /// the same shape whether there is water at the bottom of it.
     /// </summary>
     public bool Drops(Vector2I from, Vector2I onto) =>
-        RampHeading(from) < 0 && RampHeading(onto) < 0
-        && LevelAt(onto) < LevelAt(from);
+        Slopes
+            ? LevelAt(onto) < LevelAt(from) - MaxClimb
+              || (TerrainRules.Plunges(FoundationAt(onto)) && LevelAt(onto) < LevelAt(from))
+            : RampHeading(from) < 0 && RampHeading(onto) < 0
+              && LevelAt(onto) < LevelAt(from);
+
+    /// <summary>
+    /// The levels are joined by slopes, not by ramps (BOT-11, <c>--relief</c>):
+    /// a board set with no ramps (<see cref="SetRelief"/>), on which
+    /// <see cref="Passable"/> already lets a hull up or down
+    /// <see cref="MaxClimb"/> levels, says so here, so that such a step is a
+    /// drive and not a fall. What still falls is more than
+    /// <see cref="MaxClimb"/> down, and any drop on to a floor that takes one
+    /// (deep water: off the bank into the pond). Off by default, so a board
+    /// that only lost its ramps - the harness's <c>--no-ramps</c> - falls as
+    /// it did. A departure from the GDD (field.md, "Рампа"), kept to the flag.
+    /// </summary>
+    public bool Slopes;
 
     public int LevelAt(Vector2I cell) =>
         _levels is null || !InBounds(cell) ? 0 : _levels[cell.Y * Columns + cell.X];
