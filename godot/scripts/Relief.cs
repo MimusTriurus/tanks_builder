@@ -97,6 +97,14 @@ public sealed class Relief
     /// <summary>The rock's share blurred tight (<see cref="CliffSigma"/>):
     /// past a half is rock, and the wall stands where it crosses.</summary>
     public readonly float[] Cliff;
+    /// <summary>Which levels have ground near each point, a bit a level over
+    /// <see cref="LevelBase"/> (<see cref="StampLevels"/>).</summary>
+    public readonly uint[] Levels;
+    public int LevelBase { get; private set; }
+
+    /// <summary>How far a level's ground counts as near, in circumradii of
+    /// blur: a little past a terrace's slope and its warp.</summary>
+    public const float NearSigma = 0.25f;
 
     public float Seconds { get; private set; }
 
@@ -111,6 +119,7 @@ public sealed class Relief
         Owner = new Vector2I[n];
         Depth = new float[n];
         Cliff = new float[n];
+        Levels = new uint[n];
         Share = new float[Enum.GetValues<Kind>().Length][];
         for (int k = 0; k < Share.Length; k++)
             Share[k] = new float[n];
@@ -164,6 +173,10 @@ public sealed class Relief
 
         var raw = new float[n];
         var rockRaw = new float[n];
+        var rawLevel = new int[n];
+        // off the plot: the lowland's level
+        int floorLevel = Mathf.RoundToInt(floor / Mathf.Max(lift, 1e-3f));
+        Array.Fill(rawLevel, floorLevel);
         var mask = new float[Share.Length][];
         for (int k = 0; k < mask.Length; k++)
             mask[k] = new float[n];
@@ -204,7 +217,9 @@ public sealed class Relief
                 // a bank a level up came out under the surface and the pond
                 // spilt over it.
                 raw[p] = field.IsWater(from) ? field.WaterTop(from) - Shoal * lift : field.TopAt(from);
+                rawLevel[p] = field.LevelAt(from);
             }
+        StampLevels(field, rawLevel, r);
 
         // Terraces (BOT-11, the user's call): a cell's top flat at its own
         // level, the slope gathered into a band at its edge. Blurred as wide
@@ -359,6 +374,41 @@ public sealed class Relief
         var toDry = Distance(invert, Nx, Ny);
         for (int p = 0; p < n; p++)
             Shore[p] = (toWet[p] - toDry[p]) * Cell;
+    }
+
+    /// <summary>
+    /// Which levels have a cell's top near each point, as bits over
+    /// <see cref="LevelBase"/> - for the brow line, which belongs at the rim of
+    /// a terrace and nowhere else.
+    ///
+    /// <b>An isoline under every level's top drew a line through the middle of
+    /// any slope two levels tall</b>: down from a +1 shelf to a pond at −1 the
+    /// ground crosses level 0's line half way, and there is no level-0 ground
+    /// there for it to be the rim of; a rock (+2) wore a line round its skirt
+    /// for the same reason. Each level's cells, blurred a little wider than a
+    /// terrace's slope reaches, say where that level's ground is close; the
+    /// shader draws a level's brow only there.
+    /// </summary>
+    private void StampLevels(HexField field, int[] level, float r)
+    {
+        int n = level.Length, lo = int.MaxValue, hi = int.MinValue;
+        foreach (int l in level)
+        {
+            lo = Math.Min(lo, l);
+            hi = Math.Max(hi, l);
+        }
+        LevelBase = lo;
+        var near = new float[n];
+        for (int l = lo; l <= Math.Min(hi, lo + 20); l++)
+        {
+            for (int p = 0; p < n; p++)
+                near[p] = level[p] == l ? 1.0f : 0.0f;
+            Blur(near, Nx, Ny, NearSigma * r / Cell);
+            uint bit = 1u << (l - lo);
+            for (int p = 0; p < n; p++)
+                if (near[p] > 0.02f)
+                    Levels[p] |= bit;
+        }
     }
 
     /// <summary>Wet only where the water reaches: from the points over a water

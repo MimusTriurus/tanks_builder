@@ -47,6 +47,9 @@ public sealed partial class Stage3D
         var at = new Vector3[n];
         var normal = new Vector3[n];
         var paint = new Color[n];
+        // the levels near each point, for the brow (Relief.Levels): a float
+        // holds the bits exactly, and the shader reads them flat
+        var levels = new Vector2[n];
         var index = new int[(nx - 1) * (ny - 1) * 6];
         float[] sand = f.Share[(int)Relief.Kind.Sand],
                 forest = f.Share[(int)Relief.Kind.Forest];
@@ -65,6 +68,7 @@ public sealed partial class Stage3D
                 // far under the water it lies (the bed darker than the bank)
                 float under = Mathf.Clamp(-f.Shore[p] / (f.Cell * 4.0f), 0.0f, 1.0f);
                 paint[p] = new Color(sand[p], f.Cliff[p], forest[p], under);
+                levels[p] = new Vector2(f.Levels[p] & 0xFFFFFF, 0.0f);
             }
         int t = 0;
         for (int j = 0; j + 1 < ny; j++)
@@ -79,6 +83,7 @@ public sealed partial class Stage3D
         arrays[(int)Mesh.ArrayType.Vertex] = at;
         arrays[(int)Mesh.ArrayType.Normal] = normal;
         arrays[(int)Mesh.ArrayType.Color] = paint;
+        arrays[(int)Mesh.ArrayType.TexUV2] = levels;
         arrays[(int)Mesh.ArrayType.Index] = index;
         var mesh = new ArrayMesh();
         mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
@@ -137,6 +142,7 @@ public sealed partial class Stage3D
         ink.Param("sun_dir", Sun.Normalized());
         // the brow line's levels, in world Y
         ink.Param("level_world", Field.Lift / RiseFactor);
+        ink.Param("level_base", f.LevelBase);
         ink.Param("art_tile", 1.0f / (r * ArtTile));
         if (Field.Terrain is { Any: true } terrain && terrain.Plate.Size.X > 0)
         {
@@ -311,13 +317,15 @@ public sealed partial class Stage3D
             .Replace("varying vec3 ground;", ReliefHead)
             .Replace("    ground = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;",
                      "    ground = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;\n"
-                     + "    ground_n = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);")
+                     + "    ground_n = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);\n"
+                     + "    ground_levels = int(UV2.x + 0.5);")
             .Replace("    vec4 paint = texture(art, UV) * COLOR;", ReliefPaint)
             .Replace("    ALBEDO = lit;", ReliefGrid),
     };
 
     private const string ReliefHead = @"varying vec3 ground;
 varying vec3 ground_n;
+varying flat int ground_levels;
 // The art tiled over the world: its plate's inscribed square (uv rect), one
 // tile per this many world units, mirrored so a seam is a reflection.
 uniform vec4 art_rect = vec4(0.0, 0.0, 1.0, 1.0);
@@ -349,6 +357,8 @@ uniform float brow_px = 1.3;
 uniform vec3 brow_ink : source_color = vec3(0.10, 0.08, 0.06);
 uniform float brow_opacity = 0.85;
 uniform float brow_on = 1.0;
+// Relief.LevelBase: bit 0 of a point's level mask (UV2.x, read flat)
+uniform int level_base = 0;
 // A texel a cell: its ink (a route, an aim) and whether it is board.
 uniform sampler2D cells : filter_nearest, hint_default_white;
 uniform ivec2 cells_size = ivec2(1);
@@ -429,7 +439,11 @@ vec4 cell_ink(vec2 cr) {
         float t = ground.y / max(level_world, 1e-3) + brow_below;
         float off = abs(fract(t + 0.5) - 0.5);
         float bw = brow_px * fwidth(t);
-        float brow = (1.0 - smoothstep(bw, bw + fwidth(t), off)) * brow_on
+        // only a level whose ground is near: the rim of a terrace, not the
+        // middle of a slope two levels tall (Relief.StampLevels)
+        int bit = int(round(t)) - level_base;
+        float near = bit >= 0 && bit < 24 ? float((ground_levels >> bit) & 1) : 0.0;
+        float brow = (1.0 - smoothstep(bw, bw + fwidth(t), off)) * brow_on * near
                      * (1.0 - COLOR.a) * (1.0 - smoothstep(0.35, 0.5, COLOR.g));
         lit = mix(lit, brow_ink, brow * brow_opacity);
     }
