@@ -83,6 +83,13 @@ public static class TreeModel
             Width = j.GetProperty("width").GetSingle(),
             Depth = j.GetProperty("depth").GetSingle(),
         };
+        // the plate's surfaces by their glTF names, before Toon swaps the materials
+        var named = new List<(MeshInstance3D Mesh, int Surface, string Name)>();
+        Surfaces(scene, named);
+        var plated = new Dictionary<MeshInstance3D, HashSet<int>>();
+        foreach ((MeshInstance3D m, int s, string mat) in named)
+            if (IsPlate(mat))
+                (plated.TryGetValue(m, out HashSet<int>? set) ? set : plated[m] = new HashSet<int>()).Add(s);
         if (!pbr)
         {
             var roles = new List<(MeshInstance3D Mesh, int Surface, string Name)>();
@@ -96,8 +103,66 @@ public static class TreeModel
                         tree.Leaves.Add(cel);
                 }
         }
+        SplitPlate(plated);
         error = null;
         return tree;
+    }
+
+    /// <summary>The node that holds a model's root plate (<see cref="SplitPlate"/>).</summary>
+    public const string PlateName = "RootPlate";
+
+    /// <summary>The root plate's materials (<c>tree.json</c> <c>model.burn</c>):
+    /// under the ground from the start, they never burn.</summary>
+    private static bool IsPlate(string mat) => mat is "TreeGame.Soil" or "TreeGame.Root";
+
+    /// <summary>
+    /// The root plate (<c>TreeGame.Soil</c>, <c>TreeGame.Root</c>) moved off
+    /// each mesh into one of its own beside it, hidden: standing, the ground
+    /// hides it anyway, and drawn it was ~10 of a tree's 28 draw calls - the
+    /// cel pass, the ink, the crown's mask and the shadow splits; 610 of the
+    /// stress run's 3 663 (BOT-4). <see cref="TreeFall.Start"/> shows it
+    /// (<see cref="Plate"/>), as the tree goes over and the plate comes out of
+    /// the ground. Its surfaces keep their materials, so the fall's pose and
+    /// the wind reach it as before.
+    /// </summary>
+    private static void SplitPlate(Dictionary<MeshInstance3D, HashSet<int>> plated)
+    {
+        foreach ((MeshInstance3D m, HashSet<int> plates) in plated)
+            if (m.Mesh is ArrayMesh mesh)
+                SplitPlate(m, mesh, plates);
+    }
+
+    private static void SplitPlate(MeshInstance3D m, ArrayMesh mesh, HashSet<int> plates)
+    {
+        var keep = new ArrayMesh();
+        var plate = new ArrayMesh();
+        for (int s = 0; s < mesh.GetSurfaceCount(); s++)
+        {
+            Material? mat = mesh.SurfaceGetMaterial(s);
+            ArrayMesh to = plates.Contains(s) ? plate : keep;
+            Godot.Collections.Array arrays = mesh.SurfaceGetArrays(s);
+            // the custom channels' formats are the surface's own (Toon's ink normal)
+            const long customs = ((1L << (int)Mesh.ArrayFormat.FormatCustomBits) - 1) << (int)Mesh.ArrayFormat.FormatCustom0Shift
+                                 | ((1L << (int)Mesh.ArrayFormat.FormatCustomBits) - 1) << (int)Mesh.ArrayFormat.FormatCustom1Shift
+                                 | ((1L << (int)Mesh.ArrayFormat.FormatCustomBits) - 1) << (int)Mesh.ArrayFormat.FormatCustom2Shift
+                                 | ((1L << (int)Mesh.ArrayFormat.FormatCustomBits) - 1) << (int)Mesh.ArrayFormat.FormatCustom3Shift;
+            to.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays, null, null,
+                                    (Mesh.ArrayFormat)((long)mesh.SurfaceGetFormat(s) & customs));
+            to.SurfaceSetMaterial(to.GetSurfaceCount() - 1, mat);
+        }
+        if (plate.GetSurfaceCount() == 0)
+            return;
+        m.Mesh = keep;
+        m.AddChild(new MeshInstance3D { Name = PlateName, Mesh = plate, Visible = false });
+    }
+
+    /// <summary>The root plate under <paramref name="node"/> shown or hidden.</summary>
+    public static void Plate(Node node, bool shown)
+    {
+        if (node is MeshInstance3D { Name: var n } p && n == PlateName)
+            p.Visible = shown;
+        foreach (Node child in node.GetChildren())
+            Plate(child, shown);
     }
 
     /// <summary>The species read so far: the glb parsed and the sidecar.</summary>
