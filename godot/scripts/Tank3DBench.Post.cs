@@ -72,8 +72,8 @@ public sealed partial class Tank3DBench
             _postKey = key;
             _post = FindPost(target, cell);
             Log.Print(_post is { } found
-                ? $"tank3d: post for {target.Tag} {cell}: {found.Cell} facing {found.Face}, {found.Steps} of {_reach!.Budget} steps, {found.Shot.Says}"
-                : $"tank3d: post for {target.Tag} {cell}: none in reach");
+                ? $"tank3d: post for {target.Tag} {MapAt(cell)}: {MapAt(found.Cell)} facing {found.Face}, {found.Steps} of {_reach!.Budget} steps, {found.Shot.Says}"
+                : $"tank3d: post for {target.Tag} {MapAt(cell)}: none in reach");
         }
         if (_post is not { } p)
         {

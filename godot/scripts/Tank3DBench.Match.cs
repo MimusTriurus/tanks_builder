@@ -132,8 +132,8 @@ public sealed partial class Tank3DBench
             if (_field.InBounds(cell))
                 Stand(Roster[i % n], cell, SideHeading(cell, side), side);
         }
-        Log.Print($"tank3d: match: green {_modelTag} {CellHere} on the rig; standing "
-                 + string.Join(", ", _parked.Select(p => $"{SideName(p.Side)} {p.Tag} {p.Cell}")));
+        Log.Print($"tank3d: match: green {_modelTag} {MapAt(CellHere)} on the rig; standing "
+                 + string.Join(", ", _parked.Select(p => $"{SideName(p.Side)} {p.Tag} {MapAt(p.Cell)}")));
         Banner($"Раунд 1 · ходят {SideName(_turn)}", SideInk(_turn));
     }
 
@@ -210,7 +210,7 @@ public sealed partial class Tank3DBench
         if (_fired)
             return $"{_modelTag} уже стрелял в этом ходу";
         if (_parked.Find(p => p.Cell == cell && p.Fate != Fate.Destroyed) is { } on && on.Side == _side)
-            return $"на {cell} свой {on.Tag}";
+            return $"на {MapAt(cell)} свой {on.Tag}";
         return "";
     }
 
@@ -302,7 +302,7 @@ public sealed partial class Tank3DBench
             {
                 TakeOver(next);
                 Banner($"Раунд {_round} · ходят {SideName(_turn)}", SideInk(_turn));
-                Log.Print($"tank3d: match: round {_round}, {SideName(_turn)} to move, {_modelTag} on {CellHere}");
+                Log.Print($"tank3d: match: round {_round}, {SideName(_turn)} to move, {_modelTag} on {MapAt(CellHere)}");
                 return;
             }
             if (_side == _turn && _fate == Fate.Alive)
@@ -507,7 +507,7 @@ public sealed partial class Tank3DBench
             Quench(side, tag, steam: false);
             Boom(at, (float)TankTick.KnockOutFlash, grounded: false);
             _matchNote = $"{SideName(side)} {tag} подбит";
-            Log.Print($"tank3d: match: {SideName(side)} {tag} on {cell} knocked out");
+            Log.Print($"tank3d: match: {SideName(side)} {tag} on {MapAt(cell)} knocked out");
             return Fate.Knocked;
         }
         return Explode(model, tag, cell, side);
@@ -538,7 +538,7 @@ public sealed partial class Tank3DBench
         Boom(at, 1.0f, grounded: true);
         _shake.Blast(_profile.ShotShake * 0.6);
         _matchNote = $"{SideName(side)} {tag} уничтожен";
-        Log.Print($"tank3d: match: {SideName(side)} {tag} on {cell} destroyed");
+        Log.Print($"tank3d: match: {SideName(side)} {tag} on {MapAt(cell)} destroyed");
         Blast(cell);
         return Fate.Destroyed;
     }

@@ -79,7 +79,7 @@ public sealed partial class Tank3DBench
                       halfLen, _model.HullWidth * _model.PixelsPerUnit * 0.5f, 0.35f,
                       new Vector3(mid.X, top / RiseFactor, mid.Z), HexWidth * 0.5f);
         Rings(-way, halfLen, 0.35f);
-        Log.Print($"tank3d: {_modelTag} climbs out of the pond {from} -> {to}");
+        Log.Print($"tank3d: {_modelTag} climbs out of the pond {MapAt(from)} -> {MapAt(to)}");
     }
 
     /// <summary>The ride while climbing: up to <paramref name="target"/> at

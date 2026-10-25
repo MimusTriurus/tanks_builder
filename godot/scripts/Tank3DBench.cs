@@ -768,10 +768,12 @@ public sealed partial class Tank3DBench : Node3D
         // --relief: the board in a sea of deep water cells, at least one hex
         // between the land and the frame for a rammed tank to go into
         // (BoardMap.Moated); the cells the flags name are the map's, moved
+        _shownMoat = Vector2I.Zero;
         if (_reliefOn)
         {
             map = map.Moated();
             _moat = map.Shift;
+            _shownMoat = _moat;
             if (_startCell is Vector2I start)
                 _startCell = start + _moat;
             if (_hoverFixed is Vector2I hover)
@@ -853,6 +855,27 @@ public sealed partial class Tank3DBench : Node3D
 
     /// <summary>A cell a flag or a <c>--do</c> names, on the board.</summary>
     private Vector2I MapCell(int q, int r) => new Vector2I(q, r) + _moat;
+
+    /// <summary><see cref="_moat"/> for what prints a cell, the bench's nested
+    /// records among them (Leg): static, one bench at a time.</summary>
+    private static Vector2I _shownMoat;
+
+    /// <summary>A cell as the HUD and the log say it: the map's, without the
+    /// sea's shift (the user's call, 2026-10-25), so it is the cell a flag
+    /// names and the editor shows.</summary>
+    private static string MapAt(Vector2I cell) => (cell - _shownMoat).ToString();
+
+    private static string MapAt(Vector2I? cell) => cell is Vector2I c ? MapAt(c) : "-";
+
+    private static string MapAt(IEnumerable<Vector2I> cells, string between)
+    {
+        var said = new List<string>();
+        foreach (Vector2I c in cells)
+            said.Add(MapAt(c));
+        return string.Join(between, said);
+    }
+
+    private static string MapAt(Steps.Route route) => route.ToString(_shownMoat);
 
     /// <summary>The board's smooth fields (<c>--relief</c>), and their
     /// pictures, looked at before anything stands on them.</summary>
@@ -1842,11 +1865,11 @@ public sealed partial class Tank3DBench : Node3D
     private void HudText()
     {
         string where = _field is null ? "flat ground"
-            : $"{_mapName} {_field.FlatCellAt(Board(_rig.Position))}";
+            : $"{_mapName} {MapAt(_field.FlatCellAt(Board(_rig.Position)))}";
         string fate = Drowning ? "Drowned" : _fate.ToString();
         if (_fate == Fate.Alive && Swimming)
             fate = "Afloat";
-        string ram = (_other is null ? "" : $"  target {_other.Tag} {_other.Cell}"
+        string ram = (_other is null ? "" : $"  target {_other.Tag} {MapAt(_other.Cell)}"
                       + (_ramNote.Length > 0 ? $"  {_ramNote}" : ""))
                      + (_wallNote.Length > 0 ? $"  {_wallNote}" : "");
         string order = (_rules && _orderNote.Length > 0 ? $"  {_orderNote}" : "")

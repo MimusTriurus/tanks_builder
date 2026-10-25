@@ -497,7 +497,7 @@ public sealed partial class Tank3DBench
                                         _profile, o.Profile, o.Cell, heading);
         if (!push.Allowed)
         {
-            Log.Print($"ram: frame {_frame}, {_modelTag} does not shove {o.Tag} at {o.Cell} along {heading} - "
+            Log.Print($"ram: frame {_frame}, {_modelTag} does not shove {o.Tag} at {MapAt(o.Cell)} along {heading} - "
                      + Ramming.Because(push.Why));
             _ramNote = $"отказ: {Ramming.Because(push.Why)}";
             _speed = 0.0f;
@@ -513,9 +513,9 @@ public sealed partial class Tank3DBench
             Vector3 middle = CellWorld(o.Cell);
             _ramPark = at + axis * (middle - at).Dot(axis);
         }
-        Log.Print($"ram: frame {_frame}, {_modelTag} shoves {o.Tag} {o.Cell} -> {string.Join(" -> ", push.Legs)} along {heading}, "
+        Log.Print($"ram: frame {_frame}, {_modelTag} shoves {o.Tag} {MapAt(o.Cell)} -> {MapAt(push.Legs, " -> ")} along {heading}, "
                  + $"keep {keep:F2}, at {Mathf.Abs(_speed):F0} px/s");
-        _ramNote = $"{_modelTag} сдвинул {o.Tag}: {o.Cell} → {push.Legs[^1]}";
+        _ramNote = $"{_modelTag} сдвинул {o.Tag}: {MapAt(o.Cell)} → {MapAt(push.Legs[^1])}";
         o.Legs.Clear();
         foreach (Vector2I c in push.Legs)
             o.Legs.Add(CellWorld(c));
@@ -913,7 +913,7 @@ public sealed partial class Tank3DBench
                           o.Foot.HalfLen, o.Foot.HalfWide, 0.7f + 0.25f * Math.Max(0, o.Profile.Mass - 1),
                           new Vector3(mid.X, top / RiseFactor, mid.Z), HexWidth * 0.5f);
             _ripples.Strike(new Vector2(o.Rig.Position.X, o.Rig.Position.Z), Stage3D.Waves);
-            Log.Print($"tank3d: target {o.Tag} thrown into the pond at {cell}");
+            Log.Print($"tank3d: target {o.Tag} thrown into the pond at {MapAt(cell)}");
         }
         o.Wet = wet;
 

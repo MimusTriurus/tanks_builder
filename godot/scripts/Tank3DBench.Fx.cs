@@ -1063,7 +1063,7 @@ void fragment() {
             }
             radius = want;
         }
-        Log.Print($"tank3d: crater on {cell}: {asked:F0} -> {radius:F0} px (cell holds {Room(mid) / reach:F0}), "
+        Log.Print($"tank3d: crater on {MapAt(cell)}: {asked:F0} -> {radius:F0} px (cell holds {Room(mid) / reach:F0}), "
                  + $"moved in {new Vector2(at.X - from.X, at.Z - from.Z).Length():F0} px, foot room {Room(new Vector2(at.X, at.Z)) - radius * CelCrater.FootMost:F1} px");
         return (at, radius, w => Room(new Vector2(w.X, w.Z)) >= 0.0f);
     }

@@ -188,7 +188,7 @@ public sealed partial class Tank3DBench
             // deck under it (TankTick's own exception, asked of the cell).
             if (!_field.IsDeep(to))
                 _celBurn?.Douse();
-            Log.Print($"tank3d: {_modelTag} into the water at {to} - the fire is out");
+            Log.Print($"tank3d: {_modelTag} into the water at {MapAt(to)} - the fire is out");
         }
         ClimbOut(from, to);
         if (_field.Drops(from, to))
@@ -245,7 +245,7 @@ public sealed partial class Tank3DBench
                            halfLen, might, Plunge.Style.Cinematic);
         _buoy.Jolt(TankTick.PlungeKick * share);
         Rings(way, halfLen, might);
-        Log.Print($"tank3d: {_modelTag} into the pond at {cell}: water {top:F1}, bed {_field.BedAt(cell):F1}, "
+        Log.Print($"tank3d: {_modelTag} into the pond at {MapAt(cell)}: water {top:F1}, bed {_field.BedAt(cell):F1}, "
                  + $"deck {_deckPx:F1} px, draught {_deckPx * _profile.Draught:F1} px, might {might:F2}"
                  + (_amphibious ? "" : " - no wading gear, the engine is drowned"));
         if (!_amphibious)
@@ -340,7 +340,7 @@ public sealed partial class Tank3DBench
         {
             _airTold = true;
             float roof = _rig.Position.Y * RiseFactor + _roofPx;
-            Log.Print($"tank3d: {_modelTag} on the bed at {cell}: roof {roof:F1}, water {top:F1} px "
+            Log.Print($"tank3d: {_modelTag} on the bed at {MapAt(cell)}: roof {roof:F1}, water {top:F1} px "
                      + $"({(roof < top ? "under" : "OUT")} by {Mathf.Abs(top - roof):F1})");
         }
     }
@@ -374,7 +374,7 @@ public sealed partial class Tank3DBench
         {
             _airTold = true;
             float roof = _rig.Position.Y * RiseFactor + _roofPx;
-            Log.Print($"tank3d: {_modelTag} on the bed at {cell}: roof {roof:F1}, water {top:F1} px "
+            Log.Print($"tank3d: {_modelTag} on the bed at {MapAt(cell)}: roof {roof:F1}, water {top:F1} px "
                      + $"({(roof < top ? "under" : "OUT")} by {Mathf.Abs(top - roof):F1}), air over {_field.FlatCellAt(Board(middle))}");
         }
     }

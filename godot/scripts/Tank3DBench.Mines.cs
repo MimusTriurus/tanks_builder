@@ -88,7 +88,7 @@ public sealed partial class Tank3DBench
             Node3D node = BoardDress.LayMine(this, art, _field, cell, _tile.HexRect.Size, _pbr, Squash, RiseFactor,
                                              out Vector3 at);
             _mines.Add(new Laid { Cell = cell, Node = node, At = at });
-            Log.Print($"tank3d: mine on {cell} at ({at.X:F0}, {at.Z:F0}), {MineWide * HexWidth:F0} px across");
+            Log.Print($"tank3d: mine on {MapAt(cell)} at ({at.X:F0}, {at.Z:F0}), {MineWide * HexWidth:F0} px across");
         }
     }
 
@@ -125,7 +125,7 @@ public sealed partial class Tank3DBench
                 if (under)
                     continue;
                 mine.Asleep = false;
-                Log.Print($"tank3d: mine on {mine.Cell} armed");
+                Log.Print($"tank3d: mine on {MapAt(mine.Cell)} armed");
             }
             // Only a hull that is moving finds it: a mine is laid on a free
             // cell, so one standing on it has been put there (a reset, a pick).
@@ -161,7 +161,7 @@ public sealed partial class Tank3DBench
             WoodCrater(dig.At, dig.Radius);
         }
         _shake.Blast(_profile.ShotShake * 1.2);
-        Log.Print($"tank3d: mine on {mine.Cell} went off");
+        Log.Print($"tank3d: mine on {MapAt(mine.Cell)} went off");
     }
 
     /// <summary>The bench's own tank over the charge: the end over it thrown
@@ -228,7 +228,7 @@ public sealed partial class Tank3DBench
         {
             _coastTo = null;
             _speed = 0.0f;
-            Log.Print($"tank3d: rolled to the middle of {CellHere}");
+            Log.Print($"tank3d: rolled to the middle of {MapAt(CellHere)}");
             return;
         }
         float before = Mathf.Abs(_speed);

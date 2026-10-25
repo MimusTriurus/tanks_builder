@@ -79,7 +79,7 @@ public sealed partial class Tank3DBench
             Stand(tag, home.Cell, _heading);
         }
         Log.Print($"tank3d: {_parked.Count} tank(s) standing on the other parkings: "
-                 + string.Join(", ", _parked.Select(p => $"{p.Tag} {p.Cell}")));
+                 + string.Join(", ", _parked.Select(p => $"{p.Tag} {MapAt(p.Cell)}")));
     }
 
     /// <summary>The model a parking asks for, or the first one on disk nobody
@@ -109,7 +109,7 @@ public sealed partial class Tank3DBench
         }
         catch (Exception e)
         {
-            Log.Print($"tank3d: parked {tag} on {cell}: {e.Message}");
+            Log.Print($"tank3d: parked {tag} on {MapAt(cell)}: {e.Message}");
             return;
         }
         Stand(model, tag, cell, heading, side, yaw, elevation);

@@ -226,8 +226,9 @@ GDD** ([field.md](../../docs/gdd/field.md), «Рампа») — только п�
   ниже моря им не заливается.
 - **Координаты сдвинуты**: клетки во флагах и `--do` (`--cell`, `--hover`, `--target-cell`,
   `go=`, `take=`, `aim-cell=`, `click=`, `ignite=`, `lock=`, сценарии `--perf`) — по карте,
-  стенд прибавляет сдвиг (`Tank3DBench.MapCell`). HUD и лог печатают клетки доски, со сдвигом
-  (у `drill10` +2, +1).
+  стенд прибавляет сдвиг (`Tank3DBench.MapCell`). HUD и лог печатают клетки тоже по карте
+  (`Tank3DBench.MapAt`, маршруты — `Steps.Route.ToString(shift)`): морские клетки за её краем
+  выходят с номером −1 или на один больше последнего (у `drill10` ряд 10, столбцы −1 и 10).
 
 Проверено: `--map drill10 --relief --model HTR --cell 5,7 --heading 0 --target LTR
 --target-cell 5,9 --do ram@30` — тяжёлый сталкивает лёгкий с края в морской гекс.

@@ -100,12 +100,16 @@ public static class Steps
         public List<Vector2I> Cells() =>
             Legs.Where(l => l.Act is Act.Forward or Act.Back).Select(l => l.At.Cell).ToList();
 
-        public override string ToString() =>
+        public override string ToString() => ToString(Vector2I.Zero);
+
+        /// <summary>The same with every cell less <paramref name="shift"/>:
+        /// a board that moved its map's cells prints the map's.</summary>
+        public string ToString(Vector2I shift) =>
             string.Join(" ", Legs.Skip(1).Select(l => l.Act switch
             {
                 Act.Turn => $"t{l.At.Heading}",
-                Act.Back => $"b{l.At.Cell}",
-                _ => $"{l.At.Cell}",
+                Act.Back => $"b{l.At.Cell - shift}",
+                _ => $"{l.At.Cell - shift}",
             })) + $" = {Spent}";
     }
 

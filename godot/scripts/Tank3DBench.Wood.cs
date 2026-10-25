@@ -370,7 +370,7 @@ public sealed partial class Tank3DBench
                 t.Bend = bend;
             t.Shiver = Mathf.Max(t.Shiver, BrushShiver * touch * pace);
             if (pace > 0.05f && _brushed.Add(t.Cell) && _brushing.Add(t.Cell))
-                Log.Print($"tank3d: {tag} pushes through the wood on {t.Cell}");
+                Log.Print($"tank3d: {tag} pushes through the wood on {MapAt(t.Cell)}");
         }
     }
 
@@ -463,7 +463,7 @@ public sealed partial class Tank3DBench
                 // given once; the trees go down as the hull gets to them.
                 _woodedCells.Remove(cell);
                 _razed.Add(cell);
-                Log.Print($"tank3d: the heavy is in the wood on {cell}: it is ground now");
+                Log.Print($"tank3d: the heavy is in the wood on {MapAt(cell)}: it is ground now");
             }
             foreach (Planted t in _trees)
             {
@@ -574,7 +574,7 @@ public sealed partial class Tank3DBench
             if (float.IsInfinity(when))
                 when = d / BlastSpeed;
             _lights.Add((_woodClock + when, next, new Vector2(edge.X, edge.Z)));
-            Log.Print($"tank3d: blast on {here} lights the wood on {next} in {when:F2} s");
+            Log.Print($"tank3d: blast on {MapAt(here)} lights the wood on {MapAt(next)} in {when:F2} s");
         }
     }
 
