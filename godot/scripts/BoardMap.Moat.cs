@@ -82,26 +82,12 @@ public sealed partial class BoardMap
             over[to] = Over[from];
         }
 
-        // The sea's level: under every dry cell on its shore and no higher
-        // than the water that runs into it. The commonest shore level was the
-        // first try, and a pit on the edge one level under it (events' (10,1))
-        // stood below the sea's surface: the sheet ran into it, a dry cell by
-        // the rules, as a stair-cut edge and a line of foam with no water. A
-        // ford stands its depth over its level and deep water most of a
-        // level, so a ford wants the sea a level under it, deep water at it.
-        int level = int.MaxValue;
-        foreach (Vector2I cell in plot)
-        {
-            if (sea.Contains(cell))
-                continue;
-            if (!HexField.EdgeHeadings.Any(h => sea.Contains(HexField.Step(cell, h))))
-                continue;
-            int at = cell.Y * columns + cell.X;
-            bool deep = water[at] && ground[at] == Foundation.Deep;
-            level = Math.Min(level, deep ? levels[at] : levels[at] - 1);
-        }
-        if (level == int.MaxValue)
-            level = Plinth - 1;
+        // The sea's level is deep water's: the level the letter d stands at
+        // (a level under the plinth), so one sea and every deep pond of the
+        // map are one water, and a pond on the edge runs into it (the user's
+        // call, 2026-10-25). What on the edge stands lower than its surface -
+        // a dry pit, a ford - is dammed off by the relief (Relief.Weir).
+        int level = Plinth - 1;
         foreach (Vector2I cell in sea)
         {
             int at = cell.Y * columns + cell.X;

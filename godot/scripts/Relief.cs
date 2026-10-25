@@ -254,7 +254,6 @@ public sealed class Relief
                 raw[p] = field.IsWater(from) ? field.WaterTop(from) - Shoal * lift : field.TopAt(from);
                 rawLevel[p] = field.LevelAt(from);
             }
-        Weir(field, raw, dry, r);
         StampLevels(field, rawLevel, r);
 
         // Terraces (BOT-11, the user's call): a cell's top flat at its own
@@ -266,6 +265,9 @@ public sealed class Relief
               Mathf.Max(1, Mathf.RoundToInt(2.0f * sig)));
         Array.Copy(raw, Height, n);
         Blur(Height, Nx, Ny, sig);
+        // after the blur: the inset lowered a dam to the pit beside it, and
+        // a dam two points wide blurred down to a sill the sea ran over
+        Weir(field, Height, r);
         for (int k = 0; k < Share.Length; k++)
         {
             Array.Copy(mask[k], Share[k], n);
@@ -378,40 +380,59 @@ public sealed class Relief
         }
     }
 
-    /// <summary>How wide the weir between a pond and the lower sea is, in
+    /// <summary>How wide the weir between the sea and a ford or a pit is, in
     /// circumradii, on the sea's side of their border (<see cref="Weir"/>).</summary>
-    public const float WeirWide = 0.16f;
+    public const float WeirWide = 0.2f;
 
     /// <summary>
-    /// A bank of ground along the border where a pond or a ford meets the sea
-    /// standing lower (<see cref="BoardMap.Moated"/>): the sea's ring keeps
-    /// one level, under every shore, so the land's water at the edge is
-    /// higher. Without it the two sheets met on the hexes' side with nothing
-    /// between them, and the higher one ended in the raster's stairs. A thin
-    /// strip of the sea's cell, dry and a little over the pond: the pond's
-    /// shore comes out round, the sea's under it.
+    /// A bank of ground along the border where the sea (<see cref="BoardMap.Moated"/>,
+    /// at deep water's level) meets what on the edge is not at its surface: a
+    /// ford, whose water stands lower, or a dry pit under the surface (events'
+    /// (10,1)). Without it the two sheets met on the hexes' side with nothing
+    /// between them and ended in the raster's stairs, or the sea ran into the
+    /// pit. A thin strip of the sea's cell, dry and a little over the higher
+    /// water. The map's deep water is at the sea's surface and is the sea: it
+    /// joins it with no dam (the user's call, 2026-10-25).
     /// </summary>
-    private void Weir(HexField field, float[] raw, bool[] dry, float r)
+    private void Weir(HexField field, float[] raw, float r)
     {
         if (field.Sea is not { } sea)
             return;
         int reach = Math.Max(1, Mathf.RoundToInt(WeirWide * r / Cell));
-        float lip = 0.12f * field.Lift;
+        // the dam drawn into a copy of the ground and blurred a point, so its
+        // edge is round and not the raster's stairs, then laid over it
+        var dam = (float[])raw.Clone();
+        float lip = 0.15f * field.Lift;
         var top = new float[raw.Length];
         Array.Fill(top, float.NaN);
         for (int p = 0; p < raw.Length; p++)
         {
             Vector2I c = Owner[p];
-            if (c.X < 0 || sea.Contains(c) || !field.IsWater(c) || field.WaterTop(c) <= SeaTop + 1e-3f)
+            if (c.X < 0 || sea.Contains(c))
                 continue;
-            top[p] = field.WaterTop(c);
+            // deep water at the sea's own surface is the sea: no dam
+            if (field.IsWater(c) && Mathf.Abs(field.WaterTop(c) - SeaTop) < 1e-3f)
+                continue;
+            // a ford, higher or lower, or a dry pit under the surface: the dam
+            // stands over the higher of the two waters
+            if (field.IsWater(c))
+                top[p] = Mathf.Max(field.WaterTop(c), SeaTop);
+            else if (field.TopAt(c) < SeaTop)
+                top[p] = SeaTop;
         }
+        // how far each point is from the sea's cells: the dam stands on the
+        // sea's side and on to the dry cells near it, where the corner of a
+        // pit, a dry cell and the sea let the water round it along the slopes
+        var seaMask = new bool[raw.Length];
+        for (int p = 0; p < raw.Length; p++)
+            seaMask[p] = Owner[p].X < 0 || sea.Contains(Owner[p]);
+        float[] toSea = Distance(seaMask, Nx, Ny);
         for (int j = 0; j < Ny; j++)
             for (int i = 0; i < Nx; i++)
             {
                 int p = j * Nx + i;
                 Vector2I c = Owner[p];
-                if (c.X >= 0 && !sea.Contains(c))
+                if (!float.IsNaN(top[p]) || toSea[p] > 2.5f * reach)
                     continue;
                 float best = float.NaN;
                 for (int dj = -reach; dj <= reach; dj++)
@@ -431,10 +452,17 @@ public sealed class Relief
                 }
                 if (float.IsNaN(best))
                     continue;
-                raw[p] = best + lip;
-                dry[p] = true;
+                dam[p] = Mathf.Max(raw[p], best + lip);
             }
+        Blur(dam, Nx, Ny, 1.2f);
+        for (int p = 0; p < raw.Length; p++)
+            raw[p] = Mathf.Max(raw[p], dam[p]);
     }
+
+    /// <summary>How near a dry cell lower than the sea a point of a dry cell
+    /// takes no surface from the sea, in circumradii: its slope down into
+    /// the pit (<see cref="FillWater"/>).</summary>
+    public const float LowKeep = 0.35f;
 
     /// <summary>Whether a cell touches the sea: a neighbour off the plot.</summary>
     private static bool Shore_(HexField field, Vector2I c)
@@ -505,6 +533,13 @@ public sealed class Relief
     {
         int n = Nx * Ny;
         var wet = new bool[n];
+        float r = field.Atlas!.HexRect.Size.X * 0.5f;
+        // how far each point is from a dry cell lower than the sea
+        var low = new bool[n];
+        for (int p = 0; p < n; p++)
+            low[p] = field.Sea is not null && Owner[p].X >= 0 && !field.IsWater(Owner[p])
+                     && field.TopAt(Owner[p]) < SeaTop;
+        float[] toLow = Distance(low, Nx, Ny);
         for (int p = 0; p < n; p++)
         {
             Surface[p] = float.NaN;
@@ -528,8 +563,12 @@ public sealed class Relief
             for (int h = 30; h < 360 && !own; h += 60)
             {
                 Vector2I o = HexField.Step(c, h);
-                // nor is a dry cell lower than the sea flooded by it
-                if (field.Sea is { } sea && sea.Contains(o) && field.TopAt(c) < field.WaterTop(o))
+                // nor is a dry cell lower than the sea flooded by it, nor the
+                // slope of a dry cell down into one: events' (10,0) between
+                // the ring and the pit took the sea's surface over its slope
+                // into the pit, a sheet and a line of foam on dry ground
+                if (field.Sea is { } sea && sea.Contains(o)
+                    && (field.TopAt(c) < field.WaterTop(o) || toLow[p] * Cell < LowKeep * r))
                     continue;
                 if (!field.InBounds(o))
                 {
