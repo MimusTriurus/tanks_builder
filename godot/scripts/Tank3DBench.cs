@@ -472,6 +472,10 @@ public sealed partial class Tank3DBench : Node3D
     /// its noise (<c>Stage3D.Back</c>).</summary>
     private const float Back = 1500.0f;
 
+    /// <summary>Depth kept past the board's ground either way, for what
+    /// stands on it and for the frame (<see cref="FrameCamera"/>).</summary>
+    private const float DepthSpare = 600.0f;
+
     private void BuildCamera()
     {
         _camera = new Camera3D
@@ -579,6 +583,14 @@ public sealed partial class Tank3DBench : Node3D
         }
         if (lo.X > hi.X)
             return null;
+        // the relief's sea and frame round the cells (Relief.Frame), in flat
+        // space: rows squashed
+        if (_reliefOn && _relief is not null)
+        {
+            Rect2 frame = _relief.Frame.Grow(Stage3D.FrameWide * half.X);
+            lo = new Vector2(Mathf.Min(lo.X, frame.Position.X), Mathf.Min(lo.Y, frame.Position.Y * Squash));
+            hi = new Vector2(Mathf.Max(hi.X, frame.End.X), Mathf.Max(hi.Y, frame.End.Y * Squash));
+        }
         _boardBox = new Rect2(lo, hi - lo);
         return _boardBox;
     }
@@ -653,7 +665,23 @@ public sealed partial class Tank3DBench : Node3D
         }
         else
             _viewNow = new Vector2(pivot.X, pivot.Z * Squash - pivot.Y * RiseFactor);
-        _camera.Position = pivot + new Vector3(0.0f, back * Squash, back * RiseFactor);
+        // Along its own axis the camera stands back from the board's middle,
+        // not from the tank - orthographic, the picture is the same - and
+        // further where the board is deeper than the view's 3000: with the
+        // tank on the near row the relief's near frame fell in front of the
+        // near plane and the far one past the far plane (BOT-11).
+        var axis = new Vector3(0.0f, Squash, RiseFactor);
+        float dist = back;
+        if (BoardBox() is { } deep)
+        {
+            Vector3 u = axis.Normalized();
+            float mid = (deep.Position.Y + 0.5f * deep.Size.Y) / Squash;
+            pivot += u * (new Vector3(pivot.X, 0.0f, mid) - pivot).Dot(u);
+            float half = 0.5f * deep.Size.Y / Squash * u.Z + DepthSpare;
+            dist = Mathf.Max(back, half / axis.Length());
+        }
+        _camera.Far = 2.0f * dist * axis.Length();
+        _camera.Position = pivot + axis * dist;
         // Camera2D.Offset's sense: +y moves the view down the screen.
         Vector2 shake = ShakeOffset();
         _camera.Position += _camera.Basis.X * shake.X - _camera.Basis.Y * shake.Y;

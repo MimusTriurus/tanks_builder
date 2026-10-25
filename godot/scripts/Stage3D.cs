@@ -116,6 +116,8 @@ public sealed partial class Stage3D : Node3D
             // the relief draws them in its shader (Stage3D.Relief)
             if (Relief is not null && _tops?.MaterialOverride is ShaderMaterial tops)
                 tops.Param("hex_on", value ? 1.0f : 0.0f);
+            if (Relief is not null)
+                _deepInk?.Param("hex_on", value ? 1.0f : 0.0f);
         }
     }
 
@@ -2750,6 +2752,8 @@ void fragment() {{
             BuildWater(corner);
             return;
         }
+        if (_frame is not null)
+            _frame.Mesh = null;
 
         var tops = new SurfaceTool();
         var sides = new SurfaceTool();
@@ -3434,7 +3438,8 @@ void fragment() {
         bool drawn = Surf is { Any: true };
         _pond.MaterialOverride = Deep ? DeepWater()
                                : drawn ? Swell() : Decal(WaterOrder);
-        if (!Field.HasWater)
+        // the relief has its sea round the board whether or not a cell is wet
+        if (!Field.HasWater && Relief is null)
         {
             _pond.Mesh = null;
             _flank.Mesh = null;
@@ -3455,6 +3460,7 @@ void fragment() {
         // rather than written down: the tile is a dial, and a reach in pixels
         // would be right on one setting of it.
         _pondReach = Mathf.Max(halfX, halfZ) * FoamReach;
+        _deepInk?.Param("hex_on", Relief is not null && ShowEdges ? 1.0f : 0.0f);
         // on the relief a body of water is one sheet at its surface, and the
         // ground's own crossing is the shore (Stage3D.Relief)
         if (Relief is not null)
@@ -4823,6 +4829,29 @@ uniform float time = 0.0;
 uniform vec3 sun = vec3(0.0, 1.0, 0.0);
 uniform float wave_scale = 0.02;
 uniform float wave_speed = 1.0;
+// The relief's hex grid on the water too (Stage3D.Relief, ReliefHead's
+// hex_at): off on the prisms, whose water is cut to its hexes already.
+uniform float hex_on = 0.0;
+uniform float hex_r = 124.0;
+uniform vec2 hex_off = vec2(0.0);
+uniform vec3 hex_color : source_color = vec3(0.05, 0.04, 0.03);
+uniform float hex_opacity = 0.42;
+uniform float hex_w = 1.2;
+float hex_side(vec2 xz) {{
+    vec2 p = xz - hex_off;
+    float q = (2.0 / 3.0) * p.x / hex_r;
+    float r = (-p.x / 3.0 + 0.5773503 * p.y) / hex_r;
+    float s = -q - r;
+    float rq = round(q), rr = round(r), rs = round(s);
+    float dq = abs(rq - q), dr = abs(rr - r), ds = abs(rs - s);
+    if (dq > dr && dq > ds)
+        rq = -rr - rs;
+    else if (dr > ds)
+        rr = -rq - rs;
+    vec2 v = p - vec2(1.5 * hex_r * rq, 1.7320508 * hex_r * (rr + rq * 0.5));
+    float m = max(abs(v.y), max(abs(0.8660254 * v.x + 0.5 * v.y), abs(0.8660254 * v.x - 0.5 * v.y)));
+    return hex_r * 0.8660254 - m;
+}}
 uniform float relief = 0.30;
 uniform vec3 shallow : source_color = vec3(0.24, 0.52, 0.50);
 uniform vec3 deep : source_color = vec3(0.06, 0.22, 0.28);
@@ -5404,6 +5433,13 @@ void fragment() {{
     // the foam and the two highlights, which are added whatever the depth: so it
     // is those that fade, and `bottom` is where they fade to.
     col = mix(bottom, col, film);
+
+    if (hex_on > 0.5) {{
+        float hs = hex_side(world.xz);
+        float lw = max(hex_w, length(fwidth(world.xz)));
+        float line = 1.0 - smoothstep(lw, lw + max(fwidth(hs), 1e-4), hs);
+        col = mix(col, hex_color, line * hex_opacity);
+    }}
 
     ALBEDO = col;
     ALPHA = 1.0;

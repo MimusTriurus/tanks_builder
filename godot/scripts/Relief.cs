@@ -56,9 +56,36 @@ public sealed class Relief
     /// tile, 16 points across a hex.</summary>
     public const float Step = 0.0833f;
 
-    /// <summary>Ground past the board's edge on every side, in circumradii -
-    /// hex_map's <c>MARGIN</c>, smaller: our board is the whole of the scene.</summary>
-    public const float Margin = 1.5f;
+    /// <summary>How far the raster runs on under the board's frame, in
+    /// circumradii: the ground's edge never shows.</summary>
+    public const float Margin = 0.2f;
+
+    /// <summary>The sea between the outermost hexes and the frame, in
+    /// circumradii: room for an edge cell's bank to come down to the bed.</summary>
+    public const float Rim = 0.3f;
+
+    /// <summary>
+    /// The board's rectangle in world x, z (the raster's frame, without the
+    /// stage's origin): the frame stands round it (<c>Stage3D.Relief</c>).
+    ///
+    /// <b>A board is a rectangle and what is not a cell is deep water</b> (the
+    /// user's call, 2026-10-25): the plot's holes (<see cref="BoardMap.Off"/>)
+    /// and the notches of an odd-q edge are one sea, as on a tabletop board
+    /// whose frame cuts the hexes it does not hold. The rules do not see it -
+    /// it is off the board for them as before.
+    /// </summary>
+    public Rect2 Frame { get; private init; }
+
+    /// <summary>The sea's surface, lift px: a deep pond's, a level under the
+    /// lowest dry ground on its shore - or the water it meets, where that is
+    /// lower, so a river running off the board does not step down into it.</summary>
+    public float SeaTop { get; private set; }
+
+    /// <summary>The sea's bed under its surface, lift px: a deep pond's.</summary>
+    public float SeaDepth { get; private set; }
+
+    /// <summary>The sea's level, for the brow's bits.</summary>
+    private int _seaLevel;
 
     /// <summary>The plain's slow swell, in levels (hex_level's <c>SWELL</c>).</summary>
     public const float Swell = 0.04f;
@@ -93,8 +120,8 @@ public sealed class Relief
     public readonly float[][] Share;
     /// <summary>The hex under each point, or (-1, -1) off the board.</summary>
     public readonly Vector2I[] Hex;
-    /// <summary>The hex that answers for each point: its own, or past the
-    /// board's rectangle the edge cell it continues; (-1, -1) in a hole.</summary>
+    /// <summary>The hex that answers for each point: its own, or (-1, -1)
+    /// off the plot - the sea (<see cref="Frame"/>).</summary>
     public readonly Vector2I[] Owner;
     /// <summary>How far under the surface the water's bed is, at the middle of
     /// the cell whose surface a point took, lift px.</summary>
@@ -148,11 +175,16 @@ public sealed class Relief
                 lo = Mathf.Min(lo, c.X); hi = Mathf.Max(hi, c.X);
                 top = Mathf.Min(top, c.Y / squash); bottom = Mathf.Max(bottom, c.Y / squash);
             }
-        float pad = r * (1.0f + Margin);
-        float x0 = lo - pad, z0 = top - pad;
-        int nx = (int)Mathf.Ceil((hi - lo + 2 * pad) / cell) + 1;
-        int ny = (int)Mathf.Ceil((bottom - top + 2 * pad) / cell) + 1;
-        var f = new Relief(nx, ny, x0, z0, cell, squash);
+        // The board's rectangle: the outermost hexes' corners and sides, and
+        // a strip of sea past them (Rim); the raster runs on under the frame.
+        float half = r * 0.8660254f, rim = r * Rim;
+        var frame = new Rect2(lo - r - rim, top - half - rim,
+                              hi - lo + 2.0f * (r + rim), bottom - top + 2.0f * (half + rim));
+        float pad = r * Margin;
+        float x0 = frame.Position.X - pad, z0 = frame.Position.Y - pad;
+        int nx = (int)Mathf.Ceil((frame.Size.X + 2 * pad) / cell) + 1;
+        int ny = (int)Mathf.Ceil((frame.Size.Y + 2 * pad) / cell) + 1;
+        var f = new Relief(nx, ny, x0, z0, cell, squash) { Frame = frame };
         f.Fill(field, r, seed);
         f.Seconds = (Time.GetTicksUsec() - t0) / 1e6f;
         return f;
@@ -163,26 +195,14 @@ public sealed class Relief
         int n = Nx * Ny;
         float lift = field.Lift;
 
-        // Off the plot - the margin, and a holed board's holes - the board's
-        // lowest dry ground: a lowland round it rather than a cliff into nothing.
-        float floor = float.MaxValue;
-        for (int q = 0; q < field.Columns; q++)
-            for (int row = 0; row < field.Rows; row++)
-            {
-                var c = new Vector2I(q, row);
-                if (field.InBounds(c) && !field.IsWater(c))
-                    floor = Mathf.Min(floor, field.TopAt(c));
-            }
-        if (floor == float.MaxValue)
-            floor = 0.0f;
+        Sea(field);
+        float seaRaw = SeaTop - Shoal * lift;
 
         var raw = new float[n];
         var rockRaw = new float[n];
         var rawLevel = new int[n];
         var dry = new bool[n];
-        // off the plot: the lowland's level
-        int floorLevel = Mathf.RoundToInt(floor / Mathf.Max(lift, 1e-3f));
-        Array.Fill(rawLevel, floorLevel);
+        Array.Fill(rawLevel, _seaLevel);
         var mask = new float[Share.Length][];
         for (int k = 0; k < mask.Length; k++)
             mask[k] = new float[n];
@@ -196,17 +216,13 @@ public sealed class Relief
                 Vector2I c = field.FlatCellAt(flat);
                 bool on = field.InBounds(c);
                 Hex[p] = on ? c : new Vector2I(-1, -1);
-                // Past the rectangle the edge cell's ground goes on, water and
-                // all, so the board does not stand on a bank of its own and a
-                // pond at the edge runs out under it; a hole in the plot is the
-                // lowland.
-                Vector2I edge = on ? c : field.ClampCell(c);
-                Owner[p] = field.InBounds(edge) ? edge : new Vector2I(-1, -1);
-                if (Owner[p].X < 0)
+                // Past the rectangle and in the plot's holes, the sea (Frame).
+                Vector2I edge = c;
+                Owner[p] = on ? c : new Vector2I(-1, -1);
+                if (!on)
                 {
-                    raw[p] = floor;
-                    dry[p] = true;
-                    mask[(int)Kind.Plain][p] = 1.0f;
+                    raw[p] = seaRaw;
+                    mask[(int)Kind.Water][p] = 1.0f;
                     continue;
                 }
                 mask[(int)KindOf(field, edge)][p] = 1.0f;
@@ -218,7 +234,7 @@ public sealed class Relief
                 float x = X0 + i * Cell, z = Z0 + j * Cell;
                 Vector2 off = new Vector2(warpX.GetNoise2D(x, z), warpZ.GetNoise2D(x, z) * Squash) * (Warp * r);
                 Vector2I wc = field.FlatCellAt(flat + off);
-                Vector2I from = field.InBounds(wc) ? wc : field.InBounds(field.ClampCell(wc)) ? field.ClampCell(wc) : edge;
+                Vector2I from = field.InBounds(wc) ? wc : edge;
                 // The warp moves a shore only inward: a dry cell never reads a
                 // water neighbour's height, so no water is laid on a cell the
                 // rules call dry (the user's catch: a pond ran on to its bank).
@@ -342,20 +358,75 @@ public sealed class Relief
         var inward = new float[n];
         for (int p = 0; p < n; p++)
             inward[p] = Shore[p] < 0.0f ? 1.0f : 0.0f;
+        // the sea drops off steeply, a board's edge and not a beach: its
+        // notches are half a hex, and shelved as a pond's bank they came out
+        // all shallows
+        var steep = (float[])inward.Clone();
         Blur(inward, Nx, Ny, BedSigma * r / Cell);
+        Blur(steep, Nx, Ny, SeaSigma * r / Cell);
         for (int p = 0; p < n; p++)
         {
             float under = Surface[p] - Height[p];
             if (float.IsNaN(Surface[p]) || under <= 0.0f)
                 continue;
-            float cut = Mathf.SmoothStep(0.5f, 0.97f, inward[p]) * Mathf.Min(1.0f, under / (0.25f * shoal));
+            float wet = Owner[p].X < 0 ? steep[p] : inward[p];
+            float cut = Mathf.SmoothStep(0.5f, 0.97f, wet) * Mathf.Min(1.0f, under / (0.25f * shoal));
             Height[p] -= Mathf.Max(0.0f, Depth[p] - shoal) * cut;
         }
+    }
+
+    /// <summary>Whether a cell touches the sea: a neighbour off the plot.</summary>
+    private static bool Shore_(HexField field, Vector2I c)
+    {
+        for (int h = 30; h < 360; h += 60)
+            if (!field.InBounds(HexField.Step(c, h)))
+                return true;
+        return false;
+    }
+
+    /// <summary>The sea's surface and depth (<see cref="SeaTop"/>): deep
+    /// water a level under the lowest dry cell on its shore, brought down to
+    /// any water on that shore that stands lower.</summary>
+    private void Sea(HexField field)
+    {
+        float lift = Mathf.Max(field.Lift, 1e-3f);
+        int lowAny = int.MaxValue;
+        var dryCount = new Dictionary<int, int>();
+        float wetTop = float.MaxValue;
+        for (int q = 0; q < field.Columns; q++)
+            for (int row = 0; row < field.Rows; row++)
+            {
+                var c = new Vector2I(q, row);
+                if (!field.InBounds(c) || !Shore_(field, c))
+                    continue;
+                lowAny = Math.Min(lowAny, field.LevelAt(c));
+                if (field.IsWater(c))
+                    wetTop = Mathf.Min(wetTop, field.WaterTop(c));
+                else
+                    dryCount[field.LevelAt(c)] = dryCount.GetValueOrDefault(field.LevelAt(c)) + 1;
+            }
+        // the shore's commonest level, not its lowest: one hollow on the edge
+        // dropped the whole sea a level, and the notches came out walls of
+        // earth with a little water at their feet
+        int shore = lowAny != int.MaxValue ? lowAny : 0, most = 0;
+        foreach ((int level, int count) in dryCount)
+            if (count > most || (count == most && level < shore))
+            {
+                shore = level;
+                most = count;
+            }
+        _seaLevel = shore - 1;
+        SeaTop = Mathf.Min(_seaLevel * lift + field.DeepRise, wetTop);
+        SeaDepth = field.DeepRise + (float)field.DeepBed * lift;
     }
 
     /// <summary>The blur of the wet mask the bed is cut by (<see cref="Carve"/>),
     /// in circumradii: the bank shelves over about this times two.</summary>
     public const float BedSigma = 0.3f;
+
+    /// <summary>The same for the sea round the board (<see cref="Frame"/>):
+    /// its bank drops off within about this times two.</summary>
+    public const float SeaSigma = 0.08f;
 
     /// <summary>The water's surface over each point and the signed distance to
     /// where the ground comes out of it.
@@ -376,15 +447,34 @@ public sealed class Relief
             Surface[p] = float.NaN;
             Vector2I c = Owner[p];
             if (c.X < 0)
+            {
+                Surface[p] = SeaTop;
+                Depth[p] = SeaDepth;
+                wet[p] = Height[p] < SeaTop;
                 continue;
+            }
             float best = float.NaN;
+            float depth = 0.0f;
             Vector2I from = c;
             if (field.IsWater(c))
                 best = field.WaterTop(c);
             for (int h = 30; h < 360; h += 60)
             {
                 Vector2I o = HexField.Step(c, h);
-                if (field.InBounds(o) && field.IsWater(o))
+                if (!field.InBounds(o))
+                {
+                    // the sea past the plot's edge - but not over a dry
+                    // cell lower than it: that hollow stays dry
+                    if (!field.IsWater(c) && field.TopAt(c) < SeaTop)
+                        continue;
+                    if (float.IsNaN(best) || SeaTop > best)
+                    {
+                        best = SeaTop;
+                        depth = SeaDepth;
+                        from = new Vector2I(-1, -1);
+                    }
+                }
+                else if (field.IsWater(o))
                 {
                     float s = field.WaterTop(o);
                     if (float.IsNaN(best) || s > best)
@@ -396,7 +486,7 @@ public sealed class Relief
             }
             Surface[p] = best;
             if (!float.IsNaN(best))
-                Depth[p] = field.WaterTop(from) - field.BedAt(from);
+                Depth[p] = from.X < 0 ? depth : field.WaterTop(from) - field.BedAt(from);
             wet[p] = !float.IsNaN(best) && Height[p] < best;
         }
         Connect(field, wet);
@@ -507,7 +597,7 @@ public sealed class Relief
         var seen = new bool[n];
         var queue = new Queue<int>();
         for (int p = 0; p < n; p++)
-            if (wet[p] && Owner[p].X >= 0 && field.IsWater(Owner[p]))
+            if (wet[p] && (Owner[p].X < 0 || field.IsWater(Owner[p])))
             {
                 seen[p] = true;
                 queue.Enqueue(p);

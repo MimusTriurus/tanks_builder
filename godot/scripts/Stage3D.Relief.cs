@@ -169,7 +169,150 @@ public sealed partial class Stage3D
         BakeRelief(f);
         _tops.MaterialOverride = ReliefTurf(f, art);
         _glaze.MaterialOverride = null;
+        BuildFrame(f);
     }
+
+    /// <summary>The board's frame (<see cref="Relief.Frame"/>); null until
+    /// a relief is built, its mesh dropped on the prisms.</summary>
+    private MeshInstance3D? _frame;
+
+    /// <summary>The frame's width, in circumradii, and its top's bevel.</summary>
+    internal const float FrameWide = 0.42f;
+    private const float FrameBevel = 0.07f;
+
+    /// <summary>The frame's top over the highest ground at its inner edge,
+    /// in levels.</summary>
+    private const float FrameLip = 0.25f;
+
+    /// <summary>
+    /// A wooden frame round the board's rectangle, as round a tabletop board:
+    /// its top a lip over the ground and the sea at its inner edge, its outer
+    /// face down past the deepest bed, so the raster's cut edge - the
+    /// hexes' ends - never shows (the user's call, 2026-10-25).
+    /// </summary>
+    private void BuildFrame(Relief f)
+    {
+        if (_frame is null)
+        {
+            _frame = new MeshInstance3D { CastShadow = GeometryInstance3D.ShadowCastingSetting.Off };
+            AddChild(_frame);
+        }
+        float rise = RiseFactor, lift = Field.Lift;
+        float r = Field.Atlas!.HexRect.Size.X * 0.5f;
+        Rect2 inner = f.Frame;
+        // the highest ground along the inner edge, and the lowest anywhere
+        float edgeTop = f.SeaTop, low = float.MaxValue;
+        foreach (float h in f.Height)
+            low = Mathf.Min(low, h);
+        int steps = 200;
+        for (int k = 0; k <= steps; k++)
+        {
+            float t = k / (float)steps;
+            float x = inner.Position.X + inner.Size.X * t, z = inner.Position.Y + inner.Size.Y * t;
+            edgeTop = Mathf.Max(edgeTop, Mathf.Max(f.Sample(f.Height, x, inner.Position.Y), f.Sample(f.Height, x, inner.End.Y)));
+            edgeTop = Mathf.Max(edgeTop, Mathf.Max(f.Sample(f.Height, inner.Position.X, z), f.Sample(f.Height, inner.End.X, z)));
+        }
+        float top = (edgeTop + FrameLip * lift) / rise;
+        float bottom = (low - lift) / rise;
+        float bevel = FrameBevel * r;
+        var off = new Vector2(Origin.X, Origin.Y / Squash);
+        Rect2 i = new(inner.Position + off, inner.Size);
+        Rect2 b = i.Grow(FrameWide * r - bevel), o = i.Grow(FrameWide * r);
+
+        var st = new SurfaceTool();
+        st.Begin(Mesh.PrimitiveType.Triangles);
+        // the four sides, each as its profile's faces: the inner wall, the
+        // top, the bevel and the outer face
+        for (int side = 0; side < 4; side++)
+        {
+            FrameFace(st, i, top, i, bottom, side, 0.0f);
+            FrameFace(st, b, top, i, top, side, 1.0f);
+            FrameFace(st, o, top - bevel * 0.6f, b, top, side, 2.0f);
+            FrameFace(st, o, bottom, o, top - bevel * 0.6f, side, 3.0f);
+        }
+        _frame.Mesh = st.Commit();
+        _frame.MaterialOverride ??= new ShaderMaterial { Shader = FrameShader };
+        ((ShaderMaterial)_frame.MaterialOverride).Param("sun_dir", Sun.Normalized());
+    }
+
+    /// <summary>One face of the frame on one side: the quad between rect
+    /// <paramref name="a"/>'s edge at height <paramref name="ya"/> and rect
+    /// <paramref name="c"/>'s at <paramref name="yc"/>, corners mitred by the
+    /// rects' own corners. Side 0 is -Z (far), 1 +X, 2 +Z (near), 3 -X;
+    /// UV runs along the side (world units) and says which face it is.</summary>
+    private static void FrameFace(SurfaceTool st, Rect2 a, float ya, Rect2 c, float yc, int side, float face)
+    {
+        Vector3 Corner(Rect2 rc, float y, int k) => k switch
+        {
+            0 => new Vector3(rc.Position.X, y, rc.Position.Y),
+            1 => new Vector3(rc.End.X, y, rc.Position.Y),
+            2 => new Vector3(rc.End.X, y, rc.End.Y),
+            _ => new Vector3(rc.Position.X, y, rc.End.Y),
+        };
+        int k0 = side, k1 = (side + 1) % 4;
+        Vector3 a0 = Corner(a, ya, k0), a1 = Corner(a, ya, k1);
+        Vector3 c0 = Corner(c, yc, k0), c1 = Corner(c, yc, k1);
+        Vector3 n = (a1 - a0).Cross(c0 - a0).Normalized();
+        // outward-facing whichever way round the corners came
+        Vector3 mid = (a0 + a1 + c0 + c1) * 0.25f;
+        Vector3 hub = new((a.Position.X + a.End.X) * 0.5f, mid.Y, (a.Position.Y + a.End.Y) * 0.5f);
+        bool flip = face == 0 ? n.Dot(hub - mid) < 0.0f : face == 1 ? n.Y < 0.0f : n.Dot(mid - hub) < 0.0f;
+        if (flip)
+            n = -n;
+        bool alongX = side % 2 == 0;
+        foreach (Vector3 v in flip ? new[] { a0, c0, c1, a0, c1, a1 } : new[] { a0, a1, c1, a0, c1, c0 })
+        {
+            st.SetNormal(n);
+            st.SetUV(new Vector2(alongX ? v.X : v.Z, face));
+            st.SetUV2(new Vector2(alongX ? v.Z : v.X, 0.0f));
+            st.AddVertex(v);
+        }
+    }
+
+    private static readonly Shader FrameShader = new()
+    {
+        Code = @"shader_type spatial;
+render_mode unshaded, cull_disabled;
+// The board's frame: dark wood, its grain along each side, stepped by the
+// turn to the sun as the ground is (Stage3D.Relief, ReliefPaint).
+uniform vec3 wood : source_color = vec3(0.40, 0.27, 0.16);
+uniform vec3 wood_dark : source_color = vec3(0.23, 0.15, 0.09);
+uniform vec3 sun_dir = vec3(0.0, 1.0, 0.0);
+varying vec3 world;
+varying vec3 wn;
+
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float noise(vec2 p) {
+    vec2 i = floor(p), f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x),
+               mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+}
+
+void vertex() {
+    world = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+    wn = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
+}
+
+void fragment() {
+    vec3 n = normalize(wn);
+    // along the side (UV.x) and across it: the height on the faces that
+    // stand, the distance in from the edge on the top (UV2.x)
+    float across = abs(n.y) > 0.5 ? UV2.x : world.y;
+    float grain = noise(vec2(UV.x * 0.006, across * 0.08));
+    grain = 0.6 * grain + 0.4 * noise(vec2(UV.x * 0.02, grain * 6.0));
+    vec3 col = mix(wood_dark, wood, smoothstep(0.25, 0.75, grain));
+    float d = dot(n, sun_dir);
+    float flat_d = sun_dir.y;
+    float step_ = d > flat_d - 0.08 ? 1.0 : d > flat_d - 0.3 ? 0.86 : d > 0.0 ? 0.72 : 0.6;
+    col *= step_;
+    // the bevel a shade lighter, the edge it catches the light on
+    if (UV.y > 1.5 && UV.y < 2.5)
+        col *= 1.18;
+    ALBEDO = col;
+}
+",
+    };
 
     /// <summary>The sun's height map off the raster itself: one texel a point,
     /// the march's bilinear fetch landing on the points the mesh was built on.</summary>
@@ -254,9 +397,10 @@ public sealed partial class Stage3D
             for (int r = 0; r < Field.Rows; r++)
             {
                 var cell = new Vector2I(q, r);
+                // off the plot is the sea, and its hexes are drawn too
                 bool on = Field.InBounds(cell);
                 Color ink = on ? Field.InkFor(cell) : Colors.White;
-                img.SetPixel(q, r, new Color(ink.R, ink.G, ink.B, on ? 1.0f : 0.0f));
+                img.SetPixel(q, r, new Color(ink.R, ink.G, ink.B, 1.0f));
             }
         return ImageTexture.CreateFromImage(img);
     }
@@ -322,6 +466,16 @@ public sealed partial class Stage3D
                 high = new Vector2(Mathf.Max(high.X, top.X + 2 * halfX), Mathf.Max(high.Y, top.Z + 2 * halfZ));
             }
 
+        // the sea round the board: deep, over the whole frame
+        {
+            var off = new Vector2(Origin.X, Origin.Y / Squash);
+            Rect2 sea = new(f.Frame.Position + off, f.Frame.Size);
+            hub[SeaSlot] = sea.GetCenter();
+            sink[SeaSlot] = 1.0f;
+            low = new Vector2(Mathf.Min(low.X, sea.Position.X), Mathf.Min(low.Y, sea.Position.Y));
+            high = new Vector2(Mathf.Max(high.X, sea.End.X), Mathf.Max(high.Y, sea.End.Y));
+        }
+
         int nx = f.Nx;
         float rise = RiseFactor, reach = f.Cell * 3.0f;
         // which body (its first cell's slot) each point's water belongs to
@@ -376,6 +530,13 @@ public sealed partial class Stage3D
             _deepInk.Param("rim_span", inradius);
             _deepInk.Param("squash", Squash);
             _deepInk.Param("rise", RiseFactor);
+            // the grid on the water as on the ground: the sea's hexes are
+            // cells cut by the frame, and read as hexes only with their sides
+            Vector2 hexHub = Origin + Field.CentreOffset;
+            _deepInk.Param("hex_r", Field.Atlas!.HexRect.Size.X * 0.5f);
+            _deepInk.Param("hex_off", new Vector2(hexHub.X, hexHub.Y / Squash));
+            _deepInk.Param("hex_color", new Color(GridInk.R, GridInk.G, GridInk.B));
+            _deepInk.Param("hex_opacity", GridInk.A);
         }
     }
 
@@ -385,17 +546,23 @@ public sealed partial class Stage3D
     {
         Vector2I c = f.Owner[p];
         if (c.X < 0)
-            return -1;
+            return SeaSlot;
         if (Field.IsWater(c))
             return Mathf.Min(Field.WaterIndex(c), MaxWaterCells - 1);
+        bool sea = false;
         for (int h = 30; h < 360; h += 60)
         {
             Vector2I o = HexField.Step(c, h);
             if (Field.InBounds(o) && Field.IsWater(o) && Mathf.IsEqualApprox(Field.WaterTop(o), f.Surface[p]))
                 return Mathf.Min(Field.WaterIndex(o), MaxWaterCells - 1);
+            sea |= !Field.InBounds(o);
         }
-        return -1;
+        return sea && Mathf.IsEqualApprox(f.SeaTop, f.Surface[p]) ? SeaSlot : -1;
     }
+
+    /// <summary>The sea's water slot (<see cref="Relief.SeaTop"/>): the last,
+    /// deep, no cell's.</summary>
+    private const int SeaSlot = MaxWaterCells - 1;
 
     private static readonly Shader ReliefSoil = new()
     {
@@ -482,8 +649,9 @@ vec3 hex_at(vec2 xz) {
 
 vec4 cell_ink(vec2 cr) {
     ivec2 c = ivec2(cr);
+    // past the board's rectangle: the sea, its hexes drawn as the board's
     if (c.x < 0 || c.y < 0 || c.x >= cells_size.x || c.y >= cells_size.y)
-        return vec4(1.0, 1.0, 1.0, 0.0);
+        return vec4(1.0, 1.0, 1.0, 1.0);
     return texelFetch(cells, c, 0);
 }";
 
