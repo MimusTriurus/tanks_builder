@@ -63,6 +63,10 @@ public sealed partial class Tank3DBench : Node3D
     private string _modelTag = "LTR";
     private string _mapName = "events";
     private bool _flat;
+    /// <summary><c>--relief</c>: the board as one smooth ground (BOT-11,
+    /// <see cref="Relief"/>) - for now its fields, to <c>out/relief/</c>.</summary>
+    private bool _reliefOn;
+    private Relief? _relief;
     /// <summary><c>--pbr</c>: the glTF's own materials, no cel shading and no
     /// ink - the look before <see cref="Toon"/>, to hold against it.</summary>
     private bool _pbr;
@@ -744,6 +748,8 @@ public sealed partial class Tank3DBench : Node3D
         _field.SetWater(map.Water);
         AddChild(_field);
         _field.Atlas = _tile;
+        if (_reliefOn)
+            BuildRelief(map.Name);
         _home = _startCell ?? (map.Homes.Count > 0 ? map.Homes[0] : new Vector2I(map.Columns / 2, map.Rows / 2));
 
         // What the stage aims its own camera by: it mirrors a 2D camera, and
@@ -776,6 +782,18 @@ public sealed partial class Tank3DBench : Node3D
 
     /// <summary>The cell the tank opens on: the map's first parking.</summary>
     private Vector2I _home;
+
+    /// <summary>The board's smooth fields (<c>--relief</c>), and their
+    /// pictures, looked at before anything stands on them.</summary>
+    private void BuildRelief(string name)
+    {
+        _relief = Relief.Build(_field!);
+        if (_relief is null)
+            return;
+        string path = _relief.SavePictures(_field!, AssetRoot.Out + "/relief", name);
+        Log.Print($"tank3d: relief {_relief.Nx}x{_relief.Ny} points, step {_relief.Cell:0.0} px, "
+                  + $"{_relief.Seconds * 1000:0} ms; {path}");
+    }
 
     /// <summary>Where the model's shadow falls - <see cref="BoardDress.Shadows"/>,
     /// the skin over the board's tops.</summary>
@@ -1057,6 +1075,7 @@ public sealed partial class Tank3DBench : Node3D
             else if (a == "--wind" && more) _wind = F(args[++i], _wind);
             else if (a == "--soft-water") _softWater = true;
             else if (a == "--flat") _flat = true;
+            else if (a == "--relief") _reliefOn = true;
             else if (a == "--pbr") _pbr = true;
             else if (a == "--fx2d") _fx2d = true;
             else if (a == "--zoom" && more) { _zoom = F(args[++i], _zoom); _zoomFit = false; }
