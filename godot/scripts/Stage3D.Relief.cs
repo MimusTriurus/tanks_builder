@@ -64,6 +64,23 @@ public sealed partial class Stage3D
 
     private bool _showLawn = true;
 
+    /// <summary>Grass on the ground's own texture at all - the lawn
+    /// photograph or the painted patches. Off by default (the user's call,
+    /// 2026-10-25): the ground is the soil art the slopes wear, everywhere;
+    /// the tufts stand on it as before.</summary>
+    public bool ShowTurf
+    {
+        get => _showTurf;
+        set
+        {
+            _showTurf = value;
+            if (Relief is not null && _tops?.MaterialOverride is ShaderMaterial tops)
+                tops.Param("turf_on", value ? 1.0f : 0.0f);
+        }
+    }
+
+    private bool _showTurf;
+
     /// <summary>A tile of the lawn photograph, in circumradii.</summary>
     private const float LawnTile = 1.4f;
 
@@ -209,6 +226,7 @@ public sealed partial class Stage3D
             ink.Param("lawn_tile", 1.0f / (r * LawnTile));
         }
         ink.Param("lawn_on", ShowLawn && Lawn() is not null ? 1.0f : 0.0f);
+        ink.Param("turf_on", ShowTurf ? 1.0f : 0.0f);
         ink.Param("art_tile", 1.0f / (r * ArtTile));
         if (Field.Terrain is { Any: true } terrain && terrain.Plate.Size.X > 0)
         {
@@ -406,6 +424,8 @@ uniform vec3 bed_ink : source_color = vec3(0.30, 0.27, 0.20);
 // and how bright: on when it is on disk and switched on
 uniform sampler2D lawn_tex : source_color, filter_linear_mipmap, repeat_enable, hint_default_white;
 uniform float lawn_on = 0.0;
+// Grass on the ground's texture at all (photo or patches); off: bare earth
+uniform float turf_on = 0.0;
 uniform float lawn_tile = 0.01;
 uniform float lawn_gain = 1.0;
 // Grass3D's own tones, mid and tip
@@ -483,7 +503,9 @@ vec4 cell_ink(vec2 cr) {
     float flat_ = (1.0 - bare) * (1.0 - COLOR.a) * (1.0 - smoothstep(0.2, 0.32, bank));
     float lawn = flat_ * smoothstep(0.30, 0.42, patch_ + 0.25);
     vec3 turf = mix(grass_ink, grass_tip, smoothstep(0.35, 0.75, mire_fbm(ground.xz * 0.05)));
-    if (lawn_on > 0.5) {
+    if (turf_on < 0.5) {
+        // bare earth everywhere: the soil art the slopes wear (the user's call)
+    } else if (lawn_on > 0.5) {
         // the photograph (AssetRoot.Ground) over every flat, not in patches:
         // two scales, the second turned, mixed by a noise, so its tile does
         // not repeat across a board

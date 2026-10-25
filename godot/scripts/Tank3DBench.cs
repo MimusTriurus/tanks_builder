@@ -72,6 +72,9 @@ public sealed partial class Tank3DBench : Node3D
     /// <summary><c>--no-lawn</c>: the relief's painted grass, not the lawn
     /// photograph (<see cref="Stage3D.ShowLawn"/>).</summary>
     private bool _lawnOn = true;
+    /// <summary><c>--turf</c>: grass on the relief's ground texture; without
+    /// it the ground is bare soil everywhere (<see cref="Stage3D.ShowTurf"/>).</summary>
+    private bool _turfOn;
     private Relief? _relief;
     /// <summary><c>--pbr</c>: the glTF's own materials, no cel shading and no
     /// ink - the look before <see cref="Toon"/>, to hold against it.</summary>
@@ -786,6 +789,7 @@ public sealed partial class Tank3DBench : Node3D
             Relief = _relief,
             ShowBrow = _browOn,
             ShowLawn = _lawnOn,
+            ShowTurf = _turfOn,
         };
         AddChild(_stage);
         _field.ShowField = false;
@@ -1098,6 +1102,7 @@ public sealed partial class Tank3DBench : Node3D
             else if (a == "--relief") _reliefOn = true;
             else if (a == "--brow") _browOn = true;
             else if (a == "--no-lawn") _lawnOn = false;
+            else if (a == "--turf") _turfOn = true;
             else if (a == "--pbr") _pbr = true;
             else if (a == "--fx2d") _fx2d = true;
             else if (a == "--zoom" && more) { _zoom = F(args[++i], _zoom); _zoomFit = false; }
@@ -2079,8 +2084,10 @@ public sealed partial class Tank3DBench : Node3D
                           () => _stage.ShowBrow, v => _stage.ShowBrow = v);
             _panel.Toggle("tank3d.relief.grid", "гекс-сетка  (Shift+G)",
                           () => _stage.ShowEdges, v => _stage.ShowEdges = v);
+            _panel.Toggle("tank3d.relief.turf", "трава на земле  (--turf; выкл. — почва)",
+                          () => _stage.ShowTurf, v => _stage.ShowTurf = v);
             if (Stage3D.Lawn() is not null)
-                _panel.Toggle("tank3d.relief.lawn", "трава текстурой  (--no-lawn)",
+                _panel.Toggle("tank3d.relief.lawn", "  трава фото, а не пятнами  (--no-lawn)",
                               () => _stage.ShowLawn, v => _stage.ShowLawn = v);
             _panel.Expand("tank3d.relief", true);
         }
