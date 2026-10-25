@@ -43,6 +43,11 @@ public sealed class Relief
     /// a honeycomb.</summary>
     public const float Warp = 0.14f;
 
+    /// <summary>How much of a terrace's slope lies on the lower hex, in
+    /// sigmas of the four it spans (<see cref="Inset"/>): a little, so the
+    /// hill's flat top is bigger (the user's call, 2026-10-25).</summary>
+    public const float SlopeOut = 1.0f;
+
     /// <summary>The blur of the kinds' shares, in circumradii (hex_map's
     /// <c>KIND_BLUR</c>).</summary>
     public const float KindSigma = 0.35f;
@@ -238,7 +243,8 @@ public sealed class Relief
         // as the reference's, a level - a rule here, unlike there - read as a
         // swell.
         float sig = Terrace * r / Cell;
-        Inset(raw, dry, Mathf.Max(1, Mathf.RoundToInt(2.0f * sig)));
+        Inset(raw, dry, Mathf.Max(0, Mathf.RoundToInt((2.0f - SlopeOut) * sig)),
+              Mathf.Max(1, Mathf.RoundToInt(2.0f * sig)));
         Array.Copy(raw, Height, n);
         Blur(Height, Nx, Ny, sig);
         for (int k = 0; k < Share.Length; k++)
@@ -395,13 +401,15 @@ public sealed class Relief
     /// half lay on the neighbour - a hill on a hex the rules call low (the
     /// user's catch, after the same of the water).
     ///
-    /// Within <paramref name="reach"/> points (the blur's two sigma): a dry
-    /// point takes the lowest dry height round it, so a higher level gives way
-    /// and its slope comes out inside its own cells; a water point takes the
-    /// highest dry height round it if there is one, so the water gives way and
-    /// the bank's slope comes out inside the water's cells.
+    /// A dry point takes the lowest dry height within <paramref name="reachDry"/>,
+    /// so a higher level gives way and its slope comes out mostly inside its
+    /// own cells - <see cref="SlopeOut"/> sigma of it on the lower hex, the
+    /// user's call: wholly inside, a hill's flat top was small. A water point
+    /// takes the highest dry height within <paramref name="reachWet"/> (the
+    /// blur's two sigma), so the bank's slope comes out wholly inside the
+    /// water's cells and no water is laid on a dry hex.
     /// </summary>
-    private void Inset(float[] raw, bool[] dry, int reach)
+    private void Inset(float[] raw, bool[] dry, int reachDry, int reachWet)
     {
         int n = raw.Length;
         var outp = new float[n];
@@ -411,6 +419,7 @@ public sealed class Relief
                 int p = j * Nx + i;
                 float best = raw[p];
                 bool found = false;
+                int reach = dry[p] ? reachDry : reachWet;
                 for (int dj = -reach; dj <= reach; dj++)
                 {
                     int jj = j + dj;
