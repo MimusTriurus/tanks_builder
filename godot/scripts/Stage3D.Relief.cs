@@ -50,7 +50,8 @@ public sealed partial class Stage3D
 
     /// <summary>The lawn photograph on the flats instead of the painted
     /// patches (<see cref="AssetRoot.Ground"/>, <c>grass_basecolor.jpg</c>).
-    /// On by default when the file is there; the panel switches it.</summary>
+    /// Off by default (the user went back to the painted grass); <c>--lawn</c>
+    /// and the panel switch it on when the file is there.</summary>
     public bool ShowLawn
     {
         get => _showLawn;
@@ -62,12 +63,13 @@ public sealed partial class Stage3D
         }
     }
 
-    private bool _showLawn = true;
+    private bool _showLawn;
 
     /// <summary>Grass on the ground's own texture at all - the lawn
-    /// photograph or the painted patches. Off by default (the user's call,
-    /// 2026-10-25): the ground is the soil art the slopes wear, everywhere;
-    /// the tufts stand on it as before.</summary>
+    /// photograph or the painted patches. On by default - the painted grass,
+    /// which the user asked back after trying bare soil (2026-10-25). Off,
+    /// the ground is the soil art the slopes wear, everywhere, and the tufts
+    /// stand on it as before.</summary>
     public bool ShowTurf
     {
         get => _showTurf;
@@ -79,7 +81,7 @@ public sealed partial class Stage3D
         }
     }
 
-    private bool _showTurf;
+    private bool _showTurf = true;
 
     /// <summary>A tile of the lawn photograph, in circumradii.</summary>
     private const float LawnTile = 1.4f;
