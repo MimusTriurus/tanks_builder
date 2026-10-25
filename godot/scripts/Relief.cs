@@ -318,30 +318,44 @@ public sealed class Relief
             }
 
         FillWater(field);
-        Carve(lift);
+        Carve(lift, r);
     }
 
     /// <summary>The water's bed cut into the blurred ground, hex_level's river
-    /// bed: down to the cell's own drawn bed (<see cref="HexField.BedAt"/>)
-    /// where the blurred ground lies a whole <see cref="Shoal"/> under the
-    /// surface, by none at the waterline.
+    /// bed: down to the cell's own drawn bed (<see cref="HexField.BedAt"/>),
+    /// reached gradually from the waterline in.
     ///
-    /// <b>By how deep the ground already is, not by the distance to the
-    /// shore.</b> That distance is taken off a wet-or-dry mask of the raster,
-    /// so it steps by a point; cut by it, a gentle bank came out in stairs and
-    /// the waterline with it. The depth is as smooth as the blur, and nought
-    /// at the waterline, so the cut leaves the shore where it was.</summary>
-    private void Carve(float lift)
+    /// <b>By a blurred wet mask, not by the depth under the surface nor by the
+    /// distance to the shore.</b> The distance is taken off the raster's
+    /// wet-or-dry mask and steps by a point - a gentle bank came out in
+    /// stairs. The depth under the surface is smooth but small (a
+    /// <see cref="Shoal"/>), so cutting a whole pond's depth by it dropped the
+    /// bank straight down at the waterline, and a flat surface crossing a wall
+    /// follows the raster's triangles: a staircase shore (the user's catch).
+    /// The wet mask blurred over <see cref="BedSigma"/> is a half at the
+    /// waterline and rises smoothly inward; the cut starts there and is whole
+    /// a little over half a hex in.</summary>
+    private void Carve(float lift, float r)
     {
+        int n = Height.Length;
         float shoal = Shoal * lift;
-        for (int p = 0; p < Height.Length; p++)
+        var inward = new float[n];
+        for (int p = 0; p < n; p++)
+            inward[p] = Shore[p] < 0.0f ? 1.0f : 0.0f;
+        Blur(inward, Nx, Ny, BedSigma * r / Cell);
+        for (int p = 0; p < n; p++)
         {
             float under = Surface[p] - Height[p];
             if (float.IsNaN(Surface[p]) || under <= 0.0f)
                 continue;
-            Height[p] -= Mathf.Max(0.0f, Depth[p] - shoal) * Mathf.SmoothStep(0.0f, shoal * 0.9f, under);
+            float cut = Mathf.SmoothStep(0.5f, 0.97f, inward[p]) * Mathf.Min(1.0f, under / (0.25f * shoal));
+            Height[p] -= Mathf.Max(0.0f, Depth[p] - shoal) * cut;
         }
     }
+
+    /// <summary>The blur of the wet mask the bed is cut by (<see cref="Carve"/>),
+    /// in circumradii: the bank shelves over about this times two.</summary>
+    public const float BedSigma = 0.3f;
 
     /// <summary>The water's surface over each point and the signed distance to
     /// where the ground comes out of it.
