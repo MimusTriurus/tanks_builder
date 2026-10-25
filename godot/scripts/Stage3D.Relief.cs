@@ -232,7 +232,42 @@ public sealed partial class Stage3D
         }
         _frame.Mesh = st.Commit();
         _frame.MaterialOverride ??= new ShaderMaterial { Shader = FrameShader };
-        ((ShaderMaterial)_frame.MaterialOverride).Param("sun_dir", Sun.Normalized());
+        var ink = (ShaderMaterial)_frame.MaterialOverride;
+        ink.Param("sun_dir", Sun.Normalized());
+        if (Oak() is { } oak)
+        {
+            ink.Param("wood_tex", oak);
+            ink.Param("wood_tile", 1.0f / (r * OakTile));
+        }
+        ink.Param("wood_on", Oak() is not null ? 1.0f : 0.0f);
+    }
+
+    /// <summary>A tile of the oak photograph, in circumradii: across it a
+    /// plank or so the frame's width.</summary>
+    private const float OakTile = 2.5f;
+
+    private static ImageTexture? _oak;
+    private static bool _oakRead;
+
+    /// <summary>The frame's oak veneer (<see cref="AssetRoot.Ground"/>,
+    /// <c>wood_basecolor.jpg</c>, Poliigon WoodVeneerOak 7760), read once with
+    /// its mipmaps; null when it is not on disk - the frame's painted grain
+    /// then.</summary>
+    internal static ImageTexture? Oak()
+    {
+        if (_oakRead)
+            return _oak;
+        _oakRead = true;
+        string path = AssetRoot.Ground + "/wood_basecolor.jpg";
+        if (!System.IO.File.Exists(path))
+            return null;
+        Image img = Image.LoadFromFile(path);
+        if (img is null || img.IsEmpty())
+            return null;
+        img.GenerateMipmaps();
+        _oak = ImageTexture.CreateFromImage(img);
+        Log.Print($"stage3d: oak {path} {img.GetWidth()}x{img.GetHeight()}");
+        return _oak;
     }
 
     /// <summary>One face of the frame on one side: the quad between rect
@@ -278,6 +313,11 @@ render_mode unshaded, cull_disabled;
 uniform vec3 wood : source_color = vec3(0.40, 0.27, 0.16);
 uniform vec3 wood_dark : source_color = vec3(0.23, 0.15, 0.09);
 uniform vec3 sun_dir = vec3(0.0, 1.0, 0.0);
+// The oak photograph: one tile per this many world units, and how bright
+uniform sampler2D wood_tex : source_color, filter_linear_mipmap, repeat_enable, hint_default_white;
+uniform float wood_on = 0.0;
+uniform float wood_tile = 0.003;
+uniform float wood_gain = 1.0;
 varying vec3 world;
 varying vec3 wn;
 
@@ -302,6 +342,10 @@ void fragment() {
     float grain = noise(vec2(UV.x * 0.006, across * 0.08));
     grain = 0.6 * grain + 0.4 * noise(vec2(UV.x * 0.02, grain * 6.0));
     vec3 col = mix(wood_dark, wood, smoothstep(0.25, 0.75, grain));
+    // the oak photograph (AssetRoot.Ground), its grain - the picture's
+    // height - along the side
+    if (wood_on > 0.5)
+        col = texture(wood_tex, vec2(across, UV.x) * wood_tile).rgb * wood_gain;
     float d = dot(n, sun_dir);
     float flat_d = sun_dir.y;
     float step_ = d > flat_d - 0.08 ? 1.0 : d > flat_d - 0.3 ? 0.86 : d > 0.0 ? 0.72 : 0.6;
