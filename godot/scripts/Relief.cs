@@ -473,6 +473,17 @@ public sealed class Relief
     /// clamped to the raster's edge.</summary>
     public float HeightAt(Vector2 flat) => Sample(Height, flat.X, flat.Y / Squash);
 
+    /// <summary>How steep the ground is at a flat-space point: rise over run
+    /// in world units (<paramref name="rise"/>, the board's, turns lift px
+    /// into world Y), from the heights a raster step either side.</summary>
+    public float Steepness(Vector2 flat, float rise)
+    {
+        float x = flat.X, z = flat.Y / Squash;
+        float dx = Sample(Height, x + Cell, z) - Sample(Height, x - Cell, z);
+        float dz = Sample(Height, x, z + Cell) - Sample(Height, x, z - Cell);
+        return new Vector2(dx, dz).Length() / (2.0f * Cell * rise);
+    }
+
     /// <summary>A field's value under a world x, z, bilinear.</summary>
     public float Sample(float[] a, float x, float z)
     {

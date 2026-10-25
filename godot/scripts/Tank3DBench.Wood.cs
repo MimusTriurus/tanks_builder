@@ -237,9 +237,11 @@ public sealed partial class Tank3DBench
             _grass.Ground = w =>
             {
                 Vector2 flat = Board(w);
-                // none under water, and none on the rock or up its wall
+                // none under water, none on the rock or up its wall, and none
+                // on a terrace's slope - grass on the flats, earth on the banks
                 return relief.Sample(relief.Shore, flat.X, flat.Y / Squash) < 0.0f
                        || relief.Sample(relief.Cliff, flat.X, flat.Y / Squash) > 0.12f
+                       || relief.Steepness(flat, RiseFactor) > GrassSlope
                     ? null : relief.HeightAt(flat) / RiseFactor;
             };
         AddChild(_grass);
@@ -261,6 +263,10 @@ public sealed partial class Tank3DBench
         }
         Log.Print($"tank3d: grass on {lay.Count} cells in {Time.GetTicksMsec() - t0} ms");
     }
+
+    /// <summary>The steepest ground a tuft roots on, as the slope's rise over
+    /// its run: a terrace's bank runs about 1, its flat top under 0.1.</summary>
+    private const float GrassSlope = 0.35f;
 
     /// <summary>On the relief the grass grows over a minefield too: a mine is
     /// a point in its cell (Mines), and a bare hexagon round it put one cell's
