@@ -3455,6 +3455,13 @@ void fragment() {
         // rather than written down: the tile is a dial, and a reach in pixels
         // would be right on one setting of it.
         _pondReach = Mathf.Max(halfX, halfZ) * FoamReach;
+        // on the relief a body of water is one sheet at its surface, and the
+        // ground's own crossing is the shore (Stage3D.Relief)
+        if (Relief is not null)
+        {
+            BuildReliefWater(Relief, corner, halfX, halfZ);
+            return;
+        }
         // Pulled in off its own boundary, exactly as the ground faces are - see
         // Bleed, which is this defect solved once already.
         Vector2 inset = drawn

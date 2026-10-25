@@ -62,6 +62,10 @@ public sealed class Relief
     /// <summary>A rock's crest, in levels over its blurred height.</summary>
     public const float Crag = 0.35f;
 
+    /// <summary>How far under its surface the water stands in the height that
+    /// is blurred, in levels; the real bed is cut after (<see cref="Carve"/>).</summary>
+    public const float Shoal = 0.2f;
+
     public enum Kind { Plain, Sand, Mud, Rock, Forest, Water }
 
     public readonly int Nx, Ny;
@@ -79,6 +83,12 @@ public sealed class Relief
     public readonly float[][] Share;
     /// <summary>The hex under each point, or (-1, -1) off the board.</summary>
     public readonly Vector2I[] Hex;
+    /// <summary>The hex that answers for each point: its own, or past the
+    /// board's rectangle the edge cell it continues; (-1, -1) in a hole.</summary>
+    public readonly Vector2I[] Owner;
+    /// <summary>How far under the surface the water's bed is, at the middle of
+    /// the cell whose surface a point took, lift px.</summary>
+    public readonly float[] Depth;
 
     public float Seconds { get; private set; }
 
@@ -90,6 +100,8 @@ public sealed class Relief
         Surface = new float[n];
         Shore = new float[n];
         Hex = new Vector2I[n];
+        Owner = new Vector2I[n];
+        Depth = new float[n];
         Share = new float[Enum.GetValues<Kind>().Length][];
         for (int k = 0; k < Share.Length; k++)
             Share[k] = new float[n];
@@ -153,19 +165,25 @@ public sealed class Relief
                 Vector2I c = field.FlatCellAt(flat);
                 bool on = field.InBounds(c);
                 Hex[p] = on ? c : new Vector2I(-1, -1);
-                if (!on)
+                // Past the rectangle the edge cell's ground goes on, water and
+                // all, so the board does not stand on a bank of its own and a
+                // pond at the edge runs out under it; a hole in the plot is the
+                // lowland.
+                Vector2I edge = on ? c : field.ClampCell(c);
+                Owner[p] = field.InBounds(edge) ? edge : new Vector2I(-1, -1);
+                if (Owner[p].X < 0)
                 {
-                    // Past the rectangle the edge cell's ground goes on, so the
-                    // board does not stand on a bank of its own; a hole in the
-                    // plot, or water at the edge, is the lowland.
-                    Vector2I edge = field.ClampCell(c);
-                    raw[p] = edge != c && field.InBounds(edge) && !field.IsWater(edge)
-                        ? field.TopAt(edge) : floor;
+                    raw[p] = floor;
                     mask[(int)Kind.Plain][p] = 1.0f;
                     continue;
                 }
-                raw[p] = field.IsDeep(c) && !field.IsRamp(c) ? field.BedAt(c) : field.TopOn(c, flat);
-                mask[(int)KindOf(field, c)][p] = 1.0f;
+                // Water a shoal under its surface for the blur, the bed cut
+                // after it (Carve): blurred down a whole level to a deep bed,
+                // a bank a level up came out under the surface and the pond
+                // spilt over it.
+                raw[p] = field.IsWater(edge) ? field.WaterTop(edge) - Shoal * lift
+                       : on ? field.TopOn(c, flat) : field.TopAt(edge);
+                mask[(int)KindOf(field, edge)][p] = 1.0f;
             }
 
         float sig = (field.Slopes ? SlopeSigma : Sigma) * r / Cell;
@@ -205,6 +223,29 @@ public sealed class Relief
             }
 
         FillWater(field);
+        Carve(lift);
+    }
+
+    /// <summary>The water's bed cut into the blurred ground, hex_level's river
+    /// bed: down to the cell's own drawn bed (<see cref="HexField.BedAt"/>)
+    /// where the blurred ground lies a whole <see cref="Shoal"/> under the
+    /// surface, by none at the waterline.
+    ///
+    /// <b>By how deep the ground already is, not by the distance to the
+    /// shore.</b> That distance is taken off a wet-or-dry mask of the raster,
+    /// so it steps by a point; cut by it, a gentle bank came out in stairs and
+    /// the waterline with it. The depth is as smooth as the blur, and nought
+    /// at the waterline, so the cut leaves the shore where it was.</summary>
+    private void Carve(float lift)
+    {
+        float shoal = Shoal * lift;
+        for (int p = 0; p < Height.Length; p++)
+        {
+            float under = Surface[p] - Height[p];
+            if (float.IsNaN(Surface[p]) || under <= 0.0f)
+                continue;
+            Height[p] -= Mathf.Max(0.0f, Depth[p] - shoal) * Mathf.SmoothStep(0.0f, shoal * 0.9f, under);
+        }
     }
 
     /// <summary>The water's surface over each point and the signed distance to
@@ -224,10 +265,11 @@ public sealed class Relief
         for (int p = 0; p < n; p++)
         {
             Surface[p] = float.NaN;
-            Vector2I c = Hex[p];
+            Vector2I c = Owner[p];
             if (c.X < 0)
                 continue;
             float best = float.NaN;
+            Vector2I from = c;
             if (field.IsWater(c))
                 best = field.WaterTop(c);
             for (int h = 30; h < 360; h += 60)
@@ -237,12 +279,18 @@ public sealed class Relief
                 {
                     float s = field.WaterTop(o);
                     if (float.IsNaN(best) || s > best)
+                    {
                         best = s;
+                        from = o;
+                    }
                 }
             }
             Surface[p] = best;
+            if (!float.IsNaN(best))
+                Depth[p] = field.WaterTop(from) - field.BedAt(from);
             wet[p] = !float.IsNaN(best) && Height[p] < best;
         }
+        Connect(field, wet);
         var toWet = Distance(wet, Nx, Ny);
         var invert = new bool[n];
         for (int p = 0; p < n; p++)
@@ -250,6 +298,46 @@ public sealed class Relief
         var toDry = Distance(invert, Nx, Ny);
         for (int p = 0; p < n; p++)
             Shore[p] = (toWet[p] - toDry[p]) * Cell;
+    }
+
+    /// <summary>Wet only where the water reaches: from the points over a water
+    /// cell, through points under the surface. A hollow next to a pond whose
+    /// floor is under the pond's surface - the events board's ravine beside
+    /// its deep pond - stays dry behind the ridge between them, and loses the
+    /// surface it borrowed, so nothing lays water on it.</summary>
+    private void Connect(HexField field, bool[] wet)
+    {
+        int n = wet.Length;
+        var seen = new bool[n];
+        var queue = new Queue<int>();
+        for (int p = 0; p < n; p++)
+            if (wet[p] && Owner[p].X >= 0 && field.IsWater(Owner[p]))
+            {
+                seen[p] = true;
+                queue.Enqueue(p);
+            }
+        while (queue.Count > 0)
+        {
+            int p = queue.Dequeue();
+            int i = p % Nx, j = p / Nx;
+            for (int k = 0; k < 4; k++)
+            {
+                int ni = i + (k == 0 ? 1 : k == 1 ? -1 : 0), nj = j + (k == 2 ? 1 : k == 3 ? -1 : 0);
+                if (ni < 0 || nj < 0 || ni >= Nx || nj >= Ny)
+                    continue;
+                int o = nj * Nx + ni;
+                if (seen[o] || !wet[o])
+                    continue;
+                seen[o] = true;
+                queue.Enqueue(o);
+            }
+        }
+        for (int p = 0; p < n; p++)
+            if (wet[p] && !seen[p])
+            {
+                wet[p] = false;
+                Surface[p] = float.NaN;
+            }
     }
 
     private static Kind KindOf(HexField field, Vector2I c)

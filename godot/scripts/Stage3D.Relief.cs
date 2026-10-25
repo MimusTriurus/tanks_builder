@@ -188,6 +188,121 @@ public sealed partial class Stage3D
         return outp;
     }
 
+    /// <summary>
+    /// The water on the relief: a sheet at each body's surface over every
+    /// raster point the water reaches or nearly reaches, and no flanks.
+    ///
+    /// <b>The shore is where the ground comes up through the sheet, and the
+    /// pond's shader draws it already.</b> <see cref="DeepShader"/> takes its
+    /// thickness off the depth buffer and discards where the ground stands over
+    /// the surface - so a sheet cut a little past the waterline is clipped to
+    /// the real one, round, wherever the blurred bank crosses it. Its foam
+    /// along a thin film (<c>lip</c>) is that shore's own; the foam along a
+    /// hex's dry sides (<c>rim_mask</c>) is a honeycomb, and is left off.
+    /// The flanks were the prisms' cut-away pond walls, and a smooth bank has
+    /// none.
+    /// </summary>
+    private void BuildReliefWater(Relief f, Vector3[] corner, float halfX, float halfZ)
+    {
+        _flank.Mesh = null;
+        var hub = new Vector2[MaxWaterCells];
+        var mask = new float[MaxWaterCells];
+        var sink = new float[MaxWaterCells];
+        var low = new Vector2(float.MaxValue, float.MaxValue);
+        var high = new Vector2(float.MinValue, float.MinValue);
+        long wetStamp = 1469598103934665603L;
+        for (int q = 0; q < Field.Columns; q++)
+            for (int r = 0; r < Field.Rows; r++)
+            {
+                var cell = new Vector2I(q, r);
+                if (!Field.IsWater(cell))
+                    continue;
+                int ord = Mathf.Min(Field.WaterIndex(cell), MaxWaterCells - 1);
+                Vector2 flat = Origin + Field.FlatAnchor(cell) + Field.CentreOffset;
+                Vector3 top = World(flat, Field.WaterTop(cell));
+                hub[ord] = new Vector2(top.X, top.Z);
+                sink[ord] = Field.IsDeep(cell) ? 1.0f : 0.0f;
+                wetStamp = (wetStamp ^ (q * 1013 + r)) * 1099511628211L;
+                // the field of waves reaches as far as the sheet may
+                low = new Vector2(Mathf.Min(low.X, top.X - 2 * halfX), Mathf.Min(low.Y, top.Z - 2 * halfZ));
+                high = new Vector2(Mathf.Max(high.X, top.X + 2 * halfX), Mathf.Max(high.Y, top.Z + 2 * halfZ));
+            }
+
+        int nx = f.Nx;
+        float rise = RiseFactor, reach = f.Cell * 3.0f;
+        // which body (its first cell's slot) each point's water belongs to
+        var ord_ = new int[f.Height.Length];
+        for (int p = 0; p < ord_.Length; p++)
+            ord_[p] = float.IsNaN(f.Surface[p]) ? -1 : WaterSlot(f, p);
+        var st = new SurfaceTool();
+        st.Begin(Mesh.PrimitiveType.Triangles);
+        int quads = 0;
+        for (int j = 0; j + 1 < f.Ny; j++)
+            for (int i = 0; i + 1 < nx; i++)
+            {
+                int a = j * nx + i, b = a + 1, c = a + nx, d = c + 1;
+                if (ord_[a] < 0 || ord_[b] < 0 || ord_[c] < 0 || ord_[d] < 0)
+                    continue;
+                // a quad at all near the water: past the waterline by a little,
+                // which the shader clips back to it
+                if (f.Shore[a] > reach && f.Shore[b] > reach && f.Shore[c] > reach && f.Shore[d] > reach)
+                    continue;
+                float level = Mathf.Max(Mathf.Max(f.Surface[a], f.Surface[b]), Mathf.Max(f.Surface[c], f.Surface[d]));
+                int slot = ord_[a];
+                foreach (int p in new[] { a, b, d, a, d, c })
+                {
+                    int pi = p % nx, pj = p / nx;
+                    var at = new Vector3(f.X0 + pi * f.Cell + Origin.X, level / rise, f.Z0 + pj * f.Cell + Origin.Y / Squash);
+                    st.SetColor(Pond);
+                    st.SetUV(new Vector2(at.X / (2.0f * halfX), at.Z / (2.0f * halfZ)));
+                    st.SetUV2(new Vector2(slot, 0.0f));
+                    st.AddVertex(at);
+                }
+                quads++;
+            }
+        if (quads == 0)
+        {
+            _pond.Mesh = null;
+            Wash?.Drain();
+            return;
+        }
+        st.GenerateNormals();
+        _pond.Mesh = st.Commit();
+        Wash?.Fit(new Rect2(low, high - low), Squash, wetStamp,
+                  p => !float.IsNaN(f.Sample(f.Surface, p.X - Origin.X, p.Y - Origin.Y / Squash))
+                       && f.Sample(f.Shore, p.X - Origin.X, p.Y - Origin.Y / Squash) < 0.0f);
+        if (_deepInk is not null)
+        {
+            (Vector2[] normal, float[] stand, float inradius) = Rim(corner);
+            _deepInk.Param("hub", hub);
+            _deepInk.Param("rim_mask", mask);
+            _deepInk.Param("sink", sink);
+            _deepInk.Param("rim_n", normal);
+            _deepInk.Param("rim_d", stand);
+            _deepInk.Param("rim_span", inradius);
+            _deepInk.Param("squash", Squash);
+            _deepInk.Param("rise", RiseFactor);
+        }
+    }
+
+    /// <summary>The water slot a raster point's water belongs to: its own
+    /// hex's if that is water, else the neighbour whose surface it took.</summary>
+    private int WaterSlot(Relief f, int p)
+    {
+        Vector2I c = f.Owner[p];
+        if (c.X < 0)
+            return -1;
+        if (Field.IsWater(c))
+            return Mathf.Min(Field.WaterIndex(c), MaxWaterCells - 1);
+        for (int h = 30; h < 360; h += 60)
+        {
+            Vector2I o = HexField.Step(c, h);
+            if (Field.InBounds(o) && Field.IsWater(o) && Mathf.IsEqualApprox(Field.WaterTop(o), f.Surface[p]))
+                return Mathf.Min(Field.WaterIndex(o), MaxWaterCells - 1);
+        }
+        return -1;
+    }
+
     private static readonly Shader ReliefSoil = new()
     {
         Code = SoilShader
