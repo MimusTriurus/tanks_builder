@@ -195,8 +195,147 @@ public sealed partial class TankModel : Node3D
         model.Bind(scene, json.RootElement);
         if (toon && model.Turret is not null)
             Toon.MarkTurret(model.Turret, model.Cel);
+        model.MergeDebris();
         model.Snapshot();
         return model;
+    }
+
+    /// <summary>The <see cref="Debris"/> as one mesh while the tank is whole
+    /// (<see cref="MergeDebris"/>); null when there is none to merge.</summary>
+    private MeshInstance3D? _debrisMerged;
+
+    /// <summary>
+    /// The debris - skirts, drums, lamps (<c>tank.json</c> <c>debris</c>) -
+    /// made one mesh under the hull, a surface a material, and the pieces
+    /// hidden (BOT-10). They stand still on the hull until the tank dies, and
+    /// one at a time each was a draw call in the cel pass, its ink and the
+    /// shadow splits: 12 of a tank's 37-43 meshes, ~40 draw calls a tank. The
+    /// pieces stay where they are, hidden, for the throw
+    /// (<see cref="LooseDebris"/>).
+    /// </summary>
+    private void MergeDebris()
+    {
+        var groups = new Dictionary<(Material?, long), List<(Godot.Collections.Array Arrays, Transform3D To)>>();
+        var merged = new List<Node3D>();
+        foreach (Piece piece in Debris)
+        {
+            if (piece.Node is not MeshInstance3D { Mesh: { } mesh } m || m.GetParent() != Hull || m.GetChildCount() > 0)
+                continue;
+            for (int s = 0; s < mesh.GetSurfaceCount(); s++)
+            {
+                var key = (mesh.SurfaceGetMaterial(s), (long)((ArrayMesh)mesh).SurfaceGetFormat(s));
+                if (!groups.TryGetValue(key, out var list))
+                    groups[key] = list = new List<(Godot.Collections.Array, Transform3D)>();
+                list.Add((mesh.SurfaceGetArrays(s), m.Transform));
+            }
+            merged.Add(m);
+        }
+        if (merged.Count < 2)
+            return;
+        var one = new ArrayMesh();
+        // the custom channels' formats are the surfaces' own (Toon's ink normal)
+        long customs = 0;
+        for (int c = 0; c < 4; c++)
+            customs |= ((1L << (int)Mesh.ArrayFormat.FormatCustomBits) - 1)
+                       << ((int)Mesh.ArrayFormat.FormatCustom0Shift + c * (int)Mesh.ArrayFormat.FormatCustomBits);
+        foreach (((Material? mat, long format), var parts) in groups)
+        {
+            one.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, Join(parts), null, null,
+                                     (Mesh.ArrayFormat)(format & customs));
+            one.SurfaceSetMaterial(one.GetSurfaceCount() - 1, mat);
+        }
+        _debrisMerged = new MeshInstance3D { Name = "DebrisMerged", Mesh = one };
+        Hull.AddChild(_debrisMerged);
+        _debrisPieces = merged;
+        foreach (Node3D n in merged)
+            n.Visible = false;
+    }
+
+    /// <summary>The pieces <see cref="_debrisMerged"/> stands in for.</summary>
+    private List<Node3D> _debrisPieces = new();
+
+    /// <summary>The debris as the separate pieces (<paramref name="loose"/>:
+    /// the tank is dying, they are thrown) or as the one mesh (whole again).</summary>
+    public void LooseDebris(bool loose)
+    {
+        if (_debrisMerged is null)
+            return;
+        _debrisMerged.Visible = !loose;
+        foreach (Node3D n in _debrisPieces)
+            n.Visible = loose;
+    }
+
+    /// <summary>Surfaces of one format joined, each moved by its own transform
+    /// into the hull's frame: positions, normals, tangents and the ink's
+    /// normal (<c>CUSTOM0</c>, w its width) turned, the rest copied.</summary>
+    private static Godot.Collections.Array Join(List<(Godot.Collections.Array Arrays, Transform3D To)> parts)
+    {
+        var verts = new List<Vector3>();
+        var normals = new List<Vector3>();
+        var tangents = new List<float>();
+        var uv = new List<Vector2>();
+        var uv2 = new List<Vector2>();
+        var colors = new List<Color>();
+        var custom0 = new List<float>();
+        var index = new List<int>();
+        foreach ((Godot.Collections.Array a, Transform3D to) in parts)
+        {
+            Basis turn = to.Basis.Inverse().Transposed();
+            int base_ = verts.Count;
+            Vector3[] v = a[(int)Mesh.ArrayType.Vertex].AsVector3Array();
+            foreach (Vector3 p in v)
+                verts.Add(to * p);
+            if (a[(int)Mesh.ArrayType.Normal].VariantType != Variant.Type.Nil)
+                foreach (Vector3 n in a[(int)Mesh.ArrayType.Normal].AsVector3Array())
+                    normals.Add((turn * n).Normalized());
+            if (a[(int)Mesh.ArrayType.Tangent].VariantType != Variant.Type.Nil)
+            {
+                float[] t = a[(int)Mesh.ArrayType.Tangent].AsFloat32Array();
+                for (int k = 0; k < t.Length; k += 4)
+                {
+                    Vector3 d = (to.Basis * new Vector3(t[k], t[k + 1], t[k + 2])).Normalized();
+                    tangents.AddRange(new[] { d.X, d.Y, d.Z, t[k + 3] });
+                }
+            }
+            if (a[(int)Mesh.ArrayType.TexUV].VariantType != Variant.Type.Nil)
+                uv.AddRange(a[(int)Mesh.ArrayType.TexUV].AsVector2Array());
+            if (a[(int)Mesh.ArrayType.TexUV2].VariantType != Variant.Type.Nil)
+                uv2.AddRange(a[(int)Mesh.ArrayType.TexUV2].AsVector2Array());
+            if (a[(int)Mesh.ArrayType.Color].VariantType != Variant.Type.Nil)
+                colors.AddRange(a[(int)Mesh.ArrayType.Color].AsColorArray());
+            if (a[(int)Mesh.ArrayType.Custom0].VariantType != Variant.Type.Nil)
+            {
+                float[] c = a[(int)Mesh.ArrayType.Custom0].AsFloat32Array();
+                for (int k = 0; k < c.Length; k += 4)
+                {
+                    Vector3 d = turn * new Vector3(c[k], c[k + 1], c[k + 2]);
+                    custom0.AddRange(new[] { d.X, d.Y, d.Z, c[k + 3] });
+                }
+            }
+            if (a[(int)Mesh.ArrayType.Index].VariantType != Variant.Type.Nil)
+                foreach (int i in a[(int)Mesh.ArrayType.Index].AsInt32Array())
+                    index.Add(base_ + i);
+            else
+                for (int i = 0; i < v.Length; i++)
+                    index.Add(base_ + i);
+        }
+        var result = new Godot.Collections.Array();
+        result.Resize((int)Mesh.ArrayType.Max);
+        result[(int)Mesh.ArrayType.Vertex] = verts.ToArray();
+        result[(int)Mesh.ArrayType.Index] = index.ToArray();
+        if (normals.Count == verts.Count)
+            result[(int)Mesh.ArrayType.Normal] = normals.ToArray();
+        if (tangents.Count == verts.Count * 4)
+            result[(int)Mesh.ArrayType.Tangent] = tangents.ToArray();
+        if (uv.Count == verts.Count)
+            result[(int)Mesh.ArrayType.TexUV] = uv.ToArray();
+        if (uv2.Count == verts.Count)
+            result[(int)Mesh.ArrayType.TexUV2] = uv2.ToArray();
+        if (colors.Count == verts.Count)
+            result[(int)Mesh.ArrayType.Color] = colors.ToArray();
+        if (custom0.Count == verts.Count * 4)
+            result[(int)Mesh.ArrayType.Custom0] = custom0.ToArray();
+        return result;
     }
 
     /// <summary>

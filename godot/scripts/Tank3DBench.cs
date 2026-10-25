@@ -1431,6 +1431,7 @@ public sealed partial class Tank3DBench : Node3D
         // from the blast point.
         var rnd = new RandomNumberGenerator { Seed = 3 };
         Vector3 blast = _model.Tank.ToGlobal(_model.BlastAt);
+        _model.LooseDebris(true);
         foreach (TankModel.Piece piece in _model.Debris)
         {
             Node3D n = piece.Node;
@@ -1471,6 +1472,7 @@ public sealed partial class Tank3DBench : Node3D
         foreach (Flying f in _flying)
             f.Node.Visible = true;
         _flying.Clear();
+        _model.LooseDebris(false);
         _model.Visible = true;
         _model.TurretOverride = null;
         _model.Yaw = 0; _model.Elevation = 0; _model.Recoil = 0;

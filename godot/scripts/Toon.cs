@@ -915,10 +915,19 @@ void fragment() {
 ";
 
     /// <summary>A model's rim: the masks and the line, shown and hidden
-    /// together.</summary>
+    /// together.
+    ///
+    /// <b>Off, it is not hung (BOT-10).</b> Off was <c>px</c> 0 and every
+    /// pixel discarded - but the mask and the line still drew on every surface
+    /// of every tank the pointer had once been over: 78-230 draw calls of the
+    /// stress run, ~800 a long match in. Now the ink passes let go of it while
+    /// it is off and take it back as it comes on.</summary>
     public sealed class Rim
     {
         public required ShaderMaterial Mask, TurretMask, Line;
+        /// <summary>The ink passes it hangs on, and what each carries.</summary>
+        public required List<(ShaderMaterial Ink, ShaderMaterial Pass)> Hung;
+        private bool _on = true;
 
         public void Set(float px, Color tint)
         {
@@ -926,6 +935,12 @@ void fragment() {
             TurretMask.Param("px", px);
             Line.Param("px", px);
             Line.Param("tint", tint);
+            bool on = px > 0.0f;
+            if (on == _on)
+                return;
+            _on = on;
+            foreach ((ShaderMaterial ink, ShaderMaterial pass) in Hung)
+                ink.NextPass = on ? pass : null;
         }
     }
 
@@ -947,11 +962,13 @@ void fragment() {
         }
         ShaderMaterial mask = MaskOf(HaloMaskShader), turret = MaskOf(HaloTurretMaskShader);
         var seen = new HashSet<ShaderMaterial>();
+        var hung = new List<(ShaderMaterial, ShaderMaterial)>();
         void Hang(Material? mat)
         {
             if (mat is not ShaderMaterial cel || cel.NextPass is not ShaderMaterial ink || !seen.Add(ink))
                 return;
             ink.NextPass = ink.Shader == InkTurretShader ? turret : mask;
+            hung.Add((ink, (ShaderMaterial)ink.NextPass));
         }
         void Walk(Node node)
         {
@@ -970,7 +987,7 @@ void fragment() {
                 Walk(child);
         }
         Walk(model);
-        return seen.Count > 0 ? new Rim { Mask = mask, TurretMask = turret, Line = line } : null;
+        return seen.Count > 0 ? new Rim { Mask = mask, TurretMask = turret, Line = line, Hung = hung } : null;
     }
 
     private static void Collect(Node node, List<MeshInstance3D> into)
