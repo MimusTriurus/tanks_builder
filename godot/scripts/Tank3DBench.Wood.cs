@@ -156,9 +156,7 @@ public sealed partial class Tank3DBench
             return;
         if (_show.Trees)
             Plant();
-        // the lawn is a flat hexagon a cell; the relief paints its grass
-        // itself until the tufts follow the ground (BOT-11)
-        if (_show.Grass && _relief is null)
+        if (_show.Grass)
             Lawn();
     }
 
@@ -225,7 +223,7 @@ public sealed partial class Tank3DBench
         var lay = new List<Vector2I>();
         for (int q = 0; q < _field!.Columns; q++)
         for (int w = 0; w < _field.Rows; w++)
-            if (BoardDress.Lawned(_field, new Vector2I(q, w)))
+            if (BoardDress.Lawned(_field, new Vector2I(q, w)) || ReliefLawned(new Vector2I(q, w)))
                 lay.Add(new Vector2I(q, w));
         _grass = new Grass3D
         {
@@ -233,6 +231,15 @@ public sealed partial class Tank3DBench
             Recover = GrassRecover,
             GustRate = TreeModel.GustRate, GustTravel = TreeModel.GustTravel, ShadowInk = Stage3D.ShadowInk.A,
         };
+        // on the relief the tufts root on the drawn ground, none under the
+        // water, and the shader paints the lawn under them (Grass3D.Ground)
+        if (_relief is { } relief)
+            _grass.Ground = w =>
+            {
+                Vector2 flat = Board(w);
+                return relief.Sample(relief.Shore, flat.X, flat.Y / Squash) < 0.0f
+                    ? null : relief.HeightAt(flat) / RiseFactor;
+            };
         AddChild(_grass);
         _grass.Map(span);
         ulong t0 = Time.GetTicksMsec();
@@ -252,6 +259,13 @@ public sealed partial class Tank3DBench
         }
         Log.Print($"tank3d: grass on {lay.Count} cells in {Time.GetTicksMsec() - t0} ms");
     }
+
+    /// <summary>On the relief the grass grows over a minefield too: a mine is
+    /// a point in its cell (Mines), and a bare hexagon round it put one cell's
+    /// shape back on the smooth ground.</summary>
+    private bool ReliefLawned(Vector2I cell) =>
+        _relief is not null && _field!.InBounds(cell) && _field.CoverAt(cell) == Cover.Minefield
+        && _field.FoundationAt(cell) == Foundation.Solid && !_field.IsWater(cell);
 
     /// <summary>A frame of the wood: the wind on the crowns, and the grass
     /// pressed under the hulls.</summary>

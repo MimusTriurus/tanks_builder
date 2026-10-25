@@ -499,6 +499,17 @@ public sealed partial class Tank3DBench
         _wallMap = map;
         if (!_show.Walls || _field is null || _stage is null)
             return;
+        // A wall stands on its cell's level, on a flat hexagon; the relief
+        // has neither (BOT-11) - out of the prototype, and said so.
+        if (_relief is not null)
+        {
+            int walled = 0;
+            foreach (Vector2I _ in map.Walled())
+                walled++;
+            if (walled > 0)
+                Log.Print($"tank3d: --relief: {walled} walled cells (walls, capon, bunker) not stood - they want a flat cell");
+            return;
+        }
         BunkerProp.Sizes? bunker = !_show.Bunkers ? null : BunkerProp.ReadSizes();
         foreach (Vector2I cell in map.Walled())
         {

@@ -99,6 +99,21 @@ public sealed partial class Grass3D : Node3D
     /// <c>Tree3D</c>'s board; <c>Tank3D</c> lets it go.</summary>
     public float Recover;
 
+    /// <summary>
+    /// The ground under a world point, world Y, for a board that is not flat
+    /// per cell - the relief's one smooth ground (BOT-11, <c>--relief</c>):
+    /// each tuft roots on it rather than on the cell's one height. Null where
+    /// nothing grows - under water. Unset, every tuft stands on the cell's
+    /// middle, as on the prisms.
+    ///
+    /// <b>And with it no lawn and no cell's edge.</b> The painted lawn is a
+    /// hexagon a cell, and the tufts thin out toward each cell's sides; on
+    /// a ground with no cells in its shape both draw the honeycomb back, so
+    /// the relief's own shader paints the grass under the tufts and the tufts
+    /// run on to the cell's very edge.
+    /// </summary>
+    public Func<Vector3, float?>? Ground;
+
     private readonly List<ShaderMaterial> _inks = new();
 
     /// <summary>A cell of grass, for its fire: its materials, where it is, and
@@ -163,7 +178,8 @@ public sealed partial class Grass3D : Node3D
     {
         _laying = new Meadow { Mid = mid, Radius = radius, Seed = (seed % 97) * 1.37f, Speed = FrontM * Ppm };
         _meadows.Add(_laying);
-        if (kind is Kind.Painted or Kind.PaintedTufts or Kind.CelTufts)
+        // the painted lawn: a hexagon a cell, so not on the relief (Ground)
+        if (kind is Kind.Painted or Kind.PaintedTufts or Kind.CelTufts && Ground is null)
             Put(new MeshInstance3D
             {
                 Name = $"Painted{seed}",
@@ -706,9 +722,16 @@ public sealed partial class Grass3D : Node3D
             else
                 p = new Vector2(rng.RandfRange(-radius, radius), rng.RandfRange(-radius, radius));
             float inside = HexIn(p, radius);
-            float edge = Mathf.SmoothStep(0.0f, fade, inside - 0.2f * fade);
+            float edge = Ground is not null ? 1.0f : Mathf.SmoothStep(0.0f, fade, inside - 0.2f * fade);
             if (inside < 0.0f || rng.Randf() > edge)
                 continue;
+            float rootY = ground.Y;
+            if (Ground is not null)
+            {
+                if (Ground(new Vector3(ground.X + p.X, 0.0f, ground.Z + p.Y)) is not { } y)
+                    continue;
+                rootY = y + Lift;
+            }
             tall *= 0.4f + 0.6f * edge;
             bool blocked = false;
             foreach (Vector2 k in keep)
@@ -716,7 +739,7 @@ public sealed partial class Grass3D : Node3D
             if (blocked)
                 continue;
             placed++;
-            var root = new Vector3(ground.X + p.X, ground.Y, ground.Z + p.Y);
+            var root = new Vector3(ground.X + p.X, rootY, ground.Z + p.Y);
             float h = TuftTallM * Ppm * tall * rng.RandfRange(0.6f, 1.15f);
             float tone = rng.Randf();
             int blades = rng.RandiRange(5, 8);
