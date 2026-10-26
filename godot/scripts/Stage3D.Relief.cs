@@ -786,7 +786,7 @@ vec4 cell_ink(vec2 cr) {
     float bank = length(normalize(ground_n).xz);
     float patch_ = mire_fbm(ground.xz * 0.018 + vec2(7.0, 3.0));
     // none on a terrace's slope: grass on the flats, earth on the banks
-    // (the tufts keep off them too, Tank3DBench.GrassSlope)
+    // (the tufts keep off them too, BoardDress.GrassSlope)
     float flat_ = (1.0 - bare) * (1.0 - COLOR.a) * (1.0 - smoothstep(0.2, 0.32, bank));
     float lawn = flat_ * smoothstep(0.30, 0.42, patch_ + 0.25);
     vec3 turf = mix(grass_ink, grass_tip, smoothstep(0.35, 0.75, mire_fbm(ground.xz * 0.05)));

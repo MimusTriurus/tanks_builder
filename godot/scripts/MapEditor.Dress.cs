@@ -242,9 +242,29 @@ public sealed partial class MapEditor
                 Name = "Grass", Ppm = _lawnPpm,
                 GustRate = TreeModel.GustRate, GustTravel = TreeModel.GustTravel, ShadowInk = Stage3D.ShadowInk.A,
             };
+            // on the relief the tufts root on the drawn ground and keep off
+            // its banks, as on the bench (BoardDress.ReliefGround); the
+            // relief is asked when a tuft is laid, so the one built last
+            _lawn.Ground = w =>
+            {
+                var flat = new Vector2(w.X, w.Z * _field.Squash);
+                return _relief is { } relief && _stage is not null
+                    ? BoardDress.ReliefGround(relief, flat - _stage.Origin, _field.RiseFactor)
+                    : _field.TopAtPoint(flat) / _field.RiseFactor;
+            };
             AddChild(_lawn);
             _lawn.Map(BoardDress.LawnSpan(_field, radius, squash, rise));
             due = _dressedAs.Keys;
+        }
+        else
+        {
+            // A bank is smoothed across the cells beside the one that moved:
+            // their tufts are laid again on it too.
+            var near = new HashSet<Vector2I>(moved);
+            foreach (Vector2I cell in moved)
+                foreach (int heading in HexField.EdgeHeadings)
+                    near.Add(_field.Neighbour(cell, heading));
+            due = near.Where(_dressedAs.ContainsKey);
         }
         // Under the bench's veil the first lawn goes down a few cells a frame
         // (LawnMore), so the bar moves: it is a second and a half of the

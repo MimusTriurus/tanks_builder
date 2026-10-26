@@ -303,6 +303,24 @@ void light() {
         && field.FoundationAt(cell) == Foundation.Solid && !field.IsRamp(cell) && !field.IsWater(cell)
         && field.CoverAt(cell) is Cover.None or Cover.Forest;
 
+    /// <summary>The steepest ground a tuft roots on, as the slope's rise over
+    /// its run: a terrace's bank runs about 1, its flat top under 0.1.</summary>
+    public const float GrassSlope = 0.35f;
+
+    /// <summary>
+    /// Where a tuft roots on the relief (<see cref="Grass3D.Ground"/>), world
+    /// Y, at a flat point of the relief's own field: none under water, none on
+    /// the rock or up its wall, and none on a terrace's slope - grass on the
+    /// flats, earth on the banks. The bench's and the editor's one rule: the
+    /// editor's tufts stood on their cell's one height, and a pit's banks
+    /// stayed grassed over, the pit read as a mound (2026-10-26).
+    /// </summary>
+    public static float? ReliefGround(Relief relief, Vector2 flat, float rise) =>
+        relief.Sample(relief.Shore, flat.X, flat.Y / relief.Squash) < 0.0f
+        || relief.Sample(relief.Cliff, flat.X, flat.Y / relief.Squash) > 0.12f
+        || relief.Steepness(flat, rise) > GrassSlope
+            ? null : relief.HeightAt(flat) / rise;
+
     /// <summary>The span the grass's press map covers - every cell's square of
     /// <paramref name="radius"/>, world XZ.</summary>
     public static Rect2 LawnSpan(HexField field, float radius, float squash, float rise)
