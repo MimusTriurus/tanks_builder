@@ -48,6 +48,13 @@ public sealed partial class Stage3D
 
     private bool _showBrow;
 
+    /// <summary>How far under a level's top the brow runs, in levels. At the
+    /// bench's 0.15 a pit's near bank, which faces away from the camera, hides
+    /// its line behind the rim; at 0.04 the line closes round the whole rim,
+    /// and under that the ground's own noise speckles the flats (measured on
+    /// a pit, 2026-10-26). The editor's is 0.04.</summary>
+    public float BrowBelow { get; set; } = 0.15f;
+
     /// <summary>The lawn photograph on the flats instead of the painted
     /// patches (<see cref="AssetRoot.Ground"/>, <c>grass_basecolor.jpg</c>).
     /// Off by default (the user went back to the painted grass); <c>--lawn</c>
@@ -407,6 +414,7 @@ void fragment() {
         ink.Param("level_world", Field.Lift / RiseFactor);
         ink.Param("level_base", f.LevelBase);
         ink.Param("brow_on", ShowBrow ? 1.0f : 0.0f);
+        ink.Param("brow_below", BrowBelow);
         if (Lawn() is { } lawn)
         {
             ink.Param("lawn_tex", lawn);

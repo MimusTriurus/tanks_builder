@@ -403,6 +403,11 @@ public sealed partial class MapEditor : SceneRoot
             Blaze = _fire, Surf = _surf, Sea = _sea,
             // the 3D bench's water and relief (Tank3DBench.BuildBoard)
             CelWater = true, CelRelief = true,
+            // the brow at each terrace's rim: the bench keeps it off (--brow),
+            // but a board being drawn wants its levels read at a glance - a
+            // pit's near bank faces away from the camera, and the line runs
+            // close under the rim to close round it there too (2026-10-26)
+            ShowBrow = true, BrowBelow = 0.04f,
         };
         AddChild(_stage);
         Dress();
