@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using Godot;
 
 namespace TankSpriteTest;
@@ -149,7 +150,7 @@ public sealed partial class Tank3DBench
     /// <summary>The bench's <see cref="BuildParked"/> for a match: the rig is
     /// the first green unit, every other unit of the line-up standing on its
     /// home, facing the way the home says.</summary>
-    private void BuildSides()
+    private async Task BuildSides()
     {
         if (_field is null)
             return;
@@ -161,8 +162,10 @@ public sealed partial class Tank3DBench
                 Heading = HeadingFor(CellHere, u.Facing);
                 continue;
             }
-            if (_field.InBounds(u.Cell))
-                Stand(u.Model, u.Cell, HeadingFor(u.Cell, u.Facing), SideOf(u));
+            if (!_field.InBounds(u.Cell))
+                continue;
+            await TankStage(u.Model, i, _lineup.Count);
+            Stand(u.Model, u.Cell, HeadingFor(u.Cell, u.Facing), SideOf(u));
         }
         Log.Print($"tank3d: match: {SideName(_side)} {_modelTag} {MapAt(CellHere)} on the rig; standing "
                  + string.Join(", ", _parked.Select(p => $"{SideName(p.Side)} {p.Tag} {MapAt(p.Cell)}")));

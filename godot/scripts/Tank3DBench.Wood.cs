@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading.Tasks;
 using Godot;
 
 namespace TankSpriteTest;
@@ -150,14 +151,14 @@ public sealed partial class Tank3DBench
 
     /// <summary>The trees and then the grass round their trunks; after the
     /// camera, which carries the crowns' line.</summary>
-    private void BuildWood()
+    private async Task BuildWood()
     {
         if (_field is null || _tile is null)
             return;
         if (_show.Trees)
-            Plant();
+            await Plant();
         if (_show.Grass)
-            Lawn();
+            await Lawn();
     }
 
     /// <summary>
@@ -165,7 +166,7 @@ public sealed partial class Tank3DBench
     /// <see cref="BoardDress.Spots"/> lays them - the editor's board plants the
     /// same wood - each made a <see cref="Planted"/> with its fire and its fall.
     /// </summary>
-    private void Plant()
+    private async Task Plant()
     {
         List<Vector2I> wooded = BoardDress.Wooded(_field!);
         if (wooded.Count == 0)
@@ -182,9 +183,20 @@ public sealed partial class Tank3DBench
             _crowns.Build(_camera);
         }
         ulong t0 = Time.GetTicksMsec();
-        foreach (Vector2I cell in wooded)
-            foreach (BoardDress.TreeSpot spot in BoardDress.Spots(_field!, cell, _treeNames, _woodCount, Squash))
+        for (int i = 0; i < wooded.Count; i++)
+        {
+            // a stage every few cells, the lawn's reason (LawnStage): a
+            // wooded board stood a tree model at a time for three seconds
+            if (i % WoodStage == 0)
+            {
+                ulong held = Time.GetTicksMsec();
+                await Loading.Stage(this, $"trees on {i} of {wooded.Count} cells",
+                                    0.15f + 0.2f * i / wooded.Count);
+                t0 += Time.GetTicksMsec() - held;
+            }
+            foreach (BoardDress.TreeSpot spot in BoardDress.Spots(_field!, wooded[i], _treeNames, _woodCount, Squash))
                 Stand(spot);
+        }
         foreach (Vector2I cell in wooded)
             _woodMiddle += CellMiddle(cell) / wooded.Count;
         Log.Print($"tank3d: wood on {wooded.Count} cells, {_trees.Count} trees in {Time.GetTicksMsec() - t0} ms");
@@ -216,7 +228,7 @@ public sealed partial class Tank3DBench
     /// <see cref="BoardDress.Lawned"/> grows on - the tufts keeping off the
     /// trunks - at the trees' metre, and one press map over the board.
     /// </summary>
-    private void Lawn()
+    private async Task Lawn()
     {
         float r = _tile!.HexRect.Size.X * 0.5f;
         Rect2 span = BoardDress.LawnSpan(_field!, r, Squash, RiseFactor);
@@ -249,6 +261,16 @@ public sealed partial class Tank3DBench
         ulong t0 = Time.GetTicksMsec();
         for (int i = 0; i < lay.Count; i++)
         {
+            // a stage every few cells: the lawn is the longest single piece
+            // of the build (about 15 ms a cell), and one stage of it was a
+            // bar standing still for a second and a half (Loading.Stage)
+            if (i % LawnStage == 0)
+            {
+                ulong held = Time.GetTicksMsec();
+                await Loading.Stage(this, $"grass {i} of {lay.Count} cells",
+                                    0.35f + 0.25f * i / lay.Count);
+                t0 += Time.GetTicksMsec() - held;
+            }
             Vector3 mid = CellMiddle(lay[i]);
             var trunks = new List<Vector3>();
             foreach (Planted t in _trees)
@@ -263,6 +285,12 @@ public sealed partial class Tank3DBench
         }
         Log.Print($"tank3d: grass on {lay.Count} cells in {Time.GetTicksMsec() - t0} ms");
     }
+
+    /// <summary>Wooded cells planted between two stages of the build.</summary>
+    private const int WoodStage = 1;
+
+    /// <summary>Cells of grass laid between two stages of the build.</summary>
+    private const int LawnStage = 16;
 
     /// <summary>The steepest ground a tuft roots on, as the slope's rise over
     /// its run: a terrace's bank runs about 1, its flat top under 0.1.</summary>

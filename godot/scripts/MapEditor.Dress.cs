@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Godot;
@@ -238,21 +239,72 @@ public sealed partial class MapEditor
             _lawn.Map(BoardDress.LawnSpan(_field, radius, squash, rise));
             due = _dressedAs.Keys;
         }
+        // Under the bench's veil the first lawn goes down a few cells a frame
+        // (LawnMore), so the bar moves: it is a second and a half of the
+        // editor's way back, and the veil's bar stood still through all of it.
+        if (!_lawnLoaded && Loading.Veiled)
+        {
+            _lawnDue.AddRange(due);
+            _lawnLaying = (radius, squash, rise);
+            _lawnTotal = _lawnDue.Count;
+            return 0;
+        }
         int laid = 0;
         foreach (Vector2I cell in due)
-        {
-            if (_lawnOn.Remove(cell, out int was))
-                _lawn.TakeUp(was);
-            if (!BoardDress.Lawned(_field, cell))
-                continue;
-            var trunks = new List<Vector3>();
-            if (_woodOn.TryGetValue(cell, out List<(Node3D Holder, Vector3 At)>? wood))
-                foreach ((Node3D holder, Vector3 _) in wood)
-                    trunks.Add(holder.Position);
-            _lawnOn[cell] = _lawn.Lay(Grass3D.Kind.CelTufts, BoardDress.Middle(_field, cell, squash, rise), radius,
-                                      101 + cell.X * 31 + cell.Y, trunks);
-            laid++;
-        }
+            if (LawnCell(cell, radius, squash, rise))
+                laid++;
         return laid;
+    }
+
+    private bool LawnCell(Vector2I cell, float radius, float squash, float rise)
+    {
+        if (_lawnOn.Remove(cell, out int was))
+            _lawn!.TakeUp(was);
+        if (!BoardDress.Lawned(_field, cell))
+            return false;
+        var trunks = new List<Vector3>();
+        if (_woodOn.TryGetValue(cell, out List<(Node3D Holder, Vector3 At)>? wood))
+            foreach ((Node3D holder, Vector3 _) in wood)
+                trunks.Add(holder.Position);
+        _lawnOn[cell] = _lawn!.Lay(Grass3D.Kind.CelTufts, BoardDress.Middle(_field, cell, squash, rise), radius,
+                                   101 + cell.X * 31 + cell.Y, trunks);
+        return true;
+    }
+
+    /// <summary>The first lawn is down, or was never waited for: the veil
+    /// lifts after it, and every later lawn is laid whole, as a stroke
+    /// wants it.</summary>
+    private bool _lawnLoaded;
+
+    private readonly List<Vector2I> _lawnDue = new();
+    private (float Radius, float Squash, float Rise) _lawnLaying;
+    private int _lawnTotal;
+
+    /// <summary>Cells of the first lawn laid a frame under the veil.</summary>
+    private const int LawnStage = 16;
+
+    /// <summary>
+    /// A frame's share of the first lawn under the veil, and the veil told
+    /// once it is all down (<see cref="Loading.Built"/>). Opened straight,
+    /// nothing was queued and this only says the build is over.
+    /// </summary>
+    private void LawnMore()
+    {
+        if (_lawnLoaded)
+            return;
+        if (_lawnDue.Count == 0)
+        {
+            _lawnLoaded = true;
+            Loading.Built(this);
+            return;
+        }
+        int laid = _lawnTotal - _lawnDue.Count;
+        Loading.Step(this, $"grass {laid} of {_lawnTotal} cells", 0.4f + 0.6f * laid / _lawnTotal);
+        int n = Math.Min(LawnStage, _lawnDue.Count);
+        (float radius, float squash, float rise) = _lawnLaying;
+        for (int i = 0; i < n; i++)
+            LawnCell(_lawnDue[i], radius, squash, rise);
+        _lawnDue.RemoveRange(0, n);
+        Loading.Rest();
     }
 }

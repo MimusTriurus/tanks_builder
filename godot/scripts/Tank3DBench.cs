@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Threading.Tasks;
 using Godot;
 
 namespace TankSpriteTest;
@@ -220,8 +221,35 @@ public sealed partial class Tank3DBench : Node3D
     private const float SlewDeg = 240.0f;
     private const float ElevDeg = 20.0f;
 
-    public override void _Ready()
+    public override void _Ready() => _ = Build();
+
+    /// <summary>The bench is built: until then the frame and the input wait.
+    /// Only ever false across frames under the editor's veil
+    /// (<see cref="Loading.Stage"/>); launched straight, the build is over
+    /// before <c>_Ready</c> returns.</summary>
+    private bool _built;
+
+    /// <summary>The bench, built in stages the editor's veil shows a bar for
+    /// (<see cref="Loading"/>).</summary>
+    private async Task Build()
     {
+        try
+        {
+            await Building();
+        }
+        catch (Exception e)
+        {
+            // An async build throws into its task, where nobody looks: said
+            // here, and the veil let go of, rather than a black screen.
+            GD.PrintErr($"tank3d: the build threw: {e}");
+        }
+        _built = true;
+        Loading.Built(this);
+    }
+
+    private async Task Building()
+    {
+        await Loading.Stage(this, "tile and world", 0.0f);
         ReadFlags();
         _models = ModelsOnDisk();
         _rig = new Node3D { Name = "Rig" };
@@ -232,6 +260,7 @@ public sealed partial class Tank3DBench : Node3D
 
         GetViewport().Msaa3D = Viewport.Msaa.Msaa4X;
         BuildWorld();
+        await Loading.Stage(this, "board", 0.04f);
         if (!_flat)
             BuildBoard();
         // After the board: the stage makes its own camera current as it enters
@@ -239,12 +268,15 @@ public sealed partial class Tank3DBench : Node3D
         BuildCamera();
         if (_field is null)
             BuildGround();
-        BuildWood();
+        await Loading.Stage(this, "trees", 0.12f);
+        await BuildWood();
+        await Loading.Stage(this, "mines and marks", 0.6f);
         BuildMines();
         BuildMarks();
+        await Loading.Stage(this, $"tank: {_modelTag}", 0.62f);
         Park();
         Mount(_modelTag);
-        BuildParked();
+        await BuildParked();
         if (_otherWanted)
         {
             if (_otherCell is Vector2I at)
@@ -256,6 +288,7 @@ public sealed partial class Tank3DBench : Node3D
         else if (_targetDefault)
             StandTarget();
 
+        await Loading.Stage(this, "panels", 0.9f);
         var layer = new CanvasLayer();
         AddChild(layer);
         _hud = new Label { Position = new Vector2(12, 8), Modulate = new Color(1, 1, 1, 0.85f), Visible = !_noUi };
@@ -1601,6 +1634,9 @@ public sealed partial class Tank3DBench : Node3D
 
     public override void _Process(double delta)
     {
+        // a bench still building under the editor's veil (Build)
+        if (!_built)
+            return;
         // the frame before closed (Prof), before anything of this one is measured
         PerfTick(delta);
         // The way back, before the capture - the harness's order: the picture
@@ -1977,6 +2013,8 @@ public sealed partial class Tank3DBench : Node3D
 
     public override void _UnhandledInput(InputEvent @event)
     {
+        if (!_built)
+            return;
         if (@event is InputEventMouseButton { ButtonIndex: MouseButton.Right, Pressed: true } click)
         {
             AimAt(click.Position);

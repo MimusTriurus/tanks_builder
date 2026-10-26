@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using Godot;
 
 namespace TankSpriteTest;
@@ -141,8 +142,36 @@ public sealed partial class MapEditor : SceneRoot
 
     // --- setup ---------------------------------------------------------------
 
-    public override void _Ready()
+    public override void _Ready() => _ = Build();
+
+    /// <summary>The editor is built: until then the frame and the input
+    /// wait. Only ever false across frames under the bench's veil
+    /// (<see cref="Loading.Stage"/>); opened straight, the build is over
+    /// before <c>_Ready</c> returns. The veil lifts later still, when the
+    /// first dressing has laid its grass (MapEditor.Dress, <c>LawnMore</c>).</summary>
+    private bool _built;
+
+    /// <summary>The editor, built in stages the veil shows a bar for
+    /// (<see cref="Loading"/>).</summary>
+    private async Task Build()
     {
+        try
+        {
+            await Building();
+        }
+        catch (Exception e)
+        {
+            // An async build throws into its task, where nobody looks: said
+            // here, and the veil let go of, rather than a dark window.
+            GD.PrintErr($"editor: the build threw: {e}");
+            Loading.Built(this);
+        }
+        _built = true;
+    }
+
+    private async Task Building()
+    {
+        await Loading.Stage(this, "map", 0.0f);
         int newColumns = 0, newRows = 0;
         string[] args = OS.GetCmdlineUserArgs();
         for (int i = 0; i < args.Length; i++)
@@ -252,6 +281,7 @@ public sealed partial class MapEditor : SceneRoot
             _open = "";
         }
 
+        await Loading.Stage(this, "terrain and tile", 0.05f);
         TerrainSet terrain = TerrainSet.Load(AssetRoot.Terrains);
         AtlasSet? tile = null;
         try
@@ -293,14 +323,19 @@ public sealed partial class MapEditor : SceneRoot
                                       MapEdit.DefaultRows);
         }
 
-        PropSet props = PropSet.Load(AssetRoot.Props);
-        GD.Print("editor: props " + props.Note);
+        await Loading.Stage(this, "board", 0.1f);
+        // The 2D props are not loaded, only looked for: the wood on this board
+        // is MapEditor.Dress's models and the grove below is asked, never
+        // drawn - and decoding its sprite art was five of the seven seconds
+        // the editor took to open (2026-10-26). Whether there is any still
+        // matters: the field's Trees reads it.
+        bool props = PropSet.Present(AssetRoot.Props);
 
         _field = new HexField
         {
             Atlas = tile,
             Terrain = terrain,
-            Trees = props.Any,
+            Trees = props,
             Columns = _edit.Columns,
             Rows = _edit.Rows,
             Ink = Painted,
@@ -323,8 +358,8 @@ public sealed partial class MapEditor : SceneRoot
 
         _grove = new Grove
         {
-            Field = _field, Props = props, Origin = Vector2.Zero,
-            Enabled = props.Any,
+            Field = _field, Props = null, Origin = Vector2.Zero,
+            Enabled = props,
         };
         AddChild(_grove);
         // After the wood, because what can catch is what is standing - see
@@ -345,6 +380,7 @@ public sealed partial class MapEditor : SceneRoot
         }
         _sea = new Swell { Field = _board };
 
+        await Loading.Stage(this, "stage", 0.2f);
         _stage = new Stage3D
         {
             Field = _board, Origin = Vector2.Zero, Eye = _camera,
@@ -373,6 +409,7 @@ public sealed partial class MapEditor : SceneRoot
         _marks = new Overlay { Editor = this };
         marking.AddChild(_marks);
 
+        await Loading.Stage(this, "panels and rules", 0.3f);
         SettleForProof(CapturePath is not null);
         Ui();
         Settle();
@@ -418,8 +455,12 @@ public sealed partial class MapEditor : SceneRoot
     /// </summary>
     public override void _Process(double delta)
     {
+        // an editor still building under the veil (Build)
+        if (!_built)
+            return;
         _stage?.Place(Array.Empty<Vehicle>());
         Redress();
+        LawnMore();
         Tanks();
         TurnProbe();
         UnitsProbe();
@@ -1188,6 +1229,8 @@ public sealed partial class MapEditor : SceneRoot
 
     public override void _UnhandledInput(InputEvent what)
     {
+        if (!_built)
+            return;
         if (what is InputEventMouseMotion pan
             && (pan.ButtonMask & MouseButtonMask.Middle) != 0)
         {
