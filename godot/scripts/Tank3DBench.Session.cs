@@ -133,6 +133,6 @@ public sealed partial class Tank3DBench
         Session.Map = _mapName;
         Session.Editing = false;
         Log.Print($"tank3d: back to the editor on {_mapName}");
-        GetTree().ChangeSceneToFile("res://Editor.tscn");
+        Loading.Go(GetTree(), "res://Editor.tscn", $"Back to the editor: {_mapName}…");
     }
 }

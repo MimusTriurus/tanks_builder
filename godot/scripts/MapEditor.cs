@@ -1469,7 +1469,8 @@ public sealed partial class MapEditor : SceneRoot
         GD.Print($"editor: running {_edit.Name} " + (match ? "as a match" : "on the 3D bench"));
         // a match is the same bench with its root's Match set (Match3D.tscn):
         // two sides off the board's homes, Tank3DBench.LineUpSides
-        GetTree().ChangeSceneToFile(match ? "res://Match3D.tscn" : "res://Tank3D.tscn");
+        Loading.Go(GetTree(), match ? "res://Match3D.tscn" : "res://Tank3D.tscn",
+                   (match ? "Match on " : "Loading ") + _edit.Name + "…");
     }
 
     /// <summary>
