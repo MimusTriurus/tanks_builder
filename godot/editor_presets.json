@@ -1,0 +1,53 @@
+{
+  "//": "The map editor's preset brushes (Presets tab, docs/editor.md). Read when the tab is opened, so a preset added here needs no build. Each preset is layers laid in order; a layer paints the brush's own cells (ring core) or the ring just outside them (ring edge), on every cell or on a share of them (chance). floor: solid, sand, mud, rock, deep; water: true or false; cover: none, forest, trench, minefield; level: -1, 0, 1.",
+  "presets": [
+    {
+      "name": "pond",
+      "say": "deep water to the brim, a ford round it",
+      "layers": [
+        { "ring": "core", "floor": "deep" },
+        { "ring": "edge", "water": true }
+      ]
+    },
+    {
+      "name": "ford",
+      "say": "shallow water a tank wades",
+      "layers": [
+        { "ring": "core", "water": true }
+      ]
+    },
+    {
+      "name": "hill",
+      "say": "a level up; the relief slopes its sides",
+      "layers": [
+        { "ring": "core", "level": 1 }
+      ]
+    },
+    {
+      "name": "wooded hill",
+      "say": "a level up with a wood on it",
+      "layers": [
+        { "ring": "core", "level": 1 },
+        { "ring": "core", "cover": "forest" }
+      ]
+    },
+    {
+      "name": "swamp",
+      "say": "mud with water standing in a third of it",
+      "layers": [
+        { "ring": "core", "floor": "mud" },
+        { "ring": "core", "water": true, "chance": 0.35 }
+      ]
+    },
+    {
+      "name": "clearing",
+      "say": "plain ground at the datum, nothing on it",
+      "layers": [
+        { "ring": "core", "cover": "none" },
+        { "ring": "core", "water": false },
+        { "ring": "core", "floor": "solid" },
+        { "ring": "core", "level": 0 }
+      ]
+    }
+  ]
+}

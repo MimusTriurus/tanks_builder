@@ -40,7 +40,7 @@ public sealed partial class MapEditor
     private TabBar _tabs = null!;
     private VBoxContainer _choices = null!;
     private Label _brushSays = null!;
-    private Button _selectButton = null!;
+    private readonly Dictionary<Instrument, Button> _toolButtons = new();
     private OptionButton _symmetryPick = null!;
     private readonly List<Button> _picks = new();
     private readonly Dictionary<Layers, CheckBox> _switches = new();
@@ -58,7 +58,7 @@ public sealed partial class MapEditor
     private Vector2I _picked = new(-1, -1);
 
     // the four tabs' width, unclipped: what the report and the readout start past
-    private const float LeftWide = 258.0f;
+    private const float LeftWide = 282.0f;
     private const float RightWide = 254.0f;
     private const float PanelTop = 44.0f;
 
@@ -74,12 +74,43 @@ public sealed partial class MapEditor
         var box = new VBoxContainer();
         frame.AddChild(box);
 
+        // The toolbar first: how, over every tab; the tabs under it say with
+        // what (MapEditor.Tools).
+        var tools = new GridContainer { Columns = 3 };
+        var toolGroup = new ButtonGroup();
+        foreach ((Instrument tool, string face) in new[]
+                 {
+                     (Instrument.Brush, "brush"), (Instrument.Line, "line"), (Instrument.Box, "box  U"),
+                     (Instrument.Fill, "fill  G"), (Instrument.Select, "select  R"), (Instrument.Pick, "pick  I"),
+                 })
+        {
+            Instrument which = tool;
+            var button = new Button
+            {
+                Text = face, ToggleMode = true, ButtonGroup = toolGroup,
+                SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+            };
+            button.AddThemeFontSizeOverride("font_size", 13);
+            button.Pressed += () =>
+            {
+                if (_loading)
+                    return;
+                Use(which);
+                Say();
+            };
+            _toolButtons[which] = button;
+            tools.AddChild(button);
+        }
+        box.AddChild(tools);
+
         // Four tabs in the panel's width, none scrolled off: unclipped, a point
         // smaller than the palette
         _tabs = new TabBar { ClipTabs = false };
         _tabs.AddThemeFontSizeOverride("font_size", 12);
+        // Foundation as Floor on the bar - the readout's own word for it - so
+        // that five tabs fit the panel's width (Presets, MapEditor.Tools)
         foreach (MapEdit.Tab tab in Enum.GetValues<MapEdit.Tab>())
-            _tabs.AddTab(tab.ToString());
+            _tabs.AddTab(tab == MapEdit.Tab.Foundation ? "Floor" : tab.ToString());
         _tabs.CurrentTab = (int)_tab;
         _tabs.TabChanged += index =>
         {
@@ -107,18 +138,6 @@ public sealed partial class MapEditor
         brush.AddChild(_brushSays);
         brush.AddChild(Step("+", () => _radius = Math.Min(6, _radius + 1)));
         box.AddChild(brush);
-        // the select tool, beside the brush rather than on a tab: it marks
-        // cells whatever the tab (MapEditor.Select)
-        _selectButton = new Button { Text = "select   R", ToggleMode = true };
-        _selectButton.AddThemeFontSizeOverride("font_size", 14);
-        _selectButton.Toggled += on =>
-        {
-            if (_loading)
-                return;
-            SelectTool(on);
-            Say();
-        };
-        box.AddChild(_selectButton);
         // the symmetric brush, P on the keys (MapEditor.Symmetry)
         // not as wide as its longest item, which pushed the panel over the board
         _symmetryPick = new OptionButton { FitToLongestItem = false, ClipText = true };
@@ -248,6 +267,16 @@ public sealed partial class MapEditor
                     () => { _cover = Cover.Walls; _bunker = true; },
                     () => _bunker));
                 return covers;
+            case MapEdit.Tab.Presets:
+                // off editor_presets.json (MapEditor.Tools); its own words beside each
+                if (_presets.Count == 0)
+                    return new (string, Action, Func<bool>)[]
+                    {
+                        ("(no presets - " + (_presetsSay.Length > 0 ? _presetsSay : "the file is empty") + ")",
+                            () => { }, () => false),
+                    };
+                return _presets.Select((p, i) => (p.Name,
+                    (Action)(() => _preset = i), (Func<bool>)(() => _preset == i))).ToList();
             case MapEdit.Tab.Units:
                 // A side's five, then the other's: Lineup.Pairs' order, the
                 // roster's, so Q walks green LT to brown HM
@@ -293,6 +322,10 @@ public sealed partial class MapEditor
     /// <summary>Lay out the buttons for the tab that is up.</summary>
     private void Choices()
     {
+        // the presets file read again each time its tab is laid out, so an
+        // edit to it needs no build (MapEditor.Tools)
+        if (_tab == MapEdit.Tab.Presets)
+            ReadPresets();
         _laid = _tab;
         foreach (Node was in _choices.GetChildren())
         {
@@ -324,8 +357,10 @@ public sealed partial class MapEditor
                 if (_loading)
                     return;
                 chose();
-                // a brush picked is the brush in hand, not the select tool
-                _selectTool = false;
+                // a brush picked is in hand: the select tool and the
+                // eyedropper give way, the line, box and fill keep it
+                if (_instrument is Instrument.Select or Instrument.Pick)
+                    _instrument = Instrument.Brush;
                 Say();
             };
             _picks.Add(button);
@@ -365,7 +400,8 @@ public sealed partial class MapEditor
             for (int i = 0; i < _picks.Count; i++)
                 _picks[i].ButtonPressed = brushes[i].On();
         _brushSays.Text = $"brush {_radius}";
-        _selectButton.ButtonPressed = _selectTool;
+        foreach ((Instrument tool, Button button) in _toolButtons)
+            button.ButtonPressed = tool == _instrument;
         _symmetryPick.Selected = _symmetryPick.GetItemIndex((int)_symmetry);
         foreach ((Layers which, CheckBox check) in _switches)
             check.ButtonPressed = _layers.HasFlag(which);

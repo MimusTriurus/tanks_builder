@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using Godot;
 
 namespace TankSpriteTest;
@@ -66,10 +67,23 @@ public sealed partial class MapEditor
             (MapEdit.Tab.Level, "level -1") => Prism(Grass, -1),
             (MapEdit.Tab.Level, "ramp") => Prism(Grass, 0, ramp: true),
             (MapEdit.Tab.Units, string unit) => TankIcon(unit),
+            (MapEdit.Tab.Presets, string preset) => PresetIcon(preset),
             _ => null,
         };
         _icons[key] = made;
         return made;
+    }
+
+    /// <summary>A preset's icon: the cell its core makes of plain ground, in
+    /// the ghost's colours (MapEditor.Tools) - the file names no picture.</summary>
+    private Texture2D? PresetIcon(string name)
+    {
+        if (_presets.FirstOrDefault(p => p.Name == name) is not { } preset)
+            return null;
+        MapEdit cell = MapEdit.Blank("icon", 1, 1);
+        MapPresets.Lay(cell, preset, new[] { Vector2I.Zero });
+        MapFile.Glyph g = cell.GlyphAt(Vector2I.Zero);
+        return Prism(Tint(g.Letter), g.Cliff ? 2 : g.Level, puddle: g.Floor == Foundation.Mud);
     }
 
     /// <summary>

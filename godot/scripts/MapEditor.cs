@@ -219,6 +219,7 @@ public sealed partial class MapEditor : SceneRoot
                     "cover" => MapEdit.Tab.Cover,
                     "level" => MapEdit.Tab.Level,
                     "units" => MapEdit.Tab.Units,
+                    "presets" => MapEdit.Tab.Presets,
                     _ => MapEdit.Tab.Foundation,
                 };
             else if (args[i] == "--radius" && i + 1 < args.Length
@@ -496,6 +497,7 @@ public sealed partial class MapEditor : SceneRoot
         ClipProbe();
         SymmetryProbe();
         BoardProbe();
+        ToolsProbe();
         AutosaveTick(delta);
         CrownsFollow();
         Turn((float)delta);
@@ -1159,7 +1161,7 @@ public sealed partial class MapEditor : SceneRoot
         // a tank stands on one cell whatever the radius; selecting, the
         // pointer paints nothing (MapEditor.Select)
         _edit.Inside(_under) && !Selecting
-            ? _edit.Ring(_under, _tab == MapEdit.Tab.Units ? 0 : _radius)
+            ? _edit.Ring(_under, _tab == MapEdit.Tab.Units || _instrument == Instrument.Pick ? 0 : _radius)
             : Array.Empty<Vector2I>();
 
     /// <summary>The cells a stroke would write: the brush's and, with a
@@ -1311,6 +1313,9 @@ public sealed partial class MapEditor : SceneRoot
         // the select tool and a piece in hand take the pointer (MapEditor.Select)
         if (SelectInput(what))
             return;
+        // the line, the box, fill, pick and shift+click (MapEditor.Tools)
+        if (ToolInput(what))
+            return;
 
         if (what is InputEventMouseMotion move)
         {
@@ -1437,6 +1442,11 @@ public sealed partial class MapEditor : SceneRoot
             case Key.B: _layers ^= Layers.Flood; break;
             // MapEditor.Symmetry: off, half a turn, the two mirrors
             case Key.P: NextSymmetry(); break;
+            // MapEditor.Tools: the toolbar's free keys, the presets' tab
+            case Key.U: Use(Instrument.Box); break;
+            case Key.G: Use(Instrument.Fill); break;
+            case Key.I: Use(Instrument.Pick); break;
+            case Key.Key5: _tab = MapEdit.Tab.Presets; break;
             case Key.Home: Home(); return;
             // MapEditor.View: the board turned a hex side either way.
             case Key.Comma: TurnBy(1); return;
@@ -1485,17 +1495,28 @@ public sealed partial class MapEditor : SceneRoot
         if (_tab == MapEdit.Tab.Units && !started)
             return;
         if (started)
+        {
             _edit.Begin();
+            // where shift+click draws a line from (MapEditor.Tools)
+            _lastPainted = _under;
+        }
 
-        IReadOnlyList<Vector2I> own = Own();
-        var refused = new List<string>(_erasing
-            ? _edit.Sweep(own, c => (_edit.Erase(c, _tab, out string why), why))
-            : _edit.Sweep(own, Write));
-        // and again on the twins, when a symmetry is up (MapEditor.Symmetry)
-        List<Vector2I> twins = Twins(own);
-        refused.AddRange(_erasing
-            ? _edit.Sweep(twins, c => (_edit.Erase(c, _tab, out string why), why))
-            : _edit.Sweep(twins, WriteTwin));
+        List<string> refused;
+        if (_tab == MapEdit.Tab.Presets && !_erasing)
+            // a preset lays core and edge together (MapEditor.Tools)
+            refused = PresetStep(started);
+        else
+        {
+            IReadOnlyList<Vector2I> own = Own();
+            refused = new List<string>(_erasing
+                ? _edit.Sweep(own, c => (_edit.Erase(c, _tab, out string why), why))
+                : _edit.Sweep(own, Write));
+            // and again on the twins, when a symmetry is up (MapEditor.Symmetry)
+            List<Vector2I> twins = Twins(own);
+            refused.AddRange(_erasing
+                ? _edit.Sweep(twins, c => (_edit.Erase(c, _tab, out string why), why))
+                : _edit.Sweep(twins, WriteTwin));
+        }
 
         if (refused.Count > 0)
             _said = refused[0];
@@ -1514,6 +1535,9 @@ public sealed partial class MapEditor : SceneRoot
     private (bool, string) Write(Vector2I cell)
     {
         string why;
+        // a preset is laid a stroke at a time, core and edge (MapEditor.Tools)
+        if (_tab == MapEdit.Tab.Presets)
+            return (false, "a preset is laid by its stroke, not a cell at a time");
         bool ok = _tab switch
         {
             MapEdit.Tab.Foundation =>
@@ -1542,8 +1566,15 @@ public sealed partial class MapEditor : SceneRoot
         // the marked cells when there are any (MapEditor.Select), else the
         // region of one letter under the pointer
         IReadOnlyList<Vector2I> cells = _selected.Count > 0 ? _selected.ToList() : _edit.Region(_under);
-        var refused = new List<string>(_edit.Sweep(cells, Write));
-        refused.AddRange(_edit.Sweep(Twins(cells), WriteTwin));
+        List<string> refused;
+        if (_tab == MapEdit.Tab.Presets)
+            // the region is the preset's core (MapEditor.Tools)
+            refused = LayPreset(_edit, cells);
+        else
+        {
+            refused = new List<string>(_edit.Sweep(cells, Write));
+            refused.AddRange(_edit.Sweep(Twins(cells), WriteTwin));
+        }
         _dirty = true;
         _said = refused.Count > 0 ? refused[0] : "filled";
         Settle();
@@ -1751,8 +1782,16 @@ public sealed partial class MapEditor : SceneRoot
     }
 
     private string Tool() => _held is not null ? $"in hand: {(_moving ? "the marked cells" : _heldName)}"
-        : _selectTool ? $"select: {_selected.Count} marked" : _tab switch
+        : _selectTool ? $"select: {_selected.Count} marked"
+        : _instrument == Instrument.Pick ? $"pick: the {_tab} tab's brush off a cell"
+        // the line, box and fill tools name what they lay (MapEditor.Tools)
+        : _instrument != Instrument.Brush ? $"{Named(_instrument)} - {Laid()}"
+        : Laid();
+
+    /// <summary>What the tab's brush lays.</summary>
+    private string Laid() => _tab switch
     {
+        MapEdit.Tab.Presets => Preset is { } p ? $"preset: {p.Name} - {p.Say}" : "preset: none",
         MapEdit.Tab.Foundation =>
             "floor: " + (_plotBrush ? (_plotOn ? "on the board" : "off the board")
                 : _water ? "water" : _floor.ToString().ToLowerInvariant()),

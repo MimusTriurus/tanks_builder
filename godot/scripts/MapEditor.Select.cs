@@ -31,7 +31,6 @@ namespace TankSpriteTest;
 /// </summary>
 public sealed partial class MapEditor
 {
-    private bool _selectTool;
     private readonly HashSet<Vector2I> _selected = new();
 
     /// <summary>Where a box drag started, while one is going.</summary>

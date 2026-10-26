@@ -39,6 +39,10 @@ public sealed class MapEdit
         /// <summary>The homes as the tanks on them: a brush per side and class
         /// (<see cref="Unit"/>), the eraser takes a home off.</summary>
         Units,
+        /// <summary>The preset brushes (<see cref="MapPresets"/>), over the
+        /// four axes rather than instead of them: the eraser clears every axis
+        /// - plain ground at the datum, nothing on it.</summary>
+        Presets,
     }
 
     public string Name { get; set; } = "untitled";
@@ -553,8 +557,62 @@ public sealed class MapEdit
         Tab.Cover => Over(cell, Cover.None, out why),
         Tab.Foundation => Floor(cell, Foundation.Solid, out why),
         Tab.Units => Unhome(cell, out why),
+        Tab.Presets => Wipe(cell, out why),
         _ => Ramp(cell, false, out why) && Level(cell, 0, out why),
     };
+
+    /// <summary>Every axis of a cell back to plain ground at the datum - the
+    /// Presets tab's eraser. The home on it stays: tanks are the Units tab's.</summary>
+    private bool Wipe(Vector2I cell, out string why)
+    {
+        why = OnBoard(cell) ? "" : $"({cell.X},{cell.Y}) is not on the board";
+        return OnBoard(cell) && Clear(new[] { cell }, homes: false) >= 0;
+    }
+
+    /// <summary>
+    /// A copy to try a stroke on - the preset's ghost lays it here and draws
+    /// what changed. No history: it is thrown away the same frame.
+    /// </summary>
+    public MapEdit Fork() => new()
+    {
+        Name = Name, Paint = Paint, Height = Height, Plinth = Plinth,
+        Columns = Columns, Rows = Rows,
+        _ground = (char[])_ground.Clone(),
+        _ramps = (bool[])_ramps.Clone(),
+        _homes = _homes.ToList(),
+        _walls = _walls.ToDictionary(kv => kv.Key, kv => kv.Value.Copy()),
+    };
+
+    /// <summary>
+    /// The cells of a straight line from <paramref name="a"/> to
+    /// <paramref name="b"/>, both ends in - the line tool. Walked in axial
+    /// coordinates, a cell per step of hex distance, each point rounded to the
+    /// nearest hex, so the line has no gaps and no doubled cells on any
+    /// heading (the odd-q offset would bend it).
+    /// </summary>
+    public static IReadOnlyList<Vector2I> Line(Vector2I a, Vector2I b)
+    {
+        Vector2I from = Axial(a), to = Axial(b);
+        int dx = to.X - from.X, dz = to.Y - from.Y;
+        int n = (Math.Abs(dx) + Math.Abs(dz) + Math.Abs(dx + dz)) / 2;
+        var cells = new List<Vector2I>(n + 1);
+        for (int i = 0; i <= n; i++)
+        {
+            float t = n == 0 ? 0.0f : (float)i / n;
+            // nudged off the ties a line along an edge would land on
+            float x = from.X + dx * t + 1e-4f, z = from.Y + dz * t + 2e-4f, y = -x - z;
+            int rx = (int)MathF.Round(x), rz = (int)MathF.Round(z), ry = (int)MathF.Round(y);
+            float ex = MathF.Abs(rx - x), ey = MathF.Abs(ry - y), ez = MathF.Abs(rz - z);
+            if (ex > ey && ex > ez)
+                rx = -ry - rz;
+            else if (ez > ey)
+                rz = -rx - ry;
+            Vector2I cell = Offset(new Vector2I(rx, rz));
+            if (cells.Count == 0 || cells[^1] != cell)
+                cells.Add(cell);
+        }
+        return cells;
+    }
 
     /// <summary>The home on a cell taken off, or a refusal when there is none
     /// or it is the last.</summary>

@@ -35,7 +35,13 @@ public sealed partial class MapEditor
     {
         new("Board", "left drag", "paint with the brush", "paint"),
         new("Board", "right drag", "erase: plain ground, no cover, level 0", "erase"),
-        new("Board", "1  2  3  4", "Foundation, Cover, Level, Units tab"),
+        new("Board", "1  2  3  4  5", "Foundation, Cover, Level, Units, Presets tab"),
+        new("Tools", "toolbar", "brush, line, box, fill, select, pick - over every tab"),
+        new("Tools", "U  G  I", "box, fill, pick; Esc back to the brush", "box, fill, pick"),
+        new("Tools", "shift+click", "with the brush: a line from the last cell painted"),
+        new("Tools", "right drag", "with the line or the box: erase along it"),
+        new("Presets", "left drag", "lay the preset: core under the brush, edge ring round it"),
+        new("Presets", "right drag", "clear every axis: plain ground at the datum"),
         new("Board", "Q", "next brush on the tab"),
         new("Board", "[  ]", "brush radius, 0 to 6"),
         new("Board", "F", "fill the cell's region with the brush", "fill"),
@@ -270,9 +276,13 @@ public sealed partial class MapEditor
             _said = "nothing marked";
             return true;
         }
-        if (_selectTool)
+        // any tool but the brush, the select tool among them (MapEditor.Tools)
+        if (_instrument != Instrument.Brush || _dragFrom is not null)
         {
-            SelectTool(false);
+            if (_selectTool)
+                SelectTool(false);
+            else
+                Use(Instrument.Brush);
             return true;
         }
         if (_edit.Inside(_picked))
@@ -350,6 +360,10 @@ public sealed partial class MapEditor
                               HorizontalAlignment.Left, -1, 15, SelectInk);
             return;
         }
+        // a line or a box being dragged, the eyedropper, a preset's result
+        // (MapEditor.Tools)
+        if (ToolGhost(on))
+            return;
         Color ink = _erasing ? new Color(1.0f, 0.6f, 0.5f, 0.9f) : new Color(BrushInk, 0.9f);
         foreach (Vector2I cell in Patch())
         {
