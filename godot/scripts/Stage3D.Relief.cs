@@ -55,6 +55,9 @@ public sealed partial class Stage3D
     /// a pit, 2026-10-26). The editor's is 0.04.</summary>
     public float BrowBelow { get; set; } = 0.15f;
 
+    /// <summary>The brow's half width, screen px (the bench's 1.3).</summary>
+    public float BrowPx { get; set; } = 1.3f;
+
     /// <summary>The lawn photograph on the flats instead of the painted
     /// patches (<see cref="AssetRoot.Ground"/>, <c>grass_basecolor.jpg</c>).
     /// Off by default (the user went back to the painted grass); <c>--lawn</c>
@@ -416,6 +419,7 @@ void fragment() {
         ink.Param("level_base", f.LevelBase);
         ink.Param("brow_on", ShowBrow ? 1.0f : 0.0f);
         ink.Param("brow_below", BrowBelow);
+        ink.Param("brow_px", BrowPx);
         ink.Param("hollow_ink", Relief.HollowInk);
         if (Lawn() is { } lawn)
         {

@@ -407,7 +407,7 @@ public sealed partial class MapEditor : SceneRoot
             // but a board being drawn wants its levels read at a glance - a
             // pit's near bank faces away from the camera, and the line runs
             // close under the rim to close round it there too (2026-10-26)
-            ShowBrow = true, BrowBelow = 0.04f,
+            ShowBrow = true, BrowBelow = 0.04f, BrowPx = 0.5f,
         };
         AddChild(_stage);
         Dress();
