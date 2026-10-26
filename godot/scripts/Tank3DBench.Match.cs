@@ -357,12 +357,21 @@ public sealed partial class Tank3DBench
     {
         Log.Print($"tank3d: match: restart on {_mapName}");
         if (_handed)
+        {
             Session.Map = _mapName;
+            // the editor's board again, not its file, and the parked editor
+            // stays parked through the reload (Play-in-Editor)
+            Session.Board = _handedBoard;
+            Session.Unsaved = _unsaved;
+        }
+        _keepEditor = true;
         Session.Editing = _editing;
         _restarted = true;
-        // deferred: the reload takes the scene out of the tree at once, and the
-        // rest of this frame's _Process would run on a node outside it
-        Callable.From(() => GetTree().ReloadCurrentScene()).CallDeferred();
+        // Under the loading veil, as Run comes in: the same scene from its
+        // file, built in stages - a bare reload sat on the last frame for the
+        // whole build (16 s on ABBEY). Loading defers the change itself, so
+        // the rest of this frame still runs on a node in the tree.
+        Loading.Go(GetTree(), SceneFilePath, $"Restarting {_mapName}…");
     }
 
     /// <summary>The side's first standing unit able to act, in the roster's order.</summary>

@@ -42,11 +42,20 @@ public sealed partial class Loading : CanvasLayer
     private string _scene = "";
     private string _what = "";
     private Node? _from;
+
+    /// <summary>The scene that comes in when it is not a file: the parked
+    /// editor going back (<see cref="Back"/>).</summary>
+    private Node? _to;
+
+    /// <summary>The scene going out is put aside in <see cref="Session.Parked"/>
+    /// rather than freed (<see cref="Park"/>).</summary>
+    private bool _park;
     private bool _changed;
     private bool _staged;
     private bool _built;
     private bool _lifting;
     private int _frames;
+    private ulong _changedAt;
     private ColorRect _veil = null!;
     private ProgressBar _bar = null!;
     private Label _step = null!;
@@ -55,17 +64,80 @@ public sealed partial class Loading : CanvasLayer
 
     /// <summary>Change to <paramref name="scene"/> under a veil that says
     /// <paramref name="what"/>.</summary>
-    public static void Go(SceneTree tree, string scene, string what)
+    public static void Go(SceneTree tree, string scene, string what) =>
+        Start(tree, new Loading { Layer = 128, _scene = scene, _what = what });
+
+    /// <summary>
+    /// <see cref="Go"/>, with the scene going out kept rather than freed: taken
+    /// off the tree whole and left in <see cref="Session.Parked"/>, for
+    /// <see cref="Back"/> to put back as it was - the editor's Run
+    /// (Play-in-Editor). Out of the tree it gets no frames and no input, and
+    /// costs only the memory it holds.
+    /// </summary>
+    public static void Park(SceneTree tree, string scene, string what) =>
+        Start(tree, new Loading { Layer = 128, _scene = scene, _what = what, _park = true });
+
+    /// <summary>The scene going out freed and <paramref name="to"/>, parked by
+    /// <see cref="Park"/>, put back in the tree as the current scene. Nothing
+    /// is built: it was never torn down.</summary>
+    public static void Back(SceneTree tree, Node to, string what) =>
+        Start(tree, new Loading { Layer = 128, _to = to, _what = what });
+
+    /// <summary>
+    /// True only while <see cref="Park"/> takes the editor off the tree: its
+    /// nodes get <c>_ExitTree</c> as if they were going, and the ones that
+    /// drop what they built on the way out (<see cref="Stage3D"/>'s meshes,
+    /// the editor's tree species) keep it instead, because the same nodes come
+    /// back. Every other exit - a quit, a scene freed - drops as before.
+    /// </summary>
+    public static bool Parking { get; private set; }
+
+    private static void Start(SceneTree tree, Loading veil)
     {
         // Once: a second F5 in the frames before the change would queue a
         // second change behind it. One already lifting does not count - the
         // way back can be asked for while the veil it came under still fades.
         if (_on is not null && IsInstanceValid(_on) && !_on._lifting)
+        {
+            veil.Free();
             return;
-        _on = new Loading { Layer = 128, _scene = scene, _what = what };
+        }
+        _on = veil;
         // Deferred: --menu run presses Run from the editor's _Ready, while the
         // root is still adding its children and refuses one more.
         tree.Root.CallDeferred(Node.MethodName.AddChild, _on);
+    }
+
+    /// <summary>The change itself, when it is not a file replacing the scene:
+    /// the scene going out parked or freed, the one coming in added and made
+    /// current. Deferred to the end of the frame, as Godot defers its own.</summary>
+    private void Swap()
+    {
+        SceneTree tree = GetTree();
+        Node? from = tree.CurrentScene;
+        Node next = _to ?? GD.Load<PackedScene>(_scene).Instantiate();
+        if (_to is not null && ReferenceEquals(Session.Parked, _to))
+            Session.Parked = null;
+        if (from is not null)
+        {
+            Parking = _park;
+            try
+            {
+                tree.Root.RemoveChild(from);
+            }
+            finally
+            {
+                Parking = false;
+            }
+            if (_park)
+                Session.Parked = from;
+            else
+                from.QueueFree();
+        }
+        // The scene coming in builds in its _Ready, inside this AddChild -
+        // under this veil, which is already _changed, so its stages show.
+        tree.Root.AddChild(next);
+        tree.CurrentScene = next;
     }
 
     // --- the build's stages ---------------------------------------------------
@@ -219,13 +291,21 @@ public sealed partial class Loading : CanvasLayer
             if (++_frames < Settle)
                 return;
             _changed = true;
+            _changedAt = Time.GetTicksMsec();
             _frames = 0;
-            GetTree().ChangeSceneToFile(_scene);
+            if (_park || _to is not null)
+                Callable.From(Swap).CallDeferred();
+            else
+                GetTree().ChangeSceneToFile(_scene);
             return;
         }
         Node? now = GetTree().CurrentScene;
         if (now is null || now == _from || (_staged && !_built) || ++_frames < Settle)
             return;
+        if (!_lifting)
+            // the whole wait the author sat through, change to lift - the way
+            // back to a parked editor has no stages to log (Play-in-Editor)
+            Log.Print($"load: {now.Name} up {Time.GetTicksMsec() - _changedAt} ms after the change");
         _lifting = true;
         // Clamped: the first frame after the build carries its whole time as
         // delta, and the fade would be over before it was drawn.

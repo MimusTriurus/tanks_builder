@@ -709,8 +709,24 @@ public sealed partial class MapEditor : SceneRoot
         // probe worth having: after it, --capture and --capture-at are read
         // again by Main, so the frame that lands on disk is the harness playing
         // the board the editor just drew.
-        if (_open is "run" or "runmatch" && _frame == 20)
-            Play(match: _open == "runmatch");
+        // tryrun: Play-in-Editor's whole promise in one run - a stroke nobody
+        // saved (sand on --hover's cell), then shift+F5 from that cell; with
+        // --edit-at the way back says how much undo came with it, and the file
+        // on disk must not have moved
+        if (_open == "tryrun" && _frame == 10 && _hovered is Vector2I tried && _edit.Inside(tried))
+        {
+            _edit.Begin();
+            _edit.Floor(tried, Foundation.Sand, out string _);
+            _edit.End();
+            _dirty = true;
+            Settle();
+        }
+        if (_open == "tryrun" && _frame == 20)
+            Play(from: _hovered ?? StartCell());
+        // runhere: shift+F5 off --hover's cell, the start a capture run has
+        // nobody to point at
+        if (_open is "run" or "runmatch" or "runhere" && _frame == 20)
+            Play(match: _open == "runmatch", from: _open == "runhere" ? _hovered ?? StartCell() : null);
         // And a board the harness would refuse: Run must not change scene, and
         // must say which fault stopped it.
         if (_open == "runbad" && _frame == 20)
@@ -1371,7 +1387,7 @@ public sealed partial class MapEditor : SceneRoot
             case Key.O: Chose(Item.Open); return;
             case Key.S when key.ShiftPressed: Chose(Item.SaveAs); return;
             case Key.S: Keep(); return;
-            case Key.F5: Play(match: key.CtrlPressed); return;
+            case Key.F5: Play(match: key.CtrlPressed, from: key.ShiftPressed ? StartCell() : null); return;
             case Key.L: _layers ^= Layers.Levels; break;
             case Key.B: _layers ^= Layers.Flood; break;
             case Key.Home: Home(); return;
@@ -1487,32 +1503,29 @@ public sealed partial class MapEditor : SceneRoot
     }
 
     /// <summary>
-    /// Play the board being drawn, in the harness.
+    /// Play the board being drawn, on the 3D bench - from memory, without
+    /// saving (Play-in-Editor, stage 1 of docs/editor-ux-plan.md).
     ///
-    /// <b>It saves first, and that is the shape that was chosen.</b> What is
-    /// played is then what is on disk, so a name is all that has to cross the
-    /// scene change - see <see cref="Session"/>, which carries it. The cost is
-    /// named there too: Run on a compiled board refuses, because
-    /// <see cref="MapFile.Save"/> refuses to shadow one, and the author saves it
-    /// under another name first.
+    /// <b>The board crosses as a board, and the editor stays.</b> The draft is
+    /// built (<see cref="MapEdit.Build"/>, the same guards a file goes through)
+    /// and handed over in <see cref="Session.Board"/>; the editor is parked
+    /// whole (<see cref="Loading.Park"/>) and Edit puts the same one back, undo,
+    /// camera, tab and brush as they were. Until 2026-10-26 Run saved first and
+    /// the bench read the file: a try cost the file, a compiled board refused
+    /// to run, and the way back rebuilt the editor without its history. Saving
+    /// is the author's own step now - the bench says when what it plays is
+    /// ahead of the file.
     ///
     /// <b>A board with a fatal fault is not run, and the first fault is what it
-    /// says.</b> The harness would refuse it anyway - <c>Main</c> prints
-    /// REFUSED and quits - so a Run that changed scene and came straight back
-    /// would be the same refusal with the readout thrown away.
+    /// says.</b> The bench would refuse it anyway, so a Run that changed scene
+    /// and came straight back would be the same refusal with the readout
+    /// thrown away.
     ///
-    /// <b>The undo stack does not survive the round trip</b>, and nothing here
-    /// pretends otherwise: Edit re-opens the saved board, which is the letters,
-    /// the ramps, the masonry and the parkings, and no history.
-    ///
-    /// <b>Into the 3D bench, or a match on it.</b> The 3D line is the project's
-    /// main one (the root CLAUDE.md), so Run plays the board on
-    /// <c>Tank3D.tscn</c>, and <paramref name="match"/> - ctrl+F5 - on
-    /// <c>Match3D.tscn</c>. The sprite harness is not offered any more: the
-    /// legacy line, decided 2026-09-27; <c>Main</c> still hands a board back if
-    /// it is opened some other way.
+    /// <b>Into the 3D bench, or a match on it.</b> <paramref name="match"/> -
+    /// ctrl+F5 - plays <c>Match3D.tscn</c>; <paramref name="from"/> - shift+F5
+    /// - starts the bench's tank on that cell instead of the first home.
     /// </summary>
-    private void Play(bool match = false)
+    private void Play(bool match = false, Vector2I? from = null)
     {
         Settle();
         MapRules.Fault fatal =
@@ -1520,20 +1533,60 @@ public sealed partial class MapEditor : SceneRoot
         if (fatal.Rule is { Length: > 0 })
         {
             _said = "NOT run: " + fatal.Text;
-            Tell("Not run - the harness would refuse this board.\n\n"
+            Tell("Not run - the bench would refuse this board.\n\n"
                  + fatal.Text);
             Say();
             return;
         }
-        if (!Keep("run it"))
+        BoardMap board;
+        try
+        {
+            board = _edit.Build();
+        }
+        catch (Exception e)
+        {
+            _said = "NOT run: " + e.Message;
+            Tell("Not run - the board does not build.\n\n" + e.Message);
+            Say();
             return;
+        }
         Session.Map = _edit.Name;
+        Session.Board = board;
+        Session.Unsaved = _dirty;
+        Session.Start = match ? null : from;
         Session.Editing = true;
-        GD.Print($"editor: running {_edit.Name} " + (match ? "as a match" : "on the 3D bench"));
+        GD.Print($"editor: running {_edit.Name}{(_dirty ? " (unsaved)" : "")} "
+                 + (match ? "as a match" : "on the 3D bench")
+                 + (Session.Start is Vector2I at ? $" from ({at.X},{at.Y})" : ""));
         // a match is the same bench with its root's Match set (Match3D.tscn):
         // two sides off the board's homes, Tank3DBench.LineUpSides
-        Loading.Go(GetTree(), match ? "res://Match3D.tscn" : "res://Tank3D.tscn",
-                   (match ? "Match on " : "Loading ") + _edit.Name + "…");
+        Loading.Park(GetTree(), match ? "res://Match3D.tscn" : "res://Tank3D.tscn",
+                     (match ? "Match on " : "Loading ") + _edit.Name + "…");
+    }
+
+    /// <summary>The cell shift+F5 starts the tank on: the one under the
+    /// pointer, else the picked one, when it is on the board.</summary>
+    private Vector2I? StartCell()
+    {
+        foreach (Vector2I cell in new[] { _under, _picked })
+            if (_edit.Inside(cell) && _edit.OnBoard(cell))
+                return cell;
+        return null;
+    }
+
+    /// <summary>Back in the tree after the board was played: the editor is
+    /// the one that left, so only what it says changes.</summary>
+    public override void _EnterTree()
+    {
+        if (!_built)
+            return;
+        Session.Editing = false;
+        // a --menu run fires once: the frame counter goes on where it was, but
+        // the probe is not to be pressed again on the way back
+        _open = "";
+        _said = $"back from the bench on {_edit.Name}" + (_dirty ? " - not saved yet" : "");
+        GD.Print($"editor: back on {_edit.Name}, {_edit.Depth} undo kept");
+        Say();
     }
 
     /// <summary>

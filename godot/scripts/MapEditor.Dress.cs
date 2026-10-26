@@ -53,9 +53,13 @@ public sealed partial class MapEditor
     private readonly Dictionary<string, TreeModel.Loaded> _species = new();
 
     /// <summary>The species' own scenes, which only their copies ever enter the
-    /// tree: freed here, or every run ends on Godot's leak report.</summary>
+    /// tree: freed here, or every run ends on Godot's leak report. Not when
+    /// Run parks the editor (<see cref="Loading.Parking"/>): the wood planted
+    /// after the way back is copied out of these.</summary>
     public override void _ExitTree()
     {
+        if (Loading.Parking)
+            return;
         foreach (TreeModel.Loaded model in _species.Values)
             if (GodotObject.IsInstanceValid(model.Scene))
                 model.Scene.Free();

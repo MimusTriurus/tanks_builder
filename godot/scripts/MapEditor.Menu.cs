@@ -61,6 +61,7 @@ public sealed partial class MapEditor
         SaveAs,
         Run,
         RunMatch,
+        RunHere,
     }
 
     private void Menu(CanvasLayer layer)
@@ -101,11 +102,13 @@ public sealed partial class MapEditor
         file.AddItem("Save           ctrl+S", (int)Item.Save);
         file.AddItem("Save as... ctrl+shift+S", (int)Item.SaveAs);
         file.AddSeparator();
-        // Under the saves and separated from them, because it is one of them:
-        // Run saves first and plays what is on disk - see MapEditor.Play.
+        // Under the saves and separated from them: Run plays what is in
+        // memory, saved or not - see MapEditor.Play.
         file.AddItem("Run              F5", (int)Item.Run);
         // Two sides of five off the board's homes (Match3D.tscn)
         file.AddItem("Run match    ctrl+F5", (int)Item.RunMatch);
+        // the tank on the cell under the pointer, or the picked one
+        file.AddItem("Run from here  shift+F5", (int)Item.RunHere);
         file.IdPressed += id => Chose((Item)id);
         bar.AddChild(file);
         MoreMenus(bar);
@@ -171,6 +174,15 @@ public sealed partial class MapEditor
                 break;
             case Item.RunMatch:
                 Play(match: true);
+                break;
+            case Item.RunHere:
+                if (StartCell() is Vector2I here)
+                    Play(from: here);
+                else
+                {
+                    _said = "pick a cell on the board to run from";
+                    Say();
+                }
                 break;
             default:
                 _saveName.Text = _edit.Name;

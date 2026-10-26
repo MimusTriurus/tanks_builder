@@ -1081,9 +1081,15 @@ void fragment() {{
     /// C#, and a run that came down with the panel attached reported leaked
     /// instances at exit while the same run without it did not - the difference
     /// being the ring, which is only built when there is a selection to mark.
-    /// Dropped on the way out rather than left to the engine's teardown.</summary>
+    /// Dropped on the way out rather than left to the engine's teardown.
+    ///
+    /// <b>Not when the editor is parked</b> (<see cref="Loading.Parking"/>):
+    /// its stage leaves the tree whole while its board is played and comes
+    /// back expecting its meshes.</summary>
     public override void _ExitTree()
     {
+        if (Loading.Parking)
+            return;
         _tops.Mesh = null;
         _sides.Mesh = null;
         _ring.Mesh = null;

@@ -359,6 +359,14 @@ public sealed partial class Tank3DBench : Node3D
     {
         _bareNode?.Free();
         _bareNode = null;
+        // a quit from the bench: the editor parked behind it goes too
+        // (Session.Parked), or the run ends on Godot's leak report. Not on a
+        // restart, and on the way back Loading.Back has already taken it.
+        if (!_keepEditor && Session.Parked is { } parked && IsInstanceValid(parked))
+        {
+            Session.Parked = null;
+            parked.Free();
+        }
         // a quit leaves the tree: the run's last lines out before the process goes
         Log.Drain();
     }

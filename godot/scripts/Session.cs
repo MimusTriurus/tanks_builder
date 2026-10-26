@@ -1,3 +1,5 @@
+using Godot;
+
 namespace TankSpriteTest;
 
 /// <summary>
@@ -22,11 +24,14 @@ namespace TankSpriteTest;
 /// board waiting. A run under <c>--capture</c>, <c>--selftest</c> or
 /// <c>--map-report</c> never sets any of it, so none of them change behaviour.
 ///
-/// <b>The board goes through the folder rather than through here.</b> Run saves
-/// first - so what is played is what is on disk, and a name is enough to say
-/// which. That is also the one thing it costs: Run on a compiled board refuses,
-/// because <see cref="MapFile.Save"/> refuses to shadow one, and the author has
-/// to save it under another name first. The refusal is the save's own words.
+/// <b>The editor's board goes over in memory, not through the folder</b>
+/// (Play-in-Editor, stage 1 of docs/editor-ux-plan.md, 2026-10-26). Run hands
+/// the bench the board it has - <see cref="Board"/>, built from the draft,
+/// saved or not - and the editor itself is not freed but put aside
+/// (<see cref="Parked"/>, <see cref="Loading.Park"/>), so Edit gives back the
+/// same editor: its undo, its camera, its brush. Before it, Run saved first and
+/// the bench read the file: a try cost the file, a compiled board refused to
+/// run, and every way back rebuilt the editor without its history.
 /// </summary>
 public static class Session
 {
@@ -39,6 +44,22 @@ public static class Session
     /// too, and it is going the other way.</summary>
     public static bool Editing;
 
+    /// <summary>The board itself, when the editor hands over what it has in
+    /// memory: played instead of looking <see cref="Map"/> up.</summary>
+    public static BoardMap? Board;
+
+    /// <summary>Whether <see cref="Board"/> is ahead of its file - the bench
+    /// says so on its way back.</summary>
+    public static bool Unsaved;
+
+    /// <summary>The cell the bench's tank starts on (shift+F5, the map's own
+    /// coordinates), or null for the board's first home.</summary>
+    public static Vector2I? Start;
+
+    /// <summary>The editor, out of the tree while its board is played, or null.
+    /// Whoever frees the bench for good frees this with it.</summary>
+    public static Node? Parked;
+
     /// <summary>The name the next root should open, taking it off the handoff.
     /// Null when nobody handed anything over.</summary>
     public static string? Take()
@@ -46,5 +67,18 @@ public static class Session
         string? said = Map;
         Map = null;
         return said;
+    }
+
+    /// <summary>The board handed over in memory, taken off the handoff with
+    /// its start cell; null when the handoff is a name or nothing.</summary>
+    public static BoardMap? TakeBoard(out Vector2I? start, out bool unsaved)
+    {
+        BoardMap? board = Board;
+        start = Start;
+        unsaved = Unsaved;
+        Board = null;
+        Start = null;
+        Unsaved = false;
+        return board;
     }
 }

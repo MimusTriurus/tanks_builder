@@ -36,6 +36,17 @@ public sealed partial class Tank3DBench
     /// <summary>The board came through <see cref="Session"/>.</summary>
     private bool _handed;
 
+    /// <summary>The editor's board itself (<see cref="Session.Board"/>), or
+    /// null when the handoff was a name.</summary>
+    private BoardMap? _handedBoard;
+
+    /// <summary>The handed board is ahead of its file: the way back says so.</summary>
+    private bool _unsaved;
+
+    /// <summary>A restart reloads this scene: the parked editor is not this
+    /// bench's to free on the way out (<see cref="_ExitTree"/>).</summary>
+    private bool _keepEditor;
+
     /// <summary><c>--edit-at N</c>: Edit on that frame, the harness's flag -
     /// a capture run has nobody to press the button.</summary>
     private int _editAt = -1;
@@ -47,6 +58,11 @@ public sealed partial class Tank3DBench
     /// <summary>After the flags: the handoff over <c>--map</c>.</summary>
     private void TakeSession()
     {
+        _handedBoard = Session.TakeBoard(out Vector2I? start, out _unsaved);
+        // shift+F5: the tank on the editor's cell, in the map's coordinates
+        // like --cell (moved into the sea's ring with it, BuildBoard)
+        if (_handedBoard is not null && start is Vector2I at)
+            _startCell = at;
         if (Session.Take() is { Length: > 0 } handed)
         {
             _mapName = handed;
@@ -65,6 +81,9 @@ public sealed partial class Tank3DBench
     /// refusal printed and the quit asked for.</summary>
     private BoardMap? MapToPlay()
     {
+        // the editor's board as it has it, saved or not (Play-in-Editor)
+        if (_handedBoard is not null)
+            return _handedBoard;
         // The events bench's board is compiled apart from the named ones -
         // ByName would answer "events" with the harness's bench board.
         if (string.Equals(_mapName, "events", StringComparison.OrdinalIgnoreCase))
@@ -115,7 +134,7 @@ public sealed partial class Tank3DBench
             return;
         var back = new Button
         {
-            Text = "Edit   F5",
+            Text = _unsaved ? "Edit   F5   (board not saved)" : "Edit   F5",
             // Under the hud's three lines, which run the width of the board.
             Position = new Vector2(12.0f, 96.0f),
         };
@@ -130,9 +149,17 @@ public sealed partial class Tank3DBench
         if (!_editing)
             return;
         _editing = false;
-        Session.Map = _mapName;
         Session.Editing = false;
         Log.Print($"tank3d: back to the editor on {_mapName}");
+        // The editor that sent us, as it was (Play-in-Editor); a fresh one off
+        // the file only if there is none to put back.
+        if (Session.Parked is { } editor && IsInstanceValid(editor))
+        {
+            _keepEditor = true;
+            Loading.Back(GetTree(), editor, $"Back to the editor: {_mapName}…");
+            return;
+        }
+        Session.Map = _mapName;
         Loading.Go(GetTree(), "res://Editor.tscn", $"Back to the editor: {_mapName}…");
     }
 }
