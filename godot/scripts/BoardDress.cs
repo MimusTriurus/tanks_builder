@@ -321,6 +321,12 @@ void light() {
         || relief.Steepness(flat, rise) > GrassSlope
             ? null : relief.HeightAt(flat) / rise;
 
+    /// <summary>The light a tuft keeps at a flat point of the relief's own
+    /// field (<see cref="Grass3D.Shade"/>): a hollow's shade, as its ground
+    /// takes it (<see cref="Relief.Hollow"/>).</summary>
+    public static float ReliefShade(Relief relief, Vector2 flat) =>
+        1.0f - Relief.HollowInk * relief.HollowAt(flat);
+
     /// <summary>The span the grass's press map covers - every cell's square of
     /// <paramref name="radius"/>, world XZ.</summary>
     public static Rect2 LawnSpan(HexField field, float radius, float squash, float rise)

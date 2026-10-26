@@ -252,6 +252,9 @@ public sealed partial class MapEditor
                     ? BoardDress.ReliefGround(relief, flat - _stage.Origin, _field.RiseFactor)
                     : _field.TopAtPoint(flat) / _field.RiseFactor;
             };
+            _lawn.Shade = w => _relief is { } relief && _stage is not null
+                ? BoardDress.ReliefShade(relief, new Vector2(w.X, w.Z * _field.Squash) - _stage.Origin)
+                : 1.0f;
             AddChild(_lawn);
             _lawn.Map(BoardDress.LawnSpan(_field, radius, squash, rise));
             due = _dressedAs.Keys;

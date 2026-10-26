@@ -246,7 +246,10 @@ public sealed partial class Tank3DBench
         // on the relief the tufts root on the drawn ground, none under the
         // water, and the shader paints the lawn under them (Grass3D.Ground)
         if (_relief is { } relief)
+        {
             _grass.Ground = w => BoardDress.ReliefGround(relief, Board(w), RiseFactor);
+            _grass.Shade = w => BoardDress.ReliefShade(relief, Board(w));
+        }
         AddChild(_grass);
         _grass.Map(span);
         ulong t0 = Time.GetTicksMsec();

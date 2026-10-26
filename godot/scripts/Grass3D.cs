@@ -114,6 +114,12 @@ public sealed partial class Grass3D : Node3D
     /// </summary>
     public Func<Vector3, float?>? Ground;
 
+    /// <summary>How much of the light a tuft keeps where it roots, 0-1, a
+    /// world point as <see cref="Ground"/> takes it - the relief's hollows
+    /// (<c>Relief.Hollow</c>): a pit's floor shaded as its ground is. Unset,
+    /// every tuft keeps all of it.</summary>
+    public Func<Vector3, float>? Shade;
+
     private readonly List<ShaderMaterial> _inks = new();
 
     /// <summary>A cell of grass, for its fire: its materials, where it is, and
@@ -705,6 +711,7 @@ public sealed partial class Grass3D : Node3D
         var normals = new List<Vector3>();
         var uvs = new List<Vector2>();
         var roots = new List<Vector2>();
+        var shades = new List<Color>();
         Vector3 ground = mid + Vector3.Up * Lift;
         int placed = 0;
         for (int n = 0; n < count * 3 && placed < count; n++)
@@ -753,6 +760,8 @@ public sealed partial class Grass3D : Node3D
                 over = new Vector3(d.X, Mathf.Sqrt(Mathf.Max(0.15f, 1.0f - d.LengthSquared())), d.Y).Normalized();
             }
             Vector3 under = root - Vector3.Up * (0.25f * h);
+            float kept = Shade?.Invoke(root) ?? 1.0f;
+            var shade = new Color(kept, kept, kept);
             for (int b = 0; b < blades; b++)
             {
                 float a = Mathf.Tau * (b + rng.Randf() * 0.7f) / blades;
@@ -770,6 +779,7 @@ public sealed partial class Grass3D : Node3D
                 {
                     uvs.Add(new Vector2(ts[i], tone));
                     roots.Add(new Vector2(root.X, root.Z));
+                    shades.Add(shade);
                     Vector3 dome = (v[i] - under).Normalized();
                     normals.Add(clump is null ? dome : (0.35f * dome + 0.65f * over).Normalized());
                     verts.Add(v[i]);
@@ -777,12 +787,13 @@ public sealed partial class Grass3D : Node3D
             }
         }
         Log.Print($"grass3d: {placed} tufts on {area:F0} m2");
-        return Arrays(verts, normals, uvs, roots);
+        return Arrays(verts, normals, uvs, roots, Shade is null ? null : shades);
     }
 
     /// <summary>Triangles from plain arrays in one call - what a SurfaceTool
     /// committed with the same vertices, no index, comes to.</summary>
-    private static ArrayMesh Arrays(List<Vector3> verts, List<Vector3> normals, List<Vector2> uvs, List<Vector2> uv2s)
+    private static ArrayMesh Arrays(List<Vector3> verts, List<Vector3> normals, List<Vector2> uvs, List<Vector2> uv2s,
+                                    List<Color>? colors = null)
     {
         var mesh = new ArrayMesh();
         if (verts.Count == 0)
@@ -793,6 +804,8 @@ public sealed partial class Grass3D : Node3D
         arrays[(int)Mesh.ArrayType.Normal] = normals.ToArray();
         arrays[(int)Mesh.ArrayType.TexUV] = uvs.ToArray();
         arrays[(int)Mesh.ArrayType.TexUV2] = uv2s.ToArray();
+        if (colors is not null)
+            arrays[(int)Mesh.ArrayType.Color] = colors.ToArray();
         mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
         return mesh;
     }
@@ -1102,7 +1115,8 @@ void fragment() {
     if (!FRONT_FACING) { NORMAL = -NORMAL; }
     sooted = 0.0;
     vec4 b = burn_paint(grass_tone(t, grass_patch(root), root, pressed, own), tau, root, t, flame_for);
-    vec3 c = b.rgb * paint;
+    // COLOR.r: the light its root keeps (Grass3D.Shade), white unset
+    vec3 c = b.rgb * paint * COLOR.r;
     ALBEDO = b.a > 0.5 ? vec3(0.0) : c;
     EMISSION = b.a > 0.5 ? b.rgb : c * shade;
 }

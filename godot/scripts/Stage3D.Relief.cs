@@ -151,7 +151,8 @@ public sealed partial class Stage3D
                 // far under the water it lies (the bed darker than the bank)
                 float under = Mathf.Clamp(-f.Shore[p] / (f.Cell * 4.0f), 0.0f, 1.0f);
                 paint[p] = new Color(sand[p], f.Cliff[p], forest[p], under);
-                levels[p] = new Vector2(f.Levels[p] & 0xFFFFFF, 0.0f);
+                // and how deep in a hollow it lies, for its shade (Relief.Hollow)
+                levels[p] = new Vector2(f.Levels[p] & 0xFFFFFF, f.Hollow[p]);
             }
         int t = 0;
         for (int j = 0; j + 1 < ny; j++)
@@ -415,6 +416,7 @@ void fragment() {
         ink.Param("level_base", f.LevelBase);
         ink.Param("brow_on", ShowBrow ? 1.0f : 0.0f);
         ink.Param("brow_below", BrowBelow);
+        ink.Param("hollow_ink", Relief.HollowInk);
         if (Lawn() is { } lawn)
         {
             ink.Param("lawn_tex", lawn);
@@ -696,7 +698,8 @@ void fragment() {
             .Replace("    ground = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;",
                      "    ground = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;\n"
                      + "    ground_n = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);\n"
-                     + "    ground_levels = int(UV2.x + 0.5);")
+                     + "    ground_levels = int(UV2.x + 0.5);\n"
+                     + "    ground_hollow = UV2.y;")
             .Replace("    vec4 paint = texture(art, UV) * COLOR;", ReliefPaint)
             .Replace("    ALBEDO = lit;", ReliefGrid),
     };
@@ -704,6 +707,9 @@ void fragment() {
     private const string ReliefHead = @"varying vec3 ground;
 varying vec3 ground_n;
 varying flat int ground_levels;
+// How deep in a hollow (Relief.Hollow), and how much of the light that takes.
+varying float ground_hollow;
+uniform float hollow_ink = 0.3;
 // The art tiled over the world: its plate's inscribed square (uv rect), one
 // tile per this many world units, mirrored so a seam is a reflection.
 uniform vec4 art_rect = vec4(0.0, 0.0, 1.0, 1.0);
@@ -822,6 +828,8 @@ vec4 cell_ink(vec2 cr) {
     // one and not as the far side of a hill
     if (length(normalize(ground_n).xz) > 0.8)
         step_ = min(step_, 0.56);
+    // a pit's floor in shade: from above it is the same lawn as its rim
+    step_ *= 1.0 - hollow_ink * ground_hollow;
     vec4 paint = vec4(soil * step_ * mix(vec3(1.0), cink.rgb, cink.a), 1.0);";
 
     private const string ReliefGrid = @"    {

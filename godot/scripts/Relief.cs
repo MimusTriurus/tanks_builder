@@ -133,6 +133,23 @@ public sealed class Relief
     /// <see cref="LevelBase"/> (<see cref="StampLevels"/>).</summary>
     public readonly uint[] Levels;
     public int LevelBase { get; private set; }
+    /// <summary>How deep in a hollow each point lies, 0-1: its height under
+    /// the ground round it blurred over <see cref="HollowSigma"/>, a whole
+    /// at <see cref="HollowFull"/> of a level, none under water. The shade on
+    /// a pit's floor (<see cref="Hollows"/>).</summary>
+    public readonly float[] Hollow;
+
+    /// <summary>How far the ground round a point reaches, in circumradii of
+    /// blur: about a cell, so a pit of one cell reads against its rim.</summary>
+    public const float HollowSigma = 0.6f;
+
+    /// <summary>How far under the ground round it a point is wholly in the
+    /// hollow, in levels.</summary>
+    public const float HollowFull = 0.45f;
+
+    /// <summary>How much of the light a whole hollow takes, ground and grass
+    /// alike.</summary>
+    public const float HollowInk = 0.42f;
 
     /// <summary>How far a level's ground counts as near, in circumradii of
     /// blur: a little past a terrace's slope and its warp.</summary>
@@ -152,7 +169,8 @@ public sealed class Relief
         Depth = new float[n];
         Cliff = new float[n];
         Levels = new uint[n];
-        Share = new float[Enum.GetValues<Kind>().Length][];
+        Hollow = new float[n];
+        Share =new float[Enum.GetValues<Kind>().Length][];
         for (int k = 0; k < Share.Length; k++)
             Share[k] = new float[n];
     }
@@ -340,7 +358,29 @@ public sealed class Relief
 
         FillWater(field);
         Carve(lift, r);
+        Hollows(lift, r);
     }
+
+    /// <summary>
+    /// The hollows (<see cref="Hollow"/>): seen from above, a pit's floor is
+    /// the same lawn as the ground round it, and its near bank faces away
+    /// from the camera, so nothing said it was lower (the user's catch,
+    /// 2026-10-26). Shaded by how far under its surroundings it lies, it
+    /// reads as a pit. A terrace's foot takes a little of the same, as an
+    /// occlusion would; a top takes none.
+    /// </summary>
+    private void Hollows(float lift, float r)
+    {
+        Array.Copy(Height, Hollow, Height.Length);
+        Blur(Hollow, Nx, Ny, HollowSigma * r / Cell);
+        float full = Mathf.Max(HollowFull * lift, 1e-3f);
+        for (int p = 0; p < Hollow.Length; p++)
+            Hollow[p] = Shore[p] < 0.0f ? 0.0f
+                : Mathf.Clamp((Hollow[p] - Height[p]) / full, 0.0f, 1.0f);
+    }
+
+    /// <summary>The hollow under a flat-space point, bilinear.</summary>
+    public float HollowAt(Vector2 flat) => Sample(Hollow, flat.X, flat.Y / Squash);
 
     /// <summary>The water's bed cut into the blurred ground, hex_level's river
     /// bed: down to the cell's own drawn bed (<see cref="HexField.BedAt"/>),
