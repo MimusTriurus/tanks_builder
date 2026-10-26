@@ -524,8 +524,15 @@ void fragment() {
         float rise = RiseFactor, reach = f.Cell * 3.0f;
         // which body (its first cell's slot) each point's water belongs to
         var ord_ = new int[f.Height.Length];
+        // and how much of it is the deep water's murk, point by point
+        // (DeepShare) - the slot alone switched it a raster quad at a time
+        var share = new float[f.Height.Length];
         for (int p = 0; p < ord_.Length; p++)
+        {
             ord_[p] = float.IsNaN(f.Surface[p]) ? -1 : WaterSlot(f, p);
+            if (ord_[p] >= 0)
+                share[p] = DeepShare(f, p, sink[ord_[p]]);
+        }
         var st = new SurfaceTool();
         st.Begin(Mesh.PrimitiveType.Triangles);
         int quads = 0;
@@ -547,7 +554,7 @@ void fragment() {
                     var at = new Vector3(f.X0 + pi * f.Cell + Origin.X, level / rise, f.Z0 + pj * f.Cell + Origin.Y / Squash);
                     st.SetColor(Pond);
                     st.SetUV(new Vector2(at.X / (2.0f * halfX), at.Z / (2.0f * halfZ)));
-                    st.SetUV2(new Vector2(slot, 0.0f));
+                    st.SetUV2(new Vector2(slot, share[p]));
                     st.AddVertex(at);
                 }
                 quads++;
@@ -569,6 +576,8 @@ void fragment() {
             _deepInk.Param("hub", hub);
             _deepInk.Param("rim_mask", mask);
             _deepInk.Param("sink", sink);
+            // the murk off each vertex's own share, not off its slot (DeepShare)
+            _deepInk.Param("sink_smooth", 1.0f);
             _deepInk.Param("rim_n", normal);
             _deepInk.Param("rim_d", stand);
             _deepInk.Param("rim_span", inradius);
@@ -582,6 +591,70 @@ void fragment() {
             _deepInk.Param("hex_color", new Color(GridInk.R, GridInk.G, GridInk.B));
             _deepInk.Param("hex_opacity", GridInk.A);
         }
+    }
+
+    /// <summary>How far the soft edge between deep water and a ford reaches
+    /// into each, as a share of half the distance between two cells' middles.</summary>
+    private const float DeepBand = 0.35f;
+
+    /// <summary>
+    /// How much of a raster point's water is the deep water's murk: 1 inside a
+    /// deep hex, 0 inside a ford, and between them a ramp across the real hex
+    /// edge, ½ on the edge itself.
+    ///
+    /// <b>Off the hex's own geometry, not off the raster.</b> The murk used to be
+    /// switched by the slot each quad of the sheet took from its first corner's
+    /// owner, so a deep hex came up as a staircase of R/12 quads, pushed a step
+    /// down and to the right of its outline, its edge a hard cut over a bed that
+    /// slopes smoothly - a dark sticker on the ford rather than a hole in it
+    /// (2026-10-26). Here the point's hex is found by its position, the edges
+    /// it shares with water of the other kind are measured, and the nearest
+    /// sets the share. Interpolated across the sheet's triangles it is smooth,
+    /// and both sides of an edge agree on ½, so nothing steps there.
+    ///
+    /// The sea is deep. A point on a dry bank keeps its water's own share
+    /// (<paramref name="slotShare"/>): there is no edge of two waters on it.
+    /// </summary>
+    private float DeepShare(Relief f, int p, float slotShare)
+    {
+        int nx = f.Nx;
+        var at = new Vector2(f.X0 + (p % nx) * f.Cell + Origin.X, f.Z0 + (p / nx) * f.Cell + Origin.Y / Squash);
+        Vector2I cell = Field.FlatCellAt(new Vector2(at.X - Origin.X, at.Y * Squash - Origin.Y));
+        if (Deepness(cell) is not bool deep)
+            return slotShare;
+        Vector2 hub = Hub(cell);
+        float nearest = float.MaxValue, band = 1.0f;
+        foreach (int heading in HexField.EdgeHeadings)
+        {
+            Vector2I next = HexField.Step(cell, heading);
+            if (Deepness(next) is not bool other || other == deep)
+                continue;
+            Vector2 axis = Hub(next) - hub;
+            float half = axis.Length() * 0.5f;
+            // how far in from the edge the two cells share
+            float inside = half - (at - hub).Dot(axis / Mathf.Max(axis.Length(), 0.0001f));
+            if (inside < nearest)
+            {
+                nearest = inside;
+                band = half * DeepBand;
+            }
+        }
+        if (nearest == float.MaxValue)
+            return deep ? 1.0f : 0.0f;
+        float s = Mathf.SmoothStep(0.0f, band, Mathf.Max(nearest, 0.0f));
+        return deep ? 0.5f + 0.5f * s : 0.5f - 0.5f * s;
+    }
+
+    /// <summary>Deep, a ford, or not water at all (null). Off the board is the
+    /// sea, and the sea is deep.</summary>
+    private bool? Deepness(Vector2I cell) =>
+        !Field.InBounds(cell) ? true : Field.IsWater(cell) ? Field.IsDeep(cell) : null;
+
+    /// <summary>A cell's middle on the water's plane, world x and z.</summary>
+    private Vector2 Hub(Vector2I cell)
+    {
+        Vector2 flat = Origin + Field.FlatAnchor(cell) + Field.CentreOffset;
+        return new Vector2(flat.X, flat.Y / Squash);
     }
 
     /// <summary>The water slot a raster point's water belongs to: its own

@@ -17592,10 +17592,15 @@ public static class SelfTest
                 deepWalk > fordWalk * 4.0,
                 $"x{deepWalk / fordWalk:F1} - a ford shows the stones it runs "
                 + "over, and a hollow you would drown in does not show its floor");
+            // The fork is one share, sunk: the cell's slot on the prisms, and on
+            // the relief each vertex's own, smooth across the hex edge
+            // (Stage3D.DeepShare, 2026-10-26) - and both reads of it, the light's
+            // length and the body's colour, take that one share.
             Check("and the fork is per cell, read where the light is spent",
                 Stage3D.DeepShader.Contains("uniform float sink[{0}]")
-                && Stage3D.DeepShader.Contains("mix(clarity, murk, sink[")
-                && Stage3D.DeepShader.Contains("mix(deep, silt, sink["),
+                && Stage3D.DeepShader.Contains("float sunk = mix(sink[int(UV2.x + 0.5)], UV2.y, sink_smooth)")
+                && Stage3D.DeepShader.Contains("mix(clarity, murk, sunk)")
+                && Stage3D.DeepShader.Contains("mix(deep, silt, sunk)"),
                 "one uniform per water cell, written by BuildWater beside the "
                 + "shore mask - the surface could see everything about a cell but "
                 + "how deep it was");
@@ -17603,11 +17608,14 @@ public static class SelfTest
             // picture in this bench was signed off on the shallow board; a change
             // that moved it would be re-judging all of them under cover of a new
             // feature. Both forks end at the old constant when the cell is not
-            // deep, so the old expression is what a ford still evaluates.
+            // deep, so the old expression is what a ford still evaluates - and
+            // the per-vertex share is off unless the relief turns it on, so the
+            // prisms read the slot exactly as before.
             Check("a ford evaluates exactly what it evaluated before",
                 Mathf.IsEqualApprox(Mathf.Lerp(fordClear, deepClear, 0.0f),
                                     fordClear)
-                && Stage3D.DeepShader.Contains("mix(clarity, murk, sink[")
+                && Stage3D.DeepShader.Contains("mix(clarity, murk, sunk)")
+                && Stage3D.DeepShader.Contains("uniform float sink_smooth = 0.0;")
                 && !Stage3D.DeepShader.Contains("uniform float clarity = 26.0"),
                 "measured as well: the all-shallow board is bit for bit what it "
                 + "was, 0 pixels changed");

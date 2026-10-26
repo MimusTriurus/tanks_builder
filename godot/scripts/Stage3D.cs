@@ -3661,6 +3661,8 @@ void fragment() {
             _deepInk.Param("hub", hub);
             _deepInk.Param("rim_mask", mask);
             _deepInk.Param("sink", sink);
+            // the prisms' water is cut to its hexes: the slot's own share
+            _deepInk.Param("sink_smooth", 0.0f);
             _deepInk.Param("rim_n", normal);
             _deepInk.Param("rim_d", stand);
             _deepInk.Param("rim_span", inradius);
@@ -4895,6 +4897,10 @@ uniform float murk = 26.0;
 uniform vec3 silt : source_color = vec3(0.055, 0.132, 0.115);
 // Which cells of the pond are that, one per cell, written by BuildWater.
 uniform float sink[{0}];
+// 1 on the relief: the share is each vertex's own (UV2.y, Stage3D.DeepShare),
+// smooth across the real hex edge, and not its cell's slot, which switched a
+// raster quad at a time. 0 on the prisms, whose water is cut to its hexes.
+uniform float sink_smooth = 0.0;
 uniform float refraction = 22.0;
 uniform float gloss = 210.0;
 uniform float sheen_gloss = 14.0;
@@ -5181,7 +5187,8 @@ void fragment() {{
     // here rather than where the shore is worked out, because the absorption
     // below is the first thing that needs it; the shore reads the same expression
     // again a few dozen lines down.
-    float murky = mix(clarity, murk, sink[int(UV2.x + 0.5)]);
+    float sunk = mix(sink[int(UV2.x + 0.5)], UV2.y, sink_smooth);
+    float murky = mix(clarity, murk, sunk);
     // How much of the last inch of the run is water at all - a film over wet sand
     // rather than a cut. It is also what keeps the fold from reading as a tooth
     // where this field's gradient beats the ground's: a hard edge shows a fold, a
@@ -5200,7 +5207,7 @@ void fragment() {{
     // what is left.
     float t = clamp(thick / max(murky, 0.001), 0.0, 1.0);
     vec3 through = bottom * exp(-thick * absorb / max(murky, 0.001));
-    vec3 body = mix(shallow, mix(deep, silt, sink[int(UV2.x + 0.5)]), t);
+    vec3 body = mix(shallow, mix(deep, silt, sunk), t);
     vec3 col = mix(through, body, t * 0.55);
 
     // One sun, worked out here. The camera is orthographic, so the view vector
