@@ -65,6 +65,7 @@ public sealed partial class MapEditor
             (MapEdit.Tab.Level, "level 0") => Prism(Grass, 0),
             (MapEdit.Tab.Level, "level -1") => Prism(Grass, -1),
             (MapEdit.Tab.Level, "ramp") => Prism(Grass, 0, ramp: true),
+            (MapEdit.Tab.Units, string unit) => TankIcon(unit),
             _ => null,
         };
         _icons[key] = made;
@@ -133,6 +134,73 @@ public sealed partial class MapEditor
                 if (Edge(p, datum) < IconOver * 0.8f)
                     c = new Color(0.85f, 0.86f, 0.80f, 0.85f);
             }
+            img.SetPixel(x, y, c);
+        }
+        img.Resize(IconSide, IconSide, Image.Interpolation.Lanczos);
+        return ImageTexture.CreateFromImage(img);
+    }
+
+    /// <summary>
+    /// A Units brush's icon, <c>"green LT"</c>: the tank from above in its
+    /// side's paint, inked round - belts, hull, turret and gun, a casemate
+    /// (TD, HM) a fighting compartment instead of the turret - as big as its
+    /// class (<see cref="MovementProfile.Size"/>). Drawn, not rendered: ten
+    /// models loaded for the palette would stop the editor for seconds the
+    /// first time the tab is opened.
+    /// </summary>
+    private static Texture2D? TankIcon(string unit)
+    {
+        string[] said = unit.Split(' ');
+        if (said.Length != 2)
+            return null;
+        Color paint = said[0] == Parking.Brown ? BrownInk.Darkened(0.15f) : GreenInk.Darkened(0.35f);
+        int pair = Array.FindIndex(Lineup.Pairs, p => p.Class.StartsWith(said[1], StringComparison.Ordinal));
+        if (pair < 0)
+            return null;
+        string cls = Lineup.Pairs[pair].Class;
+        bool casemate = cls is "TDP" or "HMP";
+        // the heavy fills the icon, the rest as much smaller as their class
+        float size = (float)Lineup.ClassFor(Lineup.Pairs[pair].Model).Size / 1.1f;
+        int n = IconSide * IconOver;
+        var img = Image.CreateEmpty(n, n, false, Image.Format.Rgba8);
+        img.Fill(new Color(0, 0, 0, 0));
+        var mid = new Vector2(n * 0.42f, n * 0.5f);
+        float len = n * 0.62f * size, wide = n * 0.46f * size, ink = IconOver * 1.4f;
+        // 0 none, 1 belts, 2 hull, 3 turret or compartment, 4 gun - grown by
+        // the ink's width for the outline pass
+        int Part(Vector2 p, float grow)
+        {
+            bool gun = p.X > 0.0f && p.X < len * 0.95f + grow && Mathf.Abs(p.Y) < n * 0.035f + grow;
+            bool top = casemate
+                ? p.X > -len * 0.12f - grow && p.X < len * 0.36f + grow && Mathf.Abs(p.Y) < wide * 0.30f + grow
+                : p.Length() < wide * 0.30f + grow;
+            bool hull = Mathf.Abs(p.X) < len * 0.5f + grow && Mathf.Abs(p.Y) < wide * 0.36f + grow;
+            bool belts = Mathf.Abs(p.X) < len * 0.54f + grow && Mathf.Abs(p.Y) < wide * 0.5f + grow
+                         && Mathf.Abs(p.Y) > wide * 0.36f - grow;
+            return top ? 3 : gun ? 4 : hull ? 2 : belts ? 1 : 0;
+        }
+        for (int y = 0; y < n; y++)
+        for (int x = 0; x < n; x++)
+        {
+            var p = new Vector2(x + 0.5f, y + 0.5f) - mid;
+            int part = Part(p, 0.0f);
+            if (part == 0)
+            {
+                // the cel line round the whole tank
+                if (Part(p, ink) != 0)
+                    img.SetPixel(x, y, IconInk);
+                continue;
+            }
+            // and between the parts: the turret's rim over the hull
+            bool rim = part == 3 && Part(p, -ink) != 3;
+            Color c = rim ? IconInk
+                : part switch
+                {
+                    1 => IconInk.Lightened(0.3f),
+                    2 => paint,
+                    3 => paint.Lightened(0.2f),
+                    _ => IconInk.Lightened(0.35f),
+                };
             img.SetPixel(x, y, c);
         }
         img.Resize(IconSide, IconSide, Image.Interpolation.Lanczos);

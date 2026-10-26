@@ -190,6 +190,7 @@ public sealed partial class MapEditor : SceneRoot
                 {
                     "cover" => MapEdit.Tab.Cover,
                     "level" => MapEdit.Tab.Level,
+                    "units" => MapEdit.Tab.Units,
                     _ => MapEdit.Tab.Foundation,
                 };
             else if (args[i] == "--radius" && i + 1 < args.Length
@@ -407,6 +408,7 @@ public sealed partial class MapEditor : SceneRoot
         Redress();
         Tanks();
         TurnProbe();
+        UnitsProbe();
         CrownsFollow();
         Turn((float)delta);
         _frame++;
@@ -1033,7 +1035,8 @@ public sealed partial class MapEditor : SceneRoot
         RayCell(GetViewport().GetMousePosition());
 
     private IReadOnlyList<Vector2I> Patch() =>
-        _edit.Inside(_under) ? _edit.Ring(_under, _radius)
+        // a tank stands on one cell whatever the radius
+        _edit.Inside(_under) ? _edit.Ring(_under, _tab == MapEdit.Tab.Units ? 0 : _radius)
                              : Array.Empty<Vector2I>();
 
     /// <summary>
@@ -1255,6 +1258,7 @@ public sealed partial class MapEditor : SceneRoot
             case Key.Key1: _tab = MapEdit.Tab.Foundation; break;
             case Key.Key2: _tab = MapEdit.Tab.Cover; break;
             case Key.Key3: _tab = MapEdit.Tab.Level; break;
+            case Key.Key4: _tab = MapEdit.Tab.Units; break;
             case Key.Q: Cycle(); break;
             case Key.W: Toggle(true); break;
             case Key.E: Toggle(false); break;
@@ -1312,6 +1316,10 @@ public sealed partial class MapEditor : SceneRoot
     {
         if (!_edit.Inside(_under))
             return;
+        // A tank is put by a click, not painted: a drag would carry it over the
+        // others and put each one it crossed on the brush's side and class
+        if (_tab == MapEdit.Tab.Units && !started)
+            return;
         if (started)
             _edit.Begin();
 
@@ -1344,6 +1352,7 @@ public sealed partial class MapEditor : SceneRoot
                 : _water ? _edit.Water(cell, true, out why)
                 : _edit.Floor(cell, _floor, out why),
             MapEdit.Tab.Cover => _bunker ? Bunker(cell, out why) : _edit.Over(cell, _cover, out why),
+            MapEdit.Tab.Units => _edit.Unit(cell, _unitSide, _unitClass, out why),
             _ => _rampBrush ? _edit.Ramp(cell, true, out why)
                             : _edit.Level(cell, _level, out why),
         };
@@ -1357,7 +1366,8 @@ public sealed partial class MapEditor : SceneRoot
 
     private void Fill()
     {
-        if (!_edit.Inside(_under))
+        // a side fields one of each: there is no region of tanks to fill
+        if (!_edit.Inside(_under) || _tab == MapEdit.Tab.Units)
             return;
         _edit.Begin();
         IReadOnlyList<string> refused =
@@ -1492,6 +1502,7 @@ public sealed partial class MapEditor : SceneRoot
                 : _water ? "water" : _floor.ToString().ToLowerInvariant()),
         MapEdit.Tab.Cover => _bunker ? $"cover: bunker, slit {_facing}"
                                      : "cover: " + _cover.ToString().ToLowerInvariant(),
+        MapEdit.Tab.Units => $"unit: {_unitSide} {_unitClass}",
         _ => _rampBrush ? "level: ramp" : $"level: {_level}",
     };
 

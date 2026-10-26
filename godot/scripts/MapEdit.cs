@@ -36,6 +36,9 @@ public sealed class MapEdit
         Foundation,
         Cover,
         Level,
+        /// <summary>The homes as the tanks on them: a brush per side and class
+        /// (<see cref="Unit"/>), the eraser takes a home off.</summary>
+        Units,
     }
 
     public string Name { get; set; } = "untitled";
@@ -543,8 +546,97 @@ public sealed class MapEdit
     {
         Tab.Cover => Over(cell, Cover.None, out why),
         Tab.Foundation => Floor(cell, Foundation.Solid, out why),
+        Tab.Units => Unhome(cell, out why),
         _ => Ramp(cell, false, out why) && Level(cell, 0, out why),
     };
+
+    /// <summary>The home on a cell taken off, or a refusal when there is none
+    /// or it is the last.</summary>
+    public bool Unhome(Vector2I cell, out string why)
+    {
+        int slot = SlotAt(cell);
+        if (slot < 0)
+        {
+            why = $"no tank on ({cell.X},{cell.Y})";
+            return false;
+        }
+        // the others keep who they are as this one's place in the order goes
+        Freeze();
+        return DropHome(slot, out why);
+    }
+
+    /// <summary>
+    /// A tank of <paramref name="side"/> and class <paramref name="tag"/> on a
+    /// cell - the Units tab's brush.
+    ///
+    /// <b>Put, or moved: a side fields one of each</b> (<see cref="BoardMap.MustCrew"/>).
+    /// The home that fields this side and class - asked for, or given by its
+    /// order - is moved here, its facing with it, and says its side and class
+    /// from then on; another home on the cell gives the cell up to it. With none, the
+    /// home on the cell becomes this tank, or a new home is made for it.
+    /// </summary>
+    public bool Unit(Vector2I cell, string side, string tag, out string why)
+    {
+        why = "";
+        if (!OnBoard(cell))
+        {
+            why = $"({cell.X},{cell.Y}) is not on the board";
+            return false;
+        }
+        if (!Parking.Sides.Contains(side, StringComparer.OrdinalIgnoreCase))
+        {
+            why = $"{side} is not a side - " + string.Join(", ", Parking.Sides);
+            return false;
+        }
+        if (!MovementProfile.Tags.Contains(tag, StringComparer.OrdinalIgnoreCase))
+        {
+            why = $"{tag} is not a class this build has - " + string.Join(", ", MovementProfile.Tags);
+            return false;
+        }
+        side = side.ToLowerInvariant();
+        Freeze();
+        int here = SlotAt(cell);
+        int same = Asking(-1, tag, side) ?? -1;
+        if (same >= 0)
+        {
+            if (same == here)
+                return true;
+            if (here >= 0)
+            {
+                _homes.RemoveAt(here);
+                if (here < same)
+                    same--;
+            }
+            _homes[same] = _homes[same] with { Cell = cell };
+            return true;
+        }
+        if (here >= 0)
+            _homes[here] = _homes[here] with { Class = tag, Side = side };
+        else
+            _homes.Add(new Parking(cell, tag, side));
+        return true;
+    }
+
+    /// <summary>
+    /// Every home the match fields says its side and class out loud - what
+    /// <see cref="Lineup.Of"/> gives it now.
+    ///
+    /// <b>Before the Units brush touches one, all of them.</b> A home that
+    /// names nothing takes its side and class from its order among the others
+    /// (<see cref="Parking.SidesOf"/>); naming one of them shifts that order,
+    /// and a brown tank five homes on would turn green. Said out loud, each
+    /// stays who it is whatever the brush does to its neighbours - and the
+    /// brush finds the tank it means by name. The facings stay as they were.
+    /// </summary>
+    private void Freeze()
+    {
+        foreach (Lineup.Unit u in Lineup.Of(_homes))
+        {
+            int pair = Lineup.PairAt(u.Model);
+            if (pair >= 0)
+                _homes[u.Slot] = _homes[u.Slot] with { Side = u.Side, Class = Lineup.Pairs[pair].Class };
+        }
+    }
 
     /// <summary>
     /// Put a home on a cell.

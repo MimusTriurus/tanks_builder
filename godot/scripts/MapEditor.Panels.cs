@@ -55,7 +55,8 @@ public sealed partial class MapEditor
     /// with the mouse.</summary>
     private Vector2I _picked = new(-1, -1);
 
-    private const float LeftWide = 224.0f;
+    // the four tabs' width, unclipped: what the report and the readout start past
+    private const float LeftWide = 258.0f;
     private const float RightWide = 254.0f;
     private const float PanelTop = 44.0f;
 
@@ -71,8 +72,10 @@ public sealed partial class MapEditor
         var box = new VBoxContainer();
         frame.AddChild(box);
 
-        _tabs = new TabBar();
-        _tabs.AddThemeFontSizeOverride("font_size", 13);
+        // Four tabs in the panel's width, none scrolled off: unclipped, a point
+        // smaller than the palette
+        _tabs = new TabBar { ClipTabs = false };
+        _tabs.AddThemeFontSizeOverride("font_size", 12);
         foreach (MapEdit.Tab tab in Enum.GetValues<MapEdit.Tab>())
             _tabs.AddTab(tab.ToString());
         _tabs.CurrentTab = (int)_tab;
@@ -220,6 +223,19 @@ public sealed partial class MapEditor
                     () => { _cover = Cover.Walls; _bunker = true; },
                     () => _bunker));
                 return covers;
+            case MapEdit.Tab.Units:
+                // A side's five, then the other's: Lineup.Pairs' order, the
+                // roster's, so Q walks green LT to brown HM
+                var units = new List<(string, Action, Func<bool>)>();
+                foreach (string side in Parking.Sides)
+                    foreach ((string _, string cls, string name) in Lineup.Pairs)
+                    {
+                        string s = side, c = cls;
+                        units.Add(($"{s} {c[..2]}  {name}",
+                            () => { _unitSide = s; _unitClass = c; },
+                            () => _unitSide == s && _unitClass == c));
+                    }
+                return units;
             default:
                 var levels = new List<(string, Action, Func<bool>)>();
                 foreach (int level in new[] { 1, 0, -1 })

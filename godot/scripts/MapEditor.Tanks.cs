@@ -29,6 +29,9 @@ public sealed partial class MapEditor
 {
     private bool _tanksStale = true, _tanksShown = true;
 
+    /// <summary>The Units tab's brush: which side and class a click puts.</summary>
+    private string _unitSide = Parking.Green, _unitClass = "LTP";
+
     /// <summary>The frame the tanks last stood - a capture waits a few past
     /// it, as it does past the dressing.</summary>
     private int _tankedFrame = int.MaxValue / 2;
@@ -150,6 +153,55 @@ public sealed partial class MapEditor
                 break;
             case 14:
                 GD.Print($"turn: after one undo home 1 faces {FacingOf(0)}");
+                break;
+        }
+    }
+
+    /// <summary>
+    /// <c>--menu units</c>: key 4, the brown HT brush, a click on (3,3), a
+    /// click on (6,4) - the same tank moved, not a second - the green LT on top
+    /// of it, then a right click there; each step prints the homes.
+    /// </summary>
+    private void UnitsProbe()
+    {
+        if (_open != "units")
+            return;
+        void Click(Vector2I at, MouseButton button)
+        {
+            _under = at;
+            foreach (bool down in new[] { true, false })
+                Input.ParseInputEvent(new InputEventMouseButton { ButtonIndex = button, Pressed = down });
+        }
+        string Homes() => string.Join(", ", _edit.Homes);
+        switch (_frame)
+        {
+            case 4:
+                GD.Print($"units: homes {Homes()}; key 4");
+                Input.ParseInputEvent(new InputEventKey { Keycode = Key.Key4, Pressed = true });
+                Input.ParseInputEvent(new InputEventKey { Keycode = Key.Key4, Pressed = false });
+                break;
+            case 6:
+                _unitSide = Parking.Brown;
+                _unitClass = "HTP";
+                GD.Print($"units: tab {_tab}, {_picks.Count} brushes, tool '{Tool()}'; click (3,3)");
+                Click(new Vector2I(3, 3), MouseButton.Left);
+                break;
+            case 8:
+                GD.Print($"units: homes {Homes()}; click (6,4)");
+                Click(new Vector2I(6, 4), MouseButton.Left);
+                break;
+            case 10:
+                GD.Print($"units: homes {Homes()}; green LT on (6,4)");
+                _unitSide = Parking.Green;
+                _unitClass = "LTP";
+                Click(new Vector2I(6, 4), MouseButton.Left);
+                break;
+            case 12:
+                GD.Print($"units: homes {Homes()}; right click (6,4)");
+                Click(new Vector2I(6, 4), MouseButton.Right);
+                break;
+            case 14:
+                GD.Print($"units: homes {Homes()}, {_edit.Depth} undo(s)");
                 break;
         }
     }

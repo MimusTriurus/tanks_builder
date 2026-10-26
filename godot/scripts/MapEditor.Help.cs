@@ -35,7 +35,7 @@ public sealed partial class MapEditor
     {
         new("Board", "left drag", "paint with the brush", "paint"),
         new("Board", "right drag", "erase: plain ground, no cover, level 0", "erase"),
-        new("Board", "1  2  3", "Foundation, Cover, Level tab"),
+        new("Board", "1  2  3  4", "Foundation, Cover, Level, Units tab"),
         new("Board", "Q", "next brush on the tab"),
         new("Board", "[  ]", "brush radius, 0 to 6"),
         new("Board", "F", "fill the cell's region with the brush", "fill"),
@@ -49,6 +49,8 @@ public sealed partial class MapEditor
         new("Foundation", "E", "the brush puts a cell on or off the board"),
         new("Cover", "W", "the bunker brush; again, its slit turns a side"),
         new("Level", "W", "the brush is a ramp - its tilt is worked out from the heights"),
+        new("Units", "left click", "put the brush's tank here, or move it here if its side has it"),
+        new("Units", "right click", "take the tank off this cell"),
         new("File", "N  O", "new board, open one"),
         new("File", "S  shift+S", "save, save as"),
         new("File", "F5", "run the board on the 3D bench (Edit F5 there comes back)"),
