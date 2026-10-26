@@ -46,6 +46,11 @@ public readonly record struct Parking(Vector2I Cell, string? Class = null,
     /// <summary>The two sides a parking may name.</summary>
     public static readonly string[] Sides = { Green, Brown };
 
+    /// <summary>The edge a side's tank faces when its home says none: green
+    /// up the board, brown down it.</summary>
+    public static int Way(string? side) =>
+        string.Equals(side, Brown, StringComparison.OrdinalIgnoreCase) ? 270 : 90;
+
     /// <summary>A parking that names nobody, which is what every board wrote
     /// before classes existed. Implicit so that a board's list of cells stays a
     /// list of cells in the source.</summary>

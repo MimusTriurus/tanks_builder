@@ -41,6 +41,7 @@ public sealed partial class MapEditor
     private VBoxContainer _choices = null!;
     private Label _brushSays = null!;
     private Button _selectButton = null!;
+    private OptionButton _symmetryPick = null!;
     private readonly List<Button> _picks = new();
     private readonly Dictionary<Layers, CheckBox> _switches = new();
 
@@ -118,6 +119,19 @@ public sealed partial class MapEditor
             Say();
         };
         box.AddChild(_selectButton);
+        // the symmetric brush, P on the keys (MapEditor.Symmetry)
+        // not as wide as its longest item, which pushed the panel over the board
+        _symmetryPick = new OptionButton { FitToLongestItem = false, ClipText = true };
+        _symmetryPick.AddThemeFontSizeOverride("font_size", 14);
+        foreach (MapEdit.Symmetry how in Enum.GetValues<MapEdit.Symmetry>())
+            _symmetryPick.AddItem("symmetry: " + Named(how) + (how == MapEdit.Symmetry.None ? "   P" : ""), (int)how);
+        _symmetryPick.ItemSelected += index =>
+        {
+            if (_loading)
+                return;
+            SetSymmetry((MapEdit.Symmetry)_symmetryPick.GetItemId((int)index));
+        };
+        box.AddChild(_symmetryPick);
 
         box.AddChild(new HSeparator());
 
@@ -352,6 +366,7 @@ public sealed partial class MapEditor
                 _picks[i].ButtonPressed = brushes[i].On();
         _brushSays.Text = $"brush {_radius}";
         _selectButton.ButtonPressed = _selectTool;
+        _symmetryPick.Selected = _symmetryPick.GetItemIndex((int)_symmetry);
         foreach ((Layers which, CheckBox check) in _switches)
             check.ButtonPressed = _layers.HasFlag(which);
         _loading = false;

@@ -357,6 +357,8 @@ public sealed partial class MapEditor
         _sown = Array.Empty<string>();
         _stood = "";
         Unmark();
+        // the symmetry this board keeps, if any (MapEditor.Symmetry)
+        _symmetry = _edit.Fitting();
         _dirty = false;
         _said = said;
         Settle();

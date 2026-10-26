@@ -66,6 +66,7 @@ public sealed partial class MapEditor
         new("File", "F5", "play the board as it is, saved or not, on the 3D bench (Edit F5 there comes back)"),
         new("File", "shift+F5", "play it with the tank on the cell under the pointer"),
         new("File", "ctrl+F5", "run it as a match: two sides off the homes"),
+        new("Board", "P", "symmetry: off, half a turn, mirror left-right, mirror top-bottom - the brush draws the twin too", "symmetry"),
         new("View", "L  B", "levels, flood"),
         new("View", "T  M  K", "trees, grass, walls - shown or hidden"),
         new("View", ",  .", "turn the board a hex side either way; Home turns it back"),
@@ -380,7 +381,9 @@ public sealed partial class MapEditor
             {
                 if (!_field.InBounds(cell))
                     continue;
-                (Vector2 a, Vector2 b) = EdgeOnScreen(cell, _facing);
+                // a twin's slit turned with it (MapEditor.Symmetry)
+                int facing = Own().Contains(cell) ? _facing : MapEdit.Turned(_facing, _symmetry);
+                (Vector2 a, Vector2 b) = EdgeOnScreen(cell, facing);
                 Vector2 from = TopOnScreen(cell), to = (a + b) * 0.5f;
                 on.DrawLine(from, to, ink, 3.0f);
                 Vector2 back = (from - to).Normalized() * 10.0f;

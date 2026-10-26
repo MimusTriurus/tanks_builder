@@ -1115,6 +1115,170 @@ public sealed class MapEdit
         return written;
     }
 
+    // --- symmetry ---------------------------------------------------------------
+
+    /// <summary>How a board for two sides is drawn twice by one brush (stage 3
+    /// of docs/editor-ux-plan.md): turned half round its middle, or mirrored
+    /// left to right, or top to bottom.</summary>
+    public enum Symmetry
+    {
+        None,
+        /// <summary>Half a turn about the board's middle - two sides that face
+        /// each other across it, each with the other's ground.</summary>
+        Point,
+        /// <summary>Left and right swap; up stays up.</summary>
+        Across,
+        /// <summary>Top and bottom swap; left stays left.</summary>
+        Down,
+    }
+
+    /// <summary>
+    /// The cell a cell's twin is, or null when it has none on the grid.
+    ///
+    /// <b>In doubled rows, so the arithmetic is the hexes' and not the
+    /// array's.</b> An odd column stands half a row lower (odd-q), so a cell's
+    /// height on the board is <c>2r + (q &amp; 1)</c> half-rows. A reflection is
+    /// a grid symmetry only when it sends every column to one of the same
+    /// parity (a mirror across a column) or flips the parity together with the
+    /// half-row (half a turn) - so the centre is put where that holds, as near
+    /// the board's middle as it can go:
+    /// <list type="bullet">
+    /// <item><b>Point</b> on an even width turns about the edge between the two
+    /// middle columns and pairs every cell; on an odd width it turns about the
+    /// middle column, and that column's neighbours each leave their last row
+    /// without a twin.</item>
+    /// <item><b>Across</b> mirrors about a column: the middle one on an odd
+    /// width; on an even width the one left of the middle, and the last
+    /// column has no twin.</item>
+    /// <item><b>Down</b> mirrors about a row of the even columns: every odd
+    /// column leaves its last row without a twin, on any size.</item>
+    /// </list>
+    /// The naive (W-1-q, H-1-r) is exact only for the first case, and on an odd
+    /// width it parts neighbours.
+    /// </summary>
+    public Vector2I? Twin(Vector2I cell, Symmetry how)
+    {
+        int y2 = 2 * cell.Y + (cell.X & 1);
+        int q, y;
+        switch (how)
+        {
+            case Symmetry.Point:
+                q = Columns - 1 - cell.X;
+                y = ((Columns - 1) & 1) == 1 ? 2 * Rows - 1 - y2 : 2 * Rows - 2 - y2;
+                break;
+            case Symmetry.Across:
+                q = (((Columns - 1) & 1) == 0 ? Columns - 1 : Columns - 2) - cell.X;
+                y = y2;
+                break;
+            case Symmetry.Down:
+                q = cell.X;
+                y = 2 * Rows - 2 - y2;
+                break;
+            default:
+                return null;
+        }
+        if (q < 0 || q >= Columns || y < 0)
+            return null;
+        var twin = new Vector2I(q, (y - (q & 1)) / 2);
+        return Inside(twin) ? twin : null;
+    }
+
+    /// <summary>An edge heading as the twin sees it: half a turn, or the
+    /// mirror's flip (headings count anticlockwise from the right, 90 up).</summary>
+    public static int Turned(int heading, Symmetry how) => how switch
+    {
+        Symmetry.Point => Mathf.PosMod(heading + 180, 360),
+        Symmetry.Across => Mathf.PosMod(180 - heading, 360),
+        Symmetry.Down => Mathf.PosMod(360 - heading, 360),
+        _ => heading,
+    };
+
+    /// <summary>The other side.</summary>
+    public static string Opposite(string side) =>
+        string.Equals(side, Parking.Brown, StringComparison.OrdinalIgnoreCase) ? Parking.Green : Parking.Brown;
+
+    /// <summary>
+    /// The home on <paramref name="twin"/> made the twin of the one on
+    /// <paramref name="of"/>: the other side, the same class, the facing
+    /// turned - and left unsaid when the turn lands on the side's own way
+    /// across, as it does for half a turn and the top-bottom mirror.
+    /// </summary>
+    public bool Pair(Vector2I of, Vector2I twin, Symmetry how, out string why)
+    {
+        int from = SlotAt(of);
+        if (from < 0)
+        {
+            why = $"no tank on ({of.X},{of.Y})";
+            return false;
+        }
+        Freeze();
+        Parking home = _homes[from];
+        string side = Opposite(home.Side ?? Parking.Green);
+        if (!Unit(twin, side, home.Class ?? "MTP", out why))
+            return false;
+        int facing = Turned(home.Facing ?? Parking.Way(home.Side ?? Parking.Green), how);
+        return Face(SlotAt(twin), facing == Parking.Way(side) ? null : facing, out why);
+    }
+
+    /// <summary>What a board says about one symmetry.</summary>
+    public readonly record struct Asymmetry(int Cells, Vector2I? First, int Lone, Vector2I? FirstLone,
+                                            int Homes, Vector2I? FirstHome);
+
+    /// <summary>
+    /// Where the board breaks <paramref name="how"/>: cells whose twin carries
+    /// another letter or ramp (both of each pair counted), cells on the board
+    /// with no twin on the grid, and homes without a tank of the other side
+    /// on their twin. Masonry's edges are not compared; its letter is.
+    /// </summary>
+    public Asymmetry Audit(Symmetry how)
+    {
+        int cells = 0, lone = 0, homes = 0;
+        Vector2I? first = null, firstLone = null, firstHome = null;
+        for (int r = 0; r < Rows; r++)
+        for (int q = 0; q < Columns; q++)
+        {
+            var cell = new Vector2I(q, r);
+            if (Twin(cell, how) is not Vector2I twin)
+            {
+                if (OnBoard(cell))
+                {
+                    lone++;
+                    firstLone ??= cell;
+                }
+                continue;
+            }
+            if (LetterAt(twin) != LetterAt(cell) || IsRamp(twin) != IsRamp(cell))
+            {
+                cells++;
+                first ??= cell;
+            }
+        }
+        string[] sides = Parking.SidesOf(_homes);
+        for (int i = 0; i < _homes.Count; i++)
+        {
+            Vector2I cell = _homes[i].Cell;
+            int other = Twin(cell, how) is Vector2I twin ? SlotAt(twin) : -1;
+            if (other < 0 || other == i || sides[other] == sides[i])
+            {
+                homes++;
+                firstHome ??= cell;
+            }
+        }
+        return new Asymmetry(cells, first, lone, firstLone, homes, firstHome);
+    }
+
+    /// <summary>The symmetry the letters already keep, half a turn first, or
+    /// None - what the editor turns on when a board is opened. The homes are
+    /// not asked: a fresh board has one, and a board drawn symmetric is
+    /// drawn before it is crewed.</summary>
+    public Symmetry Fitting()
+    {
+        foreach (Symmetry how in new[] { Symmetry.Point, Symmetry.Down, Symmetry.Across })
+            if (Audit(how).Cells == 0)
+                return how;
+        return Symmetry.None;
+    }
+
     // --- out ------------------------------------------------------------------
 
     /// <summary>

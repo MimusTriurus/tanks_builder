@@ -334,6 +334,9 @@ public sealed partial class MapEditor : SceneRoot
                                       MapEdit.DefaultRows);
         }
 
+        // the symmetry the board already keeps, if any (MapEditor.Symmetry)
+        _symmetry = _edit.Fitting();
+
         await Loading.Stage(this, "board", 0.1f);
         // The 2D props are not loaded, only looked for: the wood on this board
         // is MapEditor.Dress's models and the grove below is asked, never
@@ -480,6 +483,7 @@ public sealed partial class MapEditor : SceneRoot
         TurnProbe();
         UnitsProbe();
         ClipProbe();
+        SymmetryProbe();
         CrownsFollow();
         Turn((float)delta);
         _frame++;
@@ -895,6 +899,8 @@ public sealed partial class MapEditor : SceneRoot
                 $"({walled.X},{walled.Y}) carries masonry, and the relief stands no "
                 + "wall, capon or bunker - kept in the file, not played", false,
                 $"({walled.X},{walled.Y}) masonry"));
+        // where the board breaks the symmetry that is up (MapEditor.Symmetry)
+        Symmetric(faults);
 
         // The wood is sown again only when the cells it grows on moved.
         // Grove.Plant walks every cell and rolls a species per prop, which is
@@ -1130,12 +1136,22 @@ public sealed partial class MapEditor : SceneRoot
     private Vector2I Pointed() =>
         RayCell(GetViewport().GetMousePosition());
 
-    private IReadOnlyList<Vector2I> Patch() =>
+    /// <summary>The cells under the brush itself.</summary>
+    private IReadOnlyList<Vector2I> Own() =>
         // a tank stands on one cell whatever the radius; selecting, the
         // pointer paints nothing (MapEditor.Select)
         _edit.Inside(_under) && !Selecting
             ? _edit.Ring(_under, _tab == MapEdit.Tab.Units ? 0 : _radius)
             : Array.Empty<Vector2I>();
+
+    /// <summary>The cells a stroke would write: the brush's and, with a
+    /// symmetry up, their twins (MapEditor.Symmetry).</summary>
+    private IReadOnlyList<Vector2I> Patch()
+    {
+        IReadOnlyList<Vector2I> own = Own();
+        List<Vector2I> twins = Twins(own);
+        return twins.Count == 0 ? own : own.Concat(twins).ToList();
+    }
 
     /// <summary>
     /// The layers drawn over the board rather than into it - numbers, arrows and
@@ -1256,6 +1272,7 @@ public sealed partial class MapEditor : SceneRoot
 
             // The marked cells and the piece in hand (MapEditor.Select), then
             // last, over everything: what the brush would do (MapEditor.Help).
+            editor.DrawAxis(this);
             editor.DrawSelection(this);
             editor.Ghost(this);
         }
@@ -1400,6 +1417,8 @@ public sealed partial class MapEditor : SceneRoot
             case Key.F5: Play(match: key.CtrlPressed, from: key.ShiftPressed ? StartCell() : null); return;
             case Key.L: _layers ^= Layers.Levels; break;
             case Key.B: _layers ^= Layers.Flood; break;
+            // MapEditor.Symmetry: off, half a turn, the two mirrors
+            case Key.P: NextSymmetry(); break;
             case Key.Home: Home(); return;
             // MapEditor.View: the board turned a hex side either way.
             case Key.Comma: TurnBy(1); return;
@@ -1446,10 +1465,15 @@ public sealed partial class MapEditor : SceneRoot
         if (started)
             _edit.Begin();
 
-        IReadOnlyList<Vector2I> patch = Patch();
-        IReadOnlyList<string> refused = _erasing
-            ? _edit.Sweep(patch, c => (_edit.Erase(c, _tab, out string why), why))
-            : _edit.Sweep(patch, Write);
+        IReadOnlyList<Vector2I> own = Own();
+        var refused = new List<string>(_erasing
+            ? _edit.Sweep(own, c => (_edit.Erase(c, _tab, out string why), why))
+            : _edit.Sweep(own, Write));
+        // and again on the twins, when a symmetry is up (MapEditor.Symmetry)
+        List<Vector2I> twins = Twins(own);
+        refused.AddRange(_erasing
+            ? _edit.Sweep(twins, c => (_edit.Erase(c, _tab, out string why), why))
+            : _edit.Sweep(twins, WriteTwin));
 
         if (refused.Count > 0)
             _said = refused[0];
@@ -1495,8 +1519,9 @@ public sealed partial class MapEditor : SceneRoot
         _edit.Begin();
         // the marked cells when there are any (MapEditor.Select), else the
         // region of one letter under the pointer
-        IReadOnlyList<string> refused =
-            _edit.Sweep(_selected.Count > 0 ? _selected.ToList() : _edit.Region(_under), Write);
+        IReadOnlyList<Vector2I> cells = _selected.Count > 0 ? _selected.ToList() : _edit.Region(_under);
+        var refused = new List<string>(_edit.Sweep(cells, Write));
+        refused.AddRange(_edit.Sweep(Twins(cells), WriteTwin));
         _dirty = true;
         _said = refused.Count > 0 ? refused[0] : "filled";
         Settle();
@@ -1684,7 +1709,8 @@ public sealed partial class MapEditor : SceneRoot
 
         _title.Text = $"   {_edit.Name}{(_dirty ? " *" : "")}";
         _hud.Text = $"{_edit.Name}  {_edit.Columns}x{_edit.Rows}   {cell}\n"
-                    + $"{Tool()}   brush {_radius}   {_edit.Depth} undo\n"
+                    + $"{Tool()}   brush {_radius}   {_edit.Depth} undo"
+                    + (_symmetry == MapEdit.Symmetry.None ? "" : $"   symmetry: {Named(_symmetry)}") + "\n"
                     + (_said.Length > 0 ? _said : "");
         Problems();
         _foot.Text = Under();

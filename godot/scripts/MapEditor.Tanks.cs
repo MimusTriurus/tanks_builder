@@ -273,6 +273,8 @@ public sealed partial class MapEditor
             Vector2I at = _edit.Homes[_carrying].Cell;
             _said = _edit.Unit(at, _unitSide, _unitClass, out string why)
                 ? $"({at.X},{at.Y}) is a {_unitSide} {_unitClass}" : why;
+            // and its twin the other side's (MapEditor.Symmetry)
+            PairTwin(at);
             _dirty = true;
         }
         _carrying = -1;
