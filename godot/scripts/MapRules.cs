@@ -65,6 +65,13 @@ public static class MapRules
         /// <summary>The flood grid.</summary>
         public bool[] Water = Array.Empty<bool>();
 
+        /// <summary>The levels are joined by slopes, not by ramps - the relief
+        /// (<see cref="HexField.Slopes"/>, BOT-11). Set, the ramp rules have
+        /// nothing to say and <see cref="DropFaults"/> names the steps no hull
+        /// drives. The editor sets it always; a built map's draft does not.
+        /// </summary>
+        public bool Slopes;
+
         /// <summary>The floor. Read for <see cref="Foundation.Shallow"/> and
         /// <see cref="Foundation.Deep"/> only, so that a map naming its water on
         /// the floor gets the same guards as one handing in a flood mask - which
@@ -107,8 +114,10 @@ public static class MapRules
             On(cell) && At(cell) < Ground.Length
             && Ground[At(cell)] == Foundation.Deep;
 
+        /// <summary>Never on the relief: the letters may still carry ramps,
+        /// and nothing builds them there.</summary>
         public bool IsRamp(Vector2I cell) =>
-            On(cell) && At(cell) < Ramps.Length && Ramps[At(cell)];
+            !Slopes && On(cell) && At(cell) < Ramps.Length && Ramps[At(cell)];
 
         public bool IsCliff(Vector2I cell) =>
             On(cell) && At(cell) < Cliffs.Length && Cliffs[At(cell)];
@@ -258,6 +267,8 @@ public static class MapRules
     public static Dictionary<Vector2I, int> Sites(Draft draft)
     {
         var legal = new Dictionary<Vector2I, int>();
+        if (draft.Slopes)
+            return legal;
         foreach (Vector2I cell in draft.Cells())
         {
             if (draft.IsCliff(cell))
@@ -281,6 +292,9 @@ public static class MapRules
     public static List<Fault> RampFaults(Draft draft)
     {
         var faults = new List<Fault>();
+        // on the relief the ramps the letters carry are not built at all
+        if (draft.Slopes)
+            return faults;
         for (int r = 0; r < draft.Rows; r++)
         for (int q = 0; q < draft.Columns; q++)
         {
@@ -375,6 +389,41 @@ public static class MapRules
         return faults;
     }
 
+    /// <summary>
+    /// The steps on the relief that no hull drives: a neighbour more than
+    /// <see cref="HexField.MaxClimb"/> levels down, neither of the two a rock.
+    ///
+    /// <b>Named, never fatal</b>, like <c>ramp.near</c>: a bluff over a hollow
+    /// is a thing an author may want, and a tank still goes down it - thrown off
+    /// by a ram (<see cref="HexField.Drops"/>). What the author gets is being
+    /// told that the edge is a wall from below and a fall from above, which on
+    /// the slopes of the relief does not show. Once per pair, on the high cell.
+    /// </summary>
+    public static List<Fault> DropFaults(Draft draft, int climb = 1)
+    {
+        var faults = new List<Fault>();
+        if (!draft.Slopes)
+            return faults;
+        foreach (Vector2I cell in draft.Cells())
+        {
+            if (draft.IsCliff(cell))
+                continue;
+            foreach (int h in HexField.EdgeHeadings)
+            {
+                Vector2I low = HexField.Step(cell, h);
+                if (!draft.On(low) || draft.IsCliff(low)
+                    || draft.LevelAt(cell) - draft.LevelAt(low) <= climb)
+                    continue;
+                faults.Add(new Fault(cell, "slope.drop",
+                    $"({cell.X},{cell.Y}) stands more than a level over "
+                    + $"({low.X},{low.Y}): no tank drives that edge, up or down",
+                    false,
+                    $"({cell.X},{cell.Y}) over ({low.X},{low.Y})"));
+            }
+        }
+        return faults;
+    }
+
     // --- water ---------------------------------------------------------------
 
     /// <summary>
@@ -397,27 +446,11 @@ public static class MapRules
                 Vector2I next = HexField.Step(cell, heading);
                 if (!draft.IsWater(next))
                     continue;
-                // the sea round a moated board meets a river with a step
-                // (BoardMap.Moated)
-                if (draft.Sea is { } sea && sea.Contains(cell) != sea.Contains(next))
+                if (!Shores(draft, cell, next))
                     continue;
-                // The same sentence about depth: a ford beside deep water on one
-                // level is two surfaces a fraction of a level apart, and a step in
-                // the water is a step whether it is a whole level or part of one.
-                if (draft.LevelAt(next) == draft.LevelAt(cell)
-                    && draft.IsDeep(next) != draft.IsDeep(cell))
-                {
-                    string deep = draft.IsDeep(cell) ? "deep" : "a ford";
-                    string other = draft.IsDeep(next) ? "deep" : "a ford";
-                    faults.Add(new Fault(cell, "water.step",
-                        $"({cell.X},{cell.Y}) is {deep} beside "
-                        + $"({next.X},{next.Y}) which is {other}, and one body "
-                        + "of water is one surface",
-                        true,
-                        $"({cell.X},{cell.Y}) {deep} beside "
-                        + $"({next.X},{next.Y}) {other}"));
-                    continue;
-                }
+                // A ford beside deep water on one level is no step: the body
+                // takes the deep water's surface and the ford's bed rises under
+                // it (Brimmed), so the one surface is one by construction.
                 if (draft.LevelAt(next) == draft.LevelAt(cell))
                     continue;
                 faults.Add(new Fault(cell, "water.step",
@@ -429,6 +462,53 @@ public static class MapRules
             }
         }
         return faults;
+    }
+
+    /// <summary>Whether two water cells side by side are asked as one body:
+    /// the sea round a moated board meets a river with a step
+    /// (<see cref="BoardMap.Moated"/>), so a sea cell and a land one never
+    /// are.</summary>
+    private static bool Shores(Draft draft, Vector2I cell, Vector2I next) =>
+        draft.Sea is not { } sea || sea.Contains(cell) == sea.Contains(next);
+
+    /// <summary>
+    /// Which water cells stand at the deep water's surface: every cell of a body
+    /// that has deep water in it.
+    ///
+    /// <b>The surface belongs to the body and the depth to the bed</b>
+    /// (2026-10-26, docs/editor3d-plan.md, «Модель воды»). A body is the water
+    /// cells joined across edges on one level - the cells
+    /// <see cref="StepFaults"/> asks as one surface - and one with any deep cell
+    /// in it is filled to the deep water's height, its fords a shelf under
+    /// it (<see cref="HexField.BedAt"/>). A body with no deep cell keeps the
+    /// ford's own surface, so every pond and river drawn before this reads as it
+    /// did.
+    /// </summary>
+    public static bool[] Brimmed(Draft draft)
+    {
+        var brim = new bool[draft.Columns * draft.Rows];
+        var queue = new Queue<Vector2I>();
+        foreach (Vector2I cell in draft.Cells())
+            if (draft.IsDeep(cell) && draft.IsWater(cell))
+            {
+                brim[draft.At(cell)] = true;
+                queue.Enqueue(cell);
+            }
+        while (queue.Count > 0)
+        {
+            Vector2I at = queue.Dequeue();
+            foreach (int h in HexField.EdgeHeadings)
+            {
+                Vector2I next = HexField.Step(at, h);
+                if (!draft.IsWater(next) || brim[draft.At(next)]
+                    || draft.LevelAt(next) != draft.LevelAt(at)
+                    || !Shores(draft, at, next))
+                    continue;
+                brim[draft.At(next)] = true;
+                queue.Enqueue(next);
+            }
+        }
+        return brim;
     }
 
     /// <summary>
@@ -486,10 +566,15 @@ public static class MapRules
     public static List<Fault> WaterFaults(Draft draft)
     {
         List<Fault> faults = StepFaults(draft);
+        // Named and allowed on the relief: its ground is one smooth surface, and
+        // a dry cell at the water's level beside it is drawn as the shore
+        // shelving under it (Relief.Connect keeps it dry past the bank) - a
+        // board the bench plays, where the prisms drew a wall of water. The
+        // old ramp out of a pond is exactly this cell once its ramp is gone.
         foreach (Vector2I cell in Flood(draft))
             faults.Add(new Fault(cell, "water.level",
                 $"({cell.X},{cell.Y}) stands at a water surface's own height "
-                + "beside it, so it is under it"));
+                + "beside it, so it is under it", !draft.Slopes));
         return faults;
     }
 
@@ -643,6 +728,7 @@ public static class MapRules
     {
         var faults = new List<Fault>();
         faults.AddRange(RampFaults(draft));
+        faults.AddRange(DropFaults(draft));
         faults.AddRange(WaterFaults(draft));
         faults.AddRange(HomeFaults(draft));
         faults.AddRange(WallFaults(draft));

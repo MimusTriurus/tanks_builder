@@ -109,9 +109,13 @@ public sealed partial class Tank3DBench
     {
         afloat = false;
         float face = _field!.TopOn(cell, flat);
-        if (!_field.IsDeep(cell))
-            return face / RiseFactor;
         bool ramp = _field.RampHeading(cell) >= 0;
+        if (!_field.IsDeep(cell))
+            // a ford beside deep water stands on its shelf, which the prisms
+            // draw over its level (HexField.Shelf); the relief's ground already
+            // is the shelf
+            return (_field.Surface is null && !ramp && _field.IsWater(cell)
+                ? Mathf.Max(face, _field.BedAt(cell)) : face) / RiseFactor;
         float bed = ramp ? face : BedPx(cell, flat);
         float top = _field.WaterTop(cell);
         float swim = top - _deckPx * (float)_profile.Draught;

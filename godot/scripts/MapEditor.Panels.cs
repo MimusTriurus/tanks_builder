@@ -108,13 +108,11 @@ public sealed partial class MapEditor
 
         box.AddChild(new HSeparator());
 
-        // The overlays, as the flags they are - see MapEditor.Layers, where
-        // reading a ramp fault means seeing the levels and the arrows at once.
+        // The overlays, as the flags they are - see MapEditor.Layers. No ramps
+        // and no ramp sites: the relief builds neither.
         foreach ((Layers flag, string name) in new[]
                  {
                      (Layers.Levels, "levels  L"),
-                     (Layers.Ramps, "ramps  R"),
-                     (Layers.Sites, "ramp sites  G"),
                      (Layers.Flood, "flood  B"),
                      (Layers.Homes, "homes"),
                  })
@@ -245,9 +243,8 @@ public sealed partial class MapEditor
                         () => { _level = want; _rampBrush = false; },
                         () => !_rampBrush && _level == want));
                 }
-                // Through RampBrush, which is where the sites come on - see
-                // its remarks, which carry why a ramp is one click and not two.
-                levels.Add(("ramp", () => RampBrush(true), () => _rampBrush));
+                // No ramp brush: the board is a relief, and its levels are
+                // joined by slopes from any side (MapEditor.Settle).
                 return levels;
         }
     }
@@ -452,16 +449,9 @@ public sealed partial class MapEditor
         level.ValueChanged += value => Wrote(() =>
             _edit.Level(_picked, (int)value, out string why) ? "" : why);
         into.AddChild(Field("level", level));
-
-        into.AddChild(Ticked("ramp", _edit.IsRamp(_picked),
-            on => _edit.Ramp(_picked, on, out string why) ? "" : why));
+        // A ramp the letters still carry is kept and not built (Settle).
         if (_edit.IsRamp(_picked))
-        {
-            int heading = _field.RampHeading(_picked);
-            into.AddChild(Note(heading >= 0
-                ? $"climbs towards {heading}"
-                : "no edge to climb - see the report"));
-        }
+            into.AddChild(Note("ramp in the file - the relief does not build it"));
 
         // --- home ------------------------------------------------------------
         into.AddChild(Heading("Home"));

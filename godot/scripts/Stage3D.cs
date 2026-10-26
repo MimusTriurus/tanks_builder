@@ -343,6 +343,13 @@ public sealed partial class Stage3D : Node3D
     /// </summary>
     private const float Back = 1500.0f;
 
+    /// <summary>How far back the camera has to stand for a board deeper than
+    /// <see cref="Back"/> clears: nought keeps Back. The map editor sets it
+    /// off the ringed board (MapEditor.Relief) - ABBEY in its sea and frame
+    /// lost its near rows and its homes' tanks to the near plane. Range is
+    /// precision, so it is asked only where the board needs it.</summary>
+    public float Depth;
+
     public override void _Process(double delta)
     {
         using (Prof.Measure("stage"))
@@ -454,8 +461,10 @@ public sealed partial class Stage3D : Node3D
         // the stage draws everything meant no shake at all. Found when a
         // detonation's shake, on and measured in the spring, was not on screen.
         Vector3 pivot = World(Eye.Position + Eye.Offset, 0.0f);
+        float back = Mathf.Max(Back, Depth);
+        _camera.Far = back * 2.0f;
         _camera.Position = pivot
-                           + new Vector3(0.0f, Back * Squash, Back * RiseFactor).Rotated(Vector3.Up, Yaw);
+                           + new Vector3(0.0f, back * Squash, back * RiseFactor).Rotated(Vector3.Up, Yaw);
         _camera.Rotation = new Vector3(-Mathf.Asin(Squash), Yaw, 0.0f);
     }
 
@@ -2357,7 +2366,10 @@ void fragment() {{
         // a field nothing ever reads again, which is a control that does
         // nothing and says nothing.
         Mix(Deep ? 1 : 0);
-        Mix(Relief is null ? 0 : 1);
+        // Which relief, not only whether: the editor hands a new one per
+        // stroke that moved the ground (MapEditor.Relief), and a floor painted
+        // sand moves nothing else this hashes.
+        Mix(Relief is null ? 0 : System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(Relief) + 1L);
         for (int q = 0; q < Field.Columns; q++)
         for (int r = 0; r < Field.Rows; r++)
         {

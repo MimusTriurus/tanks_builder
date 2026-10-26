@@ -42,67 +42,90 @@ public sealed partial class BoardMap
     /// </summary>
     public BoardMap Moated()
     {
-        // A side whose whole edge is off the board already has its sea - the
-        // holes flood - and gets no second ring: ABBEY is ringed by its own.
-        bool OffColumn(int q) => Enumerable.Range(0, Rows).All(r => !OnBoard(new Vector2I(q, r)));
-        bool OffRow(int r) => Enumerable.Range(0, Columns).All(q => !OnBoard(new Vector2I(q, r)));
-        int left = OffColumn(0) ? 0 : 2, right = OffColumn(Columns - 1) ? 0 : 1;
-        int up = OffRow(0) ? 0 : 1, down = OffRow(Rows - 1) ? 0 : 1;
+        Ring ring = RingOf(Columns, Rows, OnBoard);
+        int[] levels = ring.Spread(Levels, Plinth - 1);
+        bool[] water = ring.Spread(Water, true);
+        Foundation[] ground = ring.Spread(Ground, Foundation.Deep);
+        var homes = Parked.Select(p => p with { Cell = p.Cell + ring.Shift }).ToList();
+        var walling = Walling.ToDictionary(kv => kv.Key + ring.Shift, kv => kv.Value);
+        return new BoardMap(Name, ring.Columns, ring.Rows, homes, levels,
+                            ring.Spread(Ramps, false), water, ring.Spread(Kinds, null),
+                            ring.Spread(Cliffs, false), ring.Spread(Walls, false), ground,
+                            ring.Spread(Over, Cover.None), ring.Plot, Paint, Height, Plinth,
+                            walling)
+        {
+            Sea = ring.Sea,
+            Shift = ring.Shift,
+        };
+    }
+
+    /// <summary>
+    /// Where a board of <paramref name="columns"/> by <paramref name="rows"/>
+    /// lands in its sea (<see cref="Moated"/>), asked of the cells alone - the
+    /// editor rings a draft that need not build (MapEditor.Settle).
+    ///
+    /// A side whose whole edge is off the board already has its sea - the
+    /// holes flood - and gets no second ring: ABBEY is ringed by its own.
+    /// </summary>
+    public static Ring RingOf(int columns, int rows, Func<Vector2I, bool> onBoard)
+    {
+        bool OffColumn(int q) => Enumerable.Range(0, rows).All(r => !onBoard(new Vector2I(q, r)));
+        bool OffRow(int r) => Enumerable.Range(0, columns).All(q => !onBoard(new Vector2I(q, r)));
+        int left = OffColumn(0) ? 0 : 2, right = OffColumn(columns - 1) ? 0 : 1;
+        int up = OffRow(0) ? 0 : 1, down = OffRow(rows - 1) ? 0 : 1;
         var shift = new Vector2I(left, up);
-        int columns = Columns + left + right, rows = Rows + up + down, n = columns * rows;
-        var levels = new int[n];
-        var ramps = new bool[n];
-        var water = new bool[n];
-        var kinds = new string?[n];
-        var cliffs = new bool[n];
-        var walls = new bool[n];
-        var ground = new Foundation[n];
-        var over = new Cover[n];
+        int wide = columns + left + right, high = rows + up + down;
         var plot = new HashSet<Vector2I>();
         var sea = new HashSet<Vector2I>();
-        for (int r = 0; r < rows; r++)
-        for (int q = left > 0 ? 1 : 0; q < columns; q++)
+        var from = new int[wide * high];
+        for (int r = 0; r < high; r++)
+        for (int q = 0; q < wide; q++)
         {
             var cell = new Vector2I(q, r);
-            plot.Add(cell);
             Vector2I was = cell - shift;
-            if (!OnBoard(was))
+            from[r * wide + q] = -1;
+            // the outer left column is off the plot, the frame stands over it
+            if (left > 0 && q == 0)
+                continue;
+            plot.Add(cell);
+            if (was.X < 0 || was.X >= columns || was.Y < 0 || was.Y >= rows || !onBoard(was))
             {
                 sea.Add(cell);
                 continue;
             }
-            int to = r * columns + q, from = At(was);
-            levels[to] = Levels[from];
-            ramps[to] = Ramps[from];
-            water[to] = Water[from];
-            kinds[to] = Kinds[from];
-            cliffs[to] = Cliffs[from];
-            walls[to] = Walls[from];
-            ground[to] = Ground[from];
-            over[to] = Over[from];
+            from[r * wide + q] = was.Y * columns + was.X;
         }
+        return new Ring(wide, high, shift, plot, sea, from);
+    }
 
-        // The sea's level is deep water's: the level the letter d stands at
-        // (a level under the plinth), so one sea and every deep pond of the
-        // map are one water, and a pond on the edge runs into it (the user's
-        // call, 2026-10-25). What on the edge stands lower than its surface -
-        // a dry pit, a ford - is dammed off by the relief (Relief.Weir).
-        int level = Plinth - 1;
-        foreach (Vector2I cell in sea)
+    /// <summary>A board in its sea: the size, how far the map's cells moved,
+    /// the plot and the sea, and which map cell each ringed one came from.
+    /// </summary>
+    public sealed record Ring(int Columns, int Rows, Vector2I Shift,
+                              HashSet<Vector2I> Plot, HashSet<Vector2I> Sea, int[] From)
+    {
+        /// <summary>
+        /// A per-cell array of the map laid out on the ring, the sea's cells
+        /// given <paramref name="sea"/>.
+        ///
+        /// The sea's level is deep water's: the level the letter d stands at (a
+        /// level under the plinth), so one sea and every deep pond of the map
+        /// are one water, and a pond on the edge runs into it (the user's call,
+        /// 2026-10-25). What on the edge stands lower than its surface - a dry
+        /// pit, a ford - is dammed off by the relief (Relief.Weir).
+        /// </summary>
+        public T[] Spread<T>(T[] map, T sea)
         {
-            int at = cell.Y * columns + cell.X;
-            levels[at] = level;
-            water[at] = true;
-            ground[at] = Foundation.Deep;
+            var laid = new T[From.Length];
+            for (int i = 0; i < From.Length; i++)
+            {
+                int at = From[i];
+                if (at >= 0)
+                    laid[i] = at < map.Length ? map[at] : default!;
+                else if (Sea.Contains(new Vector2I(i % Columns, i / Columns)))
+                    laid[i] = sea;
+            }
+            return laid;
         }
-
-        var homes = Parked.Select(p => p with { Cell = p.Cell + shift }).ToList();
-        var walling = Walling.ToDictionary(kv => kv.Key + shift, kv => kv.Value);
-        return new BoardMap(Name, columns, rows, homes, levels, ramps, water, kinds,
-                            cliffs, walls, ground, over, plot, Paint, Height, Plinth, walling)
-        {
-            Sea = sea,
-            Shift = shift,
-        };
     }
 }

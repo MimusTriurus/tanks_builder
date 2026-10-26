@@ -137,7 +137,7 @@ public sealed partial class MapEditor : SceneRoot
         Homes = 32,
     }
 
-    private Layers _layers = Layers.Ramps | Layers.Faults | Layers.Homes;
+    private Layers _layers = Layers.Faults | Layers.Homes;
 
     // --- setup ---------------------------------------------------------------
 
@@ -306,6 +306,20 @@ public sealed partial class MapEditor : SceneRoot
             Ink = Painted,
         };
         AddChild(_field);
+        // The board the stage draws: the map in its sea, as Run plays it
+        // (MapEditor.Relief). The map's own field above stays the one every
+        // rule, mark and pick asks.
+        _board = new HexField
+        {
+            Atlas = tile,
+            Terrain = terrain,
+            Trees = false,
+            Columns = _edit.Columns,
+            Rows = _edit.Rows,
+            Ink = cell => Painted(cell - (_ring?.Shift ?? Vector2I.Zero)),
+            ShowField = false,
+        };
+        AddChild(_board);
 
         _grove = new Grove
         {
@@ -329,11 +343,11 @@ public sealed partial class MapEditor : SceneRoot
             _surf = WaterArt.Load(AssetRoot.Water, tile.HexRect);
             GD.Print("editor: water " + _surf.Note);
         }
-        _sea = new Swell { Field = _field };
+        _sea = new Swell { Field = _board };
 
         _stage = new Stage3D
         {
-            Field = _field, Origin = Vector2.Zero, Eye = _camera,
+            Field = _board, Origin = Vector2.Zero, Eye = _camera,
             // No Wood: the trees are the models MapEditor.Dress stands, as on
             // the 3D bench; the grove is only asked, never drawn.
             Blaze = _fire, Surf = _surf, Sea = _sea,
@@ -773,18 +787,16 @@ public sealed partial class MapEditor : SceneRoot
     {
         // the tanks on the homes stand again next frame (MapEditor.Tanks)
         _tanksStale = true;
+        // On the relief, as Run plays it (BOT-11): the levels are joined by
+        // slopes, the ramps the letters carry are kept in the file and not
+        // built, and the rules are the relief's (MapRules.Draft.Slopes).
         MapRules.Draft draft = _edit.Draft();
-        _faults = MapRules.Faults(draft);
+        draft.Slopes = true;
+        List<MapRules.Fault> faults = MapRules.Faults(draft);
+        _faults = faults;
         _sites = MapRules.Sites(draft);
         _closure = MapRules.Flood(draft);
-
-        _dropped = _faults
-            .Where(f => f.Rule is "ramp.bridge" or "ramp.rock")
-            .Select(f => f.Cell).ToHashSet();
-        var ramps = (bool[])draft.Ramps.Clone();
-        foreach (Vector2I cell in _dropped)
-            if (draft.On(cell))
-                ramps[draft.At(cell)] = false;
+        _dropped = new HashSet<Vector2I>();
 
         var water = (bool[])draft.Water.Clone();
         foreach (MapRules.Fault fault in _faults.Where(f => f.Rule == "water.step"))
@@ -794,13 +806,22 @@ public sealed partial class MapEditor : SceneRoot
         _field.Columns = _edit.Columns;
         _field.Rows = _edit.Rows;
         _field.Plot = draft.Plot;
-        _field.SetRelief(draft.Levels, ramps);
+        _field.Slopes = true;
+        _field.SetRelief(draft.Levels);
         _field.SetWater(water.Any(w => w) ? water : null);
         _field.SetGround(draft.Ground);
         string?[] kinds = Kinds(draft);
         _field.SetKinds(kinds);
         _field.Paint = _edit.Paint ?? MapFile.PaintFor(_edit.Ground());
         Covered();
+        Ringed(draft, water, kinds);
+        // no walls, capon or bunker on the relief (Tank3DBench.BuildWalls):
+        // the letters keep them, and each is named where it is
+        foreach (Vector2I walled in _edit.Walled())
+            faults.Add(new MapRules.Fault(walled, "relief.flat",
+                $"({walled.X},{walled.Y}) carries masonry, and the relief stands no "
+                + "wall, capon or bunker - kept in the file, not played", false,
+                $"({walled.X},{walled.Y}) masonry"));
 
         // The wood is sown again only when the cells it grows on moved.
         // Grove.Plant walks every cell and rolls a species per prop, which is
@@ -866,7 +887,9 @@ public sealed partial class MapEditor : SceneRoot
     {
         if (_stage is null || _field.Atlas is null)
             return;
-        IReadOnlyList<Vector2I> walled = _edit.Walled();
+        // None on the relief, which stands no masonry (Settle names the cells).
+        // The rest is kept for the day it does.
+        IReadOnlyList<Vector2I> walled = Array.Empty<Vector2I>();
         // The relief is in the signature because a wall stands at its cell's own
         // height - see WallProp.Build, which reads LevelAt - so raising the
         // ground under one has to lift it.
@@ -1287,8 +1310,6 @@ public sealed partial class MapEditor : SceneRoot
             case Key.S: Keep(); return;
             case Key.F5: Play(match: key.CtrlPressed); return;
             case Key.L: _layers ^= Layers.Levels; break;
-            case Key.R: _layers ^= Layers.Ramps; break;
-            case Key.G: _layers ^= Layers.Sites; break;
             case Key.B: _layers ^= Layers.Flood; break;
             case Key.Home: Home(); return;
             // MapEditor.View: the board turned a hex side either way.
@@ -1459,9 +1480,35 @@ public sealed partial class MapEditor : SceneRoot
     /// breaks the session rather than the drawing - which is why the refusal is
     /// shown here instead of on the next run.
     /// </summary>
+    /// <summary>
+    /// Take off the ramps the file carries that the levels no longer decide.
+    ///
+    /// <b>The editor draws a relief and authors no ramps, and the file still
+    /// has the layer</b> - the harness and the prism scenes build it, and
+    /// <see cref="HexField.SetRelief"/> throws on a ramp with no one high edge.
+    /// A stroke that moved the levels round a ramp the author can no longer see
+    /// would otherwise save a board those scenes refuse. One undoable step.
+    /// </summary>
+    private void Unramp()
+    {
+        MapRules.Draft draft = _edit.Draft();
+        List<Vector2I> bad = MapRules.RampFaults(draft)
+            .Where(f => f.Rule is "ramp.bridge" or "ramp.rock")
+            .Select(f => f.Cell).Distinct().ToList();
+        if (bad.Count == 0)
+            return;
+        _edit.Begin();
+        foreach (Vector2I cell in bad)
+            _edit.Ramp(cell, false, out string _);
+        _edit.End();
+        GD.Print($"editor: {bad.Count} ramp(s) the levels no longer decide taken off");
+        Settle();
+    }
+
     private bool Keep()
     {
         bool kept;
+        Unramp();
         try
         {
             string path = _edit.Save();
@@ -1531,8 +1578,7 @@ public sealed partial class MapEditor : SceneRoot
         var lines = new List<string>();
         MapRules.Draft draft = _edit.Draft();
         int cells = draft.Cells().Count();
-        lines.Add($"{cells} cells on the board, {_sites.Count} could carry a "
-                  + $"ramp, {_sites.Count(kv => !_edit.IsRamp(kv.Key))} free");
+        lines.Add($"{cells} cells on the board");
 
         foreach (MapRules.Fault fault in _faults.Where(f => f.Fatal).Take(12))
             lines.Add("BAD " + fault.Text);
@@ -1705,9 +1751,6 @@ public sealed partial class MapEditor : SceneRoot
                 _plotOn = !_plotBrush || !_plotOn;
                 _plotBrush = true;
                 _water = false;
-                break;
-            case MapEdit.Tab.Level when first:
-                RampBrush(!_rampBrush);
                 break;
             // The bunker brush taken up, and pressed again its slit turned a
             // side clockwise - Masonry.Headings, the six edges.

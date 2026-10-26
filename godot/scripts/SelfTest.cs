@@ -20225,8 +20225,10 @@ public static class SelfTest
             $"deep {slots.WaterRiseAt(new Vector2I(4, 3)):F1}, "
             + $"ford {slots.WaterRiseAt(new Vector2I(1, 3)):F1}, lift {slots.Lift:F1}");
 
-        // And a ford beside deep water in one hollow is two surfaces, which the
-        // waterfall guard refuses in the same breath as two levels.
+        // And a ford beside deep water in one hollow is one body: the surface is
+        // the body's, the deep water's, and the ford's bed rises under it to stay
+        // a ford (MapRules.Brimmed, HexField.Shelf; 2026-10-26). It used to be
+        // refused as a step in the surface.
         {
             var mixed = new MapRules.Draft
             {
@@ -20238,12 +20240,14 @@ public static class SelfTest
                 Cliffs = new bool[3],
             };
             List<MapRules.Fault> step = MapRules.StepFaults(mixed);
-            Check("a ford beside deep water is a step in the surface",
-                step.Count > 0 && step.All(f => f.Rule == "water.step"),
-                string.Join("; ", step.Select(f => f.Brief)));
-            mixed.Ground[0] = Foundation.Deep;
-            Check("and two deep cells side by side are one surface",
-                MapRules.StepFaults(mixed).Count == 0,
+            bool[] brim = MapRules.Brimmed(mixed);
+            Check("a ford beside deep water is one body at the deep water's surface",
+                step.Count == 0 && brim[0] && brim[1] && !brim[2],
+                string.Join("; ", step.Select(f => f.Brief))
+                + $" brim {string.Join(",", brim)}");
+            mixed.Levels[0] = 0;
+            Check("and two levels of water side by side are still a waterfall",
+                MapRules.StepFaults(mixed).Any(f => f.Rule == "water.step"),
                 string.Join("; ", MapRules.StepFaults(mixed).Select(f => f.Brief)));
         }
 

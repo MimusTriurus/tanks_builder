@@ -126,7 +126,7 @@ public sealed partial class MapEditor
                 holder.Position = BoardDress.Foot(_field, at, squash, rise);
 
         ulong tWood = Time.GetTicksMsec() - t0;
-        string relief = Relief();
+        string relief = Grounds();
         if (relief != _skinAs)
         {
             _skinAs = relief;
@@ -165,7 +165,7 @@ public sealed partial class MapEditor
         : $"{_field.CoverAt(cell)},{_field.FoundationAt(cell)},{_field.LevelAt(cell)},"
           + $"{_field.IsRamp(cell)},{_field.IsWater(cell)}";
 
-    private string Relief() =>
+    private string Grounds() =>
         $"{_field.Columns}x{_field.Rows}:" + string.Join(";", _dressedAs.OrderBy(p => p.Key.X).ThenBy(p => p.Key.Y)
             .Select(p => p.Value.Substring(p.Value.IndexOf(',') + 1)));
 

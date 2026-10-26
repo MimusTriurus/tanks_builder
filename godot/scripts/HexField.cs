@@ -360,6 +360,7 @@ public sealed partial class HexField : Node2D
                  || ramps.Length != Columns * Rows
             ? null : DeriveRamps(ramps);
         _ordered = null;
+        _brim = null;
         QueueRedraw();
     }
 
@@ -702,7 +703,22 @@ public sealed partial class HexField : Node2D
     /// </summary>
     public float BedAt(Vector2I cell) =>
         LevelAt(cell) * Lift
-        - (IsDeep(cell) && RampHeading(cell) < 0 ? Lift * (float)DeepBed : 0.0f);
+        - (IsDeep(cell) && RampHeading(cell) < 0 ? Lift * (float)DeepBed : 0.0f)
+        + Shelf(cell);
+
+    /// <summary>
+    /// How far a ford's bed stands over its level, screen px: nought, except
+    /// for a flat ford in a body that has deep water in it.
+    ///
+    /// <b>The surface is the body's and the depth is the bed's</b>
+    /// (<see cref="MapRules.Brimmed"/>). Such a ford stands at the deep water's
+    /// surface, so to stay a ford its bed comes up by the difference - a shelf
+    /// <see cref="WaterRise"/> under the one surface. The rules still read the
+    /// level (<see cref="TopAt"/>); this is where the floor is drawn.
+    /// </summary>
+    private float Shelf(Vector2I cell) =>
+        !IsDeep(cell) && RampHeading(cell) < 0 && Brimmed(cell)
+            ? DeepRise - WaterRise : 0.0f;
 
     /// <summary>
     /// Where the surface of the water over a cell stands, in screen px off the
@@ -719,7 +735,25 @@ public sealed partial class HexField : Node2D
     /// same number its flat neighbours carry, so one body of water comes out one
     /// surface by construction rather than by a check.
     /// </summary>
-    public float WaterTop(Vector2I cell) => LevelAt(cell) * Lift + WaterRiseAt(cell);
+    public float WaterTop(Vector2I cell) =>
+        LevelAt(cell) * Lift + (Brimmed(cell) ? DeepRise : WaterRiseAt(cell));
+
+    /// <summary>
+    /// Whether a water cell is in a body with deep water in it, and so stands
+    /// at the deep water's surface (<see cref="MapRules.Brimmed"/>, the rule's
+    /// one copy). Worked out once per change of the levels, the water or the
+    /// floor, on the first question after it.
+    /// </summary>
+    public bool Brimmed(Vector2I cell)
+    {
+        if (!InBounds(cell))
+            return false;
+        if (_brim is null || _brim.Length != Columns * Rows)
+            _brim = MapRules.Brimmed(Drafted());
+        return _brim[cell.Y * Columns + cell.X];
+    }
+
+    private bool[]? _brim;
 
     /// <summary>
     /// Whether a cell's water is deep: the hollow filled nearly to the brim, the
@@ -738,8 +772,9 @@ public sealed partial class HexField : Node2D
     /// ford stands <see cref="WaterRise"/> over its bed, which is one slider; deep
     /// water stands <see cref="DeepRise"/> over its own, which is the other - most
     /// of a <see cref="Lift"/>, a little under the bank rather than level with it,
-    /// see <see cref="DeepDepth"/> for why. The waterfall guard keeps the two out
-    /// of one body - see <see cref="MapRules.StepFaults"/>.
+    /// see <see cref="DeepDepth"/> for why. In one body the two meet at the deep
+    /// water's surface and the ford's bed rises to keep its depth
+    /// (<see cref="Shelf"/>), so this stays the depth over the cell's own bed.
     /// </summary>
     public float WaterRiseAt(Vector2I cell) => IsDeep(cell) ? DeepRise : WaterRise;
 
@@ -834,6 +869,7 @@ public sealed partial class HexField : Node2D
         for (int i = 0; i < _wet.Count; i++)
             _wetIndex[_wet[i]] = i;
         _ordered = null;
+        _brim = null;
         QueueRedraw();
     }
 

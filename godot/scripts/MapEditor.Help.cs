@@ -48,7 +48,6 @@ public sealed partial class MapEditor
         new("Foundation", "W", "the brush is water"),
         new("Foundation", "E", "the brush puts a cell on or off the board"),
         new("Cover", "W", "the bunker brush; again, its slit turns a side"),
-        new("Level", "W", "the brush is a ramp - its tilt is worked out from the heights"),
         new("Units", "left click", "put the brush's tank here; on a tank, make it the brush's"),
         new("Units", "left drag", "carry a tank to another cell"),
         new("Units", "right click", "take the tank off this cell"),
@@ -56,7 +55,7 @@ public sealed partial class MapEditor
         new("File", "S  shift+S", "save, save as"),
         new("File", "F5", "run the board on the 3D bench (Edit F5 there comes back)"),
         new("File", "ctrl+F5", "run it as a match: two sides off the homes"),
-        new("View", "L  R  G  B", "levels, ramps, ramp sites, flood"),
+        new("View", "L  B", "levels, flood"),
         new("View", "T  M  K", "trees, grass, walls - shown or hidden"),
         new("View", ",  .", "turn the board a hex side either way; Home turns it back"),
         new("View", "F1", "this sheet", "every key"),
@@ -94,8 +93,6 @@ public sealed partial class MapEditor
         var view = new PopupMenu { Name = "View" };
         view.AddThemeFontSizeOverride("font_size", 16);
         view.AddCheckItem("Levels            L", (int)More.Levels);
-        view.AddCheckItem("Ramps             R", (int)More.Ramps);
-        view.AddCheckItem("Ramp sites        G", (int)More.Sites);
         view.AddCheckItem("Flood             B", (int)More.Flood);
         view.AddCheckItem("Homes", (int)More.Homes);
         view.AddCheckItem("Faults", (int)More.Faults);
@@ -114,8 +111,7 @@ public sealed partial class MapEditor
         {
             foreach ((More item, bool on) in new[]
                      {
-                         (More.Levels, _layers.HasFlag(Layers.Levels)), (More.Ramps, _layers.HasFlag(Layers.Ramps)),
-                         (More.Sites, _layers.HasFlag(Layers.Sites)), (More.Flood, _layers.HasFlag(Layers.Flood)),
+                         (More.Levels, _layers.HasFlag(Layers.Levels)), (More.Flood, _layers.HasFlag(Layers.Flood)),
                          (More.Homes, _layers.HasFlag(Layers.Homes)), (More.Faults, _layers.HasFlag(Layers.Faults)),
                          (More.Trees, _show.Trees), (More.Grass, _show.Grass), (More.Walls, _show.Walls),
                          (More.Bunkers, _show.Bunkers), (More.Mines, _show.Mines),
@@ -278,12 +274,10 @@ public sealed partial class MapEditor
             parts.Add(g.Over.ToString().ToLowerInvariant());
         parts.Add($"level {g.Level}");
         if (_edit.IsRamp(c))
-        {
-            int heading = _field.RampHeading(c);
-            parts.Add(heading >= 0 ? $"ramp up to {heading}" : "ramp, no tilt");
-        }
+            parts.Add("ramp in the file, not built");
         if (_field.InBounds(c) && _field.IsWater(c))
-            parts.Add(_field.IsDeep(c) ? "deep water" : "water");
+            parts.Add(_field.IsDeep(c) ? "deep water"
+                : _field.Brimmed(c) ? "ford, shelf of deep water" : "water");
         int home = _edit.Homes.ToList().FindIndex(h => h.Cell == c);
         if (home >= 0)
             parts.Add($"home {home + 1}" + (_edit.Homes[home].Class is { Length: > 0 } cls ? $" {cls}" : ""));
