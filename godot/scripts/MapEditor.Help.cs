@@ -55,7 +55,6 @@ public sealed partial class MapEditor
         new("File", "S  shift+S", "save, save as"),
         new("File", "F5", "run the board on the 3D bench (Edit F5 there comes back)"),
         new("File", "ctrl+F5", "run it as a match: two sides off the homes"),
-        new("File", "shift+F5", "run it in the sprite harness"),
         new("View", "L  R  G  B", "levels, ramps, ramp sites, flood"),
         new("View", "T  M  K", "trees, grass, walls - shown or hidden"),
         new("View", ",  .", "turn the board a hex side either way; Home turns it back"),

@@ -61,7 +61,6 @@ public sealed partial class MapEditor
         SaveAs,
         Run,
         RunMatch,
-        RunSprites,
     }
 
     private void Menu(CanvasLayer layer)
@@ -107,9 +106,6 @@ public sealed partial class MapEditor
         file.AddItem("Run              F5", (int)Item.Run);
         // Two sides of five off the board's homes (Match3D.tscn)
         file.AddItem("Run match    ctrl+F5", (int)Item.RunMatch);
-        // The sprite harness, the legacy line's: kept while Main lives, under
-        // the 3D run rather than instead of it.
-        file.AddItem("Run sprites  shift+F5", (int)Item.RunSprites);
         file.IdPressed += id => Chose((Item)id);
         bar.AddChild(file);
         MoreMenus(bar);
@@ -175,9 +171,6 @@ public sealed partial class MapEditor
                 break;
             case Item.RunMatch:
                 Play(match: true);
-                break;
-            case Item.RunSprites:
-                Play(sprites: true);
                 break;
             default:
                 _saveName.Text = _edit.Name;

@@ -12,7 +12,8 @@ namespace TankSpriteTest;
 /// <c>Tank3D.tscn</c>. The handoff wins over <c>--map</c> for the harness's
 /// reason - the flag came from the launch that started the session and is
 /// stale by the time a name is handed over. <c>Edit  F5</c> hands it back.
-/// A handed board always plays on the relief (<c>--relief</c> implied).
+/// A handed board always plays on the relief (<c>--relief</c> implied), with
+/// no bench target (<c>--no-target</c> implied) and the side panel folded.
 ///
 /// <b>A name nobody wrote is refused, not played as another board.</b>
 /// <see cref="BoardMap.ByName"/> answers an unknown name with the harness's
@@ -53,6 +54,9 @@ public sealed partial class Tank3DBench
             // a board from the editor always plays on the relief, --relief
             // or not (BOT-11, docs/relief.md)
             _reliefOn = true;
+            // and with the tanks its homes say, not the bench's own target
+            // three hexes out (Tank3DBench.Aim, StandTarget)
+            _targetDefault = false;
         }
         _editing = Session.Editing;
     }

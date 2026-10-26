@@ -264,7 +264,13 @@ public sealed partial class Tank3DBench : Node3D
         BuildCourse(layer);
         BuildAim(layer);
         if (!_noUi)
+        {
             BuildPanel(layer);
+            // the bench's tuning, not the board's: folded for a board the
+            // editor sent, Tab opens it
+            if (_handed)
+                _panel?.Flip();
+        }
         BuildBack(layer);
         BuildMatchUi(layer);
         BuildPerf(layer);

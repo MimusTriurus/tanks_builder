@@ -639,8 +639,8 @@ public sealed partial class MapEditor : SceneRoot
         // probe worth having: after it, --capture and --capture-at are read
         // again by Main, so the frame that lands on disk is the harness playing
         // the board the editor just drew.
-        if (_open is "run" or "run2d" or "runmatch" && _frame == 20)
-            Play(sprites: _open == "run2d", match: _open == "runmatch");
+        if (_open is "run" or "runmatch" && _frame == 20)
+            Play(match: _open == "runmatch");
         // And a board the harness would refuse: Run must not change scene, and
         // must say which fault stopped it.
         if (_open == "runbad" && _frame == 20)
@@ -1272,7 +1272,7 @@ public sealed partial class MapEditor : SceneRoot
             case Key.O: Chose(Item.Open); return;
             case Key.S when key.ShiftPressed: Chose(Item.SaveAs); return;
             case Key.S: Keep(); return;
-            case Key.F5: Play(sprites: key.ShiftPressed, match: key.CtrlPressed); return;
+            case Key.F5: Play(match: key.CtrlPressed); return;
             case Key.L: _layers ^= Layers.Levels; break;
             case Key.R: _layers ^= Layers.Ramps; break;
             case Key.G: _layers ^= Layers.Sites; break;
@@ -1408,13 +1408,14 @@ public sealed partial class MapEditor : SceneRoot
     /// pretends otherwise: Edit re-opens the saved board, which is the letters,
     /// the ramps, the masonry and the parkings, and no history.
     ///
-    /// <b>Into the 3D bench, and the sprite harness only on ask.</b> The 3D line
-    /// is the project's main one (the root CLAUDE.md), so Run plays the board
-    /// on <c>Tank3D.tscn</c>; <paramref name="sprites"/> - shift+F5, File's
-    /// "Run sprites", <c>--menu run2d</c> - is the old way into <c>Main</c>,
-    /// kept while that line lives. Both hand back the same way.
+    /// <b>Into the 3D bench, or a match on it.</b> The 3D line is the project's
+    /// main one (the root CLAUDE.md), so Run plays the board on
+    /// <c>Tank3D.tscn</c>, and <paramref name="match"/> - ctrl+F5 - on
+    /// <c>Match3D.tscn</c>. The sprite harness is not offered any more: the
+    /// legacy line, decided 2026-09-27; <c>Main</c> still hands a board back if
+    /// it is opened some other way.
     /// </summary>
-    private void Play(bool sprites = false, bool match = false)
+    private void Play(bool match = false)
     {
         Settle();
         MapRules.Fault fatal =
@@ -1431,12 +1432,10 @@ public sealed partial class MapEditor : SceneRoot
             return;
         Session.Map = _edit.Name;
         Session.Editing = true;
-        GD.Print($"editor: running {_edit.Name} "
-                 + (sprites ? "in the harness" : match ? "as a match" : "on the 3D bench"));
+        GD.Print($"editor: running {_edit.Name} " + (match ? "as a match" : "on the 3D bench"));
         // a match is the same bench with its root's Match set (Match3D.tscn):
         // two sides off the board's homes, Tank3DBench.LineUpSides
-        GetTree().ChangeSceneToFile(sprites ? "res://Main.tscn"
-                                    : match ? "res://Match3D.tscn" : "res://Tank3D.tscn");
+        GetTree().ChangeSceneToFile(match ? "res://Match3D.tscn" : "res://Tank3D.tscn");
     }
 
     /// <summary>
