@@ -674,7 +674,8 @@ overlay: the report is (250, 106), (520, 420) on filter Ignore, ... reached the 
 порядок (`Tank3DBench.Session.cs`): передача побеждает `--map`, `--edit-at N`
 возвращает на кадре N, незнакомое имя — `REFUSED`. На каждой парковке стоит танк её
 класса (`Tank3DBench.Parked`). Ведёшь один — тот, что на первой. Щелчок по
-стоящему меняет его местами с ведомым. Подробности —
+стоящему меняет его местами с ведомым. Доска, приехавшая по Run, всегда
+играется на рельефе (`--relief`, [relief.md](relief.md)). Подробности —
 [editor3d-plan.md](editor3d-plan.md), этап 0б.
 
 Проверено кругом (`--map deeptest --menu run --edit-at 40`):
