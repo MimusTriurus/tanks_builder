@@ -1182,6 +1182,12 @@ public sealed partial class MapEditor : SceneRoot
                 Turning(GetViewport().GetMousePosition());
                 return;
             }
+            // a drag from a tank on the Units tab carries it
+            if (_carrying >= 0)
+            {
+                Carry();
+                return;
+            }
             if (_painting || _erasing)
                 Stroke(false);
             else if (was != _under)
@@ -1212,6 +1218,13 @@ public sealed partial class MapEditor : SceneRoot
             else if (click.ButtonIndex == MouseButton.Left && !click.Pressed && _turning >= 0)
             {
                 StopTurning();
+                return;
+            }
+            else if (click.ButtonIndex == MouseButton.Left && click.Pressed && StartCarry())
+                return;
+            else if (click.ButtonIndex == MouseButton.Left && !click.Pressed && _carrying >= 0)
+            {
+                StopCarry();
                 return;
             }
             else if (click.ButtonIndex == MouseButton.Left)
@@ -1366,7 +1379,7 @@ public sealed partial class MapEditor : SceneRoot
 
     private void Fill()
     {
-        // a side fields one of each: there is no region of tanks to fill
+        // tanks are put one by one: a region of them is not a board
         if (!_edit.Inside(_under) || _tab == MapEdit.Tab.Units)
             return;
         _edit.Begin();

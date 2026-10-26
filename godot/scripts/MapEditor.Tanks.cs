@@ -10,13 +10,13 @@ namespace TankSpriteTest;
 ///
 /// <b>The match's line-up, not a guess at it.</b> Who stands where is
 /// <see cref="Lineup.Of"/>, the call <c>Tank3DBench.Match</c> makes, so the
-/// board drawn is the board the match opens on: a home past five on its side
-/// stands empty here too.
+/// board drawn is the board the match opens on.
 ///
-/// <b>Loaded once per side and model, one a frame.</b> A side fields each
-/// model once, so a board needs ten loads at most, and a load is a good part of
-/// a second; each loaded model is kept in <see cref="_pool"/> and moved when its
-/// home moves or turns, never loaded again. The loads are spread one a frame so
+/// <b>Loaded once per tank, one a frame.</b> A load is a good part of a
+/// second, so a board of ten opens in about three; each loaded
+/// model is kept in <see cref="_pool"/> - by side, tag and which of that side's
+/// tanks of the tag it is - and moved when its home moves or turns, never
+/// loaded again. The loads are spread one a frame so
 /// the board opens at once and the tanks come up after it.
 ///
 /// <b>Turned like Blender's R, on the edges.</b> Alt and a left drag from a
@@ -45,7 +45,9 @@ public sealed partial class MapEditor
     /// <summary>The home being turned by an Alt drag, or -1.</summary>
     private int _turning = -1;
 
-    private static string PoolKey(Lineup.Unit u) => u.Side + "/" + u.Model;
+    /// <summary>A model per tank: its side, its tag and which of that side's
+    /// tanks of the tag it is - a side may field several of one.</summary>
+    private static string PoolKey(Lineup.Unit u, int nth) => $"{u.Side}/{u.Model}#{nth}";
 
     /// <summary>Stand the line-up when the board moved: each unit's pooled
     /// model on its home, the rest hidden. A model not loaded yet is loaded -
@@ -63,10 +65,13 @@ public sealed partial class MapEditor
         float squash = _field.Squash, rise = _field.RiseFactor;
         float hex = _field.Atlas.HexRect.Size.X;
         var wanted = new HashSet<string>();
+        var seen = new Dictionary<string, int>();
         bool loaded = false;
         foreach (Lineup.Unit u in Lineup.Of(_edit.Homes))
         {
-            string key = PoolKey(u);
+            string kind = u.Side + "/" + u.Model;
+            seen[kind] = seen.TryGetValue(kind, out int had) ? had + 1 : 0;
+            string key = PoolKey(u, seen[kind]);
             if (!_pool.TryGetValue(key, out (Node3D Rig, TankModel Model) tank))
             {
                 if (loaded || _unloadable.Contains(key))
@@ -158,9 +163,11 @@ public sealed partial class MapEditor
     }
 
     /// <summary>
-    /// <c>--menu units</c>: key 4, the brown HT brush, a click on (3,3), a
-    /// click on (6,4) - the same tank moved, not a second - the green LT on top
-    /// of it, then a right click there; each step prints the homes.
+    /// <c>--menu units</c>: key 4, the brown HT brush, a click on (3,3) and one
+    /// on (6,4) - two heavies, a side may field several - the second dragged to
+    /// (7,4), the green LT clicked on to it, then a right click there; each step
+    /// prints the homes. The drag's move is handed the cell, since a
+    /// synthesised press moves no pointer.
     /// </summary>
     private void UnitsProbe()
     {
@@ -187,23 +194,91 @@ public sealed partial class MapEditor
                 Click(new Vector2I(3, 3), MouseButton.Left);
                 break;
             case 8:
-                GD.Print($"units: homes {Homes()}; click (6,4)");
+                GD.Print($"units: homes {Homes()}, says \"{_said}\"; click (6,4)");
                 Click(new Vector2I(6, 4), MouseButton.Left);
                 break;
             case 10:
-                GD.Print($"units: homes {Homes()}; green LT on (6,4)");
+                GD.Print($"units: homes {Homes()}; drag (6,4) to (7,4)");
+                _under = new Vector2I(6, 4);
+                Input.ParseInputEvent(new InputEventMouseButton { ButtonIndex = MouseButton.Left, Pressed = true });
+                break;
+            case 11:
+                _under = new Vector2I(7, 4);
+                Carry();
+                Input.ParseInputEvent(new InputEventMouseButton { ButtonIndex = MouseButton.Left, Pressed = false });
+                break;
+            case 13:
+                GD.Print($"units: homes {Homes()}; green LT clicked on (7,4)");
                 _unitSide = Parking.Green;
                 _unitClass = "LTP";
-                Click(new Vector2I(6, 4), MouseButton.Left);
+                Click(new Vector2I(7, 4), MouseButton.Left);
                 break;
-            case 12:
-                GD.Print($"units: homes {Homes()}; right click (6,4)");
-                Click(new Vector2I(6, 4), MouseButton.Right);
+            case 15:
+                GD.Print($"units: homes {Homes()}, says \"{_said}\"; right click (7,4)");
+                Click(new Vector2I(7, 4), MouseButton.Right);
                 break;
-            case 14:
+            case 17:
                 GD.Print($"units: homes {Homes()}, {_edit.Depth} undo(s)");
                 break;
         }
+    }
+
+    /// <summary>The home a Units-tab drag carries, or -1; whether it has left
+    /// its cell yet - a press and a release on the same tank is a click.</summary>
+    private int _carrying = -1;
+    private bool _carried;
+
+    /// <summary>A left press on a tank, on the Units tab: the drag carries it,
+    /// one undo.</summary>
+    private bool StartCarry()
+    {
+        if (_tab != MapEdit.Tab.Units || _edit.SlotAt(_under) is not (int slot and >= 0))
+            return false;
+        _carrying = slot;
+        _carried = false;
+        _picked = _under;
+        _edit.Begin();
+        return true;
+    }
+
+    /// <summary>The carried tank onto the cell under the pointer, when that
+    /// cell is on the board and free; it follows the drag.</summary>
+    private void Carry()
+    {
+        if (_carrying < 0 || _carrying >= _edit.Homes.Count || !_edit.OnBoard(_under)
+            || _edit.Homes[_carrying].Cell == _under)
+            return;
+        if (_edit.Move(_carrying, _under, out string why))
+        {
+            _carried = true;
+            _picked = _under;
+            _said = $"home {_carrying + 1} to ({_under.X},{_under.Y})";
+        }
+        else
+            _said = why;
+        _dirty = true;
+        _tanksStale = true;
+        _marks.QueueRedraw();
+        Say();
+    }
+
+    /// <summary>The release: a drag puts the tank down where it is, a click on
+    /// it turns it into the brush's tank.</summary>
+    private void StopCarry()
+    {
+        if (_carrying < 0)
+            return;
+        if (!_carried && _carrying < _edit.Homes.Count)
+        {
+            Vector2I at = _edit.Homes[_carrying].Cell;
+            _said = _edit.Unit(at, _unitSide, _unitClass, out string why)
+                ? $"({at.X},{at.Y}) is a {_unitSide} {_unitClass}" : why;
+            _dirty = true;
+        }
+        _carrying = -1;
+        _edit.End();
+        _shape = "";
+        Settle();
     }
 
     /// <summary>The edge from <paramref name="cell"/> whose neighbour lies

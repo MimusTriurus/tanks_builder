@@ -22287,7 +22287,6 @@ public static class SelfTest
             foreach ((string tag, string wrong, string what) in new[]
                      {
                          ("NOPE", "class NOPE", "a class no build has"),
-                         (loaded[0], "two homes ask", "one class twice"),
                      })
             {
                 var homes = new Parking[]
@@ -22308,6 +22307,20 @@ public static class SelfTest
                 Check($"a board asking for {what} is refused",
                     said.Contains(wrong), said.Length == 0 ? "it was taken" : said);
             }
+            // A side may field several of a class (2026-10-26): two homes asking
+            // for one are a board, not a refusal.
+            string twiceSaid = "";
+            try
+            {
+                BoardMap.FromGround("crew", new[] { "...", "..." }, new[] { "...", "..." },
+                    new Parking[] { new(new Vector2I(1, 1), loaded[0]), new(new Vector2I(2, 1), loaded[0]) },
+                    TerrainSet.Mixed, true);
+            }
+            catch (Exception e)
+            {
+                twiceSaid = e.Message;
+            }
+            Check("a board asking for one class twice is taken", twiceSaid.Length == 0, twiceSaid);
 
             // --- the file ------------------------------------------------
             var draw = MapEdit.Blank("parked", 6, 5);
@@ -22319,10 +22332,10 @@ public static class SelfTest
                 !draw.Crew(1, "NOPE", out string nope)
                 && nope.Contains("not a class"), nope);
             string twice = "";
-            Check("and one another home already asked for, by which home",
+            Check("and one another home already asked for is taken too",
                 draw.Crew(0, loaded[0], out _)
-                && !draw.Crew(1, loaded[0], out twice)
-                && twice.Contains("home 1"), twice);
+                && draw.Crew(1, loaded[0], out twice)
+                && draw.Crew(1, null, out _), twice);
             Check("moving a home keeps the class it asked for",
                 draw.Home(new Vector2I(2, 2), 0, out _)
                 && draw.Homes[0] == new Parking(new Vector2I(2, 2), loaded[0]),

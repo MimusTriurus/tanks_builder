@@ -81,48 +81,41 @@ public static class Lineup
     public static int Across(string side) => side == Parking.Brown ? 270 : 90;
 
     /// <summary>
-    /// The match's units in the homes' order, and what was left out.
+    /// The match's units, one on every home, in the homes' order.
     ///
     /// <b>The homes say it, and silence is the old split.</b> A home's side is
-    /// its own or its order's (<see cref="Parking.SidesOf"/>); past five on a
-    /// side a home stays empty (<paramref name="left"/>). A home naming a class
-    /// gets that class's model on its side; the rest take what the side has
-    /// left, in <see cref="Roster"/>'s order. A home's facing is its own, else
+    /// its own or its order's (<see cref="Parking.SidesOf"/>); a side fields as
+    /// many as it has homes (2026-10-26; it was five). A home naming a class
+    /// gets that class's model, however many others on its side named it too;
+    /// the rest take what the side has not got, in <see cref="Roster"/>'s
+    /// order, and the roster round again past five. A home's facing is its own, else
     /// <see cref="Across"/>. A board that names none of it lines up as the
     /// drill always did.
     /// </summary>
-    public static List<Unit> Of(IReadOnlyList<Parking> homes, List<int>? left = null)
+    public static List<Unit> Of(IReadOnlyList<Parking> homes)
     {
         string[] sides = Parking.SidesOf(homes);
         int count = homes.Count;
-        var inPlay = new bool[count];
         var models = new string?[count];
-        int green = 0, brown = 0;
+        // the classes asked for first - as many of one as the homes ask - then
+        // the rest: what the side has not got yet in the roster's order, and
+        // past all five the roster round again
         for (int i = 0; i < count; i++)
         {
-            ref int on = ref sides[i] == Parking.Green ? ref green : ref brown;
-            inPlay[i] = on < Parking.SideSize;
-            if (inPlay[i])
-                on++;
-            else
-                left?.Add(i);
-        }
-        // the classes asked for first, then the rest in the roster's order
-        for (int i = 0; i < count; i++)
-        {
-            if (!inPlay[i] || homes[i].Class is not { Length: > 0 } wanted)
+            if (homes[i].Class is not { Length: > 0 } wanted)
                 continue;
             int p = Array.FindIndex(Pairs, x => string.Equals(x.Class, wanted, StringComparison.OrdinalIgnoreCase));
-            if (p >= 0 && !Taken(models, sides, sides[i], Pairs[p].Model))
+            if (p >= 0)
                 models[i] = Pairs[p].Model;
         }
+        int[] round = new int[2];
         for (int i = 0; i < count; i++)
-            if (inPlay[i] && models[i] is null)
-                models[i] = Roster.FirstOrDefault(m => !Taken(models, sides, sides[i], m)) ?? Roster[0];
+            if (models[i] is null)
+                models[i] = Roster.FirstOrDefault(m => !Taken(models, sides, sides[i], m))
+                            ?? Roster[round[sides[i] == Parking.Green ? 0 : 1]++ % Roster.Length];
         var units = new List<Unit>();
         for (int i = 0; i < count; i++)
-            if (inPlay[i])
-                units.Add(new Unit(i, homes[i].Cell, sides[i], models[i]!, homes[i].Facing ?? Across(sides[i])));
+            units.Add(new Unit(i, homes[i].Cell, sides[i], models[i]!, homes[i].Facing ?? Across(sides[i])));
         return units;
     }
 

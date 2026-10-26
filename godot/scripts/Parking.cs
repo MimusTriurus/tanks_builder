@@ -12,9 +12,9 @@ namespace TankSpriteTest;
 /// <b>The class is a preference, not a roster.</b> Which tanks exist is the
 /// harness's - one per atlas that loaded, see <c>Main.Park</c> - so a class named
 /// here says where that one goes if it is on the board, and a parking that names
-/// nobody takes whoever is left. A board naming a class no build has, or naming
-/// one twice, is refused by <c>BoardMap.MustCrew</c>: both are statements the
-/// board cannot honour.
+/// nobody takes whoever is left. A board naming a class no build has is refused
+/// by <c>BoardMap.MustCrew</c>; one named twice is a board (the 3D line stands a
+/// model on each, the sprite harness leaves the second empty).
 ///
 /// <b>Null is silence, the rule <see cref="Masonry"/> holds over its four
 /// numbers.</b> A parking that said nothing is not a parking that asked for the
@@ -24,11 +24,11 @@ namespace TankSpriteTest;
 /// <b>Side and facing are a match's, and silent the same way.</b>
 /// <see cref="Side"/> - <c>green</c> or <c>brown</c> - says which team stands
 /// here; a parking without one takes the side its order gives it (the first
-/// five green, the next brown, <c>Tank3DBench.Match</c>). <see cref="Facing"/>
+/// half green, the rest brown, <see cref="SidesOf"/>). <see cref="Facing"/>
 /// is an edge heading (<see cref="HexField.EdgeHeadings"/>) the tank starts
 /// facing; without one a green tank looks up the board, a brown one down it.
-/// A class is asked for once per side, not once per board: each team has its
-/// five.
+/// A side fields a tank per home, of any classes - three heavies among them if
+/// it likes.
 ///
 /// <b>A home is two jobs and only one of them is the tank.</b> The other is that
 /// <see cref="MapRules.ReachFaults"/> measures the board from every parking -
@@ -66,24 +66,26 @@ public readonly record struct Parking(Vector2I Cell, string? Class = null,
         return said;
     }
 
-    /// <summary>How many a side fields in a match - LT, MT, HT, TD, HM.</summary>
-    public const int SideSize = 5;
-
     /// <summary>
     /// The side each parking plays in a match: its own when it names one, else
-    /// by order - the first <see cref="SideSize"/> unsided parkings green, the
-    /// rest brown. A board that names no side splits as it always did. One
-    /// rule for the editor's panel and the match (<c>Tank3DBench.Match</c>), so
-    /// the panel says what the match does.
+    /// by order - the first half of the unsided parkings green (the odd one
+    /// too), the rest brown. A side fields as many as it has homes
+    /// (2026-10-26; it was five), and the ten-home boards still split five and
+    /// five. One rule for the editor's panel and the match
+    /// (<c>Tank3DBench.Match</c>), so the panel says what the match does.
     /// </summary>
     public static string[] SidesOf(IReadOnlyList<Parking> parked)
     {
         var sides = new string[parked.Count];
-        int unsided = 0;
+        int all = 0;
+        for (int i = 0; i < parked.Count; i++)
+            if (parked[i].Side is not { Length: > 0 })
+                all++;
+        int greens = (all + 1) / 2, unsided = 0;
         for (int i = 0; i < parked.Count; i++)
             sides[i] = parked[i].Side is { Length: > 0 } side
                 ? side.ToLowerInvariant()
-                : unsided++ < SideSize ? Green : Brown;
+                : unsided++ < greens ? Green : Brown;
         return sides;
     }
 

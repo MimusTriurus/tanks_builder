@@ -567,13 +567,12 @@ public sealed class MapEdit
 
     /// <summary>
     /// A tank of <paramref name="side"/> and class <paramref name="tag"/> on a
-    /// cell - the Units tab's brush.
+    /// cell - the Units tab's click.
     ///
-    /// <b>Put, or moved: a side fields one of each</b> (<see cref="BoardMap.MustCrew"/>).
-    /// The home that fields this side and class - asked for, or given by its
-    /// order - is moved here, its facing with it, and says its side and class
-    /// from then on; another home on the cell gives the cell up to it. With none, the
-    /// home on the cell becomes this tank, or a new home is made for it.
+    /// <b>Put, or the tank on the cell made this one.</b> A side may field
+    /// several of a class (<see cref="BoardMap.MustCrew"/>), so a click puts a
+    /// new tank on an empty cell; on a cell with a tank it turns that tank into
+    /// the brush's, its facing kept. Moving one is a drag (<see cref="Move"/>).
     /// </summary>
     public bool Unit(Vector2I cell, string side, string tag, out string why)
     {
@@ -596,25 +595,32 @@ public sealed class MapEdit
         side = side.ToLowerInvariant();
         Freeze();
         int here = SlotAt(cell);
-        int same = Asking(-1, tag, side) ?? -1;
-        if (same >= 0)
-        {
-            if (same == here)
-                return true;
-            if (here >= 0)
-            {
-                _homes.RemoveAt(here);
-                if (here < same)
-                    same--;
-            }
-            _homes[same] = _homes[same] with { Cell = cell };
-            return true;
-        }
         if (here >= 0)
             _homes[here] = _homes[here] with { Class = tag, Side = side };
         else
             _homes.Add(new Parking(cell, tag, side));
         return true;
+    }
+
+    /// <summary>A home's tank carried to another cell, facing and all - the
+    /// Units tab's drag. Refused onto a cell another home stands on: two tanks
+    /// in one hex are one tank on screen.</summary>
+    public bool Move(int slot, Vector2I cell, out string why)
+    {
+        why = "";
+        if (slot < 0 || slot >= _homes.Count)
+        {
+            why = $"there is no home {slot}";
+            return false;
+        }
+        if (SlotAt(cell) is int other && other >= 0 && other != slot)
+        {
+            why = $"home {other + 1} stands on ({cell.X},{cell.Y})";
+            return false;
+        }
+        // said out loud first, so the move shifts no one's order
+        Freeze();
+        return Home(cell, slot, out why);
     }
 
     /// <summary>
@@ -671,10 +677,10 @@ public sealed class MapEdit
     /// <summary>
     /// Which class a parking asks for, or null for whoever is left over.
     ///
-    /// <b>Refused for a class this build has not got, and for one already
-    /// asked for.</b> Both are statements the board could not honour, and both
-    /// are what <see cref="BoardMap.MustCrew"/> would throw on at save - so they
-    /// are refused here, where the author is looking, rather than there.
+    /// <b>Refused for a class this build has not got</b> - what
+    /// <see cref="BoardMap.MustCrew"/> would throw on at save, refused here,
+    /// where the author is looking. Another home asking for the same class is
+    /// fine: a side may field several.
     /// </summary>
     public bool Crew(int slot, string? tag, out string why)
     {
@@ -693,12 +699,6 @@ public sealed class MapEdit
                       + string.Join(", ", MovementProfile.Tags);
                 return false;
             }
-            if (Asking(slot, tag, _homes[slot].Side) is int other)
-            {
-                why = $"home {other + 1} already asks for {tag} on its side, and "
-                      + "there is one tank of each a side";
-                return false;
-            }
         }
         _homes[slot] = _homes[slot] with
         {
@@ -707,25 +707,9 @@ public sealed class MapEdit
         return true;
     }
 
-    /// <summary>Another home on <paramref name="side"/> asking for
-    /// <paramref name="tag"/>, or null - <see cref="BoardMap.MustCrew"/>'s rule,
-    /// one of each a side.</summary>
-    private int? Asking(int slot, string? tag, string? side)
-    {
-        if (tag is not { Length: > 0 })
-            return null;
-        var probe = new Parking(Vector2I.Zero, tag, side);
-        for (int i = 0; i < _homes.Count; i++)
-            if (i != slot && _homes[i].SameSide(probe)
-                && string.Equals(_homes[i].Class, tag, StringComparison.OrdinalIgnoreCase))
-                return i;
-        return null;
-    }
-
     /// <summary>
     /// Which side a parking is on in a match, or null for the one its order
-    /// gives it (see <see cref="Parking"/>). Refused when its class is already
-    /// asked for on the side it would join.
+    /// gives it (see <see cref="Parking"/>).
     /// </summary>
     public bool Team(int slot, string? side, out string why)
     {
@@ -742,12 +726,6 @@ public sealed class MapEdit
             return false;
         }
         string? to = side is { Length: > 0 } ? side.ToLowerInvariant() : null;
-        if (Asking(slot, _homes[slot].Class, to) is int other)
-        {
-            why = $"home {other + 1} on that side already asks for "
-                  + $"{_homes[slot].Class}, and there is one tank of each a side";
-            return false;
-        }
         _homes[slot] = _homes[slot] with { Side = to };
         return true;
     }

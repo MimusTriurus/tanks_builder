@@ -761,18 +761,21 @@ public sealed partial class BoardMap
     }
 
     /// <summary>
-    /// Every class a board's parkings ask for is a class this build has, and no
-    /// two ask for the same one.
+    /// Every class a board's parkings ask for is a class this build has, every
+    /// side is green or brown and every facing an edge.
     ///
-    /// <b>Both halves are a statement the board could not honour.</b> A tag
-    /// nothing answers to is a home that will silently take whoever is left -
-    /// <see cref="WallConfig.Strays"/>'s failure, one folder over - and two
-    /// homes asking for the same class is two parkings for one tank, which
-    /// leaves the second holding nobody however the pairing is written.
+    /// <b>Each is a statement the board could not honour.</b> A tag nothing
+    /// answers to is a home that will silently take whoever is left -
+    /// <see cref="WallConfig.Strays"/>'s failure, one folder over.
+    ///
+    /// <b>Two homes may ask for the same class</b> (2026-10-26): a side may
+    /// field three heavies. The 3D line stands a model per home, so both are
+    /// manned; the sprite harness has one tank of each and leaves the second
+    /// empty (<see cref="Parking.Pair"/>), which is the legacy line's limit and
+    /// not the board's.
     /// </summary>
     private static void MustCrew(string name, IReadOnlyList<Parking> homes)
     {
-        var asked = new List<Parking>();
         foreach (Parking home in homes)
         {
             if (home.Side is { Length: > 0 } side
@@ -792,15 +795,6 @@ public sealed partial class BoardMap
                     $"{name}: the home at ({home.Cell.X},{home.Cell.Y}) asks for "
                     + $"class {tag}, and this build has "
                     + string.Join(", ", MovementProfile.Tags));
-            // one of each a side: two sides may each ask for the same class
-            if (asked.Any(a => a.SameSide(home)
-                               && string.Equals(a.Class, tag, StringComparison.OrdinalIgnoreCase)))
-                throw new InvalidOperationException(
-                    $"{name}: two homes ask for class {tag}"
-                    + (home.Side is { Length: > 0 } s ? $" on the {s} side" : "")
-                    + ", and there is one tank of each a side - so the second would "
-                    + "stand empty whatever the pairing does");
-            asked.Add(home);
         }
     }
 

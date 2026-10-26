@@ -23,7 +23,7 @@ namespace TankSpriteTest;
 /// its marks go back with it (<c>_parkedHits</c>).
 ///
 /// <b>Sides.</b> Each home names its side, class and facing, or leaves them to
-/// the old split: the first five homes green, the next five brown, each side
+/// the old split: the first half of the homes green, the rest brown, each side
 /// in <see cref="Roster"/>'s order - LT, MT, HT, TD, HM (<see cref="LineUpSides"/>). The
 /// brown side is the same models with their green paint taken to brown in the cel
 /// shader (<c>side_brown</c>, <see cref="Toon"/>), not models of their own.
@@ -130,13 +130,12 @@ public sealed partial class Tank3DBench
         _rigUnit = -1;
         if (!Match)
             return;
-        var left = new List<int>();
-        _lineup = Lineup.Of(_parkings, left);
-        foreach (int i in left)
-            Log.Print($"tank3d: match: the home {MapAt(_parkings[i].Cell)} is past five on its side - left empty");
+        _lineup = Lineup.Of(_parkings);
         int green = _lineup.Count(u => u.Side == Parking.Green), brown = _lineup.Count - green;
-        if (green < Parking.SideSize || brown < Parking.SideSize)
-            Log.Print($"tank3d: match: the board fields {green} green and {brown} brown of {Parking.SideSize} a side");
+        Log.Print($"tank3d: match: the board fields {green} green and {brown} brown");
+        // a side with no homes has nothing to move, and the match is won before it starts
+        if (green == 0 || brown == 0)
+            Log.Print($"tank3d: match: one side has no homes - {green} green, {brown} brown");
         if (_lineup.Count == 0)
             return;
         _rigUnit = Math.Max(0, _lineup.FindIndex(u => u.Side == Parking.Green));
