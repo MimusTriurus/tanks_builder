@@ -372,9 +372,14 @@ public sealed partial class MapEditor
             float rise = 0.0f;
             if (_tab == MapEdit.Tab.Level && !_erasing && _field.Atlas is not null)
             {
+                // The brush's level is the letter's, over the plinth; the field's
+                // top is the board's, plinth and all (MapEdit.Draft). Without
+                // the plinth the target stood a level low on every board drawn
+                // here (plinth 1): its outline fell on the cell in front, and
+                // the stroke seemed to land on the cell behind it (2026-10-26).
                 float want = _rampBrush
                     ? _field.LevelAt(cell) * _field.Lift + _field.Lift * 0.5f
-                    : _level * _field.Lift;
+                    : (_level + _edit.Plinth) * _field.Lift;
                 rise = want - _field.TopAt(cell);
             }
             foreach (int heading in HexField.EdgeHeadings)

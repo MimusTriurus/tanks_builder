@@ -482,6 +482,14 @@ public sealed partial class MapEditor : SceneRoot
         if (!_built)
             return;
         _stage?.Place(Array.Empty<Vehicle>());
+        // --hover held for a capture: the real pointer's first move would take
+        // it back, wherever the desktop left the mouse (the bench's _hoverFixed)
+        if (CapturePath is not null && _hovered is Vector2I held && _under != held && _held is null)
+        {
+            _under = held;
+            _marks.QueueRedraw();
+            Say();
+        }
         Redress();
         LawnMore();
         // the problems panel's height and place, after the layout pass that
