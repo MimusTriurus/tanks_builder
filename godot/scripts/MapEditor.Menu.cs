@@ -356,6 +356,7 @@ public sealed partial class MapEditor
     {
         _sown = Array.Empty<string>();
         _stood = "";
+        Unmark();
         _dirty = false;
         _said = said;
         Settle();

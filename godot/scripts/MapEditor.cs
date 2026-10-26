@@ -479,6 +479,7 @@ public sealed partial class MapEditor : SceneRoot
         Tanks();
         TurnProbe();
         UnitsProbe();
+        ClipProbe();
         CrownsFollow();
         Turn((float)delta);
         _frame++;
@@ -1130,9 +1131,11 @@ public sealed partial class MapEditor : SceneRoot
         RayCell(GetViewport().GetMousePosition());
 
     private IReadOnlyList<Vector2I> Patch() =>
-        // a tank stands on one cell whatever the radius
-        _edit.Inside(_under) ? _edit.Ring(_under, _tab == MapEdit.Tab.Units ? 0 : _radius)
-                             : Array.Empty<Vector2I>();
+        // a tank stands on one cell whatever the radius; selecting, the
+        // pointer paints nothing (MapEditor.Select)
+        _edit.Inside(_under) && !Selecting
+            ? _edit.Ring(_under, _tab == MapEdit.Tab.Units ? 0 : _radius)
+            : Array.Empty<Vector2I>();
 
     /// <summary>
     /// The layers drawn over the board rather than into it - numbers, arrows and
@@ -1251,7 +1254,9 @@ public sealed partial class MapEditor : SceneRoot
                 }
             }
 
-            // Last, over everything: what the brush would do (MapEditor.Help).
+            // The marked cells and the piece in hand (MapEditor.Select), then
+            // last, over everything: what the brush would do (MapEditor.Help).
+            editor.DrawSelection(this);
             editor.Ghost(this);
         }
     }
@@ -1268,6 +1273,9 @@ public sealed partial class MapEditor : SceneRoot
             _camera.Position -= Panned(pan.Relative);
             return;
         }
+        // the select tool and a piece in hand take the pointer (MapEditor.Select)
+        if (SelectInput(what))
+            return;
 
         if (what is InputEventMouseMotion move)
         {
@@ -1362,6 +1370,8 @@ public sealed partial class MapEditor : SceneRoot
         }
 
         if (what is not InputEventKey { Pressed: true, Echo: false } key)
+            return;
+        if (SelectKey(key))
             return;
         switch (key.Keycode)
         {
@@ -1480,11 +1490,13 @@ public sealed partial class MapEditor : SceneRoot
     private void Fill()
     {
         // tanks are put one by one: a region of them is not a board
-        if (!_edit.Inside(_under) || _tab == MapEdit.Tab.Units)
+        if (_tab == MapEdit.Tab.Units || (!_edit.Inside(_under) && _selected.Count == 0))
             return;
         _edit.Begin();
+        // the marked cells when there are any (MapEditor.Select), else the
+        // region of one letter under the pointer
         IReadOnlyList<string> refused =
-            _edit.Sweep(_edit.Region(_under), Write);
+            _edit.Sweep(_selected.Count > 0 ? _selected.ToList() : _edit.Region(_under), Write);
         _dirty = true;
         _said = refused.Count > 0 ? refused[0] : "filled";
         Settle();
@@ -1681,7 +1693,8 @@ public sealed partial class MapEditor : SceneRoot
         Refresh();
     }
 
-    private string Tool() => _tab switch
+    private string Tool() => _held is not null ? $"in hand: {(_moving ? "the marked cells" : _heldName)}"
+        : _selectTool ? $"select: {_selected.Count} marked" : _tab switch
     {
         MapEdit.Tab.Foundation =>
             "floor: " + (_plotBrush ? (_plotOn ? "on the board" : "off the board")

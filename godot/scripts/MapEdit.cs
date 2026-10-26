@@ -958,6 +958,163 @@ public sealed class MapEdit
         return refused;
     }
 
+    // --- pieces: copy, cut, paste, move ----------------------------------------
+
+    /// <summary>One cell of a <see cref="Piece"/>: its letter, its ramp and its
+    /// masonry, on the cell it was taken from.</summary>
+    public readonly record struct Bit(Vector2I Cell, char Letter, bool Ramp, Masonry? Wall);
+
+    /// <summary>
+    /// A part of a board lifted off it - the clipboard, a stamp, the selection
+    /// being dragged (stage 2 of docs/editor-ux-plan.md).
+    ///
+    /// <b>Cells where they were taken, and the cell it is held by.</b> Put down
+    /// elsewhere, every cell keeps its place relative to <see cref="Anchor"/>
+    /// on the hex grid rather than on the offset one - see <see cref="Shift"/>.
+    /// The homes on it carry their side and class said out loud, so a copied
+    /// tank stays who it was whatever order it lands in.
+    /// </summary>
+    public sealed record Piece(IReadOnlyList<Bit> Cells, IReadOnlyList<Parking> Homes, Vector2I Anchor);
+
+    /// <summary>
+    /// Where <paramref name="cell"/> lands when the piece held at
+    /// <paramref name="from"/> is put down at <paramref name="to"/>.
+    ///
+    /// <b>Through axial coordinates, not by adding the offset.</b> The grid is
+    /// odd-q: an odd column stands half a row lower than an even one
+    /// (<see cref="HexField.Step"/>), so a piece moved an odd number of
+    /// columns by adding (dq, dr) would change which cells touch - the moat's
+    /// problem (<see cref="BoardMap"/>.Moated). In axial terms a move is a
+    /// plain sum and neighbours stay neighbours; the price is that a
+    /// rectangle moved an odd number of columns lands as a slightly sheared
+    /// one, which is what the same hexes look like there.
+    /// </summary>
+    public static Vector2I Shift(Vector2I cell, Vector2I from, Vector2I to) =>
+        Offset(Axial(cell) - Axial(from) + Axial(to));
+
+    private static Vector2I Axial(Vector2I c) => new(c.X, c.Y - (c.X - (c.X & 1)) / 2);
+
+    private static Vector2I Offset(Vector2I a) => new(a.X, a.Y + (a.X - (a.X & 1)) / 2);
+
+    /// <summary>The cells of the board from one corner to the other, columns
+    /// and rows between them - the select tool's rectangle.</summary>
+    public IReadOnlyList<Vector2I> Box(Vector2I a, Vector2I b)
+    {
+        var cells = new List<Vector2I>();
+        for (int r = Math.Max(0, Math.Min(a.Y, b.Y)); r <= Math.Min(Rows - 1, Math.Max(a.Y, b.Y)); r++)
+        for (int q = Math.Max(0, Math.Min(a.X, b.X)); q <= Math.Min(Columns - 1, Math.Max(a.X, b.X)); q++)
+            cells.Add(new Vector2I(q, r));
+        return cells;
+    }
+
+    /// <summary>
+    /// The cells given, lifted into a piece held at <paramref name="anchor"/>.
+    ///
+    /// <b>Cells off the board are not in it</b>: put down, a piece leaves what
+    /// is under its holes alone, so a selection round a bend of a river does
+    /// not punch the board's edge into the next one.
+    /// </summary>
+    public Piece Copy(IEnumerable<Vector2I> cells, Vector2I anchor)
+    {
+        var bits = new List<Bit>();
+        var taken = new HashSet<Vector2I>();
+        foreach (Vector2I cell in cells)
+        {
+            if (!OnBoard(cell) || !taken.Add(cell))
+                continue;
+            bits.Add(new Bit(cell, LetterAt(cell), IsRamp(cell),
+                             _walls.TryGetValue(cell, out Masonry? wall) ? wall.Copy() : null));
+        }
+        var homes = new List<Parking>();
+        foreach (Lineup.Unit u in Lineup.Of(_homes))
+        {
+            Parking home = _homes[u.Slot];
+            if (!taken.Contains(home.Cell))
+                continue;
+            // said out loud, as Freeze would say it, without touching the board
+            int pair = Lineup.PairAt(u.Model);
+            homes.Add(pair >= 0 ? home with { Side = u.Side, Class = Lineup.Pairs[pair].Class } : home);
+        }
+        return new Piece(bits, homes, anchor);
+    }
+
+    /// <summary>
+    /// The cells given cleared to plain ground at the datum: no cover, no
+    /// ramp, no wall - and with <paramref name="homes"/>, no home. Cut's
+    /// second half and Delete. Answers how many cells changed.
+    ///
+    /// <b>The last home goes too.</b> <see cref="DropHome"/> refuses it, for
+    /// a brush; a cut is usually half of a move whose paste brings it back,
+    /// and a board left with none says so in the problems panel and on save.
+    /// </summary>
+    public int Clear(IEnumerable<Vector2I> cells, bool homes = true)
+    {
+        var cleared = new HashSet<Vector2I>();
+        foreach (Vector2I cell in cells)
+        {
+            if (!OnBoard(cell) || !cleared.Add(cell))
+                continue;
+            _ground[At(cell)] = BoardMap.Plain;
+            _ramps[At(cell)] = false;
+            Sync(cell);
+        }
+        if (homes && _homes.Any(h => cleared.Contains(h.Cell)))
+        {
+            Freeze();
+            _homes.RemoveAll(h => cleared.Contains(h.Cell));
+        }
+        return cleared.Count;
+    }
+
+    /// <summary>
+    /// A piece put down with its anchor on <paramref name="at"/>; with
+    /// <paramref name="homes"/>, its tanks too, over any home already on the
+    /// cell. Answers the cells written and, in <paramref name="off"/>, how many
+    /// fell off the grid.
+    ///
+    /// <b>The letters go in as they are.</b> Every one came off a board, so
+    /// each is a letter the alphabet carries and nothing is asked again; the
+    /// ramps and walls come with them, the masonry copied so that the piece
+    /// can be put down twice.
+    /// </summary>
+    public int Paste(Piece piece, Vector2I at, bool homes, out int off)
+    {
+        off = 0;
+        int written = 0;
+        foreach (Bit bit in piece.Cells)
+        {
+            Vector2I to = Shift(bit.Cell, piece.Anchor, at);
+            if (!Inside(to))
+            {
+                off++;
+                continue;
+            }
+            _ground[At(to)] = bit.Letter;
+            _ramps[At(to)] = bit.Ramp;
+            _walls.Remove(to);
+            if (bit.Wall is { } wall && GlyphAt(to).Wall)
+                _walls[to] = wall.Copy();
+            Sync(to);
+            written++;
+        }
+        if (homes && piece.Homes.Count > 0)
+        {
+            Freeze();
+            foreach (Parking home in piece.Homes)
+            {
+                Vector2I to = Shift(home.Cell, piece.Anchor, at);
+                if (!OnBoard(to))
+                    continue;
+                int here = SlotAt(to);
+                if (here >= 0)
+                    _homes[here] = home with { Cell = to };
+                else
+                    _homes.Add(home with { Cell = to });
+            }
+        }
+        return written;
+    }
+
     // --- out ------------------------------------------------------------------
 
     /// <summary>

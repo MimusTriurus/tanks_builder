@@ -44,7 +44,17 @@ public sealed partial class MapEditor
         new("Board", "ctrl+wheel", "turn a home's tank an edge"),
         new("Board", "ctrl+(shift+)Z", "undo, redo - a stroke at a time; Z and Y alone too", "undo, redo"),
         new("Board", "wheel, middle drag", "zoom, pan; middle tap or Home recentres"),
-        new("Board", "Esc", "close the sheet, then drop the picked cell"),
+        new("Board", "Esc", "close the sheet, drop what is in hand, unmark, then drop the picked cell"),
+        new("Select", "R", "the select tool, on any tab; again, back to the brush", "select"),
+        new("Select", "left drag", "mark a box of cells; shift adds, alt takes away"),
+        new("Select", "drag marked", "carry the marked cells - one undo"),
+        new("Select", "right click", "unmark; drop what is in hand"),
+        new("Select", "ctrl+A  ctrl+D", "mark the whole board, unmark"),
+        new("Select", "ctrl+C  ctrl+X", "copy, cut the marked cells: ground, cover, level, walls, tanks", "copy, cut"),
+        new("Select", "ctrl+V", "paste: the piece follows the pointer, a click lays it (again and again)", "paste"),
+        new("Select", "ctrl+shift+V", "paste without its tanks"),
+        new("Select", "Del", "clear the marked cells to plain ground"),
+        new("Select", "F", "with cells marked, fills them with the brush"),
         new("Foundation", "W", "the brush is water"),
         new("Foundation", "E", "the brush puts a cell on or off the board"),
         new("Cover", "W", "the bunker brush; again, its slit turns a side"),
@@ -76,6 +86,8 @@ public sealed partial class MapEditor
         Levels, Ramps, Sites, Flood, Homes, Faults,
         Trees, Grass, Walls, Bunkers, Mines,
         Sheet,
+        // MapEditor.Select
+        Select, MarkAll, Copy, Cut, Paste, Clear, SaveStamp,
     }
 
     /// <summary>Edit, View and Help beside File.</summary>
@@ -88,6 +100,7 @@ public sealed partial class MapEditor
         edit.AddSeparator();
         edit.AddItem("Fill region       F", (int)More.Fill);
         edit.AddItem("Put a home        H", (int)More.PlaceHome);
+        SelectMenu(edit);
         edit.IdPressed += id => Act((More)id);
         bar.AddChild(edit);
 
@@ -132,6 +145,13 @@ public sealed partial class MapEditor
     /// <summary>A menu item or a key: the same call either way.</summary>
     private void Act(More what)
     {
+        if (SelectAct(what))
+        {
+            _field.QueueRedraw();
+            _marks.QueueRedraw();
+            Say();
+            return;
+        }
         switch (what)
         {
             case More.Undo: Take(_edit.Undo(), "undone"); return;
@@ -227,13 +247,31 @@ public sealed partial class MapEditor
         _layer.AddChild(_sheet);
     }
 
-    /// <summary>Escape backs out a layer at a time: the sheet, then the picked
-    /// cell. Answers whether it had anything to close.</summary>
+    /// <summary>Escape backs out a layer at a time: the sheet, the piece in
+    /// hand, the marked cells, the select tool, then the picked cell. Answers
+    /// whether it had anything to close.</summary>
     private bool Escape()
     {
         if (_sheet is not null)
         {
             Sheet(false);
+            return true;
+        }
+        if (_held is not null)
+        {
+            Drop(_moving ? "move called off" : "put down nothing");
+            return true;
+        }
+        if (_selected.Count > 0 || _boxFrom is not null)
+        {
+            _selected.Clear();
+            _boxFrom = null;
+            _said = "nothing marked";
+            return true;
+        }
+        if (_selectTool)
+        {
+            SelectTool(false);
             return true;
         }
         if (_edit.Inside(_picked))
@@ -303,6 +341,14 @@ public sealed partial class MapEditor
     {
         if (!_edit.Inside(_under) || _sheet is not null)
             return;
+        // the pointer is the selection's (MapEditor.Select), which draws its own
+        if (Selecting)
+        {
+            if (_held is null)
+                on.DrawString(ThemeDB.FallbackFont, TopOnScreen(_under) + new Vector2(18.0f, -18.0f), "select",
+                              HorizontalAlignment.Left, -1, 15, SelectInk);
+            return;
+        }
         Color ink = _erasing ? new Color(1.0f, 0.6f, 0.5f, 0.9f) : new Color(BrushInk, 0.9f);
         foreach (Vector2I cell in Patch())
         {

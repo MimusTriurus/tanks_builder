@@ -745,6 +745,130 @@ public static class MapFile
     private static string Quote(string raw) =>
         "\"" + raw.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
 
+    // --- stamps ----------------------------------------------------------------
+
+    /// <summary>
+    /// Where the editor's stamps live: <c>maps/stamps/</c>, beside the maps
+    /// and out of their way - <see cref="Names"/> reads the top of
+    /// <see cref="Dir"/> only, so no scene and no self test ever opens one
+    /// as a board (stage 2 of docs/editor-ux-plan.md).
+    /// </summary>
+    public static string StampDir => Path.Combine(Dir, "stamps");
+
+    public static IReadOnlyList<string> StampNames()
+    {
+        if (!Directory.Exists(StampDir))
+            return Array.Empty<string>();
+        return Directory.GetFiles(StampDir, "*" + Extension)
+            .Select(f => Path.GetFileNameWithoutExtension(f).ToLowerInvariant())
+            .OrderBy(n => n, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    /// <summary>
+    /// A piece of a board as a file: the map's own shape - ground, ramps,
+    /// homes, walls - cut to the piece's box, with <c>-</c> where the piece has
+    /// no cell, plus the cell it is held by.
+    ///
+    /// <b>Moved to the box by an even number of columns</b>, so its odd
+    /// columns stay odd and the drawing in the file is the hexes as they
+    /// touched (<see cref="MapEdit.Shift"/>). <b>Not a board</b>: nothing here
+    /// goes through <see cref="BoardMap.FromGround"/>, because a piece has no
+    /// homes to audit and ramps whose neighbours it never took.
+    /// </summary>
+    public static string SaveStamp(string name, MapEdit.Piece piece)
+    {
+        if (piece.Cells.Count == 0)
+            throw new InvalidOperationException("an empty piece is not a stamp");
+        int left = piece.Cells.Min(b => b.Cell.X), top = piece.Cells.Min(b => b.Cell.Y);
+        var by = new Vector2I(left - (left & 1), top);
+        int columns = piece.Cells.Max(b => b.Cell.X) - by.X + 1;
+        int rows = piece.Cells.Max(b => b.Cell.Y) - by.Y + 1;
+        var ground = Enumerable.Range(0, rows).Select(_ => new StringBuilder(new string(BoardMap.Off, columns))).ToArray();
+        var ramps = Enumerable.Range(0, rows).Select(_ => new StringBuilder(new string('.', columns))).ToArray();
+        var walls = new List<string>();
+        foreach (MapEdit.Bit bit in piece.Cells)
+        {
+            Vector2I at = bit.Cell - by;
+            ground[at.Y][at.X] = bit.Letter;
+            if (bit.Ramp)
+                ramps[at.Y][at.X] = 'r';
+            if (bit.Wall is { Plain: false } wall)
+                walls.Add("    " + Line(at, wall));
+        }
+        Vector2I anchor = piece.Anchor - by;
+        var text = new StringBuilder();
+        text.Append("{\n");
+        text.Append($"  \"format\": {Format},\n");
+        text.Append($"  \"name\": {Quote(name)},\n");
+        text.Append($"  \"size\": [{columns}, {rows}],\n");
+        text.Append($"  \"anchor\": [{anchor.X}, {anchor.Y}],\n");
+        text.Append("  \"homes\": ["
+                    + string.Join(", ", piece.Homes.Select(h => Home(h with { Cell = h.Cell - by })))
+                    + "],\n\n");
+        text.Append("  \"ground\": [\n");
+        text.Append(string.Join(",\n", ground.Select(r => "    " + Quote(r.ToString()))));
+        text.Append("\n  ],\n");
+        text.Append("  \"ramps\": [\n");
+        text.Append(string.Join(",\n", ramps.Select(r => "    " + Quote(r.ToString()))));
+        text.Append("\n  ]");
+        if (walls.Count > 0)
+            text.Append(",\n\n  \"walls\": [\n" + string.Join(",\n", walls) + "\n  ]");
+        text.Append("\n}\n");
+
+        Directory.CreateDirectory(StampDir);
+        string path = Path.Combine(StampDir, name + Extension);
+        File.WriteAllText(path, text.ToString());
+        // read back, as a map is, before the author is told it was kept
+        LoadStamp(name);
+        return path;
+    }
+
+    /// <summary>A stamp off the disk, held where it was saved held.</summary>
+    public static MapEdit.Piece LoadStamp(string name)
+    {
+        string path = Path.Combine(StampDir, name.Trim().ToLowerInvariant() + Extension);
+        if (!File.Exists(path))
+            throw new InvalidOperationException($"no stamp at {path}");
+        Shape? file;
+        try
+        {
+            file = JsonSerializer.Deserialize<Shape>(File.ReadAllText(path), new JsonSerializerOptions
+            {
+                ReadCommentHandling = JsonCommentHandling.Skip,
+                AllowTrailingCommas = true,
+            });
+        }
+        catch (JsonException e)
+        {
+            throw new InvalidOperationException($"stamp {name}: {e.Message}");
+        }
+        if (file?.Ground is not { Length: > 0 } ground)
+            throw new InvalidOperationException($"stamp {name}: no ground grid");
+        string[] ramps = file.Ramps ?? Array.Empty<string>();
+        IReadOnlyDictionary<Vector2I, Masonry> walling =
+            Walling(file.Walls, "stamp " + name) ?? new Dictionary<Vector2I, Masonry>();
+        var bits = new List<MapEdit.Bit>();
+        for (int r = 0; r < ground.Length; r++)
+        for (int q = 0; q < ground[r].Length; q++)
+        {
+            char letter = ground[r][q];
+            if (letter == BoardMap.Off)
+                continue;
+            if (Of(letter) is null)
+                throw new InvalidOperationException(
+                    $"stamp {name}: ({q},{r}) is '{letter}', which no map letter is");
+            var cell = new Vector2I(q, r);
+            bool ramp = r < ramps.Length && q < ramps[r].Length && ramps[r][q] == 'r';
+            bits.Add(new MapEdit.Bit(cell, letter, ramp,
+                                     walling.TryGetValue(cell, out Masonry? wall) ? wall : null));
+        }
+        if (bits.Count == 0)
+            throw new InvalidOperationException($"stamp {name}: not one cell on it");
+        Vector2I anchor = file.Anchor is { Length: 2 } a ? new Vector2I(a[0], a[1]) : bits[0].Cell;
+        return new MapEdit.Piece(bits, Parkings(file.Homes, "stamp " + name), anchor);
+    }
+
     // --- file shape ----------------------------------------------------------
 
     private sealed class Shape
@@ -759,6 +883,8 @@ public static class MapFile
         [JsonPropertyName("ground")] public string[]? Ground { get; set; }
         [JsonPropertyName("ramps")] public string[]? Ramps { get; set; }
         [JsonPropertyName("walls")] public WallShape[]? Walls { get; set; }
+        /// <summary>A stamp's only: the cell it is held by (SaveStamp).</summary>
+        [JsonPropertyName("anchor")] public int[]? Anchor { get; set; }
     }
 
     private sealed class WallShape

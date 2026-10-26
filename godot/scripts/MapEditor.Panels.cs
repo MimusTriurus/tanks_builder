@@ -40,6 +40,7 @@ public sealed partial class MapEditor
     private TabBar _tabs = null!;
     private VBoxContainer _choices = null!;
     private Label _brushSays = null!;
+    private Button _selectButton = null!;
     private readonly List<Button> _picks = new();
     private readonly Dictionary<Layers, CheckBox> _switches = new();
 
@@ -105,6 +106,18 @@ public sealed partial class MapEditor
         brush.AddChild(_brushSays);
         brush.AddChild(Step("+", () => _radius = Math.Min(6, _radius + 1)));
         box.AddChild(brush);
+        // the select tool, beside the brush rather than on a tab: it marks
+        // cells whatever the tab (MapEditor.Select)
+        _selectButton = new Button { Text = "select   R", ToggleMode = true };
+        _selectButton.AddThemeFontSizeOverride("font_size", 14);
+        _selectButton.Toggled += on =>
+        {
+            if (_loading)
+                return;
+            SelectTool(on);
+            Say();
+        };
+        box.AddChild(_selectButton);
 
         box.AddChild(new HSeparator());
 
@@ -297,6 +310,8 @@ public sealed partial class MapEditor
                 if (_loading)
                     return;
                 chose();
+                // a brush picked is the brush in hand, not the select tool
+                _selectTool = false;
                 Say();
             };
             _picks.Add(button);
@@ -336,6 +351,7 @@ public sealed partial class MapEditor
             for (int i = 0; i < _picks.Count; i++)
                 _picks[i].ButtonPressed = brushes[i].On();
         _brushSays.Text = $"brush {_radius}";
+        _selectButton.ButtonPressed = _selectTool;
         foreach ((Layers which, CheckBox check) in _switches)
             check.ButtonPressed = _layers.HasFlag(which);
         _loading = false;
