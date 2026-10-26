@@ -42,7 +42,7 @@ public sealed partial class MapEditor
         new("Board", "H", "put a home (parking) on the cell", "home"),
         new("Board", "alt+drag", "turn a home's tank towards the pointer, on the edges"),
         new("Board", "ctrl+wheel", "turn a home's tank an edge"),
-        new("Board", "Z  Y", "undo, redo - a stroke at a time", "undo, redo"),
+        new("Board", "ctrl+(shift+)Z", "undo, redo - a stroke at a time; Z and Y alone too", "undo, redo"),
         new("Board", "wheel, middle drag", "zoom, pan; middle tap or Home recentres"),
         new("Board", "Esc", "close the sheet, then drop the picked cell"),
         new("Foundation", "W", "the brush is water"),
@@ -51,8 +51,8 @@ public sealed partial class MapEditor
         new("Units", "left click", "put the brush's tank here; on a tank, make it the brush's"),
         new("Units", "left drag", "carry a tank to another cell"),
         new("Units", "right click", "take the tank off this cell"),
-        new("File", "N  O", "new board, open one"),
-        new("File", "S  shift+S", "save, save as"),
+        new("File", "ctrl+N  ctrl+O", "new board, open one; N and O alone too"),
+        new("File", "ctrl+S  ctrl+shift+S", "save, save as; S and shift+S alone too"),
         new("File", "F5", "run the board on the 3D bench (Edit F5 there comes back)"),
         new("File", "ctrl+F5", "run it as a match: two sides off the homes"),
         new("View", "L  B", "levels, flood"),
@@ -82,8 +82,8 @@ public sealed partial class MapEditor
     {
         var edit = new PopupMenu { Name = "Edit" };
         edit.AddThemeFontSizeOverride("font_size", 16);
-        edit.AddItem("Undo              Z", (int)More.Undo);
-        edit.AddItem("Redo              Y", (int)More.Redo);
+        edit.AddItem("Undo           ctrl+Z", (int)More.Undo);
+        edit.AddItem("Redo     ctrl+shift+Z", (int)More.Redo);
         edit.AddSeparator();
         edit.AddItem("Fill region       F", (int)More.Fill);
         edit.AddItem("Put a home        H", (int)More.PlaceHome);

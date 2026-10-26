@@ -95,11 +95,11 @@ public sealed partial class MapEditor
 
         var file = new PopupMenu { Name = "File" };
         file.AddThemeFontSizeOverride("font_size", 16);
-        file.AddItem("New board...      N", (int)Item.New);
-        file.AddItem("Open...           O", (int)Item.Open);
+        file.AddItem("New board...   ctrl+N", (int)Item.New);
+        file.AddItem("Open...        ctrl+O", (int)Item.Open);
         file.AddSeparator();
-        file.AddItem("Save              S", (int)Item.Save);
-        file.AddItem("Save as...  shift+S", (int)Item.SaveAs);
+        file.AddItem("Save           ctrl+S", (int)Item.Save);
+        file.AddItem("Save as... ctrl+shift+S", (int)Item.SaveAs);
         file.AddSeparator();
         // Under the saves and separated from them, because it is one of them:
         // Run saves first and plays what is on disk - see MapEditor.Play.
@@ -302,6 +302,33 @@ public sealed partial class MapEditor
 
         _tellDialog = new AcceptDialog { Title = "The map editor" };
         _layer.AddChild(_tellDialog);
+
+        // --- a board built into the game --------------------------------------
+        _builtInDialog = new ConfirmationDialog
+        {
+            Title = "Built-in board", OkButtonText = "Save as...",
+        };
+        _builtInDialog.Confirmed += () =>
+        {
+            Chose(Item.SaveAs);
+            // a name the save takes, rather than the one it just refused
+            _saveName.Text = _edit.Name + "_copy";
+            _saveName.SelectAll();
+        };
+        _layer.AddChild(_builtInDialog);
+    }
+
+    private ConfirmationDialog _builtInDialog = null!;
+
+    /// <summary>The author asked to save or run a board that is part of the
+    /// build (<see cref="BoardMap.Compiled"/>): say so plainly and offer the
+    /// copy, which is the only way forward.</summary>
+    private void BuiltIn(string then)
+    {
+        _builtInDialog.DialogText =
+            $"\"{_edit.Name}\" is built into the game and can't be overwritten.\n\n"
+            + $"Save a copy under another name, then {then}.";
+        _builtInDialog.PopupCentered();
     }
 
     private void Tell(string what)

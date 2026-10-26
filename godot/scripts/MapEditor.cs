@@ -119,7 +119,6 @@ public sealed partial class MapEditor : SceneRoot
     private string _said = "";
 
     private Label _hud = null!;
-    private RichTextLabel _report = null!;
 
     // --- overlays ------------------------------------------------------------
 
@@ -299,6 +298,18 @@ public sealed partial class MapEditor : SceneRoot
         {
             _edit = MapEdit.Blank("untitled", newColumns, newRows);
         }
+        else if (Map.Length > 0
+                 && !BoardMap.Names.Contains(Map.Trim(), StringComparer.OrdinalIgnoreCase))
+        {
+            // ByName answers a name nobody wrote with the harness's bench, and
+            // the editor opened that as if asked for it - `--map events` from
+            // the run args drew on bench and could not save it. Said instead,
+            // on a blank board (stage 0 of docs/editor-ux-plan.md).
+            GD.Print($"editor: no map named {Map}");
+            _edit = MapEdit.Blank("untitled", MapEdit.DefaultColumns,
+                                  MapEdit.DefaultRows);
+            _said = $"no map named \"{Map}\" - a blank board instead (File > Open lists the maps)";
+        }
         else if (Map.Length > 0)
         {
             try
@@ -461,6 +472,10 @@ public sealed partial class MapEditor : SceneRoot
         _stage?.Place(Array.Empty<Vehicle>());
         Redress();
         LawnMore();
+        // the problems panel's height and place, after the layout pass that
+        // sized its wrapped rows (MapEditor.Problems)
+        Problems();
+        ProbeProblems();
         Tanks();
         TurnProbe();
         UnitsProbe();
@@ -515,9 +530,9 @@ public sealed partial class MapEditor : SceneRoot
         if (_open == "overlay" && _frame is 4 or 8)
         {
             bool stop = _frame == 4;
-            _report.MouseFilter = stop
+            _hud.MouseFilter = stop
                 ? Control.MouseFilterEnum.Stop : Control.MouseFilterEnum.Ignore;
-            Vector2 at = _report.GetGlobalRect().GetCenter();
+            Vector2 at = _hud.GetGlobalRect().GetCenter();
             _clicks = 0;
             foreach (bool down in new[] { true, false })
                 Input.ParseInputEvent(new InputEventMouseButton
@@ -530,7 +545,7 @@ public sealed partial class MapEditor : SceneRoot
             _probeStop = stop;
         }
         if (_open == "overlay" && _frame is 5 or 9)
-            GD.Print($"overlay: the report is {_report.GetGlobalRect()} on "
+            GD.Print($"overlay: the readout is {_hud.GetGlobalRect()} on "
                      + $"filter {(_probeStop ? "Stop" : "Ignore")}, and a click at "
                      + $"its middle reached the board {_clicks} time(s)");
         // Taking up the ramp brush shows where a ramp can go. Keys rather than
@@ -1343,6 +1358,11 @@ public sealed partial class MapEditor : SceneRoot
             case Key.E: Toggle(false); break;
             case Key.Bracketleft: _radius = Math.Max(0, _radius - 1); break;
             case Key.Bracketright: _radius = Math.Min(6, _radius + 1); break;
+            // Keycode carries no modifiers, so ctrl+Z, ctrl+S, ctrl+O and ctrl+N
+            // already land on their letters; ctrl+shift+Z is the one standard
+            // pair that meant something else here - undo again (stage 0 of
+            // docs/editor-ux-plan.md).
+            case Key.Z when key.ShiftPressed: Take(_edit.Redo(), "redone"); return;
             case Key.Z: Take(_edit.Undo(), "undone"); return;
             case Key.Y: Take(_edit.Redo(), "redone"); return;
             case Key.F: Fill(); return;
@@ -1505,7 +1525,7 @@ public sealed partial class MapEditor : SceneRoot
             Say();
             return;
         }
-        if (!Keep())
+        if (!Keep("run it"))
             return;
         Session.Map = _edit.Name;
         Session.Editing = true;
@@ -1549,8 +1569,18 @@ public sealed partial class MapEditor : SceneRoot
         Settle();
     }
 
-    private bool Keep()
+    private bool Keep(string then = "save it")
     {
+        // A board built into the game is asked about in the author's words,
+        // with the way out on the button, before MapFile.Save refuses it in
+        // the self test's (stage 0 of docs/editor-ux-plan.md).
+        if (BoardMap.Compiled.Contains(_edit.Name, StringComparer.OrdinalIgnoreCase))
+        {
+            _said = $"NOT saved: {_edit.Name} is built in";
+            BuiltIn(then);
+            Say();
+            return false;
+        }
         bool kept;
         Unramp();
         try
@@ -1591,7 +1621,7 @@ public sealed partial class MapEditor : SceneRoot
         _hud.Text = $"{_edit.Name}  {_edit.Columns}x{_edit.Rows}   {cell}\n"
                     + $"{Tool()}   brush {_radius}   {_edit.Depth} undo\n"
                     + (_said.Length > 0 ? _said : "");
-        _report.Text = Report();
+        Problems();
         _foot.Text = Under();
         // Last, because the panels read the board this has just described and
         // the right one rebuilds off it - see MapEditor.Panels.
@@ -1608,49 +1638,6 @@ public sealed partial class MapEditor : SceneRoot
         MapEdit.Tab.Units => $"unit: {_unitSide} {_unitClass}",
         _ => _rampBrush ? "level: ramp" : $"level: {_level}",
     };
-
-    /// <summary>
-    /// The audit, live.
-    ///
-    /// <b>Reachability is asked of the field rather than recomputed.</b> It is
-    /// the one rule that needs the floor, the flood, the cliffs and the ramp axis
-    /// together, and <see cref="HexField.Passable"/> is where those four already
-    /// meet - see <see cref="MapRules.Seen"/>.
-    /// </summary>
-    private string Report()
-    {
-        var lines = new List<string>();
-        MapRules.Draft draft = _edit.Draft();
-        int cells = draft.Cells().Count();
-        lines.Add($"{cells} cells on the board");
-
-        foreach (MapRules.Fault fault in _faults.Where(f => f.Fatal).Take(12))
-            lines.Add("BAD " + fault.Text);
-        foreach (MapRules.Fault fault in _faults.Where(f => !f.Fatal).Take(6))
-            lines.Add("... " + fault.Text);
-        if (_faults.Count(f => f.Fatal) > 12)
-            lines.Add($"... and {_faults.Count(f => f.Fatal) - 12} more");
-
-        // Only when the board builds: reachability off a field carrying dropped
-        // ramps would be reachability on a board the author is not drawing.
-        if (_faults.All(f => !f.Fatal))
-        {
-            foreach (Parking parked in _edit.Homes)
-            {
-                Vector2I home = parked.Cell;
-                HashSet<Vector2I> seen = MapRules.Seen(_field, home);
-                int stranded = draft.Cells()
-                    .Count(c => !draft.IsCliff(c) && !seen.Contains(c));
-                lines.Add($"from ({home.X},{home.Y}): {seen.Count} reachable, "
-                          + $"{stranded} stranded");
-            }
-        }
-        else
-        {
-            lines.Add("(reach is not asked while the board has faults)");
-        }
-        return string.Join("\n", lines);
-    }
 
     // --- the panels ----------------------------------------------------------
 
@@ -1672,34 +1659,7 @@ public sealed partial class MapEditor : SceneRoot
         _hud = Text(LeftWide + 26.0f, 44.0f, 17);
         layer.AddChild(_hud);
 
-        _report = new RichTextLabel
-        {
-            Position = new Vector2(LeftWide + 26.0f, 106.0f),
-            CustomMinimumSize = new Vector2(520.0f, 420.0f),
-            ScrollActive = false,
-            BbcodeEnabled = false,
-            // And it does not eat the board.
-            //
-            // <b>Godot gives Label mouse_filter Ignore in its own constructor
-            // and leaves every other Control on the inherited Stop</b>, so this
-            // was an invisible 520x420 button over the top left of the board:
-            // every hex under the audit was unclickable, and nothing on screen
-            // said why. The panels are Stop on purpose - a click that lands on
-            // one must not paint the cell behind it - and the readout is the
-            // opposite case, because there is nothing on it to click.
-            //
-            // Proved by --menu overlay, which synthesises a click at the middle
-            // of this rectangle and prints the cell it picked. It printed
-            // (-1,-1).
-            MouseFilter = Control.MouseFilterEnum.Ignore,
-        };
-        _report.AddThemeColorOverride("default_color",
-            new Color(0.86f, 0.92f, 1.0f));
-        _report.AddThemeColorOverride("font_outline_color",
-            new Color(0, 0, 0, 0.85f));
-        _report.AddThemeConstantOverride("outline_size", 4);
-        _report.AddThemeFontSizeOverride("normal_font_size", 13);
-        layer.AddChild(_report);
+        Problems(layer);
     }
 
     private static Label Text(float x, float y, int size)
