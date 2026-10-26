@@ -405,7 +405,7 @@ public sealed partial class MapEditor
         GD.Print($"tools: {_presets.Count} preset(s) - {string.Join(", ", _presets.Select(p => p.Name))}"
                  + (_presetsSay.Length > 0 ? $"; {_presetsSay}" : ""));
         int Find(string name) => _presets.ToList().FindIndex(p => p.Name == name);
-        // a fresh board opens on half a turn; the tools are judged alone
+        // the tools are judged alone, whatever P was left on
         _symmetry = MapEdit.Symmetry.None;
 
         _tab = MapEdit.Tab.Presets;

@@ -361,8 +361,8 @@ public sealed partial class MapEditor
         _sown = Array.Empty<string>();
         _stood = "";
         Unmark();
-        // the symmetry this board keeps, if any (MapEditor.Symmetry)
-        _symmetry = _edit.Fitting();
+        // every board opens with the symmetric brush off (MapEditor.Symmetry)
+        _symmetry = MapEdit.Symmetry.None;
         _dirty = false;
         _said = said;
         Settle();

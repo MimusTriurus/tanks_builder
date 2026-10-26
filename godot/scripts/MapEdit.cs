@@ -1447,18 +1447,6 @@ public sealed class MapEdit
         return new Asymmetry(cells, first, lone, firstLone, homes, firstHome);
     }
 
-    /// <summary>The symmetry the letters already keep, half a turn first, or
-    /// None - what the editor turns on when a board is opened. The homes are
-    /// not asked: a fresh board has one, and a board drawn symmetric is
-    /// drawn before it is crewed.</summary>
-    public Symmetry Fitting()
-    {
-        foreach (Symmetry how in new[] { Symmetry.Point, Symmetry.Down, Symmetry.Across })
-            if (Audit(how).Cells == 0)
-                return how;
-        return Symmetry.None;
-    }
-
     // --- out ------------------------------------------------------------------
 
     /// <summary>

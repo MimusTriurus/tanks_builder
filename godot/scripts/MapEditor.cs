@@ -337,9 +337,6 @@ public sealed partial class MapEditor : SceneRoot
                                       MapEdit.DefaultRows);
         }
 
-        // the symmetry the board already keeps, if any (MapEditor.Symmetry)
-        _symmetry = _edit.Fitting();
-
         await Loading.Stage(this, "board", 0.1f);
         // The 2D props are not loaded, only looked for: the wood on this board
         // is MapEditor.Dress's models and the grove below is asked, never

@@ -14,11 +14,10 @@ namespace TankSpriteTest;
 /// Units tab puts a brown one of the same class on the twin cell, facing the
 /// turned way; erasing one erases both. A bunker's slit turns with it.
 ///
-/// <b>Which symmetry is up when a board opens is read off the board</b>
-/// (<see cref="MapEdit.Fitting"/>): the one its letters already keep, else
-/// none - so a fresh board, which keeps all three, opens on half a turn, and
-/// ABBEY opens with the brush alone. <c>P</c> or the panel's switch steps
-/// through them.
+/// <b>Every board opens with it off</b> - new, opened or restored - and
+/// <c>P</c> or the panel's switch turns it on (2026-10-26, the author's call:
+/// it was read off the board, so a fresh one opened on half a turn and the
+/// brush drew twice before anyone asked it to).
 ///
 /// <b>The audit is a reading, not a rule.</b> With a symmetry up, the problems
 /// panel says in how many cells the board breaks it, which cells have no twin
