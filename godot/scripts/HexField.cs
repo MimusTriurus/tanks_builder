@@ -410,14 +410,18 @@ public sealed partial class HexField : Node2D
     /// carries no homes and no cliffs, and the rules that need those are the ones
     /// a whole map is asked and this is not.
     /// </summary>
+    /// <remarks>A layer of another size is read as absent, <see cref="IsWater"/>'s
+    /// guard: the editor resizes the board and sets its layers one at a time,
+    /// and SetWater ran the rules over the old floor read at the new width - a
+    /// waterfall that was not there, on every resize with water on it.</remarks>
     private MapRules.Draft Drafted(bool[]? ramps = null) => new()
     {
         Columns = Columns,
         Rows = Rows,
-        Levels = _levels ?? new int[Columns * Rows],
+        Levels = _levels is { } levels && levels.Length == Columns * Rows ? levels : new int[Columns * Rows],
         Ramps = ramps ?? Marked(),
-        Water = _water ?? new bool[Columns * Rows],
-        Ground = _ground ?? new Foundation[Columns * Rows],
+        Water = _water is { } water && water.Length == Columns * Rows ? water : new bool[Columns * Rows],
+        Ground = _ground is { } ground && ground.Length == Columns * Rows ? ground : new Foundation[Columns * Rows],
         Cliffs = new bool[Columns * Rows],
         Plot = _plot,
         Sea = Sea,
@@ -429,7 +433,7 @@ public sealed partial class HexField : Node2D
     private bool[] Marked()
     {
         var marked = new bool[Columns * Rows];
-        if (_ramps is not null)
+        if (_ramps is not null && _ramps.Length == marked.Length)
             for (int at = 0; at < marked.Length; at++)
                 marked[at] = _ramps[at] >= 0;
         return marked;

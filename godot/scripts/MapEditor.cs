@@ -315,6 +315,8 @@ public sealed partial class MapEditor : SceneRoot
             try
             {
                 _edit = MapEdit.Of(BoardMap.ByName(Map));
+                // on File > Recent (MapEditor.Document)
+                Remember(_edit.Name);
             }
             catch (Exception e)
             {
@@ -428,6 +430,10 @@ public sealed partial class MapEditor : SceneRoot
         Ui();
         Settle();
         Home();
+        // work the last session left in the autosave, offered back
+        // (MapEditor.Document); a return from the bench has its own
+        if (!returned)
+            OfferAutosave();
 
         // A dialog opened from the command line, --layers' reason word for word:
         // a capture of the menu has to be takeable, and a capture run has nobody
@@ -438,6 +444,11 @@ public sealed partial class MapEditor : SceneRoot
             case "open": Chose(Item.Open); break;
             case "saveas": Chose(Item.SaveAs); break;
             case "sheet": Act(More.Sheet); break;
+            // the board grown and its dialog up, for a capture (MapEditor.Document)
+            case "boarddialog":
+                Resize(14, 12, 4);
+                OpenBoard();
+                break;
         }
         if (_turnSides != 0)
         {
@@ -484,6 +495,8 @@ public sealed partial class MapEditor : SceneRoot
         UnitsProbe();
         ClipProbe();
         SymmetryProbe();
+        BoardProbe();
+        AutosaveTick(delta);
         CrownsFollow();
         Turn((float)delta);
         _frame++;
@@ -885,8 +898,13 @@ public sealed partial class MapEditor : SceneRoot
         _field.Plot = draft.Plot;
         _field.Slopes = true;
         _field.SetRelief(draft.Levels);
-        _field.SetWater(water.Any(w => w) ? water : null);
+        // The old flood off, the floor on, then the new flood: each setter
+        // judges water and floor together, and a board shifted or resized
+        // under its pond was judged as the new water over the old floor - a
+        // waterfall nobody drew (MapEditor.Document).
+        _field.SetWater(null);
         _field.SetGround(draft.Ground);
+        _field.SetWater(water.Any(w => w) ? water : null);
         string?[] kinds = Kinds(draft);
         _field.SetKinds(kinds);
         _field.Paint = _edit.Paint ?? MapFile.PaintFor(_edit.Ground());
@@ -1442,7 +1460,11 @@ public sealed partial class MapEditor : SceneRoot
     private void Take(bool did, string what)
     {
         _said = did ? $"one stroke {what}" : $"nothing to be {what}";
-        Settle();
+        // a resize undone is the board changing size again (MapEditor.Document)
+        if (_field.Columns != _edit.Columns || _field.Rows != _edit.Rows)
+            Reshaped();
+        else
+            Settle();
     }
 
     // --- the brush -----------------------------------------------------------
@@ -1587,6 +1609,9 @@ public sealed partial class MapEditor : SceneRoot
             Say();
             return;
         }
+        // the work to the side first: a run that never comes back loses
+        // nothing (MapEditor.Document)
+        Autosave("run");
         Session.Map = _edit.Name;
         Session.Board = board;
         Session.Unsaved = _dirty;
@@ -1615,6 +1640,9 @@ public sealed partial class MapEditor : SceneRoot
     /// the one that left, so only what it says changes.</summary>
     public override void _EnterTree()
     {
+        // closing the window asks first while there is unsaved work
+        // (MapEditor.Document)
+        GetTree().AutoAcceptQuit = false;
         if (!_built)
             return;
         Session.Editing = false;
@@ -1679,6 +1707,9 @@ public sealed partial class MapEditor : SceneRoot
             _said = "saved " + Path.GetFileName(path);
             _dirty = false;
             kept = true;
+            // on the recent list, and its autosave spent (MapEditor.Document)
+            Remember(_edit.Name);
+            Spent(_edit.Name);
         }
         catch (Exception e)
         {

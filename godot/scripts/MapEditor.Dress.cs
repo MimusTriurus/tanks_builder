@@ -58,6 +58,9 @@ public sealed partial class MapEditor
     /// after the way back is copied out of these.</summary>
     public override void _ExitTree()
     {
+        // the window closes straight away again for whatever comes in -
+        // the bench has no unsaved work to ask about (MapEditor.Document)
+        GetTree().AutoAcceptQuit = true;
         if (Loading.Parking)
             return;
         foreach (TreeModel.Loaded model in _species.Values)

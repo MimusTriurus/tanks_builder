@@ -62,6 +62,7 @@ public sealed partial class MapEditor
         Run,
         RunMatch,
         RunHere,
+        Board,
     }
 
     private void Menu(CanvasLayer layer)
@@ -98,6 +99,11 @@ public sealed partial class MapEditor
         file.AddThemeFontSizeOverride("font_size", 16);
         file.AddItem("New board...   ctrl+N", (int)Item.New);
         file.AddItem("Open...        ctrl+O", (int)Item.Open);
+        // the last five opened or saved (MapEditor.Document)
+        RecentMenu(file);
+        file.AddSeparator();
+        // name, size, shift, crop (MapEditor.Document)
+        file.AddItem("Board...", (int)Item.Board);
         file.AddSeparator();
         file.AddItem("Save           ctrl+S", (int)Item.Save);
         file.AddItem("Save as... ctrl+shift+S", (int)Item.SaveAs);
@@ -168,6 +174,9 @@ public sealed partial class MapEditor
                 break;
             case Item.Save:
                 Keep();
+                break;
+            case Item.Board:
+                OpenBoard();
                 break;
             case Item.Run:
                 Play();
@@ -265,19 +274,8 @@ public sealed partial class MapEditor
             int[] picked = _openList.GetSelectedItems();
             if (picked.Length == 0)
                 return;
-            string name = _openList.GetItemText(picked[0]).Split("   ")[0];
-            try
-            {
-                _edit = MapEdit.Of(BoardMap.ByName(name));
-                Opened("opened " + name);
-            }
-            catch (Exception e)
-            {
-                // The editor is the one tool that has to survive a board it
-                // cannot load, --map-report's exemption and for its reason: it
-                // is what the author fixes it with.
-                Tell($"{name} refused:\n{e.Message}");
-            }
+            // remembered and its autosave offered (MapEditor.Document)
+            OpenNamed(_openList.GetItemText(picked[0]).Split("   ")[0]);
         };
         _layer.AddChild(_openDialog);
 
@@ -328,6 +326,12 @@ public sealed partial class MapEditor
             _saveName.SelectAll();
         };
         _layer.AddChild(_builtInDialog);
+
+        // the board's own panel, the autosave's question, the close button's
+        // (MapEditor.Document)
+        BoardDialog();
+        RestoreDialog();
+        QuitDialog();
     }
 
     private ConfirmationDialog _builtInDialog = null!;

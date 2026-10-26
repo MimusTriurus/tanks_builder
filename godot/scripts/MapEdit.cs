@@ -233,18 +233,23 @@ public sealed class MapEdit
     /// <summary>Everything a stroke can change, in one value. A named shape
     /// rather than a tuple written out five times: the day a fifth grid is
     /// added, a tuple is five places to add it and four to forget.</summary>
+    /// <remarks>The size is in it since the board could be resized
+    /// (<see cref="Reframe"/>): a stroke's grids are only read at the size
+    /// they were taken at.</remarks>
     private readonly record struct Snap(char[] Ground, bool[] Ramps,
                                         List<Parking> Homes,
-                                        Dictionary<Vector2I, Masonry> Walls);
+                                        Dictionary<Vector2I, Masonry> Walls,
+                                        int Columns, int Rows);
 
     private Snap Taken() => new((char[])_ground.Clone(),
                                 (bool[])_ramps.Clone(), _homes.ToList(),
                                 _walls.ToDictionary(kv => kv.Key,
-                                                    kv => kv.Value.Copy()));
+                                                    kv => kv.Value.Copy()),
+                                Columns, Rows);
 
     private void Restore(Snap was) =>
-        (_ground, _ramps, _homes, _walls) =
-            (was.Ground, was.Ramps, was.Homes, was.Walls);
+        (_ground, _ramps, _homes, _walls, Columns, Rows) =
+            (was.Ground, was.Ramps, was.Homes, was.Walls, was.Columns, was.Rows);
 
     private readonly List<Snap> _back = new();
 
@@ -279,7 +284,8 @@ public sealed class MapEdit
         if (_back.Count == 0)
             return false;
         Snap was = _back[^1];
-        bool same = was.Ground.SequenceEqual(_ground) && was.Ramps.SequenceEqual(_ramps)
+        bool same = was.Columns == Columns && was.Rows == Rows
+                    && was.Ground.SequenceEqual(_ground) && was.Ramps.SequenceEqual(_ramps)
                     && was.Homes.SequenceEqual(_homes) && was.Walls.Count == _walls.Count
                     && was.Walls.All(kv => _walls.TryGetValue(kv.Key, out Masonry? now)
                                            && now.Say() == kv.Value.Say());
@@ -1113,6 +1119,122 @@ public sealed class MapEdit
             }
         }
         return written;
+    }
+
+    // --- the board itself: size, shift, crop ------------------------------------
+
+    /// <summary>The largest board the editor makes, either way - the new-board
+    /// dialog's bound.</summary>
+    public const int Largest = 64;
+
+    /// <summary>The smallest.</summary>
+    public const int Smallest = 4;
+
+    /// <summary>
+    /// The board made <paramref name="columns"/> by <paramref name="rows"/>,
+    /// what was on cell (q, r) now on (q + dq, r + dr): the one move behind
+    /// resizing, shifting and cropping (stage 4 of docs/editor-ux-plan.md).
+    /// New cells are plain ground on the board; cells pushed past the edge are
+    /// gone, and so are the homes and walls on them. Answers how many homes
+    /// were lost, or a refusal.
+    ///
+    /// <b>The column shift is even, always.</b> An odd column stands half a
+    /// row lower (odd-q); moved an odd number of columns, every cell would sit
+    /// beside other cells than it did - the moat's problem
+    /// (<see cref="BoardMap"/>.Moated). Callers round; this refuses.
+    ///
+    /// <b>A board left with no home is refused</b>: every save would refuse it
+    /// after, and the way to keep one is to move it first.
+    /// </summary>
+    public bool Reframe(int columns, int rows, int dq, int dr, out int lost, out string why)
+    {
+        lost = 0;
+        why = "";
+        if (columns < Smallest || rows < Smallest || columns > Largest || rows > Largest)
+        {
+            why = $"a board is {Smallest} to {Largest} cells each way, and this would be {columns} x {rows}";
+            return false;
+        }
+        if ((dq & 1) != 0)
+        {
+            why = $"a shift of {dq} columns would move every odd column half a row against the even ones - shift by an even number";
+            return false;
+        }
+        Vector2I by = new(dq, dr);
+        bool Fits(Vector2I cell) => cell.X >= 0 && cell.X < columns && cell.Y >= 0 && cell.Y < rows;
+        List<Parking> homes = _homes.Where(h => Fits(h.Cell + by)).Select(h => h with { Cell = h.Cell + by }).ToList();
+        if (homes.Count == 0)
+        {
+            why = "no home would be left on the board - move one inside first";
+            return false;
+        }
+        Freeze();
+        homes = _homes.Where(h => Fits(h.Cell + by)).Select(h => h with { Cell = h.Cell + by }).ToList();
+        lost = _homes.Count - homes.Count;
+
+        var ground = Enumerable.Repeat(BoardMap.Plain, columns * rows).ToArray();
+        var ramps = new bool[columns * rows];
+        var walls = new Dictionary<Vector2I, Masonry>();
+        for (int r = 0; r < Rows; r++)
+        for (int q = 0; q < Columns; q++)
+        {
+            var from = new Vector2I(q, r);
+            Vector2I to = from + by;
+            if (!Fits(to))
+                continue;
+            ground[to.Y * columns + to.X] = _ground[At(from)];
+            ramps[to.Y * columns + to.X] = _ramps[At(from)];
+            if (_walls.TryGetValue(from, out Masonry? wall))
+                walls[to] = wall;
+        }
+        (Columns, Rows, _ground, _ramps, _homes, _walls) = (columns, rows, ground, ramps, homes, walls);
+        return true;
+    }
+
+    /// <summary>The shift that keeps a board where <paramref name="anchor"/>
+    /// says when it grows or shrinks by <paramref name="grow"/>: 0 at the
+    /// start, all of it at the end, half in the middle - for the columns,
+    /// rounded to even (<see cref="Reframe"/>).</summary>
+    public static int Anchored(int grow, int anchor, bool columns)
+    {
+        int by = anchor switch { 0 => 0, 2 => grow, _ => grow / 2 };
+        return columns ? by - (by & 1) : by;
+    }
+
+    /// <summary>
+    /// A board straight from its grids, with no question asked but whether
+    /// each letter is one - the autosave's reader. A draft is usually illegal
+    /// (that is why <see cref="MapRules"/> returns a list), so it cannot come
+    /// back through <see cref="BoardMap.FromGround"/>, which would refuse it.
+    /// </summary>
+    public static MapEdit Raw(string name, string[] ground, string[] ramps, IReadOnlyList<Parking> homes,
+                              IReadOnlyDictionary<Vector2I, Masonry>? walls, string? paint, bool height, int plinth)
+    {
+        int rows = ground.Length, columns = rows > 0 ? ground[0].Length : 0;
+        if (columns < 1 || ground.Any(row => row.Length != columns))
+            throw new InvalidOperationException($"{name}: the ground grid is not a rectangle");
+        var edit = new MapEdit
+        {
+            Name = name, Paint = paint, Height = height, Plinth = plinth,
+            Columns = columns, Rows = rows,
+            _ground = new char[columns * rows],
+            _ramps = new bool[columns * rows],
+            _homes = homes.ToList(),
+        };
+        for (int r = 0; r < rows; r++)
+        for (int q = 0; q < columns; q++)
+        {
+            char letter = ground[r][q];
+            if (MapFile.Of(letter) is null)
+                throw new InvalidOperationException($"{name}: ({q},{r}) is '{letter}', which no map letter is");
+            var cell = new Vector2I(q, r);
+            edit._ground[edit.At(cell)] = letter;
+            edit._ramps[edit.At(cell)] = r < ramps.Length && q < ramps[r].Length && ramps[r][q] == 'r';
+            if (walls is not null && walls.TryGetValue(cell, out Masonry? wall) && edit.GlyphAt(cell).Wall)
+                edit._walls[cell] = wall.Copy();
+            edit.Sync(cell);
+        }
+        return edit;
     }
 
     // --- symmetry ---------------------------------------------------------------

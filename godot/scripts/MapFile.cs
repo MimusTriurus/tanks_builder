@@ -745,6 +745,70 @@ public static class MapFile
     private static string Quote(string raw) =>
         "\"" + raw.Replace("\\", "\\\\").Replace("\"", "\\\"") + "\"";
 
+    // --- drafts: the autosave ------------------------------------------------
+
+    /// <summary>
+    /// A board being drawn, as the file it would be - written from the letters,
+    /// not from a built board, because a draft is usually illegal and
+    /// <see cref="BoardMap.FromGround"/> would refuse it. The editor's
+    /// autosave (stage 4 of docs/editor-ux-plan.md), kept in
+    /// <c>user://autosave/</c> and never in <see cref="Dir"/>: a half-drawn
+    /// board there would break every scene that reads the folder.
+    /// </summary>
+    public static string WriteDraft(MapEdit edit)
+    {
+        var text = new StringBuilder();
+        text.Append("{\n");
+        text.Append($"  \"format\": {Format},\n");
+        text.Append($"  \"name\": {Quote(edit.Name)},\n");
+        text.Append($"  \"size\": [{edit.Columns}, {edit.Rows}],\n");
+        if (edit.Paint is { Length: > 0 } paint)
+            text.Append($"  \"paint\": {Quote(paint)},\n");
+        text.Append($"  \"height\": {(edit.Height ? "true" : "false")},\n");
+        if (edit.Plinth != 0)
+            text.Append($"  \"plinth\": {edit.Plinth},\n");
+        text.Append("  \"homes\": [" + string.Join(", ", edit.Homes.Select(Home)) + "],\n\n");
+        text.Append("  \"ground\": [\n");
+        text.Append(string.Join(",\n", edit.Ground().Select(r => "    " + Quote(r))));
+        text.Append("\n  ],\n");
+        text.Append("  \"ramps\": [\n");
+        text.Append(string.Join(",\n", edit.Ramps().Select(r => "    " + Quote(r))));
+        text.Append("\n  ]");
+        var said = edit.Walled().Where(c => edit.MasonryAt(c) is { Plain: false }).ToList();
+        if (said.Count > 0)
+            text.Append(",\n\n  \"walls\": [\n"
+                        + string.Join(",\n", said.Select(c => "    " + Line(c, edit.MasonryAt(c)!)))
+                        + "\n  ]");
+        text.Append("\n}\n");
+        return text.ToString();
+    }
+
+    /// <summary>A draft back off the disk (<see cref="WriteDraft"/>), letters
+    /// checked and nothing else.</summary>
+    public static MapEdit ReadDraft(string path)
+    {
+        string name = Path.GetFileNameWithoutExtension(path).ToLowerInvariant();
+        Shape? file;
+        try
+        {
+            file = JsonSerializer.Deserialize<Shape>(File.ReadAllText(path), new JsonSerializerOptions
+            {
+                ReadCommentHandling = JsonCommentHandling.Skip,
+                AllowTrailingCommas = true,
+            });
+        }
+        catch (JsonException e)
+        {
+            throw new InvalidOperationException($"{name}: {e.Message}");
+        }
+        if (file?.Ground is not { Length: > 0 } ground)
+            throw new InvalidOperationException($"{name}: no ground grid");
+        return MapEdit.Raw(file.Name is { Length: > 0 } said ? said : name, ground,
+                           file.Ramps ?? Array.Empty<string>(), Parkings(file.Homes, name),
+                           Walling(file.Walls, name), file.Paint is { Length: > 0 } p ? p : null,
+                           file.Height ?? true, file.Plinth ?? 0);
+    }
+
     // --- stamps ----------------------------------------------------------------
 
     /// <summary>
