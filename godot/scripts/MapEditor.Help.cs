@@ -382,15 +382,24 @@ public sealed partial class MapEditor
                     : (_level + _edit.Plinth) * _field.Lift;
                 rise = want - _field.TopAt(cell);
             }
+            // The cell is the loud part, the height the quiet one. Seen from
+            // above, a top a level off lands on the next cell's ground - a
+            // drop on the one in front, a lift on the one behind - so drawn
+            // brighter than the cell it read as the brush standing between
+            // two hexes (2026-10-26).
+            var corners = new Vector2[6];
+            foreach (int heading in HexField.EdgeHeadings)
+                corners[HexField.EdgeIndex(heading)] = EdgeOnScreen(cell, heading).A;
+            on.DrawColoredPolygon(corners, new Color(ink, 0.18f));
             foreach (int heading in HexField.EdgeHeadings)
             {
                 (Vector2 a, Vector2 b) = EdgeOnScreen(cell, heading);
-                on.DrawLine(a, b, new Color(ink, 0.55f), 2.0f);
+                on.DrawLine(a, b, ink, 2.5f);
                 if (Mathf.Abs(rise) < 0.5f)
                     continue;
                 (Vector2 ua, Vector2 ub) = EdgeOnScreen(cell, heading, rise);
-                on.DrawLine(ua, ub, ink, 2.5f);
-                on.DrawLine(a, ua, new Color(ink, 0.45f), 1.5f);
+                on.DrawLine(ua, ub, new Color(ink, 0.45f), 1.5f);
+                on.DrawLine(a, ua, new Color(ink, 0.35f), 1.0f);
             }
         }
         // The bunker brush: which way each capon's slit would face, an arrow
