@@ -354,8 +354,24 @@ public static class MapFile
             string? crew = home.TryGetProperty("class", out JsonElement said_)
                            && said_.ValueKind == JsonValueKind.String
                 ? said_.GetString() : null;
+            // a match's side and the edge it starts facing; the values are
+            // judged with the class, in BoardMap.MustCrew
+            string? side = home.TryGetProperty("side", out JsonElement team)
+                           && team.ValueKind == JsonValueKind.String
+                ? team.GetString()?.ToLowerInvariant() : null;
+            int? facing = null;
+            if (home.TryGetProperty("facing", out JsonElement face))
+            {
+                if (face.ValueKind != JsonValueKind.Number || !face.TryGetInt32(out int f))
+                    throw new InvalidOperationException(
+                        $"{name}: a home's \"facing\" is an edge heading, a number, "
+                        + $"and this is {face.ValueKind}");
+                facing = f;
+            }
             homes.Add(new Parking(Pair(at, name),
-                                  crew is { Length: > 0 } ? crew : null));
+                                  crew is { Length: > 0 } ? crew : null,
+                                  side is { Length: > 0 } ? side : null,
+                                  facing));
         }
         return homes;
     }
@@ -369,6 +385,23 @@ public static class MapFile
                 + (pair.ValueKind == JsonValueKind.Array
                     ? pair.GetArrayLength().ToString() : pair.ValueKind.ToString()));
         return new Vector2I(pair[0].GetInt32(), pair[1].GetInt32());
+    }
+
+    /// <summary>One home as the file writes it: the bare pair when it said
+    /// nothing else - see <see cref="Parkings"/>, where both shapes are argued -
+    /// else an object with only the fields it said.</summary>
+    private static string Home(Parking p)
+    {
+        if (p.Plain)
+            return $"[{p.Cell.X}, {p.Cell.Y}]";
+        var said = new List<string> { $"\"at\": [{p.Cell.X}, {p.Cell.Y}]" };
+        if (p.Class is { Length: > 0 } tag)
+            said.Add($"\"class\": {Quote(tag)}");
+        if (p.Side is { Length: > 0 } side)
+            said.Add($"\"side\": {Quote(side)}");
+        if (p.Facing is int facing)
+            said.Add($"\"facing\": {facing}");
+        return "{ " + string.Join(", ", said) + " }";
     }
 
     /// <summary>
@@ -606,11 +639,7 @@ public static class MapFile
         // A parking that named nobody is written as the bare pair it always
         // was - see Parkings, where both shapes are argued.
         text.Append("  \"homes\": ["
-                    + string.Join(", ", map.Parked.Select(
-                        p => p.Class is { Length: > 0 } tag
-                            ? $"{{ \"at\": [{p.Cell.X}, {p.Cell.Y}], "
-                              + $"\"class\": {Quote(tag)} }}"
-                            : $"[{p.Cell.X}, {p.Cell.Y}]"))
+                    + string.Join(", ", map.Parked.Select(Home))
                     + "],\n");
         text.Append("\n");
         text.Append("  \"ground\": [\n");

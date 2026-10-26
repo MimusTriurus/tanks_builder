@@ -601,19 +601,84 @@ public sealed class MapEdit
                       + string.Join(", ", MovementProfile.Tags);
                 return false;
             }
-            for (int i = 0; i < _homes.Count; i++)
-                if (i != slot && string.Equals(_homes[i].Class, tag,
-                        StringComparison.OrdinalIgnoreCase))
-                {
-                    why = $"home {i + 1} already asks for {tag}, and there is "
-                          + "one tank of each";
-                    return false;
-                }
+            if (Asking(slot, tag, _homes[slot].Side) is int other)
+            {
+                why = $"home {other + 1} already asks for {tag} on its side, and "
+                      + "there is one tank of each a side";
+                return false;
+            }
         }
         _homes[slot] = _homes[slot] with
         {
             Class = tag is { Length: > 0 } ? tag : null,
         };
+        return true;
+    }
+
+    /// <summary>Another home on <paramref name="side"/> asking for
+    /// <paramref name="tag"/>, or null - <see cref="BoardMap.MustCrew"/>'s rule,
+    /// one of each a side.</summary>
+    private int? Asking(int slot, string? tag, string? side)
+    {
+        if (tag is not { Length: > 0 })
+            return null;
+        var probe = new Parking(Vector2I.Zero, tag, side);
+        for (int i = 0; i < _homes.Count; i++)
+            if (i != slot && _homes[i].SameSide(probe)
+                && string.Equals(_homes[i].Class, tag, StringComparison.OrdinalIgnoreCase))
+                return i;
+        return null;
+    }
+
+    /// <summary>
+    /// Which side a parking is on in a match, or null for the one its order
+    /// gives it (see <see cref="Parking"/>). Refused when its class is already
+    /// asked for on the side it would join.
+    /// </summary>
+    public bool Team(int slot, string? side, out string why)
+    {
+        why = "";
+        if (slot < 0 || slot >= _homes.Count)
+        {
+            why = $"there is no home {slot}";
+            return false;
+        }
+        if (side is { Length: > 0 }
+            && !Parking.Sides.Contains(side, StringComparer.OrdinalIgnoreCase))
+        {
+            why = $"{side} is not a side - " + string.Join(", ", Parking.Sides);
+            return false;
+        }
+        string? to = side is { Length: > 0 } ? side.ToLowerInvariant() : null;
+        if (Asking(slot, _homes[slot].Class, to) is int other)
+        {
+            why = $"home {other + 1} on that side already asks for "
+                  + $"{_homes[slot].Class}, and there is one tank of each a side";
+            return false;
+        }
+        _homes[slot] = _homes[slot] with { Side = to };
+        return true;
+    }
+
+    /// <summary>
+    /// Which edge a parking's tank starts facing, or null for its side's way
+    /// across the board. Only the six edge headings: a tank on a hex faces an
+    /// edge.
+    /// </summary>
+    public bool Face(int slot, int? facing, out string why)
+    {
+        why = "";
+        if (slot < 0 || slot >= _homes.Count)
+        {
+            why = $"there is no home {slot}";
+            return false;
+        }
+        if (facing is int f && !HexField.EdgeHeadings.Contains(f))
+        {
+            why = $"{f} is not an edge - " + string.Join(", ", HexField.EdgeHeadings);
+            return false;
+        }
+        _homes[slot] = _homes[slot] with { Facing = facing };
         return true;
     }
 

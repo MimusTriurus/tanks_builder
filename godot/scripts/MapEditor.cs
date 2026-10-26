@@ -405,6 +405,8 @@ public sealed partial class MapEditor : SceneRoot
     {
         _stage?.Place(Array.Empty<Vehicle>());
         Redress();
+        Tanks();
+        TurnProbe();
         CrownsFollow();
         Turn((float)delta);
         _frame++;
@@ -635,8 +637,8 @@ public sealed partial class MapEditor : SceneRoot
         // probe worth having: after it, --capture and --capture-at are read
         // again by Main, so the frame that lands on disk is the harness playing
         // the board the editor just drew.
-        if (_open is "run" or "run2d" && _frame == 20)
-            Play(sprites: _open == "run2d");
+        if (_open is "run" or "run2d" or "runmatch" && _frame == 20)
+            Play(sprites: _open == "run2d", match: _open == "runmatch");
         // And a board the harness would refuse: Run must not change scene, and
         // must say which fault stopped it.
         if (_open == "runbad" && _frame == 20)
@@ -658,7 +660,9 @@ public sealed partial class MapEditor : SceneRoot
         // Past the dressing too: the first frame lays every tree and the grass,
         // and a capture taken in it is the window before anything was drawn -
         // white, measured (MapEditor.Dress).
-        if (CapturePath is not null && _frame >= CaptureAt && _frame >= _dressedFrame + 3)
+        // and past the tanks on the homes, loaded one a frame (MapEditor.Tanks)
+        if (CapturePath is not null && _frame >= CaptureAt && _frame >= _dressedFrame + 3
+            && !_tanksStale && _frame >= _tankedFrame + 3)
         {
             Capture(CapturePath);
             GetTree().Quit();
@@ -765,6 +769,8 @@ public sealed partial class MapEditor : SceneRoot
     /// </summary>
     private void Settle()
     {
+        // the tanks on the homes stand again next frame (MapEditor.Tanks)
+        _tanksStale = true;
         MapRules.Draft draft = _edit.Draft();
         _faults = MapRules.Faults(draft);
         _sites = MapRules.Sites(draft);
@@ -981,6 +987,9 @@ public sealed partial class MapEditor : SceneRoot
     private static readonly Color BrushInk = new(0.55f, 0.90f, 1.0f);
     private static readonly Color FloodInk = new(0.55f, 0.70f, 1.0f);
     private static readonly Color BrickInk = new(0.86f, 0.55f, 0.40f);
+    /// <summary>A home's side, in the match's banner colours (Tank3DBench.SideInk).</summary>
+    private static readonly Color GreenInk = new(0.55f, 0.95f, 0.45f);
+    private static readonly Color BrownInk = new(0.85f, 0.62f, 0.38f);
 
     /// <summary>
     /// The mark a cell carries, through <see cref="HexField.Ink"/>.
@@ -1117,16 +1126,32 @@ public sealed partial class MapEditor : SceneRoot
             }
 
             if (editor._layers.HasFlag(Layers.Homes))
+            {
+                // the side a match gives each home, and the edge it starts
+                // facing - the match's own rule (Parking.SidesOf)
+                string[] sides = Parking.SidesOf(editor._edit.Homes);
                 for (int i = 0; i < editor._edit.Homes.Count; i++)
                 {
                     Parking home = editor._edit.Homes[i];
                     Vector2 at = editor.TopOnScreen(home.Cell);
-                    DrawArc(at, 26.0f * z, 0.0f, Mathf.Tau, 24,
-                        new Color(0.6f, 1.0f, 0.9f, 0.9f), 2.5f);
+                    bool green = sides[i] == Parking.Green;
+                    Color ink = green ? GreenInk : BrownInk;
+                    // a side said is solid, one by order fainter
+                    Color ring = home.Side is null ? new Color(ink, 0.55f) : ink;
+                    DrawArc(at, 26.0f * z, 0.0f, Mathf.Tau, 24, ring, 2.5f);
                     DrawString(font, at + new Vector2(-4.0f, -28.0f * z - 4.0f),
-                        (i + 1).ToString(), HorizontalAlignment.Left, -1, 15,
-                        new Color(0.6f, 1.0f, 0.9f));
+                        (i + 1).ToString(), HorizontalAlignment.Left, -1, 15, ink);
+                    int facing = home.Facing ?? (green ? 90 : 270);
+                    Vector2 to = editor.TopOnScreen(HexField.Step(home.Cell, facing));
+                    // out past the ring, so it reads at the zoom the board opens on
+                    Vector2 dir = (to - at).Normalized() * 44.0f * z;
+                    Color arrow = home.Facing is null ? new Color(ink, 0.55f) : ink;
+                    DrawLine(at, at + dir, arrow, 3.0f);
+                    Vector2 wing = new Vector2(-dir.Y, dir.X) * 0.3f;
+                    DrawPolygon(new[] { at + dir * 1.35f, at + dir + wing, at + dir - wing },
+                        new[] { arrow });
                 }
+            }
 
             // Last, over everything: what the brush would do (MapEditor.Help).
             editor.Ghost(this);
@@ -1148,6 +1173,12 @@ public sealed partial class MapEditor : SceneRoot
         {
             Vector2I was = _under;
             _under = Pointed();
+            // an Alt drag from a home turns its tank (MapEditor.Tanks)
+            if (_turning >= 0)
+            {
+                Turning(GetViewport().GetMousePosition());
+                return;
+            }
             if (_painting || _erasing)
                 Stroke(false);
             else if (was != _under)
@@ -1163,10 +1194,23 @@ public sealed partial class MapEditor : SceneRoot
         if (what is InputEventMouseButton click)
         {
             _clicks++;
+            // Ctrl and the wheel over a home turn its tank an edge; elsewhere
+            // the wheel zooms, Ctrl or not
+            if (click.ButtonIndex is MouseButton.WheelUp or MouseButton.WheelDown && click.Pressed
+                && click.CtrlPressed && TurnHome(click.ButtonIndex == MouseButton.WheelUp ? 1 : -1))
+                return;
             if (click.ButtonIndex == MouseButton.WheelUp && click.Pressed)
                 _camera.Zoom *= 1.1f;
             else if (click.ButtonIndex == MouseButton.WheelDown && click.Pressed)
                 _camera.Zoom /= 1.1f;
+            else if (click.ButtonIndex == MouseButton.Left && click.Pressed && click.AltPressed
+                     && StartTurning())
+                return;
+            else if (click.ButtonIndex == MouseButton.Left && !click.Pressed && _turning >= 0)
+            {
+                StopTurning();
+                return;
+            }
             else if (click.ButtonIndex == MouseButton.Left)
             {
                 _painting = click.Pressed;
@@ -1224,7 +1268,7 @@ public sealed partial class MapEditor : SceneRoot
             case Key.O: Chose(Item.Open); return;
             case Key.S when key.ShiftPressed: Chose(Item.SaveAs); return;
             case Key.S: Keep(); return;
-            case Key.F5: Play(sprites: key.ShiftPressed); return;
+            case Key.F5: Play(sprites: key.ShiftPressed, match: key.CtrlPressed); return;
             case Key.L: _layers ^= Layers.Levels; break;
             case Key.R: _layers ^= Layers.Ramps; break;
             case Key.G: _layers ^= Layers.Sites; break;
@@ -1360,7 +1404,7 @@ public sealed partial class MapEditor : SceneRoot
     /// "Run sprites", <c>--menu run2d</c> - is the old way into <c>Main</c>,
     /// kept while that line lives. Both hand back the same way.
     /// </summary>
-    private void Play(bool sprites = false)
+    private void Play(bool sprites = false, bool match = false)
     {
         Settle();
         MapRules.Fault fatal =
@@ -1377,8 +1421,12 @@ public sealed partial class MapEditor : SceneRoot
             return;
         Session.Map = _edit.Name;
         Session.Editing = true;
-        GD.Print($"editor: running {_edit.Name} {(sprites ? "in the harness" : "on the 3D bench")}");
-        GetTree().ChangeSceneToFile(sprites ? "res://Main.tscn" : "res://Tank3D.tscn");
+        GD.Print($"editor: running {_edit.Name} "
+                 + (sprites ? "in the harness" : match ? "as a match" : "on the 3D bench"));
+        // a match is the same bench with its root's Match set (Match3D.tscn):
+        // two sides off the board's homes, Tank3DBench.LineUpSides
+        GetTree().ChangeSceneToFile(sprites ? "res://Main.tscn"
+                                    : match ? "res://Match3D.tscn" : "res://Tank3D.tscn");
     }
 
     /// <summary>

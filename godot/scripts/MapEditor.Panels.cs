@@ -454,6 +454,8 @@ public sealed partial class MapEditor
         {
             into.AddChild(Note($"home {slot + 1} of {_edit.Homes.Count}"));
             Crew(into, slot);
+            Team(into, slot);
+            Face(into, slot);
             into.AddChild(Does("drop this home",
                 () => _edit.DropHome(slot, out string why) ? "" : why));
         }
@@ -643,6 +645,75 @@ public sealed partial class MapEditor
             _loading = false;
         };
         into.AddChild(Field("class", pick));
+    }
+
+    /// <summary>The edges a home may face, in the panel's words: the board as
+    /// it opens, before a turn.</summary>
+    private static readonly (int Heading, string Name)[] Facings =
+    {
+        (90, "90 up"), (30, "30 up-right"), (330, "330 down-right"),
+        (270, "270 down"), (210, "210 down-left"), (150, "150 up-left"),
+    };
+
+    /// <summary>
+    /// Which side a parking is on in a match. "by order" first, Crew's reason:
+    /// a parking that says nothing takes the side its place in the list gives
+    /// it, which is what every board did before sides.
+    /// </summary>
+    private void Team(VBoxContainer into, int slot)
+    {
+        string? side = _edit.Homes[slot].Side;
+        var pick = new OptionButton();
+        // what its order would give it, the others as they are
+        var probe = _edit.Homes.ToList();
+        probe[slot] = probe[slot] with { Side = null };
+        pick.AddItem($"by order ({Parking.SidesOf(probe)[slot]})");
+        foreach (string s in Parking.Sides)
+            pick.AddItem(s);
+        pick.Selected = side is null ? 0 : Array.IndexOf(Parking.Sides, side) + 1;
+        Pick(pick, index => _edit.Team(slot, index == 0 ? null : Parking.Sides[index - 1], out string why) ? "" : why);
+        into.AddChild(Field("side", pick));
+    }
+
+    /// <summary>The edge a parking's tank starts facing; "across" is its side's
+    /// way over the board.</summary>
+    private void Face(VBoxContainer into, int slot)
+    {
+        int? facing = _edit.Homes[slot].Facing;
+        var pick = new OptionButton();
+        pick.AddItem("across the board");
+        foreach ((int _, string name) in Facings)
+            pick.AddItem(name);
+        pick.Selected = facing is int f ? Array.FindIndex(Facings, x => x.Heading == f) + 1 : 0;
+        Pick(pick, index => _edit.Face(slot, index == 0 ? null : Facings[index - 1].Heading, out string why) ? "" : why);
+        into.AddChild(Field("facing", pick));
+    }
+
+    /// <summary>A dropdown that writes through <paramref name="write"/> as one
+    /// stroke and goes back to what it was on a refusal - Crew's way.</summary>
+    private void Pick(OptionButton pick, Func<int, string> write)
+    {
+        int was = pick.Selected;
+        pick.ItemSelected += index =>
+        {
+            if (_loading)
+                return;
+            bool ok = false;
+            Wrote(() =>
+            {
+                string why = write((int)index);
+                ok = why.Length == 0;
+                return why;
+            });
+            if (ok)
+            {
+                was = (int)index;
+                return;
+            }
+            _loading = true;
+            pick.Selected = was;
+            _loading = false;
+        };
     }
 
     /// <summary>A label and a control, the right panel's own - narrower

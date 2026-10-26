@@ -21,6 +21,15 @@ namespace TankSpriteTest;
 /// first class; it takes what the pairing has left over, and the file writes it
 /// as the bare pair it always was.
 ///
+/// <b>Side and facing are a match's, and silent the same way.</b>
+/// <see cref="Side"/> - <c>green</c> or <c>brown</c> - says which team stands
+/// here; a parking without one takes the side its order gives it (the first
+/// five green, the next brown, <c>Tank3DBench.Match</c>). <see cref="Facing"/>
+/// is an edge heading (<see cref="HexField.EdgeHeadings"/>) the tank starts
+/// facing; without one a green tank looks up the board, a brown one down it.
+/// A class is asked for once per side, not once per board: each team has its
+/// five.
+///
 /// <b>A home is two jobs and only one of them is the tank.</b> The other is that
 /// <see cref="MapRules.ReachFaults"/> measures the board from every parking -
 /// that is the check which catches a valley cut off by mistake - and
@@ -28,16 +37,60 @@ namespace TankSpriteTest;
 /// is nothing to measure from. So a parking is worth declaring even where no
 /// tank will ever stand.
 /// </summary>
-public readonly record struct Parking(Vector2I Cell, string? Class = null)
+public readonly record struct Parking(Vector2I Cell, string? Class = null,
+                                     string? Side = null, int? Facing = null)
 {
+    public const string Green = "green";
+    public const string Brown = "brown";
+
+    /// <summary>The two sides a parking may name.</summary>
+    public static readonly string[] Sides = { Green, Brown };
+
     /// <summary>A parking that names nobody, which is what every board wrote
     /// before classes existed. Implicit so that a board's list of cells stays a
     /// list of cells in the source.</summary>
     public static implicit operator Parking(Vector2I cell) => new(cell);
 
-    public override string ToString() =>
-        Class is { Length: > 0 } tag
-            ? $"({Cell.X},{Cell.Y}) for {tag}" : $"({Cell.X},{Cell.Y})";
+    /// <summary>Nothing but the cell said: the file writes the bare pair.</summary>
+    public bool Plain => Class is null && Side is null && Facing is null;
+
+    public override string ToString()
+    {
+        string said = $"({Cell.X},{Cell.Y})";
+        if (Class is { Length: > 0 } tag)
+            said += $" for {tag}";
+        if (Side is { Length: > 0 } side)
+            said += $" {side}";
+        if (Facing is int facing)
+            said += $" facing {facing}";
+        return said;
+    }
+
+    /// <summary>How many a side fields in a match - LT, MT, HT, TD, HM.</summary>
+    public const int SideSize = 5;
+
+    /// <summary>
+    /// The side each parking plays in a match: its own when it names one, else
+    /// by order - the first <see cref="SideSize"/> unsided parkings green, the
+    /// rest brown. A board that names no side splits as it always did. One
+    /// rule for the editor's panel and the match (<c>Tank3DBench.Match</c>), so
+    /// the panel says what the match does.
+    /// </summary>
+    public static string[] SidesOf(IReadOnlyList<Parking> parked)
+    {
+        var sides = new string[parked.Count];
+        int unsided = 0;
+        for (int i = 0; i < parked.Count; i++)
+            sides[i] = parked[i].Side is { Length: > 0 } side
+                ? side.ToLowerInvariant()
+                : unsided++ < SideSize ? Green : Brown;
+        return sides;
+    }
+
+    /// <summary>Two parkings on the same side: both unsided count as one side,
+    /// the board's only one before sides existed.</summary>
+    public bool SameSide(Parking other) =>
+        string.Equals(Side, other.Side, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Which parking each tank claims: the slot per entry of

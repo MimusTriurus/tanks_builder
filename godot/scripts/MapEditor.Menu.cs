@@ -60,6 +60,7 @@ public sealed partial class MapEditor
         Save,
         SaveAs,
         Run,
+        RunMatch,
         RunSprites,
     }
 
@@ -104,6 +105,8 @@ public sealed partial class MapEditor
         // Under the saves and separated from them, because it is one of them:
         // Run saves first and plays what is on disk - see MapEditor.Play.
         file.AddItem("Run              F5", (int)Item.Run);
+        // Two sides of five off the board's homes (Match3D.tscn)
+        file.AddItem("Run match    ctrl+F5", (int)Item.RunMatch);
         // The sprite harness, the legacy line's: kept while Main lives, under
         // the 3D run rather than instead of it.
         file.AddItem("Run sprites  shift+F5", (int)Item.RunSprites);
@@ -169,6 +172,9 @@ public sealed partial class MapEditor
                 break;
             case Item.Run:
                 Play();
+                break;
+            case Item.RunMatch:
+                Play(match: true);
                 break;
             case Item.RunSprites:
                 Play(sprites: true);

@@ -142,57 +142,18 @@ public sealed partial class Tank3DBench : Node3D
 
     // --- the tanks ---------------------------------------------------------
 
-    /// <summary>
-    /// Which class each model drives as, and what the panel calls it.
-    ///
-    /// <b>Written down, because the sidecar does not say it</b> (see
-    /// docs/tank3d.md). The class gives the tank its speed and its size - no
-    /// sprite set is read for either.
-    /// </summary>
-    private static readonly (string Model, string Class, string Name)[] Pairs =
-    {
-        ("LTR", "LTP", "лёгкий"),
-        ("MTR", "MTP", "средний"),
-        ("HTR", "HTP", "тяжёлый"),
-        ("TDR", "TDP", "ПТ-САУ"),
-        ("HMR", "HMP", "мортира"),
-    };
+    /// <summary>Which class each model drives as - <see cref="Lineup.Pairs"/>,
+    /// shared with the editor, which stands the same tanks on its homes.</summary>
+    private static (string Model, string Class, string Name)[] Pairs => Lineup.Pairs;
 
-    private static int PairAt(string model) =>
-        Array.FindIndex(Pairs, p => string.Equals(p.Model, model, StringComparison.OrdinalIgnoreCase));
+    private static int PairAt(string model) => Lineup.PairAt(model);
 
-    /// <summary>The pair's class, or the medium's for a model not in the table:
-    /// the medium is the class every other figure is read against.</summary>
-    private static MovementProfile ClassFor(string model)
-    {
-        string want = PairAt(model) is int i and >= 0 ? Pairs[i].Class : "MTP";
-        MovementProfile? medium = null;
-        foreach (MovementProfile p in MovementProfile.All)
-        {
-            if (string.Equals(p.Tag, want, StringComparison.OrdinalIgnoreCase))
-                return p;
-            if (p.Tag == "MTP")
-                medium = p;
-        }
-        return medium ?? MovementProfile.Light;
-    }
+    private static MovementProfile ClassFor(string model) => Lineup.ClassFor(model);
 
-    /// <summary>
-    /// How long the medium's hull is against the hex it stands on.
-    ///
-    /// <b>The sprite bench's own proportion, taken once and then left to the
-    /// hex</b>: MTP draws its 0.883-unit hull at 167.7 px a unit, 148 px on a
-    /// 248 px hex - 0.60. Every model's hull is brought to this, then scaled by
-    /// its class's <see cref="MovementProfile.Size"/>, which is how the 2D
-    /// benches size theirs (<see cref="Fleet.Resize"/>): the generator makes
-    /// every tank about one unit long, so its own length says nothing about
-    /// which is the heavy.
-    /// </summary>
-    private const float HullOfHex = 0.60f;
-
-    /// <summary>World px a model unit, for this model in this class.</summary>
+    /// <summary>World px a model unit, for this model in this class
+    /// (<see cref="Lineup.PixelsFor"/>).</summary>
     private float PixelsFor(TankModel model, MovementProfile profile) =>
-        HullOfHex * HexWidth * (float)profile.Size / Mathf.Max(model.HullLength, 1e-3f);
+        Lineup.PixelsFor(model, profile, HexWidth);
 
     /// <summary>The models on disk - a folder under <c>Models/</c> with both
     /// files in it - in the pairs' order, then any others by name.</summary>
@@ -811,6 +772,8 @@ public sealed partial class Tank3DBench : Node3D
         if (_reliefOn)
             BuildRelief(map.Name);
         _home = _startCell ?? (map.Homes.Count > 0 ? map.Homes[0] : new Vector2I(map.Columns / 2, map.Rows / 2));
+        // a match: who stands where, and which of them rides the rig
+        LineUpSides();
 
         // What the stage aims its own camera by: it mirrors a 2D camera, and
         // this scene has none - its camera is its own (BuildCamera), current
