@@ -13,7 +13,7 @@ public enum RockType { Crag, Mesa, Yardang, Moutonnee }
 /// A rock's paint: the layers' colours, its cap and its moss, and the numbers
 /// the shader reads beside them. Paint only - the form is the type's
 /// (<see cref="RockType"/>), and a palette changes without the raster.
-/// Lengths in circumradii, as the renders that chose them (out/rocks/rocks.py).
+/// Lengths in circumradii, as the renders that chose them (tools/render/rocks.py).
 /// </summary>
 public sealed class RockPalette
 {
