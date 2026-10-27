@@ -67,6 +67,13 @@ public sealed partial class Tank3DBench : Node3D
     /// <summary><c>--relief</c>: the board as one smooth ground (BOT-11,
     /// <see cref="Relief"/>) - for now its fields, to <c>out/relief/</c>.</summary>
     private bool _reliefOn;
+
+    /// <summary>The rocks' looks on the relief (<c>--rock</c>, docs/rocks-plan.md):
+    /// one look for every rock or a list dealt out in reading order, and the
+    /// board's wind and ice (<c>--rock-wind</c>, <c>--ice</c>). Null - every
+    /// rock a crag, the relief as it always was.</summary>
+    private RockStyles? _rocks;
+    private float _rockWind = 25.0f, _rockIce = -30.0f;
     /// <summary><c>--brow</c>: the relief's brow lines on from the start
     /// (off by default, the user's call; the panel switches them).</summary>
     private bool _browOn;
@@ -842,6 +849,7 @@ public sealed partial class Tank3DBench : Node3D
             CelRelief = !_pbr && !_flatRelief,
             // --relief: one smooth ground for the prisms (BOT-11)
             Relief = _relief,
+            RockIce = _rockIce,
             ShowBrow = _browOn,
             ShowLawn = _lawnOn,
             ShowTurf = _turfOn,
@@ -891,9 +899,16 @@ public sealed partial class Tank3DBench : Node3D
     /// pictures, looked at before anything stands on them.</summary>
     private void BuildRelief(string name)
     {
-        _relief = Relief.Build(_field!);
+        if (_rocks is not null)
+        {
+            _rocks.Wind = _rockWind;
+            _rocks.Ice = _rockIce;
+        }
+        _relief = Relief.Build(_field!, rocks: _rocks);
         if (_relief is null)
             return;
+        foreach (RockGroup g in _relief.Rocks)
+            Log.Print($"tank3d: rock {g.Index} at {MapAt(g.Cells[0])}, {g.Cells.Count} cells, {g.Look}");
         string path = _relief.SavePictures(_field!, AssetRoot.Out + "/relief", name);
         // from here on the tank, its effects and what stands on the board
         // stand on the drawn ground (HexField.Surface); the relief itself was
@@ -1184,6 +1199,20 @@ public sealed partial class Tank3DBench : Node3D
             else if (a == "--soft-water") _softWater = true;
             else if (a == "--flat") _flat = true;
             else if (a == "--relief") _reliefOn = true;
+            // --rock mesa:ochre,yardang,moutonnee: the rocks' looks, dealt out
+            // in reading order (RockStyles); the relief comes with them
+            else if (a == "--rock" && more)
+            {
+                string said = args[++i];
+                _rocks = RockStyles.Parse(said, out string bad);
+                if (_rocks is null)
+                    GD.PrintErr($"tank3d: --rock {said}: no such look '{bad}' "
+                                + "(type crag|mesa|yardang|moutonnee, :palette, :preset 1-3)");
+                else
+                    _reliefOn = true;
+            }
+            else if (a == "--rock-wind" && more) _rockWind = F(args[++i], _rockWind);
+            else if (a == "--ice" && more) _rockIce = F(args[++i], _rockIce);
             else if (a == "--brow") _browOn = true;
             else if (a == "--lawn") _lawnOn = true;
             else if (a == "--no-turf") _turfOn = false;

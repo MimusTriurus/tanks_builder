@@ -139,6 +139,20 @@ public sealed class Relief
     /// a pit's floor (<see cref="Hollows"/>).</summary>
     public readonly float[] Hollow;
 
+    /// <summary>The rock each point belongs to (<see cref="Rocks"/>), inside
+    /// its cells or just round them; -1 elsewhere, and everywhere while every
+    /// rock is a crag - the relief is then the one it always was.</summary>
+    public readonly int[] Rock;
+
+    /// <summary>A rock's own mask, 0-1, by its type: the scree or sand at a
+    /// mesa's and a yardang's foot, the lee of a moutonnee
+    /// (<see cref="ReliefRocks"/>).</summary>
+    public readonly float[] RockAux;
+
+    /// <summary>The board's rocks - groups of rock cells joined by their
+    /// sides - with their looks; empty while every rock is a crag.</summary>
+    public IReadOnlyList<RockGroup> Rocks { get; private set; } = Array.Empty<RockGroup>();
+
     /// <summary>How far the ground round a point reaches, in circumradii of
     /// blur: about a cell, so a pit of one cell reads against its rim.</summary>
     public const float HollowSigma = 0.6f;
@@ -170,6 +184,9 @@ public sealed class Relief
         Cliff = new float[n];
         Levels = new uint[n];
         Hollow = new float[n];
+        Rock = new int[n];
+        Array.Fill(Rock, -1);
+        RockAux = new float[n];
         Share =new float[Enum.GetValues<Kind>().Length][];
         for (int k = 0; k < Share.Length; k++)
             Share[k] = new float[n];
@@ -177,7 +194,7 @@ public sealed class Relief
 
     /// <summary>The fields of a filled board, its <see cref="HexField.Atlas"/>
     /// set. Null without one - there is no hex size to raster by.</summary>
-    public static Relief? Build(HexField field, int seed = 11)
+    public static Relief? Build(HexField field, int seed = 11, RockStyles? rocks = null)
     {
         if (field.Atlas is null)
             return null;
@@ -205,15 +222,32 @@ public sealed class Relief
         int nx = (int)Mathf.Ceil((frame.Size.X + 2 * pad) / cell) + 1;
         int ny = (int)Mathf.Ceil((frame.Size.Y + 2 * pad) / cell) + 1;
         var f = new Relief(nx, ny, x0, z0, cell, squash) { Frame = frame };
-        f.Fill(field, r, seed);
+        f.Fill(field, r, seed, rocks);
         f.Seconds = (Time.GetTicksUsec() - t0) / 1e6f;
         return f;
     }
 
-    private void Fill(HexField field, float r, int seed)
+    private void Fill(HexField field, float r, int seed, RockStyles? rocks)
     {
         int n = Nx * Ny;
         float lift = field.Lift;
+        // Rocks that are no crag (docs/rocks-plan.md) need the ground they
+        // rise from: the same terraces with a rock cell at its lowest dry
+        // neighbour's level (ReliefRocks.Under)
+        List<RockGroup>? groups = null;
+        float[]? rawFlat = null;
+        var under = new Dictionary<Vector2I, float>();
+        if (rocks is { AllCrag: false })
+        {
+            groups = ReliefRocks.Groups(field, rocks);
+            if (groups.Count == 0)
+                groups = null;
+            else
+            {
+                Rocks = groups;
+                rawFlat = new float[n];
+            }
+        }
 
         Sea(field);
         float seaRaw = SeaTop - Shoal * lift;
@@ -270,6 +304,16 @@ public sealed class Relief
                 // a bank a level up came out under the surface and the pond
                 // spilt over it.
                 raw[p] = field.IsWater(from) ? field.WaterTop(from) - Shoal * lift : field.TopAt(from);
+                if (rawFlat is not null)
+                {
+                    rawFlat[p] = raw[p];
+                    if (!field.IsWater(from) && field.FoundationAt(from) == Foundation.Rock)
+                    {
+                        if (!under.TryGetValue(from, out float u))
+                            under[from] = u = ReliefRocks.Under(field, from);
+                        rawFlat[p] = u;
+                    }
+                }
                 rawLevel[p] = field.LevelAt(from);
             }
         StampLevels(field, rawLevel, r);
@@ -281,6 +325,12 @@ public sealed class Relief
         float sig = Terrace * r / Cell;
         Inset(raw, dry, Mathf.Max(0, Mathf.RoundToInt((2.0f - SlopeOut) * sig)),
               Mathf.Max(1, Mathf.RoundToInt(2.0f * sig)));
+        if (rawFlat is not null)
+        {
+            Inset(rawFlat, dry, Mathf.Max(0, Mathf.RoundToInt((2.0f - SlopeOut) * sig)),
+                  Mathf.Max(1, Mathf.RoundToInt(2.0f * sig)));
+            Blur(rawFlat, Nx, Ny, sig);
+        }
         Array.Copy(raw, Height, n);
         Blur(Height, Nx, Ny, sig);
         // after the blur: the inset lowered a dam to the pit beside it, and
@@ -314,6 +364,10 @@ public sealed class Relief
         Array.Copy(rockMask, Cliff, n);
         Blur(Cliff, Nx, Ny, CliffSigma * r / Cell);
         Blur(rockTop, Nx, Ny, CliffSigma * r / Cell);
+        // the share before the crag's tear: the other rocks tear their own
+        float[]? cliff0 = groups is null ? null : (float[])Cliff.Clone();
+        if (groups is not null)
+            ReliefRocks.Mark(this, groups, r);
         var tear = new FastNoiseLite
         {
             Seed = seed + 2,
@@ -347,7 +401,12 @@ public sealed class Relief
                 float land = 1.0f - Mathf.SmoothStep(0.0f, 0.5f, water[p]);
                 float swell = noise.GetNoise2D(x, z) * 0.6f + grain.GetNoise2D(x, z) * 0.4f;
                 Height[p] += lift * Swell * swell * land;
+                if (rawFlat is not null)
+                    rawFlat[p] += lift * Swell * swell * land;
                 if (Cliff[p] <= 0.01f)
+                    continue;
+                // a rock with a form of its own is laid after (ReliefRocks.Lay)
+                if (groups is not null && Rock[p] >= 0 && groups[Rock[p]].Look.Type != RockType.Crag)
                     continue;
                 // ridged noise for the crags: sharp crests, broad hollows
                 float ridge = 1.0f - Mathf.Abs(grain.GetNoise2D(x * 1.7f, z * 1.7f));
@@ -355,6 +414,9 @@ public sealed class Relief
                 float wall = Mathf.SmoothStep(0.5f, 0.72f, Cliff[p]);
                 Height[p] = Mathf.Lerp(Height[p], Mathf.Max(Height[p], top), wall);
             }
+
+        if (groups is not null)
+            ReliefRocks.Lay(this, field, groups, rocks!, cliff0!, rawFlat!, lift, r, seed);
 
         FillWater(field);
         Carve(lift, r);
