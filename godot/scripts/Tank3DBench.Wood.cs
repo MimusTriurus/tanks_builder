@@ -218,7 +218,7 @@ public sealed partial class Tank3DBench
         };
         tree.Stagger = tree.Hashed = TreeModel.StaggerOf(spot.Flat);
         TreeModel.Wind(holder, model.Burn, model.Leaves, phase, rate);
-        foreach (Vector3 seat in TreeModel.Seats)
+        foreach (Vector3 seat in model.Seats)
             tree.Seats.Add(new Vector3(seat.X * model.Width, seat.Y * model.Height, seat.Z * model.Depth));
         _trees.Add(tree);
     }

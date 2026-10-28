@@ -881,3 +881,82 @@ def check(kind, seed, burns=(0.0, 0.25, 0.5, 0.75, 1.0)):
     sheet_png = tg.check_sheet([live] + shots, os.path.join(folder, "_check_game.png"))
     return {"name": name, "tris": tris, "export": exported, "burn": tg.glb_burn(glb),
             "sheet": sheet_png, "height": round(S.height, 2), "cfg": {k: cfg[k] for k in FRAME[kind]}}
+
+
+# Where the fire sits in the crown (`TreeModel.Seats` on the board), in halves
+# of the crown's box from its middle: x across, z up, f toward the eye. Four
+# on the box's front half, two at the sides, one high, one low - the oak's
+# seats, which these give back on an oak's crown.
+SEATS = ((-0.48, -0.2, 0.36), (0.44, 0.0, 0.28), (0.04, 0.5, 0.08), (0.08, -0.5, 0.52))
+
+
+def seats(ob, dims):
+    """The four fire seats of a baked `ob` as `tree.json` carries them: shares
+    of the model's width, height and depth from its foot, glTF (+Z the front)
+    - placed by `SEATS` on the box of the crown's own vertices (leaves and
+    cores), not the oak's crown: a spruce burns low, a palm only at its head."""
+    parts = tg._parts_by_mat(ob)
+    g = tg.MAT_NAMES["game"]
+    crown = np.concatenate([parts[n] for n in (g["leaf"], g["core"]) if n in parts])
+    lo, hi = crown.min(0), crown.max(0)
+    c, a = (lo + hi) / 2, (hi - lo) / 2
+    out = []
+    for x, z, f in SEATS:
+        # Blender: +X right, -Y toward the board's camera, +Z up
+        p = (c[0] + x * a[0], c[1] - f * a[1], c[2] + z * a[2])
+        out.append([round(p[0] / dims["width"], 3), round(p[2] / dims["height"], 3),
+                    round(-p[1] / dims["depth"], 3)])
+    return out
+
+
+def make(kind, seed, burns=(0.0, 0.25, 0.5, 0.75, 1.0)):
+    """The kind's model and sidecar for one seed, the oak's `tree_gen.make`
+    without its sprites (docs/tree-species-plan.md, T2): built, baked, written
+    to `<OUT>/<Name>/tree.glb` with `tree.json` - the oak's, plus `species`
+    and `seats`, and no `sprites`: the board scales a kind by its metres - and
+    the sheets: `_check_game.png` (the look beside the model burning),
+    `_check_fall.png` and `_check_fall_burnt.png`. Not published (`publish`)."""
+    import json
+    name = model_name(kind, seed)
+    folder = os.path.join(OUT, name)
+    os.makedirs(folder, exist_ok=True)
+    S = spec(kind, seed)
+    lname = f"Sp.{kind}.{seed}"
+    look(S, lname, Vector((0, -12, 0)))
+    S = spec(kind, seed)
+    gname = f"{name}_game"
+    cfg = game(S, gname, Vector((0, 12, 0)))
+    dims = tg.report(gname)
+    ob, tris = tg.bake(gname)
+    _bark_uv(ob)
+    glb = os.path.join(folder, "tree.glb")
+    exported = tg.export_glb(ob, glb)
+    live = os.path.join(folder, f"{name}.png")
+    tg.sprites([lname], [live])
+    shots = tg._mesh_shots(gname, [None] + list(burns), folder)
+    sheets = [tg.check_sheet([live] + shots, os.path.join(folder, "_check_game.png"))]
+    fall = tg.fall_spec(ob, cfg)
+    sheets += [tg.fall_check(gname, os.path.join(folder, "_check_fall.png"))["sheet"],
+               tg.fall_check(gname, os.path.join(folder, "_check_fall_burnt.png"), burn=1.0)["sheet"]]
+    g = tg.MAT_NAMES["game"]
+    sidecar = {
+        "name": name, "species": kind, "seed": seed, "generator": "pipeline/tree_species.py",
+        "units": "m", "up": "+Y (glTF)", "front": "+Z (glTF) = -Y Blender",
+        "foot": [0.0, 0.0, 0.0],
+        "height": dims["height"], "width": dims["width"], "depth": dims["depth"],
+        "seats": {"value": "fire seats: shares of width, height, depth from the foot, glTF (+Z front)",
+                  "at": seats(ob, dims)},
+        "model": {"file": "tree.glb", "tris": tris, "tier": tg.GAME_TIER, "look": tg.GAME_LOOK,
+                  "burn": {"uv": "TEXCOORD_1.x", "value": "burn, 0 green .. 1 done",
+                           g["leaf"]: "gone once burn > x", g["core"]: "gone once burn > x",
+                           g["twig"]: "shown once burn > x", g["bark"]: "x unused; chars with burn",
+                           g["soil"]: "never burns: the root plate, under the ground",
+                           g["root"]: "never burns: the root plate, under the ground",
+                           "ranges": tg.BURN},
+                  "fall": fall},
+    }
+    with open(os.path.join(folder, "tree.json"), "w", encoding="utf-8") as f:
+        json.dump(sidecar, f, indent=1, ensure_ascii=False)
+    return {"name": name, "tris": tris, "export": exported, "burn": tg.glb_burn(glb),
+            "height": dims["height"], "width": dims["width"], "seats": sidecar["seats"]["at"],
+            "sheets": sheets}

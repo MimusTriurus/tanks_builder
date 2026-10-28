@@ -26,7 +26,24 @@ public static class TreeModel
     /// (everything), not 7 (the turret's), not 1 (the wall's).</summary>
     public const int Stencil = 3;
 
-    public static string Dir(string name) => AssetRoot.Trees + "/" + name;
+    /// <summary>Board px to a model metre (docs/tree-species-plan.md, T3):
+    /// one for every tree, so a pine stands as much taller than an oak as it
+    /// is. The oaks' own - the mean of their sprites' <c>px_per_m</c>,
+    /// 138-147 - at <see cref="PropDetail"/>: an oak keeps the height it had
+    /// when each was fitted to its sprite, within 4%.</summary>
+    public const float Metre = 140.75f / PropDetail;
+
+    /// <summary>A tree's folder: published under <c>assets/Models/Trees/</c>,
+    /// or - only when it is not - the pipeline's draft of a kind,
+    /// <c>pipeline/out/trees/species/</c> (<c>tree_species.make</c>), so a kind
+    /// is looked at on the board before it goes into LFS (T5). A published
+    /// tree always wins.</summary>
+    public static string Dir(string name)
+    {
+        string published = AssetRoot.Trees + "/" + name;
+        string draft = AssetRoot.Repo + "/pipeline/out/trees/species/" + name;
+        return !Directory.Exists(published) && File.Exists(draft + "/tree.json") ? draft : published;
+    }
 
     /// <summary>A model read and dressed: its scene (not yet in the tree), its
     /// sidecar's root, board px to its metre, its size in metres, and the
@@ -36,6 +53,9 @@ public static class TreeModel
         public required Node Scene;
         public required JsonElement Json;
         public required float Ppm, Height, Width, Depth;
+        /// <summary>Where its fire sits: the sidecar's <c>seats</c>, a kind's
+        /// own crown, else the oak's <see cref="Seats"/>.</summary>
+        public required Vector3[] Seats;
         public readonly List<ShaderMaterial> Burn = new();
         public readonly List<ShaderMaterial> Leaves = new();
     }
@@ -78,7 +98,8 @@ public static class TreeModel
         var tree = new Loaded
         {
             Scene = scene, Json = j,
-            Ppm = j.GetProperty("sprites").GetProperty("px_per_m").GetSingle() / PropDetail,
+            Ppm = Metre,
+            Seats = SeatsOf(j),
             Height = j.GetProperty("height").GetSingle(),
             Width = j.GetProperty("width").GetSingle(),
             Depth = j.GetProperty("depth").GetSingle(),
@@ -242,6 +263,17 @@ public static class TreeModel
         new(0.02f, 0.84f, 0.04f),
         new(0.04f, 0.50f, 0.26f),
     };
+
+    /// <summary>A sidecar's <c>seats.at</c>, or the oak's when it has none.</summary>
+    private static Vector3[] SeatsOf(JsonElement j)
+    {
+        if (!j.TryGetProperty("seats", out JsonElement s) || !s.TryGetProperty("at", out JsonElement at))
+            return Seats;
+        var seats = new Vector3[at.GetArrayLength()];
+        for (int i = 0; i < seats.Length; i++)
+            seats[i] = new Vector3(at[i][0].GetSingle(), at[i][1].GetSingle(), at[i][2].GetSingle());
+        return seats;
+    }
 
     /// <summary>How late in its cell's fire a tree catches, nought to one, off
     /// where it stands on the board (flat board px) - the hash

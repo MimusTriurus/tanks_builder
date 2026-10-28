@@ -296,7 +296,7 @@ public sealed partial class Tree3DBench : Node3D
         _models.Add(holder);
         tree.Holder = holder;
         float h = model.Height, w = model.Width, d = model.Depth;
-        foreach (Vector3 p in TreeModel.Seats)
+        foreach (Vector3 p in model.Seats)
             tree.Seats.Add(new Vector3(p.X * w, p.Y * h, p.Z * d));
         Vector2 at = _field is null ? Vector2.Zero : _field.FlatAnchor(cell) + _field.CentreOffset + off;
         tree.Stagger = tree.Hashed = TreeModel.StaggerOf(at);
