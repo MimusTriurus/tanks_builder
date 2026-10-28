@@ -225,6 +225,16 @@ void light() {
     public static IEnumerable<TreeSpot> Spots(HexField field, Vector2I cell, string[] names, int count, float squash)
     {
         Vector2 flat = field.FlatAnchor(cell) + field.CentreOffset;
+        // a wood a road runs through stands back from it (Road, format 3):
+        // the axes in this method's own XZ, the board's origin left out
+        List<Road.Axis>? road = field.FoundationAt(cell) == Foundation.Road && field.Roads.Count > 0
+            ? Road.Axes(field.Roads, c =>
+            {
+                Vector2 m = field.FlatAnchor(c) + field.CentreOffset;
+                return new Vector2(m.X, m.Y / squash);
+            }, 4.0f)
+            : null;
+        float clear = (Road.Half + 0.12f) * (field.Atlas?.HexRect.Size.X ?? 248.0f) * 0.5f;
         for (int i = 0; i < count; i++)
         {
             Vector2 off = Vector2.Zero;
@@ -235,6 +245,8 @@ void light() {
                 off = new Vector2(Mathf.Cos(a) * d, Mathf.Sin(a) * d * squash);
             }
             Vector2 at = flat + off;
+            if (road is not null && Road.Distance(road, new Vector2(at.X, at.Y / squash)) < clear)
+                continue;
             int salt = cell.X * 97 + cell.Y * 31 + i;
             yield return new TreeSpot(cell, i, names[(salt + i) % names.Length],
                                       new Vector3(at.X, 0.0f, at.Y / squash), Mathf.Tau * CelPuff.Hash(salt, 611), at);

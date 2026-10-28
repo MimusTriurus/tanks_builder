@@ -196,7 +196,38 @@ public static class MapFile
                                    file.Height ?? true, file.Plinth ?? 0,
                                    Walling(file.Walls, name),
                                    Rocking(file.Rocks, name), Climate(file.Climate, name),
-                                   file.Floor, SoilBase(file.Soil, name), file.Soil?.Cells);
+                                   file.Floor, SoilBase(file.Soil, name), file.Soil?.Cells,
+                                   Paths(file.Roads, name));
+    }
+
+    /// <summary>
+    /// The roads block (format 3, Ф6): a type and a path a road. What the
+    /// path crosses and how it steps is the map's to judge
+    /// (<see cref="BoardMap.FromGround"/>, <see cref="Road.Faults"/>); here a
+    /// type nothing answers to, or a cell that is not a pair, is refused.
+    /// </summary>
+    private static IReadOnlyList<RoadPath>? Paths(RoadShape[]? said, string name)
+    {
+        if (said is null || said.Length == 0)
+            return null;
+        var roads = new List<RoadPath>();
+        foreach (RoadShape shape in said)
+        {
+            RoadType type = shape.Type is { } t
+                ? Road.Named(t) ?? throw new InvalidOperationException(
+                    $"{name}: a road is \"{t}\", and the roads are " + string.Join(", ", Road.Names))
+                : throw new InvalidOperationException($"{name}: a road says no type");
+            var cells = new List<Vector2I>();
+            foreach (int[] at in shape.Path ?? Array.Empty<int[]>())
+            {
+                if (at is not { Length: 2 })
+                    throw new InvalidOperationException(
+                        $"{name}: a {Road.Say(type)} road's cell is a pair of numbers");
+                cells.Add(new Vector2I(at[0], at[1]));
+            }
+            roads.Add(new RoadPath(type, cells));
+        }
+        return roads;
     }
 
     /// <summary>
@@ -345,7 +376,7 @@ public static class MapFile
         yield return ("climate", file.Climate is not null, true);
         yield return ("rocks", file.Rocks is not null, true);
         yield return ("soil", file.Soil is not null, true);
-        yield return ("roads", file.Roads is not null, false);
+        yield return ("roads", file.Roads is not null, true);
         yield return ("wood", file.Wood is not null, false);
         yield return ("trees", file.Trees is not null, false);
     }
@@ -636,7 +667,8 @@ public static class MapFile
         // and writing its height out would come back as a hill. See
         // BoardMap.Plinth, which exists because the round trip found this.
         // the floor grid says what this letter cannot (Encode, Floors)
-        if (Encode(map.Ground[at], map.Over[at], map.Levels[at] - map.Plinth,
+        // the floor under any road: a road is the roads block's, not a letter
+        if (Encode(map.UnpavedAt(at), map.Over[at], map.Levels[at] - map.Plinth,
                    map.Water[at], map.Cliffs[at]) is { } found)
             return found.Letter;
         throw new InvalidOperationException(
@@ -831,7 +863,7 @@ public static class MapFile
                 if (map.OnBoard(cell))
                 {
                     int at = map.At(cell);
-                    mark = Encode(map.Ground[at], map.Over[at], map.Levels[at] - map.Plinth,
+                    mark = Encode(map.UnpavedAt(at), map.Over[at], map.Levels[at] - map.Plinth,
                                   map.Water[at], map.Cliffs[at])?.Under ?? BoardMap.Plain;
                 }
                 any |= mark != BoardMap.Plain;
@@ -906,6 +938,7 @@ public static class MapFile
         }
         Look(text, map.Rocking, map.Climate, map.SoilBase,
              map.SoilCells is { } cells ? Rows(cells, map.Columns, map.Rows) : null);
+        Paved(text, map.Roads);
         text.Append("\n}\n");
         return text.ToString();
     }
@@ -921,6 +954,17 @@ public static class MapFile
     {
         Soiled(text, soilBase, soilCells);
         Rocked(text, rocking, climate);
+    }
+
+    /// <summary>The roads block, a road a line, in the order drawn: a fork
+    /// after the road it leaves.</summary>
+    private static void Paved(StringBuilder text, IReadOnlyList<RoadPath> roads)
+    {
+        if (roads.Count == 0)
+            return;
+        text.Append(",\n\n  \"roads\": [\n" + string.Join(",\n", roads.Select(r =>
+            $"    {{ \"type\": {Quote(Road.Say(r.Type))}, \"path\": ["
+            + string.Join(", ", r.Cells.Select(c => $"[{c.X}, {c.Y}]")) + "] }")) + "\n  ]");
     }
 
     /// <summary>A board's grid of one char a cell as rows, or null when every
@@ -1116,6 +1160,7 @@ public static class MapFile
                         + string.Join(",\n", said.Select(c => "    " + Line(c, edit.MasonryAt(c)!)))
                         + "\n  ]");
         Look(text, edit.Rocking(), edit.Climate, edit.SoilBase, edit.SoilRows());
+        Paved(text, edit.Roads);
         text.Append("\n}\n");
         return text.ToString();
     }
@@ -1142,7 +1187,7 @@ public static class MapFile
                            Walling(file.Walls, name), file.Paint is { Length: > 0 } p ? p : null,
                            file.Height ?? true, file.Plinth ?? 0,
                            Rocking(file.Rocks, name), Climate(file.Climate, name), file.Floor,
-                           SoilBase(file.Soil, name), file.Soil?.Cells);
+                           SoilBase(file.Soil, name), file.Soil?.Cells, Paths(file.Roads, name));
     }
 
     // --- stamps ----------------------------------------------------------------
@@ -1249,9 +1294,10 @@ public static class MapFile
         Unread(file, "stamp " + name);
         // a piece carries cells, not a board's look: a note in one would be
         // read and dropped
-        if (file.Rocks is not null || file.Climate is not null || file.Soil is not null)
+        if (file.Rocks is not null || file.Climate is not null || file.Soil is not null
+            || file.Roads is not null)
             throw new InvalidOperationException(
-                $"stamp {name}: a stamp carries no rocks, climate or soil block");
+                $"stamp {name}: a stamp carries no rocks, climate, soil or roads block");
         string[] ramps = file.Ramps ?? Array.Empty<string>();
         IReadOnlyDictionary<Vector2I, Masonry> walling =
             Walling(file.Walls, "stamp " + name) ?? new Dictionary<Vector2I, Masonry>();
@@ -1304,7 +1350,7 @@ public static class MapFile
         [JsonPropertyName("climate")] public ClimateShape? Climate { get; set; }
         [JsonPropertyName("rocks")] public RockShape[]? Rocks { get; set; }
         [JsonPropertyName("soil")] public SoilShape? Soil { get; set; }
-        [JsonPropertyName("roads")] public JsonElement? Roads { get; set; }
+        [JsonPropertyName("roads")] public RoadShape[]? Roads { get; set; }
         [JsonPropertyName("wood")] public JsonElement? Wood { get; set; }
         [JsonPropertyName("trees")] public JsonElement? Trees { get; set; }
     }
@@ -1316,6 +1362,12 @@ public static class MapFile
         [JsonPropertyName("palette")] public string? Palette { get; set; }
         [JsonPropertyName("preset")] public int? Preset { get; set; }
         [JsonPropertyName("seed")] public int? Seed { get; set; }
+    }
+
+    private sealed class RoadShape
+    {
+        [JsonPropertyName("type")] public string? Type { get; set; }
+        [JsonPropertyName("path")] public int[][]? Path { get; set; }
     }
 
     private sealed class SoilShape

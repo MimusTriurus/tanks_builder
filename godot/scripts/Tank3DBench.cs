@@ -831,6 +831,9 @@ public sealed partial class Tank3DBench : Node3D
         // asked about levels and ramps.
         _field.SetWater(map.Water);
         _field.SetSoil(Dressed(map));
+        // the roads' way through each cell, for the drawing; the rule is the
+        // floor the map already laid (Foundation.Road)
+        _field.Roads = map.Roads;
         AddChild(_field);
         _field.Atlas = _tile;
         if (_reliefOn)

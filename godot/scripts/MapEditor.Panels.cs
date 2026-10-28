@@ -258,8 +258,15 @@ public sealed partial class MapEditor
                     // the looks (format 3): each paints only the floor it is
                     // for, and says so on any other
                     ($"look: {l.Name}  ({TankSpriteTest.Soil.FloorOf(l.Letter)!.Value.ToString().ToLowerInvariant()})",
-                     (Action)(() => { _look = l.Letter; _water = false; _plotBrush = false; }),
-                     (Func<bool>)(() => !_water && !_plotBrush && _look == l.Letter)))).ToList();
+                     (Action)(() => { _look = l.Letter; _roadBrush = null; _water = false; _plotBrush = false; }),
+                     (Func<bool>)(() => !_water && !_plotBrush && _look == l.Letter))))
+                .Concat(Enum.GetValues<RoadType>().Select(t =>
+                    // the roads (format 3): a drag lays one along the cells it
+                    // crosses, a right drag cuts
+                    ($"road: {Road.Say(t)}  (drag)",
+                     (Action)(() => { _roadBrush = t; _look = null; _water = false; _plotBrush = false; }),
+                     (Func<bool>)(() => !_water && !_plotBrush && _look is null && _roadBrush == t))))
+                .ToList();
             case MapEdit.Tab.Cover:
                 var covers = Enum.GetValues<Cover>().Select(over =>
                     (over.ToString().ToLowerInvariant(),
@@ -310,12 +317,13 @@ public sealed partial class MapEditor
         }
     }
 
-    private bool Plain() => !_water && !_plotBrush && _look is null;
+    private bool Plain() => !_water && !_plotBrush && _look is null && _roadBrush is null;
 
     private void Floor(Foundation want)
     {
         _floor = want;
         _look = null;
+        _roadBrush = null;
         _water = false;
         _plotBrush = false;
     }
@@ -502,6 +510,7 @@ public sealed partial class MapEditor
             Stone(into);
         else if (!glyph.Water && TankSpriteTest.Soil.Today(glyph.Floor) != TankSpriteTest.Soil.As)
             Worn(into, glyph.Floor);
+        Paved(into);
         into.AddChild(Does("take it off the board",
             () => _edit.Plot(_picked, false, out string why) ? "" : why));
 
@@ -550,6 +559,42 @@ public sealed partial class MapEditor
                     ? "" : why));
         }
         Board(into);
+    }
+
+    /// <summary>The roads through the cell (format 3's <c>roads</c>): each its
+    /// look, and a button that cuts them all here (<see cref="MapEdit.Cut"/>).</summary>
+    private void Paved(VBoxContainer into)
+    {
+        List<int> roads = _edit.RoadsAt(_picked);
+        if (roads.Count == 0)
+            return;
+        RoadType[] types = Enum.GetValues<RoadType>();
+        foreach (int k in roads)
+        {
+            int road = k;
+            RoadPath path = _edit.Roads[road];
+            var pick = new OptionButton();
+            foreach (RoadType t in types)
+                pick.AddItem(Road.Say(t));
+            pick.Selected = Array.IndexOf(types, path.Type);
+            pick.ItemSelected += index =>
+            {
+                if (!_loading)
+                    Wrote(() =>
+                    {
+                        _edit.Retype(road, types[(int)index]);
+                        return "";
+                    });
+            };
+            into.AddChild(Field($"road {road + 1}", pick));
+            into.AddChild(Note($"{path.Cells.Count} cells, ({path.Cells[0].X},{path.Cells[0].Y}) to "
+                               + $"({path.Cells[^1].X},{path.Cells[^1].Y})"));
+        }
+        into.AddChild(Does("cut the roads here", () =>
+        {
+            _edit.Cut(_picked);
+            return "";
+        }));
     }
 
     /// <summary>The cell's own look (format 3's <c>soil.cells</c>): "as the

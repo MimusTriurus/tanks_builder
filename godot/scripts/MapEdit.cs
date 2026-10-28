@@ -84,6 +84,17 @@ public sealed class MapEdit
     /// <summary>The board's look for each floor it names (<c>soil.base</c>).</summary>
     public Dictionary<Foundation, char> SoilBase { get; private set; } = new();
 
+    /// <summary>
+    /// The roads (format 3's <c>roads</c>, docs/map-format3-plan.md Ф6): paths
+    /// along the hex sides, beside the letters rather than in them - a letter
+    /// says the floor under the road. Written only through <see cref="Pave"/>,
+    /// which refuses a set of roads the map would refuse, and cut by
+    /// <see cref="Cut"/> where a cell stops carrying one.
+    /// </summary>
+    private List<RoadPath> _roads = new();
+
+    public IReadOnlyList<RoadPath> Roads => _roads;
+
     private bool[] _ramps = Array.Empty<bool>();
     private List<Parking> _homes = new();
 
@@ -215,6 +226,7 @@ public sealed class MapEdit
             _soil = map.SoilCells is { } looks ? (char[])looks.Clone()
                 : Enumerable.Repeat(Soil.As, map.Columns * map.Rows).ToArray(),
             SoilBase = new Dictionary<Foundation, char>(map.SoilBase),
+            _roads = map.Roads.ToList(),
             _ramps = (bool[])map.Ramps.Clone(),
             _homes = map.Parked.ToList(),
             // Copied rather than referenced: the board a draft was opened from
@@ -443,6 +455,104 @@ public sealed class MapEdit
             SoilBase.Remove(floor);
     }
 
+    // --- roads ----------------------------------------------------------------
+
+    /// <summary>Why no road may cross a cell, or null: the map's own
+    /// refusals (<see cref="BoardMap.FromGround"/>).</summary>
+    public string? RoadRefuses(Vector2I cell)
+    {
+        if (!OnBoard(cell))
+            return "off the board";
+        MapFile.Glyph g = GlyphAt(cell);
+        return g.Water ? "under water - a ford or a bridge is not a road yet"
+            : g.Floor == Foundation.Rock ? "a rock"
+            : g.Wall ? "a wall"
+            : null;
+    }
+
+    /// <summary>
+    /// Lay a road along <paramref name="cells"/>, in place of road
+    /// <paramref name="replace"/> or as a new one (-1). Answers its index, or
+    /// -1 with the reason when the roads that would result are ones the map
+    /// refuses (<see cref="Road.Faults"/>) - and then nothing changes.
+    /// </summary>
+    public int Pave(IReadOnlyList<Vector2I> cells, RoadType type, int replace, out string why)
+    {
+        var next = _roads.ToList();
+        var road = new RoadPath(type, cells.ToArray());
+        if (replace >= 0 && replace < next.Count)
+            next[replace] = road;
+        else
+            next.Add(road);
+        List<string> wrong = Road.Faults(next, RoadRefuses);
+        if (wrong.Count > 0)
+        {
+            why = wrong[0];
+            return -1;
+        }
+        why = "";
+        _roads = next;
+        return replace >= 0 && replace < next.Count ? replace : next.Count - 1;
+    }
+
+    /// <summary>Every road through <paramref name="cell"/> cut there: what is
+    /// left on either side stays a road if it still joins two cells. Answers
+    /// how many roads it touched.</summary>
+    public int Cut(Vector2I cell)
+    {
+        int touched = 0;
+        var kept = new List<RoadPath>();
+        foreach (RoadPath road in _roads)
+        {
+            if (!road.Cells.Contains(cell))
+            {
+                kept.Add(road);
+                continue;
+            }
+            touched++;
+            kept.AddRange(Pieces(road, c => c == cell));
+        }
+        _roads = kept;
+        return touched;
+    }
+
+    /// <summary>A road with the cells <paramref name="gone"/> says taken out:
+    /// the runs between, each of two cells or more.</summary>
+    private static IEnumerable<RoadPath> Pieces(RoadPath road, Func<Vector2I, bool> gone)
+    {
+        var run = new List<Vector2I>();
+        foreach (Vector2I c in road.Cells)
+        {
+            if (!gone(c))
+            {
+                run.Add(c);
+                continue;
+            }
+            if (run.Count >= 2)
+                yield return road with { Cells = run.ToArray() };
+            run.Clear();
+        }
+        if (run.Count >= 2)
+            yield return road with { Cells = run.ToArray() };
+    }
+
+    /// <summary>The roads through a cell, by index.</summary>
+    public List<int> RoadsAt(Vector2I cell)
+    {
+        var at = new List<int>();
+        for (int k = 0; k < _roads.Count; k++)
+            if (_roads[k].Cells.Contains(cell))
+                at.Add(k);
+        return at;
+    }
+
+    /// <summary>A road given another look.</summary>
+    public void Retype(int road, RoadType type)
+    {
+        if (road >= 0 && road < _roads.Count)
+            _roads[road] = _roads[road] with { Type = type };
+    }
+
     public string[] Ramps()
     {
         var rows = new string[Rows];
@@ -461,7 +571,8 @@ public sealed class MapEdit
     /// (<see cref="Reframe"/>): a stroke's grids are only read at the size
     /// they were taken at.</remarks>
     private readonly record struct Snap(char[] Ground, char[] Under, char[] Soil,
-                                        Dictionary<Foundation, char> SoilBase, bool[] Ramps,
+                                        Dictionary<Foundation, char> SoilBase,
+                                        List<RoadPath> Roads, bool[] Ramps,
                                         List<Parking> Homes,
                                         Dictionary<Vector2I, Masonry> Walls,
                                         Dictionary<Vector2I, RockNote> Rocks,
@@ -470,6 +581,7 @@ public sealed class MapEdit
 
     private Snap Taken() => new((char[])_ground.Clone(), (char[])_under.Clone(),
                                 (char[])_soil.Clone(), new Dictionary<Foundation, char>(SoilBase),
+                                _roads.ToList(),
                                 (bool[])_ramps.Clone(), _homes.ToList(),
                                 _walls.ToDictionary(kv => kv.Key,
                                                     kv => kv.Value.Copy()),
@@ -477,8 +589,8 @@ public sealed class MapEdit
                                 Columns, Rows);
 
     private void Restore(Snap was) =>
-        (_ground, _under, _soil, SoilBase, _ramps, _homes, _walls, _rocks, Climate, Columns, Rows) =
-            (was.Ground, was.Under, was.Soil, was.SoilBase, was.Ramps, was.Homes, was.Walls, was.Rocks, was.Climate,
+        (_ground, _under, _soil, SoilBase, _roads, _ramps, _homes, _walls, _rocks, Climate, Columns, Rows) =
+            (was.Ground, was.Under, was.Soil, was.SoilBase, was.Roads, was.Ramps, was.Homes, was.Walls, was.Rocks, was.Climate,
              was.Columns, was.Rows);
 
     private readonly List<Snap> _back = new();
@@ -516,7 +628,8 @@ public sealed class MapEdit
         Snap was = _back[^1];
         bool same = was.Columns == Columns && was.Rows == Rows
                     && was.Ground.SequenceEqual(_ground) && was.Under.SequenceEqual(_under)
-                    && was.Soil.SequenceEqual(_soil) && was.SoilBase.Count == SoilBase.Count
+                    && was.Soil.SequenceEqual(_soil) && was.Roads.SequenceEqual(_roads)
+                    && was.SoilBase.Count == SoilBase.Count
                     && was.SoilBase.All(kv => SoilBase.TryGetValue(kv.Key, out char now) && now == kv.Value)
                     && was.Ramps.SequenceEqual(_ramps)
                     && was.Homes.SequenceEqual(_homes) && was.Walls.Count == _walls.Count
@@ -600,6 +713,9 @@ public sealed class MapEdit
         // water, a rock, a wall, the edge
         if (Inside(cell) && !MapFile.TakesUnder(LetterAt(cell)))
             _under[At(cell)] = BoardMap.Plain;
+        // a road leaves a cell that stopped being one it may cross
+        if (_roads.Count > 0 && RoadRefuses(cell) is not null)
+            Cut(cell);
         // a look stays only on the floor it is for
         if (Inside(cell) && _soil[At(cell)] != Soil.As
             && (GlyphAt(cell).Water || Soil.FloorOf(_soil[At(cell)]) != GlyphAt(cell).Floor))
@@ -825,6 +941,7 @@ public sealed class MapEdit
         _under = (char[])_under.Clone(),
         _soil = (char[])_soil.Clone(),
         SoilBase = new Dictionary<Foundation, char>(SoilBase),
+        _roads = _roads.ToList(),
         _ramps = (bool[])_ramps.Clone(),
         _homes = _homes.ToList(),
         _walls = _walls.ToDictionary(kv => kv.Key, kv => kv.Value.Copy()),
@@ -1513,6 +1630,11 @@ public sealed class MapEdit
         }
         (Columns, Rows, _ground, _under, _soil, _ramps, _homes, _walls, _rocks) =
             (columns, rows, ground, under, soil, ramps, homes, walls, rocks);
+        // the roads moved with the cells, cut where they ran off the board
+        List<RoadPath> roads = _roads.Select(r => r.Moved(by)).ToList();
+        _roads = new List<RoadPath>();
+        foreach (RoadPath road in roads)
+            _roads.AddRange(Pieces(road, c => !Inside(c)));
         return true;
     }
 
@@ -1537,7 +1659,7 @@ public sealed class MapEdit
                               IReadOnlyDictionary<Vector2I, RockNote>? rocking = null,
                               RockClimate climate = default, string[]? floors = null,
                               IReadOnlyDictionary<Foundation, char>? soilBase = null,
-                              string[]? soilCells = null)
+                              string[]? soilCells = null, IReadOnlyList<RoadPath>? roads = null)
     {
         int rows = ground.Length, columns = rows > 0 ? ground[0].Length : 0;
         if (columns < 1 || ground.Any(row => row.Length != columns))
@@ -1550,6 +1672,7 @@ public sealed class MapEdit
             _under = Enumerable.Repeat(BoardMap.Plain, columns * rows).ToArray(),
             _soil = Enumerable.Repeat(Soil.As, columns * rows).ToArray(),
             SoilBase = soilBase is null ? new() : new Dictionary<Foundation, char>(soilBase),
+            _roads = roads?.ToList() ?? new List<RoadPath>(),
             _ramps = new bool[columns * rows],
             _homes = homes.ToList(),
             Climate = climate,
@@ -1771,6 +1894,10 @@ public sealed class MapEdit
             draft.Cliffs[at] = glyph.Cliff;
         }
         draft.Plot = plot;
+        // the roads lay their floor over the letters', as the map does
+        foreach (Vector2I c in Road.Cells(_roads))
+            if (Inside(c))
+                draft.Ground[At(c)] = Foundation.Road;
         return draft;
     }
 
@@ -1795,7 +1922,7 @@ public sealed class MapEdit
                                    _walls.ToDictionary(kv => kv.Key,
                                                        kv => kv.Value.Copy()),
                                    Rocking(), Climate, Floors(),
-                                   SoilBase.Count > 0 ? SoilBase : null, SoilRows());
+                                   SoilBase.Count > 0 ? SoilBase : null, SoilRows(), _roads);
     }
 
     /// <summary>Write the draft to <c>maps/</c> and return the path.

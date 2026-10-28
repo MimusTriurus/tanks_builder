@@ -21890,6 +21890,42 @@ public static class SelfTest
                     "a swamp laid on the sand was read");
             }
 
+            // The roads (Ф6): roadtest's seven read, lay Foundation.Road on the
+            // cells they cross and the letter's floor under it, write back
+            // letter for letter through both writers, and what a road may not
+            // do is refused; a turn begun on a road has one more step.
+            if (MapFile.Has("roadtest"))
+            {
+                string roadText = System.IO.File.ReadAllText(MapFile.PathOf("roadtest"))
+                    .Replace("\r\n", "\n");
+                BoardMap paved = MapFile.Load("roadtest");
+                int corduroy = paved.At(new Vector2I(3, 7));
+                Check("roadtest's seven roads lay road over the swamp and keep the mud under it",
+                    paved.Roads.Count == 7 && paved.Ground[corduroy] == Foundation.Road
+                    && paved.UnpavedAt(corduroy) == Foundation.Mud
+                    && paved.Looks()![corduroy] == Soil.Swamp,
+                    $"{paved.Roads.Count} roads, (3,7) {paved.Ground[corduroy]} over {paved.UnpavedAt(corduroy)}");
+                Check("and writes back letter for letter",
+                    MapFile.Write(paved) == roadText, "the map's writer moved roadtest");
+                Check("and so does the editor's draft of it",
+                    MapFile.Write(MapEdit.Of(paved).Build()) == roadText,
+                    "the editor's round trip moved roadtest");
+                Check("a road that skips a cell is refused",
+                    Refusal(roadText.Replace("[[9, 1], [10, 1], [11, 1]", "[[9, 1], [11, 1]"), "roadtest")
+                        .Contains("no neighbour"),
+                    "a road jumped a cell");
+                Check("and one drawn twice over the same stretch",
+                    Refusal(roadText.Replace("[[0, 2], [1, 1], [2, 1], [3, 0]]",
+                                             "[[1, 4], [2, 4], [3, 3]]"), "roadtest")
+                        .Contains("share"),
+                    "two roads on one stretch were read");
+                Check("and one across water",
+                    Refusal(roadText.Replace("\"..............\",\n    \"..............\",\n    \"..............\",\n    \"..............\",\n    \"..............\",\n    \"..............\",\n    \"..............\",\n    \"uuuu",
+                                             "\"..............\",\n    \".w............\",\n    \"..............\",\n    \"..............\",\n    \"..............\",\n    \"..............\",\n    \"..............\",\n    \"uuuu"), "roadtest")
+                        .Contains("under water"),
+                    "a road across water was read");
+            }
+
             Vector2I stray = BoardMap.Test.Homes[0];
             Check("and so is a stray field on a home",
                 Refusal(good.Replace($"[{stray.X}, {stray.Y}]",

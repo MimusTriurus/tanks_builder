@@ -194,6 +194,7 @@ public sealed partial class Stage3D
         _tops.MaterialOverride = ReliefTurf(f, art);
         _glaze.MaterialOverride = null;
         BuildFrame(f);
+        Roads(f);
         Reeds(f);
     }
 
@@ -809,7 +810,7 @@ vec4 cell_ink(vec2 cr) {
         return vec4(1.0, 1.0, 1.0, 1.0);
     return texelFetch(cells, c, 0);
 }
-" + RockPaint + SoilPaint;
+" + RockPaint + SoilPaint + RoadPaint;
 
     private const string ReliefPaint = @"    vec2 tuv = art_rect.xy + tri(ground.xz * art_tile) * art_rect.zw;
     vec3 soil = texture(art, tuv).rgb;
@@ -851,6 +852,8 @@ vec4 cell_ink(vec2 cr) {
     } else
         soil = mix(soil, turf * (0.75 + 0.5 * grain), lawn);
     soil = mix(soil, bed_ink * (0.6 + 0.6 * grain), COLOR.a);
+    // the roads over all of it (Stage3D.Roads, format 3)
+    soil = road_at(soil, grain);
     vec3 hexc = hex_at(ground.xz);
     vec4 cink = cell_ink(hexc.xy);
     // cel steps by the turn to the sun: three, as the prisms' walls had

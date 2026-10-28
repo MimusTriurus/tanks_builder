@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Godot;
 
@@ -71,12 +72,15 @@ public sealed partial class MapEditor
         RockStyles? rocks = RockStyles.Of(rocking, _edit.Climate);
         // the soil's looks on the ring's cells, the sea wearing none
         char[]? looks = _edit.Looks() is { } own ? ring.Spread(own, TankSpriteTest.Soil.As) : null;
+        // the roads on the ring's cells
+        List<RoadPath> roads = _edit.Roads.Select(r => r.Moved(ring.Shift)).ToList();
         string want = $"{ring.Columns}x{ring.Rows}:{paint}:"
                       + string.Join(",", levels) + "|" + string.Concat(wet.Select(w => w ? '1' : '0'))
                       + "|" + string.Concat(ground.Select(g => (char)('a' + (int)g)))
                       + "|" + string.Join(",", painted.Select(k => k ?? "")) + "|"
                       + string.Concat(covered.Select(c => (char)('a' + (int)c)))
                       + "|" + (looks is null ? "" : new string(looks))
+                      + "|" + string.Join(";", roads)
                       + "|" + _edit.Climate + "|"
                       + string.Join(";", rocking.OrderBy(kv => kv.Key.Y).ThenBy(kv => kv.Key.X)
                                                 .Select(kv => $"{kv.Key}{kv.Value}"));
@@ -101,6 +105,7 @@ public sealed partial class MapEditor
             _board.SetCover(covered);
             _board.SetWater(wet);
             _board.SetSoil(looks);
+            _board.Roads = roads;
         }
         catch (InvalidOperationException e)
         {

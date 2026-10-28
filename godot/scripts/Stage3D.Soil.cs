@@ -135,6 +135,9 @@ vec3 soil_look_at(vec3 soil, float grain) {
                     Vector2 flat = clump + new Vector2(Mathf.Cos(b), Mathf.Sin(b) * Field.Squash) * e;
                     var foot = new Vector3(flat.X + Origin.X, f.HeightAt(flat) / RiseFactor,
                                            (flat.Y + Origin.Y) / Squash);
+                    // none on a road through the swamp (Stage3D.Roads)
+                    if (RoadNear(new Vector2(foot.X, foot.Z)) < (Road.Half + 0.08f) * r)
+                        continue;
                     float tall = rng.RandfRange(ReedTallLo, ReedTallHi) * m;
                     var lean = new Vector3(rng.RandfRange(-0.12f, 0.12f), 1.0f,
                                            rng.RandfRange(-0.12f, 0.12f)).Normalized();

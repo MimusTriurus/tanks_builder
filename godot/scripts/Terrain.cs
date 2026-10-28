@@ -61,6 +61,16 @@ public enum Foundation
     /// not ruled yet - neither is it for sand or the wood.
     /// </summary>
     Mud,
+
+    /// <summary>
+    /// A road: the GDD's "дорога", a hard floor a whole turn on it gives one
+    /// more step (<see cref="Steps"/>). Laid by format 3's <c>roads</c> block
+    /// and never by a letter (docs/map-format3-plan.md, Ф6): a road is a path
+    /// along the hex sides, and the cells it crosses take this floor over the
+    /// one their letter says - a cell has one floor, and a log road over a
+    /// swamp is road. Last in the enum, as mud, so no value before it moves.
+    /// </summary>
+    Road,
 }
 
 /// <summary>
@@ -312,6 +322,12 @@ public static class TerrainRules
         [Foundation.Mud] = new GroundRule
         {
             Speed = 0.45f, Ride = 1.2f, Dust = 0.0f,
+        },
+        // Road: the class's whole speed and a smoother ride; its extra step is
+        // the turn's (Steps), not a speed past the class's own.
+        [Foundation.Road] = new GroundRule
+        {
+            Ride = 0.8f, Dust = 0.8f,
         },
     };
 

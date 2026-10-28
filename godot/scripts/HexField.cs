@@ -1665,6 +1665,12 @@ public sealed partial class HexField : Node2D
         Rewet();
     }
 
+    /// <summary>The roads on the board, in its cells (format 3's <c>roads</c>,
+    /// <see cref="Road"/>): what the stage draws. The rule is the floor
+    /// (<see cref="Foundation.Road"/>, set with the ground); this is the
+    /// drawing's - which way each road runs through a cell.</summary>
+    public IReadOnlyList<RoadPath> Roads { get; set; } = Array.Empty<RoadPath>();
+
     /// <summary>The look each cell's ground wears (<see cref="Soil"/>,
     /// resolved), or null for today's ground everywhere.</summary>
     private char[]? _soil;

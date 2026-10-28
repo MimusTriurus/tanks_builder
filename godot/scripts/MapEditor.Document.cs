@@ -618,6 +618,68 @@ public sealed partial class MapEditor
     }
 
     /// <summary>
+    /// <c>--map roadtest --menu roads</c>: Ф6's roads without a mouse. The
+    /// board written back as the file; a road laid and one refused across
+    /// water; the fork cut at its cell; water painted on a road; the turn's
+    /// budget from a road and off it (<see cref="Steps"/>); a draft through the
+    /// disk; and undo back to the file.
+    /// </summary>
+    private void RoadProbe()
+    {
+        if (_open != "roads" || _frame != 10)
+            return;
+        string file = MapFile.Has(_edit.Name)
+            ? File.ReadAllText(MapFile.PathOf(_edit.Name)).Replace("\r\n", "\n") : "";
+        string Roads() => string.Join("; ", _edit.Roads);
+        GD.Print($"roads: opened - {_edit.Roads.Count} roads; writes the file back: "
+                 + $"{MapFile.Write(_edit.Build()) == file}");
+
+        _edit.Begin();
+        int laid = _edit.Pave(new[] { new Vector2I(9, 6), new Vector2I(10, 6), new Vector2I(11, 6) },
+                              RoadType.Asphalt, -1, out string why);
+        _edit.End();
+        GD.Print($"roads: laid 9,6-11,6 as road {laid + 1} {why}");
+        _edit.Begin();
+        _edit.Water(new Vector2I(12, 6), true, out why);
+        int across = _edit.Pave(new[] { new Vector2I(11, 6), new Vector2I(12, 6) }, RoadType.Dirt, -1, out why);
+        _edit.End();
+        GD.Print($"roads: across the water at 12,6 - {(across < 0 ? "refused: " + why : "laid")}");
+
+        _edit.Begin();
+        int cut = _edit.Cut(new Vector2I(3, 3));
+        _edit.End();
+        GD.Print($"roads: cut at the fork 3,3 - {cut} roads touched; now {Roads()}");
+        _edit.Begin();
+        _edit.Water(new Vector2I(10, 1), true, out why);
+        _edit.End();
+        GD.Print($"roads: water at 10,1 - {(why.Length > 0 ? why : "")} now {_edit.Roads.Count} roads, "
+                 + $"dirt: {string.Join(" | ", _edit.Roads.Where(r => r.Type == RoadType.Dirt))}");
+        while (_edit.Undo()) { }
+        Settle();
+
+        // the turn's budget: one more step where the whole way is road
+        // a speed of one, straight up the gravel 6,2-6,0 and up the grass 8,2-8,0
+        var mover = new Steps.Mover { Speed = 1 };
+        Steps.Reach on = Steps.Plan(_field, new Steps.Pose(new Vector2I(6, 2),
+            HexField.HeadingTo(new Vector2I(6, 2), new Vector2I(6, 1))), mover);
+        Steps.Reach off = Steps.Plan(_field, new Steps.Pose(new Vector2I(8, 2),
+            HexField.HeadingTo(new Vector2I(8, 2), new Vector2I(8, 1))), mover);
+        GD.Print($"roads: speed 1 up the gravel from 6,2 - budget {on.Budget} (plain {on.Plain}), "
+                 + $"reaches 6,0: {on.Reaches(new Vector2I(6, 0))}, 7,1 off it: {on.Reaches(new Vector2I(7, 1))}; "
+                 + $"up the grass from 8,2 - budget {off.Budget}, reaches 8,0: {off.Reaches(new Vector2I(8, 0))}");
+
+        string draft = MapFile.WriteDraft(_edit);
+        string tmp = Path.Combine(AutosaveDir, "zz_roads" + MapFile.Extension);
+        Directory.CreateDirectory(AutosaveDir);
+        File.WriteAllText(tmp, draft);
+        MapEdit back = MapFile.ReadDraft(tmp);
+        File.Delete(tmp);
+        GD.Print($"roads: the draft read back the same: {MapFile.WriteDraft(back) == draft}; "
+                 + $"undone - writes the file back: {MapFile.Write(_edit.Build()) == file}");
+        Say();
+    }
+
+    /// <summary>
     /// <c>--map soiltest --menu soil</c>: Ф4's looks without a mouse. The board
     /// written back as the file; a look worn, one refused on the wrong floor,
     /// one dropped by a floor brush; the board's base changed; a draft through

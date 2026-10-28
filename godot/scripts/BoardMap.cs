@@ -335,6 +335,18 @@ public sealed partial class BoardMap
     /// <see cref="Soil.As"/> where it said nothing; null when no cell did.</summary>
     public char[]? SoilCells { get; }
 
+    /// <summary>The roads (format 3's <c>roads</c>, <see cref="Road"/>): every
+    /// cell they cross is <see cref="Foundation.Road"/> in <see cref="Ground"/>.</summary>
+    public IReadOnlyList<RoadPath> Roads { get; }
+
+    /// <summary>Each cell's floor as its letter and the floor grid say it,
+    /// under the roads - what the file writes and the look is worn on; null
+    /// on a board with no road (<see cref="Ground"/> is the same then).</summary>
+    public Foundation[]? Unpaved { get; }
+
+    /// <summary>A cell's floor under any road on it.</summary>
+    public Foundation UnpavedAt(int at) => Unpaved?[at] ?? Ground[at];
+
     /// <summary>The look every cell wears, the three layers resolved
     /// (<see cref="Soil.Resolve"/>) - what <see cref="HexField.SetSoil"/> is
     /// handed. Null when the board draws nothing apart from today's ground,
@@ -345,7 +357,7 @@ public sealed partial class BoardMap
             return null;
         var looks = new char[Columns * Rows];
         for (int at = 0; at < looks.Length; at++)
-            looks[at] = Soil.Resolve(SoilCells?[at] ?? Soil.As, Ground[at], Water[at], SoilBase);
+            looks[at] = Soil.Resolve(SoilCells?[at] ?? Soil.As, UnpavedAt(at), Water[at], SoilBase);
         return looks;
     }
 
@@ -393,8 +405,12 @@ public sealed partial class BoardMap
                      IReadOnlyDictionary<Vector2I, RockNote>? rocking = null,
                      RockClimate climate = default,
                      IReadOnlyDictionary<Foundation, char>? soilBase = null,
-                     char[]? soilCells = null)
+                     char[]? soilCells = null,
+                     IReadOnlyList<RoadPath>? roads = null,
+                     Foundation[]? unpaved = null)
     {
+        Roads = roads ?? Array.Empty<RoadPath>();
+        Unpaved = unpaved;
         Rocking = rocking ?? new Dictionary<Vector2I, RockNote>();
         Climate = climate;
         SoilBase = soilBase ?? new Dictionary<Foundation, char>();
@@ -695,7 +711,8 @@ public sealed partial class BoardMap
                                         RockClimate climate = default,
                                         string[]? under = null,
                                         IReadOnlyDictionary<Foundation, char>? soilBase = null,
-                                        string[]? soilCells = null)
+                                        string[]? soilCells = null,
+                                        IReadOnlyList<RoadPath>? roads = null)
     {
         MustCrew(name, homes);
         int rows = ground.Length;
@@ -886,6 +903,25 @@ public sealed partial class BoardMap
             }
         }
 
+        // The roads, after the looks (a look is worn on the floor under the
+        // road, a swamp on either side of a log road): what a road may not
+        // cross, then the floor they lay (Road, docs/map-format3-plan.md Ф6)
+        Foundation[]? unpaved = null;
+        if (roads is { Count: > 0 })
+        {
+            wrong.AddRange(Road.Faults(roads, c =>
+                c.X < 0 || c.X >= columns || c.Y < 0 || c.Y >= rows ? "off the grid"
+                : g[c.X, c.Y] == Off ? "off the board"
+                : water[c.Y * columns + c.X] ? "under water - a ford or a bridge is not a road yet"
+                : floor[c.Y * columns + c.X] == Foundation.Rock ? "a rock"
+                : walls[c.Y * columns + c.X] ? "a wall"
+                : null));
+            unpaved = (Foundation[])floor.Clone();
+            foreach (Vector2I c in Road.Cells(roads))
+                if (c.X >= 0 && c.X < columns && c.Y >= 0 && c.Y < rows)
+                    floor[c.Y * columns + c.X] = Foundation.Road;
+        }
+
         // A rock's note off a rock, or two on one rock, are the same
         // disagreement: a look that quietly did nothing, or one that quietly
         // lost to the other.
@@ -922,7 +958,7 @@ public sealed partial class BoardMap
         return Sealed(new BoardMap(name, columns, rows, homes, levels, ramped,
                                    water, kinds, cliffs, walls, floor, over,
                                    plot, paint, height, plinth, walling,
-                                   rocking, climate, soilBase, looks));
+                                   rocking, climate, soilBase, looks, roads, unpaved));
     }
 
     /// <summary>

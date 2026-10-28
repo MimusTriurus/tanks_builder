@@ -69,7 +69,8 @@
     "shallow": { "drive": true,  "speed": 1.0,  "ride": 1.0, "wet": true, "dust": 0.0 },
     "deep":    { "drive": true,  "wet": true, "plunge": true, "dust": 0.0 },
     "rock":    { "drive": false },
-    "mud":     { "drive": true,  "speed": 0.45, "ride": 1.2, "wet": false, "dust": 0.0 }
+    "mud":     { "drive": true,  "speed": 0.45, "ride": 1.2, "wet": false, "dust": 0.0 },
+    "road":    { "drive": true,  "speed": 1.0,  "ride": 0.8, "wet": false, "dust": 0.8 }
   },
 
   "cover": {
