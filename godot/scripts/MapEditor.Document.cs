@@ -557,4 +557,63 @@ public sealed partial class MapEditor
         GD.Print($"rocks: two undos - {Notes()}; writes the file back: {MapFile.Write(_edit.Build()) == file}");
         Say();
     }
+
+    /// <summary>
+    /// <c>--map floortest --menu floor</c>: Ф3's floor under a cover without a
+    /// mouse (docs/map-format3-plan.md). The board written back as the file;
+    /// the brushes that used to refuse - sand on a wood, a wood on sand, mud
+    /// raised to a hill - each said with the cell's floor and letter after;
+    /// what the rules' draft reads there; a draft through the disk; and undo
+    /// back to the file.
+    /// </summary>
+    private void FloorProbe()
+    {
+        if (_open != "floor" || _frame != 10)
+            return;
+        string file = MapFile.Has(_edit.Name)
+            ? File.ReadAllText(MapFile.PathOf(_edit.Name)).Replace("\r\n", "\n") : "";
+        GD.Print($"floor: opened - writes the file back: {MapFile.Write(_edit.Build()) == file}");
+        string At(Vector2I c)
+        {
+            MapFile.Glyph g = _edit.GlyphAt(c);
+            return $"{c.X},{c.Y} '{g.Letter}' {g.Floor}/{g.Over} level {g.Level}";
+        }
+        void Try(string what, Vector2I c, Func<string> stroke)
+        {
+            _edit.Begin();
+            string why = stroke();
+            _edit.End();
+            GD.Print($"floor: {what} - {(why.Length > 0 ? "refused: " + why : At(c))}");
+        }
+        Try("sand under the wood at 5,1", new Vector2I(5, 1), () =>
+            _edit.Over(new Vector2I(5, 1), Cover.Forest, out string a) && _edit.Floor(new Vector2I(5, 1), Foundation.Sand, out a) ? "" : a);
+        Try("a wood on the mud at 7,2", new Vector2I(7, 2), () =>
+            _edit.Over(new Vector2I(7, 2), Cover.Forest, out string a) ? "" : a);
+        Try("the mud at 8,2 raised", new Vector2I(8, 2), () =>
+            _edit.Level(new Vector2I(8, 2), 1, out string a) ? "" : a);
+        Try("the wood on sand at 1,1 cut", new Vector2I(1, 1), () =>
+            _edit.Over(new Vector2I(1, 1), Cover.None, out string a) ? "" : a);
+        Try("water on the mud hollow at 2,6", new Vector2I(2, 6), () =>
+            _edit.Water(new Vector2I(2, 6), true, out string a) ? "" : a);
+        Try("a wall on sand at 8,6", new Vector2I(8, 6), () =>
+            _edit.Over(new Vector2I(8, 6), Cover.Walls, out string a) ? "" : a);
+        Settle();
+        MapRules.Draft draft = _edit.Draft();
+        GD.Print("floor: the draft's floors - "
+                 + string.Join(", ", new[] { new Vector2I(5, 1), new Vector2I(7, 2), new Vector2I(8, 2), new Vector2I(3, 1) }
+                     .Select(c => $"{c.X},{c.Y} {draft.Ground[draft.At(c)]}")));
+
+        string draftText = MapFile.WriteDraft(_edit);
+        string tmp = Path.Combine(AutosaveDir, "zz_floor" + MapFile.Extension);
+        Directory.CreateDirectory(AutosaveDir);
+        File.WriteAllText(tmp, draftText);
+        MapEdit back = MapFile.ReadDraft(tmp);
+        File.Delete(tmp);
+        GD.Print($"floor: the draft read back the same: {MapFile.WriteDraft(back) == draftText}");
+
+        while (_edit.Undo()) { }
+        Settle();
+        GD.Print($"floor: undone - writes the file back: {MapFile.Write(_edit.Build()) == file}");
+        Say();
+    }
 }

@@ -195,7 +195,8 @@ public static class MapFile
         return BoardMap.FromGround(name, file.Ground, file.Ramps, homes, paint,
                                    file.Height ?? true, file.Plinth ?? 0,
                                    Walling(file.Walls, name),
-                                   Rocking(file.Rocks, name), Climate(file.Climate, name));
+                                   Rocking(file.Rocks, name), Climate(file.Climate, name),
+                                   file.Floor);
     }
 
     /// <summary>
@@ -314,7 +315,7 @@ public static class MapFile
     /// whether this file said each, and whether this build reads it.</summary>
     private static IEnumerable<(string Key, bool Said, bool Read)> Blocks(Shape file)
     {
-        yield return ("floor", file.Floor is not null, false);
+        yield return ("floor", file.Floor is not null, true);
         yield return ("climate", file.Climate is not null, true);
         yield return ("rocks", file.Rocks is not null, true);
         yield return ("soil", file.Soil is not null, false);
@@ -608,11 +609,10 @@ public static class MapFile
         // against: on a board standing a level up, plain ground is at level 1
         // and writing its height out would come back as a hill. See
         // BoardMap.Plinth, which exists because the round trip found this.
-        char? letter = Letter(map.Ground[at], map.Over[at],
-                              map.Levels[at] - map.Plinth,
-                              map.Water[at], map.Cliffs[at]);
-        if (letter is char found)
-            return found;
+        // the floor grid says what this letter cannot (Encode, Floors)
+        if (Encode(map.Ground[at], map.Over[at], map.Levels[at] - map.Plinth,
+                   map.Water[at], map.Cliffs[at]) is { } found)
+            return found.Letter;
         throw new InvalidOperationException(
             $"{map.Name}: ({cell.X},{cell.Y}) is "
             + $"{map.Ground[at]}/{map.Over[at]} at level "
@@ -731,6 +731,91 @@ public static class MapFile
         return null;
     }
 
+    // --- the floor under a cover --------------------------------------------
+
+    /// <summary>
+    /// A cell as a letter and, where the letter cannot say its floor, the
+    /// format-3 <c>floor</c> grid's mark - or null where neither can
+    /// (docs/map-format3-plan.md, Ф3).
+    ///
+    /// <b>One way to say each cell.</b> A cell the alphabet has a letter for
+    /// takes it and leaves the floor grid a dot - plain sand is <c>s</c> in the
+    /// ground grid, as it always was. Only a cell the alphabet has no letter
+    /// for - sand or mud under a wood, a trench, a mine, on a hill or in a
+    /// hollow - is written as the solid letter with <c>s</c> or <c>u</c> under
+    /// it. Never under water, a rock or a wall: there the floor is said.
+    /// </summary>
+    public static (char Letter, char Under)? Encode(Foundation floor, Cover over, int level,
+                                                    bool water = false, bool cliff = false)
+    {
+        if (Letter(floor, over, level, water, cliff) is char own)
+            return (own, BoardMap.Plain);
+        if (UnderOf(floor) is char under && !water && !cliff && over != Cover.Walls
+            && Letter(Foundation.Solid, over, level) is char solid)
+            return (solid, under);
+        return null;
+    }
+
+    /// <summary>The floor grid's mark for a floor that may lie under a
+    /// letter: the floor's own letter, so the grid reads as the picture it
+    /// is.</summary>
+    private static char? UnderOf(Foundation floor) => floor switch
+    {
+        Foundation.Sand => BoardMap.Sand,
+        Foundation.Mud => BoardMap.Mud,
+        _ => null,
+    };
+
+    /// <summary>What a floor-grid mark lays, or null for one it does not
+    /// know.</summary>
+    public static Foundation? FloorUnder(char mark) => mark switch
+    {
+        BoardMap.Sand => Foundation.Sand,
+        BoardMap.Mud => Foundation.Mud,
+        _ => null,
+    };
+
+    /// <summary>Whether a letter leaves its floor for the floor grid to say:
+    /// solid ground with something on it or off the datum - a wood, a trench,
+    /// a mine, a hill, a hollow - and no water, rock or wall.</summary>
+    public static bool TakesUnder(char letter) =>
+        letter != BoardMap.Plain && Of(letter) is { Floor: Foundation.Solid, Water: false,
+                                                    Cliff: false, Wall: false };
+
+    /// <summary>A letter's glyph with the floor the grid laid under it.</summary>
+    public static Glyph Under(Glyph glyph, char mark) =>
+        FloorUnder(mark) is Foundation floor
+            ? new Glyph(glyph.Letter, floor, glyph.Over, glyph.Level, glyph.Water,
+                        glyph.Cliff, glyph.Wall, glyph.Wood)
+            : glyph;
+
+    /// <summary>The floor grid of a board, or null when no cell needs one -
+    /// the file then writes no block, as format 2 did.</summary>
+    public static string[]? Floors(BoardMap map)
+    {
+        var rows = new string[map.Rows];
+        bool any = false;
+        for (int r = 0; r < map.Rows; r++)
+        {
+            var row = new StringBuilder(map.Columns);
+            for (int q = 0; q < map.Columns; q++)
+            {
+                var cell = new Vector2I(q, r);
+                char mark = BoardMap.Plain;
+                if (map.OnBoard(cell))
+                {
+                    int at = map.At(cell);
+                    mark = Encode(map.Ground[at], map.Over[at], map.Levels[at] - map.Plinth,
+                                  map.Water[at], map.Cliffs[at])?.Under ?? BoardMap.Plain;
+                }
+                any |= mark != BoardMap.Plain;
+                row.Append(mark);
+            }
+            rows[r] = row.ToString();
+        }
+        return any ? rows : null;
+    }
+
     public static string[] Ramps(BoardMap map)
     {
         var rows = new string[map.Rows];
@@ -778,6 +863,7 @@ public static class MapFile
         text.Append("  \"ramps\": [\n");
         text.Append(string.Join(",\n", ramps.Select(r => "    " + Quote(r))));
         text.Append("\n  ]");
+        Grid(text, "floor", Floors(map));
         // The masonry last, under the picture it annotates, and only for the
         // cells that said something - see Masonry.Plain. A line per walled cell
         // saying the ring its letter already says would be a block that grows
@@ -820,6 +906,17 @@ public static class MapFile
             text.Append(",\n\n  \"rocks\": [\n"
                         + string.Join(",\n", notes.Select(kv => "    " + Line(kv.Key, kv.Value)))
                         + "\n  ]");
+    }
+
+    /// <summary>A grid under the ramps, in the picture's own layout, when the
+    /// board has one to say.</summary>
+    private static void Grid(StringBuilder text, string key, string[]? rows)
+    {
+        if (rows is null)
+            return;
+        text.Append($",\n  \"{key}\": [\n");
+        text.Append(string.Join(",\n", rows.Select(r => "    " + Quote(r))));
+        text.Append("\n  ]");
     }
 
     private static string Number(float x) =>
@@ -948,6 +1045,7 @@ public static class MapFile
         text.Append("  \"ramps\": [\n");
         text.Append(string.Join(",\n", edit.Ramps().Select(r => "    " + Quote(r))));
         text.Append("\n  ]");
+        Grid(text, "floor", edit.Floors());
         var said = edit.Walled().Where(c => edit.MasonryAt(c) is { Plain: false }).ToList();
         if (said.Count > 0)
             text.Append(",\n\n  \"walls\": [\n"
@@ -979,7 +1077,7 @@ public static class MapFile
                            file.Ramps ?? Array.Empty<string>(), Parkings(file.Homes, name),
                            Walling(file.Walls, name), file.Paint is { Length: > 0 } p ? p : null,
                            file.Height ?? true, file.Plinth ?? 0,
-                           Rocking(file.Rocks, name), Climate(file.Climate, name));
+                           Rocking(file.Rocks, name), Climate(file.Climate, name), file.Floor);
     }
 
     // --- stamps ----------------------------------------------------------------
@@ -1023,11 +1121,14 @@ public static class MapFile
         int rows = piece.Cells.Max(b => b.Cell.Y) - by.Y + 1;
         var ground = Enumerable.Range(0, rows).Select(_ => new StringBuilder(new string(BoardMap.Off, columns))).ToArray();
         var ramps = Enumerable.Range(0, rows).Select(_ => new StringBuilder(new string('.', columns))).ToArray();
+        // the floor under a cover is the cell's rule, so a stamp keeps it
+        var under = Enumerable.Range(0, rows).Select(_ => new StringBuilder(new string('.', columns))).ToArray();
         var walls = new List<string>();
         foreach (MapEdit.Bit bit in piece.Cells)
         {
             Vector2I at = bit.Cell - by;
             ground[at.Y][at.X] = bit.Letter;
+            under[at.Y][at.X] = bit.Under;
             if (bit.Ramp)
                 ramps[at.Y][at.X] = 'r';
             if (bit.Wall is { Plain: false } wall)
@@ -1049,6 +1150,8 @@ public static class MapFile
         text.Append("  \"ramps\": [\n");
         text.Append(string.Join(",\n", ramps.Select(r => "    " + Quote(r.ToString()))));
         text.Append("\n  ]");
+        Grid(text, "floor", piece.Cells.Any(b => b.Under != BoardMap.Plain)
+            ? under.Select(r => r.ToString()).ToArray() : null);
         if (walls.Count > 0)
             text.Append(",\n\n  \"walls\": [\n" + string.Join(",\n", walls) + "\n  ]");
         text.Append("\n}\n");
@@ -1099,8 +1202,12 @@ public static class MapFile
                     $"stamp {name}: ({q},{r}) is '{letter}', which no map letter is");
             var cell = new Vector2I(q, r);
             bool ramp = r < ramps.Length && q < ramps[r].Length && ramps[r][q] == 'r';
+            char mark = file.Floor is { } fl && r < fl.Length && q < fl[r].Length
+                        && FloorUnder(fl[r][q]) is not null && TakesUnder(letter)
+                ? fl[r][q] : BoardMap.Plain;
             bits.Add(new MapEdit.Bit(cell, letter, ramp,
-                                     walling.TryGetValue(cell, out Masonry? wall) ? wall : null));
+                                     walling.TryGetValue(cell, out Masonry? wall) ? wall : null,
+                                     Under: mark));
         }
         if (bits.Count == 0)
             throw new InvalidOperationException($"stamp {name}: not one cell on it");
@@ -1128,7 +1235,7 @@ public static class MapFile
         // format 3 (docs/map-format3-plan.md): named so that a file saying one
         // is refused by Unread rather than read without it; each gets its own
         // shape in the stage that reads it
-        [JsonPropertyName("floor")] public JsonElement? Floor { get; set; }
+        [JsonPropertyName("floor")] public string[]? Floor { get; set; }
         [JsonPropertyName("climate")] public ClimateShape? Climate { get; set; }
         [JsonPropertyName("rocks")] public RockShape[]? Rocks { get; set; }
         [JsonPropertyName("soil")] public JsonElement? Soil { get; set; }

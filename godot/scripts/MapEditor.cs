@@ -508,6 +508,7 @@ public sealed partial class MapEditor : SceneRoot
         SymmetryProbe();
         BoardProbe();
         RockProbe();
+        FloorProbe();
         ToolsProbe();
         AutosaveTick(delta);
         CrownsFollow();

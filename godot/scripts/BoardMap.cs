@@ -666,13 +666,17 @@ public sealed partial class BoardMap
                                             walling = null,
                                         IReadOnlyDictionary<Vector2I, RockNote>?
                                             rocking = null,
-                                        RockClimate climate = default)
+                                        RockClimate climate = default,
+                                        string[]? under = null)
     {
         MustCrew(name, homes);
         int rows = ground.Length;
         int columns = rows == 0 ? 0 : ground[0].Length;
         char[,] g = Read(name + " ground", ground, columns, rows);
         char[,] rr = Read(name + " ramps", ramps, columns, rows);
+        // format 3's floor grid: sand or mud under a letter that cannot say it
+        // (MapFile.Encode, docs/map-format3-plan.md Ф3)
+        char[,]? uu = under is null ? null : Read(name + " floor", under, columns, rows);
 
         var levels = new int[columns * rows];
         var water = new bool[columns * rows];
@@ -778,6 +782,25 @@ public sealed partial class BoardMap
                 default:
                     wrong.Add($"({q},{r}) is an unknown kind {c}");
                     break;
+            }
+
+            // The floor grid, and each refusal is a mark that would otherwise
+            // quietly do nothing or say a cell twice.
+            if (uu is not null && uu[q, r] != Plain)
+            {
+                char u = uu[q, r];
+                if (MapFile.FloorUnder(u) is not Foundation laid)
+                    wrong.Add($"({q},{r}) has '{u}' in the floor grid, which says "
+                              + $"'{Sand}', '{Mud}' or '{Plain}'");
+                else if (c == Plain)
+                    wrong.Add($"({q},{r}) is {laid.ToString().ToLowerInvariant()} on plain "
+                              + $"ground, which is the letter '{u}' in the ground grid");
+                else if (!MapFile.TakesUnder(c))
+                    wrong.Add($"({q},{r}) is '{c}', whose floor its letter already says "
+                              + $"- the floor grid lays sand or mud only under a wood, "
+                              + "a trench, a mine, a hill or a hollow");
+                else
+                    floor[at] = laid;
             }
 
             if (rr[q, r] != 'r')

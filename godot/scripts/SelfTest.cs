@@ -21826,6 +21826,38 @@ public static class SelfTest
                     "a rock note that means nothing was read");
             }
 
+            // The floor under a cover (Ф3): floortest's sand and mud under a
+            // wood, a mine, a trench, on a hill and in a hollow read as those
+            // floors, write back letter for letter through both writers, and a
+            // mark that says a cell twice or under nothing is refused.
+            if (MapFile.Has("floortest"))
+            {
+                string floorText = System.IO.File.ReadAllText(MapFile.PathOf("floortest"))
+                    .Replace("\r\n", "\n");
+                BoardMap floored = MapFile.Load("floortest");
+                Foundation FloorAt(int q, int r) => floored.Ground[floored.At(new Vector2I(q, r))];
+                Check("floortest's floor grid lays sand under a wood and mud under a mine",
+                    FloorAt(1, 1) == Foundation.Sand && floored.Over[floored.At(new Vector2I(1, 1))] == Cover.Forest
+                    && FloorAt(6, 4) == Foundation.Mud
+                    && floored.Over[floored.At(new Vector2I(6, 4))] == Cover.Minefield,
+                    $"(1,1) {FloorAt(1, 1)}, (6,4) {FloorAt(6, 4)}");
+                Check("and writes back letter for letter",
+                    MapFile.Write(floored) == floorText, "the map's writer moved floortest");
+                Check("and so does the editor's draft of it",
+                    MapFile.Write(MapEdit.Of(floored).Build()) == floorText,
+                    "the editor's round trip moved floortest");
+                string row7 = "    \"..........\"\n  ]\n}";
+                Check("sand marked under plain ground is refused - that is the letter",
+                    Refusal(floorText.Replace(row7, "    \"s.........\"\n  ]\n}"), "floortest")
+                        .Contains("letter 's'"),
+                    "a cell said two ways was read");
+                Check("and so is a mark under a letter that says its own floor",
+                    Refusal(floorText.Replace("    \"..uu......\",\n    \"..........\"\n  ]\n}",
+                                              "    \"..uu....s.\",\n    \"..........\"\n  ]\n}"), "floortest")
+                        .Contains("already says"),
+                    "a mark under sand was read");
+            }
+
             Vector2I stray = BoardMap.Test.Homes[0];
             Check("and so is a stray field on a home",
                 Refusal(good.Replace($"[{stray.X}, {stray.Y}]",

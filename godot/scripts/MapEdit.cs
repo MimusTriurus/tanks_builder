@@ -60,6 +60,18 @@ public sealed class MapEdit
     public int Rows { get; private set; }
 
     private char[] _ground = Array.Empty<char>();
+
+    /// <summary>
+    /// Format 3's floor grid (docs/map-format3-plan.md, Ф3): <c>s</c> or
+    /// <c>u</c> where sand or mud lies under a letter that cannot say it - a
+    /// wood, a trench, a mine, a hill, a hollow - and a dot everywhere else.
+    /// Written only by <see cref="Put"/>, which takes the pair from
+    /// <see cref="MapFile.Encode"/>, and dropped by <see cref="Sync"/> under
+    /// a letter that says its own floor; read through <see cref="GlyphAt"/>,
+    /// so every brush and the rules' draft see the floor and not the letter.
+    /// </summary>
+    private char[] _under = Array.Empty<char>();
+
     private bool[] _ramps = Array.Empty<bool>();
     private List<Parking> _homes = new();
 
@@ -139,6 +151,7 @@ public sealed class MapEdit
             // reads the same board.
             Plinth = 1,
             _ground = Enumerable.Repeat(BoardMap.Plain, columns * rows).ToArray(),
+            _under = Enumerable.Repeat(BoardMap.Plain, columns * rows).ToArray(),
             _ramps = new bool[columns * rows],
         };
         // One home, in the middle. A board with none is refused on the way out -
@@ -175,6 +188,7 @@ public sealed class MapEdit
     public static MapEdit Of(BoardMap map)
     {
         string[] ground = MapFile.Ground(map);
+        string[]? floors = MapFile.Floors(map);
         var edit = new MapEdit
         {
             Name = map.Name,
@@ -184,6 +198,7 @@ public sealed class MapEdit
             Columns = map.Columns,
             Rows = map.Rows,
             _ground = new char[map.Columns * map.Rows],
+            _under = Enumerable.Repeat(BoardMap.Plain, map.Columns * map.Rows).ToArray(),
             _ramps = (bool[])map.Ramps.Clone(),
             _homes = map.Parked.ToList(),
             // Copied rather than referenced: the board a draft was opened from
@@ -198,6 +213,8 @@ public sealed class MapEdit
         {
             var cell = new Vector2I(q, r);
             edit._ground[edit.At(cell)] = ground[r][q];
+            if (floors is not null)
+                edit._under[edit.At(cell)] = floors[r][q];
             // And the entry every wall letter means, for the cells the board
             // said nothing about. A board that authored no shapes - which is
             // every compiled one - would otherwise open with masonry the letters
@@ -318,8 +335,8 @@ public sealed class MapEdit
     /// the alphabet cannot get into the grid, because every write goes through
     /// <see cref="Put"/>.</summary>
     public MapFile.Glyph GlyphAt(Vector2I cell) =>
-        MapFile.Of(LetterAt(cell))
-        ?? MapFile.Of(BoardMap.Off)!.Value;
+        MapFile.Under(MapFile.Of(LetterAt(cell)) ?? MapFile.Of(BoardMap.Off)!.Value,
+                      Inside(cell) ? _under[At(cell)] : BoardMap.Plain);
 
     public bool OnBoard(Vector2I cell) =>
         Inside(cell) && _ground[At(cell)] != BoardMap.Off;
@@ -333,6 +350,18 @@ public sealed class MapEdit
         var rows = new string[Rows];
         for (int r = 0; r < Rows; r++)
             rows[r] = new string(_ground, r * Columns, Columns);
+        return rows;
+    }
+
+    /// <summary>The floor grid as the file writes it, or null when no cell
+    /// needs one (<see cref="MapFile.Floors"/>).</summary>
+    public string[]? Floors()
+    {
+        if (_under.All(c => c == BoardMap.Plain))
+            return null;
+        var rows = new string[Rows];
+        for (int r = 0; r < Rows; r++)
+            rows[r] = new string(_under, r * Columns, Columns);
         return rows;
     }
 
@@ -353,14 +382,14 @@ public sealed class MapEdit
     /// <remarks>The size is in it since the board could be resized
     /// (<see cref="Reframe"/>): a stroke's grids are only read at the size
     /// they were taken at.</remarks>
-    private readonly record struct Snap(char[] Ground, bool[] Ramps,
+    private readonly record struct Snap(char[] Ground, char[] Under, bool[] Ramps,
                                         List<Parking> Homes,
                                         Dictionary<Vector2I, Masonry> Walls,
                                         Dictionary<Vector2I, RockNote> Rocks,
                                         RockClimate Climate,
                                         int Columns, int Rows);
 
-    private Snap Taken() => new((char[])_ground.Clone(),
+    private Snap Taken() => new((char[])_ground.Clone(), (char[])_under.Clone(),
                                 (bool[])_ramps.Clone(), _homes.ToList(),
                                 _walls.ToDictionary(kv => kv.Key,
                                                     kv => kv.Value.Copy()),
@@ -368,8 +397,8 @@ public sealed class MapEdit
                                 Columns, Rows);
 
     private void Restore(Snap was) =>
-        (_ground, _ramps, _homes, _walls, _rocks, Climate, Columns, Rows) =
-            (was.Ground, was.Ramps, was.Homes, was.Walls, was.Rocks, was.Climate,
+        (_ground, _under, _ramps, _homes, _walls, _rocks, Climate, Columns, Rows) =
+            (was.Ground, was.Under, was.Ramps, was.Homes, was.Walls, was.Rocks, was.Climate,
              was.Columns, was.Rows);
 
     private readonly List<Snap> _back = new();
@@ -406,7 +435,8 @@ public sealed class MapEdit
             return false;
         Snap was = _back[^1];
         bool same = was.Columns == Columns && was.Rows == Rows
-                    && was.Ground.SequenceEqual(_ground) && was.Ramps.SequenceEqual(_ramps)
+                    && was.Ground.SequenceEqual(_ground) && was.Under.SequenceEqual(_under)
+                    && was.Ramps.SequenceEqual(_ramps)
                     && was.Homes.SequenceEqual(_homes) && was.Walls.Count == _walls.Count
                     && was.Walls.All(kv => _walls.TryGetValue(kv.Key, out Masonry? now)
                                            && now.Say() == kv.Value.Say())
@@ -457,14 +487,16 @@ public sealed class MapEdit
             why = $"({cell.X},{cell.Y}) is off the grid";
             return false;
         }
-        char? letter = MapFile.Letter(floor, over, level, water, cliff);
-        if (letter is not char found)
+        // a letter, and the floor grid's mark where the letter cannot say the
+        // floor - sand under a wood, mud on a hill (MapFile.Encode)
+        if (MapFile.Encode(floor, over, level, water, cliff) is not { } found)
         {
             why = $"the alphabet has no letter for {Say(floor, over, level, water)}"
                   + $" - see MapFile.Alphabet, which is not a cross product";
             return false;
         }
-        _ground[At(cell)] = found;
+        _ground[At(cell)] = found.Letter;
+        _under[At(cell)] = found.Under;
         Sync(cell);
         return true;
     }
@@ -482,6 +514,10 @@ public sealed class MapEdit
     /// </summary>
     private void Sync(Vector2I cell)
     {
+        // a letter that says its own floor takes no mark under it - plain, sand,
+        // water, a rock, a wall, the edge
+        if (Inside(cell) && !MapFile.TakesUnder(LetterAt(cell)))
+            _under[At(cell)] = BoardMap.Plain;
         if (GlyphAt(cell).Wall)
             _walls.TryAdd(cell, new Masonry());
         else
@@ -700,6 +736,7 @@ public sealed class MapEdit
         Name = Name, Paint = Paint, Height = Height, Plinth = Plinth,
         Columns = Columns, Rows = Rows,
         _ground = (char[])_ground.Clone(),
+        _under = (char[])_under.Clone(),
         _ramps = (bool[])_ramps.Clone(),
         _homes = _homes.ToList(),
         _walls = _walls.ToDictionary(kv => kv.Key, kv => kv.Value.Copy()),
@@ -1153,7 +1190,7 @@ public sealed class MapEdit
     /// file keeps no notes (<see cref="MapFile.SaveStamp"/>), so a rock comes
     /// out of one a crag.</summary>
     public readonly record struct Bit(Vector2I Cell, char Letter, bool Ramp, Masonry? Wall,
-                                      RockNote? Rock = null);
+                                      RockNote? Rock = null, char Under = BoardMap.Plain);
 
     /// <summary>
     /// A part of a board lifted off it - the clipboard, a stamp, the selection
@@ -1215,7 +1252,7 @@ public sealed class MapEdit
                 continue;
             bits.Add(new Bit(cell, LetterAt(cell), IsRamp(cell),
                              _walls.TryGetValue(cell, out Masonry? wall) ? wall.Copy() : null,
-                             RockAt(cell)));
+                             RockAt(cell), _under[At(cell)]));
         }
         var homes = new List<Parking>();
         foreach (Lineup.Unit u in Lineup.Of(_homes))
@@ -1282,6 +1319,7 @@ public sealed class MapEdit
                 continue;
             }
             _ground[At(to)] = bit.Letter;
+            _under[At(to)] = bit.Under;
             _ramps[At(to)] = bit.Ramp;
             _walls.Remove(to);
             if (bit.Wall is { } wall && GlyphAt(to).Wall)
@@ -1362,6 +1400,7 @@ public sealed class MapEdit
         lost = _homes.Count - homes.Count;
 
         var ground = Enumerable.Repeat(BoardMap.Plain, columns * rows).ToArray();
+        var under = Enumerable.Repeat(BoardMap.Plain, columns * rows).ToArray();
         var ramps = new bool[columns * rows];
         var walls = new Dictionary<Vector2I, Masonry>();
         var rocks = new Dictionary<Vector2I, RockNote>();
@@ -1373,14 +1412,15 @@ public sealed class MapEdit
             if (!Fits(to))
                 continue;
             ground[to.Y * columns + to.X] = _ground[At(from)];
+            under[to.Y * columns + to.X] = _under[At(from)];
             ramps[to.Y * columns + to.X] = _ramps[At(from)];
             if (_walls.TryGetValue(from, out Masonry? wall))
                 walls[to] = wall;
             if (_rocks.TryGetValue(from, out RockNote? note))
                 rocks[to] = note;
         }
-        (Columns, Rows, _ground, _ramps, _homes, _walls, _rocks) =
-            (columns, rows, ground, ramps, homes, walls, rocks);
+        (Columns, Rows, _ground, _under, _ramps, _homes, _walls, _rocks) =
+            (columns, rows, ground, under, ramps, homes, walls, rocks);
         return true;
     }
 
@@ -1403,7 +1443,7 @@ public sealed class MapEdit
     public static MapEdit Raw(string name, string[] ground, string[] ramps, IReadOnlyList<Parking> homes,
                               IReadOnlyDictionary<Vector2I, Masonry>? walls, string? paint, bool height, int plinth,
                               IReadOnlyDictionary<Vector2I, RockNote>? rocking = null,
-                              RockClimate climate = default)
+                              RockClimate climate = default, string[]? floors = null)
     {
         int rows = ground.Length, columns = rows > 0 ? ground[0].Length : 0;
         if (columns < 1 || ground.Any(row => row.Length != columns))
@@ -1413,6 +1453,7 @@ public sealed class MapEdit
             Name = name, Paint = paint, Height = height, Plinth = plinth,
             Columns = columns, Rows = rows,
             _ground = new char[columns * rows],
+            _under = Enumerable.Repeat(BoardMap.Plain, columns * rows).ToArray(),
             _ramps = new bool[columns * rows],
             _homes = homes.ToList(),
             Climate = climate,
@@ -1425,6 +1466,11 @@ public sealed class MapEdit
                 throw new InvalidOperationException($"{name}: ({q},{r}) is '{letter}', which no map letter is");
             var cell = new Vector2I(q, r);
             edit._ground[edit.At(cell)] = letter;
+            // a mark the draft cannot hold is dropped by Sync, as a stray
+            // masonry entry is: a draft may be wrong, not unwritable
+            if (floors is not null && r < floors.Length && q < floors[r].Length
+                && MapFile.FloorUnder(floors[r][q]) is not null)
+                edit._under[edit.At(cell)] = floors[r][q];
             edit._ramps[edit.At(cell)] = r < ramps.Length && q < ramps[r].Length && ramps[r][q] == 'r';
             if (walls is not null && walls.TryGetValue(cell, out Masonry? wall) && edit.GlyphAt(cell).Wall)
                 edit._walls[cell] = wall.Copy();
@@ -1650,7 +1696,7 @@ public sealed class MapEdit
                                    Plinth,
                                    _walls.ToDictionary(kv => kv.Key,
                                                        kv => kv.Value.Copy()),
-                                   Rocking(), Climate);
+                                   Rocking(), Climate, Floors());
     }
 
     /// <summary>Write the draft to <c>maps/</c> and return the path.
