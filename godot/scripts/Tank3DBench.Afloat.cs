@@ -32,9 +32,16 @@ public sealed partial class Tank3DBench
     /// <summary>Where a hull of <paramref name="model"/> floats on
     /// <paramref name="cell"/>, world Y - or null when it does not: dry land, a
     /// ramp's face, no wading gear.</summary>
-    private float? AfloatY(Vector2I cell, TankModel model, MovementProfile profile)
+    private float? AfloatY(Vector2I cell, TankModel model, MovementProfile profile) =>
+        _amphibious ? SwimY(cell, model, profile) : null;
+
+    /// <summary>Where a hull of <paramref name="model"/> would float on
+    /// <paramref name="cell"/> with the gear, world Y, the gear asked or not -
+    /// or null on dry land or a ramp's face. The ram's preview shows the sink
+    /// from it (<c>Tank3DBench.RamPlan</c>).</summary>
+    private float? SwimY(Vector2I cell, TankModel model, MovementProfile profile)
     {
-        if (_field is null || !_amphibious || !_field.InBounds(cell) || !_field.IsDeep(cell)
+        if (_field is null || !_field.InBounds(cell) || !_field.IsDeep(cell)
             || _field.RampHeading(cell) >= 0)
             return null;
         if (!_decks.TryGetValue(model, out float deck))

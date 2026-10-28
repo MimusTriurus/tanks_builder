@@ -26,8 +26,14 @@ namespace TankSpriteTest;
 /// side to ram from: one the shove is allowed along first, then a way with no
 /// risk, then the fewest steps with the turn.
 ///
-/// Not yet: ramming one's own (the pointer on an own unit takes it), what the
-/// hex behind does to the shoved - a mine, deep water - in the preview.
+/// <b>Into deep water</b> (2026-10-28, GDD states.md «Плывёт», «Утоплен»): the
+/// target's ghost goes off the bank and down on to the water, and then, as the
+/// real ram has it (<see cref="AfloatY"/>), bobs there with the wading gear or
+/// goes on down to the bed without it, dimming into the water's blue - the HUD
+/// says which.
+///
+/// Not yet: ramming one's own (the pointer on an own unit takes it), what a
+/// mine on the hex behind does to the shoved in the preview.
 /// </summary>
 public sealed partial class Tank3DBench
 {
@@ -100,6 +106,7 @@ public sealed partial class Tank3DBench
         ShowRam(plan);
         _judgedNote = plan.Allowed
             ? $"таран {MapAt(plan.Target)} → {MapAt(plan.Push.Legs[^1])}"
+              + (RamIntoDeep(plan) ? _amphibious ? " — поплывёт (ОПВТ)" : " — утонет (нет ОПВТ)" : "")
               + (_ramWaiting is not null ? "" : plan.From != CellHere ? $" с {MapAt(plan.From)}: {plan.Steps} из {_reach?.Budget}" : plan.Steps > 0 ? $": разворот {plan.Steps}" : "")
               + (_ramWaiting is null ? "; ПКМ — таранить" : "")
             : $"таран нельзя: {plan.Why}";
@@ -116,7 +123,7 @@ public sealed partial class Tank3DBench
         bool beside = SideTo(CellHere, target) is not null;
         if (!beside && !_ramMode)
             return null;
-        string key = $"{_reachVersion}|{target}|{o.Heading:F0}|{o.Fate}|{CellHere}|{HullSide()}|{_drove}|{_modelTag}|{_ramMode}";
+        string key = $"{_reachVersion}|{target}|{o.Heading:F0}|{o.Fate}|{CellHere}|{HullSide()}|{_drove}|{_modelTag}|{_ramMode}|{_amphibious}";
         if (key != _ramKey)
         {
             _ramKey = key;
@@ -317,9 +324,9 @@ public sealed partial class Tank3DBench
         return slot;
     }
 
-    private void Pose(RamGhost g, Vector3 at, float heading, float yaw, Color tint, bool firm)
+    private void Pose(RamGhost g, Vector3 at, float heading, float yaw, Color tint, bool firm, float fade = 1.0f)
     {
-        float clear = GhostClear(at);
+        float clear = GhostClear(at) * fade;
         g.Rig.Position = at;
         g.Rig.Rotation = new Vector3(0.0f, Mathf.DegToRad(heading), 0.0f);
         g.Model.Yaw = yaw;
@@ -345,17 +352,69 @@ public sealed partial class Tank3DBench
         // target and stops short against it; the target's stands red on the hex
         // it cannot have.
         _ramPlay = (_ramPlay + (float)GetProcessDeltaTime()) % RamLoop;
-        float k = plan.Allowed ? RamShove(_ramPlay / RamLoop) : RamBump(_ramPlay / RamLoop);
+        float t = _ramPlay / RamLoop;
+        float k = plan.Allowed ? RamShove(t) : RamBump(t);
         Color mine = plan.Allowed ? SelectionRing.Friendly : RamRefused;
         if (RamGhostOf(ref _ramMe, _modelTag, "RamMe") is { } me)
             Pose(me, CellMiddle(plan.From).Lerp(CellMiddle(plan.Target), k), HeadingFor(plan.Target, plan.Side), 0.0f, mine, true);
         Vector2I onto = plan.Allowed ? plan.Push.Legs[^1] : HexField.Step(plan.Target, plan.Side);
         Vector3 them0 = plan.Allowed ? CellMiddle(plan.Target) : CellMiddle(onto);
         if (_field.InBounds(onto) && RamGhostOf(ref _ramThem, o.Tag, "RamThem") is { } them)
-            Pose(them, them0.Lerp(CellMiddle(onto), plan.Allowed ? k : 0.0f), o.Heading, o.Model.Yaw,
-                 plan.Allowed ? SideInk(o.Side) : RamRefused, plan.Allowed);
+        {
+            Vector3 at = them0.Lerp(CellMiddle(onto), plan.Allowed ? k : 0.0f);
+            Color tint = plan.Allowed ? SideInk(o.Side) : RamRefused;
+            float fade = 1.0f;
+            if (plan.Allowed && SwimY(onto, o.Model, o.Profile) is float line)
+            {
+                // under by most of the deck, not to the bed: seen from above, a
+                // hull on the bed slid down the screen on to the target's own
+                // hex and read as thrown back
+                float under = Mathf.Max(BedPx(onto) / RiseFactor, line - RamUnder * _decks[o.Model] / RiseFactor);
+                at.Y = RamPlungeY(t, k, them0.Y, line, under, o.Foot.HalfLen, ref tint, ref fade);
+            }
+            Pose(them, at, o.Heading, o.Model.Yaw, tint, plan.Allowed, fade);
+        }
         else if (_ramThem is not null)
             _ramThem.Rig.Visible = false;
+    }
+
+    /// <summary>The hex the target is thrown on is deep water.</summary>
+    private bool RamIntoDeep(RamPlan plan) =>
+        plan.Allowed && _field is not null && plan.Push.Legs.Count > 0 && _field.InBounds(plan.Push.Legs[^1])
+        && _field.IsDeep(plan.Push.Legs[^1]) && _field.RampHeading(plan.Push.Legs[^1]) < 0;
+
+    /// <summary>The water the drowned ghost dims into - light enough to read
+    /// on the dark pond.</summary>
+    private static readonly Color RamDrowned = new(0.50f, 0.72f, 0.92f);
+
+    /// <summary>How far the drowned ghost goes under its swimming line, of
+    /// its deck's height.</summary>
+    private const float RamUnder = 0.8f;
+
+    /// <summary>
+    /// The thrown ghost's height over a loop when it lands in deep water, world
+    /// Y: on the bank's height while its middle is over the bank, then off it
+    /// and down on to the water <paramref name="line"/> - the fall the real
+    /// ram plays (<c>OtherTick</c>). Then, with the wading gear, a bob on the
+    /// water that dies away; without it, on down to <paramref name="under"/>
+    /// while the ghost dims into the water's blue - drowned (GDD states.md
+    /// «Утоплен»), where it stays the rest of the loop.
+    /// </summary>
+    private float RamPlungeY(float t, float k, float bank, float line, float under, float halfLen,
+                             ref Color tint, ref float fade)
+    {
+        if (k < 0.5f)
+            return bank;
+        float fall = Mathf.Clamp((k - 0.5f) / 0.5f, 0.0f, 1.0f);
+        float y = Mathf.Lerp(bank, line, fall * fall);
+        // after the shove: the loop's beat where it ends
+        float s = Mathf.Clamp((t - 0.55f) / 0.35f, 0.0f, 1.0f);
+        if (_amphibious)
+            return y + 0.08f * halfLen * Mathf.Sin(3.0f * Mathf.Pi * s) * (1.0f - s);
+        float down = Mathf.SmoothStep(0.0f, 1.0f, s);
+        tint = tint.Lerp(RamDrowned, down);
+        fade = 1.0f - 0.3f * down;
+        return Mathf.Lerp(y, Mathf.Min(under, line), down);
     }
 
     private void HideRamGhosts()
