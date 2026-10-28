@@ -121,11 +121,14 @@ public static class Road
     public readonly record struct Axis(Vector2[] Points, float[] Along, RoadType Type);
 
     /// <summary>
-    /// Every road's axis, given each cell's middle in world XZ. A road's end
-    /// cell is crossed straight to its far side, unless it lies on another road:
-    /// a fork leaves its cell by the other road's way in, a road that runs into
-    /// another goes on by the other's way out - the two share that half of the
-    /// hex, as the renders drew it.
+    /// Every road's axis, given each cell's middle in world XZ. A road ends in
+    /// the middle of its last cell - the cell the author picked, not the side
+    /// it faces (the user's call, 2026-10-28): the axis runs from the middle to
+    /// the side it leaves by, and the road's half width rounds it off there.
+    /// An end on another road is the exception: a fork leaves its cell by the
+    /// other road's way in, a road that runs into another goes on by the
+    /// other's way out - the two share that half of the hex, as the renders
+    /// drew it.
     /// </summary>
     public static List<Axis> Axes(IReadOnlyList<RoadPath> roads, Func<Vector2I, Vector2> middle,
                                   float step)
@@ -140,19 +143,30 @@ public static class Road
             var at = new Vector2[n];
             for (int i = 0; i < n; i++)
                 at[i] = middle(cells[i]);
-            Vector2 before = Neighbour(roads, k, cells[0], cells[1], -1) is Vector2I b
-                ? middle(b) : 2.0f * at[0] - at[1];
-            Vector2 after = Neighbour(roads, k, cells[n - 1], cells[n - 2], +1) is Vector2I a
-                ? middle(a) : 2.0f * at[n - 1] - at[n - 2];
+            Vector2? before = Neighbour(roads, k, cells[0], cells[1], -1) is Vector2I b
+                ? middle(b) : null;
+            Vector2? after = Neighbour(roads, k, cells[n - 1], cells[n - 2], +1) is Vector2I a
+                ? middle(a) : null;
             var points = new List<Vector2>();
             for (int i = 0; i < n; i++)
             {
-                Vector2 prev = i == 0 ? before : at[i - 1];
-                Vector2 next = i == n - 1 ? after : at[i + 1];
+                // an open end: the middle of its cell, straight to the side
+                if (i == 0 && before is null)
+                {
+                    Line(points, at[0], (at[0] + at[1]) * 0.5f, step);
+                    continue;
+                }
+                if (i == n - 1 && after is null)
+                {
+                    Line(points, (at[n - 2] + at[n - 1]) * 0.5f, at[n - 1], step);
+                    continue;
+                }
+                Vector2 prev = i == 0 ? before!.Value : at[i - 1];
+                Vector2 next = i == n - 1 ? after!.Value : at[i + 1];
                 Through(points, (prev + at[i]) * 0.5f, (at[i] - prev).Normalized(),
                         (at[i] + next) * 0.5f, (next - at[i]).Normalized(), step);
             }
-            points.Add((at[n - 1] + after) * 0.5f);
+            points.Add(after is Vector2 on ? (at[n - 1] + on) * 0.5f : at[n - 1]);
             var along = new float[points.Count];
             for (int i = 1; i < points.Count; i++)
                 along[i] = along[i - 1] + points[i].DistanceTo(points[i - 1]);
@@ -200,6 +214,15 @@ public static class Road
     /// centre where the two sides' normals cross, so 60 degrees is a gentle
     /// bend and 120 a hairpin round the shared corner (roads.py, through).
     /// </summary>
+    /// <summary>A straight piece from <paramref name="a"/>, short of
+    /// <paramref name="b"/> (the next piece starts there).</summary>
+    private static void Line(List<Vector2> into, Vector2 a, Vector2 b, float step)
+    {
+        int n = Mathf.Max(2, (int)(a.DistanceTo(b) / step));
+        for (int i = 0; i < n; i++)
+            into.Add(a.Lerp(b, (float)i / n));
+    }
+
     private static void Through(List<Vector2> into, Vector2 a, Vector2 da, Vector2 b, Vector2 db,
                                 float step)
     {
