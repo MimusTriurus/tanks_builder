@@ -254,7 +254,12 @@ public sealed partial class MapEditor
                     ("take off the board",
                         () => { _plotBrush = true; _plotOn = false; _water = false; },
                         () => _plotBrush && !_plotOn),
-                };
+                }.Concat(TankSpriteTest.Soil.Looks.Select(l =>
+                    // the looks (format 3): each paints only the floor it is
+                    // for, and says so on any other
+                    ($"look: {l.Name}  ({TankSpriteTest.Soil.FloorOf(l.Letter)!.Value.ToString().ToLowerInvariant()})",
+                     (Action)(() => { _look = l.Letter; _water = false; _plotBrush = false; }),
+                     (Func<bool>)(() => !_water && !_plotBrush && _look == l.Letter)))).ToList();
             case MapEdit.Tab.Cover:
                 var covers = Enum.GetValues<Cover>().Select(over =>
                     (over.ToString().ToLowerInvariant(),
@@ -305,11 +310,12 @@ public sealed partial class MapEditor
         }
     }
 
-    private bool Plain() => !_water && !_plotBrush;
+    private bool Plain() => !_water && !_plotBrush && _look is null;
 
     private void Floor(Foundation want)
     {
         _floor = want;
+        _look = null;
         _water = false;
         _plotBrush = false;
     }
@@ -494,6 +500,8 @@ public sealed partial class MapEditor
             wet => _edit.Water(_picked, wet, out string why) ? "" : why));
         if (glyph.Floor == Foundation.Rock)
             Stone(into);
+        else if (!glyph.Water && TankSpriteTest.Soil.Today(glyph.Floor) != TankSpriteTest.Soil.As)
+            Worn(into, glyph.Floor);
         into.AddChild(Does("take it off the board",
             () => _edit.Plot(_picked, false, out string why) ? "" : why));
 
@@ -541,6 +549,28 @@ public sealed partial class MapEditor
                 () => _edit.Home(_picked, _edit.Homes.Count, out string why)
                     ? "" : why));
         }
+        Board(into);
+    }
+
+    /// <summary>The cell's own look (format 3's <c>soil.cells</c>): "as the
+    /// board" first, which is silence, then the looks of its floor.</summary>
+    private void Worn(VBoxContainer into, Foundation floor)
+    {
+        char[] looks = TankSpriteTest.Soil.Looks.Where(l => TankSpriteTest.Soil.FloorOf(l.Letter) == floor)
+            .Select(l => l.Letter).ToArray();
+        var pick = new OptionButton();
+        pick.AddItem($"as the board ({TankSpriteTest.Soil.Name(_edit.LookAt(_picked))})");
+        foreach (char l in looks)
+            pick.AddItem(TankSpriteTest.Soil.Name(l));
+        char own = _edit.SoilAt(_picked);
+        pick.Selected = own == TankSpriteTest.Soil.As ? 0 : Array.IndexOf(looks, own) + 1;
+        pick.ItemSelected += index =>
+        {
+            if (!_loading)
+                Wrote(() => _edit.Wear(_picked, index == 0 ? TankSpriteTest.Soil.As : looks[(int)index - 1],
+                                       out string why) ? "" : why);
+        };
+        into.AddChild(Field("look", pick));
     }
 
     /// <summary>
@@ -733,11 +763,43 @@ public sealed partial class MapEditor
         if (note.Type == RockType.Mesa && note.Look.Preset == 2 && rock.Count < RockGroup.BenchCells)
             into.AddChild(Note($"preset 2 has a ledge, and a rock under {RockGroup.BenchCells} "
                                + "cells is laid without it"));
+    }
 
-        // The board's, not the rock's - one wind and one ice a board - and here
-        // because the rocks are all that read it until the dunes do (Ф4 of
-        // docs/map-format3-plan.md).
-        into.AddChild(Note("climate, the whole board's: degrees on the ground, 0 along +X"));
+    /// <summary>
+    /// The board group, under every cell's: what is the whole board's and not
+    /// the cell's - the look each floor wears (format 3's <c>soil.base</c>) and
+    /// the climate (docs/map-format3-plan.md, Ф2 and Ф4). "today's" is the
+    /// first entry and it is silence: grass, rippled sand, puddled mud.
+    /// </summary>
+    private void Board(VBoxContainer into)
+    {
+        into.AddChild(Heading("Board"));
+        foreach ((Foundation floor, string key) in TankSpriteTest.Soil.Floors)
+        {
+            Foundation laid = floor;
+            char[] looks = TankSpriteTest.Soil.Looks.Where(l => TankSpriteTest.Soil.FloorOf(l.Letter) == laid)
+                .Select(l => l.Letter).ToArray();
+            var pick = new OptionButton();
+            foreach (char l in looks)
+                pick.AddItem(l == TankSpriteTest.Soil.Today(laid) ? $"{TankSpriteTest.Soil.Name(l)} (today's)"
+                                                                 : TankSpriteTest.Soil.Name(l));
+            pick.Selected = Math.Max(0, Array.IndexOf(looks,
+                _edit.SoilBase.TryGetValue(laid, out char now) ? now : TankSpriteTest.Soil.Today(laid)));
+            pick.ItemSelected += index =>
+            {
+                if (_loading)
+                    return;
+                Wrote(() =>
+                {
+                    _edit.Lay(laid, looks[(int)index]);
+                    return "";
+                });
+            };
+            into.AddChild(Field(key, pick));
+        }
+        // the climate: one wind and one ice a board, the yardangs' and the
+        // dunes' wind and the moutonnees' ice
+        into.AddChild(Note("climate: degrees on the ground, 0 along +X"));
         foreach (bool ice in new[] { false, true })
         {
             bool isIce = ice;

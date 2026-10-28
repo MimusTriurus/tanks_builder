@@ -139,6 +139,9 @@ public sealed partial class Stage3D
         // which rock a point is (Relief.Rock) and its own mask (Relief.RockAux),
         // for the rocks' paint (ReliefRocks, RockPaint)
         var rock = new Vector2[n];
+        // the soil's looks (Relief.Look, format 3): bare earth, stones, dunes,
+        // swamp - CUSTOM0, read by SoilPaint
+        var look = new float[n * 4];
         var index = new int[(nx - 1) * (ny - 1) * 6];
         float[] sand = f.Share[(int)Relief.Kind.Sand],
                 forest = f.Share[(int)Relief.Kind.Forest];
@@ -160,6 +163,8 @@ public sealed partial class Stage3D
                 // and how deep in a hollow it lies, for its shade (Relief.Hollow)
                 levels[p] = new Vector2(f.Levels[p] & 0xFFFFFF, f.Hollow[p]);
                 rock[p] = new Vector2(f.Rock[p], f.RockAux[p]);
+                for (int k = 0; k < 4; k++)
+                    look[p * 4 + k] = f.Look[k][p];
             }
         int t = 0;
         for (int j = 0; j + 1 < ny; j++)
@@ -176,9 +181,12 @@ public sealed partial class Stage3D
         arrays[(int)Mesh.ArrayType.Color] = paint;
         arrays[(int)Mesh.ArrayType.TexUV2] = levels;
         arrays[(int)Mesh.ArrayType.TexUV] = rock;
+        arrays[(int)Mesh.ArrayType.Custom0] = look;
         arrays[(int)Mesh.ArrayType.Index] = index;
         var mesh = new ArrayMesh();
-        mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
+        mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays, null, null,
+            (Mesh.ArrayFormat)((long)Mesh.ArrayCustomFormat.RgbaFloat
+                               << (int)Mesh.ArrayFormat.FormatCustom0Shift));
         _tops.Mesh = mesh;
         _sides.Mesh = null;
         _edges.Mesh = null;
@@ -186,6 +194,7 @@ public sealed partial class Stage3D
         _tops.MaterialOverride = ReliefTurf(f, art);
         _glaze.MaterialOverride = null;
         BuildFrame(f);
+        Reeds(f);
     }
 
     /// <summary>The board's frame (<see cref="Relief.Frame"/>); null until
@@ -427,6 +436,8 @@ void fragment() {
         ink.Param("brow_px", BrowPx);
         ink.Param("hollow_ink", Relief.HollowInk);
         ink.Param("rock_tab", RockTable(f));
+        float wind = Mathf.DegToRad(SoilWind);
+        ink.Param("soil_wind", new Vector2(Mathf.Cos(wind), Mathf.Sin(wind)));
         if (Lawn() is { } lawn)
         {
             ink.Param("lawn_tex", lawn);
@@ -711,7 +722,8 @@ void fragment() {
                      + "    ground_levels = int(UV2.x + 0.5);\n"
                      + "    ground_hollow = UV2.y;\n"
                      + "    rock_id = int(round(UV.x));\n"
-                     + "    rock_aux = UV.y;")
+                     + "    rock_aux = UV.y;\n"
+                     + "    soil_look = CUSTOM0;")
             .Replace("    vec4 paint = texture(art, UV) * COLOR;", ReliefPaint)
             .Replace("    ALBEDO = lit;", ReliefGrid),
     };
@@ -797,13 +809,15 @@ vec4 cell_ink(vec2 cr) {
         return vec4(1.0, 1.0, 1.0, 1.0);
     return texelFetch(cells, c, 0);
 }
-" + RockPaint;
+" + RockPaint + SoilPaint;
 
     private const string ReliefPaint = @"    vec2 tuv = art_rect.xy + tri(ground.xz * art_tile) * art_rect.zw;
     vec3 soil = texture(art, tuv).rgb;
     float grain = dot(soil, vec3(0.299, 0.587, 0.114));
     // the kinds, each its own colour carrying the art's grain
     soil = mix(soil, sand_ink * (0.6 + 0.6 * grain), smoothstep(0.25, 0.6, COLOR.r));
+    // the soil's looks over the kinds (Stage3D.Soil, format 3)
+    soil = soil_look_at(soil, grain);
     // rock: the tight share (Relief.Cliff), cut where the wall stands; a rock
     // with a type of its own paints itself (RockPaint), a crag as it always was
     if (rock_id >= 0 && texelFetch(rock_tab, ivec2(9, rock_id), 0).x > 0.5) {
@@ -819,7 +833,8 @@ vec4 cell_ink(vec2 cr) {
     float patch_ = mire_fbm(ground.xz * 0.018 + vec2(7.0, 3.0));
     // none on a terrace's slope: grass on the flats, earth on the banks
     // (the tufts keep off them too, BoardDress.GrassSlope)
-    float flat_ = (1.0 - bare) * (1.0 - COLOR.a) * (1.0 - smoothstep(0.2, 0.32, bank));
+    float flat_ = (1.0 - bare) * (1.0 - COLOR.a) * (1.0 - smoothstep(0.2, 0.32, bank))
+                * (1.0 - smoothstep(0.2, 0.6, soil_look.x + soil_look.y + soil_look.w));
     float lawn = flat_ * smoothstep(0.30, 0.42, patch_ + 0.25);
     vec3 turf = mix(grass_ink, grass_tip, smoothstep(0.35, 0.75, mire_fbm(ground.xz * 0.05)));
     if (turf_on < 0.5) {
@@ -875,7 +890,10 @@ vec4 cell_ink(vec2 cr) {
         // wall: a neighbour's brow ran on across the rock's face
         float brow = (1.0 - smoothstep(bw, bw + fwidth(t), off)) * brow_on * near
                      * (1.0 - COLOR.a) * (1.0 - smoothstep(0.1, 0.22, COLOR.g))
-                     * (1.0 - smoothstep(0.82, 0.9, length(normalize(ground_n).xz)));
+                     * (1.0 - smoothstep(0.82, 0.9, length(normalize(ground_n).xz)))
+                     // nor across the dunes: their crests cross a level's
+                     // line with no terrace there (Relief.Dunes)
+                     * (1.0 - smoothstep(0.1, 0.3, soil_look.z));
         lit = mix(lit, brow_ink, brow * brow_opacity);
     }
     ALBEDO = lit;";

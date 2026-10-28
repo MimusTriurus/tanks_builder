@@ -53,7 +53,8 @@ public sealed partial class BoardMap
                             ring.Spread(Ramps, false), water, ring.Spread(Kinds, null),
                             ring.Spread(Cliffs, false), ring.Spread(Walls, false), ground,
                             ring.Spread(Over, Cover.None), ring.Plot, Paint, Height, Plinth,
-                            walling, rocking, Climate)
+                            walling, rocking, Climate, SoilBase,
+                            SoilCells is null ? null : ring.Spread(SoilCells, Soil.As))
         {
             Sea = ring.Sea,
             Shift = ring.Shift,

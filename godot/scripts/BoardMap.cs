@@ -327,6 +327,28 @@ public sealed partial class BoardMap
     /// the yardangs and the moutonnees lie by.</summary>
     public RockClimate Climate { get; }
 
+    /// <summary>The board's look for each floor (format 3's <c>soil.base</c>,
+    /// <see cref="Soil"/>): only the floors it named.</summary>
+    public IReadOnlyDictionary<Foundation, char> SoilBase { get; }
+
+    /// <summary>Each cell's own look (<c>soil.cells</c>), one a cell with
+    /// <see cref="Soil.As"/> where it said nothing; null when no cell did.</summary>
+    public char[]? SoilCells { get; }
+
+    /// <summary>The look every cell wears, the three layers resolved
+    /// (<see cref="Soil.Resolve"/>) - what <see cref="HexField.SetSoil"/> is
+    /// handed. Null when the board draws nothing apart from today's ground,
+    /// unless <paramref name="always"/>.</summary>
+    public char[]? Looks(bool always = false)
+    {
+        if (!always && SoilBase.Count == 0 && SoilCells is null)
+            return null;
+        var looks = new char[Columns * Rows];
+        for (int at = 0; at < looks.Length; at++)
+            looks[at] = Soil.Resolve(SoilCells?[at] ?? Soil.As, Ground[at], Water[at], SoilBase);
+        return looks;
+    }
+
     /// <summary>
     /// The board's rocks: the rock cells joined by their sides, each group in
     /// reading order of its first cell and its cells in the order they were
@@ -369,10 +391,14 @@ public sealed partial class BoardMap
                      string paint, bool height, int plinth = 0,
                      IReadOnlyDictionary<Vector2I, Masonry>? walling = null,
                      IReadOnlyDictionary<Vector2I, RockNote>? rocking = null,
-                     RockClimate climate = default)
+                     RockClimate climate = default,
+                     IReadOnlyDictionary<Foundation, char>? soilBase = null,
+                     char[]? soilCells = null)
     {
         Rocking = rocking ?? new Dictionary<Vector2I, RockNote>();
         Climate = climate;
+        SoilBase = soilBase ?? new Dictionary<Foundation, char>();
+        SoilCells = soilCells;
         Name = name;
         Columns = columns;
         Rows = rows;
@@ -667,7 +693,9 @@ public sealed partial class BoardMap
                                         IReadOnlyDictionary<Vector2I, RockNote>?
                                             rocking = null,
                                         RockClimate climate = default,
-                                        string[]? under = null)
+                                        string[]? under = null,
+                                        IReadOnlyDictionary<Foundation, char>? soilBase = null,
+                                        string[]? soilCells = null)
     {
         MustCrew(name, homes);
         int rows = ground.Length;
@@ -826,6 +854,38 @@ public sealed partial class BoardMap
                 wrong.Add($"the masonry at ({cell.X},{cell.Y}) is on a cell "
                           + "carrying no wall");
 
+        // A look on a floor it is not for - dunes on grass - is a look that
+        // quietly did nothing (Soil; the floor is the floor grid's too, so it
+        // is read after it)
+        char[]? looks = null;
+        if (soilBase is not null)
+            foreach ((Foundation laid, char look) in soilBase)
+                if (Soil.FloorOf(look) != laid)
+                    wrong.Add($"the soil's base lays '{look}' on {laid.ToString().ToLowerInvariant()}, "
+                              + "which is no look of that floor");
+        if (soilCells is not null)
+        {
+            char[,] ss = Read(name + " soil", soilCells, columns, rows);
+            looks = new char[columns * rows];
+            for (int r = 0; r < rows; r++)
+            for (int q = 0; q < columns; q++)
+            {
+                char look = ss[q, r];
+                looks[r * columns + q] = look;
+                if (look == Soil.As)
+                    continue;
+                Foundation lies = floor[r * columns + q];
+                if (Soil.FloorOf(look) is not Foundation wants)
+                    wrong.Add($"({q},{r}) has '{look}' in the soil grid, which is no look");
+                else if (g[q, r] == Off || water[r * columns + q] || wants != lies)
+                    wrong.Add($"({q},{r}) wears {Soil.Name(look)}, a look of "
+                              + $"{wants.ToString().ToLowerInvariant()}, and is "
+                              + (g[q, r] == Off ? "off the board"
+                                 : water[r * columns + q] ? "under water"
+                                 : lies.ToString().ToLowerInvariant()));
+            }
+        }
+
         // A rock's note off a rock, or two on one rock, are the same
         // disagreement: a look that quietly did nothing, or one that quietly
         // lost to the other.
@@ -862,7 +922,7 @@ public sealed partial class BoardMap
         return Sealed(new BoardMap(name, columns, rows, homes, levels, ramped,
                                    water, kinds, cliffs, walls, floor, over,
                                    plot, paint, height, plinth, walling,
-                                   rocking, climate));
+                                   rocking, climate, soilBase, looks));
     }
 
     /// <summary>

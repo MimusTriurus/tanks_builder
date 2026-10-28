@@ -1665,6 +1665,25 @@ public sealed partial class HexField : Node2D
         Rewet();
     }
 
+    /// <summary>The look each cell's ground wears (<see cref="Soil"/>,
+    /// resolved), or null for today's ground everywhere.</summary>
+    private char[]? _soil;
+
+    /// <summary>
+    /// Dress the ground (format 3's soil, docs/map-format3-plan.md Ф4): one
+    /// look a cell, resolved (<see cref="BoardMap.Looks"/>), null for today's.
+    /// Look only - no rule asks it; the relief, the grass and the stage do.
+    /// </summary>
+    public void SetSoil(char[]? looks) =>
+        _soil = looks is not null && looks.Length == Columns * Rows ? looks : null;
+
+    /// <summary>The look a cell's ground wears: <see cref="Soil.Today"/>'s
+    /// for its floor when the board dressed nothing.</summary>
+    public char SoilAt(Vector2I cell) =>
+        !InBounds(cell) ? Soil.As
+        : _soil is not null ? _soil[cell.Y * Columns + cell.X]
+        : IsWater(cell) ? Soil.As : Soil.Today(FoundationAt(cell));
+
     /// <summary>
     /// Put the cover on. One entry per cell; the states are optional and default
     /// to <see cref="CoverState.Intact"/>.

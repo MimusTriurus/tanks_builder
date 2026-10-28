@@ -86,6 +86,10 @@ public sealed partial class MapEditor : SceneRoot
     private Cover _cover = Cover.Forest;
     private bool _water;
     private bool _plotBrush;
+    /// <summary>The Floor tab's look brush (<see cref="Soil"/>, format 3), or
+    /// null for the floor brushes: it paints the look a floor wears and never
+    /// the floor.</summary>
+    private char? _look;
 
     /// <summary>Which way the board's-edge brush writes: a cell on to the plot
     /// or off it. Two statements rather than one toggle, because "empty" and
@@ -509,6 +513,7 @@ public sealed partial class MapEditor : SceneRoot
         BoardProbe();
         RockProbe();
         FloorProbe();
+        SoilProbe();
         ToolsProbe();
         AutosaveTick(delta);
         CrownsFollow();
@@ -919,6 +924,8 @@ public sealed partial class MapEditor : SceneRoot
         _field.SetWater(null);
         _field.SetGround(draft.Ground);
         _field.SetWater(water.Any(w => w) ? water : null);
+        // the ground's looks (format 3's soil), after the floor they lie on
+        _field.SetSoil(_edit.Looks());
         string?[] kinds = Kinds(draft);
         _field.SetKinds(kinds);
         _field.Paint = _edit.Paint ?? MapFile.PaintFor(_edit.Ground());
@@ -1587,6 +1594,7 @@ public sealed partial class MapEditor : SceneRoot
             MapEdit.Tab.Foundation =>
                 _plotBrush ? _edit.Plot(cell, _plotOn, out why)
                 : _water ? _edit.Water(cell, true, out why)
+                : _look is char look ? _edit.Wear(cell, look, out why)
                 : _edit.Floor(cell, _floor, out why),
             MapEdit.Tab.Cover => _bunker ? Bunker(cell, out why) : _edit.Over(cell, _cover, out why),
             MapEdit.Tab.Units => _edit.Unit(cell, _unitSide, _unitClass, out why),
@@ -1810,6 +1818,9 @@ public sealed partial class MapEditor : SceneRoot
               // the rock's look, as the panel names it (MapEditor.Panels.Stone)
               + (glyph.Floor == Foundation.Rock && _edit.RockAt(_under) is { } rock
                   ? $", {RockNote.Say(rock.Look.Type)} / {rock.Look.Palette.Name}" : "")
+              // the soil's look, when it is not today's (format 3)
+              + (TankSpriteTest.Soil.Drawn(_edit.LookAt(_under))
+                  ? $", {TankSpriteTest.Soil.Name(_edit.LookAt(_under))}" : "")
               + (glyph.Over == Cover.None
                   ? "" : "/" + glyph.Over.ToString().ToLowerInvariant())
               + $" level {glyph.Level}"
@@ -1841,7 +1852,9 @@ public sealed partial class MapEditor : SceneRoot
         MapEdit.Tab.Presets => Preset is { } p ? $"preset: {p.Name} - {p.Say}" : "preset: none",
         MapEdit.Tab.Foundation =>
             "floor: " + (_plotBrush ? (_plotOn ? "on the board" : "off the board")
-                : _water ? "water" : _floor.ToString().ToLowerInvariant()),
+                : _water ? "water"
+                : _look is char look ? "look " + TankSpriteTest.Soil.Name(look)
+                : _floor.ToString().ToLowerInvariant()),
         MapEdit.Tab.Cover => _bunker ? $"cover: bunker, slit {_facing}"
                                      : "cover: " + _cover.ToString().ToLowerInvariant(),
         MapEdit.Tab.Units => $"unit: {_unitSide} {_unitClass}",

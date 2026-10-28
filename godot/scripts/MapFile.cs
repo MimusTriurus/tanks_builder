@@ -196,7 +196,33 @@ public static class MapFile
                                    file.Height ?? true, file.Plinth ?? 0,
                                    Walling(file.Walls, name),
                                    Rocking(file.Rocks, name), Climate(file.Climate, name),
-                                   file.Floor);
+                                   file.Floor, SoilBase(file.Soil, name), file.Soil?.Cells);
+    }
+
+    /// <summary>
+    /// The soil block's <c>base</c> (format 3, Ф4): a look a floor, by the
+    /// floor's key. That a look lies on its floor is the map's to judge
+    /// (<see cref="BoardMap.FromGround"/>); here a key or a letter that is no
+    /// word at all is refused.
+    /// </summary>
+    private static IReadOnlyDictionary<Foundation, char>? SoilBase(SoilShape? said, string name)
+    {
+        if (said?.Base is not { Count: > 0 } laid)
+            return null;
+        var looks = new Dictionary<Foundation, char>();
+        foreach ((string key, string look) in laid)
+        {
+            int k = Array.FindIndex(Soil.Floors, f => f.Key == key);
+            if (k < 0)
+                throw new InvalidOperationException(
+                    $"{name}: the soil's base names \"{key}\", and its floors are "
+                    + string.Join(", ", Soil.Floors.Select(f => f.Key)));
+            if (look.Length != 1)
+                throw new InvalidOperationException(
+                    $"{name}: the soil's base lays \"{look}\" on {key}, and a look is one letter");
+            looks[Soil.Floors[k].Floor] = look[0];
+        }
+        return looks;
     }
 
     /// <summary>
@@ -318,7 +344,7 @@ public static class MapFile
         yield return ("floor", file.Floor is not null, true);
         yield return ("climate", file.Climate is not null, true);
         yield return ("rocks", file.Rocks is not null, true);
-        yield return ("soil", file.Soil is not null, false);
+        yield return ("soil", file.Soil is not null, true);
         yield return ("roads", file.Roads is not null, false);
         yield return ("wood", file.Wood is not null, false);
         yield return ("trees", file.Trees is not null, false);
@@ -878,7 +904,8 @@ public static class MapFile
                 said.Select(c => "    " + Line(c, map.Walling[c]))));
             text.Append("\n  ]");
         }
-        Look(text, map.Rocking, map.Climate);
+        Look(text, map.Rocking, map.Climate, map.SoilBase,
+             map.SoilCells is { } cells ? Rows(cells, map.Columns, map.Rows) : null);
         text.Append("\n}\n");
         return text.ToString();
     }
@@ -889,7 +916,44 @@ public static class MapFile
     /// writes as it did in format 2, bar the number.
     /// </summary>
     private static void Look(StringBuilder text, IReadOnlyDictionary<Vector2I, RockNote> rocking,
-                             RockClimate climate)
+                             RockClimate climate, IReadOnlyDictionary<Foundation, char> soilBase,
+                             string[]? soilCells)
+    {
+        Soiled(text, soilBase, soilCells);
+        Rocked(text, rocking, climate);
+    }
+
+    /// <summary>A board's grid of one char a cell as rows, or null when every
+    /// cell is <see cref="Soil.As"/>.</summary>
+    public static string[]? Rows(char[] cells, int columns, int rows)
+    {
+        if (Array.TrueForAll(cells, c => c == Soil.As))
+            return null;
+        var said = new string[rows];
+        for (int r = 0; r < rows; r++)
+            said[r] = new string(cells, r * columns, columns);
+        return said;
+    }
+
+    /// <summary>The soil block: the base on one line, the cells as a grid.</summary>
+    private static void Soiled(StringBuilder text, IReadOnlyDictionary<Foundation, char> laid,
+                               string[]? cells)
+    {
+        if (laid.Count == 0 && cells is null)
+            return;
+        var parts = new List<string>();
+        if (laid.Count > 0)
+            parts.Add("    \"base\": { " + string.Join(", ", Soil.Floors
+                .Where(f => laid.ContainsKey(f.Floor))
+                .Select(f => $"\"{f.Key}\": \"{laid[f.Floor]}\"")) + " }");
+        if (cells is not null)
+            parts.Add("    \"cells\": [\n"
+                      + string.Join(",\n", cells.Select(r => "      " + Quote(r))) + "\n    ]");
+        text.Append(",\n\n  \"soil\": {\n" + string.Join(",\n", parts) + "\n  }");
+    }
+
+    private static void Rocked(StringBuilder text, IReadOnlyDictionary<Vector2I, RockNote> rocking,
+                               RockClimate climate)
     {
         if (!climate.Plain)
         {
@@ -1051,7 +1115,7 @@ public static class MapFile
             text.Append(",\n\n  \"walls\": [\n"
                         + string.Join(",\n", said.Select(c => "    " + Line(c, edit.MasonryAt(c)!)))
                         + "\n  ]");
-        Look(text, edit.Rocking(), edit.Climate);
+        Look(text, edit.Rocking(), edit.Climate, edit.SoilBase, edit.SoilRows());
         text.Append("\n}\n");
         return text.ToString();
     }
@@ -1077,7 +1141,8 @@ public static class MapFile
                            file.Ramps ?? Array.Empty<string>(), Parkings(file.Homes, name),
                            Walling(file.Walls, name), file.Paint is { Length: > 0 } p ? p : null,
                            file.Height ?? true, file.Plinth ?? 0,
-                           Rocking(file.Rocks, name), Climate(file.Climate, name), file.Floor);
+                           Rocking(file.Rocks, name), Climate(file.Climate, name), file.Floor,
+                           SoilBase(file.Soil, name), file.Soil?.Cells);
     }
 
     // --- stamps ----------------------------------------------------------------
@@ -1184,9 +1249,9 @@ public static class MapFile
         Unread(file, "stamp " + name);
         // a piece carries cells, not a board's look: a note in one would be
         // read and dropped
-        if (file.Rocks is not null || file.Climate is not null)
+        if (file.Rocks is not null || file.Climate is not null || file.Soil is not null)
             throw new InvalidOperationException(
-                $"stamp {name}: a stamp carries no rocks or climate block");
+                $"stamp {name}: a stamp carries no rocks, climate or soil block");
         string[] ramps = file.Ramps ?? Array.Empty<string>();
         IReadOnlyDictionary<Vector2I, Masonry> walling =
             Walling(file.Walls, "stamp " + name) ?? new Dictionary<Vector2I, Masonry>();
@@ -1238,7 +1303,7 @@ public static class MapFile
         [JsonPropertyName("floor")] public string[]? Floor { get; set; }
         [JsonPropertyName("climate")] public ClimateShape? Climate { get; set; }
         [JsonPropertyName("rocks")] public RockShape[]? Rocks { get; set; }
-        [JsonPropertyName("soil")] public JsonElement? Soil { get; set; }
+        [JsonPropertyName("soil")] public SoilShape? Soil { get; set; }
         [JsonPropertyName("roads")] public JsonElement? Roads { get; set; }
         [JsonPropertyName("wood")] public JsonElement? Wood { get; set; }
         [JsonPropertyName("trees")] public JsonElement? Trees { get; set; }
@@ -1251,6 +1316,12 @@ public static class MapFile
         [JsonPropertyName("palette")] public string? Palette { get; set; }
         [JsonPropertyName("preset")] public int? Preset { get; set; }
         [JsonPropertyName("seed")] public int? Seed { get; set; }
+    }
+
+    private sealed class SoilShape
+    {
+        [JsonPropertyName("base")] public Dictionary<string, string>? Base { get; set; }
+        [JsonPropertyName("cells")] public string[]? Cells { get; set; }
     }
 
     private sealed class ClimateShape

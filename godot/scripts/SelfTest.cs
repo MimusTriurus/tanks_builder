@@ -21858,6 +21858,38 @@ public static class SelfTest
                     "a mark under sand was read");
             }
 
+            // The soil's looks (Ф4): soiltest's base and cells read and resolve
+            // - sand to dunes by the base, mud to swamp by the cell - write back
+            // letter for letter through both writers, and a look on a floor it
+            // is not for is refused.
+            if (MapFile.Has("soiltest"))
+            {
+                string soilText = System.IO.File.ReadAllText(MapFile.PathOf("soiltest"))
+                    .Replace("\r\n", "\n");
+                BoardMap soiled = MapFile.Load("soiltest");
+                char[] looks = soiled.Looks()!;
+                char LookAt(int q, int r) => looks[r * soiled.Columns + q];
+                Check("soiltest's sand wears the base's dunes, its marked mud a swamp",
+                    LookAt(2, 1) == Soil.Dunes && LookAt(1, 3) == Soil.Ripple
+                    && LookAt(8, 1) == Soil.Swamp && LookAt(8, 3) == Soil.Puddles
+                    && LookAt(5, 7) == Soil.Stony && LookAt(0, 0) == Soil.Grass,
+                    $"(2,1) {LookAt(2, 1)}, (8,1) {LookAt(8, 1)}, (5,7) {LookAt(5, 7)}");
+                Check("and writes back letter for letter",
+                    MapFile.Write(soiled) == soilText, "the map's writer moved soiltest");
+                Check("and so does the editor's draft of it",
+                    MapFile.Write(MapEdit.Of(soiled).Build()) == soilText,
+                    "the editor's round trip moved soiltest");
+                Check("a look on a floor it is not for is refused",
+                    Refusal(soilText.Replace("      \"............\",\n      \"........bbb.\"",
+                                             "      \"n...........\",\n      \"........bbb.\""), "soiltest")
+                        .Contains("a look of sand"),
+                    "dunes on grass were read");
+                Check("and so is a base look on the wrong floor",
+                    Refusal(soilText.Replace("\"sand\": \"n\"", "\"sand\": \"b\""), "soiltest")
+                        .Contains("no look of that floor"),
+                    "a swamp laid on the sand was read");
+            }
+
             Vector2I stray = BoardMap.Test.Homes[0];
             Check("and so is a stray field on a home",
                 Refusal(good.Replace($"[{stray.X}, {stray.Y}]",

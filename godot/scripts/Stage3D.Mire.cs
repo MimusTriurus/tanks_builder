@@ -58,7 +58,7 @@ public sealed partial class Stage3D
             Vector3 top = CellTop(cell);
             loX = Mathf.Min(loX, top.X - circum); hiX = Mathf.Max(hiX, top.X + circum);
             loZ = Mathf.Min(loZ, top.Z - circum); hiZ = Mathf.Max(hiZ, top.Z + circum);
-            any |= Field.FoundationAt(cell) == Foundation.Mud;
+            any |= Puddled(cell);
         }
         // The sides are left out on purpose: a wall's face is one line in XZ,
         // so a cliff next to a mud cell would come out mud from top to foot.
@@ -78,7 +78,7 @@ public sealed partial class Stage3D
         for (int r = 0; r < Field.Rows; r++)
         {
             var cell = new Vector2I(q, r);
-            if (Field.InBounds(cell) && Field.FoundationAt(cell) == Foundation.Mud)
+            if (Field.InBounds(cell) && Puddled(cell))
                 mud.Add(cell);
         }
         foreach (Vector2I cell in mud)
@@ -99,6 +99,11 @@ public sealed partial class Stage3D
         MireTell("mire_map", frame);
         MireTell("mire_ink", 1.0f);
     }
+
+    /// <summary>Whether a cell's mud wears the puddles: mud, and not a swamp,
+    /// which paints itself (Soil, format 3).</summary>
+    private bool Puddled(Vector2I cell) =>
+        Field.FoundationAt(cell) == Foundation.Mud && Field.SoilAt(cell) != TankSpriteTest.Soil.Swamp;
 
     /// <summary><see cref="Tell"/> for the tops and the glaze and not the
     /// sides - see <see cref="Mire"/>. The glaze has to hear everything the

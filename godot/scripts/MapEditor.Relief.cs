@@ -69,11 +69,14 @@ public sealed partial class MapEditor
         // docs/rocks-plan.md С5): a note is a new relief, as a level is
         var rocking = _edit.Rocking().ToDictionary(kv => kv.Key + ring.Shift, kv => kv.Value);
         RockStyles? rocks = RockStyles.Of(rocking, _edit.Climate);
+        // the soil's looks on the ring's cells, the sea wearing none
+        char[]? looks = _edit.Looks() is { } own ? ring.Spread(own, TankSpriteTest.Soil.As) : null;
         string want = $"{ring.Columns}x{ring.Rows}:{paint}:"
                       + string.Join(",", levels) + "|" + string.Concat(wet.Select(w => w ? '1' : '0'))
                       + "|" + string.Concat(ground.Select(g => (char)('a' + (int)g)))
                       + "|" + string.Join(",", painted.Select(k => k ?? "")) + "|"
                       + string.Concat(covered.Select(c => (char)('a' + (int)c)))
+                      + "|" + (looks is null ? "" : new string(looks))
                       + "|" + _edit.Climate + "|"
                       + string.Join(";", rocking.OrderBy(kv => kv.Key.Y).ThenBy(kv => kv.Key.X)
                                                 .Select(kv => $"{kv.Key}{kv.Value}"));
@@ -97,6 +100,7 @@ public sealed partial class MapEditor
             _board.SetGround(ground);
             _board.SetCover(covered);
             _board.SetWater(wet);
+            _board.SetSoil(looks);
         }
         catch (InvalidOperationException e)
         {
@@ -113,6 +117,7 @@ public sealed partial class MapEditor
         if (_stage is not null)
         {
             _stage.RockIce = _edit.Climate.Ice;
+            _stage.SoilWind = _edit.Climate.Wind;
             _stage.Origin = -offset;
             _stage.Relief = relief;
             // the ring and its frame from the middle, along the camera's

@@ -72,6 +72,18 @@ public sealed class MapEdit
     /// </summary>
     private char[] _under = Array.Empty<char>();
 
+    /// <summary>
+    /// Format 3's soil (docs/map-format3-plan.md, Ф4): each cell's own look,
+    /// <see cref="Soil.As"/> where it says nothing, and the board's look for
+    /// each floor beside it (<see cref="SoilBase"/>). Look only; a look on a
+    /// floor it is not for is dropped by <see cref="Sync"/>, as the masonry is
+    /// off a cell that stopped being a wall.
+    /// </summary>
+    private char[] _soil = Array.Empty<char>();
+
+    /// <summary>The board's look for each floor it names (<c>soil.base</c>).</summary>
+    public Dictionary<Foundation, char> SoilBase { get; private set; } = new();
+
     private bool[] _ramps = Array.Empty<bool>();
     private List<Parking> _homes = new();
 
@@ -152,6 +164,7 @@ public sealed class MapEdit
             Plinth = 1,
             _ground = Enumerable.Repeat(BoardMap.Plain, columns * rows).ToArray(),
             _under = Enumerable.Repeat(BoardMap.Plain, columns * rows).ToArray(),
+            _soil = Enumerable.Repeat(Soil.As, columns * rows).ToArray(),
             _ramps = new bool[columns * rows],
         };
         // One home, in the middle. A board with none is refused on the way out -
@@ -199,6 +212,9 @@ public sealed class MapEdit
             Rows = map.Rows,
             _ground = new char[map.Columns * map.Rows],
             _under = Enumerable.Repeat(BoardMap.Plain, map.Columns * map.Rows).ToArray(),
+            _soil = map.SoilCells is { } looks ? (char[])looks.Clone()
+                : Enumerable.Repeat(Soil.As, map.Columns * map.Rows).ToArray(),
+            SoilBase = new Dictionary<Foundation, char>(map.SoilBase),
             _ramps = (bool[])map.Ramps.Clone(),
             _homes = map.Parked.ToList(),
             // Copied rather than referenced: the board a draft was opened from
@@ -365,6 +381,68 @@ public sealed class MapEdit
         return rows;
     }
 
+    /// <summary>The soil grid as the file writes it, or null when no cell
+    /// has a look of its own.</summary>
+    public string[]? SoilRows() => MapFile.Rows(_soil, Columns, Rows);
+
+    /// <summary>A cell's own look, <see cref="Soil.As"/> when it has none.</summary>
+    public char SoilAt(Vector2I cell) => Inside(cell) ? _soil[At(cell)] : Soil.As;
+
+    /// <summary>The look the cell wears, the three layers resolved
+    /// (<see cref="Soil.Resolve"/>).</summary>
+    public char LookAt(Vector2I cell)
+    {
+        MapFile.Glyph g = GlyphAt(cell);
+        return Soil.Resolve(SoilAt(cell), g.Floor, g.Water, SoilBase);
+    }
+
+    /// <summary>Every cell's look, resolved - <see cref="HexField.SetSoil"/>'s
+    /// array; null when the board draws nothing apart from today's ground.</summary>
+    public char[]? Looks()
+    {
+        if (SoilBase.Count == 0 && _soil.All(c => c == Soil.As))
+            return null;
+        var looks = new char[Columns * Rows];
+        for (int r = 0; r < Rows; r++)
+            for (int q = 0; q < Columns; q++)
+                looks[r * Columns + q] = LookAt(new Vector2I(q, r));
+        return looks;
+    }
+
+    /// <summary>
+    /// Give a cell a look of its own, or none (<see cref="Soil.As"/>, the
+    /// eraser's). A look not of the cell's floor is refused and named - dunes
+    /// want sand - rather than written to be dropped.
+    /// </summary>
+    public bool Wear(Vector2I cell, char look, out string why)
+    {
+        why = "";
+        if (!OnBoard(cell))
+        {
+            why = $"({cell.X},{cell.Y}) is off the board";
+            return false;
+        }
+        MapFile.Glyph g = GlyphAt(cell);
+        if (look != Soil.As && (g.Water || Soil.FloorOf(look) != g.Floor))
+        {
+            why = $"{Soil.Name(look)} is a look of {Soil.FloorOf(look)?.ToString().ToLowerInvariant()}, "
+                  + $"and ({cell.X},{cell.Y}) is " + (g.Water ? "water" : g.Floor.ToString().ToLowerInvariant());
+            return false;
+        }
+        _soil[At(cell)] = look;
+        return true;
+    }
+
+    /// <summary>The board's look for a floor, or none to take it back to
+    /// today's.</summary>
+    public void Lay(Foundation floor, char? look)
+    {
+        if (look is char l && Soil.FloorOf(l) == floor && l != Soil.Today(floor))
+            SoilBase[floor] = l;
+        else
+            SoilBase.Remove(floor);
+    }
+
     public string[] Ramps()
     {
         var rows = new string[Rows];
@@ -382,7 +460,8 @@ public sealed class MapEdit
     /// <remarks>The size is in it since the board could be resized
     /// (<see cref="Reframe"/>): a stroke's grids are only read at the size
     /// they were taken at.</remarks>
-    private readonly record struct Snap(char[] Ground, char[] Under, bool[] Ramps,
+    private readonly record struct Snap(char[] Ground, char[] Under, char[] Soil,
+                                        Dictionary<Foundation, char> SoilBase, bool[] Ramps,
                                         List<Parking> Homes,
                                         Dictionary<Vector2I, Masonry> Walls,
                                         Dictionary<Vector2I, RockNote> Rocks,
@@ -390,6 +469,7 @@ public sealed class MapEdit
                                         int Columns, int Rows);
 
     private Snap Taken() => new((char[])_ground.Clone(), (char[])_under.Clone(),
+                                (char[])_soil.Clone(), new Dictionary<Foundation, char>(SoilBase),
                                 (bool[])_ramps.Clone(), _homes.ToList(),
                                 _walls.ToDictionary(kv => kv.Key,
                                                     kv => kv.Value.Copy()),
@@ -397,8 +477,8 @@ public sealed class MapEdit
                                 Columns, Rows);
 
     private void Restore(Snap was) =>
-        (_ground, _under, _ramps, _homes, _walls, _rocks, Climate, Columns, Rows) =
-            (was.Ground, was.Under, was.Ramps, was.Homes, was.Walls, was.Rocks, was.Climate,
+        (_ground, _under, _soil, SoilBase, _ramps, _homes, _walls, _rocks, Climate, Columns, Rows) =
+            (was.Ground, was.Under, was.Soil, was.SoilBase, was.Ramps, was.Homes, was.Walls, was.Rocks, was.Climate,
              was.Columns, was.Rows);
 
     private readonly List<Snap> _back = new();
@@ -436,6 +516,8 @@ public sealed class MapEdit
         Snap was = _back[^1];
         bool same = was.Columns == Columns && was.Rows == Rows
                     && was.Ground.SequenceEqual(_ground) && was.Under.SequenceEqual(_under)
+                    && was.Soil.SequenceEqual(_soil) && was.SoilBase.Count == SoilBase.Count
+                    && was.SoilBase.All(kv => SoilBase.TryGetValue(kv.Key, out char now) && now == kv.Value)
                     && was.Ramps.SequenceEqual(_ramps)
                     && was.Homes.SequenceEqual(_homes) && was.Walls.Count == _walls.Count
                     && was.Walls.All(kv => _walls.TryGetValue(kv.Key, out Masonry? now)
@@ -518,6 +600,10 @@ public sealed class MapEdit
         // water, a rock, a wall, the edge
         if (Inside(cell) && !MapFile.TakesUnder(LetterAt(cell)))
             _under[At(cell)] = BoardMap.Plain;
+        // a look stays only on the floor it is for
+        if (Inside(cell) && _soil[At(cell)] != Soil.As
+            && (GlyphAt(cell).Water || Soil.FloorOf(_soil[At(cell)]) != GlyphAt(cell).Floor))
+            _soil[At(cell)] = Soil.As;
         if (GlyphAt(cell).Wall)
             _walls.TryAdd(cell, new Masonry());
         else
@@ -737,6 +823,8 @@ public sealed class MapEdit
         Columns = Columns, Rows = Rows,
         _ground = (char[])_ground.Clone(),
         _under = (char[])_under.Clone(),
+        _soil = (char[])_soil.Clone(),
+        SoilBase = new Dictionary<Foundation, char>(SoilBase),
         _ramps = (bool[])_ramps.Clone(),
         _homes = _homes.ToList(),
         _walls = _walls.ToDictionary(kv => kv.Key, kv => kv.Value.Copy()),
@@ -1190,7 +1278,8 @@ public sealed class MapEdit
     /// file keeps no notes (<see cref="MapFile.SaveStamp"/>), so a rock comes
     /// out of one a crag.</summary>
     public readonly record struct Bit(Vector2I Cell, char Letter, bool Ramp, Masonry? Wall,
-                                      RockNote? Rock = null, char Under = BoardMap.Plain);
+                                      RockNote? Rock = null, char Under = BoardMap.Plain,
+                                      char Soil = Soil.As);
 
     /// <summary>
     /// A part of a board lifted off it - the clipboard, a stamp, the selection
@@ -1252,7 +1341,7 @@ public sealed class MapEdit
                 continue;
             bits.Add(new Bit(cell, LetterAt(cell), IsRamp(cell),
                              _walls.TryGetValue(cell, out Masonry? wall) ? wall.Copy() : null,
-                             RockAt(cell), _under[At(cell)]));
+                             RockAt(cell), _under[At(cell)], _soil[At(cell)]));
         }
         var homes = new List<Parking>();
         foreach (Lineup.Unit u in Lineup.Of(_homes))
@@ -1320,6 +1409,7 @@ public sealed class MapEdit
             }
             _ground[At(to)] = bit.Letter;
             _under[At(to)] = bit.Under;
+            _soil[At(to)] = bit.Soil;
             _ramps[At(to)] = bit.Ramp;
             _walls.Remove(to);
             if (bit.Wall is { } wall && GlyphAt(to).Wall)
@@ -1401,6 +1491,7 @@ public sealed class MapEdit
 
         var ground = Enumerable.Repeat(BoardMap.Plain, columns * rows).ToArray();
         var under = Enumerable.Repeat(BoardMap.Plain, columns * rows).ToArray();
+        var soil = Enumerable.Repeat(Soil.As, columns * rows).ToArray();
         var ramps = new bool[columns * rows];
         var walls = new Dictionary<Vector2I, Masonry>();
         var rocks = new Dictionary<Vector2I, RockNote>();
@@ -1413,14 +1504,15 @@ public sealed class MapEdit
                 continue;
             ground[to.Y * columns + to.X] = _ground[At(from)];
             under[to.Y * columns + to.X] = _under[At(from)];
+            soil[to.Y * columns + to.X] = _soil[At(from)];
             ramps[to.Y * columns + to.X] = _ramps[At(from)];
             if (_walls.TryGetValue(from, out Masonry? wall))
                 walls[to] = wall;
             if (_rocks.TryGetValue(from, out RockNote? note))
                 rocks[to] = note;
         }
-        (Columns, Rows, _ground, _under, _ramps, _homes, _walls, _rocks) =
-            (columns, rows, ground, under, ramps, homes, walls, rocks);
+        (Columns, Rows, _ground, _under, _soil, _ramps, _homes, _walls, _rocks) =
+            (columns, rows, ground, under, soil, ramps, homes, walls, rocks);
         return true;
     }
 
@@ -1443,7 +1535,9 @@ public sealed class MapEdit
     public static MapEdit Raw(string name, string[] ground, string[] ramps, IReadOnlyList<Parking> homes,
                               IReadOnlyDictionary<Vector2I, Masonry>? walls, string? paint, bool height, int plinth,
                               IReadOnlyDictionary<Vector2I, RockNote>? rocking = null,
-                              RockClimate climate = default, string[]? floors = null)
+                              RockClimate climate = default, string[]? floors = null,
+                              IReadOnlyDictionary<Foundation, char>? soilBase = null,
+                              string[]? soilCells = null)
     {
         int rows = ground.Length, columns = rows > 0 ? ground[0].Length : 0;
         if (columns < 1 || ground.Any(row => row.Length != columns))
@@ -1454,6 +1548,8 @@ public sealed class MapEdit
             Columns = columns, Rows = rows,
             _ground = new char[columns * rows],
             _under = Enumerable.Repeat(BoardMap.Plain, columns * rows).ToArray(),
+            _soil = Enumerable.Repeat(Soil.As, columns * rows).ToArray(),
+            SoilBase = soilBase is null ? new() : new Dictionary<Foundation, char>(soilBase),
             _ramps = new bool[columns * rows],
             _homes = homes.ToList(),
             Climate = climate,
@@ -1471,6 +1567,8 @@ public sealed class MapEdit
             if (floors is not null && r < floors.Length && q < floors[r].Length
                 && MapFile.FloorUnder(floors[r][q]) is not null)
                 edit._under[edit.At(cell)] = floors[r][q];
+            if (soilCells is not null && r < soilCells.Length && q < soilCells[r].Length)
+                edit._soil[edit.At(cell)] = soilCells[r][q];
             edit._ramps[edit.At(cell)] = r < ramps.Length && q < ramps[r].Length && ramps[r][q] == 'r';
             if (walls is not null && walls.TryGetValue(cell, out Masonry? wall) && edit.GlyphAt(cell).Wall)
                 edit._walls[cell] = wall.Copy();
@@ -1696,7 +1794,8 @@ public sealed class MapEdit
                                    Plinth,
                                    _walls.ToDictionary(kv => kv.Key,
                                                        kv => kv.Value.Copy()),
-                                   Rocking(), Climate, Floors());
+                                   Rocking(), Climate, Floors(),
+                                   SoilBase.Count > 0 ? SoilBase : null, SoilRows());
     }
 
     /// <summary>Write the draft to <c>maps/</c> and return the path.

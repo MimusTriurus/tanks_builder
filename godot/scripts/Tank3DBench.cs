@@ -78,6 +78,11 @@ public sealed partial class Tank3DBench : Node3D
     private float? _rockWind, _rockIce;
     /// <summary>The ice the relief was built by, for the shader's striae.</summary>
     private float _iceBuilt = RockClimate.DefaultIce;
+    /// <summary>The wind it was built by, for the dunes' ripples.</summary>
+    private float _windBuilt = RockClimate.DefaultWind;
+    /// <summary><c>--soil e|k|n|b</c>: every floor that look is for dressed in
+    /// it, over the map's soil - for pictures, as <c>--rock</c>.</summary>
+    private char? _soilAll;
     /// <summary><c>--brow</c>: the relief's brow lines on from the start
     /// (off by default, the user's call; the panel switches them).</summary>
     private bool _browOn;
@@ -825,6 +830,7 @@ public sealed partial class Tank3DBench : Node3D
         // After the relief - the tank bench's reason: the water's guards are
         // asked about levels and ramps.
         _field.SetWater(map.Water);
+        _field.SetSoil(Dressed(map));
         AddChild(_field);
         _field.Atlas = _tile;
         if (_reliefOn)
@@ -854,6 +860,7 @@ public sealed partial class Tank3DBench : Node3D
             // --relief: one smooth ground for the prisms (BOT-11)
             Relief = _relief,
             RockIce = _iceBuilt,
+            SoilWind = _windBuilt,
             ShowBrow = _browOn,
             ShowLawn = _lawnOn,
             ShowTurf = _turfOn,
@@ -899,6 +906,21 @@ public sealed partial class Tank3DBench : Node3D
 
     private static string MapAt(Steps.Route route) => route.ToString(_shownMoat);
 
+    /// <summary>The map's soil looks, every cell's resolved
+    /// (<see cref="BoardMap.Looks"/>), with <c>--soil</c> dressed over the
+    /// floor its look is for.</summary>
+    private char[]? Dressed(BoardMap map)
+    {
+        char[]? looks = map.Looks();
+        if (_soilAll is not char all)
+            return looks;
+        looks ??= map.Looks(always: true)!;
+        for (int at = 0; at < looks.Length; at++)
+            if (!map.Water[at] && map.Ground[at] == Soil.FloorOf(all))
+                looks[at] = all;
+        return looks;
+    }
+
     /// <summary>The board's smooth fields (<c>--relief</c>), and their
     /// pictures, looked at before anything stands on them.</summary>
     private void BuildRelief(BoardMap map)
@@ -915,6 +937,7 @@ public sealed partial class Tank3DBench : Node3D
             rocks.Ice = _rockIce ?? map.Climate.Ice;
         }
         _iceBuilt = rocks?.Ice ?? map.Climate.Ice;
+        _windBuilt = rocks?.Wind ?? map.Climate.Wind;
         _relief = Relief.Build(_field!, rocks: rocks);
         if (_relief is null)
             return;
@@ -1221,6 +1244,15 @@ public sealed partial class Tank3DBench : Node3D
                                 + "(type crag|mesa|yardang|moutonnee, :palette, :preset 1-3)");
                 else
                     _reliefOn = true;
+            }
+            // --soil n: every sand a dune field (Soil, format 3)
+            else if (a == "--soil" && more)
+            {
+                string said = args[++i];
+                if (said.Length == 1 && Soil.FloorOf(said[0]) is not null)
+                    _soilAll = said[0];
+                else
+                    GD.PrintErr($"tank3d: --soil {said}: no such look (g e k on solid, r n on sand, p b on mud)");
             }
             else if (a == "--rock-wind" && more) _rockWind = F(args[++i], RockClimate.DefaultWind);
             else if (a == "--ice" && more) _rockIce = F(args[++i], RockClimate.DefaultIce);

@@ -118,6 +118,10 @@ public sealed class Relief
     public readonly float[] Shore;
     /// <summary>Each kind's blurred share, 0..1, indexed by <see cref="Kind"/>.</summary>
     public readonly float[][] Share;
+    /// <summary>The soil's looks (format 3, <see cref="Soil"/>), each's blurred
+    /// share 0..1 as the kinds': bare earth, stones, dunes, swamp - the
+    /// order <see cref="LookOf"/> gives and the shader reads in CUSTOM0.</summary>
+    public readonly float[][] Look;
     /// <summary>The hex under each point, or (-1, -1) off the board.</summary>
     public readonly Vector2I[] Hex;
     /// <summary>The hex that answers for each point: its own, or (-1, -1)
@@ -190,7 +194,26 @@ public sealed class Relief
         Share =new float[Enum.GetValues<Kind>().Length][];
         for (int k = 0; k < Share.Length; k++)
             Share[k] = new float[n];
+        Look = new float[4][];
+        for (int k = 0; k < Look.Length; k++)
+            Look[k] = new float[n];
     }
+
+    /// <summary>A look's slot in <see cref="Look"/>, or -1 for one the ground
+    /// draws as it always did.</summary>
+    public static int LookOf(char look) => look switch
+    {
+        Soil.Earth => 0,
+        Soil.Stony => 1,
+        Soil.Dunes => 2,
+        Soil.Swamp => 3,
+        _ => -1,
+    };
+
+    /// <summary>A dune's crest over its trough, in levels, and its length
+    /// along the wind, in circumradii - the renders' (tools/render/ground.py,
+    /// v_sand). Look only: the rules read the cell's level.</summary>
+    public const float DuneLift = 0.5f, DuneLength = 1.5f;
 
     /// <summary>The fields of a filled board, its <see cref="HexField.Atlas"/>
     /// set. Null without one - there is no hex size to raster by.</summary>
@@ -280,6 +303,8 @@ public sealed class Relief
                     continue;
                 }
                 mask[(int)KindOf(field, edge)][p] = 1.0f;
+                if (LookOf(field.SoilAt(edge)) is int look and >= 0)
+                    Look[look][p] = 1.0f;
                 if (field.FoundationAt(edge) == Foundation.Rock)
                     rockRaw[p] = field.TopAt(edge);
                 // The height is read a little off the point (Warp): a terrace
@@ -341,6 +366,8 @@ public sealed class Relief
             Array.Copy(mask[k], Share[k], n);
             Blur(Share[k], Nx, Ny, KindSigma * r / Cell);
         }
+        foreach (float[] look in Look)
+            Blur(look, Nx, Ny, KindSigma * r / Cell);
 
         // The swell on dry plain, the crest on rock (hex_level's SWELL, its
         // chasm rim's noise).
@@ -417,10 +444,50 @@ public sealed class Relief
 
         if (groups is not null)
             ReliefRocks.Lay(this, field, groups, rocks!, cliff0!, rawFlat!, lift, r, seed);
+        Dunes(lift, r, rocks?.Wind ?? RockClimate.DefaultWind, seed);
 
         FillWater(field);
         Carve(lift, r);
         Hollows(lift, r);
+    }
+
+    /// <summary>
+    /// The dunes (format 3's soil, <see cref="Soil.Dunes"/>): transverse ridges
+    /// across the board's wind, a gentle back to windward and a steep slip face
+    /// in the lee, their crests bent by a slow noise - in the raster, because a
+    /// dune is a form the game's mesh holds (tools/render/ground.py on the 1/12
+    /// raster); the ripples on them are the shader's. Laid over the terraces
+    /// by the dunes' blurred share, so a dune field ends in a swell and not a
+    /// wall, and inside its cells.
+    /// </summary>
+    private void Dunes(float lift, float r, float windDeg, int seed)
+    {
+        float[] dune = Look[LookOf(Soil.Dunes)];
+        if (Array.TrueForAll(dune, d => d <= 0.01f))
+            return;
+        float w = Mathf.DegToRad(windDeg);
+        var wind = new Vector2(Mathf.Cos(w), Mathf.Sin(w));
+        var bend = new FastNoiseLite
+        {
+            Seed = seed + 17, NoiseType = FastNoiseLite.NoiseTypeEnum.Perlin,
+            Frequency = 1.0f / (r * 2.2f), FractalOctaves = 1,
+        };
+        float length = DuneLength * r;
+        for (int j = 0; j < Ny; j++)
+            for (int i = 0; i < Nx; i++)
+            {
+                int p = j * Nx + i;
+                if (dune[p] <= 0.01f)
+                    continue;
+                float x = X0 + i * Cell, z = Z0 + j * Cell;
+                float along = x * wind.X + z * wind.Y;
+                float t = along / length + 0.35f * bend.GetNoise2D(x, z);
+                t -= Mathf.Floor(t);
+                // the back three quarters of the wavelength, the slip face the rest
+                float h = t < 0.78f ? Mathf.SmoothStep(0.0f, 0.78f, t)
+                                    : 1.0f - Mathf.SmoothStep(0.78f, 1.0f, t);
+                Height[p] += lift * DuneLift * (h - 0.5f) * Mathf.SmoothStep(0.25f, 0.75f, dune[p]);
+            }
     }
 
     /// <summary>

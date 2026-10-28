@@ -301,7 +301,9 @@ void light() {
     public static bool Lawned(HexField field, Vector2I cell) =>
         field.InBounds(cell)
         && field.FoundationAt(cell) == Foundation.Solid && !field.IsRamp(cell) && !field.IsWater(cell)
-        && field.CoverAt(cell) is Cover.None or Cover.Forest;
+        && field.CoverAt(cell) is Cover.None or Cover.Forest
+        // bare earth and stones grow none (Soil, format 3)
+        && field.SoilAt(cell) is not (Soil.Earth or Soil.Stony);
 
     /// <summary>The steepest ground a tuft roots on, as the slope's rise over
     /// its run: a terrace's bank runs about 1, its flat top under 0.1.</summary>

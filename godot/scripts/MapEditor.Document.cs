@@ -616,4 +616,62 @@ public sealed partial class MapEditor
         GD.Print($"floor: undone - writes the file back: {MapFile.Write(_edit.Build()) == file}");
         Say();
     }
+
+    /// <summary>
+    /// <c>--map soiltest --menu soil</c>: Ф4's looks without a mouse. The board
+    /// written back as the file; a look worn, one refused on the wrong floor,
+    /// one dropped by a floor brush; the board's base changed; a draft through
+    /// the disk; and undo back to the file.
+    /// </summary>
+    private void SoilProbe()
+    {
+        if (_open != "soil" || _frame != 10)
+            return;
+        string file = MapFile.Has(_edit.Name)
+            ? File.ReadAllText(MapFile.PathOf(_edit.Name)).Replace("\r\n", "\n") : "";
+        GD.Print($"soil: opened - writes the file back: {MapFile.Write(_edit.Build()) == file}");
+        string Look(Vector2I c) => $"{c.X},{c.Y} {TankSpriteTest.Soil.Name(_edit.LookAt(c))}";
+        void Try(string what, Vector2I c, Func<string> stroke)
+        {
+            _edit.Begin();
+            string why = stroke();
+            _edit.End();
+            GD.Print($"soil: {what} - {(why.Length > 0 ? "refused: " + why : Look(c))}");
+        }
+        Try("stones on the plain at 0,0", new Vector2I(0, 0), () =>
+            _edit.Wear(new Vector2I(0, 0), TankSpriteTest.Soil.Stony, out string a) ? "" : a);
+        Try("dunes on the plain at 1,0", new Vector2I(1, 0), () =>
+            _edit.Wear(new Vector2I(1, 0), TankSpriteTest.Soil.Dunes, out string a) ? "" : a);
+        Try("the swamp at 8,1 painted sand", new Vector2I(8, 1), () =>
+            _edit.Floor(new Vector2I(8, 1), Foundation.Sand, out string a) ? "" : a);
+        Try("the board's sand back to ripples", new Vector2I(2, 1), () =>
+        {
+            _edit.Lay(Foundation.Sand, TankSpriteTest.Soil.Ripple);
+            return "";
+        });
+        Settle();
+        int drawn = _field.Columns * _field.Rows;
+        int swamp = 0, stones = 0;
+        for (int q = 0; q < _field.Columns; q++)
+            for (int r = 0; r < _field.Rows; r++)
+            {
+                char l = _field.SoilAt(new Vector2I(q, r));
+                swamp += l == TankSpriteTest.Soil.Swamp ? 1 : 0;
+                stones += l == TankSpriteTest.Soil.Stony ? 1 : 0;
+            }
+        GD.Print($"soil: the field wears {swamp} swamp and {stones} stony of {drawn} cells");
+
+        string draft = MapFile.WriteDraft(_edit);
+        string tmp = Path.Combine(AutosaveDir, "zz_soil" + MapFile.Extension);
+        Directory.CreateDirectory(AutosaveDir);
+        File.WriteAllText(tmp, draft);
+        MapEdit back = MapFile.ReadDraft(tmp);
+        File.Delete(tmp);
+        GD.Print($"soil: the draft read back the same: {MapFile.WriteDraft(back) == draft}");
+
+        while (_edit.Undo()) { }
+        Settle();
+        GD.Print($"soil: undone - writes the file back: {MapFile.Write(_edit.Build()) == file}");
+        Say();
+    }
 }
